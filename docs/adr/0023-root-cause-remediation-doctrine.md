@@ -44,3 +44,19 @@ The six PR #172 case studies ship as few-shot exemplars in the skill's `referenc
 - **Binding vocabulary and policy are single-sourced in governance** — `plugin/governance/remediation-doctrine.md` is the authoritative runtime home for the binding vocabulary and the operational rule mechanics (threshold tuning, stop-and-merge preconditions); this ADR records the decisions and rationale, the governance doc executes them (P20). The pointer is one-way ADR→governance.
 
 Reference: issues #163 and #177.
+
+## Amendment — 2026-09-18 (an unfixed finding routes by DESTINATION; the tracker is no longer the mandated home)
+
+Decision 4 and the Consequences above name "a tracked issue" as the structural home for any finding left unfixed — defer-with-scope was, in practice, read as file-an-issue-with-scope. That reading is superseded: **a finding left unfixed now routes by DESTINATION, chosen from what the finding IS.** A finding that is WORK someone should do routes to a tracked issue, preferring an EXISTING tracked home; a finding that is a DECISION — the behavior is inherited rather than introduced, its impact is bounded and understood, and the obvious remediation was considered and rejected on the merits — is written into the repository next to the code it concerns as a recorded residual, and opens no tracker entry. The explicit default ordering is: prefer an existing tracked home, prefer recording over filing, and treat a NEW issue as the last resort.
+
+The discriminating test is what the record ASSERTS: an issue asserts that SOMEONE WILL ACT; a recorded residual asserts that WE DECIDED, AND HERE IS WHY. The scope obligation is unchanged and identical across both destinations — full root-cause scope, linked threads, and a bounded-impact note. Only the destination varies. A record that omits scope remains a silent drop and remains forbidden.
+
+**Rejected alternative: file every unfixed finding as a tracked issue.** This was the operative reading of the original Decision, and its consequence was observed rather than predicted. The tracker fills with review spillover: opened issues outpace closed ones, and the backlog stops functioning as a signal because a genuine user-reported defect becomes indistinguishable from reviewer noise sitting beside it. Filing a decision as an issue is additionally a category error — it inflates the backlog with work nobody intends to do and buries the reasoning away from the code it concerns, which is exactly where the next reader needs it. Recording the decision adjacent to the behavior keeps the backlog a list of intended work and puts the rationale where it is found.
+
+Recording is not one-way: a recorded residual whose reasoning is later invalidated — the impact turns out to be unbounded, or the behavior turns out to have been introduced by the change after all — is promoted to a filed issue carrying the same scope.
+
+The NORMATIVE home for this routing — the conjunctive conditions, the destination-by-role rule, the code-comment floor, and the promotion path — is `plugin/governance/remediation-doctrine.md` (`## Defer-with-Scope`, `### Recorded Residual`). This amendment records the decision and its rationale; the governance doc executes it, and this amendment does not restate its mechanics. The pointer stays one-way ADR→governance.
+
+No new ADR is created for this decision: these existing ADRs are its correct homes, and ADR ordinals collide across parallel worktrees.
+
+This amendment is APPEND-ONLY. The original Context, Decision, Considered Options, and Consequences above stand as written. Status remains accepted.
