@@ -256,14 +256,17 @@ CONTENT must establish:
   the doctrine's **Closed-by-Construction Preference** (e.g. positive allowlist over
   reject-enumeration, a real parser over hand-parsing, ground-truth derivation over
   validating untrusted input). Pick the ordered preference that fits the cluster's root.
-- an explicit SCOPE BOUNDARY — what is fixed-now vs deferred.
-- the DEFERRAL-TARGET issue for the deferred tail, per the doctrine's **Defer-with-Scope**:
-  carry full root-cause scope, the linked threads, and a bounded-impact note. A deferral
-  missing any of these is a silent drop and is forbidden.
+- an explicit SCOPE BOUNDARY — what is fixed-now vs deferred-or-recorded.
+- the DESTINATION of the deferred tail — a tracked issue OR a recorded residual, per the
+  doctrine's **Defer-with-Scope** and **Recorded Residual**: either destination carries full
+  root-cause scope, the linked threads, and a bounded-impact note. A deferral OR a recording
+  missing any of these is a silent drop and is forbidden. Discriminator: a tracked issue when
+  the tail is work someone should do; a recorded residual when it is a decision rather than
+  work.
 - a BOUNDED-IMPACT rationale for the fix-now vs defer split, per **Bounded-Impact Gating**
   (assessed blast radius, not the reviewer's severity badge).
 
-Surface the root-cause identification, scope boundary, deferral-target, and bounded-impact
+Surface the root-cause identification, scope boundary, tail destination, and bounded-impact
 rationale in the prose (Summary / Risks / Open questions as fits); the `plan:` block carries
 the steps that implement the fix-now portion. Keep prose and `plan:` block consistent per
 Machine-Readable Plan Block.

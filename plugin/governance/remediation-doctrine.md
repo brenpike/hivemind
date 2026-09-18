@@ -54,9 +54,26 @@ Assess the actual blast radius of a finding independent of the reviewer's severi
 
 ## Defer-with-Scope
 
-A finding is never silently dropped. When a finding is the same family as a tracked structural change, it is deferred to that tracked issue WITH full root-cause scope, the linked threads, and a bounded-impact note (per **Bounded-Impact Gating**). The originating thread is then replied-to and resolved citing the tracking issue.
+A finding is never silently dropped. Every actionable finding left unfixed in the current loop MUST carry full root-cause scope, its linked threads, and a bounded-impact note (per **Bounded-Impact Gating**). That obligation is common to BOTH permitted destinations; what differs is WHERE the record lives.
 
-Defer-with-scope is the only permitted way to leave an actionable finding unfixed in the current loop. A deferral that omits scope, linkage, or impact rationale is a silent drop and is forbidden.
+- **Tracked issue.** File or defer to a tracked issue when the finding is WORK someone should do: it is newly introduced by the change under review, or its remediation is genuinely wanted but out of scope for this loop, or it belongs to the same family as an already-tracked structural change. Default to an EXISTING tracked home; create a NEW issue only when no existing home fits.
+- **Recorded residual.** Record the decision in the repository per **Recorded Residual** below.
+
+The discriminating test: an issue asserts that SOMEONE WILL ACT; a recorded residual asserts that WE DECIDED, AND HERE IS WHY. Filing a decision as an issue is a category error — it inflates the backlog and buries the reasoning away from the code it concerns.
+
+Either destination, carrying full scope, is the only permitted way to leave an actionable finding unfixed in the current loop. A record that omits scope, linkage, or impact rationale is a silent drop and is forbidden. The originating thread is then replied-to and resolved citing the tracking issue or the recorded residual.
+
+### Recorded Residual
+
+When — and only when — the behavior is INHERITED rather than introduced by the change under review, AND its impact is BOUNDED and understood, AND the obvious remediation was CONSIDERED AND REJECTED ON THE MERITS, the finding is left unfixed as a recorded residual: write the reasoning into the repository adjacent to the code it concerns — the project's durable design record (an architecture-decision record wherever the project keeps them), or a code comment where a full record would be disproportionate — carrying the root cause, the bounded impact, and why the obvious remediation was rejected, and open NO tracker entry.
+
+All three conditions are CONJUNCTIVE; any one alone is not enough. "Inherited" on its own is a universal escape hatch that launders real work into a silent drop.
+
+A recorded residual is NOT a silent drop. The scope requirement is IDENTICAL to a deferral — full root-cause scope, linked threads, bounded-impact note — only the destination differs. Recording is PREFERRED over filing when the finding is a decision rather than work.
+
+Name the destination by ROLE, never by a presumed path: wherever this project keeps its durable design records. Where the project keeps none, or where a full record would be disproportionate to the finding, a code comment adjacent to the behavior is the FLOOR. Recording nothing is never a permitted destination.
+
+Recording is NOT one-way. A recorded residual whose reasoning is later invalidated — the impact turns out to be unbounded, or the behavior turns out to have been introduced by the change after all — is PROMOTED to a filed issue carrying the same scope.
 
 ## Stop-and-Merge
 
@@ -64,7 +81,7 @@ Stop the loop and advise merge when ALL of the following hold:
 
 - zero unresolved actionable threads remain
 - remaining findings are a bounded tail on a heavily-hardened surface
-- the structural home for that tail is a tracked issue (per **Defer-with-Scope**)
+- the structural home for that tail is a tracked issue or a recorded residual (per **Defer-with-Scope**)
 - every push spawns only a fresh bounded tail, never a new defect class
 
 The stop signal is NOT round count. Chasing zero-findings-per-push on a complex security surface is itself the anti-pattern. Agents never merge — humans merge. The loop surfaces this as the `merge_advised` advisory terminal carrying `advisory_reason` and `recommendation_text`.

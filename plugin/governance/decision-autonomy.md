@@ -41,12 +41,12 @@ Two axes govern every Tier-B decision: the strength of the overlord's recommenda
 | | gate CLEAN | gate TRIPS |
 |---|---|---|
 | **strong recommendation** | DO THE WORK NOW (auto) — execute, journal `did-now` | SURFACE to the user |
-| **weak / no recommendation** | DEFER-with-scope (auto) — file a tracked follow-up, journal `deferred` | SURFACE to the user |
+| **weak / no recommendation** | DEFER-with-scope OR RECORD-with-scope (auto) — carry the full scope either to a tracked follow-up (journal `deferred`) or into the repository's durable design record (journal `recorded`) | SURFACE to the user |
 
 Key rules:
 
 - **The gate evaluates the RECOMMENDED action, NOT the option set.** A heavy or architectural ALTERNATIVE being on the table does NOT promote the decision. If the recommended action is contained and the gate is clean, the overlord acts on it even though a bigger option exists.
-- **Defer is the fallback for the absence of a strong recommendation, never a substitute for one.** When a strong recommendation exists and the gate is clean, the overlord DOES THE WORK NOW — it never downgrades a confident fix to a deferred follow-up. Defer-with-scope is chosen only when no strong recommendation is in hand.
+- **Defer-or-record is the fallback for the absence of a strong recommendation, never a substitute for one.** When a strong recommendation exists and the gate is clean, the overlord DOES THE WORK NOW — it never downgrades a confident fix to a deferred follow-up or to an accepted residual. Defer-with-scope and record-with-scope are chosen only when no strong recommendation is in hand.
 - **Any recommendation + gate TRIPS → SURFACE.** Strength is irrelevant once the gate trips; the decision returns to the user.
 
 ## Promotion Gate
@@ -63,10 +63,11 @@ This split is why the root-cluster zoom-out in **Tier B** auto-takes only the RO
 
 ## Disposition Vocabulary
 
-Every Tier-B decision resolves to exactly one of three dispositions:
+Every Tier-B decision resolves to exactly one of four dispositions:
 
 - **`did-now`** — a strong recommendation with a clean gate; the overlord executed the work.
-- **`deferred`** — no strong recommendation, clean gate; the overlord filed a tracked follow-up carrying full scope (defer-with-scope per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `## Defer-with-Scope`).
+- **`deferred`** — no strong recommendation, clean gate; the overlord carried the finding's full scope onward instead of acting on it now. FILING a tracked follow-up is ONE destination for that scope, not the definition of the disposition (defer-with-scope per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `## Defer-with-Scope`).
+- **`recorded`** — the finding was adjudicated and deliberately not actioned; the reasoning was written into the repository next to the code it concerns (the project's durable design record, or a code comment where a full record would be disproportionate), carrying root cause, bounded impact, and why the obvious remediation was rejected. No tracker entry is created. This is the correct disposition for an inherited, bounded, understood behavior whose remediation was considered and rejected on the merits. `recorded` is NOT a silent drop: the scope requirement is identical to `deferred`, only the destination differs (accepted residual per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `### Recorded Residual`).
 - **`surfaced`** — the gate tripped, or the decision was genuine ambiguity-with-risk; the decision was returned to the user.
 
 A Tier-A decision is always `surfaced`.
@@ -84,7 +85,7 @@ Per-entry fields:
 - `tradeoffs` — the tradeoffs across those options
 - `rec_strength` — `strong` | `weak` | `none`
 - `gate` — `clean` | `trips`
-- `disposition` — exactly one of `did-now` | `deferred` | `surfaced`
+- `disposition` — exactly one of `did-now` | `deferred` | `recorded` | `surfaced`
 - `decision` — the action taken or deferred
 - `rationale` — why this option was chosen
 - `reversible` — whether the action can be undone
@@ -104,7 +105,7 @@ After the PR for a run merges, the overlord ALWAYS surfaces a report of the deci
 The report is deferred-on-merge — it is not produced at merge time but on a subsequent session start. The overlord's Resume-On-Start scan (per `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Resume On Start`) derives an AWAITING-REPORT run when ALL of the following hold:
 
 - a PR is DERIVABLE for the run from a recorded event output — sourced from `event.outputs.pr` of EITHER the `open_pr` event (a standard-delivery run records the PR url there when recording the `open_pr` state, from the `url` `hivemind:open-plan-pr` returns) OR the `pr_branch_preflight`/`intake` event (a `pr-feedback-remediation` run has no `open_pr` state, so the overlord persists the resolved PR into the `pr_branch_preflight` event's `event.outputs.pr` when recording that state — the resolved PR it already checks out at `pr_branch_preflight`). Both paths ride the SAME free-form `event.outputs` write: NO schema change, NO new required ledger field, NO `facts.*` mutation
-- the run's `event.outputs.decisions[]` carries at least one entry whose `disposition` is `did-now` or `deferred` — a run whose journal holds only `surfaced` entries is NOT awaiting-report (it would never warrant a report and would otherwise reprocess every session)
+- the run's `event.outputs.decisions[]` carries at least one entry with a `disposition` of `did-now`, `deferred`, or `recorded` — a run whose journal holds only `surfaced` entries is NOT awaiting-report (it would never warrant a report and would otherwise reprocess every session)
 - the run dir does NOT yet contain the zero-byte `.decision-report-done` marker
 
 For an awaiting-report run the overlord checks PR state and, on `MERGED` or `CLOSED`, invokes `hivemind:decision-report`, surfaces the returned narrative to the user, then `touch`es the zero-byte `.decision-report-done` marker in the run dir.
@@ -113,5 +114,5 @@ This scan is BEST-EFFORT and FAIL-OPEN: a PR-state lookup failure for a deferred
 
 Firing condition and idempotency:
 
-- The report fires ONLY when at least one Tier-B AUTO decision (`disposition: did-now` or `deferred`) was journaled. A run whose journal holds only `surfaced` entries produces no report.
+- The report fires ONLY when at least one Tier-B AUTO decision was journaled — an entry with a `disposition` of `did-now`, `deferred`, or `recorded`. A run whose journal holds only `surfaced` entries produces no report.
 - The EXISTENCE of the zero-byte `.decision-report-done` marker in the run dir is the SOLE idempotency marker — there is NO ledger marker and NO `decision-report.md` content file (the report is chat-only). The marker is created with `touch` and holds NO content, so it carries no splice/injection surface. The run-status enum is unchanged; no new `run.status` value is introduced.
