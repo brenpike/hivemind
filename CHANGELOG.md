@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [2.41.0] - 2026-09-18
+
+### Added
+
+- remediation-doctrine: an unfixed finding is now routed by destination — a tracked issue when it is work someone should still do, or a new "recorded residual" written into the repository next to the affected code when it is a decision rather than deferred work. The doctrine states prefer-an-existing-home, then prefer-recording-over-filing, then new-issue-is-last-resort as the explicit default ordering. The decision vocabulary gains a fourth disposition, `recorded`, threaded through the overlord, cerebrate, decision-report, detect-remediation-signals, the run-ledger schema, CONTEXT.md, two ADR amendments, and a new policy fixture pinning the coupling.
+
 ## [2.40.12] - 2026-08-25
 
 ### Fixed
