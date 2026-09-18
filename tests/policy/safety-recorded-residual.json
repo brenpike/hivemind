@@ -1,0 +1,26 @@
+{
+  "rule": "Recorded Residual destination doctrine coupling",
+  "description": "`plugin/governance/remediation-doctrine.md` `### Recorded Residual` is the single source for the SECOND sanctioned destination of an actionable finding left unfixed in a review loop: a decision recorded in the repository rather than work filed on a tracker. The source pin is ONE span carrying BOTH halves of that conditional rule — the discriminating condition (the three CONJUNCTIVE tests: the behavior is INHERITED rather than introduced, its impact is BOUNDED and understood, and the obvious remediation was CONSIDERED AND REJECTED ON THE MERITS) and the obligation those tests trigger (leave the finding unfixed as a recorded residual and write the reasoning into the repository adjacent to the code it concerns). Deleting or rewriting either half turns the suite red. The consumers pin the POINTER only, never remedy prose, so honest rewording of the doctrine body does not break them: `plugin/governance/decision-autonomy.md` and `plugin/agents/overlord.md` must still name `### Recorded Residual` in the doctrine file, `plugin/agents/cerebrate.md` must still name the section by its doctrine-term form alongside Defer-with-Scope, and `plugin/skills/decision-report/SKILL.md` must still carry the fire-condition enum that admits `recorded` beside `did-now` and `deferred` — the coupling that keeps the fourth disposition reportable. What this pin honestly guarantees is exactly that these word sequences exist in these five named files; it claims nothing about meaning. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible — surrounding prose that turns the three conjunctive conditions into alternatives, or that re-routes the destination to a tracker entry, stays green; (2) the sentence tail carrying the scope requirement and the `open NO tracker entry` clause is deliberately OUTSIDE the pinned span, so that the destination examples stay cheap to reword honestly, and deleting that tail alone stays green; (3) the pin sees only the five files it names — a further consumer that drops its pointer is invisible, and no fixture in this directory can detect a NEW consumer that never carries the pointer at all, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/remediation-doctrine.md",
+    "pattern": "the behavior is INHERITED rather than introduced by the change under review, AND its impact is BOUNDED and understood, AND the obvious remediation was CONSIDERED AND REJECTED ON THE MERITS, the finding is left unfixed as a recorded residual: write the reasoning into the repository adjacent to the code it concerns"
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "remediation-doctrine.md` `### Recorded Residual`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "remediation-doctrine.md` (`### Recorded Residual`)"
+    },
+    {
+      "file": "plugin/agents/cerebrate.md",
+      "pattern": "doctrine's **Defer-with-Scope** and **Recorded Residual**"
+    },
+    {
+      "file": "plugin/skills/decision-report/SKILL.md",
+      "pattern": "a `disposition` of `did-now`, `deferred`, or `recorded`"
+    }
+  ]
+}
