@@ -267,9 +267,13 @@ CONTENT must establish:
   (assessed blast radius, not the reviewer's severity badge).
 
 Surface the root-cause identification, scope boundary, tail destination, and bounded-impact
-rationale in the prose (Summary / Risks / Open questions as fits); the `plan:` block carries
-the steps that implement the fix-now portion. Keep prose and `plan:` block consistent per
-Machine-Readable Plan Block.
+rationale in the prose (Summary / Risks / Open questions as fits). The `plan:` block carries
+the fix-now steps AND the tail wherever the tail is a repository write: a recorded residual is
+a file someone must actually write, so it is its own step with an owner and an exact file
+scope, like any other step — never prose-only. A tracked issue is not a repository write and
+has no file scope; name it in the prose as an explicit orchestrator obligation carrying the
+full scope, and never smuggle it in as a drone file-edit step. cerebrate plans the write; it
+never performs it. Keep prose and `plan:` block consistent per Machine-Readable Plan Block.
 
 ### Analysis Result Mapping
 

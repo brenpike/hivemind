@@ -63,6 +63,8 @@ The discriminating test: an issue asserts that SOMEONE WILL ACT; a recorded resi
 
 Either destination, carrying full scope, is the only permitted way to leave an actionable finding unfixed in the current loop. A record that omits scope, linkage, or impact rationale is a silent drop and is forbidden. The originating thread is then replied-to and resolved citing the tracking issue or the recorded residual.
 
+The actor that leaves a finding unfixed OWNS its destination: the issue filed or the record written BEFORE the loop terminates, never merely named, and that actor carries the destination's LOCATION in its own record of the decision so a later reader can reach it.
+
 "Structural home" names a ROLE, not a destination type: the tail's reasoning has a durable home. The admissible destinations are the two defined above — Tracked issue and Recorded residual. A restatement must carry BOTH and cite this section; binding the role noun to a single destination type ("a tracked structural home") re-narrows the role and is the forbidden form.
 
 ### Recorded Residual

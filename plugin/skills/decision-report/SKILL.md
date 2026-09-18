@@ -108,12 +108,20 @@ user reads the auto-decisions in that light.
    Choices: <options considered>
    Trade-offs: <tradeoffs across those options>
    Decided: <decision> — <rationale>
-   Why auto: <the cell in plain English: a strong recommendation with a clean safety check →
-     I acted without asking; or no strong call → I deferred a tracked follow-up; or I judged this
-     was a decision rather than work, so I wrote the reasoning into the code instead of opening a
-     ticket; or why this one was surfaced to you instead>
+   Why auto: <plain English, drawn from THIS entry: a strong recommendation with a clean safety
+     check → I acted without asking; or no strong call → I carried the finding's full scope
+     onward instead of acting now; or I judged this was a decision rather than work, so I
+     recorded the reasoning instead of filing it as work; or why this one was surfaced to you
+     instead>
    Reversible: <yes/no from the entry, plus what undo would involve in domain terms>
    ```
+   The `Why auto` gloss names a destination — where the finding was carried onward, or where the
+   reasoning was written down — ONLY when THIS entry's own `decision` / `rationale` text names
+   one, retold in the consumer's domain terms. The entry shape carries no destination field, so
+   the entry's own text is the report's ONLY source for one. When the entry names no destination,
+   say the finding was carried onward (or the reasoning recorded) and stop there — never supply a
+   tracker, a design record, a file, or a code comment the entry did not claim.
+
    The bracketed tag maps from `disposition`: `did-now` → `[auto: did-now]`, `deferred` →
    `[auto: deferred]`, `recorded` → `[auto: recorded]`, `surfaced` → `[surfaced]`. When
    `pr_state` is `CLOSED`, add an `abandoned — not merged` note to each header line so the reader
@@ -158,6 +166,9 @@ render-to-chat skill — the returned narrative is the deliverable, not a silent
 - read the run ledger — render only from the passed `decisions[]` content.
 - write any file — the skill holds NO Write capability and persists nothing; the narrative is
   RETURNED as chat text only, so untrusted report bytes never reach a file or a shell command.
+- name a destination for a carried-onward or recorded decision that the entry's own `decision` /
+  `rationale` text does not name — the entry shape has no destination field, so an invented one is
+  a false audit line.
 - color the narrative with the plugin's internal glossary — speak the consumer project's domain.
 - name a decision tier, the 2x2, or the promotion gate by its internal name in user-facing prose —
   render the auto mechanic as plain English.
