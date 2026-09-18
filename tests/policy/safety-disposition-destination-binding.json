@@ -1,0 +1,14 @@
+{
+  "rule": "Disposition-to-destination binding",
+  "description": "`plugin/governance/decision-autonomy.md` `## Disposition Vocabulary` resolves every Tier-B decision to EXACTLY ONE of four dispositions, so each disposition must name exactly one destination or the enumeration overlaps itself and a single residual satisfies two names at once. The source pin sits on the clause that makes `deferred` one-to-one with its destination and carries BOTH halves of that binding: the positive half (the tracked follow-up is the destination that DEFINES the disposition, not merely one available destination for it) and the exclusive half (a residual carried into the repository's durable design record is `recorded`, never `deferred`). Deleting either half — including a rewrite back to the overlapping sense in which a repository-recorded residual could also count as `deferred` — turns the suite red. The single consumer pins the downstream rule that DEPENDS on the binding, not remedy prose: `plugin/skills/decision-report/SKILL.md` glosses a destination only when THIS entry's own `decision` / `rationale` text names one, so the rendered report never supplies a destination the binding did not place there; honest rewording of the surrounding render instructions does not break it. What this pin honestly guarantees is exactly that these two word sequences exist in these two named files; it claims nothing about meaning. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible — surrounding prose that re-opens the repository record as a second `deferred` destination stays green; (2) the reciprocal half stated in the `recorded` bullet (that the scope requirement is identical and only the destination differs) is deliberately OUTSIDE the pinned span, so deleting that sentence alone stays green; (3) this fixture DELIBERATELY does not pin the sites that replicate the four-value disposition ENUM — the run-ledger schema, the overlord and local-reviewer agents, and the consumer glossary — because that replication is itself tracked for removal, and pinning it here would entrench the pattern that work exists to delete; (4) the pin sees only the two files it names, and no fixture in this directory can detect a NEW disposition bullet, or a new consumer of the disposition vocabulary, that never states its destination binding at all — that is an absence defect per rule 7 of the pin-authoring contract and needs a structural check, not a presence pin.",
+  "source": {
+    "file": "plugin/governance/decision-autonomy.md",
+    "pattern": "The tracked follow-up is the destination that defines this disposition; a residual carried into the repository's durable design record is `recorded`, never `deferred`"
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/decision-report/SKILL.md",
+      "pattern": "ONLY when THIS entry's own `decision` / `rationale` text names one"
+    }
+  ]
+}
