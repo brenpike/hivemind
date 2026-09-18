@@ -188,7 +188,7 @@ The reviewer exit_reason that carries a detected **Root-Cluster** (shared surfac
 _Avoid_: cluster-found, zoom-out signal, whack-a-mole exit
 
 **Merge-Advised**:
-The advisory terminal (`merge_advised`) recommending a human merge of a converged bounded-tail PR — fired only when zero actionable threads remain, the remaining tail is bounded on a hardened surface with a tracked structural home, and each push spawns only a fresh bounded tail. Agents never merge; the reason is carried as `advisory_reason` plus `recommendation_text`.
+The advisory terminal (`merge_advised`) recommending a human merge of a converged bounded-tail PR — fired only when zero actionable threads remain, the remaining tail is bounded on a hardened surface with a structural home (per **Defer-with-Scope**), and each push spawns only a fresh bounded tail. Agents never merge; the reason is carried as `advisory_reason`, `structural_home`, and `recommendation_text`.
 _Alias_: stop-and-merge advisory
 _Avoid_: auto-merge, merge signal, approved-to-merge
 

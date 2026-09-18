@@ -106,7 +106,7 @@ Reviewer-return handling. `STATE=MERGED` → `pr-merged`. `STATE=CLOSED` →
 fields. `root-cluster-suspected` → HARD-STOP; ONE terminal with reviewer's cluster
 payload; the caller routes to cerebrate zoom-out (classification-free — loop
 propagates only). `merge-advised` → HARD-STOP; ONE `merge-advised` terminal with
-`advisory_reason` + `recommendation_text`; ADVISORY ONLY — loop NEVER merges
+`advisory_reason` + `structural_home` + `recommendation_text`; ADVISORY ONLY — loop NEVER merges
 (classification-free). Pass EVERY reviewer return (including the escalation
 terminals above) through
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh cycle-decision <current_count> <max_cycles> <findings_resolved> <exit_reason>`
@@ -161,7 +161,7 @@ Target); `Watch` (Mode: Monitor | Monitoring: stopped | Parser: gh --jq | Cycles
 Seen comments | New actionable comments); `Routed: github-reviewer: <count>`;
 `Stopped because: <exit_reason> — <explanation>`; `Next action`; `Issues`.
 
-`exit_reason` drawn from: `clean | pr-merged | pr-closed | max-cycles-reached | planner-escalation | root-cluster-suspected | merge-advised | blocked | injection-suspect | high-severity-rejection | user-input-required`. For `root-cluster-suspected`: cluster payload under `Issues`; cerebrate zoom-out under `Next action`. For `merge-advised`: `advisory_reason` + `recommendation_text` under `Issues`. For escalation/blocked: escalation-conditional fields under `Issues`. `Cycles` = `cycles_completed`; `New actionable comments` = `findings_resolved`; restate `findings_open` in `Issues` when non-zero.
+`exit_reason` drawn from: `clean | pr-merged | pr-closed | max-cycles-reached | planner-escalation | root-cluster-suspected | merge-advised | blocked | injection-suspect | high-severity-rejection | user-input-required`. For `root-cluster-suspected`: cluster payload under `Issues`; cerebrate zoom-out under `Next action`. For `merge-advised`: `advisory_reason` + `structural_home` + `recommendation_text` under `Issues`. For escalation/blocked: escalation-conditional fields under `Issues`. `Cycles` = `cycles_completed`; `New actionable comments` = `findings_resolved`; restate `findings_open` in `Issues` when non-zero.
 
 ## Safety
 
