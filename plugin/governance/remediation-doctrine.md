@@ -54,9 +54,30 @@ Assess the actual blast radius of a finding independent of the reviewer's severi
 
 ## Defer-with-Scope
 
-A finding is never silently dropped. When a finding is the same family as a tracked structural change, it is deferred to that tracked issue WITH full root-cause scope, the linked threads, and a bounded-impact note (per **Bounded-Impact Gating**). The originating thread is then replied-to and resolved citing the tracking issue.
+A finding is never silently dropped. Every actionable finding left unfixed in the current loop MUST carry full root-cause scope, its linked threads, and a bounded-impact note (per **Bounded-Impact Gating**). That obligation is common to BOTH permitted destinations; what differs is WHERE the record lives.
 
-Defer-with-scope is the only permitted way to leave an actionable finding unfixed in the current loop. A deferral that omits scope, linkage, or impact rationale is a silent drop and is forbidden.
+- **Tracked issue.** File or defer to a tracked issue when the finding is WORK someone should do: it is newly introduced by the change under review, or its remediation is genuinely wanted but out of scope for this loop, or it belongs to the same family as an already-tracked structural change. Default to an EXISTING tracked home; create a NEW issue only when no existing home fits.
+- **Recorded residual.** Record the decision in the repository per **Recorded Residual** below.
+
+The discriminating test: an issue asserts that SOMEONE WILL ACT; a recorded residual asserts that WE DECIDED, AND HERE IS WHY. Filing a decision as an issue is a category error — it inflates the backlog and buries the reasoning away from the code it concerns.
+
+Either destination, carrying full scope, is the only permitted way to leave an actionable finding unfixed in the current loop. A record that omits scope, linkage, or impact rationale is a silent drop and is forbidden. The originating thread is then replied-to and resolved citing the tracking issue or the recorded residual.
+
+The actor that leaves a finding unfixed OWNS its destination: the issue filed or the record written BEFORE the loop terminates, never merely named, and that actor carries the destination's LOCATION in its own record of the decision so a later reader can reach it.
+
+"Structural home" names a ROLE, not a destination type: the tail's reasoning has a durable home. The admissible destinations are the two defined above — Tracked issue and Recorded residual. A restatement must carry BOTH and cite this section; binding the role noun to a single destination type ("a tracked structural home") re-narrows the role and is the forbidden form.
+
+### Recorded Residual
+
+When — and only when — the behavior is INHERITED rather than introduced by the change under review, AND its impact is BOUNDED and understood, AND the obvious remediation was CONSIDERED AND REJECTED ON THE MERITS, the finding is left unfixed as a recorded residual: write the reasoning into the repository adjacent to the code it concerns — the project's durable design record (an architecture-decision record wherever the project keeps them), or a code comment where a full record would be disproportionate — carrying the root cause, the bounded impact, and why the obvious remediation was rejected, and open NO tracker entry.
+
+All three conditions are CONJUNCTIVE; any one alone is not enough. "Inherited" on its own is a universal escape hatch that launders real work into a silent drop.
+
+A recorded residual is NOT a silent drop. The scope requirement is IDENTICAL to a deferral — full root-cause scope, linked threads, bounded-impact note — only the destination differs. Recording is PREFERRED over filing when the finding is a decision rather than work.
+
+Name the destination by ROLE, never by a presumed path: wherever this project keeps its durable design records. Where the project keeps none, or where a full record would be disproportionate to the finding, a code comment adjacent to the behavior is the FLOOR. Recording nothing is never a permitted destination.
+
+Recording is NOT one-way. A recorded residual whose reasoning is later invalidated — the impact turns out to be unbounded, or the behavior turns out to have been introduced by the change after all — is PROMOTED to a filed issue carrying the same scope.
 
 ## Stop-and-Merge
 
@@ -64,10 +85,10 @@ Stop the loop and advise merge when ALL of the following hold:
 
 - zero unresolved actionable threads remain
 - remaining findings are a bounded tail on a heavily-hardened surface
-- the structural home for that tail is a tracked issue (per **Defer-with-Scope**)
+- the tail has a structural home (per **Defer-with-Scope**)
 - every push spawns only a fresh bounded tail, never a new defect class
 
-The stop signal is NOT round count. Chasing zero-findings-per-push on a complex security surface is itself the anti-pattern. Agents never merge — humans merge. The loop surfaces this as the `merge_advised` advisory terminal carrying `advisory_reason` and `recommendation_text`.
+The stop signal is NOT round count. Chasing zero-findings-per-push on a complex security surface is itself the anti-pattern. Agents never merge — humans merge. The loop surfaces this as the `merge_advised` advisory terminal; its payload shape is owned by the detector that produces it (`hivemind:detect-remediation-signals`), not restated here.
 
 ## Severity as Sensitivity Modifier
 
@@ -103,7 +124,7 @@ Multiple roots per surface: the recurrence counter PERSISTS across structural fi
 The **Stop-and-Merge** section reserves "every push spawns only a fresh bounded tail, never a new defect class" as a merge precondition. That bounded-tail clause now applies ONLY to MATURE surfaces. The disambiguation:
 
 - **Young surface + recurring findings** (the surface was introduced or heavily modified in this PR/initiative): this is NOT a bounded tail. A young surface that keeps emitting findings is a design smell, so it escalates to a root-cause ZOOM-OUT (question the key/primitive per the **Closed-by-Construction Acceptance Test**), never to merge-advisory. This is the escalation path of **Cross-Iteration Same-Surface Recurrence**.
-- **Mature / legacy surface + bounded tail**: this remains a merge-advisory candidate per **Stop-and-Merge**. A genuine mature-surface bounded tail — a hardened legacy surface whose remaining findings are a converging tail with a tracked structural home — must STILL reach `merge_advised`. The young-surface escalation rule does not gate it.
+- **Mature / legacy surface + bounded tail**: this remains a merge-advisory candidate per **Stop-and-Merge**. A genuine mature-surface bounded tail — a hardened legacy surface whose remaining findings are a converging tail with a structural home — must STILL reach `merge_advised`. The young-surface escalation rule does not gate it.
 
 Regression guard: do not let the young-surface escalation swallow the mature-surface merge path. The two are disjoint by Gate B of **Cross-Iteration Same-Surface Recurrence** — youth is the discriminator. A mature surface failing Gate B routes to merge-advisory exactly as before this section existed.
 
@@ -133,7 +154,7 @@ When a POST-fix step reroutes a young recurring surface, it returns `root-cluste
 ### Invariants
 
 - A young-tail reroute MUST NOT return `root-cluster-suspected` with an empty payload. Every role above must be populated from the reviewer's own state.
-- Youth is the discriminator. A MATURE / legacy surface with a bounded tail and a tracked structural home stays on the existing **Stop-and-Merge** merge-advisory (or advisory early-exit) path, unchanged. The young-tail reroute MUST NOT swallow that mature path.
+- Youth is the discriminator. A MATURE / legacy surface with a bounded tail and a structural home stays on the existing **Stop-and-Merge** merge-advisory (or advisory early-exit) path, unchanged. The young-tail reroute MUST NOT swallow that mature path.
 - A reroute introduces NO new `exit_reason` and NO new payload field — it reuses `root-cluster-suspected` and the existing cluster payload roles.
 
 The four consumers of this section, per the governance-consumer convention, are: `github-reviewer` step 5 (pre-fix overlay producing the Gate-B youth judgment), `github-reviewer` step 9 (POST-fix young-tail reroute + synthesis), `local-reviewer` step 6 (pre-fix overlay producing the Gate-B youth judgment), and `local-reviewer` step 9 (POST-fix young-tail reroute + synthesis). This section is the single source of the obligation and the payload roles; those steps reference it by name and do not restate it.
@@ -235,4 +256,4 @@ Two review-loop detectors predate this doctrine and remain its companions; their
 - **Mutation Decay** (break-fix-break cycle): fixing one finding reintroduces a previously fixed finding. Policy: a MANDATORY stop. Defined in CONTEXT.md.
 - **Creep Stagnation** (diminishing-returns exit): the loop spreads across iterations but gains no new ground. Policy: an ADVISORY early exit — the reviewer recommends stopping and returns the decision to the overlord/Overmind. Defined in CONTEXT.md.
 
-The operational detail of all three signals — Mutation Decay, Creep Stagnation, and Root-Cluster — lives in `hivemind:detect-remediation-signals`. This doctrine holds only their policy meaning. Mutation Decay and Stop-and-Merge are both stop conditions but differ in cause: Mutation Decay stops on instability (a fix that breaks a prior fix); Stop-and-Merge stops on a hardened surface with a tracked structural home and a bounded tail.
+The operational detail of all three signals — Mutation Decay, Creep Stagnation, and Root-Cluster — lives in `hivemind:detect-remediation-signals`. This doctrine holds only their policy meaning. Mutation Decay and Stop-and-Merge are both stop conditions but differ in cause: Mutation Decay stops on instability (a fix that breaks a prior fix); Stop-and-Merge stops on a hardened surface with a structural home and a bounded tail.

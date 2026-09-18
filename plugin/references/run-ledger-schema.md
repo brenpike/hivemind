@@ -150,7 +150,7 @@ Done-ness of a plan step is DERIVED from the union of `events[].outputs.complete
 **Non-change clarifications (so a future reader does not "fix" a non-bug):**
 
 - NO `schema_version` bump is implied by the decision-journal convention — `decisions[]` is a free-form `event.outputs` key, not a required ledger field.
-- NO new `run.status` value is introduced — the enum stays `running | complete | blocked | cancelled`. The post-merge report's "awaiting" condition is DERIVED at Resume-On-Start (a PR exists, `event.outputs.decisions[]` carries ≥1 `did-now`/`deferred` entry, and the zero-byte `.decision-report-done` marker is absent), NOT stored.
+- NO new `run.status` value is introduced — the enum stays `running | complete | blocked | cancelled`. The post-merge report's "awaiting" condition is DERIVED at Resume-On-Start (a PR exists, `event.outputs.decisions[]` carries ≥1 `did-now`/`deferred`/`recorded` entry, and the zero-byte `.decision-report-done` marker is absent), NOT stored.
 - NO `artifacts.decision_report` ledger marker is used — the post-merge report is CHAT-ONLY (rendered and surfaced to the user, never written to disk). Its idempotency token is the EXISTENCE of a zero-byte `.decision-report-done` marker `touch`ed in the run dir — NOT a `decision-report.md` content file (which no longer exists), and not a ledger field.
 
 ## Blocker shape

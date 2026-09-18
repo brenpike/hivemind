@@ -176,7 +176,7 @@ The terminal signal that the Codex reviewer bot (`chatgpt-codex-connector`) is s
 _Avoid_: codex sign-off, approved review, thumbs-up comment
 
 **Remediation Doctrine**:
-The governance doc (`plugin/governance/remediation-doctrine.md`) holding the shared, definitional policy meaning of root-cause review remediation — Root-Cluster, Same-Framing Test, Closed-by-Construction Preference, Bounded-Impact Gating, Defer-with-Scope, Stop-and-Merge, and Severity as Sensitivity Modifier — loaded by both reviewers, the overlord, and the cerebrate so all four share one vocabulary. Policy only; detection mechanics live in **detect-remediation-signals**.
+The governance doc (`plugin/governance/remediation-doctrine.md`) holding the shared, definitional policy meaning of root-cause review remediation — Root-Cluster, Same-Framing Test, Closed-by-Construction Preference, Bounded-Impact Gating, Defer-with-Scope (which routes an unfixed finding by destination — a tracked issue when it is work someone should do, a Recorded Residual when it is a decision rather than work), Stop-and-Merge, and Severity as Sensitivity Modifier — loaded by both reviewers, the overlord, and the cerebrate so all four share one vocabulary. Policy only; detection mechanics live in **detect-remediation-signals**.
 _Avoid_: remediation policy, doctrine doc, remediation rules
 
 **Root-Cluster**:
@@ -188,7 +188,7 @@ The reviewer exit_reason that carries a detected **Root-Cluster** (shared surfac
 _Avoid_: cluster-found, zoom-out signal, whack-a-mole exit
 
 **Merge-Advised**:
-The advisory terminal (`merge_advised`) recommending a human merge of a converged bounded-tail PR — fired only when zero actionable threads remain, the remaining tail is bounded on a hardened surface with a tracked structural home, and each push spawns only a fresh bounded tail. Agents never merge; the reason is carried as `advisory_reason` plus `recommendation_text`.
+The advisory terminal (`merge_advised`) recommending a human merge of a converged bounded-tail PR — fired only when zero actionable threads remain, the remaining tail is bounded on a hardened surface with a structural home (per **Defer-with-Scope**), and each push spawns only a fresh bounded tail. Agents never merge; the reason is carried as `advisory_reason`, `structural_home`, and `recommendation_text`.
 _Alias_: stop-and-merge advisory
 _Avoid_: auto-merge, merge signal, approved-to-merge
 
@@ -215,7 +215,7 @@ The post-merge narrative the overlord ALWAYS surfaces after a PR merges, recount
 _Avoid_: summary, changelog
 
 **Disposition**:
-The outcome of a Tier-B decision — `did-now` (auto-executed), `deferred` (tracked follow-up), or `surfaced` (returned to the Overmind).
+The outcome of a Tier-B decision — `did-now` (auto-executed), `deferred` (tracked follow-up), `recorded` (accepted residual — the reasoning is recorded in the repository next to the code; no tracker entry), or `surfaced` (returned to the Overmind).
 _Avoid_: status, resolution
 
 ### Plugin Structure
@@ -388,7 +388,7 @@ _Avoid_: degraded mode, manual mode, safe mode
 - An **Unsafe Git State** blocks all modifying agent operations until resolved
 
 - An **Overlord** records a **Decision Journal** entry for every Tier-B decision; the **Promotion Gate** decides whether the decision is auto-taken or surfaced to the **Overmind**
-- A **Decision Report** is produced once per merged PR that contains ≥1 auto **Disposition** (`did-now` or `deferred`), rendered in the consumer's ubiquitous language
+- A **Decision Report** is produced once per merged PR that contains ≥1 auto **Disposition** (`did-now`, `deferred`, or `recorded`), rendered in the consumer's ubiquitous language
 - **Remediation** Tier-B choices (planner-escalation, root-cluster routing) are auto-taken + journaled unless the **Promotion Gate** trips
 
 - A **Brood** contains one or more **Strains**, each running in a separate git worktree
