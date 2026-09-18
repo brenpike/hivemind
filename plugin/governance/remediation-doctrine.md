@@ -63,7 +63,7 @@ The discriminating test: an issue asserts that SOMEONE WILL ACT; a recorded resi
 
 Either destination, carrying full scope, is the only permitted way to leave an actionable finding unfixed in the current loop. A record that omits scope, linkage, or impact rationale is a silent drop and is forbidden. The originating thread is then replied-to and resolved citing the tracking issue or the recorded residual.
 
-"Structural home" names a ROLE, not a destination type: the tail's reasoning has a durable home. The admissible destinations are enumerated ONCE — here — and no other section, agent, or skill restates them. A restatement that names a destination type ("a tracked structural home", "an issue") re-narrows the role to one destination and is forbidden; restate the role bare and cite this section.
+"Structural home" names a ROLE, not a destination type: the tail's reasoning has a durable home. The admissible destinations are the two defined above — Tracked issue and Recorded residual. A restatement must carry BOTH and cite this section; binding the role noun to a single destination type ("a tracked structural home") re-narrows the role and is the forbidden form.
 
 ### Recorded Residual
 
@@ -86,7 +86,7 @@ Stop the loop and advise merge when ALL of the following hold:
 - the tail has a structural home (per **Defer-with-Scope**)
 - every push spawns only a fresh bounded tail, never a new defect class
 
-The stop signal is NOT round count. Chasing zero-findings-per-push on a complex security surface is itself the anti-pattern. Agents never merge — humans merge. The loop surfaces this as the `merge_advised` advisory terminal carrying `advisory_reason` and `recommendation_text`.
+The stop signal is NOT round count. Chasing zero-findings-per-push on a complex security surface is itself the anti-pattern. Agents never merge — humans merge. The loop surfaces this as the `merge_advised` advisory terminal; its payload shape is owned by the detector that produces it (`hivemind:detect-remediation-signals`), not restated here.
 
 ## Severity as Sensitivity Modifier
 
