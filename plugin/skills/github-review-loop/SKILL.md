@@ -123,12 +123,9 @@ dies at an arm boundary.
 `PREFILTER_SKIP` → keep Monitor armed, no dispatch, no cycle/`Routed` increment.
 `PREFILTER_DISPATCH` or `PREFILTER_ERROR=<reason>` → dispatch reviewer fix mode
 (no `target`); `PREFILTER_ERROR` is fail-open. Handle return per Reviewer-return
-handling. `CODEX_APPROVED` or `REVIEW_APPROVED` → confirmation pass (no `target`); use only
-the latest poll's approval — a stale prior 👍 must never short-circuit later pushback.
-Both markers are handled IDENTICALLY, so an approving review adds NO new
-`exit_reason`. They can fire in the SAME poll; that duplicate is harmless because
-both route to the one confirmation pass, but run that pass ONCE — never twice. If
-the reviewer finds nothing actionable, this is terminal `clean`: map it via
+handling. `CODEX_APPROVED` → confirmation pass (no `target`); use only the latest
+poll's approval — a stale prior 👍 must never short-circuit later pushback. If the
+reviewer finds nothing actionable, this is terminal `clean`: map it via
 `loop-state.sh cycle-decision <current_count> <max_cycles> 0 approval-clean`
 (the `approval-clean` token emits `EXIT_REASON=clean`, distinguishing the approval
 terminal from a plain keep-watching `clean`). If actionable items remain, the
@@ -139,8 +136,8 @@ Reviewer-return handling. `STATE=MERGED` → `pr-merged`. `STATE=CLOSED` →
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh token-map <signal>`.
 
 PRE-DISPATCH SEED. BEFORE spawning the reviewer for ANY dispatch in this step —
-the `PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass AND the `CODEX_APPROVED` /
-`REVIEW_APPROVED` confirmation pass alike — capture a PENDING re-arm seed per step
+the `PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass AND the `CODEX_APPROVED`
+confirmation pass alike — capture a PENDING re-arm seed per step
 2's `--snapshot` procedure and HOLD it; the Monitor stays armed meanwhile, so
 nothing is missed while the reviewer runs. This is capture site 2 of the
 Seed-Advance INVARIANT (step 4). A `SNAPSHOT_ERROR` or non-zero exit follows
@@ -204,7 +201,7 @@ ceiling); `same-finding-repeat` oscillation (→ `max-cycles-reached`, an
 oscillation guard and never a quiet window); any reviewer
 `planner-escalation` / `blocked` / `injection-suspect` / `high-severity-rejection`
 / `user-input-required` / `root-cluster-suspected` / `merge-advised`; PR merged
-or closed; Codex or review approval with nothing actionable remaining.
+or closed; Codex approval with nothing actionable remaining.
 Cycle arithmetic, ceiling, terminal-vs-cycle, and `same-finding-repeat` mapping:
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`.
 Multi-token precedence ORDER:

@@ -17,11 +17,6 @@ The remaining cases pin the behavior the fix must not break: silence on no delta
 each scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone, `FAILED_CHECKS`),
 `CODEX_APPROVED` on a first-poll approval, and the fail-closed `POLL_ERROR` paths.
 
-Case `review:approved-on-first-poll` pins the approving-review signal: an `APPROVED` review by
-`chatgpt-codex-connector` with NO 👍 reaction must emit `REVIEW_APPROVED` as the FIRST marker.
-Before that marker existed an approval only bumped `LATEST_FILTERED_REVIEW_ID`, so it fired a
-generic `CHANGED`, the reviewer answered clean, and the watch kept idling to `WATCH_TIMEOUT`.
-
 ## Running it
 
 ```bash
@@ -34,11 +29,11 @@ under test is the production one and only the transport is faked.
 
 ## The seed probe
 
-The fix adds a `--snapshot` mode emitting a `BASELINE=<9 pipe-separated fields>` token captured
+The fix adds a `--snapshot` mode emitting a `BASELINE=<8 pipe-separated fields>` token captured
 BEFORE cycle 0, passed back as a REQUIRED 8th positional argument to poll mode. The runner
 probes the script under test for `--snapshot` support instead of assuming it:
 
-- **absent** — cases run against the legacy 7-arg form and the five seed-contract cases print a
+- **absent** — cases run against the legacy 7-arg form and the four seed-contract cases print a
   visible `SKIP` line. A silent pass on an unimplemented feature is the false-pass class of #321.
 - **present** — the seed is captured at the pre-cycle-0 state and passed as arg 8; the
   seed-contract cases run.
@@ -57,7 +52,6 @@ cannot be captured emits `SNAPSHOT_ERROR` and exits 1.
 | --- | --- |
 | `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (one Codex review, one Codex thread, checks green). |
 | `graphql-blind-window.json` | State B — A plus the Codex review + review-thread comment posted during the blind window. |
-| `graphql-review-approved.json` | State A with the Codex review superseded by an `APPROVED` review (databaseId 3011002) and no 👍 reaction — drives `REVIEW_APPROVED`. |
 | `graphql-malformed.json` | A GraphQL `NOT_FOUND` error response (null `pullRequest`) that makes the snapshot pipeline fail. |
 | `reactions-none.txt` | Reactions call stdout with no Codex 👍 (empty, exactly as `gh` emits). |
 | `reactions-codex.txt` | Reactions call stdout with a Codex 👍 present. |

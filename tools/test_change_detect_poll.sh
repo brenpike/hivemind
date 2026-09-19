@@ -19,7 +19,7 @@
 # cycle-0 duration is a BLIND WINDOW: feedback posted inside it missed cycle 0's fetch AND is
 # counted as pre-existing by the poll, so it never produces a CHANGED event.
 #
-# THE SEED PROBE: the planned fix adds a `--snapshot` mode emitting a `BASELINE=<9 pipe-separated
+# THE SEED PROBE: the planned fix adds a `--snapshot` mode emitting a `BASELINE=<8 pipe-separated
 # fields>` token captured BEFORE cycle 0, passed back as a REQUIRED 8th positional arg to poll mode.
 # The suite PROBES the script under test for `--snapshot` support rather than assuming it:
 #   - ABSENT  → cases run against the legacy 7-arg form; the seed-contract cases SKIP visibly.
@@ -71,10 +71,8 @@ SELF_LOGIN="hive-author"
 PRE="$FIXTURES/graphql-pre-cycle0.json"
 BLIND="$FIXTURES/graphql-blind-window.json"
 MALFORMED="$FIXTURES/graphql-malformed.json"
-APPROVED="$FIXTURES/graphql-review-approved.json"
 REACT_NONE="$FIXTURES/reactions-none.txt"
 REACT_CODEX="$FIXTURES/reactions-codex.txt"
-[ -f "$APPROVED" ] || { echo "FAIL: fixture missing: $APPROVED" >&2; exit 2; }
 
 # ── PATH-shim fake gh ───────────────────────────────────────────────────────────────
 # Serves a per-call fixture from a state dir: <kind>.seq lists one fixture path per line and
@@ -273,27 +271,6 @@ else
   failed "codex:approved-on-first-poll" "expected CODEX_APPROVED first, got=$(printf '%s' "$out" | tr '\n' ';')"
 fi
 
-# ── 4b. an approving REVIEW emits REVIEW_APPROVED ───────────────────────────────────
-# A Codex APPROVED review lands after the pre-cycle-0 seed state (which carried only a
-# COMMENTED review), with NO 👍 reaction. APPROVED_PRESENT goes FALSE -> TRUE, so the first
-# emitted marker is REVIEW_APPROVED — not a generic CHANGED that the reviewer would answer
-# clean while the watch kept idling to WATCH_TIMEOUT. Post-fix behavior, so it branches on
-# the seed probe like the other seed-contract cases.
-if [ "$SEED_SUPPORTED" -eq 1 ]; then
-  st="$(new_state reviewapproved)"
-  set_seq "$st" graphql "$APPROVED"
-  set_seq "$st" reactions "$REACT_NONE"
-  out="$(arm_poll "$st" "$SEED")"
-  first_line="$(printf '%s\n' "$out" | head -1)"
-  if [ "$first_line" = "REVIEW_APPROVED" ]; then
-    pass "review:approved-on-first-poll" "REVIEW_APPROVED emitted on the first poll"
-  else
-    failed "review:approved-on-first-poll" "expected REVIEW_APPROVED first, got=$(printf '%s' "$out" | tr '\n' ';')"
-  fi
-else
-  skipped "review:approved-on-first-poll" "$SKIP_REASON"
-fi
-
 # ── 5. missing seed argument fails CLOSED ───────────────────────────────────────────
 # Once the seed is a REQUIRED 8th positional arg, the legacy 7-arg invocation must not silently
 # fall back to self-baselining — that is exactly the defect. POLL_ERROR, exit 1.
@@ -331,15 +308,14 @@ else
 fi
 
 # ── 7. --snapshot emits a well-formed BASELINE line ─────────────────────────────────
-# One `BASELINE=` line carrying exactly 9 pipe-separated fields — the nine scalars the poll
-# diffs (state, three id tokens, three totals, failed checks, APPROVED_PRESENT) plus nothing
-# else to parse.
+# One `BASELINE=` line carrying exactly 8 pipe-separated fields — the eight scalars the poll
+# diffs (state, three id tokens, three totals, failed checks) plus nothing else to parse.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   field_count=0
   [ -z "$SEED" ] || field_count="$(printf '%s' "$SEED" | awk -F'|' '{print NF}')"
   baseline_lines="$(printf '%s\n' "$SEED_RAW" | grep -c '^BASELINE=')"
-  if [ "$baseline_lines" -eq 1 ] && [ "$field_count" -eq 9 ]; then
-    pass "snapshot:baseline-well-formed" "one BASELINE= line, 9 pipe-separated fields"
+  if [ "$baseline_lines" -eq 1 ] && [ "$field_count" -eq 8 ]; then
+    pass "snapshot:baseline-well-formed" "one BASELINE= line, 8 pipe-separated fields"
   else
     failed "snapshot:baseline-well-formed" "baseline_lines=$baseline_lines fields=$field_count raw=$(printf '%s' "$SEED_RAW" | tr '\n' ';')"
   fi

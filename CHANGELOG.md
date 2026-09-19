@@ -16,7 +16,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- github-review-loop: an approving review is now detected as a first-class approval signal ending the watch, alongside the existing Codex 👍 reaction.
 - overlord: a standing per-project opt-out from the default post-PR watch — set `HIVEMIND_SKIP_PR_WATCH` in the `env` block of `.claude/settings.json` to never watch. Unset or empty means no behavior change.
 
 ### Changed

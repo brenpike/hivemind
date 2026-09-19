@@ -35,9 +35,8 @@
 #                          the literal `same-finding-repeat` for the oscillation guard,
 #                          or the literal `approval-clean` for the approval
 #                          confirmation pass where the reviewer found nothing
-#                          actionable. BOTH approval markers route here: the
-#                          CODEX_APPROVED marker and the REVIEW_APPROVED marker
-#                          raised by the sibling pr-change-detect-poll.sh.
+#                          actionable. The CODEX_APPROVED marker raised by the
+#                          sibling pr-change-detect-poll.sh routes here.
 #
 #   loop-state.sh token-map <signal>
 #     signal one deterministic loop-input signal the loop itself observes:
@@ -108,10 +107,9 @@
 #   (e) `clean`: the keep-watching case — increment per (a)/(b), emit `none`
 #       unless the ceiling is hit.
 #   (f) `approval-clean`: an approval confirmation pass found nothing
-#       actionable — TERMINAL `clean` (SKILL.md section 4 approval path). Both
-#       the CODEX_APPROVED marker and the REVIEW_APPROVED marker raised by the
-#       sibling pr-change-detect-poll.sh feed this SAME token; this script sees
-#       only `approval-clean` and does not branch on which marker raised it.
+#       actionable — TERMINAL `clean` (SKILL.md section 4 approval path). The
+#       CODEX_APPROVED marker raised by the sibling pr-change-detect-poll.sh
+#       feeds this token; this script sees only `approval-clean`.
 #       Distinct from `clean`: a plain `clean` keeps watching, but an approved PR
 #       with nothing actionable remaining is a successful terminal and must emit
 #       `EXIT_REASON=clean` rather than keep watching to timeout. No increment
@@ -212,12 +210,11 @@ cmd_cycle_decision() {
     return 0
   fi
 
-  # approval-clean: an approval confirmation pass (CODEX_APPROVED or
-  # REVIEW_APPROVED) found nothing actionable →
-  # TERMINAL `clean` (decision 4f). No increment — a confirmation pass that finds
-  # nothing is not a remediation round. Distinct from plain `clean`, which keeps
-  # watching; this is the successful approval terminal an approved PR must emit
-  # rather than keep watching until timeout.
+  # approval-clean: an approval confirmation pass (CODEX_APPROVED) found nothing
+  # actionable → TERMINAL `clean` (decision 4f). No increment — a confirmation
+  # pass that finds nothing is not a remediation round. Distinct from plain
+  # `clean`, which keeps watching; this is the successful approval terminal an
+  # approved PR must emit rather than keep watching until timeout.
   if [ "$reviewer_exit_reason" = "approval-clean" ]; then
     printf 'NEXT_COUNT=%s\n' "$current_count"
     printf 'EXIT_REASON=clean\n'

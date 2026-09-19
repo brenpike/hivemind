@@ -14,12 +14,9 @@
 #     and self-login); totalCount tripwires for the three connections capped at
 #     50; a CI `FAILED_CHECKS` scalar that counts only checks in a failed/
 #     errored state, so CI regressions wake the reviewer even when no new review
-#     comment was posted; an `APPROVED_PRESENT` bool derived from those SAME
-#     review nodes — true when the reviewer-filtered stream's latest review for
-#     some author is APPROVED — so a genuine approving review is a first-class
-#     signal rather than a generic CHANGED) plus a Codex 👍 PRESENT bool (via
-#     paginated REST reactions). No bodies, no cursor walks — the poll only
-#     answers "did anything change?" and "is the PR terminal?".
+#     comment was posted) plus a Codex 👍 PRESENT bool (via paginated REST
+#     reactions). No bodies, no cursor walks — the poll only answers "did
+#     anything change?" and "is the PR terminal?".
 #   - It DIFFS the scalar snapshot in bash against the previous iteration and
 #     emits a single minimal marker line ONLY on a real delta or a terminal
 #     state. The reviewer re-fetches ALL feedback bodies and does the full
@@ -97,23 +94,11 @@
 #                    pre-existing 👍 surfaces through the ordinary false->true
 #                    diff on the first poll (skill confirms via reviewer;
 #                    terminal clean only if nothing actionable remains)
-#   REVIEW_APPROVED  an approving REVIEW newly present: the reviewer-filtered
-#                    review stream's latest review for some author went to
-#                    APPROVED since the previous snapshot. Ranked alongside
-#                    CODEX_APPROVED — a terminal PR state still wins, and like
-#                    CODEX_APPROVED it does NOT exit; the skill runs the same
-#                    confirmation pass (once, even when both markers fire in the
-#                    same poll) rather than treating it as a generic CHANGED.
-#                    Like the Codex bool, the seed NEVER carries a live approval
-#                    value: --snapshot pins the APPROVED_PRESENT field to the
-#                    literal FALSE, so an approving review already standing when
-#                    the watch starts still surfaces through the ordinary
-#                    FALSE->TRUE diff on the first poll.
 #   WATCH_TIMEOUT    max_watch_duration elapsed (terminal)
 #   POLL_ERROR       repeated query failure, or a missing/malformed seed
 #                    (terminal; skill returns blocked)
 #   BASELINE=<seed>  --snapshot mode only: the seed token poll mode requires as
-#                    its 8th argument (9 pipe-separated fields)
+#                    its 8th argument
 #   SNAPSHOT_ERROR   --snapshot mode only: the seed could not be captured
 #                    (terminal; skill returns blocked)
 #
@@ -131,10 +116,8 @@
 #                               activity from delta tokens (required)
 #   $8  BASELINE_SEED           poll mode only: the BARE value of the BASELINE=
 #                               line emitted by --snapshot (label stripped) —
-#                               9 pipe-separated fields carrying the 9 scalars
-#                               the poll diffs, the 9th being APPROVED_PRESENT
-#                               as the literal TRUE or FALSE. REQUIRED, never
-#                               optional: an
+#                               8 pipe-separated fields carrying the 8 scalars
+#                               the poll diffs. REQUIRED, never optional: an
 #                               optional seed would let a caller silently
 #                               regress to the self-baselining blind window, so
 #                               a missing or malformed value is POLL_ERROR
@@ -201,10 +184,9 @@ POLL_INTERVAL_SECONDS=$((10#$POLL_INTERVAL_SECONDS))
 # The baseline seed is REQUIRED in poll mode and is validated STRICTLY, before
 # the first poll or sleep: a partially-parsed seed would leave some prev_ scalar
 # empty and fire a spurious CHANGED, and an absent one would re-open the #324
-# blind window. Shape: exactly 9 non-empty fields over the charset --snapshot
-# emits — the PR state enum, NONE-or-digits id tokens, digit counts, and the
-# uppercase TRUE/FALSE approval bool (uppercase so it stays inside the charset).
-SEED_FORMAT_RE='^[A-Z0-9]+([|][A-Z0-9]+){8}$'
+# blind window. Shape: exactly 8 non-empty fields over the charset --snapshot
+# emits — the PR state enum, NONE-or-digits id tokens, and digit counts.
+SEED_FORMAT_RE='^[A-Z0-9]+([|][A-Z0-9]+){7}$'
 if [ "$MODE" = "poll" ]; then
   [[ "$BASELINE_SEED" =~ $SEED_FORMAT_RE ]] || poll_fail
 fi
@@ -248,10 +230,7 @@ fail_count=0
 # failed/errored state (FAILURE / ERROR / TIMED_OUT / CANCELLED /
 # ACTION_REQUIRED for CheckRun; FAILURE / ERROR for legacy StatusContext);
 # changes here fire CHANGED so `github-reviewer` step 3 (failed-CI fix
-# candidates) is wired to a wake signal independent of review activity.
-# `APPROVED_PRESENT` reuses the review nodes this same query already returned —
-# TRUE when, after collapsing the reviewer-filtered stream to one latest review
-# per author, any author's latest review state is APPROVED. The
+# candidates) is wired to a wake signal independent of review activity. The
 # reviewer does the full body-level classification on wake (thin poll, no
 # interpretation). Writes diagnostic stderr to /dev/null (never /tmp).
 compute_snapshot() {
@@ -303,23 +282,9 @@ query($owner: String!, $repo: String!, $pr: Int!) {
           if $filter == "codex-only" then $a == "chatgpt-codex-connector"
           elif $filter == "all" then $a != $login
           else $a == $filter
-          end))) as $filtered_reviews |
-    ($filtered_reviews
+          end))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $filtered_review |
-    # APPROVED_PRESENT: derived from the SAME already-fetched review nodes as
-    # $filtered_review — no extra round trip. Collapse the reviewer-filtered
-    # stream to ONE latest review per author (max databaseId within the author
-    # group, bot-suffix stripped so `x` and `x[bot]` are one author) and report
-    # whether the latest review of any author is APPROVED. Per-author-latest, not
-    # any-APPROVED-ever: a later CHANGES_REQUESTED or DISMISSED by the same
-    # author supersedes an earlier approval and flips the bool back to FALSE.
-    # Emitted uppercase so the value stays inside the seed token charset.
-    ($filtered_reviews
-      | group_by(.author.login // "" | sub("\\[bot\\]$"; ""))
-      | map(max_by(.databaseId))
-      | map(.state == "APPROVED")
-      | (if any then "TRUE" else "FALSE" end)) as $approved_present |
     ($pr.reviewThreads.nodes
       | map(.comments.nodes[]?)
       | map(select((.author.login // "" | sub("\\[bot\\]$"; "")) != $login))
@@ -355,8 +320,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     "COMMENTS_TOTAL=" + ($pr.comments.totalCount | tostring),
     "REVIEWS_TOTAL=" + ($pr.reviews.totalCount | tostring),
     "THREADS_TOTAL=" + ($pr.reviewThreads.totalCount | tostring),
-    "FAILED_CHECKS=" + ($failed_checks | tostring),
-    "APPROVED_PRESENT=" + $approved_present
+    "FAILED_CHECKS=" + ($failed_checks | tostring)
   ' \
   ) ) || return 1
 
@@ -372,7 +336,6 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       REVIEWS_TOTAL=*) cur_reviews_total="${line#REVIEWS_TOTAL=}" ;;
       THREADS_TOTAL=*) cur_threads_total="${line#THREADS_TOTAL=}" ;;
       FAILED_CHECKS=*) cur_failed_checks="${line#FAILED_CHECKS=}" ;;
-      APPROVED_PRESENT=*) cur_approved_present="${line#APPROVED_PRESENT=}" ;;
     esac
   done <<EOF
 $raw
@@ -398,34 +361,23 @@ EOF
 }
 
 # --snapshot: one-shot baseline capture, emitted as a single pipe-separated
-# token. It carries the 9 scalars the poll diffs and NOT the Codex 👍 bool —
+# token. It carries the 8 scalars the poll diffs and NOT the Codex 👍 bool —
 # leaving prev_codex empty in poll mode is what keeps a pre-existing approval
-# surfacing through the ordinary false->true diff. NO APPROVAL SIGNAL IS EVER
-# SEEDED LIVE, and APPROVED_PRESENT is held to that same rule: the field keeps
-# its slot in the 9-field token (format and the strict poll-side validator are
-# unchanged) but is pinned to the literal FALSE rather than the observed value.
-# Seeding the observed value suppressed REVIEW_APPROVED for an approving review
-# that already stood when the watch started, and cycle 0 cannot compensate —
-# github-reviewer returns an ordinary `clean` regardless of approval and the
-# lifecycle maps an ordinary cycle-0 `clean` to continued watching, so an
-# already-approved quiet PR idled out as `watch-window-elapsed` instead of
-# reaching the approval terminal. Pinning FALSE makes both approval signals
-# reach the loop by the SAME uniform diff and costs no spurious CHANGED: on a
-# PR with no approval the first poll compares FALSE against FALSE.
-# A seed that cannot be captured is loud (SNAPSHOT_ERROR, exit 1) rather than an
-# empty token the caller would pass on as a valid baseline.
+# surfacing through the ordinary false->true diff. A seed that cannot be
+# captured is loud (SNAPSHOT_ERROR, exit 1) rather than an empty token the
+# caller would pass on as a valid baseline.
 if [ "$MODE" = "snapshot" ]; then
   cur_state=""; cur_nonself_comment_id=""; cur_filtered_review_id=""
   cur_nonself_thread_id=""; cur_codex=""
   cur_comments_total=""; cur_reviews_total=""; cur_threads_total=""
-  cur_failed_checks=""; cur_approved_present=""
+  cur_failed_checks=""
 
   compute_snapshot || poll_fail
 
-  printf 'BASELINE=%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
+  printf 'BASELINE=%s|%s|%s|%s|%s|%s|%s|%s\n' \
     "$cur_state" "$cur_nonself_comment_id" "$cur_filtered_review_id" \
     "$cur_nonself_thread_id" "$cur_comments_total" "$cur_reviews_total" \
-    "$cur_threads_total" "$cur_failed_checks" "FALSE"
+    "$cur_threads_total" "$cur_failed_checks"
   exit 0
 fi
 
@@ -435,13 +387,9 @@ fi
 # left EMPTY: the seed carries no Codex bool, so a 👍 already present when the
 # watch starts still fires CODEX_APPROVED via the normal false->true diff on the
 # first poll (D14) instead of needing a baseline special case.
-# prev_approved_present is the same story by a different mechanism: the field is
-# present in the token but --snapshot pinned it to FALSE, so an approving review
-# already standing when the watch starts fires REVIEW_APPROVED on the first poll
-# via the same FALSE->TRUE diff. No approval signal is ever seeded live.
 IFS='|' read -r prev_state prev_nonself_comment_id prev_filtered_review_id \
   prev_nonself_thread_id prev_comments_total prev_reviews_total \
-  prev_threads_total prev_failed_checks prev_approved_present <<EOF
+  prev_threads_total prev_failed_checks <<EOF
 $BASELINE_SEED
 EOF
 prev_codex=""
@@ -455,7 +403,7 @@ while true; do
   cur_state=""; cur_nonself_comment_id=""; cur_filtered_review_id=""
   cur_nonself_thread_id=""; cur_codex=""
   cur_comments_total=""; cur_reviews_total=""; cur_threads_total=""
-  cur_failed_checks=""; cur_approved_present=""
+  cur_failed_checks=""
 
   if ! compute_snapshot; then
     fail_count=$((fail_count + 1))
@@ -482,31 +430,16 @@ while true; do
   # rather than treating it as a generic CHANGED delta). On the first iteration
   # prev_codex is empty, so an approval already present when the watch started
   # fires here too — terminal clean ONLY if nothing actionable remains (D14).
-  approval_marker_fired=0
   if [ "$cur_codex" = "true" ] && [ "$prev_codex" != "true" ]; then
     echo "CODEX_APPROVED"
-    approval_marker_fired=1
-  fi
-  # An approving REVIEW is its own first-class marker, ranked alongside the
-  # Codex 👍 rather than folded into a generic CHANGED: without it an approval
-  # only ever bumped LATEST_FILTERED_REVIEW_ID, the reviewer returned clean, and
-  # the watch kept running. Both markers route to the SAME skill-side
-  # confirmation pass, which runs ONCE even when both fire in one poll, so
-  # emitting both lines here is safe. Like CODEX_APPROVED it does not exit.
-  if [ "$cur_approved_present" = "TRUE" ] && [ "$prev_approved_present" != "TRUE" ]; then
-    echo "REVIEW_APPROVED"
-    approval_marker_fired=1
-  fi
-  if [ "$approval_marker_fired" -eq 0 ] \
-    && { [ "$cur_state" != "$prev_state" ] \
+  elif [ "$cur_state" != "$prev_state" ] \
     || [ "$cur_nonself_comment_id" != "$prev_nonself_comment_id" ] \
     || [ "$cur_filtered_review_id" != "$prev_filtered_review_id" ] \
     || [ "$cur_nonself_thread_id" != "$prev_nonself_thread_id" ] \
     || [ "$cur_comments_total" != "$prev_comments_total" ] \
     || [ "$cur_reviews_total" != "$prev_reviews_total" ] \
     || [ "$cur_threads_total" != "$prev_threads_total" ] \
-    || [ "$cur_failed_checks" != "$prev_failed_checks" ] \
-    || [ "$cur_approved_present" != "$prev_approved_present" ]; }; then
+    || [ "$cur_failed_checks" != "$prev_failed_checks" ]; then
     echo "CHANGED"
   fi
   # No-change iteration: emit nothing.
@@ -519,7 +452,6 @@ while true; do
   prev_reviews_total="$cur_reviews_total"
   prev_threads_total="$cur_threads_total"
   prev_failed_checks="$cur_failed_checks"
-  prev_approved_present="$cur_approved_present"
   prev_codex="$cur_codex"
 
   sleep "$POLL_INTERVAL_SECONDS"
