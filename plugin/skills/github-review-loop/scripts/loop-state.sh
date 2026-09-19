@@ -47,8 +47,17 @@
 #
 #   loop-state.sh floor
 #     ZERO args (a surplus arg is rejected loudly). Prints the declared
-#     max_remediation_cycles floor as `MAX_REMEDIATION_CYCLES_FLOOR=<int>` so prose
-#     and callers CITE the number from here instead of restating it.
+#     max_remediation_cycles floor as a BARE integer so prose and callers CITE the
+#     number from here instead of restating it.
+#     Deliberately UNLIKE every sibling subcommand's `KEY=VALUE` routing data:
+#     `floor` is a VALUE-PUBLISHING command, not a routing emitter. Its whole job is
+#     to be substituted where the literal used to sit, so
+#     `$(loop-state.sh floor)` drops straight into cycle-decision's <max_cycles>
+#     argv and into the SKILL.md Inputs-table default. A `KEY=VALUE` form would make
+#     every citing site restate a strip expression — trading one duplicated number
+#     for one duplicated parse — and a caller following the documented default
+#     verbatim would feed `require_uint` a labelled string and die before the watch
+#     could arm. Nothing machine-ROUTES on `floor`; callers only substitute it.
 #
 #   loop-state.sh resolve-precedence <token> [token ...]
 #     When the caller holds MORE THAN ONE fired exit_reason at once (e.g. a reviewer
@@ -71,8 +80,8 @@
 #                           the literal `none` if the loop should keep watching.
 # token-map → one line on stdout, exit 0:
 #     EXIT_REASON=<token>
-# floor → one line on stdout, exit 0:
-#     MAX_REMEDIATION_CYCLES_FLOOR=<int>
+# floor → one line on stdout, exit 0, carrying a BARE integer and NO `KEY=` label:
+#     <int>
 #
 # 4. ENCODED DECISIONS (SKILL.md sections 4/5/6 + Termination guard set)
 # ---------------------------------------------------------------------
@@ -120,7 +129,9 @@
 #       enforced in cycle-decision. A caller passing a lower ceiling is REJECTED
 #       loudly rather than silently terminating remediation early; 0 still rejects,
 #       so the former `>= 1` check is subsumed, not lost. The `floor` subcommand
-#       publishes the value so no consumer has to restate it.
+#       publishes the value as a bare integer so no consumer has to restate it and
+#       none has to parse it: what `floor` prints IS what cycle-decision accepts as
+#       <max_cycles>.
 #
 # 5. PRECEDENCE DELEGATION
 # ------------------------
@@ -144,6 +155,9 @@
 # it both DECLARES the number (MAX_REMEDIATION_CYCLES_FLOOR) and ENFORCES it in
 # cycle-decision. No prose anywhere restates the number; consumers cite it, and
 # `loop-state.sh floor` is how they read it.
+# INVARIANT: `floor` stdout is DIRECTLY acceptable as cycle-decision's <max_cycles>
+# argv — a documented default of `$(loop-state.sh floor)` composes with no strip or
+# reformat step. Adding a `KEY=` label here breaks that composition.
 
 set -euo pipefail
 
@@ -278,7 +292,9 @@ cmd_token_map() {
 
 cmd_floor() {
   [ "$#" -eq 0 ] || die "floor expects 0 args"
-  printf 'MAX_REMEDIATION_CYCLES_FLOOR=%s\n' "$MAX_REMEDIATION_CYCLES_FLOOR"
+  # BARE integer, no `KEY=` label: this value is SUBSTITUTED into cycle-decision's
+  # <max_cycles> argv (and into the documented default), never routed by key.
+  printf '%s\n' "$MAX_REMEDIATION_CYCLES_FLOOR"
 }
 
 cmd_resolve_precedence() {

@@ -102,6 +102,33 @@ assert_matches_sibling() {
   fi
 }
 
+# ---------------------------------------------------------------------------
+# assert_default_composes <case_name>
+# COMPOSITION assertion, not a unit assertion. SKILL.md's Inputs table publishes
+# `$(loop-state.sh floor)` AS THE VALUE of max_remediation_cycles, so this takes
+# the value exactly that way and hands it straight to cycle-decision's
+# <max_cycles> argv with NO strip and NO reformat step. A unit test of `floor`
+# alone cannot see a `KEY=` label creep back into the output — only this
+# composition can, because cycle-decision's require_uint rejects a labelled value
+# and the loop would die before the watch could arm.
+# ---------------------------------------------------------------------------
+assert_default_composes() {
+  local case_name="$1"
+  local composed exit_code
+  composed="$(bash "$SCRIPT" cycle-decision 0 "$DOCUMENTED_DEFAULT_MAX_CYCLES" 1 clean 2>&1)"
+  exit_code=$?
+  if [ "$exit_code" -ne 0 ]; then
+    failed "$case_name" "cycle-decision rejected the documented default '$DOCUMENTED_DEFAULT_MAX_CYCLES' (exit $exit_code): $(printf '%s' "$composed" | tr '\n' '|')"
+    return
+  fi
+  case "$composed" in
+    NEXT_COUNT=*EXIT_REASON=*)
+      pass "$case_name" "documented default '$DOCUMENTED_DEFAULT_MAX_CYCLES' accepted as <max_cycles>" ;;
+    *)
+      failed "$case_name" "unexpected cycle-decision output for default '$DOCUMENTED_DEFAULT_MAX_CYCLES': $(printf '%s' "$composed" | tr '\n' '|')" ;;
+  esac
+}
+
 # ============================================================================
 # SECTION 1: cycle-decision — increment ONLY on findings_resolved >= 1
 # ============================================================================
@@ -282,7 +309,23 @@ assert_stdout "approval-clean:plain-clean-keeps-watching" \
 # and prose read it without restating it.
 # ============================================================================
 
-assert_stdout "floor:emits-constant" "MAX_REMEDIATION_CYCLES_FLOOR=6" floor
+# `floor` is a VALUE-PUBLISHING command: a BARE integer, no `KEY=` routing label,
+# because its output is substituted where the literal used to sit.
+assert_stdout "floor:emits-constant" "6" floor
+
+# The documented default, taken EXACTLY the way SKILL.md's Inputs table publishes
+# it: the command's stdout IS the value of max_remediation_cycles.
+DOCUMENTED_DEFAULT_MAX_CYCLES="$(bash "$SCRIPT" floor 2>/dev/null)"
+
+# The composition the unit case above cannot see: documented default -> argv.
+assert_default_composes "floor:documented-default-composes"
+
+# The other direction, DERIVED from the published value rather than a re-listed
+# literal: one below what `floor` publishes must be rejected by cycle-decision.
+# This ties `floor`'s output to the guard actually enforced, so a `floor` that
+# published some OTHER number than the guard compares against cannot stay green.
+assert_nonzero_stderr "floor:one-below-published-rejected" \
+  cycle-decision 0 "$((DOCUMENTED_DEFAULT_MAX_CYCLES - 1))" 1 clean
 
 # ============================================================================
 # SECTION 5: token-map — each loop signal → its exit_reason

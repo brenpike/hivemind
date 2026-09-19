@@ -32,7 +32,7 @@ Monitor is a main-session cross-turn primitive — a subagent dispatch orphans a
 | `base` | (required) | PR base/target branch. |
 | `reviewer_filter` | `codex-only` | Actionable reviewer identities (`codex-only` \| `all` \| `<author>`). |
 | `max_watch_duration` | `3600` | Idle-window seconds per Monitor arm (1h). |
-| `max_remediation_cycles` | `bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor` | Max real remediation rounds (findings_resolved ≥ 1). |
+| `max_remediation_cycles` | `$(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor)` | Max real remediation rounds (findings_resolved ≥ 1). |
 | `poll_interval` | `60` | Seconds between polls. |
 
 `max_watch_duration` is an IDLE window, not a total budget: a completed remediation
@@ -43,7 +43,10 @@ arm IS a fresh window — the idle semantics live here, in the arm/re-arm discip
 `max_remediation_cycles` is a FLOOR. The floor value is DECLARED and ENFORCED by
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, and no
 literal is restated here — query it with
-`bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor`.
+`bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor`,
+which prints a BARE integer and no `KEY=` label. That is why the default above is a
+command SUBSTITUTION: the published value goes straight into any argv expecting the
+number — including `cycle-decision`'s `<max_cycles>` — with nothing to strip.
 A caller that invokes this loop with a lower value is REJECTED.
 
 ## Lifecycle
