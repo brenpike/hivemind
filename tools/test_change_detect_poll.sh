@@ -19,9 +19,10 @@
 # cycle-0 duration is a BLIND WINDOW: feedback posted inside it missed cycle 0's fetch AND is
 # counted as pre-existing by the poll, so it never produces a CHANGED event.
 #
-# THE SEED PROBE: the planned fix adds a `--snapshot` mode emitting a `BASELINE=<8 pipe-separated
-# fields>` token captured BEFORE cycle 0, passed back as a REQUIRED 8th positional arg to poll mode.
-# The suite PROBES the script under test for `--snapshot` support rather than assuming it:
+# THE SEED PROBE: the fix adds a `--snapshot` mode emitting a `BASELINE=<arm kind + one field per
+# diffed scalar>` token captured BEFORE cycle 0, passed back as a REQUIRED 8th positional arg to
+# poll mode. The suite PROBES the script under test for `--snapshot` support rather than assuming
+# it:
 #   - ABSENT  → cases run against the legacy 7-arg form; the seed-contract cases SKIP visibly.
 #   - PRESENT → the seed is captured at the pre-cycle-0 state and passed as arg 8; the
 #               seed-contract cases RUN.
@@ -29,9 +30,20 @@
 # bite-proof case goes red again instead of silently passing.
 #
 # HARNESS-ASSUMED SEED CONTRACT (asserted, not guessed silently): snapshot mode is invoked as
-#   pr-change-detect-poll.sh --snapshot <OWNER> <REPO> <PR> <MAX_WATCH> <INTERVAL> <FILTER> <SELF>
+#   pr-change-detect-poll.sh --snapshot <initial|re-arm> <OWNER> <REPO> <PR> <MAX_WATCH>
+#     <INTERVAL> <FILTER> <SELF>
 # and emits one `BASELINE=<value>` line; the BARE <value> (no `BASELINE=` label) is arg 8 of poll
 # mode. Snapshot failure emits `SNAPSHOT_ERROR` and exits 1.
+#
+# THE STATE-MODEL CONTRACT this suite holds (the second bite, PR #361):
+#   - COMPLETE SERIALIZATION. The seed serializes EVERY scalar the poll diffs. `seed:complete-
+#     serialization` is STRUCTURAL, not per-scalar: it reads the script's own `SNAPSHOT_FIELDS`
+#     declaration and the set of `cur_<name>` assignments and asserts they are the same set, so a
+#     future author who adds a diffed scalar without declaring it goes red. Per-scalar assertions
+#     are exactly what let the omitted approval bool through twice.
+#   - EXPLICIT ARM KIND. Whether a 👍 predating the arm surfaces is answered by the seed's ARM
+#     KIND, not by which fields the token carries: `initial` surfaces it (#324 blind window),
+#     `re-arm` suppresses it (a stale 👍 must never short-circuit later pushback).
 #
 # Usage:
 #   ./tools/test_change_detect_poll.sh
@@ -154,6 +166,23 @@ arm_poll() {
   fi
 }
 
+# snapshot_raw <state_name> <arm_kind> <graphql_entry> <reactions_entry>: snapshot mode over a
+# fresh fake-gh state, returning the RAW stdout (BASELINE= line included).
+snapshot_raw() {
+  local st
+  st="$(new_state "$1")"
+  set_seq "$st" graphql "$3"
+  set_seq "$st" reactions "$4"
+  run_poll "$st" --snapshot "$2" "$OWNER" "$REPO_NAME" "$PR_NUMBER" \
+    "$MAX_WATCH" "$POLL_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN"
+}
+
+# capture_seed <state_name> <arm_kind> <graphql_entry> <reactions_entry>: the BARE seed token the
+# skill would strip out of that BASELINE= line and pass as arg 8.
+capture_seed() {
+  snapshot_raw "$@" | sed -n 's/^BASELINE=//p' | head -1
+}
+
 # ── Seed probe ──────────────────────────────────────────────────────────────────────
 # Source-level probe for `--snapshot` support. A behavioral probe cannot discriminate: on the
 # unfixed script `--snapshot` is simply read as OWNER and the run dies with the same POLL_ERROR
@@ -164,14 +193,29 @@ grep -qF -- '--snapshot' "$POLL" && SEED_SUPPORTED=1
 SEED=""
 SEED_RAW=""
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
-  seed_state="$(new_state seed)"
-  set_seq "$seed_state" graphql "$PRE"
-  set_seq "$seed_state" reactions "$REACT_NONE"
-  SEED_RAW="$(run_poll "$seed_state" --snapshot "$OWNER" "$REPO_NAME" "$PR_NUMBER" \
-    "$MAX_WATCH" "$POLL_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN")"
+  SEED_RAW="$(snapshot_raw seed initial "$PRE" "$REACT_NONE")"
   SEED="$(printf '%s\n' "$SEED_RAW" | sed -n 's/^BASELINE=//p' | head -1)"
 fi
 SKIP_REASON="script under test has no --snapshot seed support (pre-fix baseline contract)"
+
+# ── Declared-vs-computed snapshot state (source-derived) ─────────────────────────────
+# declared_fields: the script's own `SNAPSHOT_FIELDS=( ... )` block — the single declaration the
+# serializer, parser, seed regex and diff are all built from.
+declared_fields() {
+  sed -n '/^SNAPSHOT_FIELDS=(/,/^)/p' "$POLL" \
+    | sed -e '1d' -e '$d' -e 's/[[:space:]]//g' \
+    | grep -v '^$'
+}
+# computed_fields: every scalar compute_snapshot actually fills, read off the literal `cur_<name>=`
+# assignments in executable (non-comment) lines.
+computed_fields() {
+  grep -vE '^[[:space:]]*#' "$POLL" \
+    | grep -oE '\bcur_[a-z0-9_]+=' \
+    | sed -e 's/^cur_//' -e 's/=$//' \
+    | sort -u
+}
+DECLARED_FIELD_COUNT=0
+[ "$SEED_SUPPORTED" -eq 0 ] || DECLARED_FIELD_COUNT="$(declared_fields | grep -c .)"
 
 # ── 1. blind-window feedback surfaces (THE BITE-PROOF) ──────────────────────────────
 # A Codex review + review-thread comment lands AFTER the pre-cycle-0 state and BEFORE the Monitor
@@ -308,16 +352,20 @@ else
 fi
 
 # ── 7. --snapshot emits a well-formed BASELINE line ─────────────────────────────────
-# One `BASELINE=` line carrying exactly 8 pipe-separated fields — the eight scalars the poll
-# diffs (state, three id tokens, three totals, failed checks) plus nothing else to parse.
+# One `BASELINE=` line carrying the arm kind plus exactly one field per declared snapshot scalar,
+# and nothing else to parse. The expected width is DERIVED from the script's own declaration, so
+# the count assertion and SEED_FORMAT_RE cannot drift apart from the field list.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   field_count=0
   [ -z "$SEED" ] || field_count="$(printf '%s' "$SEED" | awk -F'|' '{print NF}')"
   baseline_lines="$(printf '%s\n' "$SEED_RAW" | grep -c '^BASELINE=')"
-  if [ "$baseline_lines" -eq 1 ] && [ "$field_count" -eq 8 ]; then
-    pass "snapshot:baseline-well-formed" "one BASELINE= line, 8 pipe-separated fields"
+  expected_width=$((DECLARED_FIELD_COUNT + 1))
+  seed_kind="$(printf '%s' "$SEED" | cut -d'|' -f1)"
+  if [ "$baseline_lines" -eq 1 ] && [ "$field_count" -eq "$expected_width" ] \
+    && [ "$seed_kind" = "initial" ]; then
+    pass "snapshot:baseline-well-formed" "one BASELINE= line, arm kind + $DECLARED_FIELD_COUNT scalars"
   else
-    failed "snapshot:baseline-well-formed" "baseline_lines=$baseline_lines fields=$field_count raw=$(printf '%s' "$SEED_RAW" | tr '\n' ';')"
+    failed "snapshot:baseline-well-formed" "baseline_lines=$baseline_lines fields=$field_count expected=$expected_width kind=$seed_kind raw=$(printf '%s' "$SEED_RAW" | tr '\n' ';')"
   fi
 else
   skipped "snapshot:baseline-well-formed" "$SKIP_REASON"
@@ -327,11 +375,7 @@ fi
 # A seed that cannot be captured must be loud: SNAPSHOT_ERROR + exit 1, never an empty token the
 # caller would pass on as a valid baseline.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
-  st="$(new_state snapfail)"
-  set_seq "$st" graphql FAIL
-  set_seq "$st" reactions FAIL
-  out="$(run_poll "$st" --snapshot "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" \
-    "$POLL_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN")"
+  out="$(snapshot_raw snapfail initial FAIL FAIL)"
   status=$?
   if [ "$status" -ne 0 ] && printf '%s\n' "$out" | grep -qx 'SNAPSHOT_ERROR'; then
     pass "snapshot:gh-failure" "gh failure -> SNAPSHOT_ERROR exit=$status"
@@ -374,6 +418,131 @@ if [ "$status" -ne 0 ] && printf '%s\n' "$out" | grep -qx 'POLL_ERROR'; then
   pass "response:malformed-twice" "two unusable responses -> POLL_ERROR exit=$status"
 else
   failed "response:malformed-twice" "status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+fi
+
+# ── 11. the seed is a COMPLETE serialization (STRUCTURAL) ───────────────────────────
+# THE SECOND BITE-PROOF (PR #361). The original defect was not "the token is missing the Codex
+# bool" but "the token may omit a scalar the poll diffs at all" — a per-scalar assertion would
+# have caught neither instance. This case is structural: the set of scalars compute_snapshot
+# fills must EQUAL the declared SNAPSHOT_FIELDS set the serializer/parser/diff iterate. A future
+# author who adds a diffed scalar without declaring it — the exact shape that shipped twice —
+# goes red here.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  declared_list="$(declared_fields | sort -u)"
+  computed_list="$(computed_fields)"
+  if [ "$declared_list" = "$computed_list" ] && [ "$DECLARED_FIELD_COUNT" -gt 0 ]; then
+    pass "seed:complete-serialization" "$DECLARED_FIELD_COUNT declared scalars == $DECLARED_FIELD_COUNT computed scalars"
+  else
+    failed "seed:complete-serialization" "declared=[$(printf '%s' "$declared_list" | tr '\n' ' ')] computed=[$(printf '%s' "$computed_list" | tr '\n' ' ')]"
+  fi
+else
+  skipped "seed:complete-serialization" "$SKIP_REASON"
+fi
+
+# ── 12. a stale 👍 does NOT re-fire on a productive re-arm (THE REPORTED DEFECT) ─────
+# A productive remediation cycle re-arms with the PENDING seed captured before its dispatch, and
+# the Codex 👍 was ALREADY present at that capture. The re-armed poll must not re-announce it:
+# a re-fired CODEX_APPROVED runs a confirmation pass right after the reviewer fixed and pushed,
+# finds nothing actionable, and ends the watch as terminal `clean` — the early exit this PR's
+# idle window exists to prevent.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  rearm_seed="$(capture_seed rearmseed re-arm "$PRE" "$REACT_CODEX")"
+  st="$(new_state rearmstale)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_CODEX"
+  out="$(arm_poll "$st" "$rearm_seed")"
+  if [ "$out" = "WATCH_TIMEOUT" ]; then
+    pass "codex:stale-approval-not-refired-on-rearm" "👍 predating the re-arm stayed silent"
+  else
+    failed "codex:stale-approval-not-refired-on-rearm" "expected only WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';') seed=$rearm_seed"
+  fi
+else
+  skipped "codex:stale-approval-not-refired-on-rearm" "$SKIP_REASON"
+fi
+
+# ── 13. the INITIAL arm still surfaces a 👍 present at seed capture ──────────────────
+# The mirror of case 12, and the behavior that must NOT regress: on an `initial` arm the watch has
+# never observed the approval edge, so a 👍 already present when the watch started must still fire
+# (#324 blind window — it must not idle to WATCH_TIMEOUT). Same PR state and same reactions as
+# case 12; ONLY the seed's arm kind differs, which is what proves the kind — not the field set —
+# decides the question.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  initial_seed="$(capture_seed initseedcodex initial "$PRE" "$REACT_CODEX")"
+  st="$(new_state initialstale)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_CODEX"
+  out="$(arm_poll "$st" "$initial_seed")"
+  first_line="$(printf '%s\n' "$out" | head -1)"
+  if [ "$first_line" = "CODEX_APPROVED" ]; then
+    pass "codex:initial-arm-surfaces-pre-existing" "pre-existing 👍 still fires on an initial arm"
+  else
+    failed "codex:initial-arm-surfaces-pre-existing" "expected CODEX_APPROVED first, got=$(printf '%s' "$out" | tr '\n' ';') seed=$initial_seed"
+  fi
+else
+  skipped "codex:initial-arm-surfaces-pre-existing" "$SKIP_REASON"
+fi
+
+# ── 14. a GENUINELY new 👍 still fires on a re-arm ───────────────────────────────────
+# Guards case 12 against over-correction: `re-arm` suppresses only an approval the seed already
+# recorded. An approval that lands AFTER the pending capture is real feedback and must wake the
+# confirmation pass.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  fresh_seed="$(capture_seed rearmfresh re-arm "$PRE" "$REACT_NONE")"
+  st="$(new_state rearmfreshpoll)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE" "$REACT_CODEX"
+  out="$(arm_poll "$st" "$fresh_seed")"
+  if printf '%s\n' "$out" | grep -qx 'CODEX_APPROVED'; then
+    pass "codex:new-approval-fires-on-rearm" "👍 arriving after the pending capture fired"
+  else
+    failed "codex:new-approval-fires-on-rearm" "expected CODEX_APPROVED, got=$(printf '%s' "$out" | tr '\n' ';') seed=$fresh_seed"
+  fi
+else
+  skipped "codex:new-approval-fires-on-rearm" "$SKIP_REASON"
+fi
+
+# ── 15. the arm kind is REQUIRED and closed-set ──────────────────────────────────────
+# `--snapshot` with no kind, or an unrecognised one, must be SNAPSHOT_ERROR rather than a token
+# whose semantics are guessed downstream; a poll seed carrying an unknown kind must be POLL_ERROR.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  arm_kind_ok=1
+  arm_kind_detail=""
+
+  out="$(snapshot_raw armkindbogus bogus "$PRE" "$REACT_NONE")"
+  status=$?
+  if [ "$status" -eq 0 ] || ! printf '%s\n' "$out" | grep -qx 'SNAPSHOT_ERROR'; then
+    arm_kind_ok=0
+    arm_kind_detail="unknown-kind status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state armkindmissing)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(run_poll "$st" --snapshot "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" \
+    "$POLL_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN")"
+  status=$?
+  if [ "$status" -eq 0 ] || ! printf '%s\n' "$out" | grep -qx 'SNAPSHOT_ERROR'; then
+    arm_kind_ok=0
+    arm_kind_detail="$arm_kind_detail missing-kind status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state armkindseed)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "bogus|${SEED#*|}")"
+  status=$?
+  if [ "$status" -eq 0 ] || ! printf '%s\n' "$out" | grep -qx 'POLL_ERROR'; then
+    arm_kind_ok=0
+    arm_kind_detail="$arm_kind_detail seed-kind status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  if [ "$arm_kind_ok" -eq 1 ]; then
+    pass "seed:arm-kind-closed-set" "missing / unknown arm kind fails closed in both modes"
+  else
+    failed "seed:arm-kind-closed-set" "$arm_kind_detail"
+  fi
+else
+  skipped "seed:arm-kind-closed-set" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
