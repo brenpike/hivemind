@@ -12,6 +12,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [3.0.0] - 2026-09-18
+
+### Added
+
+- github-review-loop: an approving review is now detected as a first-class approval signal ending the watch, alongside the existing Codex 👍 reaction.
+
+### Changed
+
+- **BREAKING:** Watching a pull request after it is opened is now the default outcome of `standard-delivery`, inverting the prior default. The outcome is `not_requested` only when the user's original request explicitly declines watching; silence now means watch. To skip watching, state that explicitly in the request.
+- **BREAKING:** `max_watch_duration` is now a per-cycle IDLE window rather than one absolute budget for the whole watch — a completed remediation cycle re-arms a fresh window, and a window that elapses with no actionable arrival ends the watch. A watch window that elapses quietly now ends at a new `review_window_elapsed` terminal that reports as complete, instead of being reported as an exhaustion (previously it mapped through `max-cycles-reached` to `review_exhausted`, which records `run.status: blocked`).
+- `max_remediation_cycles` default raised from 3 to 6, now documented as a floor rather than a cap.
+- Both `standard-delivery` and `pr-feedback-remediation` workflow definitions moved from version 2 to 3 to carry the above changes.
+- See ADR-0029 for the rationale behind the default-watch and idle-window lifecycle change.
+
+### Removed
+
+- **BREAKING:** The `github_review_decision` state in `standard-delivery` no longer offers a `fix_requested` outcome, and the `github_reviewer_fix` state is removed from that workflow. For a one-shot fix pass instead of a watch, use the `pr-feedback-remediation` workflow's `fix` intake route.
+
 ## [2.41.0] - 2026-09-18
 
 ### Added
