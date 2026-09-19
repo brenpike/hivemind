@@ -92,10 +92,22 @@ Over-reporting is SAFE here, under-reporting loses findings — add NO
 duplicate-suppression.
 
 An arm that returns with NO terminal marker means the arm EXPIRED, not that the
-watch ended: re-capture a seed per step 2 and re-arm for the REMAINING idle budget
-of the current window. This holds whatever the Monitor's own per-arm ceiling turns
-out to be — assume no specific figure. The watch never silently dies at an arm
-boundary.
+watch ended: re-arm for the REMAINING idle budget of the current window, reusing
+the SAME seed the expired arm carried. NEVER take a fresh `--snapshot` at an arm
+boundary. An arm expiry is not a reviewer pass, so nothing has consumed the PR
+state there: a seed captured at the boundary absorbs any comment that arrived
+after the expired arm's final poll into the new baseline, so that comment never
+fires `CHANGED` and — absent later activity — is lost for the life of the watch.
+Carrying the seed forward costs at most a duplicate wake on activity the previous
+arm already reported, which `prefilter.sh` absorbs as `PREFILTER_SKIP`;
+over-reporting is SAFE, under-reporting loses findings. This holds whatever the
+Monitor's own per-arm ceiling turns out to be — assume no specific figure. The
+watch never silently dies at an arm boundary.
+
+INVARIANT (the rule every capture site above obeys): the baseline seed advances
+ONLY at a point where a reviewer pass is about to consume the state it
+snapshots — step 2 before cycle 0, and step 5 before a dispatch. There is no
+third capture site, so the baseline can never advance past state nobody read.
 
 **5. Per event.** `CHANGED` → run
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`:

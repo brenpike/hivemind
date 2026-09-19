@@ -104,9 +104,11 @@
 #                    CODEX_APPROVED it does NOT exit; the skill runs the same
 #                    confirmation pass (once, even when both markers fire in the
 #                    same poll) rather than treating it as a generic CHANGED.
-#                    Unlike the Codex bool the seed DOES carry APPROVED_PRESENT,
-#                    so an approval already present before cycle 0 (which cycle
-#                    0's own fetch already saw) does not re-fire here.
+#                    Like the Codex bool, the seed NEVER carries a live approval
+#                    value: --snapshot pins the APPROVED_PRESENT field to the
+#                    literal FALSE, so an approving review already standing when
+#                    the watch starts still surfaces through the ordinary
+#                    FALSE->TRUE diff on the first poll.
 #   WATCH_TIMEOUT    max_watch_duration elapsed (terminal)
 #   POLL_ERROR       repeated query failure, or a missing/malformed seed
 #                    (terminal; skill returns blocked)
@@ -398,12 +400,20 @@ EOF
 # --snapshot: one-shot baseline capture, emitted as a single pipe-separated
 # token. It carries the 9 scalars the poll diffs and NOT the Codex 👍 bool —
 # leaving prev_codex empty in poll mode is what keeps a pre-existing approval
-# surfacing through the ordinary false->true diff. APPROVED_PRESENT is the
-# deliberate opposite: it IS seeded, because an approving review already
-# standing before cycle 0 was already read by cycle 0's own full fetch, so
-# re-firing REVIEW_APPROVED for it would be pure noise. A seed that cannot be
-# captured is loud (SNAPSHOT_ERROR, exit 1) rather than an empty token the
-# caller would pass on as a valid baseline.
+# surfacing through the ordinary false->true diff. NO APPROVAL SIGNAL IS EVER
+# SEEDED LIVE, and APPROVED_PRESENT is held to that same rule: the field keeps
+# its slot in the 9-field token (format and the strict poll-side validator are
+# unchanged) but is pinned to the literal FALSE rather than the observed value.
+# Seeding the observed value suppressed REVIEW_APPROVED for an approving review
+# that already stood when the watch started, and cycle 0 cannot compensate —
+# github-reviewer returns an ordinary `clean` regardless of approval and the
+# lifecycle maps an ordinary cycle-0 `clean` to continued watching, so an
+# already-approved quiet PR idled out as `watch-window-elapsed` instead of
+# reaching the approval terminal. Pinning FALSE makes both approval signals
+# reach the loop by the SAME uniform diff and costs no spurious CHANGED: on a
+# PR with no approval the first poll compares FALSE against FALSE.
+# A seed that cannot be captured is loud (SNAPSHOT_ERROR, exit 1) rather than an
+# empty token the caller would pass on as a valid baseline.
 if [ "$MODE" = "snapshot" ]; then
   cur_state=""; cur_nonself_comment_id=""; cur_filtered_review_id=""
   cur_nonself_thread_id=""; cur_codex=""
@@ -415,7 +425,7 @@ if [ "$MODE" = "snapshot" ]; then
   printf 'BASELINE=%s|%s|%s|%s|%s|%s|%s|%s|%s\n' \
     "$cur_state" "$cur_nonself_comment_id" "$cur_filtered_review_id" \
     "$cur_nonself_thread_id" "$cur_comments_total" "$cur_reviews_total" \
-    "$cur_threads_total" "$cur_failed_checks" "$cur_approved_present"
+    "$cur_threads_total" "$cur_failed_checks" "FALSE"
   exit 0
 fi
 
@@ -425,6 +435,10 @@ fi
 # left EMPTY: the seed carries no Codex bool, so a 👍 already present when the
 # watch starts still fires CODEX_APPROVED via the normal false->true diff on the
 # first poll (D14) instead of needing a baseline special case.
+# prev_approved_present is the same story by a different mechanism: the field is
+# present in the token but --snapshot pinned it to FALSE, so an approving review
+# already standing when the watch starts fires REVIEW_APPROVED on the first poll
+# via the same FALSE->TRUE diff. No approval signal is ever seeded live.
 IFS='|' read -r prev_state prev_nonself_comment_id prev_filtered_review_id \
   prev_nonself_thread_id prev_comments_total prev_reviews_total \
   prev_threads_total prev_failed_checks prev_approved_present <<EOF
