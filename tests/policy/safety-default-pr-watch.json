@@ -8,7 +8,7 @@
   "consumers": [
     {
       "file": "plugin/workflows/standard-delivery.json",
-      "pattern": "This rule is stated normatively in plugin/agents/overlord.md (the opt-out-only GitHub review watch default rule) — that agent rule is the source of truth and this description must stay in lockstep with it."
+      "pattern": "This rule is stated normatively in ${CLAUDE_PLUGIN_ROOT}/agents/overlord.md (the opt-out-only GitHub review watch default rule) — that agent rule is the source of truth and this description must stay in lockstep with it."
     },
     {
       "file": "plugin/agents/overlord.md",

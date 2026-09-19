@@ -131,7 +131,8 @@ reviewer finds nothing actionable, this is terminal `clean`: map it via
 terminal from a plain keep-watching `clean`). If actionable items remain, the
 reviewer processes them and returns a normal fix-mode exit_reason handled per
 Reviewer-return handling. `STATE=MERGED` → `pr-merged`. `STATE=CLOSED` →
-`pr-closed`. `WATCH_TIMEOUT` → `watch-window-elapsed`. `POLL_ERROR` → stop Monitor;
+`pr-closed`. `WATCH_TIMEOUT` → `watch-window-elapsed`, EXCEPT a timeout from an arm a
+productive return supersedes, which step 6 discards. `POLL_ERROR` → stop Monitor;
 `blocked`. For the last four, use
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh token-map <signal>`.
 
@@ -168,6 +169,19 @@ re-arms the idle window: stop the Monitor and arm per step 4 with the PENDING
 seed captured before this cycle's dispatch (step 5) and a full fresh
 `max_watch_duration`; a re-arm is not a capture site, and the pending seed is
 never substituted for a fresh one, per the Seed-Advance INVARIANT (step 4).
+SUPERSEDED-ARM TIMEOUT. The Monitor is deliberately left armed across dispatch
+(step 5), so the pre-dispatch arm's `max_watch_duration` can elapse WHILE the
+reviewer runs and queue a `WATCH_TIMEOUT` for the very arm this productive return
+supersedes. DISCARD that superseded arm's `WATCH_TIMEOUT` before re-arming: the
+window was NOT quiet — the reviewer just resolved findings — so it MUST NOT map to
+`watch-window-elapsed` and MUST NOT be passed to `loop-state.sh
+resolve-precedence`. Discard the timeout token ONLY, never that arm's `CHANGED`
+events: staying armed across dispatch is what keeps change detection alive, and
+dropping those loses findings. The discard is scoped to the PRODUCTIVE return; on a
+non-productive return and on every terminal, `WATCH_TIMEOUT` is handled normally
+per step 5. The fresh full `max_watch_duration` this re-arm grants IS the
+replacement window — no seed is re-snapshotted, so the Seed-Advance INVARIANT is
+untouched.
 GATING: only a productive cycle consumes the pending seed and re-arms. A
 `PREFILTER_SKIP` event is NOT a productive cycle, does not dispatch, and MUST
 NOT reset the idle window. A NON-productive return (`findings_resolved = 0` with `EXIT_REASON=none`) keeps
