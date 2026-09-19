@@ -1,8 +1,8 @@
 {
   "id": "standard-delivery",
-  "version": 2,
+  "version": 3,
   "start": "plan",
-  "terminal": ["complete", "blocked", "cancelled", "hatchery_monitor", "user_input_required", "review_rejected", "review_exhausted", "merge_advised"],
+  "terminal": ["complete", "blocked", "cancelled", "hatchery_monitor", "user_input_required", "review_rejected", "review_exhausted", "merge_advised", "review_window_elapsed"],
   "states": {
     "plan": {
       "type": "agent",
@@ -172,11 +172,10 @@
     },
     "github_review_decision": {
       "type": "decision",
-      "description": "Overlord decides how to handle GitHub review: watch loop, one-shot fix, or none.",
+      "description": "Overlord decides whether the post-PR watch loop runs. Watching is the DEFAULT and is opt-out only: the outcome is not_requested if and only if the user's original request carries an explicit instruction not to watch or monitor the PR; in every other case, including silence and ambiguity, the outcome is watch_requested. This rule is stated normatively in plugin/agents/overlord.md (the opt-out-only GitHub review watch default rule) — that agent rule is the source of truth and this description must stay in lockstep with it. There is no one-shot fix outcome here; an explicit user request for a single fix pass is served by the pr-feedback-remediation workflow's intake: fix route.",
       "owner": "overlord",
       "transitions": {
         "watch_requested": "github_review_loop",
-        "fix_requested": "github_reviewer_fix",
         "not_requested": "complete",
         "blocked": "blocked"
       }
@@ -190,21 +189,7 @@
         "pr-merged": "complete",
         "pr-closed": "complete",
         "max-cycles-reached": "review_exhausted",
-        "planner-escalation": "review_remediation_plan_postpr",
-        "root-cluster-suspected": "review_remediation_plan_postpr",
-        "merge-advised": "merge_advised",
-        "injection-suspect": "blocked",
-        "high-severity-rejection": "review_rejected",
-        "user-input-required": "user_input_required",
-        "blocked": "blocked"
-      }
-    },
-    "github_reviewer_fix": {
-      "type": "agent",
-      "description": "One-shot GitHub reviewer fix pass; reviewer-return outcomes are named transitions matching the github-reviewer fix-mode exit_reason vocabulary.",
-      "agent": "hivemind:github-reviewer",
-      "transitions": {
-        "clean": "complete",
+        "watch-window-elapsed": "review_window_elapsed",
         "planner-escalation": "review_remediation_plan_postpr",
         "root-cluster-suspected": "review_remediation_plan_postpr",
         "merge-advised": "merge_advised",
@@ -280,6 +265,7 @@
     "user_input_required": { "type": "terminal" },
     "review_rejected": { "type": "terminal" },
     "review_exhausted": { "type": "terminal" },
-    "merge_advised": { "type": "terminal" }
+    "merge_advised": { "type": "terminal" },
+    "review_window_elapsed": { "type": "terminal" }
   }
 }
