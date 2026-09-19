@@ -17,10 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - github-review-loop: an approving review is now detected as a first-class approval signal ending the watch, alongside the existing Codex 👍 reaction.
+- overlord: a standing per-project opt-out from the default post-PR watch — set `HIVEMIND_SKIP_PR_WATCH` in the `env` block of `.claude/settings.json` to never watch. Unset or empty means no behavior change.
 
 ### Changed
 
-- **BREAKING:** Watching a pull request after it is opened is now the default outcome of `standard-delivery`, inverting the prior default. The outcome is `not_requested` only when the user's original request explicitly declines watching; silence now means watch. To skip watching, state that explicitly in the request.
+- **BREAKING:** Watching a pull request after it is opened is now the default outcome of `standard-delivery`, inverting the prior default. The outcome is `not_requested` only when the user's original request explicitly declines watching; silence now means watch. Two opt-out channels exist: state the decline explicitly in the request (per-run), or set `HIVEMIND_SKIP_PR_WATCH` in the project's `.claude/settings.json` `env` block (standing, never-watch).
 - **BREAKING:** `max_watch_duration` is now a per-cycle IDLE window rather than one absolute budget for the whole watch — a completed remediation cycle re-arms a fresh window, and a window that elapses with no actionable arrival ends the watch. A watch window that elapses quietly now ends at a new `review_window_elapsed` terminal that reports as complete, instead of being reported as an exhaustion (previously it mapped through `max-cycles-reached` to `review_exhausted`, which records `run.status: blocked`).
 - `max_remediation_cycles` default raised from 3 to 6, now documented as a floor rather than a cap.
 - Both `standard-delivery` and `pr-feedback-remediation` workflow definitions moved from version 2 to 3 to carry the above changes.

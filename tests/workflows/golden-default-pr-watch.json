@@ -1,8 +1,8 @@
 {
   "workflow": "default-pr-watch",
-  "description": "Opening a PR routes into the post-PR watch loop by default: the overlord's mechanical opt-out-only rule decides watch_requested absent an explicit no-watch instruction, standard-delivery.json's github_review_decision state transitions watch_requested into github_review_loop, that state is bound to the hivemind:github-review-loop skill, and a quiet idle window elapsing during the watch routes to the review_window_elapsed terminal rather than looping forever",
+  "description": "Opening a PR routes into the post-PR watch loop by default: the overlord's fixed-default binary read of the original request decides watch_requested absent an explicit no-watch instruction, standard-delivery.json's github_review_decision state transitions watch_requested into github_review_loop, that state is bound to the hivemind:github-review-loop skill, and a quiet idle window elapsing during the watch routes to the review_window_elapsed terminal rather than looping forever",
   "steps": [
-    { "state": "Default Watch Decision", "source": { "file": "plugin/agents/overlord.md", "pattern": "Default post-PR watch (mechanical, not a judgment call)." } },
+    { "state": "Default Watch Decision", "source": { "file": "plugin/agents/overlord.md", "pattern": "Default post-PR watch (fixed-default binary read, not a judgment call)." } },
     { "state": "Watch Requested Transition", "source": { "file": "plugin/workflows/standard-delivery.json", "pattern": "\"watch_requested\": \"github_review_loop\"" } },
     { "state": "Watch Loop Skill Binding", "source": { "file": "plugin/workflows/standard-delivery.json", "pattern": "\"skill\": \"hivemind:github-review-loop\"" } },
     { "state": "Idle Window Terminal", "source": { "file": "plugin/workflows/standard-delivery.json", "pattern": "\"review_window_elapsed\": { \"type\": \"terminal\" }" } }

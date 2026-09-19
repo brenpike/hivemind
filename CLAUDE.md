@@ -114,6 +114,8 @@ CI runs via `.github/workflows/policy-check.yml` (job: `policy-check`), enforced
 
 The local Codex review model is operator-overridable via `HIVEMIND_LOCAL_REVIEW_MODEL`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored, per-account). Empty/unset → codex uses its own default (zero consumer regression). The value passes a charset gate `^[a-zA-Z0-9/_.\-]+$` (e.g. `gpt-5.3-codex`, `gpt-5.5` are valid). The unavailable-model `400` case is account-specific. Reference: ADR-0022.
 
+The default post-PR watch (see Branching / PR workflow above) can be switched off standing-wide via `HIVEMIND_SKIP_PR_WATCH`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored, per-account). Unset/empty → the overlord watches normally per its default-watch rule (zero behavior change). Set (checked by presence) → the overlord never watches, short-circuiting the per-run `request.raw` read entirely. Because the committed settings file is in-repo, the key inherits into brood worktrees. Reference: ADR-0029.
+
 ## Brood execution
 
 The plugin supports parallel multi-overlord execution via spawn-brood and brood-status skills. Each brood session runs in its own git worktree as an independent Claude Code instance.
