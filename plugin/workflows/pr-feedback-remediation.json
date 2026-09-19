@@ -1,8 +1,8 @@
 {
   "id": "pr-feedback-remediation",
-  "version": 2,
+  "version": 3,
   "start": "intake",
-  "terminal": ["complete", "blocked", "cancelled", "user_input_required", "review_rejected", "review_exhausted", "merge_advised"],
+  "terminal": ["complete", "blocked", "cancelled", "user_input_required", "review_rejected", "review_exhausted", "merge_advised", "review_window_elapsed"],
   "states": {
     "intake": {
       "type": "decision",
@@ -33,6 +33,7 @@
         "pr-merged": "complete",
         "pr-closed": "complete",
         "max-cycles-reached": "review_exhausted",
+        "watch-window-elapsed": "review_window_elapsed",
         "planner-escalation": "review_remediation_plan",
         "root-cluster-suspected": "review_remediation_plan",
         "merge-advised": "merge_advised",
@@ -123,6 +124,7 @@
     "user_input_required": { "type": "terminal" },
     "review_rejected": { "type": "terminal" },
     "review_exhausted": { "type": "terminal" },
-    "merge_advised": { "type": "terminal" }
+    "merge_advised": { "type": "terminal" },
+    "review_window_elapsed": { "type": "terminal" }
   }
 }

@@ -3,7 +3,7 @@
 # Behavioral unit runner for the exit_reason precedence ladder (issue #204, STEP-003).
 #
 # Tests plugin/skills/github-review-loop/scripts/exit-precedence.sh against the
-# 14-rank ladder defined in that script's header. CI-runnable with bash only — no
+# 15-rank ladder defined in that script's header. CI-runnable with bash only — no
 # jq, no tmux, no network. Pure subprocess invocation of the script under test.
 #
 # Mirrors tools/test_fix_history_classify.sh: pass/fail counters, per-case
@@ -133,11 +133,13 @@ assert_args  "single:clean-args"                   "clean"                   "cl
 assert_args  "single:blocked-args"                 "blocked"                 "blocked"
 assert_stdin "single:merge-advised-stdin"          "merge-advised"           "merge-advised"
 assert_stdin "single:max-cycles-reached-stdin"     "max-cycles-reached"      "max-cycles-reached"
+assert_args  "single:watch-window-elapsed-args"    "watch-window-elapsed"    "watch-window-elapsed"
 
 # ============================================================================
-# SECTION 3: Adjacent ladder pairs — each should return the higher (13 pairs)
-# Ranks: 1  2  3  4  5  6  7  8  9  10  11  12  13  14
-# 10=pr-merged 11=pr-closed 12=max-iterations 13=max-cycles 14=clean
+# SECTION 3: Adjacent ladder pairs — each should return the higher (14 pairs)
+# Ranks: 1  2  3  4  5  6  7  8  9  10  11  12  13  14  15
+# 10=pr-merged 11=pr-closed 12=max-iterations 13=max-cycles
+# 14=watch-window-elapsed 15=clean
 # ============================================================================
 
 # Pair 1/2: injection-suspect beats high-severity-rejection
@@ -188,9 +190,18 @@ assert_stdin "adj:rank11-beats-12-stdin" "pr-closed" "max-iterations-reached pr-
 assert_args "adj:rank12-beats-13-args"   "max-iterations-reached" "max-iterations-reached" "max-cycles-reached"
 assert_stdin "adj:rank12-beats-13-stdin" "max-iterations-reached" "max-cycles-reached max-iterations-reached"
 
-# Pair 13/14
-assert_args "adj:rank13-beats-14-args"   "max-cycles-reached" "max-cycles-reached" "clean"
-assert_stdin "adj:rank13-beats-14-stdin" "max-cycles-reached" "clean max-cycles-reached"
+# Pair 13/14: max-cycles-reached beats watch-window-elapsed (a real cycle ceiling
+# is the more informative report than a quiet idle window elapsing)
+assert_args "adj:rank13-beats-14-args"   "max-cycles-reached" "max-cycles-reached" "watch-window-elapsed"
+assert_stdin "adj:rank13-beats-14-stdin" "max-cycles-reached" "watch-window-elapsed max-cycles-reached"
+
+# Pair 14/15: watch-window-elapsed beats clean (more specific than "nothing fired")
+assert_args "adj:rank14-beats-15-args"   "watch-window-elapsed" "watch-window-elapsed" "clean"
+assert_stdin "adj:rank14-beats-15-stdin" "watch-window-elapsed" "clean watch-window-elapsed"
+
+# Transitive: max-cycles-reached still beats the clean floor across the new rank
+assert_args "adj:rank13-beats-15-args"   "max-cycles-reached" "max-cycles-reached" "clean"
+assert_stdin "adj:rank13-beats-15-stdin" "max-cycles-reached" "clean max-cycles-reached"
 
 # ============================================================================
 # SECTION 4: Non-adjacent multi-token inputs spanning tiers
@@ -243,18 +254,18 @@ assert_stdin "prstate:blocked-beats-pr-closed"    "blocked" "pr-closed blocked"
 assert_args  "prstate:merge-advised-beats-pr-merged" "merge-advised" "pr-merged" "merge-advised"
 
 # ============================================================================
-# SECTION 5: All 14 tokens at once → injection-suspect
+# SECTION 5: All 15 tokens at once → injection-suspect
 # ============================================================================
 
-assert_args "all14:args" "injection-suspect" \
+assert_args "all15:args" "injection-suspect" \
   "injection-suspect" "high-severity-rejection" "user-input-required" \
   "planner-escalation" "break-fix-break" "blocked" \
   "root-cluster-suspected" "diminishing-returns" "merge-advised" \
   "pr-merged" "pr-closed" \
-  "max-iterations-reached" "max-cycles-reached" "clean"
+  "max-iterations-reached" "max-cycles-reached" "watch-window-elapsed" "clean"
 
-assert_stdin "all14:stdin" "injection-suspect" \
-  "injection-suspect high-severity-rejection user-input-required planner-escalation break-fix-break blocked root-cluster-suspected diminishing-returns merge-advised pr-merged pr-closed max-iterations-reached max-cycles-reached clean"
+assert_stdin "all15:stdin" "injection-suspect" \
+  "injection-suspect high-severity-rejection user-input-required planner-escalation break-fix-break blocked root-cluster-suspected diminishing-returns merge-advised pr-merged pr-closed max-iterations-reached max-cycles-reached watch-window-elapsed clean"
 
 # ============================================================================
 # SECTION 6: Alias tier — break-fix-break (5) vs blocked (6) vs root-cluster (7)
@@ -287,6 +298,8 @@ assert_stdin "floor:clean-alone-stdin"  "clean" "clean"
 assert_args  "floor:clean-loses-to-max-cycles" "max-cycles-reached" "clean" "max-cycles-reached"
 assert_stdin "floor:clean-loses-to-max-iter"   "max-iterations-reached" "max-iterations-reached
 clean"
+# clean also loses to the rank immediately above it
+assert_args  "floor:clean-loses-to-watch-window" "watch-window-elapsed" "clean" "watch-window-elapsed"
 
 # ============================================================================
 # SECTION 8: Unknown / garbage tokens → nonzero exit + stderr non-empty
@@ -325,6 +338,7 @@ user-input-required"
 
 assert_stdin "multiline:all-ranks-newline" "injection-suspect" \
   "clean
+watch-window-elapsed
 max-cycles-reached
 max-iterations-reached
 pr-closed

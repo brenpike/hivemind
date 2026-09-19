@@ -1,0 +1,22 @@
+{
+  "rule": "Remediation-cycle floor single-sourced in its enforcing script",
+  "description": "P3 coupling. The `max_remediation_cycles` floor is SINGLE-SOURCED in the script that enforces it: `plugin/skills/github-review-loop/scripts/loop-state.sh` both DECLARES the number and REJECTS any lower caller value, and every prose site cites that script instead of restating the literal. The source pin sits on ONE span covering the guard's CONDITION and its CONSEQUENCE together -- the `-ge \"$MAX_REMEDIATION_CYCLES_FLOOR\"` comparison and the `die` message it triggers. Splitting them would leave half the rule rewritable in either direction: a condition-only pin survives softening the `die` into a warning or deleting it, and a consequence-only pin survives inverting the comparison, so per rule 2 of the pin-authoring contract both clauses live inside one pinned span. The consumers divide per rule 3. The script itself is pinned a second time, as a CLAIM-carrying consumer, on the literal constant line `MAX_REMEDIATION_CYCLES_FLOOR=6`: this is the one place in the repository where the number is permitted to appear, so it is the one place where the number must be pinned, and changing it to any other value turns the suite red. `plugin/skills/github-review-loop/SKILL.md` and `plugin/agents/overlord.md` carry POINTER pins: each holds only that the prose still names loop-state.sh as the declaring and enforcing site -- the skill's span additionally holds its commitment that no literal is restated there -- leaving the surrounding wording free to improve without breaking the suite. What this fixture honestly guarantees is exactly that these word sequences exist in these three named files. It claims nothing about meaning, and it CANNOT prove the guard EXECUTES at runtime: a `cycle-decision` path refactored so the comparison is never reached keeps every pinned byte intact and stays green, and proving execution is the job of the shell test suite, not of a presence pin. Residuals, stated plainly: (1) the `floor` subcommand that publishes the constant to callers is deliberately unpinned here, so deleting it alone stays green even though every citing prose site depends on it to read the value; (2) the pin sees only the three files it names, and it CANNOT see a NEW caller that never invokes `cycle-decision` at all and therefore never reaches the guard -- that is an absence defect per rule 7 of the pin-authoring contract, no presence pin in this directory can close it, and closing it requires a structural check in `tools/policy_check.sh`.",
+  "source": {
+    "file": "plugin/skills/github-review-loop/scripts/loop-state.sh",
+    "pattern": "[ \"$max_cycles\" -ge \"$MAX_REMEDIATION_CYCLES_FLOOR\" ] || die \"max_cycles must be >= the declared max_remediation_cycles floor of $MAX_REMEDIATION_CYCLES_FLOOR: '$max_cycles'\""
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/github-review-loop/scripts/loop-state.sh",
+      "pattern": "MAX_REMEDIATION_CYCLES_FLOOR=6"
+    },
+    {
+      "file": "plugin/skills/github-review-loop/SKILL.md",
+      "pattern": "`max_remediation_cycles` is a FLOOR. The floor value is DECLARED and ENFORCED by `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, and no literal is restated here"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "`max_remediation_cycles` is a FLOOR declared and enforced by `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`"
+    }
+  ]
+}

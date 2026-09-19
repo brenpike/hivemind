@@ -69,10 +69,10 @@
 #     surfacing the recovery via a reviewer wake that will return clean.
 #
 # Modes:
-#   --snapshot   ONE-SHOT baseline capture. Computes the SAME scalar snapshot
-#                through the SAME query path a poll iteration uses, emits one
-#                BASELINE= line, and exits. The skill captures this BEFORE
-#                cycle 0 starts dispatching.
+#   --snapshot <arm-kind>
+#                ONE-SHOT baseline capture (`initial` | `re-arm`). Computes the
+#                SAME scalar snapshot the poll diffs through the SAME query path
+#                and emits one BASELINE= line stamped with that arm kind.
 #   (no flag)    POLL. Watches the PR, diffing the first iteration against the
 #                seed token and every later iteration against its predecessor.
 #
@@ -89,22 +89,22 @@
 #   CHANGED          a non-terminal delta in the scalar snapshot (wake reviewer)
 #   STATE=MERGED     PR merged (terminal)
 #   STATE=CLOSED     PR closed unmerged (terminal)
-#   CODEX_APPROVED   Codex 👍 newly present, including one already present when
-#                    the watch started: the seed carries NO Codex bool, so a
-#                    pre-existing 👍 surfaces through the ordinary false->true
-#                    diff on the first poll (skill confirms via reviewer;
-#                    terminal clean only if nothing actionable remains)
+#   CODEX_APPROVED   the Codex 👍 crossed into "present" against the seeded
+#                    approval state. Whether a 👍 that PREDATES this arm counts
+#                    as new is decided by the seed's ARM KIND, never by which
+#                    fields the token carries (see ARM-KIND SEMANTICS below;
+#                    skill confirms via reviewer before any terminal)
 #   WATCH_TIMEOUT    max_watch_duration elapsed (terminal)
 #   POLL_ERROR       repeated query failure, or a missing/malformed seed
 #                    (terminal; skill returns blocked)
 #   BASELINE=<seed>  --snapshot mode only: the seed token poll mode requires as
-#                    its 8th argument
+#                    its 8th argument (arm kind + every diffed scalar)
 #   SNAPSHOT_ERROR   --snapshot mode only: the seed could not be captured
 #                    (terminal; skill returns blocked)
 #
 # Positional arguments supplied by the skill when arming Monitor (all required;
 # the skill/overlord layer resolves defaults and passes concrete values).
-# --snapshot mode takes the flag FIRST followed by the same $1-$7:
+# --snapshot mode takes the flag, then the ARM KIND, then the same $1-$7:
 #   $1  OWNER                   base-repo owner
 #   $2  REPO                    base-repo name
 #   $3  PR_NUMBER               integer PR number
@@ -116,11 +116,11 @@
 #                               activity from delta tokens (required)
 #   $8  BASELINE_SEED           poll mode only: the BARE value of the BASELINE=
 #                               line emitted by --snapshot (label stripped) —
-#                               8 pipe-separated fields carrying the 8 scalars
-#                               the poll diffs. REQUIRED, never optional: an
-#                               optional seed would let a caller silently
-#                               regress to the self-baselining blind window, so
-#                               a missing or malformed value is POLL_ERROR
+#                               the arm kind followed by EVERY scalar the poll
+#                               diffs. REQUIRED, never optional: an optional
+#                               seed would let a caller silently regress to the
+#                               self-baselining blind window, so a missing,
+#                               malformed, or incomplete value is POLL_ERROR
 #                               before the first poll.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
@@ -135,9 +135,12 @@ set -u
 # alphanumeric-with-hyphens and may not BEGIN with a hyphen, so no owner can ever
 # be the literal `--snapshot`.
 MODE="poll"
+ARM_KIND=""
 if [ "${1:-}" = "--snapshot" ]; then
   MODE="snapshot"
   shift
+  ARM_KIND="${1:-}"
+  [ "$#" -eq 0 ] || shift
 fi
 
 OWNER="${1:-}"
@@ -148,6 +151,40 @@ POLL_INTERVAL_SECONDS="${5:-}"
 REVIEWER_FILTER="${6:-}"
 SELF_LOGIN="${7:-}"
 BASELINE_SEED="${8:-}"
+
+# INVARIANT: SNAPSHOT_FIELDS is the SINGLE declaration of the poll's diffed
+# state. compute_snapshot writes one `cur_<field>` per entry; the seed
+# serializer, the seed parser, the seed-format regex, the completeness
+# assertion, the CHANGED diff, and the end-of-iteration advance are ALL derived
+# by iterating THIS list. There is no second place to add a scalar, so "the seed
+# omits a scalar the poll diffs" is unrepresentable rather than merely fixed for
+# one field: a scalar absent from this list is never diffed, and a scalar
+# present in it is always serialized.
+SNAPSHOT_FIELDS=(
+  state
+  nonself_comment_id
+  filtered_review_id
+  nonself_thread_id
+  comments_total
+  reviews_total
+  threads_total
+  failed_checks
+  codex
+)
+# The approval edge is the ONE field that raises its own marker
+# (CODEX_APPROVED) instead of folding into CHANGED, so the generic diff skips it
+# by name. It is still serialized like every other field.
+APPROVAL_FIELD="codex"
+
+# An arm declares its KIND, and the kind travels inside the seed token rather
+# than alongside it: carrying a seed forward (arm-expiry re-arm) therefore
+# carries its kind forward with no caller bookkeeping.
+ARM_KIND_ALTERNATION='initial|re-arm'
+ARM_KIND_RE="^(${ARM_KIND_ALTERNATION})"'$'
+# Seed shape: the arm kind followed by exactly one field per SNAPSHOT_FIELDS
+# entry. The repeat count is DERIVED from the declaration, so adding a field
+# retightens this regex automatically.
+SEED_FORMAT_RE="^(${ARM_KIND_ALTERNATION})([|][A-Za-z0-9_-]+){${#SNAPSHOT_FIELDS[@]}}"'$'
 
 # Validate inputs before any arithmetic or gh binding. Empty OWNER/REPO or a
 # non-integer numeric arg would otherwise abort under set -u or corrupt the
@@ -162,6 +199,87 @@ poll_fail() {
   fi
   exit 1
 }
+
+# reset_snapshot_vars: clear every `cur_<field>` before a capture, so an
+# indirect read of any declared field is always defined under `set -u`.
+reset_snapshot_vars() {
+  local field
+  for field in "${SNAPSHOT_FIELDS[@]}"; do
+    printf -v "cur_$field" '%s' ''
+  done
+}
+
+# assert_snapshot_complete: every declared field must have been filled by
+# compute_snapshot. A field declared but never computed is a loud failure here
+# rather than an empty token field the caller would pass on as a valid baseline.
+assert_snapshot_complete() {
+  local field ref
+  for field in "${SNAPSHOT_FIELDS[@]}"; do
+    ref="cur_$field"
+    [ -n "${!ref}" ] || return 1
+  done
+  return 0
+}
+
+# serialize_snapshot: the seed token — the arm kind followed by EVERY declared
+# field in declaration order. Iterating the declaration is what makes an omitted
+# scalar unrepresentable.
+serialize_snapshot() {
+  local kind="$1" field ref out
+  out="$kind"
+  for field in "${SNAPSHOT_FIELDS[@]}"; do
+    ref="cur_$field"
+    out="$out|${!ref}"
+  done
+  printf 'BASELINE=%s\n' "$out"
+}
+
+# load_seed: parse a seed token into ARM_KIND plus one `prev_<field>` per
+# declared field, in the same order serialize_snapshot emitted them. Returns
+# non-zero when the field count disagrees with the declaration or any field is
+# empty — a partially-parsed seed would leave a prev_ scalar empty and fire a
+# spurious CHANGED on the first poll.
+load_seed() {
+  local token="$1" field i
+  local -a parts
+  IFS='|' read -r -a parts <<EOF
+$token
+EOF
+  [ "${#parts[@]}" -eq "$((${#SNAPSHOT_FIELDS[@]} + 1))" ] || return 1
+  ARM_KIND="${parts[0]}"
+  i=1
+  for field in "${SNAPSHOT_FIELDS[@]}"; do
+    [ -n "${parts[$i]}" ] || return 1
+    printf -v "prev_$field" '%s' "${parts[$i]}"
+    i=$((i + 1))
+  done
+  return 0
+}
+
+# snapshot_changed: 0 when any non-approval declared field differs from the
+# previous snapshot. Derived from the declaration, so a newly declared scalar is
+# diffed automatically and an undeclared one cannot be diffed at all.
+snapshot_changed() {
+  local field latest_ref earlier_ref
+  for field in "${SNAPSHOT_FIELDS[@]}"; do
+    [ "$field" != "$APPROVAL_FIELD" ] || continue
+    latest_ref="cur_$field"
+    earlier_ref="prev_$field"
+    [ "${!latest_ref}" = "${!earlier_ref}" ] || return 0
+  done
+  return 1
+}
+
+# advance_snapshot: this iteration's scalars become the next iteration's
+# previous, for every declared field including the approval edge.
+advance_snapshot() {
+  local field ref
+  for field in "${SNAPSHOT_FIELDS[@]}"; do
+    ref="cur_$field"
+    printf -v "prev_$field" '%s' "${!ref}"
+  done
+}
+
 [ -n "$OWNER" ] || poll_fail
 [ -n "$REPO" ] || poll_fail
 case "$PR_NUMBER" in ''|*[!0-9]*) poll_fail ;; esac
@@ -181,14 +299,20 @@ POLL_INTERVAL_SECONDS=$((10#$POLL_INTERVAL_SECONDS))
 # codex-only when empty; any non-empty string is accepted as a login form.
 [ -n "$SELF_LOGIN" ] || poll_fail
 [ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="codex-only"
+# Snapshot mode must be told which kind of arm it is seeding; an absent or
+# unknown kind is SNAPSHOT_ERROR rather than a token whose semantics are guessed
+# downstream.
+if [ "$MODE" = "snapshot" ]; then
+  [[ "$ARM_KIND" =~ $ARM_KIND_RE ]] || poll_fail
+fi
 # The baseline seed is REQUIRED in poll mode and is validated STRICTLY, before
 # the first poll or sleep: a partially-parsed seed would leave some prev_ scalar
 # empty and fire a spurious CHANGED, and an absent one would re-open the #324
-# blind window. Shape: exactly 8 non-empty fields over the charset --snapshot
-# emits — the PR state enum, NONE-or-digits id tokens, and digit counts.
-SEED_FORMAT_RE='^[A-Z0-9]+([|][A-Z0-9]+){7}$'
+# blind window. Two layers, both derived from SNAPSHOT_FIELDS: the shape regex,
+# then load_seed's field-count and non-empty checks.
 if [ "$MODE" = "poll" ]; then
   [[ "$BASELINE_SEED" =~ $SEED_FORMAT_RE ]] || poll_fail
+  load_seed "$BASELINE_SEED" || poll_fail
 fi
 
 # Timeout wrapper for gh API calls.
@@ -361,38 +485,38 @@ EOF
 }
 
 # --snapshot: one-shot baseline capture, emitted as a single pipe-separated
-# token. It carries the 8 scalars the poll diffs and NOT the Codex 👍 bool —
-# leaving prev_codex empty in poll mode is what keeps a pre-existing approval
-# surfacing through the ordinary false->true diff. A seed that cannot be
-# captured is loud (SNAPSHOT_ERROR, exit 1) rather than an empty token the
-# caller would pass on as a valid baseline.
+# token stamped with the arm kind it seeds. It is a COMPLETE serialization —
+# every scalar the poll diffs, the Codex 👍 bool included — so no field the diff
+# reads can be absent from the token. A seed that cannot be captured, or that
+# leaves any declared field empty, is loud (SNAPSHOT_ERROR, exit 1) rather than
+# a partial token the caller would pass on as a valid baseline.
 if [ "$MODE" = "snapshot" ]; then
-  cur_state=""; cur_nonself_comment_id=""; cur_filtered_review_id=""
-  cur_nonself_thread_id=""; cur_codex=""
-  cur_comments_total=""; cur_reviews_total=""; cur_threads_total=""
-  cur_failed_checks=""
-
+  reset_snapshot_vars
   compute_snapshot || poll_fail
-
-  printf 'BASELINE=%s|%s|%s|%s|%s|%s|%s|%s\n' \
-    "$cur_state" "$cur_nonself_comment_id" "$cur_filtered_review_id" \
-    "$cur_nonself_thread_id" "$cur_comments_total" "$cur_reviews_total" \
-    "$cur_threads_total" "$cur_failed_checks"
+  assert_snapshot_complete || poll_fail
+  serialize_snapshot "$ARM_KIND"
   exit 0
 fi
 
 # Previous-snapshot scalars, seeded from the --snapshot token captured BEFORE
 # cycle 0 so the FIRST poll is a real diff rather than a self-baselining no-op
-# (#324). The field order matches the printf above. prev_codex is deliberately
-# left EMPTY: the seed carries no Codex bool, so a 👍 already present when the
-# watch starts still fires CODEX_APPROVED via the normal false->true diff on the
-# first poll (D14) instead of needing a baseline special case.
-IFS='|' read -r prev_state prev_nonself_comment_id prev_filtered_review_id \
-  prev_nonself_thread_id prev_comments_total prev_reviews_total \
-  prev_threads_total prev_failed_checks <<EOF
-$BASELINE_SEED
-EOF
-prev_codex=""
+# (#324). load_seed already filled every prev_<field> from the token above.
+#
+# ARM-KIND SEMANTICS. The seed carries the approval bool like every other
+# scalar, so "does a 👍 that predates this arm surface?" is answered ONCE, by
+# the arm's KIND, instead of per-scalar by which fields the token happens to
+# carry:
+#   initial — this watch has never observed the approval edge. Treat it as
+#             UNOBSERVED: a 👍 already present when the watch started fires
+#             CODEX_APPROVED on the first poll, so an approval that landed in
+#             the #324 blind window cannot idle the loop to WATCH_TIMEOUT (D14).
+#   re-arm  — the seed was captured immediately before a reviewer pass that
+#             consumed this exact state. The approval edge IS observed, so the
+#             serialized bool stands and a stale 👍 predating that pass never
+#             re-fires to short-circuit later pushback.
+if [ "$ARM_KIND" = "initial" ]; then
+  printf -v "prev_$APPROVAL_FIELD" '%s' ''
+fi
 
 while true; do
   if [ "$(date +%s)" -ge "$deadline" ]; then
@@ -400,12 +524,11 @@ while true; do
     exit 0
   fi
 
-  cur_state=""; cur_nonself_comment_id=""; cur_filtered_review_id=""
-  cur_nonself_thread_id=""; cur_codex=""
-  cur_comments_total=""; cur_reviews_total=""; cur_threads_total=""
-  cur_failed_checks=""
+  reset_snapshot_vars
 
-  if ! compute_snapshot; then
+  # A declared field left unfilled is treated as a failed capture in BOTH modes:
+  # diffing an empty scalar would fire a spurious CHANGED instead of failing.
+  if ! compute_snapshot || ! assert_snapshot_complete; then
     fail_count=$((fail_count + 1))
     if [ "$fail_count" -ge 2 ]; then
       echo "POLL_ERROR"
@@ -427,32 +550,17 @@ while true; do
   fi
 
   # Codex 👍 newly present is its own marker (the skill runs a confirmation pass
-  # rather than treating it as a generic CHANGED delta). On the first iteration
-  # prev_codex is empty, so an approval already present when the watch started
-  # fires here too — terminal clean ONLY if nothing actionable remains (D14).
+  # rather than treating it as a generic CHANGED delta). What counts as "newly"
+  # on the FIRST iteration is set by ARM-KIND SEMANTICS above — terminal clean
+  # ONLY if nothing actionable remains (D14).
   if [ "$cur_codex" = "true" ] && [ "$prev_codex" != "true" ]; then
     echo "CODEX_APPROVED"
-  elif [ "$cur_state" != "$prev_state" ] \
-    || [ "$cur_nonself_comment_id" != "$prev_nonself_comment_id" ] \
-    || [ "$cur_filtered_review_id" != "$prev_filtered_review_id" ] \
-    || [ "$cur_nonself_thread_id" != "$prev_nonself_thread_id" ] \
-    || [ "$cur_comments_total" != "$prev_comments_total" ] \
-    || [ "$cur_reviews_total" != "$prev_reviews_total" ] \
-    || [ "$cur_threads_total" != "$prev_threads_total" ] \
-    || [ "$cur_failed_checks" != "$prev_failed_checks" ]; then
+  elif snapshot_changed; then
     echo "CHANGED"
   fi
   # No-change iteration: emit nothing.
 
-  prev_state="$cur_state"
-  prev_nonself_comment_id="$cur_nonself_comment_id"
-  prev_filtered_review_id="$cur_filtered_review_id"
-  prev_nonself_thread_id="$cur_nonself_thread_id"
-  prev_comments_total="$cur_comments_total"
-  prev_reviews_total="$cur_reviews_total"
-  prev_threads_total="$cur_threads_total"
-  prev_failed_checks="$cur_failed_checks"
-  prev_codex="$cur_codex"
+  advance_snapshot
 
   sleep "$POLL_INTERVAL_SECONDS"
 done

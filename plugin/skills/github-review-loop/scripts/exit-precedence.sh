@@ -60,8 +60,16 @@
 #                                  observed-reality tier as pr-merged; ranks just
 #                                  below it (merge is the success terminal).
 #  12  max-iterations-reached    ← local-reviewer ceiling token
-#  13  max-cycles-reached        ← github-review-loop WATCH_TIMEOUT token
-#  14  clean                     ← floor: nothing fired
+#  13  max-cycles-reached        ← github-review-loop cycle-budget ceiling: the
+#                                  loop ran out of remediation cycles.
+#  14  watch-window-elapsed      ← github-review-loop WATCH_TIMEOUT token: the
+#                                  per-cycle idle window expired with the PR quiet.
+#                                  A quiet window elapsing is a BENIGN ending, so it
+#                                  ranks BELOW max-cycles-reached (a real ceiling is
+#                                  the more informative report when both fire) but
+#                                  ABOVE the clean floor (it is more specific than
+#                                  "nothing fired at all").
+#  15  clean                     ← floor: nothing fired
 #
 # ALIAS NOTE: local-reviewer emits `break-fix-break` for the Mutation Decay
 # mandatory stop; github-reviewer surfaces the same condition as `blocked` with
@@ -100,7 +108,8 @@ token_rank() {
     pr-closed)                echo 11 ;;
     max-iterations-reached)   echo 12 ;;
     max-cycles-reached)       echo 13 ;;
-    clean)                    echo 14 ;;
+    watch-window-elapsed)     echo 14 ;;
+    clean)                    echo 15 ;;
     *)
       printf 'exit-precedence: unknown exit_reason token: %s\n' "$token" >&2
       return 1 ;;

@@ -27,19 +27,37 @@
 #     current_count        non-negative integer — remediation cycles completed SO FAR.
 #                          PASSED IN by the caller; never persisted by this script.
 #                          GitHub is the only ledger (no persisted loop ledger).
-#     max_cycles           positive integer — max_remediation_cycles ceiling.
+#     max_cycles           integer >= the max_remediation_cycles FLOOR THIS script
+#                          declares (see `floor` below) — the cycle ceiling the caller
+#                          runs with. A lower value is REJECTED, not clamped.
 #     findings_resolved    non-negative integer — findings the reviewer resolved THIS return.
 #     reviewer_exit_reason one reviewer fix-mode exit_reason token (see token set below),
 #                          the literal `same-finding-repeat` for the oscillation guard,
-#                          or the literal `approval-clean` for the CODEX_APPROVED
-#                          confirmation pass where the reviewer found nothing actionable.
+#                          or the literal `approval-clean` for the approval
+#                          confirmation pass where the reviewer found nothing
+#                          actionable. The CODEX_APPROVED marker raised by the
+#                          sibling pr-change-detect-poll.sh routes here.
 #
 #   loop-state.sh token-map <signal>
 #     signal one deterministic loop-input signal the loop itself observes:
 #       STATE=MERGED   -> pr-merged
 #       STATE=CLOSED   -> pr-closed
-#       WATCH_TIMEOUT  -> max-cycles-reached
+#       WATCH_TIMEOUT  -> watch-window-elapsed
 #       POLL_ERROR     -> blocked
+#
+#   loop-state.sh floor
+#     ZERO args (a surplus arg is rejected loudly). Prints the declared
+#     max_remediation_cycles floor as a BARE integer so prose and callers CITE the
+#     number from here instead of restating it.
+#     Deliberately UNLIKE every sibling subcommand's `KEY=VALUE` routing data:
+#     `floor` is a VALUE-PUBLISHING command, not a routing emitter. Its whole job is
+#     to be substituted where the literal used to sit, so
+#     `$(loop-state.sh floor)` drops straight into cycle-decision's <max_cycles>
+#     argv and into the SKILL.md Inputs-table default. A `KEY=VALUE` form would make
+#     every citing site restate a strip expression — trading one duplicated number
+#     for one duplicated parse — and a caller following the documented default
+#     verbatim would feed `require_uint` a labelled string and die before the watch
+#     could arm. Nothing machine-ROUTES on `floor`; callers only substitute it.
 #
 #   loop-state.sh resolve-precedence <token> [token ...]
 #     When the caller holds MORE THAN ONE fired exit_reason at once (e.g. a reviewer
@@ -62,6 +80,8 @@
 #                           the literal `none` if the loop should keep watching.
 # token-map → one line on stdout, exit 0:
 #     EXIT_REASON=<token>
+# floor → one line on stdout, exit 0, carrying a BARE integer and NO `KEY=` label:
+#     <int>
 #
 # 4. ENCODED DECISIONS (SKILL.md sections 4/5/6 + Termination guard set)
 # ---------------------------------------------------------------------
@@ -85,16 +105,33 @@
 #       remediation round (the reviewer fixed simple items, then escalated the
 #       complex remainder).
 #   (d) same-finding-repeat: oscillation guard maps to `max-cycles-reached`
-#       (Termination guard set), no increment.
+#       (Termination guard set), no increment. This is an OSCILLATION guard, not
+#       a quiet window — it stays `max-cycles-reached` and must NOT be folded
+#       into the WATCH_TIMEOUT / `watch-window-elapsed` mapping below.
+#   (g) WATCH_TIMEOUT (token-map): the per-cycle idle window elapsed with no new
+#       review activity — a QUIET PR, not an exhausted cycle budget. It maps to
+#       `watch-window-elapsed`, distinct from the (b)/(d) `max-cycles-reached`
+#       cases, so the caller can tell "nothing more arrived" apart from "the
+#       cycle ceiling was hit".
 #   (e) `clean`: the keep-watching case — increment per (a)/(b), emit `none`
 #       unless the ceiling is hit.
-#   (f) `approval-clean`: the CODEX_APPROVED confirmation pass found nothing
-#       actionable — TERMINAL `clean` (SKILL.md section 4 CODEX_APPROVED path).
+#   (f) `approval-clean`: an approval confirmation pass found nothing
+#       actionable — TERMINAL `clean` (SKILL.md section 4 approval path). The
+#       CODEX_APPROVED marker raised by the sibling pr-change-detect-poll.sh
+#       feeds this token; this script sees only `approval-clean`.
 #       Distinct from `clean`: a plain `clean` keeps watching, but an approved PR
 #       with nothing actionable remaining is a successful terminal and must emit
 #       `EXIT_REASON=clean` rather than keep watching to timeout. No increment
 #       (a confirmation pass that finds nothing is not a remediation round,
 #       section 6).
+#   (h) max_remediation_cycles FLOOR: the ceiling a caller may run with has a
+#       DECLARED minimum, owned by this script (MAX_REMEDIATION_CYCLES_FLOOR) and
+#       enforced in cycle-decision. A caller passing a lower ceiling is REJECTED
+#       loudly rather than silently terminating remediation early; 0 still rejects,
+#       so the former `>= 1` check is subsumed, not lost. The `floor` subcommand
+#       publishes the value as a bare integer so no consumer has to restate it and
+#       none has to parse it: what `floor` prints IS what cycle-decision accepts as
+#       <max_cycles>.
 #
 # 5. PRECEDENCE DELEGATION
 # ------------------------
@@ -114,8 +151,19 @@
 # only ledger; there is NO persisted loop ledger.
 # INVARIANT: unknown subcommand / token / signal / malformed numeric → exit 1 +
 # stderr; never silently ignored.
+# INVARIANT: this script is the SOLE source of the max_remediation_cycles floor —
+# it both DECLARES the number (MAX_REMEDIATION_CYCLES_FLOOR) and ENFORCES it in
+# cycle-decision. No prose anywhere restates the number; consumers cite it, and
+# `loop-state.sh floor` is how they read it.
+# INVARIANT: `floor` stdout is DIRECTLY acceptable as cycle-decision's <max_cycles>
+# argv — a documented default of `$(loop-state.sh floor)` composes with no strip or
+# reformat step. Adding a `KEY=` label here breaks that composition.
 
 set -euo pipefail
+
+# INVARIANT: this line is the SINGLE SOURCE of the max_remediation_cycles floor.
+# Prose cites `loop-state.sh floor` (or this line) — it never restates the number.
+MAX_REMEDIATION_CYCLES_FLOOR=6
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 
@@ -165,7 +213,9 @@ cmd_cycle_decision() {
   require_uint "current_count" "$current_count"
   require_uint "max_cycles" "$max_cycles"
   require_uint "findings_resolved" "$findings_resolved"
-  [ "$max_cycles" -ge 1 ] || die "max_cycles must be >= 1: '$max_cycles'"
+  # cycle-ceiling floor guard (decision 4h): max_cycles must be at least the floor
+  # THIS script declares. This SUBSUMES the former `>= 1` check — 0 still rejects.
+  [ "$max_cycles" -ge "$MAX_REMEDIATION_CYCLES_FLOOR" ] || die "max_cycles must be >= the declared max_remediation_cycles floor of $MAX_REMEDIATION_CYCLES_FLOOR: '$max_cycles'"
 
   # same-finding-repeat oscillation guard → max-cycles-reached, no increment.
   if [ "$reviewer_exit_reason" = "same-finding-repeat" ]; then
@@ -174,11 +224,11 @@ cmd_cycle_decision() {
     return 0
   fi
 
-  # approval-clean: CODEX_APPROVED confirmation pass found nothing actionable →
-  # TERMINAL `clean` (decision 4f). No increment — a confirmation pass that finds
-  # nothing is not a remediation round. Distinct from plain `clean`, which keeps
-  # watching; this is the successful approval terminal an approved PR must emit
-  # rather than keep watching until timeout.
+  # approval-clean: an approval confirmation pass (CODEX_APPROVED) found nothing
+  # actionable → TERMINAL `clean` (decision 4f). No increment — a confirmation
+  # pass that finds nothing is not a remediation round. Distinct from plain
+  # `clean`, which keeps watching; this is the successful approval terminal an
+  # approved PR must emit rather than keep watching until timeout.
   if [ "$reviewer_exit_reason" = "approval-clean" ]; then
     printf 'NEXT_COUNT=%s\n' "$current_count"
     printf 'EXIT_REASON=clean\n'
@@ -234,10 +284,17 @@ cmd_token_map() {
   case "$signal" in
     STATE=MERGED)  printf 'EXIT_REASON=pr-merged\n' ;;
     STATE=CLOSED)  printf 'EXIT_REASON=pr-closed\n' ;;
-    WATCH_TIMEOUT) printf 'EXIT_REASON=max-cycles-reached\n' ;;
+    WATCH_TIMEOUT) printf 'EXIT_REASON=watch-window-elapsed\n' ;;
     POLL_ERROR)    printf 'EXIT_REASON=blocked\n' ;;
     *) die "unknown loop signal: '$signal'" ;;
   esac
+}
+
+cmd_floor() {
+  [ "$#" -eq 0 ] || die "floor expects 0 args"
+  # BARE integer, no `KEY=` label: this value is SUBSTITUTED into cycle-decision's
+  # <max_cycles> argv (and into the documented default), never routed by key.
+  printf '%s\n' "$MAX_REMEDIATION_CYCLES_FLOOR"
 }
 
 cmd_resolve_precedence() {
@@ -249,15 +306,16 @@ cmd_resolve_precedence() {
   bash "$sibling" "$@"
 }
 
-[ "$#" -ge 1 ] || die "usage: loop-state.sh <cycle-decision|token-map|resolve-precedence> ..."
+[ "$#" -ge 1 ] || die "usage: loop-state.sh <cycle-decision|token-map|floor|resolve-precedence> ..."
 subcommand="$1"
 shift
 
 case "$subcommand" in
   cycle-decision)     cmd_cycle_decision "$@" ;;
   token-map)          cmd_token_map "$@" ;;
+  floor)              cmd_floor "$@" ;;
   resolve-precedence) cmd_resolve_precedence "$@" ;;
-  *) die "unknown subcommand: '$subcommand' (expected cycle-decision | token-map | resolve-precedence)" ;;
+  *) die "unknown subcommand: '$subcommand' (expected cycle-decision | token-map | floor | resolve-precedence)" ;;
 esac
 
 exit 0
