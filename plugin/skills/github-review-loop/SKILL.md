@@ -117,6 +117,17 @@ Reviewer-return handling. `STATE=MERGED` → `pr-merged`. `STATE=CLOSED` →
 `blocked`. For the last four, use
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh token-map <signal>`.
 
+PRE-DISPATCH SEED. BEFORE spawning the reviewer for ANY dispatch in this step —
+the `PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass AND the `CODEX_APPROVED` /
+`REVIEW_APPROVED` confirmation pass alike — capture a PENDING re-arm seed per step
+2's `--snapshot` procedure and HOLD it; the Monitor stays armed meanwhile, so
+nothing is missed while the reviewer runs. This capture belongs HERE, before the
+dispatch, and NEVER at re-arm time in step 6 — see step 6 for why the ordering is
+load-bearing. A `SNAPSHOT_ERROR` or non-zero exit follows step 2's posture: RETRY
+ONCE, then terminal `blocked`. `PREFILTER_SKIP` does not dispatch and captures no
+pending seed. Step 6 consumes the pending seed on a productive return and
+discards it on every other return.
+
 **6. Reviewer-return handling.** `clean` → keep watching. `planner-escalation` |
 `blocked` | `injection-suspect` | `high-severity-rejection` | `user-input-required`
 → HARD-STOP; ONE terminal with matching `exit_reason` + escalation-conditional
@@ -136,18 +147,25 @@ multiple tokens fire, delegate to `loop-state.sh resolve-precedence` (→
 When any guard fires, stop Monitor and emit ONE terminal report.
 
 A PRODUCTIVE cycle — `findings_resolved ≥ 1` returned with `EXIT_REASON=none` —
-re-arms the idle window: stop the Monitor, capture a FRESH `--snapshot` seed, and
-arm per step 4 with a full fresh `max_watch_duration`. Capture that fresh seed
-BEFORE dispatching the reviewer for the cycle, mirroring step 2's pre-cycle-0
-discipline (the #324 blind-window fix). A seed taken AFTER the remediation push
-absorbs any reviewer comment that landed during the fix into the baseline, so it
-never fires `CHANGED` — silent feedback loss. Taking it before re-fires `CHANGED`
-on our own `Fixed in <SHA>` replies, which is the already-documented,
-already-absorbed case from step 4; over-reporting is SAFE, under-reporting loses
-findings. GATING: only a productive cycle re-arms. A `PREFILTER_SKIP` event is NOT
-a productive cycle and MUST NOT reset the idle window. Once the 6-cycle ceiling is
-reached, `loop-state.sh` emits `max-cycles-reached` and the loop TERMINATES rather
-than re-arming — which is why the re-arm is gated on `EXIT_REASON=none`.
+re-arms the idle window: stop the Monitor and arm per step 4 with the PENDING
+seed captured before this cycle's dispatch (step 5) and a full fresh
+`max_watch_duration`. NEVER take a fresh `--snapshot` here and never substitute
+one for the pending seed: by this point the remediation push has landed, and a
+seed taken now absorbs any reviewer comment that arrived DURING the fix into the
+baseline, so that comment never fires `CHANGED` — silent feedback loss. The
+pending seed predates the dispatch (step 2's pre-cycle-0 discipline, the #324
+blind-window fix), so at worst it re-fires `CHANGED` on our own `Fixed in <SHA>`
+replies — the already-documented, already-absorbed case from step 4.
+Over-reporting is SAFE, under-reporting loses findings. GATING: only a productive
+cycle consumes the pending seed and re-arms. A `PREFILTER_SKIP` event is NOT a
+productive cycle, does not dispatch, and MUST NOT reset the idle window. A
+NON-productive return (`findings_resolved = 0` with `EXIT_REASON=none`) keeps
+watching on the CURRENT window: the Monitor was never stopped, so leave it armed
+and DISCARD the pending seed — the window does not reset. On any terminal
+`EXIT_REASON` the pending seed is discarded with the Monitor. Once the 6-cycle
+ceiling is reached, `loop-state.sh` emits `max-cycles-reached` and the loop
+TERMINATES rather than re-arming — which is why the re-arm is gated on
+`EXIT_REASON=none`.
 
 ## Dispatch contract
 
