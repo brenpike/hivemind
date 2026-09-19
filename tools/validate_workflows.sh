@@ -99,9 +99,13 @@ V1_STATE_TYPES='["decision","agent","skill","user_gate","terminal"]'
 #   github-reviewer producer outcome (emitted in both loop and fix mode): it routes to
 #   the merge_advised terminal from BOTH github_review_loop (REVIEW_LOOP_SET) and
 #   github_reviewer_fix (REVIEWER_FIX_SET). It is absent from LOCAL_REVIEWER_SET because
-#   local-reviewer does not emit merge-advised.
+#   local-reviewer does not emit merge-advised. watch-window-elapsed is a
+#   github_review_loop-only outcome: a QUIET IDLE WINDOW elapsing with no new review
+#   activity, routed to the review_window_elapsed done-terminal. It is DISTINCT from
+#   max-cycles-reached, which remains the real remediation-cycle ceiling — the idle
+#   window and the cycle count are independent bounds.
 LOCAL_REVIEWER_SET=(clean max-iterations-reached break-fix-break diminishing-returns injection-suspect user-input-required planner-escalation root-cluster-suspected high-severity-rejection blocked)
-REVIEW_LOOP_SET=(clean pr-merged pr-closed max-cycles-reached planner-escalation root-cluster-suspected merge-advised blocked injection-suspect high-severity-rejection user-input-required)
+REVIEW_LOOP_SET=(clean pr-merged pr-closed max-cycles-reached watch-window-elapsed planner-escalation root-cluster-suspected merge-advised blocked injection-suspect high-severity-rejection user-input-required)
 REVIEWER_FIX_SET=(clean injection-suspect user-input-required planner-escalation root-cluster-suspected high-severity-rejection merge-advised blocked)
 
 # CEREBRATE_PLANNING_SET / CEREBRATE_ANALYSIS_SET : cerebrate's two output-mode

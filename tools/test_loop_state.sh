@@ -271,7 +271,7 @@ assert_stdout "approval-clean:plain-clean-keeps-watching" \
 
 assert_stdout "tokenmap:state-merged"   "EXIT_REASON=pr-merged"          token-map STATE=MERGED
 assert_stdout "tokenmap:state-closed"   "EXIT_REASON=pr-closed"          token-map STATE=CLOSED
-assert_stdout "tokenmap:watch-timeout"  "EXIT_REASON=max-cycles-reached" token-map WATCH_TIMEOUT
+assert_stdout "tokenmap:watch-timeout"  "EXIT_REASON=watch-window-elapsed" token-map WATCH_TIMEOUT
 assert_stdout "tokenmap:poll-error"     "EXIT_REASON=blocked"            token-map POLL_ERROR
 
 # ============================================================================

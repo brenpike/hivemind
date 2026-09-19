@@ -31,14 +31,17 @@
 #     findings_resolved    non-negative integer — findings the reviewer resolved THIS return.
 #     reviewer_exit_reason one reviewer fix-mode exit_reason token (see token set below),
 #                          the literal `same-finding-repeat` for the oscillation guard,
-#                          or the literal `approval-clean` for the CODEX_APPROVED
-#                          confirmation pass where the reviewer found nothing actionable.
+#                          or the literal `approval-clean` for the approval
+#                          confirmation pass where the reviewer found nothing
+#                          actionable. BOTH approval markers route here: the
+#                          CODEX_APPROVED marker and the REVIEW_APPROVED marker
+#                          raised by the sibling pr-change-detect-poll.sh.
 #
 #   loop-state.sh token-map <signal>
 #     signal one deterministic loop-input signal the loop itself observes:
 #       STATE=MERGED   -> pr-merged
 #       STATE=CLOSED   -> pr-closed
-#       WATCH_TIMEOUT  -> max-cycles-reached
+#       WATCH_TIMEOUT  -> watch-window-elapsed
 #       POLL_ERROR     -> blocked
 #
 #   loop-state.sh resolve-precedence <token> [token ...]
@@ -85,11 +88,21 @@
 #       remediation round (the reviewer fixed simple items, then escalated the
 #       complex remainder).
 #   (d) same-finding-repeat: oscillation guard maps to `max-cycles-reached`
-#       (Termination guard set), no increment.
+#       (Termination guard set), no increment. This is an OSCILLATION guard, not
+#       a quiet window — it stays `max-cycles-reached` and must NOT be folded
+#       into the WATCH_TIMEOUT / `watch-window-elapsed` mapping below.
+#   (g) WATCH_TIMEOUT (token-map): the per-cycle idle window elapsed with no new
+#       review activity — a QUIET PR, not an exhausted cycle budget. It maps to
+#       `watch-window-elapsed`, distinct from the (b)/(d) `max-cycles-reached`
+#       cases, so the caller can tell "nothing more arrived" apart from "the
+#       cycle ceiling was hit".
 #   (e) `clean`: the keep-watching case — increment per (a)/(b), emit `none`
 #       unless the ceiling is hit.
-#   (f) `approval-clean`: the CODEX_APPROVED confirmation pass found nothing
-#       actionable — TERMINAL `clean` (SKILL.md section 4 CODEX_APPROVED path).
+#   (f) `approval-clean`: an approval confirmation pass found nothing
+#       actionable — TERMINAL `clean` (SKILL.md section 4 approval path). Both
+#       the CODEX_APPROVED marker and the REVIEW_APPROVED marker raised by the
+#       sibling pr-change-detect-poll.sh feed this SAME token; this script sees
+#       only `approval-clean` and does not branch on which marker raised it.
 #       Distinct from `clean`: a plain `clean` keeps watching, but an approved PR
 #       with nothing actionable remaining is a successful terminal and must emit
 #       `EXIT_REASON=clean` rather than keep watching to timeout. No increment
@@ -174,7 +187,8 @@ cmd_cycle_decision() {
     return 0
   fi
 
-  # approval-clean: CODEX_APPROVED confirmation pass found nothing actionable →
+  # approval-clean: an approval confirmation pass (CODEX_APPROVED or
+  # REVIEW_APPROVED) found nothing actionable →
   # TERMINAL `clean` (decision 4f). No increment — a confirmation pass that finds
   # nothing is not a remediation round. Distinct from plain `clean`, which keeps
   # watching; this is the successful approval terminal an approved PR must emit
@@ -234,7 +248,7 @@ cmd_token_map() {
   case "$signal" in
     STATE=MERGED)  printf 'EXIT_REASON=pr-merged\n' ;;
     STATE=CLOSED)  printf 'EXIT_REASON=pr-closed\n' ;;
-    WATCH_TIMEOUT) printf 'EXIT_REASON=max-cycles-reached\n' ;;
+    WATCH_TIMEOUT) printf 'EXIT_REASON=watch-window-elapsed\n' ;;
     POLL_ERROR)    printf 'EXIT_REASON=blocked\n' ;;
     *) die "unknown loop signal: '$signal'" ;;
   esac

@@ -164,9 +164,11 @@ Then it appends the event; updates `state.previous`/`state.current`/`state.statu
 (schema enum `running|complete|blocked|cancelled`): `complete`→`complete`,
 `blocked`→`blocked`, `cancelled`→`cancelled`, the human-intervention terminals
 (`user_input_required` / `review_rejected` / `review_exhausted`)→`blocked` (stopped, needs
-attention — never masked as success), and any other done-terminal (e.g. `hatchery_monitor`)
-→`complete`. Every write is temp-write + atomic rename; on ANY validation failure the
-on-disk ledger is byte-unchanged.
+attention — never masked as success), and any other done-terminal (e.g. `hatchery_monitor`,
+`review_window_elapsed`)→`complete`. `review_window_elapsed` is not an intervention terminal:
+a quiet idle window with no new review arrivals is the normal healthy ending of watching a
+quiet PR, never "stopped, needs attention". Every write is temp-write + atomic rename; on ANY
+validation failure the on-disk ledger is byte-unchanged.
 
 ## Procedure
 

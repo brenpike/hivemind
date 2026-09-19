@@ -35,7 +35,7 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh",
-    "line": 126,
+    "line": 141,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — compute_snapshot returns non-zero in the normal retry/backoff flow guarded by `if !`; failures route through poll_fail() with explicit exit codes."
   },
   {

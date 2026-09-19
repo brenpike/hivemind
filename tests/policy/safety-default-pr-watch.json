@@ -1,0 +1,14 @@
+{
+  "rule": "Default post-PR watch is mechanical, not discretionary",
+  "description": "P3 coupling. The post-PR watch is opt-out only, and the whole point of the rule is that the escape is a ground-truth test of the user's original request rather than a judgment call the overlord makes. The source pin sits on ONE span carrying BOTH halves of the conditional: the discriminating condition (`not_requested` holds if and only if the original request carries an explicit instruction not to watch or monitor the PR) and the obligation it triggers (every other case, including silence and ambiguity, yields `watch_requested`). Either half alone is rewritable while the other stays green -- deleting the `if and only if` keying re-opens the outcome to discretion, and inverting the default clause flips silence back to not-watching -- so both live inside the pinned span and a drift back to discretion in either half turns the suite red. The consumer pins the POINTER, not the remedy prose: `plugin/workflows/standard-delivery.json` must keep naming the overlord agent rule as the source of truth for the `github_review_decision` description, so severing the workflow description from its canonical rule is loud while honest rewording of the surrounding description is not. What this fixture honestly guarantees is exactly that these two word sequences exist in these two named files; it claims nothing about meaning. Residuals, stated plainly: (1) a meaning-preserving rewrite-around is invisible -- surrounding prose that re-introduces overlord discretion while leaving the pinned bytes intact stays green; (2) the pin sees only the two files it names, so a third site restating the watch default is unprotected; (3) no fixture in this directory can detect a NEW workflow state, or a new decision state in another workflow, that fails to carry the rule at all -- that is an absence defect per rule 7 of the pin-authoring contract and needs a structural check, not a presence pin.",
+  "source": {
+    "file": "plugin/agents/overlord.md",
+    "pattern": "The outcome is `not_requested` if and only if the user's original request carries an explicit instruction not to watch or monitor the PR; in every other case, including silence and ambiguity, the outcome is `watch_requested`."
+  },
+  "consumers": [
+    {
+      "file": "plugin/workflows/standard-delivery.json",
+      "pattern": "This rule is stated normatively in plugin/agents/overlord.md (the opt-out-only GitHub review watch default rule) — that agent rule is the source of truth and this description must stay in lockstep with it."
+    }
+  ]
+}

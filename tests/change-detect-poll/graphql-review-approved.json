@@ -1,0 +1,43 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "state": "OPEN",
+        "comments": {
+          "totalCount": 2,
+          "nodes": [
+            { "databaseId": 2411001, "author": { "login": "hive-author" } },
+            { "databaseId": 2411002, "author": { "login": "hive-author" } }
+          ]
+        },
+        "reviews": {
+          "totalCount": 2,
+          "nodes": [
+            { "databaseId": 3011001, "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector" } },
+            { "databaseId": 3011002, "state": "APPROVED", "author": { "login": "chatgpt-codex-connector" } }
+          ]
+        },
+        "reviewThreads": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "comments": {
+                "nodes": [
+                  { "databaseId": 4011001, "author": { "login": "chatgpt-codex-connector" } }
+                ]
+              }
+            }
+          ]
+        },
+        "statusCheckRollup": {
+          "contexts": {
+            "checkRunCountsByState": [
+              { "state": "SUCCESS", "count": 3 }
+            ],
+            "statusContextCountsByState": []
+          }
+        }
+      }
+    }
+  }
+}
