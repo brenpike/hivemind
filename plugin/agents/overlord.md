@@ -145,7 +145,7 @@ RUN-OWNERSHIP-01: a run ledger is owned and mutated only by the overlord instanc
 - `hivemind:molt` — commit completed phases, milestones, version bumps, review fixes
 - `hivemind:open-plan-pr` — open PR after validation and versioning gates pass
 - `hivemind:decision-report` — renders the post-merge decision report in the consumer project's ubiquitous language and RETURNS it as chat text (render-to-chat; writes nothing to disk — the overlord surfaces the narrative and `touch`es a zero-byte done-marker)
-- `hivemind:github-review-loop` — main-session watch loop and the mandatory-by-default post-PR path; polls a PR for review activity and dispatches fix-mode remediation per actionable event; overlord-executed (hosts Monitor). `max_remediation_cycles` is a FLOOR of 6: no caller may invoke this loop with a lower value.
+- `hivemind:github-review-loop` — main-session watch loop and the mandatory-by-default post-PR path; polls a PR for review activity and dispatches fix-mode remediation per actionable event; overlord-executed (hosts Monitor). `max_remediation_cycles` is a FLOOR declared and enforced by `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, which REJECTS any `max_remediation_cycles` below it: no caller may invoke this loop with a lower value.
 - `hivemind:adaptation-cycle` — invoked by local-reviewer internally, not by overlord
 - `hivemind:tdd` — invoked by coder internally when TDD is requested
 - `hivemind:plan-interrogation` — interactive grill + overlord-invocable; owns any CONTEXT.md/ADR writes

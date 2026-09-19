@@ -32,7 +32,7 @@ Monitor is a main-session cross-turn primitive — a subagent dispatch orphans a
 | `base` | (required) | PR base/target branch. |
 | `reviewer_filter` | `codex-only` | Actionable reviewer identities (`codex-only` \| `all` \| `<author>`). |
 | `max_watch_duration` | `3600` | Idle-window seconds per Monitor arm (1h). |
-| `max_remediation_cycles` | `6` | Max real remediation rounds (findings_resolved ≥ 1). |
+| `max_remediation_cycles` | `bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor` | Max real remediation rounds (findings_resolved ≥ 1). |
 | `poll_interval` | `60` | Seconds between polls. |
 
 `max_watch_duration` is an IDLE window, not a total budget: a completed remediation
@@ -40,8 +40,11 @@ cycle re-arms a fresh full window, and a window that elapses with no actionable
 arrival ends the watch. The poll script's own deadline is PER-PROCESS, so a fresh
 arm IS a fresh window — the idle semantics live here, in the arm/re-arm discipline.
 
-`max_remediation_cycles` is a FLOOR of 6: no caller may invoke this loop with a
-lower value.
+`max_remediation_cycles` is a FLOOR. The floor value is DECLARED and ENFORCED by
+`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, and no
+literal is restated here — query it with
+`bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor`.
+A caller that invokes this loop with a lower value is REJECTED.
 
 ## Lifecycle
 
@@ -93,21 +96,27 @@ duplicate-suppression.
 
 An arm that returns with NO terminal marker means the arm EXPIRED, not that the
 watch ended: re-arm for the REMAINING idle budget of the current window, reusing
-the SAME seed the expired arm carried. NEVER take a fresh `--snapshot` at an arm
-boundary. An arm expiry is not a reviewer pass, so nothing has consumed the PR
-state there: a seed captured at the boundary absorbs any comment that arrived
-after the expired arm's final poll into the new baseline, so that comment never
-fires `CHANGED` and — absent later activity — is lost for the life of the watch.
-Carrying the seed forward costs at most a duplicate wake on activity the previous
-arm already reported, which `prefilter.sh` absorbs as `PREFILTER_SKIP`;
-over-reporting is SAFE, under-reporting loses findings. This holds whatever the
-Monitor's own per-arm ceiling turns out to be — assume no specific figure. The
-watch never silently dies at an arm boundary.
+the SAME seed the expired arm carried, per the Seed-Advance INVARIANT below.
 
-INVARIANT (the rule every capture site above obeys): the baseline seed advances
-ONLY at a point where a reviewer pass is about to consume the state it
-snapshots — step 2 before cycle 0, and step 5 before a dispatch. There is no
-third capture site, so the baseline can never advance past state nobody read.
+**Seed-Advance INVARIANT.** The baseline seed advances ONLY at a point where a
+reviewer pass is about to consume the state it snapshots. There are exactly TWO
+capture sites: step 2, before cycle 0, and step 5, before a dispatch. There is NO
+third capture site, so the baseline can never advance past state nobody read. An
+arm boundary (step 4) and a post-dispatch re-arm (step 6) are NOT capture sites:
+each MUST reuse the seed it already carries, and taking a fresh `--snapshot` at
+either boundary is FORBIDDEN. WHY: neither boundary is a reviewer pass, so
+nothing has consumed the PR state there — at an arm boundary a fresh seed absorbs
+any comment that arrived after the expired arm's final poll, and at a re-arm,
+where the remediation push has already landed, a fresh seed absorbs any comment
+that arrived DURING the fix; either way that comment never fires `CHANGED` and
+— absent later activity — is lost for the life of the watch. Carrying the seed
+forward costs at most a duplicate wake on activity the previous arm already
+reported, or — because a pending seed predates its dispatch — a re-fire on our
+own `Fixed in <SHA>` replies, the case step 4 documents above; `prefilter.sh`
+absorbs both downstream as `PREFILTER_SKIP`. Over-reporting is SAFE,
+under-reporting loses findings. This holds whatever the Monitor's own per-arm
+ceiling turns out to be — assume no specific figure. The watch never silently
+dies at an arm boundary.
 
 **5. Per event.** `CHANGED` → run
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`:
@@ -133,11 +142,10 @@ PRE-DISPATCH SEED. BEFORE spawning the reviewer for ANY dispatch in this step �
 the `PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass AND the `CODEX_APPROVED` /
 `REVIEW_APPROVED` confirmation pass alike — capture a PENDING re-arm seed per step
 2's `--snapshot` procedure and HOLD it; the Monitor stays armed meanwhile, so
-nothing is missed while the reviewer runs. This capture belongs HERE, before the
-dispatch, and NEVER at re-arm time in step 6 — see step 6 for why the ordering is
-load-bearing. A `SNAPSHOT_ERROR` or non-zero exit follows step 2's posture: RETRY
-ONCE, then terminal `blocked`. `PREFILTER_SKIP` does not dispatch and captures no
-pending seed. Step 6 consumes the pending seed on a productive return and
+nothing is missed while the reviewer runs. This is capture site 2 of the
+Seed-Advance INVARIANT (step 4). A `SNAPSHOT_ERROR` or non-zero exit follows
+step 2's posture: RETRY ONCE, then terminal `blocked`. `PREFILTER_SKIP` does not
+dispatch and captures no pending seed. Step 6 consumes the pending seed on a productive return and
 discards it on every other return.
 
 **6. Reviewer-return handling.** `clean` → keep watching. `planner-escalation` |
@@ -161,22 +169,18 @@ When any guard fires, stop Monitor and emit ONE terminal report.
 A PRODUCTIVE cycle — `findings_resolved ≥ 1` returned with `EXIT_REASON=none` —
 re-arms the idle window: stop the Monitor and arm per step 4 with the PENDING
 seed captured before this cycle's dispatch (step 5) and a full fresh
-`max_watch_duration`. NEVER take a fresh `--snapshot` here and never substitute
-one for the pending seed: by this point the remediation push has landed, and a
-seed taken now absorbs any reviewer comment that arrived DURING the fix into the
-baseline, so that comment never fires `CHANGED` — silent feedback loss. The
-pending seed predates the dispatch (step 2's pre-cycle-0 discipline, the #324
-blind-window fix), so at worst it re-fires `CHANGED` on our own `Fixed in <SHA>`
-replies — the already-documented, already-absorbed case from step 4.
-Over-reporting is SAFE, under-reporting loses findings. GATING: only a productive
-cycle consumes the pending seed and re-arms. A `PREFILTER_SKIP` event is NOT a
-productive cycle, does not dispatch, and MUST NOT reset the idle window. A
-NON-productive return (`findings_resolved = 0` with `EXIT_REASON=none`) keeps
+`max_watch_duration`; a re-arm is not a capture site, and the pending seed is
+never substituted for a fresh one, per the Seed-Advance INVARIANT (step 4).
+GATING: only a productive cycle consumes the pending seed and re-arms. A
+`PREFILTER_SKIP` event is NOT a productive cycle, does not dispatch, and MUST
+NOT reset the idle window. A NON-productive return (`findings_resolved = 0` with `EXIT_REASON=none`) keeps
 watching on the CURRENT window: the Monitor was never stopped, so leave it armed
 and DISCARD the pending seed — the window does not reset. On any terminal
-`EXIT_REASON` the pending seed is discarded with the Monitor. Once the 6-cycle
-ceiling is reached, `loop-state.sh` emits `max-cycles-reached` and the loop
-TERMINATES rather than re-arming — which is why the re-arm is gated on
+`EXIT_REASON` the pending seed is discarded with the Monitor. Once the cycle
+ceiling declared and enforced by
+`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh` is
+reached, that script emits `max-cycles-reached` and the loop TERMINATES rather
+than re-arming — which is why the re-arm is gated on
 `EXIT_REASON=none`.
 
 ## Dispatch contract
@@ -191,7 +195,9 @@ fields. Skill consumes; does not re-fetch or re-classify.
 
 ## Termination guard set
 
-Terminates on: `max_remediation_cycles` reached — ceiling 6 — (→
+Terminates on: `max_remediation_cycles` reached — the ceiling declared and
+enforced by
+`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh` — (→
 `max-cycles-reached`); an idle `max_watch_duration` window elapsing with no
 actionable arrival (→ `watch-window-elapsed`, a QUIET window and never the cycle
 ceiling); `same-finding-repeat` oscillation (→ `max-cycles-reached`, an
