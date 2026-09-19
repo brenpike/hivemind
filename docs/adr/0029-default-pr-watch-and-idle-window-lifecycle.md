@@ -107,7 +107,7 @@ This follows ADR-0023, which refused to fold `merge-advised` into `review_exhaus
 
 ## Consequences
 
-- **Session occupancy changes shape.** A `standard-delivery` run no longer terminates the moment the PR opens; it watches. The watch is bounded by 6 remediation cycles, and only a productive cycle re-arms, so a quiet PR ends after a single idle window (currently 1h) rather than running to any larger budget.
+- **Session occupancy changes shape.** A `standard-delivery` run no longer terminates the moment the PR opens; it watches. The watch is bounded by the `max_remediation_cycles` floor declared and enforced by `plugin/skills/github-review-loop/scripts/loop-state.sh` — read the current value with `loop-state.sh floor`; this record asserts no figure — and only a productive cycle re-arms, so a quiet PR ends after a single idle window (currently 1h) rather than running to any larger budget.
 - **Review feedback is picked up by default.** The path that was almost never taken is now the path taken unless the user says otherwise, and the opt-out survives as an explicit instruction in the original request.
 - **A quiet watch reports `complete`.** `review_exhausted` now means only the cycle ceiling or an oscillation guard; readers can trust `blocked` again.
 - **Brood children inherit the default** and watch their own PRs. The hatchery coordinator is unaffected — `hatchery-dispatch` never enters `github_review_decision`.
