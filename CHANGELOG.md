@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [4.0.0] - 2026-09-23
+
+### Added
+
+- ADR-0030 (`docs/adr/0030-config-gated-post-merge-decision-report.md`): records the decision to config-gate the post-merge decision report.
+- `tests/policy/safety-decision-report-toggle.json`: policy fixture pinning the opt-in gate and its default-off state.
+
+### Changed
+
+- **BREAKING:** The post-merge decision report is now opt-in and OFF by default. This gates the overlord's Resume-On-Start deferred-report scan and its `hivemind:decision-report` invocation behind a new standing key, `HIVEMIND_ENABLE_DECISION_REPORT`. To restore the report, set `HIVEMIND_ENABLE_DECISION_REPORT` (any non-empty value, checked by presence) in the `env` block of `.claude/settings.json` or `.claude/settings.local.json`.
+- While the key is off, the scan makes no GitHub call and instead touches the zero-byte `.decision-report-done` marker for each awaiting run, so the first session after upgrading marks all existing awaiting runs done. Enabling the key afterward only reports runs that finish after enabling — a run whose PR is still open while the key is off will not report, even after the key is later turned on.
+- The decision journal (`event.outputs.decisions[]`) is still written regardless of this key; Tier-B autonomy is unchanged.
+
 ## [3.1.0] - 2026-09-23
 
 ### Changed

@@ -100,7 +100,11 @@ The recurrence mechanics — the counting unit, the trip threshold, the Gate-A r
 
 ## Post-Merge Decision Report Trigger
 
-After the PR for a run merges, the overlord ALWAYS surfaces a report of the decisions it made on the user's behalf, rendered in the CONSUMER project's ubiquitous language. The report is CHAT-ONLY: it is RENDERED to chat and surfaced to the user — NO report file is written to disk. This section defines the TRIGGER and policy only; the rendering mechanics live in the `hivemind:decision-report` skill and are not restated here.
+After the PR for a run merges, the overlord surfaces a report of the decisions it made on the user's behalf, rendered in the CONSUMER project's ubiquitous language — but ONLY while the operator has enabled the report. The report is CHAT-ONLY: it is RENDERED to chat and surfaced to the user — NO report file is written to disk. This section defines the TRIGGER and policy only; the rendering mechanics live in the `hivemind:decision-report` skill and are not restated here.
+
+The report is CONFIG-GATED on `HIVEMIND_ENABLE_DECISION_REPORT`, set in the `env` block of the project's `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored) — the same operator-override channel as `HIVEMIND_SKIP_PR_WATCH` and `HIVEMIND_LOCAL_REVIEW_MODEL`. Check it by PRESENCE with a simple non-empty test; that check is mechanical and reads no prose. Set and non-empty means every rule below applies unchanged. When `HIVEMIND_ENABLE_DECISION_REPORT` is unset or empty — the DEFAULT — the deferred-report scan renders no report, NEVER invokes `hivemind:decision-report`, and makes NO GitHub call of any kind: no PR-state lookup, no `gh pr view`, no other GitHub request whatsoever. Because the committed settings file lives in the repository, the preference inherits into brood worktrees.
+
+The decision journal keeps being written regardless of this key: `event.outputs.decisions[]` is appended exactly as **Decision Journal** specifies, and Tier-B autonomy, the 2x2, and the promotion gate are UNAFFECTED. Only the chat report is gated.
 
 The report is deferred-on-merge — it is not produced at merge time but on a subsequent session start. The overlord's Resume-On-Start scan (per `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Resume On Start`) derives an AWAITING-REPORT run when ALL of the following hold:
 
@@ -108,11 +112,16 @@ The report is deferred-on-merge — it is not produced at merge time but on a su
 - the run's `event.outputs.decisions[]` carries at least one entry with a `disposition` of `did-now`, `deferred`, or `recorded` — a run whose journal holds only `surfaced` entries is NOT awaiting-report (it would never warrant a report and would otherwise reprocess every session)
 - the run dir does NOT yet contain the zero-byte `.decision-report-done` marker
 
-For an awaiting-report run the overlord checks PR state and, on `MERGED` or `CLOSED`, invokes `hivemind:decision-report`, surfaces the returned narrative to the user, then `touch`es the zero-byte `.decision-report-done` marker in the run dir.
+The awaiting-report predicate above is derived from LOCAL ledger reads alone and is evaluated identically whether the key is set or not.
 
-This scan is BEST-EFFORT and FAIL-OPEN: a PR-state lookup failure for a deferred-report run leaves the run AWAITING (no marker written) and is skipped without blocking session startup — never a session-blocking stop — and is retried on a future session (see `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Resume On Start`).
+When the key is SET, for an awaiting-report run the overlord checks PR state and, on `MERGED` or `CLOSED`, invokes `hivemind:decision-report`, surfaces the returned narrative to the user, then `touch`es the zero-byte `.decision-report-done` marker in the run dir.
+
+When the key is UNSET or EMPTY, the overlord derives the same awaiting-report set from the same predicate and, for each run in it, `touch`es the zero-byte `.decision-report-done` marker WITHOUT checking PR state — the marker is written whether or not the run's PR has merged, because no PR state is read. A run with no derivable PR fails the predicate, is therefore NOT awaiting-report, and is NOT marked. Enabling the key later consequently reports only on runs that finish after it is enabled; runs already suppressed stay marked.
+
+This scan is BEST-EFFORT and FAIL-OPEN in both modes, and is never a session-blocking stop. With the key set, a PR-state lookup failure leaves the run AWAITING (no marker written) and is skipped without blocking session startup. With the key unset or empty, the `touch` is the ONLY failure surface: a failed `touch` is swallowed, the run stays AWAITING, and nothing else is attempted. Either way the run is retried on a future session (see `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Resume On Start`).
 
 Firing condition and idempotency:
 
-- The report fires ONLY when at least one Tier-B AUTO decision was journaled — an entry with a `disposition` of `did-now`, `deferred`, or `recorded`. A run whose journal holds only `surfaced` entries produces no report.
+- The report fires ONLY when `HIVEMIND_ENABLE_DECISION_REPORT` is set and non-empty AND at least one Tier-B AUTO decision was journaled — an entry with a `disposition` of `did-now`, `deferred`, or `recorded`. A run whose journal holds only `surfaced` entries produces no report.
 - The EXISTENCE of the zero-byte `.decision-report-done` marker in the run dir is the SOLE idempotency marker — there is NO ledger marker and NO `decision-report.md` content file (the report is chat-only). The marker is created with `touch` and holds NO content, so it carries no splice/injection surface. The run-status enum is unchanged; no new `run.status` value is introduced.
+- The marker means "this run will produce no further decision report" — it is written both when a report WAS rendered and when the report was SUPPRESSED because the key was unset or empty. Its shape and role do not widen with its meaning: still zero-byte, still the sole idempotency token, still no ledger marker and no schema change.

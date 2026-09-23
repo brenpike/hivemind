@@ -211,7 +211,7 @@ The per-decision record (situation, options, trade-offs, recommendation strength
 _Avoid_: audit log, decision log
 
 **Decision Report**:
-The post-merge narrative the overlord ALWAYS surfaces after a PR merges, recounting each autonomous decision in the consumer project's ubiquitous language; produced by `hivemind:decision-report`.
+The OPT-IN post-merge narrative the overlord surfaces after a PR merges — only when the decision report is enabled via `HIVEMIND_ENABLE_DECISION_REPORT` — recounting each autonomous decision in the consumer project's ubiquitous language; produced by `hivemind:decision-report`.
 _Avoid_: summary, changelog
 
 **Disposition**:
@@ -388,7 +388,7 @@ _Avoid_: degraded mode, manual mode, safe mode
 - An **Unsafe Git State** blocks all modifying agent operations until resolved
 
 - An **Overlord** records a **Decision Journal** entry for every Tier-B decision; the **Promotion Gate** decides whether the decision is auto-taken or surfaced to the **Overmind**
-- A **Decision Report** is produced once per merged PR that contains ≥1 auto **Disposition** (`did-now`, `deferred`, or `recorded`), rendered in the consumer's ubiquitous language
+- A **Decision Report** is produced once per merged PR that contains ≥1 auto **Disposition** (`did-now`, `deferred`, or `recorded`) when the decision report is enabled via `HIVEMIND_ENABLE_DECISION_REPORT`, rendered in the consumer's ubiquitous language
 - **Remediation** Tier-B choices (planner-escalation, root-cluster routing) are auto-taken + journaled unless the **Promotion Gate** trips
 
 - A **Brood** contains one or more **Strains**, each running in a separate git worktree
