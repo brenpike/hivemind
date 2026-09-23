@@ -1,7 +1,7 @@
 ---
 name: drone
 description: Implement code, fix bugs, refactor safely, update assigned tests/release metadata, and validate behavior within explicitly assigned file scope.
-model: claude-opus-5
+model: opus
 effort: high
 tools:
   - Read

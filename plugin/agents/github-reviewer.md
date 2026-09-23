@@ -1,7 +1,7 @@
 ---
 name: github-reviewer
 description: Own post-PR GitHub review feedback — detect, classify, fix simple issues, push, reply, and resolve threads. Stateless fix-mode-only worker (one-shot).
-model: claude-opus-5
+model: opus
 effort: high
 tools:
   - Read

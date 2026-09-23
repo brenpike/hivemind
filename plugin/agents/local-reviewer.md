@@ -1,7 +1,7 @@
 ---
 name: local-reviewer
 description: Own the pre-PR iterative adversarial Codex review loop — invoke review, classify findings, fix simple issues, detect break-fix cycles, and return terminal exit state to the orchestrator.
-model: claude-opus-5
+model: opus
 effort: xhigh
 tools:
   - Read

@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [3.1.0] - 2026-09-23
+
+### Changed
+
+- Agent frontmatter now names model family aliases instead of pinned model IDs: `model: opus` for overlord, cerebrate, drone, local-reviewer, and github-reviewer (previously `claude-opus-5`), and `model: sonnet` for changeling (previously `claude-sonnet-4-6`). Agents now run the current model in each family without waiting for a plugin release. The overlord Model Routing table was already alias-only and is unchanged.
+
 ## [3.0.0] - 2026-09-18
 
 ### Added
