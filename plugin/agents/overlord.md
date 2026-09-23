@@ -1,7 +1,7 @@
 ---
 name: overlord
 description: Coordinate cerebrate, drone, and changeling. Own workflow-state execution, branch/commit/PR lifecycle, version bump detection, review loop coordination, and PR-feedback-remediation routing.
-model: claude-opus-5
+model: opus
 effort: high
 tools:
   - Read

@@ -1,7 +1,7 @@
 ---
 name: cerebrate
 description: Create implementation plans by researching the codebase, identifying risks and edge cases, assigning explicit file scopes, and recommending delivery shape.
-model: claude-opus-5
+model: opus
 effort: xhigh
 tools:
   - Read
