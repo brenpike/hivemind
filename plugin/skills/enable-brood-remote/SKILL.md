@@ -1,6 +1,6 @@
 ---
 name: enable-brood-remote
-description: Enables remote control over every strain of a brood by fanning the `/rc <strain-name>` slash command out to each strain's live session. Fires ONLY on an EXPLICIT user request to turn on remote control for a brood — e.g. "enable RC for all strains", "RC for all strains", "turn on remote control for the brood / all strains", "enable remote control for the brood". This is a user-initiated action, NOT an autonomous coordination step the coordinator takes on its own.
+description: Enables remote control over every strain of a brood by fanning the `/rc <strain-name>` slash command out to each strain's live session. Fires ONLY on an EXPLICIT user request to turn on remote control for a brood — e.g. "enable RC for all strains". This is a user-initiated action, NOT an autonomous coordination step the coordinator takes on its own.
 allowed-tools:
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/enable-brood-remote/scripts/rc-brood.sh *)
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-discover.sh)
