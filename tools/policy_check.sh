@@ -1516,6 +1516,106 @@ fi
 
 mark_time 'CHECK14'
 
+# ── CHECK 15: No tracker references in plugin runtime prose ────────────────
+#
+# WHAT IT GUARANTEES. docs/engineering-principles.md P19 (doctrine anchors on
+# durable records, not tracker IDs) forbids a bare `#NNN` in runtime doctrine:
+# the ticket closes, is renumbered in meaning, or is superseded, and the prose
+# silently rots. P17 says a mechanizable rule left to reviewer vigilance is
+# decoration, so P19 is only real once a CI guard asserts it -- this is that
+# guard.
+#
+# SCOPE. plugin/**/*.md plus plugin/workflows/*.json: the runtime-loaded
+# instruction payload an agent reads as its own context. Committed shell under
+# plugin/ is deliberately OUT of scope -- its comments are developer-facing and
+# are never loaded into an agent's context, so a tracker ID there stales a
+# maintainer note rather than doctrine.
+#
+# SCAN SHAPE. One awk pass per file strips a trailing CR (prose in this repo is
+# stored CRLF) and skips YAML frontmatter (line 1 `---` opens, the next `---`
+# closes), which is structured metadata rather than prose. Fenced code blocks
+# and indented lines are deliberately NOT skipped: real tracker references here
+# have lived inside a ```text fence and in an indented continuation line, so
+# skipping either construct would let the class ship unseen.
+#
+# PATTERN CLAUSES, each earning its place:
+#   * a digit is REQUIRED after `#`       -> ATX headings (`# `, `## `) and a
+#     `#!` shebang can never match.
+#   * no preceding word character or `/`  -> a cross-repo citation such as
+#     `cli/cli#12258` names its repo and stays legal, while a bare `#12258`
+#     is caught.
+#   * `{1,5}` digits AND no trailing alphanumeric -> hex colors `#123456` and
+#     `#1a2b3c` can never match.
+#   * anchors: a `(#section)` fragment starts with a letter, and the `](#...)`
+#     strip below additionally covers digit-leading slugs.
+#   * the backtick strip exempts inline-code placeholders such as the literal
+#     issue-number placeholder in plugin/skills/prd-to-issues/SKILL.md.
+#
+# Discovery FAILS CLOSED: zero discovered prose files is an ERROR, not a pass,
+# so a moved or renamed payload tree cannot silently disarm this check.
+#
+# RESIDUAL, stated plainly: a fenced example that legitimately needs a literal
+# `#123` must move into inline code or be allowlisted like any other finding.
+echo ''
+echo '=== CHECK 15: No tracker references in plugin runtime prose ==='
+
+CHECK15_TRACKER_PATTERN='(^|[^A-Za-z0-9_/])#[0-9]{1,5}([^0-9A-Za-z_]|$)'
+
+check15_found=false
+check15_file_count=0
+
+# scan_file_for_tracker_refs FILE
+# Emits a CHECK15 finding per prose line carrying a bare tracker reference.
+scan_file_for_tracker_refs() {
+    local prose_file="$1"
+    local line_num textline residual token
+    while IFS=$'\t' read -r line_num textline; do
+        # Cheap gate: the overwhelming majority of prose lines carry no `#` at
+        # all, so the sed/grep pipeline below is only paid for candidates.
+        case "$textline" in
+            *'#'*) ;;
+            *) continue ;;
+        esac
+        residual="$(printf '%s' "$textline" | sed -E 's/`[^`]*`//g; s/\]\(#[^)]*\)//g')"
+        if ! printf '%s' "$residual" | grep -qE "$CHECK15_TRACKER_PATTERN"; then
+            continue
+        fi
+        token="$(printf '%s' "$residual" | grep -oE "$CHECK15_TRACKER_PATTERN" | head -n1)"
+        check15_found=true
+        add_finding 'CHECK15' "$prose_file" "$line_num" \
+            "tracker reference '${token}' in plugin runtime prose -- cite a durable anchor (ADR, named invariant, or a present-tense description of the rule), never an issue or PR number"
+    done < <(awk '
+        { sub(/\r$/, "") }
+        NR == 1 && $0 == "---" { in_frontmatter = 1; next }
+        in_frontmatter && $0 == "---" { in_frontmatter = 0; next }
+        in_frontmatter { next }
+        { print NR "\t" $0 }
+    ' "$prose_file")
+}
+
+while IFS= read -r -d '' prose_file; do
+    check15_file_count=$((check15_file_count + 1))
+    scan_file_for_tracker_refs "$prose_file"
+done < <(
+    find "$PLUGIN_ROOT" -name '*.md' -type f -print0
+    find "$PLUGIN_ROOT/workflows" -maxdepth 1 -name '*.json' -type f -print0
+)
+
+if [[ "$check15_file_count" -eq 0 ]]; then
+    check15_found=true
+    add_finding 'CHECK15' "$PLUGIN_ROOT" 0 \
+        "Tracker-reference discovery found ZERO plugin runtime prose files -- no plugin/**/*.md and no plugin/workflows/*.json were discovered, which disarms this check; restore the payload tree or retire the check deliberately"
+fi
+
+if [[ "$check15_found" == false ]]; then
+    echo "[PASS] Check 15: No tracker references in $check15_file_count plugin runtime prose files"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'CHECK15'
+
 # ── SAFETY REGRESSION TESTS ────────────────────────────────────────────────
 
 echo ''

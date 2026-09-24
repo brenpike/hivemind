@@ -1,0 +1,14 @@
+{
+  "rule": "check15-tracker-ref-guard-present",
+  "description": "P3 consumer-assertion: CHECK 15 (No tracker references in plugin runtime prose) in tools/policy_check.sh is the CI guard that makes P19 (doctrine anchors on durable records, not tracker IDs) real rather than decoration, per P17. This fixture pins the two literals that prove the guard still exists and still reports through the shared finding machinery: the `=== CHECK 15:` section header (the block is present and still announces itself) and `add_finding 'CHECK15'` (it still emits CHECK15 findings, so --strict and the allowlist still apply to it). superset mode fails if either literal is removed; extras elsewhere in the file are ignored. Residual, stated plainly: this pin claims presence only. It cannot prove the regex still detects anything, and it is blind to a weakened pattern -- narrowing CHECK15_TRACKER_PATTERN, or narrowing the discovery globs, leaves both pinned literals intact and this fixture green.",
+  "set_check": {
+    "extract_regex": "(=== CHECK 15:|add_finding 'CHECK15')",
+    "expected_set": [
+      "=== CHECK 15:",
+      "add_finding 'CHECK15'"
+    ],
+    "files": [
+      { "path": "tools/policy_check.sh", "mode": "superset" }
+    ]
+  }
+}
