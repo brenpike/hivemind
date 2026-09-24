@@ -1,0 +1,52 @@
+{
+  "rule": "No document other than the canonical one carries the Destructive Fix gate category markers",
+  "description": "The Destructive Fix Confirmation Gate has exactly one normative enumeration, in security-policy.md. A second normative copy is the defect this fixture exists to catch: two copies drift, one narrows while the other stays broad, and readers of the narrow copy apply a gate that is smaller than the rule. This fixture asserts the NEGATIVE half of that invariant on the documents that cite the gate — safety-rails.md, decision-autonomy.md, overlord.md, drone.md, local-reviewer.md — by requiring each `DESTRUCTIVE-CAT <n>:` marker to occur ZERO times in each of them. expected_counts is shared across a single set_check, so the positive count of one per category in the canonical file and the count of zero per category in the citing files cannot live in the same fixture; this fixture owns the zero half and its companion owns the canonical enumeration. subset mode is what makes the zero half work: it ignores the ten 'missing' members that a marker-free file necessarily reports, while still failing on any captured value outside 1 through 10, so a marker numbered 11 pasted into a citing file is an extra and fails here too. The capture group is a negated-delimiter class anchored on the marker rather than a positive charset, so a copied marker cannot be invisible to the check by virtue of how its number is written. The source pin carries the sentence in safety-rails.md that states the prohibition and its reason in one clause — 'This section never restates the categories: the second copy is exactly what let one copy narrow while the other stayed broad' — so deleting the rule, or keeping the rule while deleting the reason that justifies it, stops the pattern matching. The consumers entries pin the canonical file's own two structural claims: that its list is the single canonical statement of the categories, and that the list's shape is one line per category, numbered 1 through 10, with no duplicates. Both are claim-carrying: the first is the uniqueness assertion the citing documents rely on, the second is the shape that makes the marker-set assertion in the companion fixture meaningful. overlord.md and local-reviewer.md reach the gate through safety-rails.md's retained pointer section rather than citing security-policy.md directly; that is resolving indirection, not a dangling reference. RESIDUALS, stated plainly: an UNMARKED verbatim re-copy of the ten rows — the same category text without the `DESTRUCTIVE-CAT <n>:` markers — is invisible here, because no fixture in this directory can assert body-prose ABSENCE (`absent` is scoped to YAML frontmatter), and the counted markers are the only handle this mechanism has. set_check `files` is a literal list with no glob expansion, so a marked copy planted in a document this fixture does not name is likewise invisible; the protection is real for the five named files and blind to new ones. Every pin here claims word-sequence presence, never meaning, so prose that keeps the pinned sentences intact while contradicting them elsewhere passes.",
+  "set_check": {
+    "extract_regex": "DESTRUCTIVE-CAT ([^:<[:space:]]+):",
+    "expected_set": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10"
+    ],
+    "expected_counts": {
+      "1": 0,
+      "2": 0,
+      "3": 0,
+      "4": 0,
+      "5": 0,
+      "6": 0,
+      "7": 0,
+      "8": 0,
+      "9": 0,
+      "10": 0
+    },
+    "files": [
+      { "path": "plugin/governance/safety-rails.md", "mode": "subset" },
+      { "path": "plugin/governance/decision-autonomy.md", "mode": "subset" },
+      { "path": "plugin/agents/overlord.md", "mode": "subset" },
+      { "path": "plugin/agents/drone.md", "mode": "subset" },
+      { "path": "plugin/agents/local-reviewer.md", "mode": "subset" }
+    ]
+  },
+  "source": {
+    "file": "plugin/governance/safety-rails.md",
+    "pattern": "This section never restates the categories: the second copy is exactly what let one copy narrow while the other stayed broad."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/security-policy.md",
+      "pattern": "This list is the ONE canonical statement of the gate categories"
+    },
+    {
+      "file": "plugin/governance/security-policy.md",
+      "pattern": "one line per category, numbered 1 through 10, no duplicates"
+    }
+  ]
+}

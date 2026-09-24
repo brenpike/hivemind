@@ -2,11 +2,9 @@
 
 How the analyst reasons about the *shape* of a deepened module's interface when writing a candidate's "Proposed deepening" in the blueprint. Based on "Design It Twice" (Ousterhout): your first interface idea is unlikely to be the best, so generate a few and pick. This is **inline reasoning the analyst performs in its own head** — it produces one recommended interface in the blueprint, not a research process. It assumes the architecture vocabulary (**module**, **interface**, **seam**, **adapter**, **leverage**, **locality**) defined in the skill's `LANGUAGE.md` reference.
 
-## This skill does NOT spawn design sub-agents
+## Scope of the exploration
 
-This is a read-only analysis skill. It does not use the Agent tool, does not spawn parallel design agents, and does not run a multi-agent design exploration. Generating two or three candidate interface shapes happens entirely as the analyst's own inline reasoning while drafting a candidate card.
-
-Deeper or parallel multi-design interface exploration — developing radically different interfaces side by side — is a **separate downstream activity** this skill does not perform. Do not attempt that work here, and do not instruct the reader to. If the interface shape genuinely needs more exploration than inline reasoning can give, say so in the candidate's notes and let the workflow that implements changes handle it.
+Generating two or three candidate interface shapes happens entirely as the analyst's own inline reasoning while drafting a candidate card. Deeper side-by-side exploration — developing radically different interfaces in parallel and evaluating each in depth — is a downstream activity. When an interface shape genuinely needs more than inline reasoning can give, say so in the candidate's notes and let the workflow that implements changes carry it.
 
 ## Contents
 

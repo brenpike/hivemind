@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [4.1.0] - 2026-09-25
+
+### Added
+
+- `tests/policy/safety-destructive-fix-gate-single-source.json` asserts the canonical ten-marker category set in `governance/security-policy.md` (one occurrence each) plus the broadest-reading rule and the pointer at `governance/safety-rails.md`. `tests/policy/safety-destructive-fix-gate-no-second-copy.json` asserts zero category markers in the five runtime docs that cite or load the gate, so a re-copied list is loud.
+
+### Changed
+
+- `agents/overlord.md` Continuous Execution: the overlord proceeds without pausing but now surfaces stop conditions, every Tier-A surface, the final report, and a brief progress line on long stretches (multi-wave implement loops, PR watches, brood dispatch). Per-state announcements, transition logs, and tool-by-tool narration stay out.
+- `agents/github-reviewer.md` and `agents/local-reviewer.md` no longer instruct zero text output; the terminal Output Contract YAML remains the report returned to the caller.
+- `agents/cerebrate.md` research is scoped by outcome: read until every step's file list is complete and confident, with unresolved paths in Open questions, replacing the fixed 3N-file read budget.
+- Repeated restatements removed in favour of one authoritative statement: the Routing-vs-Execution Invariant sites in `agents/overlord.md`, the claude-mem note in `agents/cerebrate.md`, `plan-interrogation`, `improving-architecture` (and its INTERFACE-DESIGN reference), `creep-spread` (term rules now point at CONTEXT-FORMAT.md), and `decision-report` (its constraints live in `## Do Not`).
+- `governance/workflow.md`: PR summary length is need-based instead of capped at five sentences.
+- Destructive Fix Gate categories are single-sourced. `governance/security-policy.md` (Destructive Fix Confirmation Gate) holds the one canonical list — each category a `DESTRUCTIVE-CAT <n>:` marker line, read at its broadest — and `governance/safety-rails.md` keeps its `## Destructive Fix Gate` section as a pointer carrying its own trigger framing. No category is narrower than either former wording: deleting a security-relevant file needs no "marked as" precondition, tests are covered rather than only test execution, cryptographic keys as well as key sizes, and credentials as well as credential values. The breadth the earlier alignment added is kept: salt rounds and TLS settings, `Cargo.toml` and `go.mod` dependency additions, `.circleci/` workflow files, and `*.p12` / `credentials.*` / `secrets.*` files. `agents/drone.md` now cites the canonical section by name.
+- `enable-brood-remote` skill description gives one trigger example instead of four near-synonyms.
+
+### Fixed
+
+- `tools/policy_check.sh` `set_check`: a fixture file with zero `extract_regex` matches no longer aborts the whole run. The grep fallback now runs only when perl is absent, and a failed capture pipeline yields an empty capture instead of appending a second `{}` that `jq --argjson` then rejected. A SAFETY-CANARY over `tests/policy/fixtures/set-check-zero-match-canary.md` witnesses the zero-match path.
+
 ## [4.0.2] - 2026-09-24
 
 ### Added

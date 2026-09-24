@@ -56,7 +56,7 @@ SemVer:
 Open PR only when: plan complete, validation passed, version bump included if required, branch pushed.
 
 PR content must include:
-- Summary (5 sentences or fewer)
+- Summary covering what changed and why, at the length the change needs
 - File paths modified, grouped by plan step
 - Validation status
 - Version/release notes when bump applies

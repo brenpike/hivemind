@@ -130,9 +130,3 @@ blueprint.
 
 - The user wants to find where the codebase is hard to test, hard to navigate, or tightly coupled, and wants concrete, ranked refactors.
 - Before planning a refactor — to produce candidates the planning pipeline can harden.
-
-## Edge cases
-
-- **No `CONTEXT.md` / `docs/adr/`:** do not block. Infer vocabulary from code, recommend the user first generate a domain glossary (CONTEXT.md from project artifacts) for sharper domain naming, and proceed.
-- **Multi-context repo (`CONTEXT-MAP.md` present):** scope the blueprint to one bounded context; ask which if ambiguous.
-- **"Just do the refactor" / "apply this":** decline. This skill is read-only — it emits the blueprint and hands off; it does not perform refactors.
