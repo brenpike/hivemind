@@ -35,10 +35,12 @@ Optional (brood child / id control):
 
 - `parent_kind`: `none | brood` (default `none`).
 - `parent_run_id`, `parent_brood_id`, `parent_strain_id`, `parent_manifest`: required for
-  the `brood` variant. `parent_brood_id` is the CANONICAL brood id (the manifest's
-  colon-bearing ISO-8601 timestamp) — it is persisted VERBATIM into `.parent.brood_id` so the
-  child ledger reconciles with the manifest, and is sanitized internally (colons -> dashes)
-  only to derive the filesystem-safe run id. `parent_strain_id` must match `[A-Za-z0-9._-]`.
+  the `brood` variant. `parent_brood_id` is the CANONICAL brood id — the GUID `spawn-brood`
+  generates (`brood-<uuidv4>`, asserted `^brood-[0-9a-f-]+$`; ADR-0021). It is persisted
+  VERBATIM into `.parent.brood_id` so the child ledger reconciles with the manifest. The
+  internal colon->dash sanitization is retained only as defensive tolerance for the retired
+  timestamp-shaped brood id and is a no-op on the GUID form, which is already
+  filesystem-safe. `parent_strain_id` must match `[A-Za-z0-9._-]`.
 - `suggested_run_id`: caller-suggested run id, used verbatim only if it matches
   `[A-Za-z0-9._-]`, else a derived id is used.
 - `plan_steps`: cerebrate's plan `steps` reformatted to a JSON array — child/resume SEED for
@@ -77,7 +79,7 @@ interpolates it into shell source or the jq program source. Shape:
   "parent": {
     "kind": "none | brood",
     "run_id": "<required when kind=brood> parent run id",
-    "brood_id": "<required when kind=brood> CANONICAL brood id; persisted verbatim, sanitized internally (colons->dashes) for the run id",
+    "brood_id": "<required when kind=brood> CANONICAL brood id — spawn-brood's generated GUID brood-<uuidv4>; persisted verbatim; already filesystem-safe",
     "strain_id": "<required when kind=brood> strain id",
     "manifest": "<required when kind=brood> manifest path"
   },
@@ -101,8 +103,8 @@ Field rules:
 - `plan_path` is optional; defaults to `null` when omitted.
 - Every value is data. None is interpolated into generated shell command source.
 
-Run-id derivation: `brood` -> `<sanitized-brood-id>--<strain-id>` (the canonical brood id's
-colons mapped to dashes for a filesystem-safe component; `.parent.brood_id` keeps the
+Run-id derivation: `brood` -> `<brood-id>--<strain-id>` (the GUID is already
+filesystem-safe, so the retained colon->dash pass is a no-op; `.parent.brood_id` keeps the
 canonical value); else a safe `suggested_run_id` verbatim; else derived
 `<utc-timestamp>-<workflow-id>`.
 

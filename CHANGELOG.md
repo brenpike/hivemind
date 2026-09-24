@@ -17,11 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `cerebrate` no longer carries the `Skill` tool; its instructions already forbid invoking skills, so the grant was unused.
-- `brood-status` no longer names the retired `.hivemind/brood/manifest.json` singleton path.
+- `brood-status` no longer names the retired `.hivemind/brood/manifest.json` singleton path, including `brood-status-project.sh`'s header comment.
 - `detect-remediation-signals` Do-Not list: the verdict-block presence-test item no longer reads as a double negative.
-- `governance/security-policy.md`: the inputs-file path invariant is stated in present tense, and the Trust-Boundary Discipline cross-reference points the right direction (above).
+- `governance/security-policy.md`: the Inert Inputs-File Navigator Pattern's closing paragraph now scopes the Write-grant soundness argument to the transport itself (skill-body-authored path plus `jq`-inert content) and hands per-engine field handling to Trust-Boundary Discipline, replacing a per-field path inventory that did not hold across every covered navigator. The Trust-Boundary Discipline cross-reference points the right direction (above).
 - `adaptation-cycle` output schema no longer pins a stale Codex version.
 - `CLAUDE.md`: repo layout (agent list, `_shared/` contents), roster description, and the per-brood manifest path corrected.
+- `init-run-ledger` (skill body and engine comments): the parent brood id is documented as `spawn-brood`'s generated GUID `brood-<uuidv4>`, not the retired colon-bearing ISO-8601 timestamp; the internal colon-to-dash pass is described as the defensive no-op it now is. Comments only; no behavior change.
 
 ## [4.0.0] - 2026-09-23
 
