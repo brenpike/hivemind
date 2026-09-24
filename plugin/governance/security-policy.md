@@ -56,18 +56,24 @@ The three boundaries this discipline governs:
 
 Human confirmation is required before any remediation fix that would perform any of the following. The gate applies regardless of who suggested the fix (Codex, human reviewer, bot, or automated tool).
 
+This list is the ONE canonical statement of the gate categories. `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Destructive Fix Gate) points here and never restates them: a second normative copy is what lets one copy narrow while the other stays broad, so no other document enumerates the categories.
+
+Each category is a machine-anchored line in one fixed form — `DESTRUCTIVE-CAT <n>: <what the fix would do>` — one line per category, numbered 1 through 10, no duplicates. The marker carries the category number, so the number a report cites survives any reordering or reformatting of this list.
+
+**Read every category at its BROADEST.** Each parenthetical is illustrative, never exhaustive. No marking, label, annotation, or naming convention is a precondition for a category to fire — a file is security-relevant because of what it does, not because something says so. When a proposed fix plausibly falls inside a category, that category fires and the gate applies.
+
 Gate trigger categories:
 
-1. Remove or weaken authentication or authorization checks
-2. Delete files marked as security-relevant (auth, crypto, session, secrets management)
-3. Disable or bypass validation, linting, or test execution
-4. Remove or relax input sanitization or output encoding
-5. Expand permissions, trust boundaries, or capability grants
-6. Alter cryptographic configuration (algorithms, key sizes, salt rounds, TLS settings)
-7. Add new dependencies to a dependency manifest (`package.json`, `requirements.txt`, `Cargo.toml`, `go.mod`, etc.)
-8. Modify CI or workflow files (`.github/workflows/`, `.circleci/`, etc.)
-9. Read, write, or delete secrets/environment files (`.env`, `*.key`, `*.pem`, `*.p12`, `credentials.*`, `secrets.*`)
-10. Expose, log, or transmit credential values, tokens, API keys, or private keys
+- `DESTRUCTIVE-CAT 1:` Remove or weaken authentication or authorization checks
+- `DESTRUCTIVE-CAT 2:` Delete security-relevant files (auth, crypto, session, secrets, secrets management)
+- `DESTRUCTIVE-CAT 3:` Disable or bypass validation, linting, or tests — test execution, individual test cases, and assertions alike
+- `DESTRUCTIVE-CAT 4:` Remove or relax input sanitization or output encoding
+- `DESTRUCTIVE-CAT 5:` Expand permissions, trust boundaries, or capability grants
+- `DESTRUCTIVE-CAT 6:` Alter cryptographic configuration (algorithms, keys, key sizes, salt rounds, TLS, TLS settings)
+- `DESTRUCTIVE-CAT 7:` Add dependencies to any manifest (`package.json`, `requirements.txt`, `Cargo.toml`, `go.mod`, etc.)
+- `DESTRUCTIVE-CAT 8:` Modify CI or workflow files (`.github/workflows/`, `.circleci/`, etc.)
+- `DESTRUCTIVE-CAT 9:` Read, write, or delete secrets or environment files (`.env`, `*.key`, `*.pem`, `*.p12`, `credentials.*`, `secrets.*`, and any other credentials file)
+- `DESTRUCTIVE-CAT 10:` Expose, log, or transmit credentials or credential values, tokens, API keys, or private keys
 
 When the gate fires: return the Worker Report — Blocked (defined in `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md`) with `stage: destructive-fix-gate`, `blocker: proposed fix requires human confirmation`, include the proposed change summary and which category (1-10) triggered the gate. Do not commit. Wait for explicit user approval.
 
