@@ -8,9 +8,9 @@
 # deterministic read + validation steps.
 #
 # INPUT (positional arguments):
-#   $1  Path (absolute or repo-relative) to a brood manifest JSON (default name
-#       `.hivemind/brood/manifest.json`). LAYOUT-AGNOSTIC: the caller passes the manifest path
-#       explicitly; this script does NOT hardcode `.hivemind/brood/`
+#   $1  Path (absolute or repo-relative) to a brood manifest JSON (current layout:
+#       `.hivemind/broods/<brood-id>/manifest.json`, per ADR-0021). LAYOUT-AGNOSTIC: the caller
+#       passes the manifest path explicitly; this script hardcodes NO manifest layout
 #       The manifest is UNTRUSTED data — see below.
 #   $2  OPTIONAL: the checkout root the manifest belongs to, used as the containment root for the
 #       manifest read-guard. DEFAULTS to `git rev-parse --show-toplevel` (the CURRENT checkout).
