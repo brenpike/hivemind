@@ -1875,12 +1875,22 @@ test_set_check() {
         local content
         content="$(<"$abs_path")"
 
-        # Extract capture group 1 matches; Perl is primary (handles PCRE regexes correctly)
+        # Extract capture group 1 matches; Perl is primary (handles PCRE regexes correctly).
+        # The fallback runs ONLY when perl is ABSENT -- an empty capture ('{}') from a
+        # SUCCESSFUL perl run is a legitimate zero-match result, not a missing interpreter.
+        # Each branch normalizes its own failure to '' (never `|| echo '{}'` INSIDE the
+        # substitution: the pipeline's last stage has already printed one document, so the
+        # echo APPENDS a second and yields invalid JSON for the --argjson below).
         local captured_json
-        captured_json="$(echo "$content" | perl -ne "while (/$regex_text/g) { print \"\$1\n\" }" 2>/dev/null | jq -R . | jq -s 'group_by(.) | map({key: .[0], value: length}) | from_entries' 2>/dev/null || echo '{}')"
-        # Fallback: grep -oP + sed-E for environments without Perl
-        if [[ "$captured_json" == '{}' ]]; then
-            captured_json="$(echo "$content" | grep -oP "$regex_text" 2>/dev/null | sed -E "s/$regex_text/\1/" | jq -R . | jq -s 'group_by(.) | map({key: .[0], value: length}) | from_entries' 2>/dev/null || echo '{}')"
+        captured_json=''
+        if command -v perl > /dev/null 2>&1; then
+            captured_json="$(echo "$content" | perl -ne "while (/$regex_text/g) { print \"\$1\n\" }" 2>/dev/null | jq -R . | jq -s 'group_by(.) | map({key: .[0], value: length}) | from_entries' 2>/dev/null)" || captured_json=''
+        else
+            # Fallback: grep -oP + sed -E for environments without Perl
+            captured_json="$(echo "$content" | grep -oP "$regex_text" 2>/dev/null | sed -E "s/$regex_text/\1/" | jq -R . | jq -s 'group_by(.) | map({key: .[0], value: length}) | from_entries' 2>/dev/null)" || captured_json=''
+        fi
+        if [[ -z "$captured_json" ]]; then
+            captured_json='{}'
         fi
 
         local captured_set
@@ -2120,6 +2130,82 @@ if [[ "$normalize_absent_canary_ok" == true ]]; then
     CHECKS_PASSED=$((CHECKS_PASSED + 1))
 else
     echo '[FAIL] SAFETY-CANARY: frontmatter-absent normalization self-test'
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+# ── SAFETY-CANARY: set_check zero-match self-test ──────────────────────────
+# A files entry whose extract_regex matches NOTHING must still produce a valid
+# empty capture object. No standing green fixture witnesses that branch: real
+# fixtures always capture something, so a regression in the capture plumbing
+# (an interpreter-fallback misfire that appends a second JSON document and
+# makes the downstream --argjson reject) aborts the whole run instead of
+# failing one check. Assertion 1 is the regression witness; because the
+# regression ABORTS rather than returns false, test_set_check is called in a
+# SUBSHELL and its verdict read back over stdout -- an abort kills only the
+# subshell, empty output means FAIL, and the run continues to a summary.
+# Subshell isolation also keeps the control assertion's findings out of the
+# real report. Assertion 2 is the non-vacuity control: a deliberately wrong
+# occurrence count must fail, proving assertion 1 asserts something.
+# INVARIANT: the capture must NOT be written as `out="$( ... )" || out=''` --
+# bash disables errexit inside a command substitution that is part of an
+# AND-OR list, so the regression would be swallowed INSIDE the subshell and
+# the canary would report a false PASS. The parent therefore drops errexit
+# around the capture and the subshell re-arms it with its own `set -e`.
+SET_CHECK_ZERO_CANARY_REL='tests/policy/fixtures/set-check-zero-match-canary.md'
+set_check_zero_canary_target="$(resolve_repo_path "$SET_CHECK_ZERO_CANARY_REL")"
+set_check_zero_canary_ok=true
+if [[ ! -f "$set_check_zero_canary_target" ]]; then
+    set_check_zero_canary_ok=false
+    add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
+        'set_check zero-match canary target missing -- the zero-match capture self-test cannot run'
+else
+    set_check_zero_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
+        extract_regex: "SETCHECK-ZERO-MATCH-CANARY ([0-9]+):",
+        expected_set: ["1", "2"],
+        expected_counts: {"1": 0, "2": 0},
+        files: [{path: $path, mode: "subset"}]
+    }')"
+    set_check_zero_result=''
+    set +e
+    set_check_zero_result="$(
+        set -e
+        TEST_SET_CHECK_RESULT=''
+        test_set_check 'set-check-zero-match-canary' "$set_check_zero_spec" 1>&2
+        echo "$TEST_SET_CHECK_RESULT"
+    )"
+    set -e
+    if [[ "$set_check_zero_result" != 'true' ]]; then
+        set_check_zero_canary_ok=false
+        add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
+            "set_check over a zero-match file did not return a clean pass (empty result = the call aborted the run; the grep fallback appended a second '{}' to a pipeline that already printed one -- see test_set_check in tools/policy_check.sh)"
+    fi
+
+    set_check_control_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
+        extract_regex: "SETCHECK-PRESENT-CANARY ([0-9]+):",
+        expected_set: ["1", "2"],
+        expected_counts: {"1": 2, "2": 1},
+        files: [{path: $path, mode: "equal"}]
+    }')"
+    set_check_control_result=''
+    set +e
+    set_check_control_result="$(
+        set -e
+        TEST_SET_CHECK_RESULT=''
+        test_set_check 'set-check-zero-match-canary-control' "$set_check_control_spec" > /dev/null 2>&1
+        echo "$TEST_SET_CHECK_RESULT"
+    )"
+    set -e
+    if [[ "$set_check_control_result" != 'false' ]]; then
+        set_check_zero_canary_ok=false
+        add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
+            'set_check control did not fail -- capture/count assertion is vacuous'
+    fi
+fi
+if [[ "$set_check_zero_canary_ok" == true ]]; then
+    echo '[PASS] SAFETY-CANARY: set_check returns a clean pass over a zero-match file'
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    echo '[FAIL] SAFETY-CANARY: set_check zero-match self-test'
     CHECKS_FAILED=$((CHECKS_FAILED + 1))
 fi
 
