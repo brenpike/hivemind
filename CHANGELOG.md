@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [4.0.1] - 2026-09-24
+
+### Fixed
+
+- `cerebrate` no longer carries the `Skill` tool; its instructions already forbid invoking skills, so the grant was unused.
+- `brood-status` no longer names the retired `.hivemind/brood/manifest.json` singleton path.
+- `detect-remediation-signals` Do-Not list: the verdict-block presence-test item no longer reads as a double negative.
+- `governance/security-policy.md`: the inputs-file path invariant is stated in present tense, and the Trust-Boundary Discipline cross-reference points the right direction (above).
+- `adaptation-cycle` output schema no longer pins a stale Codex version.
+- `CLAUDE.md`: repo layout (agent list, `_shared/` contents), roster description, and the per-brood manifest path corrected.
+
 ## [4.0.0] - 2026-09-23
 
 ### Added
