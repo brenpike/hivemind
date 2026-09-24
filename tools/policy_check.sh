@@ -1544,43 +1544,73 @@ mark_time 'CHECK14'
 #   * no preceding word character or `/`  -> a cross-repo citation such as
 #     `cli/cli#12258` names its repo and stays legal, while a bare `#12258`
 #     is caught.
-#   * `{1,5}` digits AND no trailing alphanumeric -> hex colors `#123456` and
-#     `#1a2b3c` can never match.
+#   * no trailing alphanumeric           -> a letter-bearing hex colour such as
+#     `#1a2b3c` can never match. The digit run itself is UNBOUNDED, so a tracker
+#     id of any length is in reach; the cost is that a pure-digit colour literal
+#     (`#123456`) is flagged too. That direction is deliberate: a false positive
+#     here is loud and allowlistable, a false negative is silent forever.
 #   * anchors: a `(#section)` fragment starts with a letter, and the `](#...)`
 #     strip below additionally covers digit-leading slugs.
 #   * the backtick strip exempts inline-code placeholders such as the literal
 #     issue-number placeholder in plugin/skills/prd-to-issues/SKILL.md.
 #
-# Discovery FAILS CLOSED: zero discovered prose files is an ERROR, not a pass,
-# so a moved or renamed payload tree cannot silently disarm this check.
+# Discovery FAILS CLOSED PER ARM: each of the two discovery arms (`plugin/**/*.md`
+# and `plugin/workflows/*.json`) carries its OWN zero-file assertion. An aggregate
+# count cannot carry this guarantee -- a missing, renamed, or unreadable workflows
+# tree yields zero JSON files while the markdown arm keeps the aggregate nonzero,
+# so half the stated scope would vanish with the check still green.
+#
+# DETECTION CANARY: the safety fixture for this guard pins presence only (the
+# section banner and `add_finding 'CHECK15'`), so a narrowed pattern or a dropped
+# exemption leaves it green. The canary below asserts the DETECTION semantics
+# directly, one case per pattern clause above, in both directions.
 #
 # RESIDUAL, stated plainly: a fenced example that legitimately needs a literal
 # `#123` must move into inline code or be allowlisted like any other finding.
 echo ''
 echo '=== CHECK 15: No tracker references in plugin runtime prose ==='
 
-CHECK15_TRACKER_PATTERN='(^|[^A-Za-z0-9_/])#[0-9]{1,5}([^0-9A-Za-z_]|$)'
+CHECK15_TRACKER_PATTERN='(^|[^A-Za-z0-9_/])#[0-9]+([^0-9A-Za-z_]|$)'
 
 check15_found=false
 check15_file_count=0
+
+# tracker_ref_token TEXTLINE
+# Echoes the first bare tracker reference in TEXTLINE, or nothing when the line
+# carries none. PURE -- no findings, no globals, always exit 0 -- so the
+# detection canary below can assert the guard's semantics directly rather than
+# merely asserting that the guard exists.
+tracker_ref_token() {
+    local textline="$1" residual
+    # Cheap gate: the overwhelming majority of prose lines carry no `#` at all,
+    # so the sed/grep pipeline below is only paid for candidates.
+    case "$textline" in
+        *'#'*) ;;
+        *) return 0 ;;
+    esac
+    residual="$(printf '%s' "$textline" | sed -E 's/`[^`]*`//g; s/\]\(#[^)]*\)//g')"
+    # `|| true` is load-bearing under `set -euo pipefail`: `head -n1` can close
+    # the pipe before `grep` finishes, and the resulting SIGPIPE status would
+    # otherwise abort the whole run on a line that merely has no match.
+    printf '%s' "$residual" | grep -oE "$CHECK15_TRACKER_PATTERN" | head -n1 || true
+}
 
 # scan_file_for_tracker_refs FILE
 # Emits a CHECK15 finding per prose line carrying a bare tracker reference.
 scan_file_for_tracker_refs() {
     local prose_file="$1"
-    local line_num textline residual token
+    local line_num textline token
     while IFS=$'\t' read -r line_num textline; do
-        # Cheap gate: the overwhelming majority of prose lines carry no `#` at
-        # all, so the sed/grep pipeline below is only paid for candidates.
+        # Same cheap gate as tracker_ref_token, hoisted so a line with no `#`
+        # never pays the command-substitution fork.
         case "$textline" in
             *'#'*) ;;
             *) continue ;;
         esac
-        residual="$(printf '%s' "$textline" | sed -E 's/`[^`]*`//g; s/\]\(#[^)]*\)//g')"
-        if ! printf '%s' "$residual" | grep -qE "$CHECK15_TRACKER_PATTERN"; then
+        token="$(tracker_ref_token "$textline")"
+        if [[ -z "$token" ]]; then
             continue
         fi
-        token="$(printf '%s' "$residual" | grep -oE "$CHECK15_TRACKER_PATTERN" | head -n1)"
         check15_found=true
         add_finding 'CHECK15' "$prose_file" "$line_num" \
             "tracker reference '${token}' in plugin runtime prose -- cite a durable anchor (ADR, named invariant, or a present-tense description of the rule), never an issue or PR number"
@@ -1593,19 +1623,73 @@ scan_file_for_tracker_refs() {
     ' "$prose_file")
 }
 
+check15_md_count=0
 while IFS= read -r -d '' prose_file; do
-    check15_file_count=$((check15_file_count + 1))
+    check15_md_count=$((check15_md_count + 1))
     scan_file_for_tracker_refs "$prose_file"
-done < <(
-    find "$PLUGIN_ROOT" -name '*.md' -type f -print0
-    find "$PLUGIN_ROOT/workflows" -maxdepth 1 -name '*.json' -type f -print0
-)
+done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0 2>/dev/null)
 
-if [[ "$check15_file_count" -eq 0 ]]; then
+check15_json_count=0
+while IFS= read -r -d '' prose_file; do
+    check15_json_count=$((check15_json_count + 1))
+    scan_file_for_tracker_refs "$prose_file"
+done < <(find "$PLUGIN_ROOT/workflows" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null)
+
+check15_file_count=$((check15_md_count + check15_json_count))
+
+# Per-arm fail-closed. Each arm's tree is non-empty by construction, so a zero
+# count means that arm was moved, renamed, or is unreadable -- and a per-arm
+# assertion is the only shape that catches it: an aggregate count stays nonzero
+# while one arm silently contributes nothing.
+if [[ "$check15_md_count" -eq 0 ]]; then
     check15_found=true
     add_finding 'CHECK15' "$PLUGIN_ROOT" 0 \
-        "Tracker-reference discovery found ZERO plugin runtime prose files -- no plugin/**/*.md and no plugin/workflows/*.json were discovered, which disarms this check; restore the payload tree or retire the check deliberately"
+        "Tracker-reference discovery found ZERO plugin/**/*.md runtime prose files, which disarms half this check; restore the payload tree or retire the check deliberately"
 fi
+
+if [[ "$check15_json_count" -eq 0 ]]; then
+    check15_found=true
+    add_finding 'CHECK15' "$PLUGIN_ROOT/workflows" 0 \
+        "Tracker-reference discovery found ZERO plugin/workflows/*.json runtime definitions, which disarms half this check; restore the workflow-definition tree or retire the check deliberately"
+fi
+
+# ── CHECK 15 DETECTION CANARY ──────────────────────────────────────────────
+# One case per documented pattern clause, in BOTH directions. A narrowed
+# pattern, a dropped strip, or a lost exemption turns this run red where the
+# presence-pinning safety fixture would stay green.
+check15_expect_hit() {
+    if [[ -z "$(tracker_ref_token "$1")" ]]; then
+        check15_found=true
+        add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
+            "detection canary: no tracker reference detected in \"$1\" -- CHECK15_TRACKER_PATTERN has been narrowed and the guard no longer catches the class it claims to ban"
+    fi
+}
+
+check15_expect_miss() {
+    local hit
+    hit="$(tracker_ref_token "$1")"
+    if [[ -n "$hit" ]]; then
+        check15_found=true
+        add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
+            "detection canary: exempt construct \"$1\" was flagged as tracker reference '${hit}' -- an exemption clause has been dropped and the guard now fires on legal prose"
+    fi
+}
+
+check15_expect_hit 'see #123 for the rationale'
+check15_expect_hit 'tracked as #7.'
+check15_expect_hit '(#42) covers the remainder'
+check15_expect_hit '#5 is the earliest'
+check15_expect_hit 'superseded by #123456'
+check15_expect_hit 'superseded by #1000000'
+
+check15_expect_miss '# Heading'
+check15_expect_miss '## Subheading'
+check15_expect_miss '#!/usr/bin/env bash'
+check15_expect_miss 'cross-repo citation cli/cli#12258 names its repo'
+check15_expect_miss 'see [the anchor](#section-2) above'
+check15_expect_miss 'the literal placeholder `#123` inside inline code'
+check15_expect_miss 'the colour #1a2b3c is letter-bearing'
+check15_expect_miss 'no hash here at all'
 
 if [[ "$check15_found" == false ]]; then
     echo "[PASS] Check 15: No tracker references in $check15_file_count plugin runtime prose files"
