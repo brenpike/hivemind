@@ -158,7 +158,12 @@ The caller resolves and passes these; the skill does not resolve them.
    staging path under `.hivemind/` (e.g. `.hivemind/spawn-inputs.<rand>.json`).
    Use the Write tool's `file_path` parameter for that unique path; set `content`
    to the JSON object from step 1. Write performs no shell parsing of the values,
-   so untrusted description text is inert. Do NOT use a fixed singleton path —
+   and `spawn-brood.sh` reads each field with `jq` into a shell variable, so no
+   field is interpolated into shell or jq program source. That is a transport
+   property only: the description is carried on into the child's prompt as
+   `task.description`, and the controls that bound that text are the compensating
+   controls in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Brood Spawn
+   Bypass-Mode Mitigation), not this write. Do NOT use a fixed singleton path —
    concurrent spawns must not clobber each other's staging file.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →

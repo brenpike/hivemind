@@ -166,8 +166,10 @@ authorizes an agent overwrite, never clobbering a malformed file.
 Once every tri-state is resolved, author ONE inputs file (via the Write tool) at the
 PER-INVOCATION-UNIQUE gitignored path `.hivemind/seed-inputs-<token>.json` carrying the
 RESOLVED values and the detection facts, and pass that path to the `apply` phase. Every value
-is inert data — the engine reads each field with `jq` into a shell variable and never
-interpolates it into shell or jq program source. Shape (authoritative: the entrypoint header):
+crosses the transport as data only — the engine reads each field with `jq` into a shell
+variable and never interpolates it into shell or jq program source. What the engine does with
+a field after that read is the field's own contract. Shape (authoritative: the entrypoint
+header):
 
 ```json
 {
@@ -210,8 +212,10 @@ detection) is reported `not-checked`.
    invocation-unique `<token>` for the filename (a UTC timestamp plus a random component, such
    as `20260601T014132Z-a1b2c3`) so two concurrent same-checkout sessions author DISTINCT inputs
    files and cannot clobber each other's payload between the Write and the script exec.
-   `.hivemind/` is gitignored. Write performs no shell parsing, so the values are inert. A
-   FIRST-EVER install still prompts once for this write, because the permission allow rule
+   `.hivemind/` is gitignored. Write performs no shell parsing, and the engine reads each
+   field with `jq` into a shell variable, so no value is interpolated into shell or jq program
+   source. A FIRST-EVER install still prompts once for this write, because the permission
+   allow rule
    covering `.hivemind/seed-inputs-*.json` is itself seeded by this very skill; that is an
    accepted bootstrap ordering, not a defect — the rule lands for repair re-runs and every
    later seeded project.

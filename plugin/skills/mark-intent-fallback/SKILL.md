@@ -51,8 +51,9 @@ The caller resolves and passes these; the skill does not invent them.
 
 The script owns deterministic read -> validate -> mutate -> atomic-write; the navigator
 authors a single JSON inputs file and passes its path as the one positional argument. Every
-value is inert data — the script reads each field with `jq` into a shell variable and never
-interpolates it into shell source or the jq program source. Shape:
+value crosses the transport as data only — the script reads each field with `jq` into a shell
+variable and never interpolates it into shell source or the jq program source. What the script
+does with a field after that read is the field's own contract. Shape:
 
 ```json
 {
@@ -152,8 +153,9 @@ ledger is byte-unchanged.
    gitignored. Do NOT pass the inputs via stdin/heredoc: a heredoc reintroduces the very
    delimiter-injection class the inert Write-tool-file pattern exists to avoid (ADR-0017).
    Cleanup is not required: this is transient gitignored state and `.hivemind/` is ephemeral.
-   Write performs no shell parsing of the values, so untrusted `state` / `summary` / `outputs`
-   text is inert.
+   Write performs no shell parsing of the values, and the engine reads each field with `jq`
+   into a shell variable, so `state` / `summary` / `outputs` text is never interpolated into
+   shell or jq program source.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
    Transport Degradation Is a Hard Stop).

@@ -65,9 +65,10 @@ child/resume run that already has the steps in hand; absent the field it default
 ## Inputs JSON
 
 The script owns deterministic create-and-write; the navigator authors a single JSON
-inputs file and passes its path as the one positional argument. Every value is inert
-data — the script reads each field with `jq` into a shell variable and never
-interpolates it into shell source or the jq program source. Shape:
+inputs file and passes its path as the one positional argument. Every value crosses the
+transport as data only — the script reads each field with `jq` into a shell variable and
+never interpolates it into shell source or the jq program source. What the script does with
+a field after that read is the field's own contract. Shape:
 
 ```json
 {
@@ -129,8 +130,9 @@ canonical value); else a safe `suggested_run_id` verbatim; else derived
    existing-ledger check. `.hivemind/` is gitignored. Do NOT pass the inputs via stdin/heredoc:
    a heredoc reintroduces the very delimiter-injection class the inert Write-tool-file pattern
    exists to avoid (ADR-0017). Cleanup is not required: this is transient gitignored state and
-   `.hivemind/` is ephemeral. Write performs no shell parsing of the values, so untrusted
-   `user_request` / `normalized` / `plan_steps` text is inert.
+   `.hivemind/` is ephemeral. Write performs no shell parsing of the values, and the engine
+   reads each field with `jq` into a shell variable, so `user_request` / `normalized` /
+   `plan_steps` text is never interpolated into shell or jq program source.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
    Transport Degradation Is a Hard Stop).
