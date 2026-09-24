@@ -71,8 +71,8 @@ BARE token (`sed -n 's/^BASELINE=//p' | head -1`). A `SNAPSHOT_ERROR` line or
 non-zero exit → RETRY ONCE; a second failure is terminal `blocked` (same posture
 as `PREFLIGHT_ERROR`). NEVER arm the Monitor with an empty or absent seed — the
 poll rejects it as `POLL_ERROR` regardless, so failing here is the honest path.
-Capturing BEFORE cycle 0 IS the fix for the #324 blind window: a seed taken after
-cycle 0 re-opens it.
+Capture BEFORE cycle 0: a seed taken after cycle 0 opens a blind window, in
+which feedback that arrived during cycle 0 is never seen by the watch.
 
 **3. Cycle 0.** Dispatch `hivemind:github-reviewer` fix mode (see Dispatch contract)
 over pre-existing PR feedback before arming the Monitor. NEVER prefiltered. Handle

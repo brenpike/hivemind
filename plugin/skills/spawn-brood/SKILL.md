@@ -72,7 +72,7 @@ After:
       non-failed observable rendered by `hivemind:brood-status` as such;
       only `failed` is the error state in brood-status derivation. Verification
       reads the child run-ledger `state.current` as ground truth — capture-pane
-      is not used (architectural direction established in #213/#248). Whether a
+      is not used. Whether a
       child actually completed turn-start is also observed independently by
       `hivemind:brood-status` from run-ledger ground truth (`state.current`
       present => `running`, absent => `starting`), not only by spawn-brood.
