@@ -88,15 +88,13 @@ Absent vs. failing: a `No such tool available` return is absence — skip cleanl
 
 `mcp__plugin_claude-mem_mcp-search__smart_outline` is available for structural lookups. All these tools are read-only. Look for prior plans, user decisions/constraints, known risks, failed approaches. If no relevant results, continue without memory.
 
-The `claude-mem:mem-search` skill is optional/legacy documentation only — the MCP tools above are the memory-access path; do not depend on the skill to read memory.
-
 ## Research Rules
 
 - Use local repo inspection first.
 - Prefer the already-granted Read / Glob / Grep tools and the concrete read-only git tools listed in frontmatter over Bash. Bash is read-only inspection only; follow Bash Command Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Bash Command Discipline). Follow Shell Output Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Shell Output Discipline) — cerebrate emits none of the exempt routing fields anyway.
 - Use WebFetch/WebSearch only when the task references a specific external library/framework/API by name AND the answer is absent from the repo.
-- File map first (Glob/ls), targeted reads second, grep before read, stop when sufficient.
-- Budget: read at most 3N files for a task touching N files (minimum 3). Exceed budget: state unknowns in `Open questions:`.
+- Read as far as the plan needs: every step's `files` list must name every path that step will touch, and you must be confident those scopes are complete. Scope precision is what makes the overlord's parallel waves safe, so under-reading is the expensive failure — not over-reading. Keep the cost down by starting from a file map (Glob/ls) and grepping before reading a file whole.
+- Any path you could not resolve goes to `Open questions:` — never into a step's `files` list as a guess.
 - Retry tool failures once if transient per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Transient Failure). Otherwise return blocked.
 
 ## Versioning

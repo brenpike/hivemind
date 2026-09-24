@@ -64,8 +64,6 @@ If a `CONTEXT-MAP.md` exists at the root, the repo has multiple contexts. The ma
 │       └── docs/adr/
 ```
 
-If `CONTEXT-MAP.md` exists at the repo root, the repo has multiple contexts. Read the map to find where each lives and how they relate.
-
 Create files lazily — only when there is something to write. When the first term is resolved:
 
 - **If `CONTEXT-MAP.md` does NOT exist** — create `CONTEXT.md` at the repo root.

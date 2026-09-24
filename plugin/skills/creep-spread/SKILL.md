@@ -125,12 +125,7 @@ None. Operates on the current project root resolved via `git rev-parse --show-to
 
 ## Term Quality Rules
 
-Per `${CLAUDE_PLUGIN_ROOT}/skills/plan-interrogation/references/CONTEXT-FORMAT.md` (Rules):
-- Be opinionated: pick one term, list others as aliases to avoid
-- Keep definitions tight: one sentence, define what it IS not what it does
-- Only include terms specific to this project's context
-- Group under subheadings when natural clusters emerge
-- Write a realistic example dialogue using the extracted terms
+Apply the Rules defined in `${CLAUDE_PLUGIN_ROOT}/skills/plan-interrogation/references/CONTEXT-FORMAT.md` (Rules) — that file is the single source and they are not restated here.
 
 ## Do Not
 

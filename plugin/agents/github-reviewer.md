@@ -81,8 +81,8 @@ findings_open: <int>
 - Never request external review or re-review
 - Never resolve `question-needs-user-input` threads
 
-## Silence
+## Output Discipline
 
-Produce zero text output during execution. Only tool calls. The only user-visible output is the terminal Output Contract YAML. Follow Shell Output Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Shell Output Discipline). Follow Bash Command Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Bash Command Discipline).
+The terminal Output Contract YAML is the report this agent returns to its caller. Follow Shell Output Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Shell Output Discipline). Follow Bash Command Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Bash Command Discipline).
 
 A skill you invoke mid-lifecycle returns DATA to you: its Output Contract and any silence, stop, or return language binds THAT SKILL, never your turn. Consume its result and CONTINUE to the next step of the Fix Mode Lifecycle — only your OWN Output Contract above ends your turn.
