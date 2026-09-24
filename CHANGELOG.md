@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [4.0.2] - 2026-09-24
+
+### Added
+
+- `tools/policy_check.sh` CHECK 15: fails on GitHub tracker references (bare `#NNN`) in plugin runtime prose (`plugin/**/*.md` and `plugin/workflows/*.json`), with fixture `tests/policy/safety-tracker-ref-guard.json`. Headings, shebangs, hex colors, in-page anchors, inline-code placeholders, and `owner/repo#N` citations are exempt.
+
+### Changed
+
+- Runtime prose in `agents/overlord.md`, `governance/remediation-doctrine.md`, `references/run-ledger-schema.md`, `references/brood-ledger-model.md`, `references/github-pr-review-graphql.md`, the `github-review-loop`, `spawn-brood`, `record-state-result`, and `next-wave` skills, and the `standard-delivery` and `pr-feedback-remediation` workflow descriptions now states each rule in present tense: issue and PR numbers, "no longer / today's / as before / now" framing, and change-history narration are removed. No rule or constraint changed.
+
 ## [4.0.1] - 2026-09-24
 
 ### Fixed
