@@ -37,7 +37,7 @@ When there are no findings, the render emits the literal line `No material findi
   - `file` / `line_start` / `line_end`: from the location group. Split on the LAST `:` inside the parens so Windows-drive paths such as `C:\x\f.md:10-12` parse correctly: text before the last `:` is the `file`, text after is the line spec. If the line spec matches `^(\d+)(?:-(\d+))?$`, set `line_start` to the first number and `line_end` to the second when present, else equal to `line_start`. If the location has no line suffix (no `:<digits>` at the end), set `file` to the whole location group and `line_start` / `line_end` to `null`.
   - `body`: indented continuation lines following the entry header, up to (but not including) the next `- [<severity>]` finding line, the `Recommendation:` line, or a `Next steps:` / `Reasoning:` section header.
   - `recommendation`: the text of the `  Recommendation: <text>` indented line when present, otherwise empty string. This line terminates the body; it must not be swallowed into body, and it must not consume a following `- [<severity>]` finding line.
-  - `confidence`: not present in rendered stdout (v1.0.4 has no JSON stdout mode); set to `null` in normalized output.
+  - `confidence`: not present in rendered stdout; set to `null` in normalized output.
 - **next_steps:** empty array (the `Next steps:` section, if present, is treated as non-finding trailing text and not extracted into structured findings).
 
 **Empty review (clean path):** `Verdict: approve` followed by `No material findings.` is a clean result — `findings_count` is `0` and verdict is `approve`. It is NOT a block.
