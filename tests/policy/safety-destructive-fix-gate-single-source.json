@@ -1,0 +1,68 @@
+{
+  "rule": "Destructive Fix gate categories are enumerated once, canonically, at their broadest",
+  "description": "The Destructive Fix Confirmation Gate categories are machine-anchored marker lines (`DESTRUCTIVE-CAT <n>:`) in security-policy.md, which is their ONE canonical home. This fixture owns two axes. (1) MEMBERSHIP: set_check asserts the marker set in security-policy.md is exactly 1 through 10 with each number appearing exactly once, so a deleted category, an unreviewed added category, and a duplicated category all fail structurally rather than waiting for a reviewer to notice a missing row. Membership is the axis where silent narrowing of the gate actually lives; equal mode plus expected_counts is the only primitive that catches an ADDITION, which a presence pin cannot. The capture group is a negated-delimiter class anchored on the marker, not a positive charset, so no authored marker can be invisible to the check: a category numbered with any non-delimiter token surfaces as an extra instead of being silently skipped. The `<` exclusion keeps the fixed-form template sentence (`DESTRUCTIVE-CAT <n>: <what the fix would do>`) out of the captured set; every other marker occurrence in the file is captured and must reconcile. (2) BREADTH: the source pin carries the paragraph that makes each category fire at its broadest. Each clause in it is claim-carrying: 'Each parenthetical is illustrative, never exhaustive' is what stops the parentheses from being read as a closed list; 'No marking, label, annotation, or naming convention is a precondition for a category to fire' is what stops a marking requirement from being reintroduced as a gate precondition; 'a file is security-relevant because of what it does, not because something says so' supplies the positive replacement test; and 'When a proposed fix plausibly falls inside a category, that category fires and the gate applies' is the obligation the condition triggers, so narrowing 'plausibly' or dropping 'the gate applies' stops the pattern matching. Pinning the condition alone would leave the obligation rewritable and vice versa, so the pin spans both. The consumers entries are pointer pins only: each asserts that the citing document still names the canonical section, never that it restates the remedy prose, so honest rewording of surrounding text does not turn the suite red. overlord.md and local-reviewer.md cite the gate through safety-rails.md's retained pointer section rather than security-policy.md directly; that is resolving indirection, not a dangling reference, because safety-rails.md's own pointer to the canonical section is itself pinned here. RESIDUALS, stated plainly: an unmarked verbatim re-copy of the ten rows into any document is invisible to this fixture, because body-prose ABSENCE is not assertable by any fixture in this directory (`absent` is scoped to YAML frontmatter); set_check `files` is a literal list with no glob expansion, so a MARKED copy in a file this fixture does not name is also invisible; and every pin here claims word-sequence presence in the named files, never meaning, so a rewrite-around that leaves the pinned bytes intact while inverting their effect passes.",
+  "set_check": {
+    "extract_regex": "DESTRUCTIVE-CAT ([^:<[:space:]]+):",
+    "expected_set": [
+      "1",
+      "2",
+      "3",
+      "4",
+      "5",
+      "6",
+      "7",
+      "8",
+      "9",
+      "10"
+    ],
+    "expected_counts": {
+      "1": 1,
+      "2": 1,
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 1,
+      "10": 1
+    },
+    "files": [
+      { "path": "plugin/governance/security-policy.md", "mode": "equal" }
+    ]
+  },
+  "source": {
+    "file": "plugin/governance/security-policy.md",
+    "pattern": "Each parenthetical is illustrative, never exhaustive. No marking, label, annotation, or naming convention is a precondition for a category to fire — a file is security-relevant because of what it does, not because something says so. When a proposed fix plausibly falls inside a category, that category fires and the gate applies."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/safety-rails.md",
+      "pattern": "defined canonically in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate)"
+    },
+    {
+      "file": "plugin/governance/safety-rails.md",
+      "pattern": "which category (1-10) fired"
+    },
+    {
+      "file": "plugin/governance/security-policy.md",
+      "pattern": "which category (1-10) triggered the gate"
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "Destructive Fix category 1-10 per `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Destructive Fix Gate)"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Destructive Fix Gate) before honoring any destructive remediation"
+    },
+    {
+      "file": "plugin/agents/drone.md",
+      "pattern": "Apply the Destructive Fix Confirmation Gate per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate)"
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "Apply the destructive fix gate per `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` before any fix matching a gate category"
+    }
+  ]
+}

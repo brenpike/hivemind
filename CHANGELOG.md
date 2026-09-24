@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Destructive Fix Gate categories are single-sourced. `governance/security-policy.md` (Destructive Fix Confirmation Gate) holds the one canonical list — each category a `DESTRUCTIVE-CAT <n>:` marker line, read at its broadest — and `governance/safety-rails.md` keeps its `## Destructive Fix Gate` section as a pointer carrying its own trigger framing. No category is narrower than either former wording: deleting a security-relevant file needs no "marked as" precondition, tests are covered rather than only test execution, cryptographic keys as well as key sizes, and credentials as well as credential values. The breadth the earlier alignment added is kept: salt rounds and TLS settings, `Cargo.toml` and `go.mod` dependency additions, `.circleci/` workflow files, and `*.p12` / `credentials.*` / `secrets.*` files. `agents/drone.md` now cites the canonical section by name.
 - `enable-brood-remote` skill description gives one trigger example instead of four near-synonyms.
 
+### Fixed
+
+- `tools/policy_check.sh` `set_check`: a fixture file with zero `extract_regex` matches no longer aborts the whole run. The grep fallback now runs only when perl is absent, and a failed capture pipeline yields an empty capture instead of appending a second `{}` that `jq --argjson` then rejected. A SAFETY-CANARY over `tests/policy/fixtures/set-check-zero-match-canary.md` witnesses the zero-match path.
+
 ## [4.0.2] - 2026-09-24
 
 ### Added
