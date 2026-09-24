@@ -40,9 +40,9 @@ Human approval is required before any fix that would:
 4. Remove or relax input sanitization or output encoding
 5. Expand permissions, trust boundaries, or capability grants
 6. Alter cryptographic configuration (algorithms, key sizes, salt rounds, TLS settings)
-7. Add dependencies to a manifest (`package.json`, `requirements.txt`, `Cargo.toml`, `go.mod`, etc.)
+7. Add new dependencies to a dependency manifest (`package.json`, `requirements.txt`, `Cargo.toml`, `go.mod`, etc.)
 8. Modify CI or workflow files (`.github/workflows/`, `.circleci/`, etc.)
-9. Read/write/delete secrets or env files (`.env`, `*.key`, `*.pem`, `*.p12`, `credentials.*`, `secrets.*`)
+9. Read, write, or delete secrets/environment files (`.env`, `*.key`, `*.pem`, `*.p12`, `credentials.*`, `secrets.*`)
 10. Expose, log, or transmit credential values, tokens, API keys, or private keys
 
 When triggered: return Blocked with the proposed change summary and which category (1-10) fired. Do not commit. Wait for explicit user approval.
