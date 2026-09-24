@@ -15,8 +15,8 @@ Resolvable pull request review threads are GraphQL objects. Do not try to resolv
 - [Detection Filtering](#detection-filtering) — filters to apply before yielding any result as actionable feedback
 - [Reply to Review Thread](#reply-to-review-thread) — mutation to post a reply to an existing review thread
 - [Resolve Review Thread](#resolve-review-thread) — mutation to mark a review thread as resolved
-- [Surface-to-Delivery Contract](#surface-to-delivery-contract) — canonical mapping of feedback surface to mutation(s) used (issue #218)
-- [Reaction Marker](#reaction-marker) — self-authored `EYES` reaction that marks a fixed non-thread surface handled (issue #265)
+- [Surface-to-Delivery Contract](#surface-to-delivery-contract) — canonical mapping of feedback surface to mutation(s) used
+- [Reaction Marker](#reaction-marker) — self-authored `EYES` reaction that marks a fixed non-thread surface handled
 - [Author Filtering](#author-filtering) — rules for scoping feedback to specific reviewer identities
 - [Codex Approval Detection](#codex-approval-detection) — paginated 👍 reaction lookup that signals Codex approval
 
@@ -28,7 +28,7 @@ Sanctioned exception — canonical fix-history classification: the github-review
 
 ## Pagination Requirement
 
-Page all connections via `-F after="CURSOR"` using `endCursor` from `pageInfo`. Omit `-F after` on first page. Nested connections (e.g., thread comments) require per-item queries with the item's `id`. This requirement governs the reviewer's deep body-level fetch (reviews, review threads, thread comments, top-level comments) and the Codex approval reactions lookup — NOT the `github-review-loop` thin poll, which is deliberately coarse (scalar `totalCount`s only, no connection walking) per plan D5; citing this section to justify adding cursor walks to the poll is out of scope.
+Page all connections via `-F after="CURSOR"` using `endCursor` from `pageInfo`. Omit `-F after` on first page. Nested connections (e.g., thread comments) require per-item queries with the item's `id`. This requirement governs the reviewer's deep body-level fetch (reviews, review threads, thread comments, top-level comments) and the Codex approval reactions lookup — NOT the `github-review-loop` thin poll, which is exempt by design: it reads scalar `totalCount`s only and walks no connections.
 
 ## Fetch Reviews
 
@@ -228,11 +228,11 @@ Maps each feedback surface to the mutation(s) used to mark a fixed surface handl
 | Surface | Mutation(s) | Notes |
 |---------|-------------|-------|
 | `thread` | `addPullRequestReviewThreadReply` then (conditional) `resolveReviewThread` | Reply targets the thread node id (`PRRT_...`). Resolve fires only when the thread is unresolved after reply. Executed by `reply-resolve.sh`. |
-| `toplevel` | `addReaction` (`EYES`) on the IssueComment node | A self-authored `EYES` (👀) reaction is added to the reviewer's top-level IssueComment node as the handled marker. NOT reply-targeted, NOT thread-resolvable (top-level PR comments have no thread node). `reply-resolve.sh` is NOT invoked for this surface — its `toplevel` silent no-op is UNCHANGED; posting `addPullRequestReviewThreadReply` against a non-thread node was the #218 defect. |
+| `toplevel` | `addReaction` (`EYES`) on the IssueComment node | A self-authored `EYES` (👀) reaction is added to the reviewer's top-level IssueComment node as the handled marker. NOT reply-targeted, NOT thread-resolvable (top-level PR comments have no thread node). `reply-resolve.sh` is NOT invoked for this surface — it is a silent no-op for `toplevel`; posting `addPullRequestReviewThreadReply` against a non-thread node fails, because a top-level IssueComment has no review-thread node to target. |
 | `review` | `addReaction` (`EYES`) on the PullRequestReview node | Same as `toplevel`: a self-authored `EYES` (👀) reaction is added to the reviewer's PullRequestReview summary node as the handled marker. Review-summary nodes have no thread node, so they are NOT reply-targeted and NOT thread-resolvable. `reply-resolve.sh` is NOT invoked — its `review` silent no-op is UNCHANGED. |
 | unmapped / unknown | fail-closed | Any surface value not in the table above causes the script to exit with an error rather than fall through silently. |
 
-The former `Addresses: <url>` body line that was appended to replies is removed from the live path — thread replies carry only the fix summary, not a back-reference URL. The handled marker for non-thread surfaces is the `EYES` reaction described below; ZERO new PR comments are posted.
+Thread replies carry only the fix summary: no `Addresses: <url>` back-reference line is appended on the emit path. The handled marker for non-thread surfaces is the `EYES` reaction described below; ZERO new PR comments are posted.
 
 ## Reaction Marker
 
@@ -269,7 +269,7 @@ A surface is handled when its `reactionGroups` contains an entry with `content =
 
 The `EYES` marker here is OUR self-authored reaction on a per-COMMENT / per-REVIEW node. It is a DISJOINT subject from the 👀 reaction described in [Codex Approval Detection](#codex-approval-detection), which is Codex's reaction on the PR OBJECT meaning "still running". The two share an emoji but never the same subject:
 
-- **This marker (#265):** `EYES` reaction on an `IssueComment` / `PullRequestReview` node, authored by our viewer, detected via `reactionGroups { content viewerHasReacted }` on that node → surface handled.
+- **This marker:** `EYES` reaction on an `IssueComment` / `PullRequestReview` node, authored by our viewer, detected via `reactionGroups { content viewerHasReacted }` on that node → surface handled.
 - **Codex "still running" (existing):** `eyes` reaction on the PR object, authored by Codex, detected via the REST reactions endpoint → never approval.
 
 A reader must not conflate them: per-node viewer-scoped handled marker vs PR-object Codex-authored progress signal.

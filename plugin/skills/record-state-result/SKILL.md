@@ -57,8 +57,8 @@ cerebrate's YAML plan `steps` into a JSON array and includes `plan_steps` (and o
 `.plan.path`). When those keys are ABSENT (missing or null), `.plan.*` is left UNTOUCHED —
 never clobbered to `[]`.
 
-`init-run-ledger`'s `plan_steps` remains a writer ONLY for the child/resume SEED path
-(default `[]`); it is no longer the primary live writer (see that skill's §A Plan-Steps Seam).
+`init-run-ledger`'s `plan_steps` is a writer ONLY for the child/resume SEED path
+(default `[]`); the primary live writer is here (see that skill's §A Plan-Steps Seam).
 
 The `outputs` field here is the event's free-form `outputs` object — it is NOT a plan-steps
 writer; use `plan_steps` for that.

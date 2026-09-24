@@ -82,7 +82,7 @@
     },
     "implement_step": {
       "type": "agent",
-      "description": "Overlord dispatches the whole ready wave of remediation steps as parallel agents (mixed drone/changeling from the static allowed set) in one batch, awaits all, then aggregates results with blocked > needs_replan > complete precedence. A wave of one step degrades to today's serial behavior.",
+      "description": "Overlord dispatches the whole ready wave of remediation steps as parallel agents (mixed drone/changeling from the static allowed set) in one batch, awaits all, then aggregates results with blocked > needs_replan > complete precedence. A wave of one step runs serially.",
       "allowed_agents": ["hivemind:drone", "hivemind:changeling"],
       "transitions": {
         "complete": "checkpoint",

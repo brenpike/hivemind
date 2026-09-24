@@ -117,16 +117,16 @@ Threshold N for this axis:
 
 Distinction from the within-pass axis (do not conflate): the "just-touched / same-framing surface" qualifier in **Severity as Sensitivity Modifier** is a WITHIN-PASS modifier scoped to a single classification pass. THIS axis is ACROSS-ITERATION — it spans the loop's distinct iterations — and is additive to and distinct from the within-pass modifier. A surface can be quiet within every individual pass and still trip this axis by re-emitting across iterations.
 
-Multiple roots per surface: the recurrence counter PERSISTS across structural fixes. Closing root #1 with an accepted structural fix does NOT reset the counter. A surface that has already yielded one root is held to a LOWER threshold for the next — having needed a structural fix once is evidence the surface is structurally hot, so the next recurrence trips sooner.
+Multiple roots per surface: the recurrence counter PERSISTS across structural fixes. Closing the FIRST root with an accepted structural fix does NOT reset the counter. A surface that has already yielded one root is held to a LOWER threshold for the next — having needed a structural fix once is evidence the surface is structurally hot, so the next recurrence trips sooner.
 
 ## Bounded-Tail vs Recurring-Class Disambiguation
 
-The **Stop-and-Merge** section reserves "every push spawns only a fresh bounded tail, never a new defect class" as a merge precondition. That bounded-tail clause now applies ONLY to MATURE surfaces. The disambiguation:
+The **Stop-and-Merge** section reserves "every push spawns only a fresh bounded tail, never a new defect class" as a merge precondition. That bounded-tail clause applies ONLY to MATURE surfaces. The disambiguation:
 
 - **Young surface + recurring findings** (the surface was introduced or heavily modified in this PR/initiative): this is NOT a bounded tail. A young surface that keeps emitting findings is a design smell, so it escalates to a root-cause ZOOM-OUT (question the key/primitive per the **Closed-by-Construction Acceptance Test**), never to merge-advisory. This is the escalation path of **Cross-Iteration Same-Surface Recurrence**.
 - **Mature / legacy surface + bounded tail**: this remains a merge-advisory candidate per **Stop-and-Merge**. A genuine mature-surface bounded tail — a hardened legacy surface whose remaining findings are a converging tail with a structural home — must STILL reach `merge_advised`. The young-surface escalation rule does not gate it.
 
-Regression guard: do not let the young-surface escalation swallow the mature-surface merge path. The two are disjoint by Gate B of **Cross-Iteration Same-Surface Recurrence** — youth is the discriminator. A mature surface failing Gate B routes to merge-advisory exactly as before this section existed.
+Regression guard: do not let the young-surface escalation swallow the mature-surface merge path. The two are disjoint by Gate B of **Cross-Iteration Same-Surface Recurrence** — youth is the discriminator. A mature surface failing Gate B routes to merge-advisory.
 
 ## Post-Fix Young-Tail Reroute Synthesis
 

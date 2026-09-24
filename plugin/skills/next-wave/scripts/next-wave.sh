@@ -4,7 +4,7 @@
 #
 # Computes the READY SET and the next dispatchable WAVE of plan steps for the intra-run
 # parallel-wave implement loop. This is the engine that lets the overlord fan out
-# independent plan steps concurrently while preserving today's serial behavior when the
+# independent plan steps concurrently while running serially when the
 # plan graph forces it. It reads the run ledger and PRINTS a routing decision; it mutates
 # NOTHING (no ledger write, no temp file, no atomic rename) — a pure read -> derive -> emit
 # engine. It sits in the same committed-script engine-op family as record-state-result.sh /
