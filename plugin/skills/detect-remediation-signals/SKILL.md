@@ -198,7 +198,7 @@ merge_advisory:
 ## Do Not
 
 - return an `exit_reason` — return the verdict to the caller; the reviewer maps it.
-- never presence-test a verdict block — block presence is unconditional; read the inner fired field (per the Output Contract Consumer rule).
+- presence-test a verdict block — block presence is unconditional; read the inner fired field instead (per the Output Contract Consumer rule).
 - read or write `.hivemind` or any store — reason only over the supplied ledger structure.
 - apply a standalone severity trigger — severity only tunes the cluster threshold N.
 - weaken or drop any Mutation Decay or Creep Stagnation guard relocated here.

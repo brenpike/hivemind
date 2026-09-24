@@ -4,7 +4,7 @@ Guidance for Claude Code instances working **on this repo** (not consuming the p
 
 ## What this repo is
 
-Source for the `hivemind` Claude Code plugin + a single-plugin marketplace pointing at it. Plugin defines four agents (overlord, cerebrate, drone, changeling) and ten skills; governance docs are plugin **runtime data** loaded by agents, not just human reference.
+Source for the `hivemind` Claude Code plugin + a single-plugin marketplace pointing at it. The agent roster lives in `plugin/agents/` and the skill roster in `plugin/skills/` — read those directories for the current set rather than a count here; governance docs are plugin **runtime data** loaded by agents, not just human reference.
 
 ## Engineering principles
 
@@ -16,9 +16,9 @@ Project engineering principles governing how prose, scripts, and skills are fact
 .claude-plugin/marketplace.json   # marketplace manifest at repo root → source: ./plugin
 plugin/                           # plugin root (resolves to ${CLAUDE_PLUGIN_ROOT})
   .claude-plugin/plugin.json      # plugin manifest (name, version)
-  agents/{overlord,cerebrate,drone,changeling}.md
+  agents/{overlord,cerebrate,drone,changeling,local-reviewer,github-reviewer}.md
   skills/<skill-name>/SKILL.md
-  skills/_shared/                 # cross-skill shared docs; first use = architecture vocabulary (LANGUAGE.md) + deepening mechanics (DEEPENING.md), shared by improving-architecture and refactor-to-depth
+  skills/_shared/                 # cross-skill shared assets: reference docs (LANGUAGE.md, DEEPENING.md) plus shell libraries sourced by skill engine scripts
   governance/                     # *.md loaded by agents at runtime
 README.md
 CLAUDE.md
@@ -123,7 +123,7 @@ The post-merge decision report is opt-in via `HIVEMIND_ENABLE_DECISION_REPORT`, 
 The plugin supports parallel multi-overlord execution via spawn-brood and brood-status skills. Each brood session runs in its own git worktree as an independent Claude Code instance.
 
 - **Architecture decision:** `docs/adr/0007-fleet-children-unaware-coordinator-dashboard.md` — children have zero brood awareness; coordinator is a status dashboard
-- **Brood manifest:** `.hivemind/brood/manifest.json` (in main checkout; already gitignored under `.hivemind/`)
+- **Brood manifest:** `.hivemind/broods/<brood-id>/manifest.json` — one per brood, written by `spawn-brood.sh` and discovered by `brood-discover.sh` via the `.hivemind/broods/brood-*/manifest.json` glob anchored to the spawning checkout root; already gitignored under `.hivemind/`. Layout reference: `plugin/references/brood-ledger-model.md`.
 - **Worktree sessions:** `.claude/worktrees/` (gitignored)
 
 Children are standard overlord sessions receiving a task description. No brood-specific code paths exist in child sessions.

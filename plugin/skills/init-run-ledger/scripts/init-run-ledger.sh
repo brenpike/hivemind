@@ -52,11 +52,11 @@
 #       "parent": {
 #         "kind":      "none|brood",   // default none
 #         "run_id":    "<required when kind=brood> parent run id",
-#         "brood_id":  "<required when kind=brood> CANONICAL brood id — the manifest's
-#                       colon-bearing ISO-8601 timestamp. Persisted VERBATIM into
-#                       .parent.brood_id (so the child ledger reconciles with the
-#                       manifest's canonical brood_id). The run id/path is derived by
-#                       sanitizing it internally (colons->dashes).",
+#         "brood_id":  "<required when kind=brood> CANONICAL brood id — spawn-brood's
+#                       generated GUID brood-<uuidv4> (^brood-[0-9a-f-]+$, ADR-0021).
+#                       Persisted VERBATIM into .parent.brood_id (so the child ledger
+#                       reconciles with the manifest). Already filesystem-safe; the
+#                       internal colons->dashes pass is a defensive no-op on it.",
 #         "strain_id": "<required when kind=brood> strain id",
 #         "manifest":  "<required when kind=brood> manifest path"
 #       },
@@ -72,10 +72,10 @@
 #     }
 #
 # RUN-ID DERIVATION:
-#   - parent.kind=brood: child form <sanitized-brood-id>--<strain-id>. The brood id is the
-#     CANONICAL ISO-8601 form (colons allowed); it is persisted verbatim into .parent.brood_id
-#     and sanitized internally (colons->dashes, matching spawn-brood's brood_id_safe transform)
-#     ONLY to derive the filesystem-safe run id. strain id must match the safe charset.
+#   - parent.kind=brood: child form <brood-id>--<strain-id>. The brood id is spawn-brood's
+#     generated GUID brood-<uuidv4> (already filesystem-safe); it is persisted verbatim into
+#     .parent.brood_id and still run through the colons->dashes transform, which is a no-op on
+#     the GUID and is retained only for the retired timestamp form. strain id: safe charset.
 #   - else if suggested_run_id is safe (^[A-Za-z0-9._-]+$): use it verbatim.
 #   - else derived: <utc-timestamp>-<workflow-id> (timestamp colons mapped to dashes so
 #     the id is a safe directory name).
@@ -281,18 +281,19 @@ if [ "$parent_kind" = "brood" ]; then
   # reconciliation trail — so require both non-empty before creating the ledger.
   [ -n "$parent_run_id" ]    || blocker "parent.kind=brood requires parent.run_id"
   [ -n "$parent_manifest" ]  || blocker "parent.kind=brood requires parent.manifest"
-  # parent.brood_id is the CANONICAL brood id (the manifest's ISO-8601 timestamp, e.g.
-  # 2026-05-31T17:30:00Z). Accept the ISO form — [A-Za-z0-9._-] PLUS ':' (the ISO time
-  # separator) — while still rejecting genuinely unsafe bytes (path separators, control
-  # bytes, shell metacharacters). It is persisted VERBATIM into .parent.brood_id so the
-  # child ledger reconciles with the manifest's canonical brood_id; only the derived run id
-  # is sanitized below.
+  # parent.brood_id is spawn-brood's generated GUID brood-<uuidv4> (asserted
+  # ^brood-[0-9a-f-]+$ at generation, ADR-0021), carrying no colons. The charset gate below
+  # still ADMITS ':' — deliberate residual tolerance for the retired timestamp-shaped id,
+  # harmless because it keeps rejecting path separators, control bytes, and shell
+  # metacharacters. It is persisted VERBATIM into .parent.brood_id so the child ledger
+  # reconciles with the manifest's canonical brood_id.
   case "$parent_brood_id"  in *[!A-Za-z0-9._:-]*) blocker "parent.brood_id contains characters outside [A-Za-z0-9._:-]: $parent_brood_id" ;; esac
   case "$parent_strain_id" in *[!A-Za-z0-9._-]*) blocker "parent.strain_id contains characters outside [A-Za-z0-9._-]: $parent_strain_id" ;; esac
-  # Sanitize the canonical brood id (colons->dashes, same transform as spawn-brood's
-  # brood_id_safe) ONLY for the filesystem run-id component. parent_brood_id stays canonical
-  # for verbatim persistence below. Result equals the manifest's run.suggested_id form
-  # (<brood_id_safe>--<short>).
+  # The colons->dashes pass is ONLY for the filesystem run-id component and is a NO-OP on the
+  # GUID (spawn-brood's brood_id_safe is likewise an identity pass); it is retained as
+  # defensive tolerance for the retired timestamp form. parent_brood_id stays canonical for
+  # verbatim persistence below. Result equals the manifest's run.suggested_id form
+  # (<brood-id>--<short>).
   parent_brood_id_safe="$(printf '%s' "$parent_brood_id" | tr ':' '-')"
   run_id="${parent_brood_id_safe}--${parent_strain_id}"
 elif [ -n "$suggested_run_id" ] && printf '%s' "$suggested_run_id" | grep -Eq "$SAFE_ID_RE"; then
