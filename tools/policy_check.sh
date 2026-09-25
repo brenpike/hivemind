@@ -633,7 +633,21 @@ echo '=== CHECK 1: Forbidden hedge ==='
 
 check1_found=false
 
-while IFS= read -r -d '' md_file; do
+declare -a check1_md_files=()
+check1_discovery_rc=0
+discover_paths check1_md_files "$PLUGIN_ROOT" -- -name '*.md' || check1_discovery_rc=$?
+if [[ "$check1_discovery_rc" -ne 0 ]]; then
+    check1_found=true
+    flag_discovery_failure 'CHECK1' "$PLUGIN_ROOT" 'plugin Markdown files' "$check1_discovery_rc"
+fi
+for md_file in "${check1_md_files[@]}"; do
+    check1_gate_rc=0
+    discovery_gate_status "$md_file" files || check1_gate_rc=$?
+    if [[ "$check1_gate_rc" -ne 0 ]]; then
+        check1_found=true
+        flag_discovery_gate 'CHECK1' "$md_file" "$check1_gate_rc"
+        continue
+    fi
     # Candidate prefilter (#305): one grep per FILE on the BROADEST pattern.
     # Every finding-producing line must pass the ladder's \bambiguous\b gate
     # below, so non-matching lines can never add a finding; the
@@ -696,7 +710,7 @@ while IFS= read -r -d '' md_file; do
         add_finding 'CHECK1' "$md_file" "$line_num" \
             "Forbidden hedge: 'ambiguous' used as gate-level uncertainty"
     done <<< "$candidates"
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0)
+done
 
 if [[ "$check1_found" == false ]]; then
     echo '[PASS] Check 1: No forbidden hedge violations found'
@@ -751,17 +765,41 @@ echo '=== CHECK 3: Skill names exist ==='
 
 AGENT_NAMES=('cerebrate' 'overlord' 'drone' 'changeling' 'local-reviewer' 'github-reviewer')
 
+check3_found=false
+
 # Collect scan sources
 declare -a SCAN_FILES=()
-while IFS= read -r -d '' f; do
-    SCAN_FILES+=("$f")
-done < <(find "$PLUGIN_ROOT/agents" -maxdepth 1 -name '*.md' -type f -print0 2>/dev/null)
-while IFS= read -r -d '' f; do
-    SCAN_FILES+=("$f")
-done < <(find "$PLUGIN_ROOT/skills" -name 'SKILL.md' -type f -print0 2>/dev/null)
-while IFS= read -r -d '' f; do
-    SCAN_FILES+=("$f")
-done < <(find "$PLUGIN_ROOT/governance" -maxdepth 1 -name '*.md' -type f -print0 2>/dev/null)
+declare -a check3_agent_files=()
+check3_discovery_rc=0
+discover_paths check3_agent_files "$PLUGIN_ROOT/agents" -- -maxdepth 1 -name '*.md' || check3_discovery_rc=$?
+if [[ "$check3_discovery_rc" -ne 0 ]]; then
+    check3_found=true
+    flag_discovery_failure 'CHECK3' "$PLUGIN_ROOT/agents" 'agent Markdown files' "$check3_discovery_rc"
+fi
+declare -a check3_skill_files=()
+check3_discovery_rc=0
+discover_paths check3_skill_files "$PLUGIN_ROOT/skills" -- -name 'SKILL.md' || check3_discovery_rc=$?
+if [[ "$check3_discovery_rc" -ne 0 ]]; then
+    check3_found=true
+    flag_discovery_failure 'CHECK3' "$PLUGIN_ROOT/skills" 'skill SKILL.md files' "$check3_discovery_rc"
+fi
+declare -a check3_governance_files=()
+check3_discovery_rc=0
+discover_paths check3_governance_files "$PLUGIN_ROOT/governance" -- -maxdepth 1 -name '*.md' || check3_discovery_rc=$?
+if [[ "$check3_discovery_rc" -ne 0 ]]; then
+    check3_found=true
+    flag_discovery_failure 'CHECK3' "$PLUGIN_ROOT/governance" 'governance Markdown files' "$check3_discovery_rc"
+fi
+for scan_candidate in "${check3_agent_files[@]}" "${check3_skill_files[@]}" "${check3_governance_files[@]}"; do
+    check3_gate_rc=0
+    discovery_gate_status "$scan_candidate" files || check3_gate_rc=$?
+    if [[ "$check3_gate_rc" -ne 0 ]]; then
+        check3_found=true
+        flag_discovery_gate 'CHECK3' "$scan_candidate" "$check3_gate_rc"
+        continue
+    fi
+    SCAN_FILES+=("$scan_candidate")
+done
 
 # Extract all hivemind:* references.
 # skill_refs: associative array mapping skill name -> space-separated source file paths
@@ -800,7 +838,6 @@ for scan_file in "${SCAN_FILES[@]}"; do
     done < <(echo "$scan_content" | grep -oP 'hivemind:\K[a-zA-Z0-9_-]+' | sort -u)
 done
 
-check3_found=false
 skill_ref_count=${#SKILL_REF_SOURCES[@]}
 for skill_name in "${!SKILL_REF_SOURCES[@]}"; do
     skill_md_path="$PLUGIN_ROOT/skills/$skill_name/SKILL.md"
@@ -857,7 +894,21 @@ echo ''
 echo '=== CHECK 5: Unsupported frontmatter fields ==='
 
 check5_found=false
-while IFS= read -r -d '' agent_file; do
+declare -a check5_agent_files=()
+check5_discovery_rc=0
+discover_paths check5_agent_files "$PLUGIN_ROOT/agents" -- -maxdepth 1 -name '*.md' || check5_discovery_rc=$?
+if [[ "$check5_discovery_rc" -ne 0 ]]; then
+    check5_found=true
+    flag_discovery_failure 'CHECK5' "$PLUGIN_ROOT/agents" 'agent Markdown files' "$check5_discovery_rc"
+fi
+for agent_file in "${check5_agent_files[@]}"; do
+    check5_gate_rc=0
+    discovery_gate_status "$agent_file" files || check5_gate_rc=$?
+    if [[ "$check5_gate_rc" -ne 0 ]]; then
+        check5_found=true
+        flag_discovery_gate 'CHECK5' "$agent_file" "$check5_gate_rc"
+        continue
+    fi
     in_frontmatter=false
     frontmatter_started=false
     line_num=0
@@ -889,7 +940,7 @@ while IFS= read -r -d '' agent_file; do
                 'Unsupported frontmatter field: permissionMode'
         fi
     done < "$agent_file"
-done < <(find "$PLUGIN_ROOT/agents" -maxdepth 1 -name '*.md' -type f -print0)
+done
 
 if [[ "$check5_found" == false ]]; then
     echo '[PASS] Check 5: No unsupported frontmatter fields found'
@@ -908,7 +959,21 @@ echo '=== CHECK 6: Governance reference paths resolve ==='
 check6_found=false
 # PLUGIN_ROOT is invariant across the scan; resolve it once (#305).
 normalized_plugin_root="$(realpath -m "$PLUGIN_ROOT")"
-while IFS= read -r -d '' md_file; do
+declare -a check6_md_files=()
+check6_discovery_rc=0
+discover_paths check6_md_files "$PLUGIN_ROOT" -- -name '*.md' || check6_discovery_rc=$?
+if [[ "$check6_discovery_rc" -ne 0 ]]; then
+    check6_found=true
+    flag_discovery_failure 'CHECK6' "$PLUGIN_ROOT" 'plugin Markdown files' "$check6_discovery_rc"
+fi
+for md_file in "${check6_md_files[@]}"; do
+    check6_gate_rc=0
+    discovery_gate_status "$md_file" files || check6_gate_rc=$?
+    if [[ "$check6_gate_rc" -ne 0 ]]; then
+        check6_found=true
+        flag_discovery_gate 'CHECK6' "$md_file" "$check6_gate_rc"
+        continue
+    fi
     # Candidate prefilter (#305): the extraction below requires the literal
     # ${CLAUDE_PLUGIN_ROOT}/ prefix, so one fixed-string grep per FILE finds
     # every line that can yield a reference.
@@ -943,7 +1008,7 @@ while IFS= read -r -d '' md_file; do
             fi
         done < <(echo "$textline" | grep -oP '\$\{CLAUDE_PLUGIN_ROOT\}/\K[^\s`\)]+' || true)
     done <<< "$candidates"
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0)
+done
 
 if [[ "$check6_found" == false ]]; then
     echo '[PASS] Check 6: All governance reference paths resolve'
@@ -963,7 +1028,21 @@ REQUIRED_FRONTMATTER_FIELDS=('name' 'description' 'allowed-tools' 'shell')
 check7_found=false
 skill_file_count=0
 
-while IFS= read -r -d '' skill_file; do
+declare -a check7_skill_files=()
+check7_discovery_rc=0
+discover_paths check7_skill_files "$PLUGIN_ROOT/skills" -- -name 'SKILL.md' || check7_discovery_rc=$?
+if [[ "$check7_discovery_rc" -ne 0 ]]; then
+    check7_found=true
+    flag_discovery_failure 'CHECK7' "$PLUGIN_ROOT/skills" 'skill SKILL.md files' "$check7_discovery_rc"
+fi
+for skill_file in "${check7_skill_files[@]}"; do
+    check7_gate_rc=0
+    discovery_gate_status "$skill_file" files || check7_gate_rc=$?
+    if [[ "$check7_gate_rc" -ne 0 ]]; then
+        check7_found=true
+        flag_discovery_gate 'CHECK7' "$skill_file" "$check7_gate_rc"
+        continue
+    fi
     skill_file_count=$((skill_file_count + 1))
 
     fm_content="$(get_frontmatter "$skill_file")"
@@ -974,7 +1053,7 @@ while IFS= read -r -d '' skill_file; do
                 "Missing required frontmatter field: $field_name"
         fi
     done
-done < <(find "$PLUGIN_ROOT/skills" -name 'SKILL.md' -type f -print0)
+done
 
 if [[ "$check7_found" == false ]]; then
     echo "[PASS] Check 7: All $skill_file_count skill files have complete frontmatter"
@@ -991,7 +1070,21 @@ echo ''
 echo '=== CHECK 8: No bare governance/agents/skills path refs ==='
 
 check8_found=false
-while IFS= read -r -d '' md_file; do
+declare -a check8_md_files=()
+check8_discovery_rc=0
+discover_paths check8_md_files "$PLUGIN_ROOT" -- -name '*.md' || check8_discovery_rc=$?
+if [[ "$check8_discovery_rc" -ne 0 ]]; then
+    check8_found=true
+    flag_discovery_failure 'CHECK8' "$PLUGIN_ROOT" 'plugin Markdown files' "$check8_discovery_rc"
+fi
+for md_file in "${check8_md_files[@]}"; do
+    check8_gate_rc=0
+    discovery_gate_status "$md_file" files || check8_gate_rc=$?
+    if [[ "$check8_gate_rc" -ne 0 ]]; then
+        check8_found=true
+        flag_discovery_gate 'CHECK8' "$md_file" "$check8_gate_rc"
+        continue
+    fi
     # Candidate prefilter (#305): one grep per FILE for the bare-ref shape
     # WITHOUT the left-boundary group. Sound superset: every flagged ref is
     # built solely of characters inside the strip-token class below, and the
@@ -1015,7 +1108,7 @@ while IFS= read -r -d '' md_file; do
                 "Bare path ref (missing \${CLAUDE_PLUGIN_ROOT}/ prefix): $bare_ref"
         done < <(echo "$stripped" | grep -oP '(^|[^A-Za-z0-9_./-])\K(agents|skills|governance|references|workflows)/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(md|sh|json)' || true)
     done <<< "$candidates"
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0)
+done
 
 if [[ "$check8_found" == false ]]; then
     echo '[PASS] Check 8: No bare governance/agents/skills path refs'
@@ -1113,7 +1206,21 @@ first_match_line() {
 check9_found=false
 check9_script_count=0
 
-while IFS= read -r -d '' engine_script; do
+declare -a check9_engine_scripts=()
+check9_discovery_rc=0
+discover_paths check9_engine_scripts "$PLUGIN_ROOT/skills" -- -path '*/scripts/*.sh' || check9_discovery_rc=$?
+if [[ "$check9_discovery_rc" -ne 0 ]]; then
+    check9_found=true
+    flag_discovery_failure 'CHECK9' "$PLUGIN_ROOT/skills" 'skill engine scripts' "$check9_discovery_rc"
+fi
+for engine_script in "${check9_engine_scripts[@]}"; do
+    check9_gate_rc=0
+    discovery_gate_status "$engine_script" files || check9_gate_rc=$?
+    if [[ "$check9_gate_rc" -ne 0 ]]; then
+        check9_found=true
+        flag_discovery_gate 'CHECK9' "$engine_script" "$check9_gate_rc"
+        continue
+    fi
     # Only engine scripts that source the containment helper participate.
     if ! grep -qE '(^|[[:space:]])(\.|source)[[:space:]][^#]*containment\.sh' "$engine_script"; then
         continue
@@ -1183,7 +1290,7 @@ while IFS= read -r -d '' engine_script; do
     done
 
     unset token_labels token_guards token_reads token_read_excludes
-done < <(find "$PLUGIN_ROOT/skills" -path '*/scripts/*.sh' -type f -print0)
+done
 
 if [[ "$check9_found" == false ]]; then
     echo "[PASS] Check 9: All $check9_script_count containment-sourcing engine scripts guard each token before its first read"
@@ -1206,14 +1313,28 @@ echo '=== CHECK 10: No literal NUL byte in plugin Markdown payload ==='
 
 check10_found=false
 check10_md_count=0
-while IFS= read -r -d '' md_file; do
+declare -a check10_md_files=()
+check10_discovery_rc=0
+discover_paths check10_md_files "$PLUGIN_ROOT" -- -name '*.md' || check10_discovery_rc=$?
+if [[ "$check10_discovery_rc" -ne 0 ]]; then
+    check10_found=true
+    flag_discovery_failure 'CHECK10' "$PLUGIN_ROOT" 'plugin Markdown files' "$check10_discovery_rc"
+fi
+for md_file in "${check10_md_files[@]}"; do
+    check10_gate_rc=0
+    discovery_gate_status "$md_file" files || check10_gate_rc=$?
+    if [[ "$check10_gate_rc" -ne 0 ]]; then
+        check10_found=true
+        flag_discovery_gate 'CHECK10' "$md_file" "$check10_gate_rc"
+        continue
+    fi
     check10_md_count=$((check10_md_count + 1))
     if LC_ALL=C grep -qaP '\x00' "$md_file" 2>/dev/null; then
         check10_found=true
         add_finding 'CHECK10' "$md_file" 0 \
             "Literal NUL byte in plugin Markdown payload — replace with a textual escape (e.g. \\u0000 or <NUL>); NUL makes the file binary and breaks Markdown/shell tooling and plugin consumers"
     fi
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0)
+done
 
 if [[ "$check10_found" == false ]]; then
     echo "[PASS] Check 10: All $check10_md_count plugin Markdown payload files are free of literal NUL bytes"
@@ -1254,7 +1375,21 @@ declare -a CHECK11_CANDIDATE_WORDS=()
 IFS='|' read -ra CHECK11_CANDIDATE_WORDS <<< "${BIOFORM_DENYLIST,,}|${CHECK11_KEEP_REGEX,,}"
 
 check11_found=false
-while IFS= read -r -d '' skill_file; do
+declare -a check11_skill_files=()
+check11_discovery_rc=0
+discover_paths check11_skill_files "$PLUGIN_ROOT/skills" -- -name 'SKILL.md' || check11_discovery_rc=$?
+if [[ "$check11_discovery_rc" -ne 0 ]]; then
+    check11_found=true
+    flag_discovery_failure 'CHECK11' "$PLUGIN_ROOT/skills" 'skill SKILL.md files' "$check11_discovery_rc"
+fi
+for skill_file in "${check11_skill_files[@]}"; do
+    check11_gate_rc=0
+    discovery_gate_status "$skill_file" files || check11_gate_rc=$?
+    if [[ "$check11_gate_rc" -ne 0 ]]; then
+        check11_found=true
+        flag_discovery_gate 'CHECK11' "$skill_file" "$check11_gate_rc"
+        continue
+    fi
     # One-pass awk state machine emits surviving BODY lines as "line_num<TAB>line",
     # excluding YAML frontmatter, fenced code blocks, and markdown table rows.
     while IFS=$'\t' read -r line_num textline; do
@@ -1297,7 +1432,7 @@ while IFS= read -r -d '' skill_file; do
             print NR "\t" $0
         }
     ' "$skill_file")
-done < <(find "$PLUGIN_ROOT/skills" -name 'SKILL.md' -type f -print0)
+done
 
 if [[ "$check11_found" == false ]]; then
     echo '[PASS] Check 11: No bare calling-bioform name in skill body prose (P14)'
@@ -1331,7 +1466,21 @@ echo '=== CHECK 12: No bare validation-tool/manifest token in governance/agents 
 CHECK12_DENYLIST='tools/validate\.sh|bash -n|python3 -m json\.tool|test_[a-z0-9_]+\.sh|package\.json|pyproject\.toml|Cargo\.toml|go\.mod|requirements\.txt|plugin\.json|marketplace\.json'
 
 check12_found=false
-while IFS= read -r -d '' doc_file; do
+declare -a check12_doc_files=()
+check12_discovery_rc=0
+discover_paths check12_doc_files "$PLUGIN_ROOT/governance" "$PLUGIN_ROOT/agents" -- -maxdepth 1 -name '*.md' || check12_discovery_rc=$?
+if [[ "$check12_discovery_rc" -ne 0 ]]; then
+    check12_found=true
+    flag_discovery_failure 'CHECK12' "$PLUGIN_ROOT" 'governance and agent Markdown files' "$check12_discovery_rc"
+fi
+for doc_file in "${check12_doc_files[@]}"; do
+    check12_gate_rc=0
+    discovery_gate_status "$doc_file" files || check12_gate_rc=$?
+    if [[ "$check12_gate_rc" -ne 0 ]]; then
+        check12_found=true
+        flag_discovery_gate 'CHECK12' "$doc_file" "$check12_gate_rc"
+        continue
+    fi
     # One-pass awk state machine emits surviving BODY lines as "line_num<TAB>line",
     # excluding YAML frontmatter, fenced code blocks, and >=4-space indented lines.
     while IFS=$'\t' read -r line_num textline; do
@@ -1376,7 +1525,7 @@ while IFS= read -r -d '' doc_file; do
             print NR "\t" $0
         }
     ' "$doc_file")
-done < <(find "$PLUGIN_ROOT/governance" "$PLUGIN_ROOT/agents" -maxdepth 1 -name '*.md' -type f -print0)
+done
 
 if [[ "$check12_found" == false ]]; then
     echo '[PASS] Check 12: No bare validation-tool/manifest token in governance/agents prose'
@@ -1431,7 +1580,21 @@ echo ''
 echo '=== CHECK 13: P18 fail-closed shell floor ==='
 
 check13_found=false
-while IFS= read -r -d '' shell_script; do
+declare -a check13_shell_scripts=()
+check13_discovery_rc=0
+discover_paths check13_shell_scripts "$PLUGIN_ROOT" -- -name '*.sh' || check13_discovery_rc=$?
+if [[ "$check13_discovery_rc" -ne 0 ]]; then
+    check13_found=true
+    flag_discovery_failure 'CHECK13' "$PLUGIN_ROOT" 'plugin shell scripts' "$check13_discovery_rc"
+fi
+for shell_script in "${check13_shell_scripts[@]}"; do
+    check13_gate_rc=0
+    discovery_gate_status "$shell_script" files || check13_gate_rc=$?
+    if [[ "$check13_gate_rc" -ne 0 ]]; then
+        check13_found=true
+        flag_discovery_gate 'CHECK13' "$shell_script" "$check13_gate_rc"
+        continue
+    fi
     has_errexit=false
     has_nounset=false
     has_pipefail=false
@@ -1659,7 +1822,7 @@ while IFS= read -r -d '' shell_script; do
     fi
     add_finding 'CHECK13' "$shell_script" "$finding_line" \
         "missing P18 fail-closed shell floor (set -euo pipefail) -- add the floor or document a justified CHECK13 allowlist exception"
-done < <(find "$PLUGIN_ROOT" -name '*.sh' -type f -print0)
+done
 
 if [[ "$check13_found" == false ]]; then
     echo '[PASS] Check 13: All plugin shell scripts carry the P18 fail-closed floor or a CHECK13 exception'
@@ -1751,24 +1914,70 @@ skill_declares_navigator_marker() {
 }
 
 # skill_sources_containment SKILL_DIR
-# Echoes "true" when any engine script under SKILL_DIR/scripts sources
-# containment.sh under CHECK 9's enrollment predicate (reused verbatim).
+# Sets SKILL_SOURCES_CONTAINMENT_RESULT to "true" when any engine script under
+# SKILL_DIR/scripts sources containment.sh under CHECK 9's enrollment predicate
+# (reused verbatim), "false" otherwise -- including when SKILL_DIR/scripts is
+# absent. A scripts path that exists but is not a followable directory, a
+# failed discovery, or a rejected script is reported as a CHECK14 finding (and
+# sets check14_found), so the result is returned in a global rather than by
+# command substitution: a subshell would drop those findings.
+SKILL_SOURCES_CONTAINMENT_RESULT=""
 skill_sources_containment() {
     local skill_dir="$1"
+    local scripts_dir="$skill_dir/scripts"
     local engine_script
-    while IFS= read -r -d '' engine_script; do
-        if grep -qE '(^|[[:space:]])(\.|source)[[:space:]][^#]*containment\.sh' "$engine_script"; then
-            echo "true"
-            return
+    SKILL_SOURCES_CONTAINMENT_RESULT="false"
+    if [[ ! -e "$scripts_dir" && ! -L "$scripts_dir" ]]; then
+        return 0
+    fi
+    local scripts_dir_rc=0
+    discovery_gate_status "$scripts_dir" dirs || scripts_dir_rc=$?
+    if [[ "$scripts_dir_rc" -ne 0 ]]; then
+        check14_found=true
+        flag_discovery_gate 'CHECK14' "$scripts_dir" "$scripts_dir_rc"
+        return 0
+    fi
+    local -a check14_engine_scripts=()
+    local check14_scripts_rc=0
+    discover_paths check14_engine_scripts "$scripts_dir" -- -maxdepth 1 -name '*.sh' || check14_scripts_rc=$?
+    if [[ "$check14_scripts_rc" -ne 0 ]]; then
+        check14_found=true
+        flag_discovery_failure 'CHECK14' "$scripts_dir" 'skill engine scripts' "$check14_scripts_rc"
+    fi
+    local engine_gate_rc
+    for engine_script in "${check14_engine_scripts[@]}"; do
+        engine_gate_rc=0
+        discovery_gate_status "$engine_script" files || engine_gate_rc=$?
+        if [[ "$engine_gate_rc" -ne 0 ]]; then
+            check14_found=true
+            flag_discovery_gate 'CHECK14' "$engine_script" "$engine_gate_rc"
+            continue
         fi
-    done < <(find "$skill_dir/scripts" -maxdepth 1 -name '*.sh' -type f -print0 2>/dev/null || true)
-    echo "false"
+        if grep -qE '(^|[[:space:]])(\.|source)[[:space:]][^#]*containment\.sh' "$engine_script"; then
+            SKILL_SOURCES_CONTAINMENT_RESULT="true"
+            return 0
+        fi
+    done
 }
 
 check14_found=false
 check14_navigator_count=0
 
-while IFS= read -r -d '' skill_file; do
+declare -a check14_skill_files=()
+check14_discovery_rc=0
+discover_paths check14_skill_files "$PLUGIN_ROOT/skills" -- -maxdepth 2 -name 'SKILL.md' || check14_discovery_rc=$?
+if [[ "$check14_discovery_rc" -ne 0 ]]; then
+    check14_found=true
+    flag_discovery_failure 'CHECK14' "$PLUGIN_ROOT/skills" 'skill SKILL.md files' "$check14_discovery_rc"
+fi
+for skill_file in "${check14_skill_files[@]}"; do
+    check14_gate_rc=0
+    discovery_gate_status "$skill_file" files || check14_gate_rc=$?
+    if [[ "$check14_gate_rc" -ne 0 ]]; then
+        check14_found=true
+        flag_discovery_gate 'CHECK14' "$skill_file" "$check14_gate_rc"
+        continue
+    fi
     if [[ "$(skill_declares_navigator_marker "$skill_file")" != "true" ]]; then
         continue
     fi
@@ -1779,7 +1988,8 @@ while IFS= read -r -d '' skill_file; do
     marker_line="$(grep -nF "$CHECK14_MARKER" "$skill_file" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
     [[ -z "$marker_line" ]] && marker_line=0
 
-    if [[ "$(skill_sources_containment "$skill_dir")" != "true" ]]; then
+    skill_sources_containment "$skill_dir"
+    if [[ "$SKILL_SOURCES_CONTAINMENT_RESULT" != "true" ]]; then
         check14_found=true
         add_finding 'CHECK14' "$skill_file" "$marker_line" \
             "Inert inputs-file navigator hivemind:${skill_name} fails obligation (a): no plugin/skills/${skill_name}/scripts/*.sh sources containment.sh in the direct '. <path>/containment.sh' form CHECK 9 enrolls on (an indirect loop-variable source does not enroll) -- until it does, CHECK 9's guard-before-read enforcement never applies to this navigator"
@@ -1790,7 +2000,7 @@ while IFS= read -r -d '' skill_file; do
         add_finding 'CHECK14' "$skill_file" "$marker_line" \
             "Inert inputs-file navigator hivemind:${skill_name} fails obligation (b): literal 'hivemind:${skill_name}' is absent from the '${CHECK14_SECTION_HEADING}' section of plugin/governance/security-policy.md -- add it to the covered-set enumeration"
     fi
-done < <(find "$PLUGIN_ROOT/skills" -maxdepth 2 -name 'SKILL.md' -type f -print0)
+done
 
 # FAIL-CLOSED on the discovery key itself: zero navigators means the marker was
 # renamed or dropped, which would silently disarm this check rather than fail it.
