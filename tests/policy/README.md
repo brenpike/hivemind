@@ -6,9 +6,12 @@ You are reading this because you are about to add or edit a fixture. This file i
 authoring contract: every rule below states the invariant it enforces first, then the
 mechanism that enforces it. Read the whole thing before pinning anything.
 
-This README is invisible to the fixture loader: discovery is
-`find tests/policy -maxdepth 1 -name 'safety-*.json'` (the `SAFETY_FIXTURES` discovery block in `tools/policy_check.sh`),
-so only `safety-*.json` files are ever evaluated.
+This README is invisible to the fixture loader: the SAFETY suite discovers its
+fixtures through the script's shared checked discovery (`discover_checked_paths`
+selecting `-maxdepth 1 -name 'safety-*.json'` under `tests/policy`, in the
+`SAFETY_FIXTURES` discovery block of `tools/policy_check.sh`), so only
+`safety-*.json` files are ever evaluated, and a name-matching path that is not a
+readable regular file is a SAFETY finding rather than a silently skipped fixture.
 
 ## 1. Honest capability statement
 

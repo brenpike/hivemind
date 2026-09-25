@@ -292,9 +292,12 @@ file_candidates() {
 #       `files` gate of discovery_gate_status that rejects it (missing), and
 #       discover_checked_paths reports it through flag_discovery_gate.
 #   Call sites: every scanning check discovers through discover_checked_paths,
-#   the one composition of the pieces below. discover_paths and
-#   discovery_gate_status are called directly only by canaries, which assert
-#   their statuses without emitting a real finding.
+#   the one composition of the pieces below. discover_paths is called directly
+#   only by canaries, which assert its status without emitting a real finding.
+#   discovery_gate_status is called directly by canaries and, outside a
+#   discovery, only to classify an optional ROOT before discovering under it
+#   (CHECK 14's skill scripts directory), whose rejection is still reported
+#   through flag_discovery_gate.
 #   Precondition: every ROOT must exist. This is the CALLER's job; there is
 #   no swallow mode and find's stderr is never suppressed, so a missing root
 #   fails discovery with find's non-zero status and must be reported.
@@ -2035,9 +2038,10 @@ mark_time 'CHECK14'
 # layers shrinks what the check reads. The candidate rule has no right-boundary
 # condition, so `#123g`, `#123_` and `_#123_` are candidates rather than silently
 # dropped; the only narrowing is by a named safe shape. Discovery selects by
-# NAME only, never by type, so every name-matching path -- a symlink, a
-# directory named `*.md`, a dangling link -- reaches the read gate, where it is
-# read or becomes a finding instead of vanishing inside find.
+# NAME only, never by type, and follows symlinks, so every name-matching path
+# -- a symlink, a directory named `*.md`, a dangling link, a file beneath a
+# symlinked directory -- reaches the read gate, where it is read or becomes a
+# finding instead of vanishing inside find.
 #
 # CARDINALITY. A candidate consumes only its own token and never the separator
 # after it, so every reference on a line is reported, not just the first. A
@@ -2056,7 +2060,7 @@ mark_time 'CHECK14'
 #     (including an unclosed-frontmatter fixture that no predicate test reaches).
 #   * the TRAVERSAL CANARY asserts that discovery, the read gate, and the awk
 #     layer each return non-zero on failure instead of empty output, and that
-#     discovery selects by name only.
+#     discovery selects by name only and descends a symlinked directory.
 #
 # Discovery FAILS CLOSED PER ARM: each of the two discovery arms (`plugin/**/*.md`
 # and `plugin/workflows/*.json`) carries its OWN zero-file assertion. An aggregate
@@ -2069,6 +2073,14 @@ mark_time 'CHECK14'
 # path that is missing (a dangling symlink), not a regular file (a directory or a
 # symlink to one), or unreadable is a finding, as is a classifier that exits
 # non-zero on a file -- never a clean file.
+#
+# Both arms discover through the shared checked-discovery engine
+# (discover_checked_paths under CHECK15_DISCOVERY_GATE, see the Checked
+# discovery section), which follows symlinks with -L script-wide: a symlinked
+# directory under plugin/ is descended and every name-matching path beneath it
+# is scanned; a dangling link is materialised and, under the `raw` gate,
+# reaches CHECK 15's own read gate, where it is a finding; a symlink loop makes
+# find exit non-zero, which is a CHECK15 discovery-failure finding.
 #
 # RESIDUALS, stated plainly:
 #   * allowlist granularity is the LINE, not the token. An entry added for one
@@ -2092,17 +2104,16 @@ mark_time 'CHECK14'
 #     letter, so `#12ab` is indistinguishable from a tracker id glued to letters
 #     and is exempt. Bounded: a tracker id is pure digits, and a pure-digit run
 #     is never S4.
-#   * RECORDED RESIDUAL, same root class as silent input-set narrowing:
-#     discovery does not pass `-L`, so a symlinked DIRECTORY under plugin/ is
-#     not traversed and any `*.md` beneath it is absent from the scan set.
-#     Bounded: zero symlinks exist under plugin/ today, and the input is the
-#     repo's own committed tree. Remediation is rejected for now because an
-#     honest witness needs a filesystem object created at run time, and `-L`
-#     changes find's dangling-link and loop error semantics for the whole
-#     check. Promote this to a tracked issue if a symlink lands under plugin/.
-#   * discovery coverage is split: the traversal canary's behavioural symlink
-#     probe witnesses the discovery FUNCTION, and its exact args pin witnesses
-#     the production CALL SITES. Neither alone covers both.
+#   * a symlinked directory that points back inside plugin/ materialises the
+#     same file under two paths: it is scanned twice, never skipped, but an
+#     allowlist entry keyed to one path does not cover the other. A symlink
+#     loop is not witnessed by a committed fixture; it reports through the same
+#     non-zero find status the traversal canary's nonexistent-root probe
+#     witnesses.
+#   * discovery coverage is split: the traversal canary's exact args and gate
+#     pins witness the production CALL SITES, and its discovery probes witness
+#     the production COMPOSITION (discover_checked_paths under
+#     CHECK15_DISCOVERY_GATE over the shared engine). Neither alone covers both.
 #   * an inline code span broken across physical lines is not recognized: each
 #     line is classified alone, so a reference on either half is reported.
 #   * the scanner canary pins fixture LINE NUMBERS in this file. The fixtures say
