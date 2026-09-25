@@ -2229,6 +2229,13 @@ test_set_check() {
     local set_check_json="$2"
     local passed=true
 
+    if ! command -v perl > /dev/null 2>&1; then
+        add_finding 'SAFETY' '<fixture>' 0 \
+            "[$rule_name] set_check requires perl (REQUIRED dependency: it is the only regex engine set_check compiles and extracts with) and perl was not found on PATH"
+        TEST_SET_CHECK_RESULT="false"
+        return
+    fi
+
     local regex_text
     regex_text="$(echo "$set_check_json" | jq -r '.extract_regex // empty')"
     if [[ -z "$regex_text" ]]; then
@@ -2238,15 +2245,14 @@ test_set_check() {
         return
     fi
 
-    # Validate regex compiles
-    if ! echo "" | grep -P "$regex_text" > /dev/null 2>&1; then
-        # grep -P returns 1 for no match but 2 for bad regex; test specifically
-        if echo "" | grep -P "$regex_text" 2>&1 | grep -qi 'error\|invalid\|unknown'; then
-            add_finding 'SAFETY' '<fixture>' 0 \
-                "[$rule_name] set_check.extract_regex did not compile"
-            TEST_SET_CHECK_RESULT="false"
-            return
-        fi
+    # The compile oracle is the extraction engine itself: the regex reaches
+    # perl as DATA through the environment and is compiled with qr//, exactly
+    # as the extractor below compiles it.
+    if ! RE="$regex_text" perl -e 'qr/$ENV{RE}/' 2>/dev/null; then
+        add_finding 'SAFETY' '<fixture>' 0 \
+            "[$rule_name] set_check.extract_regex did not compile"
+        TEST_SET_CHECK_RESULT="false"
+        return
     fi
 
     # Build expected set
@@ -2281,22 +2287,37 @@ test_set_check() {
         local content
         content="$(<"$abs_path")"
 
-        # Extract capture group 1 matches; Perl is primary (handles PCRE regexes correctly).
-        # The fallback runs ONLY when perl is ABSENT -- an empty capture ('{}') from a
-        # SUCCESSFUL perl run is a legitimate zero-match result, not a missing interpreter.
-        # Each branch normalizes its own failure to '' (never `|| echo '{}'` INSIDE the
-        # substitution: the pipeline's last stage has already printed one document, so the
-        # echo APPENDS a second and yields invalid JSON for the --argjson below).
-        local captured_json
-        captured_json=''
-        if command -v perl > /dev/null 2>&1; then
-            captured_json="$(echo "$content" | perl -ne "while (/$regex_text/g) { print \"\$1\n\" }" 2>/dev/null | jq -R . | jq -s 'group_by(.) | map({key: .[0], value: length}) | from_entries' 2>/dev/null)" || captured_json=''
-        else
-            # Fallback: grep -oP + sed -E for environments without Perl
-            captured_json="$(echo "$content" | grep -oP "$regex_text" 2>/dev/null | sed -E "s/$regex_text/\1/" | jq -R . | jq -s 'group_by(.) | map({key: .[0], value: length}) | from_entries' 2>/dev/null)" || captured_json=''
+        # Extract capture group 1 of every match, line by line. The regex is
+        # passed to perl as DATA (the RE environment variable) and compiled
+        # with qr//, never spliced into program source, so a `/` in the regex
+        # cannot break the program. A match with no group-1 capture dies: a
+        # regex that cannot capture is a broken extraction, not zero matches.
+        # perl prints a trailing \x1f record mark so the command substitution
+        # cannot strip a final empty capture; the mark is removed below.
+        # INVARIANT: the capture must never swallow the extractor's status. It
+        # is read into extract_rc and tested explicitly; the `|| extract_rc=$?`
+        # form also suppresses errexit for this one command only. Rewriting it
+        # as `|| extract_out=''` (or defaulting an empty result to '{}') makes
+        # a failed extraction indistinguishable from a real zero-match result
+        # and lets a zero-count subset fixture pass vacuously.
+        local extract_out extract_rc jq_rc captured_json
+        extract_rc=0
+        extract_out="$(RE="$regex_text" perl -ne 'BEGIN { $re = qr/$ENV{RE}/ } while (/$re/g) { defined($1) or die "no capture group\n"; print "$1\n" } END { print "\x1f" }' <<< "$content" 2>/dev/null)" || extract_rc=$?
+        if [[ "$extract_rc" -ne 0 ]]; then
+            passed=false
+            add_finding 'SAFETY' "$rel_path" 0 \
+                "[$rule_name] set_check extraction FAILED for ${rel_path} (perl rc=$extract_rc): the extract_regex did not compile or matched without a group-1 capture -- a broken extraction is not a zero-match result"
+            continue
         fi
-        if [[ -z "$captured_json" ]]; then
-            captured_json='{}'
+        extract_out="${extract_out%$'\x1f'}"
+
+        jq_rc=0
+        captured_json="$(printf '%s' "$extract_out" | jq -R . | jq -s 'group_by(.) | map({key: .[0], value: length}) | from_entries')" || jq_rc=$?
+        if [[ "$jq_rc" -ne 0 || -z "$captured_json" ]]; then
+            passed=false
+            add_finding 'SAFETY' "$rel_path" 0 \
+                "[$rule_name] set_check capture aggregation FAILED for ${rel_path} (jq rc=$jq_rc): no capture object was produced"
+            continue
         fi
 
         local captured_set
@@ -2541,17 +2562,23 @@ fi
 
 # ── SAFETY-CANARY: set_check zero-match self-test ──────────────────────────
 # A files entry whose extract_regex matches NOTHING must still produce a valid
-# empty capture object. No standing green fixture witnesses that branch: real
-# fixtures always capture something, so a regression in the capture plumbing
-# (an interpreter-fallback misfire that appends a second JSON document and
-# makes the downstream --argjson reject) aborts the whole run instead of
-# failing one check. Assertion 1 is the regression witness; because the
-# regression ABORTS rather than returns false, test_set_check is called in a
-# SUBSHELL and its verdict read back over stdout -- an abort kills only the
-# subshell, empty output means FAIL, and the run continues to a summary.
-# Subshell isolation also keeps the control assertion's findings out of the
-# real report. Assertion 2 is the non-vacuity control: a deliberately wrong
-# occurrence count must fail, proving assertion 1 asserts something.
+# empty capture object, and a BROKEN extraction must never be mistaken for
+# that zero-match result. No standing green fixture witnesses these branches:
+# real fixtures always capture something. Each assertion calls test_set_check
+# in a SUBSHELL and reads its verdict back over stdout, so a regression that
+# ABORTS the call (e.g. malformed capture JSON rejected by the downstream
+# --argjson) kills only the subshell, empty output means FAIL, and the run
+# continues to a summary. Subshell isolation also keeps the must-fail
+# assertions' findings out of the real report.
+#   1. zero-match: a regex matching nothing must pass (the zero-match witness).
+#   2. non-vacuity control: a deliberately wrong occurrence count must fail,
+#      proving assertion 1 asserts something.
+#   3. non-compiling regex: must fail through the perl compile oracle.
+#   4. broken extraction: a regex that compiles and matches but has no group-1
+#      capture must fail -- the extractor's nonzero status must not collapse
+#      into an empty capture object that reads as a vacuous zero-match pass.
+#   5. unescaped slash: a regex containing `/` must extract normally, proving
+#      the regex reaches perl as data rather than as program source.
 # INVARIANT: the capture must NOT be written as `out="$( ... )" || out=''` --
 # bash disables errexit inside a command substitution that is part of an
 # AND-OR list, so the regression would be swallowed INSIDE the subshell and
@@ -2583,7 +2610,7 @@ else
     if [[ "$set_check_zero_result" != 'true' ]]; then
         set_check_zero_canary_ok=false
         add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
-            "set_check over a zero-match file did not return a clean pass (empty result = the call aborted the run; the grep fallback appended a second '{}' to a pipeline that already printed one -- see test_set_check in tools/policy_check.sh)"
+            "set_check over a zero-match file did not return a clean pass (empty result = the call aborted the run; a false result = the zero-match capture was not a valid empty object -- see test_set_check in tools/policy_check.sh)"
     fi
 
     set_check_control_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
@@ -2605,6 +2632,69 @@ else
         set_check_zero_canary_ok=false
         add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
             'set_check control did not fail -- capture/count assertion is vacuous'
+    fi
+
+    set_check_uncompiled_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
+        extract_regex: "(SETCHECK-UNCLOSED",
+        expected_set: [],
+        expected_counts: {},
+        files: [{path: $path, mode: "subset"}]
+    }')"
+    set_check_uncompiled_result=''
+    set +e
+    set_check_uncompiled_result="$(
+        set -e
+        TEST_SET_CHECK_RESULT=''
+        test_set_check 'set-check-zero-match-canary-uncompiled' "$set_check_uncompiled_spec" > /dev/null 2>&1
+        echo "$TEST_SET_CHECK_RESULT"
+    )"
+    set -e
+    if [[ "$set_check_uncompiled_result" != 'false' ]]; then
+        set_check_zero_canary_ok=false
+        add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
+            'set_check accepted a non-compiling extract_regex -- the perl compile oracle is not failing closed'
+    fi
+
+    set_check_nocapture_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
+        extract_regex: "SETCHECK-PRESENT-CANARY [0-9]:",
+        expected_set: [],
+        expected_counts: {},
+        files: [{path: $path, mode: "subset"}]
+    }')"
+    set_check_nocapture_result=''
+    set +e
+    set_check_nocapture_result="$(
+        set -e
+        TEST_SET_CHECK_RESULT=''
+        test_set_check 'set-check-zero-match-canary-nocapture' "$set_check_nocapture_spec" > /dev/null 2>&1
+        echo "$TEST_SET_CHECK_RESULT"
+    )"
+    set -e
+    if [[ "$set_check_nocapture_result" != 'false' ]]; then
+        set_check_zero_canary_ok=false
+        add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
+            'set_check passed a broken extraction (regex matched without a group-1 capture) -- a failed extraction is being read as a zero-match result'
+    fi
+
+    set_check_slash_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
+        extract_regex: "SETCHECK-SLASH-CANARY (a/[a-z]+):",
+        expected_set: ["a/b"],
+        expected_counts: {"a/b": 1},
+        files: [{path: $path, mode: "equal"}]
+    }')"
+    set_check_slash_result=''
+    set +e
+    set_check_slash_result="$(
+        set -e
+        TEST_SET_CHECK_RESULT=''
+        test_set_check 'set-check-zero-match-canary-slash' "$set_check_slash_spec" 1>&2
+        echo "$TEST_SET_CHECK_RESULT"
+    )"
+    set -e
+    if [[ "$set_check_slash_result" != 'true' ]]; then
+        set_check_zero_canary_ok=false
+        add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
+            'set_check failed to extract with a regex containing an unescaped slash -- the regex is reaching perl as program source instead of data'
     fi
 fi
 if [[ "$set_check_zero_canary_ok" == true ]]; then
