@@ -1531,61 +1531,107 @@ mark_time 'CHECK14'
 # are never loaded into an agent's context, so a tracker ID there stales a
 # maintainer note rather than doctrine.
 #
-# SCAN SHAPE. The awk program is `{ print NR "\t" $0 }` and nothing else: zero
-# state, zero regions, one record per physical line. NO line is exempt by
-# POSITION -- YAML frontmatter, fenced code blocks, and indented continuation
-# lines are all scanned. Exemption is by PATTERN only. Two reasons, both
-# load-bearing. First, a region skipper is a state machine whose failure mode is
-# silent: one unclosed region opener swallows the entire remaining file body and
-# the check still reports PASS over prose it never read, so that whole class of
-# failure is DELETED here rather than guarded. Second, frontmatter in this
-# payload is not inert metadata -- it is runtime-loaded agent context (a skill's
-# name and description are read before its body), so it carries doctrine and
-# earns the same rule as the body.
+# SCAN SHAPE. One POSIX awk program, CHECK15_CLASSIFY_AWK, is the single source
+# of classification: scan_prose_file_refs runs it over a whole file and
+# tracker_ref_tokens runs it over one line, so the predicate the canaries assert
+# and the traversal CI runs cannot drift apart. It carries no state across
+# records: one record per physical line, every per-line variable reset on
+# entry. NO line is exempt by POSITION -- YAML frontmatter, fenced code blocks,
+# and indented continuation lines are all scanned. Exemption is by SHAPE only.
+# Two reasons, both load-bearing. First, a region skipper is a state machine
+# whose failure mode is silent: one unclosed region opener swallows the entire
+# remaining file body and the check still reports PASS over prose it never
+# read, so that whole class of failure is DELETED here rather than guarded.
+# Second, frontmatter in this payload is not inert metadata -- it is
+# runtime-loaded agent context (a skill's name and description are read before
+# its body), so it carries doctrine and earns the same rule as the body.
 #
-# PATTERN CLAUSES are NORMALIZE-THEN-MATCH: every legal construct is deleted
-# from a working copy of the line first, and whatever survives is matched by the
-# bare token pattern `#[0-9]+`. Each sed pass, and what it earns:
-#   * `s/\r$//`                       -- CR strip. Prose here may be stored CRLF
-#     depending on autocrlf, and stripping the trailing CR makes every record
-#     and every token byte-identical to the LF case.
-#   * `s/`[^`]*`//g`                  -- inline code. Exempts literal
-#     placeholders such as the issue-number placeholder in
-#     plugin/skills/prd-to-issues/SKILL.md.
-#   * `s/\]\(#[^)]*\)//g`             -- Markdown in-page anchors `](#...)`,
-#     including digit-leading slugs a letter-first rule would miss.
-#   * `s@([A-Za-z0-9_/])#@\1@g`       -- a `#` glued to a word character or `/`,
-#     which is the cross-repo citation form `cli/cli#12258`: it names its repo,
-#     so it does not rot, and stays legal.
-#   * `s/#([0-9]+)([A-Za-z_])/\1\2/g` -- a letter-bearing hex colour such as
-#     `#1a2b3c`. The trailing class MUST be `[A-Za-z_]` and MUST NOT admit
-#     digits: with `[A-Za-z0-9_]` the greedy `[0-9]+` run backtracks one digit to
-#     feed the trailing class, so the `#` is stripped from EVERY multi-digit
-#     reference (`see #123` yields no token) and the guard goes silently blind.
-# ATX headings (`# `, `## `) and a `#!` shebang need no pass of their own: the
-# matcher requires a digit immediately after the `#`.
+# DETECTION IS A POSITIVE ALLOWLIST. Each record first loses a trailing CR, so a
+# CRLF checkout yields records and tokens byte-identical to the LF case. A
+# left-to-right walk then classifies the line:
+#   * CANDIDATE: a `#` followed by a digit run, UNCONDITIONALLY -- whatever
+#     character follows the run. The token is the `#` plus that digit run and
+#     never the word characters after it. Only a candidate can become a
+#     finding, so ATX headings and a `#!` shebang are never candidates: their
+#     `#` is not followed by a digit.
+#   * SAFE SHAPES, each an anchored prefix match at the walk position, consumed
+#     whole so nothing inside the span is classified:
+#       S1 inline code -- a backtick run of length L, closed by the next
+#          backtick run of EXACTLY length L on the line. With no such closer
+#          the opening run is literal text and the walk continues right after
+#          it (CommonMark spec, "Code spans"), so an unclosed span, or a fence
+#          delimiter line such as ```text, exempts nothing.
+#          Exempts literal placeholders such as the issue-number placeholder
+#          in plugin/skills/prd-to-issues/SKILL.md.
+#       S3 in-page anchor -- `](#` through the first `)`, including the
+#          digit-leading slugs a letter-first rule would miss.
+#       S2 cross-repo citation -- owner/repo#NNN with exactly one `/`, each
+#          side starting alphanumeric, the digit run followed by end of line
+#          or a character outside [0-9A-Za-z_], and tried only at a LEFT
+#          BOUNDARY (line start, or a previous character outside
+#          [A-Za-z0-9._/-]). It names its repo, so it does not rot, and
+#          `[cli/cli#12258](...)` stays legal.
+#       S4 hex colour -- `#` plus a run of [0-9A-Fa-f] of length exactly 3,
+#          4, 6 or 8 that carries at least one letter, with the character
+#          before the `#` and the character after the run each end of line or
+#          outside [0-9A-Za-z_]. `#1a2b3c` and `#1af` stay legal; a pure-digit
+#          run such as `#123456` has no letter and stays a candidate.
+#   * ESCAPES -- a backslash followed by ASCII punctuation other than `#` is a
+#     CommonMark backslash escape: the pair is literal text and is stepped over
+#     BEFORE any safe shape is tried, so an escaped delimiter (a backtick, a
+#     `]`, or a backslash) can never open S1 or S3. `#` is excluded so an
+#     escaped `#` stays a candidate. Escapes are not processed inside a span
+#     already consumed, matching CommonMark code spans.
+#   The walk tries an escape, then S1, then S3, then S2, then S4; on a match it
+#   jumps past the span, else a candidate is emitted and stepped over, else it
+#   advances one character.
 #
-# CARDINALITY. The matcher consumes no surrounding context, so every reference
-# on a line is reported, not just the first. A context-consuming matcher eats
-# the separator between neighbours and misses the second (`x #12 #34` reports
-# only `#12`), and that is not cosmetic here: the allowlist keys on (rule, path,
-# line), so a finding that is not line-COMPLETE lets an allowlist entry absolve
-# a reference no reviewer ever saw.
+# ELIMINATED CLASS: OVER-BROAD EXEMPTION. A `#` is exempt only when a safe shape
+# matches an exact span around it at the walk position. There is no deletion
+# pass over the line, so no exemption can reach past its own span: a `#` glued
+# to an arbitrary word (`issue#123`, `x#9`) has no shape that admits it, a
+# backtick run can be closed only by a run of its own length, and escape
+# processing precedes every shape, so a backslash-escaped delimiter opens no
+# span. All three are unrepresentable as exemptions rather than guarded against.
 #
-# WITNESSES, two layers, because they fail independently:
+# ELIMINATED CLASS: SILENT INPUT-SET NARROWING. Nothing ahead of the fail-closed
+# layers shrinks what the check reads. The candidate rule has no right-boundary
+# condition, so `#123g`, `#123_` and `_#123_` are candidates rather than silently
+# dropped; the only narrowing is by a named safe shape. Discovery selects by
+# NAME only, never by type, so every name-matching path -- a symlink, a
+# directory named `*.md`, a dangling link -- reaches the read gate, where it is
+# read or becomes a finding instead of vanishing inside find.
+#
+# CARDINALITY. A candidate consumes only its own token and never the separator
+# after it, so every reference on a line is reported, not just the first. A
+# context-consuming matcher eats the separator between neighbours and misses the
+# second (`x #12 #34` reports only `#12`), and that is not cosmetic here: the
+# allowlist keys on (rule, path, line), so a finding that is not line-COMPLETE
+# lets an allowlist entry absolve a reference no reviewer ever saw.
+#
+# WITNESSES, three layers, because they fail independently:
 #   * the DETECTION CANARY asserts the pure predicate `tracker_ref_tokens` over
-#     literal lines -- one case per pattern clause above, in both directions,
-#     and by EXACT token string so a dropped neighbour is caught.
+#     literal lines -- the candidate rule and each safe shape, in both
+#     directions, and by EXACT token string so a dropped neighbour is caught.
 #   * the SCANNER CANARY asserts `scan_prose_file_refs` over committed fixtures.
 #     It is the only layer that can witness the file-level traversal: the awk
 #     record shape, the line numbering, and the absence of any region skipping
 #     (including an unclosed-frontmatter fixture that no predicate test reaches).
+#   * the TRAVERSAL CANARY asserts that discovery, the read gate, and the awk
+#     layer each return non-zero on failure instead of empty output, and that
+#     discovery selects by name only.
 #
 # Discovery FAILS CLOSED PER ARM: each of the two discovery arms (`plugin/**/*.md`
 # and `plugin/workflows/*.json`) carries its OWN zero-file assertion. An aggregate
 # count cannot carry this guarantee -- a missing, renamed, or unreadable workflows
 # tree yields zero JSON files while the markdown arm keeps the aggregate nonzero,
-# so half the stated scope would vanish with the check still green.
+# so half the stated scope would vanish with the check still green. A find that
+# fails, or a path stream that ends without its trailing status record, is its
+# own finding. Because discovery passes no type test, every name-matching path is
+# handed to the read gate: a symlink to a regular file is read through it, and a
+# path that is missing (a dangling symlink), not a regular file (a directory or a
+# symlink to one), or unreadable is a finding, as is a classifier that exits
+# non-zero on a file -- never a clean file.
 #
 # RESIDUALS, stated plainly:
 #   * allowlist granularity is the LINE, not the token. An entry added for one
@@ -1599,85 +1645,293 @@ mark_time 'CHECK14'
 #     Deliberate: an unbounded digit run keeps a tracker id of any length in
 #     reach, and a loud allowlistable false positive beats a silent permanent
 #     false negative.
+#   * a `#` glued to a word (`word#123`) and a digit-leading URL fragment
+#     (`https://ex.com/p#123`) are reported, including inside a link target.
+#     Neither occurs in plugin/ today; the remedy is inline code.
+#   * the reported token for a reference glued to trailing word characters is
+#     its `#`-plus-digits prefix only: `#123g` reports `#123`, and
+#     `word#1a2b3c` (left-glued, so S4 does not apply) reports `#1`.
+#   * S4 exempts ANY left- and right-bounded 3, 4, 6 or 8 hex run carrying a
+#     letter, so `#12ab` is indistinguishable from a tracker id glued to letters
+#     and is exempt. Bounded: a tracker id is pure digits, and a pure-digit run
+#     is never S4.
+#   * RECORDED RESIDUAL, same root class as silent input-set narrowing:
+#     discovery does not pass `-L`, so a symlinked DIRECTORY under plugin/ is
+#     not traversed and any `*.md` beneath it is absent from the scan set.
+#     Bounded: zero symlinks exist under plugin/ today, and the input is the
+#     repo's own committed tree. Remediation is rejected for now because an
+#     honest witness needs a filesystem object created at run time, and `-L`
+#     changes find's dangling-link and loop error semantics for the whole
+#     check. Promote this to a tracked issue if a symlink lands under plugin/.
+#   * discovery coverage is split: the traversal canary's behavioural symlink
+#     probe witnesses the discovery FUNCTION, and its exact args pin witnesses
+#     the production CALL SITES. Neither alone covers both.
+#   * an inline code span broken across physical lines is not recognized: each
+#     line is classified alone, so a reference on either half is reported.
 #   * the scanner canary pins fixture LINE NUMBERS in this file. The fixtures say
 #     so in-file; edit fixture and canary together.
 echo ''
 echo '=== CHECK 15: No tracker references in plugin runtime prose ==='
 
-CHECK15_TRACKER_PATTERN='#[0-9]+'
-CHECK15_LEGAL_CONTEXT_SED='s/\r$//; s/`[^`]*`//g; s/\]\(#[^)]*\)//g; s@([A-Za-z0-9_/])#@\1@g; s/#([0-9]+)([A-Za-z_])/\1\2/g'
+CHECK15_CLASSIFY_AWK="$(cat <<'CHECK15_AWK'
+function backtick_run_len(text, at,    run_len) {
+    run_len = 0
+    while (substr(text, at + run_len, 1) == "`") run_len++
+    return run_len
+}
+function code_span_end(text, at, open_len,    scan_pos, run_len) {
+    scan_pos = at + open_len
+    while (scan_pos <= length(text)) {
+        if (substr(text, scan_pos, 1) != "`") { scan_pos++; continue }
+        run_len = backtick_run_len(text, scan_pos)
+        if (run_len == open_len) return scan_pos + run_len
+        scan_pos += run_len
+    }
+    return 0
+}
+function is_left_boundary(text, at) {
+    return at == 1 || substr(text, at - 1, 1) !~ /[A-Za-z0-9._\/-]/
+}
+function is_right_boundary(text, at) {
+    return substr(text, at, 1) !~ /[0-9A-Za-z_]/
+}
+function is_word_left_boundary(text, at) {
+    return at == 1 || substr(text, at - 1, 1) !~ /[0-9A-Za-z_]/
+}
+function is_escape(text, at,    next_char) {
+    if (substr(text, at, 1) != "\\") return 0
+    next_char = substr(text, at + 1, 1)
+    return next_char != "" && index("!\"$%&'()*+,-./:;<=>?@[\\]^_`{|}~", next_char) > 0
+}
+function hex_colour_len(text, at,    hex_len) {
+    if (!is_word_left_boundary(text, at)) return 0
+    if (!match(substr(text, at), /^#[0-9A-Fa-f]+/)) return 0
+    hex_len = RLENGTH - 1
+    if (hex_len != 3 && hex_len != 4 && hex_len != 6 && hex_len != 8) return 0
+    if (substr(text, at + 1, hex_len) !~ /[A-Fa-f]/) return 0
+    if (!is_right_boundary(text, at + RLENGTH)) return 0
+    return RLENGTH
+}
+{
+    sub(/\r$/, "")
+    if (index($0, "#") == 0) next
+    line_text = $0
+    line_len = length(line_text)
+    found_tokens = ""
+    token_sep = ""
+    pos = 1
+    while (pos <= line_len) {
+        cur_char = substr(line_text, pos, 1)
+        if (is_escape(line_text, pos)) {
+            pos += 2
+            continue
+        }
+        if (cur_char == "`") {
+            open_len = backtick_run_len(line_text, pos)
+            span_end = code_span_end(line_text, pos, open_len)
+            pos = span_end ? span_end : pos + open_len
+            continue
+        }
+        if (cur_char == "]" && match(substr(line_text, pos), /^\]\(#[^)]*\)/)) {
+            pos += RLENGTH
+            continue
+        }
+        if (is_left_boundary(line_text, pos) && match(substr(line_text, pos), /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*#[0-9]+/) && is_right_boundary(line_text, pos + RLENGTH)) {
+            pos += RLENGTH
+            continue
+        }
+        if (cur_char == "#") {
+            colour_len = hex_colour_len(line_text, pos)
+            if (colour_len) {
+                pos += colour_len
+                continue
+            }
+        }
+        if (cur_char == "#" && match(substr(line_text, pos + 1), /^[0-9]+/)) {
+            found_tokens = found_tokens token_sep "#" substr(line_text, pos + 1, RLENGTH)
+            token_sep = " "
+            pos += 1 + RLENGTH
+            continue
+        }
+        pos++
+    }
+    if (found_tokens != "") print NR "\t" found_tokens
+}
+CHECK15_AWK
+)"
 
 check15_found=false
 check15_file_count=0
 
 # tracker_ref_tokens TEXTLINE
 # Prints EVERY bare tracker reference in TEXTLINE, space-separated in source
-# order, or nothing when the line carries none. PURE -- no findings, no globals,
-# always exit 0 -- so the detection canary below can assert the guard's
-# semantics directly rather than merely asserting that the guard exists.
+# order, or nothing when the line carries none. PURE -- no findings, no globals;
+# exits non-zero only when the classifier itself fails -- so the detection
+# canary below can assert the guard's semantics directly rather than merely
+# asserting that the guard exists.
 tracker_ref_tokens() {
-    local textline="$1" normalized tokens
+    local textline="$1" record
     # Cheap gate: the overwhelming majority of prose lines carry no `#` at all,
-    # so the sed/grep pipeline below is only paid for candidates.
+    # so the classifier fork is only paid for candidates.
     case "$textline" in
         *'#'*) ;;
         *) return 0 ;;
     esac
-    normalized="$(printf '%s' "$textline" | sed -E "$CHECK15_LEGAL_CONTEXT_SED")"
-    # `|| true` is load-bearing under `set -euo pipefail`: `grep -o` exits 1 when
-    # the normalized line carries no token, which is the common case for a line
-    # whose every `#` was legal, and that status would otherwise abort the run.
-    tokens="$(printf '%s' "$normalized" | grep -oE "$CHECK15_TRACKER_PATTERN" | tr '\n' ' ' || true)"
-    printf '%s' "${tokens% }"
+    record="$(printf '%s\n' "$textline" | awk "$CHECK15_CLASSIFY_AWK")" || return
+    printf '%s' "${record#*$'\t'}"
+}
+
+# Status codes the read and discovery layers return for their own failures,
+# distinct from each other and from the 0/1/2 that awk and find exit with.
+CHECK15_RC_NOT_REGULAR=10
+CHECK15_RC_UNREADABLE=11
+CHECK15_RC_TRUNCATED=12
+CHECK15_FIND_STATUS_TAG='__CHECK15_FIND_STATUS='
+
+# check15_awk_records FILE
+# Runs the classifier over FILE, ungated, and returns awk's own exit status.
+# The traversal canary witnesses that this status is propagated, not swallowed.
+check15_awk_records() {
+    awk "$CHECK15_CLASSIFY_AWK" "$1"
+}
+
+# check15_read_records FILE
+# Prints the classifier records for FILE. Returns CHECK15_RC_NOT_REGULAR when
+# FILE is missing or not a regular file, CHECK15_RC_UNREADABLE when it cannot
+# be read, and awk's non-zero status when the classifier fails -- never 0 with
+# empty output for a file it did not actually read.
+check15_read_records() {
+    local prose_file="$1" records
+    # INVARIANT: the -f gate is load-bearing, not redundant with awk's own
+    # error handling -- gawk (and nawk) exit 0 with ZERO records when handed a
+    # directory, which would read as a clean file.
+    if [[ ! -f "$prose_file" ]]; then
+        return "$CHECK15_RC_NOT_REGULAR"
+    fi
+    if [[ ! -r "$prose_file" ]]; then
+        return "$CHECK15_RC_UNREADABLE"
+    fi
+    records="$(check15_awk_records "$prose_file")" || return
+    if [[ -n "$records" ]]; then
+        printf '%s\n' "$records"
+    fi
 }
 
 # scan_prose_file_refs FILE
 # Prints one record per offending line, `LINENO<TAB>tok1 tok2 ...`, in file
-# order. PURE -- no findings, no globals, always exit 0 -- so the scanner canary
-# below can assert the file-level traversal (record shape, line numbering, and
-# the absence of any region skipping) over committed fixtures.
+# order. No findings, no globals; STATUS-BEARING -- non-zero when FILE is not a
+# regular file, is unreadable, or the classifier fails (see check15_read_records)
+# -- so the scanner canary below can assert the file-level traversal (record
+# shape, line numbering, and the absence of any region skipping) over committed
+# fixtures, and a caller can never mistake an unread file for a clean one.
 scan_prose_file_refs() {
-    local prose_file="$1"
-    local line_num textline tokens
-    while IFS=$'\t' read -r line_num textline; do
-        # Same cheap gate as tracker_ref_tokens, hoisted so a line with no `#`
-        # never pays the command-substitution fork.
-        case "$textline" in
-            *'#'*) ;;
-            *) continue ;;
-        esac
-        tokens="$(tracker_ref_tokens "$textline")"
-        if [[ -z "$tokens" ]]; then
-            continue
-        fi
-        printf '%s\t%s\n' "$line_num" "$tokens"
-    done < <(awk '{ print NR "\t" $0 }' "$prose_file")
+    check15_read_records "$1"
 }
 
 # scan_file_for_tracker_refs FILE
 # Thin reporting wrapper: turns each record from scan_prose_file_refs into a
-# CHECK15 finding. Carries no detection logic of its own.
+# CHECK15 finding, and any read or classifier failure into a finding of its
+# own. Carries no detection logic of its own.
 scan_file_for_tracker_refs() {
     local prose_file="$1"
-    local line_num tokens
+    local line_num tokens records failure_reason scan_rc=0
+    records="$(scan_prose_file_refs "$prose_file")" || scan_rc=$?
+    if [[ "$scan_rc" -ne 0 ]]; then
+        case "$scan_rc" in
+            "$CHECK15_RC_NOT_REGULAR") failure_reason='is missing or is not a regular file' ;;
+            "$CHECK15_RC_UNREADABLE") failure_reason='is not readable' ;;
+            *) failure_reason="made the CHECK15_CLASSIFY_AWK classifier exit ${scan_rc}" ;;
+        esac
+        check15_found=true
+        add_finding 'CHECK15' "$prose_file" 0 \
+            "this runtime prose file ${failure_reason}, so none of it was scanned for tracker references -- fix the file or the classifier; an unreadable runtime-prose file is NOT clean"
+        return 0
+    fi
+    if [[ -z "$records" ]]; then
+        return 0
+    fi
     while IFS=$'\t' read -r line_num tokens; do
         check15_found=true
         add_finding 'CHECK15' "$prose_file" "$line_num" \
             "tracker reference(s) ${tokens} in plugin runtime prose -- cite a durable anchor (ADR, named invariant, or a present-tense description of the rule), never an issue or PR number; every reference on the line is listed because an allowlist entry covers the whole line, not one token"
-    done < <(scan_prose_file_refs "$prose_file")
+    done <<< "$records"
 }
 
-check15_md_count=0
-while IFS= read -r -d '' prose_file; do
-    check15_md_count=$((check15_md_count + 1))
-    scan_file_for_tracker_refs "$prose_file"
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0 2>/dev/null)
+# check15_discover_files ROOT FIND_ARGS...
+# Materialises the paths `find ROOT FIND_ARGS... -print0` emits into the global
+# array check15_discovered_files, and returns find's exit status, or
+# CHECK15_RC_TRUNCATED when the stream does not end in exactly one status
+# record. Paths found before a failure are still materialised so they are
+# scanned; the non-zero status is what keeps the arm from reading as clean.
+#
+# INVARIANT: a failing producer inside `< <(...)` is invisible to the reading
+# loop (see the materialisation invariant under Helpers), so the producer
+# appends its own status as a trailing NUL-delimited sentinel record. The
+# `|| find_status=$?` is load-bearing: errexit is inherited by the process
+# substitution, so a bare `find ...; printf ... "$?"` dies before the sentinel
+# is written whenever find fails.
+check15_discover_files() {
+    local search_root="$1" stream_record status_record=''
+    local sentinel_total=0 last_was_sentinel=false
+    shift
+    check15_discovered_files=()
+    while IFS= read -r -d '' stream_record; do
+        if [[ "$stream_record" == "$CHECK15_FIND_STATUS_TAG"* ]]; then
+            sentinel_total=$((sentinel_total + 1))
+            status_record="$stream_record"
+            last_was_sentinel=true
+        else
+            check15_discovered_files+=("$stream_record")
+            last_was_sentinel=false
+        fi
+    done < <(find_status=0; find "$search_root" "$@" -print0 || find_status=$?; printf '__CHECK15_FIND_STATUS=%d\0' "$find_status")
+    if [[ "$sentinel_total" -ne 1 || "$last_was_sentinel" != true ]]; then
+        return "$CHECK15_RC_TRUNCATED"
+    fi
+    return "${status_record#"$CHECK15_FIND_STATUS_TAG"}"
+}
 
-check15_json_count=0
-while IFS= read -r -d '' prose_file; do
-    check15_json_count=$((check15_json_count + 1))
+# check15_flag_discovery_failure ARM_ROOT ARM_LABEL STATUS
+# Records the finding for a discovery arm whose find failed or whose stream
+# was truncated: a partial file list is never a clean one.
+check15_flag_discovery_failure() {
+    local arm_root="$1" arm_label="$2" discovery_rc="$3" failure_reason
+    if [[ "$discovery_rc" -eq "$CHECK15_RC_TRUNCATED" ]]; then
+        failure_reason='its path stream ended without exactly one trailing find-status record (truncated)'
+    else
+        failure_reason="find exited ${discovery_rc}"
+    fi
+    check15_found=true
+    add_finding 'CHECK15' "$arm_root" 0 \
+        "Tracker-reference discovery of ${arm_label} failed: ${failure_reason}, so files in that arm may never have been scanned -- fix the tree's readability; a failed discovery is NOT clean"
+}
+
+# INVARIANT: discovery selects by NAME only, never by type: every name-matching
+# path reaches the read gate, where a path that is missing or not a regular file becomes a
+# finding instead of being dropped silently by find. The traversal canary pins
+# these arrays literally.
+CHECK15_MD_FIND_ARGS=(-name '*.md')
+CHECK15_JSON_FIND_ARGS=(-maxdepth 1 -name '*.json')
+
+check15_discovery_rc=0
+check15_discover_files "$PLUGIN_ROOT" "${CHECK15_MD_FIND_ARGS[@]}" || check15_discovery_rc=$?
+if [[ "$check15_discovery_rc" -ne 0 ]]; then
+    check15_flag_discovery_failure "$PLUGIN_ROOT" 'plugin/**/*.md' "$check15_discovery_rc"
+fi
+check15_md_count="${#check15_discovered_files[@]}"
+for prose_file in "${check15_discovered_files[@]}"; do
     scan_file_for_tracker_refs "$prose_file"
-done < <(find "$PLUGIN_ROOT/workflows" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null)
+done
+
+check15_discovery_rc=0
+check15_discover_files "$PLUGIN_ROOT/workflows" "${CHECK15_JSON_FIND_ARGS[@]}" || check15_discovery_rc=$?
+if [[ "$check15_discovery_rc" -ne 0 ]]; then
+    check15_flag_discovery_failure "$PLUGIN_ROOT/workflows" 'plugin/workflows/*.json' "$check15_discovery_rc"
+fi
+check15_json_count="${#check15_discovered_files[@]}"
+for prose_file in "${check15_discovered_files[@]}"; do
+    scan_file_for_tracker_refs "$prose_file"
+done
 
 check15_file_count=$((check15_md_count + check15_json_count))
 
@@ -1698,25 +1952,43 @@ if [[ "$check15_json_count" -eq 0 ]]; then
 fi
 
 # ── CHECK 15 DETECTION CANARY ──────────────────────────────────────────────
-# One case per documented pattern clause, in BOTH directions, plus exact-token
-# cases that pin CARDINALITY. A narrowed pattern, a dropped normalization pass,
-# or a matcher that stops after the first token turns this run red where the
-# presence-pinning safety fixture would stay green.
+# The candidate rule and each safe shape, in BOTH directions, plus exact-token
+# cases that pin CARDINALITY. A narrowed candidate rule, a widened or dropped
+# safe shape, or a walk that stops after the first token turns this run red
+# where the presence-pinning safety fixture would stay green.
+
+# check15_flag_classifier_failure LINE
+# Records a canary finding for a classifier that exited non-zero on LINE, so a
+# broken CHECK15_CLASSIFY_AWK program is loud rather than read as "no tokens".
+check15_flag_classifier_failure() {
+    check15_found=true
+    add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
+        "detection canary: the CHECK15_CLASSIFY_AWK classifier exited non-zero on \"$1\" -- the program no longer runs under this awk, so the guard classifies nothing"
+}
+
 check15_expect_hit() {
-    if [[ -z "$(tracker_ref_tokens "$1")" ]]; then
+    local got
+    if ! got="$(tracker_ref_tokens "$1")"; then
+        check15_flag_classifier_failure "$1"
+        return 0
+    fi
+    if [[ -z "$got" ]]; then
         check15_found=true
         add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
-            "detection canary: no tracker reference detected in \"$1\" -- CHECK15_TRACKER_PATTERN has been narrowed, or a CHECK15_LEGAL_CONTEXT_SED pass now eats a real reference, and the guard no longer catches the class it claims to ban"
+            "detection canary: no tracker reference detected in \"$1\" -- the CHECK15_CLASSIFY_AWK candidate rule has been narrowed, or a safe shape now admits a real reference, and the guard no longer catches the class it claims to ban"
     fi
 }
 
 check15_expect_miss() {
     local hit
-    hit="$(tracker_ref_tokens "$1")"
+    if ! hit="$(tracker_ref_tokens "$1")"; then
+        check15_flag_classifier_failure "$1"
+        return 0
+    fi
     if [[ -n "$hit" ]]; then
         check15_found=true
         add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
-            "detection canary: exempt construct \"$1\" was flagged as tracker reference '${hit}' -- a CHECK15_LEGAL_CONTEXT_SED normalization pass has been dropped and the guard now fires on legal prose"
+            "detection canary: exempt construct \"$1\" was flagged as tracker reference '${hit}' -- a CHECK15_CLASSIFY_AWK safe shape has been dropped or the candidate rule widened, and the guard now fires on legal prose"
     fi
 }
 
@@ -1726,11 +1998,14 @@ check15_expect_miss() {
 # reference on a line and silently drops its neighbours.
 check15_expect_tokens() {
     local got
-    got="$(tracker_ref_tokens "$1")"
+    if ! got="$(tracker_ref_tokens "$1")"; then
+        check15_flag_classifier_failure "$1"
+        return 0
+    fi
     if [[ "$got" != "$2" ]]; then
         check15_found=true
         add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
-            "detection canary: line \"$1\" yielded tokens '${got}' but expected '${2}' -- CHECK15_TRACKER_PATTERN or CHECK15_LEGAL_CONTEXT_SED no longer reports every reference on a line, and a line-keyed allowlist entry would then absolve the references it drops"
+            "detection canary: line \"$1\" yielded tokens '${got}' but expected '${2}' -- the CHECK15_CLASSIFY_AWK walk no longer reports every reference on a line, and a line-keyed allowlist entry would then absolve the references it drops"
     fi
 }
 
@@ -1740,6 +2015,17 @@ check15_expect_hit '(#42) covers the remainder'
 check15_expect_hit '#5 is the earliest'
 check15_expect_hit 'superseded by #123456'
 check15_expect_hit 'superseded by #1000000'
+check15_expect_hit 'issue#123 stays flagged'
+check15_expect_hit 'PR#456 stays flagged'
+check15_expect_hit 'x#9 glued'
+check15_expect_hit 'an unclosed ``#123 double run'
+check15_expect_hit 'an unclosed ```#123 triple run'
+check15_expect_hit 'host path example.com/a/b#12'
+check15_expect_hit 'a mismatched ``#123` run'
+# Escapes: an escaped delimiter opens no safe shape, and an escaped `#` stays a candidate.
+check15_expect_hit '\``#123`` escaped opener'
+check15_expect_hit '\](#123) escaped bracket'
+check15_expect_hit '\#123 escaped hash'
 
 check15_expect_miss '# Heading'
 check15_expect_miss '## Subheading'
@@ -1747,8 +2033,18 @@ check15_expect_miss '#!/usr/bin/env bash'
 check15_expect_miss 'cross-repo citation cli/cli#12258 names its repo'
 check15_expect_miss 'see [the anchor](#section-2) above'
 check15_expect_miss 'the literal placeholder `#123` inside inline code'
+# S4 hex colour: a left- and right-bounded 3, 4, 6 or 8 hex run carrying a letter.
 check15_expect_miss 'the colour #1a2b3c is letter-bearing'
+check15_expect_miss 'the colour #1af is short'
+check15_expect_miss 'the colour #1af8 carries alpha'
+check15_expect_miss 'the colour #1a2b3c4d carries alpha'
 check15_expect_miss 'no hash here at all'
+check15_expect_miss 'the ``#123`` double run'
+check15_expect_miss 'the ```#123``` triple run'
+check15_expect_miss 'see [the section](#2-section) above'
+check15_expect_miss '[cli/cli#12258](https://github.com/cli/cli/pull/12258)'
+# An escaped backslash escapes nothing after it, so the backtick run still opens S1.
+check15_expect_miss '\\``#123`` escaped backslash'
 
 check15_expect_tokens 'see #123 for context' '#123'
 check15_expect_tokens 'tracked as #7.' '#7'
@@ -1760,6 +2056,29 @@ check15_expect_tokens 'x #12 #34' '#12 #34'
 check15_expect_tokens '#12 #34' '#12 #34'
 check15_expect_tokens 'a #12, #34.' '#12 #34'
 check15_expect_tokens "$(printf 'tracked as #7.\r')" '#7'
+check15_expect_tokens 'issue#123 stays flagged' '#123'
+check15_expect_tokens 'PR#456 stays flagged' '#456'
+check15_expect_tokens 'x#9 glued' '#9'
+check15_expect_tokens '``code`` and #123' '#123'
+check15_expect_tokens 'bare (#2-slug) text' '#2'
+check15_expect_tokens 'cli/cli#1 and issue#2 and `#3` and #4' '#2 #4'
+check15_expect_tokens 'host path example.com/a/b#12' '#12'
+check15_expect_tokens 'a mismatched ``#123` run' '#123'
+check15_expect_tokens 'see #123_ underscore' '#123'
+check15_expect_tokens '_#123_' '#123'
+check15_expect_tokens '__#123__' '#123'
+check15_expect_tokens 'see #123g letter' '#123'
+check15_expect_tokens '#12ab5' '#12'
+check15_expect_tokens 'glued word#1a2b3c' '#1'
+check15_expect_tokens '#1a2b3c_' '#1'
+check15_expect_tokens '#12345678' '#12345678'
+check15_expect_tokens '#1234' '#1234'
+check15_expect_tokens '#12g #34' '#12 #34'
+check15_expect_tokens 'colour #1a2b3c then ref #45' '#45'
+check15_expect_tokens '\``#123`` escaped opener' '#123'
+check15_expect_tokens '\#12 and \`#34`' '#12 #34'
+# A backslash inside a code span is literal, so it cannot extend the span.
+check15_expect_tokens '`a\` #5 `' '#5'
 
 # ── CHECK 15 SCANNER CANARY ────────────────────────────────────────────────
 # The detection canary above witnesses the PREDICATE. This layer witnesses the
@@ -1770,7 +2089,7 @@ check15_expect_tokens "$(printf 'tracked as #7.\r')" '#7'
 # fixture reference turns this red; no predicate test can see any of those.
 check15_expect_scan() {
     local fixture_rel="$1" expected="$2"
-    local fixture_path got got_flat expected_flat
+    local fixture_path got got_flat expected_flat scan_rc=0
     fixture_path="$REPO_ROOT/$fixture_rel"
     if [[ ! -f "$fixture_path" ]]; then
         check15_found=true
@@ -1778,7 +2097,13 @@ check15_expect_scan() {
             "scanner canary: fixture ${fixture_rel} is missing -- the file-level traversal has no witness, so a reintroduced region skip or an off-by-one line number could ship unseen; restore the fixture rather than deleting the assertion"
         return 0
     fi
-    got="$(scan_prose_file_refs "$fixture_path")"
+    got="$(scan_prose_file_refs "$fixture_path")" || scan_rc=$?
+    if [[ "$scan_rc" -ne 0 ]]; then
+        check15_found=true
+        add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
+            "scanner canary: scan_prose_file_refs exited ${scan_rc} on ${fixture_rel} -- the file-level traversal did not run, so its records cannot be trusted"
+        return 0
+    fi
     if [[ "$got" != "$expected" ]]; then
         got_flat="${got//$'\n'/ | }"
         expected_flat="${expected//$'\n'/ | }"
@@ -1792,6 +2117,87 @@ check15_expect_scan 'tests/policy/fixtures/tracker-ref-scan-canary.md' \
     $'3\t#11\n13\t#21\n16\t#31\n20\t#41\n22\t#12 #34 #56'
 check15_expect_scan 'tests/policy/fixtures/tracker-ref-unclosed-frontmatter.md' \
     $'10\t#77'
+check15_expect_scan 'tests/policy/fixtures/tracker-ref-allowlist-canary.md' \
+    $'9\t#123\n11\t#456\n13\t#9\n19\t#123\n21\t#123\n23\t#123\n27\t#2\n29\t#2 #4\n31\t#12\n37\t#123\n39\t#123\n41\t#123\n45\t#1\n47\t#1\n49\t#12345678'
+
+# ── CHECK 15 TRAVERSAL CANARY ──────────────────────────────────────────────
+# Witnesses that each traversal layer FAILS CLOSED: a failed discovery, a
+# missing path, a directory, and a failing awk must each surface as a non-zero
+# status rather than as empty output that reads as a clean file. A positive
+# control proves the read layer still returns records for a real fixture, so
+# the failure arms cannot all pass by the layer failing unconditionally. Each
+# probe runs under `if !` so set -euo pipefail cannot abort the run; stderr is
+# discarded only here, because these failures are the expected outcome.
+# Discovery coverage is split across two witnesses: the args pin below witnesses
+# the production CALL SITES (their arrays select by name only), and the symlink
+# probe witnesses the discovery FUNCTION (a name-matching symlink is
+# materialised, and the same probe with `-type f` appended drops it -- the
+# negative control). The symlink fixture is committed, so no probe creates a
+# filesystem object at run time.
+# Residual: the reporting wrapper's finding emission on a read failure has no
+# canary -- asserting it would emit a real finding -- and it is a thin
+# translation of the status-bearing layer these probes do witness.
+
+# check15_flag_traversal_canary DESCRIPTION
+# Records a traversal-canary finding for a probe whose status came back wrong.
+check15_flag_traversal_canary() {
+    check15_found=true
+    add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
+        "traversal canary: $1 -- a traversal layer now fails open, so a missing, unreadable, or undiscoverable runtime-prose file would be reported clean"
+}
+
+check15_canary_missing_path="$REPO_ROOT/tests/policy/fixtures/__check15_nonexistent__"
+check15_canary_dir_path="$REPO_ROOT/tests/policy/fixtures"
+check15_canary_fixture_path="$REPO_ROOT/tests/policy/fixtures/tracker-ref-scan-canary.md"
+check15_canary_symlink_name='tracker-ref-symlink-canary.md'
+check15_canary_symlink_path="$REPO_ROOT/tests/policy/fixtures/$check15_canary_symlink_name"
+
+# check15_expect_find_args ARRAY_NAME EXPECTED ARGS...
+# Exact-string pin of one production discovery args array, joined by single
+# spaces. Any drift -- a re-added `-type f` above all -- is a canary finding.
+check15_expect_find_args() {
+    local array_name="$1" expected_args="$2" IFS=' '
+    shift 2
+    if [[ "$*" != "$expected_args" ]]; then
+        check15_flag_traversal_canary "${array_name} is '$*' but must be exactly '${expected_args}' -- discovery selects by NAME only, never by type, so every name-matching path reaches the read gate"
+    fi
+}
+
+check15_expect_find_args 'CHECK15_MD_FIND_ARGS' '-name *.md' "${CHECK15_MD_FIND_ARGS[@]}"
+check15_expect_find_args 'CHECK15_JSON_FIND_ARGS' '-maxdepth 1 -name *.json' "${CHECK15_JSON_FIND_ARGS[@]}"
+
+if check15_discover_files "$check15_canary_missing_path" -type f 2>/dev/null; then
+    check15_flag_traversal_canary "check15_discover_files returned 0 for the nonexistent root ${check15_canary_missing_path}, so a failing find is read as an empty tree"
+fi
+if check15_read_records "$check15_canary_missing_path" >/dev/null 2>&1; then
+    check15_flag_traversal_canary "check15_read_records returned 0 for the nonexistent path ${check15_canary_missing_path}"
+fi
+if check15_read_records "$check15_canary_dir_path" >/dev/null 2>&1; then
+    check15_flag_traversal_canary "check15_read_records returned 0 for the directory ${check15_canary_dir_path}, so the regular-file gate is gone and awk's zero-record directory skip reads as clean"
+fi
+if check15_awk_records "$check15_canary_missing_path" >/dev/null 2>&1; then
+    check15_flag_traversal_canary "check15_awk_records returned 0 for the nonexistent path ${check15_canary_missing_path}, so awk's own failure status is being swallowed"
+fi
+if ! check15_canary_records="$(check15_read_records "$check15_canary_fixture_path")"; then
+    check15_flag_traversal_canary "positive control: check15_read_records failed on the committed fixture ${check15_canary_fixture_path}"
+elif [[ -z "$check15_canary_records" ]]; then
+    check15_flag_traversal_canary "positive control: check15_read_records returned no records for the committed fixture ${check15_canary_fixture_path}, which carries known references"
+fi
+check15_canary_discovery_rc=0
+check15_discover_files "$REPO_ROOT/tests/policy/fixtures" -maxdepth 1 -name "$check15_canary_symlink_name" || check15_canary_discovery_rc=$?
+if [[ "$check15_canary_discovery_rc" -ne 0 || "${#check15_discovered_files[@]}" -ne 1 ]]; then
+    check15_flag_traversal_canary "check15_discover_files materialised ${#check15_discovered_files[@]} path(s) with status ${check15_canary_discovery_rc} for the committed symlink ${check15_canary_symlink_path}, expected exactly 1 with status 0, so discovery drops a name-matching path before the read gate"
+fi
+check15_canary_discovery_rc=0
+check15_discover_files "$REPO_ROOT/tests/policy/fixtures" -maxdepth 1 -name "$check15_canary_symlink_name" -type f || check15_canary_discovery_rc=$?
+if [[ "$check15_canary_discovery_rc" -ne 0 || "${#check15_discovered_files[@]}" -ne 0 ]]; then
+    check15_flag_traversal_canary "negative control: check15_discover_files with -type f materialised ${#check15_discovered_files[@]} path(s) with status ${check15_canary_discovery_rc} for the committed symlink ${check15_canary_symlink_path}, expected 0 with status 0, so the symlink probe above no longer distinguishes name-only from type-filtered discovery"
+fi
+check15_canary_symlink_rc=0
+check15_canary_symlink_records="$(check15_read_records "$check15_canary_symlink_path")" || check15_canary_symlink_rc=$?
+if [[ "$check15_canary_symlink_rc" -ne 0 || "$check15_canary_symlink_records" != $'10\t#77' ]]; then
+    check15_flag_traversal_canary "check15_read_records returned status ${check15_canary_symlink_rc} and records [${check15_canary_symlink_records}] for the committed symlink ${check15_canary_symlink_path}, expected status 0 and the pinned records of its target, so a symlinked runtime-prose file is not read through"
+fi
 
 if [[ "$check15_found" == false ]]; then
     echo "[PASS] Check 15: No tracker references in $check15_file_count plugin runtime prose files"
