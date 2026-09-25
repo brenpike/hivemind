@@ -499,6 +499,133 @@ print_timing_table() {
 CHECKS_PASSED=0
 CHECKS_FAILED=0
 
+# ── DISCOVERY CANARY ────────────────────────────────────────────────────────
+# Witnesses the checked-discovery helpers (see the Checked discovery section).
+# It sits directly after State, the first point where its CHECKS_PASSED /
+# CHECKS_FAILED accounting survives the counter initialisation. Assertions:
+#   * precondition: the committed fixture symlinks ARE symlinks in this checkout
+#     (a core.symlinks=false checkout turns them into plain files) -- a loud
+#     finding, never a self-skip;
+#   * args pin: DISCOVERY_FIND_BASE is exactly the single element `-L`;
+#   * positive: discover_paths over the canary tree materialises exactly
+#     real/inner.md and link-dir/inner.md, both accepted by the `files` gate --
+#     proving -L descends a symlinked directory;
+#   * negative control: one raw `find -P` over the same tree materialises only
+#     real/inner.md, so the positive probe discriminates -L from -P;
+#   * gates in both directions, against the status-bearing classifier
+#     discovery_gate_status (never the reporting wrappers, so no probe emits a
+#     real finding), each probe path chosen so no earlier gate arm shadows the
+#     arm under test; a regular fixture accepted by `files` is the positive
+#     control, so the failure arms cannot all pass by the gate failing
+#     unconditionally;
+#   * status propagation: discover_paths over a nonexistent root returns
+#     find's own non-zero status (not TRUNCATED or USAGE).
+# The fixtures are committed, so no probe creates a filesystem object at run
+# time. stderr is discarded only for the nonexistent-root probe, whose find
+# error is the expected outcome.
+# Residuals: the symlink-loop case is not witnessed by a committed fixture --
+# find reports a loop through the same non-zero exit status the
+# nonexistent-root probe witnesses; a symlinked directory that points back
+# inside a scanned root materialises the same file under two paths (scanned
+# twice, never skipped), which this canary does not assert.
+
+echo ''
+echo '=== DISCOVERY: Checked-discovery canary ==='
+
+DISCOVERY_CANARY_REL='tests/policy/fixtures/discovery-canary'
+dcanary_root="$REPO_ROOT/$DISCOVERY_CANARY_REL"
+dcanary_tree="$dcanary_root/tree"
+dcanary_real_dir="$dcanary_tree/real"
+dcanary_link_dir="$dcanary_tree/link-dir"
+dcanary_real_file="$dcanary_real_dir/inner.md"
+dcanary_linked_file="$dcanary_link_dir/inner.md"
+dcanary_dangling_file="$dcanary_root/broken/dangling.md"
+dcanary_missing_root="$dcanary_root/__discovery_nonexistent__"
+dcanary_found=false
+
+# flag_discovery_canary DESCRIPTION
+# Records a DISCOVERY finding for a canary assertion that came back wrong.
+flag_discovery_canary() {
+    dcanary_found=true
+    add_finding 'DISCOVERY' 'tools/policy_check.sh' 0 \
+        "discovery canary: $1 -- the checked-discovery engine no longer holds its follow-symlinks, fail-loud contract, so a symlinked, dangling, or undiscoverable path could be read as clean"
+}
+
+# expect_discovery_gate PATH_LABEL PATH GATE EXPECTED_RC
+# Asserts discovery_gate_status PATH GATE returns exactly EXPECTED_RC.
+expect_discovery_gate() {
+    local path_label="$1" candidate_path="$2" gate_name="$3" expected_rc="$4" gate_rc=0
+    discovery_gate_status "$candidate_path" "$gate_name" || gate_rc=$?
+    if [[ "$gate_rc" -ne "$expected_rc" ]]; then
+        flag_discovery_canary "discovery_gate_status on ${path_label} under the '${gate_name}' gate returned ${gate_rc}, expected ${expected_rc}"
+    fi
+}
+
+if [[ ! -L "$dcanary_link_dir" || ! -L "$dcanary_dangling_file" ]]; then
+    flag_discovery_canary "precondition: ${DISCOVERY_CANARY_REL}/tree/link-dir and ${DISCOVERY_CANARY_REL}/broken/dangling.md must both be symlinks in this checkout, but at least one is not -- the likely cause is core.symlinks=false materialising them as plain files; set core.symlinks=true and re-checkout, never skip this canary"
+fi
+
+if [[ "${#DISCOVERY_FIND_BASE[@]}" -ne 1 || "${DISCOVERY_FIND_BASE[0]}" != '-L' ]]; then
+    flag_discovery_canary "DISCOVERY_FIND_BASE is '${DISCOVERY_FIND_BASE[*]}' (${#DISCOVERY_FIND_BASE[@]} element(s)) but must be exactly the single element '-L' -- discovery must follow symlinks script-wide"
+fi
+
+declare -a dcanary_paths=()
+dcanary_rc=0
+discover_paths dcanary_paths "$dcanary_tree" -- -name '*.md' || dcanary_rc=$?
+dcanary_accepted_total=0
+dcanary_saw_real=false
+dcanary_saw_linked=false
+for dcanary_path in "${dcanary_paths[@]}"; do
+    dcanary_gate_rc=0
+    discovery_gate_status "$dcanary_path" files || dcanary_gate_rc=$?
+    if [[ "$dcanary_gate_rc" -eq 0 ]]; then
+        dcanary_accepted_total=$((dcanary_accepted_total + 1))
+    fi
+    if [[ "$dcanary_path" == "$dcanary_real_file" ]]; then
+        dcanary_saw_real=true
+    elif [[ "$dcanary_path" == "$dcanary_linked_file" ]]; then
+        dcanary_saw_linked=true
+    fi
+done
+if [[ "$dcanary_rc" -ne 0 || "${#dcanary_paths[@]}" -ne 2 || "$dcanary_accepted_total" -ne 2 \
+   || "$dcanary_saw_real" != true || "$dcanary_saw_linked" != true ]]; then
+    flag_discovery_canary "discover_paths over ${DISCOVERY_CANARY_REL}/tree returned status ${dcanary_rc} and materialised ${#dcanary_paths[@]} path(s) [${dcanary_paths[*]}], ${dcanary_accepted_total} accepted by the 'files' gate; expected status 0 and exactly real/inner.md and link-dir/inner.md, both accepted -- -L no longer descends a symlinked directory"
+fi
+
+# INTENTIONAL NON-HELPER FIND: the only raw find in this canary, run with an
+# explicit -P as the negative control for the -L probe above; it is not a
+# discovery call site and must never be migrated to discover_paths.
+dcanary_raw_rc=0
+dcanary_raw_listing="$(find -P "$dcanary_tree" -name '*.md' -print)" || dcanary_raw_rc=$?
+if [[ "$dcanary_raw_rc" -ne 0 || "$dcanary_raw_listing" != "$dcanary_real_file" ]]; then
+    dcanary_raw_flat="${dcanary_raw_listing//$'\n'/ | }"
+    flag_discovery_canary "negative control: find -P over ${DISCOVERY_CANARY_REL}/tree returned status ${dcanary_raw_rc} and [${dcanary_raw_flat}], expected status 0 and exactly real/inner.md -- the positive probe no longer discriminates -L from -P"
+fi
+
+expect_discovery_gate 'broken/dangling.md' "$dcanary_dangling_file" files "$DISCOVERY_GATE_RC_MISSING"
+expect_discovery_gate 'broken/dangling.md' "$dcanary_dangling_file" raw 0
+expect_discovery_gate 'tree/real (a directory)' "$dcanary_real_dir" files "$DISCOVERY_GATE_RC_NOT_REGULAR"
+expect_discovery_gate 'tree/link-dir (a symlinked directory)' "$dcanary_link_dir" dirs 0
+expect_discovery_gate 'tree/real/inner.md (a regular file)' "$dcanary_real_file" dirs "$DISCOVERY_GATE_RC_NOT_DIR"
+expect_discovery_gate 'tree/real/inner.md (positive control)' "$dcanary_real_file" files 0
+
+dcanary_missing_rc=0
+discover_paths dcanary_paths "$dcanary_missing_root" -- -name '*.md' 2>/dev/null || dcanary_missing_rc=$?
+if [[ "$dcanary_missing_rc" -eq 0 || "$dcanary_missing_rc" -eq "$DISCOVERY_RC_TRUNCATED" \
+   || "$dcanary_missing_rc" -eq "$DISCOVERY_RC_USAGE" ]]; then
+    flag_discovery_canary "discover_paths over the nonexistent root ${DISCOVERY_CANARY_REL}/__discovery_nonexistent__ returned ${dcanary_missing_rc}, expected find's own non-zero status -- a failing find (a missing root or a symlink loop) no longer propagates, so it would read as a clean tree"
+fi
+
+if [[ "$dcanary_found" == false ]]; then
+    echo '[PASS] DISCOVERY: checked discovery follows symlinked directories, gates dangling and wrong-type paths, and propagates find failures'
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    echo '[FAIL] DISCOVERY: checked-discovery canary'
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'DISCOVERY'
+
 # ── CHECK 1: Forbidden hedge ───────────────────────────────────────────────
 
 echo ''
