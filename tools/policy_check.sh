@@ -279,6 +279,172 @@ file_candidates() {
     printf '%s' "$out"
 }
 
+# ── Checked discovery ───────────────────────────────────────────────────────
+# The single file-discovery engine for this script. Contract:
+#
+#   Policy: every discovery find runs with DISCOVERY_FIND_BASE (-L), so
+#   symlinks are FOLLOWED script-wide -- a symlinked file or directory is
+#   scanned as its target. Failures are loud, never silently skipped:
+#     - a symlink loop makes find print an error and exit non-zero (it keeps
+#       traversing), so discover_paths returns that status and the caller
+#       reports it through flag_discovery_failure;
+#     - a dangling symlink is printed by find -L with exit 0, so it is the
+#       `files` gate of discovery_gate_status that rejects it (missing), and
+#       the caller reports it through flag_discovery_gate.
+#   Precondition: every ROOT must exist. This is the CALLER's job; there is
+#   no swallow mode and find's stderr is never suppressed, so a missing root
+#   fails discovery with find's non-zero status and must be reported.
+#   Findings: both reporting wrappers emit through add_finding, so --strict
+#   and the allowlist apply. They do NOT set any per-check found/pass flag;
+#   the caller owns that.
+#   Residuals: symlink-loop reporting is not witnessed by a committed fixture;
+#   a symlinked directory that points back inside a scanned root materialises
+#   the same file under two paths (it is scanned twice, never skipped).
+
+DISCOVERY_FIND_BASE=(-L)
+DISCOVERY_FIND_STATUS_TAG='__DISCOVERY_FIND_STATUS='
+DISCOVERY_RC_TRUNCATED=20
+DISCOVERY_RC_USAGE=21
+DISCOVERY_GATE_RC_MISSING=22
+DISCOVERY_GATE_RC_NOT_REGULAR=23
+DISCOVERY_GATE_RC_UNREADABLE=24
+DISCOVERY_GATE_RC_NOT_DIR=25
+DISCOVERY_GATE_RC_UNKNOWN_GATE=26
+
+# discover_paths DEST_ARRAY ROOT... -- FIND_ARGS...
+# Materialises the paths
+#   find "${DISCOVERY_FIND_BASE[@]}" ROOT... FIND_ARGS... -print0
+# emits into the caller-named array DEST_ARRAY (replacing its contents), and
+# returns find's exit status, DISCOVERY_RC_TRUNCATED when the stream does not
+# end in exactly one status record, or DISCOVERY_RC_USAGE (with a stderr
+# message) when no ROOT or no `--` separator is given. Paths found before a
+# failure are still materialised so they are scanned; the non-zero status is
+# what keeps the caller from reading the list as clean.
+#
+# DEST_ARRAY is bound by nameref, so nested discovery (a discovery inside
+# another discovery's loop) must use distinct destination names; it must also
+# not be one of this function's own `discovery_*` locals.
+#
+# INVARIANT: a failing producer inside `< <(...)` is invisible to the reading
+# loop (see the materialisation invariant above), so the producer appends its
+# own status as a trailing NUL-delimited sentinel record. The
+# `|| discovery_find_status=$?` is load-bearing: errexit is inherited by the
+# process substitution, so a bare `find ...; printf ... "$?"` dies before the
+# sentinel is written whenever find fails.
+#
+# INVARIANT: every emitted path begins with one of the ROOTs, so a path record
+# can only collide with DISCOVERY_FIND_STATUS_TAG if a ROOT itself begins with
+# it; callers pass absolute roots.
+discover_paths() {
+    local -n discovery_dest_ref="$1"
+    shift
+    local -a discovery_roots=()
+    local discovery_saw_separator=false
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == '--' ]]; then
+            discovery_saw_separator=true
+            shift
+            break
+        fi
+        discovery_roots+=("$1")
+        shift
+    done
+    if [[ "$discovery_saw_separator" != true || "${#discovery_roots[@]}" -eq 0 ]]; then
+        echo "discover_paths: usage: discover_paths DEST_ARRAY ROOT... -- FIND_ARGS..." >&2
+        return "$DISCOVERY_RC_USAGE"
+    fi
+    local discovery_record discovery_status_record=''
+    local discovery_sentinel_total=0 discovery_last_was_sentinel=false
+    discovery_dest_ref=()
+    while IFS= read -r -d '' discovery_record; do
+        if [[ "$discovery_record" == "$DISCOVERY_FIND_STATUS_TAG"* ]]; then
+            discovery_sentinel_total=$((discovery_sentinel_total + 1))
+            discovery_status_record="$discovery_record"
+            discovery_last_was_sentinel=true
+        else
+            discovery_dest_ref+=("$discovery_record")
+            discovery_last_was_sentinel=false
+        fi
+    done < <(discovery_find_status=0; find "${DISCOVERY_FIND_BASE[@]}" "${discovery_roots[@]}" "$@" -print0 || discovery_find_status=$?; printf '%s%d\0' "$DISCOVERY_FIND_STATUS_TAG" "$discovery_find_status")
+    if [[ "$discovery_sentinel_total" -ne 1 || "$discovery_last_was_sentinel" != true ]]; then
+        return "$DISCOVERY_RC_TRUNCATED"
+    fi
+    return "${discovery_status_record#"$DISCOVERY_FIND_STATUS_TAG"}"
+}
+
+# discovery_gate_status PATH GATE
+# Status-bearing classifier for one discovered PATH (symlinks resolved, per
+# the -L policy). GATE is one of:
+#   files -- 0 only for a readable regular file; otherwise
+#            DISCOVERY_GATE_RC_MISSING (missing or dangling symlink),
+#            DISCOVERY_GATE_RC_NOT_REGULAR, or DISCOVERY_GATE_RC_UNREADABLE;
+#   dirs  -- 0 for a directory (a symlinked directory passes); otherwise
+#            DISCOVERY_GATE_RC_MISSING or DISCOVERY_GATE_RC_NOT_DIR;
+#   raw   -- always 0; the caller does its own read gating.
+# An unknown GATE returns DISCOVERY_GATE_RC_UNKNOWN_GATE with a stderr message.
+discovery_gate_status() {
+    local candidate_path="$1" gate_name="$2"
+    case "$gate_name" in
+        files)
+            if [[ ! -e "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_MISSING"
+            fi
+            if [[ ! -f "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_NOT_REGULAR"
+            fi
+            if [[ ! -r "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_UNREADABLE"
+            fi
+            ;;
+        dirs)
+            if [[ ! -e "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_MISSING"
+            fi
+            if [[ ! -d "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_NOT_DIR"
+            fi
+            ;;
+        raw)
+            ;;
+        *)
+            echo "discovery_gate_status: unknown gate '${gate_name}' (expected files, dirs, or raw)" >&2
+            return "$DISCOVERY_GATE_RC_UNKNOWN_GATE"
+            ;;
+    esac
+    return 0
+}
+
+# flag_discovery_failure RULE ROOT LABEL STATUS
+# Thin reporting wrapper: records the RULE finding for a discover_paths call
+# (described by LABEL, anchored at ROOT) that returned non-zero STATUS. A
+# partial path list is never a clean one.
+flag_discovery_failure() {
+    local rule_name="$1" discovery_root="$2" discovery_label="$3" discovery_rc="$4" failure_reason
+    case "$discovery_rc" in
+        "$DISCOVERY_RC_TRUNCATED") failure_reason='its path stream ended without exactly one trailing find-status record (truncated)' ;;
+        "$DISCOVERY_RC_USAGE") failure_reason='discover_paths was called without a ROOT or without the -- separator' ;;
+        *) failure_reason="find exited ${discovery_rc} (a missing root, an unreadable directory, or a symlink loop)" ;;
+    esac
+    add_finding "$rule_name" "$discovery_root" 0 \
+        "Discovery of ${discovery_label} failed: ${failure_reason}, so paths in it may never have been checked -- fix the tree; a failed discovery is NOT clean"
+}
+
+# flag_discovery_gate RULE PATH RC
+# Thin reporting wrapper: records the RULE finding for a discovered PATH that
+# discovery_gate_status rejected with non-zero RC.
+flag_discovery_gate() {
+    local rule_name="$1" candidate_path="$2" gate_rc="$3" rejection_reason
+    case "$gate_rc" in
+        "$DISCOVERY_GATE_RC_MISSING") rejection_reason='is missing or is a dangling symlink' ;;
+        "$DISCOVERY_GATE_RC_NOT_REGULAR") rejection_reason='is not a regular file' ;;
+        "$DISCOVERY_GATE_RC_UNREADABLE") rejection_reason='is not readable' ;;
+        "$DISCOVERY_GATE_RC_NOT_DIR") rejection_reason='is not a directory' ;;
+        *) rejection_reason="was rejected by the discovery gate with status ${gate_rc}" ;;
+    esac
+    add_finding "$rule_name" "$candidate_path" 0 \
+        "this discovered path ${rejection_reason}, so it was never checked -- fix or remove it; an unchecked path is NOT clean"
+}
+
 # ── Timing instrumentation ──────────────────────────────────────────────────
 # Permanent per-check profiling (#305, precedent #304). Emits one
 # "[TIME] <label> <elapsed>s" line after each check block and a per-check
