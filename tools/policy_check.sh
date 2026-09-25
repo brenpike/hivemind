@@ -2662,14 +2662,17 @@ echo '=== SAFETY: Regression fixture tests ==='
 
 SAFETY_DIR="$REPO_ROOT/tests/policy"
 declare -a SAFETY_FIXTURES=()
+SAFETY_DISCOVERY_FAILED=false
 if [[ -d "$SAFETY_DIR" ]]; then
-    while IFS= read -r -d '' f; do
-        SAFETY_FIXTURES+=("$f")
-    done < <(find "$SAFETY_DIR" -maxdepth 1 -name 'safety-*.json' -type f -print0)
+    discover_checked_paths 'SAFETY' SAFETY_FIXTURES files 'safety-*.json fixture files' "$SAFETY_DIR" -- -maxdepth 1 -name 'safety-*.json' || SAFETY_DISCOVERY_FAILED=true
 fi
 
 SAFETY_PASSED=0
 SAFETY_FAILED=0
+if [[ "$SAFETY_DISCOVERY_FAILED" == true ]]; then
+    echo '[FAIL] SAFETY: safety-*.json fixture discovery'
+    SAFETY_FAILED=$((SAFETY_FAILED + 1))
+fi
 
 test_set_check() {
     local rule_name="$1"
@@ -2981,10 +2984,10 @@ for fixture_file in "${SAFETY_FIXTURES[@]}"; do
     fi
 done
 
-if [[ ${#SAFETY_FIXTURES[@]} -eq 0 ]]; then
+if [[ ${#SAFETY_FIXTURES[@]} -eq 0 && "$SAFETY_FAILED" -eq 0 ]]; then
     echo '[SKIP] No safety fixture files found'
 else
-    echo "Safety fixtures: $SAFETY_PASSED passed, $SAFETY_FAILED failed out of ${#SAFETY_FIXTURES[@]}"
+    echo "Safety fixtures: $SAFETY_PASSED passed, $SAFETY_FAILED failed out of $((SAFETY_PASSED + SAFETY_FAILED))"
     CHECKS_PASSED=$((CHECKS_PASSED + SAFETY_PASSED))
     CHECKS_FAILED=$((CHECKS_FAILED + SAFETY_FAILED))
 fi
@@ -3220,14 +3223,17 @@ echo '=== COMPAT: Plugin compatibility fixture tests ==='
 
 COMPAT_DIR="$REPO_ROOT/tests/plugin"
 declare -a COMPAT_FIXTURES=()
+COMPAT_DISCOVERY_FAILED=false
 if [[ -d "$COMPAT_DIR" ]]; then
-    while IFS= read -r -d '' f; do
-        COMPAT_FIXTURES+=("$f")
-    done < <(find "$COMPAT_DIR" -maxdepth 1 -name '*.json' -type f -print0)
+    discover_checked_paths 'COMPAT' COMPAT_FIXTURES files 'compatibility fixture files' "$COMPAT_DIR" -- -maxdepth 1 -name '*.json' || COMPAT_DISCOVERY_FAILED=true
 fi
 
 COMPAT_PASSED=0
 COMPAT_FAILED=0
+if [[ "$COMPAT_DISCOVERY_FAILED" == true ]]; then
+    echo '[FAIL] COMPAT: compatibility fixture discovery'
+    COMPAT_FAILED=$((COMPAT_FAILED + 1))
+fi
 
 for fixture_file in "${COMPAT_FIXTURES[@]}"; do
     fixture_raw="$(<"$fixture_file")"
@@ -3355,13 +3361,9 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                 if [[ "$glob_pattern" == *"/"* ]]; then
                     # Glob with subdirectory (e.g. */SKILL.md) — recurse and filter
                     local_filter="${glob_pattern##*/}"
-                    while IFS= read -r -d '' tf; do
-                        target_files+=("$tf")
-                    done < <(find "$target_dir" -name "$local_filter" -type f -print0)
+                    discover_checked_paths 'COMPAT' target_files files "[$check_desc] files named '$local_filter' under $target_dir_rel" "$target_dir" -- -name "$local_filter" || fixture_passed=false
                 else
-                    while IFS= read -r -d '' tf; do
-                        target_files+=("$tf")
-                    done < <(find "$target_dir" -maxdepth 1 -name "$glob_pattern" -type f -print0)
+                    discover_checked_paths 'COMPAT' target_files files "[$check_desc] files matching '$glob_pattern' in $target_dir_rel" "$target_dir" -- -maxdepth 1 -name "$glob_pattern" || fixture_passed=false
                 fi
 
                 if [[ -n "$exclude_pattern" ]]; then
@@ -3407,7 +3409,9 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                 add_finding 'COMPAT' "$target_dir_rel" 0 \
                     "[$check_desc] Directory missing: $target_dir_rel"
             else
-                while IFS= read -r -d '' target_file; do
+                declare -a field_absent_files=()
+                discover_checked_paths 'COMPAT' field_absent_files files "[$check_desc] Markdown files in $target_dir_rel" "$target_dir" -- -maxdepth 1 -name '*.md' || fixture_passed=false
+                for target_file in "${field_absent_files[@]}"; do
                     fm_content="$(get_frontmatter "$target_file")"
                     absent_count="$(echo "$fixture_raw" | jq '.absent | length')"
                     ai=0
@@ -3422,7 +3426,7 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                         fi
                         ai=$((ai + 1))
                     done
-                done < <(find "$target_dir" -maxdepth 1 -name '*.md' -type f -print0)
+                done
             fi
             ;;
 
@@ -3443,7 +3447,14 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                     "[$check_desc] Reference file missing: $ref_file_rel"
             else
                 ref_content="$(<"$ref_file_path")"
-                while IFS= read -r -d '' subdir; do
+                # INVARIANT: under DISCOVERY_FIND_BASE (-L) `-type d` is true for
+                # a directory AND a symlink to one, and `-type l` is true only for
+                # a symlink find cannot follow (dangling), so this predicate hands
+                # every subdirectory plus every dangling entry to the `dirs` gate,
+                # which rejects the dangling ones loudly; plain files stay out.
+                declare -a named_subdirs=()
+                discover_checked_paths 'COMPAT' named_subdirs dirs "[$check_desc] subdirectories of $target_dir_rel" "$target_dir" -- -mindepth 1 -maxdepth 1 '(' -type d -o -type l ')' || fixture_passed=false
+                for subdir in "${named_subdirs[@]}"; do
                     dir_name="$(basename "$subdir")"
                     if [[ -n "$exclude_pattern" && "$dir_name" == "$exclude_pattern" ]]; then
                         continue
@@ -3462,7 +3473,7 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                         add_finding 'COMPAT' "$ref_file_rel" 0 \
                             "[$check_desc] Directory name not found in $ref_file_rel: $dir_name"
                     fi
-                done < <(find "$target_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+                done
             fi
             ;;
 
@@ -3482,7 +3493,9 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                     "[$check_desc] Reference file missing: $ref_file_rel"
             else
                 ref_content="$(<"$ref_file_path")"
-                while IFS= read -r -d '' file_in_dir; do
+                declare -a named_md_files=()
+                discover_checked_paths 'COMPAT' named_md_files files "[$check_desc] Markdown files in $target_dir_rel" "$target_dir" -- -maxdepth 1 -name '*.md' || fixture_passed=false
+                for file_in_dir in "${named_md_files[@]}"; do
                     base_name="$(basename "$file_in_dir" .md)"
                     # Builtin fixed-string test — same EPIPE/pipefail false-negative class as the
                     # dir-names-in-file arm above (see its comment).
@@ -3491,7 +3504,7 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                         add_finding 'COMPAT' "$ref_file_rel" 0 \
                             "[$check_desc] Filename not found in $ref_file_rel: $base_name"
                     fi
-                done < <(find "$target_dir" -maxdepth 1 -name '*.md' -type f -print0)
+                done
             fi
             ;;
 
@@ -3534,7 +3547,14 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                 add_finding 'COMPAT' "$target_dir_rel" 0 \
                     "[$check_desc] Directory missing: $target_dir_rel"
             else
-                while IFS= read -r -d '' scan_file; do
+                # INVARIANT: under DISCOVERY_FIND_BASE (-L) `-type d` is true for
+                # a directory AND a symlink to one, so `! -type d` keeps every
+                # directory out while regular files, symlinks to files, dangling
+                # symlinks, and special files all reach the `files` gate, which
+                # rejects all but readable regular files loudly.
+                declare -a pattern_scan_files=()
+                discover_checked_paths 'COMPAT' pattern_scan_files files "[$check_desc] files under $target_dir_rel" "$target_dir" -- '!' -type d || fixture_passed=false
+                for scan_file in "${pattern_scan_files[@]}"; do
                     scan_content="$(<"$scan_file")"
                     if [[ "$scan_content" == *"$search_pattern"* ]]; then
                         fixture_passed=false
@@ -3543,7 +3563,7 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                         add_finding 'COMPAT' "$rel_file" 0 \
                             "[$check_desc] Forbidden pattern found: $search_pattern"
                     fi
-                done < <(find "$target_dir" -type f -print0)
+                done
             fi
             ;;
 
@@ -3563,10 +3583,10 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
     fi
 done
 
-if [[ ${#COMPAT_FIXTURES[@]} -eq 0 ]]; then
+if [[ ${#COMPAT_FIXTURES[@]} -eq 0 && "$COMPAT_FAILED" -eq 0 ]]; then
     echo '[SKIP] No compatibility fixture files found'
 else
-    echo "Compatibility fixtures: $COMPAT_PASSED passed, $COMPAT_FAILED failed out of ${#COMPAT_FIXTURES[@]}"
+    echo "Compatibility fixtures: $COMPAT_PASSED passed, $COMPAT_FAILED failed out of $((COMPAT_PASSED + COMPAT_FAILED))"
     CHECKS_PASSED=$((CHECKS_PASSED + COMPAT_PASSED))
     CHECKS_FAILED=$((CHECKS_FAILED + COMPAT_FAILED))
 fi
@@ -3581,14 +3601,17 @@ echo '=== WORKFLOW-FIXTURES: Golden-path workflow tests ==='
 test_workflow_fixtures() {
     local fixtures_dir="$REPO_ROOT/tests/workflows"
     declare -a fixtures=()
+    local wf_discovery_failed=false
     if [[ -d "$fixtures_dir" ]]; then
-        while IFS= read -r -d '' f; do
-            fixtures+=("$f")
-        done < <(find "$fixtures_dir" -maxdepth 1 -name 'golden-*.json' -type f -print0)
+        discover_checked_paths 'WORKFLOW-FIXTURES' fixtures files 'golden-*.json workflow fixture files' "$fixtures_dir" -- -maxdepth 1 -name 'golden-*.json' || wf_discovery_failed=true
     fi
 
     WF_PASSED=0
     WF_FAILED=0
+    if [[ "$wf_discovery_failed" == true ]]; then
+        echo 'FAIL [WORKFLOW-FIXTURES] golden-*.json fixture discovery'
+        WF_FAILED=$((WF_FAILED + 1))
+    fi
 
     if [[ ${#fixtures[@]} -eq 0 ]]; then
         echo "FAIL [WORKFLOW-FIXTURES] No golden-*.json fixtures found in tests/workflows/"
