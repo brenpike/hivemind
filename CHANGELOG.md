@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `tools/policy_check.sh` CHECK 15: tracker references are classified against exactly three safe shapes — an inline-code span at any backtick-run length, a full `owner/repo#N` citation, and a `](#...)` in-page anchor — so word-glued references like `issue#123` and `PR#456` are now findings while two- and three-backtick inline code is no longer a false positive. File discovery and per-file reads are status-checked, so a failed `find`, a missing, non-regular, or unreadable path fails the check instead of reading as clean. New canaries: `tests/policy/fixtures/tracker-ref-allowlist-canary.md` and a CHECK 15 traversal canary.
+
 ## [4.1.0] - 2026-09-25
 
 ### Added
