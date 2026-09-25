@@ -1549,11 +1549,11 @@ mark_time 'CHECK14'
 # DETECTION IS A POSITIVE ALLOWLIST. Each record first loses a trailing CR, so a
 # CRLF checkout yields records and tokens byte-identical to the LF case. A
 # left-to-right walk then classifies the line:
-#   * CANDIDATE: a `#` followed by a digit run whose next character is end of
-#     line or outside [0-9A-Za-z_]. The token is the `#` plus that digit run.
-#     Only a candidate can become a finding, so ATX headings, a `#!` shebang,
-#     and a letter-bearing hex colour such as `#1a2b3c` are never candidates
-#     and need no exemption of their own.
+#   * CANDIDATE: a `#` followed by a digit run, UNCONDITIONALLY -- whatever
+#     character follows the run. The token is the `#` plus that digit run and
+#     never the word characters after it. Only a candidate can become a
+#     finding, so ATX headings and a `#!` shebang are never candidates: their
+#     `#` is not followed by a digit.
 #   * SAFE SHAPES, each an anchored prefix match at the walk position, consumed
 #     whole so nothing inside the span is classified:
 #       S1 inline code -- a backtick run of length L, closed by the next
@@ -1566,12 +1566,18 @@ mark_time 'CHECK14'
 #       S3 in-page anchor -- `](#` through the first `)`, including the
 #          digit-leading slugs a letter-first rule would miss.
 #       S2 cross-repo citation -- owner/repo#NNN with exactly one `/`, each
-#          side starting alphanumeric, the same right boundary as a candidate,
-#          and tried only at a LEFT BOUNDARY (line start, or a previous
-#          character outside [A-Za-z0-9._/-]). It names its repo, so it does
-#          not rot, and `[cli/cli#12258](...)` stays legal.
-#   The walk tries S1, then S3, then S2; on a match it jumps past the span,
-#   else a candidate is emitted and stepped over, else it advances one
+#          side starting alphanumeric, the digit run followed by end of line
+#          or a character outside [0-9A-Za-z_], and tried only at a LEFT
+#          BOUNDARY (line start, or a previous character outside
+#          [A-Za-z0-9._/-]). It names its repo, so it does not rot, and
+#          `[cli/cli#12258](...)` stays legal.
+#       S4 hex colour -- `#` plus a run of [0-9A-Fa-f] of length exactly 3,
+#          4, 6 or 8 that carries at least one letter, with the character
+#          before the `#` and the character after the run each end of line or
+#          outside [0-9A-Za-z_]. `#1a2b3c` and `#1af` stay legal; a pure-digit
+#          run such as `#123456` has no letter and stays a candidate.
+#   The walk tries S1, then S3, then S2, then S4; on a match it jumps past the
+#   span, else a candidate is emitted and stepped over, else it advances one
 #   character.
 #
 # ELIMINATED CLASS: OVER-BROAD EXEMPTION. A `#` is exempt only when a safe shape
@@ -1581,6 +1587,14 @@ mark_time 'CHECK14'
 # backtick run can be closed only by a run of its own length. Both are
 # unrepresentable as exemptions rather than guarded against.
 #
+# ELIMINATED CLASS: SILENT INPUT-SET NARROWING. Nothing ahead of the fail-closed
+# layers shrinks what the check reads. The candidate rule has no right-boundary
+# condition, so `#123g`, `#123_` and `_#123_` are candidates rather than silently
+# dropped; the only narrowing is by a named safe shape. Discovery selects by
+# NAME only, never by type, so every name-matching path -- a symlink, a
+# directory named `*.md`, a dangling link -- reaches the read gate, where it is
+# read or becomes a finding instead of vanishing inside find.
+#
 # CARDINALITY. A candidate consumes only its own token and never the separator
 # after it, so every reference on a line is reported, not just the first. A
 # context-consuming matcher eats the separator between neighbours and misses the
@@ -1588,7 +1602,7 @@ mark_time 'CHECK14'
 # allowlist keys on (rule, path, line), so a finding that is not line-COMPLETE
 # lets an allowlist entry absolve a reference no reviewer ever saw.
 #
-# WITNESSES, two layers, because they fail independently:
+# WITNESSES, three layers, because they fail independently:
 #   * the DETECTION CANARY asserts the pure predicate `tracker_ref_tokens` over
 #     literal lines -- the candidate rule and each safe shape, in both
 #     directions, and by EXACT token string so a dropped neighbour is caught.
@@ -1597,7 +1611,8 @@ mark_time 'CHECK14'
 #     record shape, the line numbering, and the absence of any region skipping
 #     (including an unclosed-frontmatter fixture that no predicate test reaches).
 #   * the TRAVERSAL CANARY asserts that discovery, the read gate, and the awk
-#     layer each return non-zero on failure instead of empty output.
+#     layer each return non-zero on failure instead of empty output, and that
+#     discovery selects by name only.
 #
 # Discovery FAILS CLOSED PER ARM: each of the two discovery arms (`plugin/**/*.md`
 # and `plugin/workflows/*.json`) carries its OWN zero-file assertion. An aggregate
@@ -1605,9 +1620,11 @@ mark_time 'CHECK14'
 # tree yields zero JSON files while the markdown arm keeps the aggregate nonzero,
 # so half the stated scope would vanish with the check still green. A find that
 # fails, or a path stream that ends without its trailing status record, is its
-# own finding. Likewise a path that is missing, not a regular file, or
-# unreadable, and a classifier that exits non-zero on a file, are each a
-# finding, never a clean file.
+# own finding. Because discovery passes no type test, every name-matching path is
+# handed to the read gate: a symlink to a regular file is read through it, and a
+# path that is missing (a dangling symlink), not a regular file (a directory or a
+# symlink to one), or unreadable is a finding, as is a classifier that exits
+# non-zero on a file -- never a clean file.
 #
 # RESIDUALS, stated plainly:
 #   * allowlist granularity is the LINE, not the token. An entry added for one
@@ -1624,6 +1641,24 @@ mark_time 'CHECK14'
 #   * a `#` glued to a word (`word#123`) and a digit-leading URL fragment
 #     (`https://ex.com/p#123`) are reported, including inside a link target.
 #     Neither occurs in plugin/ today; the remedy is inline code.
+#   * the reported token for a reference glued to trailing word characters is
+#     its `#`-plus-digits prefix only: `#123g` reports `#123`, and
+#     `word#1a2b3c` (left-glued, so S4 does not apply) reports `#1`.
+#   * S4 exempts ANY left- and right-bounded 3, 4, 6 or 8 hex run carrying a
+#     letter, so `#12ab` is indistinguishable from a tracker id glued to letters
+#     and is exempt. Bounded: a tracker id is pure digits, and a pure-digit run
+#     is never S4.
+#   * RECORDED RESIDUAL, same root class as silent input-set narrowing:
+#     discovery does not pass `-L`, so a symlinked DIRECTORY under plugin/ is
+#     not traversed and any `*.md` beneath it is absent from the scan set.
+#     Bounded: zero symlinks exist under plugin/ today, and the input is the
+#     repo's own committed tree. Remediation is rejected for now because an
+#     honest witness needs a filesystem object created at run time, and `-L`
+#     changes find's dangling-link and loop error semantics for the whole
+#     check. Promote this to a tracked issue if a symlink lands under plugin/.
+#   * discovery coverage is split: the traversal canary's behavioural symlink
+#     probe witnesses the discovery FUNCTION, and its exact args pin witnesses
+#     the production CALL SITES. Neither alone covers both.
 #   * an inline code span broken across physical lines is not recognized: each
 #     line is classified alone, so a reference on either half is reported.
 #   * the scanner canary pins fixture LINE NUMBERS in this file. The fixtures say
@@ -1653,6 +1688,18 @@ function is_left_boundary(text, at) {
 function is_right_boundary(text, at) {
     return substr(text, at, 1) !~ /[0-9A-Za-z_]/
 }
+function is_word_left_boundary(text, at) {
+    return at == 1 || substr(text, at - 1, 1) !~ /[0-9A-Za-z_]/
+}
+function hex_colour_len(text, at,    hex_len) {
+    if (!is_word_left_boundary(text, at)) return 0
+    if (!match(substr(text, at), /^#[0-9A-Fa-f]+/)) return 0
+    hex_len = RLENGTH - 1
+    if (hex_len != 3 && hex_len != 4 && hex_len != 6 && hex_len != 8) return 0
+    if (substr(text, at + 1, hex_len) !~ /[A-Fa-f]/) return 0
+    if (!is_right_boundary(text, at + RLENGTH)) return 0
+    return RLENGTH
+}
 {
     sub(/\r$/, "")
     if (index($0, "#") == 0) next
@@ -1677,7 +1724,14 @@ function is_right_boundary(text, at) {
             pos += RLENGTH
             continue
         }
-        if (cur_char == "#" && match(substr(line_text, pos + 1), /^[0-9]+/) && is_right_boundary(line_text, pos + 1 + RLENGTH)) {
+        if (cur_char == "#") {
+            colour_len = hex_colour_len(line_text, pos)
+            if (colour_len) {
+                pos += colour_len
+                continue
+            }
+        }
+        if (cur_char == "#" && match(substr(line_text, pos + 1), /^[0-9]+/)) {
             found_tokens = found_tokens token_sep "#" substr(line_text, pos + 1, RLENGTH)
             token_sep = " "
             pos += 1 + RLENGTH
@@ -1836,8 +1890,15 @@ check15_flag_discovery_failure() {
         "Tracker-reference discovery of ${arm_label} failed: ${failure_reason}, so files in that arm may never have been scanned -- fix the tree's readability; a failed discovery is NOT clean"
 }
 
+# INVARIANT: discovery selects by NAME only, never by type: every name-matching
+# path reaches the read gate, where a path that is missing or not a regular file becomes a
+# finding instead of being dropped silently by find. The traversal canary pins
+# these arrays literally.
+CHECK15_MD_FIND_ARGS=(-name '*.md')
+CHECK15_JSON_FIND_ARGS=(-maxdepth 1 -name '*.json')
+
 check15_discovery_rc=0
-check15_discover_files "$PLUGIN_ROOT" -name '*.md' -type f || check15_discovery_rc=$?
+check15_discover_files "$PLUGIN_ROOT" "${CHECK15_MD_FIND_ARGS[@]}" || check15_discovery_rc=$?
 if [[ "$check15_discovery_rc" -ne 0 ]]; then
     check15_flag_discovery_failure "$PLUGIN_ROOT" 'plugin/**/*.md' "$check15_discovery_rc"
 fi
@@ -1847,7 +1908,7 @@ for prose_file in "${check15_discovered_files[@]}"; do
 done
 
 check15_discovery_rc=0
-check15_discover_files "$PLUGIN_ROOT/workflows" -maxdepth 1 -name '*.json' -type f || check15_discovery_rc=$?
+check15_discover_files "$PLUGIN_ROOT/workflows" "${CHECK15_JSON_FIND_ARGS[@]}" || check15_discovery_rc=$?
 if [[ "$check15_discovery_rc" -ne 0 ]]; then
     check15_flag_discovery_failure "$PLUGIN_ROOT/workflows" 'plugin/workflows/*.json' "$check15_discovery_rc"
 fi
@@ -1952,8 +2013,11 @@ check15_expect_miss '#!/usr/bin/env bash'
 check15_expect_miss 'cross-repo citation cli/cli#12258 names its repo'
 check15_expect_miss 'see [the anchor](#section-2) above'
 check15_expect_miss 'the literal placeholder `#123` inside inline code'
-# Not a candidate: the digit run after `#` is right-bounded by a letter.
+# S4 hex colour: a left- and right-bounded 3, 4, 6 or 8 hex run carrying a letter.
 check15_expect_miss 'the colour #1a2b3c is letter-bearing'
+check15_expect_miss 'the colour #1af is short'
+check15_expect_miss 'the colour #1af8 carries alpha'
+check15_expect_miss 'the colour #1a2b3c4d carries alpha'
 check15_expect_miss 'no hash here at all'
 check15_expect_miss 'the ``#123`` double run'
 check15_expect_miss 'the ```#123``` triple run'
@@ -1978,6 +2042,17 @@ check15_expect_tokens 'bare (#2-slug) text' '#2'
 check15_expect_tokens 'cli/cli#1 and issue#2 and `#3` and #4' '#2 #4'
 check15_expect_tokens 'host path example.com/a/b#12' '#12'
 check15_expect_tokens 'a mismatched ``#123` run' '#123'
+check15_expect_tokens 'see #123_ underscore' '#123'
+check15_expect_tokens '_#123_' '#123'
+check15_expect_tokens '__#123__' '#123'
+check15_expect_tokens 'see #123g letter' '#123'
+check15_expect_tokens '#12ab5' '#12'
+check15_expect_tokens 'glued word#1a2b3c' '#1'
+check15_expect_tokens '#1a2b3c_' '#1'
+check15_expect_tokens '#12345678' '#12345678'
+check15_expect_tokens '#1234' '#1234'
+check15_expect_tokens '#12g #34' '#12 #34'
+check15_expect_tokens 'colour #1a2b3c then ref #45' '#45'
 
 # ── CHECK 15 SCANNER CANARY ────────────────────────────────────────────────
 # The detection canary above witnesses the PREDICATE. This layer witnesses the
@@ -2017,7 +2092,7 @@ check15_expect_scan 'tests/policy/fixtures/tracker-ref-scan-canary.md' \
 check15_expect_scan 'tests/policy/fixtures/tracker-ref-unclosed-frontmatter.md' \
     $'10\t#77'
 check15_expect_scan 'tests/policy/fixtures/tracker-ref-allowlist-canary.md' \
-    $'9\t#123\n11\t#456\n13\t#9\n19\t#123\n21\t#123\n23\t#123\n27\t#2\n29\t#2 #4\n31\t#12\n37\t#123'
+    $'9\t#123\n11\t#456\n13\t#9\n19\t#123\n21\t#123\n23\t#123\n27\t#2\n29\t#2 #4\n31\t#12\n37\t#123\n39\t#123\n41\t#123\n45\t#1\n47\t#1\n49\t#12345678'
 
 # ── CHECK 15 TRAVERSAL CANARY ──────────────────────────────────────────────
 # Witnesses that each traversal layer FAILS CLOSED: a failed discovery, a
@@ -2027,6 +2102,12 @@ check15_expect_scan 'tests/policy/fixtures/tracker-ref-allowlist-canary.md' \
 # the failure arms cannot all pass by the layer failing unconditionally. Each
 # probe runs under `if !` so set -euo pipefail cannot abort the run; stderr is
 # discarded only here, because these failures are the expected outcome.
+# Discovery coverage is split across two witnesses: the args pin below witnesses
+# the production CALL SITES (their arrays select by name only), and the symlink
+# probe witnesses the discovery FUNCTION (a name-matching symlink is
+# materialised, and the same probe with `-type f` appended drops it -- the
+# negative control). The symlink fixture is committed, so no probe creates a
+# filesystem object at run time.
 # Residual: the reporting wrapper's finding emission on a read failure has no
 # canary -- asserting it would emit a real finding -- and it is a thin
 # translation of the status-bearing layer these probes do witness.
@@ -2042,6 +2123,22 @@ check15_flag_traversal_canary() {
 check15_canary_missing_path="$REPO_ROOT/tests/policy/fixtures/__check15_nonexistent__"
 check15_canary_dir_path="$REPO_ROOT/tests/policy/fixtures"
 check15_canary_fixture_path="$REPO_ROOT/tests/policy/fixtures/tracker-ref-scan-canary.md"
+check15_canary_symlink_name='tracker-ref-symlink-canary.md'
+check15_canary_symlink_path="$REPO_ROOT/tests/policy/fixtures/$check15_canary_symlink_name"
+
+# check15_expect_find_args ARRAY_NAME EXPECTED ARGS...
+# Exact-string pin of one production discovery args array, joined by single
+# spaces. Any drift -- a re-added `-type f` above all -- is a canary finding.
+check15_expect_find_args() {
+    local array_name="$1" expected_args="$2" IFS=' '
+    shift 2
+    if [[ "$*" != "$expected_args" ]]; then
+        check15_flag_traversal_canary "${array_name} is '$*' but must be exactly '${expected_args}' -- discovery selects by NAME only, never by type, so every name-matching path reaches the read gate"
+    fi
+}
+
+check15_expect_find_args 'CHECK15_MD_FIND_ARGS' '-name *.md' "${CHECK15_MD_FIND_ARGS[@]}"
+check15_expect_find_args 'CHECK15_JSON_FIND_ARGS' '-maxdepth 1 -name *.json' "${CHECK15_JSON_FIND_ARGS[@]}"
 
 if check15_discover_files "$check15_canary_missing_path" -type f 2>/dev/null; then
     check15_flag_traversal_canary "check15_discover_files returned 0 for the nonexistent root ${check15_canary_missing_path}, so a failing find is read as an empty tree"
@@ -2059,6 +2156,21 @@ if ! check15_canary_records="$(check15_read_records "$check15_canary_fixture_pat
     check15_flag_traversal_canary "positive control: check15_read_records failed on the committed fixture ${check15_canary_fixture_path}"
 elif [[ -z "$check15_canary_records" ]]; then
     check15_flag_traversal_canary "positive control: check15_read_records returned no records for the committed fixture ${check15_canary_fixture_path}, which carries known references"
+fi
+check15_canary_discovery_rc=0
+check15_discover_files "$REPO_ROOT/tests/policy/fixtures" -maxdepth 1 -name "$check15_canary_symlink_name" || check15_canary_discovery_rc=$?
+if [[ "$check15_canary_discovery_rc" -ne 0 || "${#check15_discovered_files[@]}" -ne 1 ]]; then
+    check15_flag_traversal_canary "check15_discover_files materialised ${#check15_discovered_files[@]} path(s) with status ${check15_canary_discovery_rc} for the committed symlink ${check15_canary_symlink_path}, expected exactly 1 with status 0, so discovery drops a name-matching path before the read gate"
+fi
+check15_canary_discovery_rc=0
+check15_discover_files "$REPO_ROOT/tests/policy/fixtures" -maxdepth 1 -name "$check15_canary_symlink_name" -type f || check15_canary_discovery_rc=$?
+if [[ "$check15_canary_discovery_rc" -ne 0 || "${#check15_discovered_files[@]}" -ne 0 ]]; then
+    check15_flag_traversal_canary "negative control: check15_discover_files with -type f materialised ${#check15_discovered_files[@]} path(s) with status ${check15_canary_discovery_rc} for the committed symlink ${check15_canary_symlink_path}, expected 0 with status 0, so the symlink probe above no longer distinguishes name-only from type-filtered discovery"
+fi
+check15_canary_symlink_rc=0
+check15_canary_symlink_records="$(check15_read_records "$check15_canary_symlink_path")" || check15_canary_symlink_rc=$?
+if [[ "$check15_canary_symlink_rc" -ne 0 || "$check15_canary_symlink_records" != $'10\t#77' ]]; then
+    check15_flag_traversal_canary "check15_read_records returned status ${check15_canary_symlink_rc} and records [${check15_canary_symlink_records}] for the committed symlink ${check15_canary_symlink_path}, expected status 0 and the pinned records of its target, so a symlinked runtime-prose file is not read through"
 fi
 
 if [[ "$check15_found" == false ]]; then

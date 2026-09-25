@@ -32,6 +32,18 @@ Host path example.com/a/b#12 is flagged.
 
 Linked [cli/cli#12258](https://github.com/cli/cli/pull/12258) stays legal.
 
-Right-bounded candidate #1a2b3c stays legal.
+Hex-colour safe shape #1a2b3c stays legal.
 
 Mismatched ``#123` run is flagged.
+
+Underscore-wrapped _#123_ is flagged.
+
+Letter-glued #123g is flagged.
+
+Hex colour #1af stays legal.
+
+Word-glued word#1a2b3c is flagged.
+
+Underscore-bounded #1a2b3c_ is flagged.
+
+Pure-digit #12345678 is flagged.
