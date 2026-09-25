@@ -2255,6 +2255,29 @@ test_set_check() {
         return
     fi
 
+    # Independent capture-group validation: the compile oracle above only
+    # proves the regex compiles -- it says nothing about whether the regex
+    # captures a group. A capture-free regex that matches ZERO times in the
+    # extraction loop below never runs the `defined($1) or die` guard (the
+    # while-loop body never executes), so it would otherwise vacuously pass as
+    # a legitimate empty-capture zero-match result. Count the regex's own
+    # capture groups independently of whether it matches anything: wrap it in
+    # a synthetic always-matching alternation `(?:$re)|(?:)` against the empty
+    # string. Perl populates @+ with one slot per capture group defined
+    # ANYWHERE in the pattern (participating or not), regardless of which
+    # alternation branch actually matched, so `scalar(@+) - 1` reports the
+    # true group count without requiring the regex to match real content.
+    if ! RE="$regex_text" perl -e '
+        my $re = qr/$ENV{RE}/;
+        "" =~ /(?:$re)|(?:)/;
+        exit(scalar(@+) - 1 > 0 ? 0 : 1);
+    ' 2>/dev/null; then
+        add_finding 'SAFETY' '<fixture>' 0 \
+            "[$rule_name] set_check.extract_regex has no capture group -- a capture-free regex that matches nothing would vacuously pass as an empty result"
+        TEST_SET_CHECK_RESULT="false"
+        return
+    fi
+
     # Build expected set
     local expected_json
     expected_json="$(echo "$set_check_json" | jq -r '.expected_set // []')"
@@ -2579,6 +2602,11 @@ fi
 #      into an empty capture object that reads as a vacuous zero-match pass.
 #   5. unescaped slash: a regex containing `/` must extract normally, proving
 #      the regex reaches perl as data rather than as program source.
+#   6. capture-free zero-match: a regex with NO capture group that ALSO
+#      matches nothing must fail -- without an independent capture-group
+#      count, this exact combination never reaches the `defined($1) or die`
+#      guard (the while-loop body never runs) and would vacuously pass as the
+#      same clean empty result as branch 1.
 # INVARIANT: the capture must NOT be written as `out="$( ... )" || out=''` --
 # bash disables errexit inside a command substitution that is part of an
 # AND-OR list, so the regression would be swallowed INSIDE the subshell and
@@ -2695,6 +2723,33 @@ else
         set_check_zero_canary_ok=false
         add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
             'set_check failed to extract with a regex containing an unescaped slash -- the regex is reaching perl as program source instead of data'
+    fi
+
+    # Branch 6: a capture-free regex reusing the reserved zero-match token
+    # prefix (guaranteed to match nothing in this fixture per the file's own
+    # docstring) must still FAIL -- without the independent capture-group
+    # count above, this exact combination never runs the extraction loop's
+    # `defined($1) or die` guard and would vacuously pass as a clean
+    # zero-match result identical to branch 1.
+    set_check_nocapture_zero_match_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
+        extract_regex: "SETCHECK-ZERO-MATCH-CANARY [0-9]+:",
+        expected_set: [],
+        expected_counts: {},
+        files: [{path: $path, mode: "subset"}]
+    }')"
+    set_check_nocapture_zero_match_result=''
+    set +e
+    set_check_nocapture_zero_match_result="$(
+        set -e
+        TEST_SET_CHECK_RESULT=''
+        test_set_check 'set-check-zero-match-canary-nocapture-zero-match' "$set_check_nocapture_zero_match_spec" > /dev/null 2>&1
+        echo "$TEST_SET_CHECK_RESULT"
+    )"
+    set -e
+    if [[ "$set_check_nocapture_zero_match_result" != 'false' ]]; then
+        set_check_zero_canary_ok=false
+        add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
+            'set_check passed a capture-free extract_regex that matches nothing -- a capture-free regex is being vacuously accepted as a zero-match result'
     fi
 fi
 if [[ "$set_check_zero_canary_ok" == true ]]; then
