@@ -305,6 +305,19 @@ file_candidates() {
 #   Precondition: every ROOT must exist. This is the CALLER's job; there is
 #   no swallow mode and find's stderr is never suppressed, so a missing root
 #   fails discovery with find's non-zero status and must be reported.
+#   Containment: every path discover_checked_paths accepts resolves inside
+#   the checkout. Because -L follows symlinks, a link can lead discovery out
+#   of the repository, so discovery_containment_status canonicalises each
+#   materialised path with `realpath -m` and rejects any that does not
+#   resolve to REPO_ROOT or under it (a realpath failure is a rejection,
+#   never an accept). It runs AHEAD of discovery_gate_status for every gate,
+#   `raw` included, so an escaping path is never classified, never accepted,
+#   and never read by any check -- an escape is reported as an escape even
+#   when the gate would also have rejected it. The report is capped at ONE
+#   finding per discover_checked_paths call: it names the first escaping path
+#   (its in-checkout path, never its external target) and counts the further
+#   escaping paths it suppressed, so a link to a large external tree cannot
+#   flood the log; the call still returns non-zero.
 #   Findings: both reporting wrappers emit through add_finding, so --strict
 #   and the allowlist apply. Neither they nor discover_checked_paths set any
 #   per-check found/pass flag; discover_checked_paths returns non-zero when it
@@ -312,6 +325,11 @@ file_candidates() {
 #   Residuals: symlink-loop reporting is not witnessed by a committed fixture;
 #   a symlinked directory that points back inside a scanned root materialises
 #   the same file under two paths (it is scanned twice, never skipped).
+#   Containment stops the READ, not the WALK: find -L still traverses an
+#   external tree a link leads into (only its paths are rejected), and a
+#   loop there still surfaces as find's non-zero status. Only the first
+#   escaping path is named; the rest are counted, not listed. discover_paths
+#   itself applies no containment -- only its canaries call it directly.
 
 DISCOVERY_FIND_BASE=(-L)
 DISCOVERY_FIND_STATUS_TAG='__DISCOVERY_FIND_STATUS='
@@ -322,6 +340,7 @@ DISCOVERY_GATE_RC_NOT_REGULAR=23
 DISCOVERY_GATE_RC_UNREADABLE=24
 DISCOVERY_GATE_RC_NOT_DIR=25
 DISCOVERY_GATE_RC_UNKNOWN_GATE=26
+DISCOVERY_GATE_RC_ESCAPES=27
 
 # discover_paths DEST_ARRAY ROOT... -- FIND_ARGS...
 # Materialises the paths
@@ -426,6 +445,21 @@ discovery_gate_status() {
     return 0
 }
 
+# discovery_containment_status PATH
+# Status-bearing containment classifier for one discovered PATH: 0 only when
+# `realpath -m -- PATH` succeeds and its result equals REPO_ROOT or begins with
+# REPO_ROOT/; otherwise DISCOVERY_GATE_RC_ESCAPES. A realpath failure is a
+# rejection, never an accept.
+discovery_containment_status() {
+    local containment_candidate="$1" containment_canonical
+    local containment_prefix="${REPO_ROOT%/}/"
+    containment_canonical="$(realpath -m -- "$containment_candidate")" || return "$DISCOVERY_GATE_RC_ESCAPES"
+    if [[ "$containment_canonical" == "$REPO_ROOT" || "$containment_canonical" == "$containment_prefix"* ]]; then
+        return 0
+    fi
+    return "$DISCOVERY_GATE_RC_ESCAPES"
+}
+
 # flag_discovery_failure RULE ROOT LABEL STATUS
 # Thin reporting wrapper: records the RULE finding for a discover_paths call
 # (described by LABEL, anchored at ROOT) that returned non-zero STATUS. A
@@ -441,16 +475,19 @@ flag_discovery_failure() {
         "Discovery of ${discovery_label} failed: ${failure_reason}, so paths in it may never have been checked -- fix the tree; a failed discovery is NOT clean"
 }
 
-# flag_discovery_gate RULE PATH RC
+# flag_discovery_gate RULE PATH RC [SUPPRESSED_TOTAL]
 # Thin reporting wrapper: records the RULE finding for a discovered PATH that
-# discovery_gate_status rejected with non-zero RC.
+# discovery_gate_status or discovery_containment_status rejected with non-zero
+# RC. SUPPRESSED_TOTAL (default 0) is read only for DISCOVERY_GATE_RC_ESCAPES:
+# the count of further escaping paths the capped containment report withheld.
 flag_discovery_gate() {
-    local rule_name="$1" candidate_path="$2" gate_rc="$3" rejection_reason
+    local rule_name="$1" candidate_path="$2" gate_rc="$3" suppressed_total="${4:-0}" rejection_reason
     case "$gate_rc" in
         "$DISCOVERY_GATE_RC_MISSING") rejection_reason='is missing or is a dangling symlink' ;;
         "$DISCOVERY_GATE_RC_NOT_REGULAR") rejection_reason='is not a regular file' ;;
         "$DISCOVERY_GATE_RC_UNREADABLE") rejection_reason='is not readable' ;;
         "$DISCOVERY_GATE_RC_NOT_DIR") rejection_reason='is not a directory' ;;
+        "$DISCOVERY_GATE_RC_ESCAPES") rejection_reason="does not resolve inside the checkout (a symlink leads it outside the repository root, or realpath could not canonicalise it) [${suppressed_total} further escaping path(s) from the same discovery suppressed]" ;;
         *) rejection_reason="was rejected by the discovery gate with status ${gate_rc}" ;;
     esac
     add_finding "$rule_name" "$candidate_path" 0 \
@@ -461,11 +498,19 @@ flag_discovery_gate() {
 # The checked discovery every scanning check calls. Runs
 #   discover_paths ROOT... -- FIND_ARGS...
 # and reports a non-zero status through flag_discovery_failure (anchored at
-# the first ROOT, described by LABEL); then gates each materialised path with
-# discovery_gate_status PATH GATE and reports each rejection through
-# flag_discovery_gate. DEST_ARRAY is replaced with ONLY the accepted paths, in
-# find order. Returns 1 when it emitted any RULE finding, else 0, so the
-# caller sets its own flag: `discover_checked_paths ... || checkN_found=true`.
+# the first ROOT, described by LABEL); then, for each materialised path,
+# first checks discovery_containment_status PATH and, only when it is
+# contained, gates it with discovery_gate_status PATH GATE, reporting each
+# gate rejection through flag_discovery_gate. Escaping paths are counted and
+# reported after the loop as ONE flag_discovery_gate finding naming the first
+# of them with the suppressed remainder. DEST_ARRAY is replaced with ONLY the
+# accepted paths, in find order. Returns 1 when it emitted any RULE finding,
+# else 0, so the caller sets its own flag:
+# `discover_checked_paths ... || checkN_found=true`.
+#
+# INVARIANT: every path added to DEST_ARRAY passed discovery_containment_status
+# before discovery_gate_status, so no gate -- `raw` included -- hands a check
+# a path that resolves outside the checkout.
 #
 # INVARIANT: DEST_ARRAY is bound by nameref, so it must not be one of this
 # function's own `checked_discovery_*` locals (the nameref would bind the
@@ -479,6 +524,7 @@ discover_checked_paths() {
     local -a checked_discovery_materialised=()
     local checked_discovery_rc=0 checked_discovery_flagged=false
     local checked_discovery_path checked_discovery_gate_rc
+    local checked_discovery_escape_first='' checked_discovery_escape_total=0
     discover_paths checked_discovery_materialised "$@" || checked_discovery_rc=$?
     if [[ "$checked_discovery_rc" -ne 0 ]]; then
         checked_discovery_flagged=true
@@ -487,6 +533,14 @@ discover_checked_paths() {
     checked_discovery_dest_ref=()
     for checked_discovery_path in "${checked_discovery_materialised[@]}"; do
         checked_discovery_gate_rc=0
+        discovery_containment_status "$checked_discovery_path" || checked_discovery_gate_rc=$?
+        if [[ "$checked_discovery_gate_rc" -ne 0 ]]; then
+            if [[ "$checked_discovery_escape_total" -eq 0 ]]; then
+                checked_discovery_escape_first="$checked_discovery_path"
+            fi
+            checked_discovery_escape_total=$((checked_discovery_escape_total + 1))
+            continue
+        fi
         discovery_gate_status "$checked_discovery_path" "$checked_discovery_gate" || checked_discovery_gate_rc=$?
         if [[ "$checked_discovery_gate_rc" -ne 0 ]]; then
             checked_discovery_flagged=true
@@ -495,6 +549,10 @@ discover_checked_paths() {
         fi
         checked_discovery_dest_ref+=("$checked_discovery_path")
     done
+    if [[ "$checked_discovery_escape_total" -gt 0 ]]; then
+        checked_discovery_flagged=true
+        flag_discovery_gate "$checked_discovery_rule" "$checked_discovery_escape_first" "$DISCOVERY_GATE_RC_ESCAPES" "$((checked_discovery_escape_total - 1))"
+    fi
     if [[ "$checked_discovery_flagged" == true ]]; then
         return 1
     fi
@@ -580,7 +638,20 @@ CHECKS_FAILED=0
 #     `files` gate keeps exactly real/inner.md and link-dir/inner.md, returns
 #     non-zero, and emits exactly one finding, naming broken/dangling.md. It
 #     runs inside a command substitution so that finding is captured as text
-#     and its FINDING_* append dies with the subshell -- no real finding.
+#     and its FINDING_* append dies with the subshell -- no real finding. Its
+#     two accepted paths are also the positive control for containment: a
+#     containment check that rejected unconditionally would drop them;
+#   * containment: discover_checked_paths over the escape canary root (a FILE
+#     symlink whose target lies outside the repository root), once under the
+#     `files` gate and once under `raw`, returns non-zero, accepts ZERO paths,
+#     and emits exactly one finding naming escape.md with the containment
+#     reason and 0 suppressed -- `raw` proves containment runs ahead of every
+#     gate, and the reason text proves `files` rejected it as an escape, not
+#     as the dangling link it also is;
+#   * cap: the same discovery with the escape root passed twice materialises
+#     escape.md twice yet emits exactly one containment finding, with 1
+#     suppressed. Both probes run in command substitutions like the
+#     composition probe, so no real finding is emitted.
 # The fixtures are committed, so no probe creates a filesystem object at run
 # time. stderr is discarded only for the nonexistent-root probe, whose find
 # error is the expected outcome.
@@ -602,6 +673,9 @@ dcanary_real_file="$dcanary_real_dir/inner.md"
 dcanary_linked_file="$dcanary_link_dir/inner.md"
 dcanary_dangling_file="$dcanary_root/broken/dangling.md"
 dcanary_missing_root="$dcanary_root/__discovery_nonexistent__"
+DISCOVERY_ESCAPE_CANARY_REL='tests/policy/fixtures/discovery-escape-canary'
+dcanary_escape_root="$REPO_ROOT/$DISCOVERY_ESCAPE_CANARY_REL"
+dcanary_escape_file="$dcanary_escape_root/escape.md"
 dcanary_found=false
 
 # flag_discovery_canary DESCRIPTION
@@ -622,8 +696,8 @@ expect_discovery_gate() {
     fi
 }
 
-if [[ ! -L "$dcanary_link_dir" || ! -L "$dcanary_dangling_file" ]]; then
-    flag_discovery_canary "precondition: ${DISCOVERY_CANARY_REL}/tree/link-dir and ${DISCOVERY_CANARY_REL}/broken/dangling.md must both be symlinks in this checkout, but at least one is not -- the likely cause is core.symlinks=false materialising them as plain files; set core.symlinks=true and re-checkout, never skip this canary"
+if [[ ! -L "$dcanary_link_dir" || ! -L "$dcanary_dangling_file" || ! -L "$dcanary_escape_file" ]]; then
+    flag_discovery_canary "precondition: ${DISCOVERY_CANARY_REL}/tree/link-dir, ${DISCOVERY_CANARY_REL}/broken/dangling.md and ${DISCOVERY_ESCAPE_CANARY_REL}/escape.md must all be symlinks in this checkout, but at least one is not -- the likely cause is core.symlinks=false materialising them as plain files; set core.symlinks=true and re-checkout, never skip this canary"
 fi
 
 if [[ "${#DISCOVERY_FIND_BASE[@]}" -ne 1 || "${DISCOVERY_FIND_BASE[0]}" != '-L' ]]; then
@@ -725,6 +799,58 @@ if [[ "$dcanary_composition_rc" != 1 || "$dcanary_composition_accepted_total" -n
     dcanary_composition_flat="${dcanary_composition_output//$'\n'/ | }"
     flag_discovery_canary "discover_checked_paths over ${DISCOVERY_CANARY_REL} under the 'files' gate produced [${dcanary_composition_flat}]; expected rc=1, exactly real/inner.md and link-dir/inner.md accepted, and exactly one finding naming broken/dangling.md -- the call-site composition no longer gates, reports, or returns its findings"
 fi
+
+# probe_checked_discovery_containment GATE ROOT...
+# Prints discover_checked_paths' output over ROOT... under GATE (its findings),
+# then `rc=STATUS` and one `accepted=PATH` line per accepted path. Called only
+# inside a command substitution, so the finding it emits stays in the subshell.
+probe_checked_discovery_containment() {
+    local containment_probe_gate="$1"
+    shift
+    local -a dcanary_contained_paths=()
+    local dcanary_contained_rc=0 dcanary_contained_path
+    discover_checked_paths 'DISCOVERY' dcanary_contained_paths "$containment_probe_gate" 'discovery escape canary Markdown files' "$@" -- -name '*.md' || dcanary_contained_rc=$?
+    printf 'rc=%d\n' "$dcanary_contained_rc"
+    for dcanary_contained_path in "${dcanary_contained_paths[@]}"; do
+        printf 'accepted=%s\n' "$dcanary_contained_path"
+    done
+}
+
+# expect_discovery_containment PROBE_LABEL EXPECTED_SUPPRESSED GATE ROOT...
+# Runs probe_checked_discovery_containment GATE ROOT... in a command
+# substitution and asserts rc=1, zero accepted paths, and exactly one
+# DISCOVERY finding: the containment finding naming escape.md with
+# EXPECTED_SUPPRESSED further escaping paths suppressed.
+expect_discovery_containment() {
+    local probe_label="$1" expected_suppressed="$2" probe_output probe_line
+    local probe_rc='' probe_accepted_total=0 probe_finding_total=0 probe_saw_escape=false
+    shift 2
+    probe_output="$(probe_checked_discovery_containment "$@")"
+    while IFS= read -r probe_line; do
+        case "$probe_line" in
+            'rc='*)
+                probe_rc="${probe_line#rc=}"
+                ;;
+            'accepted='*)
+                probe_accepted_total=$((probe_accepted_total + 1))
+                ;;
+            *'[DISCOVERY] '*)
+                probe_finding_total=$((probe_finding_total + 1))
+                if [[ "$probe_line" == *"[DISCOVERY] ${DISCOVERY_ESCAPE_CANARY_REL}/escape.md -- this discovered path does not resolve inside the checkout "*"[${expected_suppressed} further escaping path(s) "* ]]; then
+                    probe_saw_escape=true
+                fi
+                ;;
+        esac
+    done <<< "$probe_output"
+    if [[ "$probe_rc" != 1 || "$probe_accepted_total" -ne 0 \
+       || "$probe_finding_total" -ne 1 || "$probe_saw_escape" != true ]]; then
+        flag_discovery_canary "${probe_label}: discover_checked_paths over ${DISCOVERY_ESCAPE_CANARY_REL} produced [${probe_output//$'\n'/ | }]; expected rc=1, zero accepted paths, and exactly one finding naming escape.md as a containment escape with ${expected_suppressed} further path(s) suppressed -- discovery no longer confines accepted paths to the checkout, or no longer caps its containment report"
+    fi
+}
+
+expect_discovery_containment "containment under the 'files' gate" 0 files "$dcanary_escape_root"
+expect_discovery_containment "containment under the 'raw' gate" 0 raw "$dcanary_escape_root"
+expect_discovery_containment 'containment cap (escape root passed twice)' 1 files "$dcanary_escape_root" "$dcanary_escape_root"
 
 if [[ "$dcanary_found" == false ]]; then
     echo '[PASS] DISCOVERY: checked discovery follows symlinked directories, gates dangling and wrong-type paths, and propagates find failures'
