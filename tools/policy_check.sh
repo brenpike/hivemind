@@ -2597,9 +2597,13 @@ fi
 #   2. non-vacuity control: a deliberately wrong occurrence count must fail,
 #      proving assertion 1 asserts something.
 #   3. non-compiling regex: must fail through the perl compile oracle.
-#   4. broken extraction: a regex that compiles and matches but has no group-1
-#      capture must fail -- the extractor's nonzero status must not collapse
-#      into an empty capture object that reads as a vacuous zero-match pass.
+#   4. broken extraction: a regex that compiles, HAS a capture group (so it
+#      clears the independent group count), and matches, but whose group 1
+#      does not participate in the match must fail -- the extractor's
+#      `defined($1) or die` fires at run time, and that nonzero status must
+#      never collapse into an empty capture object that reads as a vacuous
+#      zero-match pass. This is the only assertion that reaches the extractor
+#      exit-status path; branch 6 is stopped earlier by the group count.
 #   5. unescaped slash: a regex containing `/` must extract normally, proving
 #      the regex reaches perl as data rather than as program source.
 #   6. capture-free zero-match: a regex with NO capture group that ALSO
@@ -2684,7 +2688,7 @@ else
     fi
 
     set_check_nocapture_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
-        extract_regex: "SETCHECK-PRESENT-CANARY [0-9]:",
+        extract_regex: "SETCHECK-PRESENT-CANARY (x)?[0-9]:",
         expected_set: [],
         expected_counts: {},
         files: [{path: $path, mode: "subset"}]
@@ -2701,7 +2705,7 @@ else
     if [[ "$set_check_nocapture_result" != 'false' ]]; then
         set_check_zero_canary_ok=false
         add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
-            'set_check passed a broken extraction (regex matched without a group-1 capture) -- a failed extraction is being read as a zero-match result'
+            'set_check passed a broken extraction (the regex has a capture group, but group 1 did not participate in a match, so the extractor died with a nonzero status) -- a failed extraction is being read as a zero-match result'
     fi
 
     set_check_slash_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
