@@ -7,7 +7,7 @@ authoring contract: every rule below states the invariant it enforces first, the
 mechanism that enforces it. Read the whole thing before pinning anything.
 
 This README is invisible to the fixture loader: discovery is
-`find tests/policy -maxdepth 1 -name 'safety-*.json'` (`tools/policy_check.sh:1473`),
+`find tests/policy -maxdepth 1 -name 'safety-*.json'` (the `SAFETY_FIXTURES` discovery block in `tools/policy_check.sh`),
 so only `safety-*.json` files are ever evaluated.
 
 ## 1. Honest capability statement
@@ -178,3 +178,23 @@ file (or a new section) fails to say X," no fixture in this directory can see it
 that requires a structural check in `tools/policy_check.sh` itself (compare the
 CHECK-numbered guards). Do not paper over the gap with a presence pin; name the
 uncovered half in the fixture `description` or add the structural check.
+
+## 8. Runtime dependencies
+
+**Invariant: a missing interpreter must fail the check loudly and name itself,
+never silently degrade to a weaker check or a false pass.**
+
+`set_check` fixtures require `perl` to run them. There is no fallback: each
+fixture's `extract_regex` is compiled and executed by `perl` (`qr//`). If `perl`
+is not available on the runner, the check fails closed and names `perl` in the
+failure message, rather than silently passing.
+
+Each fixture's `extract_regex` reaches `perl` as data, not as program source: it
+is never interpolated into a shell command line or a Perl program string, so
+characters such as `/`, `$`, and `@` need no extra escaping for the shell or for
+Perl.
+
+The regex MUST contain a capture group; the first group is what `set_check`
+captures as a set member. A regex that fails to compile, or whose extraction
+fails at run time, FAILS the check -- a broken extraction is never silently
+treated as a zero-match (empty set) result.
