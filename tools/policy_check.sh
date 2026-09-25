@@ -1596,13 +1596,18 @@ mark_time 'CHECK14'
 #     It is the only layer that can witness the file-level traversal: the awk
 #     record shape, the line numbering, and the absence of any region skipping
 #     (including an unclosed-frontmatter fixture that no predicate test reaches).
+#   * the TRAVERSAL CANARY asserts that discovery, the read gate, and the awk
+#     layer each return non-zero on failure instead of empty output.
 #
 # Discovery FAILS CLOSED PER ARM: each of the two discovery arms (`plugin/**/*.md`
 # and `plugin/workflows/*.json`) carries its OWN zero-file assertion. An aggregate
 # count cannot carry this guarantee -- a missing, renamed, or unreadable workflows
 # tree yields zero JSON files while the markdown arm keeps the aggregate nonzero,
-# so half the stated scope would vanish with the check still green. Likewise a
-# classifier that exits non-zero on a file is a finding, never a clean file.
+# so half the stated scope would vanish with the check still green. A find that
+# fails, or a path stream that ends without its trailing status record, is its
+# own finding. Likewise a path that is missing, not a regular file, or
+# unreadable, and a classifier that exits non-zero on a file, are each a
+# finding, never a clean file.
 #
 # RESIDUALS, stated plainly:
 #   * allowlist granularity is the LINE, not the token. An entry added for one
@@ -1706,28 +1711,70 @@ tracker_ref_tokens() {
     printf '%s' "${record#*$'\t'}"
 }
 
+# Status codes the read and discovery layers return for their own failures,
+# distinct from each other and from the 0/1/2 that awk and find exit with.
+CHECK15_RC_NOT_REGULAR=10
+CHECK15_RC_UNREADABLE=11
+CHECK15_RC_TRUNCATED=12
+CHECK15_FIND_STATUS_TAG='__CHECK15_FIND_STATUS='
+
+# check15_awk_records FILE
+# Runs the classifier over FILE, ungated, and returns awk's own exit status.
+# The traversal canary witnesses that this status is propagated, not swallowed.
+check15_awk_records() {
+    awk "$CHECK15_CLASSIFY_AWK" "$1"
+}
+
+# check15_read_records FILE
+# Prints the classifier records for FILE. Returns CHECK15_RC_NOT_REGULAR when
+# FILE is missing or not a regular file, CHECK15_RC_UNREADABLE when it cannot
+# be read, and awk's non-zero status when the classifier fails -- never 0 with
+# empty output for a file it did not actually read.
+check15_read_records() {
+    local prose_file="$1" records
+    # INVARIANT: the -f gate is load-bearing, not redundant with awk's own
+    # error handling -- gawk (and nawk) exit 0 with ZERO records when handed a
+    # directory, which would read as a clean file.
+    if [[ ! -f "$prose_file" ]]; then
+        return "$CHECK15_RC_NOT_REGULAR"
+    fi
+    if [[ ! -r "$prose_file" ]]; then
+        return "$CHECK15_RC_UNREADABLE"
+    fi
+    records="$(check15_awk_records "$prose_file")" || return
+    if [[ -n "$records" ]]; then
+        printf '%s\n' "$records"
+    fi
+}
+
 # scan_prose_file_refs FILE
 # Prints one record per offending line, `LINENO<TAB>tok1 tok2 ...`, in file
-# order. PURE -- no findings, no globals; exits non-zero only when the
-# classifier itself fails -- so the scanner canary below can assert the
-# file-level traversal (record shape, line numbering, and the absence of any
-# region skipping) over committed fixtures.
+# order. No findings, no globals; STATUS-BEARING -- non-zero when FILE is not a
+# regular file, is unreadable, or the classifier fails (see check15_read_records)
+# -- so the scanner canary below can assert the file-level traversal (record
+# shape, line numbering, and the absence of any region skipping) over committed
+# fixtures, and a caller can never mistake an unread file for a clean one.
 scan_prose_file_refs() {
-    awk "$CHECK15_CLASSIFY_AWK" "$1"
+    check15_read_records "$1"
 }
 
 # scan_file_for_tracker_refs FILE
 # Thin reporting wrapper: turns each record from scan_prose_file_refs into a
-# CHECK15 finding, and a classifier failure into a finding of its own. Carries
-# no detection logic of its own.
+# CHECK15 finding, and any read or classifier failure into a finding of its
+# own. Carries no detection logic of its own.
 scan_file_for_tracker_refs() {
     local prose_file="$1"
-    local line_num tokens records scan_rc=0
+    local line_num tokens records failure_reason scan_rc=0
     records="$(scan_prose_file_refs "$prose_file")" || scan_rc=$?
     if [[ "$scan_rc" -ne 0 ]]; then
+        case "$scan_rc" in
+            "$CHECK15_RC_NOT_REGULAR") failure_reason='is missing or is not a regular file' ;;
+            "$CHECK15_RC_UNREADABLE") failure_reason='is not readable' ;;
+            *) failure_reason="made the CHECK15_CLASSIFY_AWK classifier exit ${scan_rc}" ;;
+        esac
         check15_found=true
         add_finding 'CHECK15' "$prose_file" 0 \
-            "tracker-reference classifier exited ${scan_rc} on this file, so none of it was scanned -- fix the file's readability or the CHECK15_CLASSIFY_AWK program; an unscanned file is never reported clean"
+            "this runtime prose file ${failure_reason}, so none of it was scanned for tracker references -- fix the file or the classifier; an unreadable runtime-prose file is NOT clean"
         return 0
     fi
     if [[ -z "$records" ]]; then
@@ -1740,17 +1787,74 @@ scan_file_for_tracker_refs() {
     done <<< "$records"
 }
 
-check15_md_count=0
-while IFS= read -r -d '' prose_file; do
-    check15_md_count=$((check15_md_count + 1))
-    scan_file_for_tracker_refs "$prose_file"
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0 2>/dev/null)
+# check15_discover_files ROOT FIND_ARGS...
+# Materialises the paths `find ROOT FIND_ARGS... -print0` emits into the global
+# array check15_discovered_files, and returns find's exit status, or
+# CHECK15_RC_TRUNCATED when the stream does not end in exactly one status
+# record. Paths found before a failure are still materialised so they are
+# scanned; the non-zero status is what keeps the arm from reading as clean.
+#
+# INVARIANT: a failing producer inside `< <(...)` is invisible to the reading
+# loop (see the materialisation invariant under Helpers), so the producer
+# appends its own status as a trailing NUL-delimited sentinel record. The
+# `|| find_status=$?` is load-bearing: errexit is inherited by the process
+# substitution, so a bare `find ...; printf ... "$?"` dies before the sentinel
+# is written whenever find fails.
+check15_discover_files() {
+    local search_root="$1" stream_record status_record=''
+    local sentinel_total=0 last_was_sentinel=false
+    shift
+    check15_discovered_files=()
+    while IFS= read -r -d '' stream_record; do
+        if [[ "$stream_record" == "$CHECK15_FIND_STATUS_TAG"* ]]; then
+            sentinel_total=$((sentinel_total + 1))
+            status_record="$stream_record"
+            last_was_sentinel=true
+        else
+            check15_discovered_files+=("$stream_record")
+            last_was_sentinel=false
+        fi
+    done < <(find_status=0; find "$search_root" "$@" -print0 || find_status=$?; printf '__CHECK15_FIND_STATUS=%d\0' "$find_status")
+    if [[ "$sentinel_total" -ne 1 || "$last_was_sentinel" != true ]]; then
+        return "$CHECK15_RC_TRUNCATED"
+    fi
+    return "${status_record#"$CHECK15_FIND_STATUS_TAG"}"
+}
 
-check15_json_count=0
-while IFS= read -r -d '' prose_file; do
-    check15_json_count=$((check15_json_count + 1))
+# check15_flag_discovery_failure ARM_ROOT ARM_LABEL STATUS
+# Records the finding for a discovery arm whose find failed or whose stream
+# was truncated: a partial file list is never a clean one.
+check15_flag_discovery_failure() {
+    local arm_root="$1" arm_label="$2" discovery_rc="$3" failure_reason
+    if [[ "$discovery_rc" -eq "$CHECK15_RC_TRUNCATED" ]]; then
+        failure_reason='its path stream ended without exactly one trailing find-status record (truncated)'
+    else
+        failure_reason="find exited ${discovery_rc}"
+    fi
+    check15_found=true
+    add_finding 'CHECK15' "$arm_root" 0 \
+        "Tracker-reference discovery of ${arm_label} failed: ${failure_reason}, so files in that arm may never have been scanned -- fix the tree's readability; a failed discovery is NOT clean"
+}
+
+check15_discovery_rc=0
+check15_discover_files "$PLUGIN_ROOT" -name '*.md' -type f || check15_discovery_rc=$?
+if [[ "$check15_discovery_rc" -ne 0 ]]; then
+    check15_flag_discovery_failure "$PLUGIN_ROOT" 'plugin/**/*.md' "$check15_discovery_rc"
+fi
+check15_md_count="${#check15_discovered_files[@]}"
+for prose_file in "${check15_discovered_files[@]}"; do
     scan_file_for_tracker_refs "$prose_file"
-done < <(find "$PLUGIN_ROOT/workflows" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null)
+done
+
+check15_discovery_rc=0
+check15_discover_files "$PLUGIN_ROOT/workflows" -maxdepth 1 -name '*.json' -type f || check15_discovery_rc=$?
+if [[ "$check15_discovery_rc" -ne 0 ]]; then
+    check15_flag_discovery_failure "$PLUGIN_ROOT/workflows" 'plugin/workflows/*.json' "$check15_discovery_rc"
+fi
+check15_json_count="${#check15_discovered_files[@]}"
+for prose_file in "${check15_discovered_files[@]}"; do
+    scan_file_for_tracker_refs "$prose_file"
+done
 
 check15_file_count=$((check15_md_count + check15_json_count))
 
@@ -1896,7 +2000,7 @@ check15_expect_scan() {
     if [[ "$scan_rc" -ne 0 ]]; then
         check15_found=true
         add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
-            "scanner canary: the CHECK15_CLASSIFY_AWK classifier exited ${scan_rc} on ${fixture_rel} -- the file-level traversal did not run, so its records cannot be trusted"
+            "scanner canary: scan_prose_file_refs exited ${scan_rc} on ${fixture_rel} -- the file-level traversal did not run, so its records cannot be trusted"
         return 0
     fi
     if [[ "$got" != "$expected" ]]; then
@@ -1914,6 +2018,48 @@ check15_expect_scan 'tests/policy/fixtures/tracker-ref-unclosed-frontmatter.md' 
     $'10\t#77'
 check15_expect_scan 'tests/policy/fixtures/tracker-ref-allowlist-canary.md' \
     $'9\t#123\n11\t#456\n13\t#9\n19\t#123\n21\t#123\n23\t#123\n27\t#2\n29\t#2 #4\n31\t#12\n37\t#123'
+
+# ── CHECK 15 TRAVERSAL CANARY ──────────────────────────────────────────────
+# Witnesses that each traversal layer FAILS CLOSED: a failed discovery, a
+# missing path, a directory, and a failing awk must each surface as a non-zero
+# status rather than as empty output that reads as a clean file. A positive
+# control proves the read layer still returns records for a real fixture, so
+# the failure arms cannot all pass by the layer failing unconditionally. Each
+# probe runs under `if !` so set -euo pipefail cannot abort the run; stderr is
+# discarded only here, because these failures are the expected outcome.
+# Residual: the reporting wrapper's finding emission on a read failure has no
+# canary -- asserting it would emit a real finding -- and it is a thin
+# translation of the status-bearing layer these probes do witness.
+
+# check15_flag_traversal_canary DESCRIPTION
+# Records a traversal-canary finding for a probe whose status came back wrong.
+check15_flag_traversal_canary() {
+    check15_found=true
+    add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
+        "traversal canary: $1 -- a traversal layer now fails open, so a missing, unreadable, or undiscoverable runtime-prose file would be reported clean"
+}
+
+check15_canary_missing_path="$REPO_ROOT/tests/policy/fixtures/__check15_nonexistent__"
+check15_canary_dir_path="$REPO_ROOT/tests/policy/fixtures"
+check15_canary_fixture_path="$REPO_ROOT/tests/policy/fixtures/tracker-ref-scan-canary.md"
+
+if check15_discover_files "$check15_canary_missing_path" -type f 2>/dev/null; then
+    check15_flag_traversal_canary "check15_discover_files returned 0 for the nonexistent root ${check15_canary_missing_path}, so a failing find is read as an empty tree"
+fi
+if check15_read_records "$check15_canary_missing_path" >/dev/null 2>&1; then
+    check15_flag_traversal_canary "check15_read_records returned 0 for the nonexistent path ${check15_canary_missing_path}"
+fi
+if check15_read_records "$check15_canary_dir_path" >/dev/null 2>&1; then
+    check15_flag_traversal_canary "check15_read_records returned 0 for the directory ${check15_canary_dir_path}, so the regular-file gate is gone and awk's zero-record directory skip reads as clean"
+fi
+if check15_awk_records "$check15_canary_missing_path" >/dev/null 2>&1; then
+    check15_flag_traversal_canary "check15_awk_records returned 0 for the nonexistent path ${check15_canary_missing_path}, so awk's own failure status is being swallowed"
+fi
+if ! check15_canary_records="$(check15_read_records "$check15_canary_fixture_path")"; then
+    check15_flag_traversal_canary "positive control: check15_read_records failed on the committed fixture ${check15_canary_fixture_path}"
+elif [[ -z "$check15_canary_records" ]]; then
+    check15_flag_traversal_canary "positive control: check15_read_records returned no records for the committed fixture ${check15_canary_fixture_path}, which carries known references"
+fi
 
 if [[ "$check15_found" == false ]]; then
     echo "[PASS] Check 15: No tracker references in $check15_file_count plugin runtime prose files"
