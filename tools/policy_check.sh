@@ -1576,16 +1576,23 @@ mark_time 'CHECK14'
 #          before the `#` and the character after the run each end of line or
 #          outside [0-9A-Za-z_]. `#1a2b3c` and `#1af` stay legal; a pure-digit
 #          run such as `#123456` has no letter and stays a candidate.
-#   The walk tries S1, then S3, then S2, then S4; on a match it jumps past the
-#   span, else a candidate is emitted and stepped over, else it advances one
-#   character.
+#   * ESCAPES -- a backslash followed by ASCII punctuation other than `#` is a
+#     CommonMark backslash escape: the pair is literal text and is stepped over
+#     BEFORE any safe shape is tried, so an escaped delimiter (a backtick, a
+#     `]`, or a backslash) can never open S1 or S3. `#` is excluded so an
+#     escaped `#` stays a candidate. Escapes are not processed inside a span
+#     already consumed, matching CommonMark code spans.
+#   The walk tries an escape, then S1, then S3, then S2, then S4; on a match it
+#   jumps past the span, else a candidate is emitted and stepped over, else it
+#   advances one character.
 #
 # ELIMINATED CLASS: OVER-BROAD EXEMPTION. A `#` is exempt only when a safe shape
 # matches an exact span around it at the walk position. There is no deletion
 # pass over the line, so no exemption can reach past its own span: a `#` glued
-# to an arbitrary word (`issue#123`, `x#9`) has no shape that admits it, and a
-# backtick run can be closed only by a run of its own length. Both are
-# unrepresentable as exemptions rather than guarded against.
+# to an arbitrary word (`issue#123`, `x#9`) has no shape that admits it, a
+# backtick run can be closed only by a run of its own length, and escape
+# processing precedes every shape, so a backslash-escaped delimiter opens no
+# span. All three are unrepresentable as exemptions rather than guarded against.
 #
 # ELIMINATED CLASS: SILENT INPUT-SET NARROWING. Nothing ahead of the fail-closed
 # layers shrinks what the check reads. The candidate rule has no right-boundary
@@ -1691,6 +1698,11 @@ function is_right_boundary(text, at) {
 function is_word_left_boundary(text, at) {
     return at == 1 || substr(text, at - 1, 1) !~ /[0-9A-Za-z_]/
 }
+function is_escape(text, at,    next_char) {
+    if (substr(text, at, 1) != "\\") return 0
+    next_char = substr(text, at + 1, 1)
+    return next_char != "" && index("!\"$%&'()*+,-./:;<=>?@[\\]^_`{|}~", next_char) > 0
+}
 function hex_colour_len(text, at,    hex_len) {
     if (!is_word_left_boundary(text, at)) return 0
     if (!match(substr(text, at), /^#[0-9A-Fa-f]+/)) return 0
@@ -1710,6 +1722,10 @@ function hex_colour_len(text, at,    hex_len) {
     pos = 1
     while (pos <= line_len) {
         cur_char = substr(line_text, pos, 1)
+        if (is_escape(line_text, pos)) {
+            pos += 2
+            continue
+        }
         if (cur_char == "`") {
             open_len = backtick_run_len(line_text, pos)
             span_end = code_span_end(line_text, pos, open_len)
@@ -2006,6 +2022,10 @@ check15_expect_hit 'an unclosed ``#123 double run'
 check15_expect_hit 'an unclosed ```#123 triple run'
 check15_expect_hit 'host path example.com/a/b#12'
 check15_expect_hit 'a mismatched ``#123` run'
+# Escapes: an escaped delimiter opens no safe shape, and an escaped `#` stays a candidate.
+check15_expect_hit '\``#123`` escaped opener'
+check15_expect_hit '\](#123) escaped bracket'
+check15_expect_hit '\#123 escaped hash'
 
 check15_expect_miss '# Heading'
 check15_expect_miss '## Subheading'
@@ -2023,6 +2043,8 @@ check15_expect_miss 'the ``#123`` double run'
 check15_expect_miss 'the ```#123``` triple run'
 check15_expect_miss 'see [the section](#2-section) above'
 check15_expect_miss '[cli/cli#12258](https://github.com/cli/cli/pull/12258)'
+# An escaped backslash escapes nothing after it, so the backtick run still opens S1.
+check15_expect_miss '\\``#123`` escaped backslash'
 
 check15_expect_tokens 'see #123 for context' '#123'
 check15_expect_tokens 'tracked as #7.' '#7'
@@ -2053,6 +2075,10 @@ check15_expect_tokens '#12345678' '#12345678'
 check15_expect_tokens '#1234' '#1234'
 check15_expect_tokens '#12g #34' '#12 #34'
 check15_expect_tokens 'colour #1a2b3c then ref #45' '#45'
+check15_expect_tokens '\``#123`` escaped opener' '#123'
+check15_expect_tokens '\#12 and \`#34`' '#12 #34'
+# A backslash inside a code span is literal, so it cannot extend the span.
+check15_expect_tokens '`a\` #5 `' '#5'
 
 # ── CHECK 15 SCANNER CANARY ────────────────────────────────────────────────
 # The detection canary above witnesses the PREDICATE. This layer witnesses the
