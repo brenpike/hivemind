@@ -1531,51 +1531,67 @@ mark_time 'CHECK14'
 # are never loaded into an agent's context, so a tracker ID there stales a
 # maintainer note rather than doctrine.
 #
-# SCAN SHAPE. The awk program is `{ print NR "\t" $0 }` and nothing else: zero
-# state, zero regions, one record per physical line. NO line is exempt by
-# POSITION -- YAML frontmatter, fenced code blocks, and indented continuation
-# lines are all scanned. Exemption is by PATTERN only. Two reasons, both
-# load-bearing. First, a region skipper is a state machine whose failure mode is
-# silent: one unclosed region opener swallows the entire remaining file body and
-# the check still reports PASS over prose it never read, so that whole class of
-# failure is DELETED here rather than guarded. Second, frontmatter in this
-# payload is not inert metadata -- it is runtime-loaded agent context (a skill's
-# name and description are read before its body), so it carries doctrine and
-# earns the same rule as the body.
+# SCAN SHAPE. One POSIX awk program, CHECK15_CLASSIFY_AWK, is the single source
+# of classification: scan_prose_file_refs runs it over a whole file and
+# tracker_ref_tokens runs it over one line, so the predicate the canaries assert
+# and the traversal CI runs cannot drift apart. It carries no state across
+# records: one record per physical line, every per-line variable reset on
+# entry. NO line is exempt by POSITION -- YAML frontmatter, fenced code blocks,
+# and indented continuation lines are all scanned. Exemption is by SHAPE only.
+# Two reasons, both load-bearing. First, a region skipper is a state machine
+# whose failure mode is silent: one unclosed region opener swallows the entire
+# remaining file body and the check still reports PASS over prose it never
+# read, so that whole class of failure is DELETED here rather than guarded.
+# Second, frontmatter in this payload is not inert metadata -- it is
+# runtime-loaded agent context (a skill's name and description are read before
+# its body), so it carries doctrine and earns the same rule as the body.
 #
-# PATTERN CLAUSES are NORMALIZE-THEN-MATCH: every legal construct is deleted
-# from a working copy of the line first, and whatever survives is matched by the
-# bare token pattern `#[0-9]+`. Each sed pass, and what it earns:
-#   * `s/\r$//`                       -- CR strip. Prose here may be stored CRLF
-#     depending on autocrlf, and stripping the trailing CR makes every record
-#     and every token byte-identical to the LF case.
-#   * `s/`[^`]*`//g`                  -- inline code. Exempts literal
-#     placeholders such as the issue-number placeholder in
-#     plugin/skills/prd-to-issues/SKILL.md.
-#   * `s/\]\(#[^)]*\)//g`             -- Markdown in-page anchors `](#...)`,
-#     including digit-leading slugs a letter-first rule would miss.
-#   * `s@([A-Za-z0-9_/])#@\1@g`       -- a `#` glued to a word character or `/`,
-#     which is the cross-repo citation form `cli/cli#12258`: it names its repo,
-#     so it does not rot, and stays legal.
-#   * `s/#([0-9]+)([A-Za-z_])/\1\2/g` -- a letter-bearing hex colour such as
-#     `#1a2b3c`. The trailing class MUST be `[A-Za-z_]` and MUST NOT admit
-#     digits: with `[A-Za-z0-9_]` the greedy `[0-9]+` run backtracks one digit to
-#     feed the trailing class, so the `#` is stripped from EVERY multi-digit
-#     reference (`see #123` yields no token) and the guard goes silently blind.
-# ATX headings (`# `, `## `) and a `#!` shebang need no pass of their own: the
-# matcher requires a digit immediately after the `#`.
+# DETECTION IS A POSITIVE ALLOWLIST. Each record first loses a trailing CR, so a
+# CRLF checkout yields records and tokens byte-identical to the LF case. A
+# left-to-right walk then classifies the line:
+#   * CANDIDATE: a `#` followed by a digit run whose next character is end of
+#     line or outside [0-9A-Za-z_]. The token is the `#` plus that digit run.
+#     Only a candidate can become a finding, so ATX headings, a `#!` shebang,
+#     and a letter-bearing hex colour such as `#1a2b3c` are never candidates
+#     and need no exemption of their own.
+#   * SAFE SHAPES, each an anchored prefix match at the walk position, consumed
+#     whole so nothing inside the span is classified:
+#       S1 inline code -- a backtick run of length L, closed by the next
+#          backtick run of EXACTLY length L on the line. With no such closer
+#          the opening run is literal text and the walk continues right after
+#          it (CommonMark spec, "Code spans"), so an unclosed span, or a fence
+#          delimiter line such as ```text, exempts nothing.
+#          Exempts literal placeholders such as the issue-number placeholder
+#          in plugin/skills/prd-to-issues/SKILL.md.
+#       S3 in-page anchor -- `](#` through the first `)`, including the
+#          digit-leading slugs a letter-first rule would miss.
+#       S2 cross-repo citation -- owner/repo#NNN with exactly one `/`, each
+#          side starting alphanumeric, the same right boundary as a candidate,
+#          and tried only at a LEFT BOUNDARY (line start, or a previous
+#          character outside [A-Za-z0-9._/-]). It names its repo, so it does
+#          not rot, and `[cli/cli#12258](...)` stays legal.
+#   The walk tries S1, then S3, then S2; on a match it jumps past the span,
+#   else a candidate is emitted and stepped over, else it advances one
+#   character.
 #
-# CARDINALITY. The matcher consumes no surrounding context, so every reference
-# on a line is reported, not just the first. A context-consuming matcher eats
-# the separator between neighbours and misses the second (`x #12 #34` reports
-# only `#12`), and that is not cosmetic here: the allowlist keys on (rule, path,
-# line), so a finding that is not line-COMPLETE lets an allowlist entry absolve
-# a reference no reviewer ever saw.
+# ELIMINATED CLASS: OVER-BROAD EXEMPTION. A `#` is exempt only when a safe shape
+# matches an exact span around it at the walk position. There is no deletion
+# pass over the line, so no exemption can reach past its own span: a `#` glued
+# to an arbitrary word (`issue#123`, `x#9`) has no shape that admits it, and a
+# backtick run can be closed only by a run of its own length. Both are
+# unrepresentable as exemptions rather than guarded against.
+#
+# CARDINALITY. A candidate consumes only its own token and never the separator
+# after it, so every reference on a line is reported, not just the first. A
+# context-consuming matcher eats the separator between neighbours and misses the
+# second (`x #12 #34` reports only `#12`), and that is not cosmetic here: the
+# allowlist keys on (rule, path, line), so a finding that is not line-COMPLETE
+# lets an allowlist entry absolve a reference no reviewer ever saw.
 #
 # WITNESSES, two layers, because they fail independently:
 #   * the DETECTION CANARY asserts the pure predicate `tracker_ref_tokens` over
-#     literal lines -- one case per pattern clause above, in both directions,
-#     and by EXACT token string so a dropped neighbour is caught.
+#     literal lines -- the candidate rule and each safe shape, in both
+#     directions, and by EXACT token string so a dropped neighbour is caught.
 #   * the SCANNER CANARY asserts `scan_prose_file_refs` over committed fixtures.
 #     It is the only layer that can witness the file-level traversal: the awk
 #     record shape, the line numbering, and the absence of any region skipping
@@ -1585,7 +1601,8 @@ mark_time 'CHECK14'
 # and `plugin/workflows/*.json`) carries its OWN zero-file assertion. An aggregate
 # count cannot carry this guarantee -- a missing, renamed, or unreadable workflows
 # tree yields zero JSON files while the markdown arm keeps the aggregate nonzero,
-# so half the stated scope would vanish with the check still green.
+# so half the stated scope would vanish with the check still green. Likewise a
+# classifier that exits non-zero on a file is a finding, never a clean file.
 #
 # RESIDUALS, stated plainly:
 #   * allowlist granularity is the LINE, not the token. An entry added for one
@@ -1599,72 +1616,128 @@ mark_time 'CHECK14'
 #     Deliberate: an unbounded digit run keeps a tracker id of any length in
 #     reach, and a loud allowlistable false positive beats a silent permanent
 #     false negative.
+#   * a `#` glued to a word (`word#123`) and a digit-leading URL fragment
+#     (`https://ex.com/p#123`) are reported, including inside a link target.
+#     Neither occurs in plugin/ today; the remedy is inline code.
+#   * an inline code span broken across physical lines is not recognized: each
+#     line is classified alone, so a reference on either half is reported.
 #   * the scanner canary pins fixture LINE NUMBERS in this file. The fixtures say
 #     so in-file; edit fixture and canary together.
 echo ''
 echo '=== CHECK 15: No tracker references in plugin runtime prose ==='
 
-CHECK15_TRACKER_PATTERN='#[0-9]+'
-CHECK15_LEGAL_CONTEXT_SED='s/\r$//; s/`[^`]*`//g; s/\]\(#[^)]*\)//g; s@([A-Za-z0-9_/])#@\1@g; s/#([0-9]+)([A-Za-z_])/\1\2/g'
+CHECK15_CLASSIFY_AWK="$(cat <<'CHECK15_AWK'
+function backtick_run_len(text, at,    run_len) {
+    run_len = 0
+    while (substr(text, at + run_len, 1) == "`") run_len++
+    return run_len
+}
+function code_span_end(text, at, open_len,    scan_pos, run_len) {
+    scan_pos = at + open_len
+    while (scan_pos <= length(text)) {
+        if (substr(text, scan_pos, 1) != "`") { scan_pos++; continue }
+        run_len = backtick_run_len(text, scan_pos)
+        if (run_len == open_len) return scan_pos + run_len
+        scan_pos += run_len
+    }
+    return 0
+}
+function is_left_boundary(text, at) {
+    return at == 1 || substr(text, at - 1, 1) !~ /[A-Za-z0-9._\/-]/
+}
+function is_right_boundary(text, at) {
+    return substr(text, at, 1) !~ /[0-9A-Za-z_]/
+}
+{
+    sub(/\r$/, "")
+    if (index($0, "#") == 0) next
+    line_text = $0
+    line_len = length(line_text)
+    found_tokens = ""
+    token_sep = ""
+    pos = 1
+    while (pos <= line_len) {
+        cur_char = substr(line_text, pos, 1)
+        if (cur_char == "`") {
+            open_len = backtick_run_len(line_text, pos)
+            span_end = code_span_end(line_text, pos, open_len)
+            pos = span_end ? span_end : pos + open_len
+            continue
+        }
+        if (cur_char == "]" && match(substr(line_text, pos), /^\]\(#[^)]*\)/)) {
+            pos += RLENGTH
+            continue
+        }
+        if (is_left_boundary(line_text, pos) && match(substr(line_text, pos), /^[A-Za-z0-9][A-Za-z0-9._-]*\/[A-Za-z0-9][A-Za-z0-9._-]*#[0-9]+/) && is_right_boundary(line_text, pos + RLENGTH)) {
+            pos += RLENGTH
+            continue
+        }
+        if (cur_char == "#" && match(substr(line_text, pos + 1), /^[0-9]+/) && is_right_boundary(line_text, pos + 1 + RLENGTH)) {
+            found_tokens = found_tokens token_sep "#" substr(line_text, pos + 1, RLENGTH)
+            token_sep = " "
+            pos += 1 + RLENGTH
+            continue
+        }
+        pos++
+    }
+    if (found_tokens != "") print NR "\t" found_tokens
+}
+CHECK15_AWK
+)"
 
 check15_found=false
 check15_file_count=0
 
 # tracker_ref_tokens TEXTLINE
 # Prints EVERY bare tracker reference in TEXTLINE, space-separated in source
-# order, or nothing when the line carries none. PURE -- no findings, no globals,
-# always exit 0 -- so the detection canary below can assert the guard's
-# semantics directly rather than merely asserting that the guard exists.
+# order, or nothing when the line carries none. PURE -- no findings, no globals;
+# exits non-zero only when the classifier itself fails -- so the detection
+# canary below can assert the guard's semantics directly rather than merely
+# asserting that the guard exists.
 tracker_ref_tokens() {
-    local textline="$1" normalized tokens
+    local textline="$1" record
     # Cheap gate: the overwhelming majority of prose lines carry no `#` at all,
-    # so the sed/grep pipeline below is only paid for candidates.
+    # so the classifier fork is only paid for candidates.
     case "$textline" in
         *'#'*) ;;
         *) return 0 ;;
     esac
-    normalized="$(printf '%s' "$textline" | sed -E "$CHECK15_LEGAL_CONTEXT_SED")"
-    # `|| true` is load-bearing under `set -euo pipefail`: `grep -o` exits 1 when
-    # the normalized line carries no token, which is the common case for a line
-    # whose every `#` was legal, and that status would otherwise abort the run.
-    tokens="$(printf '%s' "$normalized" | grep -oE "$CHECK15_TRACKER_PATTERN" | tr '\n' ' ' || true)"
-    printf '%s' "${tokens% }"
+    record="$(printf '%s\n' "$textline" | awk "$CHECK15_CLASSIFY_AWK")" || return
+    printf '%s' "${record#*$'\t'}"
 }
 
 # scan_prose_file_refs FILE
 # Prints one record per offending line, `LINENO<TAB>tok1 tok2 ...`, in file
-# order. PURE -- no findings, no globals, always exit 0 -- so the scanner canary
-# below can assert the file-level traversal (record shape, line numbering, and
-# the absence of any region skipping) over committed fixtures.
+# order. PURE -- no findings, no globals; exits non-zero only when the
+# classifier itself fails -- so the scanner canary below can assert the
+# file-level traversal (record shape, line numbering, and the absence of any
+# region skipping) over committed fixtures.
 scan_prose_file_refs() {
-    local prose_file="$1"
-    local line_num textline tokens
-    while IFS=$'\t' read -r line_num textline; do
-        # Same cheap gate as tracker_ref_tokens, hoisted so a line with no `#`
-        # never pays the command-substitution fork.
-        case "$textline" in
-            *'#'*) ;;
-            *) continue ;;
-        esac
-        tokens="$(tracker_ref_tokens "$textline")"
-        if [[ -z "$tokens" ]]; then
-            continue
-        fi
-        printf '%s\t%s\n' "$line_num" "$tokens"
-    done < <(awk '{ print NR "\t" $0 }' "$prose_file")
+    awk "$CHECK15_CLASSIFY_AWK" "$1"
 }
 
 # scan_file_for_tracker_refs FILE
 # Thin reporting wrapper: turns each record from scan_prose_file_refs into a
-# CHECK15 finding. Carries no detection logic of its own.
+# CHECK15 finding, and a classifier failure into a finding of its own. Carries
+# no detection logic of its own.
 scan_file_for_tracker_refs() {
     local prose_file="$1"
-    local line_num tokens
+    local line_num tokens records scan_rc=0
+    records="$(scan_prose_file_refs "$prose_file")" || scan_rc=$?
+    if [[ "$scan_rc" -ne 0 ]]; then
+        check15_found=true
+        add_finding 'CHECK15' "$prose_file" 0 \
+            "tracker-reference classifier exited ${scan_rc} on this file, so none of it was scanned -- fix the file's readability or the CHECK15_CLASSIFY_AWK program; an unscanned file is never reported clean"
+        return 0
+    fi
+    if [[ -z "$records" ]]; then
+        return 0
+    fi
     while IFS=$'\t' read -r line_num tokens; do
         check15_found=true
         add_finding 'CHECK15' "$prose_file" "$line_num" \
             "tracker reference(s) ${tokens} in plugin runtime prose -- cite a durable anchor (ADR, named invariant, or a present-tense description of the rule), never an issue or PR number; every reference on the line is listed because an allowlist entry covers the whole line, not one token"
-    done < <(scan_prose_file_refs "$prose_file")
+    done <<< "$records"
 }
 
 check15_md_count=0
@@ -1698,25 +1771,43 @@ if [[ "$check15_json_count" -eq 0 ]]; then
 fi
 
 # ── CHECK 15 DETECTION CANARY ──────────────────────────────────────────────
-# One case per documented pattern clause, in BOTH directions, plus exact-token
-# cases that pin CARDINALITY. A narrowed pattern, a dropped normalization pass,
-# or a matcher that stops after the first token turns this run red where the
-# presence-pinning safety fixture would stay green.
+# The candidate rule and each safe shape, in BOTH directions, plus exact-token
+# cases that pin CARDINALITY. A narrowed candidate rule, a widened or dropped
+# safe shape, or a walk that stops after the first token turns this run red
+# where the presence-pinning safety fixture would stay green.
+
+# check15_flag_classifier_failure LINE
+# Records a canary finding for a classifier that exited non-zero on LINE, so a
+# broken CHECK15_CLASSIFY_AWK program is loud rather than read as "no tokens".
+check15_flag_classifier_failure() {
+    check15_found=true
+    add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
+        "detection canary: the CHECK15_CLASSIFY_AWK classifier exited non-zero on \"$1\" -- the program no longer runs under this awk, so the guard classifies nothing"
+}
+
 check15_expect_hit() {
-    if [[ -z "$(tracker_ref_tokens "$1")" ]]; then
+    local got
+    if ! got="$(tracker_ref_tokens "$1")"; then
+        check15_flag_classifier_failure "$1"
+        return 0
+    fi
+    if [[ -z "$got" ]]; then
         check15_found=true
         add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
-            "detection canary: no tracker reference detected in \"$1\" -- CHECK15_TRACKER_PATTERN has been narrowed, or a CHECK15_LEGAL_CONTEXT_SED pass now eats a real reference, and the guard no longer catches the class it claims to ban"
+            "detection canary: no tracker reference detected in \"$1\" -- the CHECK15_CLASSIFY_AWK candidate rule has been narrowed, or a safe shape now admits a real reference, and the guard no longer catches the class it claims to ban"
     fi
 }
 
 check15_expect_miss() {
     local hit
-    hit="$(tracker_ref_tokens "$1")"
+    if ! hit="$(tracker_ref_tokens "$1")"; then
+        check15_flag_classifier_failure "$1"
+        return 0
+    fi
     if [[ -n "$hit" ]]; then
         check15_found=true
         add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
-            "detection canary: exempt construct \"$1\" was flagged as tracker reference '${hit}' -- a CHECK15_LEGAL_CONTEXT_SED normalization pass has been dropped and the guard now fires on legal prose"
+            "detection canary: exempt construct \"$1\" was flagged as tracker reference '${hit}' -- a CHECK15_CLASSIFY_AWK safe shape has been dropped or the candidate rule widened, and the guard now fires on legal prose"
     fi
 }
 
@@ -1726,11 +1817,14 @@ check15_expect_miss() {
 # reference on a line and silently drops its neighbours.
 check15_expect_tokens() {
     local got
-    got="$(tracker_ref_tokens "$1")"
+    if ! got="$(tracker_ref_tokens "$1")"; then
+        check15_flag_classifier_failure "$1"
+        return 0
+    fi
     if [[ "$got" != "$2" ]]; then
         check15_found=true
         add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
-            "detection canary: line \"$1\" yielded tokens '${got}' but expected '${2}' -- CHECK15_TRACKER_PATTERN or CHECK15_LEGAL_CONTEXT_SED no longer reports every reference on a line, and a line-keyed allowlist entry would then absolve the references it drops"
+            "detection canary: line \"$1\" yielded tokens '${got}' but expected '${2}' -- the CHECK15_CLASSIFY_AWK walk no longer reports every reference on a line, and a line-keyed allowlist entry would then absolve the references it drops"
     fi
 }
 
@@ -1740,6 +1834,13 @@ check15_expect_hit '(#42) covers the remainder'
 check15_expect_hit '#5 is the earliest'
 check15_expect_hit 'superseded by #123456'
 check15_expect_hit 'superseded by #1000000'
+check15_expect_hit 'issue#123 stays flagged'
+check15_expect_hit 'PR#456 stays flagged'
+check15_expect_hit 'x#9 glued'
+check15_expect_hit 'an unclosed ``#123 double run'
+check15_expect_hit 'an unclosed ```#123 triple run'
+check15_expect_hit 'host path example.com/a/b#12'
+check15_expect_hit 'a mismatched ``#123` run'
 
 check15_expect_miss '# Heading'
 check15_expect_miss '## Subheading'
@@ -1747,8 +1848,13 @@ check15_expect_miss '#!/usr/bin/env bash'
 check15_expect_miss 'cross-repo citation cli/cli#12258 names its repo'
 check15_expect_miss 'see [the anchor](#section-2) above'
 check15_expect_miss 'the literal placeholder `#123` inside inline code'
+# Not a candidate: the digit run after `#` is right-bounded by a letter.
 check15_expect_miss 'the colour #1a2b3c is letter-bearing'
 check15_expect_miss 'no hash here at all'
+check15_expect_miss 'the ``#123`` double run'
+check15_expect_miss 'the ```#123``` triple run'
+check15_expect_miss 'see [the section](#2-section) above'
+check15_expect_miss '[cli/cli#12258](https://github.com/cli/cli/pull/12258)'
 
 check15_expect_tokens 'see #123 for context' '#123'
 check15_expect_tokens 'tracked as #7.' '#7'
@@ -1760,6 +1866,14 @@ check15_expect_tokens 'x #12 #34' '#12 #34'
 check15_expect_tokens '#12 #34' '#12 #34'
 check15_expect_tokens 'a #12, #34.' '#12 #34'
 check15_expect_tokens "$(printf 'tracked as #7.\r')" '#7'
+check15_expect_tokens 'issue#123 stays flagged' '#123'
+check15_expect_tokens 'PR#456 stays flagged' '#456'
+check15_expect_tokens 'x#9 glued' '#9'
+check15_expect_tokens '``code`` and #123' '#123'
+check15_expect_tokens 'bare (#2-slug) text' '#2'
+check15_expect_tokens 'cli/cli#1 and issue#2 and `#3` and #4' '#2 #4'
+check15_expect_tokens 'host path example.com/a/b#12' '#12'
+check15_expect_tokens 'a mismatched ``#123` run' '#123'
 
 # ── CHECK 15 SCANNER CANARY ────────────────────────────────────────────────
 # The detection canary above witnesses the PREDICATE. This layer witnesses the
@@ -1770,7 +1884,7 @@ check15_expect_tokens "$(printf 'tracked as #7.\r')" '#7'
 # fixture reference turns this red; no predicate test can see any of those.
 check15_expect_scan() {
     local fixture_rel="$1" expected="$2"
-    local fixture_path got got_flat expected_flat
+    local fixture_path got got_flat expected_flat scan_rc=0
     fixture_path="$REPO_ROOT/$fixture_rel"
     if [[ ! -f "$fixture_path" ]]; then
         check15_found=true
@@ -1778,7 +1892,13 @@ check15_expect_scan() {
             "scanner canary: fixture ${fixture_rel} is missing -- the file-level traversal has no witness, so a reintroduced region skip or an off-by-one line number could ship unseen; restore the fixture rather than deleting the assertion"
         return 0
     fi
-    got="$(scan_prose_file_refs "$fixture_path")"
+    got="$(scan_prose_file_refs "$fixture_path")" || scan_rc=$?
+    if [[ "$scan_rc" -ne 0 ]]; then
+        check15_found=true
+        add_finding 'CHECK15' 'tools/policy_check.sh' 0 \
+            "scanner canary: the CHECK15_CLASSIFY_AWK classifier exited ${scan_rc} on ${fixture_rel} -- the file-level traversal did not run, so its records cannot be trusted"
+        return 0
+    fi
     if [[ "$got" != "$expected" ]]; then
         got_flat="${got//$'\n'/ | }"
         expected_flat="${expected//$'\n'/ | }"
@@ -1792,6 +1912,8 @@ check15_expect_scan 'tests/policy/fixtures/tracker-ref-scan-canary.md' \
     $'3\t#11\n13\t#21\n16\t#31\n20\t#41\n22\t#12 #34 #56'
 check15_expect_scan 'tests/policy/fixtures/tracker-ref-unclosed-frontmatter.md' \
     $'10\t#77'
+check15_expect_scan 'tests/policy/fixtures/tracker-ref-allowlist-canary.md' \
+    $'9\t#123\n11\t#456\n13\t#9\n19\t#123\n21\t#123\n23\t#123\n27\t#2\n29\t#2 #4\n31\t#12\n37\t#123'
 
 if [[ "$check15_found" == false ]]; then
     echo "[PASS] Check 15: No tracker references in $check15_file_count plugin runtime prose files"
