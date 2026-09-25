@@ -295,9 +295,13 @@ file_candidates() {
 #   the one composition of the pieces below. discover_paths is called directly
 #   only by canaries, which assert its status without emitting a real finding.
 #   discovery_gate_status is called directly by canaries and, outside a
-#   discovery, only to classify an optional ROOT before discovering under it
-#   (CHECK 14's skill scripts directory), whose rejection is still reported
-#   through flag_discovery_gate.
+#   discovery, to classify a ROOT before discovering under it -- CHECK 14's
+#   OPTIONAL skill scripts directory, and the REQUIRED SAFETY, COMPAT and
+#   WORKFLOW-FIXTURES fixture roots -- whose rejection is still reported
+#   through flag_discovery_gate. A root is never pre-guarded by a bare `-d`
+#   test: that skips the discovery entirely, so a missing or non-directory
+#   root would become a silent green run over an empty set instead of a
+#   finding.
 #   Precondition: every ROOT must exist. This is the CALLER's job; there is
 #   no swallow mode and find's stderr is never suppressed, so a missing root
 #   fails discovery with find's non-zero status and must be reported.
@@ -2674,7 +2678,17 @@ echo '=== SAFETY: Regression fixture tests ==='
 SAFETY_DIR="$REPO_ROOT/tests/policy"
 declare -a SAFETY_FIXTURES=()
 SAFETY_DISCOVERY_FAILED=false
-if [[ -d "$SAFETY_DIR" ]]; then
+# REQUIRED root: classify it with the status-bearing `dirs` gate rather than a
+# bare `-d` pre-guard. A `-d` test that simply skips the discovery makes a
+# missing or non-directory root a silent green run over an empty fixture set --
+# the exact input-set narrowing ahead of the fail-closed layer this engine
+# exists to prevent.
+SAFETY_DIR_RC=0
+discovery_gate_status "$SAFETY_DIR" dirs || SAFETY_DIR_RC=$?
+if [[ "$SAFETY_DIR_RC" -ne 0 ]]; then
+    SAFETY_DISCOVERY_FAILED=true
+    flag_discovery_gate 'SAFETY' "$SAFETY_DIR" "$SAFETY_DIR_RC"
+else
     discover_checked_paths 'SAFETY' SAFETY_FIXTURES files 'safety-*.json fixture files' "$SAFETY_DIR" -- -maxdepth 1 -name 'safety-*.json' || SAFETY_DISCOVERY_FAILED=true
 fi
 
@@ -3235,7 +3249,14 @@ echo '=== COMPAT: Plugin compatibility fixture tests ==='
 COMPAT_DIR="$REPO_ROOT/tests/plugin"
 declare -a COMPAT_FIXTURES=()
 COMPAT_DISCOVERY_FAILED=false
-if [[ -d "$COMPAT_DIR" ]]; then
+# REQUIRED root: see the SAFETY root gate above -- a bare `-d` pre-guard would
+# turn a missing or non-directory root into a silent SKIP over zero fixtures.
+COMPAT_DIR_RC=0
+discovery_gate_status "$COMPAT_DIR" dirs || COMPAT_DIR_RC=$?
+if [[ "$COMPAT_DIR_RC" -ne 0 ]]; then
+    COMPAT_DISCOVERY_FAILED=true
+    flag_discovery_gate 'COMPAT' "$COMPAT_DIR" "$COMPAT_DIR_RC"
+else
     discover_checked_paths 'COMPAT' COMPAT_FIXTURES files 'compatibility fixture files' "$COMPAT_DIR" -- -maxdepth 1 -name '*.json' || COMPAT_DISCOVERY_FAILED=true
 fi
 
@@ -3613,7 +3634,16 @@ test_workflow_fixtures() {
     local fixtures_dir="$REPO_ROOT/tests/workflows"
     declare -a fixtures=()
     local wf_discovery_failed=false
-    if [[ -d "$fixtures_dir" ]]; then
+    # REQUIRED root: see the SAFETY root gate above. This site already failed
+    # loudly on zero fixtures, but it is gated the same way so the `-d`
+    # pre-guard shape exists nowhere in this script and cannot be copied
+    # forward into a call site that has no such backstop.
+    local wf_dir_rc=0
+    discovery_gate_status "$fixtures_dir" dirs || wf_dir_rc=$?
+    if [[ "$wf_dir_rc" -ne 0 ]]; then
+        wf_discovery_failed=true
+        flag_discovery_gate 'WORKFLOW-FIXTURES' "$fixtures_dir" "$wf_dir_rc"
+    else
         discover_checked_paths 'WORKFLOW-FIXTURES' fixtures files 'golden-*.json workflow fixture files' "$fixtures_dir" -- -maxdepth 1 -name 'golden-*.json' || wf_discovery_failed=true
     fi
 
