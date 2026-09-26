@@ -279,6 +279,286 @@ file_candidates() {
     printf '%s' "$out"
 }
 
+# ── Checked discovery ───────────────────────────────────────────────────────
+# The single file-discovery engine for this script. Contract:
+#
+#   Policy: every discovery find runs with DISCOVERY_FIND_BASE (-L), so
+#   symlinks are FOLLOWED script-wide -- a symlinked file or directory is
+#   scanned as its target. Failures are loud, never silently skipped:
+#     - a symlink loop makes find print an error and exit non-zero (it keeps
+#       traversing), so discover_paths returns that status and
+#       discover_checked_paths reports it through flag_discovery_failure;
+#     - a dangling symlink is printed by find -L with exit 0, so it is the
+#       `files` gate of discovery_gate_status that rejects it (missing), and
+#       discover_checked_paths reports it through flag_discovery_gate.
+#   Call sites: every scanning check discovers through discover_checked_paths,
+#   the one composition of the pieces below. discover_paths is called directly
+#   only by canaries, which assert its status without emitting a real finding.
+#   discovery_gate_status is called directly by canaries and, outside a
+#   discovery, to classify a ROOT before discovering under it -- CHECK 14's
+#   OPTIONAL skill scripts directory, and the REQUIRED SAFETY, COMPAT and
+#   WORKFLOW-FIXTURES fixture roots -- whose rejection is still reported
+#   through flag_discovery_gate. A root is never pre-guarded by a bare `-d`
+#   test: that skips the discovery entirely, so a missing or non-directory
+#   root would become a silent green run over an empty set instead of a
+#   finding.
+#   Precondition: every ROOT must exist. This is the CALLER's job; there is
+#   no swallow mode and find's stderr is never suppressed, so a missing root
+#   fails discovery with find's non-zero status and must be reported.
+#   Containment: every path discover_checked_paths accepts resolves inside
+#   the checkout. Because -L follows symlinks, a link can lead discovery out
+#   of the repository, so discovery_containment_status canonicalises each
+#   materialised path with `realpath -m` and rejects any that does not
+#   resolve to REPO_ROOT or under it (a realpath failure is a rejection,
+#   never an accept). It runs AHEAD of discovery_gate_status for every gate,
+#   `raw` included, so an escaping path is never classified, never accepted,
+#   and never read by any check -- an escape is reported as an escape even
+#   when the gate would also have rejected it. The report is capped at ONE
+#   finding per discover_checked_paths call: it names the first escaping path
+#   (its in-checkout path, never its external target) and counts the further
+#   escaping paths it suppressed, so a link to a large external tree cannot
+#   flood the log; the call still returns non-zero.
+#   Findings: both reporting wrappers emit through add_finding, so --strict
+#   and the allowlist apply. Neither they nor discover_checked_paths set any
+#   per-check found/pass flag; discover_checked_paths returns non-zero when it
+#   emitted a finding, and the caller owns its flag.
+#   Residuals: symlink-loop reporting is not witnessed by a committed fixture;
+#   a symlinked directory that points back inside a scanned root materialises
+#   the same file under two paths (it is scanned twice, never skipped).
+#   Containment stops the READ, not the WALK: find -L still traverses an
+#   external tree a link leads into (only its paths are rejected), and a
+#   loop there still surfaces as find's non-zero status. Only the first
+#   escaping path is named; the rest are counted, not listed. discover_paths
+#   itself applies no containment -- only its canaries call it directly.
+
+DISCOVERY_FIND_BASE=(-L)
+DISCOVERY_FIND_STATUS_TAG='__DISCOVERY_FIND_STATUS='
+DISCOVERY_RC_TRUNCATED=20
+DISCOVERY_RC_USAGE=21
+DISCOVERY_GATE_RC_MISSING=22
+DISCOVERY_GATE_RC_NOT_REGULAR=23
+DISCOVERY_GATE_RC_UNREADABLE=24
+DISCOVERY_GATE_RC_NOT_DIR=25
+DISCOVERY_GATE_RC_UNKNOWN_GATE=26
+DISCOVERY_GATE_RC_ESCAPES=27
+
+# discover_paths DEST_ARRAY ROOT... -- FIND_ARGS...
+# Materialises the paths
+#   find "${DISCOVERY_FIND_BASE[@]}" ROOT... FIND_ARGS... -print0
+# emits into the caller-named array DEST_ARRAY (replacing its contents), and
+# returns find's exit status, DISCOVERY_RC_TRUNCATED when the stream does not
+# end in exactly one status record, or DISCOVERY_RC_USAGE (with a stderr
+# message) when no ROOT or no `--` separator is given. Paths found before a
+# failure are still materialised so they are scanned; the non-zero status is
+# what keeps the caller from reading the list as clean.
+#
+# DEST_ARRAY is bound by nameref, so nested discovery (a discovery inside
+# another discovery's loop) must use distinct destination names; it must also
+# not be one of this function's own `discovery_*` locals.
+#
+# INVARIANT: a failing producer inside `< <(...)` is invisible to the reading
+# loop (see the materialisation invariant above), so the producer appends its
+# own status as a trailing NUL-delimited sentinel record. The
+# `|| discovery_find_status=$?` is load-bearing: errexit is inherited by the
+# process substitution, so a bare `find ...; printf ... "$?"` dies before the
+# sentinel is written whenever find fails.
+#
+# INVARIANT: every emitted path begins with one of the ROOTs, so a path record
+# can only collide with DISCOVERY_FIND_STATUS_TAG if a ROOT itself begins with
+# it; callers pass absolute roots.
+discover_paths() {
+    local -n discovery_dest_ref="$1"
+    shift
+    local -a discovery_roots=()
+    local discovery_saw_separator=false
+    while [[ $# -gt 0 ]]; do
+        if [[ "$1" == '--' ]]; then
+            discovery_saw_separator=true
+            shift
+            break
+        fi
+        discovery_roots+=("$1")
+        shift
+    done
+    if [[ "$discovery_saw_separator" != true || "${#discovery_roots[@]}" -eq 0 ]]; then
+        echo "discover_paths: usage: discover_paths DEST_ARRAY ROOT... -- FIND_ARGS..." >&2
+        return "$DISCOVERY_RC_USAGE"
+    fi
+    local discovery_record discovery_status_record=''
+    local discovery_sentinel_total=0 discovery_last_was_sentinel=false
+    discovery_dest_ref=()
+    while IFS= read -r -d '' discovery_record; do
+        if [[ "$discovery_record" == "$DISCOVERY_FIND_STATUS_TAG"* ]]; then
+            discovery_sentinel_total=$((discovery_sentinel_total + 1))
+            discovery_status_record="$discovery_record"
+            discovery_last_was_sentinel=true
+        else
+            discovery_dest_ref+=("$discovery_record")
+            discovery_last_was_sentinel=false
+        fi
+    done < <(discovery_find_status=0; find "${DISCOVERY_FIND_BASE[@]}" "${discovery_roots[@]}" "$@" -print0 || discovery_find_status=$?; printf '%s%d\0' "$DISCOVERY_FIND_STATUS_TAG" "$discovery_find_status")
+    if [[ "$discovery_sentinel_total" -ne 1 || "$discovery_last_was_sentinel" != true ]]; then
+        return "$DISCOVERY_RC_TRUNCATED"
+    fi
+    return "${discovery_status_record#"$DISCOVERY_FIND_STATUS_TAG"}"
+}
+
+# discovery_gate_status PATH GATE
+# Status-bearing classifier for one discovered PATH (symlinks resolved, per
+# the -L policy). GATE is one of:
+#   files -- 0 only for a readable regular file; otherwise
+#            DISCOVERY_GATE_RC_MISSING (missing or dangling symlink),
+#            DISCOVERY_GATE_RC_NOT_REGULAR, or DISCOVERY_GATE_RC_UNREADABLE;
+#   dirs  -- 0 for a directory (a symlinked directory passes); otherwise
+#            DISCOVERY_GATE_RC_MISSING or DISCOVERY_GATE_RC_NOT_DIR;
+#   raw   -- always 0; the caller does its own read gating.
+# An unknown GATE returns DISCOVERY_GATE_RC_UNKNOWN_GATE with a stderr message.
+discovery_gate_status() {
+    local candidate_path="$1" gate_name="$2"
+    case "$gate_name" in
+        files)
+            if [[ ! -e "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_MISSING"
+            fi
+            if [[ ! -f "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_NOT_REGULAR"
+            fi
+            if [[ ! -r "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_UNREADABLE"
+            fi
+            ;;
+        dirs)
+            if [[ ! -e "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_MISSING"
+            fi
+            if [[ ! -d "$candidate_path" ]]; then
+                return "$DISCOVERY_GATE_RC_NOT_DIR"
+            fi
+            ;;
+        raw)
+            ;;
+        *)
+            echo "discovery_gate_status: unknown gate '${gate_name}' (expected files, dirs, or raw)" >&2
+            return "$DISCOVERY_GATE_RC_UNKNOWN_GATE"
+            ;;
+    esac
+    return 0
+}
+
+# discovery_containment_status PATH
+# Status-bearing containment classifier for one discovered PATH: 0 only when
+# `realpath -m -- PATH` succeeds and its result equals REPO_ROOT or begins with
+# REPO_ROOT/; otherwise DISCOVERY_GATE_RC_ESCAPES. A realpath failure is a
+# rejection, never an accept.
+discovery_containment_status() {
+    local containment_candidate="$1" containment_canonical
+    local containment_prefix="${REPO_ROOT%/}/"
+    containment_canonical="$(realpath -m -- "$containment_candidate")" || return "$DISCOVERY_GATE_RC_ESCAPES"
+    if [[ "$containment_canonical" == "$REPO_ROOT" || "$containment_canonical" == "$containment_prefix"* ]]; then
+        return 0
+    fi
+    return "$DISCOVERY_GATE_RC_ESCAPES"
+}
+
+# flag_discovery_failure RULE ROOT LABEL STATUS
+# Thin reporting wrapper: records the RULE finding for a discover_paths call
+# (described by LABEL, anchored at ROOT) that returned non-zero STATUS. A
+# partial path list is never a clean one.
+flag_discovery_failure() {
+    local rule_name="$1" discovery_root="$2" discovery_label="$3" discovery_rc="$4" failure_reason
+    case "$discovery_rc" in
+        "$DISCOVERY_RC_TRUNCATED") failure_reason='its path stream ended without exactly one trailing find-status record (truncated)' ;;
+        "$DISCOVERY_RC_USAGE") failure_reason='discover_paths was called without a ROOT or without the -- separator' ;;
+        *) failure_reason="find exited ${discovery_rc} (a missing root, an unreadable directory, or a symlink loop)" ;;
+    esac
+    add_finding "$rule_name" "$discovery_root" 0 \
+        "Discovery of ${discovery_label} failed: ${failure_reason}, so paths in it may never have been checked -- fix the tree; a failed discovery is NOT clean"
+}
+
+# flag_discovery_gate RULE PATH RC [SUPPRESSED_TOTAL]
+# Thin reporting wrapper: records the RULE finding for a discovered PATH that
+# discovery_gate_status or discovery_containment_status rejected with non-zero
+# RC. SUPPRESSED_TOTAL (default 0) is read only for DISCOVERY_GATE_RC_ESCAPES:
+# the count of further escaping paths the capped containment report withheld.
+flag_discovery_gate() {
+    local rule_name="$1" candidate_path="$2" gate_rc="$3" suppressed_total="${4:-0}" rejection_reason
+    case "$gate_rc" in
+        "$DISCOVERY_GATE_RC_MISSING") rejection_reason='is missing or is a dangling symlink' ;;
+        "$DISCOVERY_GATE_RC_NOT_REGULAR") rejection_reason='is not a regular file' ;;
+        "$DISCOVERY_GATE_RC_UNREADABLE") rejection_reason='is not readable' ;;
+        "$DISCOVERY_GATE_RC_NOT_DIR") rejection_reason='is not a directory' ;;
+        "$DISCOVERY_GATE_RC_ESCAPES") rejection_reason="does not resolve inside the checkout (a symlink leads it outside the repository root, or realpath could not canonicalise it) [${suppressed_total} further escaping path(s) from the same discovery suppressed]" ;;
+        *) rejection_reason="was rejected by the discovery gate with status ${gate_rc}" ;;
+    esac
+    add_finding "$rule_name" "$candidate_path" 0 \
+        "this discovered path ${rejection_reason}, so it was never checked -- fix or remove it; an unchecked path is NOT clean"
+}
+
+# discover_checked_paths RULE DEST_ARRAY GATE LABEL ROOT... -- FIND_ARGS...
+# The checked discovery every scanning check calls. Runs
+#   discover_paths ROOT... -- FIND_ARGS...
+# and reports a non-zero status through flag_discovery_failure (anchored at
+# the first ROOT, described by LABEL); then, for each materialised path,
+# first checks discovery_containment_status PATH and, only when it is
+# contained, gates it with discovery_gate_status PATH GATE, reporting each
+# gate rejection through flag_discovery_gate. Escaping paths are counted and
+# reported after the loop as ONE flag_discovery_gate finding naming the first
+# of them with the suppressed remainder. DEST_ARRAY is replaced with ONLY the
+# accepted paths, in find order. Returns 1 when it emitted any RULE finding,
+# else 0, so the caller sets its own flag:
+# `discover_checked_paths ... || checkN_found=true`.
+#
+# INVARIANT: every path added to DEST_ARRAY passed discovery_containment_status
+# before discovery_gate_status, so no gate -- `raw` included -- hands a check
+# a path that resolves outside the checkout.
+#
+# INVARIANT: DEST_ARRAY is bound by nameref, so it must not be one of this
+# function's own `checked_discovery_*` locals (the nameref would bind the
+# local, not the caller's array) and, like every discover_paths DEST, must not
+# be `discovery_*`-prefixed. Nested use -- a discovery inside another
+# discovery's loop -- needs distinct DEST names.
+discover_checked_paths() {
+    local checked_discovery_rule="$1" checked_discovery_gate="$3" checked_discovery_label="$4"
+    local -n checked_discovery_dest_ref="$2"
+    shift 4
+    local -a checked_discovery_materialised=()
+    local checked_discovery_rc=0 checked_discovery_flagged=false
+    local checked_discovery_path checked_discovery_gate_rc
+    local checked_discovery_escape_first='' checked_discovery_escape_total=0
+    discover_paths checked_discovery_materialised "$@" || checked_discovery_rc=$?
+    if [[ "$checked_discovery_rc" -ne 0 ]]; then
+        checked_discovery_flagged=true
+        flag_discovery_failure "$checked_discovery_rule" "$1" "$checked_discovery_label" "$checked_discovery_rc"
+    fi
+    checked_discovery_dest_ref=()
+    for checked_discovery_path in "${checked_discovery_materialised[@]}"; do
+        checked_discovery_gate_rc=0
+        discovery_containment_status "$checked_discovery_path" || checked_discovery_gate_rc=$?
+        if [[ "$checked_discovery_gate_rc" -ne 0 ]]; then
+            if [[ "$checked_discovery_escape_total" -eq 0 ]]; then
+                checked_discovery_escape_first="$checked_discovery_path"
+            fi
+            checked_discovery_escape_total=$((checked_discovery_escape_total + 1))
+            continue
+        fi
+        discovery_gate_status "$checked_discovery_path" "$checked_discovery_gate" || checked_discovery_gate_rc=$?
+        if [[ "$checked_discovery_gate_rc" -ne 0 ]]; then
+            checked_discovery_flagged=true
+            flag_discovery_gate "$checked_discovery_rule" "$checked_discovery_path" "$checked_discovery_gate_rc"
+            continue
+        fi
+        checked_discovery_dest_ref+=("$checked_discovery_path")
+    done
+    if [[ "$checked_discovery_escape_total" -gt 0 ]]; then
+        checked_discovery_flagged=true
+        flag_discovery_gate "$checked_discovery_rule" "$checked_discovery_escape_first" "$DISCOVERY_GATE_RC_ESCAPES" "$((checked_discovery_escape_total - 1))"
+    fi
+    if [[ "$checked_discovery_flagged" == true ]]; then
+        return 1
+    fi
+    return 0
+}
+
 # ── Timing instrumentation ──────────────────────────────────────────────────
 # Permanent per-check profiling (#305, precedent #304). Emits one
 # "[TIME] <label> <elapsed>s" line after each check block and a per-check
@@ -333,6 +613,255 @@ print_timing_table() {
 CHECKS_PASSED=0
 CHECKS_FAILED=0
 
+# ── DISCOVERY CANARY ────────────────────────────────────────────────────────
+# Witnesses the checked-discovery helpers (see the Checked discovery section).
+# It sits directly after State, the first point where its CHECKS_PASSED /
+# CHECKS_FAILED accounting survives the counter initialisation. Assertions:
+#   * precondition: the committed fixture symlinks ARE symlinks in this checkout
+#     (a core.symlinks=false checkout turns them into plain files) -- a loud
+#     finding, never a self-skip;
+#   * args pin: DISCOVERY_FIND_BASE is exactly the single element `-L`;
+#   * positive: discover_paths over the canary tree materialises exactly
+#     real/inner.md and link-dir/inner.md, both accepted by the `files` gate --
+#     proving -L descends a symlinked directory;
+#   * negative control: one raw `find -P` over the same tree materialises only
+#     real/inner.md, so the positive probe discriminates -L from -P;
+#   * gates in both directions, against the status-bearing classifier
+#     discovery_gate_status (never the reporting wrappers, so no probe emits a
+#     real finding), each probe path chosen so no earlier gate arm shadows the
+#     arm under test; a regular fixture accepted by `files` is the positive
+#     control, so the failure arms cannot all pass by the gate failing
+#     unconditionally;
+#   * status propagation: discover_paths over a nonexistent root returns
+#     find's own non-zero status (not TRUNCATED or USAGE);
+#   * composition: discover_checked_paths over the whole canary root under the
+#     `files` gate keeps exactly real/inner.md and link-dir/inner.md, returns
+#     non-zero, and emits exactly one finding, naming broken/dangling.md. It
+#     runs inside a command substitution so that finding is captured as text
+#     and its FINDING_* append dies with the subshell -- no real finding. Its
+#     two accepted paths are also the positive control for containment: a
+#     containment check that rejected unconditionally would drop them;
+#   * containment: discover_checked_paths over the escape canary root (a FILE
+#     symlink whose target lies outside the repository root), once under the
+#     `files` gate and once under `raw`, returns non-zero, accepts ZERO paths,
+#     and emits exactly one finding naming escape.md with the containment
+#     reason and 0 suppressed -- `raw` proves containment runs ahead of every
+#     gate, and the reason text proves `files` rejected it as an escape, not
+#     as the dangling link it also is;
+#   * cap: the same discovery with the escape root passed twice materialises
+#     escape.md twice yet emits exactly one containment finding, with 1
+#     suppressed. Both probes run in command substitutions like the
+#     composition probe, so no real finding is emitted.
+# The fixtures are committed, so no probe creates a filesystem object at run
+# time. stderr is discarded only for the nonexistent-root probe, whose find
+# error is the expected outcome.
+# Residuals: the symlink-loop case is not witnessed by a committed fixture --
+# find reports a loop through the same non-zero exit status the
+# nonexistent-root probe witnesses; a symlinked directory that points back
+# inside a scanned root materialises the same file under two paths (scanned
+# twice, never skipped), which this canary does not assert.
+
+echo ''
+echo '=== DISCOVERY: Checked-discovery canary ==='
+
+DISCOVERY_CANARY_REL='tests/policy/fixtures/discovery-canary'
+dcanary_root="$REPO_ROOT/$DISCOVERY_CANARY_REL"
+dcanary_tree="$dcanary_root/tree"
+dcanary_real_dir="$dcanary_tree/real"
+dcanary_link_dir="$dcanary_tree/link-dir"
+dcanary_real_file="$dcanary_real_dir/inner.md"
+dcanary_linked_file="$dcanary_link_dir/inner.md"
+dcanary_dangling_file="$dcanary_root/broken/dangling.md"
+dcanary_missing_root="$dcanary_root/__discovery_nonexistent__"
+DISCOVERY_ESCAPE_CANARY_REL='tests/policy/fixtures/discovery-escape-canary'
+dcanary_escape_root="$REPO_ROOT/$DISCOVERY_ESCAPE_CANARY_REL"
+dcanary_escape_file="$dcanary_escape_root/escape.md"
+dcanary_found=false
+
+# flag_discovery_canary DESCRIPTION
+# Records a DISCOVERY finding for a canary assertion that came back wrong.
+flag_discovery_canary() {
+    dcanary_found=true
+    add_finding 'DISCOVERY' 'tools/policy_check.sh' 0 \
+        "discovery canary: $1 -- the checked-discovery engine no longer holds its follow-symlinks, fail-loud contract, so a symlinked, dangling, or undiscoverable path could be read as clean"
+}
+
+# expect_discovery_gate PATH_LABEL PATH GATE EXPECTED_RC
+# Asserts discovery_gate_status PATH GATE returns exactly EXPECTED_RC.
+expect_discovery_gate() {
+    local path_label="$1" candidate_path="$2" gate_name="$3" expected_rc="$4" gate_rc=0
+    discovery_gate_status "$candidate_path" "$gate_name" || gate_rc=$?
+    if [[ "$gate_rc" -ne "$expected_rc" ]]; then
+        flag_discovery_canary "discovery_gate_status on ${path_label} under the '${gate_name}' gate returned ${gate_rc}, expected ${expected_rc}"
+    fi
+}
+
+if [[ ! -L "$dcanary_link_dir" || ! -L "$dcanary_dangling_file" || ! -L "$dcanary_escape_file" ]]; then
+    flag_discovery_canary "precondition: ${DISCOVERY_CANARY_REL}/tree/link-dir, ${DISCOVERY_CANARY_REL}/broken/dangling.md and ${DISCOVERY_ESCAPE_CANARY_REL}/escape.md must all be symlinks in this checkout, but at least one is not -- the likely cause is core.symlinks=false materialising them as plain files; set core.symlinks=true and re-checkout, never skip this canary"
+fi
+
+if [[ "${#DISCOVERY_FIND_BASE[@]}" -ne 1 || "${DISCOVERY_FIND_BASE[0]}" != '-L' ]]; then
+    flag_discovery_canary "DISCOVERY_FIND_BASE is '${DISCOVERY_FIND_BASE[*]}' (${#DISCOVERY_FIND_BASE[@]} element(s)) but must be exactly the single element '-L' -- discovery must follow symlinks script-wide"
+fi
+
+declare -a dcanary_paths=()
+dcanary_rc=0
+discover_paths dcanary_paths "$dcanary_tree" -- -name '*.md' || dcanary_rc=$?
+dcanary_accepted_total=0
+dcanary_saw_real=false
+dcanary_saw_linked=false
+for dcanary_path in "${dcanary_paths[@]}"; do
+    dcanary_gate_rc=0
+    discovery_gate_status "$dcanary_path" files || dcanary_gate_rc=$?
+    if [[ "$dcanary_gate_rc" -eq 0 ]]; then
+        dcanary_accepted_total=$((dcanary_accepted_total + 1))
+    fi
+    if [[ "$dcanary_path" == "$dcanary_real_file" ]]; then
+        dcanary_saw_real=true
+    elif [[ "$dcanary_path" == "$dcanary_linked_file" ]]; then
+        dcanary_saw_linked=true
+    fi
+done
+if [[ "$dcanary_rc" -ne 0 || "${#dcanary_paths[@]}" -ne 2 || "$dcanary_accepted_total" -ne 2 \
+   || "$dcanary_saw_real" != true || "$dcanary_saw_linked" != true ]]; then
+    flag_discovery_canary "discover_paths over ${DISCOVERY_CANARY_REL}/tree returned status ${dcanary_rc} and materialised ${#dcanary_paths[@]} path(s) [${dcanary_paths[*]}], ${dcanary_accepted_total} accepted by the 'files' gate; expected status 0 and exactly real/inner.md and link-dir/inner.md, both accepted -- -L no longer descends a symlinked directory"
+fi
+
+# INTENTIONAL NON-HELPER FIND: the only raw find in this canary, run with an
+# explicit -P as the negative control for the -L probe above; it is not a
+# discovery call site and must never be migrated to discover_paths.
+dcanary_raw_rc=0
+dcanary_raw_listing="$(find -P "$dcanary_tree" -name '*.md' -print)" || dcanary_raw_rc=$?
+if [[ "$dcanary_raw_rc" -ne 0 || "$dcanary_raw_listing" != "$dcanary_real_file" ]]; then
+    dcanary_raw_flat="${dcanary_raw_listing//$'\n'/ | }"
+    flag_discovery_canary "negative control: find -P over ${DISCOVERY_CANARY_REL}/tree returned status ${dcanary_raw_rc} and [${dcanary_raw_flat}], expected status 0 and exactly real/inner.md -- the positive probe no longer discriminates -L from -P"
+fi
+
+expect_discovery_gate 'broken/dangling.md' "$dcanary_dangling_file" files "$DISCOVERY_GATE_RC_MISSING"
+expect_discovery_gate 'broken/dangling.md' "$dcanary_dangling_file" raw 0
+expect_discovery_gate 'tree/real (a directory)' "$dcanary_real_dir" files "$DISCOVERY_GATE_RC_NOT_REGULAR"
+expect_discovery_gate 'tree/link-dir (a symlinked directory)' "$dcanary_link_dir" dirs 0
+expect_discovery_gate 'tree/real/inner.md (a regular file)' "$dcanary_real_file" dirs "$DISCOVERY_GATE_RC_NOT_DIR"
+expect_discovery_gate 'tree/real/inner.md (positive control)' "$dcanary_real_file" files 0
+
+dcanary_missing_rc=0
+discover_paths dcanary_paths "$dcanary_missing_root" -- -name '*.md' 2>/dev/null || dcanary_missing_rc=$?
+if [[ "$dcanary_missing_rc" -eq 0 || "$dcanary_missing_rc" -eq "$DISCOVERY_RC_TRUNCATED" \
+   || "$dcanary_missing_rc" -eq "$DISCOVERY_RC_USAGE" ]]; then
+    flag_discovery_canary "discover_paths over the nonexistent root ${DISCOVERY_CANARY_REL}/__discovery_nonexistent__ returned ${dcanary_missing_rc}, expected find's own non-zero status -- a failing find (a missing root or a symlink loop) no longer propagates, so it would read as a clean tree"
+fi
+
+# probe_checked_discovery_composition
+# Prints discover_checked_paths' output over the canary root (its findings),
+# then `rc=STATUS` and one `accepted=PATH` line per accepted path. Called only
+# inside a command substitution, so the finding it emits stays in the subshell.
+probe_checked_discovery_composition() {
+    local -a dcanary_checked_paths=()
+    local dcanary_checked_rc=0 dcanary_checked_path
+    discover_checked_paths 'DISCOVERY' dcanary_checked_paths files 'discovery canary Markdown files' "$dcanary_root" -- -name '*.md' || dcanary_checked_rc=$?
+    printf 'rc=%d\n' "$dcanary_checked_rc"
+    for dcanary_checked_path in "${dcanary_checked_paths[@]}"; do
+        printf 'accepted=%s\n' "$dcanary_checked_path"
+    done
+}
+
+dcanary_composition_output="$(probe_checked_discovery_composition)"
+dcanary_composition_rc=''
+dcanary_composition_finding_total=0
+dcanary_composition_saw_dangling=false
+dcanary_composition_accepted_total=0
+dcanary_composition_saw_real=false
+dcanary_composition_saw_linked=false
+while IFS= read -r dcanary_composition_line; do
+    case "$dcanary_composition_line" in
+        'rc='*)
+            dcanary_composition_rc="${dcanary_composition_line#rc=}"
+            ;;
+        'accepted='*)
+            dcanary_composition_accepted_total=$((dcanary_composition_accepted_total + 1))
+            if [[ "${dcanary_composition_line#accepted=}" == "$dcanary_real_file" ]]; then
+                dcanary_composition_saw_real=true
+            elif [[ "${dcanary_composition_line#accepted=}" == "$dcanary_linked_file" ]]; then
+                dcanary_composition_saw_linked=true
+            fi
+            ;;
+        *'[DISCOVERY] '*)
+            dcanary_composition_finding_total=$((dcanary_composition_finding_total + 1))
+            if [[ "$dcanary_composition_line" == *"[DISCOVERY] ${DISCOVERY_CANARY_REL}/broken/dangling.md -- "* ]]; then
+                dcanary_composition_saw_dangling=true
+            fi
+            ;;
+    esac
+done <<< "$dcanary_composition_output"
+if [[ "$dcanary_composition_rc" != 1 || "$dcanary_composition_accepted_total" -ne 2 \
+   || "$dcanary_composition_saw_real" != true || "$dcanary_composition_saw_linked" != true \
+   || "$dcanary_composition_finding_total" -ne 1 || "$dcanary_composition_saw_dangling" != true ]]; then
+    dcanary_composition_flat="${dcanary_composition_output//$'\n'/ | }"
+    flag_discovery_canary "discover_checked_paths over ${DISCOVERY_CANARY_REL} under the 'files' gate produced [${dcanary_composition_flat}]; expected rc=1, exactly real/inner.md and link-dir/inner.md accepted, and exactly one finding naming broken/dangling.md -- the call-site composition no longer gates, reports, or returns its findings"
+fi
+
+# probe_checked_discovery_containment GATE ROOT...
+# Prints discover_checked_paths' output over ROOT... under GATE (its findings),
+# then `rc=STATUS` and one `accepted=PATH` line per accepted path. Called only
+# inside a command substitution, so the finding it emits stays in the subshell.
+probe_checked_discovery_containment() {
+    local containment_probe_gate="$1"
+    shift
+    local -a dcanary_contained_paths=()
+    local dcanary_contained_rc=0 dcanary_contained_path
+    discover_checked_paths 'DISCOVERY' dcanary_contained_paths "$containment_probe_gate" 'discovery escape canary Markdown files' "$@" -- -name '*.md' || dcanary_contained_rc=$?
+    printf 'rc=%d\n' "$dcanary_contained_rc"
+    for dcanary_contained_path in "${dcanary_contained_paths[@]}"; do
+        printf 'accepted=%s\n' "$dcanary_contained_path"
+    done
+}
+
+# expect_discovery_containment PROBE_LABEL EXPECTED_SUPPRESSED GATE ROOT...
+# Runs probe_checked_discovery_containment GATE ROOT... in a command
+# substitution and asserts rc=1, zero accepted paths, and exactly one
+# DISCOVERY finding: the containment finding naming escape.md with
+# EXPECTED_SUPPRESSED further escaping paths suppressed.
+expect_discovery_containment() {
+    local probe_label="$1" expected_suppressed="$2" probe_output probe_line
+    local probe_rc='' probe_accepted_total=0 probe_finding_total=0 probe_saw_escape=false
+    shift 2
+    probe_output="$(probe_checked_discovery_containment "$@")"
+    while IFS= read -r probe_line; do
+        case "$probe_line" in
+            'rc='*)
+                probe_rc="${probe_line#rc=}"
+                ;;
+            'accepted='*)
+                probe_accepted_total=$((probe_accepted_total + 1))
+                ;;
+            *'[DISCOVERY] '*)
+                probe_finding_total=$((probe_finding_total + 1))
+                if [[ "$probe_line" == *"[DISCOVERY] ${DISCOVERY_ESCAPE_CANARY_REL}/escape.md -- this discovered path does not resolve inside the checkout "*"[${expected_suppressed} further escaping path(s) "* ]]; then
+                    probe_saw_escape=true
+                fi
+                ;;
+        esac
+    done <<< "$probe_output"
+    if [[ "$probe_rc" != 1 || "$probe_accepted_total" -ne 0 \
+       || "$probe_finding_total" -ne 1 || "$probe_saw_escape" != true ]]; then
+        flag_discovery_canary "${probe_label}: discover_checked_paths over ${DISCOVERY_ESCAPE_CANARY_REL} produced [${probe_output//$'\n'/ | }]; expected rc=1, zero accepted paths, and exactly one finding naming escape.md as a containment escape with ${expected_suppressed} further path(s) suppressed -- discovery no longer confines accepted paths to the checkout, or no longer caps its containment report"
+    fi
+}
+
+expect_discovery_containment "containment under the 'files' gate" 0 files "$dcanary_escape_root"
+expect_discovery_containment "containment under the 'raw' gate" 0 raw "$dcanary_escape_root"
+expect_discovery_containment 'containment cap (escape root passed twice)' 1 files "$dcanary_escape_root" "$dcanary_escape_root"
+
+if [[ "$dcanary_found" == false ]]; then
+    echo '[PASS] DISCOVERY: checked discovery follows symlinked directories, gates dangling and wrong-type paths, and propagates find failures'
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    echo '[FAIL] DISCOVERY: checked-discovery canary'
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'DISCOVERY'
+
 # ── CHECK 1: Forbidden hedge ───────────────────────────────────────────────
 
 echo ''
@@ -340,7 +869,9 @@ echo '=== CHECK 1: Forbidden hedge ==='
 
 check1_found=false
 
-while IFS= read -r -d '' md_file; do
+declare -a check1_md_files=()
+discover_checked_paths 'CHECK1' check1_md_files files 'plugin Markdown files' "$PLUGIN_ROOT" -- -name '*.md' || check1_found=true
+for md_file in "${check1_md_files[@]}"; do
     # Candidate prefilter (#305): one grep per FILE on the BROADEST pattern.
     # Every finding-producing line must pass the ladder's \bambiguous\b gate
     # below, so non-matching lines can never add a finding; the
@@ -403,7 +934,7 @@ while IFS= read -r -d '' md_file; do
         add_finding 'CHECK1' "$md_file" "$line_num" \
             "Forbidden hedge: 'ambiguous' used as gate-level uncertainty"
     done <<< "$candidates"
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0)
+done
 
 if [[ "$check1_found" == false ]]; then
     echo '[PASS] Check 1: No forbidden hedge violations found'
@@ -458,17 +989,17 @@ echo '=== CHECK 3: Skill names exist ==='
 
 AGENT_NAMES=('cerebrate' 'overlord' 'drone' 'changeling' 'local-reviewer' 'github-reviewer')
 
+check3_found=false
+
 # Collect scan sources
 declare -a SCAN_FILES=()
-while IFS= read -r -d '' f; do
-    SCAN_FILES+=("$f")
-done < <(find "$PLUGIN_ROOT/agents" -maxdepth 1 -name '*.md' -type f -print0 2>/dev/null)
-while IFS= read -r -d '' f; do
-    SCAN_FILES+=("$f")
-done < <(find "$PLUGIN_ROOT/skills" -name 'SKILL.md' -type f -print0 2>/dev/null)
-while IFS= read -r -d '' f; do
-    SCAN_FILES+=("$f")
-done < <(find "$PLUGIN_ROOT/governance" -maxdepth 1 -name '*.md' -type f -print0 2>/dev/null)
+declare -a check3_agent_files=()
+discover_checked_paths 'CHECK3' check3_agent_files files 'agent Markdown files' "$PLUGIN_ROOT/agents" -- -maxdepth 1 -name '*.md' || check3_found=true
+declare -a check3_skill_files=()
+discover_checked_paths 'CHECK3' check3_skill_files files 'skill SKILL.md files' "$PLUGIN_ROOT/skills" -- -name 'SKILL.md' || check3_found=true
+declare -a check3_governance_files=()
+discover_checked_paths 'CHECK3' check3_governance_files files 'governance Markdown files' "$PLUGIN_ROOT/governance" -- -maxdepth 1 -name '*.md' || check3_found=true
+SCAN_FILES+=("${check3_agent_files[@]}" "${check3_skill_files[@]}" "${check3_governance_files[@]}")
 
 # Extract all hivemind:* references.
 # skill_refs: associative array mapping skill name -> space-separated source file paths
@@ -507,7 +1038,6 @@ for scan_file in "${SCAN_FILES[@]}"; do
     done < <(echo "$scan_content" | grep -oP 'hivemind:\K[a-zA-Z0-9_-]+' | sort -u)
 done
 
-check3_found=false
 skill_ref_count=${#SKILL_REF_SOURCES[@]}
 for skill_name in "${!SKILL_REF_SOURCES[@]}"; do
     skill_md_path="$PLUGIN_ROOT/skills/$skill_name/SKILL.md"
@@ -564,7 +1094,9 @@ echo ''
 echo '=== CHECK 5: Unsupported frontmatter fields ==='
 
 check5_found=false
-while IFS= read -r -d '' agent_file; do
+declare -a check5_agent_files=()
+discover_checked_paths 'CHECK5' check5_agent_files files 'agent Markdown files' "$PLUGIN_ROOT/agents" -- -maxdepth 1 -name '*.md' || check5_found=true
+for agent_file in "${check5_agent_files[@]}"; do
     in_frontmatter=false
     frontmatter_started=false
     line_num=0
@@ -596,7 +1128,7 @@ while IFS= read -r -d '' agent_file; do
                 'Unsupported frontmatter field: permissionMode'
         fi
     done < "$agent_file"
-done < <(find "$PLUGIN_ROOT/agents" -maxdepth 1 -name '*.md' -type f -print0)
+done
 
 if [[ "$check5_found" == false ]]; then
     echo '[PASS] Check 5: No unsupported frontmatter fields found'
@@ -615,7 +1147,9 @@ echo '=== CHECK 6: Governance reference paths resolve ==='
 check6_found=false
 # PLUGIN_ROOT is invariant across the scan; resolve it once (#305).
 normalized_plugin_root="$(realpath -m "$PLUGIN_ROOT")"
-while IFS= read -r -d '' md_file; do
+declare -a check6_md_files=()
+discover_checked_paths 'CHECK6' check6_md_files files 'plugin Markdown files' "$PLUGIN_ROOT" -- -name '*.md' || check6_found=true
+for md_file in "${check6_md_files[@]}"; do
     # Candidate prefilter (#305): the extraction below requires the literal
     # ${CLAUDE_PLUGIN_ROOT}/ prefix, so one fixed-string grep per FILE finds
     # every line that can yield a reference.
@@ -650,7 +1184,7 @@ while IFS= read -r -d '' md_file; do
             fi
         done < <(echo "$textline" | grep -oP '\$\{CLAUDE_PLUGIN_ROOT\}/\K[^\s`\)]+' || true)
     done <<< "$candidates"
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0)
+done
 
 if [[ "$check6_found" == false ]]; then
     echo '[PASS] Check 6: All governance reference paths resolve'
@@ -670,7 +1204,9 @@ REQUIRED_FRONTMATTER_FIELDS=('name' 'description' 'allowed-tools' 'shell')
 check7_found=false
 skill_file_count=0
 
-while IFS= read -r -d '' skill_file; do
+declare -a check7_skill_files=()
+discover_checked_paths 'CHECK7' check7_skill_files files 'skill SKILL.md files' "$PLUGIN_ROOT/skills" -- -name 'SKILL.md' || check7_found=true
+for skill_file in "${check7_skill_files[@]}"; do
     skill_file_count=$((skill_file_count + 1))
 
     fm_content="$(get_frontmatter "$skill_file")"
@@ -681,7 +1217,7 @@ while IFS= read -r -d '' skill_file; do
                 "Missing required frontmatter field: $field_name"
         fi
     done
-done < <(find "$PLUGIN_ROOT/skills" -name 'SKILL.md' -type f -print0)
+done
 
 if [[ "$check7_found" == false ]]; then
     echo "[PASS] Check 7: All $skill_file_count skill files have complete frontmatter"
@@ -698,7 +1234,9 @@ echo ''
 echo '=== CHECK 8: No bare governance/agents/skills path refs ==='
 
 check8_found=false
-while IFS= read -r -d '' md_file; do
+declare -a check8_md_files=()
+discover_checked_paths 'CHECK8' check8_md_files files 'plugin Markdown files' "$PLUGIN_ROOT" -- -name '*.md' || check8_found=true
+for md_file in "${check8_md_files[@]}"; do
     # Candidate prefilter (#305): one grep per FILE for the bare-ref shape
     # WITHOUT the left-boundary group. Sound superset: every flagged ref is
     # built solely of characters inside the strip-token class below, and the
@@ -722,7 +1260,7 @@ while IFS= read -r -d '' md_file; do
                 "Bare path ref (missing \${CLAUDE_PLUGIN_ROOT}/ prefix): $bare_ref"
         done < <(echo "$stripped" | grep -oP '(^|[^A-Za-z0-9_./-])\K(agents|skills|governance|references|workflows)/([A-Za-z0-9_-]+/)*[A-Za-z0-9_-]+\.(md|sh|json)' || true)
     done <<< "$candidates"
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0)
+done
 
 if [[ "$check8_found" == false ]]; then
     echo '[PASS] Check 8: No bare governance/agents/skills path refs'
@@ -820,7 +1358,9 @@ first_match_line() {
 check9_found=false
 check9_script_count=0
 
-while IFS= read -r -d '' engine_script; do
+declare -a check9_engine_scripts=()
+discover_checked_paths 'CHECK9' check9_engine_scripts files 'skill engine scripts' "$PLUGIN_ROOT/skills" -- -path '*/scripts/*.sh' || check9_found=true
+for engine_script in "${check9_engine_scripts[@]}"; do
     # Only engine scripts that source the containment helper participate.
     if ! grep -qE '(^|[[:space:]])(\.|source)[[:space:]][^#]*containment\.sh' "$engine_script"; then
         continue
@@ -890,7 +1430,7 @@ while IFS= read -r -d '' engine_script; do
     done
 
     unset token_labels token_guards token_reads token_read_excludes
-done < <(find "$PLUGIN_ROOT/skills" -path '*/scripts/*.sh' -type f -print0)
+done
 
 if [[ "$check9_found" == false ]]; then
     echo "[PASS] Check 9: All $check9_script_count containment-sourcing engine scripts guard each token before its first read"
@@ -913,14 +1453,16 @@ echo '=== CHECK 10: No literal NUL byte in plugin Markdown payload ==='
 
 check10_found=false
 check10_md_count=0
-while IFS= read -r -d '' md_file; do
+declare -a check10_md_files=()
+discover_checked_paths 'CHECK10' check10_md_files files 'plugin Markdown files' "$PLUGIN_ROOT" -- -name '*.md' || check10_found=true
+for md_file in "${check10_md_files[@]}"; do
     check10_md_count=$((check10_md_count + 1))
     if LC_ALL=C grep -qaP '\x00' "$md_file" 2>/dev/null; then
         check10_found=true
         add_finding 'CHECK10' "$md_file" 0 \
             "Literal NUL byte in plugin Markdown payload — replace with a textual escape (e.g. \\u0000 or <NUL>); NUL makes the file binary and breaks Markdown/shell tooling and plugin consumers"
     fi
-done < <(find "$PLUGIN_ROOT" -name '*.md' -type f -print0)
+done
 
 if [[ "$check10_found" == false ]]; then
     echo "[PASS] Check 10: All $check10_md_count plugin Markdown payload files are free of literal NUL bytes"
@@ -961,7 +1503,9 @@ declare -a CHECK11_CANDIDATE_WORDS=()
 IFS='|' read -ra CHECK11_CANDIDATE_WORDS <<< "${BIOFORM_DENYLIST,,}|${CHECK11_KEEP_REGEX,,}"
 
 check11_found=false
-while IFS= read -r -d '' skill_file; do
+declare -a check11_skill_files=()
+discover_checked_paths 'CHECK11' check11_skill_files files 'skill SKILL.md files' "$PLUGIN_ROOT/skills" -- -name 'SKILL.md' || check11_found=true
+for skill_file in "${check11_skill_files[@]}"; do
     # One-pass awk state machine emits surviving BODY lines as "line_num<TAB>line",
     # excluding YAML frontmatter, fenced code blocks, and markdown table rows.
     while IFS=$'\t' read -r line_num textline; do
@@ -1004,7 +1548,7 @@ while IFS= read -r -d '' skill_file; do
             print NR "\t" $0
         }
     ' "$skill_file")
-done < <(find "$PLUGIN_ROOT/skills" -name 'SKILL.md' -type f -print0)
+done
 
 if [[ "$check11_found" == false ]]; then
     echo '[PASS] Check 11: No bare calling-bioform name in skill body prose (P14)'
@@ -1038,7 +1582,9 @@ echo '=== CHECK 12: No bare validation-tool/manifest token in governance/agents 
 CHECK12_DENYLIST='tools/validate\.sh|bash -n|python3 -m json\.tool|test_[a-z0-9_]+\.sh|package\.json|pyproject\.toml|Cargo\.toml|go\.mod|requirements\.txt|plugin\.json|marketplace\.json'
 
 check12_found=false
-while IFS= read -r -d '' doc_file; do
+declare -a check12_doc_files=()
+discover_checked_paths 'CHECK12' check12_doc_files files 'governance and agent Markdown files' "$PLUGIN_ROOT/governance" "$PLUGIN_ROOT/agents" -- -maxdepth 1 -name '*.md' || check12_found=true
+for doc_file in "${check12_doc_files[@]}"; do
     # One-pass awk state machine emits surviving BODY lines as "line_num<TAB>line",
     # excluding YAML frontmatter, fenced code blocks, and >=4-space indented lines.
     while IFS=$'\t' read -r line_num textline; do
@@ -1083,7 +1629,7 @@ while IFS= read -r -d '' doc_file; do
             print NR "\t" $0
         }
     ' "$doc_file")
-done < <(find "$PLUGIN_ROOT/governance" "$PLUGIN_ROOT/agents" -maxdepth 1 -name '*.md' -type f -print0)
+done
 
 if [[ "$check12_found" == false ]]; then
     echo '[PASS] Check 12: No bare validation-tool/manifest token in governance/agents prose'
@@ -1138,7 +1684,9 @@ echo ''
 echo '=== CHECK 13: P18 fail-closed shell floor ==='
 
 check13_found=false
-while IFS= read -r -d '' shell_script; do
+declare -a check13_shell_scripts=()
+discover_checked_paths 'CHECK13' check13_shell_scripts files 'plugin shell scripts' "$PLUGIN_ROOT" -- -name '*.sh' || check13_found=true
+for shell_script in "${check13_shell_scripts[@]}"; do
     has_errexit=false
     has_nounset=false
     has_pipefail=false
@@ -1366,7 +1914,7 @@ while IFS= read -r -d '' shell_script; do
     fi
     add_finding 'CHECK13' "$shell_script" "$finding_line" \
         "missing P18 fail-closed shell floor (set -euo pipefail) -- add the floor or document a justified CHECK13 allowlist exception"
-done < <(find "$PLUGIN_ROOT" -name '*.sh' -type f -print0)
+done
 
 if [[ "$check13_found" == false ]]; then
     echo '[PASS] Check 13: All plugin shell scripts carry the P18 fail-closed floor or a CHECK13 exception'
@@ -1458,24 +2006,45 @@ skill_declares_navigator_marker() {
 }
 
 # skill_sources_containment SKILL_DIR
-# Echoes "true" when any engine script under SKILL_DIR/scripts sources
-# containment.sh under CHECK 9's enrollment predicate (reused verbatim).
+# Sets SKILL_SOURCES_CONTAINMENT_RESULT to "true" when any engine script under
+# SKILL_DIR/scripts sources containment.sh under CHECK 9's enrollment predicate
+# (reused verbatim), "false" otherwise -- including when SKILL_DIR/scripts is
+# absent. A scripts path that exists but is not a followable directory, a
+# failed discovery, or a rejected script is reported as a CHECK14 finding (and
+# sets check14_found), so the result is returned in a global rather than by
+# command substitution: a subshell would drop those findings.
+SKILL_SOURCES_CONTAINMENT_RESULT=""
 skill_sources_containment() {
     local skill_dir="$1"
+    local scripts_dir="$skill_dir/scripts"
     local engine_script
-    while IFS= read -r -d '' engine_script; do
+    SKILL_SOURCES_CONTAINMENT_RESULT="false"
+    if [[ ! -e "$scripts_dir" && ! -L "$scripts_dir" ]]; then
+        return 0
+    fi
+    local scripts_dir_rc=0
+    discovery_gate_status "$scripts_dir" dirs || scripts_dir_rc=$?
+    if [[ "$scripts_dir_rc" -ne 0 ]]; then
+        check14_found=true
+        flag_discovery_gate 'CHECK14' "$scripts_dir" "$scripts_dir_rc"
+        return 0
+    fi
+    local -a check14_engine_scripts=()
+    discover_checked_paths 'CHECK14' check14_engine_scripts files 'skill engine scripts' "$scripts_dir" -- -maxdepth 1 -name '*.sh' || check14_found=true
+    for engine_script in "${check14_engine_scripts[@]}"; do
         if grep -qE '(^|[[:space:]])(\.|source)[[:space:]][^#]*containment\.sh' "$engine_script"; then
-            echo "true"
-            return
+            SKILL_SOURCES_CONTAINMENT_RESULT="true"
+            return 0
         fi
-    done < <(find "$skill_dir/scripts" -maxdepth 1 -name '*.sh' -type f -print0 2>/dev/null || true)
-    echo "false"
+    done
 }
 
 check14_found=false
 check14_navigator_count=0
 
-while IFS= read -r -d '' skill_file; do
+declare -a check14_skill_files=()
+discover_checked_paths 'CHECK14' check14_skill_files files 'skill SKILL.md files' "$PLUGIN_ROOT/skills" -- -maxdepth 2 -name 'SKILL.md' || check14_found=true
+for skill_file in "${check14_skill_files[@]}"; do
     if [[ "$(skill_declares_navigator_marker "$skill_file")" != "true" ]]; then
         continue
     fi
@@ -1486,7 +2055,8 @@ while IFS= read -r -d '' skill_file; do
     marker_line="$(grep -nF "$CHECK14_MARKER" "$skill_file" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
     [[ -z "$marker_line" ]] && marker_line=0
 
-    if [[ "$(skill_sources_containment "$skill_dir")" != "true" ]]; then
+    skill_sources_containment "$skill_dir"
+    if [[ "$SKILL_SOURCES_CONTAINMENT_RESULT" != "true" ]]; then
         check14_found=true
         add_finding 'CHECK14' "$skill_file" "$marker_line" \
             "Inert inputs-file navigator hivemind:${skill_name} fails obligation (a): no plugin/skills/${skill_name}/scripts/*.sh sources containment.sh in the direct '. <path>/containment.sh' form CHECK 9 enrolls on (an indirect loop-variable source does not enroll) -- until it does, CHECK 9's guard-before-read enforcement never applies to this navigator"
@@ -1497,7 +2067,7 @@ while IFS= read -r -d '' skill_file; do
         add_finding 'CHECK14' "$skill_file" "$marker_line" \
             "Inert inputs-file navigator hivemind:${skill_name} fails obligation (b): literal 'hivemind:${skill_name}' is absent from the '${CHECK14_SECTION_HEADING}' section of plugin/governance/security-policy.md -- add it to the covered-set enumeration"
     fi
-done < <(find "$PLUGIN_ROOT/skills" -maxdepth 2 -name 'SKILL.md' -type f -print0)
+done
 
 # FAIL-CLOSED on the discovery key itself: zero navigators means the marker was
 # renamed or dropped, which would silently disarm this check rather than fail it.
@@ -1598,9 +2168,10 @@ mark_time 'CHECK14'
 # layers shrinks what the check reads. The candidate rule has no right-boundary
 # condition, so `#123g`, `#123_` and `_#123_` are candidates rather than silently
 # dropped; the only narrowing is by a named safe shape. Discovery selects by
-# NAME only, never by type, so every name-matching path -- a symlink, a
-# directory named `*.md`, a dangling link -- reaches the read gate, where it is
-# read or becomes a finding instead of vanishing inside find.
+# NAME only, never by type, and follows symlinks, so every name-matching path
+# -- a symlink, a directory named `*.md`, a dangling link, a file beneath a
+# symlinked directory -- reaches the read gate, where it is read or becomes a
+# finding instead of vanishing inside find.
 #
 # CARDINALITY. A candidate consumes only its own token and never the separator
 # after it, so every reference on a line is reported, not just the first. A
@@ -1619,7 +2190,7 @@ mark_time 'CHECK14'
 #     (including an unclosed-frontmatter fixture that no predicate test reaches).
 #   * the TRAVERSAL CANARY asserts that discovery, the read gate, and the awk
 #     layer each return non-zero on failure instead of empty output, and that
-#     discovery selects by name only.
+#     discovery selects by name only and descends a symlinked directory.
 #
 # Discovery FAILS CLOSED PER ARM: each of the two discovery arms (`plugin/**/*.md`
 # and `plugin/workflows/*.json`) carries its OWN zero-file assertion. An aggregate
@@ -1632,6 +2203,14 @@ mark_time 'CHECK14'
 # path that is missing (a dangling symlink), not a regular file (a directory or a
 # symlink to one), or unreadable is a finding, as is a classifier that exits
 # non-zero on a file -- never a clean file.
+#
+# Both arms discover through the shared checked-discovery engine
+# (discover_checked_paths under CHECK15_DISCOVERY_GATE, see the Checked
+# discovery section), which follows symlinks with -L script-wide: a symlinked
+# directory under plugin/ is descended and every name-matching path beneath it
+# is scanned; a dangling link is materialised and, under the `raw` gate,
+# reaches CHECK 15's own read gate, where it is a finding; a symlink loop makes
+# find exit non-zero, which is a CHECK15 discovery-failure finding.
 #
 # RESIDUALS, stated plainly:
 #   * allowlist granularity is the LINE, not the token. An entry added for one
@@ -1655,17 +2234,16 @@ mark_time 'CHECK14'
 #     letter, so `#12ab` is indistinguishable from a tracker id glued to letters
 #     and is exempt. Bounded: a tracker id is pure digits, and a pure-digit run
 #     is never S4.
-#   * RECORDED RESIDUAL, same root class as silent input-set narrowing:
-#     discovery does not pass `-L`, so a symlinked DIRECTORY under plugin/ is
-#     not traversed and any `*.md` beneath it is absent from the scan set.
-#     Bounded: zero symlinks exist under plugin/ today, and the input is the
-#     repo's own committed tree. Remediation is rejected for now because an
-#     honest witness needs a filesystem object created at run time, and `-L`
-#     changes find's dangling-link and loop error semantics for the whole
-#     check. Promote this to a tracked issue if a symlink lands under plugin/.
-#   * discovery coverage is split: the traversal canary's behavioural symlink
-#     probe witnesses the discovery FUNCTION, and its exact args pin witnesses
-#     the production CALL SITES. Neither alone covers both.
+#   * a symlinked directory that points back inside plugin/ materialises the
+#     same file under two paths: it is scanned twice, never skipped, but an
+#     allowlist entry keyed to one path does not cover the other. A symlink
+#     loop is not witnessed by a committed fixture; it reports through the same
+#     non-zero find status the traversal canary's nonexistent-root probe
+#     witnesses.
+#   * discovery coverage is split: the traversal canary's exact args and gate
+#     pins witness the production CALL SITES, and its discovery probes witness
+#     the production COMPOSITION (discover_checked_paths under
+#     CHECK15_DISCOVERY_GATE over the shared engine). Neither alone covers both.
 #   * an inline code span broken across physical lines is not recognized: each
 #     line is classified alone, so a reference on either half is reported.
 #   * the scanner canary pins fixture LINE NUMBERS in this file. The fixtures say
@@ -1781,12 +2359,11 @@ tracker_ref_tokens() {
     printf '%s' "${record#*$'\t'}"
 }
 
-# Status codes the read and discovery layers return for their own failures,
-# distinct from each other and from the 0/1/2 that awk and find exit with.
+# Status codes the read layer returns for its own failures, distinct from each
+# other and from the 0/1/2 that awk exits with. Discovery status is the shared
+# checked-discovery engine's (see the Checked discovery section).
 CHECK15_RC_NOT_REGULAR=10
 CHECK15_RC_UNREADABLE=11
-CHECK15_RC_TRUNCATED=12
-CHECK15_FIND_STATUS_TAG='__CHECK15_FIND_STATUS='
 
 # check15_awk_records FILE
 # Runs the classifier over FILE, ungated, and returns awk's own exit status.
@@ -1857,55 +2434,6 @@ scan_file_for_tracker_refs() {
     done <<< "$records"
 }
 
-# check15_discover_files ROOT FIND_ARGS...
-# Materialises the paths `find ROOT FIND_ARGS... -print0` emits into the global
-# array check15_discovered_files, and returns find's exit status, or
-# CHECK15_RC_TRUNCATED when the stream does not end in exactly one status
-# record. Paths found before a failure are still materialised so they are
-# scanned; the non-zero status is what keeps the arm from reading as clean.
-#
-# INVARIANT: a failing producer inside `< <(...)` is invisible to the reading
-# loop (see the materialisation invariant under Helpers), so the producer
-# appends its own status as a trailing NUL-delimited sentinel record. The
-# `|| find_status=$?` is load-bearing: errexit is inherited by the process
-# substitution, so a bare `find ...; printf ... "$?"` dies before the sentinel
-# is written whenever find fails.
-check15_discover_files() {
-    local search_root="$1" stream_record status_record=''
-    local sentinel_total=0 last_was_sentinel=false
-    shift
-    check15_discovered_files=()
-    while IFS= read -r -d '' stream_record; do
-        if [[ "$stream_record" == "$CHECK15_FIND_STATUS_TAG"* ]]; then
-            sentinel_total=$((sentinel_total + 1))
-            status_record="$stream_record"
-            last_was_sentinel=true
-        else
-            check15_discovered_files+=("$stream_record")
-            last_was_sentinel=false
-        fi
-    done < <(find_status=0; find "$search_root" "$@" -print0 || find_status=$?; printf '__CHECK15_FIND_STATUS=%d\0' "$find_status")
-    if [[ "$sentinel_total" -ne 1 || "$last_was_sentinel" != true ]]; then
-        return "$CHECK15_RC_TRUNCATED"
-    fi
-    return "${status_record#"$CHECK15_FIND_STATUS_TAG"}"
-}
-
-# check15_flag_discovery_failure ARM_ROOT ARM_LABEL STATUS
-# Records the finding for a discovery arm whose find failed or whose stream
-# was truncated: a partial file list is never a clean one.
-check15_flag_discovery_failure() {
-    local arm_root="$1" arm_label="$2" discovery_rc="$3" failure_reason
-    if [[ "$discovery_rc" -eq "$CHECK15_RC_TRUNCATED" ]]; then
-        failure_reason='its path stream ended without exactly one trailing find-status record (truncated)'
-    else
-        failure_reason="find exited ${discovery_rc}"
-    fi
-    check15_found=true
-    add_finding 'CHECK15' "$arm_root" 0 \
-        "Tracker-reference discovery of ${arm_label} failed: ${failure_reason}, so files in that arm may never have been scanned -- fix the tree's readability; a failed discovery is NOT clean"
-}
-
 # INVARIANT: discovery selects by NAME only, never by type: every name-matching
 # path reaches the read gate, where a path that is missing or not a regular file becomes a
 # finding instead of being dropped silently by find. The traversal canary pins
@@ -1913,23 +2441,24 @@ check15_flag_discovery_failure() {
 CHECK15_MD_FIND_ARGS=(-name '*.md')
 CHECK15_JSON_FIND_ARGS=(-maxdepth 1 -name '*.json')
 
-check15_discovery_rc=0
-check15_discover_files "$PLUGIN_ROOT" "${CHECK15_MD_FIND_ARGS[@]}" || check15_discovery_rc=$?
-if [[ "$check15_discovery_rc" -ne 0 ]]; then
-    check15_flag_discovery_failure "$PLUGIN_ROOT" 'plugin/**/*.md' "$check15_discovery_rc"
-fi
-check15_md_count="${#check15_discovered_files[@]}"
-for prose_file in "${check15_discovered_files[@]}"; do
+# INVARIANT: both arms discover under the `raw` gate. check15_read_records is
+# CHECK 15's type gate; a `files` gate ahead of it would reject a directory or
+# dangling link before the read gate, leaving the traversal canary's read-gate
+# probes guarding a path production never reaches. The traversal canary pins
+# this value and runs its discovery probes under it.
+CHECK15_DISCOVERY_GATE='raw'
+
+declare -a check15_md_files=()
+discover_checked_paths 'CHECK15' check15_md_files "$CHECK15_DISCOVERY_GATE" 'plugin/**/*.md' "$PLUGIN_ROOT" -- "${CHECK15_MD_FIND_ARGS[@]}" || check15_found=true
+check15_md_count="${#check15_md_files[@]}"
+for prose_file in "${check15_md_files[@]}"; do
     scan_file_for_tracker_refs "$prose_file"
 done
 
-check15_discovery_rc=0
-check15_discover_files "$PLUGIN_ROOT/workflows" "${CHECK15_JSON_FIND_ARGS[@]}" || check15_discovery_rc=$?
-if [[ "$check15_discovery_rc" -ne 0 ]]; then
-    check15_flag_discovery_failure "$PLUGIN_ROOT/workflows" 'plugin/workflows/*.json' "$check15_discovery_rc"
-fi
-check15_json_count="${#check15_discovered_files[@]}"
-for prose_file in "${check15_discovered_files[@]}"; do
+declare -a check15_json_files=()
+discover_checked_paths 'CHECK15' check15_json_files "$CHECK15_DISCOVERY_GATE" 'plugin/workflows/*.json' "$PLUGIN_ROOT/workflows" -- "${CHECK15_JSON_FIND_ARGS[@]}" || check15_found=true
+check15_json_count="${#check15_json_files[@]}"
+for prose_file in "${check15_json_files[@]}"; do
     scan_file_for_tracker_refs "$prose_file"
 done
 
@@ -2128,12 +2657,23 @@ check15_expect_scan 'tests/policy/fixtures/tracker-ref-allowlist-canary.md' \
 # the failure arms cannot all pass by the layer failing unconditionally. Each
 # probe runs under `if !` so set -euo pipefail cannot abort the run; stderr is
 # discarded only here, because these failures are the expected outcome.
-# Discovery coverage is split across two witnesses: the args pin below witnesses
-# the production CALL SITES (their arrays select by name only), and the symlink
-# probe witnesses the discovery FUNCTION (a name-matching symlink is
-# materialised, and the same probe with `-type f` appended drops it -- the
-# negative control). The symlink fixture is committed, so no probe creates a
-# filesystem object at run time.
+# Discovery coverage is split across two witnesses: the args and gate pins
+# below witness the production CALL SITES (their arrays select by name only,
+# under the `raw` gate), and the discovery probes witness the production
+# COMPOSITION -- discover_checked_paths under CHECK15_DISCOVERY_GATE, over the
+# shared discover_paths engine:
+#   * a nonexistent root makes it return non-zero and emit a CHECK15
+#     find-failure finding, run inside a command substitution so the finding is
+#     captured as text and dies with the subshell;
+#   * a name-matching committed symlink is materialised; a raw `find -P` with
+#     `-type f` drops it -- the negative control proving that fixture is still
+#     a symlink rather than a plain file;
+#   * over the DISCOVERY canary root, CHECK15_MD_FIND_ARGS materialise the file
+#     under a symlinked directory (the -L policy) and a dangling link (name-only
+#     selection plus the raw gate hand it to the read gate); the same probe with
+#     `-type f` appended drops only the dangling link -- the negative control.
+# Every fixture is committed, so no probe creates a filesystem object at run
+# time.
 # Residual: the reporting wrapper's finding emission on a read failure has no
 # canary -- asserting it would emit a real finding -- and it is a thin
 # translation of the status-bearing layer these probes do witness.
@@ -2165,9 +2705,26 @@ check15_expect_find_args() {
 
 check15_expect_find_args 'CHECK15_MD_FIND_ARGS' '-name *.md' "${CHECK15_MD_FIND_ARGS[@]}"
 check15_expect_find_args 'CHECK15_JSON_FIND_ARGS' '-maxdepth 1 -name *.json' "${CHECK15_JSON_FIND_ARGS[@]}"
+if [[ "$CHECK15_DISCOVERY_GATE" != 'raw' ]]; then
+    check15_flag_traversal_canary "CHECK15_DISCOVERY_GATE is '${CHECK15_DISCOVERY_GATE}' but must be exactly 'raw' -- check15_read_records is the type gate, so a discovery gate ahead of it rejects a directory or dangling link before the read gate ever sees it"
+fi
 
-if check15_discover_files "$check15_canary_missing_path" -type f 2>/dev/null; then
-    check15_flag_traversal_canary "check15_discover_files returned 0 for the nonexistent root ${check15_canary_missing_path}, so a failing find is read as an empty tree"
+# probe_check15_missing_root_discovery
+# Prints the findings the production discovery composition emits over the
+# nonexistent canary root, then `rc=STATUS`. Called only inside a command
+# substitution, so the finding stays in the subshell.
+probe_check15_missing_root_discovery() {
+    local -a check15_canary_missing_paths=()
+    local check15_canary_missing_rc=0
+    discover_checked_paths 'CHECK15' check15_canary_missing_paths "$CHECK15_DISCOVERY_GATE" 'the traversal canary nonexistent root' "$check15_canary_missing_path" -- "${CHECK15_MD_FIND_ARGS[@]}" 2>/dev/null || check15_canary_missing_rc=$?
+    printf 'rc=%d\n' "$check15_canary_missing_rc"
+}
+
+check15_canary_missing_output="$(probe_check15_missing_root_discovery)"
+check15_canary_missing_rel="${check15_canary_missing_path#"$REPO_ROOT"/}"
+if [[ "$check15_canary_missing_output" != *'rc=1' \
+   || "$check15_canary_missing_output" != *"[CHECK15] ${check15_canary_missing_rel} -- Discovery of the traversal canary nonexistent root failed: find exited "* ]]; then
+    check15_flag_traversal_canary "discover_checked_paths over the nonexistent root ${check15_canary_missing_path} produced [${check15_canary_missing_output//$'\n'/ | }], expected rc=1 and a CHECK15 finding that find exited non-zero, so a failing find is read as an empty tree"
 fi
 if check15_read_records "$check15_canary_missing_path" >/dev/null 2>&1; then
     check15_flag_traversal_canary "check15_read_records returned 0 for the nonexistent path ${check15_canary_missing_path}"
@@ -2183,16 +2740,47 @@ if ! check15_canary_records="$(check15_read_records "$check15_canary_fixture_pat
 elif [[ -z "$check15_canary_records" ]]; then
     check15_flag_traversal_canary "positive control: check15_read_records returned no records for the committed fixture ${check15_canary_fixture_path}, which carries known references"
 fi
+declare -a check15_canary_paths=()
 check15_canary_discovery_rc=0
-check15_discover_files "$REPO_ROOT/tests/policy/fixtures" -maxdepth 1 -name "$check15_canary_symlink_name" || check15_canary_discovery_rc=$?
-if [[ "$check15_canary_discovery_rc" -ne 0 || "${#check15_discovered_files[@]}" -ne 1 ]]; then
-    check15_flag_traversal_canary "check15_discover_files materialised ${#check15_discovered_files[@]} path(s) with status ${check15_canary_discovery_rc} for the committed symlink ${check15_canary_symlink_path}, expected exactly 1 with status 0, so discovery drops a name-matching path before the read gate"
+discover_checked_paths 'CHECK15' check15_canary_paths "$CHECK15_DISCOVERY_GATE" 'the committed symlink canary' "$REPO_ROOT/tests/policy/fixtures" -- -maxdepth 1 -name "$check15_canary_symlink_name" || check15_canary_discovery_rc=$?
+if [[ "$check15_canary_discovery_rc" -ne 0 || "${#check15_canary_paths[@]}" -ne 1 ]]; then
+    check15_flag_traversal_canary "discover_checked_paths materialised ${#check15_canary_paths[@]} path(s) with status ${check15_canary_discovery_rc} for the committed symlink ${check15_canary_symlink_path}, expected exactly 1 with status 0, so discovery drops a name-matching path before the read gate"
 fi
-check15_canary_discovery_rc=0
-check15_discover_files "$REPO_ROOT/tests/policy/fixtures" -maxdepth 1 -name "$check15_canary_symlink_name" -type f || check15_canary_discovery_rc=$?
-if [[ "$check15_canary_discovery_rc" -ne 0 || "${#check15_discovered_files[@]}" -ne 0 ]]; then
-    check15_flag_traversal_canary "negative control: check15_discover_files with -type f materialised ${#check15_discovered_files[@]} path(s) with status ${check15_canary_discovery_rc} for the committed symlink ${check15_canary_symlink_path}, expected 0 with status 0, so the symlink probe above no longer distinguishes name-only from type-filtered discovery"
+# INTENTIONAL NON-HELPER FIND: run with an explicit -P as the negative control
+# for the committed-symlink probe above (under -L, `-type f` matches a symlink
+# to a regular file, so no helper call can drop it); it is not a discovery call
+# site and must never be migrated to discover_paths.
+check15_canary_raw_rc=0
+check15_canary_raw_listing="$(find -P "$REPO_ROOT/tests/policy/fixtures" -maxdepth 1 -name "$check15_canary_symlink_name" -type f -print)" || check15_canary_raw_rc=$?
+if [[ "$check15_canary_raw_rc" -ne 0 || -n "$check15_canary_raw_listing" ]]; then
+    check15_flag_traversal_canary "negative control: find -P with -type f listed [${check15_canary_raw_listing//$'\n'/ | }] with status ${check15_canary_raw_rc} for the committed symlink ${check15_canary_symlink_path}, expected nothing with status 0, so that fixture is no longer a symlink and the probe above no longer exercises a symlinked runtime-prose file"
 fi
+
+# expect_check15_canary_tree_discovery LABEL EXPECTED_TOTAL EXPECT_DANGLING FIND_ARGS...
+# Asserts the production composition over the DISCOVERY canary root returns 0
+# and materialises exactly EXPECTED_TOTAL paths, always including the file
+# under the symlinked directory, and the dangling link iff EXPECT_DANGLING.
+expect_check15_canary_tree_discovery() {
+    local probe_label="$1" expected_total="$2" expect_dangling="$3"
+    shift 3
+    local -a check15_tree_paths=()
+    local check15_tree_rc=0 check15_tree_path saw_linked=false saw_dangling=false
+    discover_checked_paths 'CHECK15' check15_tree_paths "$CHECK15_DISCOVERY_GATE" 'the DISCOVERY canary tree' "$dcanary_root" -- "$@" || check15_tree_rc=$?
+    for check15_tree_path in "${check15_tree_paths[@]}"; do
+        if [[ "$check15_tree_path" == "$dcanary_linked_file" ]]; then
+            saw_linked=true
+        elif [[ "$check15_tree_path" == "$dcanary_dangling_file" ]]; then
+            saw_dangling=true
+        fi
+    done
+    if [[ "$check15_tree_rc" -ne 0 || "${#check15_tree_paths[@]}" -ne "$expected_total" \
+       || "$saw_linked" != true || "$saw_dangling" != "$expect_dangling" ]]; then
+        check15_flag_traversal_canary "${probe_label}: discover_checked_paths over ${DISCOVERY_CANARY_REL} with '$*' returned ${check15_tree_rc} and materialised ${#check15_tree_paths[@]} path(s) [${check15_tree_paths[*]}], expected status 0 and exactly ${expected_total} including tree/link-dir/inner.md, with broken/dangling.md present=${expect_dangling} -- CHECK 15 discovery no longer follows a symlinked directory, or no longer hands a dangling link to the read gate"
+    fi
+}
+
+expect_check15_canary_tree_discovery 'symlinked-directory and dangling-link probe' 3 true "${CHECK15_MD_FIND_ARGS[@]}"
+expect_check15_canary_tree_discovery 'negative control' 2 false "${CHECK15_MD_FIND_ARGS[@]}" -type f
 check15_canary_symlink_rc=0
 check15_canary_symlink_records="$(check15_read_records "$check15_canary_symlink_path")" || check15_canary_symlink_rc=$?
 if [[ "$check15_canary_symlink_rc" -ne 0 || "$check15_canary_symlink_records" != $'10\t#77' ]]; then
@@ -2215,14 +2803,27 @@ echo '=== SAFETY: Regression fixture tests ==='
 
 SAFETY_DIR="$REPO_ROOT/tests/policy"
 declare -a SAFETY_FIXTURES=()
-if [[ -d "$SAFETY_DIR" ]]; then
-    while IFS= read -r -d '' f; do
-        SAFETY_FIXTURES+=("$f")
-    done < <(find "$SAFETY_DIR" -maxdepth 1 -name 'safety-*.json' -type f -print0)
+SAFETY_DISCOVERY_FAILED=false
+# REQUIRED root: classify it with the status-bearing `dirs` gate rather than a
+# bare `-d` pre-guard. A `-d` test that simply skips the discovery makes a
+# missing or non-directory root a silent green run over an empty fixture set --
+# the exact input-set narrowing ahead of the fail-closed layer this engine
+# exists to prevent.
+SAFETY_DIR_RC=0
+discovery_gate_status "$SAFETY_DIR" dirs || SAFETY_DIR_RC=$?
+if [[ "$SAFETY_DIR_RC" -ne 0 ]]; then
+    SAFETY_DISCOVERY_FAILED=true
+    flag_discovery_gate 'SAFETY' "$SAFETY_DIR" "$SAFETY_DIR_RC"
+else
+    discover_checked_paths 'SAFETY' SAFETY_FIXTURES files 'safety-*.json fixture files' "$SAFETY_DIR" -- -maxdepth 1 -name 'safety-*.json' || SAFETY_DISCOVERY_FAILED=true
 fi
 
 SAFETY_PASSED=0
 SAFETY_FAILED=0
+if [[ "$SAFETY_DISCOVERY_FAILED" == true ]]; then
+    echo '[FAIL] SAFETY: safety-*.json fixture discovery'
+    SAFETY_FAILED=$((SAFETY_FAILED + 1))
+fi
 
 test_set_check() {
     local rule_name="$1"
@@ -2534,10 +3135,10 @@ for fixture_file in "${SAFETY_FIXTURES[@]}"; do
     fi
 done
 
-if [[ ${#SAFETY_FIXTURES[@]} -eq 0 ]]; then
+if [[ ${#SAFETY_FIXTURES[@]} -eq 0 && "$SAFETY_FAILED" -eq 0 ]]; then
     echo '[SKIP] No safety fixture files found'
 else
-    echo "Safety fixtures: $SAFETY_PASSED passed, $SAFETY_FAILED failed out of ${#SAFETY_FIXTURES[@]}"
+    echo "Safety fixtures: $SAFETY_PASSED passed, $SAFETY_FAILED failed out of $((SAFETY_PASSED + SAFETY_FAILED))"
     CHECKS_PASSED=$((CHECKS_PASSED + SAFETY_PASSED))
     CHECKS_FAILED=$((CHECKS_FAILED + SAFETY_FAILED))
 fi
@@ -2773,14 +3374,24 @@ echo '=== COMPAT: Plugin compatibility fixture tests ==='
 
 COMPAT_DIR="$REPO_ROOT/tests/plugin"
 declare -a COMPAT_FIXTURES=()
-if [[ -d "$COMPAT_DIR" ]]; then
-    while IFS= read -r -d '' f; do
-        COMPAT_FIXTURES+=("$f")
-    done < <(find "$COMPAT_DIR" -maxdepth 1 -name '*.json' -type f -print0)
+COMPAT_DISCOVERY_FAILED=false
+# REQUIRED root: see the SAFETY root gate above -- a bare `-d` pre-guard would
+# turn a missing or non-directory root into a silent SKIP over zero fixtures.
+COMPAT_DIR_RC=0
+discovery_gate_status "$COMPAT_DIR" dirs || COMPAT_DIR_RC=$?
+if [[ "$COMPAT_DIR_RC" -ne 0 ]]; then
+    COMPAT_DISCOVERY_FAILED=true
+    flag_discovery_gate 'COMPAT' "$COMPAT_DIR" "$COMPAT_DIR_RC"
+else
+    discover_checked_paths 'COMPAT' COMPAT_FIXTURES files 'compatibility fixture files' "$COMPAT_DIR" -- -maxdepth 1 -name '*.json' || COMPAT_DISCOVERY_FAILED=true
 fi
 
 COMPAT_PASSED=0
 COMPAT_FAILED=0
+if [[ "$COMPAT_DISCOVERY_FAILED" == true ]]; then
+    echo '[FAIL] COMPAT: compatibility fixture discovery'
+    COMPAT_FAILED=$((COMPAT_FAILED + 1))
+fi
 
 for fixture_file in "${COMPAT_FIXTURES[@]}"; do
     fixture_raw="$(<"$fixture_file")"
@@ -2908,13 +3519,9 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                 if [[ "$glob_pattern" == *"/"* ]]; then
                     # Glob with subdirectory (e.g. */SKILL.md) — recurse and filter
                     local_filter="${glob_pattern##*/}"
-                    while IFS= read -r -d '' tf; do
-                        target_files+=("$tf")
-                    done < <(find "$target_dir" -name "$local_filter" -type f -print0)
+                    discover_checked_paths 'COMPAT' target_files files "[$check_desc] files named '$local_filter' under $target_dir_rel" "$target_dir" -- -name "$local_filter" || fixture_passed=false
                 else
-                    while IFS= read -r -d '' tf; do
-                        target_files+=("$tf")
-                    done < <(find "$target_dir" -maxdepth 1 -name "$glob_pattern" -type f -print0)
+                    discover_checked_paths 'COMPAT' target_files files "[$check_desc] files matching '$glob_pattern' in $target_dir_rel" "$target_dir" -- -maxdepth 1 -name "$glob_pattern" || fixture_passed=false
                 fi
 
                 if [[ -n "$exclude_pattern" ]]; then
@@ -2960,7 +3567,9 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                 add_finding 'COMPAT' "$target_dir_rel" 0 \
                     "[$check_desc] Directory missing: $target_dir_rel"
             else
-                while IFS= read -r -d '' target_file; do
+                declare -a field_absent_files=()
+                discover_checked_paths 'COMPAT' field_absent_files files "[$check_desc] Markdown files in $target_dir_rel" "$target_dir" -- -maxdepth 1 -name '*.md' || fixture_passed=false
+                for target_file in "${field_absent_files[@]}"; do
                     fm_content="$(get_frontmatter "$target_file")"
                     absent_count="$(echo "$fixture_raw" | jq '.absent | length')"
                     ai=0
@@ -2975,7 +3584,7 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                         fi
                         ai=$((ai + 1))
                     done
-                done < <(find "$target_dir" -maxdepth 1 -name '*.md' -type f -print0)
+                done
             fi
             ;;
 
@@ -2996,7 +3605,14 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                     "[$check_desc] Reference file missing: $ref_file_rel"
             else
                 ref_content="$(<"$ref_file_path")"
-                while IFS= read -r -d '' subdir; do
+                # INVARIANT: under DISCOVERY_FIND_BASE (-L) `-type d` is true for
+                # a directory AND a symlink to one, and `-type l` is true only for
+                # a symlink find cannot follow (dangling), so this predicate hands
+                # every subdirectory plus every dangling entry to the `dirs` gate,
+                # which rejects the dangling ones loudly; plain files stay out.
+                declare -a named_subdirs=()
+                discover_checked_paths 'COMPAT' named_subdirs dirs "[$check_desc] subdirectories of $target_dir_rel" "$target_dir" -- -mindepth 1 -maxdepth 1 '(' -type d -o -type l ')' || fixture_passed=false
+                for subdir in "${named_subdirs[@]}"; do
                     dir_name="$(basename "$subdir")"
                     if [[ -n "$exclude_pattern" && "$dir_name" == "$exclude_pattern" ]]; then
                         continue
@@ -3015,7 +3631,7 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                         add_finding 'COMPAT' "$ref_file_rel" 0 \
                             "[$check_desc] Directory name not found in $ref_file_rel: $dir_name"
                     fi
-                done < <(find "$target_dir" -mindepth 1 -maxdepth 1 -type d -print0)
+                done
             fi
             ;;
 
@@ -3035,7 +3651,9 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                     "[$check_desc] Reference file missing: $ref_file_rel"
             else
                 ref_content="$(<"$ref_file_path")"
-                while IFS= read -r -d '' file_in_dir; do
+                declare -a named_md_files=()
+                discover_checked_paths 'COMPAT' named_md_files files "[$check_desc] Markdown files in $target_dir_rel" "$target_dir" -- -maxdepth 1 -name '*.md' || fixture_passed=false
+                for file_in_dir in "${named_md_files[@]}"; do
                     base_name="$(basename "$file_in_dir" .md)"
                     # Builtin fixed-string test — same EPIPE/pipefail false-negative class as the
                     # dir-names-in-file arm above (see its comment).
@@ -3044,7 +3662,7 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                         add_finding 'COMPAT' "$ref_file_rel" 0 \
                             "[$check_desc] Filename not found in $ref_file_rel: $base_name"
                     fi
-                done < <(find "$target_dir" -maxdepth 1 -name '*.md' -type f -print0)
+                done
             fi
             ;;
 
@@ -3087,7 +3705,14 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                 add_finding 'COMPAT' "$target_dir_rel" 0 \
                     "[$check_desc] Directory missing: $target_dir_rel"
             else
-                while IFS= read -r -d '' scan_file; do
+                # INVARIANT: under DISCOVERY_FIND_BASE (-L) `-type d` is true for
+                # a directory AND a symlink to one, so `! -type d` keeps every
+                # directory out while regular files, symlinks to files, dangling
+                # symlinks, and special files all reach the `files` gate, which
+                # rejects all but readable regular files loudly.
+                declare -a pattern_scan_files=()
+                discover_checked_paths 'COMPAT' pattern_scan_files files "[$check_desc] files under $target_dir_rel" "$target_dir" -- '!' -type d || fixture_passed=false
+                for scan_file in "${pattern_scan_files[@]}"; do
                     scan_content="$(<"$scan_file")"
                     if [[ "$scan_content" == *"$search_pattern"* ]]; then
                         fixture_passed=false
@@ -3096,7 +3721,7 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
                         add_finding 'COMPAT' "$rel_file" 0 \
                             "[$check_desc] Forbidden pattern found: $search_pattern"
                     fi
-                done < <(find "$target_dir" -type f -print0)
+                done
             fi
             ;;
 
@@ -3116,10 +3741,10 @@ for fixture_file in "${COMPAT_FIXTURES[@]}"; do
     fi
 done
 
-if [[ ${#COMPAT_FIXTURES[@]} -eq 0 ]]; then
+if [[ ${#COMPAT_FIXTURES[@]} -eq 0 && "$COMPAT_FAILED" -eq 0 ]]; then
     echo '[SKIP] No compatibility fixture files found'
 else
-    echo "Compatibility fixtures: $COMPAT_PASSED passed, $COMPAT_FAILED failed out of ${#COMPAT_FIXTURES[@]}"
+    echo "Compatibility fixtures: $COMPAT_PASSED passed, $COMPAT_FAILED failed out of $((COMPAT_PASSED + COMPAT_FAILED))"
     CHECKS_PASSED=$((CHECKS_PASSED + COMPAT_PASSED))
     CHECKS_FAILED=$((CHECKS_FAILED + COMPAT_FAILED))
 fi
@@ -3134,14 +3759,26 @@ echo '=== WORKFLOW-FIXTURES: Golden-path workflow tests ==='
 test_workflow_fixtures() {
     local fixtures_dir="$REPO_ROOT/tests/workflows"
     declare -a fixtures=()
-    if [[ -d "$fixtures_dir" ]]; then
-        while IFS= read -r -d '' f; do
-            fixtures+=("$f")
-        done < <(find "$fixtures_dir" -maxdepth 1 -name 'golden-*.json' -type f -print0)
+    local wf_discovery_failed=false
+    # REQUIRED root: see the SAFETY root gate above. This site already failed
+    # loudly on zero fixtures, but it is gated the same way so the `-d`
+    # pre-guard shape exists nowhere in this script and cannot be copied
+    # forward into a call site that has no such backstop.
+    local wf_dir_rc=0
+    discovery_gate_status "$fixtures_dir" dirs || wf_dir_rc=$?
+    if [[ "$wf_dir_rc" -ne 0 ]]; then
+        wf_discovery_failed=true
+        flag_discovery_gate 'WORKFLOW-FIXTURES' "$fixtures_dir" "$wf_dir_rc"
+    else
+        discover_checked_paths 'WORKFLOW-FIXTURES' fixtures files 'golden-*.json workflow fixture files' "$fixtures_dir" -- -maxdepth 1 -name 'golden-*.json' || wf_discovery_failed=true
     fi
 
     WF_PASSED=0
     WF_FAILED=0
+    if [[ "$wf_discovery_failed" == true ]]; then
+        echo 'FAIL [WORKFLOW-FIXTURES] golden-*.json fixture discovery'
+        WF_FAILED=$((WF_FAILED + 1))
+    fi
 
     if [[ ${#fixtures[@]} -eq 0 ]]; then
         echo "FAIL [WORKFLOW-FIXTURES] No golden-*.json fixtures found in tests/workflows/"
