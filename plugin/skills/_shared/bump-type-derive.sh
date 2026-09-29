@@ -51,6 +51,16 @@
 #   A8  A subject with no `(` and no `:` has no leading token and is unmapped.
 #   A marker body line is matched per line with `$` at end-of-line, so a CR-terminated line
 #   (`...abc1234.\r`) does not match and the revert is kept (literal, no normalization).
+#   A9  The revert pre-pass trusts the marker body line naming the reverted SHA: a revert commit
+#       whose marker names an in-range commit drops BOTH commits with no content or ordering check.
+#       A forged marker can drop a real MAJOR/MINOR commit — an UNDER-bump direction, unlike A1's
+#       over-bump. Bounded: the only input is the branch's own commit messages, and every row is
+#       already message-derived, so an author able to forge a marker could equally type `chore:` on
+#       the breaking commit — the marker adds no capability. Output is advisory routing; the
+#       caller's Bump Trigger / no-bump judgments and the ask_user verdict still apply. Rejected:
+#       subject cross-check (subjects are not unique — the reason the rule keys on the SHA marker);
+#       patch-id/content validation (needs git I/O in this pure core); ignoring unverifiable
+#       reverts (no revert is verifiable here, so it deletes the pre-pass).
 
 set -u
 
