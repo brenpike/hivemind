@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 #
-# bump-type — THIN executable entrypoint for the hivemind:bump-type engine (ADR-0020). Computes
-# the versioning.md `## Bump Type Determination` dominant row + verdict for the commits on the
-# working branch since <base>, so the overlord reads a routing decision instead of hand-running
-# the revert pre-pass / row mapping / precedence arithmetic in prose. READ-ONLY: it mutates
-# nothing (no ledger, no temp file, no git write).
+# bump-type — THIN executable entrypoint for the hivemind:bump-type engine (ADR-0020), the SINGLE
+# SOURCE of the Bump Type Determination arithmetic that versioning.md `## Bump Type Determination`
+# delegates to. Computes the dominant row + verdict for the commits on the working branch since
+# <base>, so the overlord reads a routing decision instead of hand-computing the revert pre-pass /
+# row mapping / precedence. READ-ONLY: it mutates nothing (no ledger, no temp file, no git write).
 #
 # INPUT:
 #   $1                        base ref (positional). Gated by hivemind_assert_identifier
@@ -19,14 +19,13 @@
 #   Flags may appear before or after the positional; each exactly once; `--flag value` form only.
 #
 # COMMIT READ: `git log -z --format='%H%n%s%n%b' <resolved-base-sha>..HEAD --`. Records are
-# NUL-terminated — a DELIBERATE deviation from versioning.md's `--END--` line delimiter, because a
-# commit body line reading `--END--` could forge record framing, while git refuses NUL in commit
-# messages. Every record's first line must be a full hex object id; anything else is a framing
+# NUL-terminated rather than line-delimited by a sentinel line, because a commit body line equal to
+# any sentinel could forge record framing, while git refuses NUL in commit messages. Every record's first line must be a full hex object id; anything else is a framing
 # violation and fails closed. `log.showSignature` is forced off so signature text cannot enter the
 # record stream. git's exit status is checked (pipefail); a failed read is a blocker.
 #
 # DERIVATION: the pure rules live in _shared/bump-type-derive.sh (see its header for the rule
-# re-encoding and the A1/A2/A3/A4/A6/A8 residuals). This entrypoint only frames records, runs the
+# set and the A1/A2/A3/A4/A6/A8 residuals). This entrypoint only frames records, runs the
 # revert pre-pass union, tallies rows, and emits.
 #
 # OUTPUT on success (exit 0), YAML routing lines on stdout, emitted in ONE write at the end:

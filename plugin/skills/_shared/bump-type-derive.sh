@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# bump-type-derive.sh — PURE Bump Type Determination arithmetic for the hivemind:bump-type engine.
+# bump-type-derive.sh — single-source PURE Bump Type Determination arithmetic (hivemind:bump-type).
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: the thin entrypoint
 # (`skills/bump-type/scripts/bump-type.sh`) sources it by a path derived from its OWN script_dir.
@@ -14,11 +14,13 @@
 # full `set -euo pipefail`. `set -u` alone is safe to inherit. Allowlisted under CHECK13 as a P18
 # documented exception.
 #
-# SINGLE RESPONSIBILITY: re-encode, literally, the mechanical rules of versioning.md
-# `## Bump Type Determination` — the revert pre-pass predicates, the per-commit row mapping, the
-# dominant-row precedence, and the verdict projection. EVERYTHING here is PURE string/arithmetic
-# mapping: inputs in, words out on stdout, status via return code. There is NO git/file I/O and no
-# `exit`; the IMPURE git reads, argument gating, and record framing live in the entrypoint.
+# SINGLE RESPONSIBILITY: be the SINGLE SOURCE of the Bump Type Determination arithmetic — the
+# revert pre-pass predicates, the per-commit row mapping, the dominant-row precedence, and the
+# verdict projection. versioning.md `## Bump Type Determination` keeps the row table and the
+# caller's two judgments and delegates this arithmetic to the engine without restating it.
+# EVERYTHING here is PURE string/arithmetic mapping: inputs in, words out on stdout, status via
+# return code. There is NO git/file I/O and no `exit`; the IMPURE git reads, argument gating, and
+# record framing live in the entrypoint.
 #
 # UNTRUSTED-DATA POSTURE: commit subjects/bodies are attacker-influenceable DATA. Every match below
 # is a bash `[[ $text =~ $re ]]` whose pattern lives in an UNQUOTED shell variable (bash 3.2 treats
@@ -34,8 +36,9 @@
 # DOMINANT VOCABULARY: MAJOR | MINOR | PATCH | NO_BUMP | NONE (matches no row) | MULTI (matches
 # more than one row).
 #
-# RESIDUALS (deliberate literal preservation of versioning.md; documented, not fixed here):
-#   A1  Rule 1 is a literal CONTAINS test for `!:` anywhere in the subject — not anchored to the
+# RESIDUALS (deliberate engine behaviour, preserved from the former governance prose; documented,
+# not fixed here):
+#   A1  Row step 1 is a literal CONTAINS test for `!:` anywhere in the subject — not anchored to the
 #       type token. A subject such as `docs: note that foo!: bar` or `Revert "feat!: x"` maps to
 #       MAJOR (over-bump). Over-bump is the fail-safe direction (it escalates, never hides a break).
 #   A2  A reverted-original SHA prefix matching MORE THAN ONE in-range commit is ambiguous and is

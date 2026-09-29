@@ -20,8 +20,9 @@ the commit range, derives the verdict, and prints a routing decision.
 
 The engine owns ALL the mechanical arithmetic of
 `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Type Determination): the revert
-pre-pass, the per-commit row mapping, and the dominant-row precedence. That section and the
-engine are the single sources for those rules; this skill does not restate them.
+pre-pass, the per-commit row mapping, and the dominant-row precedence. The engine alone is the
+single source for that arithmetic; versioning.md keeps the row table and the two judgment
+definitions; this skill does not restate them.
 
 The caller keeps ONLY two judgments, both defined in
 `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Trigger):
