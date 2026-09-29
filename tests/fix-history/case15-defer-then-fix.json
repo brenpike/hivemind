@@ -1,0 +1,54 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRRT_case15llllllllllll",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 5,
+                "nodes": [
+                  {
+                    "id": "PRRC_case15comment1500",
+                    "databaseId": 1500,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Original finding: the cache key omits the tenant id."
+                  },
+                  {
+                    "id": "PRRC_case15comment1501",
+                    "databaseId": 1501,
+                    "author": { "login": "selfuser" },
+                    "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. Tenant scoping lands with the multi-tenant slice."
+                  },
+                  {
+                    "id": "PRRC_case15comment1502",
+                    "databaseId": 1502,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Re-raising: this leaks across tenants today, not after the slice."
+                  },
+                  {
+                    "id": "PRRC_case15comment1503",
+                    "databaseId": 1503,
+                    "author": { "login": "selfuser" },
+                    "body": "Fixed in abc1234. Added the tenant id to the cache key."
+                  },
+                  {
+                    "id": "PRRC_case15comment1504",
+                    "databaseId": 1504,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Re-raising: the eviction path still builds the old key shape."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": { "totalCount": 0, "nodes": [] },
+        "reviews": { "totalCount": 0, "nodes": [] }
+      }
+    }
+  }
+}

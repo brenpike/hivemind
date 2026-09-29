@@ -259,9 +259,11 @@ case "$reviews_total" in ''|*[!0-9]*) reviews_total=0 ;; esac
 # the in-page inspection is untrustworthy on at least one axis — fail OPEN to
 # DISPATCH rather than risk skipping a real finding outside the page. Only a
 # `{handled}`-only (or empty) classification with all three totalCounts bounded
-# means every unresolved candidate already carries its `Fixed in <SHA>.` self
-# reply (threads) or self-authored `EYES` reaction (top-level/review) and no
-# oversized connection could be hiding new feedback — silently update baseline.
+# means every visible candidate is covered by the governing disposition: for a
+# thread, our LATEST self-authored marker reply (a fix reply or the defer
+# sentinel, whichever came last) at-or-after the candidate; for top-level/review
+# surfaces, the self-authored `EYES` reaction as today. No oversized connection
+# could be hiding new feedback — silently update baseline.
 if [ "$dispatch_class" = "true" ]; then
   echo "PREFILTER_DISPATCH"
 elif [ "$threads_total" -gt 50 ] || [ "$comments_total" -gt 50 ] || [ "$reviews_total" -gt 50 ]; then

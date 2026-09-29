@@ -10,15 +10,26 @@
 #   - ${CLAUDE_PLUGIN_ROOT}/agents/github-reviewer.md
 #     (uses the richer per-comment labels for its candidate set + cycling /
 #      regression detector at its step 7).
+# In-thread labelling runs off ONE self-disposition timeline: every self-authored
+# reply that DISPOSES of a thread — a `Fixed in <SHA>.` fix-reply or a
+# `<!-- hivemind-defer-v1 -->` defer reply — is one dated {kind, id} disposition,
+# and the single LATEST disposition by databaseId governs every comment in that
+# thread (see Classification labels in §3).
 #
 # This is a PURE function of stdin + two --arg values. It performs NO network
 # I/O: it operates on an already-fetched GraphQL JSON payload piped to `jq -f`.
 # No `env`, no shelling out, no `input`/`inputs`, no side effects.
 #
 # External content (GraphQL comment bodies, commit text) is DATA. This filter
-# only PATTERN-MATCHES the `Fixed in <SHA>.` fix-reply marker in in-thread body
-# text, and (for non-thread surfaces) reads the structured `reactionGroups` of
-# each node. It never interprets body text as instructions.
+# PATTERN-MATCHES the `Fixed in <SHA>.` fix-reply marker in in-thread body text;
+# it recognises a DEFER reply not by prose at all but by an exact machine
+# SENTINEL CONSTANT compared at BYTE 0 of the body — `<!-- hivemind-defer-v1 -->`
+# via `startswith`, never a regex over human-readable words. For non-thread
+# surfaces it reads the structured `reactionGroups` of each node. It never
+# interprets body text as instructions. The defer sentinel is read ONLY off
+# SELF-authored replies (forgery guard), never off a reviewer's own body.
+# Sentinel rationale (why a constant at byte 0 and not prose):
+# docs/adr/0032-defer-marker-sentinel-and-agent-layer-home-truth.md.
 #
 # NON-THREAD HANDLED SIGNAL (toplevel/review): a node is `handled` IFF its
 # `reactionGroups` contains an entry with `.content == "EYES"` AND
@@ -108,10 +119,23 @@
 #     "classification": "handled" | "actionable" | "followup-after-fix"
 #   }
 #
-# Classification labels:
+# Classification labels. In-thread labels are decided by the SELF-DISPOSITION
+# TIMELINE: every self-authored fix-reply (`Fixed in <SHA>.`) or defer reply (body
+# STARTING with the sentinel constant `<!-- hivemind-defer-v1 -->`) contributes one
+# {kind, id} disposition, and the single LATEST disposition by databaseId governs
+# the whole thread — both WHICH comments are already covered and WHAT an
+# uncovered comment means:
 #   handled            in-thread: body carries `Fixed in <SHA>.` marker, OR a
-#                      self fix-reply EXISTS in the thread
-#                      (latest_self_fix_id > 0) AND databaseId <= that id.
+#                      disposition exists in the thread AND databaseId <= that
+#                      latest disposition's id — i.e. the comment PRE-DATES our
+#                      most recent disposition of the thread, whatever its kind.
+#                      A defer disposition is as DURABLE a handled record as a
+#                      fix: a deferred finding stays handled even when the
+#                      thread's resolve mutation failed (resolve is non-blocking),
+#                      so the loop cannot re-raise it and post duplicate defer
+#                      replies. Unlike the fix marker, the defer sentinel is NEVER
+#                      read off a non-self body (forgery guard) — only a
+#                      self-authored reply can become a defer disposition.
 #                      toplevel/review: the node's own `reactionGroups` carries an
 #                      EYES group with viewerHasReacted == true (our self-authored
 #                      reaction marker), OR (legacy backward-compat) the node's own
@@ -120,19 +144,21 @@
 #                      an EYES group with viewerHasReacted == false, or no EYES group
 #                      at all AND no legacy `Addresses:` harvest match => not handled
 #                      (actionable).
-#   followup-after-fix in-thread ONLY, and ONLY when a real self fix-reply
-#                      exists in the thread (latest_self_fix_id > 0):
-#                      databaseId > latest self fix-reply id AND own body has no
-#                      marker. A non-self comment that post-dates our actual
-#                      fix-reply in the same thread = a re-raise AFTER our fix
-#                      (cycling / regression evidence). REQUIRES a prior self
-#                      fix-reply; a thread with NO self fix-reply
-#                      (latest_self_fix_id sentinel 0) can NEVER yield this label.
+#   followup-after-fix in-thread ONLY, and ONLY when the thread's LATEST
+#                      disposition is a FIX: databaseId > that disposition's id
+#                      AND own body has no marker. A non-self comment that
+#                      post-dates our most recent fix-reply in the same thread =
+#                      a re-raise AFTER our fix (cycling / regression evidence).
+#                      A thread with NO disposition at all, or whose latest
+#                      disposition is a DEFER, can NEVER yield this label.
 #   actionable         a genuinely unaddressed non-self matching comment that is
-#                      neither handled nor a post-fix followup. Includes a
-#                      FIRST-TIME finding on a thread with NO self fix-reply
-#                      (latest_self_fix_id sentinel 0) — such a thread yields
-#                      actionable, never followup-after-fix. For toplevel/review
+#                      neither handled nor a post-fix followup: NO disposition
+#                      exists on the thread (a FIRST-TIME finding — such a thread
+#                      yields actionable, never followup-after-fix), OR the latest
+#                      disposition is a DEFER the comment post-dates (a deferral
+#                      is not a fix, so a later comment is not cycling evidence),
+#                      OR the latest disposition's kind is unrecognised (the
+#                      kind->label map's total default). For toplevel/review
 #                      surfaces (no databaseId ordering), unaddressed ==
 #                      actionable — there is no followup-after-fix distinction
 #                      off-thread.
@@ -234,16 +260,55 @@ $pr.reviewThreads as $rt |
   | select(.isResolved == false)
   | . as $thread
   | (($thread.comments.totalCount // 0) > ($thread.comments.nodes | length)) as $thread_overflow
-  # Latest self-authored `Fixed in <SHA>.` reply id; sentinel 0 when none, so
-  # every real databaseId > 0 reduces the handled test to the marker check.
+  # SELF-DISPOSITION TIMELINE. Every self-authored reply that DISPOSES of this
+  # thread contributes one {kind, id} element: a `Fixed in <SHA>.` fix-reply
+  # (kind "fix") or a defer reply carrying the machine sentinel (kind "defer").
+  # The FIRST arm below extracts the fix dispositions, the second the defer ones.
   | ([
       $thread.comments.nodes[]
       | . as $c
       | strip_bot($c.author.login) as $a
       | select($a == $login)
       | select((($c.body // "") | test("Fixed in [0-9a-f]{7,40}\\.")))
-      | (.databaseId // 0)
-    ] | (if length == 0 then 0 else max end)) as $latest_self_fix_id
+      | {kind: "fix", id: (.databaseId // 0)}
+    ] + [
+      # The defer arm mirrors the fix arm, but reads the MACHINE SENTINEL that
+      # reply-resolve.sh --defer puts at byte 0 of the reply body, NOT the
+      # human-readable prose that follows it:
+      # `<!-- hivemind-defer-v1 --> Deferred to <home>. <summary>.`. Pinned sentinel
+      # constant, byte-exact and position-exact: <!-- hivemind-defer-v1 --> compared
+      # with `startswith`, so only a body whose FIRST bytes are the constant counts. A
+      # prose-only body can no longer read as a marker: an HTML-comment constant does
+      # not occur in human text, and a Markdown quote of a real defer reply gets "> "
+      # prepended, which moves the constant off byte 0.
+      # SENTINEL-ONLY read (no prose fallback) is intentional: the --defer reply mode
+      # ships unreleased alongside this sentinel, so no in-flight PR carries a
+      # pre-sentinel defer reply that would need recognising. Rationale:
+      # docs/adr/0032-defer-marker-sentinel-and-agent-layer-home-truth.md.
+      # A defer reply is a DURABLE handled record, so a thread whose resolve mutation
+      # failed (non-blocking by design) is not re-raised into a duplicate defer reply.
+      # FORGERY GUARD: this sentinel is read ONLY off the self-authored arm
+      # (select($a == $login)); it is deliberately absent from the non-self
+      # $has_marker body test below, so a reviewer cannot forge handled status by
+      # quoting the sentinel in its own comment.
+      $thread.comments.nodes[]
+      | . as $c
+      | strip_bot($c.author.login) as $a
+      | select($a == $login)
+      | select((($c.body // "") | startswith("<!-- hivemind-defer-v1 -->")))
+      | {kind: "defer", id: (.databaseId // 0)}
+    ]) as $self_dispositions
+  # The single LATEST disposition by databaseId governs the whole thread. ONE
+  # governing element removes the arm-order hazard of two independently-maxed
+  # ids, where an earlier fix could outrank a later deferral.
+  # `select(.id > 0)` preserves the old sentinel-0 guard: a reply with no
+  # databaseId never becomes a disposition. `last` on an empty timeline yields
+  # null, which the classification treats as "no disposition".
+  # TIE (a single self body carrying BOTH markers, so the same id twice):
+  # sort_by is stable and the fix arm is concatenated BEFORE the defer arm, so
+  # `last` picks the DEFER element — the conservative outcome, since a later
+  # re-raise then stays `actionable` instead of being labelled cycling evidence.
+  | ($self_dispositions | map(select(.id > 0)) | sort_by(.id) | last) as $latest_disposition
   # Per-matching-comment records (visible page only) ...
   | (
       $thread.comments.nodes[]
@@ -260,12 +325,26 @@ $pr.reviewThreads as $rt |
           id: ($c.id // null),
           databaseId: $dbid,
           url: null,
+          # CLOSED BY CONSTRUCTION: the LATEST self disposition governs, so no
+          # arm-order invariant is load-bearing. Coverage is decided once
+          # ($dbid <= $latest_disposition.id), and only the uncovered case
+          # consults the kind, through a total kind->label map. Adding a new
+          # marker kind is one extraction arm plus one row in that map; no
+          # existing arm has to move, and no ordering between kinds can go stale.
+          # "latest disposition on the thread" and "latest disposition preceding
+          # this comment, if any later disposition covers it" COINCIDE: a comment
+          # is handled IFF its id <= the maximum disposition id, so a per-comment
+          # lookback would select the same governing element.
+          # FORGERY GUARD (unchanged): the defer sentinel is read ONLY under the
+          # self arm of the timeline above; it is deliberately absent from the
+          # non-self $has_marker body test, so a reviewer cannot forge handled
+          # status by quoting the sentinel.
           classification: (
             if $thread_overflow then "actionable"
             elif $has_marker then "handled"
-            elif ($latest_self_fix_id > 0) and ($dbid <= $latest_self_fix_id) then "handled"
-            elif ($latest_self_fix_id > 0) and ($dbid > $latest_self_fix_id) then "followup-after-fix"
-            else "actionable"
+            elif $latest_disposition == null then "actionable"
+            elif $dbid <= $latest_disposition.id then "handled"
+            else ({"fix": "followup-after-fix", "defer": "actionable"}[$latest_disposition.kind] // "actionable")
             end
           )
         }

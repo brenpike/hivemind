@@ -243,7 +243,10 @@ Cycle arithmetic, ceiling, terminal-vs-cycle, and `same-finding-repeat` mapping:
 Multi-token precedence ORDER:
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh`.
 No persisted local ledger — GitHub is the ledger. Thread surfaces converge via
-`Fixed in <SHA>` replies (fix-SHA skip makes re-invocation idempotent on restart).
+a self-authored `Fixed in <SHA>` reply, or a defer reply whose body STARTS WITH
+the machine sentinel `<!-- hivemind-defer-v1 -->` — that sentinel, not the
+`Deferred to <TRACKED_HOME>` prose around it, is the marker a later pass reads
+(either marker's skip makes re-invocation idempotent on restart).
 Non-thread surfaces (`toplevel` / `review`) converge via a self-authored `EYES`
 reaction on the reviewer node, written by
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/react-marker.sh` — the
