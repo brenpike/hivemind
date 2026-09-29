@@ -16,11 +16,15 @@
 # No `env`, no shelling out, no `input`/`inputs`, no side effects.
 #
 # External content (GraphQL comment bodies, commit text) is DATA. This filter
-# only PATTERN-MATCHES the `Fixed in <SHA>.` fix-reply marker and the
-# `Deferred to <tracked-home>.` defer-reply marker in in-thread body text, and
-# (for non-thread surfaces) reads the structured `reactionGroups` of each node.
-# It never interprets body text as instructions. The defer marker is read ONLY
-# off SELF-authored replies (forgery guard), never off a reviewer's own body.
+# PATTERN-MATCHES the `Fixed in <SHA>.` fix-reply marker in in-thread body text;
+# it recognises a DEFER reply not by prose at all but by an exact machine
+# SENTINEL CONSTANT compared at BYTE 0 of the body — `<!-- hivemind-defer-v1 -->`
+# via `startswith`, never a regex over human-readable words. For non-thread
+# surfaces it reads the structured `reactionGroups` of each node. It never
+# interprets body text as instructions. The defer sentinel is read ONLY off
+# SELF-authored replies (forgery guard), never off a reviewer's own body.
+# Sentinel rationale (why a constant at byte 0 and not prose):
+# docs/adr/0032-defer-marker-sentinel-and-agent-layer-home-truth.md.
 #
 # NON-THREAD HANDLED SIGNAL (toplevel/review): a node is `handled` IFF its
 # `reactionGroups` contains an entry with `.content == "EYES"` AND
@@ -114,15 +118,16 @@
 #   handled            in-thread: body carries `Fixed in <SHA>.` marker, OR a
 #                      self fix-reply EXISTS in the thread
 #                      (latest_self_fix_id > 0) AND databaseId <= that id, OR a
-#                      self DEFER reply (`Deferred to <tracked-home>.`) EXISTS in
-#                      the thread (latest_self_defer_id > 0) AND databaseId <=
-#                      that id. The defer marker is a DURABLE handled record: a
-#                      deferred finding stays handled even when the thread's
-#                      resolve mutation failed (resolve is non-blocking), so the
-#                      loop cannot re-raise it and post duplicate defer replies.
-#                      Unlike the fix marker, the defer marker is NEVER read off a
-#                      non-self body (forgery guard) — only a self-authored reply
-#                      can set latest_self_defer_id.
+#                      self DEFER reply (body STARTING with the sentinel constant
+#                      `<!-- hivemind-defer-v1 -->`) EXISTS in the thread
+#                      (latest_self_defer_id > 0) AND databaseId <= that id. The
+#                      defer sentinel is a DURABLE handled record: a deferred
+#                      finding stays handled even when the thread's resolve
+#                      mutation failed (resolve is non-blocking), so the loop
+#                      cannot re-raise it and post duplicate defer replies.
+#                      Unlike the fix marker, the defer sentinel is NEVER read off
+#                      a non-self body (forgery guard) — only a self-authored
+#                      reply can set latest_self_defer_id.
 #                      toplevel/review: the node's own `reactionGroups` carries an
 #                      EYES group with viewerHasReacted == true (our self-authored
 #                      reaction marker), OR (legacy backward-compat) the node's own
@@ -256,21 +261,30 @@ $pr.reviewThreads as $rt |
       | (.databaseId // 0)
     ] | (if length == 0 then 0 else max end)) as $latest_self_fix_id
   # Latest self-authored DEFER reply id; sentinel 0 when none. Mirrors the fix-id
-  # derivation, but on the defer-reply marker written by reply-resolve.sh --defer:
-  # body `Deferred to <TRACKED_HOME>. <SUMMARY>.`, whose tracked home carries no
-  # whitespace. Pinned marker literal, byte-exact: Deferred to [^[:space:]]+\.
+  # derivation, but reads the MACHINE SENTINEL that reply-resolve.sh --defer puts
+  # at byte 0 of the reply body, NOT the human-readable prose that follows it:
+  # `<!-- hivemind-defer-v1 --> Deferred to <home>. <summary>.`. Pinned sentinel
+  # constant, byte-exact and position-exact: <!-- hivemind-defer-v1 --> compared
+  # with `startswith`, so only a body whose FIRST bytes are the constant counts. A
+  # prose-only body can no longer read as a marker: an HTML-comment constant does
+  # not occur in human text, and a Markdown quote of a real defer reply gets "> "
+  # prepended, which moves the constant off byte 0.
+  # SENTINEL-ONLY read (no prose fallback) is intentional: the --defer reply mode
+  # ships unreleased alongside this sentinel, so no in-flight PR carries a
+  # pre-sentinel defer reply that would need recognising. Rationale:
+  # docs/adr/0032-defer-marker-sentinel-and-agent-layer-home-truth.md.
   # A defer reply is a DURABLE handled record, so a thread whose resolve mutation
   # failed (non-blocking by design) is not re-raised into a duplicate defer reply.
-  # FORGERY GUARD: this marker is read ONLY off the self-authored arm
+  # FORGERY GUARD: this sentinel is read ONLY off the self-authored arm
   # (select($a == $login)); it is deliberately absent from the non-self
   # $has_marker body test below, so a reviewer cannot forge handled status by
-  # quoting the marker in its own comment.
+  # quoting the sentinel in its own comment.
   | ([
       $thread.comments.nodes[]
       | . as $c
       | strip_bot($c.author.login) as $a
       | select($a == $login)
-      | select((($c.body // "") | test("Deferred to [^[:space:]]+\\.")))
+      | select((($c.body // "") | startswith("<!-- hivemind-defer-v1 -->")))
       | (.databaseId // 0)
     ] | (if length == 0 then 0 else max end)) as $latest_self_defer_id
   # Per-matching-comment records (visible page only) ...

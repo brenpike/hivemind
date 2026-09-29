@@ -39,7 +39,22 @@
 #
 # There are EXACTLY TWO sanctioned reply bodies and no others (§3, §4):
 #   FIX    (--defer absent):   "Fixed in <SHA>. <summary>."
-#   DEFER  (--defer present):  "Deferred to <TRACKED_HOME>. <SUMMARY>."
+#   DEFER  (--defer present):  "<!-- hivemind-defer-v1 --> Deferred to <TRACKED_HOME>. <SUMMARY>."
+#
+# The DEFER body opens with the MACHINE SENTINEL `<!-- hivemind-defer-v1 -->` at
+# byte 0. That sentinel — not the English that follows it — is the whole machine
+# record of the deferral: the fix-history classifier recognises a deferred thread
+# by a CONSTANT COMPARISON against this exact byte sequence at the start of the
+# body (jq `startswith`), never by pattern-matching prose. Consequently a
+# hand-written sentence is never mistaken for machine state, and machine state is
+# never forgeable by writing one.
+#
+# TRACKED_HOME carries NO machine authority. It is a human-readable citation at
+# exactly the same trust level as FIX_SHA and SUMMARY: DATA this script
+# interpolates verbatim and never verifies — the script does not resolve the url,
+# does not confirm an issue exists, and does not confirm a recorded residual was
+# written. Recorded residual for that unverified-citation posture:
+# docs/adr/0032-defer-marker-sentinel-and-agent-layer-home-truth.md.
 #
 # SCOPE NOTE: this script is the DESIGNATED single source.
 # The duplicate prose in github-reviewer.md step 12 is NOT collapsed here — that
@@ -97,11 +112,22 @@
 #                             recorded residual (see §1; the flag binds to
 #                             neither destination type). It is DATA: passed via
 #                             `gh -f body=`, never spliced into the query text,
-#                             never interpreted. It MUST be non-empty, contain NO
-#                             whitespace, and NOT begin with `-`. Empty / absent
-#                             -> missing-tracked-home (including `--defer` as the
-#                             LAST arg, which has no value); whitespace-bearing or
-#                             `-`-leading -> invalid-tracked-home.
+#                             never interpreted, never verified (§1 — same trust
+#                             level as FIX_SHA / SUMMARY). It MUST be non-empty,
+#                             contain NO whitespace, and NOT begin with `-`.
+#                             Empty / absent -> missing-tracked-home (including
+#                             `--defer` as the LAST arg, which has no value);
+#                             whitespace-bearing or `-`-leading ->
+#                             invalid-tracked-home.
+#                             These guards are NOT marker-load-bearing — the
+#                             machine marker is the sentinel, which this script
+#                             writes unconditionally. They survive for two
+#                             independent reasons: a `-`-leading value is how a
+#                             SWALLOWED FLAG is caught (`--defer --resolve-eligible`
+#                             would otherwise bind a flag as the home), and a
+#                             whitespace-free single token keeps the home a
+#                             CITABLE one-token reference a human reader can
+#                             follow out of the reply.
 #
 # 3. OUTPUT / BEHAVIOR — SURFACE -> DELIVERY MAP (closed by construction)
 # -----------------------------------------------------------------------
@@ -122,11 +148,12 @@
 #       body shape is ever emitted; neither carries an `Addresses:` line, on any
 #       surface, in either mode:
 #         FIX   (--defer absent)  "Fixed in <SHA>. <summary>."
-#         DEFER (--defer present) "Deferred to <TRACKED_HOME>. <SUMMARY>."
-#       Mode selection happens INSIDE the thread branch. With --defer absent the
-#       FIX path is unchanged and FIX_SHA is still REQUIRED (missing-fix-sha
-#       still fires). With --defer present FIX_SHA is NOT required (and must be
-#       empty), and TRACKED_HOME takes its place in the body.
+#         DEFER (--defer present) "<!-- hivemind-defer-v1 --> Deferred to <TRACKED_HOME>. <SUMMARY>."
+#       Each body is ONE LINE. Mode selection happens INSIDE the thread branch.
+#       With --defer absent the FIX path is unchanged and FIX_SHA is still
+#       REQUIRED (missing-fix-sha still fires). With --defer present FIX_SHA is
+#       NOT required (and must be empty), the sentinel leads the body, and
+#       TRACKED_HOME takes FIX_SHA's place as the cited home.
 #   (b) RESOLVE (conditional) — resolveReviewThread over THREAD_ID, issued ONLY
 #       when --resolve-eligible AND NOT --question-needs-user-input. IDENTICAL in
 #       both reply modes: a deferred thread IS resolved when the caller passes
@@ -173,21 +200,26 @@
 #     would orphan the resolve. Holds identically for a DEFER reply.
 #   - REPLY BODY FORMAT — EXACTLY TWO SANCTIONED BODIES, and no other body shape
 #     is ever emitted on any surface:
-#         FIX    "Fixed in <SHA>. <summary>."             (--defer absent)
-#         DEFER  "Deferred to <TRACKED_HOME>. <SUMMARY>." (--defer present)
+#         FIX    "Fixed in <SHA>. <summary>."  (--defer absent)
+#         DEFER  "<!-- hivemind-defer-v1 --> Deferred to <TRACKED_HOME>. <SUMMARY>."
+#                                             (--defer present)
 #     Neither carries an `Addresses:` line.
 #   - DEFER MODE IS EXPLICIT AND EXCLUSIVE: --defer is the ONLY way to reach the
 #     DEFER body — the script never infers a mode from the data — and it is
 #     mutually exclusive with a FIX_SHA positional (conflicting-reply-mode). So
 #     one reply can never claim both dispositions.
-#   - MARKER-MATCHABILITY: every DEFER body this script emits matches the
-#     fix-history classifier's deferred-marker regex
-#     `Deferred to [^[:space:]]+\.` BY CONSTRUCTION. missing-tracked-home rejects
-#     the empty value and invalid-tracked-home rejects any TRACKED_HOME bearing
-#     whitespace (and any value beginning with `-`), so the emitted literal always
-#     presents a non-empty whitespace-free token immediately followed by `.`.
-#     Loosening either guard would emit deferral replies the classifier cannot
-#     match, silently un-tracking the deferral.
+#   - SENTINEL: the machine marker of a deferral is the EXACT CONSTANT
+#     `<!-- hivemind-defer-v1 -->` at BYTE 0 of the DEFER body, and nothing else.
+#     It is written unconditionally by this script and read by the fix-history
+#     classifier as a CONSTANT COMPARISON on the body's leading bytes (jq
+#     `startswith`), never as a pattern: no regex, no wildcard, no prose match.
+#     The classifier NEVER reads the prose after the sentinel — the tracked home
+#     and the summary are display text for humans, not machine state — so no
+#     sentence a human writes can be mistaken for a deferral and no wording change
+#     after byte 0 can un-track one. The body MUST stay ONE LINE: the capture seam
+#     (§5) and the classifier both treat a deferral as a single leading-sentinel
+#     line, so an embedded newline would put the machine record and the prose on
+#     different lines.
 #   - RESOLVE ONLY THE THREAD SURFACE, ONLY WHEN FULLY ADDRESSED: resolve is issued
 #     only for SURFACE == "thread" with --resolve-eligible. toplevel/review
 #     surfaces post nothing at all, so they are inherently never resolved.
@@ -226,7 +258,11 @@
 #                               The <body> is whichever of the two sanctioned
 #                               bodies the reply mode selected — the line format
 #                               is IDENTICAL for a FIX and a DEFER reply, and the
-#                               DEFER mode adds NO new env seam.
+#                               DEFER mode adds NO new env seam. One mutation is
+#                               ONE line, so a DEFER capture line reads
+#                               `REPLY thread=<id> body=<!-- hivemind-defer-v1 --> Deferred to <home>. <summary>.`
+#                               — the sentinel sits at byte 0 of <body>, which is
+#                               why the body must never contain a newline (§4).
 #   REPLYRESOLVE_REPLY_STATUS   simulated gh exit status for the REPLY mutation
 #                               (default 0). Non-zero -> hard failure path.
 #   REPLYRESOLVE_RESOLVE_STATUS simulated gh exit status for the RESOLVE mutation
@@ -405,9 +441,10 @@ case "$SURFACE" in
     if [ "$DEFER_MODE" -eq 1 ]; then
       # DEFER mode. Mode coherence FIRST: a candidate carrying both a FIX_SHA and
       # --defer claims two dispositions at once, so it is rejected without
-      # reference to TRACKED_HOME. Then the value guards that keep the emitted
-      # body matchable by the deferred-marker regex (MARKER-MATCHABILITY, §4) —
-      # a `-`-leading value is also how a swallowed flag is caught.
+      # reference to TRACKED_HOME. Then the value guards — NOT marker-load-bearing
+      # (the machine marker is the sentinel, §4): a `-`-leading value is how a
+      # swallowed flag is caught, and rejecting whitespace keeps the home a
+      # single-token citation a human reader can follow.
       [ -z "$FIX_SHA" ] || replyresolve_fail "conflicting-reply-mode"
       [ -n "$TRACKED_HOME" ] || replyresolve_fail "missing-tracked-home"
       case "$TRACKED_HOME" in
@@ -422,8 +459,11 @@ case "$SURFACE" in
     # resolving a thread whose reply never posted would orphan the resolve. The
     # body is one of the EXACTLY TWO sanctioned literals (§4); the interpolated
     # fields are DATA, passed to gh via -f body= and never spliced into the query.
+    # INVARIANT: the DEFER sentinel `<!-- hivemind-defer-v1 -->` occupies byte 0 of
+    # the body and is the ONLY machine marker of the deferral; everything after it
+    # is human prose the classifier never reads. Single line, always.
     if [ "$DEFER_MODE" -eq 1 ]; then
-      reply_body="Deferred to $TRACKED_HOME. $SUMMARY."
+      reply_body="<!-- hivemind-defer-v1 --> Deferred to $TRACKED_HOME. $SUMMARY."
     else
       reply_body="Fixed in $FIX_SHA. $SUMMARY."
     fi

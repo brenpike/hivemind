@@ -208,7 +208,7 @@ mutation($threadId: ID!, $body: String!) {
 }'
 ```
 
-The reply body is one of two sanctioned forms depending on remediation outcome: `Fixed in COMMIT_SHA. SUMMARY.` (shown above) for a committed fix, or `Deferred to TRACKED_HOME. SUMMARY.` for a deferred candidate. No other body shape is emitted on this mutation.
+The reply body is one of two sanctioned forms depending on remediation outcome: `Fixed in COMMIT_SHA. SUMMARY.` (shown above) for a committed fix, or `<!-- hivemind-defer-v1 --> Deferred to TRACKED_HOME. SUMMARY.` for a deferred candidate. A defer body MUST START WITH the exact `<!-- hivemind-defer-v1 -->` sentinel: the sentinel is the machine marker that records the thread as already deferred, and the `Deferred to TRACKED_HOME.` prose alone records nothing. No other body shape is emitted on this mutation.
 
 ## Resolve Review Thread
 
@@ -229,7 +229,7 @@ Maps each feedback surface to the mutation(s) used to mark a fixed or deferred s
 
 | Surface | Mutation(s) | Notes |
 |---------|-------------|-------|
-| `thread` | `addPullRequestReviewThreadReply` then (conditional) `resolveReviewThread` | Reply targets the thread node id (`PRRT_...`) with one of two sanctioned bodies: `Fixed in <SHA>. <summary>.` (fix) or `Deferred to <TRACKED_HOME>. <summary>.` (defer). Resolve fires only when the thread is unresolved after reply. Executed by `reply-resolve.sh`. |
+| `thread` | `addPullRequestReviewThreadReply` then (conditional) `resolveReviewThread` | Reply targets the thread node id (`PRRT_...`) with one of two sanctioned bodies: `Fixed in <SHA>. <summary>.` (fix) or `<!-- hivemind-defer-v1 --> Deferred to <TRACKED_HOME>. <summary>.` (defer, sentinel-first — the sentinel is the machine marker, not the prose). Resolve fires only when the thread is unresolved after reply. Executed by `reply-resolve.sh`. |
 | `toplevel` | `addReaction` (`EYES`) on the IssueComment node | A self-authored `EYES` (👀) reaction is added to the reviewer's top-level IssueComment node as the handled marker. NOT reply-targeted, NOT thread-resolvable (top-level PR comments have no thread node). `reply-resolve.sh` is NOT invoked for this surface — it is a silent no-op for `toplevel`; posting `addPullRequestReviewThreadReply` against a non-thread node fails, because a top-level IssueComment has no review-thread node to target. |
 | `review` | `addReaction` (`EYES`) on the PullRequestReview node | Same as `toplevel`: a self-authored `EYES` (👀) reaction is added to the reviewer's PullRequestReview summary node as the handled marker. Review-summary nodes have no thread node, so they are NOT reply-targeted and NOT thread-resolvable. `reply-resolve.sh` is NOT invoked — its `review` silent no-op is UNCHANGED. |
 | unmapped / unknown | fail-closed | Any surface value not in the table above causes the script to exit with an error rather than fall through silently. |
