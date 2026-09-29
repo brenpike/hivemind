@@ -154,6 +154,25 @@ run_case "case10:thread-overflow-no-visible-match" "case10-thread-overflow-no-vi
 run_case "case11:legacy-addresses-no-eyes" "case11-legacy-addresses-no-eyes.json" "selfuser" "all" \
   '[{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase11review113","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-111","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase11comment111","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-111","classification":"handled"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase11comment112","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-112","classification":"actionable"}]'
 
+# ── Case 12: self defer reply as a durable handled marker ────────────────────────
+# One unresolved thread, NO self fix-reply (latest_self_fix_id sentinel 0), one self DEFER reply
+# (`Deferred to <tracked-home>.`, id 1201) → latest_self_defer_id=1201. Three assertions in one
+# thread:
+#   1200 non-self, BEFORE the defer reply (1200 <= 1201) → handled. This is the durability
+#        guarantee: the deferred finding stays handled even if the thread's resolve mutation failed,
+#        so the loop cannot re-raise it and post a duplicate defer reply.
+#   1202 non-self, AFTER the defer reply (1202 > 1201) → actionable, NOT followup-after-fix: a
+#        deferral is not a fix, so a post-defer re-raise on a defer-ONLY thread is not cycling
+#        evidence (followup-after-fix requires latest_self_fix_id > 0).
+#   1203 non-self whose OWN body carries `Deferred to https://x/1.` → actionable (FORGERY GUARD).
+#        It sits AFTER the self defer reply precisely so the id-ordering handled arm cannot absolve
+#        it; the only thing that could turn it handled is the forged body itself. If the defer
+#        pattern ever leaked into the non-self $has_marker body test, 1203 alone would flip to
+#        handled while 1202 stayed actionable — making the guard's regression directly observable.
+# The self defer reply (1201) is stripped by matches_filter and emits no record.
+run_case "case12:deferred-marker" "case12-deferred-marker.json" "selfuser" "all" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case12iiiiiiiiiiii","id":"PRRC_case12comment1200","databaseId":1200,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case12iiiiiiiiiiii","id":"PRRC_case12comment1202","databaseId":1202,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case12iiiiiiiiiiii","id":"PRRC_case12comment1203","databaseId":1203,"url":null,"classification":"actionable"}]'
+
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo
 echo "fix-history-classify: $PASS_COUNT passed, $FAIL_COUNT failed"

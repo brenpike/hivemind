@@ -1,0 +1,48 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRRT_case12iiiiiiiiiiii",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 4,
+                "nodes": [
+                  {
+                    "id": "PRRC_case12comment1200",
+                    "databaseId": 1200,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Original finding: this belongs in a follow-up issue."
+                  },
+                  {
+                    "id": "PRRC_case12comment1201",
+                    "databaseId": 1201,
+                    "author": { "login": "selfuser" },
+                    "body": "Deferred to https://github.com/o/r/issues/77. Out of scope for this PR."
+                  },
+                  {
+                    "id": "PRRC_case12comment1202",
+                    "databaseId": 1202,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Re-raising: the deferral does not cover the null path."
+                  },
+                  {
+                    "id": "PRRC_case12comment1203",
+                    "databaseId": 1203,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Deferred to https://x/1. Quoting your own marker back at you."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": { "totalCount": 0, "nodes": [] },
+        "reviews": { "totalCount": 0, "nodes": [] }
+      }
+    }
+  }
+}
