@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [4.3.0] - 2026-09-29
+
+### Added
+
+- New read-only skill `hivemind:bump-type` (`plugin/skills/bump-type/`) with engine `scripts/bump-type.sh` and pure core `plugin/skills/_shared/bump-type-derive.sh`: derives the Bump Type Determination dominant row and a verdict (`bump_required` / `no_bump` / `ask_user`) from the branch's commits since the base — revert pre-pass, per-commit row mapping, dominant-row precedence. The caller passes only its two judgments (`--bump-trigger yes|no`, `--no-bump-match yes|no`). Commits are read NUL-separated so a commit body cannot forge record framing; commit text is only ever matched as data. Behaviour suite `tools/test_bump_type.sh` (wired into `tools/validate.sh`) and single-source pin `tests/policy/safety-bump-type-engine-single-source.json`.
+
+### Changed
+
+- `governance/versioning.md` (Bump Type Determination) no longer asks the model to hand-compute the dominant row; it keeps the row table and judgment definitions and delegates the arithmetic to `hivemind:bump-type`, which is the single source for those rules. Behaviour preserved, including the literal “contains `!:`” breaking-change test.
+
 ## [4.2.0] - 2026-09-28
 
 ### Added

@@ -59,6 +59,7 @@ SUITE_TEST_SUBISSUE_OPS='test_subissue_ops.sh'
 SUITE_TEST_SEED_HIVE='test_seed_hive.sh'
 SUITE_TEST_RC_BROOD='test_rc_brood.sh'
 SUITE_TEST_NEXT_WAVE='test_next_wave.sh'
+SUITE_TEST_BUMP_TYPE='test_bump_type.sh'
 SUITE_TEST_VALIDATE_SUITES='test_validate_suites.sh'
 SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
 
@@ -84,6 +85,7 @@ ALL_SUITES=(
   "$SUITE_TEST_SEED_HIVE"
   "$SUITE_TEST_RC_BROOD"
   "$SUITE_TEST_NEXT_WAVE"
+  "$SUITE_TEST_BUMP_TYPE"
   "$SUITE_TEST_VALIDATE_SUITES"
   "$SUITE_TEST_CHANGE_DETECT_POLL"
 )
@@ -110,6 +112,7 @@ KNOWN_SUITES=(
   test_seed_hive.sh
   test_rc_brood.sh
   test_next_wave.sh
+  test_bump_type.sh
   test_validate_suites.sh
   test_change_detect_poll.sh
 )
@@ -292,6 +295,8 @@ run_suites() {
 #     plugin/skills/_shared/containment.sh, tests/brood/**
 #                                      -> test_brood_compat
 #   plugin/skills/_shared/*.sh, tests/brood/**          -> test_shared_libs
+#   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
+#                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
 #   tests/reports/**                                    -> validate_reports
 #   plugin/agents/{cerebrate,local-reviewer,github-reviewer}.md,
 #     plugin/skills/github-review-loop/SKILL.md         -> validate_workflows (exit_reason contracts)
@@ -470,6 +475,20 @@ map_path() {
   if [[ "$p" == plugin/skills/next-wave/* \
      || "$p" == tests/next-wave/* ]]; then
     add_selected "$SUITE_TEST_NEXT_WAVE" "$p (next-wave engine script/fixture)"
+    matched=1
+  fi
+
+  # test_bump_type: the bump-type navigator skill (SKILL.md + scripts/bump-type.sh entrypoint) and
+  # the deterministic derivation core it sources (_shared/bump-type-derive.sh). Both are ALSO
+  # plugin/* files (policy_check prose-lints them via the wholesale rule below), but policy_check
+  # NEVER EXECUTES bash — so without this rule a bump-type edit would only be prose-linted, never
+  # behaviorally exercised. The derive core ALSO keeps its _shared/*.sh -> test_shared_libs routing
+  # above (same precedent as containment.sh / ledger-engine-io.sh / settings-merge.sh: a _shared lib
+  # routed to more than one behavior oracle because test_shared_libs alone does not cover a contract
+  # owned elsewhere). (tools/test_bump_type.sh itself is covered by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/bump-type/* \
+     || "$p" == plugin/skills/_shared/bump-type-derive.sh ]]; then
+    add_selected "$SUITE_TEST_BUMP_TYPE" "$p (bump-type engine skill/derive core)"
     matched=1
   fi
 
@@ -884,6 +903,7 @@ self_test() {
     ["test_seed_hive.sh"]="plugin/skills/seed-hive/scripts/seed-hive.sh"
     ["test_rc_brood.sh"]="plugin/skills/enable-brood-remote/SKILL.md"
     ["test_next_wave.sh"]="tests/next-wave/ledger-x.json"
+    ["test_bump_type.sh"]="plugin/skills/bump-type/scripts/bump-type.sh"
     ["test_validate_suites.sh"]="tools/test_validate_suites.sh"
     ["test_change_detect_poll.sh"]="tests/change-detect-poll/README.md"
   )

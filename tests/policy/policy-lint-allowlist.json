@@ -169,5 +169,11 @@
     "path": "plugin/skills/_shared/test-detect.sh",
     "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Detect-only test-command projector + Validation recorder (delegates the section append to file-guard.sh); callers own set -u and error routing."
+  },
+  {
+    "rule": "CHECK13",
+    "path": "plugin/skills/_shared/bump-type-derive.sh",
+    "line": 10,
+    "reason": "P18 documented exception (ADR-0020): SOURCED library carrying set -u ONLY. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; set -u alone is safe to inherit. Pure Bump Type Determination arithmetic (revert predicates, row mapping, dominant-row precedence, verdict): inputs in, fixed-vocabulary words out, no I/O, no exit."
   }
 ]

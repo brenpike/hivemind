@@ -2968,7 +2968,7 @@ test_set_check() {
 
         local exp_val
         for exp_val in "${expected_vals[@]}"; do
-            if ! grep -qxF "$exp_val" <<< "$captured_set"; then
+            if ! grep -qxF -- "$exp_val" <<< "$captured_set"; then
                 if [[ -n "$missing" ]]; then missing="$missing, $exp_val"; else missing="$exp_val"; fi
             fi
         done
@@ -3212,6 +3212,9 @@ fi
 #      count, this exact combination never reaches the `defined($1) or die`
 #      guard (the while-loop body never runs) and would vacuously pass as the
 #      same clean empty result as branch 1.
+#   7. leading-dash member: an expected_set member beginning with `-` must be
+#      matched as a literal operand, never parsed by the membership grep as an
+#      option -- otherwise it reads as MISSING and an `equal` check fails.
 # INVARIANT: the capture must NOT be written as `out="$( ... )" || out=''` --
 # bash disables errexit inside a command substitution that is part of an
 # AND-OR list, so the regression would be swallowed INSIDE the subshell and
@@ -3355,6 +3358,29 @@ else
         set_check_zero_canary_ok=false
         add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
             'set_check passed a capture-free extract_regex that matches nothing -- a capture-free regex is being vacuously accepted as a zero-match result'
+    fi
+
+    # Branch 7: a leading-dash member present in the file must PASS an `equal`
+    # check -- the membership grep must end option parsing before the operand.
+    set_check_dash_spec="$(jq -n --arg path "$SET_CHECK_ZERO_CANARY_REL" '{
+        extract_regex: "SETCHECK-DASH-CANARY (--[a-z]+--):",
+        expected_set: ["--x--"],
+        expected_counts: {"--x--": 1},
+        files: [{path: $path, mode: "equal"}]
+    }')"
+    set_check_dash_result=''
+    set +e
+    set_check_dash_result="$(
+        set -e
+        TEST_SET_CHECK_RESULT=''
+        test_set_check 'set-check-zero-match-canary-dash' "$set_check_dash_spec" 1>&2
+        echo "$TEST_SET_CHECK_RESULT"
+    )"
+    set -e
+    if [[ "$set_check_dash_result" != 'true' ]]; then
+        set_check_zero_canary_ok=false
+        add_finding 'SAFETY-CANARY' "$SET_CHECK_ZERO_CANARY_REL" 0 \
+            'set_check reported a present leading-dash expected_set member as missing -- the membership grep is parsing the member as an option'
     fi
 fi
 if [[ "$set_check_zero_canary_ok" == true ]]; then

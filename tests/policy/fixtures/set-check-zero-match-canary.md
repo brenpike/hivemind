@@ -5,7 +5,7 @@ self-test in `tools/policy_check.sh`. It is NOT a policy fixture (fixture
 discovery is `safety-*.json` at the `tests/policy/` top level) and nothing else
 in the repo reads it.
 
-It exists to exercise six branches of `test_set_check`:
+It exists to exercise seven branches of `test_set_check`:
 
 1. ZERO-MATCH branch. The self-test extracts with the regex
    `SETCHECK-ZERO-MATCH-CANARY <n>:` (digit-suffixed form), which matches
@@ -46,8 +46,15 @@ It exists to exercise six branches of `test_set_check`:
    extraction loop's capture guard and would vacuously pass as the same clean
    empty result as branch 1. That must FAIL the check.
 
+7. LEADING-DASH MEMBER branch. The self-test also extracts with the regex
+   `SETCHECK-DASH-CANARY <member>:`, matched against the dash-canary marker line
+   below whose value begins with `-`. The membership check must treat that
+   value as a literal operand, never as a command-line option, so the `equal`
+   check must PASS.
+
 Present-canary lines (one occurrence each, do not duplicate or remove):
 
 - SETCHECK-PRESENT-CANARY 1: first present marker
 - SETCHECK-PRESENT-CANARY 2: second present marker
 - SETCHECK-SLASH-CANARY a/b: unescaped-slash delimiter marker
+- SETCHECK-DASH-CANARY --x--: leading-dash member marker

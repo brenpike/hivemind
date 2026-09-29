@@ -1,0 +1,107 @@
+{
+  "rule": "The hivemind:bump-type engine is the single source of the Bump Type Determination arithmetic",
+  "description": "The Bump Type Determination arithmetic — the revert pre-pass, the per-commit row mapping, the dominant-row precedence, and the verdict projection — lives in exactly one place: the pure core plugin/skills/_shared/bump-type-derive.sh, driven by the thin entrypoint plugin/skills/bump-type/scripts/bump-type.sh. versioning.md (Bump Type Determination) keeps the row table and the caller's two judgments and delegates the arithmetic to the engine; the hivemind:bump-type SKILL.md is a navigator that runs the engine. A second prose copy of the arithmetic is the defect this fixture exists to catch: two copies drift, and a caller hand-applying a stale prose copy routes a different bump than the engine computes. This fixture owns three axes. (1) CANONICAL CLAIMS in the core. The source pin carries the MAJOR precedence clause (`if [ \"$major_count\" -gt 0 ]; then printf '%s\\n' 'MAJOR 2'`): condition and outcome in one span, so weakening the any-MAJOR condition or re-routing its outcome stops the match. The core consumer pins carry the two function definitions (`hivemind_bump_select_dominant_row`, `hivemind_bump_derive_verdict`), the Bump Trigger precedence clause (rule 3: MINOR over PATCH among bump-impacting rows), the tie clause (rule 5: two or more tied non-MAJOR rows yield MULTI), the verdict projection for the MAJOR/MINOR/PATCH rows (bump_required only when the Bump Trigger judgment is yes, else ask_user), the NO_BUMP verdict clause (no_bump only when the no-bump judgment is yes AND the Bump Trigger judgment is no, else ask_user), and the fail-safe default that projects every other dominant row to ask_user. Each is pinned as condition plus outcome in one span. The entrypoint pins carry the wiring: it sources the core and routes through both functions, so an entrypoint that stops delegating to the core and re-derives inline fails here. (2) CONSUMER POINTERS. versioning.md must still name the engine by skill name and script path, still state that the engine is the single source for the revert pre-pass, row mapping, and dominant-row precedence, still forbid restating or hand-applying those rules, and still forbid hand-computing the dominant row when the engine blocks. The single-source statement and its prohibition are two adjacent sentences pinned as two pins, one per clause, so deleting either the claim or the obligation it triggers fails. SKILL.md must still name the engine script as the deterministic engine, still disclaim restating the rules, and still list hand-computing the revert pre-pass, row mapping, or dominant row among what it does not do. These are pointer pins, never remedy prose, so honest rewording of surrounding text does not turn the suite red. (3) NO SECOND COPY. set_check scans versioning.md and SKILL.md line by line for literals that only a re-copy of the arithmetic would carry — the former section headings (`Revert pre-pass`, `MAJOR precedence`, `Bump Trigger precedence`, `Tie detection`, `Single-row winner`), the git revert body marker (`This reverts commit`), the hyphenated breaking-change footer token (`BREAKING-CHANGE`), the reverted-SHA length quantifier (`{7,40}`), and the former record delimiter (`--END--`) — and requires each to occur ZERO times in each file. subset mode never reports the members a clean file necessarily lacks; expected_counts carries the zero assertion. The capture group is a fixed literal alternation rather than a negated-delimiter class because the axis is ABSENCE of known literals, not membership of an enumerable marker set: there is no structural marker to anchor on, and every capture is by construction a member whose required count is zero. RESIDUALS, stated plainly: these pins claim word-sequence presence (and, for the set_check, absence of the listed literals) in the named files, never meaning — they do NOT prove the core computes what the row table and judgments intend; semantic equivalence is proved by the behaviour suite tools/test_bump_type.sh, not by this fixture. The absence literals are case-sensitive and line-scoped: a re-copy that paraphrases the arithmetic, lower-cases a heading (versioning.md legitimately says `revert pre-pass` in its single-source sentence), or wraps a literal across a line break is invisible, because no fixture here can assert body-prose ABSENCE beyond fixed literals (`absent` is scoped to YAML frontmatter). versioning.md legitimately keeps `BREAKING CHANGE:` (space form) in its row table and bump-reason list, so that form cannot be forbidden. set_check `files` is a literal list with no glob expansion, so a re-copy planted in any other document is invisible. The SKILL.md Do Not entry takes its negation from the `## Do Not` heading, not from the pinned sentence, so rewriting that heading is not caught.",
+  "set_check": {
+    "extract_regex": "(Revert pre-pass|MAJOR precedence|Bump Trigger precedence|Tie detection|Single-row winner|This reverts commit|BREAKING-CHANGE|\\{7,40\\}|--END--)",
+    "expected_set": [
+      "Revert pre-pass",
+      "MAJOR precedence",
+      "Bump Trigger precedence",
+      "Tie detection",
+      "Single-row winner",
+      "This reverts commit",
+      "BREAKING-CHANGE",
+      "{7,40}",
+      "--END--"
+    ],
+    "expected_counts": {
+      "Revert pre-pass": 0,
+      "MAJOR precedence": 0,
+      "Bump Trigger precedence": 0,
+      "Tie detection": 0,
+      "Single-row winner": 0,
+      "This reverts commit": 0,
+      "BREAKING-CHANGE": 0,
+      "{7,40}": 0,
+      "--END--": 0
+    },
+    "files": [
+      { "path": "plugin/governance/versioning.md", "mode": "subset" },
+      { "path": "plugin/skills/bump-type/SKILL.md", "mode": "subset" }
+    ]
+  },
+  "source": {
+    "file": "plugin/skills/_shared/bump-type-derive.sh",
+    "pattern": "if [ \"$major_count\" -gt 0 ]; then printf '%s\\n' 'MAJOR 2'"
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/_shared/bump-type-derive.sh",
+      "pattern": "hivemind_bump_select_dominant_row() {"
+    },
+    {
+      "file": "plugin/skills/_shared/bump-type-derive.sh",
+      "pattern": "if [ \"$bump_trigger\" = 'yes' ] && [ $((minor_count + patch_count)) -gt 0 ]; then if [ \"$minor_count\" -gt 0 ]; then printf '%s\\n' 'MINOR 3' else printf '%s\\n' 'PATCH 3' fi"
+    },
+    {
+      "file": "plugin/skills/_shared/bump-type-derive.sh",
+      "pattern": "if [ \"$rule_number\" -eq 6 ] && [ \"$tied_rows\" -ge 2 ]; then printf '%s\\n' 'MULTI 5'"
+    },
+    {
+      "file": "plugin/skills/_shared/bump-type-derive.sh",
+      "pattern": "hivemind_bump_derive_verdict() {"
+    },
+    {
+      "file": "plugin/skills/_shared/bump-type-derive.sh",
+      "pattern": "if [ \"$bump_trigger\" = 'yes' ]; then case \"$dominant_row\" in MAJOR) printf '%s\\n' 'bump_required major' ;; MINOR) printf '%s\\n' 'bump_required minor' ;; PATCH) printf '%s\\n' 'bump_required patch' ;; esac else printf '%s\\n' 'ask_user none'"
+    },
+    {
+      "file": "plugin/skills/_shared/bump-type-derive.sh",
+      "pattern": "if [ \"$no_bump_match\" = 'yes' ] && [ \"$bump_trigger\" = 'no' ]; then printf '%s\\n' 'no_bump none' else printf '%s\\n' 'ask_user none'"
+    },
+    {
+      "file": "plugin/skills/_shared/bump-type-derive.sh",
+      "pattern": "*) printf '%s\\n' 'ask_user none' ;; esac return 0 }"
+    },
+    {
+      "file": "plugin/skills/bump-type/scripts/bump-type.sh",
+      "pattern": ". \"$shared_dir/bump-type-derive.sh\""
+    },
+    {
+      "file": "plugin/skills/bump-type/scripts/bump-type.sh",
+      "pattern": "dominant_pair=\"$(hivemind_bump_select_dominant_row"
+    },
+    {
+      "file": "plugin/skills/bump-type/scripts/bump-type.sh",
+      "pattern": "verdict_pair=\"$(hivemind_bump_derive_verdict"
+    },
+    {
+      "file": "plugin/governance/versioning.md",
+      "pattern": "runs the `hivemind:bump-type` engine (`${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh`)"
+    },
+    {
+      "file": "plugin/governance/versioning.md",
+      "pattern": "The engine is the single source for the revert pre-pass, the per-commit row mapping, and the dominant-row precedence"
+    },
+    {
+      "file": "plugin/governance/versioning.md",
+      "pattern": "Do not restate or hand-apply those rules."
+    },
+    {
+      "file": "plugin/governance/versioning.md",
+      "pattern": "surface the blocker; do not hand-compute the dominant row instead."
+    },
+    {
+      "file": "plugin/skills/bump-type/SKILL.md",
+      "pattern": "The deterministic engine is the committed, READ-ONLY script `${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh`"
+    },
+    {
+      "file": "plugin/skills/bump-type/SKILL.md",
+      "pattern": "this skill does not restate them."
+    },
+    {
+      "file": "plugin/skills/bump-type/SKILL.md",
+      "pattern": "hand-compute the revert pre-pass, row mapping, or dominant row — the script derives them from the commit range."
+    }
+  ]
+}
