@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [4.2.0] - 2026-09-28
+
+### Added
+
+- `reply-resolve.sh` gains a `--defer <tracked-home>` mode: it posts `Deferred to <tracked-home>. <summary>.` on a review thread instead of `Fixed in <SHA>. <summary>.`, needs no fix SHA, and keeps every existing rule (reply before resolve, resolve only when eligible, never resolve a question thread, non-thread surfaces stay a silent no-op). The tracked home is a tracked issue URL or a recorded-residual location. Three new fail-closed reason tokens: `missing-tracked-home`, `invalid-tracked-home` (whitespace or a leading dash), and `conflicting-reply-mode` (a fix SHA given alongside `--defer`). `fix-history-classify.jq` treats a self-authored `Deferred to` reply as marking earlier thread comments handled; a reviewer comment that merely quotes the text does not count. The `github-reviewer` agent routes Defer-with-Scope replies through this mode (the tracked home must already exist) and never issues raw reply/resolve GraphQL mutations. New policy pins: `tests/policy/safety-deferral-reply-body-marker.json` and `tests/policy/safety-defer-with-scope-reply-route.json`.
+
+### Fixed
+
 - `tools/policy_check.sh` CHECK 15: tracker references are classified against exactly four safe shapes — an inline-code span at any backtick-run length, a `](#...)` in-page anchor, a full `owner/repo#N` citation, and a bounded 3/4/6/8-digit hex-colour run carrying a letter — so word-glued references like `issue#123` and `PR#456` are now findings, and two- and three-backtick inline code is no longer a false positive. The candidate rule is any `#` followed by a digit run with no right-boundary condition, so `#123_`, `#123g`, and `_#123_` are also findings. A backslash escape is stepped over before any safe shape is tried, so an escaped backtick or `]` no longer opens a span that exempts the reference behind it, while an escaped `#` stays a finding. File discovery selects by name only, never by type, so a missing path (a dangling symlink), a path that is not a regular file (a directory, or a symlink to one), or an unreadable path fails the check instead of reading as clean, while a symlink to a regular file is scanned through to its target. New canaries: `tests/policy/fixtures/tracker-ref-allowlist-canary.md`, `tests/policy/fixtures/tracker-ref-symlink-canary.md`, and a CHECK 15 traversal canary.
 
 ## [4.1.0] - 2026-09-25
