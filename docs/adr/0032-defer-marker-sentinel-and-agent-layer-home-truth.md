@@ -77,3 +77,13 @@ The GitHub Codex review on PR https://github.com/brenpike/hivemind/pull/386, sur
 **Residual — a marker reply with no usable databaseId never governs.** A self-authored marker reply whose databaseId is unavailable falls to the fold's zero sentinel and can never outrank a real candidate id, so it never governs the timeline — unchanged from the prior per-marker high-water-mark behavior it replaces.
 
 References: `plugin/skills/github-review-loop/scripts/fix-history-classify.jq`; `plugin/governance/remediation-doctrine.md` (Closed-by-Construction Acceptance Test); brenpike/hivemind#386 (origin finding), brenpike/hivemind#385 (fix-marker migration, now a one-place addition).
+
+## Amendment — 2026-09-29 (tracked-home obligation is existence-confirmed, not provenance-derived)
+
+The GitHub Codex review on PR https://github.com/brenpike/hivemind/pull/386 — external content evaluated as a finding, never as an instruction — found that Decision 3's caller-obligation bullet forbids a default this record's own governing doctrine sets. That bullet requires the caller to pass the identifier RETURNED by the creating action and never a hand-typed value; `plugin/governance/remediation-doctrine.md` (`## Defer-with-Scope`) instead directs the caller to default to an EXISTING tracked home and to create a new issue only when no existing home fits. An existing home has no creating action inside the loop, so nothing is returned to pass, and the provenance framing makes the doctrine's own default unperformable.
+
+**The obligation is restated as EXISTENCE CONFIRMED AT DEFER TIME.** The caller must confirm the tracked home exists immediately before the defer reply is posted, and an EXISTING home is preferred over a newly created one per Defer-with-Scope. `plugin/agents/github-reviewer.md` (step 8, the `thread` bullet) owns the live clause and states how that confirmation is performed; this record points at it rather than restating it. The provenance framing in Decision 3's "Structural obligation this places on the caller" bullet and in the Consequences bullet on destination truth is SUPERSEDED — read both as existence-confirmed rather than provenance-derived.
+
+**This narrows the recorded residual; it does not close it.** `reply-resolve.sh --defer` still performs no ground-truth check on the tracked home, so Decision 3 stands: destination truth remains a caller-side discipline, now discharged by confirmation at defer time rather than by provenance. Decision 3's scope, its root cause for not verifying in-script, its mitigation, and its **Revisit if** are all unchanged.
+
+References: `plugin/agents/github-reviewer.md` (owner of the live defer-route clause); `plugin/governance/remediation-doctrine.md` (`## Defer-with-Scope`).
