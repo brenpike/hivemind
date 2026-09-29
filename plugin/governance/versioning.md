@@ -80,36 +80,25 @@ Ask the user before delegating version edits when the change matches more than o
 
 A change "matches a row" when both:
 
-- the dominant Bump Type Determination row across all commits on the working branch since it diverged from `<base>` equals the row in question, AND
+- the dominant Bump Type Determination row across all commits on the working branch since it diverged from `<base>`, as computed by `hivemind:bump-type` below, equals the row in question, AND
 - the row's impact condition is satisfied:
   - for the MAJOR, MINOR, and PATCH rows: at least one bullet in Bump Trigger above is satisfied by the change
   - for the No-bump row: the change matches one or more bullets in the "No bump is required by default" list above and matches no bullet in Bump Trigger
 
-To compute the dominant row: read each commit's full subject and body via `git log --format='%H%n%s%n%b%n--END--' <base>..HEAD`, where `<base>` is the resolved base branch from `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Framework Defaults).
+To compute the dominant row, the overlord makes two judgments and then runs the `hivemind:bump-type` engine (`${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh`):
 
-**Revert pre-pass.** Before mapping rows, drop revert pairs from the set:
+1. Decide whether the change satisfies any bullet in Bump Trigger above; pass the answer as `--bump-trigger yes|no`.
+2. Decide whether the change matches one or more bullets in the "No bump is required by default" list above; pass the answer as `--no-bump-match yes|no`.
+3. Run `bash ${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh <base> --bump-trigger <yes|no> --no-bump-match <yes|no>`, where `<base>` is the resolved base branch from `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Framework Defaults).
 
-- A revert commit is one whose subject matches `^Revert "(.+)"$` (git default) or `^revert(\([^)]*\))?:\s*(.+)$` (Conventional Commits).
-- For each revert commit, look in its body for a line matching `^This reverts commit ([0-9a-f]{7,40})\.?$`. The captured SHA is the reverted-original-SHA.
-- If the reverted-original-SHA is present in the same `<base>..HEAD` range (matched by full or abbreviated SHA prefix), drop **both** that original commit and the revert commit from row-mapping.
-- If the revert body has no `This reverts commit <sha>` marker, keep the revert commit and map it by step 3 below (subject-only matching is not used because commit subjects are not unique — repeated dependency-update subjects, automated bumps, etc., can produce false pairs).
+Act on the engine's `verdict`:
 
-Then for each remaining commit:
+- `bump_required`: a bump is required; the increment is the reported `bump_type`.
+- `no_bump`: no bump is required.
+- `ask_user`: the change matches more than one row or matches no row (a dominant row whose impact condition above is unsatisfied counts as no row); ask the user before delegating version edits, per the rule above.
+- exit 1 with `blocker: <reason>` on stderr: surface the blocker; do not hand-compute the dominant row instead.
 
-1. If the subject contains `!` immediately before `:` (e.g., `feat!:`, `refactor!:`), map the commit to the MAJOR row regardless of subject type.
-2. Else if any line of the subject or body matches `^BREAKING CHANGE:` or `^BREAKING-CHANGE:`, map the commit to the MAJOR row regardless of subject type.
-3. Else parse the leading token before `(` or `:` in the subject and map by type: `feat` → MINOR; `fix`, `bugfix`, and `hotfix` → PATCH; `refactor` → PATCH; `chore`, `docs`, `test`, `ci` → No-bump.
-
-Determine the dominant row with this precedence (apply in order; the first matching rule wins):
-
-1. **No mapped commits**: if no commit (after the revert pre-pass) maps to a recognized row, the change matches no row.
-2. **MAJOR precedence**: if any mapped commit maps to the MAJOR row, the dominant row is MAJOR. Breaking changes are never overridden by majority count of non-breaking commits.
-3. **Bump Trigger precedence**: if the change satisfies any bullet in Bump Trigger AND at least one mapped commit maps to MINOR or PATCH, the dominant row is the most significant of those bump-impacting rows: MINOR if any mapped commit is MINOR, otherwise PATCH. No-bump-mapped commits are excluded from this selection so docs/test/ci noise alongside one `feat` or `fix` commit no longer outvotes the bump.
-4. **Single mapped commit**: if exactly one commit maps to a row (after the revert pre-pass), that row is the dominant row.
-5. **Tie detection**: count commits per row across all mapped commits. If two or more non-MAJOR rows tie for the highest count, the change matches more than one row.
-6. **Single-row winner**: otherwise the row with the strictly highest count is the dominant row.
-
-Note: multiple commit types that map to the same row do not produce a tie. Example: a branch with one `docs:` commit and one `test:` commit has two commits in the No-bump row and is a single-row match (No bump), not a multi-row escalation.
+The engine is the single source for the revert pre-pass, the per-commit row mapping, and the dominant-row precedence; it reads commits NUL-separated. Do not restate or hand-apply those rules.
 
 ## Bump Execution
 
