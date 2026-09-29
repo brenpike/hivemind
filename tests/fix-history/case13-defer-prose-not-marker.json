@@ -1,0 +1,48 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRRT_case13jjjjjjjjjjjj",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 4,
+                "nodes": [
+                  {
+                    "id": "PRRC_case13comment1300",
+                    "databaseId": 1300,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Original finding: the retry path swallows the error."
+                  },
+                  {
+                    "id": "PRRC_case13comment1301",
+                    "databaseId": 1301,
+                    "author": { "login": "selfuser" },
+                    "body": "Deferred to https://github.com/o/r/issues/77. Tracked separately."
+                  },
+                  {
+                    "id": "PRRC_case13comment1302",
+                    "databaseId": 1302,
+                    "author": { "login": "selfuser" },
+                    "body": "> <!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. Tracked separately.\n\nQuoting the earlier reply for context."
+                  },
+                  {
+                    "id": "PRRC_case13comment1303",
+                    "databaseId": 1303,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "<!-- hivemind-defer-v1 --> Deferred to https://x/2. Forged sentinel from a reviewer."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": { "totalCount": 0, "nodes": [] },
+        "reviews": { "totalCount": 0, "nodes": [] }
+      }
+    }
+  }
+}

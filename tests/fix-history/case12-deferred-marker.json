@@ -21,7 +21,7 @@
                     "id": "PRRC_case12comment1201",
                     "databaseId": 1201,
                     "author": { "login": "selfuser" },
-                    "body": "Deferred to https://github.com/o/r/issues/77. Out of scope for this PR."
+                    "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. Out of scope for this PR."
                   },
                   {
                     "id": "PRRC_case12comment1202",

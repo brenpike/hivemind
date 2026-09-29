@@ -156,22 +156,43 @@ run_case "case11:legacy-addresses-no-eyes" "case11-legacy-addresses-no-eyes.json
 
 # ── Case 12: self defer reply as a durable handled marker ────────────────────────
 # One unresolved thread, NO self fix-reply (latest_self_fix_id sentinel 0), one self DEFER reply
-# (`Deferred to <tracked-home>.`, id 1201) → latest_self_defer_id=1201. Three assertions in one
-# thread:
+# whose body STARTS with the machine sentinel `<!-- hivemind-defer-v1 -->` (id 1201) →
+# latest_self_defer_id=1201. The sentinel is the whole machine record; the `Deferred to <home>.`
+# prose that follows it is display text the filter never reads. Three assertions in one thread:
 #   1200 non-self, BEFORE the defer reply (1200 <= 1201) → handled. This is the durability
 #        guarantee: the deferred finding stays handled even if the thread's resolve mutation failed,
 #        so the loop cannot re-raise it and post a duplicate defer reply.
 #   1202 non-self, AFTER the defer reply (1202 > 1201) → actionable, NOT followup-after-fix: a
 #        deferral is not a fix, so a post-defer re-raise on a defer-ONLY thread is not cycling
 #        evidence (followup-after-fix requires latest_self_fix_id > 0).
-#   1203 non-self whose OWN body carries `Deferred to https://x/1.` → actionable (FORGERY GUARD).
-#        It sits AFTER the self defer reply precisely so the id-ordering handled arm cannot absolve
-#        it; the only thing that could turn it handled is the forged body itself. If the defer
-#        pattern ever leaked into the non-self $has_marker body test, 1203 alone would flip to
-#        handled while 1202 stayed actionable — making the guard's regression directly observable.
+#   1203 non-self whose OWN body carries the defer PROSE `Deferred to https://x/1.` but NOT the
+#        sentinel → actionable (PROSE-IS-NOT-A-MARKER guard). It sits AFTER the self defer reply
+#        precisely so the id-ordering handled arm cannot absolve it; the only thing that could turn
+#        it handled is its own body. If prose matching ever returned to the body tests, 1203 alone
+#        would flip to handled while 1202 stayed actionable — making that regression directly
+#        observable. The self-only forgery guard (a reviewer body carrying the sentinel at byte 0)
+#        is asserted by case 13.
 # The self defer reply (1201) is stripped by matches_filter and emits no record.
 run_case "case12:deferred-marker" "case12-deferred-marker.json" "selfuser" "all" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case12iiiiiiiiiiii","id":"PRRC_case12comment1200","databaseId":1200,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case12iiiiiiiiiiii","id":"PRRC_case12comment1202","databaseId":1202,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case12iiiiiiiiiiii","id":"PRRC_case12comment1203","databaseId":1203,"url":null,"classification":"actionable"}]'
+
+# ── Case 13: defer PROSE / QUOTED sentinel is NOT a defer marker ─────────────────
+# Regression lock for the pre-sentinel prose match: only the EXACT constant
+# `<!-- hivemind-defer-v1 -->` at BYTE 0 of a SELF-authored body sets latest_self_defer_id. One
+# unresolved thread, NO self fix-reply, and THREE bodies that each look like a deferral but are not:
+#   1301 SELF, plain prose `Deferred to <url>. Tracked separately.` with NO sentinel. Under the old
+#        prose match this alone would set latest_self_defer_id=1301.
+#   1302 SELF, a Markdown QUOTE of a real defer reply: the `> ` prefix pushes the sentinel off byte
+#        0, so `startswith` rejects it. A `contains`-style read would accept it and set
+#        latest_self_defer_id=1302.
+#   1303 NON-SELF, sentinel at BYTE 0 (FORGERY GUARD): the sentinel is read ONLY off the
+#        self-authored arm, so a reviewer cannot mint handled status by pasting the constant.
+# Because latest_self_defer_id stays at its sentinel 0, the original reviewer finding 1300 is a
+# FIRST-TIME finding on a never-handled thread → actionable, and the forged 1303 → actionable. The
+# two SELF comments are stripped by matches_filter and emit no record. Either regression (prose
+# fallback, or a non-anchored/non-self-scoped sentinel read) flips 1300 to handled and fails here.
+run_case "case13:defer-prose-not-marker" "case13-defer-prose-not-marker.json" "selfuser" "all" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case13jjjjjjjjjjjj","id":"PRRC_case13comment1300","databaseId":1300,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case13jjjjjjjjjjjj","id":"PRRC_case13comment1303","databaseId":1303,"url":null,"classification":"actionable"}]'
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo

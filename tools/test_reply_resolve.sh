@@ -10,9 +10,12 @@
 # mutation log and the script's own exit status, so each case is deterministic and offline.
 #
 # Both reply modes are covered: the FIX body (`Fixed in <SHA>. <summary>.`) and the sanctioned DEFER
-# body selected by `--defer <TRACKED_HOME>` (`Deferred to <TRACKED_HOME>. <SUMMARY>.`, issue #384),
-# including the DEFER-only reason tokens (conflicting-reply-mode / missing-tracked-home /
-# invalid-tracked-home) and the classifier marker-matchability invariant (reply-resolve.sh §4).
+# body selected by `--defer <TRACKED_HOME>`
+# (`<!-- hivemind-defer-v1 --> Deferred to <TRACKED_HOME>. <SUMMARY>.`, issue #384), including the
+# DEFER-only reason tokens (conflicting-reply-mode / missing-tracked-home / invalid-tracked-home)
+# and the SENTINEL invariant (reply-resolve.sh §4): the machine record of a deferral is the exact
+# constant `<!-- hivemind-defer-v1 -->` at BYTE 0 of a ONE-LINE body, asserted here as a byte-exact
+# prefix comparison against that constant — never as a prose pattern.
 #
 # Mirrors tools/test_fetch_normalize.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
 # -fail convention. Read-only: the only writes are scratch capture files in a disposable tmpdir
@@ -251,9 +254,14 @@ else
 fi
 
 # ══ DEFER reply mode (--defer <TRACKED_HOME>, issue #384) ═══════════════════════════
-# The sanctioned second reply body: "Deferred to <TRACKED_HOME>. <SUMMARY>." (reply-resolve.sh §3).
+# The sanctioned second reply body:
+# "<!-- hivemind-defer-v1 --> Deferred to <TRACKED_HOME>. <SUMMARY>." (reply-resolve.sh §3).
 # Same capture seam, same exit-status seams, no new env var.
 
+# The machine sentinel, pinned here as a byte-exact CONSTANT (reply-resolve.sh §4). Every DEFER
+# assertion below compares against this literal — no regex, no wildcard, no prose match — so a
+# reworded body still passes while a body that loses the sentinel (or moves it off byte 0) fails.
+DEFER_SENTINEL='<!-- hivemind-defer-v1 -->'
 DEFER_ISSUE_HOME="https://github.com/brenpike/hivemind/issues/384"
 DEFER_RESIDUAL_HOME="docs/adr/0031-checked-discovery-policy.md"
 
@@ -295,7 +303,7 @@ assert_silent_no_op() {
   fi
 }
 
-# ── DEFER happy path: reply-then-resolve ordering, exact body, marker-matchability ──
+# ── DEFER happy path: reply-then-resolve ordering, exact body, sentinel at byte 0 ───
 # A deferred thread resolves on the SAME --resolve-eligible predicate as a fixed one (§3(b)), so the
 # REPLY line must precede the RESOLVE line. FIX_SHA is EMPTY — required to be, under --defer.
 cap="$(fresh_capture defer_happy)"
@@ -310,22 +318,37 @@ if [ "$status" -eq 0 ] && [ -n "$reply_line" ] && [ -n "$resolve_line" ] && [ "$
 else
   failed "defer:reply-before-resolve" "status=$status reply_line=$reply_line resolve_line=$resolve_line cap=$(cat "$cap") out=$out"
 fi
-# Exact DEFER body (§4, one of EXACTLY TWO sanctioned bodies): no `Fixed in`, no `Addresses:` line.
-expected_defer_reply="REPLY thread=PRRT_d1 body=Deferred to $DEFER_ISSUE_HOME. Tracked for the next cycle."
+# Exact DEFER body (§4, one of EXACTLY TWO sanctioned bodies): sentinel-first, no `Fixed in`, no
+# `Addresses:` line.
+expected_defer_reply="REPLY thread=PRRT_d1 body=$DEFER_SENTINEL Deferred to $DEFER_ISSUE_HOME. Tracked for the next cycle."
 actual_defer_reply="$(grep '^REPLY ' "$cap" | head -n1)"
+actual_defer_body="${actual_defer_reply#*body=}"
 if [ "$actual_defer_reply" = "$expected_defer_reply" ] && ! grep -q 'Fixed in' "$cap" \
    && ! grep -q 'Addresses:' "$cap"; then
   pass "defer:reply-body-exact" "DEFER reply body exact, no 'Fixed in', no 'Addresses:'"
 else
   failed "defer:reply-body-exact" "expected=$expected_defer_reply actual=$actual_defer_reply cap=$(cat "$cap")"
 fi
-# MARKER-MATCHABILITY (§4): the emitted body must match the fix-history classifier's deferred-marker
-# regex `Deferred to [^[:space:]]+\.` (fix-history-classify.jq), else the deferral is silently
-# un-tracked downstream.
-if printf '%s\n' "$actual_defer_reply" | grep -qE 'Deferred to [^[:space:]]+\.'; then
-  pass "defer:body-matches-classifier-marker" "body matches 'Deferred to [^[:space:]]+\\.'"
+# SENTINEL AT BYTE 0 (§4): the classifier recognises a deferral by a CONSTANT COMPARISON on the
+# body's leading bytes (jq `startswith`), so the emitted body must START WITH the exact sentinel
+# constant. Asserted as a byte-exact prefix match against $DEFER_SENTINEL — deliberately NOT a
+# regex over the prose that follows, because prose is not the machine record. A body whose sentinel
+# is missing, altered, or preceded by anything (e.g. a Markdown quote marker) fails here.
+if [[ "$actual_defer_body" == "$DEFER_SENTINEL"* ]]; then
+  pass "defer:body-starts-with-sentinel" "body starts with the exact sentinel constant"
 else
-  failed "defer:body-matches-classifier-marker" "marker regex did not match: $actual_defer_reply"
+  failed "defer:body-starts-with-sentinel" "sentinel not at byte 0 of body: $actual_defer_body"
+fi
+# ONE-LINE BODY (§4/§5): the capture seam writes ONE line per mutation, so an embedded newline in
+# the body would split the machine record from its prose across capture lines. Assert the happy-path
+# capture holds EXACTLY ONE REPLY line and NO line that is neither a REPLY nor a RESOLVE record —
+# i.e. no stray continuation line leaked out of the body.
+defer_reply_lines="$(grep -c '^REPLY ' "$cap")"
+defer_stray_lines="$(grep -cvE '^(REPLY|RESOLVE) ' "$cap")"
+if [ "$defer_reply_lines" -eq 1 ] && [ "$defer_stray_lines" -eq 0 ]; then
+  pass "defer:body-single-line" "exactly 1 REPLY line, 0 stray continuation lines"
+else
+  failed "defer:body-single-line" "reply_lines=$defer_reply_lines stray_lines=$defer_stray_lines cap=$(cat "$cap")"
 fi
 
 # ── DEFER to a RECORDED RESIDUAL home (not a tracked issue) ─────────────────────────
@@ -336,7 +359,7 @@ out="$(REPLYRESOLVE_TEST_MODE=1 REPLYRESOLVE_CAPTURE_FILE="$cap" \
   bash "$REPLY_RESOLVE" --defer "$DEFER_RESIDUAL_HOME" --resolve-eligible -- \
   PRRT_d2 "" "Recorded as residual" thread "" 2>&1)"
 status=$?
-expected_residual_reply="REPLY thread=PRRT_d2 body=Deferred to $DEFER_RESIDUAL_HOME. Recorded as residual."
+expected_residual_reply="REPLY thread=PRRT_d2 body=$DEFER_SENTINEL Deferred to $DEFER_RESIDUAL_HOME. Recorded as residual."
 if [ "$status" -eq 0 ] && [ "$(grep '^REPLY ' "$cap" | head -n1)" = "$expected_residual_reply" ]; then
   pass "defer:recorded-residual-home" "residual location named in body verbatim, exit 0"
 else
@@ -399,8 +422,9 @@ assert_hard_fail "defer:empty-home-missing-tracked-home" missing-tracked-home \
   --defer "" --resolve-eligible -- PRRT_d10 "" "Deferred" thread ""
 assert_hard_fail "defer:no-value-missing-tracked-home" missing-tracked-home \
   PRRT_d11 "" "Deferred" thread "" --defer
-# 4. invalid-tracked-home: whitespace-bearing (space or tab) or `-`-leading values would emit a body
-#    the classifier's deferred-marker regex cannot match, or indicate a swallowed flag.
+# 4. invalid-tracked-home: whitespace-bearing (space or tab) or `-`-leading values. NOT marker-
+#    load-bearing (the sentinel is written unconditionally, §2) — a `-`-leading value catches a
+#    SWALLOWED FLAG, and a whitespace-free token keeps the home a citable one-token reference.
 assert_hard_fail "defer:space-home-invalid-tracked-home" invalid-tracked-home \
   --defer "has space" --resolve-eligible -- PRRT_d12 "" "Deferred" thread ""
 assert_hard_fail "defer:tab-home-invalid-tracked-home" invalid-tracked-home \
