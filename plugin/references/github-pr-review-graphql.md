@@ -194,7 +194,7 @@ An `APPROVED` review state is NOT how Codex signals approval — Codex never fil
 ```bash
 gh api graphql \
   -f threadId="THREAD_ID" \
-  -f body="Fixed in COMMIT_SHA. Summary: ..." \
+  -f body="Fixed in COMMIT_SHA. SUMMARY." \
   -f query='
 mutation($threadId: ID!, $body: String!) {
   addPullRequestReviewThreadReply(
@@ -208,7 +208,7 @@ mutation($threadId: ID!, $body: String!) {
 }'
 ```
 
-The reply body is one of two sanctioned forms depending on remediation outcome: `Fixed in COMMIT_SHA. Summary: ...` (shown above) for a committed fix, or `Deferred to TRACKED_HOME. Summary: ...` for a deferred candidate. No other body shape is emitted on this mutation.
+The reply body is one of two sanctioned forms depending on remediation outcome: `Fixed in COMMIT_SHA. SUMMARY.` (shown above) for a committed fix, or `Deferred to TRACKED_HOME. SUMMARY.` for a deferred candidate. No other body shape is emitted on this mutation.
 
 ## Resolve Review Thread
 
