@@ -1,0 +1,66 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRRT_case16mmmmmmmmmmmm",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 7,
+                "nodes": [
+                  {
+                    "id": "PRRC_case16comment1600",
+                    "databaseId": 1600,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Original finding: the parser accepts a negative page size."
+                  },
+                  {
+                    "id": "PRRC_case16comment1601",
+                    "databaseId": 1601,
+                    "author": { "login": "selfuser" },
+                    "body": "Fixed in abc1234. Rejected negative page sizes at the boundary."
+                  },
+                  {
+                    "id": "PRRC_case16comment1602",
+                    "databaseId": 1602,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Re-raising: zero is still accepted and divides by zero downstream."
+                  },
+                  {
+                    "id": "PRRC_case16comment1603",
+                    "databaseId": 1603,
+                    "author": { "login": "selfuser" },
+                    "body": "Fixed in bcd2345. Rejected zero page sizes as well."
+                  },
+                  {
+                    "id": "PRRC_case16comment1604",
+                    "databaseId": 1604,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Re-raising: the upper bound is still unvalidated."
+                  },
+                  {
+                    "id": "PRRC_case16comment1605",
+                    "databaseId": 1605,
+                    "author": { "login": "selfuser" },
+                    "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. The upper bound needs a product decision."
+                  },
+                  {
+                    "id": "PRRC_case16comment1606",
+                    "databaseId": 1606,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Re-raising: an unbounded page size is a denial-of-service vector today."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": { "totalCount": 0, "nodes": [] },
+        "reviews": { "totalCount": 0, "nodes": [] }
+      }
+    }
+  }
+}

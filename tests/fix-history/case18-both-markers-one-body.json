@@ -1,0 +1,42 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRRT_case18oooooooooooo",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "id": "PRRC_case18comment1800",
+                    "databaseId": 1800,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Original finding: the config loader ignores the override precedence."
+                  },
+                  {
+                    "id": "PRRC_case18comment1801",
+                    "databaseId": 1801,
+                    "author": { "login": "selfuser" },
+                    "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. Partial only: the env layer is Fixed in abc1234. The file layer needs the follow-up issue."
+                  },
+                  {
+                    "id": "PRRC_case18comment1802",
+                    "databaseId": 1802,
+                    "author": { "login": "chatgpt-codex-connector" },
+                    "body": "Re-raising: the file layer still wins over the env layer."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": { "totalCount": 0, "nodes": [] },
+        "reviews": { "totalCount": 0, "nodes": [] }
+      }
+    }
+  }
+}
