@@ -1,6 +1,6 @@
 {
   "rule": "Review remediation must commit push reply before resolve",
-  "description": "P3. The antecedent list — fix is committed, pushed, validated, and a fix-SHA reply is posted — IS this rule (the rule name is that list). Pinning only `Resolve review threads only after` leaves every precondition rewritable with the suite green. Honest residual: source and consumer are the same file and the same clause, so this fixture protects one sentence in one file; it asserts no cross-file coupling.",
+  "description": "P3. The antecedent list — fix is committed, pushed, validated, and a fix-SHA reply is posted — IS this rule (the rule name is that list). Pinning only `Resolve review threads only after` leaves every precondition rewritable with the suite green. Honest residual: source and consumer are the same file and the same clause, so this fixture protects one sentence in one file; it asserts no cross-file coupling. Scope residual: the pinned antecedent list scopes the FIX path only — a fix committed, pushed, validated, and a fix-SHA reply posted. The DEFER path, where an actionable finding left unfixed under Defer-with-Scope is replied-to and resolved citing an already-existing tracked home instead of a fix SHA, has a different antecedent list, is outside this pin entirely, and is guarded by `tests/policy/safety-defer-with-scope-reply-route.json`.",
   "source": {
     "file": "plugin/agents/github-reviewer.md",
     "pattern": "Resolve review threads only after fix is committed, pushed, validated, and a fix-SHA reply is posted"
