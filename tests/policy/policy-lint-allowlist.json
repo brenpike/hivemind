@@ -53,7 +53,7 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/reply-resolve.sh",
-    "line": 254,
+    "line": 290,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — the resolve mutation is NON-BLOCKING (a failed resolve logs and still exits 0); set -e would abort on a deliberately-tolerated resolve failure. Hard failures route through replyresolve_fail()."
   },
   {
