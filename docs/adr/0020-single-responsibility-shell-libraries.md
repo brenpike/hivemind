@@ -109,6 +109,8 @@ C5: the emitter is defined above the first derivation line.
 
 **Accepted residual.** For an unparseable library, bash prints its own parse diagnostic above the contracted failure line.
 
+**Accepted residual (C3 helper variable).** When a C3 step fails, the library returns before its `unset <var>` line, so the helper variable stays set in the caller's shell. This amendment introduced that: before it, a failed step fell through to the `unset` and the file returned 0. The impact is bounded. The variable holds a directory string or nothing, and no code reads it. The one production caller of the two C3 libraries, `seed-hive.sh`, exits through its C4 source-or-die line. In `tools/test_shared_libs.sh`, a failed source leaves the library's functions undefined, so its assertions fail. Unsetting the variable on every failure branch was considered and rejected: it is visible only in a shell whose library source has already failed, and every current caller treats that as fatal. If a caller ever recovers from a failed library source and keeps running, this residual is no longer bounded and must be fixed.
+
 **Scope boundary.** `tools/*.sh` self-location and data-path `cd "$(dirname "$x")"` canonicalisations are not covered by this amendment.
 
 **Enforcement.** `tools/test_script_bootstrap.sh` checks these forms; `tools/validate.sh` runs it whenever a `plugin/**/*.sh` file changes.
