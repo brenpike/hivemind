@@ -138,8 +138,8 @@ SAFE_ID_RE='^[A-Za-z0-9._-]+$'
 # Resolve the plugin root from THIS script's own location, never from a caller value.
 # `cd ... && pwd -P` is portable (no GNU-only readlink -f); BASH_SOURCE is set under
 # `#!/usr/bin/env bash`. Layout: plugin/skills/next-wave/scripts/ => 3 dirs up is the plugin root.
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-plugin_root="$(cd "$script_dir/../../.." && pwd -P)"
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
+plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
 
 # Source the shared containment helper ONCE, early. hivemind_open_ledger (sourced next)
 # ORCHESTRATES its guards (hivemind_assert_contained / hivemind_assert_ledger_contained), so

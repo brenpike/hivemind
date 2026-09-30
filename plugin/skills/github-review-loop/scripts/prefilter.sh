@@ -134,7 +134,7 @@ case "$PR_NUMBER" in ''|*[!0-9]*) prefilter_fail "invalid-pr-number" ;; esac
 # Resolve the shared classifier filter RELATIVE to this script's own location.
 # prefilter is executed directly as a sibling of fix-history-classify.jq, so a
 # hard-coded absolute or ${CLAUDE_PLUGIN_ROOT} path would be wrong at runtime.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || prefilter_fail "cannot-self-locate"
 CLASSIFY_FILTER="$SCRIPT_DIR/fix-history-classify.jq"
 # Fail open (DISPATCH) when the shared filter is missing, consistent with the
 # GraphQL-error posture: better to wake the reviewer than to silently skip.

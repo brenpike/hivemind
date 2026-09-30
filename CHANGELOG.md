@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [4.3.1] - 2026-09-29
+
+### Added
+
+- `tools/test_script_bootstrap.sh`, run by `tools/validate.sh` for any `plugin/**/*.sh` change: enrols every self-locating plugin script, checks the canonical forms statically, and probes failure paths (failed/empty `dirname`, failed stage-2 `cd`, missing or unparseable libraries, `CDPATH` decoy) on the real engines and on copies.
+
+### Changed
+
+- `docs/adr/0020-single-responsibility-shell-libraries.md` gains an append-only amendment recording the fail-closed bootstrap forms.
+
+### Fixed
+
+- Plugin engine scripts now fail closed with their own contracted error line when they cannot locate themselves or a shared library: bootstrap self-location uses one guarded form (checks `dirname` output is non-empty, neutralises `CDPATH`, guards `--`), every sourced shared library has a source-or-die guard, and the two sibling-sourcing libraries (`_shared/settings-merge.sh`, `_shared/claude-mem-path.sh`) now return non-zero instead of falling through. Previously a failed `cd` printed raw bash text, a missing library could be skipped silently, and an empty `dirname` result silently resolved to the current directory.
+
 ## [4.3.0] - 2026-09-29
 
 ### Added

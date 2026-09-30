@@ -106,8 +106,8 @@ SAFE_ID_RE='^[A-Za-z0-9._-]+$'
 # `cd ... && pwd -P` is portable (no GNU-only readlink -f); BASH_SOURCE is set under
 # `#!/usr/bin/env bash`. Layout: plugin/skills/mark-intent-fallback/scripts/ => 3 dirs up is
 # the plugin root. This script reads NO workflow definition, so workflows_dir is not needed.
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-plugin_root="$(cd "$script_dir/../../.." && pwd -P)"
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
+plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
 
 # Source the shared containment helper ONCE, early — it provides both the inputs-file
 # READ-guard (hivemind_assert_inputs_contained) and the write-chain guard

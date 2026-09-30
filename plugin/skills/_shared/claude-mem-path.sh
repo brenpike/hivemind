@@ -77,9 +77,12 @@
 # json-normalize.sh sibling that supplies hivemind_jq_is_single_object_file. SOURCE-OR-DIE: a missing
 # or unparseable sibling returns non-zero from this fragment so the caller (entrypoint / test harness)
 # fails closed exactly as it does for this file. Re-sourcing is idempotent (pure function definitions).
-__cm_path_shared_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# Each step carries an explicit `|| return 1`: errexit is off inside a file sourced under the caller's
+# `|| fail`, so without it a failed cd or sibling source would fall through and this fragment return 0.
+__cm_path_shared_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || return 1
+[ -f "$__cm_path_shared_dir/json-normalize.sh" ] || return 1
 # shellcheck source=/dev/null
-. "$__cm_path_shared_dir/json-normalize.sh"
+. "$__cm_path_shared_dir/json-normalize.sh" || return 1
 unset __cm_path_shared_dir
 
 # hivemind_claude_mem_resolve_binary [home_dir]

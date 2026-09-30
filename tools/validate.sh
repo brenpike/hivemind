@@ -62,6 +62,7 @@ SUITE_TEST_NEXT_WAVE='test_next_wave.sh'
 SUITE_TEST_BUMP_TYPE='test_bump_type.sh'
 SUITE_TEST_VALIDATE_SUITES='test_validate_suites.sh'
 SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
+SUITE_TEST_SCRIPT_BOOTSTRAP='test_script_bootstrap.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
 ALL_SUITES=(
@@ -88,6 +89,7 @@ ALL_SUITES=(
   "$SUITE_TEST_BUMP_TYPE"
   "$SUITE_TEST_VALIDATE_SUITES"
   "$SUITE_TEST_CHANGE_DETECT_POLL"
+  "$SUITE_TEST_SCRIPT_BOOTSTRAP"
 )
 
 # KNOWN_SUITES: the tools/*.sh validation suites this dispatcher knows about. --self-test
@@ -115,6 +117,7 @@ KNOWN_SUITES=(
   test_bump_type.sh
   test_validate_suites.sh
   test_change_detect_poll.sh
+  test_script_bootstrap.sh
 )
 
 # NON_SUITE_TOOLS: tools/*.sh files that are NOT validation suites (so --self-test does not
@@ -297,6 +300,7 @@ run_suites() {
 #   plugin/skills/_shared/*.sh, tests/brood/**          -> test_shared_libs
 #   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
+#   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
 #   tests/reports/**                                    -> validate_reports
 #   plugin/agents/{cerebrate,local-reviewer,github-reviewer}.md,
 #     plugin/skills/github-review-loop/SKILL.md         -> validate_workflows (exit_reason contracts)
@@ -642,6 +646,19 @@ map_path() {
     matched=1
   fi
 
+  # test_script_bootstrap: the fail-closed bootstrap prologue of every self-locating plugin engine
+  # (ADR-0020 Amendment 2026-09-29, forms C1-C5). The suite's closure check fails until a NEW
+  # self-locating plugin/**/*.sh is enrolled in its bootstrap table, so EVERY plugin shell file —
+  # not only the currently enrolled engines — routes here: a new script, or an existing one that
+  # starts to self-locate, must trigger the enrolment gate pre-PR. The .sh files are ALSO plugin/*
+  # files (policy_check prose-lints them via the wholesale rule below), but policy_check NEVER
+  # EXECUTES bash, so without this rule a bootstrap regression would only be caught on push-to-main.
+  # (tools/test_script_bootstrap.sh itself is covered by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/* && "$p" == *.sh ]]; then
+    add_selected "$SUITE_TEST_SCRIPT_BOOTSTRAP" "$p (engine bootstrap/self-location contract)"
+    matched=1
+  fi
+
   # policy_check: all plugin/.claude-plugin runtime + policy/plugin/workflows fixtures.
   if [[ "$p" == plugin/* \
      || "$p" == .claude-plugin/* \
@@ -906,6 +923,7 @@ self_test() {
     ["test_bump_type.sh"]="plugin/skills/bump-type/scripts/bump-type.sh"
     ["test_validate_suites.sh"]="tools/test_validate_suites.sh"
     ["test_change_detect_poll.sh"]="tests/change-detect-poll/README.md"
+    ["test_script_bootstrap.sh"]="plugin/skills/_shared/claude-mem-path.sh"
   )
   local script_name expected_suite suite_path probe_path hit
   for script_name in "${KNOWN_SUITES[@]}"; do

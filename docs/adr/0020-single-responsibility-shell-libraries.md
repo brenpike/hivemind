@@ -68,3 +68,63 @@ Concretely:
 The Decision and Consequences above name the manifest-extraction library `_shared/manifest.sh`. That YAML hand-scraper (`sed`/`awk`) was superseded the SAME day by `_shared/manifest-json.sh` (pure-`jq` projections over a JSON manifest) under the ADR-0018 / ADR-0019 manifest-to-JSON amendments, and the `manifest.sh` file was DELETED — it does not exist in the tree. Read every `_shared/manifest.sh` reference above as the historical name of what is now `_shared/manifest-json.sh`. The single-responsibility / thin-entrypoint / source-safe-library decision recorded here is unchanged by the rename.
 
 This amendment is APPEND-ONLY; the original Decision and Consequences stand. Status remains accepted.
+
+## Amendment — 2026-09-29 (fail-closed engine bootstrap forms)
+
+For plugin runtime scripts, the forms below replace the self-location idiom `cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P` quoted in the Decision (third bullet) and in the Carry-forward conventions (third bullet).
+
+Canonical forms. `<var>`, `<var2>`, `<rel>`, `<lib>`, `<path>`, `<emitter>` and the quoted reasons are per-site placeholders:
+
+```bash
+# C1: entrypoint, stage 1 (self-location)
+<var>="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || <emitter> "<reason>"
+
+# C2: stage 2, relative to the stage-1 directory
+<var2>="$(CDPATH= cd -- "$<var>/<rel>" 2>/dev/null && pwd -P 2>/dev/null)" || <emitter> "<reason>"
+
+# C3: sourced library that locates a sibling
+<var>="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || return 1
+[ -f "$<var>/<lib>.sh" ] || return 1
+. "$<var>/<lib>.sh" || return 1
+unset <var>
+
+# C4: source-or-die (comment lines may sit between the two lines)
+[ -f "<path>" ] || <emitter> "<missing reason>"
+. "<path>" || <emitter> "<unparseable reason>"
+```
+
+C5: the emitter is defined above the first derivation line.
+
+**Emitter rule.** Each site routes failure to its OWN contracted emitter: a `blocker:` line where the script's contract says so, seed-hive's `seed-hive:` prefix with exit 2, loop-state's `loop-state:` prefix, and token emitters on the channel their contract names. A universal inline blocker `printf` was rejected because it breaks those contracts. A shared helper was rejected because it would have to be sourced before the script knows where `_shared` is.
+
+**Why the bare idiom was replaced.** It fails open in three cases:
+
+- CDPATH is set: `cd` can print the directory to stdout, polluting the captured value, and can land in the wrong directory.
+- errexit is off: in `set -u`-only scripts, and in libraries sourced under a caller's `|| fail`, a failed `cd` or source falls through and the file returns 0.
+- dirname fails or prints nothing: `cd -- ""` is a successful no-op in bash, so the variable silently becomes the cwd. That is why `[ -n "$__d" ]` exists and dirname's own status is checked.
+
+`__d` lives only inside the command-substitution subshell, so the no-top-level-mutation convention holds. `--` guards paths that start with `-`.
+
+**Libraries.** Libraries use C3: `|| return 1` on every step, never `exit`, because errexit is off inside a file sourced under `||`.
+
+**Accepted residual.** For an unparseable library, bash prints its own parse diagnostic above the contracted failure line.
+
+**Accepted residual (C3 helper variable).** When a C3 step fails, the library returns before its `unset <var>` line, so the helper variable stays set in the caller's shell. This amendment introduced that: before it, a failed step fell through to the `unset` and the file returned 0. The impact is bounded. The variable holds a directory string or nothing, and no code reads it. The one production caller of the two C3 libraries, `seed-hive.sh`, exits through its C4 source-or-die line. In `tools/test_shared_libs.sh`, a failed source leaves the library's functions undefined, so its assertions fail. Unsetting the variable on every failure branch was considered and rejected: it is visible only in a shell whose library source has already failed, and every current caller treats that as fatal. If a caller ever recovers from a failed library source and keeps running, this residual is no longer bounded and must be fixed.
+
+**Accepted residual (trusted invoking environment).** The forms trust the shell environment of the process
+that invokes the script. A caller that exports shell functions named `dirname`, `cd` or `pwd` can steer
+self-location to a directory it controls, and the script then sources libraries from there. This is not
+defended here, for three reasons. The same principal already runs arbitrary code before the script's first
+line (through `BASH_ENV`) and chooses which `jq`, `git` and `dirname` binaries `PATH` resolves. Qualifying the
+calls (`builtin cd`, `command pwd`) does not close it, because an exported function named `builtin` or
+`command` shadows those too, so the fix would only enumerate cases. And the trust boundary these engines
+enforce covers caller-supplied arguments, identifiers and cross-boundary content, not the caller's own
+environment. The behaviour probes in `tools/test_script_bootstrap.sh` rely on this same override to simulate
+failures. Closing it would take a different approach, such as re-executing every entrypoint under a
+sanitised environment; that is a cross-cutting design change, not a change to these forms.
+
+**Scope boundary.** `tools/*.sh` self-location and data-path `cd "$(dirname "$x")"` canonicalisations are not covered by this amendment.
+
+**Enforcement.** `tools/test_script_bootstrap.sh` checks these forms; `tools/validate.sh` runs it whenever a `plugin/**/*.sh` file changes.
+
+This amendment is APPEND-ONLY; the original Decision and Consequences stand. Status remains accepted.

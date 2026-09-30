@@ -222,15 +222,22 @@ SHARED_CONTAINMENT="$REPO_ROOT/plugin/skills/_shared/containment.sh"
 mkdir -p "$FAKEPLUGIN/skills/_shared"
 cp "$SHARED_CONTAINMENT" "$FAKEPLUGIN/skills/_shared/containment.sh"
 # spawn-brood.sh self-locates plugin_root=<fakeplugin> (3 dirs up from its scripts/ dir) like the
-# other engines and sources BOTH the shared containment helper AND the shared allowlist helper
-# (skills/_shared/allowlist.sh) BEFORE its inputs READ-guard. Stage the engine COPY and the
-# allowlist helper so the sourced paths resolve. A COPY, never a symlink: pwd -P would resolve a
-# symlink back to the real tree and defeat the isolation.
+# other engines and sources the shared containment helper, the shared allowlist helper
+# (skills/_shared/allowlist.sh), AND the shared run-ledger projector
+# (skills/_shared/ledger-project.sh) BEFORE its inputs READ-guard. Each source line is guarded by
+# a source-or-die `[ -f ]` check, so a lib missing from the fakeplugin stops the engine with a
+# blocker line before the read-guard under test. Stage the engine COPY and both helpers so the
+# sourced paths resolve. A COPY, never a symlink: pwd -P would resolve a symlink back to the real
+# tree and defeat the isolation.
 cp "$SPAWN_BROOD_ENGINE" "$FAKE_SPAWN_BROOD_ENGINE"
 SHARED_ALLOWLIST="$REPO_ROOT/plugin/skills/_shared/allowlist.sh"
 [[ -f "$SHARED_ALLOWLIST" ]] \
     || { echo "FAIL: required input missing: $SHARED_ALLOWLIST" >&2; exit 2; }
 cp "$SHARED_ALLOWLIST" "$FAKEPLUGIN/skills/_shared/allowlist.sh"
+SHARED_LEDGER_PROJECT="$REPO_ROOT/plugin/skills/_shared/ledger-project.sh"
+[[ -f "$SHARED_LEDGER_PROJECT" ]] \
+    || { echo "FAIL: required input missing: $SHARED_LEDGER_PROJECT" >&2; exit 2; }
+cp "$SHARED_LEDGER_PROJECT" "$FAKEPLUGIN/skills/_shared/ledger-project.sh"
 # init-run-ledger.sh, record-state-result.sh, and mark-intent-fallback.sh all source
 # ledger-engine-io.sh (new shared I/O dependency). Stage a copy so the sourced path resolves.
 SHARED_LEDGER_ENGINE_IO="$REPO_ROOT/plugin/skills/_shared/ledger-engine-io.sh"

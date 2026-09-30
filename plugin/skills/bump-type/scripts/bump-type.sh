@@ -59,8 +59,8 @@ blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 # layout plugin/skills/bump-type/scripts/ => ../../_shared is the shared-library dir. cd && pwd -P
 # is portable (no realpath/readlink). NO ${CLAUDE_PLUGIN_ROOT} inside an engine script.
 # SOURCE-OR-DIE: a missing/unparseable library fails closed before any derivation.
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-shared_dir="$(cd "$script_dir/../../_shared" && pwd -P)"
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
+shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve skills/_shared from the script directory; refusing to proceed"
 [ -f "$shared_dir/allowlist.sh" ] || blocker "required shared library missing: skills/_shared/allowlist.sh; refusing to proceed"
 . "$shared_dir/allowlist.sh" || blocker "failed to source skills/_shared/allowlist.sh (unparseable); refusing to proceed"
 [ -f "$shared_dir/bump-type-derive.sh" ] || blocker "required shared library missing: skills/_shared/bump-type-derive.sh; refusing to proceed"

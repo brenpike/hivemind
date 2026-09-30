@@ -177,9 +177,9 @@
 # Markers / exit posture (mirrors prefilter.sh's fail-open):
 #   - stdout: the single normalized JSON array (always, on success).
 #   - exit 0 on success (including the fail-open empty-set case).
-#   - FETCHNORM_ERROR=<reason> on stdout + exit 1 ONLY on a LIVE-fetch failure
-#     (gh error, missing shared filter, bad input, or a LIVE-RESPONSE operational
-#     failure caught by validate_live_response) — never on a merely-empty or
+#   - FETCHNORM_ERROR=<reason> on stdout + exit 1 ONLY on a bootstrap or LIVE-fetch failure
+#     (gh error, cannot-self-locate, missing/unparseable core or filter, bad input,
+#     or a LIVE-RESPONSE failure caught by validate_live_response) — never on an empty or
 #     malformed INJECTED payload (that is the fail-open empty-set path).
 #   - OVERFLOW diagnostic emitted on stderr when any connection totalCount > 50.
 #
@@ -331,7 +331,7 @@ SELF_LOGIN="${positionals[4]:-}"
 # Resolve the shared classifier filter RELATIVE to this script's own location,
 # matching prefilter.sh: this script runs as a sibling of fix-history-classify.jq
 # so ${BASH_SOURCE[0]}'s dir is the correct resolution, NOT ${CLAUDE_PLUGIN_ROOT}.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || fetchnorm_fail "cannot-self-locate"
 CLASSIFY_FILTER="$SCRIPT_DIR/fix-history-classify.jq"
 [ -f "$CLASSIFY_FILTER" ] || fetchnorm_fail "missing-filter"
 
@@ -343,7 +343,7 @@ CLASSIFY_FILTER="$SCRIPT_DIR/fix-history-classify.jq"
 FETCHNORM_CORE="$SCRIPT_DIR/../../_shared/fetch-normalize-core.sh"
 [ -f "$FETCHNORM_CORE" ] || fetchnorm_fail "missing-core"
 # shellcheck source=../../_shared/fetch-normalize-core.sh
-. "$FETCHNORM_CORE"
+. "$FETCHNORM_CORE" || fetchnorm_fail "unparseable-core"
 
 # Timeout wrapper for gh API calls. Prefer coreutils `timeout`;
 # fall back to macOS Homebrew `gtimeout`; degrade gracefully (run unguarded) when
