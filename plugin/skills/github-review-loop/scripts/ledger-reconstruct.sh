@@ -203,10 +203,10 @@
 # Markers / exit posture (mirrors fetch-normalize.sh):
 #   - stdout: the single fix-ledger JSON object (always, on success).
 #   - exit 0 on success (including the fail-open empty-findings case).
-#   - LEDGERRECON_ERROR=<reason> on stderr + exit 1 ONLY on a LIVE failure
-#     (missing base, git failure, unreadable input file, live-parse-failed,
-#     normalized-parse-failed) — never on a merely-empty or malformed INJECTED
-#     payload.
+#   - LEDGERRECON_ERROR=<reason> on stderr + exit 1 on a bootstrap failure in ANY
+#     mode (cannot-self-locate, cannot-resolve-plugin-root, missing-shared-lib,
+#     unparseable-shared-lib) or a LIVE failure (missing base, git failure, bad input
+#     file, live/normalized-parse-failed) — never on an empty/malformed INJECTED payload.
 #
 # Schema authority:  ${CLAUDE_PLUGIN_ROOT}/references/fix-ledger-schema.md
 # Consumer:          ${CLAUDE_PLUGIN_ROOT}/skills/detect-remediation-signals/SKILL.md
@@ -240,19 +240,21 @@ RECORD_MARKER="${US}COMMIT${RS}"
 # process cwd). layout plugin/skills/github-review-loop/scripts/ => 3 dirs up is
 # the plugin root. cd && pwd -P is portable (no realpath/readlink). NO
 # ${CLAUDE_PLUGIN_ROOT} inside an engine script.
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-plugin_root="$(cd "$script_dir/../../.." && pwd -P)"
-. "$plugin_root/skills/_shared/ledger-reconstruct-parse.sh"
-. "$plugin_root/skills/_shared/ledger-reconstruct-fold.sh"
-
-BASE=""
-NORMALIZED_FILE=""
-GIT_LOG_FILE=""
-
 ledgerrecon_fail() {
   echo "LEDGERRECON_ERROR=$1" >&2
   exit 1
 }
+
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || ledgerrecon_fail "cannot-self-locate"
+plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || ledgerrecon_fail "cannot-resolve-plugin-root"
+[ -f "$plugin_root/skills/_shared/ledger-reconstruct-parse.sh" ] || ledgerrecon_fail "missing-shared-lib"
+. "$plugin_root/skills/_shared/ledger-reconstruct-parse.sh" || ledgerrecon_fail "unparseable-shared-lib"
+[ -f "$plugin_root/skills/_shared/ledger-reconstruct-fold.sh" ] || ledgerrecon_fail "missing-shared-lib"
+. "$plugin_root/skills/_shared/ledger-reconstruct-fold.sh" || ledgerrecon_fail "unparseable-shared-lib"
+
+BASE=""
+NORMALIZED_FILE=""
+GIT_LOG_FILE=""
 
 # Parse flags; collect positionals (BASE binds first). Mirrors fetch-normalize.sh.
 positionals=()

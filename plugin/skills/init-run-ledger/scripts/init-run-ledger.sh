@@ -142,8 +142,8 @@ SAFE_ID_RE='^[A-Za-z0-9._-]+$'
 # value. `cd ... && pwd -P` is portable (no GNU-only readlink -f); BASH_SOURCE is set under
 # `#!/usr/bin/env bash`. Layout: plugin/skills/init-run-ledger/scripts/ => 3 dirs up is the
 # plugin root (verified against the real tree).
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-plugin_root="$(cd "$script_dir/../../.." && pwd -P)"
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
+plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
 workflows_dir="$plugin_root/workflows"
 
 # Source the shared containment helper ONCE, early — it provides both the inputs-file

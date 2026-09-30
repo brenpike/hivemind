@@ -43,15 +43,17 @@
 
 set -euo pipefail
 trap ':' EXIT
+blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 
 # ── Self-location + shared libs ───────────────────────────────────────────────────
 # layout plugin/skills/brood-status/scripts/ => 3 dirs up is the plugin root. cd && pwd -P is
 # portable (no realpath/readlink). NO ${CLAUDE_PLUGIN_ROOT} inside an engine script.
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-plugin_root="$(cd "$script_dir/../../.." && pwd -P)"
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
+plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
 DISCOVER_SCRIPT="$script_dir/brood-discover.sh"
 PROJECT_SCRIPT="$script_dir/brood-status-project.sh"
-. "$plugin_root/skills/_shared/brood-status-derive.sh"
+[ -f "$plugin_root/skills/_shared/brood-status-derive.sh" ] || blocker "required shared library missing: skills/_shared/brood-status-derive.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/brood-status-derive.sh" || blocker "failed to source skills/_shared/brood-status-derive.sh (unparseable); refusing to proceed"
 
 # ── Dependency check ──────────────────────────────────────────────────────────────
 # jq is the hard floor (consume projector TAB output + build the JSON document). git resolves the

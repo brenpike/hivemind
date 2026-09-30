@@ -201,20 +201,23 @@ INPUTS_FILE="${1:-}"
 # ONCE here so BOTH the inputs READ-guard (immediately below) and the later write-chain guards
 # (hivemind_assert_contained over .hivemind/broods/<brood-id> and .claude/worktrees/<brood-id>)
 # share one load point.
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-plugin_root="$(cd "$script_dir/../../.." && pwd -P)"
-. "$plugin_root/skills/_shared/containment.sh"
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
+plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
+[ -f "$plugin_root/skills/_shared/containment.sh" ] || blocker "required shared library missing: skills/_shared/containment.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/containment.sh" || blocker "failed to source skills/_shared/containment.sh (unparseable); refusing to proceed"
 # Source the shared allowlist so the producer strain-name contract (presentation value-class)
 # is single-sourced from the SAME validator the reader's dashboard uses. The producer MUST
 # enforce the reader's contract at launch time so no child ever starts with a name the
 # dashboard cannot faithfully render.
-. "$plugin_root/skills/_shared/allowlist.sh"
+[ -f "$plugin_root/skills/_shared/allowlist.sh" ] || blocker "required shared library missing: skills/_shared/allowlist.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/allowlist.sh" || blocker "failed to source skills/_shared/allowlist.sh (unparseable); refusing to proceed"
 # Source the shared run-ledger scalar projector so spawn-time started-evidence is single-sourced
 # from the SAME validator the brood-status dashboard uses (hivemind_project_state_current). This
 # closes the prior divergence where an inline non-empty-string check accepted ledger values the
 # canonical projector rejects as MALFORMED (overlength, wrong charset, multi-document JSON),
 # producing split-brain launch evidence between spawn-brood and brood-status.
-. "$plugin_root/skills/_shared/ledger-project.sh"
+[ -f "$plugin_root/skills/_shared/ledger-project.sh" ] || blocker "required shared library missing: skills/_shared/ledger-project.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/ledger-project.sh" || blocker "failed to source skills/_shared/ledger-project.sh (unparseable); refusing to proceed"
 
 # ── Defense-in-depth inputs READ-guard (shared helper) ─────────────────────────
 # Refuse to READ the inputs file when its canonical path escapes the checkout (e.g. via a

@@ -165,12 +165,12 @@ set -euo pipefail
 # Prose cites `loop-state.sh floor` (or this line) — it never restates the number.
 MAX_REMEDIATION_CYCLES_FLOOR=6
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-
 die() {
   printf 'loop-state: %s\n' "$1" >&2
   exit 1
 }
+
+SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || die "cannot self-locate the script directory; refusing to proceed"
 
 # INVARIANT: a field must be a non-negative integer (no sign, no whitespace, no
 # glob). Reject anything else loudly rather than letting bash arithmetic coerce it.

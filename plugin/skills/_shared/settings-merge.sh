@@ -301,9 +301,12 @@
 # or unparseable sibling returns non-zero from this fragment so the caller (entrypoint loop / test
 # harness) fails closed exactly as it does for this file — the merge cannot run its shape guard
 # without those defs. Re-sourcing is idempotent (it only redefines a pure echo function).
-__settings_merge_shared_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
+# Each step carries an explicit `|| return 1`: errexit is off inside a file sourced under the caller's
+# `|| fail`, so without it a failed cd or sibling source would fall through and this fragment return 0.
+__settings_merge_shared_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || return 1
+[ -f "$__settings_merge_shared_dir/json-normalize.sh" ] || return 1
 # shellcheck source=/dev/null
-. "$__settings_merge_shared_dir/json-normalize.sh"
+. "$__settings_merge_shared_dir/json-normalize.sh" || return 1
 unset __settings_merge_shared_dir
 
 # hivemind_settings_permissions_template

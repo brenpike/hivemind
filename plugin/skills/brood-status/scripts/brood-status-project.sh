@@ -149,12 +149,16 @@ encode_cell() {
 # Self-locate from THIS script (layout plugin/skills/brood-status/scripts/ => 3 dirs up is the
 # plugin root). cd && pwd -P is portable (no realpath/readlink -f). NO ${CLAUDE_PLUGIN_ROOT}
 # inside an engine script — the path is derived from BASH_SOURCE.
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
-plugin_root="$(cd "$script_dir/../../.." && pwd -P)"
-. "$plugin_root/skills/_shared/containment.sh"
-. "$plugin_root/skills/_shared/allowlist.sh"
-. "$plugin_root/skills/_shared/manifest-json.sh"
-. "$plugin_root/skills/_shared/ledger-project.sh"
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
+plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
+[ -f "$plugin_root/skills/_shared/containment.sh" ] || blocker "required shared library missing: skills/_shared/containment.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/containment.sh" || blocker "failed to source skills/_shared/containment.sh (unparseable); refusing to proceed"
+[ -f "$plugin_root/skills/_shared/allowlist.sh" ] || blocker "required shared library missing: skills/_shared/allowlist.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/allowlist.sh" || blocker "failed to source skills/_shared/allowlist.sh (unparseable); refusing to proceed"
+[ -f "$plugin_root/skills/_shared/manifest-json.sh" ] || blocker "required shared library missing: skills/_shared/manifest-json.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/manifest-json.sh" || blocker "failed to source skills/_shared/manifest-json.sh (unparseable); refusing to proceed"
+[ -f "$plugin_root/skills/_shared/ledger-project.sh" ] || blocker "required shared library missing: skills/_shared/ledger-project.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/ledger-project.sh" || blocker "failed to source skills/_shared/ledger-project.sh (unparseable); refusing to proceed"
 
 # ── Dependency check ────────────────────────────────────────────────────────────
 # jq is required (the child ledgers are JSON). tmux/claude/gh are NOT required — this read
