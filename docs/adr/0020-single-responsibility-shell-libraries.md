@@ -111,6 +111,18 @@ C5: the emitter is defined above the first derivation line.
 
 **Accepted residual (C3 helper variable).** When a C3 step fails, the library returns before its `unset <var>` line, so the helper variable stays set in the caller's shell. This amendment introduced that: before it, a failed step fell through to the `unset` and the file returned 0. The impact is bounded. The variable holds a directory string or nothing, and no code reads it. The one production caller of the two C3 libraries, `seed-hive.sh`, exits through its C4 source-or-die line. In `tools/test_shared_libs.sh`, a failed source leaves the library's functions undefined, so its assertions fail. Unsetting the variable on every failure branch was considered and rejected: it is visible only in a shell whose library source has already failed, and every current caller treats that as fatal. If a caller ever recovers from a failed library source and keeps running, this residual is no longer bounded and must be fixed.
 
+**Accepted residual (trusted invoking environment).** The forms trust the shell environment of the process
+that invokes the script. A caller that exports shell functions named `dirname`, `cd` or `pwd` can steer
+self-location to a directory it controls, and the script then sources libraries from there. This is not
+defended here, for three reasons. The same principal already runs arbitrary code before the script's first
+line (through `BASH_ENV`) and chooses which `jq`, `git` and `dirname` binaries `PATH` resolves. Qualifying the
+calls (`builtin cd`, `command pwd`) does not close it, because an exported function named `builtin` or
+`command` shadows those too, so the fix would only enumerate cases. And the trust boundary these engines
+enforce covers caller-supplied arguments, identifiers and cross-boundary content, not the caller's own
+environment. The behaviour probes in `tools/test_script_bootstrap.sh` rely on this same override to simulate
+failures. Closing it would take a different approach, such as re-executing every entrypoint under a
+sanitised environment; that is a cross-cutting design change, not a change to these forms.
+
 **Scope boundary.** `tools/*.sh` self-location and data-path `cd "$(dirname "$x")"` canonicalisations are not covered by this amendment.
 
 **Enforcement.** `tools/test_script_bootstrap.sh` checks these forms; `tools/validate.sh` runs it whenever a `plugin/**/*.sh` file changes.
