@@ -38,13 +38,18 @@
 #
 # 3. IDENTITY KEY: account type + login
 # -------------------------------------
-# A registry match requires BOTH `$type == "Bot"` AND a stripped-login hit.
-# `$type` is the author's account type: GraphQL `author.__typename` or REST
-# `user.type`. A login alone is NOT an identity: a human GitHub User account
-# named `claude` (created 2009) exists, and its bare login collides with the
-# Claude app bot's login once `[bot]` is stripped. Gating on the Bot type keeps
-# that human out of every registry mode. A missing or null `$type` never matches
-# a registry mode (fail closed toward "not automated").
+# A registry match requires BOTH a Bot account (`is_bot`) AND a stripped-login
+# hit. An author is a Bot account when `$type == "Bot"` OR its RAW login ends in
+# the `[bot]` suffix. `$type` alone is not a reliable source: GraphQL
+# `author.__typename` reports a bot as `Bot`, but the REST reactions endpoint
+# reports a bot reactor's `user.type` as `User` while its login still carries
+# `[bot]`. The suffix is unforgeable by a human: a GitHub login is alphanumerics
+# and hyphens only, so `[bot]` is reserved for app bot accounts. A login alone
+# (without the suffix) is NOT an identity: a human GitHub User account named
+# `claude` (created 2009) exists, and its bare login collides with the Claude app
+# bot's login once `[bot]` is stripped. Requiring a Bot account keeps that human
+# out of every registry mode. A non-suffixed login with a missing or null
+# `$type` never matches a registry mode (fail closed toward "not automated").
 #
 # SELF identity (`is_self`) is keyed the same way, on the opposite type: the
 # author is self ONLY when `$type == "User"` AND the RAW login equals `$self`
@@ -72,8 +77,8 @@
 #
 # 5. FILTER MODES (`reviewer_matches_filter` $filter values)
 # ----------------------------------------------------------
-#   "automated"   any registry entry (Bot type required).
-#   "codex-only"  the `codex` registry entry only (Bot type required).
+#   "automated"   any registry entry (Bot account per is_bot).
+#   "codex-only"  the `codex` registry entry only (Bot account per is_bot).
 #   "all"         every author.
 #   "<login>"     legacy: stripped login == $filter, type-agnostic (unchanged
 #                 from the pre-registry behavior).
@@ -109,6 +114,11 @@ def approval_kinds: ["pr-reaction-thumbs-up", "review-approved"];
 # [bot]-suffix normalization on an author login BEFORE any identity compare.
 def strip_bot($login): ($login // "") | sub("\\[bot\\]$"; "");
 
+# True when the author is a Bot account (§3): typed Bot, OR its raw login ends in
+# the reserved `[bot]` suffix, because REST mis-types a bot reactor as User and a
+# GitHub login (alphanumerics + hyphens) can never carry the suffix itself.
+def is_bot($login; $type): $type == "Bot" or (($login // "") | endswith("[bot]"));
+
 # True when the author is the authenticated viewer: a User-typed account whose
 # raw login equals the non-empty $self (§3). Positive allowlist on the type, so
 # a null/missing $type is never self.
@@ -121,10 +131,10 @@ def reviewer_matches_filter($login; $type; $self; $filter):
   | (is_self($login; $type; $self) | not)
     and (
       if $filter == "automated" then
-        $type == "Bot"
+        is_bot($login; $type)
         and any(automated_reviewers[]; any(.logins[]; . == $stripped))
       elif $filter == "codex-only" then
-        $type == "Bot"
+        is_bot($login; $type)
         and any(automated_reviewers[] | select(.id == "codex");
                 any(.logins[]; . == $stripped))
       elif $filter == "all" then true
@@ -132,11 +142,11 @@ def reviewer_matches_filter($login; $type; $self; $filter):
       end
     );
 
-# True when a Bot-typed author belongs to a registry entry whose approval kind
-# is $kind and $kind is a member of approval_kinds (§4).
+# True when a Bot account (is_bot, §3) belongs to a registry entry whose approval
+# kind is $kind and $kind is a member of approval_kinds (§4).
 def reviewer_is_approver($login; $type; $kind):
   strip_bot($login) as $stripped
-  | $type == "Bot"
+  | is_bot($login; $type)
     and any(approval_kinds[]; . == $kind)
     and any(automated_reviewers[] | select(.approval == $kind);
             any(.logins[]; . == $stripped));

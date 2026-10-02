@@ -21,23 +21,33 @@ each scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone
 
 Every login, filter, and approver decision the poll makes is delegated to the shared
 `reviewer-identity.jq` registry module. The poll's `approval` scalar is true on EITHER a 👍
-reaction from a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-typed
+reaction from a Bot-account `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-account
 `review-approved` member (Copilot) whose latest review is `APPROVED`, both scoped by the active
-reviewer filter, and an approval edge surfaces as the `REVIEWER_APPROVED` marker. The latest
+reviewer filter, and an approval edge surfaces as the `REVIEWER_APPROVED` marker. A Bot account is
+the module's `is_bot`: typed `Bot`, OR a raw login ending in the reserved `[bot]` suffix. The REST
+reactions endpoint reports a bot reactor's `user.type` as `User`, so the Codex 👍 arrives
+User-typed with a `[bot]`-suffixed login; a GitHub login is alphanumerics and hyphens only, so no
+human account can carry the suffix. The latest
 review is the one GitHub reports per author in `latestReviews`, never one rebuilt from the bounded
 `reviews` history window, and it is read by an exhaustive paginated walk in a query of its own:
 `first: 100` is the page size, not a bound, and a walk that fails on any page fails the capture.
 The suite pins:
 
-- `approval:thumbs-up-on-first-poll` — a Bot-typed Codex 👍 row fires `REVIEWER_APPROVED` first.
-- `approval:user-thumbs-up-never-approves` — User-typed 👍 rows (one carrying the Codex registry
-  login itself) never approve, under `codex-only` OR `all`; `all` admits every login to the
-  filter, so the approver's Bot-type gate is the only thing under test.
+- `approval:thumbs-up-on-first-poll` — a Codex 👍 row in the REST shape (User-typed,
+  `[bot]`-suffixed login) fires `REVIEWER_APPROVED` first.
+- `approval:rest-user-typed-bot-thumbs-up-approves` — the same REST-shaped Codex 👍 fires
+  `REVIEWER_APPROVED` first under `automated` AND `codex-only`, and so does a variant re-typing
+  the row `Bot`; a gate on the account type alone idles to `WATCH_TIMEOUT`.
+- `approval:human-thumbs-up-never-approves` — User-typed 👍 rows with bare logins (one carrying the
+  Codex registry login itself) never approve, under `automated`, `codex-only`, OR `all`; `all`
+  admits every login to the filter, so the approver's Bot-account gate is the only thing under
+  test.
 - `approval:reaction-login-cannot-forge-type` — a User-typed 👍 whose login is the Codex bot login
-  followed by a TAB and `Bot` never approves, under `codex-only` OR `all`. Reaction rows travel as
-  JSON objects, so no login byte can be read as a field boundary.
-- `approval:eyes-reaction-never-approves` — a Bot-typed Codex `eyes` reaction never approves; only
-  a +1 is the Codex approval signal.
+  followed by a TAB and `Bot` never approves, under `automated`, `codex-only`, OR `all`. Reaction
+  rows travel as JSON objects, so no login byte can be read as a field boundary, and the login does
+  not END in the `[bot]` suffix, so it is no Bot account.
+- `approval:eyes-reaction-never-approves` — a REST-shaped Codex `eyes` reaction never approves;
+  only a +1 is the Codex approval signal.
 - `approval:copilot-review-scoped-by-filter` — a Copilot `APPROVED` latest review fires
   `REVIEWER_APPROVED` first under `automated`, and only `CHANGED` (never an approval) under
   `codex-only`.
@@ -134,10 +144,10 @@ a snapshot that cannot be captured, or one given a missing or unknown arm kind, 
 | `graphql-blind-window.json` | State B — A plus the Codex review + review-thread comment posted during the blind window. |
 | `graphql-malformed.json` | A GraphQL `NOT_FOUND` error response (null `pullRequest`) that makes the snapshot pipeline fail. |
 | `reactions-none.json` | Raw REST reactions page with no reaction (`[]`). |
-| `reactions-codex.json` | Raw REST reactions page with one +1 from the Bot-typed `chatgpt-codex-connector[bot]`. |
+| `reactions-codex.json` | Raw REST reactions page with one +1 from `chatgpt-codex-connector[bot]`, in the shape the REST endpoint returns for a bot reactor (`user.type` `User`, plus `id` and `user_view_type`). |
 | `reactions-human.json` | Raw REST reactions page with two User-typed +1s (`chatgpt-codex-connector`, `claude`) that must never approve. |
 | `reactions-forged.json` | Raw REST reactions page with one User-typed +1 whose login is `chatgpt-codex-connector[bot]`, a TAB, and `Bot`; it must never approve. |
-| `reactions-codex-eyes.json` | Raw REST reactions page with one `eyes` reaction from the Bot-typed `chatgpt-codex-connector[bot]`; it must never approve. |
+| `reactions-codex-eyes.json` | Raw REST reactions page with one `eyes` reaction from `chatgpt-codex-connector[bot]`, in the same REST bot-reactor shape (`user.type` `User`); it must never approve. |
 
 The `graphql-*.json` files are whole GraphQL responses shaped to the script's own query; every
 author (issue comments, reviews, and review-thread comments) carries `__typename` (`Bot` for

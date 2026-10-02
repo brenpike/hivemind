@@ -11,8 +11,8 @@
 #
 # It also tests the reviewer identity registry the filter includes:
 #   plugin/skills/github-review-loop/scripts/reviewer-identity.jq
-# for registry integrity (unique ids, non-empty logins, approval kind in the closed enum) and for
-# CLOSURE: no registry login and no `[bot]` strip literal may be inlined in a consumer script.
+# for registry integrity (unique ids, non-empty logins, approval kind in the closed enum), for the
+# Bot-account truth table of `is_bot` and the predicates gated on it, and for CLOSURE: no registry login and no `[bot]` strip literal may be inlined in a consumer script.
 #
 # Mirrors tools/test_shared_libs.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any-
 # fail convention. Read-only: the only writes are scratch files in a disposable tmpdir removed on EXIT.
@@ -360,6 +360,42 @@ registry_rule "registry:logins-stored-stripped" \
 registry_rule "registry:approval-in-enum-or-null" \
   'approval_kinds as $kinds | all(.[]; .approval == null or (.approval as $kind | any($kinds[]; . == $kind)))' \
   '[{"id":"codex","logins":["a"],"approval":"thumbs-up"}]'
+
+# ── Bot-account truth table ──────────────────────────────────────────────────────
+# `is_bot` is the module's Bot-account test: typed `Bot`, OR a raw login ending in the reserved
+# `[bot]` suffix (the REST reactions endpoint types a bot reactor `User`). Each row evaluates one
+# module call with the module included and exact-matches the boolean it must return. A suffix that
+# is not at the end (the tab-forged login) and a bare login without a `Bot` type are NOT bots.
+
+# identity_row <case> <expected-json> <jq-call-over-the-module>
+identity_row() {
+  local case_name="$1" expected="$2" call="$3" actual
+  if ! actual="$(jq -n -c -L "$MODULE_DIR" "include \"reviewer-identity\"; $call")"; then
+    failed "$case_name" "jq failed evaluating: $call"
+    return
+  fi
+  if [ "$actual" = "$expected" ]; then
+    pass "$case_name" "$call -> $actual"
+  else
+    failed "$case_name" "$call -> $actual (expected $expected)"
+  fi
+}
+
+identity_row "is-bot:suffix-user-typed" 'true' 'is_bot("chatgpt-codex-connector[bot]"; "User")'
+identity_row "is-bot:suffix-null-typed" 'true' 'is_bot("chatgpt-codex-connector[bot]"; null)'
+identity_row "is-bot:bare-bot-typed" 'true' 'is_bot("chatgpt-codex-connector"; "Bot")'
+identity_row "is-bot:bare-user-typed" 'false' 'is_bot("claude"; "User")'
+identity_row "is-bot:bare-null-typed" 'false' 'is_bot("claude"; null)'
+identity_row "is-bot:tab-forged-suffix" 'false' 'is_bot("chatgpt-codex-connector[bot]\tBot"; "User")'
+identity_row "is-bot:null-login-null-type" 'false' 'is_bot(null; null)'
+identity_row "approver:suffix-user-typed-thumbs-up" 'true' \
+  'reviewer_is_approver("chatgpt-codex-connector[bot]"; "User"; "pr-reaction-thumbs-up")'
+identity_row "approver:bare-user-typed-thumbs-up" 'false' \
+  'reviewer_is_approver("chatgpt-codex-connector"; "User"; "pr-reaction-thumbs-up")'
+identity_row "filter:automated-suffix-user-typed" 'true' \
+  'reviewer_matches_filter("claude[bot]"; "User"; "selfuser"; "automated")'
+identity_row "filter:automated-bare-user-typed" 'false' \
+  'reviewer_matches_filter("claude"; "User"; "selfuser"; "automated")'
 
 # ── CLOSURE: no inlined identity literal in a consumer ───────────────────────────
 # Every registry login (derived from the module, never hard-coded here) and the `[bot]` strip
