@@ -27,6 +27,7 @@ The identity predicate itself was not held in one place. It was duplicated acros
 - `automated_reviewers` — the registry: Codex, Copilot, and Claude, each with its recognized login forms and its approval kind.
 - `approval_kinds` — the closed set of approval signal kinds a registry entry may declare.
 - `strip_bot` — the one `[bot]`-suffix normalizer.
+- `is_self` — whether an author is the authenticated operator (§7).
 - `reviewer_matches_filter` — whether an author is in scope under the active `reviewer_filter`.
 - `reviewer_is_approver` — whether an author's signal counts as approval under the active filter.
 
@@ -49,10 +50,10 @@ Each registry entry declares its approval kind:
 | Reviewer | Approval kind | Signal |
 |---|---|---|
 | Codex | `pr-reaction-thumbs-up` | a 👍 (`+1`) reaction on the PR object; 👀 is never approval |
-| Copilot | `review-approved` | an `APPROVED` review; requires an admin opt-in, which per a secondary source arrived in a GitHub changelog dated 2026-09-01 |
+| Copilot | `review-approved` | its latest review is `APPROVED`; requires an admin opt-in, which per a secondary source arrived in a GitHub changelog dated 2026-09-01 |
 | Claude | none | the loop ends through the idle watch window, never through an approval signal |
 
-Approval counts only from a reviewer in scope under the active filter. The loop marker `CODEX_APPROVED` is renamed `REVIEWER_APPROVED`, and the poll snapshot field `codex` is renamed `approval`. The seed width stays 9 scalars, so a seed written by an older version still parses.
+Approval counts only from a reviewer in scope under the active filter. A `review-approved` reviewer is judged by its latest submitted review (the highest `databaseId` among its reviews), so an `APPROVED` superseded by a later `CHANGES_REQUESTED`, `COMMENTED`, or `DISMISSED` review from the same reviewer never counts. The loop marker `CODEX_APPROVED` is renamed `REVIEWER_APPROVED`, and the poll snapshot field `codex` is renamed `approval`. The seed width stays 9 scalars, so a seed written by an older version still parses.
 
 ### 5. `github-actions[bot]` is not in the default set
 
@@ -62,7 +63,19 @@ It is a generic CI identity, not a reviewer. Operators whose review bot posts as
 
 `plugin/skills/github-review-loop/scripts/fetch-normalize.sh` gains a compile probe of the classifier, which now depends on the included module. A probe failure fails closed. It never degrades to a silent empty candidate array.
 
-### 7. Compatibility
+### 7. Self is account type `User` plus login
+
+`is_self` holds an author to be the authenticated operator only when its account type is `User` AND its login equals the operator's login, which must be non-empty. Login alone is not sufficient, for the same reason as §2 seen from the other side: the Claude app's bare login in GraphQL is `claude`, which is also the login of the human `User` account `claude`. An operator signed in as that human would read every Claude review as self-authored, so its findings were dropped, its `Fixed in`, defer, and `Addresses:` markers were honored as the operator's own, and the change-detect poll never woke on its activity. A GitHub App's slug cannot collide with another account's login, so a hostile bot cannot take an arbitrary operator's login; the collision is with that one human account, and keying self on type `User` closes it.
+
+The operator's identity comes from REST `/user`, the ground truth for the authenticated credential. `plugin/skills/github-review-loop/scripts/preflight.sh` resolves `SELF_LOGIN` only from a `/user` response whose `type` is `User` and fails closed with `SELF_LOGIN is not a User account` otherwise, so the predicate's `User` gate and the resolved login always describe the same account kind.
+
+The type check is a positive allowlist: a null or missing account type is never self. Each consumer fails safe under that rule:
+
+- **Filter self-exclusion** (`reviewer_matches_filter`) can only over-include: an unverified author is never dropped as self, so its content stays in scope for the active filter.
+- **The forgery guard and the `Addresses:` harvest** in `fix-history-classify.jq` honor nothing from an author not verified as self: an unverified `Fixed in`, defer, or `Addresses:` marker is not treated as the operator's.
+- **The change-detect poll** wakes: an unverified author's comment or thread reply is not suppressed as a self-echo.
+
+### 8. Compatibility
 
 Changing the default filter is a breaking change to the loop's default behavior, so it takes a major version bump. Migration for an operator who wants the old behavior: set `reviewer_filter: codex-only`.
 
@@ -76,7 +89,10 @@ Changing the default filter is a breaking change to the loop's default behavior,
 | A `HIVEMIND_REVIEWER_LOGINS` env extension to the registry | DEFERRED under P23 (YAGNI): not requested, and `all` / `<login>` cover today's needs. Revisit trigger: the first concrete request for a fourth bot, which would also be Bot-gated |
 | Hold the registry as a JSON data import | jq 1.6 binds data imports as arrays, so the registry would read differently across supported jq versions |
 | Approval independent of the active filter | Would let a filtered-out reviewer end the loop it was filtered out of |
-| One Bot-gated `def`-literal registry in a single included module; default `automated`; approval scoped by filter (CHOSEN) | — |
+| Recognize self by login alone | A Bot whose bare login equals the operator's is read as self: its findings are dropped, its `Fixed in`, defer, and `Addresses:` markers are honored as the operator's, and the poll never wakes on it |
+| Recognize self as any author whose type is not `Bot` (`type != "Bot"`) | A null or missing type would read as self, so an author of unverified type could have its marker honored as the operator's. The positive `User` allowlist fails toward actionable instead |
+| Carry the viewer's account type as a predicate argument | Adds a positional argument to every self-aware predicate and call site with no information gain: preflight already guarantees the viewer is a `User`, so the constant `User` gate says the same thing |
+| One Bot-gated `def`-literal registry in a single included module; default `automated`; approval scoped by filter; self keyed on type `User` plus login (CHOSEN) | — |
 
 ## Consequences
 
@@ -87,11 +103,15 @@ Changing the default filter is a breaking change to the loop's default behavior,
 - **A mid-session plugin upgrade may leave loaded prose expecting the old `CODEX_APPROVED` marker.** Bounded: a session restart picks up the new prose.
 - **Under a non-registry `<login>` filter, a Codex 👍 no longer fires approval**, because approval is scoped to the active filter.
 - **Identity has one home.** Adding a registry member is one entry in `reviewer-identity.jq`; the closure tests and policy pin catch a reintroduced per-site copy.
+- **An operator signed in as the human `claude` account now receives Claude-bot feedback.** The Claude app's reviews are no longer mistaken for the operator's own.
+- **A Bot sharing the operator's login can no longer forge dispositions or harvests.** Its `Fixed in`, defer, and `Addresses:` markers are not honored as the operator's.
+- **Preflight now rejects a non-`User` credential.** A loop authenticated as a Bot or other non-`User` account stops at preflight with `SELF_LOGIN is not a User account` instead of running.
 
 ## References
 
 - `plugin/skills/github-review-loop/scripts/reviewer-identity.jq` (owner of the live registry and predicates)
 - `plugin/skills/github-review-loop/scripts/fix-history-classify.jq`, `plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh`, `plugin/skills/github-review-loop/scripts/fetch-normalize.sh` (consumers)
+- `plugin/skills/github-review-loop/scripts/preflight.sh` (resolves `SELF_LOGIN` from REST `/user` and asserts a `User` account)
 - https://api.github.com/users/claude
 - https://api.github.com/users/claude%5Bbot%5D
 - https://api.github.com/users/copilot-pull-request-reviewer%5Bbot%5D

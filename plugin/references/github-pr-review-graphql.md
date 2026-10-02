@@ -17,8 +17,8 @@ Resolvable pull request review threads are GraphQL objects. Do not try to resolv
 - [Resolve Review Thread](#resolve-review-thread) — mutation to mark a review thread as resolved
 - [Surface-to-Delivery Contract](#surface-to-delivery-contract) — canonical mapping of feedback surface to mutation(s) used
 - [Reaction Marker](#reaction-marker) — self-authored `EYES` reaction that marks a fixed non-thread surface handled
-- [Author Filtering](#author-filtering) — `reviewer_filter` modes and the Bot-type + login identity rule for scoping feedback to reviewer identities
-- [Reviewer Approval Detection](#reviewer-approval-detection) — in-scope automated-reviewer approval signals (paginated PR 👍 reaction lookup, `APPROVED` review state)
+- [Author Filtering](#author-filtering) — `reviewer_filter` modes, the Bot-type + login identity rule for scoping feedback to reviewer identities, and the User-type + login self rule
+- [Reviewer Approval Detection](#reviewer-approval-detection) — in-scope automated-reviewer approval signals (paginated PR 👍 reaction lookup, `APPROVED` latest review state)
 
 ## Shell and Parsing Rules
 
@@ -47,6 +47,7 @@ query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
+          databaseId
           author { login __typename }
           state
           body
@@ -111,9 +112,9 @@ query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
       | . as $thread
       | $thread.comments.nodes[]
       | select(.body != null and (.body | gsub("[[:space:]]+"; "") != ""))
-      | select(.author.login != $ENV.SELF_LOGIN)
+      | select((.author.__typename == "User" and .author.login == $ENV.SELF_LOGIN) | not)
       | "THREAD=\($thread.id) COMMENT=\(.id) AUTHOR=\(.author.login) PATH=\($thread.path) LINE=\($thread.line // "") URL=\(.url)"'
-# SELF_LOGIN is resolved at runtime via: gh api user --jq .login
+# SELF_LOGIN is resolved at runtime via: gh api user --jq 'select(.type == "User") | .login'
 ```
 
 ## Fetch Thread Comments (Paginated)
@@ -173,9 +174,9 @@ query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
 }' \
   --jq '.data.repository.pullRequest.comments.nodes[]
         | select(.body != null and (.body | gsub("[[:space:]]+"; "") != ""))
-        | select(.author.login != $ENV.SELF_LOGIN)
+        | select((.author.__typename == "User" and .author.login == $ENV.SELF_LOGIN) | not)
         | "COMMENT=\(.id) AUTHOR=\(.author.login) URL=\(.url)"'
-# SELF_LOGIN is resolved at runtime via: gh api user --jq .login
+# SELF_LOGIN is resolved at runtime via: gh api user --jq 'select(.type == "User") | .login'
 ```
 
 ## Detection Filtering
@@ -183,7 +184,7 @@ query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
 All queries must apply both filters before yielding results as actionable feedback. Silently skip items that fail either filter.
 
 1. **Exclude empty body:** `select(.body != null and (.body | gsub("[[:space:]]+"; "") != ""))`
-2. **Exclude self-authored:** `select(.author.login != $ENV.SELF_LOGIN)` — resolve once per poll: `export SELF_LOGIN=$(gh api user --jq .login)`
+2. **Exclude self-authored:** `select((.author.__typename == "User" and .author.login == $ENV.SELF_LOGIN) | not)` — the `gh --jq` form of the `is_self` predicate in `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`. Self is a `User`-typed author whose login equals `SELF_LOGIN`: a Bot sharing the operator's login is never self, and a missing or null `__typename` never reads as self, so such an item stays actionable. Resolve once per poll: `export SELF_LOGIN=$(gh api user --jq 'select(.type == "User") | .login')` — empty output means the authenticated identity is not a `User` account; stop rather than poll with an empty `SELF_LOGIN`.
 
 The Fetch Review Threads (unresolved summary output) and Fetch Top-Level PR Comments templates apply both filters inline. The Fetch Reviews and Fetch Thread Comments (Paginated) templates return raw nodes — consuming agents must apply both filters to their results before yielding as actionable feedback. For Fetch Reviews, also filter to `state` values `CHANGES_REQUESTED` or `COMMENTED`.
 
@@ -278,7 +279,7 @@ A reader must not conflate them: per-node viewer-scoped handled marker vs PR-obj
 
 ## Author Filtering
 
-`reviewer_filter` selects which non-self authors' feedback is in scope. Every mode first excludes self-authored content (login, with a trailing `[bot]` stripped, equal to `SELF_LOGIN`).
+`reviewer_filter` selects which non-self authors' feedback is in scope. Every mode first excludes self-authored content. An author is self only when its account type is `User` (GraphQL `author.__typename`, REST `user.type`) AND its login equals `SELF_LOGIN` — the module's `is_self` predicate. A Bot whose login equals the operator's is never self, and a missing or null account type never reads as self, so that author's content stays in scope for the filter below.
 
 | Mode | In scope |
 |------|----------|
@@ -287,9 +288,9 @@ A reader must not conflate them: per-node viewer-scoped handled marker vs PR-obj
 | `all` | every author |
 | `<login>` | the author whose login, with a trailing `[bot]` stripped, equals the value; type-agnostic. The keywords above shadow a same-named login |
 
-Identity key for the registry modes (`automated`, `codex-only`): an author matches a registry entry only when its account type is `Bot` (GraphQL `author.__typename`, REST `user.type`) AND its login, with a trailing `[bot]` stripped, is one of that entry's recognized login forms. A login alone is not an identity: a human GitHub `User` account shares the Claude app's bare login once `[bot]` is stripped, so login-only matching would admit that human as an automated reviewer. A missing or null account type never matches a registry mode. This is why every template above selects `author { login __typename }`.
+Identity key for the registry modes (`automated`, `codex-only`): an author matches a registry entry only when its account type is `Bot` (GraphQL `author.__typename`, REST `user.type`) AND its login, with a trailing `[bot]` stripped, is one of that entry's recognized login forms. A login alone is not an identity: a human GitHub `User` account shares the Claude app's bare login once `[bot]` is stripped, so login-only matching would admit that human as an automated reviewer. A missing or null account type never matches a registry mode. Self identity keys on the same field, which is why every template above selects `author { login __typename }`.
 
-The registry and every identity predicate — recognized login forms, the `[bot]` strip, filter matching, approver matching — live in one home: `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`. Consumers include that module; never restate a reviewer login or copy a predicate inline.
+The registry and every identity predicate — recognized login forms, the `[bot]` strip, self matching, filter matching, approver matching — live in one home: `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`. Consumers include that module; never restate a reviewer login or copy a predicate inline.
 
 `github-actions[bot]` is deliberately not in the registry. It is the generic CI identity every workflow step posts as, so admitting it by default would admit arbitrary CI output and widen the injection surface. Operators whose review bot posts as `github-actions[bot]` select it with `all` or an explicit `<login>` filter.
 
@@ -302,7 +303,7 @@ An automated reviewer's approval is the signal that lets a watched PR end cleanl
 | Approval kind | Reviewer | Signal |
 |---------------|----------|--------|
 | `pr-reaction-thumbs-up` | Codex | a 👍 (`+1`) reaction on the PR object |
-| `review-approved` | Copilot | a submitted review with `state` `APPROVED` |
+| `review-approved` | Copilot | its latest submitted review has `state` `APPROVED` |
 
 Claude declares no approval kind; a Claude-reviewed loop ends through the idle watch window, never through an approval signal. Approval never overrides open feedback: while unresolved non-self actionable items remain, the PR is not clean.
 
@@ -319,4 +320,4 @@ REST content `+1` is the 👍 reaction. The 👀 `eyes` reaction (REST content `
 
 ### APPROVED review (`review-approved`)
 
-Read `state` and `author { login __typename }` from the review nodes (see [Fetch Reviews](#fetch-reviews)). A review whose `state` is `APPROVED` counts as approval only when its author passes the module's `reviewer_is_approver` (kind `review-approved`) and `reviewer_matches_filter` predicates. Codex never files an `APPROVED` review. When the reviewer's `APPROVED` capability is unavailable or not opted into, this kind never fires and the loop ends through the watch window instead.
+Read `databaseId`, `state`, and `author { login __typename }` from the review nodes (see [Fetch Reviews](#fetch-reviews)). Keep the submitted reviews (`state` `CHANGES_REQUESTED`, `COMMENTED`, `APPROVED`, or `DISMISSED`) whose author passes the module's `reviewer_is_approver` (kind `review-approved`) and `reviewer_matches_filter` predicates, group them per approver (login normalized by the module's `strip_bot`), and judge each approver by its LATEST submitted review — the one with the highest `databaseId`. Approval fires when some approver's latest review is `APPROVED`. An `APPROVED` review superseded by a later `CHANGES_REQUESTED`, `COMMENTED`, or `DISMISSED` review from the same approver never counts. Codex never files an `APPROVED` review. When the reviewer's `APPROVED` capability is unavailable or not opted into, this kind never fires and the loop ends through the watch window instead.
