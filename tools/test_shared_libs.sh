@@ -4164,6 +4164,216 @@ assert_eq "rsshape:purity-caller-vars-unchanged" "caller-body|caller-token|calle
   "check locals do not leak into or overwrite the caller's variables"
 unset surface_body shape_token shape_program rsshape_base rsshape_pr rsshape_subshell_out
 
+# ── Section 20: review-surface shape check closure (#393) ───────────────────────
+echo ''
+echo '=== review-surface shape closure: every reviewThreads( reader uses review-surface-shape.sh (#393) ==='
+#
+# A review-loop script is DISCOVERED when a non-comment line contains `reviewThreads(`. Every
+# discovered script must (a) source a path ending in `_shared/review-surface-shape.sh"` on a
+# non-comment line and (b) call hivemind_review_surface_shape_check on a non-comment line. Two
+# no-second-copy checks run beside it: no review-loop script carries the predicate body on a
+# non-comment line (`(.nodes | type) == "array"`, or the old fetch-normalize form
+# `(.comments?.nodes? | type) == "array"`, whitespace-normalized), and the predicate signature
+# `def is_skeleton_connection:` (whitespace-normalized) appears on a non-comment line exactly once
+# across plugin/skills/**/*.sh and *.jq, in review-surface-shape.sh. The same predicates run over
+# the canaries (20b) and the real tree (20c).
+#
+# RESIDUAL: this closure is file-level only. It proves each discovered script sources the lib and
+# calls the check somewhere, not that every review-activity read in that script routes its body
+# through the check; per-call-site correctness is covered by the consumer behavior suites.
+
+# rsclosure_code_lines <path>: print the non-comment lines of a file; return 1 when it is unreadable.
+rsclosure_code_lines() {
+  local script_path="$1" code_lines grep_rc
+  code_lines="$(grep -v '^[[:space:]]*#' "$script_path" 2>/dev/null)"
+  grep_rc=$?
+  [ "$grep_rc" -gt 1 ] && return 1
+  printf '%s\n' "$code_lines"
+}
+
+# rsclosure_classify_file <path>: print one verdict for a script: `undiscovered`, `checked`,
+# `missing-source`, `missing-call`, `missing-source+missing-call`, or `unreadable` (returns 1).
+rsclosure_classify_file() {
+  local script_path="$1" code_lines verdict_parts=""
+  if ! code_lines="$(rsclosure_code_lines "$script_path")"; then
+    printf 'unreadable'
+    return 1
+  fi
+  if ! grep -qF 'reviewThreads(' <<<"$code_lines"; then
+    printf 'undiscovered'
+    return 0
+  fi
+  grep -Eq '^[[:space:]]*(\.|source)[[:space:]]+"[^"]*_shared/review-surface-shape\.sh"' <<<"$code_lines" \
+    || verdict_parts="missing-source"
+  grep -Eq 'hivemind_review_surface_shape_check([^A-Za-z0-9_]|$)' <<<"$code_lines" \
+    || verdict_parts="${verdict_parts:+$verdict_parts+}missing-call"
+  printf '%s' "${verdict_parts:-checked}"
+}
+
+# rsclosure_scan_scripts <path>...: print `<basename> <verdict>` per discovered script, one per line.
+rsclosure_scan_scripts() {
+  local script_path script_verdict
+  for script_path in "$@"; do
+    [ -f "$script_path" ] || { printf '%s unreadable\n' "${script_path##*/}"; continue; }
+    script_verdict="$(rsclosure_classify_file "$script_path")"
+    [ "$script_verdict" = "undiscovered" ] && continue
+    printf '%s %s\n' "${script_path##*/}" "$script_verdict"
+  done
+}
+
+# rsclosure_scan_local_copies <path>...: print `<basename> local-copy` for each file whose
+# whitespace-stripped non-comment lines carry the skeleton predicate body (either form), and
+# `<basename> unreadable` for a file that cannot be read. Prints nothing for a clean set.
+rsclosure_scan_local_copies() {
+  local script_path code_lines
+  for script_path in "$@"; do
+    if ! code_lines="$(rsclosure_code_lines "$script_path")"; then
+      printf '%s unreadable\n' "${script_path##*/}"
+      continue
+    fi
+    sed 's/[[:space:]]//g' <<<"$code_lines" \
+      | grep -qF -e '(.nodes|type)=="array"' -e '(.comments?.nodes?|type)=="array"' \
+      && printf '%s local-copy\n' "${script_path##*/}"
+  done
+  return 0
+}
+
+# rsclosure_signature_hits <path>...: print `<path>` once per non-comment line whose
+# whitespace-stripped form carries the predicate signature `def is_skeleton_connection:`, and
+# `<path> unreadable` for a file that cannot be read.
+rsclosure_signature_hits() {
+  local script_path code_lines code_line
+  for script_path in "$@"; do
+    if ! code_lines="$(rsclosure_code_lines "$script_path")"; then
+      printf '%s unreadable\n' "$script_path"
+      continue
+    fi
+    while IFS= read -r code_line; do
+      [[ "${code_line//[[:space:]]/}" == *'defis_skeleton_connection:'* ]] && printf '%s\n' "$script_path"
+    done <<<"$code_lines"
+  done
+  return 0
+}
+
+# 20a: canary fixtures.
+rsclosure_canary_dir="$WORKDIR/rsclosure-canaries"
+mkdir -p "$rsclosure_canary_dir"
+cat > "$rsclosure_canary_dir/a-checked.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" || exit 1
+query='pullRequest { reviewThreads(first: 50) { nodes { id } } }'
+hivemind_review_surface_shape_check "$body" >/dev/null || exit 1
+EOF
+cat > "$rsclosure_canary_dir/b-unchecked.sh" <<'EOF'
+#!/usr/bin/env bash
+query='pullRequest { reviewThreads(first: 50) { nodes { id } } }'
+printf '%s\n' "$query"
+EOF
+cat > "$rsclosure_canary_dir/c-comment-only.sh" <<'EOF'
+#!/usr/bin/env bash
+# This script never requests reviewThreads(first: 50); it only mentions it here.
+  # def is_skeleton_connection: (type == "object") and ((.nodes | type) == "array");
+  # (.comments?.nodes? | type) == "array"
+gh api repos/o/r/pulls
+EOF
+cat > "$rsclosure_canary_dir/d-source-only.sh" <<'EOF'
+#!/usr/bin/env bash
+source "$SCRIPT_DIR/../../_shared/review-surface-shape.sh"
+query='reviewThreads(first: 50) { nodes { id } }'
+EOF
+cat > "$rsclosure_canary_dir/e-call-only.sh" <<'EOF'
+#!/usr/bin/env bash
+[ -f "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" ] || exit 1
+query='reviewThreads(first: 50) { nodes { id } }'
+hivemind_review_surface_shape_check "$body" >/dev/null || exit 1
+EOF
+cat > "$rsclosure_canary_dir/f-local-copy.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" || exit 1
+query='reviewThreads(first: 50) { nodes { id } }'
+hivemind_review_surface_shape_check "$body" >/dev/null || exit 1
+jq -e '(.reviewThreads | type) == "object" and ( .nodes|type )=="array"' <<<"$body"
+EOF
+cat > "$rsclosure_canary_dir/g-old-form-copy.sh" <<'EOF'
+#!/usr/bin/env bash
+jq -e '(.comments?.nodes?  |  type) == "array"' <<<"$body"
+EOF
+cat > "$rsclosure_canary_dir/h-signature-copy.jq" <<'EOF'
+# A second definition with different spacing still counts as a copy.
+def   is_skeleton_connection :  (type == "object");
+EOF
+
+# 20b: the predicates over the canaries. A checked script is clean, an unchecked script is flagged
+# (each missing half independently), and a comment-only mention is not discovered. A `[ -f ]` probe
+# of the lib path is not a source line. A local predicate body (either form, any spacing) is
+# flagged even in a checked script, and comment-only mentions of the body or signature satisfy
+# nothing and flag nothing.
+assert_eq "rsclosure:canary-checked" "checked" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/a-checked.sh")"
+assert_eq "rsclosure:canary-unchecked" "missing-source+missing-call" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/b-unchecked.sh")"
+assert_eq "rsclosure:canary-comment-only-undiscovered" "undiscovered" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/c-comment-only.sh")"
+assert_eq "rsclosure:canary-source-only" "missing-call" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/d-source-only.sh")"
+assert_eq "rsclosure:canary-file-probe-is-not-source" "missing-source" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/e-call-only.sh")"
+assert_eq "rsclosure:canary-local-copy-still-checked" "checked" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/f-local-copy.sh")"
+assert_eq "rsclosure:canary-unreadable" "unreadable rc=1" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/absent.sh"; printf ' rc=%s' "$?")"
+assert_eq "rsclosure:canary-scan" \
+  "a-checked.sh checked|b-unchecked.sh missing-source+missing-call|d-source-only.sh missing-call|e-call-only.sh missing-source|f-local-copy.sh checked" \
+  "$(rsclosure_scan_scripts "$rsclosure_canary_dir"/*.sh | paste -sd '|' -)" \
+  "scan lists every discovered canary with its verdict and skips the undiscovered ones"
+assert_eq "rsclosure:canary-local-copy-scan" \
+  "f-local-copy.sh local-copy|g-old-form-copy.sh local-copy|absent.sh unreadable" \
+  "$(rsclosure_scan_local_copies "$rsclosure_canary_dir"/*.sh "$rsclosure_canary_dir/absent.sh" | paste -sd '|' -)" \
+  "both predicate-body forms are flagged at any spacing; comment-only mentions are not"
+assert_eq "rsclosure:canary-signature-hits" \
+  "$SHARED_DIR/review-surface-shape.sh|$rsclosure_canary_dir/h-signature-copy.jq" \
+  "$(rsclosure_signature_hits "$SHARED_DIR/review-surface-shape.sh" "$rsclosure_canary_dir"/*.sh \
+      "$rsclosure_canary_dir"/*.jq | paste -sd '|' -)" \
+  "a respaced second definition is a hit; a commented definition is not"
+
+# 20c: the same predicates over the real tree.
+rsclosure_report="$(rsclosure_scan_scripts "$REPO_ROOT"/plugin/skills/github-review-loop/scripts/*.sh)"
+rsclosure_discovered="$(cut -d' ' -f1 <<<"$rsclosure_report" | paste -sd ' ' -)"
+echo "INFO [rsclosure:real-discovered] $rsclosure_discovered"
+if [ -n "$rsclosure_report" ]; then
+  pass "rsclosure:real-non-vacuous" "discovered set is non-empty"
+else
+  failed "rsclosure:real-non-vacuous" "no review-loop script discovered requesting reviewThreads( (glob or predicate broke)"
+fi
+for rsclosure_expected in fetch-normalize.sh pr-change-detect-poll.sh prefilter.sh; do
+  if grep -q "^$rsclosure_expected " <<<"$rsclosure_report"; then
+    pass "rsclosure:real-discovers-$rsclosure_expected" "discovered as a reviewThreads( reader"
+  else
+    failed "rsclosure:real-discovers-$rsclosure_expected" "not discovered (actual set: '$rsclosure_discovered')"
+  fi
+done
+rsclosure_violations="$(grep -v ' checked$' <<<"$rsclosure_report" | paste -sd '|' -)"
+assert_eq "rsclosure:real-all-checked" "" "$rsclosure_violations" \
+  "every discovered review-loop script sources review-surface-shape.sh and calls the check"
+assert_eq "rsclosure:real-no-local-copy" "" \
+  "$(rsclosure_scan_local_copies "$REPO_ROOT"/plugin/skills/github-review-loop/scripts/*.sh \
+      "$REPO_ROOT"/plugin/skills/github-review-loop/scripts/*.jq | paste -sd '|' -)" \
+  "no review-loop script carries its own copy of the skeleton predicate body"
+rsclosure_signature_files=()
+while IFS= read -r rsclosure_signature_file; do
+  rsclosure_signature_files+=("$rsclosure_signature_file")
+done < <(find "$REPO_ROOT/plugin/skills" -type f \( -name '*.sh' -o -name '*.jq' \) | LC_ALL=C sort)
+if [ "${#rsclosure_signature_files[@]}" -gt 0 ]; then
+  pass "rsclosure:real-signature-scan-non-vacuous" "${#rsclosure_signature_files[@]} plugin/skills .sh/.jq files scanned"
+else
+  failed "rsclosure:real-signature-scan-non-vacuous" "no .sh/.jq file found under plugin/skills"
+fi
+assert_eq "rsclosure:real-signature-unique-to-lib" "$SHARED_DIR/review-surface-shape.sh" \
+  "$(rsclosure_signature_hits ${rsclosure_signature_files[@]+"${rsclosure_signature_files[@]}"} | paste -sd '|' -)" \
+  "def is_skeleton_connection: appears on exactly one non-comment line, in review-surface-shape.sh"
+unset rsclosure_canary_dir rsclosure_report rsclosure_discovered rsclosure_expected rsclosure_violations \
+  rsclosure_signature_files rsclosure_signature_file
+
 # ── Summary ─────────────────────────────────────────────────────────────────────
 echo ''
 echo '=== Summary ==='

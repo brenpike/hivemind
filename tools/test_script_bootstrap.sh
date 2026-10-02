@@ -186,6 +186,9 @@ SOURCE_ROWS=(
     'plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
     'plugin/skills/github-review-loop/scripts/react-marker.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
     'plugin/skills/github-review-loop/scripts/reply-resolve.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
+    'plugin/skills/github-review-loop/scripts/fetch-normalize.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
+    'plugin/skills/github-review-loop/scripts/prefilter.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
+    'plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
 )
 
 # ── Table helpers ───────────────────────────────────────────────────────────
