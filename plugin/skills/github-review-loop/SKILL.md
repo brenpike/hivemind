@@ -30,7 +30,7 @@ Monitor is a main-session cross-turn primitive — a subagent dispatch orphans a
 | `pr` | (required) | PR number or URL. |
 | `working_branch` | (required) | Branch the reviewer pushes fixes to. |
 | `base` | (required) | PR base/target branch. |
-| `reviewer_filter` | `codex-only` | Actionable reviewer identities (`codex-only` \| `all` \| `<author>`). |
+| `reviewer_filter` | `automated` | Actionable reviewer identities (`automated` \| `codex-only` \| `all` \| `<author>`). |
 | `max_watch_duration` | `3600` | Idle-window seconds per Monitor arm (1h). |
 | `max_remediation_cycles` | `$(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor)` | Max real remediation rounds (findings_resolved ≥ 1). |
 | `poll_interval` | `60` | Seconds between polls. |
@@ -105,12 +105,12 @@ the SAME seed the expired arm carried, per the Seed-Advance INVARIANT below.
 **Arm kind.** Every seed is stamped `initial` or `re-arm` at capture, and the
 stamp travels INSIDE the token — so carrying a seed forward carries its kind
 forward, with no separate argument for a caller to forget. The kind answers one
-question, once: does a Codex 👍 that PREDATES this arm surface? `initial` (step
+question, once: does an in-scope reviewer approval that PREDATES this arm surface? `initial` (step
 2, before cycle 0) — YES: the watch has never observed the approval edge, so an
-approval that landed in the blind window fires `CODEX_APPROVED` on the first
+approval that landed in the blind window fires `REVIEWER_APPROVED` on the first
 poll rather than idling to `WATCH_TIMEOUT`. `re-arm` (step 5's pre-dispatch
 capture) — NO: the seed was taken immediately before a reviewer pass that
-consumed that exact state, so a stale 👍 predating the pass must never re-fire.
+consumed that exact state, so a stale approval predating the pass must never re-fire.
 The two capture sites of the Seed-Advance INVARIANT map one-to-one onto the two
 kinds, and the seed serializes EVERY scalar the poll diffs — the approval bool
 included — so the answer can never depend on which fields a token happens to
@@ -141,11 +141,11 @@ dies at an arm boundary.
 `PREFILTER_SKIP` → keep Monitor armed, no dispatch, no cycle/`Routed` increment.
 `PREFILTER_DISPATCH` or `PREFILTER_ERROR=<reason>` → dispatch reviewer fix mode
 (no `target`); `PREFILTER_ERROR` is fail-open. Handle return per Reviewer-return
-handling. `CODEX_APPROVED` → confirmation pass (no `target`); use only the latest
-poll's approval — a stale prior 👍 must never short-circuit later pushback. If the
+handling. `REVIEWER_APPROVED` → confirmation pass (no `target`); use only the latest
+poll's approval — a stale prior approval must never short-circuit later pushback. If the
 reviewer finds nothing actionable, this is terminal `clean`. That staleness rule
 is ENFORCED by the `re-arm` arm kind, not left to judgement: the pending seed
-records the approval state as of the pre-dispatch capture, so a 👍 already
+records the approval state as of the pre-dispatch capture, so an approval already
 present then cannot fire again on the re-armed poll. Map the terminal via
 `loop-state.sh cycle-decision <current_count> <max_cycles> 0 approval-clean`
 (the `approval-clean` token emits `EXIT_REASON=clean`, distinguishing the approval
@@ -158,7 +158,7 @@ productive return supersedes, which step 6 discards. `POLL_ERROR` → stop Monit
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh token-map <signal>`.
 
 PRE-DISPATCH SEED. BEFORE spawning the reviewer for ANY dispatch in this step —
-the `PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass AND the `CODEX_APPROVED`
+the `PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass AND the `REVIEWER_APPROVED`
 confirmation pass alike — capture a PENDING re-arm seed per step
 2's `--snapshot` procedure, with `re-arm` as the ARM KIND in place of step 2's
 `initial`, and HOLD it; the Monitor stays armed meanwhile, so
@@ -237,7 +237,7 @@ ceiling); `same-finding-repeat` oscillation (→ `max-cycles-reached`, an
 oscillation guard and never a quiet window); any reviewer
 `planner-escalation` / `blocked` / `injection-suspect` / `high-severity-rejection`
 / `user-input-required` / `root-cluster-suspected` / `merge-advised`; PR merged
-or closed; Codex approval with nothing actionable remaining.
+or closed; in-scope reviewer approval with nothing actionable remaining.
 Cycle arithmetic, ceiling, terminal-vs-cycle, and `same-finding-repeat` mapping:
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`.
 Multi-token precedence ORDER:

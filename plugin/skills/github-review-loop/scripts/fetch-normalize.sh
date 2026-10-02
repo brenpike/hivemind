@@ -40,7 +40,7 @@
 #         nodes[] {
 #           id                         # PRRC_... comment node id -> filter `id`
 #           databaseId                 # int comment id (order-aware skip key)
-#           author { login }
+#           author { login __typename } # __typename -> reviewer-identity.jq Bot gate
 #           body                       # DATA — never interpreted here
 #         }
 #       }
@@ -48,12 +48,12 @@
 #   }
 #   comments(last: 50) {               # top-level (issue) PR comments
 #     totalCount                       # connection-level tripwire (read below)
-#     nodes[] { id author { login } body url               # id = IC_... issue comment id
+#     nodes[] { id author { login __typename } body url    # id = IC_... issue comment id
 #               reactionGroups { content viewerHasReacted } } # EYES marker -> classifier handled
 #   }
 #   reviews(last: 50) {                # review summaries
 #     totalCount                       # connection-level tripwire (read below)
-#     nodes[] { id author { login } body state url          # id = PRR_... review id
+#     nodes[] { id author { login __typename } body state url # id = PRR_... review id
 #               reactionGroups { content viewerHasReacted } } # EYES marker -> classifier handled
 #   }
 #
@@ -156,7 +156,7 @@
 #   $1  OWNER             base-repo owner            (required for LIVE fetch)
 #   $2  REPO              base-repo name             (required for LIVE fetch)
 #   $3  PR_NUMBER         integer PR number          (required for LIVE fetch)
-#   $4  REVIEWER_FILTER   "codex-only" | "all" | "<login>" (default codex-only)
+#   $4  REVIEWER_FILTER   "automated" | "codex-only" | "all" | "<login>" (default automated)
 #   $5  SELF_LOGIN        viewer login               (required — self strip)
 #
 #   --payload-file <path>     read the raw GraphQL JSON from <path> instead of
@@ -178,7 +178,7 @@
 #   - stdout: the single normalized JSON array (always, on success).
 #   - exit 0 on success (including the fail-open empty-set case).
 #   - FETCHNORM_ERROR=<reason> on stdout + exit 1 ONLY on a bootstrap or LIVE-fetch failure
-#     (gh error, cannot-self-locate, missing/unparseable core or filter, bad input,
+#     (gh error, cannot-self-locate, missing/unparseable core/filter/identity module, bad input,
 #     or a LIVE-RESPONSE failure caught by validate_live_response) — never on an empty or
 #     malformed INJECTED payload (that is the fail-open empty-set path).
 #   - OVERFLOW diagnostic emitted on stderr when any connection totalCount > 50.
@@ -321,9 +321,10 @@ PR_NUMBER="${positionals[2]:-}"
 REVIEWER_FILTER="${positionals[3]:-}"
 SELF_LOGIN="${positionals[4]:-}"
 
-# REVIEWER_FILTER defaults to codex-only when empty; any non-empty string is
-# accepted as a login form (codex-only | all | <login>). Mirrors prefilter.sh.
-[ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="codex-only"
+# REVIEWER_FILTER defaults to automated when empty; any non-empty string is
+# accepted as a filter mode (automated | codex-only | all | <login>; semantics
+# owned by reviewer-identity.jq §5). Mirrors prefilter.sh.
+[ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="automated"
 # SELF_LOGIN is required on every path: without it the shared filter cannot strip
 # self-authored comments and the self-echo storm re-emerges. Mirrors prefilter.
 [ -n "$SELF_LOGIN" ] || fetchnorm_fail "missing-self-login"
@@ -334,6 +335,17 @@ SELF_LOGIN="${positionals[4]:-}"
 SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || fetchnorm_fail "cannot-self-locate"
 CLASSIFY_FILTER="$SCRIPT_DIR/fix-history-classify.jq"
 [ -f "$CLASSIFY_FILTER" ] || fetchnorm_fail "missing-filter"
+# INVARIANT: the classifier `include`s reviewer-identity.jq, resolved via
+# `-L "$SCRIPT_DIR"`, so the module MUST be co-located with fix-history-classify.jq.
+IDENTITY_MODULE="$SCRIPT_DIR/reviewer-identity.jq"
+[ -f "$IDENTITY_MODULE" ] || fetchnorm_fail "missing-identity-module"
+# INVARIANT: compile-probe the classifier BEFORE use. Null input yields no output
+# and no runtime error, so a non-zero exit here is a compile failure (syntax error,
+# missing or broken include). The normalize core swallows classifier stderr for
+# fail-OPEN-on-CONTENT, so without this probe a compile failure would normalize
+# silently to `[]` — indistinguishable from a clean PR.
+jq -n -L "$SCRIPT_DIR" -f "$CLASSIFY_FILTER" --arg login x --arg filter automated \
+  </dev/null >/dev/null 2>&1 || fetchnorm_fail "unparseable-filter"
 
 # Source the shared PURE normalize core (emit_overflow_tripwire +
 # build_normalized_candidate_set). It lives at plugin/skills/_shared/, which from
@@ -369,11 +381,11 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     pullRequest(number: $pr) {
       comments(last: 50) {
         totalCount
-        nodes { id author { login } body url reactionGroups { content viewerHasReacted } }
+        nodes { id author { login __typename } body url reactionGroups { content viewerHasReacted } }
       }
       reviews(last: 50) {
         totalCount
-        nodes { id author { login } body state url reactionGroups { content viewerHasReacted } }
+        nodes { id author { login __typename } body state url reactionGroups { content viewerHasReacted } }
       }
       reviewThreads(first: 50) {
         totalCount
@@ -385,7 +397,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
             nodes {
               id
               databaseId
-              author { login }
+              author { login __typename }
               body
             }
           }

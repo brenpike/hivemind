@@ -1,0 +1,4 @@
+[
+  { "content": "+1", "user": { "login": "chatgpt-codex-connector", "type": "User" } },
+  { "content": "+1", "user": { "login": "claude", "type": "User" } }
+]

@@ -18,9 +18,14 @@
 #       ${SCRIPT_DIR}/fix-history-classify.jq
 #   which is the single source of truth for the skip/order semantics shared
 #   between this prefilter and the github-reviewer agent (so the two can never
-#   drift again). prefilter feeds the captured GraphQL payload into
-#   `jq -f fix-history-classify.jq --arg login --arg filter` and projects the
-#   emitted per-comment stream down to its binary SKIP / DISPATCH decision.
+#   drift again). The filter in turn `include`s the reviewer identity registry
+#   module ${SCRIPT_DIR}/reviewer-identity.jq, which owns every author-identity
+#   predicate (registry logins, bot-suffix stripping, Bot-type gating); prefilter
+#   carries no identity logic of its own. prefilter feeds the captured GraphQL
+#   payload into
+#   `jq -L <scripts dir> -f fix-history-classify.jq --arg login --arg filter`
+#   and projects the emitted per-comment stream down to its binary
+#   SKIP / DISPATCH decision.
 #   prefilter KEEPS its own concerns: the gh fetch, the timeout wrapper, the
 #   fail-open posture, the three connection-level totalCount tripwires (read
 #   DIRECTLY off the raw payload — the filter does not emit them), and input
@@ -39,6 +44,12 @@
 #   - Fail-open on a missing shared filter file: emits
 #     `PREFILTER_ERROR=missing-filter` and exits non-zero (DISPATCH),
 #     consistent with the GraphQL-error fail-open posture.
+#   - Fail-open on a missing reviewer identity module: emits
+#     `PREFILTER_ERROR=missing-identity-module` and exits non-zero (DISPATCH),
+#     the same posture as the missing-filter case.
+#   - Every GraphQL `author` selection requests `__typename` alongside `login`:
+#     the identity module requires the author account type (Bot vs User) for
+#     every registry filter mode.
 #   - Fail-open on >50-node overflow in any of `reviewThreads`, `comments`, or
 #     `reviews`. The bound is reached when any connection's `totalCount`
 #     exceeds 50 nodes; the prefilter cannot reliably author-classify activity
@@ -58,8 +69,9 @@
 #     the poll-side `THREADS_TOTAL` / `COMMENTS_TOTAL` / `REVIEWS_TOTAL`
 #     scalars in `pr-change-detect-poll.sh`'s accepted-trade-off block and
 #     the same "wake unnecessarily > miss feedback" posture. Cost under
-#     `codex-only`: a >50 issue-comment burst from humans will wake the
-#     reviewer once and return clean — acceptable vs silent drop.
+#     `automated` (and the narrower `codex-only` / `<login>` modes): a >50
+#     issue-comment burst from non-matching authors (humans, CI bots) will
+#     wake the reviewer once and return clean — acceptable vs silent drop.
 #   - The per-thread >20-comment overflow is owned by the shared filter: when a
 #     thread's `comments.totalCount` exceeds its fetched `comments.nodes`
 #     length, the filter force-labels every non-self matching comment in that
@@ -94,8 +106,9 @@
 #   $1  OWNER             base-repo owner
 #   $2  REPO              base-repo name
 #   $3  PR_NUMBER         integer PR number
-#   $4  REVIEWER_FILTER   "codex-only" | "all" | "<login>"
-#                         (default "codex-only" when empty)
+#   $4  REVIEWER_FILTER   "automated" | "codex-only" | "all" | "<login>"
+#                         (default "automated" when empty; mode semantics
+#                         live in reviewer-identity.jq §5)
 #   $5  SELF_LOGIN        viewer login used to strip self-authored latest
 #                         comments from the actionable set (required)
 #
@@ -123,9 +136,9 @@ prefilter_fail() {
 [ -n "$OWNER" ] || prefilter_fail "missing-owner"
 [ -n "$REPO" ] || prefilter_fail "missing-repo"
 case "$PR_NUMBER" in ''|*[!0-9]*) prefilter_fail "invalid-pr-number" ;; esac
-# REVIEWER_FILTER defaults to codex-only when empty; any non-empty string is
-# accepted as a login form (codex-only | all | <login>).
-[ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="codex-only"
+# REVIEWER_FILTER defaults to automated when empty; any non-empty string is
+# accepted as a mode (automated | codex-only | all | <login>).
+[ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="automated"
 # SELF_LOGIN is required: without it the shared filter cannot strip
 # self-authored comments, and the self-echo storm this prefilter exists to
 # suppress would re-emerge.
@@ -139,6 +152,9 @@ CLASSIFY_FILTER="$SCRIPT_DIR/fix-history-classify.jq"
 # Fail open (DISPATCH) when the shared filter is missing, consistent with the
 # GraphQL-error posture: better to wake the reviewer than to silently skip.
 [ -f "$CLASSIFY_FILTER" ] || prefilter_fail "missing-filter"
+# The shared filter `include`s the identity module from $SCRIPT_DIR via -L;
+# fail open (DISPATCH) when it is missing, same posture as missing-filter.
+[ -f "$SCRIPT_DIR/reviewer-identity.jq" ] || prefilter_fail "missing-identity-module"
 
 # Timeout wrapper for gh API calls.
 # Normal gh graphql completes in 1-5s; 45s is generous against transient
@@ -182,11 +198,11 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     pullRequest(number: $pr) {
       comments(last: 50) {
         totalCount
-        nodes { author { login } body url reactionGroups { content viewerHasReacted } }
+        nodes { author { login __typename } body url reactionGroups { content viewerHasReacted } }
       }
       reviews(last: 50) {
         totalCount
-        nodes { author { login } body state url reactionGroups { content viewerHasReacted } }
+        nodes { author { login __typename } body state url reactionGroups { content viewerHasReacted } }
       }
       reviewThreads(first: 50) {
         totalCount
@@ -197,7 +213,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
             totalCount
             nodes {
               databaseId
-              author { login }
+              author { login __typename }
               body
             }
           }
@@ -219,7 +235,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
 # the filter pass itself errors, consistent with the GraphQL-error posture.
 dispatch_class=$( ( set -o pipefail; \
   printf '%s' "$response" \
-  | jq -r -f "$CLASSIFY_FILTER" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" \
+  | jq -r -L "$SCRIPT_DIR" -f "$CLASSIFY_FILTER" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" \
     2>/dev/null \
   | jq -rs 'any(.[]?; .classification == "actionable" or .classification == "followup-after-fix")' \
     2>/dev/null \

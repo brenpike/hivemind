@@ -20,13 +20,13 @@
                   {
                     "id": "PRRC_case17comment1701",
                     "databaseId": 1701,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Fixed in abc1234. Closed the handle in the cleanup trap."
                   },
                   {
                     "id": "PRRC_case17comment1702",
                     "databaseId": 1702,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. The fsync hardening follows separately."
                   }
                 ]

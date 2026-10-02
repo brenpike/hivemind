@@ -11,12 +11,24 @@
 #   - Each iteration computes a CHEAP SCALAR snapshot via ONE non-paginated
 #     GraphQL query (PR state; author-aware latest-id tokens for issue comments,
 #     filtered reviews, and review-thread comments (filtered by reviewer-filter
-#     and self-login); totalCount tripwires for the three connections capped at
+#     and self identity); totalCount tripwires for the three connections capped at
 #     50; a CI `FAILED_CHECKS` scalar that counts only checks in a failed/
 #     errored state, so CI regressions wake the reviewer even when no new review
-#     comment was posted) plus a Codex 👍 PRESENT bool (via paginated REST
-#     reactions). No bodies, no cursor walks — the poll only answers "did
-#     anything change?" and "is the PR terminal?".
+#     comment was posted) plus ONE automated-reviewer APPROVAL bool (a
+#     `review-approved` reviewer whose LATEST review is APPROVED, read from
+#     GitHub's per-author `latestReviews` and never rebuilt from review history,
+#     OR a 👍 reaction on the PR from a `pr-reaction-thumbs-up` reviewer; both
+#     scoped by the active reviewer filter). Both approval reads are EXHAUSTIVE
+#     paginated walks (`latestReviews` in its own paginated GraphQL query, the
+#     reactions over paginated REST): the `latestReviews` `first: 100` is a
+#     page size, not a bound, and a walk that fails on any page fails the
+#     capture rather than judging approval from a partial fetch. No bodies —
+#     the poll only answers "did anything change?" and "is the PR terminal?".
+#   - Every reviewer IDENTITY decision (self identity, login normalization,
+#     filter scope, approver membership) is delegated to the sibling jq module
+#     `reviewer-identity.jq` (ADR-0033), loaded by `jq -L "$SCRIPT_DIR"`. This
+#     script carries no login literal, login compare, or suffix-strip regex of
+#     its own; a missing module is a terminal error before the first gh call.
 #   - It DIFFS the scalar snapshot in bash against the previous iteration and
 #     emits a single minimal marker line ONLY on a real delta or a terminal
 #     state. The reviewer re-fetches ALL feedback bodies and does the full
@@ -89,11 +101,13 @@
 #   CHANGED          a non-terminal delta in the scalar snapshot (wake reviewer)
 #   STATE=MERGED     PR merged (terminal)
 #   STATE=CLOSED     PR closed unmerged (terminal)
-#   CODEX_APPROVED   the Codex 👍 crossed into "present" against the seeded
-#                    approval state. Whether a 👍 that PREDATES this arm counts
-#                    as new is decided by the seed's ARM KIND, never by which
-#                    fields the token carries (see ARM-KIND SEMANTICS below;
-#                    skill confirms via reviewer before any terminal)
+#   REVIEWER_APPROVED
+#                    the in-scope automated-reviewer approval crossed into
+#                    "present" against the seeded approval state. Whether an
+#                    approval that PREDATES this arm counts as new is decided by
+#                    the seed's ARM KIND, never by which fields the token carries
+#                    (see ARM-KIND SEMANTICS below; skill confirms via reviewer
+#                    before any terminal)
 #   WATCH_TIMEOUT    max_watch_duration elapsed (terminal)
 #   POLL_ERROR       repeated query failure, or a missing/malformed seed
 #                    (terminal; skill returns blocked)
@@ -110,8 +124,9 @@
 #   $3  PR_NUMBER               integer PR number
 #   $4  MAX_WATCH_SECONDS       integer seconds before WATCH_TIMEOUT
 #   $5  POLL_INTERVAL_SECONDS   integer seconds between polls
-#   $6  REVIEWER_FILTER         "codex-only" | "all" | "<login>"
-#                               (default "codex-only" when empty)
+#   $6  REVIEWER_FILTER         "automated" | "codex-only" | "all" | "<login>"
+#                               (default "automated" when empty; modes are
+#                               defined by reviewer-identity.jq)
 #   $7  SELF_LOGIN              viewer login used to exclude self-authored
 #                               activity from delta tokens (required)
 #   $8  BASELINE_SEED           poll mode only: the BARE value of the BASELINE=
@@ -169,12 +184,12 @@ SNAPSHOT_FIELDS=(
   reviews_total
   threads_total
   failed_checks
-  codex
+  approval
 )
 # The approval edge is the ONE field that raises its own marker
-# (CODEX_APPROVED) instead of folding into CHANGED, so the generic diff skips it
-# by name. It is still serialized like every other field.
-APPROVAL_FIELD="codex"
+# (REVIEWER_APPROVED) instead of folding into CHANGED, so the generic diff skips
+# it by name. It is still serialized like every other field.
+APPROVAL_FIELD="approval"
 
 # An arm declares its KIND, and the kind travels inside the seed token rather
 # than alongside it: carrying a seed forward (arm-expiry re-arm) therefore
@@ -190,7 +205,9 @@ SEED_FORMAT_RE="^(${ARM_KIND_ALTERNATION})([|][A-Za-z0-9_-]+){${#SNAPSHOT_FIELDS
 # non-integer numeric arg would otherwise abort under set -u or corrupt the
 # GraphQL Int binding / the $(( )) deadline math. Emits the terminal error
 # marker of the mode this run was invoked in, then exits non-zero; every
-# validation and capture failure routes through here.
+# validation and capture failure routes through here. An optional reason
+# argument is accepted and deliberately NOT emitted: the contracted stdout is the
+# bare marker alone, and nothing is written to stderr.
 poll_fail() {
   if [ "$MODE" = "snapshot" ]; then
     echo "SNAPSHOT_ERROR"
@@ -199,6 +216,12 @@ poll_fail() {
   fi
   exit 1
 }
+
+# Resolve the sibling identity module RELATIVE to this script's own location
+# (ADR-0020 C1): the poll runs as a direct sibling of reviewer-identity.jq, and
+# every snapshot jq program loads it by search path.
+SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || poll_fail "cannot-self-locate"
+[ -f "$SCRIPT_DIR/reviewer-identity.jq" ] || poll_fail "missing-identity-module"
 
 # reset_snapshot_vars: clear every `cur_<field>` before a capture, so an
 # indirect read of any declared field is always defined under `set -u`.
@@ -296,9 +319,10 @@ POLL_INTERVAL_SECONDS=$((10#$POLL_INTERVAL_SECONDS))
 [ "$POLL_INTERVAL_SECONDS" -ge 1 ] || poll_fail
 # SELF_LOGIN is required: without it, the jq filter cannot exclude self-authored
 # activity and self-echo CHANGED storms return. REVIEWER_FILTER defaults to
-# codex-only when empty; any non-empty string is accepted as a login form.
+# automated when empty; any non-empty string is accepted (a non-keyword value is
+# the legacy login form).
 [ -n "$SELF_LOGIN" ] || poll_fail
-[ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="codex-only"
+[ -n "$REVIEWER_FILTER" ] || REVIEWER_FILTER="automated"
 # Snapshot mode must be told which kind of arm it is seeding; an absent or
 # unknown kind is SNAPSHOT_ERROR rather than a token whose semantics are guessed
 # downstream.
@@ -341,24 +365,33 @@ fail_count=0
 # compute_snapshot: fills the global scalar variables from ONE non-paginated
 # GraphQL query (PR state + last 50 issue-comment databaseIds + last 50 review
 # databaseIds with state and author + last 50 reviewThreads with their last
-# comment databaseId and author + the totalCount of each of those three
-# connections + the `statusCheckRollup` contexts so a `FAILED_CHECKS` scalar
-# can be derived) plus a paginated REST reactions read for the Codex 👍 bool.
-# Returns 0 on success, non-zero on failure of the query or the reactions call.
+# comment databaseId and author + the totalCount of the comments, reviews, and
+# reviewThreads connections + the `statusCheckRollup` contexts so a
+# `FAILED_CHECKS` scalar can be derived) plus two exhaustive paginated approval
+# reads — every per-author latest review (`latestReviews`, its own paginated
+# GraphQL query) and every REST reaction — folded into ONE in-scope approval
+# bool (an approver's LATEST review APPROVED, OR PR 👍, each from its registry
+# approver kind). The `latestReviews` `first: 100` is a page size, not a
+# bound; a walk that fails on any page fails the capture.
+# Returns 0 on success, non-zero on failure of the query, either approval walk,
+# or any identity jq evaluation.
 # Each id token is a single max-databaseId across the author-filtered stream —
 # self-only flurries (own replies, own pushes) do not bump any token,
-# eliminating self-echo CHANGED storms. The totalCount scalars are tripwires
-# for activity past the 50-node page boundary: when it bumps the totalCount but
-# not the id token, CHANGED still fires and the reviewer re-fetches all on
-# wake. `FAILED_CHECKS` is the count of `statusCheckRollup` contexts in a
-# failed/errored state (FAILURE / ERROR / TIMED_OUT / CANCELLED /
+# eliminating self-echo CHANGED storms. "Self" is the module's `is_self` over
+# each node's login AND `__typename` (both selected for that reason): only a
+# User-typed SELF_LOGIN author is self, so a Bot sharing the login, or a node
+# with no type, still bumps its token (fail toward wake). The totalCount scalars
+# are tripwires for activity past the 50-node page boundary: when it bumps the
+# totalCount but not the id token, CHANGED still fires and the reviewer
+# re-fetches all on wake. `FAILED_CHECKS` is the count of `statusCheckRollup`
+# contexts in a failed/errored state (FAILURE / ERROR / TIMED_OUT / CANCELLED /
 # ACTION_REQUIRED for CheckRun; FAILURE / ERROR for legacy StatusContext);
 # changes here fire CHANGED so `github-reviewer` step 3 (failed-CI fix
 # candidates) is wired to a wake signal independent of review activity. The
 # reviewer does the full body-level classification on wake (thin poll, no
 # interpretation). Writes diagnostic stderr to /dev/null (never /tmp).
 compute_snapshot() {
-  local raw line
+  local raw line review_rows review_approved reaction_rows thumbs_approved
 
   raw=$( ( set -o pipefail; \
     "${GH_TIMEOUT[@]}" gh api graphql \
@@ -370,17 +403,17 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       state
       comments(last: 50) {
         totalCount
-        nodes { databaseId author { login } }
+        nodes { databaseId author { login __typename } }
       }
       reviews(last: 50) {
         totalCount
-        nodes { databaseId state author { login } }
+        nodes { databaseId state author { login __typename } }
       }
       reviewThreads(first: 50) {
         totalCount
         nodes {
           comments(last: 1) {
-            nodes { databaseId author { login } }
+            nodes { databaseId author { login __typename } }
           }
         }
       }
@@ -393,25 +426,21 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     }
   }
 }' 2>/dev/null \
-    | jq -r --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
+    | jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
+    include "reviewer-identity";
     .data.repository.pullRequest as $pr |
     ($pr.comments.nodes
-      | map(select((.author.login // "" | sub("\\[bot\\]$"; "")) != $login))
+      | map(select(is_self(.author.login; .author.__typename; $login) | not))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $nonself_comment |
     ($pr.reviews.nodes
       | map(select(.state as $s | ["CHANGES_REQUESTED","COMMENTED","APPROVED","DISMISSED"] | index($s)))
-      | map(select(
-          (.author.login // "" | sub("\\[bot\\]$"; "")) as $a |
-          if $filter == "codex-only" then $a == "chatgpt-codex-connector"
-          elif $filter == "all" then $a != $login
-          else $a == $filter
-          end))
+      | map(select(reviewer_matches_filter(.author.login; .author.__typename; $login; $filter)))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $filtered_review |
     ($pr.reviewThreads.nodes
       | map(.comments.nodes[]?)
-      | map(select((.author.login // "" | sub("\\[bot\\]$"; "")) != $login))
+      | map(select(is_self(.author.login; .author.__typename; $login) | not))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $nonself_thread |
     # FAILED_CHECKS: sum rollup state-count buckets for failed/errored
@@ -465,18 +494,69 @@ query($owner: String!, $repo: String!, $pr: Int!) {
 $raw
 EOF
 
-  # Codex 👍 via the paginated REST reactions endpoint. The --jq filter emits the
-  # matching login ONCE per Codex +1 reaction and nothing otherwise; gh may apply
-  # --jq per page, so aggregate to a bool in bash (non-empty output = present).
-  # This avoids a 100-node GraphQL blind spot and the per-page slurp pitfall.
-  local codex_logins
-  codex_logins=$("${GH_TIMEOUT[@]}" gh api --paginate "repos/$OWNER/$REPO/issues/$PR_NUMBER/reactions" \
-    --jq '.[] | select(.content == "+1") | ((.user.login // "") | sub("\\[bot\\]$"; "")) | select(. == "chatgpt-codex-connector")' \
+  # Review approval is CURRENT state read from GitHub, never rebuilt from review
+  # history: `latestReviews` holds the latest submitted review of each author, so
+  # a later COMMENTED, CHANGES_REQUESTED, or DISMISSED review from the same
+  # approver supersedes an earlier APPROVED. The read is an EXHAUSTIVE paginated
+  # walk in its own query (gh follows only one paginated connection per query):
+  # `first: 100` is the page size, not a bound, so an approver past any number of
+  # other authors is still read. The gh --jq filter is pure TRANSPORT, one
+  # `tojson` row `{state, login, type}` per entry and per page, exactly like the
+  # reactions read below; the identity decision runs locally over every row at
+  # once. A failed later page, a GraphQL error, or a null connection (a jq
+  # iteration error) fails the capture, so no approval verdict is ever drawn from
+  # a partial walk. Empty input slurps to `[]` (no approval).
+  review_rows=$("${GH_TIMEOUT[@]}" gh api graphql --paginate \
+    -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER" \
+    -f query='
+query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      latestReviews(first: 100, after: $endCursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { state author { login __typename } }
+      }
+    }
+  }
+}' \
+    --jq '.data.repository.pullRequest.latestReviews.nodes[] | {state, login: .author.login, type: .author.__typename} | tojson' \
     2>/dev/null) || return 1
-  if [ -n "$codex_logins" ]; then
-    cur_codex="true"
+  review_approved=$(printf '%s' "$review_rows" \
+    | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
+      include "reviewer-identity";
+      any(.[];
+          .state == "APPROVED"
+          and reviewer_is_approver(.login; .type; "review-approved")
+          and reviewer_matches_filter(.login; .type; $login; $filter))
+    ' 2>/dev/null) || return 1
+
+  # PR 👍 via the paginated REST reactions endpoint. The gh --jq filter is pure
+  # TRANSPORT: it emits one JSON object `{login, type}` per +1 reaction and
+  # makes NO identity decision (gh may apply --jq per page, so rows concatenate
+  # across pages). Each row is `tojson`-encoded because gh prints a string
+  # result raw and uncolored, one per line; the local jq parses the rows back
+  # as JSON values, so no login byte can be read as a field boundary. The
+  # identity decision runs locally over all rows at once, through the module,
+  # so the 100-node GraphQL blind spot and the per-page slurp pitfall are both
+  # avoided. Empty input slurps to `[]` (no approval); a row that is not JSON
+  # is a jq error and fails the capture.
+  reaction_rows=$("${GH_TIMEOUT[@]}" gh api --paginate "repos/$OWNER/$REPO/issues/$PR_NUMBER/reactions" \
+    --jq '.[] | select(.content == "+1") | {login: .user.login, type: .user.type} | tojson' \
+    2>/dev/null) || return 1
+  thumbs_approved=$(printf '%s' "$reaction_rows" \
+    | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
+      include "reviewer-identity";
+      any(.[];
+          reviewer_is_approver(.login; .type; "pr-reaction-thumbs-up")
+          and reviewer_matches_filter(.login; .type; $login; $filter))
+    ' 2>/dev/null) || return 1
+
+  case "$review_approved" in true|false) ;; *) return 1 ;; esac
+  case "$thumbs_approved" in true|false) ;; *) return 1 ;; esac
+  if [ "$review_approved" = "true" ] || [ "$thumbs_approved" = "true" ]; then
+    cur_approval="true"
   else
-    cur_codex="false"
+    cur_approval="false"
   fi
 
   # A well-formed snapshot always carries a non-empty PR state.
@@ -486,7 +566,7 @@ EOF
 
 # --snapshot: one-shot baseline capture, emitted as a single pipe-separated
 # token stamped with the arm kind it seeds. It is a COMPLETE serialization —
-# every scalar the poll diffs, the Codex 👍 bool included — so no field the diff
+# every scalar the poll diffs, the approval bool included — so no field the diff
 # reads can be absent from the token. A seed that cannot be captured, or that
 # leaves any declared field empty, is loud (SNAPSHOT_ERROR, exit 1) rather than
 # a partial token the caller would pass on as a valid baseline.
@@ -503,17 +583,18 @@ fi
 # (#324). load_seed already filled every prev_<field> from the token above.
 #
 # ARM-KIND SEMANTICS. The seed carries the approval bool like every other
-# scalar, so "does a 👍 that predates this arm surface?" is answered ONCE, by
-# the arm's KIND, instead of per-scalar by which fields the token happens to
-# carry:
+# scalar, so "does an approval that predates this arm surface?" is answered
+# ONCE, by the arm's KIND, instead of per-scalar by which fields the token
+# happens to carry:
 #   initial — this watch has never observed the approval edge. Treat it as
-#             UNOBSERVED: a 👍 already present when the watch started fires
-#             CODEX_APPROVED on the first poll, so an approval that landed in
-#             the #324 blind window cannot idle the loop to WATCH_TIMEOUT (D14).
+#             UNOBSERVED: an approval already present when the watch started
+#             fires REVIEWER_APPROVED on the first poll, so an approval that
+#             landed in the #324 blind window cannot idle the loop to
+#             WATCH_TIMEOUT (D14).
 #   re-arm  — the seed was captured immediately before a reviewer pass that
 #             consumed this exact state. The approval edge IS observed, so the
-#             serialized bool stands and a stale 👍 predating that pass never
-#             re-fires to short-circuit later pushback.
+#             serialized bool stands and a stale approval predating that pass
+#             never re-fires to short-circuit later pushback.
 if [ "$ARM_KIND" = "initial" ]; then
   printf -v "prev_$APPROVAL_FIELD" '%s' ''
 fi
@@ -549,12 +630,12 @@ while true; do
     exit 0
   fi
 
-  # Codex 👍 newly present is its own marker (the skill runs a confirmation pass
-  # rather than treating it as a generic CHANGED delta). What counts as "newly"
-  # on the FIRST iteration is set by ARM-KIND SEMANTICS above — terminal clean
-  # ONLY if nothing actionable remains (D14).
-  if [ "$cur_codex" = "true" ] && [ "$prev_codex" != "true" ]; then
-    echo "CODEX_APPROVED"
+  # An in-scope approval newly present is its own marker (the skill runs a
+  # confirmation pass rather than treating it as a generic CHANGED delta). What
+  # counts as "newly" on the FIRST iteration is set by ARM-KIND SEMANTICS above —
+  # terminal clean ONLY if nothing actionable remains (D14).
+  if [ "$cur_approval" = "true" ] && [ "$prev_approval" != "true" ]; then
+    echo "REVIEWER_APPROVED"
   elif snapshot_changed; then
     echo "CHANGED"
   fi

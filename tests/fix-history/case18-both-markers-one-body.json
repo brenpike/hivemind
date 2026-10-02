@@ -20,7 +20,7 @@
                   {
                     "id": "PRRC_case18comment1801",
                     "databaseId": 1801,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. Partial only: the env layer is Fixed in abc1234. The file layer needs the follow-up issue."
                   },
                   {

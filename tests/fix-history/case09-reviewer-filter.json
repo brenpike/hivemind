@@ -14,13 +14,13 @@
                   {
                     "id": "PRRC_case09comment900",
                     "databaseId": 900,
-                    "author": { "login": "chatgpt-codex-connector" },
+                    "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
                     "body": "Codex finding: bounds check missing."
                   },
                   {
                     "id": "PRRC_case09comment901",
                     "databaseId": 901,
-                    "author": { "login": "human-reviewer" },
+                    "author": { "login": "human-reviewer", "__typename": "User" },
                     "body": "Human nit: prefer a guard clause."
                   }
                 ]

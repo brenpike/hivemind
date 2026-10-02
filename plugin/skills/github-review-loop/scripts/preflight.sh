@@ -8,7 +8,7 @@
 #   - PR is OPEN
 #   - the local working branch matches the expected working_branch
 #   - the resolved base branch
-#   - SELF_LOGIN (the authenticated gh identity, used for self-comment filtering)
+#   - SELF_LOGIN (the authenticated gh User-account login, for self-comment filtering)
 #
 # Emits labeled results on stdout for the skill to read directly. No /tmp. No
 # stop-file. On any failure it prints a PREFLIGHT_ERROR line and exits non-zero.
@@ -73,8 +73,9 @@ repo="${url_rest%%/*}"
 [ "$pr_base" = "$BASE_BRANCH" ] \
   || fail "PR base '$pr_base' does not match expected base_branch '$BASE_BRANCH'"
 
-self_login=$(gh api user --jq '.login' 2>/dev/null) \
+self_login=$(gh api user --jq 'select(.type == "User") | .login' 2>/dev/null) \
   || fail "could not resolve SELF_LOGIN"
+[ -n "$self_login" ] || fail "SELF_LOGIN is not a User account"
 
 current_branch=$(git branch --show-current 2>/dev/null) \
   || fail "could not read current git branch"

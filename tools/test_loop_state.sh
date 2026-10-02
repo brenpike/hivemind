@@ -280,7 +280,7 @@ assert_stdout "oscillation:same-finding-repeat-zero" \
 # ============================================================================
 # SECTION 4b: cycle-decision — approval-clean → TERMINAL clean, no increment
 #
-# The CODEX_APPROVED confirmation pass found nothing actionable. Unlike a plain
+# The REVIEWER_APPROVED confirmation pass found nothing actionable. Unlike a plain
 # `clean` (keep watching → EXIT_REASON=none), approval-clean is the successful
 # approval terminal and MUST emit EXIT_REASON=clean. No increment (a confirmation
 # pass that finds nothing is not a remediation round).

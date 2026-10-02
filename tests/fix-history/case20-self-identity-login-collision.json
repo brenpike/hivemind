@@ -1,0 +1,137 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 4,
+          "nodes": [
+            {
+              "id": "PRRT_case20qqqqqqqqqqq1",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 1,
+                "nodes": [
+                  {
+                    "id": "PRRC_case20comment2000",
+                    "databaseId": 2000,
+                    "author": { "login": "claude", "__typename": "Bot" },
+                    "body": "Claude app finding: unchecked return value."
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_case20qqqqqqqqqqq2",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "id": "PRRC_case20comment2010",
+                    "databaseId": 2010,
+                    "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
+                    "body": "Codex finding: missing bounds check."
+                  },
+                  {
+                    "id": "PRRC_case20comment2011",
+                    "databaseId": 2011,
+                    "author": { "login": "claude", "__typename": "Bot" },
+                    "body": "Fixed in abc1234."
+                  },
+                  {
+                    "id": "PRRC_case20comment2012",
+                    "databaseId": 2012,
+                    "author": { "login": "claude", "__typename": "Bot" },
+                    "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/9. Out of scope."
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_case20qqqqqqqqqqq3",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 3,
+                "nodes": [
+                  {
+                    "id": "PRRC_case20comment2020",
+                    "databaseId": 2020,
+                    "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
+                    "body": "Codex finding: leaked file handle."
+                  },
+                  {
+                    "id": "PRRC_case20comment2021",
+                    "databaseId": 2021,
+                    "author": { "login": "claude", "__typename": "User" },
+                    "body": "Fixed in abc1234."
+                  },
+                  {
+                    "id": "PRRC_case20comment2022",
+                    "databaseId": 2022,
+                    "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
+                    "body": "Codex follow-up: the handle still leaks on the error path."
+                  }
+                ]
+              }
+            },
+            {
+              "id": "PRRT_case20qqqqqqqqqqq4",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 2,
+                "nodes": [
+                  {
+                    "id": "PRRC_case20comment2030",
+                    "databaseId": 2030,
+                    "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
+                    "body": "Codex finding: stale cache entry."
+                  },
+                  {
+                    "id": "PRRC_case20comment2031",
+                    "databaseId": 2031,
+                    "author": { "login": "claude" },
+                    "body": "Fixed in abc1234."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": {
+          "totalCount": 4,
+          "nodes": [
+            {
+              "id": "IC_kwDOcase20comment2040",
+              "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
+              "body": "Codex top-level finding: flaky retry loop.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2040",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase20comment2041",
+              "author": { "login": "claude", "__typename": "Bot" },
+              "body": "Addresses: https://github.com/o/r/pull/1#issuecomment-2040",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2041",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase20comment2042",
+              "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
+              "body": "Codex top-level finding: unbounded queue.",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2042",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase20comment2043",
+              "author": { "login": "claude", "__typename": "User" },
+              "body": "Addresses: https://github.com/o/r/pull/1#issuecomment-2042",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2043",
+              "reactionGroups": []
+            }
+          ]
+        },
+        "reviews": { "totalCount": 0, "nodes": [] }
+      }
+    }
+  }
+}

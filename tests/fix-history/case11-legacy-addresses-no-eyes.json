@@ -8,7 +8,7 @@
           "nodes": [
             {
               "id": "IC_kwDOcase11self110",
-              "author": { "login": "selfuser" },
+              "author": { "login": "selfuser", "__typename": "User" },
               "body": "Addresses: https://github.com/o/r/pull/1#issuecomment-111",
               "url": "https://github.com/o/r/pull/1#issuecomment-110",
               "reactionGroups": []

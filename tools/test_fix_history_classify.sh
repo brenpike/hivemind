@@ -9,6 +9,11 @@
 # stream equals an expected set. The filter is a PURE function of stdin + --arg login/--arg filter,
 # so every case is deterministic and offline.
 #
+# It also tests the reviewer identity registry the filter includes:
+#   plugin/skills/github-review-loop/scripts/reviewer-identity.jq
+# for registry integrity (unique ids, non-empty logins, approval kind in the closed enum) and for
+# CLOSURE: no registry login and no `[bot]` strip literal may be inlined in a consumer script.
+#
 # Mirrors tools/test_shared_libs.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any-
 # fail convention. Read-only: the only writes are scratch files in a disposable tmpdir removed on EXIT.
 #
@@ -19,10 +24,13 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-FILTER="$REPO_ROOT/plugin/skills/github-review-loop/scripts/fix-history-classify.jq"
+MODULE_DIR="$REPO_ROOT/plugin/skills/github-review-loop/scripts"
+FILTER="$MODULE_DIR/fix-history-classify.jq"
+IDENTITY_MODULE="$MODULE_DIR/reviewer-identity.jq"
 FIX_DIR="$REPO_ROOT/tests/fix-history"
 
 [ -f "$FILTER" ] || { echo "FAIL: filter under test missing: $FILTER" >&2; exit 2; }
+[ -f "$IDENTITY_MODULE" ] || { echo "FAIL: identity module missing: $IDENTITY_MODULE" >&2; exit 2; }
 [ -d "$FIX_DIR" ] || { echo "FAIL: fixture dir missing: $FIX_DIR" >&2; exit 2; }
 command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite" >&2; exit 2; }
 
@@ -45,7 +53,8 @@ canon() {
 
 # run_case <case> <fixture-basename> <login> <filter> <expected-canonical-json>
 # Feed the fixture through the filter with the given args, canonicalize, and exact-match against
-# the expected canonical JSON. A jq failure (filter error / invalid fixture) fails the case loudly.
+# the expected canonical JSON. `-L "$MODULE_DIR"` resolves the filter's `include "reviewer-identity"`.
+# A jq failure (filter error / invalid fixture / unresolved include) fails the case loudly.
 run_case() {
   local case_name="$1" fixture="$2" login="$3" filt="$4" expected="$5"
   local path="$FIX_DIR/$fixture"
@@ -54,7 +63,7 @@ run_case() {
     return
   fi
   local actual
-  if ! actual="$(jq -cf "$FILTER" --arg login "$login" --arg filter "$filt" < "$path" | canon)"; then
+  if ! actual="$(jq -c -L "$MODULE_DIR" -f "$FILTER" --arg login "$login" --arg filter "$filt" < "$path" | canon)"; then
     failed "$case_name" "jq filter failed on fixture $fixture (login=$login filter=$filt)"
     return
   fi
@@ -116,16 +125,20 @@ run_case "case06:toplevel-addressed" "case06-toplevel-addressed.json" "selfuser"
 run_case "case07:review-summary" "case07-review-summary.json" "selfuser" "all" \
   '[{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase07review700","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-700","classification":"handled"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase07review701","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-701","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase07review702","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-702","classification":"actionable"}]'
 
-# ── Case 8: [bot] normalization ──────────────────────────────────────────────────
-# A self author login carrying a trailing `[bot]` suffix (selfuser[bot]) normalizes to selfuser →
-# treated as self, so its `Fixed in <SHA>.` becomes a fix disposition (id 801) and it is NOT emitted.
-# The non-self comment (id 800 <= 801) → handled. Exactly one record.
-run_case "case08:bot-normalization" "case08-bot-normalization.json" "selfuser" "all" \
-  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case08ffffffffffff","id":"PRRC_case08comment800","databaseId":800,"url":null,"classification":"handled"}]'
+# ── Case 8: a bot-suffixed Bot sharing the self login is NOT self ────────────────
+# Self identity is a User-typed author whose RAW login equals --arg login (module `is_self`); the
+# `[bot]` strip never applies to it. A Bot-typed `selfuser[bot]` therefore stays a non-self author
+# under `all`: it is emitted, its own `Fixed in <SHA>.` body marks IT handled (801), and it
+# contributes NO self disposition, so the codex finding before it (800) is a first-time finding on a
+# never-disposed thread → actionable. Under the superseded login-only key the stripped `selfuser`
+# read as self: 801 became a fix disposition, 800 was absolved, and 801 was dropped.
+run_case "case08:bot-suffixed-bot-not-self" "case08-bot-normalization.json" "selfuser" "all" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case08ffffffffffff","id":"PRRC_case08comment800","databaseId":800,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case08ffffffffffff","id":"PRRC_case08comment801","databaseId":801,"url":null,"classification":"handled"}]'
 
 # ── Case 9: reviewer_filter — codex-only vs all on one payload ────────────────────
-# Same payload, two filters. codex-only matches ONLY chatgpt-codex-connector (900). all matches any
-# non-self author (900 + the human reviewer 901). No self disposition on the thread → both are
+# Same payload, two filters. codex-only matches ONLY the Bot-typed chatgpt-codex-connector (900). all
+# matches any non-self author (900 + the User-typed human reviewer 901). Every author node carries
+# `__typename` because the registry modes require a Bot-typed author. No self disposition on the thread → both are
 # FIRST-TIME findings on a never-disposed thread → actionable (per case 4).
 run_case "case09:reviewer-filter-codex-only" "case09-reviewer-filter.json" "selfuser" "codex-only" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case09gggggggggggg","id":"PRRC_case09comment900","databaseId":900,"url":null,"classification":"actionable"}]'
@@ -263,6 +276,236 @@ run_case "case17:terminal-defer-no-later-comment" "case17-fix-then-defer-no-late
 # concatenated arms in the filter flips 1802 back to followup-after-fix and fails here.
 run_case "case18:both-markers-one-body-tie" "case18-both-markers-one-body.json" "selfuser" "all" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case18oooooooooooo","id":"PRRC_case18comment1800","databaseId":1800,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case18oooooooooooo","id":"PRRC_case18comment1802","databaseId":1802,"url":null,"classification":"actionable"}]'
+
+# ── Case 19: registry filter modes over every reviewer identity class ────────────
+# One unresolved thread, no self disposition, so every emitted record is a FIRST-TIME actionable
+# finding and the assertions isolate WHICH authors each filter mode admits:
+#   1900 chatgpt-codex-connector Bot      registry (codex)
+#   1901 copilot-pull-request-reviewer Bot registry (copilot, GraphQL spelling)
+#   1902 Copilot Bot                      registry (copilot, REST spelling)
+#   1903 claude Bot                       registry (claude)
+#   1904 claude User                      HUMAN sharing the claude login; the Bot gate excludes it
+#   1905 dependabot Bot                   Bot outside the registry
+#   1906 github-actions Bot               Bot deliberately excluded from the registry (generic CI)
+#   1907 human-reviewer User              human
+#   1908 selfuser User                    self; stripped by every mode
+# automated → exactly the four registry Bot records. codex-only → 1900 only. all → every non-self
+# author (1900..1907). The legacy `<login>` mode stays type-agnostic: `claude` selects both the Bot
+# (1903) and the human User (1904).
+run_case "case19:automated-registry-bots-only" "case19-automated-reviewers.json" "selfuser" "automated" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1900","databaseId":1900,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1901","databaseId":1901,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1902","databaseId":1902,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"}]'
+run_case "case19:codex-only" "case19-automated-reviewers.json" "selfuser" "codex-only" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1900","databaseId":1900,"url":null,"classification":"actionable"}]'
+run_case "case19:all-non-self" "case19-automated-reviewers.json" "selfuser" "all" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1900","databaseId":1900,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1901","databaseId":1901,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1902","databaseId":1902,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1904","databaseId":1904,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1905","databaseId":1905,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1906","databaseId":1906,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1907","databaseId":1907,"url":null,"classification":"actionable"}]'
+run_case "case19:legacy-login-type-agnostic" "case19-automated-reviewers.json" "selfuser" "claude" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1904","databaseId":1904,"url":null,"classification":"actionable"}]'
+
+# ── Case 20: self identity is User type + login, never login alone ───────────────
+# The viewer runs as the human User `claude`; the Claude app Bot's bare login is also `claude`.
+# Self is ONLY the User-typed `claude` (module `is_self`). Four unresolved threads plus top-level:
+#   T1 2000 claude Bot finding → emitted (registry Bot), first-time → actionable. A login-only self
+#        key dropped it.
+#   T2 FORGERY: 2010 codex finding; 2011 claude Bot `Fixed in abc1234.`; 2012 claude Bot with the
+#        defer sentinel at byte 0. Neither Bot reply is a self disposition, so 2010 → actionable;
+#        2011 → handled by its OWN body marker; 2012 → actionable (the sentinel is never read off a
+#        non-self body).
+#   T3 REAL SELF: 2020 codex; 2021 claude User `Fixed in abc1234.` (self fix disposition, not
+#        emitted); 2022 codex post-fix → 2020 handled, 2022 followup-after-fix.
+#   T4 NULL TYPE: 2030 codex; 2031 claude with NO __typename `Fixed in abc1234.`. A null type is never
+#        self, so no disposition → 2030 actionable. 2031 is not Bot-typed, so `automated` omits it;
+#        `all` emits it, handled by its own body marker.
+#   Top-level: 2041 claude Bot `Addresses: <2040>` is not a self harvest, so 2040 → actionable and
+#        2041 itself → actionable (a registry Bot comment); 2043 claude User `Addresses: <2042>` is
+#        the self harvest → 2042 handled, 2043 not emitted.
+run_case "case20:self-identity-automated" "case20-self-identity-login-collision.json" "claude" "automated" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2040","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2040","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2041","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2041","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2042","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2042","classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq1","id":"PRRC_case20comment2000","databaseId":2000,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2010","databaseId":2010,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2011","databaseId":2011,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2012","databaseId":2012,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2020","databaseId":2020,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2022","databaseId":2022,"url":null,"classification":"followup-after-fix"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2030","databaseId":2030,"url":null,"classification":"actionable"}]'
+run_case "case20:self-identity-all" "case20-self-identity-login-collision.json" "claude" "all" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2040","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2040","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2041","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2041","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2042","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2042","classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq1","id":"PRRC_case20comment2000","databaseId":2000,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2010","databaseId":2010,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2011","databaseId":2011,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2012","databaseId":2012,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2020","databaseId":2020,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2022","databaseId":2022,"url":null,"classification":"followup-after-fix"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2030","databaseId":2030,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2031","databaseId":2031,"url":null,"classification":"handled"}]'
+
+# ── Registry integrity ───────────────────────────────────────────────────────────
+# Each rule is a jq predicate over a registry ARRAY on its input, evaluated with the module
+# included (so `approval_kinds` resolves). It must hold for the real `automated_reviewers` AND be
+# FALSE for a synthetic registry that breaks exactly that rule, proving the predicate bites.
+
+# registry_rule <case> <jq-predicate-over-registry-array> <violating-registry-json>
+registry_rule() {
+  local case_name="$1" predicate="$2" bad_registry="$3"
+  if ! jq -n -e -L "$MODULE_DIR" "include \"reviewer-identity\"; automated_reviewers | ($predicate)" >/dev/null 2>&1; then
+    failed "$case_name" "real registry violates: $predicate"
+    return
+  fi
+  if jq -n -e -L "$MODULE_DIR" --argjson reg "$bad_registry" "include \"reviewer-identity\"; \$reg | ($predicate)" >/dev/null 2>&1; then
+    failed "$case_name" "predicate did not reject violating registry: $bad_registry"
+    return
+  fi
+  pass "$case_name" "real registry holds; violating registry rejected"
+}
+
+registry_rule "registry:non-empty" \
+  'type == "array" and length > 0' \
+  '[]'
+registry_rule "registry:ids-unique-non-empty" \
+  '[.[].id] | all(.[]; type == "string" and length > 0) and length == (unique | length)' \
+  '[{"id":"codex","logins":["a"],"approval":null},{"id":"codex","logins":["b"],"approval":null}]'
+registry_rule "registry:logins-non-empty-strings" \
+  'all(.[]; (.logins | type == "array" and length > 0) and all(.logins[]; type == "string" and length > 0))' \
+  '[{"id":"codex","logins":[],"approval":null}]'
+registry_rule "registry:logins-unique-across-entries" \
+  '[.[].logins[]] | length == (unique | length)' \
+  '[{"id":"a","logins":["x"],"approval":null},{"id":"b","logins":["x"],"approval":null}]'
+registry_rule "registry:logins-stored-stripped" \
+  'all(.[].logins[]; endswith("[bot]") | not)' \
+  '[{"id":"codex","logins":["chatgpt-codex-connector[bot]"],"approval":null}]'
+registry_rule "registry:approval-in-enum-or-null" \
+  'approval_kinds as $kinds | all(.[]; .approval == null or (.approval as $kind | any($kinds[]; . == $kind)))' \
+  '[{"id":"codex","logins":["a"],"approval":"thumbs-up"}]'
+
+# ── CLOSURE: no inlined identity literal in a consumer ───────────────────────────
+# Every registry login (derived from the module, never hard-coded here) and the `[bot]` strip
+# literal must live ONLY in reviewer-identity.jq. A consumer that inlines either is a second source
+# of truth the registry cannot govern.
+#
+# Matching choice:
+#   - logins: `grep -wF` — fixed-string, CASE-SENSITIVE, whole-word. Case-sensitivity keeps the
+#     current `${CLAUDE_PLUGIN_ROOT}` path refs green while `claude` / `Copilot` are caught; the
+#     whole-word bound (hyphen is a non-word char, so hyphenated logins match as a unit) catches the
+#     login in ANY syntactic form — `== "claude"`, `"Copilot"`, a bare bash `= claude` — not only
+#     a quoted jq literal. Prose mentioning a login in these files also trips it; that is
+#     intentional, as the module header is the one place the identity semantics are described.
+#   - strip literal: ERE `\[bot\\*\]` — matches `[bot]` with zero or more backslashes before the
+#     closing bracket, so it catches the bare `[bot]` text AND both the jq-escaped `\\[bot\\]` and
+#     single-escaped `\[bot\]` regex spellings.
+# Both matchers are proven to bite against a scratch canary carrying each forbidden construct, and
+# proven not to over-match the legitimate constructs these files contain today.
+CLOSURE_TARGETS=(
+  "$MODULE_DIR/fix-history-classify.jq"
+  "$MODULE_DIR/prefilter.sh"
+  "$MODULE_DIR/fetch-normalize.sh"
+  "$REPO_ROOT/plugin/skills/_shared/fetch-normalize-core.sh"
+  "$MODULE_DIR/pr-change-detect-poll.sh"
+)
+BOT_STRIP_ERE='\[bot\\*\]'
+
+REGISTRY_LOGINS=()
+if registry_logins_text="$(jq -n -r -L "$MODULE_DIR" 'include "reviewer-identity"; automated_reviewers[].logins[]')"; then
+  while IFS= read -r registry_login; do
+    [ -n "$registry_login" ] && REGISTRY_LOGINS+=("$registry_login")
+  done <<< "$registry_logins_text"
+fi
+
+# print_closure_hits <file>
+# Print every hit of a registry login or the `[bot]` strip literal in <file>, one per line, as
+# `login=<login>:<lineno>:<text>` or `bot-strip:<lineno>:<text>`.
+print_closure_hits() {
+  local target="$1" login
+  for login in "${REGISTRY_LOGINS[@]}"; do
+    grep -nwF -- "$login" "$target" | sed "s/^/login=$login:/"
+  done
+  grep -nE -- "$BOT_STRIP_ERE" "$target" | sed 's/^/bot-strip:/'
+  return 0
+}
+
+if [ "${#REGISTRY_LOGINS[@]}" -eq 0 ]; then
+  failed "closure:logins-derived" "no logins derived from $IDENTITY_MODULE (closure would be vacuous)"
+else
+  pass "closure:logins-derived" "${#REGISTRY_LOGINS[@]} registry logins derived from the module"
+
+  CANARY_HIT="$WORKDIR/closure-canary-hit.jq"
+  for registry_login in "${REGISTRY_LOGINS[@]}"; do
+    printf 'select(.author.login == "%s")\n' "$registry_login"
+  done > "$CANARY_HIT"
+  printf '%s\n' 'sub("\\[bot\\]$"; "")' 'test("\[bot\]$")' '# strips the [bot] suffix' >> "$CANARY_HIT"
+  canary_lines="$(wc -l < "$CANARY_HIT" | tr -d ' ')"
+  canary_hit_lines="$(print_closure_hits "$CANARY_HIT" | cut -d: -f2 | sort -un | wc -l | tr -d ' ')"
+  if [ "$canary_hit_lines" = "$canary_lines" ]; then
+    pass "closure:canary-bites" "every one of $canary_lines forbidden canary lines detected"
+  else
+    failed "closure:canary-bites" "detected $canary_hit_lines of $canary_lines forbidden canary lines"
+  fi
+
+  CANARY_CLEAN="$WORKDIR/closure-canary-clean.sh"
+  printf '%s\n' '# ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh' \
+    'REVIEWER_FILTER="codex-only"' 'include "reviewer-identity";' > "$CANARY_CLEAN"
+  canary_clean_hits="$(print_closure_hits "$CANARY_CLEAN")"
+  if [ -z "$canary_clean_hits" ]; then
+    pass "closure:canary-no-overmatch" "legitimate constructs produce no closure hit"
+  else
+    failed "closure:canary-no-overmatch" "false-positive closure hits:
+$canary_clean_hits"
+  fi
+
+  for closure_target in "${CLOSURE_TARGETS[@]}"; do
+    closure_rel="${closure_target#"$REPO_ROOT"/}"
+    if [ ! -f "$closure_target" ]; then
+      failed "closure:$closure_rel" "closure target missing"
+      continue
+    fi
+    closure_hits="$(print_closure_hits "$closure_target")"
+    if [ -z "$closure_hits" ]; then
+      pass "closure:$closure_rel" "no inlined registry login or [bot] strip literal"
+    else
+      failed "closure:$closure_rel" "inlined identity literal(s):
+$closure_hits"
+    fi
+  done
+fi
+
+# ── CLOSURE: no login-only self compare in a consumer ────────────────────────────
+# Self identity is the module's `is_self` (User type + raw login). A consumer that compares an
+# author login straight against the `$login` (SELF_LOGIN) --arg — `select($a == $login)`,
+# `strip_bot(.author.login) != $login` — re-derives self on login alone, so a Bot sharing the
+# viewer's bare login reads as self. Any `==` / `!=` with `$login` as either operand is a hit; the
+# word bound after `$login` keeps a longer variable name (`$login_x`) out. `$login` passed as an
+# argument (`--arg login`, `is_self(...; $login)`, the matches_filter wrapper) is not a compare.
+# RESIDUAL: rebinding the --arg to another variable (`$login as $me | ... == $me`) evades this
+# matcher; the behavioural cases (8, 20) are the guard for that shape.
+SELF_COMPARE_ERE='(==|!=)[[:space:]]*\$login([^A-Za-z0-9_]|$)|\$login[[:space:]]*(==|!=)'
+
+# print_self_compare_hits <file>
+# Print every login-only self compare in <file> as `<lineno>:<text>`, one per line.
+print_self_compare_hits() {
+  grep -nE -- "$SELF_COMPARE_ERE" "$1"
+  return 0
+}
+
+SELF_CANARY_HIT="$WORKDIR/self-compare-canary-hit.jq"
+printf '%s\n' '| select($a == $login)' '| map(select(strip_bot(.author.login) != $login))' \
+  'select($login == .x)' > "$SELF_CANARY_HIT"
+self_canary_lines="$(wc -l < "$SELF_CANARY_HIT" | tr -d ' ')"
+self_canary_hit_lines="$(print_self_compare_hits "$SELF_CANARY_HIT" | cut -d: -f1 | sort -un | wc -l | tr -d ' ')"
+if [ "$self_canary_hit_lines" = "$self_canary_lines" ]; then
+  pass "self-compare:canary-bites" "every one of $self_canary_lines forbidden canary lines detected"
+else
+  failed "self-compare:canary-bites" "detected $self_canary_hit_lines of $self_canary_lines forbidden canary lines"
+fi
+
+SELF_CANARY_CLEAN="$WORKDIR/self-compare-canary-clean.sh"
+printf '%s\n' 'jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER"' \
+  '| select(is_self(.author.login; .author.__typename; $login))' \
+  'def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter);' > "$SELF_CANARY_CLEAN"
+self_canary_clean_hits="$(print_self_compare_hits "$SELF_CANARY_CLEAN")"
+if [ -z "$self_canary_clean_hits" ]; then
+  pass "self-compare:canary-no-overmatch" "legitimate \$login uses produce no self-compare hit"
+else
+  failed "self-compare:canary-no-overmatch" "false-positive self-compare hits:
+$self_canary_clean_hits"
+fi
+
+for closure_target in "${CLOSURE_TARGETS[@]}"; do
+  closure_rel="${closure_target#"$REPO_ROOT"/}"
+  if [ ! -f "$closure_target" ]; then
+    failed "self-compare:$closure_rel" "closure target missing"
+    continue
+  fi
+  self_compare_hits="$(print_self_compare_hits "$closure_target")"
+  if [ -z "$self_compare_hits" ]; then
+    pass "self-compare:$closure_rel" "no login-only self compare"
+  else
+    failed "self-compare:$closure_rel" "login-only self compare(s); route through is_self:
+$self_compare_hits"
+  fi
+done
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo

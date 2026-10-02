@@ -15,11 +15,64 @@ unfixed script.
 
 The remaining cases pin the behavior the fix must not break: silence on no delta, `CHANGED` on
 each scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone, `FAILED_CHECKS`),
-`CODEX_APPROVED` on a first-poll approval, and the fail-closed `POLL_ERROR` paths.
+`REVIEWER_APPROVED` on a first-poll approval, and the fail-closed `POLL_ERROR` paths.
+
+## Reviewer identity (ADR-0033)
+
+Every login, filter, and approver decision the poll makes is delegated to the shared
+`reviewer-identity.jq` registry module. The poll's `approval` scalar is true on EITHER a 👍
+reaction from a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-typed
+`review-approved` member (Copilot) whose latest review is `APPROVED`, both scoped by the active
+reviewer filter, and an approval edge surfaces as the `REVIEWER_APPROVED` marker. The latest
+review is the one GitHub reports per author in `latestReviews`, never one rebuilt from the bounded
+`reviews` history window, and it is read by an exhaustive paginated walk in a query of its own:
+`first: 100` is the page size, not a bound, and a walk that fails on any page fails the capture.
+The suite pins:
+
+- `approval:thumbs-up-on-first-poll` — a Bot-typed Codex 👍 row fires `REVIEWER_APPROVED` first.
+- `approval:user-thumbs-up-never-approves` — User-typed 👍 rows (one carrying the Codex registry
+  login itself) never approve, under `codex-only` OR `all`; `all` admits every login to the
+  filter, so the approver's Bot-type gate is the only thing under test.
+- `approval:reaction-login-cannot-forge-type` — a User-typed 👍 whose login is the Codex bot login
+  followed by a TAB and `Bot` never approves, under `codex-only` OR `all`. Reaction rows travel as
+  JSON objects, so no login byte can be read as a field boundary.
+- `approval:eyes-reaction-never-approves` — a Bot-typed Codex `eyes` reaction never approves; only
+  a +1 is the Codex approval signal.
+- `approval:copilot-review-scoped-by-filter` — a Copilot `APPROVED` latest review fires
+  `REVIEWER_APPROVED` first under `automated`, and only `CHANGED` (never an approval) under
+  `codex-only`.
+- `approval:superseded-review-never-approves` — a Copilot `latestReviews` entry in state
+  `CHANGES_REQUESTED`, `COMMENTED`, or `DISMISSED` after an earlier `APPROVED` never approves and
+  fires `CHANGED`; a latest `APPROVED` after an earlier `COMMENTED` still fires.
+- `approval:review-window-overflow-still-approves` — with `REVIEWS_TOTAL` at 120 and no Copilot
+  review inside the 50-review window, a Copilot `APPROVED` in `latestReviews` still fires
+  `REVIEWER_APPROVED` first under `automated`.
+- `approval:latest-review-not-history` — a Copilot `APPROVED` that is the latest Copilot review in
+  the `reviews` window, with no Copilot `latestReviews` entry, never approves and fires `CHANGED`.
+- `approval:user-typed-review-never-approves` — a User-typed `APPROVED` latest review under the
+  Copilot registry login never approves under `all`, and fires `CHANGED`.
+- `approval:latest-reviews-every-page-read` — a Copilot `APPROVED` on the LAST page of a 2-page and
+  a 3-page `latestReviews` walk, behind 100 / 200 distinct User-typed `COMMENTED` authors, fires
+  `REVIEWER_APPROVED` first under `automated`; the snapshot query's own `latestReviews` holds
+  exactly page 1, so a read bounded to one page idles to `WATCH_TIMEOUT`. The same walks ending in
+  a Copilot `COMMENTED` review stay silent to `WATCH_TIMEOUT` (discrimination).
+- `approval:latest-reviews-partial-walk-fails-closed` — a walk whose page 1 reports
+  `hasNextPage` true and whose next page fails is `SNAPSHOT_ERROR`, exit 1, in snapshot mode and
+  `POLL_ERROR`, exit 1, in poll mode; no approval verdict is drawn from a partial walk.
+- `filter:empty-slot-is-automated` — over one mixed review state, the seed token captured with an
+  empty filter slot equals the `automated` token and differs from both the `codex-only` and `all`
+  tokens; an empty-slot arm fires `REVIEWER_APPROVED` on the Copilot approval.
+- `identity:comment-self-keys-on-type` — a higher-id issue comment whose login IS the self login,
+  `COMMENTS_TOTAL` unchanged, fires `CHANGED` when Bot-typed or untyped (the module's `is_self` is
+  User-gated, and a null type is never self) and stays silent to `WATCH_TIMEOUT` when User-typed
+  (self-echo suppression intact). A login-only self compare idles the Bot and untyped variants.
+- `identity:thread-self-keys-on-type` — the same three swaps on a review thread's last comment, over
+  a base whose thread ends in a User-typed self reply, with `REVIEW_THREADS_TOTAL` unchanged.
 
 ## The second bite: the seed's state model (PR #361)
 
-The seed originally serialized 8 of the 9 scalars the poll diffs, omitting the Codex 👍 bool. That
+The seed originally serialized 8 of the 9 scalars the poll diffs, omitting the approval bool
+(then the Codex-only 👍 bool, field `codex`; now `approval`). That
 omission was correct while the seed had ONE consumer — the initial arm, which WANTS a pre-existing
 👍 to surface. The productive-cycle re-arm is a SECOND consumer with the opposite requirement, so
 one token was carrying two contradictory semantics, decided per-scalar by which fields it happened
@@ -34,13 +87,13 @@ to carry. Two halves close the class rather than the instance, and the suite hol
   which is why this case is set-equality and not a field checklist.
 - **Explicit arm kind.** Each seed is stamped `initial` or `re-arm` at capture and the stamp lives
   INSIDE the token, so carrying a seed forward carries its kind forward.
-  `codex:stale-approval-not-refired-on-rearm` is the regression bite (a 👍 present at the
+  `approval:stale-not-refired-on-rearm` is the regression bite (a 👍 present at the
   pre-dispatch capture must stay silent on the re-armed poll, or the confirmation pass ends the
   watch as terminal `clean` right after the reviewer pushed).
-  `codex:initial-arm-surfaces-pre-existing` is its mirror and pins the behavior that must NOT
+  `approval:initial-arm-surfaces-pre-existing` is its mirror and pins the behavior that must NOT
   regress; the two cases serve IDENTICAL PR state and IDENTICAL reactions and differ ONLY in the
   seed's arm kind, which is what proves the kind — not the field set — decides the question.
-  `codex:new-approval-fires-on-rearm` guards against over-correction, and
+  `approval:new-fires-on-rearm` guards against over-correction, and
   `seed:arm-kind-closed-set` pins the fail-closed paths for a missing or unknown kind.
 
 ## Running it
@@ -49,7 +102,7 @@ to carry. Two halves close the class rather than the instance, and the suite hol
 bash tools/test_change_detect_poll.sh
 ```
 
-Offline — bash + `jq` only, no `gh`, no network, ~20s. A PATH-shim fake `gh` serves canned
+Offline — bash + `jq` only, no `gh`, no network, ~130s. A PATH-shim fake `gh` serves canned
 fixture bytes while the REAL `jq` runs the script's REAL filters, so the snapshot derivation
 under test is the production one and only the transport is faked.
 
@@ -59,7 +112,7 @@ The fix adds a `--snapshot` mode emitting a `BASELINE=<arm kind + one field per 
 token captured BEFORE cycle 0, passed back as a REQUIRED 8th positional argument to poll mode. The
 runner probes the script under test for `--snapshot` support instead of assuming it:
 
-- **absent** — cases run against the legacy 7-arg form and the four seed-contract cases print a
+- **absent** — cases run against the legacy 7-arg form and the seed-contract cases print a
   visible `SKIP` line. A silent pass on an unimplemented feature is the false-pass class of #321.
 - **present** — the seed is captured at the pre-cycle-0 state and passed as arg 8; the
   seed-contract cases run.
@@ -77,28 +130,60 @@ a snapshot that cannot be captured, or one given a missing or unknown arm kind, 
 
 | File | Role |
 | --- | --- |
-| `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (one Codex review, one Codex thread, checks green). |
+| `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (two User-typed self issue comments, one Bot-typed Codex review and its `COMMENTED` `latestReviews` entry, one Bot-typed Codex thread, checks green). |
 | `graphql-blind-window.json` | State B — A plus the Codex review + review-thread comment posted during the blind window. |
 | `graphql-malformed.json` | A GraphQL `NOT_FOUND` error response (null `pullRequest`) that makes the snapshot pipeline fail. |
-| `reactions-none.txt` | Reactions call stdout with no Codex 👍 (empty, exactly as `gh` emits). |
-| `reactions-codex.txt` | Reactions call stdout with a Codex 👍 present. |
+| `reactions-none.json` | Raw REST reactions page with no reaction (`[]`). |
+| `reactions-codex.json` | Raw REST reactions page with one +1 from the Bot-typed `chatgpt-codex-connector[bot]`. |
+| `reactions-human.json` | Raw REST reactions page with two User-typed +1s (`chatgpt-codex-connector`, `claude`) that must never approve. |
+| `reactions-forged.json` | Raw REST reactions page with one User-typed +1 whose login is `chatgpt-codex-connector[bot]`, a TAB, and `Bot`; it must never approve. |
+| `reactions-codex-eyes.json` | Raw REST reactions page with one `eyes` reaction from the Bot-typed `chatgpt-codex-connector[bot]`; it must never approve. |
 
-The `graphql-*.json` files are whole GraphQL responses shaped to the script's own query. The
-`reactions-*.txt` files are the POST-`--jq` stdout `gh` itself emits — the reactions filter is
-applied by `gh`, so the fixture stands where its output does.
+The `graphql-*.json` files are whole GraphQL responses shaped to the script's own query; every
+author (issue comments, reviews, and review-thread comments) carries `__typename` (`Bot` for
+automated reviewers, `User` for humans and the self login) because every author selection requests
+it and the registry's self, filter, and approver tests are all type-gated. Every
+`graphql-*.json` state other than the malformed one carries a `latestReviews` connection, because
+the poll reads review approval from it and a missing connection fails the capture. The Copilot
+`APPROVED`, superseded, window-overflow, and mixed-review states are derived in the runner rather
+than committed; each adds its Copilot review to `reviews` and, where GitHub would report it as
+that author's latest, to `latestReviews`. The multi-page `latestReviews` walks are generated in
+the runner (`review_page`, `review_pages`, `review_walk`) rather than committed. The
+`reactions-*.json` files are raw REST reactions pages, the bytes the API returns before `gh`
+applies `--jq`. The fake `gh` reads the script's own `--jq` argument and applies it to each
+served page with the real `jq -r`, so the production transport expression runs under test; a jq
+error on any page exits non-zero, and a call without `--jq` (the snapshot GraphQL query) is
+served raw. The fake `gh` strips CR when serving, so a `core.autocrlf` checkout of a fixture
+cannot carry CR into the parsed bytes.
+
+The fake `gh` routes three call kinds: `graphql` (the snapshot query), `latestreviews` (a
+`graphql` call carrying `--paginate`, the approval walk), and `reactions`. With no
+`latestreviews` sequence set, a `latestreviews` call mirrors the `graphql` sequence entry at its
+OWN call counter, so every committed state fixture serves both calls and the existing cases need
+no walk of their own. Caveat: the two counters advance independently, so a case whose `graphql`
+sequence has a `FAIL` or malformed entry before a good one desynchronises the mirror and must set
+its own `latestreviews` sequence. A sequence entry ending `.pages` is a paginated walk: a file
+listing one page path per line, served in order as one call; a `FAIL` line exits non-zero after
+the earlier pages are printed. The fake `gh` serves pages after the first ONLY when the
+whitespace-normalized query declares `$endCursor: String`, passes `after: $endCursor`, and
+selects `pageInfo { hasNextPage endCursor }` — otherwise page 1 alone, as real `gh` returns for a
+query it cannot walk — so the GraphQL pagination contract is enforced behaviourally.
 
 ## Adding a case
 
 1. Reuse a committed fixture, or derive a variant in the runner with `derive_fixture <name>
    <base> <jq-program>` — one fixture file per scalar class is not worth the churn.
 2. `st="$(new_state <name>)"`, then `set_seq "$st" graphql <entry>...` and
-   `set_seq "$st" reactions <entry>...`. Call N serves line N, clamping to the last line, so one
-   entry means a steady state. The literal entry `FAIL` makes that call exit non-zero.
-3. Drive it with `arm_poll "$st" "$SEED"` (`$SEED` is empty when the probe found no seed support,
-   which selects the legacy form) and assert with `pass` / `failed`. Cases that exercise
+   `set_seq "$st" reactions <entry>...` (plus `set_seq "$st" latestreviews <entry>...` when the
+   approval walk must differ from the mirrored `graphql` entry). Call N serves line N, clamping to
+   the last line, so one entry means a steady state. The literal entry `FAIL` makes that call exit
+   non-zero.
+3. Drive it with `arm_poll "$st" "$SEED" [filter]` (`$SEED` is empty when the probe found no seed
+   support, which selects the legacy form; `[filter]` defaults to `codex-only` when omitted, and an
+   explicit `""` passes an empty filter slot) and assert with `pass` / `failed`. Cases that exercise
    behavior which only exists after the fix must branch on `SEED_SUPPORTED` and `skipped` otherwise.
 4. A case needing a seed other than the shared `initial` one uses
-   `capture_seed <state_name> <arm_kind> <graphql_entry> <reactions_entry>`, which returns the
+   `capture_seed <state_name> <arm_kind> <graphql_entry> <reactions_entry> [filter]`, which returns the
    BARE token; `snapshot_raw` is the same call returning raw stdout when the `BASELINE=`/
    `SNAPSHOT_ERROR` line itself is the assertion.
 5. Never assert the token's field list scalar by scalar — derive the expected width from

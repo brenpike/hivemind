@@ -35,13 +35,13 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh",
-    "line": 126,
+    "line": 141,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — compute_snapshot returns non-zero in the normal retry/backoff flow guarded by `if !`; failures route through poll_fail() with explicit exit codes."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/prefilter.sh",
-    "line": 102,
+    "line": 115,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — pipefail is scoped per-pipeline inside subshells; fail-open posture; failures route through prefilter_fail() with explicit exit codes."
   },
   {

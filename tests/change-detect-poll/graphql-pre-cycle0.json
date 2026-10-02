@@ -6,14 +6,19 @@
         "comments": {
           "totalCount": 2,
           "nodes": [
-            { "databaseId": 2411001, "author": { "login": "hive-author" } },
-            { "databaseId": 2411002, "author": { "login": "hive-author" } }
+            { "databaseId": 2411001, "author": { "login": "hive-author", "__typename": "User" } },
+            { "databaseId": 2411002, "author": { "login": "hive-author", "__typename": "User" } }
           ]
         },
         "reviews": {
           "totalCount": 1,
           "nodes": [
-            { "databaseId": 3011001, "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector" } }
+            { "databaseId": 3011001, "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" } }
+          ]
+        },
+        "latestReviews": {
+          "nodes": [
+            { "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" } }
           ]
         },
         "reviewThreads": {
@@ -22,7 +27,7 @@
             {
               "comments": {
                 "nodes": [
-                  { "databaseId": 4011001, "author": { "login": "chatgpt-codex-connector" } }
+                  { "databaseId": 4011001, "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" } }
                 ]
               }
             }

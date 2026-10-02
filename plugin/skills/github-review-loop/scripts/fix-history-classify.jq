@@ -62,11 +62,14 @@
 #                                  # threaded through as `id` for node(id:) body refetch
 #       .comments.nodes[].databaseId
 #       .comments.nodes[].author.login
+#       .comments.nodes[].author.__typename  # account type ("Bot" | "User" |
+#                                  # ...); identity key with the login
 #       .comments.nodes[].body
 #   .data.repository.pullRequest.comments.nodes[]
 #       .id                        # GraphQL comment node id (IC_...);
 #                                  # threaded through as `id` for node(id:) body refetch
 #       .author.login
+#       .author.__typename         # account type; identity key with the login
 #       .body
 #       .url
 #       .reactionGroups[]          # [{content, viewerHasReacted}]; EYES +
@@ -75,11 +78,24 @@
 #       .id                        # GraphQL review node id (PRR_...);
 #                                  # threaded through as `id` for node(id:) body refetch
 #       .author.login
+#       .author.__typename         # account type; identity key with the login
 #       .body
 #       .state
 #       .url
 #       .reactionGroups[]          # [{content, viewerHasReacted}]; EYES +
 #                                  # viewerHasReacted==true => handled (self marker)
+#
+# `author.__typename` is a CONTRACT field on every surface: the registry filter
+# modes (`automated`, `codex-only`) match only a Bot-typed author, so a payload
+# omitting it never matches those modes (fail closed toward "not automated").
+# It is ALSO the self identity key: an author is self only when its
+# `__typename` is "User" AND its raw login equals --arg login (module
+# `is_self`), so a payload omitting `__typename` never reads as self — its
+# comment stays a candidate and its fix/defer/`Addresses:` markers are never
+# honored as a self disposition (fail toward "actionable"). A Bot sharing the
+# viewer's bare login is likewise never self.
+# Identity semantics (registry, type gate, self key, filter modes) are owned by
+# the reviewer-identity.jq module this filter includes; see its header.
 #
 # Connection-level tripwires (reviewThreads/comments/reviews `.totalCount`) are
 # NOT this filter's concern. They are top-level scalar fields trivially read off
@@ -198,9 +214,20 @@
 #
 # 4. ARGS
 # -------
-#   --arg login   SELF_LOGIN      viewer login; used to strip self-authored
-#                                 comments before the filter compare.
-#   --arg filter  REVIEWER_FILTER "codex-only" | "all" | "<login>".
+#   --arg login   SELF_LOGIN      viewer login (a User account, from REST
+#                                 GET /user); with author.__typename it keys
+#                                 self identity (module `is_self`): self-
+#                                 authored comments are excluded from every
+#                                 filter mode and are the only source of fix /
+#                                 defer / `Addresses:` dispositions.
+#   --arg filter  REVIEWER_FILTER "automated" | "codex-only" | "all" |
+#                                 "<login>"; mode semantics are owned by
+#                                 reviewer-identity.jq (its §5).
+#
+# CALLER OBLIGATION: this filter does `include "reviewer-identity";`, so every
+# caller MUST pass the module search path, i.e. the directory holding this file:
+#   jq -L <scripts dir> -f fix-history-classify.jq --arg login ... --arg filter ...
+# Without `-L` the include fails to resolve and jq exits non-zero.
 #
 # 5. PLACEMENT
 # ------------
@@ -209,20 +236,13 @@
 # relocate to a neutral home if the agent<->skill coupling proves awkward. No
 # ADR governs this; revisit in practice.
 
-# Identity-match predicate for the active REVIEWER_FILTER. The caller passes the
-# stripped login; this returns true when that login is non-self AND matches the
-# filter. Reproduces prefilter.sh's `matches_filter` def verbatim.
-def matches_filter($a):
-  $a != $login
-  and (
-    if $filter == "codex-only" then $a == "chatgpt-codex-connector"
-    elif $filter == "all" then true
-    else $a == $filter
-    end
-  );
+include "reviewer-identity";
 
-# [bot]-suffix normalization on an author login BEFORE the self/filter compare.
-def strip_bot($login): ($login // "") | sub("\\[bot\\]$"; "");
+# Identity-match predicate for the active REVIEWER_FILTER, binding this filter's
+# --arg globals ($login = self, $filter = mode) onto the module predicate. The
+# caller passes the RAW author login and its account type; the module strips the
+# bot suffix itself.
+def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter);
 
 # Non-thread handled predicate. A toplevel/review node is handled IFF its own
 # `reactionGroups` carries an EYES group whose viewerHasReacted is true — i.e. a
@@ -247,8 +267,7 @@ $pr.reviewThreads as $rt |
 # is the legacy fallback only.
 ([ $pr.comments.nodes[]?
    | . as $c
-   | strip_bot($c.author.login) as $a
-   | select($a == $login)
+   | select(is_self($c.author.login; $c.author.__typename; $login))
    | ($c.body // "")
    | scan("Addresses:[[:space:]]*([^[:space:]]+)")
    | .[0]
@@ -267,8 +286,7 @@ $pr.reviewThreads as $rt |
   | ([
       $thread.comments.nodes[]
       | . as $c
-      | strip_bot($c.author.login) as $a
-      | select($a == $login)
+      | select(is_self($c.author.login; $c.author.__typename; $login))
       | select((($c.body // "") | test("Fixed in [0-9a-f]{7,40}\\.")))
       | {kind: "fix", id: (.databaseId // 0)}
     ] + [
@@ -288,13 +306,14 @@ $pr.reviewThreads as $rt |
       # A defer reply is a DURABLE handled record, so a thread whose resolve mutation
       # failed (non-blocking by design) is not re-raised into a duplicate defer reply.
       # FORGERY GUARD: this sentinel is read ONLY off the self-authored arm
-      # (select($a == $login)); it is deliberately absent from the non-self
-      # $has_marker body test below, so a reviewer cannot forge handled status by
-      # quoting the sentinel in its own comment.
+      # (module `is_self`: User-typed author whose raw login is the viewer's);
+      # it is deliberately absent from the non-self $has_marker body test below,
+      # so a reviewer cannot forge handled status by quoting the sentinel in its
+      # own comment, and a Bot sharing the viewer's bare login cannot mint a
+      # self disposition.
       $thread.comments.nodes[]
       | . as $c
-      | strip_bot($c.author.login) as $a
-      | select($a == $login)
+      | select(is_self($c.author.login; $c.author.__typename; $login))
       | select((($c.body // "") | startswith("<!-- hivemind-defer-v1 -->")))
       | {kind: "defer", id: (.databaseId // 0)}
     ]) as $self_dispositions
@@ -313,8 +332,7 @@ $pr.reviewThreads as $rt |
   | (
       $thread.comments.nodes[]
       | . as $c
-      | strip_bot($c.author.login) as $a
-      | select(matches_filter($a))
+      | select(matches_filter($c.author.login; $c.author.__typename))
       | (.databaseId // 0) as $dbid
       | (($c.body // "") | test("Fixed in [0-9a-f]{7,40}\\.")) as $has_marker
       | {
@@ -336,9 +354,9 @@ $pr.reviewThreads as $rt |
           # is handled IFF its id <= the maximum disposition id, so a per-comment
           # lookback would select the same governing element.
           # FORGERY GUARD (unchanged): the defer sentinel is read ONLY under the
-          # self arm of the timeline above; it is deliberately absent from the
-          # non-self $has_marker body test, so a reviewer cannot forge handled
-          # status by quoting the sentinel.
+          # `is_self` arm of the timeline above (User type + viewer login); it
+          # is deliberately absent from the non-self $has_marker body test, so a
+          # reviewer cannot forge handled status by quoting the sentinel.
           classification: (
             if $thread_overflow then "actionable"
             elif $has_marker then "handled"
@@ -373,8 +391,7 @@ $pr.reviewThreads as $rt |
 (
   $pr.comments.nodes[]?
   | . as $c
-  | strip_bot($c.author.login) as $a
-  | select(matches_filter($a))
+  | select(matches_filter($c.author.login; $c.author.__typename))
   | select((($c.body // "") | gsub("[[:space:]]+"; "")) != "")
   | ($c.url // "") as $u
   | {
@@ -398,8 +415,7 @@ $pr.reviewThreads as $rt |
 (
   $pr.reviews.nodes[]?
   | . as $r
-  | strip_bot($r.author.login) as $a
-  | select(matches_filter($a))
+  | select(matches_filter($r.author.login; $r.author.__typename))
   | select(.state == "CHANGES_REQUESTED" or .state == "COMMENTED")
   | select((($r.body // "") | gsub("[[:space:]]+"; "")) != "")
   | ($r.url // "") as $u

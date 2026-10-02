@@ -20,7 +20,7 @@
                   {
                     "id": "PRRC_case08comment801",
                     "databaseId": 801,
-                    "author": { "login": "selfuser[bot]" },
+                    "author": { "login": "selfuser[bot]", "__typename": "Bot" },
                     "body": "Fixed in 0ff1ce42."
                   }
                 ]

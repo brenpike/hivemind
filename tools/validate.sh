@@ -298,6 +298,8 @@ run_suites() {
 #     plugin/skills/_shared/containment.sh, tests/brood/**
 #                                      -> test_brood_compat
 #   plugin/skills/_shared/*.sh, tests/brood/**          -> test_shared_libs
+#   plugin/skills/github-review-loop/scripts/*.jq      -> test_fix_history_classify, test_fetch_normalize,
+#                                                         test_shared_libs, test_change_detect_poll
 #   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
@@ -510,6 +512,17 @@ map_path() {
   if [[ "$p" == plugin/skills/github-review-loop/scripts/*.jq \
      || "$p" == tests/fix-history/* ]]; then
     add_selected "$SUITE_TEST_FIX_HISTORY" "$p (fix-history classify filter/fixture)"
+    matched=1
+  fi
+
+  # The github-review-loop scripts/*.jq modules (fix-history-classify.jq, reviewer-identity.jq) are
+  # executed by more than the fix-history suite: the fetch-normalize builder, the shared fetch core
+  # (_shared), and the change-detect poll all include them via `jq -L`. policy_check NEVER EXECUTES
+  # jq, so a module edit must route to EVERY suite that runs it, not just test_fix_history_classify.
+  if [[ "$p" == plugin/skills/github-review-loop/scripts/*.jq ]]; then
+    add_selected "$SUITE_TEST_FETCH_NORMALIZE" "$p (jq module executed by fetch-normalize)"
+    add_selected "$SUITE_TEST_SHARED" "$p (jq module executed by shared fetch core)"
+    add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (jq module executed by change-detect poll)"
     matched=1
   fi
 

@@ -1,0 +1,84 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 1,
+          "nodes": [
+            {
+              "id": "PRRT_case19pppppppppppp",
+              "isResolved": false,
+              "comments": {
+                "totalCount": 9,
+                "nodes": [
+                  {
+                    "id": "PRRC_case19comment1900",
+                    "databaseId": 1900,
+                    "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" },
+                    "body": "Codex finding: unchecked index."
+                  },
+                  {
+                    "id": "PRRC_case19comment1901",
+                    "databaseId": 1901,
+                    "author": { "login": "copilot-pull-request-reviewer", "__typename": "Bot" },
+                    "body": "Copilot (GraphQL spelling) finding: missing null guard."
+                  },
+                  {
+                    "id": "PRRC_case19comment1902",
+                    "databaseId": 1902,
+                    "author": { "login": "Copilot", "__typename": "Bot" },
+                    "body": "Copilot (REST spelling) finding: off-by-one in loop bound."
+                  },
+                  {
+                    "id": "PRRC_case19comment1903",
+                    "databaseId": 1903,
+                    "author": { "login": "claude", "__typename": "Bot" },
+                    "body": "Claude app finding: unhandled error path."
+                  },
+                  {
+                    "id": "PRRC_case19comment1904",
+                    "databaseId": 1904,
+                    "author": { "login": "claude", "__typename": "User" },
+                    "body": "Human account named claude: drive-by nit."
+                  },
+                  {
+                    "id": "PRRC_case19comment1905",
+                    "databaseId": 1905,
+                    "author": { "login": "dependabot", "__typename": "Bot" },
+                    "body": "Dependabot: bumps a dependency."
+                  },
+                  {
+                    "id": "PRRC_case19comment1906",
+                    "databaseId": 1906,
+                    "author": { "login": "github-actions", "__typename": "Bot" },
+                    "body": "CI workflow step output."
+                  },
+                  {
+                    "id": "PRRC_case19comment1907",
+                    "databaseId": 1907,
+                    "author": { "login": "human-reviewer", "__typename": "User" },
+                    "body": "Human nit: prefer early return."
+                  },
+                  {
+                    "id": "PRRC_case19comment1908",
+                    "databaseId": 1908,
+                    "author": { "login": "selfuser", "__typename": "User" },
+                    "body": "Looking into these now."
+                  }
+                ]
+              }
+            }
+          ]
+        },
+        "comments": {
+          "totalCount": 0,
+          "nodes": []
+        },
+        "reviews": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      }
+    }
+  }
+}
