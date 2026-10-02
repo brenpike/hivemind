@@ -47,8 +47,8 @@
 #
 # THE REVIEWER-IDENTITY CONTRACT (ADR-0033): every login / filter / approver decision is the
 # shared `reviewer-identity.jq` registry's. The poll's approval scalar is true on EITHER a 👍 from
-# a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR an APPROVED review from a Bot-typed
-# `review-approved` member (Copilot), both scoped by the active filter, and surfaces as
+# a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-typed `review-approved`
+# member (Copilot) whose LATEST review is APPROVED, both scoped by the active filter, and surfaces as
 # `REVIEWER_APPROVED`. An empty filter slot defaults to `automated`.
 #
 # Usage:
@@ -648,6 +648,56 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "filter:empty-slot-is-automated" "$SKIP_REASON"
+fi
+
+# ── 19. a SUPERSEDED Copilot APPROVED review never approves ─────────────────────────
+# Review approval is current state, not history: each approver is judged by its LATEST review.
+# A Copilot APPROVED followed by a later Copilot CHANGES_REQUESTED, COMMENTED, or DISMISSED
+# review must not fire REVIEWER_APPROVED under `automated`, even on an `initial` arm (which
+# surfaces any approval present when the watch starts). The later review still moves the
+# filtered review id, so CHANGED fires. The reverse order (COMMENTED, then a later APPROVED) is
+# the discrimination check: it must still fire, which proves the assertion could pass.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  stale_ok=1
+  stale_detail=""
+  for later_state in CHANGES_REQUESTED COMMENTED DISMISSED; do
+    stale_fixture="$(derive_fixture "copilot-stale-$later_state" "$COPILOT_APPROVED" \
+      ".data.repository.pullRequest.reviews.totalCount = 3
+       | .data.repository.pullRequest.reviews.nodes += [{\"databaseId\":3011009,\"state\":\"$later_state\",\"author\":{\"login\":\"copilot-pull-request-reviewer\",\"__typename\":\"Bot\"}}]")"
+    stale_seed="$(capture_seed "copilotstaleseed-$later_state" initial "$PRE" "$REACT_NONE" automated)"
+    st="$(new_state "copilot-stale-$later_state")"
+    set_seq "$st" graphql "$PRE" "$stale_fixture"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(arm_poll "$st" "$stale_seed" automated)"
+    if printf '%s\n' "$out" | grep -qx 'REVIEWER_APPROVED' \
+      || ! printf '%s\n' "$out" | grep -qx 'CHANGED'; then
+      stale_ok=0
+      stale_detail="$stale_detail later=$later_state got=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+
+  reapproved="$(derive_fixture copilot-reapproved "$PRE" \
+    '.data.repository.pullRequest.reviews.totalCount = 3
+     | .data.repository.pullRequest.reviews.nodes += [
+         {"databaseId":3011002,"state":"COMMENTED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}},
+         {"databaseId":3011009,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
+  reapproved_seed="$(capture_seed copilotreapprovedseed initial "$PRE" "$REACT_NONE" automated)"
+  st="$(new_state copilot-reapproved)"
+  set_seq "$st" graphql "$PRE" "$reapproved"
+  set_seq "$st" reactions "$REACT_NONE"
+  reapproved_out="$(arm_poll "$st" "$reapproved_seed" automated)"
+  if [ "$(printf '%s\n' "$reapproved_out" | head -1)" != "REVIEWER_APPROVED" ]; then
+    stale_ok=0
+    stale_detail="$stale_detail reapproved got=$(printf '%s' "$reapproved_out" | tr '\n' ';')"
+  fi
+
+  if [ "$stale_ok" -eq 1 ]; then
+    pass "approval:superseded-review-never-approves" "stale Copilot APPROVED stayed silent after CHANGES_REQUESTED/COMMENTED/DISMISSED; a latest APPROVED still fired"
+  else
+    failed "approval:superseded-review-never-approves" "$stale_detail"
+  fi
+else
+  skipped "approval:superseded-review-never-approves" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

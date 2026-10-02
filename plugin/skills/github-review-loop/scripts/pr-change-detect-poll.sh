@@ -14,8 +14,8 @@
 #     and self-login); totalCount tripwires for the three connections capped at
 #     50; a CI `FAILED_CHECKS` scalar that counts only checks in a failed/
 #     errored state, so CI regressions wake the reviewer even when no new review
-#     comment was posted) plus ONE automated-reviewer APPROVAL bool (an
-#     APPROVED review from a `review-approved` reviewer, OR a 👍 reaction on the
+#     comment was posted) plus ONE automated-reviewer APPROVAL bool (a
+#     `review-approved` reviewer whose LATEST review is APPROVED, OR a 👍 reaction on the
 #     PR from a `pr-reaction-thumbs-up` reviewer via paginated REST reactions;
 #     both scoped by the active reviewer filter). No bodies, no cursor walks —
 #     the poll only answers "did anything change?" and "is the PR terminal?".
@@ -363,7 +363,8 @@ fail_count=0
 # comment databaseId and author + the totalCount of each of those three
 # connections + the `statusCheckRollup` contexts so a `FAILED_CHECKS` scalar
 # can be derived) plus a paginated REST reactions read, folded into ONE in-scope
-# approval bool (APPROVED review OR PR 👍, each from its registry approver kind).
+# approval bool (an approver's LATEST review APPROVED, OR PR 👍, each from its
+# registry approver kind).
 # Returns 0 on success, non-zero on failure of the query, the reactions call, or
 # either identity jq evaluation.
 # Each id token is a single max-databaseId across the author-filtered stream —
@@ -426,11 +427,16 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       | map(select(reviewer_matches_filter(.author.login; .author.__typename; $login; $filter)))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $filtered_review |
+    # Review approval is CURRENT state, not history: each in-scope approver is
+    # judged by its LATEST submitted review (max databaseId), so a stale APPROVED
+    # superseded by a later review from the same approver never counts.
     ($pr.reviews.nodes
-      | any(.[];
-          .state == "APPROVED"
-          and reviewer_is_approver(.author.login; .author.__typename; "review-approved")
-          and reviewer_matches_filter(.author.login; .author.__typename; $login; $filter))) as $review_approved |
+      | map(select(.state as $s | ["CHANGES_REQUESTED","COMMENTED","APPROVED","DISMISSED"] | index($s)))
+      | map(select(
+          reviewer_is_approver(.author.login; .author.__typename; "review-approved")
+          and reviewer_matches_filter(.author.login; .author.__typename; $login; $filter)))
+      | group_by(strip_bot(.author.login))
+      | any(.[]; (max_by(.databaseId) | .state) == "APPROVED")) as $review_approved |
     ($pr.reviewThreads.nodes
       | map(.comments.nodes[]?)
       | map(select(strip_bot(.author.login) != $login))
