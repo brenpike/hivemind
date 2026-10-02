@@ -40,6 +40,7 @@ for required in "$LEDGER_PRESENT" \
                 "$SHARED_DIR/json-normalize.sh" \
                 "$SHARED_DIR/settings-merge.sh" "$SHARED_DIR/claude-mem-path.sh" \
                 "$SHARED_DIR/file-guard.sh" "$SHARED_DIR/test-detect.sh" \
+                "$SHARED_DIR/graphql-response.sh" \
                 "$CLASSIFY_FILTER" \
                 "$FN_REVIEW_HANDLED" "$FN_EXPECTED_REVIEW" "$FN_CI_CHECKS" "$FN_EXPECTED_CI" \
                 "$FN_OVERFLOW_THREADS" "$FN_MALFORMED"; do
@@ -87,6 +88,8 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite"
 # dependency before this source line.
 # shellcheck source=/dev/null
 . "$SHARED_DIR/test-detect.sh"
+# shellcheck source=/dev/null
+. "$SHARED_DIR/graphql-response.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -3861,6 +3864,89 @@ if [ "$mx_fail" -eq 0 ]; then
 else
   failed "matrix:root-cluster-class-lock" "a seed-hive merge-predicate-gap site fix regressed (see matrix-N FAIL lines above)"
 fi
+
+# ── Section 17: graphql-response.sh — fail-closed GraphQL envelope validator (#393) ──
+echo ''
+echo '=== graphql-response.sh: hivemind_graphql_response_check / hivemind_graphql_pages_check (#393) ==='
+#
+# Every case asserts the full (return code, stdout) pair: success is `rc=0 out=` (prints nothing),
+# failure is `rc=1 out=<token>` with exactly one token. Token precedence under test:
+# empty-body > malformed > errors > missing-data.
+
+# gr_probe <fn> <body>: run one validator and render its outcome as `rc=<n> out=<stdout>`.
+gr_probe() {
+  local probe_fn="$1" probe_body="$2" probe_out probe_rc
+  probe_out="$("$probe_fn" "$probe_body")"
+  probe_rc=$?
+  printf 'rc=%s out=%s' "$probe_rc" "$probe_out"
+}
+
+# gr_case <case> <fn> <body> <expected-outcome>
+gr_case() {
+  assert_eq "$1" "$4" "$(gr_probe "$2" "$3")" "$2"
+}
+
+# 17a: single-body mode.
+gr_case "gqlresp:single-clean"              hivemind_graphql_response_check '{"data":{"viewer":{"login":"x"}}}' 'rc=0 out='
+gr_case "gqlresp:single-errors-empty-array" hivemind_graphql_response_check '{"errors":[],"data":{}}'           'rc=0 out='
+gr_case "gqlresp:single-errors-null"        hivemind_graphql_response_check '{"errors":null,"data":{}}'         'rc=0 out='
+gr_case "gqlresp:single-empty-string"       hivemind_graphql_response_check ''                                  'rc=1 out=empty-body'
+gr_case "gqlresp:single-blank-crlf"         hivemind_graphql_response_check $'  \r\n'                           'rc=1 out=empty-body'
+gr_case "gqlresp:single-not-json"           hivemind_graphql_response_check 'not json'                          'rc=1 out=malformed'
+gr_case "gqlresp:single-array-value"        hivemind_graphql_response_check '[1]'                               'rc=1 out=malformed'
+gr_case "gqlresp:single-two-values"         hivemind_graphql_response_check '{"a":1}{"b":2}'                    'rc=1 out=malformed'
+gr_case "gqlresp:single-errors-message"     hivemind_graphql_response_check '{"errors":[{"message":"Could not resolve to a PullRequest"}],"data":{}}' 'rc=1 out=errors'
+gr_case "gqlresp:single-errors-empty-obj"   hivemind_graphql_response_check '{"errors":[{}],"data":{}}'         'rc=1 out=errors'
+gr_case "gqlresp:single-errors-object"      hivemind_graphql_response_check '{"errors":{},"data":{}}'           'rc=1 out=errors'
+gr_case "gqlresp:single-errors-string"      hivemind_graphql_response_check '{"errors":"boom","data":{}}'       'rc=1 out=errors'
+gr_case "gqlresp:single-errors-false"       hivemind_graphql_response_check '{"errors":false,"data":{}}'        'rc=1 out=errors'
+gr_case "gqlresp:single-errors-zero"        hivemind_graphql_response_check '{"errors":0,"data":{}}'            'rc=1 out=errors'
+gr_case "gqlresp:single-errors-null-elem"   hivemind_graphql_response_check '{"errors":[null],"data":{}}'       'rc=1 out=errors'
+gr_case "gqlresp:single-data-null"          hivemind_graphql_response_check '{"data":null}'                     'rc=1 out=missing-data'
+gr_case "gqlresp:single-data-absent"        hivemind_graphql_response_check '{}'                                'rc=1 out=missing-data'
+gr_case "gqlresp:single-data-array"         hivemind_graphql_response_check '{"data":[]}'                       'rc=1 out=missing-data'
+gr_case "gqlresp:single-errors-over-data"   hivemind_graphql_response_check '{"errors":[{"message":"x"}],"data":null}' 'rc=1 out=errors'
+
+# 17b: paginated stream mode (pages concatenated with no separator, as `gh api graphql --paginate`
+# prints them without --jq / --slurp).
+gr_case "gqlresp:pages-two-clean"           hivemind_graphql_pages_check '{"data":{"n":1}}{"data":{"n":2}}'    'rc=0 out='
+gr_case "gqlresp:pages-clean-then-errors"   hivemind_graphql_pages_check '{"data":{"n":1}}{"errors":[{"message":"x"}],"data":{"n":2}}' 'rc=1 out=errors'
+gr_case "gqlresp:pages-errors-then-clean"   hivemind_graphql_pages_check '{"errors":[{"message":"x"}],"data":{"n":1}}{"data":{"n":2}}' 'rc=1 out=errors'
+gr_case "gqlresp:pages-clean-then-array"    hivemind_graphql_pages_check '{"data":{"n":1}}[1]'                 'rc=1 out=malformed'
+gr_case "gqlresp:pages-empty"               hivemind_graphql_pages_check ''                                    'rc=1 out=empty-body'
+gr_case "gqlresp:pages-one-clean"           hivemind_graphql_pages_check '{"data":{"n":1}}'                    'rc=0 out='
+gr_case "gqlresp:pages-clean-then-data-null" hivemind_graphql_pages_check '{"data":{"n":1}}{"data":null}'      'rc=1 out=missing-data'
+gr_case "gqlresp:pages-truncated"           hivemind_graphql_pages_check '{"data":{"n":1}}{"data":{"n"'        'rc=1 out=malformed'
+
+# 17c: purity. A sourced validator must `return`, never `exit`: the subshell reaches its trailing
+# printf only when the failing call returned control.
+gr_subshell_out="$( (hivemind_graphql_response_check 'not json' >/dev/null; printf 'returned:%s' "$?") )"
+assert_eq "gqlresp:purity-return-not-exit" "returned:1" "$gr_subshell_out" \
+  "failing hivemind_graphql_response_check returns 1 to its caller instead of exiting"
+gr_pages_subshell_out="$( (hivemind_graphql_pages_check '' >/dev/null; printf 'returned:%s' "$?") )"
+assert_eq "gqlresp:purity-pages-return-not-exit" "returned:1" "$gr_pages_subshell_out" \
+  "failing hivemind_graphql_pages_check returns 1 to its caller instead of exiting"
+
+# Success prints nothing on either stream; failure prints only its one token (jq diagnostics stay off
+# the caller's stderr).
+assert_eq "gqlresp:purity-success-silent" "" "$(hivemind_graphql_response_check '{"data":{}}' 2>&1)" \
+  "successful single check writes nothing to stdout or stderr"
+assert_eq "gqlresp:purity-pages-success-silent" "" "$(hivemind_graphql_pages_check '{"data":{}}{"data":{}}' 2>&1)" \
+  "successful pages check writes nothing to stdout or stderr"
+assert_eq "gqlresp:purity-failure-one-token" "malformed" "$(hivemind_graphql_response_check '{"data":' 2>&1)" \
+  "failing check writes exactly its token and no jq diagnostic"
+
+# Caller variables that share the validator's internal local names are left untouched.
+check_mode="caller-mode"
+response_body="caller-body"
+check_token="caller-token"
+envelope_program="caller-program"
+hivemind_graphql_response_check '{"errors":[{}],"data":{}}' >/dev/null
+hivemind_graphql_pages_check '{"data":{}}{"data":{}}' >/dev/null
+assert_eq "gqlresp:purity-caller-vars-unchanged" "caller-mode|caller-body|caller-token|caller-program" \
+  "$check_mode|$response_body|$check_token|$envelope_program" \
+  "validator locals do not leak into or overwrite the caller's variables"
+unset check_mode response_body check_token envelope_program
 
 # ── Summary ─────────────────────────────────────────────────────────────────────
 echo ''
