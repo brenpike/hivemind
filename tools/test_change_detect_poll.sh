@@ -196,6 +196,25 @@ capture_seed() {
   snapshot_raw "$@" | sed -n 's/^BASELINE=//p' | head -1
 }
 
+# identity_author_json <type>: a `$SELF_LOGIN`-login author object typed <type>, or carrying no
+# `__typename` at all when <type> is `none`.
+identity_author_json() {
+  if [ "$1" = "none" ]; then
+    printf '{"login":"%s"}' "$SELF_LOGIN"
+  else
+    printf '{"login":"%s","__typename":"%s"}' "$SELF_LOGIN" "$1"
+  fi
+}
+
+# identity_outcome_matches <type> <poll_output>: a User-typed SELF_LOGIN author is self and must
+# idle to WATCH_TIMEOUT; a Bot-typed or untyped one is never self and must fire CHANGED.
+identity_outcome_matches() {
+  case "$1" in
+    User) [ "$2" = "WATCH_TIMEOUT" ] ;;
+    *) printf '%s\n' "$2" | grep -qx 'CHANGED' ;;
+  esac
+}
+
 # ── Seed probe ──────────────────────────────────────────────────────────────────────
 # Source-level probe for `--snapshot` support. A behavioral probe cannot discriminate: on the
 # unfixed script `--snapshot` is simply read as OWNER and the run dies with the same POLL_ERROR
@@ -264,7 +283,7 @@ fi
 # poll-to-poll change.
 delta_comment="$(derive_fixture delta-comment "$PRE" \
   '.data.repository.pullRequest.comments.totalCount = 3
-   | .data.repository.pullRequest.comments.nodes += [{"databaseId":2411003,"author":{"login":"chatgpt-codex-connector"}}]')"
+   | .data.repository.pullRequest.comments.nodes += [{"databaseId":2411003,"author":{"login":"chatgpt-codex-connector","__typename":"Bot"}}]')"
 st="$(new_state deltacomment)"
 set_seq "$st" graphql "$PRE" "$delta_comment"
 set_seq "$st" reactions "$REACT_NONE"
@@ -698,6 +717,68 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "approval:superseded-review-never-approves" "$SKIP_REASON"
+fi
+
+# ── 20. the issue-comment self filter keys on account type, not login alone ─────────
+# comments.nodes[1] is swapped for a higher-id comment whose login IS SELF_LOGIN, COMMENTS_TOTAL
+# unchanged, so only LATEST_NONSELF_ISSUE_COMMENT_ID can fire. Bot-typed: `is_self` is User-gated,
+# so it is not self and the token moves NONE -> 2411003 (CHANGED); a login-only compare drops it
+# as self-echo and idles to WATCH_TIMEOUT. User-typed: genuinely self, silent (self-echo
+# suppression intact). Untyped: a null type is never self, so CHANGED (fail toward wake).
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  ident_comment_ok=1
+  ident_comment_detail=""
+  ident_comment_seed="$(capture_seed identcommentseed initial "$PRE" "$REACT_NONE")"
+  for swap_type in Bot User none; do
+    swap_fixture="$(derive_fixture "ident-comment-$swap_type" "$PRE" \
+      ".data.repository.pullRequest.comments.nodes[1] = {\"databaseId\":2411003,\"author\":$(identity_author_json "$swap_type")}")"
+    st="$(new_state "ident-comment-$swap_type")"
+    set_seq "$st" graphql "$PRE" "$swap_fixture"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(arm_poll "$st" "$ident_comment_seed")"
+    if ! identity_outcome_matches "$swap_type" "$out"; then
+      ident_comment_ok=0
+      ident_comment_detail="$ident_comment_detail type=$swap_type got=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$ident_comment_ok" -eq 1 ]; then
+    pass "identity:comment-self-keys-on-type" "SELF_LOGIN comment: Bot/untyped fired CHANGED, User stayed silent"
+  else
+    failed "identity:comment-self-keys-on-type" "$ident_comment_detail seed=$ident_comment_seed"
+  fi
+else
+  skipped "identity:comment-self-keys-on-type" "$SKIP_REASON"
+fi
+
+# ── 21. the review-thread self filter keys on account type, not login alone ──────────
+# Base: the one thread's last comment is a User-typed SELF_LOGIN reply (self, token NONE). The
+# variant replaces it with a higher-id SELF_LOGIN reply, REVIEW_THREADS_TOTAL unchanged, so only
+# LATEST_NONSELF_THREAD_COMMENT_ID can fire. Same expectations per type as case 20.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  ident_thread_ok=1
+  ident_thread_detail=""
+  thread_self_base="$(derive_fixture ident-thread-base "$PRE" \
+    ".data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes = [{\"databaseId\":4011001,\"author\":$(identity_author_json User)}]")"
+  ident_thread_seed="$(capture_seed identthreadseed initial "$thread_self_base" "$REACT_NONE")"
+  for swap_type in Bot User none; do
+    swap_fixture="$(derive_fixture "ident-thread-$swap_type" "$thread_self_base" \
+      ".data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes = [{\"databaseId\":4011002,\"author\":$(identity_author_json "$swap_type")}]")"
+    st="$(new_state "ident-thread-$swap_type")"
+    set_seq "$st" graphql "$thread_self_base" "$swap_fixture"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(arm_poll "$st" "$ident_thread_seed")"
+    if ! identity_outcome_matches "$swap_type" "$out"; then
+      ident_thread_ok=0
+      ident_thread_detail="$ident_thread_detail type=$swap_type got=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$ident_thread_ok" -eq 1 ]; then
+    pass "identity:thread-self-keys-on-type" "SELF_LOGIN thread reply: Bot/untyped fired CHANGED, User stayed silent"
+  else
+    failed "identity:thread-self-keys-on-type" "$ident_thread_detail seed=$ident_thread_seed"
+  fi
+else
+  skipped "identity:thread-self-keys-on-type" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

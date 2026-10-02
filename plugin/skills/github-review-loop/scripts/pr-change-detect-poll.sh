@@ -11,7 +11,7 @@
 #   - Each iteration computes a CHEAP SCALAR snapshot via ONE non-paginated
 #     GraphQL query (PR state; author-aware latest-id tokens for issue comments,
 #     filtered reviews, and review-thread comments (filtered by reviewer-filter
-#     and self-login); totalCount tripwires for the three connections capped at
+#     and self identity); totalCount tripwires for the three connections capped at
 #     50; a CI `FAILED_CHECKS` scalar that counts only checks in a failed/
 #     errored state, so CI regressions wake the reviewer even when no new review
 #     comment was posted) plus ONE automated-reviewer APPROVAL bool (a
@@ -19,11 +19,11 @@
 #     PR from a `pr-reaction-thumbs-up` reviewer via paginated REST reactions;
 #     both scoped by the active reviewer filter). No bodies, no cursor walks —
 #     the poll only answers "did anything change?" and "is the PR terminal?".
-#   - Every reviewer IDENTITY decision (login normalization, filter scope,
-#     approver membership) is delegated to the sibling jq module
+#   - Every reviewer IDENTITY decision (self identity, login normalization,
+#     filter scope, approver membership) is delegated to the sibling jq module
 #     `reviewer-identity.jq` (ADR-0033), loaded by `jq -L "$SCRIPT_DIR"`. This
-#     script carries no reviewer login literal and no suffix-strip regex of its
-#     own; a missing module is a terminal error before the first gh call.
+#     script carries no login literal, login compare, or suffix-strip regex of
+#     its own; a missing module is a terminal error before the first gh call.
 #   - It DIFFS the scalar snapshot in bash against the previous iteration and
 #     emits a single minimal marker line ONLY on a real delta or a terminal
 #     state. The reviewer re-fetches ALL feedback bodies and does the full
@@ -369,11 +369,14 @@ fail_count=0
 # either identity jq evaluation.
 # Each id token is a single max-databaseId across the author-filtered stream —
 # self-only flurries (own replies, own pushes) do not bump any token,
-# eliminating self-echo CHANGED storms. The totalCount scalars are tripwires
-# for activity past the 50-node page boundary: when it bumps the totalCount but
-# not the id token, CHANGED still fires and the reviewer re-fetches all on
-# wake. `FAILED_CHECKS` is the count of `statusCheckRollup` contexts in a
-# failed/errored state (FAILURE / ERROR / TIMED_OUT / CANCELLED /
+# eliminating self-echo CHANGED storms. "Self" is the module's `is_self` over
+# each node's login AND `__typename` (both selected for that reason): only a
+# User-typed SELF_LOGIN author is self, so a Bot sharing the login, or a node
+# with no type, still bumps its token (fail toward wake). The totalCount scalars
+# are tripwires for activity past the 50-node page boundary: when it bumps the
+# totalCount but not the id token, CHANGED still fires and the reviewer
+# re-fetches all on wake. `FAILED_CHECKS` is the count of `statusCheckRollup`
+# contexts in a failed/errored state (FAILURE / ERROR / TIMED_OUT / CANCELLED /
 # ACTION_REQUIRED for CheckRun; FAILURE / ERROR for legacy StatusContext);
 # changes here fire CHANGED so `github-reviewer` step 3 (failed-CI fix
 # candidates) is wired to a wake signal independent of review activity. The
@@ -392,7 +395,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       state
       comments(last: 50) {
         totalCount
-        nodes { databaseId author { login } }
+        nodes { databaseId author { login __typename } }
       }
       reviews(last: 50) {
         totalCount
@@ -402,7 +405,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
         totalCount
         nodes {
           comments(last: 1) {
-            nodes { databaseId author { login } }
+            nodes { databaseId author { login __typename } }
           }
         }
       }
@@ -419,7 +422,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     include "reviewer-identity";
     .data.repository.pullRequest as $pr |
     ($pr.comments.nodes
-      | map(select(strip_bot(.author.login) != $login))
+      | map(select(is_self(.author.login; .author.__typename; $login) | not))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $nonself_comment |
     ($pr.reviews.nodes
@@ -439,7 +442,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       | any(.[]; (max_by(.databaseId) | .state) == "APPROVED")) as $review_approved |
     ($pr.reviewThreads.nodes
       | map(.comments.nodes[]?)
-      | map(select(strip_bot(.author.login) != $login))
+      | map(select(is_self(.author.login; .author.__typename; $login) | not))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $nonself_thread |
     # FAILED_CHECKS: sum rollup state-count buckets for failed/errored

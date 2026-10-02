@@ -35,6 +35,12 @@ an approval edge surfaces as the `REVIEWER_APPROVED` marker. The suite pins:
 - `filter:empty-slot-is-automated` — over one mixed review state, the seed token captured with an
   empty filter slot equals the `automated` token and differs from both the `codex-only` and `all`
   tokens; an empty-slot arm fires `REVIEWER_APPROVED` on the Copilot approval.
+- `identity:comment-self-keys-on-type` — a higher-id issue comment whose login IS the self login,
+  `COMMENTS_TOTAL` unchanged, fires `CHANGED` when Bot-typed or untyped (the module's `is_self` is
+  User-gated, and a null type is never self) and stays silent to `WATCH_TIMEOUT` when User-typed
+  (self-echo suppression intact). A login-only self compare idles the Bot and untyped variants.
+- `identity:thread-self-keys-on-type` — the same three swaps on a review thread's last comment, over
+  a base whose thread ends in a User-typed self reply, with `REVIEW_THREADS_TOTAL` unchanged.
 
 ## The second bite: the seed's state model (PR #361)
 
@@ -97,16 +103,17 @@ a snapshot that cannot be captured, or one given a missing or unknown arm kind, 
 
 | File | Role |
 | --- | --- |
-| `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (one Bot-typed Codex review, one Codex thread, checks green). |
+| `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (two User-typed self issue comments, one Bot-typed Codex review, one Bot-typed Codex thread, checks green). |
 | `graphql-blind-window.json` | State B — A plus the Codex review + review-thread comment posted during the blind window. |
 | `graphql-malformed.json` | A GraphQL `NOT_FOUND` error response (null `pullRequest`) that makes the snapshot pipeline fail. |
 | `reactions-none.txt` | Reactions call stdout with no 👍 (empty, exactly as `gh` emits). |
 | `reactions-codex.txt` | Reactions call stdout with one Bot-typed Codex 👍 row (`chatgpt-codex-connector[bot]<TAB>Bot`). |
 | `reactions-human.txt` | Reactions call stdout with two User-typed 👍 rows (`chatgpt-codex-connector<TAB>User`, `claude<TAB>User`) that must never approve. |
 
-The `graphql-*.json` files are whole GraphQL responses shaped to the script's own query; review
-authors carry `__typename` (`Bot` for automated reviewers, `User` for humans) because the reviews
-selection requests it and the registry's filter and approver tests are type-gated. The Copilot
+The `graphql-*.json` files are whole GraphQL responses shaped to the script's own query; every
+author (issue comments, reviews, and review-thread comments) carries `__typename` (`Bot` for
+automated reviewers, `User` for humans and the self login) because every author selection requests
+it and the registry's self, filter, and approver tests are all type-gated. The Copilot
 `APPROVED` and mixed-review states are derived in the runner rather than committed. The
 `reactions-*.txt` files are the POST-`--jq` stdout `gh` itself emits — one `login<TAB>type` row
 per 👍 reaction — so the fixture stands where its output does. The fake `gh` strips CR when
