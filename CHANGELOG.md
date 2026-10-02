@@ -18,8 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - New `reviewer_filter: automated` mode that accepts reviews and comments from automated reviewer bot accounts (Codex, Copilot, and Claude).
 - Single reviewer identity module `plugin/skills/github-review-loop/scripts/reviewer-identity.jq` holding the reviewer registry and its predicates; the classifier, prefilter, fetch-normalize, and change-detect poll all consume it instead of keeping their own copies.
-- Copilot approval detection: an APPROVED review from the Copilot reviewer now counts as reviewer approval when it is that reviewer's latest review.
-- Tests: fix-history case19 (automated reviewers) and case20, a closure test for the identity module, the self-compare closure check, registry integrity checks, fail-closed cases for a missing or broken identity module, change-detect approval cases including a superseded-review case, change-detect poll self-identity cases, and enrolment of the change-detect poll in the bootstrap suite.
+- Copilot approval detection: an APPROVED review from the Copilot reviewer now counts as reviewer approval when it is that reviewer's latest review. Approval is read from GitHub's per-author `latestReviews`, so it is found however many reviews the PR has.
+- Tests: fix-history case19 (automated reviewers) and case20, a closure test for the identity module, the self-compare closure check, registry integrity checks, fail-closed cases for a missing or broken identity module, change-detect approval cases including superseded-review, review-window-overflow, latest-review-not-history, user-typed-review, reaction-login forgery, and eyes-reaction cases, change-detect poll self-identity cases, raw REST reaction fixtures run through the poll's own `--jq` filter, and enrolment of the change-detect poll in the bootstrap suite.
 - Policy pin `tests/policy/safety-reviewer-identity-single-source.json` asserting the identity module is the single source of reviewer identity.
 - ADR-0033 (`docs/adr/0033-automated-reviewer-identity-registry.md`): records the decision to route reviewer identity through one registry module.
 
@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - review-loop preflight now fails closed with `SELF_LOGIN is not a User account` when the authenticated identity is not a GitHub User account.
 - The `github-reviewer` agent drops its no-op Codex early-clean clause.
 - `pr-change-detect-poll.sh` now self-locates using the ADR-0020 bootstrap form.
+- `pr-change-detect-poll.sh` now carries Codex 👍 reaction rows as JSON objects parsed by jq instead of tab-separated text.
 
 ### Fixed
 

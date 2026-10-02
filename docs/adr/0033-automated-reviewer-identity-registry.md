@@ -16,6 +16,9 @@ The identity predicate itself was not held in one place. It was duplicated acros
 - **The Copilot reviewer's login differs by API surface.** REST `users/copilot-pull-request-reviewer[bot]` resolves to the `Bot` login `Copilot` (id 175728472), while secondary sources report GraphQL author nodes carrying `copilot-pull-request-reviewer`. The evidence is conflicting and secondary, so both forms must match.
 - **Codex resolves cleanly.** REST `users/chatgpt-codex-connector[bot]` is a `Bot` (id 199175422).
 - **The bare org accounts cannot author reviews.** `copilot-pull-request-reviewer` and `chatgpt-codex-connector` without the suffix are `Organization` accounts, so they never appear as a comment or review author.
+- **GitHub keeps each reviewer's latest verdict.** The GraphQL `PullRequest.latestReviews` connection is documented as the "latest reviews per user ... that are not also pending review" (primary: GitHub GraphQL reference, pulls). A secondary source (a9n-shoji/rvw pull 88) reports that the sibling connection `latestOpinionatedReviews`, which takes a `writersOnly` argument, keeps an author's `APPROVED` over a later `COMMENTED`, while `latestReviews` lets the later `COMMENTED` replace it. Another secondary source (notaharness/n10 pull 231) reports that `latestReviews` omits an author who has an open review request, and that Bot authors appear in it typed `Bot`.
+- **GraphQL reactions cannot type a Bot reactor.** `Reaction.user` is typed `User` (primary: GitHub GraphQL reference, reactions), so a Bot's reaction cannot be read with its account type through the PR's `reactions` connection. `ReactionGroup.reactors` is a union connection that can carry a Bot, but it is capped at 100 reactors.
+- **`gh --jq` prints string results raw.** go-gh `pkg/jq/jq.go` writes a string result raw and uncolored, one per line, while an object result may be colorized.
 - **jq 1.6 binds data imports as arrays.** `import "x" as $x;` of a JSON data file yields an array wrapper under jq 1.6 (jqlang/jq issue 2208), so a registry held as a JSON data import reads differently across the jq versions this repo supports. A `def` returning a literal reads the same on all of them.
 
 ## Decision
@@ -50,10 +53,18 @@ Each registry entry declares its approval kind:
 | Reviewer | Approval kind | Signal |
 |---|---|---|
 | Codex | `pr-reaction-thumbs-up` | a 👍 (`+1`) reaction on the PR object; 👀 is never approval |
-| Copilot | `review-approved` | its latest review is `APPROVED`; requires an admin opt-in, which per a secondary source arrived in a GitHub changelog dated 2026-09-01 |
+| Copilot | `review-approved` | its entry in GitHub's per-author `latestReviews` is `APPROVED`; requires an admin opt-in, which per a secondary source arrived in a GitHub changelog dated 2026-09-01 |
 | Claude | none | the loop ends through the idle watch window, never through an approval signal |
 
-Approval counts only from a reviewer in scope under the active filter. A `review-approved` reviewer is judged by its latest submitted review (the highest `databaseId` among its reviews), so an `APPROVED` superseded by a later `CHANGES_REQUESTED`, `COMMENTED`, or `DISMISSED` review from the same reviewer never counts. The loop marker `CODEX_APPROVED` is renamed `REVIEWER_APPROVED`, and the poll snapshot field `codex` is renamed `approval`. The seed width stays 9 scalars, so a seed written by an older version still parses.
+Approval counts only from a reviewer in scope under the active filter. A `review-approved` reviewer is judged by its entry in GitHub's `PullRequest.latestReviews`, which holds one entry per author: that author's latest submitted, non-pending review. The poll reads that current state from GitHub and never rebuilds it from the `reviews(last: 50)` history, which it keeps only for its change token and review total. An `APPROVED` superseded by a later `CHANGES_REQUESTED`, `COMMENTED`, or `DISMISSED` review from the same reviewer never counts.
+
+A later `COMMENTED` superseding an `APPROVED` is deliberate. The loop asks whether this reviewer is satisfied now, not whether the PR may merge. `latestOpinionatedReviews` would keep the standing approval across the `COMMENTED`, so the approval bool would never fall, and a re-approval after the next remediation pass would raise no fresh false-to-true edge: the loop would end through the watch window instead of through the approval.
+
+`latestReviews` is read 100 entries at a time, and the poll reads page 1 only. A verdict visible in that page is authoritative. An approver whose entry falls past the bound reads as not-approved, so the loop ends through the watch window; the bound never produces a false approval. A null `latestReviews` connection fails the capture rather than reading as no approval.
+
+The Codex 👍 rows travel from the paginated REST reactions read as JSON objects: the `gh --jq` transport filter emits one `tojson`-encoded `{login, type}` object per `+1` reaction, and the poll decodes all rows with `jq -s` through the module. No row is split on a delimiter, so no byte of a login can be read as a field boundary. Each row is `tojson`-encoded because `gh` prints a string result raw and uncolored, while an object result may be colorized.
+
+The loop marker `CODEX_APPROVED` is renamed `REVIEWER_APPROVED`, and the poll snapshot field `codex` is renamed `approval`. The seed width stays 9 scalars, so a seed written by an older version still parses.
 
 ### 5. `github-actions[bot]` is not in the default set
 
@@ -92,13 +103,21 @@ Changing the default filter is a breaking change to the loop's default behavior,
 | Recognize self by login alone | A Bot whose bare login equals the operator's is read as self: its findings are dropped, its `Fixed in`, defer, and `Addresses:` markers are honored as the operator's, and the poll never wakes on it |
 | Recognize self as any author whose type is not `Bot` (`type != "Bot"`) | A null or missing type would read as self, so an author of unverified type could have its marker honored as the operator's. The positive `User` allowlist fails toward actionable instead |
 | Carry the viewer's account type as a predicate argument | Adds a positional argument to every self-aware predicate and call site with no information gain: preflight already guarantees the viewer is a `User`, so the constant `User` gate says the same thing |
-| One Bot-gated `def`-literal registry in a single included module; default `automated`; approval scoped by filter; self keyed on type `User` plus login (CHOSEN) | — |
+| Rebuild each approver's latest review from the `reviews(last: 50)` history (highest `databaseId` per approver) | Windowed: on a PR with more than 50 reviews, the approval or the review that superseded it can fall outside the page, so the verdict depends on how many reviews the PR has. GitHub already reports the per-author latest review |
+| Read Copilot approval from `latestOpinionatedReviews` | It keeps an `APPROVED` over a later `COMMENTED`, so a standing approval gives no fresh false-to-true edge after a re-approval, and a re-approved loop would end through the watch window instead of through the approval. The loop asks whether the reviewer is satisfied now, not whether the PR may merge |
+| Read the Codex 👍 through GraphQL (`reactions` or `ReactionGroup.reactors`) | `Reaction.user` is typed `User`, so a Bot reactor cannot be read with its account type through `reactions`; `reactors` is capped at 100 and loses the coverage of the paginated REST read |
+| Carry the 👍 rows as tab-separated text (`@tsv`) | Needs an enumerated set of escapes and a hand-written split, and a login byte read as a field boundary could forge the account type. JSON rows parsed by jq have no boundary to forge |
+| One Bot-gated `def`-literal registry in a single included module; default `automated`; approval scoped by filter; self keyed on type `User` plus login; Copilot approval from `latestReviews`; 👍 rows carried as JSON (CHOSEN) | — |
 
 ## Consequences
 
 - **Copilot and Claude feedback is actionable by default.** A wider default set means more remediation cycles on PRs those reviewers comment on.
-- **The Copilot GraphQL login evidence is secondary and conflicting.** Both forms are listed to cover it; a live smoke on a Copilot-reviewed PR is recommended to confirm which form GraphQL actually reports.
+- **The Copilot GraphQL login evidence is secondary and conflicting.** Both forms are listed to cover it; a live smoke on a Copilot-reviewed PR is recommended to confirm which form GraphQL actually reports, and that Bot reviewers appear in `latestReviews` typed `Bot`.
 - **Copilot's `APPROVED` capability is verified only through a secondary article.** If the capability is absent or not opted into, the `review-approved` kind is inert — it never fires, and the loop ends through the watch window instead.
+- **Copilot approval is found however many reviews the PR has.** It is read from `latestReviews`, not from a 50-review history window.
+- **`latestReviews` is bounded at 100 entries in the poll.** An approver whose entry falls past the bound reads as not-approved, and the loop ends through the watch window; the bound never yields a false approval.
+- **Part of the `latestReviews` semantics is secondary-sourced.** The primary documentation states only "latest reviews per user" that are not pending. The supersede-on-`COMMENTED` behavior, the `Bot` typing of its authors, and the omission of authors with an open review request come from secondary sources.
+- **Approval reads false while a re-review request to the approver is pending,** if the secondary omission claim holds: the approver has no `latestReviews` entry until it submits its next review.
 - **The Claude entry assumes the Anthropic Claude review app posts as `claude[bot]`.** A deployment that posts under another identity (such as `github-actions[bot]` via `claude-code-action` with `github_token`) is not matched by the default set.
 - **A mid-session plugin upgrade may leave loaded prose expecting the old `CODEX_APPROVED` marker.** Bounded: a session restart picks up the new prose.
 - **Under a non-registry `<login>` filter, a Codex 👍 no longer fires approval**, because approval is scoped to the active filter.
@@ -118,5 +137,10 @@ Changing the default filter is a breaking change to the loop's default behavior,
 - https://api.github.com/users/chatgpt-codex-connector%5Bbot%5D
 - https://github.com/github/awesome-copilot/blob/main/skills/copilot-pr-autopilot/references/api-quirks.md
 - https://github.com/anthropics/claude-code-action/blob/main/docs/faq.md
+- https://docs.github.com/en/graphql/reference/pulls
+- https://docs.github.com/en/graphql/reference/reactions
+- https://github.com/cli/go-gh/blob/trunk/pkg/jq/jq.go
+- https://github.com/a9n-shoji/rvw/pull/88
+- https://github.com/notaharness/n10/pull/231
 - https://jqlang.org/manual/
 - https://github.com/jqlang/jq/issues/2208

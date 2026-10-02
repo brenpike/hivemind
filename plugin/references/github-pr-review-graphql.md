@@ -18,7 +18,7 @@ Resolvable pull request review threads are GraphQL objects. Do not try to resolv
 - [Surface-to-Delivery Contract](#surface-to-delivery-contract) — canonical mapping of feedback surface to mutation(s) used
 - [Reaction Marker](#reaction-marker) — self-authored `EYES` reaction that marks a fixed non-thread surface handled
 - [Author Filtering](#author-filtering) — `reviewer_filter` modes, the Bot-type + login identity rule for scoping feedback to reviewer identities, and the User-type + login self rule
-- [Reviewer Approval Detection](#reviewer-approval-detection) — in-scope automated-reviewer approval signals (paginated PR 👍 reaction lookup, `APPROVED` latest review state)
+- [Reviewer Approval Detection](#reviewer-approval-detection) — in-scope automated-reviewer approval signals (paginated PR 👍 reaction lookup, per-author `latestReviews` APPROVED)
 
 ## Shell and Parsing Rules
 
@@ -28,7 +28,7 @@ Sanctioned exception — canonical fix-history classification: `${CLAUDE_PLUGIN_
 
 ## Pagination Requirement
 
-Page all connections via `-F after="CURSOR"` using `endCursor` from `pageInfo`. Omit `-F after` on first page. Nested connections (e.g., thread comments) require per-item queries with the item's `id`. This requirement governs the reviewer's deep body-level fetch (reviews, review threads, thread comments, top-level comments) and the reviewer approval reactions lookup — NOT the `github-review-loop` thin poll, which is exempt by design: it reads scalar `totalCount`s only and walks no connections.
+Page all connections via `-F after="CURSOR"` using `endCursor` from `pageInfo`. Omit `-F after` on first page. Nested connections (e.g., thread comments) require per-item queries with the item's `id`. This requirement governs the reviewer's deep body-level fetch (reviews, review threads, thread comments, top-level comments) and both approval lookups: the REST reactions read for the PR 👍 (paged by `gh api --paginate`) and the GraphQL `latestReviews` read for the `APPROVED` review (paged by `pageInfo` and `after` in the deep fetch). The `github-review-loop` thin poll is exempt by design: it reads one bounded page of each GraphQL connection plus `totalCount` tripwires and walks no cursors. Its `latestReviews` read is page 1 only, an exempt bounded read whose overflow semantics are stated in [Reviewer Approval Detection](#reviewer-approval-detection).
 
 ## Fetch Reviews
 
@@ -303,21 +303,47 @@ An automated reviewer's approval is the signal that lets a watched PR end cleanl
 | Approval kind | Reviewer | Signal |
 |---------------|----------|--------|
 | `pr-reaction-thumbs-up` | Codex | a 👍 (`+1`) reaction on the PR object |
-| `review-approved` | Copilot | its latest submitted review has `state` `APPROVED` |
+| `review-approved` | Copilot | its per-author `latestReviews` entry has `state` `APPROVED` |
 
 Claude declares no approval kind; a Claude-reviewed loop ends through the idle watch window, never through an approval signal. Approval never overrides open feedback: while unresolved non-self actionable items remain, the PR is not clean.
 
 ### PR 👍 reaction (`pr-reaction-thumbs-up`)
 
-Read the paginated REST reactions endpoint so the approver's reaction is found even when the PR has more than one page of reactions. The `gh --jq` filter is transport only: it emits one `login<TAB>type` row per `+1` reaction and makes no identity decision. Match the rows afterward, all at once, through the module's `reviewer_is_approver` (kind `pr-reaction-thumbs-up`) and `reviewer_matches_filter` predicates.
+Read the paginated REST reactions endpoint so the approver's reaction is found even when the PR has more than one page of reactions. The `gh --jq` filter is transport only: it emits one JSON object `{login, type}` per `+1` reaction and makes no identity decision.
 
 ```bash
 gh api --paginate "repos/OWNER/REPO/issues/PR_NUMBER/reactions" \
-  --jq '.[] | select(.content == "+1") | "\(.user.login // "")\t\(.user.type // "")"'
+  --jq '.[] | select(.content == "+1") | {login: .user.login, type: .user.type} | tojson'
 ```
+
+Each row is `tojson`-encoded because `gh` prints a string result raw and uncolored, one per line, while an object result may be colorized; the encoded row is plain JSON text whatever the output stream. The rows are JSON values, parsed by jq, never split: slurp every row from every page into one array (`jq -s`) and match them all at once through the module's `reviewer_is_approver` (kind `pr-reaction-thumbs-up`) and `reviewer_matches_filter` predicates. No delimiter is ever cut out of a row, so no byte of a login can be read as a field boundary or forge the account type. Empty output slurps to an empty array (no approval); a row that is not JSON is a jq error and fails the lookup rather than reading as no approval.
 
 REST content `+1` is the 👍 reaction. The 👀 `eyes` reaction (REST content `eyes`) is Codex's "still running" signal on the PR object — never treat it as approval (the `+1` filter already excludes it).
 
 ### APPROVED review (`review-approved`)
 
-Read `databaseId`, `state`, and `author { login __typename }` from the review nodes (see [Fetch Reviews](#fetch-reviews)). Keep the submitted reviews (`state` `CHANGES_REQUESTED`, `COMMENTED`, `APPROVED`, or `DISMISSED`) whose author passes the module's `reviewer_is_approver` (kind `review-approved`) and `reviewer_matches_filter` predicates, group them per approver (login normalized by the module's `strip_bot`), and judge each approver by its LATEST submitted review — the one with the highest `databaseId`. Approval fires when some approver's latest review is `APPROVED`. An `APPROVED` review superseded by a later `CHANGES_REQUESTED`, `COMMENTED`, or `DISMISSED` review from the same approver never counts. Codex never files an `APPROVED` review. When the reviewer's `APPROVED` capability is unavailable or not opted into, this kind never fires and the loop ends through the watch window instead.
+Read the PR's `latestReviews` connection. GitHub keeps one entry per author: that author's latest submitted review, never a pending one. Approval fires when some entry has `state` `APPROVED` and its author passes the module's `reviewer_is_approver` (kind `review-approved`) and `reviewer_matches_filter` predicates.
+
+```bash
+gh api graphql \
+  -f owner="OWNER" \
+  -f repo="REPO" \
+  -F pr=123 \
+  -f query='
+query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $pr) {
+      latestReviews(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes { state author { login __typename } }
+      }
+    }
+  }
+}'
+```
+
+Because an author holds one entry, a later `COMMENTED`, `CHANGES_REQUESTED`, or `DISMISSED` review from the same approver supersedes its earlier `APPROVED`, which then never counts. Never rebuild an approver's latest review from the `reviews` history (see [Fetch Reviews](#fetch-reviews)): a bounded page of that history can hold neither the approval nor the review that superseded it, so a verdict rebuilt from it would depend on how many reviews the PR has.
+
+The connection is read 100 entries per page. The deep reviewer fetch pages it through `pageInfo` and `after` like every other connection. The thin poll reads page 1 only: a verdict visible in that page is authoritative, and an approver whose entry falls past it reads as not-approved, so the loop ends through the watch window instead. The bound can withhold an approval, never invent one. A null or missing `latestReviews` connection fails the read; never default it to empty.
+
+Codex never files an `APPROVED` review. When the reviewer's `APPROVED` capability is unavailable or not opted into, this kind never fires and the loop ends through the watch window instead.
