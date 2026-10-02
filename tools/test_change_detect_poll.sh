@@ -48,8 +48,11 @@
 # THE REVIEWER-IDENTITY CONTRACT (ADR-0033): every login / filter / approver decision is the
 # shared `reviewer-identity.jq` registry's. The poll's approval scalar is true on EITHER a 👍 from
 # a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-typed `review-approved`
-# member (Copilot) whose LATEST review is APPROVED, both scoped by the active filter, and surfaces as
-# `REVIEWER_APPROVED`. An empty filter slot defaults to `automated`.
+# member (Copilot) whose latest review, as GitHub's per-author `latestReviews` reports it, is
+# APPROVED, both scoped by the active filter, and surfaces as `REVIEWER_APPROVED`. The approval is
+# read from `latestReviews`, never rebuilt from the bounded `reviews` history window. Reactions
+# travel as one JSON object per +1 row, so a login carrying a delimiter byte cannot forge the
+# account type. An empty filter slot defaults to `automated`.
 #
 # Usage:
 #   ./tools/test_change_detect_poll.sh
@@ -89,27 +92,39 @@ SELF_LOGIN="hive-author"
 PRE="$FIXTURES/graphql-pre-cycle0.json"
 BLIND="$FIXTURES/graphql-blind-window.json"
 MALFORMED="$FIXTURES/graphql-malformed.json"
-REACT_NONE="$FIXTURES/reactions-none.txt"
-REACT_CODEX="$FIXTURES/reactions-codex.txt"
-REACT_HUMAN="$FIXTURES/reactions-human.txt"
+REACT_NONE="$FIXTURES/reactions-none.json"
+REACT_CODEX="$FIXTURES/reactions-codex.json"
+REACT_HUMAN="$FIXTURES/reactions-human.json"
+REACT_FORGED="$FIXTURES/reactions-forged.json"
+REACT_CODEX_EYES="$FIXTURES/reactions-codex-eyes.json"
 
 # ── PATH-shim fake gh ───────────────────────────────────────────────────────────────
 # Serves a per-call fixture from a state dir: <kind>.seq lists one fixture path per line and
 # <kind>.n is the call counter; call N serves line N, clamping to the last line so a steady
 # state can be served indefinitely. The literal entry `FAIL` makes the call exit non-zero
-# (a gh transport failure). `graphql` responses are raw GraphQL JSON piped into the script's
-# real jq filter; the reactions entry is the post-`--jq` stdout gh itself would emit — one
-# `login<TAB>type` row per +1 reaction.
+# (a gh transport failure). Every entry is a raw API response: `graphql` responses are raw
+# GraphQL JSON piped into the script's real jq filter, and reactions entries are raw REST pages.
+# When the call carries `--jq`, the stub applies the script's OWN `--jq` expression to the entry
+# with the real jq (`-r`, matching gh printing string results raw), so the production transport
+# expression runs; a call without `--jq` serves the raw bytes.
 STUB_BIN="$TMPDIR_TEST/bin"
 mkdir -p "$STUB_BIN"
 cat > "$STUB_BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 set -u
 kind=""
+jq_expr=""
+want_jq=0
 for arg in "$@"; do
+  if [ "$want_jq" -eq 1 ]; then
+    jq_expr="$arg"
+    want_jq=0
+    continue
+  fi
   case "$arg" in
-    graphql) kind="graphql"; break ;;
-    repos/*/reactions) kind="reactions"; break ;;
+    graphql) kind="graphql" ;;
+    repos/*/reactions) kind="reactions" ;;
+    --jq) want_jq=1 ;;
   esac
 done
 [ -n "$kind" ] || { echo "fake gh: unrecognized call: $*" >&2; exit 1; }
@@ -124,9 +139,13 @@ total=$(wc -l < "$seq_file")
 [ "$n" -le "$total" ] || n="$total"
 entry=$(sed -n "${n}p" "$seq_file")
 [ "$entry" != "FAIL" ] || exit 1
-# INVARIANT: gh stdout never carries CR; a core.autocrlf checkout of a .txt fixture would
-# otherwise append CR to the TSV type column and silently fail the Bot-type gate.
-tr -d '\r' < "$entry"
+# INVARIANT: gh stdout never carries CR; a core.autocrlf checkout of a fixture would otherwise
+# carry CR into the bytes the script parses.
+if [ -n "$jq_expr" ]; then
+  tr -d '\r' < "$entry" | jq -r "$jq_expr"
+else
+  tr -d '\r' < "$entry"
+fi
 STUB
 chmod +x "$STUB_BIN/gh"
 
@@ -332,7 +351,7 @@ else
 fi
 
 # ── 4. Codex 👍 present at the first poll emits REVIEWER_APPROVED ────────────────────
-# The reaction (a Bot-typed `chatgpt-codex-connector[bot]` row, the shape gh's --jq emits) is
+# The reaction (a Bot-typed `chatgpt-codex-connector[bot]` +1 in a raw REST page) is
 # present for every poll while the pre-cycle-0 seed state carried none. Legacy arm: the baseline
 # poll's pre-existing-approval special case fires. Seeded arm: false -> true against the seed
 # fires. Either way the FIRST emitted marker is REVIEWER_APPROVED — an approval that lands in the
@@ -579,8 +598,8 @@ else
 fi
 
 # ── 16. a User-typed 👍 NEVER approves ───────────────────────────────────────────────
-# reactions-human.txt carries a User-typed row whose login IS the Codex registry login, plus a
-# User-typed `claude` row. The registry's approver test is Bot-type gated, so neither may approve
+# reactions-human.json carries a User-typed +1 whose login IS the Codex registry login, plus a
+# User-typed `claude` +1. The registry's approver test is Bot-type gated, so neither may approve
 # under `codex-only` OR under `all` — `all` admits every login to the filter, which isolates the
 # approver type gate as the only thing standing between a human 👍 and a terminal `clean`.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
@@ -607,13 +626,16 @@ else
 fi
 
 # ── 17. a Copilot APPROVED review fires under `automated`, NOT under `codex-only` ─────
-# Copilot's registry approval kind is `review-approved`: an APPROVED review by the Bot-typed
-# `copilot-pull-request-reviewer` is the approval signal, no reaction involved. Under `automated`
+# Copilot's registry approval kind is `review-approved`: a `latestReviews` entry in state APPROVED
+# for the Bot-typed `copilot-pull-request-reviewer` is the approval signal, no reaction involved.
+# The derived fixture adds that review to BOTH the `reviews` history and `latestReviews`, as GitHub
+# reports a fresh approval. Under `automated`
 # Copilot is in scope, so the first marker is REVIEWER_APPROVED. Under `codex-only` it is out of
 # scope: the review still moves REVIEWS_TOTAL (CHANGED) but must never approve.
 COPILOT_APPROVED="$(derive_fixture copilot-approved "$PRE" \
   '.data.repository.pullRequest.reviews.totalCount = 2
-   | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011002,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
+   | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011002,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]
+   | .data.repository.pullRequest.latestReviews.nodes += [{"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   automated_seed="$(capture_seed copilotseed-automated initial "$PRE" "$REACT_NONE" automated)"
   st="$(new_state copilot-automated)"
@@ -646,7 +668,8 @@ fi
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   mixed_reviews="$(derive_fixture mixed-reviews "$COPILOT_APPROVED" \
     '.data.repository.pullRequest.reviews.totalCount = 3
-     | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011003,"state":"COMMENTED","author":{"login":"octo-human","__typename":"User"}}]')"
+     | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011003,"state":"COMMENTED","author":{"login":"octo-human","__typename":"User"}}]
+     | .data.repository.pullRequest.latestReviews.nodes += [{"state":"COMMENTED","author":{"login":"octo-human","__typename":"User"}}]')"
   empty_token="$(capture_seed mixed-empty initial "$mixed_reviews" "$REACT_NONE" "")"
   automated_token="$(capture_seed mixed-automated initial "$mixed_reviews" "$REACT_NONE" automated)"
   codexonly_token="$(capture_seed mixed-codexonly initial "$mixed_reviews" "$REACT_NONE" codex-only)"
@@ -670,19 +693,22 @@ else
 fi
 
 # ── 19. a SUPERSEDED Copilot APPROVED review never approves ─────────────────────────
-# Review approval is current state, not history: each approver is judged by its LATEST review.
-# A Copilot APPROVED followed by a later Copilot CHANGES_REQUESTED, COMMENTED, or DISMISSED
-# review must not fire REVIEWER_APPROVED under `automated`, even on an `initial` arm (which
-# surfaces any approval present when the watch starts). The later review still moves the
-# filtered review id, so CHANGED fires. The reverse order (COMMENTED, then a later APPROVED) is
-# the discrimination check: it must still fire, which proves the assertion could pass.
+# Review approval is current state, not history: each approver is judged by its LATEST review,
+# which is the state GitHub reports in its `latestReviews` entry. A Copilot APPROVED followed by a
+# later Copilot CHANGES_REQUESTED, COMMENTED, or DISMISSED review (appended to `reviews`, and the
+# `latestReviews` entry taking that later state) must not fire REVIEWER_APPROVED under
+# `automated`, even on an `initial` arm (which surfaces any approval present when the watch
+# starts). The later review still moves the filtered review id, so CHANGED fires. The reverse
+# order (COMMENTED, then a later APPROVED) is the discrimination check: it must still fire, which
+# proves the assertion could pass.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   stale_ok=1
   stale_detail=""
   for later_state in CHANGES_REQUESTED COMMENTED DISMISSED; do
     stale_fixture="$(derive_fixture "copilot-stale-$later_state" "$COPILOT_APPROVED" \
       ".data.repository.pullRequest.reviews.totalCount = 3
-       | .data.repository.pullRequest.reviews.nodes += [{\"databaseId\":3011009,\"state\":\"$later_state\",\"author\":{\"login\":\"copilot-pull-request-reviewer\",\"__typename\":\"Bot\"}}]")"
+       | .data.repository.pullRequest.reviews.nodes += [{\"databaseId\":3011009,\"state\":\"$later_state\",\"author\":{\"login\":\"copilot-pull-request-reviewer\",\"__typename\":\"Bot\"}}]
+       | .data.repository.pullRequest.latestReviews.nodes |= map(if .author.login == \"copilot-pull-request-reviewer\" then .state = \"$later_state\" else . end)")"
     stale_seed="$(capture_seed "copilotstaleseed-$later_state" initial "$PRE" "$REACT_NONE" automated)"
     st="$(new_state "copilot-stale-$later_state")"
     set_seq "$st" graphql "$PRE" "$stale_fixture"
@@ -699,7 +725,8 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     '.data.repository.pullRequest.reviews.totalCount = 3
      | .data.repository.pullRequest.reviews.nodes += [
          {"databaseId":3011002,"state":"COMMENTED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}},
-         {"databaseId":3011009,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
+         {"databaseId":3011009,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]
+     | .data.repository.pullRequest.latestReviews.nodes += [{"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
   reapproved_seed="$(capture_seed copilotreapprovedseed initial "$PRE" "$REACT_NONE" automated)"
   st="$(new_state copilot-reapproved)"
   set_seq "$st" graphql "$PRE" "$reapproved"
@@ -779,6 +806,123 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "identity:thread-self-keys-on-type" "$SKIP_REASON"
+fi
+
+# ── 22. an approval outside the `reviews` history window still approves ─────────────
+# The poll reads only the last 50 `reviews`; a busy PR pushes an approver's latest review out of
+# that window. `REVIEWS_TOTAL` is 120 and no Copilot review sits in the window, but GitHub's
+# `latestReviews` still reports the Copilot APPROVED. The approval comes from `latestReviews`, so
+# the FIRST marker under `automated` is REVIEWER_APPROVED; an approval rebuilt from the window
+# misses it and the watch idles toward WATCH_TIMEOUT.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  overflow_fixture="$(derive_fixture review-window-overflow "$PRE" \
+    '.data.repository.pullRequest.reviews.totalCount = 120
+     | .data.repository.pullRequest.latestReviews.nodes += [{"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
+  overflow_seed="$(capture_seed overflowseed initial "$PRE" "$REACT_NONE" automated)"
+  st="$(new_state review-window-overflow)"
+  set_seq "$st" graphql "$overflow_fixture"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$overflow_seed" automated)"
+  if [ "$(printf '%s\n' "$out" | head -1)" = "REVIEWER_APPROVED" ]; then
+    pass "approval:review-window-overflow-still-approves" "latestReviews APPROVED outside the 50-review window fired REVIEWER_APPROVED first"
+  else
+    failed "approval:review-window-overflow-still-approves" "expected REVIEWER_APPROVED first, got=$(printf '%s' "$out" | tr '\n' ';') seed=$overflow_seed"
+  fi
+else
+  skipped "approval:review-window-overflow-still-approves" "$SKIP_REASON"
+fi
+
+# ── 23. approval is GitHub's latest review, not the poll's reading of history ─────────
+# The `reviews` window ends in a Copilot APPROVED, but `latestReviews` carries no Copilot entry.
+# The poll never rebuilds the latest review from history, so no REVIEWER_APPROVED fires; the new
+# review still moves the filtered review id and `REVIEWS_TOTAL`, so CHANGED fires.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  history_only_fixture="$(derive_fixture latest-review-not-history "$PRE" \
+    '.data.repository.pullRequest.reviews.totalCount = 2
+     | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011002,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
+  history_only_seed="$(capture_seed historyonlyseed initial "$PRE" "$REACT_NONE" automated)"
+  st="$(new_state latest-review-not-history)"
+  set_seq "$st" graphql "$PRE" "$history_only_fixture"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$history_only_seed" automated)"
+  if ! printf '%s\n' "$out" | grep -qx 'REVIEWER_APPROVED' \
+    && printf '%s\n' "$out" | grep -qx 'CHANGED'; then
+    pass "approval:latest-review-not-history" "history-only Copilot APPROVED fired CHANGED, never REVIEWER_APPROVED"
+  else
+    failed "approval:latest-review-not-history" "expected CHANGED without REVIEWER_APPROVED, got=$(printf '%s' "$out" | tr '\n' ';') seed=$history_only_seed"
+  fi
+else
+  skipped "approval:latest-review-not-history" "$SKIP_REASON"
+fi
+
+# ── 24. a User-typed APPROVED review NEVER approves ──────────────────────────────────
+# A User-typed account whose login IS the Copilot registry login submits an APPROVED review that
+# is its latest. Under `all` every login passes the filter, which isolates the approver's Bot-type
+# gate as the only thing standing between that human review and a terminal `clean`. The review
+# moves `REVIEWS_TOTAL`, so CHANGED fires.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  user_review_fixture="$(derive_fixture user-typed-review "$PRE" \
+    '.data.repository.pullRequest.reviews.totalCount = 2
+     | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011002,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"User"}}]
+     | .data.repository.pullRequest.latestReviews.nodes += [{"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"User"}}]')"
+  user_review_seed="$(capture_seed userreviewseed initial "$PRE" "$REACT_NONE" all)"
+  st="$(new_state user-typed-review)"
+  set_seq "$st" graphql "$PRE" "$user_review_fixture"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$user_review_seed" all)"
+  if ! printf '%s\n' "$out" | grep -qx 'REVIEWER_APPROVED' \
+    && printf '%s\n' "$out" | grep -qx 'CHANGED'; then
+    pass "approval:user-typed-review-never-approves" "User-typed APPROVED latest review under all fired CHANGED, never REVIEWER_APPROVED"
+  else
+    failed "approval:user-typed-review-never-approves" "expected CHANGED without REVIEWER_APPROVED, got=$(printf '%s' "$out" | tr '\n' ';') seed=$user_review_seed"
+  fi
+else
+  skipped "approval:user-typed-review-never-approves" "$SKIP_REASON"
+fi
+
+# ── 25. a reaction login cannot forge the account type ───────────────────────────────
+# reactions-forged.json carries one User-typed +1 whose login is the Codex bot login followed by a
+# TAB and `Bot`. A transport that joins login and type with a delimiter and splits them again
+# reads that row as a Bot-typed Codex approval. The transport carries each row as a JSON object,
+# so the login stays one value and the type stays User: no approval under `codex-only` OR `all`.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  forged_ok=1
+  forged_detail=""
+  for forged_filter in codex-only all; do
+    forged_seed="$(capture_seed "forgedseed-$forged_filter" initial "$PRE" "$REACT_NONE" "$forged_filter")"
+    st="$(new_state "forgedpoll-$forged_filter")"
+    set_seq "$st" graphql "$PRE"
+    set_seq "$st" reactions "$REACT_FORGED"
+    out="$(arm_poll "$st" "$forged_seed" "$forged_filter")"
+    if [ "$out" != "WATCH_TIMEOUT" ]; then
+      forged_ok=0
+      forged_detail="$forged_detail filter=$forged_filter got=$(printf '%s' "$out" | tr '\n' ';') seed=$forged_seed"
+    fi
+  done
+  if [ "$forged_ok" -eq 1 ]; then
+    pass "approval:reaction-login-cannot-forge-type" "delimiter-forged login stayed silent under codex-only and all"
+  else
+    failed "approval:reaction-login-cannot-forge-type" "$forged_detail"
+  fi
+else
+  skipped "approval:reaction-login-cannot-forge-type" "$SKIP_REASON"
+fi
+
+# ── 26. a non-+1 reaction from the approver NEVER approves ───────────────────────────
+# reactions-codex-eyes.json carries one Bot-typed Codex `eyes` reaction. Only a +1 is the Codex
+# approval signal, so the poll idles to WATCH_TIMEOUT.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  st="$(new_state codex-eyes)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_CODEX_EYES"
+  out="$(arm_poll "$st" "$SEED")"
+  if [ "$out" = "WATCH_TIMEOUT" ]; then
+    pass "approval:eyes-reaction-never-approves" "Bot-typed Codex eyes reaction stayed silent"
+  else
+    failed "approval:eyes-reaction-never-approves" "expected only WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+else
+  skipped "approval:eyes-reaction-never-approves" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

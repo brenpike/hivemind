@@ -66,7 +66,8 @@
 # 4. APPROVAL KINDS (`approval_kinds`, closed enum)
 # -------------------------------------------------
 #   "pr-reaction-thumbs-up"  a +1 reaction on the PR object itself (Codex).
-#   "review-approved"        a submitted review with state APPROVED (Copilot).
+#   "review-approved"        an approver's latest submitted review (GitHub
+#                            `latestReviews`) has state APPROVED (Copilot).
 # A kind outside this enum (including null) never identifies an approver.
 #
 # 5. FILTER MODES (`reviewer_matches_filter` $filter values)

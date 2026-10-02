@@ -17,6 +17,11 @@
             { "databaseId": 3011002, "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" } }
           ]
         },
+        "latestReviews": {
+          "nodes": [
+            { "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" } }
+          ]
+        },
         "reviewThreads": {
           "totalCount": 2,
           "nodes": [

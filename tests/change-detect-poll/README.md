@@ -21,17 +21,34 @@ each scalar class (`LATEST_NONSELF_ISSUE_COMMENT_ID`, a `*_TOTAL` tripwire alone
 
 Every login, filter, and approver decision the poll makes is delegated to the shared
 `reviewer-identity.jq` registry module. The poll's `approval` scalar is true on EITHER a 👍
-reaction from a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR an `APPROVED` review
-from a Bot-typed `review-approved` member (Copilot), both scoped by the active reviewer filter, and
-an approval edge surfaces as the `REVIEWER_APPROVED` marker. The suite pins:
+reaction from a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-typed
+`review-approved` member (Copilot) whose latest review is `APPROVED`, both scoped by the active
+reviewer filter, and an approval edge surfaces as the `REVIEWER_APPROVED` marker. The latest
+review is the one GitHub reports per author in `latestReviews`, never one rebuilt from the bounded
+`reviews` history window. The suite pins:
 
 - `approval:thumbs-up-on-first-poll` — a Bot-typed Codex 👍 row fires `REVIEWER_APPROVED` first.
 - `approval:user-thumbs-up-never-approves` — User-typed 👍 rows (one carrying the Codex registry
   login itself) never approve, under `codex-only` OR `all`; `all` admits every login to the
   filter, so the approver's Bot-type gate is the only thing under test.
-- `approval:copilot-review-scoped-by-filter` — a Copilot `APPROVED` review fires
+- `approval:reaction-login-cannot-forge-type` — a User-typed 👍 whose login is the Codex bot login
+  followed by a TAB and `Bot` never approves, under `codex-only` OR `all`. Reaction rows travel as
+  JSON objects, so no login byte can be read as a field boundary.
+- `approval:eyes-reaction-never-approves` — a Bot-typed Codex `eyes` reaction never approves; only
+  a +1 is the Codex approval signal.
+- `approval:copilot-review-scoped-by-filter` — a Copilot `APPROVED` latest review fires
   `REVIEWER_APPROVED` first under `automated`, and only `CHANGED` (never an approval) under
   `codex-only`.
+- `approval:superseded-review-never-approves` — a Copilot `latestReviews` entry in state
+  `CHANGES_REQUESTED`, `COMMENTED`, or `DISMISSED` after an earlier `APPROVED` never approves and
+  fires `CHANGED`; a latest `APPROVED` after an earlier `COMMENTED` still fires.
+- `approval:review-window-overflow-still-approves` — with `REVIEWS_TOTAL` at 120 and no Copilot
+  review inside the 50-review window, a Copilot `APPROVED` in `latestReviews` still fires
+  `REVIEWER_APPROVED` first under `automated`.
+- `approval:latest-review-not-history` — a Copilot `APPROVED` that is the latest Copilot review in
+  the `reviews` window, with no Copilot `latestReviews` entry, never approves and fires `CHANGED`.
+- `approval:user-typed-review-never-approves` — a User-typed `APPROVED` latest review under the
+  Copilot registry login never approves under `all`, and fires `CHANGED`.
 - `filter:empty-slot-is-automated` — over one mixed review state, the seed token captured with an
   empty filter slot equals the `automated` token and differs from both the `codex-only` and `all`
   tokens; an empty-slot arm fires `REVIEWER_APPROVED` on the Copilot approval.
@@ -75,7 +92,7 @@ to carry. Two halves close the class rather than the instance, and the suite hol
 bash tools/test_change_detect_poll.sh
 ```
 
-Offline — bash + `jq` only, no `gh`, no network, ~20s. A PATH-shim fake `gh` serves canned
+Offline — bash + `jq` only, no `gh`, no network, ~100s. A PATH-shim fake `gh` serves canned
 fixture bytes while the REAL `jq` runs the script's REAL filters, so the snapshot derivation
 under test is the production one and only the transport is faked.
 
@@ -103,21 +120,29 @@ a snapshot that cannot be captured, or one given a missing or unknown arm kind, 
 
 | File | Role |
 | --- | --- |
-| `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (two User-typed self issue comments, one Bot-typed Codex review, one Bot-typed Codex thread, checks green). |
+| `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (two User-typed self issue comments, one Bot-typed Codex review and its `COMMENTED` `latestReviews` entry, one Bot-typed Codex thread, checks green). |
 | `graphql-blind-window.json` | State B — A plus the Codex review + review-thread comment posted during the blind window. |
 | `graphql-malformed.json` | A GraphQL `NOT_FOUND` error response (null `pullRequest`) that makes the snapshot pipeline fail. |
-| `reactions-none.txt` | Reactions call stdout with no 👍 (empty, exactly as `gh` emits). |
-| `reactions-codex.txt` | Reactions call stdout with one Bot-typed Codex 👍 row (`chatgpt-codex-connector[bot]<TAB>Bot`). |
-| `reactions-human.txt` | Reactions call stdout with two User-typed 👍 rows (`chatgpt-codex-connector<TAB>User`, `claude<TAB>User`) that must never approve. |
+| `reactions-none.json` | Raw REST reactions page with no reaction (`[]`). |
+| `reactions-codex.json` | Raw REST reactions page with one +1 from the Bot-typed `chatgpt-codex-connector[bot]`. |
+| `reactions-human.json` | Raw REST reactions page with two User-typed +1s (`chatgpt-codex-connector`, `claude`) that must never approve. |
+| `reactions-forged.json` | Raw REST reactions page with one User-typed +1 whose login is `chatgpt-codex-connector[bot]`, a TAB, and `Bot`; it must never approve. |
+| `reactions-codex-eyes.json` | Raw REST reactions page with one `eyes` reaction from the Bot-typed `chatgpt-codex-connector[bot]`; it must never approve. |
 
 The `graphql-*.json` files are whole GraphQL responses shaped to the script's own query; every
 author (issue comments, reviews, and review-thread comments) carries `__typename` (`Bot` for
 automated reviewers, `User` for humans and the self login) because every author selection requests
-it and the registry's self, filter, and approver tests are all type-gated. The Copilot
-`APPROVED` and mixed-review states are derived in the runner rather than committed. The
-`reactions-*.txt` files are the POST-`--jq` stdout `gh` itself emits — one `login<TAB>type` row
-per 👍 reaction — so the fixture stands where its output does. The fake `gh` strips CR when
-serving, so a `core.autocrlf` checkout of a `.txt` fixture cannot corrupt the type column.
+it and the registry's self, filter, and approver tests are all type-gated. Every
+`graphql-*.json` state other than the malformed one carries a `latestReviews` connection, because
+the poll reads review approval from it and a missing connection fails the capture. The Copilot
+`APPROVED`, superseded, window-overflow, and mixed-review states are derived in the runner rather
+than committed; each adds its Copilot review to `reviews` and, where GitHub would report it as
+that author's latest, to `latestReviews`. The `reactions-*.json` files are raw REST reactions
+pages, the bytes the API returns before `gh` applies `--jq`. The fake `gh` reads the script's
+own `--jq` argument and applies it to the page with the real `jq -r`, so the production transport
+expression runs under test; a call without `--jq` (the GraphQL query) is served raw. The fake
+`gh` strips CR when serving, so a `core.autocrlf` checkout of a fixture cannot carry CR into the
+parsed bytes.
 
 ## Adding a case
 

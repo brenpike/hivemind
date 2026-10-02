@@ -15,9 +15,11 @@
 #     50; a CI `FAILED_CHECKS` scalar that counts only checks in a failed/
 #     errored state, so CI regressions wake the reviewer even when no new review
 #     comment was posted) plus ONE automated-reviewer APPROVAL bool (a
-#     `review-approved` reviewer whose LATEST review is APPROVED, OR a 👍 reaction on the
-#     PR from a `pr-reaction-thumbs-up` reviewer via paginated REST reactions;
-#     both scoped by the active reviewer filter). No bodies, no cursor walks —
+#     `review-approved` reviewer whose LATEST review is APPROVED, read from
+#     GitHub's per-author `latestReviews` and never rebuilt from review history,
+#     OR a 👍 reaction on the PR from a `pr-reaction-thumbs-up` reviewer via
+#     paginated REST reactions; both scoped by the active reviewer filter).
+#     No bodies, no cursor walks —
 #     the poll only answers "did anything change?" and "is the PR terminal?".
 #   - Every reviewer IDENTITY decision (self identity, login normalization,
 #     filter scope, approver membership) is delegated to the sibling jq module
@@ -359,12 +361,13 @@ fail_count=0
 
 # compute_snapshot: fills the global scalar variables from ONE non-paginated
 # GraphQL query (PR state + last 50 issue-comment databaseIds + last 50 review
-# databaseIds with state and author + last 50 reviewThreads with their last
-# comment databaseId and author + the totalCount of each of those three
-# connections + the `statusCheckRollup` contexts so a `FAILED_CHECKS` scalar
-# can be derived) plus a paginated REST reactions read, folded into ONE in-scope
-# approval bool (an approver's LATEST review APPROVED, OR PR 👍, each from its
-# registry approver kind).
+# databaseIds with state and author + up to 100 per-author latest reviews
+# (`latestReviews`) with state and author + last 50 reviewThreads with their
+# last comment databaseId and author + the totalCount of the comments, reviews,
+# and reviewThreads connections + the `statusCheckRollup` contexts so a
+# `FAILED_CHECKS` scalar can be derived) plus a paginated REST reactions read,
+# folded into ONE in-scope approval bool (an approver's LATEST review APPROVED,
+# OR PR 👍, each from its registry approver kind).
 # Returns 0 on success, non-zero on failure of the query, the reactions call, or
 # either identity jq evaluation.
 # Each id token is a single max-databaseId across the author-filtered stream —
@@ -401,6 +404,9 @@ query($owner: String!, $repo: String!, $pr: Int!) {
         totalCount
         nodes { databaseId state author { login __typename } }
       }
+      latestReviews(first: 100) {
+        nodes { state author { login __typename } }
+      }
       reviewThreads(first: 50) {
         totalCount
         nodes {
@@ -430,16 +436,18 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       | map(select(reviewer_matches_filter(.author.login; .author.__typename; $login; $filter)))
       | map(.databaseId)
       | (if length == 0 then "NONE" else max | tostring end)) as $filtered_review |
-    # Review approval is CURRENT state, not history: each in-scope approver is
-    # judged by its LATEST submitted review (max databaseId), so a stale APPROVED
-    # superseded by a later review from the same approver never counts.
-    ($pr.reviews.nodes
-      | map(select(.state as $s | ["CHANGES_REQUESTED","COMMENTED","APPROVED","DISMISSED"] | index($s)))
-      | map(select(
-          reviewer_is_approver(.author.login; .author.__typename; "review-approved")
-          and reviewer_matches_filter(.author.login; .author.__typename; $login; $filter)))
-      | group_by(strip_bot(.author.login))
-      | any(.[]; (max_by(.databaseId) | .state) == "APPROVED")) as $review_approved |
+    # Review approval is CURRENT state read from GitHub, never rebuilt from
+    # review history: `latestReviews` holds the latest submitted review of each
+    # author, so a later COMMENTED, CHANGES_REQUESTED, or DISMISSED review from
+    # the same approver supersedes an earlier APPROVED. The connection is
+    # bounded at 100 authors: a verdict visible in it is authoritative, and an
+    # approver whose entry falls past the bound reads as not-approved. A null
+    # or missing connection fails the capture (no `// []`).
+    ($pr.latestReviews.nodes
+      | any(.[];
+          .state == "APPROVED"
+          and reviewer_is_approver(.author.login; .author.__typename; "review-approved")
+          and reviewer_matches_filter(.author.login; .author.__typename; $login; $filter))) as $review_approved |
     ($pr.reviewThreads.nodes
       | map(.comments.nodes[]?)
       | map(select(is_self(.author.login; .author.__typename; $login) | not))
@@ -499,22 +507,24 @@ $raw
 EOF
 
   # PR 👍 via the paginated REST reactions endpoint. The gh --jq filter is pure
-  # TRANSPORT: it emits one `login<TAB>type` row per +1 reaction and makes NO
-  # identity decision (gh may apply --jq per page, so rows concatenate across
-  # pages). The identity decision runs locally over all rows at once, through
-  # the module, so the 100-node GraphQL blind spot and the per-page slurp pitfall
-  # are both avoided.
+  # TRANSPORT: it emits one JSON object `{login, type}` per +1 reaction and
+  # makes NO identity decision (gh may apply --jq per page, so rows concatenate
+  # across pages). Each row is `tojson`-encoded because gh prints a string
+  # result raw and uncolored, one per line; the local jq parses the rows back
+  # as JSON values, so no login byte can be read as a field boundary. The
+  # identity decision runs locally over all rows at once, through the module,
+  # so the 100-node GraphQL blind spot and the per-page slurp pitfall are both
+  # avoided. Empty input slurps to `[]` (no approval); a row that is not JSON
+  # is a jq error and fails the capture.
   reaction_rows=$("${GH_TIMEOUT[@]}" gh api --paginate "repos/$OWNER/$REPO/issues/$PR_NUMBER/reactions" \
-    --jq '.[] | select(.content == "+1") | "\(.user.login // "")\t\(.user.type // "")"' \
+    --jq '.[] | select(.content == "+1") | {login: .user.login, type: .user.type} | tojson' \
     2>/dev/null) || return 1
   thumbs_approved=$(printf '%s' "$reaction_rows" \
-    | jq -R -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
+    | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
       include "reviewer-identity";
-      split("\n")
-      | map(select(length > 0) | split("\t"))
-      | any(.[];
-          reviewer_is_approver(.[0]; .[1]; "pr-reaction-thumbs-up")
-          and reviewer_matches_filter(.[0]; .[1]; $login; $filter))
+      any(.[];
+          reviewer_is_approver(.login; .type; "pr-reaction-thumbs-up")
+          and reviewer_matches_filter(.login; .type; $login; $filter))
     ' 2>/dev/null) || return 1
 
   case "$review_approved" in true|false) ;; *) return 1 ;; esac
