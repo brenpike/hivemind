@@ -25,7 +25,9 @@ reaction from a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR a B
 `review-approved` member (Copilot) whose latest review is `APPROVED`, both scoped by the active
 reviewer filter, and an approval edge surfaces as the `REVIEWER_APPROVED` marker. The latest
 review is the one GitHub reports per author in `latestReviews`, never one rebuilt from the bounded
-`reviews` history window. The suite pins:
+`reviews` history window, and it is read by an exhaustive paginated walk in a query of its own:
+`first: 100` is the page size, not a bound, and a walk that fails on any page fails the capture.
+The suite pins:
 
 - `approval:thumbs-up-on-first-poll` — a Bot-typed Codex 👍 row fires `REVIEWER_APPROVED` first.
 - `approval:user-thumbs-up-never-approves` — User-typed 👍 rows (one carrying the Codex registry
@@ -49,6 +51,14 @@ review is the one GitHub reports per author in `latestReviews`, never one rebuil
   the `reviews` window, with no Copilot `latestReviews` entry, never approves and fires `CHANGED`.
 - `approval:user-typed-review-never-approves` — a User-typed `APPROVED` latest review under the
   Copilot registry login never approves under `all`, and fires `CHANGED`.
+- `approval:latest-reviews-every-page-read` — a Copilot `APPROVED` on the LAST page of a 2-page and
+  a 3-page `latestReviews` walk, behind 100 / 200 distinct User-typed `COMMENTED` authors, fires
+  `REVIEWER_APPROVED` first under `automated`; the snapshot query's own `latestReviews` holds
+  exactly page 1, so a read bounded to one page idles to `WATCH_TIMEOUT`. The same walks ending in
+  a Copilot `COMMENTED` review stay silent to `WATCH_TIMEOUT` (discrimination).
+- `approval:latest-reviews-partial-walk-fails-closed` — a walk whose page 1 reports
+  `hasNextPage` true and whose next page fails is `SNAPSHOT_ERROR`, exit 1, in snapshot mode and
+  `POLL_ERROR`, exit 1, in poll mode; no approval verdict is drawn from a partial walk.
 - `filter:empty-slot-is-automated` — over one mixed review state, the seed token captured with an
   empty filter slot equals the `automated` token and differs from both the `codex-only` and `all`
   tokens; an empty-slot arm fires `REVIEWER_APPROVED` on the Copilot approval.
@@ -92,7 +102,7 @@ to carry. Two halves close the class rather than the instance, and the suite hol
 bash tools/test_change_detect_poll.sh
 ```
 
-Offline — bash + `jq` only, no `gh`, no network, ~100s. A PATH-shim fake `gh` serves canned
+Offline — bash + `jq` only, no `gh`, no network, ~130s. A PATH-shim fake `gh` serves canned
 fixture bytes while the REAL `jq` runs the script's REAL filters, so the snapshot derivation
 under test is the production one and only the transport is faked.
 
@@ -137,20 +147,37 @@ it and the registry's self, filter, and approver tests are all type-gated. Every
 the poll reads review approval from it and a missing connection fails the capture. The Copilot
 `APPROVED`, superseded, window-overflow, and mixed-review states are derived in the runner rather
 than committed; each adds its Copilot review to `reviews` and, where GitHub would report it as
-that author's latest, to `latestReviews`. The `reactions-*.json` files are raw REST reactions
-pages, the bytes the API returns before `gh` applies `--jq`. The fake `gh` reads the script's
-own `--jq` argument and applies it to the page with the real `jq -r`, so the production transport
-expression runs under test; a call without `--jq` (the GraphQL query) is served raw. The fake
-`gh` strips CR when serving, so a `core.autocrlf` checkout of a fixture cannot carry CR into the
-parsed bytes.
+that author's latest, to `latestReviews`. The multi-page `latestReviews` walks are generated in
+the runner (`review_page`, `review_pages`, `review_walk`) rather than committed. The
+`reactions-*.json` files are raw REST reactions pages, the bytes the API returns before `gh`
+applies `--jq`. The fake `gh` reads the script's own `--jq` argument and applies it to each
+served page with the real `jq -r`, so the production transport expression runs under test; a jq
+error on any page exits non-zero, and a call without `--jq` (the snapshot GraphQL query) is
+served raw. The fake `gh` strips CR when serving, so a `core.autocrlf` checkout of a fixture
+cannot carry CR into the parsed bytes.
+
+The fake `gh` routes three call kinds: `graphql` (the snapshot query), `latestreviews` (a
+`graphql` call carrying `--paginate`, the approval walk), and `reactions`. With no
+`latestreviews` sequence set, a `latestreviews` call mirrors the `graphql` sequence entry at its
+OWN call counter, so every committed state fixture serves both calls and the existing cases need
+no walk of their own. Caveat: the two counters advance independently, so a case whose `graphql`
+sequence has a `FAIL` or malformed entry before a good one desynchronises the mirror and must set
+its own `latestreviews` sequence. A sequence entry ending `.pages` is a paginated walk: a file
+listing one page path per line, served in order as one call; a `FAIL` line exits non-zero after
+the earlier pages are printed. The fake `gh` serves pages after the first ONLY when the
+whitespace-normalized query declares `$endCursor: String`, passes `after: $endCursor`, and
+selects `pageInfo { hasNextPage endCursor }` — otherwise page 1 alone, as real `gh` returns for a
+query it cannot walk — so the GraphQL pagination contract is enforced behaviourally.
 
 ## Adding a case
 
 1. Reuse a committed fixture, or derive a variant in the runner with `derive_fixture <name>
    <base> <jq-program>` — one fixture file per scalar class is not worth the churn.
 2. `st="$(new_state <name>)"`, then `set_seq "$st" graphql <entry>...` and
-   `set_seq "$st" reactions <entry>...`. Call N serves line N, clamping to the last line, so one
-   entry means a steady state. The literal entry `FAIL` makes that call exit non-zero.
+   `set_seq "$st" reactions <entry>...` (plus `set_seq "$st" latestreviews <entry>...` when the
+   approval walk must differ from the mirrored `graphql` entry). Call N serves line N, clamping to
+   the last line, so one entry means a steady state. The literal entry `FAIL` makes that call exit
+   non-zero.
 3. Drive it with `arm_poll "$st" "$SEED" [filter]` (`$SEED` is empty when the probe found no seed
    support, which selects the legacy form; `[filter]` defaults to `codex-only` when omitted, and an
    explicit `""` passes an empty filter slot) and assert with `pass` / `failed`. Cases that exercise

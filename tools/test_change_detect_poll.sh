@@ -50,9 +50,12 @@
 # a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-typed `review-approved`
 # member (Copilot) whose latest review, as GitHub's per-author `latestReviews` reports it, is
 # APPROVED, both scoped by the active filter, and surfaces as `REVIEWER_APPROVED`. The approval is
-# read from `latestReviews`, never rebuilt from the bounded `reviews` history window. Reactions
-# travel as one JSON object per +1 row, so a login carrying a delimiter byte cannot forge the
-# account type. An empty filter slot defaults to `automated`.
+# read from `latestReviews`, never rebuilt from the bounded `reviews` history window, by an
+# exhaustive paginated walk in its own query: `first: 100` is the page size, not a bound, and a
+# walk that fails on any page fails the capture. The fake gh models gh's GraphQL pagination
+# contract, so a walk that stops at page 1 or judges a partial walk goes red. Reactions and
+# latest-review rows travel as one JSON object per row, so a login carrying a delimiter byte
+# cannot forge the account type. An empty filter slot defaults to `automated`.
 #
 # Usage:
 #   ./tools/test_change_detect_poll.sh
@@ -104,17 +107,37 @@ REACT_CODEX_EYES="$FIXTURES/reactions-codex-eyes.json"
 # state can be served indefinitely. The literal entry `FAIL` makes the call exit non-zero
 # (a gh transport failure). Every entry is a raw API response: `graphql` responses are raw
 # GraphQL JSON piped into the script's real jq filter, and reactions entries are raw REST pages.
-# When the call carries `--jq`, the stub applies the script's OWN `--jq` expression to the entry
-# with the real jq (`-r`, matching gh printing string results raw), so the production transport
-# expression runs; a call without `--jq` serves the raw bytes.
+# When the call carries `--jq`, the stub applies the script's OWN `--jq` expression to each
+# served page with the real jq (`-r`, matching gh printing string results raw), so the
+# production transport expression runs; a jq error on any page exits non-zero, and a call
+# without `--jq` serves the raw bytes.
+#
+# Call kinds: `reactions` (the REST reactions path), `latestreviews` (a `graphql` call carrying
+# `--paginate`, the paginated per-author latest-reviews walk), and `graphql` (the snapshot query).
+# With no `latestreviews.seq`, a `latestreviews` call MIRRORS the `graphql.seq` entry at its OWN
+# counter, so every committed state fixture (each carries a `latestReviews` connection) serves both
+# calls. Caveat: the two counters advance independently, so a sequence whose `graphql` call fails
+# mid-sequence (a `FAIL` or malformed entry before a good one) desynchronises the mirror; such a
+# case sets its own `latestreviews.seq`.
+#
+# A sequence entry ending `.pages` is a paginated walk: a file listing one page path per line,
+# served in order as one paginated call. A `FAIL` line exits non-zero after printing the earlier
+# pages (a later page failing mid-walk). Pages after the first are served ONLY when the
+# whitespace-normalized query declares `$endCursor: String`, passes `after: $endCursor`, and
+# selects `pageInfo { hasNextPage endCursor }`; otherwise only page 1 is served, as real gh
+# returns a single page for a query it cannot walk.
 STUB_BIN="$TMPDIR_TEST/bin"
 mkdir -p "$STUB_BIN"
 cat > "$STUB_BIN/gh" <<'STUB'
 #!/usr/bin/env bash
 set -u
+set -o pipefail
 kind=""
 jq_expr=""
+query_text=""
 want_jq=0
+saw_graphql=0
+saw_paginate=0
 for arg in "$@"; do
   if [ "$want_jq" -eq 1 ]; then
     jq_expr="$arg"
@@ -122,15 +145,24 @@ for arg in "$@"; do
     continue
   fi
   case "$arg" in
-    graphql) kind="graphql" ;;
+    graphql) saw_graphql=1 ;;
     repos/*/reactions) kind="reactions" ;;
+    --paginate) saw_paginate=1 ;;
     --jq) want_jq=1 ;;
+    query=*) query_text="${arg#query=}" ;;
   esac
 done
+if [ -z "$kind" ] && [ "$saw_graphql" -eq 1 ]; then
+  kind="graphql"
+  [ "$saw_paginate" -eq 0 ] || kind="latestreviews"
+fi
 [ -n "$kind" ] || { echo "fake gh: unrecognized call: $*" >&2; exit 1; }
 [ -n "${FAKE_GH_STATE_DIR:-}" ] || { echo "fake gh: FAKE_GH_STATE_DIR unset" >&2; exit 1; }
 seq_file="$FAKE_GH_STATE_DIR/$kind.seq"
 n_file="$FAKE_GH_STATE_DIR/$kind.n"
+if [ "$kind" = "latestreviews" ] && [ ! -f "$seq_file" ]; then
+  seq_file="$FAKE_GH_STATE_DIR/graphql.seq"
+fi
 [ -f "$seq_file" ] || { echo "fake gh: no sequence for $kind" >&2; exit 1; }
 n=$(cat "$n_file" 2>/dev/null || printf '0')
 n=$((n + 1))
@@ -139,13 +171,45 @@ total=$(wc -l < "$seq_file")
 [ "$n" -le "$total" ] || n="$total"
 entry=$(sed -n "${n}p" "$seq_file")
 [ "$entry" != "FAIL" ] || exit 1
+
+# serve_page <path>: one page of the response.
 # INVARIANT: gh stdout never carries CR; a core.autocrlf checkout of a fixture would otherwise
 # carry CR into the bytes the script parses.
-if [ -n "$jq_expr" ]; then
-  tr -d '\r' < "$entry" | jq -r "$jq_expr"
-else
-  tr -d '\r' < "$entry"
-fi
+serve_page() {
+  if [ -n "$jq_expr" ]; then
+    tr -d '\r' < "$1" | jq -r "$jq_expr"
+  else
+    tr -d '\r' < "$1"
+  fi
+}
+
+# query_walks_pages: 0 when the whitespace-normalized query carries the full GraphQL cursor
+# contract gh --paginate needs to request a page after the first.
+query_walks_pages() {
+  local norm_query
+  norm_query=$(printf '%s' "$query_text" | tr -s '[:space:]' ' ')
+  case "$norm_query" in *'$endCursor: String'*) ;; *) return 1 ;; esac
+  case "$norm_query" in *'after: $endCursor'*) ;; *) return 1 ;; esac
+  case "$norm_query" in *'pageInfo { hasNextPage endCursor }'*) ;; *) return 1 ;; esac
+  return 0
+}
+
+case "$entry" in
+  *.pages) ;;
+  *) serve_page "$entry" || exit 1; exit 0 ;;
+esac
+page_number=0
+while IFS= read -r page || [ -n "$page" ]; do
+  page="${page%$'\r'}"
+  [ -n "$page" ] || continue
+  page_number=$((page_number + 1))
+  if [ "$page_number" -gt 1 ]; then
+    [ "$saw_paginate" -eq 1 ] && query_walks_pages || exit 0
+  fi
+  [ "$page" != "FAIL" ] || exit 1
+  serve_page "$page" || exit 1
+done < "$entry"
+exit 0
 STUB
 chmod +x "$STUB_BIN/gh"
 
@@ -154,11 +218,12 @@ new_state() {
   local dir="$TMPDIR_TEST/state-$1"
   mkdir -p "$dir"
   printf '0' > "$dir/graphql.n"
+  printf '0' > "$dir/latestreviews.n"
   printf '0' > "$dir/reactions.n"
   printf '%s' "$dir"
 }
 
-# set_seq <state_dir> <graphql|reactions> <entry>...: the per-call fixture sequence.
+# set_seq <state_dir> <graphql|latestreviews|reactions> <entry>...: the per-call fixture sequence.
 set_seq() {
   local dir="$1" kind="$2"
   shift 2
@@ -171,6 +236,46 @@ derive_fixture() {
   local out="$TMPDIR_TEST/$1.json"
   jq "$3" "$2" > "$out" || return 1
   printf '%s' "$out"
+}
+
+# review_page <name> <first_user> <user_count> <has_next> [last_state]: one raw `latestReviews`
+# GraphQL page holding <user_count> distinct User-typed COMMENTED authors numbered from
+# <first_user>, followed, when <last_state> is given, by a Bot-typed Copilot review in that state.
+review_page() {
+  local out="$TMPDIR_TEST/$1.json"
+  jq -n --argjson first "$2" --argjson count "$3" --argjson next "$4" --arg last "${5:-}" '
+    {data: {repository: {pullRequest: {latestReviews: {
+      pageInfo: {hasNextPage: $next, endCursor: (if $next then "cursor-\($first + $count)" else null end)},
+      nodes: ([range($first; $first + $count)
+                | {state: "COMMENTED", author: {login: "octo-user-\(.)", __typename: "User"}}]
+              + (if $last == "" then []
+                 else [{state: $last, author: {login: "copilot-pull-request-reviewer", __typename: "Bot"}}]
+                 end))}}}}}' > "$out" || return 1
+  printf '%s' "$out"
+}
+
+# review_pages <name> <page>...: a `.pages` sequence entry listing one page path (or `FAIL`) per
+# line, served by the fake gh as one paginated walk.
+review_pages() {
+  local out="$TMPDIR_TEST/$1.pages"
+  shift
+  printf '%s\n' "$@" > "$out"
+  printf '%s' "$out"
+}
+
+# review_walk <name> <page_count> <last_state>: a `.pages` walk whose every page but the last
+# holds 100 distinct User-typed COMMENTED authors (hasNextPage true) and whose last page holds
+# only the Copilot review in <last_state> (hasNextPage false).
+review_walk() {
+  local name="$1" page_count="$2" last_state="$3" page_index page
+  local -a walk_pages=()
+  for ((page_index = 1; page_index < page_count; page_index++)); do
+    page="$(review_page "$name-$page_index" $(((page_index - 1) * 100)) 100 true)" || return 1
+    walk_pages+=("$page")
+  done
+  page="$(review_page "$name-$page_count" $(((page_count - 1) * 100)) 0 false "$last_state")" || return 1
+  walk_pages+=("$page")
+  review_pages "$name" "${walk_pages[@]}"
 }
 
 # run_poll <state_dir> <arg>...: the script under test with the fake gh on PATH. Only stdout is
@@ -923,6 +1028,87 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "approval:eyes-reaction-never-approves" "$SKIP_REASON"
+fi
+
+# ── 27. the approval read walks EVERY latestReviews page ─────────────────────────────
+# A Bot-typed Copilot APPROVED sits on the LAST page of a 2-page and a 3-page `latestReviews`
+# walk, behind 100 / 200 distinct User-typed COMMENTED authors. The snapshot query's own
+# `latestReviews` holds exactly page 1, so a read bounded to one 100-author page finds no approval
+# and idles to WATCH_TIMEOUT. The approval read is an exhaustive paginated walk, so the FIRST
+# marker under `automated` is REVIEWER_APPROVED. Discrimination: the same walks ending in a
+# Copilot COMMENTED review idle to WATCH_TIMEOUT, which proves the assertion could pass.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  walk_ok=1
+  walk_detail=""
+  walk_head="$(review_page walk-head 0 100 true)"
+  walk_main="$(derive_fixture walk-main "$PRE" \
+    ".data.repository.pullRequest.latestReviews.nodes = $(jq -c '.data.repository.pullRequest.latestReviews.nodes' "$walk_head")")"
+  walk_seed="$(capture_seed walkseed initial "$PRE" "$REACT_NONE" automated)"
+  for walk_page_count in 2 3; do
+    for walk_last_state in APPROVED COMMENTED; do
+      walk_entry="$(review_walk "walk-$walk_page_count-$walk_last_state" "$walk_page_count" "$walk_last_state")"
+      st="$(new_state "walk-$walk_page_count-$walk_last_state")"
+      set_seq "$st" graphql "$walk_main"
+      set_seq "$st" latestreviews "$walk_entry"
+      set_seq "$st" reactions "$REACT_NONE"
+      out="$(arm_poll "$st" "$walk_seed" automated)"
+      if [ "$walk_last_state" = "APPROVED" ]; then
+        [ "$(printf '%s\n' "$out" | head -1)" = "REVIEWER_APPROVED" ] || walk_ok=0
+      else
+        [ "$out" = "WATCH_TIMEOUT" ] || walk_ok=0
+      fi
+      walk_detail="$walk_detail pages=$walk_page_count last=$walk_last_state got=$(printf '%s' "$out" | tr '\n' ';')"
+    done
+  done
+  if [ "$walk_ok" -eq 1 ]; then
+    pass "approval:latest-reviews-every-page-read" "last-page Copilot APPROVED fired REVIEWER_APPROVED first on 2- and 3-page walks; last-page COMMENTED stayed silent"
+  else
+    failed "approval:latest-reviews-every-page-read" "$walk_detail seed=$walk_seed"
+  fi
+else
+  skipped "approval:latest-reviews-every-page-read" "$SKIP_REASON"
+fi
+
+# ── 28. a PARTIAL latestReviews walk fails the capture CLOSED ────────────────────────
+# Page 1 reports hasNextPage true and the next page fails. An approval judged from the pages read
+# so far would be a verdict over a partial fetch, so the capture fails instead: SNAPSHOT_ERROR,
+# exit 1, in snapshot mode, and POLL_ERROR, exit 1, in poll mode (two consecutive failures).
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  partial_ok=1
+  partial_detail=""
+  partial_head="$(review_page partial-head 0 100 true)"
+  partial_entry="$(review_pages partial-walk "$partial_head" FAIL)"
+
+  st="$(new_state partial-snapshot)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" latestreviews "$partial_entry"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(run_poll "$st" --snapshot initial "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" \
+    "$POLL_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN")"
+  status=$?
+  if [ "$status" -eq 0 ] || [ "$out" != "SNAPSHOT_ERROR" ]; then
+    partial_ok=0
+    partial_detail="snapshot status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state partial-poll)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" latestreviews "$partial_entry"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$SEED")"
+  status=$?
+  if [ "$status" -eq 0 ] || [ "$out" != "POLL_ERROR" ]; then
+    partial_ok=0
+    partial_detail="$partial_detail poll status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  if [ "$partial_ok" -eq 1 ]; then
+    pass "approval:latest-reviews-partial-walk-fails-closed" "failed later page -> SNAPSHOT_ERROR / POLL_ERROR, exit 1"
+  else
+    failed "approval:latest-reviews-partial-walk-fails-closed" "$partial_detail"
+  fi
+else
+  skipped "approval:latest-reviews-partial-walk-fails-closed" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
