@@ -38,8 +38,12 @@
 #     $1 graphql_payload      — raw GraphQL JSON (live-validated or trusted injected).
 #     $2 ci_payload           — raw `gh pr checks --json ...` JSON (may be empty).
 #     $3 self_login           — viewer login (passed to the classifier as --arg login).
-#     $4 reviewer_filter      — codex-only | all | <login> (--arg filter).
-#     $5 classify_filter_path — absolute path to fix-history-classify.jq.
+#     $4 reviewer_filter      — automated | codex-only | all | <login> (--arg filter;
+#                               mode semantics owned by reviewer-identity.jq §5).
+#     $5 classify_filter_path — absolute path to fix-history-classify.jq. The classifier
+#                               `include`s reviewer-identity.jq, resolved via
+#                               `-L <dir of $5>`, so the module MUST be co-located with
+#                               the classify filter (same directory).
 #     Emits the SINGLE compact normalized candidate array on stdout; `[]` when both
 #     record families are empty (the fail-open shape). Malformed/empty injected payload
 #     fails OPEN to `[]`, never an error.
@@ -85,7 +89,8 @@ emit_overflow_tripwire() {
 # never errors on a bad injected payload.
 build_normalized_candidate_set() {
   local graphql_payload="$1" ci_payload="$2" self_login="$3" reviewer_filter="$4" classify_filter_path="$5"
-  local review_records ci_records
+  local review_records ci_records classify_module_dir
+  classify_module_dir="$(dirname -- "$classify_filter_path")"
 
   # --- Review-surface records: pipe the raw GraphQL payload through the shared
   # classifier filter (the single source of skip/order/overflow semantics), then
@@ -97,9 +102,12 @@ build_normalized_candidate_set() {
   # trusted injected content (--payload-file). A jq content-level parse failure
   # (e.g. structurally valid JSON but unexpected shape) degrades to an empty record
   # set — the slurp below canonicalizes to []. This is NOT an unguarded live
-  # boundary; the live gate ran before this point.
+  # boundary; the live gate ran before this point. A classifier COMPILE failure (syntax
+  # error, missing/broken reviewer-identity include) is NOT content: the entrypoint
+  # compile-probes the classifier before calling this function and fails closed
+  # (FETCHNORM_ERROR=unparseable-filter).
   review_records="$(printf '%s' "$graphql_payload" \
-    | jq -c -f "$classify_filter_path" --arg login "$self_login" --arg filter "$reviewer_filter" 2>/dev/null \
+    | jq -c -L "$classify_module_dir" -f "$classify_filter_path" --arg login "$self_login" --arg filter "$reviewer_filter" 2>/dev/null \
     | jq -c '. + {item_source: "review"}' 2>/dev/null)"
   # A jq failure (e.g. malformed payload) leaves review_records empty -> the slurp
   # below canonicalizes to an empty array. This is the fail-open empty-set path.

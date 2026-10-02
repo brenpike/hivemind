@@ -62,11 +62,14 @@
 #                                  # threaded through as `id` for node(id:) body refetch
 #       .comments.nodes[].databaseId
 #       .comments.nodes[].author.login
+#       .comments.nodes[].author.__typename  # account type ("Bot" | "User" |
+#                                  # ...); identity key with the login
 #       .comments.nodes[].body
 #   .data.repository.pullRequest.comments.nodes[]
 #       .id                        # GraphQL comment node id (IC_...);
 #                                  # threaded through as `id` for node(id:) body refetch
 #       .author.login
+#       .author.__typename         # account type; identity key with the login
 #       .body
 #       .url
 #       .reactionGroups[]          # [{content, viewerHasReacted}]; EYES +
@@ -75,11 +78,18 @@
 #       .id                        # GraphQL review node id (PRR_...);
 #                                  # threaded through as `id` for node(id:) body refetch
 #       .author.login
+#       .author.__typename         # account type; identity key with the login
 #       .body
 #       .state
 #       .url
 #       .reactionGroups[]          # [{content, viewerHasReacted}]; EYES +
 #                                  # viewerHasReacted==true => handled (self marker)
+#
+# `author.__typename` is a CONTRACT field on every surface: the registry filter
+# modes (`automated`, `codex-only`) match only a Bot-typed author, so a payload
+# omitting it never matches those modes (fail closed toward "not automated").
+# Identity semantics (registry, type gate, filter modes) are owned by the
+# reviewer-identity.jq module this filter includes; see its header.
 #
 # Connection-level tripwires (reviewThreads/comments/reviews `.totalCount`) are
 # NOT this filter's concern. They are top-level scalar fields trivially read off
@@ -200,7 +210,14 @@
 # -------
 #   --arg login   SELF_LOGIN      viewer login; used to strip self-authored
 #                                 comments before the filter compare.
-#   --arg filter  REVIEWER_FILTER "codex-only" | "all" | "<login>".
+#   --arg filter  REVIEWER_FILTER "automated" | "codex-only" | "all" |
+#                                 "<login>"; mode semantics are owned by
+#                                 reviewer-identity.jq (its §5).
+#
+# CALLER OBLIGATION: this filter does `include "reviewer-identity";`, so every
+# caller MUST pass the module search path, i.e. the directory holding this file:
+#   jq -L <scripts dir> -f fix-history-classify.jq --arg login ... --arg filter ...
+# Without `-L` the include fails to resolve and jq exits non-zero.
 #
 # 5. PLACEMENT
 # ------------
@@ -209,20 +226,13 @@
 # relocate to a neutral home if the agent<->skill coupling proves awkward. No
 # ADR governs this; revisit in practice.
 
-# Identity-match predicate for the active REVIEWER_FILTER. The caller passes the
-# stripped login; this returns true when that login is non-self AND matches the
-# filter. Reproduces prefilter.sh's `matches_filter` def verbatim.
-def matches_filter($a):
-  $a != $login
-  and (
-    if $filter == "codex-only" then $a == "chatgpt-codex-connector"
-    elif $filter == "all" then true
-    else $a == $filter
-    end
-  );
+include "reviewer-identity";
 
-# [bot]-suffix normalization on an author login BEFORE the self/filter compare.
-def strip_bot($login): ($login // "") | sub("\\[bot\\]$"; "");
+# Identity-match predicate for the active REVIEWER_FILTER, binding this filter's
+# --arg globals ($login = self, $filter = mode) onto the module predicate. The
+# caller passes the RAW author login and its account type; the module strips the
+# bot suffix itself.
+def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter);
 
 # Non-thread handled predicate. A toplevel/review node is handled IFF its own
 # `reactionGroups` carries an EYES group whose viewerHasReacted is true — i.e. a
@@ -313,8 +323,7 @@ $pr.reviewThreads as $rt |
   | (
       $thread.comments.nodes[]
       | . as $c
-      | strip_bot($c.author.login) as $a
-      | select(matches_filter($a))
+      | select(matches_filter($c.author.login; $c.author.__typename))
       | (.databaseId // 0) as $dbid
       | (($c.body // "") | test("Fixed in [0-9a-f]{7,40}\\.")) as $has_marker
       | {
@@ -373,8 +382,7 @@ $pr.reviewThreads as $rt |
 (
   $pr.comments.nodes[]?
   | . as $c
-  | strip_bot($c.author.login) as $a
-  | select(matches_filter($a))
+  | select(matches_filter($c.author.login; $c.author.__typename))
   | select((($c.body // "") | gsub("[[:space:]]+"; "")) != "")
   | ($c.url // "") as $u
   | {
@@ -398,8 +406,7 @@ $pr.reviewThreads as $rt |
 (
   $pr.reviews.nodes[]?
   | . as $r
-  | strip_bot($r.author.login) as $a
-  | select(matches_filter($a))
+  | select(matches_filter($r.author.login; $r.author.__typename))
   | select(.state == "CHANGES_REQUESTED" or .state == "COMMENTED")
   | select((($r.body // "") | gsub("[[:space:]]+"; "")) != "")
   | ($r.url // "") as $u
