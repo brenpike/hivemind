@@ -35,7 +35,7 @@
 #                          the literal `same-finding-repeat` for the oscillation guard,
 #                          or the literal `approval-clean` for the approval
 #                          confirmation pass where the reviewer found nothing
-#                          actionable. The CODEX_APPROVED marker raised by the
+#                          actionable. The REVIEWER_APPROVED marker raised by the
 #                          sibling pr-change-detect-poll.sh routes here.
 #
 #   loop-state.sh token-map <signal>
@@ -117,7 +117,7 @@
 #       unless the ceiling is hit.
 #   (f) `approval-clean`: an approval confirmation pass found nothing
 #       actionable — TERMINAL `clean` (SKILL.md section 4 approval path). The
-#       CODEX_APPROVED marker raised by the sibling pr-change-detect-poll.sh
+#       REVIEWER_APPROVED marker raised by the sibling pr-change-detect-poll.sh
 #       feeds this token; this script sees only `approval-clean`.
 #       Distinct from `clean`: a plain `clean` keeps watching, but an approved PR
 #       with nothing actionable remaining is a successful terminal and must emit
@@ -224,7 +224,7 @@ cmd_cycle_decision() {
     return 0
   fi
 
-  # approval-clean: an approval confirmation pass (CODEX_APPROVED) found nothing
+  # approval-clean: an approval confirmation pass (REVIEWER_APPROVED) found nothing
   # actionable → TERMINAL `clean` (decision 4f). No increment — a confirmation
   # pass that finds nothing is not a remediation round. Distinct from plain
   # `clean`, which keeps watching; this is the successful approval terminal an

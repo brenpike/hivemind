@@ -27,7 +27,8 @@ set -u
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-NORMALIZE="$REPO_ROOT/plugin/skills/github-review-loop/scripts/fetch-normalize.sh"
+SKILLS_DIR="$REPO_ROOT/plugin/skills"
+NORMALIZE="$SKILLS_DIR/github-review-loop/scripts/fetch-normalize.sh"
 FIX_HISTORY_DIR="$REPO_ROOT/tests/fix-history"
 FN_DIR="$REPO_ROOT/tests/fetch-normalize"
 EXPECTED_DIR="$FN_DIR/expected"
@@ -42,6 +43,10 @@ PASS_COUNT=0
 FAIL_COUNT=0
 pass() { echo "PASS [$1] $2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
+
+WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-fetch-normalize.XXXXXX")"
+cleanup() { rm -rf "$WORKDIR"; return 0; }
+trap cleanup EXIT
 
 # Canonicalize a normalized candidate array into a single deterministic line: sort the array by
 # the union of fields that disambiguate both record families (review records and ci-check-failure
@@ -588,17 +593,88 @@ else
 fi
 
 # ── reviewer_filter scoping ───────────────────────────────────────────────────────
-# Same payload, three filters. codex-only matches ONLY chatgpt-codex-connector (900). all matches
-# any non-self author (900 + human reviewer 901). An empty filter slot defaults to codex-only.
+# case09: codex-only matches ONLY the Bot-typed chatgpt-codex-connector (900). all matches any
+# non-self author (900 + the User-typed human reviewer 901). An empty filter slot defaults to
+# automated, which on case09 admits only the Bot-typed codex record (900).
 run_case "filter:codex-only" \
   "$FIX_HISTORY_DIR/case09-reviewer-filter.json" - codex-only \
   "$EXPECTED_DIR/review-filter-codex-only.json"
 run_case "filter:all" \
   "$FIX_HISTORY_DIR/case09-reviewer-filter.json" - all \
   "$EXPECTED_DIR/review-filter-all.json"
-run_case "filter:default-is-codex-only" \
+run_case "filter:default-is-automated" \
   "$FIX_HISTORY_DIR/case09-reviewer-filter.json" - "" \
   "$EXPECTED_DIR/review-filter-default.json"
+# case19 carries one author per identity class (registry Bots incl. both Copilot spellings, a human
+# User named claude, non-registry Bots dependabot/github-actions, a human, and self). automated
+# admits ONLY the four registry Bot records (1900..1903). The empty-slot run on the same payload
+# DISCRIMINATES the default: under a codex-only default it would emit 1900 alone.
+run_case "filter:automated" \
+  "$FIX_HISTORY_DIR/case19-automated-reviewers.json" - automated \
+  "$EXPECTED_DIR/review-filter-automated.json"
+run_case "filter:default-is-automated-discriminating" \
+  "$FIX_HISTORY_DIR/case19-automated-reviewers.json" - "" \
+  "$EXPECTED_DIR/review-filter-automated.json"
+
+# ── Identity-module bootstrap fail-closed (missing / unparseable) ─────────────────
+# The classifier `include`s reviewer-identity.jq. fetch-normalize.sh checks the module is present
+# and compile-probes the classifier BEFORE sourcing the core; without these checks the core's
+# fail-open-on-content stderr swallow would turn a broken include into a silent `[]`. Each case runs
+# a COPY of the skills tree (fetch-normalize.sh self-locates via BASH_SOURCE, so the copy resolves
+# its own siblings), mutates the copied module, and asserts exit 1 + stdout EXACTLY the single
+# `FETCHNORM_ERROR=<reason>` line. A pristine-copy control proves the copy itself is faithful.
+
+# copy_skills_tree <dest-dir>
+# Copy the two skill dirs fetch-normalize.sh resolves at runtime (its own scripts dir and
+# ../../_shared) into <dest-dir>/skills/, preserving the relative layout.
+copy_skills_tree() {
+  local dest="$1"
+  mkdir -p "$dest/skills/github-review-loop" || return 1
+  cp -R "$SKILLS_DIR/github-review-loop/scripts" "$dest/skills/github-review-loop/" || return 1
+  cp -R "$SKILLS_DIR/_shared" "$dest/skills/" || return 1
+}
+
+# remove_identity_module <scripts-dir> — delete the copied module.
+remove_identity_module() { rm -f "$1/reviewer-identity.jq"; }
+
+# corrupt_identity_module <scripts-dir> — overwrite the copied module with a syntax error.
+corrupt_identity_module() { printf '%s\n' 'def automated_reviewers: [' > "$1/reviewer-identity.jq"; }
+
+# keep_identity_module <scripts-dir> — leave the copy untouched (control).
+keep_identity_module() { :; }
+
+# run_tree_case <case> <mutator-fn> <expected-exit> <expected-stdout>
+# Copy the skills tree into a fresh scratch dir, apply <mutator-fn> to the copied scripts dir, run
+# the COPIED fetch-normalize.sh over case09 with the automated filter, and exact-match exit + stdout.
+# A success (expected exit 0) stdout is canonicalized first, so pass a canonicalized expected value.
+run_tree_case() {
+  local case_name="$1" mutator="$2" expected_status="$3" expected_out="$4"
+  local tree="$WORKDIR/$case_name"
+  tree="${tree//:/_}"
+  if ! copy_skills_tree "$tree"; then failed "$case_name" "could not copy skills tree to $tree"; return; fi
+  local copied_scripts="$tree/skills/github-review-loop/scripts"
+  if ! "$mutator" "$copied_scripts"; then failed "$case_name" "mutator $mutator failed"; return; fi
+  local out status
+  out="$(bash "$copied_scripts/fetch-normalize.sh" --payload-file "$FIX_HISTORY_DIR/case09-reviewer-filter.json" \
+    -- "" "" "" automated selfuser 2>/dev/null)"
+  status=$?
+  if [ "$expected_status" -eq 0 ] && [ "$status" -eq 0 ]; then
+    out="$(printf '%s' "$out" | canon)"
+  fi
+  if [ "$status" -eq "$expected_status" ] && [ "$out" = "$expected_out" ]; then
+    pass "$case_name" "exit=$status stdout=$out"
+  else
+    failed "$case_name" "expected exit=$expected_status stdout=$expected_out
+    actual:   exit=$status stdout=$out"
+  fi
+}
+
+run_tree_case "bootstrap:pristine-copy-control" keep_identity_module 0 \
+  "$(canon < "$EXPECTED_DIR/review-filter-default.json")"
+run_tree_case "fail-closed:missing-identity-module" remove_identity_module 1 \
+  "FETCHNORM_ERROR=missing-identity-module"
+run_tree_case "fail-closed:unparseable-filter" corrupt_identity_module 1 \
+  "FETCHNORM_ERROR=unparseable-filter"
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo

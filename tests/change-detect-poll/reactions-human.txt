@@ -1,0 +1,2 @@
+chatgpt-codex-connector	User
+claude	User

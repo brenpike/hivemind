@@ -13,7 +13,7 @@
         "reviews": {
           "totalCount": 1,
           "nodes": [
-            { "databaseId": 3011001, "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector" } }
+            { "databaseId": 3011001, "state": "COMMENTED", "author": { "login": "chatgpt-codex-connector", "__typename": "Bot" } }
           ]
         },
         "reviewThreads": {

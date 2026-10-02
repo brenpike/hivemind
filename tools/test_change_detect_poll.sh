@@ -41,9 +41,15 @@
 #     declaration and the set of `cur_<name>` assignments and asserts they are the same set, so a
 #     future author who adds a diffed scalar without declaring it goes red. Per-scalar assertions
 #     are exactly what let the omitted approval bool through twice.
-#   - EXPLICIT ARM KIND. Whether a 👍 predating the arm surfaces is answered by the seed's ARM
-#     KIND, not by which fields the token carries: `initial` surfaces it (#324 blind window),
-#     `re-arm` suppresses it (a stale 👍 must never short-circuit later pushback).
+#   - EXPLICIT ARM KIND. Whether an approval predating the arm surfaces is answered by the seed's
+#     ARM KIND, not by which fields the token carries: `initial` surfaces it (#324 blind window),
+#     `re-arm` suppresses it (a stale approval must never short-circuit later pushback).
+#
+# THE REVIEWER-IDENTITY CONTRACT (ADR-0033): every login / filter / approver decision is the
+# shared `reviewer-identity.jq` registry's. The poll's approval scalar is true on EITHER a 👍 from
+# a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR an APPROVED review from a Bot-typed
+# `review-approved` member (Copilot), both scoped by the active filter, and surfaces as
+# `REVIEWER_APPROVED`. An empty filter slot defaults to `automated`.
 #
 # Usage:
 #   ./tools/test_change_detect_poll.sh
@@ -85,13 +91,15 @@ BLIND="$FIXTURES/graphql-blind-window.json"
 MALFORMED="$FIXTURES/graphql-malformed.json"
 REACT_NONE="$FIXTURES/reactions-none.txt"
 REACT_CODEX="$FIXTURES/reactions-codex.txt"
+REACT_HUMAN="$FIXTURES/reactions-human.txt"
 
 # ── PATH-shim fake gh ───────────────────────────────────────────────────────────────
 # Serves a per-call fixture from a state dir: <kind>.seq lists one fixture path per line and
 # <kind>.n is the call counter; call N serves line N, clamping to the last line so a steady
 # state can be served indefinitely. The literal entry `FAIL` makes the call exit non-zero
 # (a gh transport failure). `graphql` responses are raw GraphQL JSON piped into the script's
-# real jq filter; the reactions entry is the post-`--jq` stdout gh itself would emit.
+# real jq filter; the reactions entry is the post-`--jq` stdout gh itself would emit — one
+# `login<TAB>type` row per +1 reaction.
 STUB_BIN="$TMPDIR_TEST/bin"
 mkdir -p "$STUB_BIN"
 cat > "$STUB_BIN/gh" <<'STUB'
@@ -116,7 +124,9 @@ total=$(wc -l < "$seq_file")
 [ "$n" -le "$total" ] || n="$total"
 entry=$(sed -n "${n}p" "$seq_file")
 [ "$entry" != "FAIL" ] || exit 1
-cat "$entry"
+# INVARIANT: gh stdout never carries CR; a core.autocrlf checkout of a .txt fixture would
+# otherwise append CR to the TSV type column and silently fail the Bot-type gate.
+tr -d '\r' < "$entry"
 STUB
 chmod +x "$STUB_BIN/gh"
 
@@ -153,32 +163,35 @@ run_poll() {
   PATH="$STUB_BIN:$PATH" FAKE_GH_STATE_DIR="$dir" bash "$POLL" "$@" 2>/dev/null
 }
 
-# arm_poll <state_dir> [seed]: poll mode with the standard 7 args, appending <seed> as the
-# required 8th arg when non-empty (empty seed = legacy form on the unfixed script).
+# arm_poll <state_dir> [seed] [filter]: poll mode with the standard 7 args, appending <seed> as
+# the required 8th arg when non-empty (empty seed = legacy form on the unfixed script). <filter>
+# defaults to $REVIEWER_FILTER when OMITTED; an explicit empty string is passed through as an
+# empty filter slot.
 arm_poll() {
-  local dir="$1" seed="${2:-}"
+  local dir="$1" seed="${2:-}" filter="${3-$REVIEWER_FILTER}"
   if [ -n "$seed" ]; then
     run_poll "$dir" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" "$POLL_INTERVAL" \
-      "$REVIEWER_FILTER" "$SELF_LOGIN" "$seed"
+      "$filter" "$SELF_LOGIN" "$seed"
   else
     run_poll "$dir" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" "$POLL_INTERVAL" \
-      "$REVIEWER_FILTER" "$SELF_LOGIN"
+      "$filter" "$SELF_LOGIN"
   fi
 }
 
-# snapshot_raw <state_name> <arm_kind> <graphql_entry> <reactions_entry>: snapshot mode over a
-# fresh fake-gh state, returning the RAW stdout (BASELINE= line included).
+# snapshot_raw <state_name> <arm_kind> <graphql_entry> <reactions_entry> [filter]: snapshot mode
+# over a fresh fake-gh state, returning the RAW stdout (BASELINE= line included). <filter> follows
+# arm_poll's omitted-vs-empty rule.
 snapshot_raw() {
-  local st
+  local st filter="${5-$REVIEWER_FILTER}"
   st="$(new_state "$1")"
   set_seq "$st" graphql "$3"
   set_seq "$st" reactions "$4"
   run_poll "$st" --snapshot "$2" "$OWNER" "$REPO_NAME" "$PR_NUMBER" \
-    "$MAX_WATCH" "$POLL_INTERVAL" "$REVIEWER_FILTER" "$SELF_LOGIN"
+    "$MAX_WATCH" "$POLL_INTERVAL" "$filter" "$SELF_LOGIN"
 }
 
-# capture_seed <state_name> <arm_kind> <graphql_entry> <reactions_entry>: the BARE seed token the
-# skill would strip out of that BASELINE= line and pass as arg 8.
+# capture_seed <state_name> <arm_kind> <graphql_entry> <reactions_entry> [filter]: the BARE seed
+# token the skill would strip out of that BASELINE= line and pass as arg 8.
 capture_seed() {
   snapshot_raw "$@" | sed -n 's/^BASELINE=//p' | head -1
 }
@@ -299,20 +312,21 @@ else
   failed "delta:failed-checks" "expected CHANGED, got=$(printf '%s' "$out" | tr '\n' ';')"
 fi
 
-# ── 4. Codex 👍 present at the first poll emits CODEX_APPROVED ───────────────────────
-# The reaction is present for every poll while the pre-cycle-0 seed state carried none. Legacy
-# arm: the baseline poll's pre-existing-approval special case fires. Seeded arm: false -> true
-# against the seed fires. Either way the FIRST emitted marker is CODEX_APPROVED — an approval
-# that lands in the blind window must not idle the loop to WATCH_TIMEOUT.
+# ── 4. Codex 👍 present at the first poll emits REVIEWER_APPROVED ────────────────────
+# The reaction (a Bot-typed `chatgpt-codex-connector[bot]` row, the shape gh's --jq emits) is
+# present for every poll while the pre-cycle-0 seed state carried none. Legacy arm: the baseline
+# poll's pre-existing-approval special case fires. Seeded arm: false -> true against the seed
+# fires. Either way the FIRST emitted marker is REVIEWER_APPROVED — an approval that lands in the
+# blind window must not idle the loop to WATCH_TIMEOUT.
 st="$(new_state codex)"
 set_seq "$st" graphql "$PRE"
 set_seq "$st" reactions "$REACT_CODEX"
 out="$(arm_poll "$st" "$SEED")"
 first_line="$(printf '%s\n' "$out" | head -1)"
-if [ "$first_line" = "CODEX_APPROVED" ]; then
-  pass "codex:approved-on-first-poll" "CODEX_APPROVED emitted on the first poll"
+if [ "$first_line" = "REVIEWER_APPROVED" ]; then
+  pass "approval:thumbs-up-on-first-poll" "REVIEWER_APPROVED emitted on the first poll"
 else
-  failed "codex:approved-on-first-poll" "expected CODEX_APPROVED first, got=$(printf '%s' "$out" | tr '\n' ';')"
+  failed "approval:thumbs-up-on-first-poll" "expected REVIEWER_APPROVED first, got=$(printf '%s' "$out" | tr '\n' ';')"
 fi
 
 # ── 5. missing seed argument fails CLOSED ───────────────────────────────────────────
@@ -334,7 +348,7 @@ else
 fi
 
 # ── 6. malformed seed fails CLOSED ──────────────────────────────────────────────────
-# A seed that is not the emitted 8-field token must be rejected outright rather than parsed into
+# A seed that is not a well-formed emitted token must be rejected outright rather than parsed into
 # partially-empty previous scalars (which would fire a spurious CHANGED on the first poll).
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   st="$(new_state badseed)"
@@ -442,7 +456,7 @@ fi
 # ── 12. a stale 👍 does NOT re-fire on a productive re-arm (THE REPORTED DEFECT) ─────
 # A productive remediation cycle re-arms with the PENDING seed captured before its dispatch, and
 # the Codex 👍 was ALREADY present at that capture. The re-armed poll must not re-announce it:
-# a re-fired CODEX_APPROVED runs a confirmation pass right after the reviewer fixed and pushed,
+# a re-fired REVIEWER_APPROVED runs a confirmation pass right after the reviewer fixed and pushed,
 # finds nothing actionable, and ends the watch as terminal `clean` — the early exit this PR's
 # idle window exists to prevent.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
@@ -452,12 +466,12 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   set_seq "$st" reactions "$REACT_CODEX"
   out="$(arm_poll "$st" "$rearm_seed")"
   if [ "$out" = "WATCH_TIMEOUT" ]; then
-    pass "codex:stale-approval-not-refired-on-rearm" "👍 predating the re-arm stayed silent"
+    pass "approval:stale-not-refired-on-rearm" "👍 predating the re-arm stayed silent"
   else
-    failed "codex:stale-approval-not-refired-on-rearm" "expected only WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';') seed=$rearm_seed"
+    failed "approval:stale-not-refired-on-rearm" "expected only WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';') seed=$rearm_seed"
   fi
 else
-  skipped "codex:stale-approval-not-refired-on-rearm" "$SKIP_REASON"
+  skipped "approval:stale-not-refired-on-rearm" "$SKIP_REASON"
 fi
 
 # ── 13. the INITIAL arm still surfaces a 👍 present at seed capture ──────────────────
@@ -473,13 +487,13 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   set_seq "$st" reactions "$REACT_CODEX"
   out="$(arm_poll "$st" "$initial_seed")"
   first_line="$(printf '%s\n' "$out" | head -1)"
-  if [ "$first_line" = "CODEX_APPROVED" ]; then
-    pass "codex:initial-arm-surfaces-pre-existing" "pre-existing 👍 still fires on an initial arm"
+  if [ "$first_line" = "REVIEWER_APPROVED" ]; then
+    pass "approval:initial-arm-surfaces-pre-existing" "pre-existing 👍 still fires on an initial arm"
   else
-    failed "codex:initial-arm-surfaces-pre-existing" "expected CODEX_APPROVED first, got=$(printf '%s' "$out" | tr '\n' ';') seed=$initial_seed"
+    failed "approval:initial-arm-surfaces-pre-existing" "expected REVIEWER_APPROVED first, got=$(printf '%s' "$out" | tr '\n' ';') seed=$initial_seed"
   fi
 else
-  skipped "codex:initial-arm-surfaces-pre-existing" "$SKIP_REASON"
+  skipped "approval:initial-arm-surfaces-pre-existing" "$SKIP_REASON"
 fi
 
 # ── 14. a GENUINELY new 👍 still fires on a re-arm ───────────────────────────────────
@@ -492,13 +506,13 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   set_seq "$st" graphql "$PRE"
   set_seq "$st" reactions "$REACT_NONE" "$REACT_CODEX"
   out="$(arm_poll "$st" "$fresh_seed")"
-  if printf '%s\n' "$out" | grep -qx 'CODEX_APPROVED'; then
-    pass "codex:new-approval-fires-on-rearm" "👍 arriving after the pending capture fired"
+  if printf '%s\n' "$out" | grep -qx 'REVIEWER_APPROVED'; then
+    pass "approval:new-fires-on-rearm" "👍 arriving after the pending capture fired"
   else
-    failed "codex:new-approval-fires-on-rearm" "expected CODEX_APPROVED, got=$(printf '%s' "$out" | tr '\n' ';') seed=$fresh_seed"
+    failed "approval:new-fires-on-rearm" "expected REVIEWER_APPROVED, got=$(printf '%s' "$out" | tr '\n' ';') seed=$fresh_seed"
   fi
 else
-  skipped "codex:new-approval-fires-on-rearm" "$SKIP_REASON"
+  skipped "approval:new-fires-on-rearm" "$SKIP_REASON"
 fi
 
 # ── 15. the arm kind is REQUIRED and closed-set ──────────────────────────────────────
@@ -543,6 +557,97 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "seed:arm-kind-closed-set" "$SKIP_REASON"
+fi
+
+# ── 16. a User-typed 👍 NEVER approves ───────────────────────────────────────────────
+# reactions-human.txt carries a User-typed row whose login IS the Codex registry login, plus a
+# User-typed `claude` row. The registry's approver test is Bot-type gated, so neither may approve
+# under `codex-only` OR under `all` — `all` admits every login to the filter, which isolates the
+# approver type gate as the only thing standing between a human 👍 and a terminal `clean`.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  human_ok=1
+  human_detail=""
+  for human_filter in codex-only all; do
+    human_seed="$(capture_seed "humanseed-$human_filter" initial "$PRE" "$REACT_NONE" "$human_filter")"
+    st="$(new_state "humanpoll-$human_filter")"
+    set_seq "$st" graphql "$PRE"
+    set_seq "$st" reactions "$REACT_HUMAN"
+    out="$(arm_poll "$st" "$human_seed" "$human_filter")"
+    if [ "$out" != "WATCH_TIMEOUT" ]; then
+      human_ok=0
+      human_detail="$human_detail filter=$human_filter got=$(printf '%s' "$out" | tr '\n' ';') seed=$human_seed"
+    fi
+  done
+  if [ "$human_ok" -eq 1 ]; then
+    pass "approval:user-thumbs-up-never-approves" "User-typed 👍 stayed silent under codex-only and all"
+  else
+    failed "approval:user-thumbs-up-never-approves" "$human_detail"
+  fi
+else
+  skipped "approval:user-thumbs-up-never-approves" "$SKIP_REASON"
+fi
+
+# ── 17. a Copilot APPROVED review fires under `automated`, NOT under `codex-only` ─────
+# Copilot's registry approval kind is `review-approved`: an APPROVED review by the Bot-typed
+# `copilot-pull-request-reviewer` is the approval signal, no reaction involved. Under `automated`
+# Copilot is in scope, so the first marker is REVIEWER_APPROVED. Under `codex-only` it is out of
+# scope: the review still moves REVIEWS_TOTAL (CHANGED) but must never approve.
+COPILOT_APPROVED="$(derive_fixture copilot-approved "$PRE" \
+  '.data.repository.pullRequest.reviews.totalCount = 2
+   | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011002,"state":"APPROVED","author":{"login":"copilot-pull-request-reviewer","__typename":"Bot"}}]')"
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  automated_seed="$(capture_seed copilotseed-automated initial "$PRE" "$REACT_NONE" automated)"
+  st="$(new_state copilot-automated)"
+  set_seq "$st" graphql "$PRE" "$COPILOT_APPROVED"
+  set_seq "$st" reactions "$REACT_NONE"
+  automated_out="$(arm_poll "$st" "$automated_seed" automated)"
+
+  st="$(new_state copilot-codexonly)"
+  set_seq "$st" graphql "$PRE" "$COPILOT_APPROVED"
+  set_seq "$st" reactions "$REACT_NONE"
+  codexonly_out="$(arm_poll "$st" "$SEED" codex-only)"
+
+  if [ "$(printf '%s\n' "$automated_out" | head -1)" = "REVIEWER_APPROVED" ] \
+    && ! printf '%s\n' "$codexonly_out" | grep -qx 'REVIEWER_APPROVED' \
+    && printf '%s\n' "$codexonly_out" | grep -qx 'CHANGED'; then
+    pass "approval:copilot-review-scoped-by-filter" "Copilot APPROVED fired under automated, only CHANGED under codex-only"
+  else
+    failed "approval:copilot-review-scoped-by-filter" "automated=$(printf '%s' "$automated_out" | tr '\n' ';') codex-only=$(printf '%s' "$codexonly_out" | tr '\n' ';')"
+  fi
+else
+  skipped "approval:copilot-review-scoped-by-filter" "$SKIP_REASON"
+fi
+
+# ── 18. an EMPTY filter slot behaves as `automated` ──────────────────────────────────
+# Over one mixed state — a Codex COMMENTED review, a Copilot APPROVED review, and a later
+# User-typed human review — `automated`, `codex-only` and `all` each yield a DIFFERENT seed token
+# (filtered review id and approval both move). The empty-slot token must equal the `automated`
+# one, and the discrimination check proves the comparison could have failed. Behaviorally, an
+# empty-slot arm then fires REVIEWER_APPROVED on the Copilot approval exactly as `automated` does.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  mixed_reviews="$(derive_fixture mixed-reviews "$COPILOT_APPROVED" \
+    '.data.repository.pullRequest.reviews.totalCount = 3
+     | .data.repository.pullRequest.reviews.nodes += [{"databaseId":3011003,"state":"COMMENTED","author":{"login":"octo-human","__typename":"User"}}]')"
+  empty_token="$(capture_seed mixed-empty initial "$mixed_reviews" "$REACT_NONE" "")"
+  automated_token="$(capture_seed mixed-automated initial "$mixed_reviews" "$REACT_NONE" automated)"
+  codexonly_token="$(capture_seed mixed-codexonly initial "$mixed_reviews" "$REACT_NONE" codex-only)"
+  all_token="$(capture_seed mixed-all initial "$mixed_reviews" "$REACT_NONE" all)"
+
+  empty_seed="$(capture_seed emptyseed initial "$PRE" "$REACT_NONE" "")"
+  st="$(new_state emptyfilterpoll)"
+  set_seq "$st" graphql "$PRE" "$COPILOT_APPROVED"
+  set_seq "$st" reactions "$REACT_NONE"
+  empty_out="$(arm_poll "$st" "$empty_seed" "")"
+
+  if [ -n "$empty_token" ] && [ "$empty_token" = "$automated_token" ] \
+    && [ "$automated_token" != "$codexonly_token" ] && [ "$automated_token" != "$all_token" ] \
+    && [ "$(printf '%s\n' "$empty_out" | head -1)" = "REVIEWER_APPROVED" ]; then
+    pass "filter:empty-slot-is-automated" "empty-slot seed == automated seed (!= codex-only, != all); empty-slot arm fired REVIEWER_APPROVED"
+  else
+    failed "filter:empty-slot-is-automated" "empty=$empty_token automated=$automated_token codex-only=$codexonly_token all=$all_token poll=$(printf '%s' "$empty_out" | tr '\n' ';')"
+  fi
+else
+  skipped "filter:empty-slot-is-automated" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

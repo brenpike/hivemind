@@ -17,18 +17,18 @@ Resolvable pull request review threads are GraphQL objects. Do not try to resolv
 - [Resolve Review Thread](#resolve-review-thread) — mutation to mark a review thread as resolved
 - [Surface-to-Delivery Contract](#surface-to-delivery-contract) — canonical mapping of feedback surface to mutation(s) used
 - [Reaction Marker](#reaction-marker) — self-authored `EYES` reaction that marks a fixed non-thread surface handled
-- [Author Filtering](#author-filtering) — rules for scoping feedback to specific reviewer identities
-- [Codex Approval Detection](#codex-approval-detection) — paginated 👍 reaction lookup that signals Codex approval
+- [Author Filtering](#author-filtering) — `reviewer_filter` modes and the Bot-type + login identity rule for scoping feedback to reviewer identities
+- [Reviewer Approval Detection](#reviewer-approval-detection) — in-scope automated-reviewer approval signals (paginated PR 👍 reaction lookup, `APPROVED` review state)
 
 ## Shell and Parsing Rules
 
 Use `gh --jq` only for inline value extraction. No ad-hoc standalone `jq`, `python3`, `python`, `node`, or PowerShell. No `/tmp/` for data processing. If `gh --jq` cannot produce the required value, return `blocked`.
 
-Sanctioned exception — canonical fix-history classification: the github-reviewer agent captures the raw `gh api graphql` JSON (threads/comments/reviews/top-level, with the contract fields `isResolved`, `comments.totalCount`, comment `databaseId`, `author.login`, `body`, top-level/review `url`, review `state`) and pipes it through the shared filter FILE `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/fix-history-classify.jq` via `jq -f`. This is a pure offline function over already-fetched JSON and is the single source of truth for the skip/order/overflow predicate; it is NOT the ad-hoc inline `jq` munging this rule prohibits.
+Sanctioned exception — canonical fix-history classification: `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/fetch-normalize.sh` (which the github-reviewer agent calls) captures the raw `gh api graphql` JSON (threads/comments/reviews/top-level, with the contract fields `isResolved`, `comments.totalCount`, comment `databaseId`, `author.login`, `author.__typename`, `body`, top-level/review `url`, review `state`) and pipes it through the shared filter FILE `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/fix-history-classify.jq` via `jq -L <scripts dir> -f`. The script supplies the `-L` module search path because the classifier `include`s the reviewer identity module `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`. This is a pure offline function over already-fetched JSON and is the single source of truth for the skip/order/overflow predicate; it is NOT the ad-hoc inline `jq` munging this rule prohibits. The same exception covers evaluating that module's identity predicates over rows a `gh --jq` transport filter emitted (see [Reviewer Approval Detection](#reviewer-approval-detection)).
 
 ## Pagination Requirement
 
-Page all connections via `-F after="CURSOR"` using `endCursor` from `pageInfo`. Omit `-F after` on first page. Nested connections (e.g., thread comments) require per-item queries with the item's `id`. This requirement governs the reviewer's deep body-level fetch (reviews, review threads, thread comments, top-level comments) and the Codex approval reactions lookup — NOT the `github-review-loop` thin poll, which is exempt by design: it reads scalar `totalCount`s only and walks no connections.
+Page all connections via `-F after="CURSOR"` using `endCursor` from `pageInfo`. Omit `-F after` on first page. Nested connections (e.g., thread comments) require per-item queries with the item's `id`. This requirement governs the reviewer's deep body-level fetch (reviews, review threads, thread comments, top-level comments) and the reviewer approval reactions lookup — NOT the `github-review-loop` thin poll, which is exempt by design: it reads scalar `totalCount`s only and walks no connections.
 
 ## Fetch Reviews
 
@@ -47,7 +47,7 @@ query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
-          author { login }
+          author { login __typename }
           state
           body
           submittedAt
@@ -87,7 +87,7 @@ query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
             nodes {
               id
               databaseId
-              author { login }
+              author { login __typename }
               body
               createdAt
               url
@@ -134,7 +134,7 @@ query($threadId: ID!, $after: String) {
         nodes {
           id
           databaseId
-          author { login }
+          author { login __typename }
           body
           createdAt
           url
@@ -162,7 +162,7 @@ query($owner: String!, $repo: String!, $pr: Int!, $after: String) {
         pageInfo { hasNextPage endCursor }
         nodes {
           id
-          author { login }
+          author { login __typename }
           body
           createdAt
           url
@@ -187,7 +187,7 @@ All queries must apply both filters before yielding results as actionable feedba
 
 The Fetch Review Threads (unresolved summary output) and Fetch Top-Level PR Comments templates apply both filters inline. The Fetch Reviews and Fetch Thread Comments (Paginated) templates return raw nodes — consuming agents must apply both filters to their results before yielding as actionable feedback. For Fetch Reviews, also filter to `state` values `CHANGES_REQUESTED` or `COMMENTED`.
 
-An `APPROVED` review state is NOT how Codex signals approval — Codex never files an `APPROVED` review. Codex approval is a 👍 reaction on the PR object (see [Codex Approval Detection](#codex-approval-detection)).
+An `APPROVED` review is never actionable feedback, and these filters do not detect approval. Approval is per reviewer: an `APPROVED` review state is approval only from a reviewer whose approval kind is `review-approved` (Copilot); Codex never files an `APPROVED` review — its approval is a 👍 reaction on the PR object. Both are scoped by the active `reviewer_filter` (see [Reviewer Approval Detection](#reviewer-approval-detection)).
 
 ## Reply to Review Thread
 
@@ -269,7 +269,7 @@ A surface is handled when its `reactionGroups` contains an entry with `content =
 
 ### Disambiguation — two different `EYES` subjects
 
-The `EYES` marker here is OUR self-authored reaction on a per-COMMENT / per-REVIEW node. It is a DISJOINT subject from the 👀 reaction described in [Codex Approval Detection](#codex-approval-detection), which is Codex's reaction on the PR OBJECT meaning "still running". The two share an emoji but never the same subject:
+The `EYES` marker here is OUR self-authored reaction on a per-COMMENT / per-REVIEW node. It is a DISJOINT subject from the 👀 reaction noted in [Reviewer Approval Detection](#reviewer-approval-detection), which is Codex's reaction on the PR OBJECT meaning "still running" — never approval. The two share an emoji but never the same subject:
 
 - **This marker:** `EYES` reaction on an `IssueComment` / `PullRequestReview` node, authored by our viewer, detected via `reactionGroups { content viewerHasReacted }` on that node → surface handled.
 - **Codex "still running" (existing):** `eyes` reaction on the PR object, authored by Codex, detected via the REST reactions endpoint → never approval.
@@ -278,15 +278,45 @@ A reader must not conflate them: per-node viewer-scoped handled marker vs PR-obj
 
 ## Author Filtering
 
-When `reviewer_filter` is `codex-only`, include only comments from the Codex reviewer identity. The Codex reviewer's canonical login base is `chatgpt-codex-connector`. Inside `reactions` nodes the login carries a `[bot]` suffix (`chatgpt-codex-connector[bot]`); match by stripping a trailing `[bot]` and comparing equal to `chatgpt-codex-connector`. If identity is unclear, ask the user before processing.
+`reviewer_filter` selects which non-self authors' feedback is in scope. Every mode first excludes self-authored content (login, with a trailing `[bot]` stripped, equal to `SELF_LOGIN`).
 
-## Codex Approval Detection
+| Mode | In scope |
+|------|----------|
+| `automated` (default) | every automated reviewer in the registry — Codex, Copilot, and Claude — Bot-gated |
+| `codex-only` | the Codex registry entry only, Bot-gated |
+| `all` | every author |
+| `<login>` | the author whose login, with a trailing `[bot]` stripped, equals the value; type-agnostic. The keywords above shadow a same-named login |
 
-Codex signals approval via a 👍 reaction on the PR object (not an `APPROVED` review). Detect it with the paginated REST reactions endpoint so the bot's reaction is found even when a PR has more than one page of reactions:
+Identity key for the registry modes (`automated`, `codex-only`): an author matches a registry entry only when its account type is `Bot` (GraphQL `author.__typename`, REST `user.type`) AND its login, with a trailing `[bot]` stripped, is one of that entry's recognized login forms. A login alone is not an identity: a human GitHub `User` account shares the Claude app's bare login once `[bot]` is stripped, so login-only matching would admit that human as an automated reviewer. A missing or null account type never matches a registry mode. This is why every template above selects `author { login __typename }`.
+
+The registry and every identity predicate — recognized login forms, the `[bot]` strip, filter matching, approver matching — live in one home: `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`. Consumers include that module; never restate a reviewer login or copy a predicate inline.
+
+`github-actions[bot]` is deliberately not in the registry. It is the generic CI identity every workflow step posts as, so admitting it by default would admit arbitrary CI output and widen the injection surface. Operators whose review bot posts as `github-actions[bot]` select it with `all` or an explicit `<login>` filter.
+
+If identity is unclear, ask the user before processing.
+
+## Reviewer Approval Detection
+
+An automated reviewer's approval is the signal that lets a watched PR end cleanly. Each registry entry in `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq` declares its approval kind. Approval counts only from a Bot-typed approver of that kind that is also in scope under the active `reviewer_filter`, so a filtered-out reviewer never ends the loop it was filtered out of.
+
+| Approval kind | Reviewer | Signal |
+|---------------|----------|--------|
+| `pr-reaction-thumbs-up` | Codex | a 👍 (`+1`) reaction on the PR object |
+| `review-approved` | Copilot | a submitted review with `state` `APPROVED` |
+
+Claude declares no approval kind; a Claude-reviewed loop ends through the idle watch window, never through an approval signal. Approval never overrides open feedback: while unresolved non-self actionable items remain, the PR is not clean.
+
+### PR 👍 reaction (`pr-reaction-thumbs-up`)
+
+Read the paginated REST reactions endpoint so the approver's reaction is found even when the PR has more than one page of reactions. The `gh --jq` filter is transport only: it emits one `login<TAB>type` row per `+1` reaction and makes no identity decision. Match the rows afterward, all at once, through the module's `reviewer_is_approver` (kind `pr-reaction-thumbs-up`) and `reviewer_matches_filter` predicates.
 
 ```bash
 gh api --paginate "repos/OWNER/REPO/issues/PR_NUMBER/reactions" \
-  --jq '.[] | select(.content == "+1") | ((.user.login // "") | sub("\\[bot\\]$"; "")) | select(. == "chatgpt-codex-connector")'
+  --jq '.[] | select(.content == "+1") | "\(.user.login // "")\t\(.user.type // "")"'
 ```
 
-REST content `+1` is the 👍 reaction. A reactor matches Codex when its login, with a trailing `[bot]` stripped, equals `chatgpt-codex-connector`. Codex approval is terminal for the github-reviewer ONLY when no unresolved non-self actionable items remain. The 👀 `eyes` reaction (REST content `eyes`) means "still running" — never treat it as approval (the `+1` filter already excludes it).
+REST content `+1` is the 👍 reaction. The 👀 `eyes` reaction (REST content `eyes`) is Codex's "still running" signal on the PR object — never treat it as approval (the `+1` filter already excludes it).
+
+### APPROVED review (`review-approved`)
+
+Read `state` and `author { login __typename }` from the review nodes (see [Fetch Reviews](#fetch-reviews)). A review whose `state` is `APPROVED` counts as approval only when its author passes the module's `reviewer_is_approver` (kind `review-approved`) and `reviewer_matches_filter` predicates. Codex never files an `APPROVED` review. When the reviewer's `APPROVED` capability is unavailable or not opted into, this kind never fires and the loop ends through the watch window instead.

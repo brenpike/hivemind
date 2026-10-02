@@ -1,1 +1,1 @@
-chatgpt-codex-connector
+chatgpt-codex-connector[bot]	Bot
