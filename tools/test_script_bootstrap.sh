@@ -119,7 +119,11 @@ ENTRY_ROWS=(
     "plugin/skills/github-review-loop/scripts/loop-state.sh|SCRIPT_DIR|die|$SELF_LOCATE_REASON"
     "plugin/skills/github-review-loop/scripts/fetch-normalize.sh|SCRIPT_DIR|fetchnorm_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/prefilter.sh|SCRIPT_DIR|prefilter_fail|cannot-self-locate"
+    "plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|SCRIPT_DIR|poll_fail|cannot-self-locate"
 )
+
+POLL_SCRIPT_PATH='plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh'
+POLL_PROBE_SEED='initial|OPEN|NONE|NONE|NONE|0|0|0|0|false'
 
 # LIB_ROWS: <path>|<var>|<sibling lib in the same dir>   (C3 sourced libraries)
 LIB_ROWS=(
@@ -199,8 +203,11 @@ list_table_paths() {
 }
 
 # emitter_contract <emitter> -> sets EC_RC / EC_CHANNEL (out|err) / EC_PREFIX for the emitter's
-# contracted failure line; returns 1 for an emitter the table does not know.
+# contracted failure line, and EC_TOKEN for an emitter that prints a bare reason-less token (the
+# reason argument is accepted but never emitted; empty EC_TOKEN means the line is prefix+reason);
+# returns 1 for an emitter the table does not know.
 emitter_contract() {
+    EC_TOKEN=''
     case "$1" in
         blocker)          EC_RC=1; EC_CHANNEL=err; EC_PREFIX='blocker: ' ;;
         fail)             EC_RC=2; EC_CHANNEL=err; EC_PREFIX='seed-hive: ' ;;
@@ -208,6 +215,7 @@ emitter_contract() {
         ledgerrecon_fail) EC_RC=1; EC_CHANNEL=err; EC_PREFIX='LEDGERRECON_ERROR=' ;;
         fetchnorm_fail)   EC_RC=1; EC_CHANNEL=out; EC_PREFIX='FETCHNORM_ERROR=' ;;
         prefilter_fail)   EC_RC=1; EC_CHANNEL=out; EC_PREFIX='PREFILTER_ERROR=' ;;
+        poll_fail)        EC_RC=1; EC_CHANNEL=out; EC_PREFIX=''; EC_TOKEN='POLL_ERROR' ;;
         *) return 1 ;;
     esac
 }
@@ -216,7 +224,8 @@ emitter_contract() {
 # (everything before C1 must accept it; confirmed by reading each prologue).
 set_probe_args() {
     case "$1" in
-        */prefilter.sh|*/fetch-normalize.sh) PROBE_ARGS=(owner repo 1 codex-only me) ;;
+        */prefilter.sh|*/fetch-normalize.sh) PROBE_ARGS=(owner repo 1 automated me) ;;
+        */pr-change-detect-poll.sh) PROBE_ARGS=(owner repo 1 0 1 automated me "$POLL_PROBE_SEED") ;;
         */spawn-brood.sh) PROBE_ARGS=("$BROOD_INPUTS_FILE") ;;
         */loop-state.sh) PROBE_ARGS=(floor) ;;
         *) PROBE_ARGS=() ;;
@@ -305,7 +314,7 @@ probe_matches_contract() {
     local rc="$1" emitter="$2" reason="$3" mode="$4"
     local expected_line chan_file other_file last_line
     emitter_contract "$emitter" || { CONTRACT_DIAG="unknown emitter '$emitter'"; return 1; }
-    expected_line="$EC_PREFIX$reason"
+    expected_line="${EC_TOKEN:-$EC_PREFIX$reason}"
     if [[ "$EC_CHANNEL" == out ]]; then
         chan_file="$PROBE_OUT"; other_file="$PROBE_ERR"
     else
@@ -577,6 +586,30 @@ test_r1_entrypoints() {
     done
 }
 
+# test_r1_poll_baseline -> the UNBROKEN poll, given its R1 probe args, must exit 0 with stdout
+# exactly WATCH_TIMEOUT and empty stderr, without invoking gh (the gh stub first on PATH creates a
+# marker file; the poll discards gh stderr, so a stderr-only stub could not prove this). This
+# proves the poll's R1 POLL_ERROR comes from C1, not from argument validation or a gh call.
+test_r1_poll_baseline() {
+    local STUB_BIN="$WORKDIR/stub-bin-marker-gh"
+    local gh_marker="$WORKDIR/gh-invoked.marker"
+    local script="$REPO_ROOT/$POLL_SCRIPT_PATH" rc=0
+    mkdir -p "$STUB_BIN"
+    cp -a "$WORKDIR/stub-bin/tmux" "$WORKDIR/stub-bin/claude" "$STUB_BIN/"
+    printf '#!/usr/bin/env bash\n: >%q\nexit 1\n' "$gh_marker" >"$STUB_BIN/gh"
+    chmod +x "$STUB_BIN/gh"
+    rm -f "$gh_marker"
+    set_probe_args "$POLL_SCRIPT_PATH"
+    run_probe none "${script%/*}" "$script" "${PROBE_ARGS[@]}" || rc=$?
+    if [[ -e "$gh_marker" ]]; then
+        failed "r1-baseline ${POLL_SCRIPT_PATH##*/}" "gh was invoked by the unbroken probe run"
+    elif [[ "$rc" -eq 0 && ! -s "$PROBE_ERR" ]] && printf 'WATCH_TIMEOUT\n' | cmp -s - "$PROBE_OUT"; then
+        pass "r1-baseline ${POLL_SCRIPT_PATH##*/}" "exit 0, WATCH_TIMEOUT, gh never invoked"
+    else
+        failed "r1-baseline ${POLL_SCRIPT_PATH##*/}" "exit $rc; $(describe_probe_output)"
+    fi
+}
+
 test_r1_libraries() {
     local row row_path var sibling lib variant rc
     for row in "${LIB_ROWS[@]}"; do
@@ -788,6 +821,7 @@ test_static_c4_pairs
 test_static_source_census
 test_static_emitter_order
 test_r1_entrypoints
+test_r1_poll_baseline
 test_r1_libraries
 test_r1_seed_hive_library_chain
 test_r2_stage2
