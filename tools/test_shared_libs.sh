@@ -3948,6 +3948,133 @@ assert_eq "gqlresp:purity-caller-vars-unchanged" "caller-mode|caller-body|caller
   "validator locals do not leak into or overwrite the caller's variables"
 unset check_mode response_body check_token envelope_program
 
+# ── Section 18: review-loop GraphQL check closure (#393) ────────────────────────
+echo ''
+echo '=== review-loop GraphQL check closure: every `gh api graphql` script uses graphql-response.sh (#393) ==='
+#
+# A review-loop script is DISCOVERED when a non-comment line contains `gh api graphql`. Every
+# discovered script must (a) source a path ending in `_shared/graphql-response.sh"` on a non-comment
+# line and (b) call hivemind_graphql_response_check or hivemind_graphql_pages_check on a non-comment
+# line. The same predicate runs over the canaries (18b) and the real glob (18c), so the canaries prove
+# the real check flags an unchecked script and ignores a comment-only mention.
+#
+# RESIDUAL: this closure is file-level only. It proves each discovered script sources the lib and
+# calls a validator somewhere, not that every `gh api graphql` call site in that script routes its
+# body through the validator; per-call-site correctness is covered by the consumer behavior suites.
+
+# gqlclosure_classify_file <path>: print one verdict for a script: `undiscovered`, `checked`,
+# `missing-source`, `missing-call`, `missing-source+missing-call`, or `unreadable` (returns 1).
+gqlclosure_classify_file() {
+  local script_path="$1" code_lines grep_rc verdict_parts=""
+  code_lines="$(grep -v '^[[:space:]]*#' "$script_path" 2>/dev/null)"
+  grep_rc=$?
+  if [ "$grep_rc" -gt 1 ]; then
+    printf 'unreadable'
+    return 1
+  fi
+  if ! grep -q 'gh api graphql' <<<"$code_lines"; then
+    printf 'undiscovered'
+    return 0
+  fi
+  grep -Eq '^[[:space:]]*(\.|source)[[:space:]]+"[^"]*_shared/graphql-response\.sh"' <<<"$code_lines" \
+    || verdict_parts="missing-source"
+  grep -Eq 'hivemind_graphql_(response|pages)_check([^A-Za-z0-9_]|$)' <<<"$code_lines" \
+    || verdict_parts="${verdict_parts:+$verdict_parts+}missing-call"
+  printf '%s' "${verdict_parts:-checked}"
+}
+
+# gqlclosure_scan_scripts <path>...: print `<basename> <verdict>` per discovered script, one per line.
+gqlclosure_scan_scripts() {
+  local script_path script_verdict
+  for script_path in "$@"; do
+    [ -f "$script_path" ] || { printf '%s unreadable\n' "${script_path##*/}"; continue; }
+    script_verdict="$(gqlclosure_classify_file "$script_path")"
+    [ "$script_verdict" = "undiscovered" ] && continue
+    printf '%s %s\n' "${script_path##*/}" "$script_verdict"
+  done
+}
+
+# 18a: canary fixtures.
+gqlclosure_canary_dir="$WORKDIR/gqlclosure-canaries"
+mkdir -p "$gqlclosure_canary_dir"
+cat > "$gqlclosure_canary_dir/a-checked.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$SCRIPT_DIR/../../_shared/graphql-response.sh" || exit 1
+body="$(gh api graphql -f query=q)"
+hivemind_graphql_response_check "$body" >/dev/null || exit 1
+EOF
+cat > "$gqlclosure_canary_dir/b-unchecked.sh" <<'EOF'
+#!/usr/bin/env bash
+body="$(gh api graphql -f query=q)"
+printf '%s\n' "$body"
+EOF
+cat > "$gqlclosure_canary_dir/c-comment-only.sh" <<'EOF'
+#!/usr/bin/env bash
+# This script never runs `gh api graphql`; it only mentions it here.
+  # gh api graphql --paginate (indented comment mention)
+gh api repos/o/r/pulls
+EOF
+cat > "$gqlclosure_canary_dir/d-source-only.sh" <<'EOF'
+#!/usr/bin/env bash
+source "$SCRIPT_DIR/../../_shared/graphql-response.sh"
+gh api graphql -f query=q
+EOF
+cat > "$gqlclosure_canary_dir/e-call-only.sh" <<'EOF'
+#!/usr/bin/env bash
+[ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || exit 1
+pages="$(gh api graphql --paginate -f query=q)"
+hivemind_graphql_pages_check "$pages" >/dev/null || exit 1
+EOF
+cat > "$gqlclosure_canary_dir/f-checked-in-comments-only.sh" <<'EOF'
+#!/usr/bin/env bash
+# . "$SCRIPT_DIR/../../_shared/graphql-response.sh"
+body="$(gh api graphql -f query=q)"
+  # hivemind_graphql_response_check "$body"
+EOF
+
+# 18b: the predicate over the canaries. A checked script is clean, an unchecked script is flagged
+# (each missing half independently), and a comment-only mention is not discovered. A `[ -f ]` probe
+# of the lib path is not a source line, and source/call text inside comments satisfies nothing.
+assert_eq "gqlclosure:canary-checked" "checked" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/a-checked.sh")"
+assert_eq "gqlclosure:canary-unchecked" "missing-source+missing-call" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/b-unchecked.sh")"
+assert_eq "gqlclosure:canary-comment-only-undiscovered" "undiscovered" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/c-comment-only.sh")"
+assert_eq "gqlclosure:canary-source-only" "missing-call" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/d-source-only.sh")"
+assert_eq "gqlclosure:canary-file-probe-is-not-source" "missing-source" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/e-call-only.sh")"
+assert_eq "gqlclosure:canary-comment-source-and-call" "missing-source+missing-call" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/f-checked-in-comments-only.sh")"
+assert_eq "gqlclosure:canary-unreadable" "unreadable rc=1" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/absent.sh"; printf ' rc=%s' "$?")"
+assert_eq "gqlclosure:canary-scan" \
+  "a-checked.sh checked|b-unchecked.sh missing-source+missing-call|d-source-only.sh missing-call|e-call-only.sh missing-source|f-checked-in-comments-only.sh missing-source+missing-call" \
+  "$(gqlclosure_scan_scripts "$gqlclosure_canary_dir"/*.sh | paste -sd '|' -)" \
+  "scan lists every discovered canary with its verdict and skips the comment-only one"
+
+# 18c: the same scan over the real review-loop scripts.
+gqlclosure_report="$(gqlclosure_scan_scripts "$REPO_ROOT"/plugin/skills/github-review-loop/scripts/*.sh)"
+gqlclosure_discovered="$(cut -d' ' -f1 <<<"$gqlclosure_report" | paste -sd ' ' -)"
+echo "INFO [gqlclosure:real-discovered] $gqlclosure_discovered"
+if [ -n "$gqlclosure_report" ]; then
+  pass "gqlclosure:real-non-vacuous" "discovered set is non-empty"
+else
+  failed "gqlclosure:real-non-vacuous" "no review-loop script discovered calling gh api graphql (glob or predicate broke)"
+fi
+for gqlclosure_expected in fetch-normalize.sh pr-change-detect-poll.sh prefilter.sh react-marker.sh reply-resolve.sh; do
+  if grep -q "^$gqlclosure_expected " <<<"$gqlclosure_report"; then
+    pass "gqlclosure:real-discovers-$gqlclosure_expected" "discovered as a gh api graphql caller"
+  else
+    failed "gqlclosure:real-discovers-$gqlclosure_expected" "not discovered (actual set: '$gqlclosure_discovered')"
+  fi
+done
+gqlclosure_violations="$(grep -v ' checked$' <<<"$gqlclosure_report" | paste -sd '|' -)"
+assert_eq "gqlclosure:real-all-checked" "" "$gqlclosure_violations" \
+  "every discovered review-loop script sources graphql-response.sh and calls a validator"
+unset gqlclosure_canary_dir gqlclosure_report gqlclosure_discovered gqlclosure_expected gqlclosure_violations
+
 # ── Summary ─────────────────────────────────────────────────────────────────────
 echo ''
 echo '=== Summary ==='
