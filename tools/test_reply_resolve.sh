@@ -17,6 +17,11 @@
 # constant `<!-- hivemind-defer-v1 -->` at BYTE 0 of a ONE-LINE body, asserted here as a byte-exact
 # prefix comparison against that constant — never as a prose pattern.
 #
+# The LIVE run_mutation path is covered too (issue #393): with every REPLYRESOLVE_* test env var unset,
+# a PATH-shim `gh` tells the REPLY call from the RESOLVE call by its `query=` text and answers each with
+# a canned response body and exit status, recording every call in a call log. A live mutation succeeds
+# only when gh exits 0 AND the shared validator hivemind_graphql_response_check accepts the body.
+#
 # Mirrors tools/test_fetch_normalize.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
 # -fail convention. Read-only: the only writes are scratch capture files in a disposable tmpdir
 # removed on EXIT.
@@ -463,6 +468,109 @@ if [ "$status" -eq 0 ] && grep -q '^REPLY ' "$cap" && grep -q '^RESOLVE ' "$cap"
   pass "defer:resolvefail-non-blocking" "resolve attempted + failed, diagnostic on stderr, exit 0"
 else
   failed "defer:resolvefail-non-blocking" "status=$status cap=$(cat "$cap") err=$err"
+fi
+
+# ── LIVE path: shared GraphQL response check over both mutations (#393) ───────────
+# These cases drive the LIVE run_mutation body (every REPLYRESOLVE_* test env var UNSET) against a
+# PATH-shim `gh`. The shim classifies each call by its `query=` argument (the reply mutation names
+# addPullRequestReviewThreadReply, the resolve mutation names resolveReviewThread), appends the kind to
+# a call log, prints that kind's canned body on stdout, writes an unrelated line on stderr, and exits
+# with that kind's status. gh exits 0 on several GraphQL error envelopes, so success must require BOTH
+# exit 0 AND the shared response check passing. The call log proves which mutations went live and in
+# what order, so no case can pass without reaching the live path.
+LIVE_REPLY_CLEAN='{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"PRRC_l1","url":"https://github.com/o/r/pull/5#discussion_r1"}}}}'
+LIVE_RESOLVE_CLEAN='{"data":{"resolveReviewThread":{"thread":{"id":"PRRT_l1","isResolved":true}}}}'
+
+# make_live_gh_shim <name> <reply status> <reply body> <resolve status> <resolve body>: write a stub
+# gh under the tmpdir that answers per mutation kind and logs each call. Prints the stub's bin dir.
+make_live_gh_shim() {
+  local shim_dir="$TMPDIR_TEST/$1-stubbin"
+  local reply_body_file="$TMPDIR_TEST/$1-reply-body.json"
+  local resolve_body_file="$TMPDIR_TEST/$1-resolve-body.json"
+  mkdir -p "$shim_dir"
+  printf '%s' "$3" > "$reply_body_file"
+  printf '%s' "$5" > "$resolve_body_file"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf '%s\n' 'call_kind=unknown'
+    printf '%s\n' 'for call_arg in "$@"; do'
+    printf '%s\n' '  case "$call_arg" in'
+    printf '%s\n' '    query=*addPullRequestReviewThreadReply*) call_kind=reply ;;'
+    printf '%s\n' '    query=*resolveReviewThread*) call_kind=resolve ;;'
+    printf '%s\n' '  esac'
+    printf '%s\n' 'done'
+    printf 'printf "%%s\\n" "$call_kind" >> %q\n' "$TMPDIR_TEST/$1-calls.log"
+    printf '%s\n' 'echo "gh: stub stderr line" >&2'
+    printf '%s\n' 'case "$call_kind" in'
+    printf '  reply) cat %q; exit %d ;;\n' "$reply_body_file" "$2"
+    printf '  resolve) cat %q; exit %d ;;\n' "$resolve_body_file" "$4"
+    printf '%s\n' 'esac'
+    printf '%s\n' 'exit 97'
+  } > "$shim_dir/gh"
+  chmod +x "$shim_dir/gh"
+  printf '%s' "$shim_dir"
+}
+
+# run_live_case <name> <reply status> <reply body> <resolve status> <resolve body>: run reply-resolve
+# over a resolve-eligible thread candidate on the live path against the shim, with every REPLYRESOLVE_*
+# test env var unset. Sets live_status, live_stdout, live_stderr, live_calls (the call log, one kind
+# per line; empty when the shim was never reached).
+run_live_case() {
+  local shim_dir
+  shim_dir="$(make_live_gh_shim "$@")"
+  PATH="$shim_dir:$PATH" env -u REPLYRESOLVE_TEST_MODE -u REPLYRESOLVE_CAPTURE_FILE \
+    -u REPLYRESOLVE_REPLY_STATUS -u REPLYRESOLVE_RESOLVE_STATUS \
+    bash "$REPLY_RESOLVE" --resolve-eligible -- PRRT_l1 abc123 "Live fix" thread "" \
+    > "$TMPDIR_TEST/$1.stdout" 2> "$TMPDIR_TEST/$1.stderr"
+  live_status=$?
+  live_stdout="$(cat "$TMPDIR_TEST/$1.stdout")"
+  live_stderr="$(cat "$TMPDIR_TEST/$1.stderr")"
+  live_calls="$(cat "$TMPDIR_TEST/$1-calls.log" 2>/dev/null)"
+}
+
+# assert_live_reply_failed <name> <label>: the live case exited 1 with exactly the reply-failed token
+# on stdout, and the call log shows the reply went live and NO resolve was sent.
+assert_live_reply_failed() {
+  if [ "$live_status" -eq 1 ] && [ "$live_stdout" = "REPLYRESOLVE_ERROR=reply-failed" ] \
+     && [ "$live_calls" = "reply" ]; then
+    pass "$1" "$2"
+  else
+    failed "$1" "status=$live_status stdout=$live_stdout calls=$(printf '%s' "$live_calls" | tr '\n' ',') stderr=$live_stderr"
+  fi
+}
+
+# exit 0 + a top-level errors array carrying a message on the REPLY -> reply-failed, no resolve sent.
+run_live_case live-reply-errors-message 0 \
+  '{"data":{"addPullRequestReviewThreadReply":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}' \
+  0 "$LIVE_RESOLVE_CLEAN"
+assert_live_reply_failed "live:reply-exit0-errors-message" "reply exit 0 + errors[{message}] -> exit 1 reply-failed, no resolve sent"
+
+# exit 0 + errors [{}] on the REPLY (no message: gh does not turn this into a non-zero exit).
+run_live_case live-reply-errors-empty-object 0 '{"data":{"addPullRequestReviewThreadReply":null},"errors":[{}]}' \
+  0 "$LIVE_RESOLVE_CLEAN"
+assert_live_reply_failed "live:reply-exit0-errors-empty-object" "reply exit 0 + errors[{}] -> exit 1 reply-failed, no resolve sent"
+
+# non-zero gh exit on the REPLY -> reply-failed, no resolve sent (the exit status still decides first).
+run_live_case live-reply-nonzero 1 "$LIVE_REPLY_CLEAN" 0 "$LIVE_RESOLVE_CLEAN"
+assert_live_reply_failed "live:reply-nonzero-exit" "reply exit 1 -> exit 1 reply-failed, no resolve sent"
+
+# clean REPLY + exit 0 RESOLVE carrying errors -> REPLYRESOLVE_RESOLVE_FAILED, still exit 0.
+run_live_case live-resolve-errors 0 "$LIVE_REPLY_CLEAN" \
+  0 '{"data":{"resolveReviewThread":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}'
+if [ "$live_status" -eq 0 ] && [ -z "$live_stdout" ] && [ "$live_calls" = "$(printf 'reply\nresolve')" ] \
+   && printf '%s\n' "$live_stderr" | grep -q 'REPLYRESOLVE_RESOLVE_FAILED'; then
+  pass "live:resolve-exit0-errors-non-blocking" "resolve exit 0 + errors -> RESOLVE_FAILED on stderr, exit 0, reply then resolve"
+else
+  failed "live:resolve-exit0-errors-non-blocking" "status=$live_status stdout=$live_stdout calls=$(printf '%s' "$live_calls" | tr '\n' ',') stderr=$live_stderr"
+fi
+
+# clean REPLY + clean RESOLVE -> exit 0, silent on stdout, no RESOLVE_FAILED, reply then resolve.
+run_live_case live-both-clean 0 "$LIVE_REPLY_CLEAN" 0 "$LIVE_RESOLVE_CLEAN"
+if [ "$live_status" -eq 0 ] && [ -z "$live_stdout" ] && [ "$live_calls" = "$(printf 'reply\nresolve')" ] \
+   && ! printf '%s\n' "$live_stderr" | grep -q 'REPLYRESOLVE_RESOLVE_FAILED'; then
+  pass "live:both-clean" "clean reply + clean resolve -> exit 0, empty stdout, no RESOLVE_FAILED, reply then resolve"
+else
+  failed "live:both-clean" "status=$live_status stdout=$live_stdout calls=$(printf '%s' "$live_calls" | tr '\n' ',') stderr=$live_stderr"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

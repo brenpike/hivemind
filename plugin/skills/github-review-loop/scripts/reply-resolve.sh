@@ -229,6 +229,14 @@
 #     to stderr and the script STILL exits 0. A resolve failure must never fail
 #     the candidate — the fix is committed, pushed, and replied; an unresolved
 #     thread is a cosmetic GitHub-side state, not a remediation failure.
+#   - RESPONSE CHECK: a live mutation succeeds only when gh exits 0 AND the shared
+#     validator hivemind_graphql_response_check
+#     (${CLAUDE_PLUGIN_ROOT}/skills/_shared/graphql-response.sh) accepts the response
+#     body. gh exits 0 on several GraphQL error envelopes (a top-level `errors`
+#     value), so an exit-0 response the check rejects is NOT success. A rejected
+#     REPLY is therefore reply-failed (exit 1, NO resolve sent); a rejected RESOLVE
+#     is REPLYRESOLVE_RESOLVE_FAILED (non-blocking, still exit 0). Only stdout is
+#     captured for the check — gh's own stderr chatter never reaches the body.
 #   - Missing `timeout` / `gtimeout` -> degrade gracefully with a loud stderr
 #     warning and run the gh calls UNGUARDED (mirrors fetch-normalize.sh).
 #
@@ -273,19 +281,27 @@
 #
 # Markers / exit posture:
 #   - exit 0 on success (reply posted; resolve issued-or-skipped-or-failed).
-#   - REPLYRESOLVE_ERROR=<reason> on stdout + exit 1 on a HARD failure (bad input
-#     or a failed REPLY).
+#   - REPLYRESOLVE_ERROR=<reason> on stdout + exit 1 on a HARD failure (bad input,
+#     a bootstrap failure, or a failed REPLY — including an exit-0 REPLY response
+#     the shared GraphQL response check rejects).
 #   - REPLYRESOLVE_RESOLVE_FAILED on stderr + exit 0 on a failed (non-blocking)
-#     resolve.
+#     resolve, including an exit-0 RESOLVE response the check rejects.
 #
 # Reason tokens (STABLE — asserted by the test):
 #   missing-thread-id | missing-fix-sha | missing-summary | unmapped-surface |
 #   reply-failed | missing-tracked-home | invalid-tracked-home |
-#   conflicting-reply-mode
-# The last three are DEFER-mode-only and fire ONLY on the thread surface; each is
-# a hard failure (no mutation issued, REPLYRESOLVE_ERROR=<token> on stdout,
-# exit 1). Their firing order relative to the pre-existing tokens is fixed by the
-# THREAD-SURFACE VALIDATION ORDER in §3.
+#   conflicting-reply-mode | cannot-self-locate | missing-graphql-check |
+#   unparseable-graphql-check
+# missing-tracked-home | invalid-tracked-home | conflicting-reply-mode are
+# DEFER-mode-only and fire ONLY on the thread surface; each is a hard failure (no
+# mutation issued, REPLYRESOLVE_ERROR=<token> on stdout, exit 1). Their firing
+# order relative to the pre-existing tokens is fixed by the THREAD-SURFACE
+# VALIDATION ORDER in §3.
+# cannot-self-locate | missing-graphql-check | unparseable-graphql-check are
+# BOOTSTRAP tokens: the script cannot resolve its own directory, or the shared
+# GraphQL response validator is absent or fails to source. They fire after the
+# positional binding and before any surface dispatch, on EVERY surface, with no
+# mutation issued (REPLYRESOLVE_ERROR=<token> on stdout, exit 1).
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
 # are DELIBERATELY omitted. The full floor would change behavior: the resolve mutation is
@@ -354,6 +370,15 @@ CANDIDATE_URL="${positionals[4]:-}"
 # with unmapped-surface). CANDIDATE_URL is accepted for positional-arity
 # compatibility but no live path interpolates it, so it has no validation gate.
 
+SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || replyresolve_fail "cannot-self-locate"
+
+# Source the shared GraphQL response validator (hivemind_graphql_response_check). It
+# lives at plugin/skills/_shared/, two levels up from this script's own dir, then into
+# _shared/. The lib is a sourced fragment (function definitions only).
+[ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || replyresolve_fail "missing-graphql-check"
+# shellcheck source=../../_shared/graphql-response.sh
+. "$SCRIPT_DIR/../../_shared/graphql-response.sh" || replyresolve_fail "unparseable-graphql-check"
+
 # Timeout wrapper for gh API calls. Prefer coreutils `timeout`; fall
 # back to macOS Homebrew `gtimeout`; degrade gracefully (run unguarded) when
 # neither exists, with a loud stderr warning. Verbatim posture from
@@ -392,9 +417,11 @@ mutation($threadId: ID!) {
 
 # run_mutation <kind> <thread_id> [body]: issue ONE mutation. kind is "reply" or
 # "resolve". The single indirection point for both the live gh call AND the
-# offline CAPTURE seam (§5). Returns the gh exit status so the caller decides
-# hard-fail (reply) vs non-blocking (resolve). INVARIANT: when the capture seam is
-# active, NO gh call is made — the script is fully offline.
+# offline CAPTURE seam (§5). Returns 0 only when gh exits 0 AND the shared GraphQL
+# response check accepts the body; returns gh's non-zero exit status as-is, and 1
+# for a rejected response or an unknown kind. The caller decides hard-fail (reply)
+# vs non-blocking (resolve). INVARIANT: when the capture seam is active, NO gh call
+# is made — the script is fully offline.
 run_mutation() {
   local kind="$1" thread_id="$2" body="${3:-}"
   # TEST SEAM GATE (§5): capture seam activates ONLY when the dedicated test-mode
@@ -410,19 +437,31 @@ run_mutation() {
         return "${REPLYRESOLVE_RESOLVE_STATUS:-0}" ;;
     esac
   fi
+  # LIVE path. Capture the response body from stdout ONLY, so gh's own stderr
+  # chatter is kept out of the body handed to the shared response check.
+  local gh_output
+  local gh_status
   case "$kind" in
     reply)
-      "${GH_TIMEOUT[@]}" gh api graphql \
+      gh_output="$("${GH_TIMEOUT[@]}" gh api graphql \
         -f threadId="$thread_id" \
         -f body="$body" \
-        -f query="$REPLY_MUTATION" >/dev/null 2>&1
-      return $? ;;
+        -f query="$REPLY_MUTATION" 2>/dev/null)"
+      gh_status=$? ;;
     resolve)
-      "${GH_TIMEOUT[@]}" gh api graphql \
+      gh_output="$("${GH_TIMEOUT[@]}" gh api graphql \
         -f threadId="$thread_id" \
-        -f query="$RESOLVE_MUTATION" >/dev/null 2>&1
-      return $? ;;
+        -f query="$RESOLVE_MUTATION" 2>/dev/null)"
+      gh_status=$? ;;
+    *)
+      return 1 ;;
   esac
+  [ "$gh_status" -eq 0 ] || return "$gh_status"
+  # Success requires BOTH a zero gh exit AND a passing shared response check: gh
+  # exits 0 on several GraphQL error envelopes, so the exit status alone is not
+  # proof the mutation landed.
+  hivemind_graphql_response_check "$gh_output" >/dev/null || return 1
+  return 0
 }
 
 # --- SURFACE -> DELIVERY DISPATCH (§3, closed by construction) -----------------
