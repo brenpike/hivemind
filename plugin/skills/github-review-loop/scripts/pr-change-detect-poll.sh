@@ -483,6 +483,23 @@ query($owner: String!, $repo: String!, $pr: Int!) {
     # else — PENDING / QUEUED / IN_PROGRESS / NEUTRAL / SUCCESS / SKIPPED
     # / STARTUP_FAILURE / STALE — is NOT counted. A null rollup means no
     # checks have run yet; count 0.
+    # RECORDED RESIDUAL (linked finding a303b3ee): the `// []` and `// 0`
+    # defaults below are the correct reading, not a degradation. In the
+    # published schema pullRequest.statusCheckRollup is NULLABLE (null = no
+    # checks yet) and both CountsByState fields are NULLABLE lists of
+    # non-null buckets, so a null at either position arrives WITHOUT an
+    # `errors` entry and means no failed checks. `contexts` and each bucket
+    # `state` and `count` are non-null, so a lost one arrives only with an
+    # `errors` entry, which the envelope check rejects before this program
+    # runs. A string, number, boolean, or array where the rollup object
+    # belongs raises a jq error and fails the capture. Inherited: these
+    # reads are byte-identical to main. Obvious remediation considered and
+    # rejected on the merits: a gate that rejects a null rollup or a null
+    # bucket list would fail the capture on every PR with no checks.
+    # Residual window: an absent field, a `false` or an object where a
+    # bucket list belongs, or a null bucket, shapes only a server violating
+    # its own schema can send. The query-derived shape check that would
+    # close that window is tracked in issue #328.
     (
       ((($pr.statusCheckRollup.contexts.checkRunCountsByState // [])
         | map(select(.state == "FAILURE" or .state == "TIMED_OUT" or .state == "CANCELLED" or .state == "ACTION_REQUIRED"))

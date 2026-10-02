@@ -281,11 +281,16 @@ dispatch_class=$( ( set -o pipefail; \
 ) ) || prefilter_fail "classify-failed"
 
 # Pass 2 — read the three connection-level totalCounts DIRECTLY off the raw
-# payload (the filter does not emit them). The shape check above already ran, so
-# every connection is present; the `// 0` defaults only cover a missing
-# totalCount scalar, read as a 0-node page on that connection. A
-# single jq pass emits three label-prefixed lines, parsed exactly as the old
-# inline-token path did.
+# payload (the filter does not emit them). A single jq pass emits three
+# label-prefixed lines, parsed exactly as the old inline-token path did.
+# The `// 0` defaults and the non-digit-to-0 guards below are INHERITED from
+# main and are not a sanctioned degradation path: `totalCount` is `Int!` in the
+# published schema, so a lost count arrives only with an `errors` entry, which
+# the envelope check above already failed open (DISPATCH). The coercion is
+# reachable only when the server violates its own schema (linked finding
+# 1a6b2eb8); the bound and the rejected conjunct remedy are recorded under
+# FIELDS BESIDE THE SKELETON in skills/_shared/review-surface-shape.sh, and
+# replacing this totalizing read is tracked as fragment 1 of issue #328.
 totals=$( printf '%s' "$response" | jq -r '
   .data.repository.pullRequest as $pr |
   "THREADS_TOTAL=" + (($pr.reviewThreads.totalCount // 0) | tostring),

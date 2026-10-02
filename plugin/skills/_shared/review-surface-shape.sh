@@ -86,12 +86,32 @@
 # HAND. A future query that adds a nullable connection a consumer reads must add that connection
 # here, or a lost instance of it reads as clean. Inherited: the predicate existed on main inside
 # fetch-normalize.sh (validate_live_response); it is lifted here and tightened to the type-strict
-# form above. Bounded: the gap opens
-# only for a spec-legal null-without-errors response at a position not yet listed, a shape never
-# observed from the GitHub API. Obvious remediation considered and rejected on the merits:
-# deriving the positions from the query text needs a GraphQL parser plus schema nullability
-# data, disproportionate to a hand-listed five-position skeleton. Because every consumer calls
-# this one copy, that maintenance happens in one place.
+# form above. Bounded: the gap opens only for a spec-legal null-without-errors response at a
+# position not yet listed, a shape never observed from the GitHub API. Obvious remediation
+# considered and rejected on the merits FOR THIS CHANGE: deriving the positions from the query
+# text needs a GraphQL parser plus schema nullability data, disproportionate to a hand-listed
+# five-position skeleton. That derivation is the class-closing direction for the whole family
+# and stays open, tracked work in issue #328; this record does not close #328. Because every
+# consumer calls this one copy, that maintenance happens in one place.
+#
+# FIELDS BESIDE THE SKELETON (linked findings 1a6b2eb8, a303b3ee): consumers also read fields
+# this predicate deliberately does not check. The NON-NULL ones, per the published GitHub schema
+# (live introspection, 2026-10-02): `totalCount` is `Int!` on all four skeleton connections, and
+# `StatusCheckRollup.contexts` plus each `CheckRunStateCount` / `StatusContextStateCount` `state`
+# and `count` are non-null. Per COMPLETENESS above, a lost non-null value reaches a consumer only
+# together with an `errors` entry, which hivemind_graphql_response_check rejects first; an ABSENT
+# or wrongly typed non-null value means the server violated its own schema and the GraphQL
+# specification. Inherited: every consumer read of these fields is byte-identical to main.
+# Bounded: were GitHub to send such a body, prefilter.sh could SKIP one poll on an overflowed
+# connection, fetch-normalize-core.sh would lose one stderr OVERFLOW diagnostic,
+# fix-history-classify.jq could miss one per-thread overflow sentinel, and the
+# pr-change-detect-poll.sh totals would project the token `null` and fire one extra CHANGED wake.
+# Obvious remediation considered and rejected on the merits: adding a `totalCount` conjunct here
+# is complete-the-known-set (the next field is the next finding), not a class-closing fix. The
+# consumers' totalizing reads of `totalCount` stay tracked as fragment 1 of issue #328. The
+# NULLABLE ones (pullRequest.statusCheckRollup and both CountsByState lists) are read only by
+# pr-change-detect-poll.sh, where null means no checks; they carry their own recorded residual
+# beside the FAILED_CHECKS projection.
 #
 # SINGLE SOURCE: this file holds the ONLY copy of the review-activity skeleton predicate
 # (shape_program). No consumer re-implements it. Its signature is the jq definition
