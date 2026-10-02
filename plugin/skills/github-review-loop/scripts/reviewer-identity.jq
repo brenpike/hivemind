@@ -3,8 +3,9 @@
 # 1. PURPOSE
 # ----------
 # Single source of truth for GitHub review IDENTITY predicates: which PR-review
-# authors count as an automated reviewer, which one a REVIEWER_FILTER value
-# selects, and which automated reviewer's signal counts as an approval. Every
+# author is the authenticated viewer (`is_self`), which authors count as an
+# automated reviewer, which one a REVIEWER_FILTER value selects, and which
+# automated reviewer's signal counts as an approval. Every
 # github-review-loop script that filters review authors or detects an automated
 # approval MUST call these defs instead of inlining its own login compare, so the
 # identity semantics never drift between consumers.
@@ -45,6 +46,16 @@
 # that human out of every registry mode. A missing or null `$type` never matches
 # a registry mode (fail closed toward "not automated").
 #
+# SELF identity (`is_self`) is keyed the same way, on the opposite type: the
+# author is self ONLY when `$type == "User"` AND the RAW login equals `$self`
+# (no `[bot]` strip). `$self` is SELF_LOGIN, read from REST `GET /user`, which
+# answers only for a user credential, so the viewer is always a User account. A
+# Bot whose bare login equals the operator's login (operator = the human User
+# `claude`, the Claude app Bot also `claude`) is therefore NOT self: its findings
+# stay visible and its fix/defer/`Addresses:` markers are never honored as the
+# operator's. A missing or null `$type`, or an empty `$self`, is never self (fail
+# toward "actionable": an unrecognised author is surfaced, never silenced).
+#
 # `github-actions[bot]` is DELIBERATELY EXCLUDED from the registry. It is the
 # generic CI identity that any workflow step posts as, so admitting it would
 # admit arbitrary CI noise and widen the prompt-injection surface to anything a
@@ -67,8 +78,8 @@
 #                 from the pre-registry behavior).
 # The keywords SHADOW same-named logins: an account literally named `automated`,
 # `codex-only`, or `all` cannot be selected via the `<login>` mode.
-# Every mode first requires the stripped login to differ from `$self` (the
-# authenticated viewer), so self-authored content never matches a filter.
+# Every mode first requires the author not be self per `is_self` (§3), so
+# self-authored content never matches a filter.
 #
 # 6. CALLER OBLIGATION
 # --------------------
@@ -97,10 +108,16 @@ def approval_kinds: ["pr-reaction-thumbs-up", "review-approved"];
 # [bot]-suffix normalization on an author login BEFORE any identity compare.
 def strip_bot($login): ($login // "") | sub("\\[bot\\]$"; "");
 
-# True when the stripped login is non-self AND matches the filter mode (§5).
+# True when the author is the authenticated viewer: a User-typed account whose
+# raw login equals the non-empty $self (§3). Positive allowlist on the type, so
+# a null/missing $type is never self.
+def is_self($login; $type; $self):
+  $type == "User" and $self != "" and $login == $self;
+
+# True when the author is non-self (is_self, §3) AND matches the filter mode (§5).
 def reviewer_matches_filter($login; $type; $self; $filter):
   strip_bot($login) as $stripped
-  | $stripped != $self
+  | (is_self($login; $type; $self) | not)
     and (
       if $filter == "automated" then
         $type == "Bot"

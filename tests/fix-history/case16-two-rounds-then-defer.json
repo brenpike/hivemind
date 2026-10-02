@@ -20,7 +20,7 @@
                   {
                     "id": "PRRC_case16comment1601",
                     "databaseId": 1601,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Fixed in abc1234. Rejected negative page sizes at the boundary."
                   },
                   {
@@ -32,7 +32,7 @@
                   {
                     "id": "PRRC_case16comment1603",
                     "databaseId": 1603,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Fixed in bcd2345. Rejected zero page sizes as well."
                   },
                   {
@@ -44,7 +44,7 @@
                   {
                     "id": "PRRC_case16comment1605",
                     "databaseId": 1605,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. The upper bound needs a product decision."
                   },
                   {

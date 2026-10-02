@@ -20,7 +20,7 @@
                   {
                     "id": "PRRC_case03comment301",
                     "databaseId": 301,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Fixed in cafe1234."
                   },
                   {

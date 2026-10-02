@@ -14,7 +14,7 @@
                   {
                     "id": "PRRC_case10comment1000",
                     "databaseId": 1000,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Fixed in feed1234. (self fix-reply; only visible node on an overflowed page)"
                   }
                 ]

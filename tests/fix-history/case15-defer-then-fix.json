@@ -20,7 +20,7 @@
                   {
                     "id": "PRRC_case15comment1501",
                     "databaseId": 1501,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. Tenant scoping lands with the multi-tenant slice."
                   },
                   {
@@ -32,7 +32,7 @@
                   {
                     "id": "PRRC_case15comment1503",
                     "databaseId": 1503,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Fixed in abc1234. Added the tenant id to the cache key."
                   },
                   {

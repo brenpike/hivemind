@@ -20,13 +20,13 @@
                   {
                     "id": "PRRC_case13comment1301",
                     "databaseId": 1301,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Deferred to https://github.com/o/r/issues/77. Tracked separately."
                   },
                   {
                     "id": "PRRC_case13comment1302",
                     "databaseId": 1302,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "> <!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. Tracked separately.\n\nQuoting the earlier reply for context."
                   },
                   {

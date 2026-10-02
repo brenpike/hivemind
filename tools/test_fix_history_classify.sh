@@ -125,12 +125,15 @@ run_case "case06:toplevel-addressed" "case06-toplevel-addressed.json" "selfuser"
 run_case "case07:review-summary" "case07-review-summary.json" "selfuser" "all" \
   '[{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase07review700","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-700","classification":"handled"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase07review701","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-701","classification":"actionable"},{"surface":"review","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"PRR_kwDOcase07review702","databaseId":null,"url":"https://github.com/o/r/pull/1#pullrequestreview-702","classification":"actionable"}]'
 
-# ── Case 8: [bot] normalization ──────────────────────────────────────────────────
-# A self author login carrying a trailing `[bot]` suffix (selfuser[bot]) normalizes to selfuser →
-# treated as self, so its `Fixed in <SHA>.` becomes a fix disposition (id 801) and it is NOT emitted.
-# The non-self comment (id 800 <= 801) → handled. Exactly one record.
-run_case "case08:bot-normalization" "case08-bot-normalization.json" "selfuser" "all" \
-  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case08ffffffffffff","id":"PRRC_case08comment800","databaseId":800,"url":null,"classification":"handled"}]'
+# ── Case 8: a bot-suffixed Bot sharing the self login is NOT self ────────────────
+# Self identity is a User-typed author whose RAW login equals --arg login (module `is_self`); the
+# `[bot]` strip never applies to it. A Bot-typed `selfuser[bot]` therefore stays a non-self author
+# under `all`: it is emitted, its own `Fixed in <SHA>.` body marks IT handled (801), and it
+# contributes NO self disposition, so the codex finding before it (800) is a first-time finding on a
+# never-disposed thread → actionable. Under the superseded login-only key the stripped `selfuser`
+# read as self: 801 became a fix disposition, 800 was absolved, and 801 was dropped.
+run_case "case08:bot-suffixed-bot-not-self" "case08-bot-normalization.json" "selfuser" "all" \
+  '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case08ffffffffffff","id":"PRRC_case08comment800","databaseId":800,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case08ffffffffffff","id":"PRRC_case08comment801","databaseId":801,"url":null,"classification":"handled"}]'
 
 # ── Case 9: reviewer_filter — codex-only vs all on one payload ────────────────────
 # Same payload, two filters. codex-only matches ONLY the Bot-typed chatgpt-codex-connector (900). all
@@ -298,6 +301,28 @@ run_case "case19:all-non-self" "case19-automated-reviewers.json" "selfuser" "all
 run_case "case19:legacy-login-type-agnostic" "case19-automated-reviewers.json" "selfuser" "claude" \
   '[{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1903","databaseId":1903,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case19pppppppppppp","id":"PRRC_case19comment1904","databaseId":1904,"url":null,"classification":"actionable"}]'
 
+# ── Case 20: self identity is User type + login, never login alone ───────────────
+# The viewer runs as the human User `claude`; the Claude app Bot's bare login is also `claude`.
+# Self is ONLY the User-typed `claude` (module `is_self`). Four unresolved threads plus top-level:
+#   T1 2000 claude Bot finding → emitted (registry Bot), first-time → actionable. A login-only self
+#        key dropped it.
+#   T2 FORGERY: 2010 codex finding; 2011 claude Bot `Fixed in abc1234.`; 2012 claude Bot with the
+#        defer sentinel at byte 0. Neither Bot reply is a self disposition, so 2010 → actionable;
+#        2011 → handled by its OWN body marker; 2012 → actionable (the sentinel is never read off a
+#        non-self body).
+#   T3 REAL SELF: 2020 codex; 2021 claude User `Fixed in abc1234.` (self fix disposition, not
+#        emitted); 2022 codex post-fix → 2020 handled, 2022 followup-after-fix.
+#   T4 NULL TYPE: 2030 codex; 2031 claude with NO __typename `Fixed in abc1234.`. A null type is never
+#        self, so no disposition → 2030 actionable. 2031 is not Bot-typed, so `automated` omits it;
+#        `all` emits it, handled by its own body marker.
+#   Top-level: 2041 claude Bot `Addresses: <2040>` is not a self harvest, so 2040 → actionable and
+#        2041 itself → actionable (a registry Bot comment); 2043 claude User `Addresses: <2042>` is
+#        the self harvest → 2042 handled, 2043 not emitted.
+run_case "case20:self-identity-automated" "case20-self-identity-login-collision.json" "claude" "automated" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2040","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2040","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2041","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2041","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2042","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2042","classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq1","id":"PRRC_case20comment2000","databaseId":2000,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2010","databaseId":2010,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2011","databaseId":2011,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2012","databaseId":2012,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2020","databaseId":2020,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2022","databaseId":2022,"url":null,"classification":"followup-after-fix"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2030","databaseId":2030,"url":null,"classification":"actionable"}]'
+run_case "case20:self-identity-all" "case20-self-identity-login-collision.json" "claude" "all" \
+  '[{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2040","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2040","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2041","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2041","classification":"actionable"},{"surface":"toplevel","thread_resolved":false,"thread_overflow":false,"thread_id":null,"id":"IC_kwDOcase20comment2042","databaseId":null,"url":"https://github.com/o/r/pull/1#issuecomment-2042","classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq1","id":"PRRC_case20comment2000","databaseId":2000,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2010","databaseId":2010,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2011","databaseId":2011,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq2","id":"PRRC_case20comment2012","databaseId":2012,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2020","databaseId":2020,"url":null,"classification":"handled"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq3","id":"PRRC_case20comment2022","databaseId":2022,"url":null,"classification":"followup-after-fix"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2030","databaseId":2030,"url":null,"classification":"actionable"},{"surface":"thread","thread_resolved":false,"thread_overflow":false,"thread_id":"PRRT_case20qqqqqqqqqqq4","id":"PRRC_case20comment2031","databaseId":2031,"url":null,"classification":"handled"}]'
+
 # ── Registry integrity ───────────────────────────────────────────────────────────
 # Each rule is a jq predicate over a registry ARRAY on its input, evaluated with the module
 # included (so `approval_kinds` resolves). It must hold for the real `automated_reviewers` AND be
@@ -425,6 +450,62 @@ $closure_hits"
     fi
   done
 fi
+
+# ── CLOSURE: no login-only self compare in a consumer ────────────────────────────
+# Self identity is the module's `is_self` (User type + raw login). A consumer that compares an
+# author login straight against the `$login` (SELF_LOGIN) --arg — `select($a == $login)`,
+# `strip_bot(.author.login) != $login` — re-derives self on login alone, so a Bot sharing the
+# viewer's bare login reads as self. Any `==` / `!=` with `$login` as either operand is a hit; the
+# word bound after `$login` keeps a longer variable name (`$login_x`) out. `$login` passed as an
+# argument (`--arg login`, `is_self(...; $login)`, the matches_filter wrapper) is not a compare.
+# RESIDUAL: rebinding the --arg to another variable (`$login as $me | ... == $me`) evades this
+# matcher; the behavioural cases (8, 20) are the guard for that shape.
+SELF_COMPARE_ERE='(==|!=)[[:space:]]*\$login([^A-Za-z0-9_]|$)|\$login[[:space:]]*(==|!=)'
+
+# print_self_compare_hits <file>
+# Print every login-only self compare in <file> as `<lineno>:<text>`, one per line.
+print_self_compare_hits() {
+  grep -nE -- "$SELF_COMPARE_ERE" "$1"
+  return 0
+}
+
+SELF_CANARY_HIT="$WORKDIR/self-compare-canary-hit.jq"
+printf '%s\n' '| select($a == $login)' '| map(select(strip_bot(.author.login) != $login))' \
+  'select($login == .x)' > "$SELF_CANARY_HIT"
+self_canary_lines="$(wc -l < "$SELF_CANARY_HIT" | tr -d ' ')"
+self_canary_hit_lines="$(print_self_compare_hits "$SELF_CANARY_HIT" | cut -d: -f1 | sort -un | wc -l | tr -d ' ')"
+if [ "$self_canary_hit_lines" = "$self_canary_lines" ]; then
+  pass "self-compare:canary-bites" "every one of $self_canary_lines forbidden canary lines detected"
+else
+  failed "self-compare:canary-bites" "detected $self_canary_hit_lines of $self_canary_lines forbidden canary lines"
+fi
+
+SELF_CANARY_CLEAN="$WORKDIR/self-compare-canary-clean.sh"
+printf '%s\n' 'jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER"' \
+  '| select(is_self(.author.login; .author.__typename; $login))' \
+  'def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter);' > "$SELF_CANARY_CLEAN"
+self_canary_clean_hits="$(print_self_compare_hits "$SELF_CANARY_CLEAN")"
+if [ -z "$self_canary_clean_hits" ]; then
+  pass "self-compare:canary-no-overmatch" "legitimate \$login uses produce no self-compare hit"
+else
+  failed "self-compare:canary-no-overmatch" "false-positive self-compare hits:
+$self_canary_clean_hits"
+fi
+
+for closure_target in "${CLOSURE_TARGETS[@]}"; do
+  closure_rel="${closure_target#"$REPO_ROOT"/}"
+  if [ ! -f "$closure_target" ]; then
+    failed "self-compare:$closure_rel" "closure target missing"
+    continue
+  fi
+  self_compare_hits="$(print_self_compare_hits "$closure_target")"
+  if [ -z "$self_compare_hits" ]; then
+    pass "self-compare:$closure_rel" "no login-only self compare"
+  else
+    failed "self-compare:$closure_rel" "login-only self compare(s); route through is_self:
+$self_compare_hits"
+  fi
+done
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo

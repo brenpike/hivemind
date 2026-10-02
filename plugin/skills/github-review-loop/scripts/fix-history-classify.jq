@@ -88,8 +88,14 @@
 # `author.__typename` is a CONTRACT field on every surface: the registry filter
 # modes (`automated`, `codex-only`) match only a Bot-typed author, so a payload
 # omitting it never matches those modes (fail closed toward "not automated").
-# Identity semantics (registry, type gate, filter modes) are owned by the
-# reviewer-identity.jq module this filter includes; see its header.
+# It is ALSO the self identity key: an author is self only when its
+# `__typename` is "User" AND its raw login equals --arg login (module
+# `is_self`), so a payload omitting `__typename` never reads as self — its
+# comment stays a candidate and its fix/defer/`Addresses:` markers are never
+# honored as a self disposition (fail toward "actionable"). A Bot sharing the
+# viewer's bare login is likewise never self.
+# Identity semantics (registry, type gate, self key, filter modes) are owned by
+# the reviewer-identity.jq module this filter includes; see its header.
 #
 # Connection-level tripwires (reviewThreads/comments/reviews `.totalCount`) are
 # NOT this filter's concern. They are top-level scalar fields trivially read off
@@ -208,8 +214,12 @@
 #
 # 4. ARGS
 # -------
-#   --arg login   SELF_LOGIN      viewer login; used to strip self-authored
-#                                 comments before the filter compare.
+#   --arg login   SELF_LOGIN      viewer login (a User account, from REST
+#                                 GET /user); with author.__typename it keys
+#                                 self identity (module `is_self`): self-
+#                                 authored comments are excluded from every
+#                                 filter mode and are the only source of fix /
+#                                 defer / `Addresses:` dispositions.
 #   --arg filter  REVIEWER_FILTER "automated" | "codex-only" | "all" |
 #                                 "<login>"; mode semantics are owned by
 #                                 reviewer-identity.jq (its §5).
@@ -257,8 +267,7 @@ $pr.reviewThreads as $rt |
 # is the legacy fallback only.
 ([ $pr.comments.nodes[]?
    | . as $c
-   | strip_bot($c.author.login) as $a
-   | select($a == $login)
+   | select(is_self($c.author.login; $c.author.__typename; $login))
    | ($c.body // "")
    | scan("Addresses:[[:space:]]*([^[:space:]]+)")
    | .[0]
@@ -277,8 +286,7 @@ $pr.reviewThreads as $rt |
   | ([
       $thread.comments.nodes[]
       | . as $c
-      | strip_bot($c.author.login) as $a
-      | select($a == $login)
+      | select(is_self($c.author.login; $c.author.__typename; $login))
       | select((($c.body // "") | test("Fixed in [0-9a-f]{7,40}\\.")))
       | {kind: "fix", id: (.databaseId // 0)}
     ] + [
@@ -298,13 +306,14 @@ $pr.reviewThreads as $rt |
       # A defer reply is a DURABLE handled record, so a thread whose resolve mutation
       # failed (non-blocking by design) is not re-raised into a duplicate defer reply.
       # FORGERY GUARD: this sentinel is read ONLY off the self-authored arm
-      # (select($a == $login)); it is deliberately absent from the non-self
-      # $has_marker body test below, so a reviewer cannot forge handled status by
-      # quoting the sentinel in its own comment.
+      # (module `is_self`: User-typed author whose raw login is the viewer's);
+      # it is deliberately absent from the non-self $has_marker body test below,
+      # so a reviewer cannot forge handled status by quoting the sentinel in its
+      # own comment, and a Bot sharing the viewer's bare login cannot mint a
+      # self disposition.
       $thread.comments.nodes[]
       | . as $c
-      | strip_bot($c.author.login) as $a
-      | select($a == $login)
+      | select(is_self($c.author.login; $c.author.__typename; $login))
       | select((($c.body // "") | startswith("<!-- hivemind-defer-v1 -->")))
       | {kind: "defer", id: (.databaseId // 0)}
     ]) as $self_dispositions
@@ -345,9 +354,9 @@ $pr.reviewThreads as $rt |
           # is handled IFF its id <= the maximum disposition id, so a per-comment
           # lookback would select the same governing element.
           # FORGERY GUARD (unchanged): the defer sentinel is read ONLY under the
-          # self arm of the timeline above; it is deliberately absent from the
-          # non-self $has_marker body test, so a reviewer cannot forge handled
-          # status by quoting the sentinel.
+          # `is_self` arm of the timeline above (User type + viewer login); it
+          # is deliberately absent from the non-self $has_marker body test, so a
+          # reviewer cannot forge handled status by quoting the sentinel.
           classification: (
             if $thread_overflow then "actionable"
             elif $has_marker then "handled"

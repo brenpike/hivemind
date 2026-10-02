@@ -20,7 +20,7 @@
                   {
                     "id": "PRRC_case02comment201",
                     "databaseId": 201,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Fixed in deadbeef1234."
                   }
                 ]

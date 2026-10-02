@@ -20,7 +20,7 @@
                   {
                     "id": "PRRC_case14comment1401",
                     "databaseId": 1401,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "Fixed in abc1234. Propagated the timeout error to the caller."
                   },
                   {
@@ -32,7 +32,7 @@
                   {
                     "id": "PRRC_case14comment1403",
                     "databaseId": 1403,
-                    "author": { "login": "selfuser" },
+                    "author": { "login": "selfuser", "__typename": "User" },
                     "body": "<!-- hivemind-defer-v1 --> Deferred to https://github.com/o/r/issues/77. Backoff tuning is out of scope for this PR."
                   },
                   {
