@@ -19,9 +19,10 @@
 #
 # SINGLE RESPONSIBILITY: decide whether a GraphQL response body that `gh` delivered with exit 0
 # is a usable success, and name the failure class when it is not. It performs no fetch, reads no
-# file, and projects no field beyond the top-level `errors` / `data` envelope. Consumer-specific
-# shape checks (e.g. a required `.data.repository.pullRequest`) stay with the consumer and run
-# AFTER this check passes.
+# file, and projects no field beyond the top-level `errors` / `data` envelope. Query shape checks
+# run AFTER this check passes: with the consumer for a single-consumer query, or in
+# review-surface-shape.sh (hivemind_review_surface_shape_check) for the PR review-activity
+# skeleton several consumers share. A mutation proves success from the object it requested.
 #
 # CONTRACT (both functions):
 #   success -> return 0, print NOTHING.

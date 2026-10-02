@@ -77,19 +77,24 @@
 #   - SINGLE NAMED MARKER: EYES is the ONE reaction content, defined ONCE as a
 #     script-level readonly constant and identical to the literal the classifier
 #     harvest keys on (references/github-pr-review-graphql.md "Reaction Marker").
-#   - IDEMPOTENCY: addReaction against a node the authenticated viewer has ALREADY
-#     reacted to with EYES is a server-side no-op / success. The live path treats an
-#     "already reacted" response as SUCCESS without erroring — duplicate re-marking
-#     never fails the candidate. A clean success passes through unchanged.
+#   - IDEMPOTENCY: a duplicate is a server-side success per
+#     ${CLAUDE_PLUGIN_ROOT}/references/github-pr-review-graphql.md (Reaction Marker ->
+#     Emit), never special-cased: it arrives as the same success payload and passes
+#     the RESPONSE CHECK below like any first reaction. It cannot happen in normal
+#     flow, because a node already carrying the viewer's EYES reaction classifies
+#     handled and is never handed to this script.
 #   - NEVER REACT TO A THREAD: the thread surface delivers nothing; thread
 #     convergence is reply-resolve.sh's resolveReviewThread, not a reaction here.
-#   - RESPONSE CHECK: a live reaction succeeds only when gh exits 0 AND the shared
-#     validator hivemind_graphql_response_check
+#   - RESPONSE CHECK (positive proof — the ONLY definition of success): a live
+#     reaction succeeds only when ALL of these hold: gh exits 0; the shared validator
+#     hivemind_graphql_response_check
 #     (${CLAUDE_PLUGIN_ROOT}/skills/_shared/graphql-response.sh) accepts the response
-#     body. gh exits 0 on several GraphQL error envelopes (a top-level `errors`
-#     value), so an exit-0 response the check rejects is NOT success: it falls to the
-#     idempotency test over stdout and otherwise fails react-failed. Only stdout is
-#     captured — gh copies the response body there even on a non-zero exit.
+#     body; and the body's .data.addReaction.reaction.content equals the requested
+#     REACTION_CONTENT. Every other response is react-failed: a non-zero exit, an
+#     envelope the check rejects (gh exits 0 on several GraphQL error envelopes), a
+#     null addReaction payload, or a different reaction content. No response text is
+#     ever pattern-matched. Only stdout is captured, so gh's stderr never reaches the
+#     body under check.
 #   - Missing `timeout` / `gtimeout` -> degrade gracefully with a loud stderr
 #     warning and run the gh call UNGUARDED (mirrors reply-resolve.sh).
 #
@@ -117,11 +122,11 @@
 # inside run_reaction, and requires BOTH TEST_MODE=1 and CAPTURE_FILE to engage.
 #
 # Markers / exit posture:
-#   - exit 0 on success (reaction added, or already-present duplicate tolerated, or
-#     a thread silent no-op).
+#   - exit 0 on success (a reaction with positive proof per §4 RESPONSE CHECK, or a
+#     thread silent no-op).
 #   - REACTMARKER_ERROR=<reason> on stderr + exit 1 on a HARD failure (bad input,
-#     unmapped surface, a bootstrap failure, or a non-idempotent failed reaction —
-#     including an exit-0 response the shared GraphQL response check rejects).
+#     unmapped surface, a bootstrap failure, or any live reaction lacking positive
+#     proof — including an exit-0 response the shared GraphQL response check rejects).
 #
 # Reason tokens (STABLE — asserted by the test):
 #   missing-node-id | unmapped-surface | react-failed | cannot-self-locate |
@@ -134,10 +139,9 @@
 # instruction.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
-# are DELIBERATELY omitted. The full floor would change behavior: the reaction mutation is
-# IDEMPOTENCY-TOLERANT (an "already reacted" gh response is treated as success), so `set -e`
-# would abort on a deliberately-tolerated duplicate-reaction status; hard failures route
-# through react_marker_fail().
+# are DELIBERATELY omitted. Every failure must surface as a REACTMARKER_ERROR token via
+# react_marker_fail(); `set -e` would turn an unanticipated failing statement into an exit
+# with no token. The gh exit status is captured explicitly with `$?` and checked by hand.
 
 set -u
 
@@ -219,10 +223,11 @@ mutation($id: ID!) {
 
 # run_reaction <node_id>: issue the EYES reaction over NODE_ID. The single
 # indirection point for both the live gh call AND the offline CAPTURE seam (§5).
-# Returns 0 on success (gh exit 0 AND the shared GraphQL response check passing),
-# including the idempotent "already reacted" case; returns non-zero only on a
-# genuine non-idempotent failure. INVARIANT: when the capture
-# seam is active, NO gh call is made — the script is fully offline.
+# On the live path returns 0 ONLY on positive proof (gh exit 0, the shared GraphQL
+# response check passing, AND .data.addReaction.reaction.content equal to the
+# requested content); every other response returns non-zero. No response text is
+# pattern-matched. INVARIANT: when the capture seam is active, NO gh call is made —
+# the script is fully offline.
 run_reaction() {
   local node_id="$1"
   # TEST SEAM GATE (§5): capture seam activates ONLY when the dedicated test-mode
@@ -239,29 +244,21 @@ run_reaction() {
     printf 'REACT node=%s content=%s\n' "$node_id" "$REACTION_CONTENT" >> "$REACTMARKER_CAPTURE_FILE" || return 1
     return "${REACTMARKER_REACT_STATUS:-0}"
   fi
-  # LIVE path. Capture the response body from stdout ONLY: gh copies the GraphQL
-  # response body to stdout even when it exits non-zero, so an "already reacted"
-  # error stays detectable there (idempotency invariant, §4) while gh's own stderr
-  # chatter is kept out of the body handed to the shared response check.
+  # LIVE path. Capture the response body from stdout ONLY so gh's own stderr chatter
+  # is kept out of the body handed to the shared response check.
   local gh_output gh_status
   gh_output="$("${GH_TIMEOUT[@]}" gh api graphql \
     -F id="$node_id" \
     -f query="$REACT_MUTATION" 2>/dev/null)"
   gh_status=$?
-  # Success requires BOTH a zero gh exit AND a passing shared response check: gh
-  # exits 0 on several GraphQL error envelopes, so the exit status alone is not
-  # proof the reaction landed.
-  if [ "$gh_status" -eq 0 ] && hivemind_graphql_response_check "$gh_output" >/dev/null; then
-    return 0
-  fi
-  # Idempotency tolerance: a response whose body names an already-existing
-  # reaction is a server-side no-op for our purposes — treat it as success. Any
-  # other failure (non-zero exit, or exit 0 with a rejected response) is a genuine
-  # react-failed.
-  if printf '%s' "$gh_output" | grep -qi 'already.*reacted\|reaction.*already\|already exists'; then
-    return 0
-  fi
-  return 1
+  # Positive proof (§4 RESPONSE CHECK), the ONLY definition of success: gh exits 0,
+  # the shared response check accepts the envelope, AND the payload names the
+  # requested reaction content. gh exits 0 on several GraphQL error envelopes, so
+  # neither the exit status nor the envelope alone proves the reaction landed.
+  [ "$gh_status" -eq 0 ] || return 1
+  hivemind_graphql_response_check "$gh_output" >/dev/null || return 1
+  printf '%s' "$gh_output" | jq -e --arg content "$REACTION_CONTENT" '.data.addReaction.reaction.content == $content' >/dev/null 2>&1 || return 1
+  return 0
 }
 
 # --- SURFACE -> DELIVERY DISPATCH (§3, closed by construction) -----------------

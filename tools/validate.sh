@@ -311,6 +311,10 @@ run_suites() {
 #                                      -> test_fetch_normalize, test_change_detect_poll, test_prefilter,
 #                                         test_react_marker, test_reply_resolve (+ test_shared_libs,
 #                                         test_script_bootstrap, policy_check via the generic globs)
+#   plugin/skills/_shared/review-surface-shape.sh
+#                                      -> test_fetch_normalize, test_prefilter, test_change_detect_poll
+#                                         (+ test_shared_libs, test_script_bootstrap, policy_check via the
+#                                         generic globs)
 #   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
@@ -562,6 +566,17 @@ map_path() {
     add_selected "$SUITE_TEST_PREFILTER" "$p (graphql-response lib sourced by prefilter)"
     add_selected "$SUITE_TEST_REACT_MARKER" "$p (graphql-response lib sourced by react-marker)"
     add_selected "$SUITE_TEST_REPLY_RESOLVE" "$p (graphql-response lib sourced by reply-resolve)"
+    matched=1
+  fi
+
+  # _shared/review-surface-shape.sh: the shared review-surface shape library sourced by the review-loop
+  # scripts. Route to the behavior oracles of its consumers: fetch-normalize, prefilter, change-detect-poll.
+  # (test_shared_libs, test_script_bootstrap and policy_check already match via the generic
+  # _shared/*.sh, plugin/**/*.sh and plugin/* rules.)
+  if [[ "$p" == plugin/skills/_shared/review-surface-shape.sh ]]; then
+    add_selected "$SUITE_TEST_FETCH_NORMALIZE" "$p (review-surface-shape lib sourced by fetch-normalize)"
+    add_selected "$SUITE_TEST_PREFILTER" "$p (review-surface-shape lib sourced by prefilter)"
+    add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (review-surface-shape lib sourced by change-detect poll)"
     matched=1
   fi
 

@@ -10,6 +10,12 @@
 # (line format: REACT node=<NODE_ID> content=EYES) and the script's own exit status / REACTMARKER_ERROR
 # reason token, so each case is deterministic and offline.
 #
+# The live-path cases (#393) leave the capture seam unset and put a stub `gh` first on PATH that prints
+# a canned GraphQL response body. They lock the single definition of live success — gh exit 0, the
+# shared response check passing, AND .data.addReaction.reaction.content == EYES — and assert every
+# other response (error envelopes, already-reacted wording, a null payload, a different content, a
+# non-zero exit) is REACTMARKER_ERROR=react-failed.
+#
 # Mirrors tools/test_reply_resolve.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
 # -fail convention. Read-only: the only writes are scratch capture files in a disposable tmpdir
 # removed on EXIT.
@@ -200,12 +206,13 @@ else
   failed "capfail:append-failure-hard-fails" "status=$status out=$out gh_reached=$([ -f "$gh_stub_marker2" ] && echo yes || echo no)"
 fi
 
-# ── LIVE path: shared GraphQL response check + stdout-only idempotency (#393) ─────
+# ── LIVE path: positive proof is the ONLY definition of success (#393) ──────────
 # These cases drive the LIVE run_reaction body (TEST_MODE and CAPTURE_FILE UNSET) against a PATH-shim
-# `gh` that prints a canned response body on stdout and exits with a chosen status. gh exits 0 on
-# several GraphQL error envelopes, so success must require BOTH exit 0 AND the shared response check
-# passing; the idempotency grep runs over stdout only (gh copies the body there even on a non-zero
-# exit). Each case asserts the shim was reached, so a case can never pass without the live path.
+# `gh` that prints a canned response body on stdout and exits with a chosen status. Success requires
+# ALL of: gh exit 0, the shared response check accepting the envelope, AND
+# .data.addReaction.reaction.content equal to the requested EYES. Nothing text-matches a response, so a
+# body whose error message mentions an existing reaction is react-failed like any other error. Each
+# case asserts the shim was reached, so a case can never pass without the live path.
 
 # make_live_gh_shim <name> <exit status> <body>: write a stub gh under the tmpdir that records it was
 # reached, prints <body> on stdout, writes an unrelated line on stderr, and exits <exit status>.
@@ -271,20 +278,37 @@ assert_live_react_failed "live:exit0-errors-message" "exit 0 + errors[{message}]
 run_live_case live-errors-empty-object 0 '{"data":{"addReaction":null},"errors":[{}]}'
 assert_live_react_failed "live:exit0-errors-empty-object" "exit 0 + errors[{}] -> exit 1 REACTMARKER_ERROR=react-failed"
 
-# exit 0 + a clean success envelope -> success, silent on stdout.
+# exit 0 + a clean success envelope naming the requested content -> success, silent on stdout.
 run_live_case live-clean 0 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
-assert_live_success "live:exit0-clean" "exit 0 + clean data envelope -> exit 0, empty stdout"
+assert_live_success "live:exit0-clean" "exit 0 + clean data envelope with reaction.content EYES -> exit 0, empty stdout"
 
-# exit 0 + errors naming an already-present reaction -> idempotent success.
+# exit 0 + errors array naming an already-present reaction -> react-failed (no text-match success path).
 run_live_case live-errors-already 0 \
   '{"data":{"addReaction":null},"errors":[{"message":"Viewer has already reacted with this content"}]}'
-assert_live_success "live:exit0-errors-already-reacted" "exit 0 + already-reacted errors -> exit 0 (idempotent)"
+assert_live_react_failed "live:exit0-errors-already-reacted-fails" "exit 0 + already-reacted errors -> exit 1 REACTMARKER_ERROR=react-failed"
 
-# exit 1 + already-reacted body on STDOUT -> idempotent success. Guards the stdout-only capture: gh
-# copies the response body to stdout on a non-zero exit, so idempotency detection must still see it.
+# exit 1 + already-reacted body on stdout -> react-failed: a non-zero gh exit is never success.
 run_live_case live-exit1-already 1 \
   '{"data":{"addReaction":null},"errors":[{"message":"Viewer has already reacted with this content"}]}'
-assert_live_success "live:exit1-already-reacted-on-stdout" "exit 1 + already-reacted body on stdout -> exit 0 (idempotent)"
+assert_live_react_failed "live:exit1-already-reacted-fails" "exit 1 + already-reacted body on stdout -> exit 1 REACTMARKER_ERROR=react-failed"
+
+# exit 0 + an errors OBJECT whose message names an existing reaction, next to an EYES payload ->
+# react-failed: the envelope check rejects any non-null, non-empty errors value.
+run_live_case live-errors-object-already 0 \
+  '{"data":{"addReaction":{"reaction":{"content":"EYES"}}},"errors":{"message":"Viewer has already reacted with this content"}}'
+assert_live_react_failed "live:exit0-errors-object-already-reacted" "exit 0 + errors{message} beside EYES payload -> exit 1 REACTMARKER_ERROR=react-failed"
+
+# exit 0 + clean envelope with a null addReaction payload -> react-failed: no positive proof.
+run_live_case live-null-payload 0 '{"data":{"addReaction":null}}'
+assert_live_react_failed "live:exit0-null-payload" "exit 0 + data.addReaction null -> exit 1 REACTMARKER_ERROR=react-failed"
+
+# exit 0 + clean envelope naming a different reaction content -> react-failed.
+run_live_case live-wrong-content 0 '{"data":{"addReaction":{"reaction":{"content":"HEART"}}}}'
+assert_live_react_failed "live:exit0-wrong-content" "exit 0 + reaction.content HEART -> exit 1 REACTMARKER_ERROR=react-failed"
+
+# exit 1 + a clean EYES payload on stdout -> react-failed: the gh exit status is checked first.
+run_live_case live-exit1-clean 1 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
+assert_live_react_failed "live:exit1-clean-payload" "exit 1 + clean EYES payload -> exit 1 REACTMARKER_ERROR=react-failed"
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo

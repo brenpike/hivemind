@@ -40,7 +40,7 @@ for required in "$LEDGER_PRESENT" \
                 "$SHARED_DIR/json-normalize.sh" \
                 "$SHARED_DIR/settings-merge.sh" "$SHARED_DIR/claude-mem-path.sh" \
                 "$SHARED_DIR/file-guard.sh" "$SHARED_DIR/test-detect.sh" \
-                "$SHARED_DIR/graphql-response.sh" \
+                "$SHARED_DIR/graphql-response.sh" "$SHARED_DIR/review-surface-shape.sh" \
                 "$CLASSIFY_FILTER" \
                 "$FN_REVIEW_HANDLED" "$FN_EXPECTED_REVIEW" "$FN_CI_CHECKS" "$FN_EXPECTED_CI" \
                 "$FN_OVERFLOW_THREADS" "$FN_MALFORMED"; do
@@ -90,6 +90,8 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite"
 . "$SHARED_DIR/test-detect.sh"
 # shellcheck source=/dev/null
 . "$SHARED_DIR/graphql-response.sh"
+# shellcheck source=/dev/null
+. "$SHARED_DIR/review-surface-shape.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -4074,6 +4076,93 @@ gqlclosure_violations="$(grep -v ' checked$' <<<"$gqlclosure_report" | paste -sd
 assert_eq "gqlclosure:real-all-checked" "" "$gqlclosure_violations" \
   "every discovered review-loop script sources graphql-response.sh and calls a validator"
 unset gqlclosure_canary_dir gqlclosure_report gqlclosure_discovered gqlclosure_expected gqlclosure_violations
+
+# ── Section 19: review-surface-shape.sh — PR review-activity skeleton predicate (#393) ──
+echo ''
+echo '=== review-surface-shape.sh: hivemind_review_surface_shape_check (#393) ==='
+#
+# Every case asserts the full (return code, stdout) pair via gr_case (Section 17): success is
+# `rc=0 out=`, failure is `rc=1 out=<token>`. Token precedence under test:
+# null-pullrequest > missing-connection. The base fixture carries exactly the selection set of
+# fetch-normalize.sh's QUERY (comments, reviews, reviewThreads with per-thread comments); each
+# variant is derived from it with one jq edit so a case differs from the clean skeleton in one place.
+rsshape_base='{"data":{"repository":{"pullRequest":{
+  "comments":{"totalCount":1,"nodes":[{"id":"IC_1","author":{"login":"alice","__typename":"User"},"body":"top-level note","url":"https://example.invalid/c1","reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":false}]}]},
+  "reviews":{"totalCount":1,"nodes":[{"id":"PRR_1","author":{"login":"alice","__typename":"User"},"body":"review summary","state":"COMMENTED","url":"https://example.invalid/r1","reactionGroups":[]}]},
+  "reviewThreads":{"totalCount":1,"nodes":[{"id":"PRRT_1","isResolved":false,"comments":{"totalCount":1,"nodes":[{"id":"PRRC_1","databaseId":101,"author":{"login":"alice","__typename":"User"},"body":"inline note"}]}}]}
+}}}}'
+rsshape_pr='.data.repository.pullRequest'
+
+# rsshape_case <case> <jq-edit> <expected-outcome>: derive one variant of the base fixture and assert
+# the check's outcome on it. A variant that fails to build is a FAIL in its own right, so a broken
+# jq edit can never feed a non-JSON body that would read as a null-pullrequest pass.
+rsshape_case() {
+  local case_name="$1" variant_edit="$2" expected_outcome="$3" variant_body
+  if ! variant_body="$(jq -c "$variant_edit" <<<"$rsshape_base" 2>/dev/null)" || [ -z "$variant_body" ]; then
+    failed "$case_name" "fixture variant failed to build from edit: $variant_edit"
+    return 0
+  fi
+  gr_case "$case_name" hivemind_review_surface_shape_check "$variant_body" "$expected_outcome"
+}
+
+# 19a: a clean skeleton passes, including every empty-nodes form of a genuinely clean PR.
+rsshape_case "rsshape:clean-skeleton"           '.'                                                   'rc=0 out='
+rsshape_case "rsshape:thread-comments-empty"    "$rsshape_pr.reviewThreads.nodes[0].comments.nodes = []" 'rc=0 out='
+rsshape_case "rsshape:all-nodes-empty" \
+  "$rsshape_pr.comments.nodes = [] | $rsshape_pr.reviews.nodes = [] | $rsshape_pr.reviewThreads.nodes = []" 'rc=0 out='
+
+# 19b: no pullRequest object.
+rsshape_case "rsshape:pullrequest-null"         "$rsshape_pr = null"                                  'rc=1 out=null-pullrequest'
+rsshape_case "rsshape:repository-null"          '.data.repository = null'                             'rc=1 out=null-pullrequest'
+rsshape_case "rsshape:pullrequest-array"        "$rsshape_pr = []"                                    'rc=1 out=null-pullrequest'
+gr_case      "rsshape:not-json"                 hivemind_review_surface_shape_check 'not json'        'rc=1 out=null-pullrequest'
+
+# 19c: a pullRequest object that has lost part of the skeleton.
+rsshape_case "rsshape:reviews-absent"           "del($rsshape_pr.reviews)"                            'rc=1 out=missing-connection'
+rsshape_case "rsshape:reviews-null"             "$rsshape_pr.reviews = null"                          'rc=1 out=missing-connection'
+rsshape_case "rsshape:comments-nodes-null"      "$rsshape_pr.comments.nodes = null"                   'rc=1 out=missing-connection'
+rsshape_case "rsshape:threads-nodes-null"       "$rsshape_pr.reviewThreads.nodes = null"              'rc=1 out=missing-connection'
+rsshape_case "rsshape:threads-nodes-null-elem"  "$rsshape_pr.reviewThreads.nodes = [null]"            'rc=1 out=missing-connection'
+rsshape_case "rsshape:thread-comments-absent"   "del($rsshape_pr.reviewThreads.nodes[0].comments)"   'rc=1 out=missing-connection'
+rsshape_case "rsshape:thread-comments-nodes-null" "$rsshape_pr.reviewThreads.nodes[0].comments.nodes = null" 'rc=1 out=missing-connection'
+rsshape_case "rsshape:connection-scalar"        "$rsshape_pr.reviews = 5"                             'rc=1 out=missing-connection'
+
+# 19c-strict: type-strict per position. Each case puts a wrong-typed value at one skeleton position
+# where the condition could otherwise yield NO output, which jq's all/2 counts as passing.
+rsshape_case "rsshape:threads-elem-scalar"      "$rsshape_pr.reviewThreads.nodes = [\"x\"]"          'rc=1 out=missing-connection'
+rsshape_case "rsshape:thread-comments-scalar"   "$rsshape_pr.reviewThreads.nodes[0].comments = 5"    'rc=1 out=missing-connection'
+rsshape_case "rsshape:thread-comments-nodes-object" \
+  "$rsshape_pr.reviewThreads.nodes[0].comments.nodes = {}"                                            'rc=1 out=missing-connection'
+rsshape_case "rsshape:threads-nodes-object"     "$rsshape_pr.reviewThreads.nodes = {}"                'rc=1 out=missing-connection'
+rsshape_case "rsshape:connection-array"         "$rsshape_pr.comments = []"                           'rc=1 out=missing-connection'
+rsshape_case "rsshape:data-scalar"              '.data = "x"'                                         'rc=1 out=null-pullrequest'
+rsshape_case "rsshape:repository-scalar"        '.data.repository = 5'                                'rc=1 out=null-pullrequest'
+gr_case      "rsshape:body-array"               hivemind_review_surface_shape_check '[]'              'rc=1 out=null-pullrequest'
+
+# 19d: purity. A sourced check must `return`, never `exit`: the subshell reaches its trailing printf
+# only when the failing call returned control.
+rsshape_subshell_out="$( (hivemind_review_surface_shape_check 'not json' >/dev/null; printf 'returned:%s' "$?") )"
+assert_eq "rsshape:purity-return-not-exit" "returned:1" "$rsshape_subshell_out" \
+  "failing hivemind_review_surface_shape_check returns 1 to its caller instead of exiting"
+
+# Success prints nothing on either stream; failure prints only its one token (jq diagnostics stay off
+# the caller's stderr).
+assert_eq "rsshape:purity-success-silent" "" "$(hivemind_review_surface_shape_check "$rsshape_base" 2>&1)" \
+  "successful check writes nothing to stdout or stderr"
+assert_eq "rsshape:purity-failure-one-token" "null-pullrequest" \
+  "$(hivemind_review_surface_shape_check '{"data":' 2>&1)" \
+  "failing check writes exactly its token and no jq diagnostic"
+
+# Caller variables that share the check's internal local names are left untouched.
+surface_body="caller-body"
+shape_token="caller-token"
+shape_program="caller-program"
+hivemind_review_surface_shape_check '{"data":{"repository":null}}' >/dev/null
+hivemind_review_surface_shape_check "$rsshape_base" >/dev/null
+assert_eq "rsshape:purity-caller-vars-unchanged" "caller-body|caller-token|caller-program" \
+  "$surface_body|$shape_token|$shape_program" \
+  "check locals do not leak into or overwrite the caller's variables"
+unset surface_body shape_token shape_program rsshape_base rsshape_pr rsshape_subshell_out
 
 # ── Summary ─────────────────────────────────────────────────────────────────────
 echo ''

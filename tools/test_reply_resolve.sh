@@ -539,6 +539,17 @@ assert_live_reply_failed() {
   fi
 }
 
+# assert_live_resolve_failed <name> <label>: the live case exited 0 silent on stdout, the call log
+# shows the reply then the resolve went live, and stderr carries REPLYRESOLVE_RESOLVE_FAILED.
+assert_live_resolve_failed() {
+  if [ "$live_status" -eq 0 ] && [ -z "$live_stdout" ] && [ "$live_calls" = "$(printf 'reply\nresolve')" ] \
+     && printf '%s\n' "$live_stderr" | grep -q 'REPLYRESOLVE_RESOLVE_FAILED'; then
+    pass "$1" "$2"
+  else
+    failed "$1" "status=$live_status stdout=$live_stdout calls=$(printf '%s' "$live_calls" | tr '\n' ',') stderr=$live_stderr"
+  fi
+}
+
 # exit 0 + a top-level errors array carrying a message on the REPLY -> reply-failed, no resolve sent.
 run_live_case live-reply-errors-message 0 \
   '{"data":{"addPullRequestReviewThreadReply":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}' \
@@ -557,12 +568,36 @@ assert_live_reply_failed "live:reply-nonzero-exit" "reply exit 1 -> exit 1 reply
 # clean REPLY + exit 0 RESOLVE carrying errors -> REPLYRESOLVE_RESOLVE_FAILED, still exit 0.
 run_live_case live-resolve-errors 0 "$LIVE_REPLY_CLEAN" \
   0 '{"data":{"resolveReviewThread":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}'
-if [ "$live_status" -eq 0 ] && [ -z "$live_stdout" ] && [ "$live_calls" = "$(printf 'reply\nresolve')" ] \
-   && printf '%s\n' "$live_stderr" | grep -q 'REPLYRESOLVE_RESOLVE_FAILED'; then
-  pass "live:resolve-exit0-errors-non-blocking" "resolve exit 0 + errors -> RESOLVE_FAILED on stderr, exit 0, reply then resolve"
-else
-  failed "live:resolve-exit0-errors-non-blocking" "status=$live_status stdout=$live_stdout calls=$(printf '%s' "$live_calls" | tr '\n' ',') stderr=$live_stderr"
-fi
+assert_live_resolve_failed "live:resolve-exit0-errors-non-blocking" "resolve exit 0 + errors -> RESOLVE_FAILED on stderr, exit 0, reply then resolve"
+
+# ── LIVE path: positive proof of the requested object (reply-resolve.sh §4 RESPONSE CHECK) ──
+# A clean envelope is not success: exit 0 with no `errors` and an object `data` still proves nothing
+# when the mutation payload is null. A REPLY must carry a non-empty comment id; a RESOLVE must report
+# the thread isResolved true.
+
+# exit 0 + clean envelope + null reply payload -> reply-failed, no resolve sent.
+run_live_case live-reply-null-payload 0 '{"data":{"addPullRequestReviewThreadReply":null}}' \
+  0 "$LIVE_RESOLVE_CLEAN"
+assert_live_reply_failed "live:reply-exit0-null-payload" "reply exit 0 + null payload -> exit 1 reply-failed, no resolve sent"
+
+# exit 0 + clean envelope + null comment -> reply-failed, no resolve sent.
+run_live_case live-reply-comment-null 0 '{"data":{"addPullRequestReviewThreadReply":{"comment":null}}}' \
+  0 "$LIVE_RESOLVE_CLEAN"
+assert_live_reply_failed "live:reply-exit0-comment-null" "reply exit 0 + comment null -> exit 1 reply-failed, no resolve sent"
+
+# exit 0 + clean envelope + empty-string comment id -> reply-failed (the id must be NON-EMPTY).
+run_live_case live-reply-comment-id-empty 0 '{"data":{"addPullRequestReviewThreadReply":{"comment":{"id":"","url":""}}}}' \
+  0 "$LIVE_RESOLVE_CLEAN"
+assert_live_reply_failed "live:reply-exit0-comment-id-empty" "reply exit 0 + empty comment id -> exit 1 reply-failed, no resolve sent"
+
+# clean REPLY + exit 0 RESOLVE reporting isResolved false -> RESOLVE_FAILED, still exit 0.
+run_live_case live-resolve-not-resolved 0 "$LIVE_REPLY_CLEAN" \
+  0 '{"data":{"resolveReviewThread":{"thread":{"id":"PRRT_l1","isResolved":false}}}}'
+assert_live_resolve_failed "live:resolve-exit0-not-resolved" "resolve exit 0 + isResolved false -> RESOLVE_FAILED on stderr, exit 0, reply then resolve"
+
+# clean REPLY + exit 0 RESOLVE with a null payload -> RESOLVE_FAILED, still exit 0.
+run_live_case live-resolve-null-payload 0 "$LIVE_REPLY_CLEAN" 0 '{"data":{"resolveReviewThread":null}}'
+assert_live_resolve_failed "live:resolve-exit0-null-payload" "resolve exit 0 + null payload -> RESOLVE_FAILED on stderr, exit 0, reply then resolve"
 
 # clean REPLY + clean RESOLVE -> exit 0, silent on stdout, no RESOLVE_FAILED, reply then resolve.
 run_live_case live-both-clean 0 "$LIVE_REPLY_CLEAN" 0 "$LIVE_RESOLVE_CLEAN"

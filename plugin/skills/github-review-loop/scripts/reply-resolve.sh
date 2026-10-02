@@ -229,14 +229,22 @@
 #     to stderr and the script STILL exits 0. A resolve failure must never fail
 #     the candidate — the fix is committed, pushed, and replied; an unresolved
 #     thread is a cosmetic GitHub-side state, not a remediation failure.
-#   - RESPONSE CHECK: a live mutation succeeds only when gh exits 0 AND the shared
+#   - RESPONSE CHECK: a live mutation succeeds only when gh exits 0, the shared
 #     validator hivemind_graphql_response_check
 #     (${CLAUDE_PLUGIN_ROOT}/skills/_shared/graphql-response.sh) accepts the response
-#     body. gh exits 0 on several GraphQL error envelopes (a top-level `errors`
-#     value), so an exit-0 response the check rejects is NOT success. A rejected
-#     REPLY is therefore reply-failed (exit 1, NO resolve sent); a rejected RESOLVE
-#     is REPLYRESOLVE_RESOLVE_FAILED (non-blocking, still exit 0). Only stdout is
-#     captured for the check — gh's own stderr chatter never reaches the body.
+#     body, AND the body carries POSITIVE PROOF of the requested object. gh exits 0
+#     on several GraphQL error envelopes (a top-level `errors` value), so an exit-0
+#     response the check rejects is NOT success. A clean envelope is not success
+#     either: `{"data":{"addPullRequestReviewThreadReply":null}}` passes the
+#     envelope check yet proves nothing landed. The proof is per kind, asserted with
+#     `jq -e` over fields both mutations' selection sets request:
+#       reply   -> .data.addPullRequestReviewThreadReply.comment.id is a non-empty string
+#       resolve -> .data.resolveReviewThread.thread.isResolved == true
+#     A rejected or unproven REPLY is therefore reply-failed (exit 1, NO resolve
+#     sent); a rejected or unproven RESOLVE is REPLYRESOLVE_RESOLVE_FAILED
+#     (non-blocking, still exit 0). Only stdout is captured for the check — gh's
+#     own stderr chatter never reaches the body. The capture seam (§5) is upstream
+#     of the live call and is unaffected.
 #   - Missing `timeout` / `gtimeout` -> degrade gracefully with a loud stderr
 #     warning and run the gh calls UNGUARDED (mirrors fetch-normalize.sh).
 #
@@ -283,9 +291,10 @@
 #   - exit 0 on success (reply posted; resolve issued-or-skipped-or-failed).
 #   - REPLYRESOLVE_ERROR=<reason> on stdout + exit 1 on a HARD failure (bad input,
 #     a bootstrap failure, or a failed REPLY — including an exit-0 REPLY response
-#     the shared GraphQL response check rejects).
+#     the shared GraphQL response check rejects or that lacks a comment id, §4).
 #   - REPLYRESOLVE_RESOLVE_FAILED on stderr + exit 0 on a failed (non-blocking)
-#     resolve, including an exit-0 RESOLVE response the check rejects.
+#     resolve, including an exit-0 RESOLVE response the check rejects or that does
+#     not report the thread isResolved true (§4).
 #
 # Reason tokens (STABLE — asserted by the test):
 #   missing-thread-id | missing-fix-sha | missing-summary | unmapped-surface |
@@ -417,11 +426,13 @@ mutation($threadId: ID!) {
 
 # run_mutation <kind> <thread_id> [body]: issue ONE mutation. kind is "reply" or
 # "resolve". The single indirection point for both the live gh call AND the
-# offline CAPTURE seam (§5). Returns 0 only when gh exits 0 AND the shared GraphQL
-# response check accepts the body; returns gh's non-zero exit status as-is, and 1
-# for a rejected response or an unknown kind. The caller decides hard-fail (reply)
-# vs non-blocking (resolve). INVARIANT: when the capture seam is active, NO gh call
-# is made — the script is fully offline.
+# offline CAPTURE seam (§5). Returns 0 only when gh exits 0, the shared GraphQL
+# response check accepts the body, AND the body positively proves the requested
+# object (§4 RESPONSE CHECK: reply -> a non-empty comment id; resolve -> the thread
+# reports isResolved true); returns gh's non-zero exit status as-is, and 1 for a
+# rejected response, a missing proof, or an unknown kind. The caller decides
+# hard-fail (reply) vs non-blocking (resolve). INVARIANT: when the capture seam is
+# active, NO gh call is made — the script is fully offline.
 run_mutation() {
   local kind="$1" thread_id="$2" body="${3:-}"
   # TEST SEAM GATE (§5): capture seam activates ONLY when the dedicated test-mode
@@ -457,10 +468,17 @@ run_mutation() {
       return 1 ;;
   esac
   [ "$gh_status" -eq 0 ] || return "$gh_status"
-  # Success requires BOTH a zero gh exit AND a passing shared response check: gh
-  # exits 0 on several GraphQL error envelopes, so the exit status alone is not
-  # proof the mutation landed.
+  # Success requires a zero gh exit, a passing shared response check, AND positive
+  # proof of the requested object: gh exits 0 on several GraphQL error envelopes,
+  # and a clean envelope can still carry a null mutation payload, so neither the
+  # exit status nor the envelope alone is proof the mutation landed.
   hivemind_graphql_response_check "$gh_output" >/dev/null || return 1
+  local proof_filter
+  case "$kind" in
+    reply) proof_filter='.data.addPullRequestReviewThreadReply.comment.id | type == "string" and length > 0' ;;
+    resolve) proof_filter='.data.resolveReviewThread.thread.isResolved == true' ;;
+  esac
+  printf '%s' "$gh_output" | jq -e "$proof_filter" >/dev/null 2>&1 || return 1
   return 0
 }
 

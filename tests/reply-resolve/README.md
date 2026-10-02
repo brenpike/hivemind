@@ -18,7 +18,12 @@ when `gh` exits 0 AND the shared validator `hivemind_graphql_response_check`
 response carrying a top-level `errors` value (with a message, or `[{}]`) fails
 with `reply-failed` and the call log shows NO resolve was sent. An exit-0 RESOLVE
 response carrying `errors` logs `REPLYRESOLVE_RESOLVE_FAILED` and the script
-still exits 0. The bootstrap tokens `cannot-self-locate`, `missing-graphql-check`,
+still exits 0. A clean envelope is not enough: the body must also prove the
+requested object (REPLY: a non-empty `comment.id`; RESOLVE: `thread.isResolved`
+true), so an exit-0 REPLY with a null payload, a null `comment`, or an empty id
+fails with `reply-failed` and sends no resolve, and an exit-0 RESOLVE with a
+null payload or `isResolved: false` logs `REPLYRESOLVE_RESOLVE_FAILED` and still
+exits 0. The bootstrap tokens `cannot-self-locate`, `missing-graphql-check`,
 and `unparseable-graphql-check` are documented in the script header; the shared
 self-location suite covers them.
 
