@@ -168,12 +168,20 @@ The one-shot operating mode of the github-reviewer agent that processes existing
 _Avoid_: one-shot mode, immediate mode
 
 **GitHub Review Loop**:
-The main-session skill (`hivemind:github-review-loop`, executed by the overlord) that watches a single PR via a thin change-detection poll armed on a Monitor and dispatches the github-reviewer agent in fix mode per actionable event. It owns the loop lifecycle — cycle counting, continue/stop decisions, and the single terminal report to the overlord — but never reads, interprets, or classifies feedback (that is the reviewer's job). It returns ONLY on a terminal condition: merged, closed, max cycles, an idle window elapsing with no new review activity (distinct from the cycle ceiling), same-finding-repeat, deferred escalation, injection-suspect, or Codex approval with nothing actionable remaining. Distinct from the **Adaptation Cycle** ("review loop"), which is the local pre-PR Codex cycle. Operational detail of its remediation signals now in `hivemind:detect-remediation-signals`; remediation policy in the **Remediation Doctrine**.
+The main-session skill (`hivemind:github-review-loop`, executed by the overlord) that watches a single PR via a thin change-detection poll armed on a Monitor and dispatches the github-reviewer agent in fix mode per actionable event. It owns the loop lifecycle — cycle counting, continue/stop decisions, and the single terminal report to the overlord — but never reads, interprets, or classifies feedback (that is the reviewer's job). It returns ONLY on a terminal condition: merged, closed, max cycles, an idle window elapsing with no new review activity (distinct from the cycle ceiling), same-finding-repeat, deferred escalation, injection-suspect, or a **Reviewer Approval** with nothing actionable remaining. Distinct from the **Adaptation Cycle** ("review loop"), which is the local pre-PR Codex cycle. Operational detail of its remediation signals now in `hivemind:detect-remediation-signals`; remediation policy in the **Remediation Doctrine**.
 _Avoid_: watch mode, polling mode, monitor mode, continuous mode, background watch
 
-**Codex Approval**:
-The terminal signal that the Codex reviewer bot (`chatgpt-codex-connector`) is satisfied with a PR: a 👍 `THUMBS_UP` reaction on the pull request object authored by that bot identity. Codex never files a GitHub `APPROVED` review, so detection uses the `reactions(content: THUMBS_UP)` connection, not review state. Terminal for the github-reviewer only when no unresolved non-self actionable items remain.
-_Avoid_: codex sign-off, approved review, thumbs-up comment
+**Automated Reviewer**:
+A member of the reviewer identity registry (`plugin/skills/github-review-loop/scripts/reviewer-identity.jq`) — currently Codex, Copilot, and Claude. Identity is actor type `Bot` plus a recognized login form, never login alone: a bare login can collide with a human account (the human `claude` vs the `claude[bot]` app). Each member declares its own approval kind. `github-actions[bot]` is not a member (ADR-0033).
+_Avoid_: review bot, any bot, reviewer app
+
+**Reviewer Filter**:
+The `reviewer_filter` setting that scopes which comment authors the **GitHub Review Loop** treats as actionable: `automated` (default — every **Automated Reviewer**, Bot-gated), `codex-only` (Codex alone; the pre-ADR-0033 default, kept for migration), `all` (every author), or `<login>` (that one login, matched whatever its actor type). A keyword shadows a same-named login. The active filter also scopes which reviewers can produce a **Reviewer Approval**.
+_Avoid_: author filter, bot filter
+
+**Reviewer Approval**:
+The terminal signal that an in-scope **Automated Reviewer** is satisfied with a PR: that reviewer's declared approval signal — the Codex 👍 `THUMBS_UP` reaction on the pull request object (👀 is never approval), or a Copilot `APPROVED` review. Claude declares no approval signal. Counts only from a reviewer in scope under the active **Reviewer Filter**. Surfaced to the loop as the `REVIEWER_APPROVED` marker. Terminal for the github-reviewer only when no unresolved non-self actionable items remain.
+_Avoid_: codex approval, codex sign-off, thumbs-up comment
 
 **Remediation Doctrine**:
 The governance doc (`plugin/governance/remediation-doctrine.md`) holding the shared, definitional policy meaning of root-cause review remediation — Root-Cluster, Same-Framing Test, Closed-by-Construction Preference, Bounded-Impact Gating, Defer-with-Scope (which routes an unfixed finding by destination — a tracked issue when it is work someone should do, a Recorded Residual when it is a decision rather than work), Stop-and-Merge, and Severity as Sensitivity Modifier — loaded by both reviewers, the overlord, and the cerebrate so all four share one vocabulary. Policy only; detection mechanics live in **detect-remediation-signals**.
@@ -382,7 +390,7 @@ _Avoid_: degraded mode, manual mode, safe mode
 - A **Fix Mode** invocation processes existing unresolved feedback in a single **Remediation** pass
 - The **Overlord** executes the **GitHub Review Loop** skill by default once a PR is opened — watching is opt-out only — and hosts its **Monitor**; the skill dispatches the **GitHub-Reviewer** in fix mode per actionable event, producing zero or more **Remediation** cycles bounded by `max_remediation_cycles`, whose floor is declared and enforced by the loop's own bookkeeping script `plugin/skills/github-review-loop/scripts/loop-state.sh`: each completed cycle re-arms a fresh idle window, while a quiet window with no new arrivals ends the watch as a terminal distinct from the cycle ceiling
 - The **GitHub Review Loop** skill — not the **GitHub-Reviewer** — owns monitoring; the reviewer is stateless and only remediates. The **Overlord** must not claim active monitoring for a returned reviewer run
-- A **Codex Approval** ends a **GitHub Review Loop** invocation only when no unresolved non-self actionable items remain
+- A **Reviewer Approval** ends a **GitHub Review Loop** invocation only when no unresolved non-self actionable items remain, and only from an **Automated Reviewer** in scope under the active **Reviewer Filter**
 - A **Worker Report** is the structured output of every **Phase**, consumed as input to an **Essence**
 - **Intent-Based Governance** defines which rules remain mechanical (**Unsafe Git State**, **Destructive Fix Gate**, **External Content Boundary**, report schemas) vs intent-described
 - An **Unsafe Git State** blocks all modifying agent operations until resolved
