@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [5.0.1] - 2026-10-02
+
+### Fixed
+
+- The review loop never detected a Codex thumbs-up approval: GitHub's REST reactions endpoint reports bot reactors with `type: "User"` while keeping the `[bot]` login suffix, and 5.0.0 required `type == "Bot"`. The identity module now treats an author as a Bot account when its type is `Bot` or its login ends in the reserved `[bot]` suffix (`is_bot` in `plugin/skills/github-review-loop/scripts/reviewer-identity.jq`). Reaction test fixtures now use the real REST response shape, with regression cases.
+
 ## [5.0.0] - 2026-10-01
 
 ### Added
