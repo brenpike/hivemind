@@ -200,6 +200,92 @@ else
   failed "capfail:append-failure-hard-fails" "status=$status out=$out gh_reached=$([ -f "$gh_stub_marker2" ] && echo yes || echo no)"
 fi
 
+# ── LIVE path: shared GraphQL response check + stdout-only idempotency (#393) ─────
+# These cases drive the LIVE run_reaction body (TEST_MODE and CAPTURE_FILE UNSET) against a PATH-shim
+# `gh` that prints a canned response body on stdout and exits with a chosen status. gh exits 0 on
+# several GraphQL error envelopes, so success must require BOTH exit 0 AND the shared response check
+# passing; the idempotency grep runs over stdout only (gh copies the body there even on a non-zero
+# exit). Each case asserts the shim was reached, so a case can never pass without the live path.
+
+# make_live_gh_shim <name> <exit status> <body>: write a stub gh under the tmpdir that records it was
+# reached, prints <body> on stdout, writes an unrelated line on stderr, and exits <exit status>.
+# Prints the stub's bin dir.
+make_live_gh_shim() {
+  local shim_dir="$TMPDIR_TEST/$1-stubbin"
+  local body_file="$TMPDIR_TEST/$1-body.json"
+  mkdir -p "$shim_dir"
+  printf '%s' "$3" > "$body_file"
+  {
+    printf '%s\n' '#!/usr/bin/env bash'
+    printf 'printf reached > %q\n' "$TMPDIR_TEST/$1-gh-reached"
+    printf 'cat %q\n' "$body_file"
+    printf '%s\n' 'echo "gh: stub stderr line" >&2'
+    printf 'exit %d\n' "$2"
+  } > "$shim_dir/gh"
+  chmod +x "$shim_dir/gh"
+  printf '%s' "$shim_dir"
+}
+
+# run_live_case <name> <exit status> <body>: run react-marker over a toplevel node on the live path
+# against the shim. Sets live_status, live_stdout, live_stderr, live_reached (yes|no).
+run_live_case() {
+  local shim_dir
+  shim_dir="$(make_live_gh_shim "$1" "$2" "$3")"
+  PATH="$shim_dir:$PATH" env -u REACTMARKER_TEST_MODE -u REACTMARKER_CAPTURE_FILE \
+    bash "$REACT_MARKER" "$TOPLEVEL_NODE" toplevel "https://github.com/o/r/pull/5#issuecomment-1" \
+    > "$TMPDIR_TEST/$1.stdout" 2> "$TMPDIR_TEST/$1.stderr"
+  live_status=$?
+  live_stdout="$(cat "$TMPDIR_TEST/$1.stdout")"
+  live_stderr="$(cat "$TMPDIR_TEST/$1.stderr")"
+  if [ -f "$TMPDIR_TEST/$1-gh-reached" ]; then live_reached=yes; else live_reached=no; fi
+}
+
+# assert_live_react_failed <name> <label>: the live case exited 1 with exactly the react-failed
+# token on stderr and the shim reached.
+assert_live_react_failed() {
+  if [ "$live_status" -eq 1 ] && [ "$live_reached" = yes ] \
+     && printf '%s\n' "$live_stderr" | grep -qx 'REACTMARKER_ERROR=react-failed'; then
+    pass "$1" "$2"
+  else
+    failed "$1" "status=$live_status reached=$live_reached stdout=$live_stdout stderr=$live_stderr"
+  fi
+}
+
+# assert_live_success <name> <label>: the live case exited 0, silent on stdout, no error token on
+# stderr, and the shim reached.
+assert_live_success() {
+  if [ "$live_status" -eq 0 ] && [ "$live_reached" = yes ] && [ -z "$live_stdout" ] \
+     && ! printf '%s\n' "$live_stderr" | grep -q 'REACTMARKER_ERROR='; then
+    pass "$1" "$2"
+  else
+    failed "$1" "status=$live_status reached=$live_reached stdout=$live_stdout stderr=$live_stderr"
+  fi
+}
+
+# exit 0 + a top-level errors array carrying a message -> NOT success: react-failed.
+run_live_case live-errors-message 0 \
+  '{"data":{"addReaction":null},"errors":[{"type":"FORBIDDEN","message":"Resource not accessible by integration"}]}'
+assert_live_react_failed "live:exit0-errors-message" "exit 0 + errors[{message}] -> exit 1 REACTMARKER_ERROR=react-failed"
+
+# exit 0 + errors [{}] (no message: gh does not turn this into a non-zero exit) -> react-failed.
+run_live_case live-errors-empty-object 0 '{"data":{"addReaction":null},"errors":[{}]}'
+assert_live_react_failed "live:exit0-errors-empty-object" "exit 0 + errors[{}] -> exit 1 REACTMARKER_ERROR=react-failed"
+
+# exit 0 + a clean success envelope -> success, silent on stdout.
+run_live_case live-clean 0 '{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}'
+assert_live_success "live:exit0-clean" "exit 0 + clean data envelope -> exit 0, empty stdout"
+
+# exit 0 + errors naming an already-present reaction -> idempotent success.
+run_live_case live-errors-already 0 \
+  '{"data":{"addReaction":null},"errors":[{"message":"Viewer has already reacted with this content"}]}'
+assert_live_success "live:exit0-errors-already-reacted" "exit 0 + already-reacted errors -> exit 0 (idempotent)"
+
+# exit 1 + already-reacted body on STDOUT -> idempotent success. Guards the stdout-only capture: gh
+# copies the response body to stdout on a non-zero exit, so idempotency detection must still see it.
+run_live_case live-exit1-already 1 \
+  '{"data":{"addReaction":null},"errors":[{"message":"Viewer has already reacted with this content"}]}'
+assert_live_success "live:exit1-already-reacted-on-stdout" "exit 1 + already-reacted body on stdout -> exit 0 (idempotent)"
+
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo
 echo "react-marker: $PASS_COUNT passed, $FAIL_COUNT failed"

@@ -83,6 +83,13 @@
 #     never fails the candidate. A clean success passes through unchanged.
 #   - NEVER REACT TO A THREAD: the thread surface delivers nothing; thread
 #     convergence is reply-resolve.sh's resolveReviewThread, not a reaction here.
+#   - RESPONSE CHECK: a live reaction succeeds only when gh exits 0 AND the shared
+#     validator hivemind_graphql_response_check
+#     (${CLAUDE_PLUGIN_ROOT}/skills/_shared/graphql-response.sh) accepts the response
+#     body. gh exits 0 on several GraphQL error envelopes (a top-level `errors`
+#     value), so an exit-0 response the check rejects is NOT success: it falls to the
+#     idempotency test over stdout and otherwise fails react-failed. Only stdout is
+#     captured — gh copies the response body there even on a non-zero exit.
 #   - Missing `timeout` / `gtimeout` -> degrade gracefully with a loud stderr
 #     warning and run the gh call UNGUARDED (mirrors reply-resolve.sh).
 #
@@ -113,10 +120,12 @@
 #   - exit 0 on success (reaction added, or already-present duplicate tolerated, or
 #     a thread silent no-op).
 #   - REACTMARKER_ERROR=<reason> on stderr + exit 1 on a HARD failure (bad input,
-#     unmapped surface, or a non-idempotent failed reaction).
+#     unmapped surface, a bootstrap failure, or a non-idempotent failed reaction —
+#     including an exit-0 response the shared GraphQL response check rejects).
 #
 # Reason tokens (STABLE — asserted by the test):
-#   missing-node-id | unmapped-surface | react-failed
+#   missing-node-id | unmapped-surface | react-failed | cannot-self-locate |
+#   missing-graphql-check | unparseable-graphql-check
 #
 # EXTERNAL-CONTENT BOUNDARY: NODE_ID and CANDIDATE_URL are external DATA. NODE_ID is
 # passed to gh as a typed `-F id=...` variable bound to the query's `$id: ID!`
@@ -173,6 +182,15 @@ CANDIDATE_URL="${positionals[2]:-}"
 # unmapped-surface). CANDIDATE_URL is accepted for positional-arity / logging parity
 # but no live path interpolates it, so it has no validation gate.
 
+SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || react_marker_fail "cannot-self-locate"
+
+# Source the shared GraphQL response validator (hivemind_graphql_response_check). It
+# lives at plugin/skills/_shared/, two levels up from this script's own dir, then into
+# _shared/. The lib is a sourced fragment (function definitions only).
+[ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || react_marker_fail "missing-graphql-check"
+# shellcheck source=../../_shared/graphql-response.sh
+. "$SCRIPT_DIR/../../_shared/graphql-response.sh" || react_marker_fail "unparseable-graphql-check"
+
 # Timeout wrapper for gh API calls. Prefer coreutils `timeout`; fall
 # back to macOS Homebrew `gtimeout`; degrade gracefully (run unguarded) when
 # neither exists, with a loud stderr warning. Verbatim posture from
@@ -201,8 +219,9 @@ mutation($id: ID!) {
 
 # run_reaction <node_id>: issue the EYES reaction over NODE_ID. The single
 # indirection point for both the live gh call AND the offline CAPTURE seam (§5).
-# Returns 0 on success, including the idempotent "already reacted" case; returns
-# non-zero only on a genuine non-idempotent failure. INVARIANT: when the capture
+# Returns 0 on success (gh exit 0 AND the shared GraphQL response check passing),
+# including the idempotent "already reacted" case; returns non-zero only on a
+# genuine non-idempotent failure. INVARIANT: when the capture
 # seam is active, NO gh call is made — the script is fully offline.
 run_reaction() {
   local node_id="$1"
@@ -220,23 +239,29 @@ run_reaction() {
     printf 'REACT node=%s content=%s\n' "$node_id" "$REACTION_CONTENT" >> "$REACTMARKER_CAPTURE_FILE" || return 1
     return "${REACTMARKER_REACT_STATUS:-0}"
   fi
-  # LIVE path. Capture combined output so an "already reacted" error can be
-  # detected-and-tolerated as success (idempotency invariant, §4).
+  # LIVE path. Capture the response body from stdout ONLY: gh copies the GraphQL
+  # response body to stdout even when it exits non-zero, so an "already reacted"
+  # error stays detectable there (idempotency invariant, §4) while gh's own stderr
+  # chatter is kept out of the body handed to the shared response check.
   local gh_output gh_status
   gh_output="$("${GH_TIMEOUT[@]}" gh api graphql \
     -F id="$node_id" \
-    -f query="$REACT_MUTATION" 2>&1)"
+    -f query="$REACT_MUTATION" 2>/dev/null)"
   gh_status=$?
-  if [ "$gh_status" -eq 0 ]; then
+  # Success requires BOTH a zero gh exit AND a passing shared response check: gh
+  # exits 0 on several GraphQL error envelopes, so the exit status alone is not
+  # proof the reaction landed.
+  if [ "$gh_status" -eq 0 ] && hivemind_graphql_response_check "$gh_output" >/dev/null; then
     return 0
   fi
-  # Idempotency tolerance: a failure whose message names an already-existing
+  # Idempotency tolerance: a response whose body names an already-existing
   # reaction is a server-side no-op for our purposes — treat it as success. Any
-  # other failure is a genuine react-failed.
+  # other failure (non-zero exit, or exit 0 with a rejected response) is a genuine
+  # react-failed.
   if printf '%s' "$gh_output" | grep -qi 'already.*reacted\|reaction.*already\|already exists'; then
     return 0
   fi
-  return "$gh_status"
+  return 1
 }
 
 # --- SURFACE -> DELIVERY DISPATCH (§3, closed by construction) -----------------

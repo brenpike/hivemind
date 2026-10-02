@@ -488,6 +488,30 @@ run_live_fail_case "live-closed:graphql-absent-thread-comments" "graphql-missing
   "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-absent-thread-comments.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
   "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-empty.json" "FETCHNORM_LIVE_CI_STATUS=0" \
   -- o r 5 all selfuser
+# Shared envelope validator (#393, _shared/graphql-response.sh). gh exits 0 for these error
+# envelopes, so each must fail closed on content. The two errors fixtures carry a VALID empty
+# pullRequest, so only the envelope check can reject them.
+# 4e. `.errors` array whose element has no `message` -> graphql-errors.
+run_live_fail_case "live-closed:graphql-errors-no-message" "graphql-errors" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-errors-no-message.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-empty.json" "FETCHNORM_LIVE_CI_STATUS=0" \
+  -- o r 5 all selfuser
+# 4f. `.errors` is an OBJECT, not an array -> graphql-errors. The prior array-length check read an
+#     empty object as length 0 and passed it through to [].
+run_live_fail_case "live-closed:graphql-errors-object" "graphql-errors" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-errors-object.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-empty.json" "FETCHNORM_LIVE_CI_STATUS=0" \
+  -- o r 5 all selfuser
+# 4g. non-JSON body at status 0 -> graphql-malformed.
+run_live_fail_case "live-closed:graphql-malformed" "graphql-malformed" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-malformed.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-empty.json" "FETCHNORM_LIVE_CI_STATUS=0" \
+  -- o r 5 all selfuser
+# 4h. `.data` null with no `.errors` -> graphql-missing-data.
+run_live_fail_case "live-closed:graphql-null-data" "graphql-missing-data" \
+  "FETCHNORM_LIVE_GRAPHQL_FILE=$FN_DIR/live-graphql-null-data.json" "FETCHNORM_LIVE_GRAPHQL_STATUS=0" \
+  "FETCHNORM_LIVE_CI_FILE=$FN_DIR/live-ci-empty.json" "FETCHNORM_LIVE_CI_STATUS=0" \
+  -- o r 5 all selfuser
 
 # Fail-CLOSED via the CI live seam (FETCHNORM_LIVE_CI_FILE/STATUS). Each pairs a VALID empty GraphQL
 # seam (present pullRequest, zero connections @ status 0) so the GraphQL gate passes and the CI gate

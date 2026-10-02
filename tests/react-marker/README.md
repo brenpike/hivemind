@@ -11,6 +11,20 @@ simulated live mutation exit status is supplied via `REACTMARKER_REACT_STATUS` f
 the failure-path case. Reason tokens asserted on the hard-failure paths are
 `missing-node-id`, `unmapped-surface`, and `react-failed`.
 
+The live-path cases (issue #393) leave `REACTMARKER_TEST_MODE` and
+`REACTMARKER_CAPTURE_FILE` unset and put a stub `gh` first on `PATH`. The stub
+prints a canned GraphQL response body on stdout, writes an unrelated line on
+stderr, and exits with a chosen status. A live reaction succeeds only when `gh`
+exits 0 AND the shared validator `hivemind_graphql_response_check`
+(`plugin/skills/_shared/graphql-response.sh`) accepts the body: an exit-0 response
+carrying a top-level `errors` value (with a message, or `[{}]`) fails with
+`react-failed`. The idempotency check reads stdout only, so an "already reacted"
+body is still a success both on exit 0 and on a non-zero exit (gh copies the
+response body to stdout even when it exits non-zero). Each case asserts the stub
+was reached. The bootstrap tokens `cannot-self-locate`, `missing-graphql-check`,
+and `unparseable-graphql-check` are documented in the script header; the shared
+self-location suite covers them.
+
 The suite uses REAL production-shaped reviewer node ids — `IC_...` for a toplevel
 IssueComment and `PRR_...` for a review PullRequestReview — not fake placeholder
 ids, so validation-order bugs cannot hide behind a non-production node shape. The

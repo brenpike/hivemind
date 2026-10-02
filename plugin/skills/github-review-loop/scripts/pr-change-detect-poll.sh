@@ -219,9 +219,14 @@ poll_fail() {
 
 # Resolve the sibling identity module RELATIVE to this script's own location
 # (ADR-0020 C1): the poll runs as a direct sibling of reviewer-identity.jq, and
-# every snapshot jq program loads it by search path.
+# every snapshot jq program loads it by search path. The shared GraphQL response
+# check (plugin/skills/_shared/graphql-response.sh, two levels up) is sourced the
+# same way; it defines functions only.
 SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || poll_fail "cannot-self-locate"
 [ -f "$SCRIPT_DIR/reviewer-identity.jq" ] || poll_fail "missing-identity-module"
+[ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || poll_fail "missing-graphql-check"
+# shellcheck source=../../_shared/graphql-response.sh
+. "$SCRIPT_DIR/../../_shared/graphql-response.sh" || poll_fail "unparseable-graphql-check"
 
 # reset_snapshot_vars: clear every `cur_<field>` before a capture, so an
 # indirect read of any declared field is always defined under `set -u`.
@@ -374,7 +379,9 @@ fail_count=0
 # approver kind). The `latestReviews` `first: 100` is a page size, not a
 # bound; a walk that fails on any page fails the capture.
 # Returns 0 on success, non-zero on failure of the query, either approval walk,
-# or any identity jq evaluation.
+# or any identity jq evaluation, and on a GraphQL response (the snapshot body or
+# any `latestReviews` page) that the shared graphql-response.sh check rejects —
+# gh exits 0 on several error envelopes, so its exit status alone is not success.
 # Each id token is a single max-databaseId across the author-filtered stream —
 # self-only flurries (own replies, own pushes) do not bump any token,
 # eliminating self-echo CHANGED storms. "Self" is the module's `is_self` over
@@ -391,12 +398,16 @@ fail_count=0
 # reviewer does the full body-level classification on wake (thin poll, no
 # interpretation). Writes diagnostic stderr to /dev/null (never /tmp).
 compute_snapshot() {
-  local raw line review_rows review_approved reaction_rows thumbs_approved
+  local snapshot_body raw line review_pages review_rows review_approved reaction_rows thumbs_approved
 
-  raw=$( ( set -o pipefail; \
-    "${GH_TIMEOUT[@]}" gh api graphql \
-      -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER" \
-      -f query='
+  # gh exits 0 on several GraphQL error envelopes, so its exit status alone never
+  # proves a usable response: the body is captured first and must pass the shared
+  # hivemind_graphql_response_check before any field is projected from it. A
+  # rejected body fails the capture; the check's token is discarded because the
+  # contracted stdout is the bare marker alone.
+  snapshot_body=$("${GH_TIMEOUT[@]}" gh api graphql \
+    -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER" \
+    -f query='
 query($owner: String!, $repo: String!, $pr: Int!) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $pr) {
@@ -425,7 +436,10 @@ query($owner: String!, $repo: String!, $pr: Int!) {
       }
     }
   }
-}' 2>/dev/null \
+}' 2>/dev/null) || return 1
+  hivemind_graphql_response_check "$snapshot_body" >/dev/null || return 1
+
+  raw=$( ( set -o pipefail; printf '%s' "$snapshot_body" \
     | jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '
     include "reviewer-identity";
     .data.repository.pullRequest as $pr |
@@ -500,13 +514,18 @@ EOF
   # approver supersedes an earlier APPROVED. The read is an EXHAUSTIVE paginated
   # walk in its own query (gh follows only one paginated connection per query):
   # `first: 100` is the page size, not a bound, so an approver past any number of
-  # other authors is still read. The gh --jq filter is pure TRANSPORT, one
-  # `tojson` row `{state, login, type}` per entry and per page, exactly like the
-  # reactions read below; the identity decision runs locally over every row at
-  # once. A failed later page, a GraphQL error, or a null connection (a jq
-  # iteration error) fails the capture, so no approval verdict is ever drawn from
-  # a partial walk. Empty input slurps to `[]` (no approval).
-  review_rows=$("${GH_TIMEOUT[@]}" gh api graphql --paginate \
+  # other authors is still read. The walk carries NO --jq: under --paginate gh
+  # runs --jq once per page and cannot load a module, so no envelope check could
+  # run inside it. The raw page stream (every page's JSON object concatenated) is
+  # captured whole and must pass the shared hivemind_graphql_pages_check, which
+  # rejects the stream when ANY page carries a GraphQL error envelope. Only then
+  # does a local jq (no -s, so it reads each concatenated page in turn) project
+  # one compact row `{state, login, type}` per entry across every page; the
+  # identity decision then runs locally over every row at once. A failed later
+  # page, a rejected page, or a null connection (a jq iteration error) fails the
+  # capture, so no approval verdict is ever drawn from a partial or errored
+  # walk. A walk whose pages hold no entries slurps to `[]` (no approval).
+  review_pages=$("${GH_TIMEOUT[@]}" gh api graphql --paginate \
     -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER" \
     -f query='
 query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
@@ -519,7 +538,10 @@ query($owner: String!, $repo: String!, $pr: Int!, $endCursor: String) {
     }
   }
 }' \
-    --jq '.data.repository.pullRequest.latestReviews.nodes[] | {state, login: .author.login, type: .author.__typename} | tojson' \
+    2>/dev/null) || return 1
+  hivemind_graphql_pages_check "$review_pages" >/dev/null || return 1
+  review_rows=$(printf '%s' "$review_pages" \
+    | jq -c '.data.repository.pullRequest.latestReviews.nodes[] | {state, login: .author.login, type: .author.__typename}' \
     2>/dev/null) || return 1
   review_approved=$(printf '%s' "$review_rows" \
     | jq -s -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '

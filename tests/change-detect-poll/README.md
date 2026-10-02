@@ -69,6 +69,7 @@ The suite pins:
 - `approval:latest-reviews-partial-walk-fails-closed` — a walk whose page 1 reports
   `hasNextPage` true and whose next page fails is `SNAPSHOT_ERROR`, exit 1, in snapshot mode and
   `POLL_ERROR`, exit 1, in poll mode; no approval verdict is drawn from a partial walk.
+- `approval:latest-reviews-graphql-errors-fail-closed` — see GraphQL error envelopes below.
 - `filter:empty-slot-is-automated` — over one mixed review state, the seed token captured with an
   empty filter slot equals the `automated` token and differs from both the `codex-only` and `all`
   tokens; an empty-slot arm fires `REVIEWER_APPROVED` on the Copilot approval.
@@ -78,6 +79,24 @@ The suite pins:
   (self-echo suppression intact). A login-only self compare idles the Bot and untyped variants.
 - `identity:thread-self-keys-on-type` — the same three swaps on a review thread's last comment, over
   a base whose thread ends in a User-typed self reply, with `REVIEW_THREADS_TOTAL` unchanged.
+
+## GraphQL error envelopes (#393)
+
+`gh` exits 0 on several GraphQL error envelopes (a top-level `errors` value), so an exit-0
+response is usable only when the shared `plugin/skills/_shared/graphql-response.sh` check
+accepts it. The snapshot body passes `hivemind_graphql_response_check` before any field is
+projected; the `latestReviews` walk carries no `--jq`, so its raw page stream (every page's
+JSON object concatenated) passes `hivemind_graphql_pages_check` before the script projects one
+row per entry itself. The fake `gh` serves every case below exit 0.
+
+- `response:snapshot-graphql-errors-fail-closed` — the pre-cycle-0 state, `data` intact, with a
+  top-level `errors` of `[{"message":"x"}]`, `[{}]`, or `{}` is `SNAPSHOT_ERROR`, exit 1, in
+  snapshot mode and `POLL_ERROR`, exit 1, in poll mode. The `data` alone would yield a valid
+  baseline and a silent poll.
+- `approval:latest-reviews-graphql-errors-fail-closed` — a 2-page walk ending in a Bot-typed
+  `review-approved` `APPROVED` review (which alone fires `REVIEWER_APPROVED` first, as in
+  `approval:latest-reviews-every-page-read`), with a top-level `errors` value on page 2 or on
+  page 1, is `SNAPSHOT_ERROR` / `POLL_ERROR`, exit 1, and never fires `REVIEWER_APPROVED`.
 
 ## The second bite: the seed's state model (PR #361)
 
@@ -142,7 +161,7 @@ a snapshot that cannot be captured, or one given a missing or unknown arm kind, 
 | --- | --- |
 | `graphql-pre-cycle0.json` | State A — the PR as it stood before cycle 0 (two User-typed self issue comments, one Bot-typed Codex review and its `COMMENTED` `latestReviews` entry, one Bot-typed Codex thread, checks green). |
 | `graphql-blind-window.json` | State B — A plus the Codex review + review-thread comment posted during the blind window. |
-| `graphql-malformed.json` | A GraphQL `NOT_FOUND` error response (null `pullRequest`) that makes the snapshot pipeline fail. |
+| `graphql-malformed.json` | A GraphQL `NOT_FOUND` error response (`errors` array, null `pullRequest`) that the snapshot capture rejects. |
 | `reactions-none.json` | Raw REST reactions page with no reaction (`[]`). |
 | `reactions-codex.json` | Raw REST reactions page with one +1 from `chatgpt-codex-connector[bot]`, in the shape the REST endpoint returns for a bot reactor (`user.type` `User`, plus `id` and `user_view_type`). |
 | `reactions-human.json` | Raw REST reactions page with two User-typed +1s (`chatgpt-codex-connector`, `claude`) that must never approve. |
@@ -162,8 +181,8 @@ the runner (`review_page`, `review_pages`, `review_walk`) rather than committed.
 `reactions-*.json` files are raw REST reactions pages, the bytes the API returns before `gh`
 applies `--jq`. The fake `gh` reads the script's own `--jq` argument and applies it to each
 served page with the real `jq -r`, so the production transport expression runs under test; a jq
-error on any page exits non-zero, and a call without `--jq` (the snapshot GraphQL query) is
-served raw. The fake `gh` strips CR when serving, so a `core.autocrlf` checkout of a fixture
+error on any page exits non-zero, and a call without `--jq` (the snapshot GraphQL query and
+the `latestReviews` walk; only the reactions read carries `--jq`) is served raw. The fake `gh` strips CR when serving, so a `core.autocrlf` checkout of a fixture
 cannot carry CR into the parsed bytes.
 
 The fake `gh` routes three call kinds: `graphql` (the snapshot query), `latestreviews` (a
@@ -173,7 +192,9 @@ OWN call counter, so every committed state fixture serves both calls and the exi
 no walk of their own. Caveat: the two counters advance independently, so a case whose `graphql`
 sequence has a `FAIL` or malformed entry before a good one desynchronises the mirror and must set
 its own `latestreviews` sequence. A sequence entry ending `.pages` is a paginated walk: a file
-listing one page path per line, served in order as one call; a `FAIL` line exits non-zero after
+listing one page path per line, served raw in order as one call (every page's JSON object
+concatenated, the stream the script hands to the shared pages check); a `FAIL` line exits
+non-zero after
 the earlier pages are printed. The fake `gh` serves pages after the first ONLY when the
 whitespace-normalized query declares `$endCursor: String`, passes `after: $endCursor`, and
 selects `pageInfo { hasNextPage endCursor }` — otherwise page 1 alone, as real `gh` returns for a

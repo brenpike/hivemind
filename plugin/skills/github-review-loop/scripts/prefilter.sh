@@ -47,6 +47,15 @@
 #   - Fail-open on a missing reviewer identity module: emits
 #     `PREFILTER_ERROR=missing-identity-module` and exits non-zero (DISPATCH),
 #     the same posture as the missing-filter case.
+#   - Fail-open on a missing or unsourceable shared GraphQL response validator
+#     (skills/_shared/graphql-response.sh): emits
+#     `PREFILTER_ERROR=missing-graphql-check` or
+#     `PREFILTER_ERROR=unparseable-graphql-check` and exits non-zero (DISPATCH).
+#   - Fail-open on an unusable GraphQL body that gh delivered with exit 0: the
+#     shared validator's token is emitted as `PREFILTER_ERROR=graphql-<token>`
+#     (`graphql-empty-body`, `graphql-malformed`, `graphql-errors`,
+#     `graphql-missing-data`) and the script exits non-zero (DISPATCH). A gh
+#     non-zero exit stays `PREFILTER_ERROR=graphql-failed`.
 #   - Every GraphQL `author` selection requests `__typename` alongside `login`:
 #     the identity module requires the author account type (Bot vs User) for
 #     every registry filter mode.
@@ -155,6 +164,10 @@ CLASSIFY_FILTER="$SCRIPT_DIR/fix-history-classify.jq"
 # The shared filter `include`s the identity module from $SCRIPT_DIR via -L;
 # fail open (DISPATCH) when it is missing, same posture as missing-filter.
 [ -f "$SCRIPT_DIR/reviewer-identity.jq" ] || prefilter_fail "missing-identity-module"
+# The shared GraphQL response validator lives two levels up in skills/_shared; fail open
+# (DISPATCH) when it is missing or cannot be sourced, same posture as missing-filter.
+[ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || prefilter_fail "missing-graphql-check"
+. "$SCRIPT_DIR/../../_shared/graphql-response.sh" || prefilter_fail "unparseable-graphql-check"
 
 # Timeout wrapper for gh API calls.
 # Normal gh graphql completes in 1-5s; 45s is generous against transient
@@ -223,6 +236,20 @@ query($owner: String!, $repo: String!, $pr: Int!) {
   }
 }' 2>/dev/null \
 ) ) || prefilter_fail "graphql-failed"
+
+# gh exits 0 on several GraphQL error envelopes, so a zero exit does not prove a usable body.
+# The shared validator accepts only a single JSON object with no `errors` and an object `data`;
+# any other shape fails open (DISPATCH) as `graphql-<token>` instead of reading as an empty page
+# that would classify to SKIP.
+#
+# RECORDED RESIDUAL: a body with no `errors` but a null `pullRequest` or a null connection still
+# passes this check, reads as an empty page, and can yield SKIP. Bounded: GitHub returns that
+# shape only in violation of the GraphQL spec, because a missing PR arrives with a NOT_FOUND
+# entry in `errors`, which this check now rejects. The obvious fix (copying fetch-normalize's
+# query-specific connection predicate here) is rejected because it would be a second copy of
+# that predicate; the intended fix is the pending rewire of prefilter onto fetch-normalize
+# (fetch-normalize.sh §1 SCOPE NOTE).
+graphql_token="$(hivemind_graphql_response_check "$response")" || prefilter_fail "graphql-$graphql_token"
 
 # Pass 1 — delegate per-comment/thread classification to the shared filter.
 # Emits a stream of one JSON object per classified non-self matching comment;
