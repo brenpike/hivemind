@@ -56,6 +56,17 @@
 #     (`graphql-empty-body`, `graphql-malformed`, `graphql-errors`,
 #     `graphql-missing-data`) and the script exits non-zero (DISPATCH). A gh
 #     non-zero exit stays `PREFILTER_ERROR=graphql-failed`.
+#   - Fail-open on a missing or unsourceable shared review-surface shape check
+#     (skills/_shared/review-surface-shape.sh): emits
+#     `PREFILTER_ERROR=missing-review-surface-check` or
+#     `PREFILTER_ERROR=unparseable-review-surface-check` and exits non-zero
+#     (DISPATCH).
+#   - Fail-open on an error-free but hollow body: after the envelope check,
+#     the shared shape check's token is emitted as
+#     `PREFILTER_ERROR=graphql-null-pullrequest` (null or absent repository or
+#     pullRequest) or `PREFILTER_ERROR=graphql-missing-connection` (an absent
+#     or null `comments` / `reviews` / `reviewThreads` connection, its `nodes`,
+#     or a thread's `comments.nodes`) and the script exits non-zero (DISPATCH).
 #   - Every GraphQL `author` selection requests `__typename` alongside `login`:
 #     the identity module requires the author account type (Bot vs User) for
 #     every registry filter mode.
@@ -168,6 +179,10 @@ CLASSIFY_FILTER="$SCRIPT_DIR/fix-history-classify.jq"
 # (DISPATCH) when it is missing or cannot be sourced, same posture as missing-filter.
 [ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || prefilter_fail "missing-graphql-check"
 . "$SCRIPT_DIR/../../_shared/graphql-response.sh" || prefilter_fail "unparseable-graphql-check"
+# The shared review-surface shape check lives beside it; fail open (DISPATCH) when it is missing
+# or cannot be sourced, same posture as missing-filter.
+[ -f "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" ] || prefilter_fail "missing-review-surface-check"
+. "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" || prefilter_fail "unparseable-review-surface-check"
 
 # Timeout wrapper for gh API calls.
 # Normal gh graphql completes in 1-5s; 45s is generous against transient
@@ -241,15 +256,12 @@ query($owner: String!, $repo: String!, $pr: Int!) {
 # The shared validator accepts only a single JSON object with no `errors` and an object `data`;
 # any other shape fails open (DISPATCH) as `graphql-<token>` instead of reading as an empty page
 # that would classify to SKIP.
-#
-# RECORDED RESIDUAL: a body with no `errors` but a null `pullRequest` or a null connection still
-# passes this check, reads as an empty page, and can yield SKIP. Bounded: GitHub returns that
-# shape only in violation of the GraphQL spec, because a missing PR arrives with a NOT_FOUND
-# entry in `errors`, which this check now rejects. The obvious fix (copying fetch-normalize's
-# query-specific connection predicate here) is rejected because it would be a second copy of
-# that predicate; the intended fix is the pending rewire of prefilter onto fetch-normalize
-# (fetch-normalize.sh §1 SCOPE NOTE).
 graphql_token="$(hivemind_graphql_response_check "$response")" || prefilter_fail "graphql-$graphql_token"
+# An error-free body can still be hollow (null repository or pullRequest, an absent or null
+# connection), which would read as an empty page and classify to SKIP. The shared shape check
+# requires the full review-activity skeleton this query selects and fails open (DISPATCH) as
+# `graphql-<token>` otherwise.
+shape_token="$(hivemind_review_surface_shape_check "$response")" || prefilter_fail "graphql-$shape_token"
 
 # Pass 1 — delegate per-comment/thread classification to the shared filter.
 # Emits a stream of one JSON object per classified non-self matching comment;
@@ -269,8 +281,9 @@ dispatch_class=$( ( set -o pipefail; \
 ) ) || prefilter_fail "classify-failed"
 
 # Pass 2 — read the three connection-level totalCounts DIRECTLY off the raw
-# payload (the filter does not emit them). Default each to 0 when absent so a
-# malformed/empty payload behaves like a 0-node page on every connection. A
+# payload (the filter does not emit them). The shape check above already ran, so
+# every connection is present; the `// 0` defaults only cover a missing
+# totalCount scalar, read as a 0-node page on that connection. A
 # single jq pass emits three label-prefixed lines, parsed exactly as the old
 # inline-token path did.
 totals=$( printf '%s' "$response" | jq -r '

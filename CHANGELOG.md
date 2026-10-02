@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The review-loop GitHub GraphQL reads (fetch-normalize, the change-detect poll snapshot and its `latestReviews` approval walk, the prefilter, react-marker, and reply-resolve) now fail closed on any response whose top-level `errors` is not absent, null, or `[]`, or whose `data` is not an object. All of them use one shared check, `plugin/skills/_shared/graphql-response.sh`. Previously `gh` exited 0 for some error shapes (message-less error objects and non-array `errors`), so an `errors: {}` response passed as a clean PR and an errored approval walk could report approval. The approval walk now validates every page. A new closure test fails if a review-loop script calls `gh api graphql` without the check. Closes #393.
 
+- Review-surface reads (fetch-normalize, prefilter, change-detect poll snapshot) fail closed on an error-free response with a missing or wrong-typed repository, pull request, connection, or thread, through `plugin/skills/_shared/review-surface-shape.sh`; previously the prefilter could report `PREFILTER_SKIP` and the poll could miss a wake. react-marker and reply-resolve count a mutation as done only when the response carries the requested object; react-marker no longer treats response text mentioning an existing reaction as success.
+
 ## [5.0.1] - 2026-10-02
 
 ### Fixed

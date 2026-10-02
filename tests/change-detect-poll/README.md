@@ -98,6 +98,23 @@ row per entry itself. The fake `gh` serves every case below exit 0.
   `approval:latest-reviews-every-page-read`), with a top-level `errors` value on page 2 or on
   page 1, is `SNAPSHOT_ERROR` / `POLL_ERROR`, exit 1, and never fires `REVIEWER_APPROVED`.
 
+### Review-surface shape (#393)
+
+After the envelope check, the snapshot body passes the shared
+`plugin/skills/_shared/review-surface-shape.sh` check (`hivemind_review_surface_shape_check`),
+which requires the whole review-activity skeleton: an object `pullRequest`; `comments`, `reviews`,
+and `reviewThreads` each an object with a `nodes` array; and every thread an object whose
+`comments` is an object with a `nodes` array. A body missing any of these would otherwise project
+as no activity and idle the poll past real feedback. `nodes: []` passes at every level.
+
+- `response:snapshot-hollow-surface-fail-closed` — the pre-cycle-0 state with no `errors` value
+  and a thread whose `comments.nodes` is null, a thread with `comments` deleted, a null thread
+  (the three bites: each yields a valid baseline without the check), a null `reviews`, or a null
+  `pullRequest` (locks) is `SNAPSHOT_ERROR` / `POLL_ERROR`, exit 1.
+- `response:empty-surface-valid-baseline` — every connection empty, and a variant whose one thread
+  holds an empty `comments.nodes`, each capture the exact expected `BASELINE=` line, exit 0, and a
+  poll armed with it idles silently to `WATCH_TIMEOUT`.
+
 ## The second bite: the seed's state model (PR #361)
 
 The seed originally serialized 8 of the 9 scalars the poll diffs, omitting the approval bool

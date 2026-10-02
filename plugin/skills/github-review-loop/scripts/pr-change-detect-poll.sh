@@ -220,13 +220,17 @@ poll_fail() {
 # Resolve the sibling identity module RELATIVE to this script's own location
 # (ADR-0020 C1): the poll runs as a direct sibling of reviewer-identity.jq, and
 # every snapshot jq program loads it by search path. The shared GraphQL response
-# check (plugin/skills/_shared/graphql-response.sh, two levels up) is sourced the
-# same way; it defines functions only.
+# check (plugin/skills/_shared/graphql-response.sh, two levels up) and the shared
+# review-surface shape check (plugin/skills/_shared/review-surface-shape.sh) are
+# sourced the same way; each defines functions only.
 SCRIPT_DIR="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || poll_fail "cannot-self-locate"
 [ -f "$SCRIPT_DIR/reviewer-identity.jq" ] || poll_fail "missing-identity-module"
 [ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || poll_fail "missing-graphql-check"
 # shellcheck source=../../_shared/graphql-response.sh
 . "$SCRIPT_DIR/../../_shared/graphql-response.sh" || poll_fail "unparseable-graphql-check"
+[ -f "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" ] || poll_fail "missing-review-surface-check"
+# shellcheck source=../../_shared/review-surface-shape.sh
+. "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" || poll_fail "unparseable-review-surface-check"
 
 # reset_snapshot_vars: clear every `cur_<field>` before a capture, so an
 # indirect read of any declared field is always defined under `set -u`.
@@ -379,9 +383,11 @@ fail_count=0
 # approver kind). The `latestReviews` `first: 100` is a page size, not a
 # bound; a walk that fails on any page fails the capture.
 # Returns 0 on success, non-zero on failure of the query, either approval walk,
-# or any identity jq evaluation, and on a GraphQL response (the snapshot body or
+# or any identity jq evaluation, on a GraphQL response (the snapshot body or
 # any `latestReviews` page) that the shared graphql-response.sh check rejects —
-# gh exits 0 on several error envelopes, so its exit status alone is not success.
+# gh exits 0 on several error envelopes, so its exit status alone is not success —
+# and on a snapshot body the shared review-surface-shape.sh check rejects (a lost
+# connection or per-thread `comments` would otherwise project as no activity).
 # Each id token is a single max-databaseId across the author-filtered stream —
 # self-only flurries (own replies, own pushes) do not bump any token,
 # eliminating self-echo CHANGED storms. "Self" is the module's `is_self` over
@@ -402,9 +408,14 @@ compute_snapshot() {
 
   # gh exits 0 on several GraphQL error envelopes, so its exit status alone never
   # proves a usable response: the body is captured first and must pass the shared
-  # hivemind_graphql_response_check before any field is projected from it. A
-  # rejected body fails the capture; the check's token is discarded because the
-  # contracted stdout is the bare marker alone.
+  # hivemind_graphql_response_check, then the shared
+  # hivemind_review_surface_shape_check, before any field is projected from it.
+  # The shape check rejects a hollow body (a null pullRequest, a null or absent
+  # comments / reviews / reviewThreads connection or `nodes` list, a null thread,
+  # or a thread whose `comments` connection or `nodes` list is lost) that the
+  # projection below would otherwise read as no activity: a silently missed wake.
+  # A rejected body fails the capture; each check's token is discarded because
+  # the contracted stdout is the bare marker alone.
   snapshot_body=$("${GH_TIMEOUT[@]}" gh api graphql \
     -f owner="$OWNER" -f repo="$REPO" -F pr="$PR_NUMBER" \
     -f query='
@@ -438,6 +449,7 @@ query($owner: String!, $repo: String!, $pr: Int!) {
   }
 }' 2>/dev/null) || return 1
   hivemind_graphql_response_check "$snapshot_body" >/dev/null || return 1
+  hivemind_review_surface_shape_check "$snapshot_body" >/dev/null || return 1
 
   raw=$( ( set -o pipefail; printf '%s' "$snapshot_body" \
     | jq -r -L "$SCRIPT_DIR" --arg login "$SELF_LOGIN" --arg filter "$REVIEWER_FILTER" '

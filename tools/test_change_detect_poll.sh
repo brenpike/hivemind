@@ -64,7 +64,11 @@
 # exit-0 response is usable only when the shared plugin/skills/_shared/graphql-response.sh check
 # accepts it. A snapshot body carrying a top-level `errors` value, or a `latestReviews` walk with
 # such a value on ANY page, fails the capture (SNAPSHOT_ERROR / POLL_ERROR) and never yields a
-# baseline, a delta, or an approval verdict.
+# baseline, a delta, or an approval verdict. A snapshot body that has lost part of the
+# review-activity skeleton (a null pullRequest, a null or absent connection or `nodes` list, a null
+# thread, or a thread whose `comments` connection is lost) fails the capture the same way through
+# the shared plugin/skills/_shared/review-surface-shape.sh check, while a genuinely empty PR (every
+# `nodes` list `[]`) still yields a valid baseline.
 #
 # Usage:
 #   ./tools/test_change_detect_poll.sh
@@ -1257,6 +1261,87 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "approval:latest-reviews-graphql-errors-fail-closed" "$SKIP_REASON"
+fi
+
+# ── 32. a snapshot body that lost part of the review-activity skeleton fails CLOSED ────
+# Each variant derives from the pre-cycle-0 state with NO `errors` value, so the shared
+# graphql-response.sh check accepts it. The first three are the hollow per-thread bodies the
+# snapshot projection reads as "no thread comment" (its optional iteration skips them) and would
+# idle the poll past real feedback: a thread whose `comments.nodes` is null, a thread with its
+# `comments` connection deleted, and a null thread element. The last two are locks a projection
+# error already fails today: a null `reviews` connection and a null `pullRequest`. The shared
+# review-surface-shape.sh check rejects every variant, so snapshot mode is SNAPSHOT_ERROR and poll
+# mode is POLL_ERROR, both exit 1.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  hollow_ok=1
+  hollow_detail=""
+  hollow_index=0
+  for hollow_program in \
+    '.data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes = null' \
+    '.data.repository.pullRequest.reviewThreads.nodes[0] |= del(.comments)' \
+    '.data.repository.pullRequest.reviewThreads.nodes[0] = null' \
+    '.data.repository.pullRequest.reviews = null' \
+    '.data.repository.pullRequest = null'; do
+    hollow_index=$((hollow_index + 1))
+    hollow_fixture="$(derive_fixture "snapshot-hollow-$hollow_index" "$PRE" "$hollow_program")"
+    if ! hollow_outcome="$(capture_fails_closed "snapshot-hollow-$hollow_index" "$hollow_fixture" "" \
+      "$SEED" "$REVIEWER_FILTER")"; then
+      hollow_ok=0
+      hollow_detail="$hollow_detail program=[$hollow_program] $hollow_outcome"
+    fi
+  done
+  if [ "$hollow_ok" -eq 1 ]; then
+    pass "response:snapshot-hollow-surface-fail-closed" "null thread comments.nodes, deleted thread comments, null thread, null reviews, null pullRequest -> SNAPSHOT_ERROR / POLL_ERROR, exit 1"
+  else
+    failed "response:snapshot-hollow-surface-fail-closed" "$hollow_detail"
+  fi
+else
+  skipped "response:snapshot-hollow-surface-fail-closed" "$SKIP_REASON"
+fi
+
+# ── 33. a genuinely empty review surface still yields a valid baseline ────────────────
+# Discrimination for case 32: `nodes: []` is a clean PR, not a hollow one. Every connection empty
+# (totals 0), and a variant whose one thread holds an empty `comments.nodes`, each capture exactly
+# the expected BASELINE= line, exit 0, and a poll armed with that seed over the same state idles
+# silently to WATCH_TIMEOUT.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  empty_ok=1
+  empty_detail=""
+  empty_all="$(derive_fixture surface-empty-all "$PRE" \
+    '.data.repository.pullRequest |= (.comments = {"totalCount":0,"nodes":[]}
+      | .reviews = {"totalCount":0,"nodes":[]}
+      | .reviewThreads = {"totalCount":0,"nodes":[]})')"
+  empty_thread="$(derive_fixture surface-empty-thread "$empty_all" \
+    '.data.repository.pullRequest.reviewThreads = {"totalCount":1,"nodes":[{"comments":{"nodes":[]}}]}')"
+  for empty_case in "all|$empty_all|initial|OPEN|NONE|NONE|NONE|0|0|0|0|false" \
+    "thread|$empty_thread|initial|OPEN|NONE|NONE|NONE|0|0|1|0|false"; do
+    empty_name="${empty_case%%|*}"
+    empty_rest="${empty_case#*|}"
+    empty_fixture="${empty_rest%%|*}"
+    empty_expected="${empty_rest#*|}"
+    empty_raw="$(snapshot_raw "surface-empty-$empty_name" initial "$empty_fixture" "$REACT_NONE")"
+    empty_status=$?
+    if [ "$empty_status" -ne 0 ] || [ "$empty_raw" != "BASELINE=$empty_expected" ]; then
+      empty_ok=0
+      empty_detail="$empty_detail $empty_name: snapshot status=$empty_status out=$(printf '%s' "$empty_raw" | tr '\n' ';')"
+      continue
+    fi
+    st="$(new_state "surface-empty-$empty_name-poll")"
+    set_seq "$st" graphql "$empty_fixture"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(arm_poll "$st" "$empty_expected")"
+    if [ "$out" != "WATCH_TIMEOUT" ]; then
+      empty_ok=0
+      empty_detail="$empty_detail $empty_name: poll out=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$empty_ok" -eq 1 ]; then
+    pass "response:empty-surface-valid-baseline" "all-empty connections and an empty-comment thread -> exact BASELINE=, exit 0; seeded poll silent to WATCH_TIMEOUT"
+  else
+    failed "response:empty-surface-valid-baseline" "$empty_detail"
+  fi
+else
+  skipped "response:empty-surface-valid-baseline" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

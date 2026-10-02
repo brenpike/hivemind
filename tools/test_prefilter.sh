@@ -18,6 +18,13 @@
 # could yield PREFILTER_SKIP, silently swallowing a failed fetch. Each error case asserts the
 # fail-open `PREFILTER_ERROR=graphql-<token>` line and a non-zero exit instead.
 #
+# The shape cases prove the second bite: an error-free but hollow body (null repository or
+# pullRequest, an absent or null connection or `nodes` list) read as an empty page and yielded
+# PREFILTER_SKIP. Each now asserts `PREFILTER_ERROR=graphql-null-pullrequest` or
+# `PREFILTER_ERROR=graphql-missing-connection` from the shared review-surface shape check, while
+# a genuinely empty page (every `nodes` [] and totalCount 0) still skips, and an `errors` entry
+# next to a null pullRequest stays `graphql-errors` because the envelope check runs first.
+#
 # Mirrors tools/test_change_detect_poll.sh's pass/fail counter + per-case assertion +
 # exit-nonzero-on-any-fail convention. Read-only: the only writes are scratch files under a
 # disposable tmpdir removed on EXIT.
@@ -116,6 +123,27 @@ run_case "graphql:blank-body" "$BLANK_BODY" 0 "PREFILTER_ERROR=graphql-empty-bod
 run_case "graphql:non-json" "$NON_JSON" 0 "PREFILTER_ERROR=graphql-malformed" 1
 run_case "graphql:null-data" "$NULL_DATA" 0 "PREFILTER_ERROR=graphql-missing-data" 1
 run_case "graphql:gh-nonzero-exit" "$CASE01" 1 "PREFILTER_ERROR=graphql-failed" 1
+
+# ── Hollow-body shape cases ──────────────────────────────────────────────────────
+NULL_PULLREQUEST="$(derive_body shape-null-pullrequest '.data.repository.pullRequest = null' "$CASE01")" || exit 2
+NULL_REPOSITORY="$(derive_body shape-null-repository '.data.repository = null' "$CASE01")" || exit 2
+ABSENT_REVIEWS="$(derive_body shape-absent-reviews 'del(.data.repository.pullRequest.reviews)' "$CASE01")" || exit 2
+NULL_COMMENTS_NODES="$(derive_body shape-null-comments-nodes '.data.repository.pullRequest.comments.nodes = null' "$CASE01")" || exit 2
+NULL_THREAD_COMMENTS_NODES="$(derive_body shape-null-thread-comments-nodes \
+  '.data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes = null' "$CASE01")" || exit 2
+VALID_EMPTY="$(derive_body shape-valid-empty \
+  '.data.repository.pullRequest |= with_entries(.value = {totalCount: 0, nodes: []})' "$CASE01")" || exit 2
+ERRORS_OVER_NULL_PR="$(derive_body shape-errors-over-null-pr \
+  '.data.repository.pullRequest = null | . + {errors: [{type: "NOT_FOUND", message: "Could not resolve to a PullRequest with the number of 5."}]}' \
+  "$CASE01")" || exit 2
+
+run_case "shape:null-pullrequest" "$NULL_PULLREQUEST" 0 "PREFILTER_ERROR=graphql-null-pullrequest" 1
+run_case "shape:null-repository" "$NULL_REPOSITORY" 0 "PREFILTER_ERROR=graphql-null-pullrequest" 1
+run_case "shape:absent-reviews" "$ABSENT_REVIEWS" 0 "PREFILTER_ERROR=graphql-missing-connection" 1
+run_case "shape:null-comments-nodes" "$NULL_COMMENTS_NODES" 0 "PREFILTER_ERROR=graphql-missing-connection" 1
+run_case "shape:null-thread-comments-nodes" "$NULL_THREAD_COMMENTS_NODES" 0 "PREFILTER_ERROR=graphql-missing-connection" 1
+run_case "shape:valid-empty-skips" "$VALID_EMPTY" 0 "PREFILTER_SKIP" 0
+run_case "shape:errors-over-null-pr" "$ERRORS_OVER_NULL_PR" 0 "PREFILTER_ERROR=graphql-errors" 1
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
 echo
