@@ -47,12 +47,15 @@
 #
 # THE REVIEWER-IDENTITY CONTRACT (ADR-0033): every login / filter / approver decision is the
 # shared `reviewer-identity.jq` registry's. The poll's approval scalar is true on EITHER a 👍 from
-# a Bot-typed `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-typed `review-approved`
+# a Bot-account `pr-reaction-thumbs-up` registry member (Codex) OR a Bot-account `review-approved`
 # member (Copilot) whose latest review, as GitHub's per-author `latestReviews` reports it, is
-# APPROVED, both scoped by the active filter, and surfaces as `REVIEWER_APPROVED`. The approval is
-# read from `latestReviews`, never rebuilt from the bounded `reviews` history window, by an
-# exhaustive paginated walk in its own query: `first: 100` is the page size, not a bound, and a
-# walk that fails on any page fails the capture. The fake gh models gh's GraphQL pagination
+# APPROVED, both scoped by the active filter, and surfaces as `REVIEWER_APPROVED`. A Bot account is
+# the module's `is_bot`: typed `Bot`, OR a raw login ending in the reserved `[bot]` suffix — the
+# REST reactions endpoint types a bot reactor `User`, so the Codex 👍 arrives User-typed with a
+# `[bot]`-suffixed login, and the committed Codex reaction fixtures carry exactly that shape. The
+# approval is read from `latestReviews`, never rebuilt from the bounded `reviews` history window,
+# by an exhaustive paginated walk in its own query: `first: 100` is the page size, not a bound, and
+# a walk that fails on any page fails the capture. The fake gh models gh's GraphQL pagination
 # contract, so a walk that stops at page 1 or judges a partial walk goes red. Reactions and
 # latest-review rows travel as one JSON object per row, so a login carrying a delimiter byte
 # cannot forge the account type. An empty filter slot defaults to `automated`.
@@ -456,7 +459,8 @@ else
 fi
 
 # ── 4. Codex 👍 present at the first poll emits REVIEWER_APPROVED ────────────────────
-# The reaction (a Bot-typed `chatgpt-codex-connector[bot]` +1 in a raw REST page) is
+# The reaction (a `chatgpt-codex-connector[bot]` +1 in a raw REST page, typed `User` as the REST
+# endpoint reports a bot reactor) is
 # present for every poll while the pre-cycle-0 seed state carried none. Legacy arm: the baseline
 # poll's pre-existing-approval special case fires. Seeded arm: false -> true against the seed
 # fires. Either way the FIRST emitted marker is REVIEWER_APPROVED — an approval that lands in the
@@ -702,15 +706,16 @@ else
   skipped "seed:arm-kind-closed-set" "$SKIP_REASON"
 fi
 
-# ── 16. a User-typed 👍 NEVER approves ───────────────────────────────────────────────
-# reactions-human.json carries a User-typed +1 whose login IS the Codex registry login, plus a
-# User-typed `claude` +1. The registry's approver test is Bot-type gated, so neither may approve
-# under `codex-only` OR under `all` — `all` admits every login to the filter, which isolates the
-# approver type gate as the only thing standing between a human 👍 and a terminal `clean`.
+# ── 16. a human 👍 NEVER approves ────────────────────────────────────────────────────
+# reactions-human.json carries a User-typed +1 whose login IS the bare Codex registry login, plus a
+# User-typed `claude` +1. Neither login carries the reserved `[bot]` suffix, so neither is a Bot
+# account per the module's `is_bot`, and neither may approve under `automated`, `codex-only`, OR
+# `all` — `all` admits every login to the filter, which isolates the approver's Bot-account gate as
+# the only thing standing between a human 👍 and a terminal `clean`.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   human_ok=1
   human_detail=""
-  for human_filter in codex-only all; do
+  for human_filter in automated codex-only all; do
     human_seed="$(capture_seed "humanseed-$human_filter" initial "$PRE" "$REACT_NONE" "$human_filter")"
     st="$(new_state "humanpoll-$human_filter")"
     set_seq "$st" graphql "$PRE"
@@ -722,12 +727,12 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     fi
   done
   if [ "$human_ok" -eq 1 ]; then
-    pass "approval:user-thumbs-up-never-approves" "User-typed 👍 stayed silent under codex-only and all"
+    pass "approval:human-thumbs-up-never-approves" "human 👍 stayed silent under automated, codex-only and all"
   else
-    failed "approval:user-thumbs-up-never-approves" "$human_detail"
+    failed "approval:human-thumbs-up-never-approves" "$human_detail"
   fi
 else
-  skipped "approval:user-thumbs-up-never-approves" "$SKIP_REASON"
+  skipped "approval:human-thumbs-up-never-approves" "$SKIP_REASON"
 fi
 
 # ── 17. a Copilot APPROVED review fires under `automated`, NOT under `codex-only` ─────
@@ -989,11 +994,13 @@ fi
 # reactions-forged.json carries one User-typed +1 whose login is the Codex bot login followed by a
 # TAB and `Bot`. A transport that joins login and type with a delimiter and splits them again
 # reads that row as a Bot-typed Codex approval. The transport carries each row as a JSON object,
-# so the login stays one value and the type stays User: no approval under `codex-only` OR `all`.
+# so the login stays one value and the type stays User; the login ends in `Bot`, not the reserved
+# `[bot]` suffix, so it is no Bot account per `is_bot`: no approval under `automated`,
+# `codex-only`, OR `all`.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   forged_ok=1
   forged_detail=""
-  for forged_filter in codex-only all; do
+  for forged_filter in automated codex-only all; do
     forged_seed="$(capture_seed "forgedseed-$forged_filter" initial "$PRE" "$REACT_NONE" "$forged_filter")"
     st="$(new_state "forgedpoll-$forged_filter")"
     set_seq "$st" graphql "$PRE"
@@ -1005,7 +1012,7 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     fi
   done
   if [ "$forged_ok" -eq 1 ]; then
-    pass "approval:reaction-login-cannot-forge-type" "delimiter-forged login stayed silent under codex-only and all"
+    pass "approval:reaction-login-cannot-forge-type" "delimiter-forged login stayed silent under automated, codex-only and all"
   else
     failed "approval:reaction-login-cannot-forge-type" "$forged_detail"
   fi
@@ -1014,15 +1021,16 @@ else
 fi
 
 # ── 26. a non-+1 reaction from the approver NEVER approves ───────────────────────────
-# reactions-codex-eyes.json carries one Bot-typed Codex `eyes` reaction. Only a +1 is the Codex
-# approval signal, so the poll idles to WATCH_TIMEOUT.
+# reactions-codex-eyes.json carries one Codex bot `eyes` reaction in the REST shape (User-typed,
+# `[bot]`-suffixed login, so a Bot account per `is_bot`). Only a +1 is the Codex approval signal,
+# so the poll idles to WATCH_TIMEOUT.
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   st="$(new_state codex-eyes)"
   set_seq "$st" graphql "$PRE"
   set_seq "$st" reactions "$REACT_CODEX_EYES"
   out="$(arm_poll "$st" "$SEED")"
   if [ "$out" = "WATCH_TIMEOUT" ]; then
-    pass "approval:eyes-reaction-never-approves" "Bot-typed Codex eyes reaction stayed silent"
+    pass "approval:eyes-reaction-never-approves" "Codex bot eyes reaction stayed silent"
   else
     failed "approval:eyes-reaction-never-approves" "expected only WATCH_TIMEOUT, got=$(printf '%s' "$out" | tr '\n' ';')"
   fi
@@ -1109,6 +1117,40 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "approval:latest-reviews-partial-walk-fails-closed" "$SKIP_REASON"
+fi
+
+# ── 29. the REST-typed Codex 👍 approves under every Codex-admitting filter ───────────
+# The REST reactions endpoint reports the Codex bot reactor as `user.type` `User` with the
+# `[bot]`-suffixed login (reactions-codex.json is that verbatim shape). The module's `is_bot`
+# admits it by the reserved suffix, so under `automated` AND `codex-only` the FIRST marker is
+# REVIEWER_APPROVED. A gate on the account type alone rejects that row and idles to
+# WATCH_TIMEOUT. The variant re-typing the same row `Bot` must approve too, so the suffix arm
+# widens the type arm rather than replacing it.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  rest_ok=1
+  rest_detail=""
+  react_codex_bot_typed="$(derive_fixture reactions-codex-bot-typed "$REACT_CODEX" '.[].user.type = "Bot"')"
+  for rest_reactions in "$REACT_CODEX" "$react_codex_bot_typed"; do
+    for rest_filter in automated codex-only; do
+      rest_name="restpoll-$(basename "$rest_reactions" .json)-$rest_filter"
+      rest_seed="$(capture_seed "$rest_name-seed" initial "$PRE" "$REACT_NONE" "$rest_filter")"
+      st="$(new_state "$rest_name")"
+      set_seq "$st" graphql "$PRE"
+      set_seq "$st" reactions "$rest_reactions"
+      out="$(arm_poll "$st" "$rest_seed" "$rest_filter")"
+      if [ "$(printf '%s\n' "$out" | head -1)" != "REVIEWER_APPROVED" ]; then
+        rest_ok=0
+        rest_detail="$rest_detail reactions=$(basename "$rest_reactions") filter=$rest_filter got=$(printf '%s' "$out" | tr '\n' ';') seed=$rest_seed"
+      fi
+    done
+  done
+  if [ "$rest_ok" -eq 1 ]; then
+    pass "approval:rest-user-typed-bot-thumbs-up-approves" "User-typed and Bot-typed Codex bot 👍 fired REVIEWER_APPROVED first under automated and codex-only"
+  else
+    failed "approval:rest-user-typed-bot-thumbs-up-approves" "$rest_detail"
+  fi
+else
+  skipped "approval:rest-user-typed-bot-thumbs-up-approves" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

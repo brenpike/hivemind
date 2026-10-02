@@ -15,6 +15,7 @@ The identity predicate itself was not held in one place. It was duplicated acros
 - **A bare login is not an identity.** GitHub's REST `users/claude` is a human `User` account created in 2009 (id 81847). The Claude review app posts as `claude[bot]`, a `Bot` (id 209825114). Stripping `[bot]` and comparing the bare login — the existing Codex technique — would admit that human as an automated reviewer.
 - **The Copilot reviewer's login differs by API surface.** REST `users/copilot-pull-request-reviewer[bot]` resolves to the `Bot` login `Copilot` (id 175728472), while secondary sources report GraphQL author nodes carrying `copilot-pull-request-reviewer`. The evidence is conflicting and secondary, so both forms must match.
 - **Codex resolves cleanly.** REST `users/chatgpt-codex-connector[bot]` is a `Bot` (id 199175422).
+- **REST reactions type a Bot reactor as `User` (live, 2026-10-02).** `GET repos/brenpike/hivemind/issues/394/reactions` and `GET repos/brenpike/hivemind/issues/392/reactions` report the Codex reactor as `{login: "chatgpt-codex-connector[bot]", id: 199175422, type: "User", user_view_type: "public"}`. `GET users/chatgpt-codex-connector%5Bbot%5D` reports the same id typed `Bot`. GraphQL review and thread authors on PRs 380, 386, and 390 report `chatgpt-codex-connector` with `__typename` `Bot`. So REST reactions keep the `[bot]` suffix but report the wrong type, and GraphQL reports the right type but drops the suffix. A GitHub login is alphanumerics and hyphens only, so no human login can carry the `[bot]` suffix: it is reserved for app bot accounts and cannot be forged. The original decision assumed otherwise. §4 and the module assumed REST reports a Bot reactor's `user.type` as `Bot`. That was never verified live, and the test fixtures were synthetic. Version 5.0.0 therefore never detected a real Codex 👍, and https://github.com/brenpike/hivemind/pull/394, which shipped it, was merged by hand after the poll missed the approval.
 - **The bare org accounts cannot author reviews.** `copilot-pull-request-reviewer` and `chatgpt-codex-connector` without the suffix are `Organization` accounts, so they never appear as a comment or review author.
 - **GitHub keeps each reviewer's latest verdict.** The GraphQL `PullRequest.latestReviews` connection is documented as the "latest reviews per user ... that are not also pending review" (primary: GitHub GraphQL reference, pulls). A secondary source (a9n-shoji/rvw pull 88) reports that the sibling connection `latestOpinionatedReviews`, which takes a `writersOnly` argument, keeps an author's `APPROVED` over a later `COMMENTED`, while `latestReviews` lets the later `COMMENTED` replace it. Another secondary source (notaharness/n10 pull 231) reports that `latestReviews` omits an author who has an open review request, and that Bot authors appear in it typed `Bot`.
 - **GraphQL reactions cannot type a Bot reactor.** `Reaction.user` is typed `User` (primary: GitHub GraphQL reference, reactions), so a Bot's reaction cannot be read with its account type through the PR's `reactions` connection. `ReactionGroup.reactors` is a union connection that can carry a Bot, but it is capped at 100 reactors.
@@ -117,6 +118,7 @@ Changing the default filter is a breaking change to the loop's default behavior,
 
 - **Copilot and Claude feedback is actionable by default.** A wider default set means more remediation cycles on PRs those reviewers comment on.
 - **The Copilot GraphQL login evidence is secondary and conflicting.** Both forms are listed to cover it; a live smoke on a Copilot-reviewed PR is recommended to confirm which form GraphQL actually reports, and that Bot reviewers appear in `latestReviews` typed `Bot`.
+- **Codex identity is live-verified on both surfaces (2026-10-02).** A live smoke read the Codex REST reactions, which carry the suffixed login typed `User`, and the Codex GraphQL review and thread authors, which carry the bare login typed `Bot`. Both read as a Bot account under the amended identity key below. The Copilot smoke in the bullet above is still open.
 - **Copilot's `APPROVED` capability is verified only through a secondary article.** If the capability is absent or not opted into, the `review-approved` kind is inert — it never fires, and the loop ends through the watch window instead.
 - **Copilot approval is found however many reviews and distinct reviewers the PR has.** It is read from every page of `latestReviews`, not from a 50-review history window.
 - **The exhaustive approval read costs one more GraphQL call per poll iteration (recorded residual).** Each further 100 distinct reviewers adds one call. Every page of the walk runs inside the one 45-second `gh` call timeout, and a failure is a loud `POLL_ERROR` (`SNAPSHOT_ERROR` when capturing the seed), never a silent not-approved.
@@ -129,6 +131,29 @@ Changing the default filter is a breaking change to the loop's default behavior,
 - **An operator signed in as the human `claude` account now receives Claude-bot feedback.** The Claude app's reviews are no longer mistaken for the operator's own.
 - **A Bot sharing the operator's login can no longer forge dispositions or harvests.** Its `Fixed in`, defer, and `Addresses:` markers are not honored as the operator's.
 - **Preflight now rejects a non-`User` credential.** A loop authenticated as a Bot or other non-`User` account stops at preflight with `SELF_LOGIN is not a User account` instead of running.
+
+## Amendment — 2026-10-02 (Bot account also derived from the reserved login suffix)
+
+§2 assumed every surface reports a bot's account type as `Bot`. The REST reactions finding above shows it does not: REST reactions report the Codex reactor typed `User` under its suffixed login. Under the type-only gate, the Codex 👍 never counted as approval.
+
+**Refined §2.** A registry member matches only when the author is a Bot account AND its login, with a trailing `[bot]` stripped, matches one of the entry's recognized forms. An author is a Bot account when its account type is `Bot` OR its raw login ends in the reserved `[bot]` suffix. Login alone is still not sufficient: the human `claude` collision is with the bare login, which carries no suffix, so that human stays out of every registry mode. A login without the suffix whose account type is missing or null still never matches. Self identity (§7) is unchanged: it keys on type `User` and the raw login, and the operator's login never carries the suffix.
+
+**A seventh definition.** The module gains `is_bot`, the one Bot-account predicate. `reviewer_matches_filter` (in both the `automated` and `codex-only` arms) and `reviewer_is_approver` gate on it instead of comparing the type to `Bot` inline. The REST reactions transport still carries `user.type` verbatim; the module decides Bot-ness.
+
+**Rejected options.**
+
+| Option | Rejected because |
+|---|---|
+| Normalize the type to `Bot` at the REST call site | The defect recurs for every new consumer that reads REST rows. Each one would need its own normalizer, which is a second home for identity |
+| Key Bot-ness on the suffix alone and drop the type | GraphQL reports bots under their bare login typed `Bot`, so every GraphQL review and thread author would stop matching |
+| Resolve each reactor with `GET users/<login>` | One extra REST call per reactor per poll iteration, for a fact the suffix already proves |
+| Read reactors through GraphQL `ReactionGroup.reactors` | Capped at 100 reactors; already rejected in Considered Options above |
+
+**Recorded residual.** A bot whose login carries no suffix and whose REST row is typed `User` is still rejected. The Copilot REST login `Copilot` is one example. This is inert today: Copilot approval comes from GraphQL `latestReviews`, which types its authors, and REST reactions are judged only for the `pr-reaction-thumbs-up` kind, which only Codex declares. Promote this to an issue if a bot without the suffix is ever read from REST.
+
+**Trust root.** The suffix guarantee rests on GitHub's login charset: a login is alphanumerics and hyphens only, so a human account can never end in `[bot]`. If GitHub ever widens that charset, the suffix stops being an identity proof.
+
+This amendment is APPEND-ONLY; the original Decision and Consequences stand except where refined above. Status remains accepted.
 
 ## References
 

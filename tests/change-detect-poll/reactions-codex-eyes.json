@@ -1,3 +1,3 @@
 [
-  { "content": "eyes", "user": { "login": "chatgpt-codex-connector[bot]", "type": "Bot" } }
+  { "content": "eyes", "user": { "login": "chatgpt-codex-connector[bot]", "id": 199175422, "type": "User", "user_view_type": "public" } }
 ]

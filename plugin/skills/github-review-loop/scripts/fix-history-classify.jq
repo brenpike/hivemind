@@ -86,8 +86,9 @@
 #                                  # viewerHasReacted==true => handled (self marker)
 #
 # `author.__typename` is a CONTRACT field on every surface: the registry filter
-# modes (`automated`, `codex-only`) match only a Bot-typed author, so a payload
-# omitting it never matches those modes (fail closed toward "not automated").
+# modes (`automated`, `codex-only`) match only a Bot account per the module's
+# `is_bot`, so a payload omitting it matches those modes only through the login's
+# reserved bot suffix (otherwise fail closed toward "not automated").
 # It is ALSO the self identity key: an author is self only when its
 # `__typename` is "User" AND its raw login equals --arg login (module
 # `is_self`), so a payload omitting `__typename` never reads as self — its

@@ -288,7 +288,7 @@ A reader must not conflate them: per-node viewer-scoped handled marker vs PR-obj
 | `all` | every author |
 | `<login>` | the author whose login, with a trailing `[bot]` stripped, equals the value; type-agnostic. The keywords above shadow a same-named login |
 
-Identity key for the registry modes (`automated`, `codex-only`): an author matches a registry entry only when its account type is `Bot` (GraphQL `author.__typename`, REST `user.type`) AND its login, with a trailing `[bot]` stripped, is one of that entry's recognized login forms. A login alone is not an identity: a human GitHub `User` account shares the Claude app's bare login once `[bot]` is stripped, so login-only matching would admit that human as an automated reviewer. A missing or null account type never matches a registry mode. Self identity keys on the same field, which is why every template above selects `author { login __typename }`.
+Identity key for the registry modes (`automated`, `codex-only`): an author matches a registry entry only when it is a Bot account AND its login, with a trailing `[bot]` stripped, is one of that entry's recognized login forms. "Bot-gated" in the table above means exactly this Bot-account requirement. An author is a Bot account — the module's `is_bot` predicate — when its account type is `Bot` (GraphQL `author.__typename`, REST `user.type`) OR its raw login ends in the reserved `[bot]` suffix. The account type alone is not enough: the REST reactions endpoint reports a bot reactor's `user.type` as `User` while its login keeps the `[bot]` suffix, and GraphQL reports the same bot under its bare login typed `Bot`. No human can carry the suffix, because a GitHub login is alphanumerics and hyphens only. A login alone is not an identity: a human GitHub `User` account shares the Claude app's bare login once `[bot]` is stripped, so login-only matching would admit that human as an automated reviewer. A login without the suffix whose account type is missing or null never matches a registry mode. Self identity keys on the account-type field too, which is why every template above selects `author { login __typename }`.
 
 The registry and every identity predicate — recognized login forms, the `[bot]` strip, self matching, filter matching, approver matching — live in one home: `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq`. Consumers include that module; never restate a reviewer login or copy a predicate inline.
 
@@ -298,7 +298,7 @@ If identity is unclear, ask the user before processing.
 
 ## Reviewer Approval Detection
 
-An automated reviewer's approval is the signal that lets a watched PR end cleanly. Each registry entry in `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq` declares its approval kind. Approval counts only from a Bot-typed approver of that kind that is also in scope under the active `reviewer_filter`, so a filtered-out reviewer never ends the loop it was filtered out of.
+An automated reviewer's approval is the signal that lets a watched PR end cleanly. Each registry entry in `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/reviewer-identity.jq` declares its approval kind. Approval counts only from an approver of that kind that is a Bot account per the module's `is_bot` that is also in scope under the active `reviewer_filter`, so a filtered-out reviewer never ends the loop it was filtered out of.
 
 | Approval kind | Reviewer | Signal |
 |---------------|----------|--------|
@@ -309,14 +309,14 @@ Claude declares no approval kind; a Claude-reviewed loop ends through the idle w
 
 ### PR 👍 reaction (`pr-reaction-thumbs-up`)
 
-Read the paginated REST reactions endpoint so the approver's reaction is found even when the PR has more than one page of reactions. The `gh --jq` filter is transport only: it emits one JSON object `{login, type}` per `+1` reaction and makes no identity decision.
+Read the paginated REST reactions endpoint so the approver's reaction is found even when the PR has more than one page of reactions. The `gh --jq` filter is transport only: it emits one JSON object `{login, type}` per `+1` reaction, carrying `user.type` verbatim, and makes no identity decision. REST reports a bot reactor typed `User`, so the transport never reads or rewrites `type`; the module's `is_bot` decides Bot-ness from the type or the reserved `[bot]` login suffix.
 
 ```bash
 gh api --paginate "repos/OWNER/REPO/issues/PR_NUMBER/reactions" \
   --jq '.[] | select(.content == "+1") | {login: .user.login, type: .user.type} | tojson'
 ```
 
-Each row is `tojson`-encoded because `gh` prints a string result raw and uncolored, one per line, while an object result may be colorized; the encoded row is plain JSON text whatever the output stream. The rows are JSON values, parsed by jq, never split: slurp every row from every page into one array (`jq -s`) and match them all at once through the module's `reviewer_is_approver` (kind `pr-reaction-thumbs-up`) and `reviewer_matches_filter` predicates. No delimiter is ever cut out of a row, so no byte of a login can be read as a field boundary or forge the account type. Empty output slurps to an empty array (no approval); a row that is not JSON is a jq error and fails the lookup rather than reading as no approval.
+Each row is `tojson`-encoded because `gh` prints a string result raw and uncolored, one per line, while an object result may be colorized; the encoded row is plain JSON text whatever the output stream. The rows are JSON values, parsed by jq, never split: slurp every row from every page into one array (`jq -s`) and match them all at once through the module's `reviewer_is_approver` (kind `pr-reaction-thumbs-up`) and `reviewer_matches_filter` predicates, which decide Bot-ness through `is_bot`. No delimiter is ever cut out of a row, so no byte of a login can be read as a field boundary or forge the account type. Empty output slurps to an empty array (no approval); a row that is not JSON is a jq error and fails the lookup rather than reading as no approval.
 
 REST content `+1` is the 👍 reaction. The 👀 `eyes` reaction (REST content `eyes`) is Codex's "still running" signal on the PR object — never treat it as approval (the `+1` filter already excludes it).
 
