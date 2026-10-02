@@ -404,8 +404,13 @@ list_closure_findings() {
         printf 'zero-discovered\n'
         return 0
     fi
+    # INVARIANT: capture the table once and grep a here-string, never `list_table_paths | grep -q`;
+    # under pipefail the early-exiting grep -q can SIGPIPE the multi-write producer and report an
+    # enrolled path as unenrolled.
+    local table_paths
+    table_paths="$(list_table_paths)"
     for rel in "${discovered[@]}"; do
-        list_table_paths | grep -Fxq -- "$rel" || printf 'unenrolled %s\n' "$rel"
+        grep -Fxq -- "$rel" <<<"$table_paths" || printf 'unenrolled %s\n' "$rel"
     done
     while IFS= read -r row_path; do
         [[ -f "$root/$row_path" ]] || printf 'missing-row %s\n' "$row_path"
