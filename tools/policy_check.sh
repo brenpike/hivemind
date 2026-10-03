@@ -1844,7 +1844,11 @@ check13_scan_script() {
         # to a single space, then uppercase. Recognition is contiguous (the
         # normalized line must CONTAIN the normalized canonical token), NOT a
         # gappy subsequence, so unrelated comments cannot falsely match.
-        if [[ "$marker_line" -eq 0 ]]; then
+        # Only a FULL-LINE comment can carry the marker: the phrase in an
+        # inline comment or a string literal on an executable line (e.g.
+        # `set -u # P18 FLOOR EXCEPTION`) is never a prologue marker, so
+        # deleting the standalone marker still revokes the exception.
+        if [[ "$marker_line" -eq 0 && "$trimmed" == '#'* ]]; then
             # Candidate pretest (#305): the canonical token contains the
             # contiguous run 'P18', and no normalization step below can
             # CREATE that run (collapsing inserts a single space; the strips
@@ -2082,8 +2086,10 @@ done
 # Witnesses the marker-keyed exception end to end over two committed fixtures
 # that live outside plugin/, so the production scan above never reaches them.
 #   * Scanner pins: each fixture's exact check13_scan_script record, so a
-#     scanner that credits a partial floor or reads past the first executable
-#     line (and so recognizes a marker outside the prologue) turns red.
+#     scanner that credits a partial floor, reads past the first executable
+#     line, or recognizes the marker phrase anywhere but a full-line prologue
+#     comment (an inline comment or string literal on an executable line)
+#     turns red.
 #   * Decision cases: check13_exception_allowed is true for the listed fixture
 #     at its scanned marker line and at a moved line, false once the marker is
 #     gone, and false for the unlisted fixture at any line -- so an entry never
@@ -2164,7 +2170,7 @@ check13_expect_preload_status() {
 }
 
 check13_expect_scan "$CHECK13_LISTED_FIXTURE" $'unfloored\t7\t8'
-check13_expect_scan "$CHECK13_UNLISTED_FIXTURE" $'unfloored\t0\t6'
+check13_expect_scan "$CHECK13_UNLISTED_FIXTURE" $'unfloored\t0\t8'
 
 check13_listed_marker="$(check13_scanned_marker_line "$CHECK13_LISTED_FIXTURE")"
 check13_unlisted_marker="$(check13_scanned_marker_line "$CHECK13_UNLISTED_FIXTURE")"
