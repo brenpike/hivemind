@@ -215,6 +215,13 @@ Each entry has `rule`, `path`, an optional `line`, and an optional `reason`.
 Omitting `line` makes the entry a whole-file wildcard for that rule and path;
 a `line` makes it match only that line.
 
+No entry excuses a discovery finding. When the shared checked discovery cannot
+check a path -- the discovery itself failed, or a discovered path is missing,
+dangling, not a regular file, unreadable, or resolves outside the checkout --
+the finding is always a new finding, whatever rule, path, or line an entry
+names. An unchecked path is never the construct an entry was written for. The
+DISCOVERY canary witnesses this for all three reporting routes.
+
 CHECK13 (the P18 fail-closed shell floor) matches on a marker in the script, not
 on a line number:
 

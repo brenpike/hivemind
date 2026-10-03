@@ -344,10 +344,14 @@ file_candidates() {
 #   (its in-checkout path, never its external target) and counts the further
 #   escaping paths it suppressed, so a link to a large external tree cannot
 #   flood the log; the call still returns non-zero.
-#   Findings: both reporting wrappers emit through add_finding, so --strict
-#   and the allowlist apply. Neither they nor discover_checked_paths set any
-#   per-check found/pass flag; discover_checked_paths returns non-zero when it
-#   emitted a finding, and the caller owns its flag.
+#   Findings: both reporting wrappers emit through add_finding with `deny`, so
+#   --strict applies and NO allowlist entry can excuse them -- whatever rule,
+#   path, or line an entry names, an unchecked path is never the construct it
+#   was written for, so a path-wide entry cannot turn a missing, dangling,
+#   wrong-type, unreadable, or escaping path into a clean one. Neither they nor
+#   discover_checked_paths set any per-check found/pass flag;
+#   discover_checked_paths returns non-zero when it emitted a finding, and the
+#   caller owns its flag.
 #   Residuals: symlink-loop reporting is not witnessed by a committed fixture;
 #   a symlinked directory that points back inside a scanned root materialises
 #   the same file under two paths (it is scanned twice, never skipped).
@@ -489,7 +493,8 @@ discovery_containment_status() {
 # flag_discovery_failure RULE ROOT LABEL STATUS
 # Thin reporting wrapper: records the RULE finding for a discover_paths call
 # (described by LABEL, anchored at ROOT) that returned non-zero STATUS. A
-# partial path list is never a clean one.
+# partial path list is never a clean one, so the finding is recorded with
+# `deny`: no allowlist entry can excuse it.
 flag_discovery_failure() {
     local rule_name="$1" discovery_root="$2" discovery_label="$3" discovery_rc="$4" failure_reason
     case "$discovery_rc" in
@@ -498,7 +503,7 @@ flag_discovery_failure() {
         *) failure_reason="find exited ${discovery_rc} (a missing root, an unreadable directory, or a symlink loop)" ;;
     esac
     add_finding "$rule_name" "$discovery_root" 0 \
-        "Discovery of ${discovery_label} failed: ${failure_reason}, so paths in it may never have been checked -- fix the tree; a failed discovery is NOT clean"
+        "Discovery of ${discovery_label} failed: ${failure_reason}, so paths in it may never have been checked -- fix the tree; a failed discovery is NOT clean" deny
 }
 
 # flag_discovery_gate RULE PATH RC [SUPPRESSED_TOTAL]
@@ -506,6 +511,9 @@ flag_discovery_failure() {
 # discovery_gate_status or discovery_containment_status rejected with non-zero
 # RC. SUPPRESSED_TOTAL (default 0) is read only for DISCOVERY_GATE_RC_ESCAPES:
 # the count of further escaping paths the capped containment report withheld.
+# The path was never checked, so the finding is recorded with `deny`: an
+# allowlist entry for the same rule and path -- such as a path-wide CHECK13
+# exception -- can never excuse it.
 flag_discovery_gate() {
     local rule_name="$1" candidate_path="$2" gate_rc="$3" suppressed_total="${4:-0}" rejection_reason
     case "$gate_rc" in
@@ -517,7 +525,7 @@ flag_discovery_gate() {
         *) rejection_reason="was rejected by the discovery gate with status ${gate_rc}" ;;
     esac
     add_finding "$rule_name" "$candidate_path" 0 \
-        "this discovered path ${rejection_reason}, so it was never checked -- fix or remove it; an unchecked path is NOT clean"
+        "this discovered path ${rejection_reason}, so it was never checked -- fix or remove it; an unchecked path is NOT clean" deny
 }
 
 # discover_checked_paths RULE DEST_ARRAY GATE LABEL ROOT... -- FIND_ARGS...
@@ -677,7 +685,15 @@ CHECKS_FAILED=0
 #   * cap: the same discovery with the escape root passed twice materialises
 #     escape.md twice yet emits exactly one containment finding, with 1
 #     suppressed. Both probes run in command substitutions like the
-#     composition probe, so no real finding is emitted.
+#     composition probe, so no real finding is emitted;
+#   * denial: with a whole-file DISCOVERY allowlist entry appended (inside a
+#     command substitution only) for each path the three reporting routes
+#     name -- broken/dangling.md (gate rejection), the nonexistent root
+#     (discovery failure) and escape.md (containment escape) -- each route
+#     still records its finding as [FIND], never [ALLOW]. test_allowlisted
+#     confirms each appended entry matches its path at line 0, so the probe
+#     cannot pass because an entry missed rather than because the wrapper
+#     denied.
 # The fixtures are committed, so no probe creates a filesystem object at run
 # time. stderr is discarded only for the nonexistent-root probe, whose find
 # error is the expected outcome.
@@ -877,6 +893,79 @@ expect_discovery_containment() {
 expect_discovery_containment "containment under the 'files' gate" 0 files "$dcanary_escape_root"
 expect_discovery_containment "containment under the 'raw' gate" 0 raw "$dcanary_escape_root"
 expect_discovery_containment 'containment cap (escape root passed twice)' 1 files "$dcanary_escape_root" "$dcanary_escape_root"
+
+# probe_checked_discovery_denial
+# Appends a whole-file DISCOVERY allowlist entry for each path the three
+# reporting routes name, prints `lookup=PATH=RESULT` for each (the positive
+# control that the entry matches at line 0), then runs each route's discovery
+# and prints its findings and `rc=STATUS`. Called only inside a command
+# substitution, so neither the appended entries nor the findings outlive it.
+probe_checked_discovery_denial() {
+    local -a dcanary_denied_paths=() dcanary_denied_rels=()
+    local dcanary_denied_rel dcanary_denied_rc
+    dcanary_denied_rels=(
+        "${DISCOVERY_CANARY_REL}/broken/dangling.md"
+        "${DISCOVERY_CANARY_REL}/__discovery_nonexistent__"
+        "${DISCOVERY_ESCAPE_CANARY_REL}/escape.md"
+    )
+    for dcanary_denied_rel in "${dcanary_denied_rels[@]}"; do
+        ALLOWLIST_RULES+=('DISCOVERY')
+        ALLOWLIST_PATHS+=("$dcanary_denied_rel")
+        ALLOWLIST_LINESPECS+=('W')
+        printf 'lookup=%s=%s\n' "$dcanary_denied_rel" "$(test_allowlisted 'DISCOVERY' "$dcanary_denied_rel" 0)"
+    done
+    dcanary_denied_rc=0
+    discover_checked_paths 'DISCOVERY' dcanary_denied_paths files 'discovery canary Markdown files' "$dcanary_root" -- -name '*.md' || dcanary_denied_rc=$?
+    printf 'rc=%d\n' "$dcanary_denied_rc"
+    dcanary_denied_rc=0
+    discover_checked_paths 'DISCOVERY' dcanary_denied_paths files 'discovery canary Markdown files' "$dcanary_missing_root" -- -name '*.md' 2>/dev/null || dcanary_denied_rc=$?
+    printf 'rc=%d\n' "$dcanary_denied_rc"
+    dcanary_denied_rc=0
+    discover_checked_paths 'DISCOVERY' dcanary_denied_paths files 'discovery escape canary Markdown files' "$dcanary_escape_root" -- -name '*.md' || dcanary_denied_rc=$?
+    printf 'rc=%d\n' "$dcanary_denied_rc"
+}
+
+dcanary_denial_output="$(probe_checked_discovery_denial)"
+dcanary_denial_lookup_total=0
+dcanary_denial_rc_total=0
+dcanary_denial_find_total=0
+dcanary_denial_allow_total=0
+dcanary_denial_saw_gate=false
+dcanary_denial_saw_failure=false
+dcanary_denial_saw_escape=false
+while IFS= read -r dcanary_denial_line; do
+    case "$dcanary_denial_line" in
+        'lookup='*'=true')
+            dcanary_denial_lookup_total=$((dcanary_denial_lookup_total + 1))
+            ;;
+        'rc=1')
+            dcanary_denial_rc_total=$((dcanary_denial_rc_total + 1))
+            ;;
+        '[ALLOW] [DISCOVERY] '*)
+            dcanary_denial_allow_total=$((dcanary_denial_allow_total + 1))
+            ;;
+        '[FIND] [DISCOVERY] '*)
+            dcanary_denial_find_total=$((dcanary_denial_find_total + 1))
+            case "$dcanary_denial_line" in
+                "[FIND] [DISCOVERY] ${DISCOVERY_CANARY_REL}/broken/dangling.md -- "*)
+                    dcanary_denial_saw_gate=true
+                    ;;
+                "[FIND] [DISCOVERY] ${DISCOVERY_CANARY_REL}/__discovery_nonexistent__ -- "*)
+                    dcanary_denial_saw_failure=true
+                    ;;
+                "[FIND] [DISCOVERY] ${DISCOVERY_ESCAPE_CANARY_REL}/escape.md -- "*)
+                    dcanary_denial_saw_escape=true
+                    ;;
+            esac
+            ;;
+    esac
+done <<< "$dcanary_denial_output"
+if [[ "$dcanary_denial_lookup_total" -ne 3 || "$dcanary_denial_rc_total" -ne 3 \
+   || "$dcanary_denial_allow_total" -ne 0 || "$dcanary_denial_find_total" -ne 3 \
+   || "$dcanary_denial_saw_gate" != true || "$dcanary_denial_saw_failure" != true \
+   || "$dcanary_denial_saw_escape" != true ]]; then
+    flag_discovery_canary "denial: with a matching whole-file DISCOVERY allowlist entry for broken/dangling.md, the nonexistent root and escape.md, the three reporting routes produced [${dcanary_denial_output//$'\n'/ | }]; expected three lookup=...=true lines, rc=1 three times, and exactly one [FIND] finding per route with no [ALLOW] -- a discovery finding is excusable again, so a path-wide allowlist entry could turn an unchecked path into a clean one"
+fi
 
 if [[ "$dcanary_found" == false ]]; then
     echo '[PASS] DISCOVERY: checked discovery follows symlinked directories, gates dangling and wrong-type paths, and propagates find failures'
@@ -1707,7 +1796,10 @@ mark_time 'CHECK12'
 # present, so edits that move the marker keep the exception and deleting the
 # marker revokes it. The finding is anchored to the marker line; a script with no
 # marker falls back to its first `set` line, or line 1, and its finding is
-# recorded with no allowlist lookup at all.
+# recorded with no allowlist lookup at all. A listed script that discovery
+# cannot check (missing, dangling, not a regular file, unreadable, or escaping
+# the checkout) is never excused either: the discovery wrappers record those
+# findings with `deny`, so the path-wide entry cannot reach them.
 
 echo ''
 echo '=== CHECK 13: P18 fail-closed shell floor ==='
