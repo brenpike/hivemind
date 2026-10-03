@@ -1789,12 +1789,19 @@ mark_time 'CHECK12'
 # silently credited.
 #
 # Exception key: a documented exception script carries a `P18 FLOOR EXCEPTION`
-# comment in its prologue marking the deliberate omission, recognized by
-# canonical normalized match (see the marker branch below). A CHECK13 allowlist
-# entry keys on rule + path alone -- the preload rejects a CHECK13 entry that
-# carries a "line" key -- and it excuses a script only while that marker is
-# present, so edits that move the marker keep the exception and deleting the
-# marker revokes it. The finding is anchored to the marker line; a script with no
+# comment in its LEADING COMMENT HEADER marking the deliberate omission,
+# recognized by canonical normalized match (see check13_header_marker_line
+# below). The leading comment header is the comment and blank lines after an
+# optional line-1 `#!`; the first line that is neither blank nor `#`-led -- any
+# statement, `set` included -- closes it, and it never reopens. The marker counts
+# only on a comment line inside that header: the phrase inline after a
+# statement, in a string literal, after a standalone `set`, inside a function
+# body, or on any line below the first statement is never a marker. A CHECK13
+# allowlist entry keys on rule + path alone -- the preload rejects a CHECK13
+# entry that carries a "line" key -- and it excuses a script only while that
+# marker is present, so moving the marker within the header keeps the
+# exception, and moving it below the first statement or deleting it revokes
+# it. The finding is anchored to the marker line; a script with no
 # marker falls back to its first `set` line, or line 1, and its finding is
 # recorded with no allowlist lookup at all. A listed script that discovery
 # cannot check (missing, dangling, not a regular file, unreadable, or escaping
@@ -1806,31 +1813,33 @@ echo '=== CHECK 13: P18 fail-closed shell floor ==='
 
 check13_found=false
 
-# check13_scan_script FILE
-# Scans FILE's prologue and prints exactly one record: `floored` when errexit,
-# nounset, and pipefail are all in force before the first executable statement,
-# otherwise `unfloored<TAB>MARKER_LINE<TAB>FIRST_SET_LINE` (0 = absent). No
-# findings, no globals; returns non-zero without a record when FILE is not a
-# readable regular file, so an unread script can never read as a clean one.
-check13_scan_script() {
+# check13_header_marker_line FILE
+# Prints the line number of the first `P18 FLOOR EXCEPTION` marker in FILE's
+# leading comment header, else 0. The header is the comment and blank lines
+# after an optional line-1 `#!` (a marker phrase on the shebang itself is never
+# a marker); the first line that is neither blank nor `#`-led -- any statement,
+# `set` included -- closes the header, and it never reopens. Only a `#`-led line
+# inside the header can carry the marker, so the phrase inline after a
+# statement, in a string literal, after a standalone `set`, inside a function
+# body, or on any line below the first statement is never recognized. Lines
+# are CRLF-tolerant and may be indented. Returns non-zero when FILE cannot be
+# read.
+check13_header_marker_line() {
     local shell_script="$1"
-    local has_errexit=false has_nounset=false has_pipefail=false
-    local first_set_line=0 marker_line=0 line_num=0
-    local textline trimmed norm_line set_flags token opt_name
-    local cluster cluster_i letter arg_count arg_index
-    local -a set_args=()
-    if [[ ! -f "$shell_script" || ! -r "$shell_script" ]]; then
-        return 1
-    fi
+    local line_num=0
+    local textline trimmed norm_line
     while IFS= read -r textline || [[ -n "$textline" ]]; do
         line_num=$((line_num + 1))
-        # CRLF tolerance: strip a single trailing carriage return.
         textline="${textline%$'\r'}"
         trimmed="${textline#"${textline%%[![:space:]]*}"}"
-        # Skip the shebang, blank lines, and comment lines. The documented
-        # P18 FLOOR EXCEPTION marker, when present, anchors the finding line.
         if [[ "$line_num" -eq 1 && "$trimmed" == '#!'* ]]; then
             continue
+        fi
+        if [[ -z "$trimmed" ]]; then
+            continue
+        fi
+        if [[ "$trimmed" != '#'* ]]; then
+            break
         fi
         # Recognize the documented P18 FLOOR EXCEPTION marker by CANONICAL
         # NORMALIZED match rather than a brittle contiguous-substring test. All
@@ -1844,28 +1853,54 @@ check13_scan_script() {
         # to a single space, then uppercase. Recognition is contiguous (the
         # normalized line must CONTAIN the normalized canonical token), NOT a
         # gappy subsequence, so unrelated comments cannot falsely match.
-        # Only a FULL-LINE comment can carry the marker: the phrase in an
-        # inline comment or a string literal on an executable line (e.g.
-        # `set -u # P18 FLOOR EXCEPTION`) is never a prologue marker, so
-        # deleting the standalone marker still revokes the exception.
-        if [[ "$marker_line" -eq 0 && "$trimmed" == '#'* ]]; then
-            # Candidate pretest (#305): the canonical token contains the
-            # contiguous run 'P18', and no normalization step below can
-            # CREATE that run (collapsing inserts a single space; the strips
-            # only remove edge characters), so a line without a
-            # case-insensitive 'p18' can never normalize to contain the
-            # token. Skip the sed|tr spawns for such lines.
-            if [[ "${trimmed^^}" == *'P18'* ]]; then
-                norm_line="$(printf '%s' "$trimmed" \
-                    | sed -e 's/\r$//' \
-                          -e 's/^#//' \
-                          -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-                          -e 's/[[:space:]–—-]\{1,\}/ /g' \
-                    | tr '[:lower:]' '[:upper:]')"
-                if [[ "$norm_line" == *'P18 FLOOR EXCEPTION'* ]]; then
-                    marker_line="$line_num"
-                fi
+        # Candidate pretest (#305): the canonical token contains the
+        # contiguous run 'P18', and no normalization step below can
+        # CREATE that run (collapsing inserts a single space; the strips
+        # only remove edge characters), so a line without a
+        # case-insensitive 'p18' can never normalize to contain the
+        # token. Skip the sed|tr spawns for such lines.
+        if [[ "${trimmed^^}" == *'P18'* ]]; then
+            norm_line="$(printf '%s' "$trimmed" \
+                | sed -e 's/\r$//' \
+                      -e 's/^#//' \
+                      -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+                      -e 's/[[:space:]–—-]\{1,\}/ /g' \
+                | tr '[:lower:]' '[:upper:]')"
+            if [[ "$norm_line" == *'P18 FLOOR EXCEPTION'* ]]; then
+                printf '%s\n' "$line_num"
+                return 0
             fi
+        fi
+    done < "$shell_script" || return 1
+    printf '0\n'
+}
+
+# check13_scan_script FILE
+# Scans FILE's prologue and prints exactly one record: `floored` when errexit,
+# nounset, and pipefail are all in force before the first executable statement,
+# otherwise `unfloored<TAB>MARKER_LINE<TAB>FIRST_SET_LINE` (0 = absent), where
+# MARKER_LINE comes from check13_header_marker_line and so counts only a marker
+# in the leading comment header. No findings, no globals; returns non-zero
+# without a record when FILE is not a readable regular file, so an unread script
+# can never read as a clean one.
+check13_scan_script() {
+    local shell_script="$1"
+    local has_errexit=false has_nounset=false has_pipefail=false
+    local first_set_line=0 marker_line=0 line_num=0
+    local textline trimmed set_flags token opt_name
+    local cluster cluster_i letter arg_count arg_index
+    local -a set_args=()
+    if [[ ! -f "$shell_script" || ! -r "$shell_script" ]]; then
+        return 1
+    fi
+    while IFS= read -r textline || [[ -n "$textline" ]]; do
+        line_num=$((line_num + 1))
+        # CRLF tolerance: strip a single trailing carriage return.
+        textline="${textline%$'\r'}"
+        trimmed="${textline#"${textline%%[![:space:]]*}"}"
+        # Skip the shebang, blank lines, and comment lines.
+        if [[ "$line_num" -eq 1 && "$trimmed" == '#!'* ]]; then
+            continue
         fi
         if [[ -z "$trimmed" || "$trimmed" == '#'* ]]; then
             continue
@@ -2018,6 +2053,7 @@ check13_scan_script() {
     if [[ "$has_errexit" == true && "$has_nounset" == true && "$has_pipefail" == true ]]; then
         printf 'floored\n'
     else
+        marker_line="$(check13_header_marker_line "$shell_script")" || return 1
         printf 'unfloored\t%s\t%s\n' "$marker_line" "$first_set_line"
     fi
 }
@@ -2075,7 +2111,7 @@ for shell_script in "${check13_shell_scripts[@]}"; do
             "missing P18 fail-closed shell floor (set -euo pipefail) -- add the floor or document a justified CHECK13 allowlist exception"
     elif [[ "$(test_allowlisted 'CHECK13' "$rel_script" "$finding_line")" == "true" ]]; then
         add_finding 'CHECK13' "$shell_script" "$finding_line" \
-            "missing P18 fail-closed shell floor (set -euo pipefail) and the listed CHECK13 exception lost its P18 FLOOR EXCEPTION marker -- restore the marker in the script prologue, or remove the allowlist entry and add the floor" deny
+            "missing P18 fail-closed shell floor (set -euo pipefail) and the listed CHECK13 exception lost its P18 FLOOR EXCEPTION marker -- restore the marker in the script's leading comment header, or remove the allowlist entry and add the floor" deny
     else
         add_finding 'CHECK13' "$shell_script" "$finding_line" \
             "missing P18 fail-closed shell floor (set -euo pipefail) -- add the floor or document a justified CHECK13 allowlist exception" deny
@@ -2083,13 +2119,19 @@ for shell_script in "${check13_shell_scripts[@]}"; do
 done
 
 # ── CHECK 13 MARKER-KEY CANARY ─────────────────────────────────────────────
-# Witnesses the marker-keyed exception end to end over two committed fixtures
-# that live outside plugin/, so the production scan above never reaches them.
+# Witnesses the marker-keyed exception end to end over three committed
+# fixtures that live outside plugin/, so the production scan above never
+# reaches them: the listed fixture, the unlisted script fixture, and the
+# unlisted library fixture.
 #   * Scanner pins: each fixture's exact check13_scan_script record, so a
 #     scanner that credits a partial floor, reads past the first executable
-#     line, or recognizes the marker phrase anywhere but a full-line prologue
-#     comment (an inline comment or string literal on an executable line)
-#     turns red.
+#     line, or recognizes the marker phrase anywhere but a comment line in the
+#     leading comment header turns red. The unlisted script fixture carries the
+#     phrase inline on its first statement (a standalone `set`), in a
+#     full-line comment after that `set`, in a string literal, and in a
+#     full-line comment after a non-set statement. The unlisted library
+#     fixture (no shebang, no `set`) carries it inside a function body and in
+#     a full-line comment after the first statement.
 #   * Decision cases: check13_exception_allowed is true for the listed fixture
 #     at its scanned marker line and at a moved line, false once the marker is
 #     gone, and false for the unlisted fixture at any line -- so an entry never
@@ -2100,6 +2142,7 @@ done
 # Each failure is a denied finding, so no allowlist entry can mask it.
 CHECK13_LISTED_FIXTURE='tests/policy/fixtures/check13-exception-canary.sh'
 CHECK13_UNLISTED_FIXTURE='tests/policy/fixtures/check13-unlisted-canary.sh'
+CHECK13_UNLISTED_LIBRARY_FIXTURE='tests/policy/fixtures/check13-unlisted-library-canary.sh'
 
 # check13_flag_canary MESSAGE
 # Records one denied canary finding and marks CHECK 13 failed.
@@ -2171,6 +2214,7 @@ check13_expect_preload_status() {
 
 check13_expect_scan "$CHECK13_LISTED_FIXTURE" $'unfloored\t7\t8'
 check13_expect_scan "$CHECK13_UNLISTED_FIXTURE" $'unfloored\t0\t8'
+check13_expect_scan "$CHECK13_UNLISTED_LIBRARY_FIXTURE" $'unfloored\t0\t0'
 
 check13_listed_marker="$(check13_scanned_marker_line "$CHECK13_LISTED_FIXTURE")"
 check13_unlisted_marker="$(check13_scanned_marker_line "$CHECK13_UNLISTED_FIXTURE")"

@@ -227,21 +227,29 @@ on a line number:
 
 - A CHECK13 entry MUST NOT carry `line`, not even `0`. The allowlist preload
   stops the whole run on one, naming the rule, the path, and the fix.
-- An entry applies only while the script's prologue -- the header region before
-  its first executable statement -- carries a `P18 FLOOR EXCEPTION` marker.
-  Deleting the marker revokes the exception, and the script is flagged with a
-  lost-marker message.
-- A marker placed after the first executable statement is not recognized.
+- An entry applies only while the script's leading comment header carries the
+  `P18 FLOOR EXCEPTION` marker. The header is the comment and blank lines after
+  an optional line-1 `#!`, ending at the first line that is neither blank nor a
+  comment -- any statement, `set` included.
+- Moving the marker within the header keeps the exception. Deleting the marker,
+  or moving it below the first statement, revokes the exception, and the script
+  is flagged with a lost-marker message.
+- A marker never counts inline after a statement, in a string literal, after a
+  standalone `set`, after any other statement, or inside a function body.
+- Every comment in the header is a real shell comment, because the header
+  precedes every statement.
 - A marker with no entry grants nothing.
 - `reason` is not machine-checked; whether it justifies the exception stays
   reviewer-enforced.
 
 The CHECK 13 marker-key canary witnesses this end to end. It runs over
-`tests/policy/fixtures/check13-exception-canary.sh` (listed) and
-`tests/policy/fixtures/check13-unlisted-canary.sh` (marker, not listed), and
-relies on the line-free CHECK13 entry for the listed fixture in
-`policy-lint-allowlist.json`. The two fixtures and that entry must not be
-deleted, or the canary no longer proves the marker keying.
+`tests/policy/fixtures/check13-exception-canary.sh` (listed),
+`tests/policy/fixtures/check13-unlisted-canary.sh` (exception phrases only
+outside the header, not listed), and
+`tests/policy/fixtures/check13-unlisted-library-canary.sh`, and relies on the
+line-free CHECK13 entry for the listed fixture in `policy-lint-allowlist.json`.
+The three fixtures and that entry must not be deleted, or the canary no longer
+proves the marker keying.
 
 Recorded residual: CHECK11 and CHECK15 stay line-keyed on purpose.
 
