@@ -121,7 +121,8 @@ as no activity and idle the poll past real feedback. `nodes: []` passes at every
 terminal marker are the last line the process prints, and `REVIEWER_APPROVED` exits 0. The
 skill's confirmation pass is a full fix pass, and any return that keeps watching arms a fresh poll
 from the pending `re-arm` seed, so a poll left running past the approval marker is an orphan
-that can trail a stale `CHANGED`.
+that can trail a stale `CHANGED`. A return that would end clean, or keep watching with no poll
+running, first runs `--check` against the pending seed (see Quiet-exit check below).
 
 - `approval:marker-ends-poll-process` — (i) a lone approval edge (pre-cycle-0 state, reactions
   none then Codex 👍) prints exactly `REVIEWER_APPROVED`, exit 0, and the fake `gh` sees exactly
@@ -129,6 +130,31 @@ that can trail a stale `CHANGED`.
   co-firing with a new comment delta prints exactly `REVIEWER_APPROVED`, with no trailing marker;
   (iii) discrimination: the same comment delta without an approval prints `CHANGED` and keeps
   polling to a last line of `WATCH_TIMEOUT`, so only the approval edge ends the process.
+
+## Quiet-exit check
+
+`pr-change-detect-poll.sh --check <OWNER> <REPO> <PR> <MAX_WATCH> <INTERVAL> <FILTER> <SELF> <SEED>`
+is the one-shot compare the skill runs against the pending seed before a watch goes quiet. It takes
+ONE capture through the poll's own query path, decides through the poll's own `iteration_marker`,
+and prints exactly one line (`STATE=MERGED`, `STATE=CLOSED`, `REVIEWER_APPROVED`, `CHANGED`, or
+`UNCHANGED`), exit 0. A missing or malformed seed is `CHECK_ERROR`, exit 1, before any `gh` call; a
+failed capture is `CHECK_ERROR`, exit 1, never retried. Each case reads the fake `gh` call counters
+to pin the number of captures.
+
+- `check:delta-after-pending-seed-detected` — the bite: a `re-arm` seed captured over the
+  pre-cycle-0 state with the Codex 👍, then a new Codex issue comment, prints exactly `CHANGED`,
+  exit 0, in one capture. A script with no `--check` mode reads the flag as `OWNER` and prints
+  `POLL_ERROR`.
+- `check:no-delta-unchanged` — the same seed over the unchanged state prints exactly `UNCHANGED`,
+  exit 0, in one capture.
+- `check:parity-with-poll-first-iteration` — for a `*_TOTAL` tripwire delta, a `FAILED_CHECKS`
+  delta, a merged PR, a closed PR, an approval rising against a `re-arm` seed captured with no
+  reaction, and no delta, the check's line equals the expected marker AND the first line a poll
+  armed with the same seed prints over the same state (its `WATCH_TIMEOUT` read as `UNCHANGED`);
+  each check exits 0 in one capture.
+- `check:fails-closed` — a failed snapshot query, a missing seed, and a malformed seed each print
+  exactly `CHECK_ERROR`, exit 1; the failed query is not retried, and neither seed failure reaches
+  `gh`.
 
 ## The second bite: the seed's state model (PR #361)
 
@@ -163,7 +189,7 @@ to carry. Two halves close the class rather than the instance, and the suite hol
 bash tools/test_change_detect_poll.sh
 ```
 
-Offline — bash + `jq` only, no `gh`, no network, ~130s. A PATH-shim fake `gh` serves canned
+Offline — bash + `jq` only, no `gh`, no network, ~160s. A PATH-shim fake `gh` serves canned
 fixture bytes while the REAL `jq` runs the script's REAL filters, so the snapshot derivation
 under test is the production one and only the transport is faked.
 
@@ -252,3 +278,6 @@ query it cannot walk — so the GraphQL pagination contract is enforced behaviou
 5. Never assert the token's field list scalar by scalar — derive the expected width from
    `DECLARED_FIELD_COUNT` and let `seed:complete-serialization` hold the set equality. A field
    checklist is the shape that let the omitted approval bool ship twice.
+6. A `--check` case drives `run_check "$st" [seed] [filter]` (same seed and filter rules as
+   `arm_poll`) and reads `gh_call_counts "$st"` (`<graphql> <latestreviews> <reactions>`; one
+   capture is `1 1 1`) when the number of captures is part of the assertion.
