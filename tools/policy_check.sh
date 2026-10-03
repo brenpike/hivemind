@@ -83,15 +83,28 @@ declare -a ALLOWLIST_RULES=()
 declare -a ALLOWLIST_PATHS=()
 # INVARIANT: ALLOWLIST_LINESPECS entries are "W" (no "line" key = wildcard) or
 # "L<value>" (the entry's line rendered exactly as jq -r renders the scalar).
+# An entry for a line-free rule is always "W": ALLOWLIST_PRELOAD_JQ rejects any
+# such entry that carries a "line" key, 0 included, so it can never become "L".
 declare -a ALLOWLIST_LINESPECS=()
+
+# ALLOWLIST_PRELOAD_JQ
+# The one allowlist preload program, shared by preload_allowlist and the CHECK
+# 13 marker-key canary. `line_free_rules` is the single declaration of the
+# rules whose entries key on rule + path alone; an entry for one of them that
+# carries a "line" key is an error naming the rule, the path, and the fix.
+# Uses only any/has/error so jq 1.6 and 1.7 both run it.
+ALLOWLIST_PRELOAD_JQ="$JQ_NOSEP_DEF"'def line_free_rules: ["CHECK13"];
+    .[]
+    | if has("line") and (.rule as $entry_rule | line_free_rules | any(. == $entry_rule))
+      then error("allowlist entry for line-free rule \(.rule) at path \(.path) carries a \"line\" key -- delete the \"line\" key; \(.rule) entries match on rule and path alone")
+      else . end
+    | (.rule|nosep), "\u001f",
+      (.path|nosep), "\u001f",
+      ((if has("line") then "L\(.line)" else "W" end)|nosep), "\u001f"'
 
 preload_allowlist() {
     local tuples
-    tuples="$(jq -j "$JQ_NOSEP_DEF"'.[]
-        | (.rule|nosep), "\u001f",
-          (.path|nosep), "\u001f",
-          ((if has("line") then "L\(.line)" else "W" end)|nosep), "\u001f"' \
-        <<< "$ALLOWLIST_JSON")"
+    tuples="$(jq -j "$ALLOWLIST_PRELOAD_JQ" <<< "$ALLOWLIST_JSON")"
     if [[ -z "$tuples" ]]; then
         return 0
     fi
@@ -143,11 +156,17 @@ test_allowlisted() {
     echo "false"
 }
 
+# add_finding RULE FILEPATH LINE DESCRIPTION [deny]
+# Records one finding and prints it. Allowlist status comes from
+# test_allowlisted unless the optional fifth argument is exactly `deny`, which
+# records the finding as not allowlisted without any lookup. The fifth argument
+# can only deny, never grant: any other non-empty value is a harness error.
 add_finding() {
     local rule="$1"
     local filepath="$2"
     local line="$3"
     local description="$4"
+    local lookup_mode="${5:-}"
 
     local rel_path="$filepath"
     if [[ "$filepath" == "$REPO_ROOT"* ]]; then
@@ -157,7 +176,14 @@ add_finding() {
     rel_path="${rel_path//\\//}"
 
     local is_allowlisted
-    is_allowlisted="$(test_allowlisted "$rule" "$rel_path" "$line")"
+    if [[ -z "$lookup_mode" ]]; then
+        is_allowlisted="$(test_allowlisted "$rule" "$rel_path" "$line")"
+    elif [[ "$lookup_mode" == 'deny' ]]; then
+        is_allowlisted='false'
+    else
+        echo "add_finding: unknown lookup mode '${lookup_mode}' for ${rule} ${rel_path} (only 'deny' is accepted)" >&2
+        exit 2
+    fi
 
     FINDING_RULES+=("$rule")
     FINDING_PATHS+=("$rel_path")
@@ -318,10 +344,14 @@ file_candidates() {
 #   (its in-checkout path, never its external target) and counts the further
 #   escaping paths it suppressed, so a link to a large external tree cannot
 #   flood the log; the call still returns non-zero.
-#   Findings: both reporting wrappers emit through add_finding, so --strict
-#   and the allowlist apply. Neither they nor discover_checked_paths set any
-#   per-check found/pass flag; discover_checked_paths returns non-zero when it
-#   emitted a finding, and the caller owns its flag.
+#   Findings: both reporting wrappers emit through add_finding with `deny`, so
+#   --strict applies and NO allowlist entry can excuse them -- whatever rule,
+#   path, or line an entry names, an unchecked path is never the construct it
+#   was written for, so a path-wide entry cannot turn a missing, dangling,
+#   wrong-type, unreadable, or escaping path into a clean one. Neither they nor
+#   discover_checked_paths set any per-check found/pass flag;
+#   discover_checked_paths returns non-zero when it emitted a finding, and the
+#   caller owns its flag.
 #   Residuals: symlink-loop reporting is not witnessed by a committed fixture;
 #   a symlinked directory that points back inside a scanned root materialises
 #   the same file under two paths (it is scanned twice, never skipped).
@@ -463,7 +493,8 @@ discovery_containment_status() {
 # flag_discovery_failure RULE ROOT LABEL STATUS
 # Thin reporting wrapper: records the RULE finding for a discover_paths call
 # (described by LABEL, anchored at ROOT) that returned non-zero STATUS. A
-# partial path list is never a clean one.
+# partial path list is never a clean one, so the finding is recorded with
+# `deny`: no allowlist entry can excuse it.
 flag_discovery_failure() {
     local rule_name="$1" discovery_root="$2" discovery_label="$3" discovery_rc="$4" failure_reason
     case "$discovery_rc" in
@@ -472,7 +503,7 @@ flag_discovery_failure() {
         *) failure_reason="find exited ${discovery_rc} (a missing root, an unreadable directory, or a symlink loop)" ;;
     esac
     add_finding "$rule_name" "$discovery_root" 0 \
-        "Discovery of ${discovery_label} failed: ${failure_reason}, so paths in it may never have been checked -- fix the tree; a failed discovery is NOT clean"
+        "Discovery of ${discovery_label} failed: ${failure_reason}, so paths in it may never have been checked -- fix the tree; a failed discovery is NOT clean" deny
 }
 
 # flag_discovery_gate RULE PATH RC [SUPPRESSED_TOTAL]
@@ -480,6 +511,9 @@ flag_discovery_failure() {
 # discovery_gate_status or discovery_containment_status rejected with non-zero
 # RC. SUPPRESSED_TOTAL (default 0) is read only for DISCOVERY_GATE_RC_ESCAPES:
 # the count of further escaping paths the capped containment report withheld.
+# The path was never checked, so the finding is recorded with `deny`: an
+# allowlist entry for the same rule and path -- such as a path-wide CHECK13
+# exception -- can never excuse it.
 flag_discovery_gate() {
     local rule_name="$1" candidate_path="$2" gate_rc="$3" suppressed_total="${4:-0}" rejection_reason
     case "$gate_rc" in
@@ -491,7 +525,7 @@ flag_discovery_gate() {
         *) rejection_reason="was rejected by the discovery gate with status ${gate_rc}" ;;
     esac
     add_finding "$rule_name" "$candidate_path" 0 \
-        "this discovered path ${rejection_reason}, so it was never checked -- fix or remove it; an unchecked path is NOT clean"
+        "this discovered path ${rejection_reason}, so it was never checked -- fix or remove it; an unchecked path is NOT clean" deny
 }
 
 # discover_checked_paths RULE DEST_ARRAY GATE LABEL ROOT... -- FIND_ARGS...
@@ -651,7 +685,15 @@ CHECKS_FAILED=0
 #   * cap: the same discovery with the escape root passed twice materialises
 #     escape.md twice yet emits exactly one containment finding, with 1
 #     suppressed. Both probes run in command substitutions like the
-#     composition probe, so no real finding is emitted.
+#     composition probe, so no real finding is emitted;
+#   * denial: with a whole-file DISCOVERY allowlist entry appended (inside a
+#     command substitution only) for each path the three reporting routes
+#     name -- broken/dangling.md (gate rejection), the nonexistent root
+#     (discovery failure) and escape.md (containment escape) -- each route
+#     still records its finding as [FIND], never [ALLOW]. test_allowlisted
+#     confirms each appended entry matches its path at line 0, so the probe
+#     cannot pass because an entry missed rather than because the wrapper
+#     denied.
 # The fixtures are committed, so no probe creates a filesystem object at run
 # time. stderr is discarded only for the nonexistent-root probe, whose find
 # error is the expected outcome.
@@ -851,6 +893,79 @@ expect_discovery_containment() {
 expect_discovery_containment "containment under the 'files' gate" 0 files "$dcanary_escape_root"
 expect_discovery_containment "containment under the 'raw' gate" 0 raw "$dcanary_escape_root"
 expect_discovery_containment 'containment cap (escape root passed twice)' 1 files "$dcanary_escape_root" "$dcanary_escape_root"
+
+# probe_checked_discovery_denial
+# Appends a whole-file DISCOVERY allowlist entry for each path the three
+# reporting routes name, prints `lookup=PATH=RESULT` for each (the positive
+# control that the entry matches at line 0), then runs each route's discovery
+# and prints its findings and `rc=STATUS`. Called only inside a command
+# substitution, so neither the appended entries nor the findings outlive it.
+probe_checked_discovery_denial() {
+    local -a dcanary_denied_paths=() dcanary_denied_rels=()
+    local dcanary_denied_rel dcanary_denied_rc
+    dcanary_denied_rels=(
+        "${DISCOVERY_CANARY_REL}/broken/dangling.md"
+        "${DISCOVERY_CANARY_REL}/__discovery_nonexistent__"
+        "${DISCOVERY_ESCAPE_CANARY_REL}/escape.md"
+    )
+    for dcanary_denied_rel in "${dcanary_denied_rels[@]}"; do
+        ALLOWLIST_RULES+=('DISCOVERY')
+        ALLOWLIST_PATHS+=("$dcanary_denied_rel")
+        ALLOWLIST_LINESPECS+=('W')
+        printf 'lookup=%s=%s\n' "$dcanary_denied_rel" "$(test_allowlisted 'DISCOVERY' "$dcanary_denied_rel" 0)"
+    done
+    dcanary_denied_rc=0
+    discover_checked_paths 'DISCOVERY' dcanary_denied_paths files 'discovery canary Markdown files' "$dcanary_root" -- -name '*.md' || dcanary_denied_rc=$?
+    printf 'rc=%d\n' "$dcanary_denied_rc"
+    dcanary_denied_rc=0
+    discover_checked_paths 'DISCOVERY' dcanary_denied_paths files 'discovery canary Markdown files' "$dcanary_missing_root" -- -name '*.md' 2>/dev/null || dcanary_denied_rc=$?
+    printf 'rc=%d\n' "$dcanary_denied_rc"
+    dcanary_denied_rc=0
+    discover_checked_paths 'DISCOVERY' dcanary_denied_paths files 'discovery escape canary Markdown files' "$dcanary_escape_root" -- -name '*.md' || dcanary_denied_rc=$?
+    printf 'rc=%d\n' "$dcanary_denied_rc"
+}
+
+dcanary_denial_output="$(probe_checked_discovery_denial)"
+dcanary_denial_lookup_total=0
+dcanary_denial_rc_total=0
+dcanary_denial_find_total=0
+dcanary_denial_allow_total=0
+dcanary_denial_saw_gate=false
+dcanary_denial_saw_failure=false
+dcanary_denial_saw_escape=false
+while IFS= read -r dcanary_denial_line; do
+    case "$dcanary_denial_line" in
+        'lookup='*'=true')
+            dcanary_denial_lookup_total=$((dcanary_denial_lookup_total + 1))
+            ;;
+        'rc=1')
+            dcanary_denial_rc_total=$((dcanary_denial_rc_total + 1))
+            ;;
+        '[ALLOW] [DISCOVERY] '*)
+            dcanary_denial_allow_total=$((dcanary_denial_allow_total + 1))
+            ;;
+        '[FIND] [DISCOVERY] '*)
+            dcanary_denial_find_total=$((dcanary_denial_find_total + 1))
+            case "$dcanary_denial_line" in
+                "[FIND] [DISCOVERY] ${DISCOVERY_CANARY_REL}/broken/dangling.md -- "*)
+                    dcanary_denial_saw_gate=true
+                    ;;
+                "[FIND] [DISCOVERY] ${DISCOVERY_CANARY_REL}/__discovery_nonexistent__ -- "*)
+                    dcanary_denial_saw_failure=true
+                    ;;
+                "[FIND] [DISCOVERY] ${DISCOVERY_ESCAPE_CANARY_REL}/escape.md -- "*)
+                    dcanary_denial_saw_escape=true
+                    ;;
+            esac
+            ;;
+    esac
+done <<< "$dcanary_denial_output"
+if [[ "$dcanary_denial_lookup_total" -ne 3 || "$dcanary_denial_rc_total" -ne 3 \
+   || "$dcanary_denial_allow_total" -ne 0 || "$dcanary_denial_find_total" -ne 3 \
+   || "$dcanary_denial_saw_gate" != true || "$dcanary_denial_saw_failure" != true \
+   || "$dcanary_denial_saw_escape" != true ]]; then
+    flag_discovery_canary "denial: with a matching whole-file DISCOVERY allowlist entry for broken/dangling.md, the nonexistent root and escape.md, the three reporting routes produced [${dcanary_denial_output//$'\n'/ | }]; expected three lookup=...=true lines, rc=1 three times, and exactly one [FIND] finding per route with no [ALLOW] -- a discovery finding is excusable again, so a path-wide allowlist entry could turn an unchecked path into a clean one"
+fi
 
 if [[ "$dcanary_found" == false ]]; then
     echo '[PASS] DISCOVERY: checked discovery follows symlinked directories, gates dangling and wrong-type paths, and propagates find failures'
@@ -1673,35 +1788,58 @@ mark_time 'CHECK12'
 # effectiveness guard below), so those constructs are flagged rather than
 # silently credited.
 #
-# Finding line: a documented exception script carries a `P18 FLOOR EXCEPTION`
-# comment marking the deliberate omission; the marker is recognized by canonical
-# normalized match (see the marker branch below) and the finding is anchored to
-# that line so the CHECK13 allowlist entry (seeded to that comment line) matches
-# via the established test_allowlisted path. A script with no such marker (e.g. a
-# new unguarded script) falls back to its first executable line, or line 1.
+# Exception key: a documented exception script carries a `P18 FLOOR EXCEPTION`
+# comment in its LEADING COMMENT HEADER marking the deliberate omission,
+# recognized by canonical normalized match (see check13_header_marker_line
+# below). The leading comment header is the comment and blank lines after an
+# optional line-1 `#!`; the first line that is neither blank nor `#`-led -- any
+# statement, `set` included -- closes it, and it never reopens. The marker counts
+# only on a comment line inside that header: the phrase inline after a
+# statement, in a string literal, after a standalone `set`, inside a function
+# body, or on any line below the first statement is never a marker. A CHECK13
+# allowlist entry keys on rule + path alone -- the preload rejects a CHECK13
+# entry that carries a "line" key -- and it excuses a script only while that
+# marker is present, so moving the marker within the header keeps the
+# exception, and moving it below the first statement or deleting it revokes
+# it. The finding is anchored to the marker line; a script with no
+# marker falls back to its first `set` line, or line 1, and its finding is
+# recorded with no allowlist lookup at all. A listed script that discovery
+# cannot check (missing, dangling, not a regular file, unreadable, or escaping
+# the checkout) is never excused either: the discovery wrappers record those
+# findings with `deny`, so the path-wide entry cannot reach them.
 
 echo ''
 echo '=== CHECK 13: P18 fail-closed shell floor ==='
 
 check13_found=false
-declare -a check13_shell_scripts=()
-discover_checked_paths 'CHECK13' check13_shell_scripts files 'plugin shell scripts' "$PLUGIN_ROOT" -- -name '*.sh' || check13_found=true
-for shell_script in "${check13_shell_scripts[@]}"; do
-    has_errexit=false
-    has_nounset=false
-    has_pipefail=false
-    first_set_line=0
-    exception_line=0
-    line_num=0
+
+# check13_header_marker_line FILE
+# Prints the line number of the first `P18 FLOOR EXCEPTION` marker in FILE's
+# leading comment header, else 0. The header is the comment and blank lines
+# after an optional line-1 `#!` (a marker phrase on the shebang itself is never
+# a marker); the first line that is neither blank nor `#`-led -- any statement,
+# `set` included -- closes the header, and it never reopens. Only a `#`-led line
+# inside the header can carry the marker, so the phrase inline after a
+# statement, in a string literal, after a standalone `set`, inside a function
+# body, or on any line below the first statement is never recognized. Lines
+# are CRLF-tolerant and may be indented. Returns non-zero when FILE cannot be
+# read.
+check13_header_marker_line() {
+    local shell_script="$1"
+    local line_num=0
+    local textline trimmed norm_line
     while IFS= read -r textline || [[ -n "$textline" ]]; do
         line_num=$((line_num + 1))
-        # CRLF tolerance: strip a single trailing carriage return.
         textline="${textline%$'\r'}"
         trimmed="${textline#"${textline%%[![:space:]]*}"}"
-        # Skip the shebang, blank lines, and comment lines. The documented
-        # P18 FLOOR EXCEPTION marker, when present, anchors the finding line.
         if [[ "$line_num" -eq 1 && "$trimmed" == '#!'* ]]; then
             continue
+        fi
+        if [[ -z "$trimmed" ]]; then
+            continue
+        fi
+        if [[ "$trimmed" != '#'* ]]; then
+            break
         fi
         # Recognize the documented P18 FLOOR EXCEPTION marker by CANONICAL
         # NORMALIZED match rather than a brittle contiguous-substring test. All
@@ -1715,24 +1853,54 @@ for shell_script in "${check13_shell_scripts[@]}"; do
         # to a single space, then uppercase. Recognition is contiguous (the
         # normalized line must CONTAIN the normalized canonical token), NOT a
         # gappy subsequence, so unrelated comments cannot falsely match.
-        if [[ "$exception_line" -eq 0 ]]; then
-            # Candidate pretest (#305): the canonical token contains the
-            # contiguous run 'P18', and no normalization step below can
-            # CREATE that run (collapsing inserts a single space; the strips
-            # only remove edge characters), so a line without a
-            # case-insensitive 'p18' can never normalize to contain the
-            # token. Skip the sed|tr spawns for such lines.
-            if [[ "${trimmed^^}" == *'P18'* ]]; then
-                norm_line="$(printf '%s' "$trimmed" \
-                    | sed -e 's/\r$//' \
-                          -e 's/^#//' \
-                          -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-                          -e 's/[[:space:]–—-]\{1,\}/ /g' \
-                    | tr '[:lower:]' '[:upper:]')"
-                if [[ "$norm_line" == *'P18 FLOOR EXCEPTION'* ]]; then
-                    exception_line="$line_num"
-                fi
+        # Candidate pretest (#305): the canonical token contains the
+        # contiguous run 'P18', and no normalization step below can
+        # CREATE that run (collapsing inserts a single space; the strips
+        # only remove edge characters), so a line without a
+        # case-insensitive 'p18' can never normalize to contain the
+        # token. Skip the sed|tr spawns for such lines.
+        if [[ "${trimmed^^}" == *'P18'* ]]; then
+            norm_line="$(printf '%s' "$trimmed" \
+                | sed -e 's/\r$//' \
+                      -e 's/^#//' \
+                      -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
+                      -e 's/[[:space:]–—-]\{1,\}/ /g' \
+                | tr '[:lower:]' '[:upper:]')"
+            if [[ "$norm_line" == *'P18 FLOOR EXCEPTION'* ]]; then
+                printf '%s\n' "$line_num"
+                return 0
             fi
+        fi
+    done < "$shell_script" || return 1
+    printf '0\n'
+}
+
+# check13_scan_script FILE
+# Scans FILE's prologue and prints exactly one record: `floored` when errexit,
+# nounset, and pipefail are all in force before the first executable statement,
+# otherwise `unfloored<TAB>MARKER_LINE<TAB>FIRST_SET_LINE` (0 = absent), where
+# MARKER_LINE comes from check13_header_marker_line and so counts only a marker
+# in the leading comment header. No findings, no globals; returns non-zero
+# without a record when FILE is not a readable regular file, so an unread script
+# can never read as a clean one.
+check13_scan_script() {
+    local shell_script="$1"
+    local has_errexit=false has_nounset=false has_pipefail=false
+    local first_set_line=0 marker_line=0 line_num=0
+    local textline trimmed set_flags token opt_name
+    local cluster cluster_i letter arg_count arg_index
+    local -a set_args=()
+    if [[ ! -f "$shell_script" || ! -r "$shell_script" ]]; then
+        return 1
+    fi
+    while IFS= read -r textline || [[ -n "$textline" ]]; do
+        line_num=$((line_num + 1))
+        # CRLF tolerance: strip a single trailing carriage return.
+        textline="${textline%$'\r'}"
+        trimmed="${textline#"${textline%%[![:space:]]*}"}"
+        # Skip the shebang, blank lines, and comment lines.
+        if [[ "$line_num" -eq 1 && "$trimmed" == '#!'* ]]; then
+            continue
         fi
         if [[ -z "$trimmed" || "$trimmed" == '#'* ]]; then
             continue
@@ -1883,38 +2051,182 @@ for shell_script in "${check13_shell_scripts[@]}"; do
     done < "$shell_script"
 
     if [[ "$has_errexit" == true && "$has_nounset" == true && "$has_pipefail" == true ]]; then
+        printf 'floored\n'
+    else
+        marker_line="$(check13_header_marker_line "$shell_script")" || return 1
+        printf 'unfloored\t%s\t%s\n' "$marker_line" "$first_set_line"
+    fi
+}
+
+# check13_exception_allowed REL_PATH MARKER_LINE
+# Prints `true` only when REL_PATH carries a recognized P18 FLOOR EXCEPTION
+# marker (MARKER_LINE > 0) AND a CHECK13 allowlist entry; prints `false` for a
+# marker-less script without consulting the allowlist, so an entry can never
+# excuse a script whose marker is gone.
+check13_exception_allowed() {
+    local rel_path="$1"
+    local marker_line="$2"
+    if [[ "$marker_line" == '0' ]]; then
+        echo 'false'
+        return 0
+    fi
+    test_allowlisted 'CHECK13' "$rel_path" "$marker_line"
+}
+
+declare -a check13_shell_scripts=()
+discover_checked_paths 'CHECK13' check13_shell_scripts files 'plugin shell scripts' "$PLUGIN_ROOT" -- -name '*.sh' || check13_found=true
+for shell_script in "${check13_shell_scripts[@]}"; do
+    if ! scan_record="$(check13_scan_script "$shell_script")"; then
+        check13_found=true
+        add_finding 'CHECK13' "$shell_script" 1 \
+            "shell floor scan could not read this script -- it is not a readable regular file, so its floor is unverified" deny
         continue
     fi
+    if [[ "$scan_record" == 'floored' ]]; then
+        continue
+    fi
+    IFS=$'\t' read -r scan_state marker_line first_set_line <<< "$scan_record"
 
-    # Anchor the finding to (in precedence order) the documented P18 FLOOR
-    # EXCEPTION comment, the first partial `set` line, or line 1 — so a
-    # documented-exception script's finding line matches its seeded CHECK13
-    # allowlist entry via test_allowlisted (the exception comment for scripts
-    # that carry one, the partial-floor `set` line otherwise, line 1 for a
-    # bare sourced library). A new unguarded script with none of these still
-    # fires on line 1.
-    if [[ "$exception_line" -gt 0 ]]; then
-        finding_line="$exception_line"
+    # The finding anchors to the marker line, else the first partial `set`
+    # line, else line 1. The tally counts a finding as a failure unless
+    # check13_exception_allowed excuses it, resolved on the same rel-path
+    # normalization add_finding applies so the two agree.
+    if [[ "$marker_line" -gt 0 ]]; then
+        finding_line="$marker_line"
     elif [[ "$first_set_line" -gt 0 ]]; then
         finding_line="$first_set_line"
     else
         finding_line=1
     fi
-    # The pass/fail tally counts only NON-allowlisted findings as failures: a
-    # script with a documented CHECK13 exception is a clean (allowlisted) state,
-    # not a check failure. Resolve allowlist status on the same rel-path
-    # normalization add_finding applies so the two agree.
     rel_script="$shell_script"
     if [[ "$shell_script" == "$REPO_ROOT"* ]]; then
         rel_script="${shell_script#"$REPO_ROOT"/}"
     fi
     rel_script="${rel_script//\\//}"
-    if [[ "$(test_allowlisted 'CHECK13' "$rel_script" "$finding_line")" != "true" ]]; then
+    if [[ "$(check13_exception_allowed "$rel_script" "$marker_line")" != "true" ]]; then
         check13_found=true
     fi
-    add_finding 'CHECK13' "$shell_script" "$finding_line" \
-        "missing P18 fail-closed shell floor (set -euo pipefail) -- add the floor or document a justified CHECK13 allowlist exception"
+    if [[ "$marker_line" -gt 0 ]]; then
+        add_finding 'CHECK13' "$shell_script" "$finding_line" \
+            "missing P18 fail-closed shell floor (set -euo pipefail) -- add the floor or document a justified CHECK13 allowlist exception"
+    elif [[ "$(test_allowlisted 'CHECK13' "$rel_script" "$finding_line")" == "true" ]]; then
+        add_finding 'CHECK13' "$shell_script" "$finding_line" \
+            "missing P18 fail-closed shell floor (set -euo pipefail) and the listed CHECK13 exception lost its P18 FLOOR EXCEPTION marker -- restore the marker in the script's leading comment header, or remove the allowlist entry and add the floor" deny
+    else
+        add_finding 'CHECK13' "$shell_script" "$finding_line" \
+            "missing P18 fail-closed shell floor (set -euo pipefail) -- add the floor or document a justified CHECK13 allowlist exception" deny
+    fi
 done
+
+# ── CHECK 13 MARKER-KEY CANARY ─────────────────────────────────────────────
+# Witnesses the marker-keyed exception end to end over three committed
+# fixtures that live outside plugin/, so the production scan above never
+# reaches them: the listed fixture, the unlisted script fixture, and the
+# unlisted library fixture.
+#   * Scanner pins: each fixture's exact check13_scan_script record, so a
+#     scanner that credits a partial floor, reads past the first executable
+#     line, or recognizes the marker phrase anywhere but a comment line in the
+#     leading comment header turns red. The unlisted script fixture carries the
+#     phrase inline on its first statement (a standalone `set`), in a
+#     full-line comment after that `set`, in a string literal, and in a
+#     full-line comment after a non-set statement. The unlisted library
+#     fixture (no shebang, no `set`) carries it inside a function body and in
+#     a full-line comment after the first statement.
+#   * Decision cases: check13_exception_allowed is true for the listed fixture
+#     at its scanned marker line and at a moved line, false once the marker is
+#     gone, and false for the unlisted fixture at any line -- so an entry never
+#     excuses a marker-less script and a marker never excuses an unlisted one.
+#   * Schema cases: ALLOWLIST_PRELOAD_JQ, the same program preload_allowlist
+#     runs, rejects a CHECK13 entry carrying a "line" key and accepts a
+#     line-free CHECK13 entry and a CHECK11 entry carrying one.
+# Each failure is a denied finding, so no allowlist entry can mask it.
+CHECK13_LISTED_FIXTURE='tests/policy/fixtures/check13-exception-canary.sh'
+CHECK13_UNLISTED_FIXTURE='tests/policy/fixtures/check13-unlisted-canary.sh'
+CHECK13_UNLISTED_LIBRARY_FIXTURE='tests/policy/fixtures/check13-unlisted-library-canary.sh'
+
+# check13_flag_canary MESSAGE
+# Records one denied canary finding and marks CHECK 13 failed.
+check13_flag_canary() {
+    check13_found=true
+    add_finding 'CHECK13' 'tools/policy_check.sh' 0 "marker-key canary: $1" deny
+}
+
+# check13_expect_scan FIXTURE_REL EXPECTED
+# Asserts FIXTURE_REL scans to exactly the EXPECTED record.
+check13_expect_scan() {
+    local fixture_rel="$1" expected="$2"
+    local fixture_path got scan_rc=0 tab_label='\t'
+    fixture_path="$REPO_ROOT/$fixture_rel"
+    if [[ ! -f "$fixture_path" ]]; then
+        check13_flag_canary "fixture ${fixture_rel} is missing -- the scanner and exception decision have no witness; restore the fixture rather than deleting the assertion"
+        return 0
+    fi
+    got="$(check13_scan_script "$fixture_path")" || scan_rc=$?
+    if [[ "$scan_rc" -ne 0 ]]; then
+        check13_flag_canary "check13_scan_script exited ${scan_rc} on ${fixture_rel} -- the scan did not run, so its record cannot be trusted"
+        return 0
+    fi
+    if [[ "$got" != "$expected" ]]; then
+        check13_flag_canary "scanning ${fixture_rel} produced [${got//$'\t'/$tab_label}] but expected [${expected//$'\t'/$tab_label}] -- the scanner now credits a partial floor or reads outside the prologue; fix the scanner, or update fixture and pinned record together if the fixture moved"
+    fi
+}
+
+# check13_scanned_marker_line FIXTURE_REL
+# Prints the MARKER_LINE field of FIXTURE_REL's scan record, or 0 when the scan
+# yields no unfloored record; check13_expect_scan reports that failure itself.
+check13_scanned_marker_line() {
+    local scan_record scan_state scanned_marker=0 scanned_set_line
+    if scan_record="$(check13_scan_script "$REPO_ROOT/$1")"; then
+        IFS=$'\t' read -r scan_state scanned_marker scanned_set_line <<< "$scan_record"
+        if [[ "$scan_state" != 'unfloored' ]]; then
+            scanned_marker=0
+        fi
+    fi
+    printf '%s\n' "$scanned_marker"
+}
+
+# check13_expect_decision CASE FIXTURE_REL LINE EXPECTED
+# Asserts check13_exception_allowed FIXTURE_REL LINE prints EXPECTED.
+check13_expect_decision() {
+    local case_label="$1" fixture_rel="$2" probe_line="$3" expected="$4"
+    local got
+    got="$(check13_exception_allowed "$fixture_rel" "$probe_line")"
+    if [[ "$got" != "$expected" ]]; then
+        check13_flag_canary "${case_label}: check13_exception_allowed ${fixture_rel} ${probe_line} printed '${got}' but expected '${expected}' -- the exception decision no longer keys on the marker plus the allowlist entry"
+    fi
+}
+
+# check13_expect_preload_status CASE ALLOWLIST_JSON EXPECTED
+# Runs ALLOWLIST_PRELOAD_JQ over ALLOWLIST_JSON and asserts only its exit
+# status: EXPECTED is `rejects` (non-zero) or `accepts` (zero).
+check13_expect_preload_status() {
+    local case_label="$1" allowlist_literal="$2" expected="$3"
+    local preload_rc=0 got
+    jq -j "$ALLOWLIST_PRELOAD_JQ" <<< "$allowlist_literal" > /dev/null 2>&1 || preload_rc=$?
+    got='accepts'
+    if [[ "$preload_rc" -ne 0 ]]; then
+        got='rejects'
+    fi
+    if [[ "$got" != "$expected" ]]; then
+        check13_flag_canary "${case_label}: ALLOWLIST_PRELOAD_JQ ${got} ${allowlist_literal} (exit ${preload_rc}) but should ${expected%s} it -- the line-free allowlist schema guard has drifted"
+    fi
+}
+
+check13_expect_scan "$CHECK13_LISTED_FIXTURE" $'unfloored\t7\t8'
+check13_expect_scan "$CHECK13_UNLISTED_FIXTURE" $'unfloored\t0\t8'
+check13_expect_scan "$CHECK13_UNLISTED_LIBRARY_FIXTURE" $'unfloored\t0\t0'
+
+check13_listed_marker="$(check13_scanned_marker_line "$CHECK13_LISTED_FIXTURE")"
+check13_unlisted_marker="$(check13_scanned_marker_line "$CHECK13_UNLISTED_FIXTURE")"
+check13_expect_decision 'D1 listed, marker in place' "$CHECK13_LISTED_FIXTURE" "$check13_listed_marker" 'true'
+check13_expect_decision 'D2 listed, marker moved' "$CHECK13_LISTED_FIXTURE" "$((check13_listed_marker + 100))" 'true'
+check13_expect_decision 'D3 listed, marker removed' "$CHECK13_LISTED_FIXTURE" 0 'false'
+check13_expect_decision 'D4 unlisted, scanned marker' "$CHECK13_UNLISTED_FIXTURE" "$check13_unlisted_marker" 'false'
+check13_expect_decision 'D5 unlisted, non-zero line' "$CHECK13_UNLISTED_FIXTURE" 8 'false'
+
+check13_expect_preload_status 'S1 CHECK13 entry with line' '[{"rule":"CHECK13","path":"x","line":1}]' 'rejects'
+check13_expect_preload_status 'S1 CHECK13 entry without line' '[{"rule":"CHECK13","path":"x"}]' 'accepts'
+check13_expect_preload_status 'S1 CHECK11 entry with line' '[{"rule":"CHECK11","path":"x","line":1}]' 'accepts'
 
 if [[ "$check13_found" == false ]]; then
     echo '[PASS] Check 13: All plugin shell scripts carry the P18 fail-closed floor or a CHECK13 exception'

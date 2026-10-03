@@ -17,175 +17,151 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/brood-status/scripts/brood-status-project.sh",
-    "line": 106,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — per-strain field/ledger problems are rendered as MALFORMED/MISSING tokens and must not abort the whole read; pre-flight failures route through blocker() with explicit exit codes."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/fetch-normalize.sh",
-    "line": 283,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — fail-OPEN-on-CONTENT posture (jq pipelines swallow malformed payloads to []); live failures route through fetchnorm_fail()/validate_live_response with explicit exit codes."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh",
-    "line": 215,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — grep -q marker probe returns non-zero in normal empty-log flow; injected fixtures fail-open; live failures route through ledgerrecon_fail() with explicit exit codes."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh",
-    "line": 159,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — compute_snapshot returns non-zero in the normal retry/backoff flow guarded by `if !`; failures route through poll_fail() with explicit exit codes."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/prefilter.sh",
-    "line": 135,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — pipefail is scoped per-pipeline inside subshells; fail-open posture; failures route through prefilter_fail() with explicit exit codes."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/preflight.sh",
-    "line": 21,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — every `gh ... || fail` and `[ ... ] || fail` relies on a non-zero result NOT aborting so fail() can emit a structured PREFLIGHT_ERROR with an explicit exit code."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/reply-resolve.sh",
-    "line": 315,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — the resolve mutation is NON-BLOCKING (a failed resolve logs and still exits 0); set -e would abort on a deliberately-tolerated resolve failure. Hard failures route through replyresolve_fail()."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/react-marker.sh",
-    "line": 141,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — every failure must surface as a REACTMARKER_ERROR token via react_marker_fail() with an explicit exit code; set -e would turn an unanticipated failing statement into a tokenless exit. The gh exit status is captured explicitly with $? and checked by hand."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/init-run-ledger/scripts/init-run-ledger.sh",
-    "line": 98,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — grep -Eq charset gates and `[ -e ] && blocker` value-tests return non-zero in normal flow; failures route through blocker() with explicit exit codes; an EXIT trap performs invocation-owned cleanup."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/mark-intent-fallback/scripts/mark-intent-fallback.sh",
-    "line": 91,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — `jq -e has(...)` key-presence probes return non-zero in the normal absent-key flow; grep -Eq gates and `[ ]` tests gate blocker() with explicit exit codes."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/record-state-result/scripts/record-state-result.sh",
-    "line": 148,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — `jq -e has(...)` key-presence probes return non-zero in the normal absent-key flow; transition/binding validation routes through blocker() with explicit exit codes (ledger left byte-unchanged)."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/spawn-brood/scripts/spawn-brood.sh",
-    "line": 74,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — per-strain failures are caught (`if ! git worktree add`) and routed to the failed-strain path so the manifest still records the partial brood; `git ls-remote --exit-code` rc=2 is a normal no-collision result; INT/TERM trap reports leaked resources."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/containment.sh",
-    "line": 14,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Callers own set -u and route rejects through their own blocker() (this lib never exits)."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/allowlist.sh",
-    "line": 11,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure value-class validators that return non-zero on reject; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/ledger-project.sh",
-    "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure projection emitting validated values or MISSING/MALFORMED tokens; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/manifest-json.sh",
-    "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure extraction signalling presence/rejection via exit code; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/brood-status-derive.sh",
-    "line": 18,
     "reason": "P18 documented exception (ADR-0020): SOURCED library carrying set -u ONLY. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; set -u alone is safe to inherit. Pure status-derivation/aggregation: inputs in, string out, no I/O, no exit."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/ledger-reconstruct-parse.sh",
-    "line": 14,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure parse-stage functions (git-log tokenizer + jq fix-surface assembly); callers own set -u, EXIT trap, and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/ledger-reconstruct-fold.sh",
-    "line": 15,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure fold/gate/wrap-stage functions (normalized-to-findings fold, live parse gate, reconstruct wrap); callers own set -u, EXIT trap, and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/fetch-normalize-core.sh",
-    "line": 17,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure normalize-core functions (overflow tripwire + normalized candidate-set union) whose jq pipelines fail-OPEN-on-CONTENT to []; set -e/pipefail would abort those guarded paths. Callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/graphql-response.sh",
-    "line": 12,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure GraphQL response-body validators (single-body check + paginated page-stream check) that print one failure token and return non-zero, never exit; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/review-surface-shape.sh",
-    "line": 11,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure review-activity skeleton shape predicate (single GraphQL response body check) that prints one failure token and returns non-zero, never exits; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/ledger-engine-io.sh",
-    "line": 19,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Inputs-bootstrap + ledger-read/containment-orchestration functions (hivemind_read_inputs_file + hivemind_open_ledger); functions return non-zero with stderr message on failure and NEVER call exit; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/settings-merge.sh",
-    "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure I/O-free settings.json required-key merge emitting an in-band status (ok|conflict|malformed) object; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/json-normalize.sh",
-    "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure I/O-free primitive emitting a constant jq definition block (canon_obj/canon_arr container-shape normalization) as program text — no value splice; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/claude-mem-path.sh",
-    "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Conditional never-clobber CLAUDE_CODE_PATH provisioner signalling an in-band status word; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/file-guard.sh",
-    "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure append-if-absent text file-guard family (kernel + variants + hook scaffold + section guard) signalling an in-band status word; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/test-detect.sh",
-    "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Detect-only test-command projector + Validation recorder (delegates the section append to file-guard.sh); callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/bump-type-derive.sh",
-    "line": 10,
     "reason": "P18 documented exception (ADR-0020): SOURCED library carrying set -u ONLY. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; set -u alone is safe to inherit. Pure Bump Type Determination arithmetic (revert predicates, row mapping, dominant-row precedence, verdict): inputs in, fixed-vocabulary words out, no I/O, no exit."
+  },
+  {
+    "rule": "CHECK13",
+    "path": "tests/policy/fixtures/check13-exception-canary.sh",
+    "reason": "Decision-canary fixture for the CHECK 13 marker-key canary: never executed, and it lives outside plugin/ so the production scan never reaches it. The canary resolves this entry against the fixture's scanned P18 marker line to witness that a CHECK13 exception keys on rule + path plus a present marker."
   }
 ]

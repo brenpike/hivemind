@@ -13,6 +13,9 @@ selecting `-maxdepth 1 -name 'safety-*.json'` under `tests/policy`, in the
 `safety-*.json` files are ever evaluated, and a name-matching path that is not a
 readable regular file is a SAFETY finding rather than a silently skipped fixture.
 
+The allowlist that `tools/policy_check.sh` consults for non-fixture findings has its
+own matching contract, documented after section 8.
+
 ## 1. Honest capability statement
 
 **Invariant: a fixture must never claim more than the mechanism can deliver — an
@@ -201,3 +204,61 @@ The regex MUST contain a capture group; the first group is what `set_check`
 captures as a set member. A regex that fails to compile, or whose extraction
 fails at run time, FAILS the check -- a broken extraction is never silently
 treated as a zero-match (empty set) result.
+
+## Allowlist matching (`policy-lint-allowlist.json`)
+
+**Invariant: an allowlist entry may excuse only the exact construct it was
+written for; if the construct changes shape, the excuse must lapse instead of
+silently following it.**
+
+Each entry has `rule`, `path`, an optional `line`, and an optional `reason`.
+Omitting `line` makes the entry a whole-file wildcard for that rule and path;
+a `line` makes it match only that line.
+
+No entry excuses a discovery finding. When the shared checked discovery cannot
+check a path -- the discovery itself failed, or a discovered path is missing,
+dangling, not a regular file, unreadable, or resolves outside the checkout --
+the finding is always a new finding, whatever rule, path, or line an entry
+names. An unchecked path is never the construct an entry was written for. The
+DISCOVERY canary witnesses this for all three reporting routes.
+
+CHECK13 (the P18 fail-closed shell floor) matches on a marker in the script, not
+on a line number:
+
+- A CHECK13 entry MUST NOT carry `line`, not even `0`. The allowlist preload
+  stops the whole run on one, naming the rule, the path, and the fix.
+- An entry applies only while the script's leading comment header carries the
+  `P18 FLOOR EXCEPTION` marker. The header is the comment and blank lines after
+  an optional line-1 `#!`, ending at the first line that is neither blank nor a
+  comment -- any statement, `set` included.
+- Moving the marker within the header keeps the exception. Deleting the marker,
+  or moving it below the first statement, revokes the exception, and the script
+  is flagged with a lost-marker message.
+- A marker never counts inline after a statement, in a string literal, after a
+  standalone `set`, after any other statement, or inside a function body.
+- Every comment in the header is a real shell comment, because the header
+  precedes every statement.
+- A marker with no entry grants nothing.
+- `reason` is not machine-checked; whether it justifies the exception stays
+  reviewer-enforced.
+
+The CHECK 13 marker-key canary witnesses this end to end. It runs over
+`tests/policy/fixtures/check13-exception-canary.sh` (listed),
+`tests/policy/fixtures/check13-unlisted-canary.sh` (exception phrases only
+outside the header, not listed), and
+`tests/policy/fixtures/check13-unlisted-library-canary.sh`, and relies on the
+line-free CHECK13 entry for the listed fixture in `policy-lint-allowlist.json`.
+The three fixtures and that entry must not be deleted, or the canary no longer
+proves the marker keying.
+
+Recorded residual: CHECK11 and CHECK15 stay line-keyed on purpose.
+
+- Root cause: each of their findings is a single occurrence with no marker in
+  the file to key on.
+- Bounded impact: three CHECK11 entries with low churn; CHECK15 has none.
+- Rejected fix: a path wildcard would also excuse future violations in the same
+  file, and a content or hash key is too much machinery for three entries.
+
+Honest capability statement: stale CHECK13 entries are not detected. A script
+that later gains the full floor keeps its entry and marker unflagged. Line
+keying did not detect this either.
