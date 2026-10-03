@@ -37,7 +37,9 @@
 #     → the model is never woken → zero model tokens during idle.
 #   - It reads each gh command's stdout directly via command substitution. There
 #     is NO functional pipe (`tail -f | grep`, etc.) feeding Monitor.
-#   - No /tmp. No stop-file. Monitor is stopped natively by the skill.
+#   - No /tmp. No stop-file. Every terminal marker and `REVIEWER_APPROVED` end
+#     the process themselves; the skill natively stops only an arm that is
+#     still running.
 #
 # Accepted trade-off (coarse author-aware tokens, not full fingerprints): the
 # poll tracks a single max databaseId per author-filtered stream rather than a
@@ -106,8 +108,9 @@
 #                    "present" against the seeded approval state. Whether an
 #                    approval that PREDATES this arm counts as new is decided by
 #                    the seed's ARM KIND, never by which fields the token carries
-#                    (see ARM-KIND SEMANTICS below; skill confirms via reviewer
-#                    before any terminal)
+#                    (see ARM-KIND SEMANTICS below). ENDS THIS PROCESS (exit 0)
+#                    but is NOT a loop terminal: the skill confirms via the
+#                    reviewer before any terminal
 #   WATCH_TIMEOUT    max_watch_duration elapsed (terminal)
 #   POLL_ERROR       repeated query failure, or a missing/malformed seed
 #                    (terminal; skill returns blocked)
@@ -115,6 +118,9 @@
 #                    its 8th argument (arm kind + every diffed scalar)
 #   SNAPSHOT_ERROR   --snapshot mode only: the seed could not be captured
 #                    (terminal; skill returns blocked)
+#
+# Process lifetime: `CHANGED` is the ONLY marker after which the poll keeps
+# running. Every other marker is the last line the process prints.
 #
 # Positional arguments supplied by the skill when arming Monitor (all required;
 # the skill/overlord layer resolves defaults and passes concrete values).
@@ -684,9 +690,15 @@ while true; do
   # An in-scope approval newly present is its own marker (the skill runs a
   # confirmation pass rather than treating it as a generic CHANGED delta). What
   # counts as "newly" on the FIRST iteration is set by ARM-KIND SEMANTICS above —
-  # terminal clean ONLY if nothing actionable remains (D14).
+  # terminal clean ONLY if nothing actionable remains (D14). The process ends
+  # here. That is safe because the skill captures a pending `re-arm` seed before
+  # the confirmation pass, and that pass is a full fix pass, so it consumes
+  # anything this poll saw alongside the approval. Any return that keeps
+  # watching arms a fresh poll from that seed, which diffs everything that
+  # arrived during the pass.
   if [ "$cur_approval" = "true" ] && [ "$prev_approval" != "true" ]; then
     echo "REVIEWER_APPROVED"
+    exit 0
   elif snapshot_changed; then
     echo "CHANGED"
   fi

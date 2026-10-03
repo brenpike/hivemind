@@ -115,6 +115,21 @@ as no activity and idle the poll past real feedback. `nodes: []` passes at every
   holds an empty `comments.nodes`, each capture the exact expected `BASELINE=` line, exit 0, and a
   poll armed with it idles silently to `WATCH_TIMEOUT`.
 
+## Process lifetime
+
+`CHANGED` is the only marker after which the poll keeps running. `REVIEWER_APPROVED` and every
+terminal marker are the last line the process prints, and `REVIEWER_APPROVED` exits 0. The
+skill's confirmation pass is a full fix pass, and any return that keeps watching arms a fresh poll
+from the pending `re-arm` seed, so a poll left running past the approval marker is an orphan
+that can trail a stale `CHANGED`.
+
+- `approval:marker-ends-poll-process` — (i) a lone approval edge (pre-cycle-0 state, reactions
+  none then Codex 👍) prints exactly `REVIEWER_APPROVED`, exit 0, and the fake `gh` sees exactly
+  two snapshot queries under a watch window long enough for several more; (ii) the approval
+  co-firing with a new comment delta prints exactly `REVIEWER_APPROVED`, with no trailing marker;
+  (iii) discrimination: the same comment delta without an approval prints `CHANGED` and keeps
+  polling to a last line of `WATCH_TIMEOUT`, so only the approval edge ends the process.
+
 ## The second bite: the seed's state model (PR #361)
 
 The seed originally serialized 8 of the 9 scalars the poll diffs, omitting the approval bool

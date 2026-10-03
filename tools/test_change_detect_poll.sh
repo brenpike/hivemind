@@ -70,6 +70,10 @@
 # the shared plugin/skills/_shared/review-surface-shape.sh check, while a genuinely empty PR (every
 # `nodes` list `[]`) still yields a valid baseline.
 #
+# THE PROCESS-LIFETIME CONTRACT: `CHANGED` is the only marker after which the poll keeps running.
+# `REVIEWER_APPROVED` and every terminal marker are the last line the process prints, so an
+# approval co-firing with a delta never trails a later `CHANGED` from an orphaned poll.
+#
 # Usage:
 #   ./tools/test_change_detect_poll.sh
 
@@ -1342,6 +1346,62 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "response:empty-surface-valid-baseline" "$SKIP_REASON"
+fi
+
+# ── 34. REVIEWER_APPROVED is the last line the poll process prints ────────────────────
+# The approval marker ends the process (exit 0): the skill's confirmation pass is a full fix pass
+# and any return that keeps watching arms a fresh poll, so a poll left running past the marker is
+# an orphan. (i) a lone approval edge prints exactly `REVIEWER_APPROVED`, exit 0, and the fake gh
+# sees no snapshot query after it; (ii) an approval co-firing with a comment delta still prints
+# exactly `REVIEWER_APPROVED` with no trailing marker; (iii) discrimination: the same comment delta
+# WITHOUT an approval prints `CHANGED` and keeps polling to `WATCH_TIMEOUT`, so only the approval
+# edge ends the process. (i) runs under a watch window long enough for several polls after the
+# marker, so the snapshot-query count, not just stdout, catches a poll that outlives it; a passing
+# run exits at the marker and never waits that window out.
+LIFETIME_MAX_WATCH=8
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  lifetime_ok=1
+  lifetime_detail=""
+
+  st="$(new_state lifetime-lone)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE" "$REACT_CODEX"
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$LIFETIME_MAX_WATCH" "$POLL_INTERVAL" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED")"
+  status=$?
+  graphql_calls="$(cat "$st/graphql.n")"
+  if [ "$out" != "REVIEWER_APPROVED" ] || [ "$status" -ne 0 ] || [ "$graphql_calls" != "2" ]; then
+    lifetime_ok=0
+    lifetime_detail="$lifetime_detail lone: status=$status graphql_calls=$graphql_calls out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state lifetime-cofire)"
+  set_seq "$st" graphql "$PRE" "$delta_comment"
+  set_seq "$st" reactions "$REACT_NONE" "$REACT_CODEX"
+  out="$(arm_poll "$st" "$SEED")"
+  status=$?
+  if [ "$out" != "REVIEWER_APPROVED" ] || [ "$status" -ne 0 ]; then
+    lifetime_ok=0
+    lifetime_detail="$lifetime_detail co-fire: status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state lifetime-changed)"
+  set_seq "$st" graphql "$PRE" "$delta_comment"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$SEED")"
+  last_line="$(printf '%s\n' "$out" | tail -1)"
+  if ! printf '%s\n' "$out" | grep -qx 'CHANGED' || [ "$last_line" != "WATCH_TIMEOUT" ]; then
+    lifetime_ok=0
+    lifetime_detail="$lifetime_detail changed: out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  if [ "$lifetime_ok" -eq 1 ]; then
+    pass "approval:marker-ends-poll-process" "REVIEWER_APPROVED alone or co-fired is the last line, exit 0, no later poll; CHANGED keeps polling to WATCH_TIMEOUT"
+  else
+    failed "approval:marker-ends-poll-process" "$lifetime_detail"
+  fi
+else
+  skipped "approval:marker-ends-poll-process" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────
