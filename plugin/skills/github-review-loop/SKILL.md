@@ -10,6 +10,7 @@ allowed-tools:
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh *)
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh *)
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh *)
+  - Bash(date +%s)
 shell: bash
 ---
 
@@ -39,6 +40,16 @@ Monitor is a main-session cross-turn primitive — a subagent dispatch orphans a
 cycle re-arms a fresh full window, and a window that elapses with no actionable
 arrival ends the watch. The poll script's own deadline is PER-PROCESS, so a fresh
 arm IS a fresh window — the idle semantics live here, in the arm/re-arm discipline.
+
+**Window deadline.** The REMAINING idle budget of the current window has ONE
+source: the window deadline, an epoch-seconds value recorded when an arm OPENS a
+window and held until the next arm opens one. Exactly two arms open a window: the
+first arm after cycle 0 (step 4) and a productive re-arm (step 6). Each passes the
+full `max_watch_duration` and records `$(date +%s)` plus that value as the
+deadline. The other two arms CONTINUE the current window: an expired-arm re-arm
+(step 4) and the re-arm after a non-productive return when no poll is running
+(step 6). Each passes `max(0, deadline - $(date +%s))` as its `max_watch_duration`
+argument, never the full value, and leaves the deadline unchanged.
 
 `max_remediation_cycles` is a FLOOR. The floor value is DECLARED and ENFORCED by
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, and no
@@ -98,9 +109,11 @@ them; that is absorbed downstream by `prefilter.sh` as `PREFILTER_SKIP`.
 Over-reporting is SAFE here, under-reporting loses findings — add NO
 duplicate-suppression.
 
-An arm that returns with NO terminal marker means the arm EXPIRED, not that the
-watch ended: re-arm for the REMAINING idle budget of the current window, reusing
-the SAME seed the expired arm carried, per the Seed-Advance INVARIANT below.
+An arm that returns without printing a marker that ends the poll (a terminal
+marker or `REVIEWER_APPROVED`, step 5) means the arm EXPIRED, not that the watch
+ended: re-arm for the REMAINING idle budget of the current window (computed per
+Window deadline above), reusing the SAME seed the expired arm carried, per the
+Seed-Advance INVARIANT below.
 
 **Arm kind.** Every seed is stamped `initial` or `re-arm` at capture, and the
 stamp travels INSIDE the token — so carrying a seed forward carries its kind
@@ -119,8 +132,9 @@ carry.
 **Seed-Advance INVARIANT.** The baseline seed advances ONLY at a point where a
 reviewer pass is about to consume the state it snapshots. There are exactly TWO
 capture sites: step 2, before cycle 0, and step 5, before a dispatch. There is NO
-third capture site, so the baseline can never advance past state nobody read. An
-arm boundary (step 4) and a post-dispatch re-arm (step 6) are NOT capture sites:
+third capture site, so the baseline can never advance past state nobody read.
+The QUIET-EXIT CHECK (step 6) is NOT a capture site: `--check` READS a pending seed, prints no seed, and leaves the baseline where it was.
+An arm boundary (step 4) and a post-dispatch re-arm (step 6) are NOT capture sites:
 each MUST reuse the seed it already carries, and taking a fresh `--snapshot` at
 either boundary is FORBIDDEN. WHY: neither boundary is a reviewer pass, so
 nothing has consumed the PR state there — at an arm boundary a fresh seed absorbs
@@ -142,16 +156,21 @@ dies at an arm boundary.
 `PREFILTER_DISPATCH` or `PREFILTER_ERROR=<reason>` → dispatch reviewer fix mode
 (no `target`); `PREFILTER_ERROR` is fail-open. Handle return per Reviewer-return
 handling. `REVIEWER_APPROVED` → confirmation pass (no `target`); use only the latest
-poll's approval — a stale prior approval must never short-circuit later pushback. If the
-reviewer finds nothing actionable, this is terminal `clean`. That staleness rule
+poll's approval — a stale prior approval must never short-circuit later pushback.
+If the reviewer finds nothing actionable, the loop ends `clean` only after the QUIET-EXIT CHECK (step 6) reports nothing new since the pending seed.
+That staleness rule
 is ENFORCED by the `re-arm` arm kind, not left to judgement: the pending seed
 records the approval state as of the pre-dispatch capture, so an approval already
-present then cannot fire again on the re-armed poll. Map the terminal via
+present then cannot fire again on the re-armed poll or the QUIET-EXIT CHECK.
+Only after that check, map the terminal via
 `loop-state.sh cycle-decision <current_count> <max_cycles> 0 approval-clean`
 (the `approval-clean` token emits `EXIT_REASON=clean`, distinguishing the approval
 terminal from a plain keep-watching `clean`). If actionable items remain, the
 reviewer processes them and returns a normal fix-mode exit_reason handled per
-Reviewer-return handling. `STATE=MERGED` → `pr-merged`. `STATE=CLOSED` →
+Reviewer-return handling. The poll EXITS right after printing `REVIEWER_APPROVED`,
+so no poll runs during the confirmation pass: skip every stop-Monitor
+instruction for that pass's return and handle the return per step 6's
+no-poll-running rules. `STATE=MERGED` → `pr-merged`. `STATE=CLOSED` →
 `pr-closed`. `WATCH_TIMEOUT` → `watch-window-elapsed`, EXCEPT a timeout from an arm a
 productive return supersedes, which step 6 discards. `POLL_ERROR` → stop Monitor;
 `blocked`. For the last four, use
@@ -161,12 +180,18 @@ PRE-DISPATCH SEED. BEFORE spawning the reviewer for ANY dispatch in this step �
 the `PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass AND the `REVIEWER_APPROVED`
 confirmation pass alike — capture a PENDING re-arm seed per step
 2's `--snapshot` procedure, with `re-arm` as the ARM KIND in place of step 2's
-`initial`, and HOLD it; the Monitor stays armed meanwhile, so
-nothing is missed while the reviewer runs. This is capture site 2 of the
+`initial`, and HOLD it. For a dispatch made while a poll is running, the Monitor
+stays armed meanwhile, so nothing is missed while the reviewer runs. When no
+poll is running (the confirmation pass, or a dispatch the QUIET-EXIT CHECK
+routed), nothing watches the pass, and its activity is caught only afterwards,
+by diffing this pending seed in the next arm's first poll or in the QUIET-EXIT
+CHECK; the pending seed is the base of that diff because it predates the
+dispatch. This is capture site 2 of the
 Seed-Advance INVARIANT (step 4). A `SNAPSHOT_ERROR` or non-zero exit follows
 step 2's posture: RETRY ONCE, then terminal `blocked`. `PREFILTER_SKIP` does not
-dispatch and captures no pending seed. Step 6 consumes the pending seed on a productive return and
-discards it on every other return.
+dispatch and captures no pending seed. Step 6 consumes the pending seed on a
+productive return and, when no poll is running, on a non-productive or
+approval-clean return, and discards it on every other return.
 
 **6. Reviewer-return handling.** `clean` → keep watching. `planner-escalation` |
 `blocked` | `injection-suspect` | `high-severity-rejection` | `user-input-required`
@@ -184,17 +209,21 @@ escalation hard-stop — a mixed fix+escalate pass IS a cycle — while keeping
 `root-cluster-suspected` and `merge-advised` no-increment. When
 multiple tokens fire, delegate to `loop-state.sh resolve-precedence` (→
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh`).
-When any guard fires, stop Monitor and emit ONE terminal report.
+When any guard fires, stop the Monitor if one is running and emit ONE terminal
+report. A poll is RUNNING from the start of its arm until it prints any marker
+other than `CHANGED` (or its arm expires, step 4); `--check` never leaves one
+running.
 
 A PRODUCTIVE cycle — `findings_resolved ≥ 1` returned with `EXIT_REASON=none` —
-re-arms the idle window: stop the Monitor and arm per step 4 with the PENDING
-seed captured before this cycle's dispatch (step 5) and a full fresh
-`max_watch_duration`; a re-arm is not a capture site, and the pending seed is
-never substituted for a fresh one, per the Seed-Advance INVARIANT (step 4).
-SUPERSEDED-ARM TIMEOUT. The Monitor is deliberately left armed across dispatch
-(step 5), so the pre-dispatch arm's `max_watch_duration` can elapse WHILE the
-reviewer runs and queue a `WATCH_TIMEOUT` for the very arm this productive return
-supersedes. DISCARD that superseded arm's `WATCH_TIMEOUT` before re-arming: the
+re-arms the idle window: stop the Monitor if a poll is running and arm per step 4 with the PENDING seed captured
+before this cycle's dispatch (step 5) and a full fresh `max_watch_duration`,
+recording a new window deadline per Window deadline above; a re-arm is not a
+capture site, and the pending seed is never substituted for a
+fresh one, per the Seed-Advance INVARIANT (step 4).
+SUPERSEDED-ARM TIMEOUT. On a dispatch made while a poll is running, the Monitor is deliberately
+left armed across dispatch (step 5), so the pre-dispatch arm's
+`max_watch_duration` can elapse WHILE the reviewer runs and queue a
+`WATCH_TIMEOUT` for the very arm this productive return supersedes. DISCARD that superseded arm's `WATCH_TIMEOUT` before re-arming: the
 window was NOT quiet — the reviewer just resolved findings — so it MUST NOT map to
 `watch-window-elapsed` and MUST NOT be passed to `loop-state.sh
 resolve-precedence`. Discard the timeout token ONLY, never that arm's `CHANGED`
@@ -204,17 +233,44 @@ non-productive return and on every terminal, `WATCH_TIMEOUT` is handled normally
 per step 5. The fresh full `max_watch_duration` this re-arm grants IS the
 replacement window — no seed is re-snapshotted, so the Seed-Advance INVARIANT is
 untouched.
-GATING: only a productive cycle consumes the pending seed and re-arms. A
-`PREFILTER_SKIP` event is NOT a productive cycle, does not dispatch, and MUST
-NOT reset the idle window. A NON-productive return (`findings_resolved = 0` with `EXIT_REASON=none`) keeps
-watching on the CURRENT window: the Monitor was never stopped, so leave it armed
-and DISCARD the pending seed — the window does not reset. On any terminal
-`EXIT_REASON` the pending seed is discarded with the Monitor. Once the cycle
+GATING: only a productive cycle resets the idle window. A `PREFILTER_SKIP` event
+is NOT a productive cycle, does not dispatch, and MUST NOT reset the idle window.
+A NON-productive return (`findings_resolved = 0` with `EXIT_REASON=none`) keeps
+watching on the CURRENT window, and the window does not reset. If a poll is
+still running, leave it armed and DISCARD the pending seed.
+If no poll is running, run the QUIET-EXIT CHECK; on `UNCHANGED`, arm per step 4 with the PENDING seed
+for the REMAINING idle budget of the current window, computed from
+the recorded deadline per Window deadline above — never the full
+`max_watch_duration` — and floored at 0 (the poll rejects a negative budget as
+`POLL_ERROR`; 0 prints `WATCH_TIMEOUT` immediately). NEVER arm with the seed the exited arm carried — an `initial` seed
+re-fires the same approval and loops the confirmation pass. This arm is not a
+capture site, so the Seed-Advance INVARIANT holds. On any terminal
+`EXIT_REASON` the pending seed is discarded and any running Monitor stopped. Once the cycle
 ceiling declared and enforced by
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh` is
 reached, that script emits `max-cycles-reached` and the loop TERMINATES rather
 than re-arming — which is why the re-arm is gated on
 `EXIT_REASON=none`.
+
+QUIET-EXIT CHECK. Before the loop ends `clean` after an approval, or keeps
+watching with no poll running, compare the PR once against the pending seed:
+
+```
+bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh --check <OWNER> <REPO> <PR_NUMBER> <max_watch_duration> <poll_interval> <reviewer_filter> <SELF_LOGIN> "<PENDING_SEED>"
+```
+
+`--check` FIRST, then the SAME 7 positional args the step-4 arm uses, with the
+pending seed as arg 8, QUOTED and verbatim. It runs ONE poll iteration and
+prints ONE line: the marker, or `UNCHANGED`. `UNCHANGED` → finish the return:
+the `approval-clean` terminal (step 5), or the arm for the remaining budget
+(GATING above). `CHANGED` → run `prefilter.sh` per step 5: `PREFILTER_SKIP`
+counts as `UNCHANGED`; `PREFILTER_DISPATCH` or `PREFILTER_ERROR` dispatches per
+step 5, with a new pending seed. `REVIEWER_APPROVED` → confirmation pass (step
+5). `STATE=MERGED` / `STATE=CLOSED` → the `token-map` terminal (step 5).
+`CHECK_ERROR` or non-zero exit → RETRY ONCE, then terminal `blocked`. A
+confirmation return the check routes elsewhere ends no cycle and maps no
+terminal. Only the moment between the check and the terminal report stays
+unwatched — the bounded gap every terminal has.
 
 ## Dispatch contract
 
@@ -237,7 +293,8 @@ ceiling); `same-finding-repeat` oscillation (→ `max-cycles-reached`, an
 oscillation guard and never a quiet window); any reviewer
 `planner-escalation` / `blocked` / `injection-suspect` / `high-severity-rejection`
 / `user-input-required` / `root-cluster-suspected` / `merge-advised`; PR merged
-or closed; in-scope reviewer approval with nothing actionable remaining.
+or closed; in-scope reviewer approval with nothing actionable remaining,
+confirmed by the QUIET-EXIT CHECK (step 6).
 Cycle arithmetic, ceiling, terminal-vs-cycle, and `same-finding-repeat` mapping:
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`.
 Multi-token precedence ORDER:

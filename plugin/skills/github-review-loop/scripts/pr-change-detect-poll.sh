@@ -37,7 +37,9 @@
 #     → the model is never woken → zero model tokens during idle.
 #   - It reads each gh command's stdout directly via command substitution. There
 #     is NO functional pipe (`tail -f | grep`, etc.) feeding Monitor.
-#   - No /tmp. No stop-file. Monitor is stopped natively by the skill.
+#   - No /tmp. No stop-file. Every terminal marker and `REVIEWER_APPROVED` end
+#     the process themselves; the skill natively stops only an arm that is
+#     still running.
 #
 # Accepted trade-off (coarse author-aware tokens, not full fingerprints): the
 # poll tracks a single max databaseId per author-filtered stream rather than a
@@ -85,6 +87,11 @@
 #                ONE-SHOT baseline capture (`initial` | `re-arm`). Computes the
 #                SAME scalar snapshot the poll diffs through the SAME query path
 #                and emits one BASELINE= line stamped with that arm kind.
+#   --check      ONE-SHOT compare for the skill's QUIET-EXIT CHECK. Takes the
+#                same $1-$8 as poll mode (seed required), computes ONE snapshot
+#                through the SAME query path, runs the poll's own marker decision
+#                once against the seed, and prints that marker or UNCHANGED. No
+#                sleep, no deadline, no baseline line.
 #   (no flag)    POLL. Watches the PR, diffing the first iteration against the
 #                seed token and every later iteration against its predecessor.
 #
@@ -106,8 +113,9 @@
 #                    "present" against the seeded approval state. Whether an
 #                    approval that PREDATES this arm counts as new is decided by
 #                    the seed's ARM KIND, never by which fields the token carries
-#                    (see ARM-KIND SEMANTICS below; skill confirms via reviewer
-#                    before any terminal)
+#                    (see ARM-KIND SEMANTICS below). ENDS THIS PROCESS (exit 0)
+#                    but is NOT a loop terminal: the skill confirms via the
+#                    reviewer before any terminal
 #   WATCH_TIMEOUT    max_watch_duration elapsed (terminal)
 #   POLL_ERROR       repeated query failure, or a missing/malformed seed
 #                    (terminal; skill returns blocked)
@@ -115,10 +123,19 @@
 #                    its 8th argument (arm kind + every diffed scalar)
 #   SNAPSHOT_ERROR   --snapshot mode only: the seed could not be captured
 #                    (terminal; skill returns blocked)
+#   UNCHANGED        --check mode only: the snapshot raised no marker against
+#                    the seed
+#   CHECK_ERROR      --check mode only: a missing/malformed seed or a failed
+#                    capture (terminal)
+#
+# Process lifetime: `CHANGED` is the ONLY marker after which the poll keeps
+# running. Every other marker is the last line the process prints. --check
+# prints exactly one line and exits.
 #
 # Positional arguments supplied by the skill when arming Monitor (all required;
 # the skill/overlord layer resolves defaults and passes concrete values).
-# --snapshot mode takes the flag, then the ARM KIND, then the same $1-$7:
+# --snapshot mode takes the flag, then the ARM KIND, then the same $1-$7.
+# --check mode takes the flag, then the same $1-$8:
 #   $1  OWNER                   base-repo owner
 #   $2  REPO                    base-repo name
 #   $3  PR_NUMBER               integer PR number
@@ -129,14 +146,15 @@
 #                               defined by reviewer-identity.jq)
 #   $7  SELF_LOGIN              viewer login used to exclude self-authored
 #                               activity from delta tokens (required)
-#   $8  BASELINE_SEED           poll mode only: the BARE value of the BASELINE=
-#                               line emitted by --snapshot (label stripped) —
-#                               the arm kind followed by EVERY scalar the poll
-#                               diffs. REQUIRED, never optional: an optional
-#                               seed would let a caller silently regress to the
-#                               self-baselining blind window, so a missing,
-#                               malformed, or incomplete value is POLL_ERROR
-#                               before the first poll.
+#   $8  BASELINE_SEED           poll and --check modes: the BARE value of the
+#                               BASELINE= line emitted by --snapshot (label
+#                               stripped) — the arm kind followed by EVERY
+#                               scalar the poll diffs. REQUIRED, never optional:
+#                               an optional seed would let a caller silently
+#                               regress to the self-baselining blind window, so
+#                               a missing, malformed, or incomplete value is
+#                               POLL_ERROR (CHECK_ERROR in --check mode) before
+#                               any gh call.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
 # are DELIBERATELY omitted. The full floor would change behavior: compute_snapshot returns
@@ -146,9 +164,9 @@
 
 set -u
 
-# Mode dispatch. The sentinel cannot collide with a real OWNER: GitHub logins are
-# alphanumeric-with-hyphens and may not BEGIN with a hyphen, so no owner can ever
-# be the literal `--snapshot`.
+# Mode dispatch. The sentinels cannot collide with a real OWNER: GitHub logins
+# are alphanumeric-with-hyphens and may not BEGIN with a hyphen, so no owner can
+# ever be the literal `--snapshot` or `--check`.
 MODE="poll"
 ARM_KIND=""
 if [ "${1:-}" = "--snapshot" ]; then
@@ -156,6 +174,9 @@ if [ "${1:-}" = "--snapshot" ]; then
   shift
   ARM_KIND="${1:-}"
   [ "$#" -eq 0 ] || shift
+elif [ "${1:-}" = "--check" ]; then
+  MODE="check"
+  shift
 fi
 
 OWNER="${1:-}"
@@ -211,6 +232,8 @@ SEED_FORMAT_RE="^(${ARM_KIND_ALTERNATION})([|][A-Za-z0-9_-]+){${#SNAPSHOT_FIELDS
 poll_fail() {
   if [ "$MODE" = "snapshot" ]; then
     echo "SNAPSHOT_ERROR"
+  elif [ "$MODE" = "check" ]; then
+    echo "CHECK_ERROR"
   else
     echo "POLL_ERROR"
   fi
@@ -312,6 +335,24 @@ advance_snapshot() {
   done
 }
 
+# iteration_marker: the ONE marker decision over the current snapshot against
+# the previous one. Echoes STATE=MERGED or STATE=CLOSED (terminal PR state takes
+# precedence over any other delta), REVIEWER_APPROVED (an in-scope approval
+# newly present), CHANGED (any other declared field differs), or nothing.
+# INVARIANT: the poll loop and --check both decide through this function, so the
+# QUIET-EXIT CHECK can never judge a seed differently from the poll it stands in for.
+iteration_marker() {
+  if [ "$cur_state" = "MERGED" ]; then
+    echo "STATE=MERGED"
+  elif [ "$cur_state" = "CLOSED" ]; then
+    echo "STATE=CLOSED"
+  elif [ "$cur_approval" = "true" ] && [ "$prev_approval" != "true" ]; then
+    echo "REVIEWER_APPROVED"
+  elif snapshot_changed; then
+    echo "CHANGED"
+  fi
+}
+
 [ -n "$OWNER" ] || poll_fail
 [ -n "$REPO" ] || poll_fail
 case "$PR_NUMBER" in ''|*[!0-9]*) poll_fail ;; esac
@@ -338,12 +379,12 @@ POLL_INTERVAL_SECONDS=$((10#$POLL_INTERVAL_SECONDS))
 if [ "$MODE" = "snapshot" ]; then
   [[ "$ARM_KIND" =~ $ARM_KIND_RE ]] || poll_fail
 fi
-# The baseline seed is REQUIRED in poll mode and is validated STRICTLY, before
-# the first poll or sleep: a partially-parsed seed would leave some prev_ scalar
-# empty and fire a spurious CHANGED, and an absent one would re-open the #324
-# blind window. Two layers, both derived from SNAPSHOT_FIELDS: the shape regex,
-# then load_seed's field-count and non-empty checks.
-if [ "$MODE" = "poll" ]; then
+# The baseline seed is REQUIRED in poll and --check modes and is validated
+# STRICTLY, before any gh call or sleep: a partially-parsed seed would leave some
+# prev_ scalar empty and fire a spurious CHANGED, and an absent one would re-open
+# the #324 blind window. Two layers, both derived from SNAPSHOT_FIELDS: the shape
+# regex, then load_seed's field-count and non-empty checks.
+if [ "$MODE" = "poll" ] || [ "$MODE" = "check" ]; then
   [[ "$BASELINE_SEED" =~ $SEED_FORMAT_RE ]] || poll_fail
   load_seed "$BASELINE_SEED" || poll_fail
 fi
@@ -650,6 +691,30 @@ if [ "$ARM_KIND" = "initial" ]; then
   printf -v "prev_$APPROVAL_FIELD" '%s' ''
 fi
 
+# --check: ONE-SHOT compare for the skill's QUIET-EXIT CHECK. One capture, the
+# poll's own marker decision against the seed, one line out. A failed or
+# incomplete capture is CHECK_ERROR (exit 1); it is never retried, never sleeps,
+# never reads the deadline, and never advances or re-emits a seed.
+# RECORDED RESIDUAL (linked local-review finding 91655d29, iter2,
+# approval-exit lifecycle): activity between this check and the skill's
+# terminal report is unseen. Root cause: any watcher must stop at a terminal,
+# so a gap always exists after the last look; the same gap is WATCH_TIMEOUT's
+# final sleep interval and an expired arm's last interval, inherited from
+# main. Bounded impact: seconds or one poll interval, on a PR the loop no
+# longer owns; agents never merge, and the activity stays on the PR for the
+# human who merges. Obvious remediation considered and rejected on the merits:
+# keeping a poll alive past the terminal needs a Monitor running after the
+# loop returns (forbidden; nothing would consume its events) or TaskStop (the
+# dependency the self-exit removed).
+if [ "$MODE" = "check" ]; then
+  reset_snapshot_vars
+  compute_snapshot || poll_fail
+  assert_snapshot_complete || poll_fail
+  check_marker="$(iteration_marker)"
+  echo "${check_marker:-UNCHANGED}"
+  exit 0
+fi
+
 while true; do
   if [ "$(date +%s)" -ge "$deadline" ]; then
     echo "WATCH_TIMEOUT"
@@ -671,24 +736,19 @@ while true; do
   fi
   fail_count=0
 
-  # Terminal PR state takes precedence over any other delta.
-  if [ "$cur_state" = "MERGED" ]; then
-    echo "STATE=MERGED"
-    exit 0
-  fi
-  if [ "$cur_state" = "CLOSED" ]; then
-    echo "STATE=CLOSED"
-    exit 0
-  fi
-
   # An in-scope approval newly present is its own marker (the skill runs a
   # confirmation pass rather than treating it as a generic CHANGED delta). What
   # counts as "newly" on the FIRST iteration is set by ARM-KIND SEMANTICS above —
-  # terminal clean ONLY if nothing actionable remains (D14).
-  if [ "$cur_approval" = "true" ] && [ "$prev_approval" != "true" ]; then
-    echo "REVIEWER_APPROVED"
-  elif snapshot_changed; then
-    echo "CHANGED"
+  # terminal clean ONLY if nothing actionable remains (D14). Every marker but
+  # CHANGED ends the process here. Exiting on REVIEWER_APPROVED is safe because
+  # every exit from the confirmation pass diffs the pending seed before the watch
+  # goes quiet. A productive return arms a fresh poll from it; a return that would
+  # end clean or keep watching with no poll running runs --check against it first
+  # (SKILL.md step 6, QUIET-EXIT CHECK).
+  iteration_marker_line="$(iteration_marker)"
+  if [ -n "$iteration_marker_line" ]; then
+    echo "$iteration_marker_line"
+    [ "$iteration_marker_line" = "CHANGED" ] || exit 0
   fi
   # No-change iteration: emit nothing.
 

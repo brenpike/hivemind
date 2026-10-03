@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [5.0.3] - 2026-10-02
+
+### Fixed
+
+- The review-loop change-detect poll (`pr-change-detect-poll.sh`) now ends its own process right after it prints `REVIEWER_APPROVED`, the same way it already exits on `STATE=MERGED` and `STATE=CLOSED`. Previously the marker was non-terminal, so the poll kept running until its watch window or the Monitor expired whenever the orchestrator could not stop it. The github-review-loop skill now never relies on a running Monitor after an approval wake: a non-productive confirmation pass arms a fresh poll from the pending seed for the remaining idle window. A new behaviour case proves the poll exits at the marker. Before the loop ends clean after an approval, or keeps watching with no poll running, the skill now runs a one-shot poll `--check` against the pending seed, so feedback that arrives during the confirmation pass is still caught; a behaviour case proves it. Closes #397.
+
 ## [5.0.2] - 2026-10-02
 
 ### Fixed

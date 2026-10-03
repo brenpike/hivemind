@@ -70,6 +70,21 @@
 # the shared plugin/skills/_shared/review-surface-shape.sh check, while a genuinely empty PR (every
 # `nodes` list `[]`) still yields a valid baseline.
 #
+# THE PROCESS-LIFETIME CONTRACT: `CHANGED` is the only marker after which the poll keeps running.
+# `REVIEWER_APPROVED` and every terminal marker are the last line the process prints, so an
+# approval co-firing with a delta never trails a later `CHANGED` from an orphaned poll.
+#
+# THE QUIET-EXIT CHECK CONTRACT: a return that would end the watch clean, or keep watching with no
+# poll running, first runs
+#   pr-change-detect-poll.sh --check <OWNER> <REPO> <PR> <MAX_WATCH> <INTERVAL> <FILTER> <SELF>
+#     <SEED>
+# against the pending seed. It takes ONE capture through the poll's own query path, decides through
+# the poll's own `iteration_marker`, and prints exactly one line (`STATE=MERGED`, `STATE=CLOSED`,
+# `REVIEWER_APPROVED`, `CHANGED`, or `UNCHANGED`), exit 0, so its line equals the line a poll armed
+# with the same seed prints first over the same state, with that poll's `WATCH_TIMEOUT` read as
+# `UNCHANGED`. A missing or malformed seed is `CHECK_ERROR`, exit 1, before any gh call; a failed
+# capture is `CHECK_ERROR`, exit 1, never retried.
+#
 # Usage:
 #   ./tools/test_change_detect_poll.sh
 
@@ -316,6 +331,26 @@ arm_poll() {
     run_poll "$dir" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" "$POLL_INTERVAL" \
       "$filter" "$SELF_LOGIN"
   fi
+}
+
+# run_check <state_dir> [seed] [filter]: --check mode with the standard 7 args, appending <seed>
+# as the 8th arg when non-empty (empty seed = the arg omitted). <filter> follows arm_poll's
+# omitted-vs-empty rule.
+run_check() {
+  local dir="$1" seed="${2:-}" filter="${3-$REVIEWER_FILTER}"
+  if [ -n "$seed" ]; then
+    run_poll "$dir" --check "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" "$POLL_INTERVAL" \
+      "$filter" "$SELF_LOGIN" "$seed"
+  else
+    run_poll "$dir" --check "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" "$POLL_INTERVAL" \
+      "$filter" "$SELF_LOGIN"
+  fi
+}
+
+# gh_call_counts <state_dir>: the fake gh's call counters as `<graphql> <latestreviews>
+# <reactions>`; one capture is `1 1 1`.
+gh_call_counts() {
+  printf '%s %s %s' "$(cat "$1/graphql.n")" "$(cat "$1/latestreviews.n")" "$(cat "$1/reactions.n")"
 }
 
 # snapshot_raw <state_name> <arm_kind> <graphql_entry> <reactions_entry> [filter]: snapshot mode
@@ -1342,6 +1377,174 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "response:empty-surface-valid-baseline" "$SKIP_REASON"
+fi
+
+# ── 34. REVIEWER_APPROVED is the last line the poll process prints ────────────────────
+# The approval marker ends the process (exit 0): the skill's confirmation pass is a full fix pass
+# and any return that keeps watching arms a fresh poll, so a poll left running past the marker is
+# an orphan. (i) a lone approval edge prints exactly `REVIEWER_APPROVED`, exit 0, and the fake gh
+# sees no snapshot query after it; (ii) an approval co-firing with a comment delta still prints
+# exactly `REVIEWER_APPROVED` with no trailing marker; (iii) discrimination: the same comment delta
+# WITHOUT an approval prints `CHANGED` and keeps polling to `WATCH_TIMEOUT`, so only the approval
+# edge ends the process. (i) runs under a watch window long enough for several polls after the
+# marker, so the snapshot-query count, not just stdout, catches a poll that outlives it; a passing
+# run exits at the marker and never waits that window out.
+LIFETIME_MAX_WATCH=8
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  lifetime_ok=1
+  lifetime_detail=""
+
+  st="$(new_state lifetime-lone)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_NONE" "$REACT_CODEX"
+  out="$(run_poll "$st" "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$LIFETIME_MAX_WATCH" "$POLL_INTERVAL" \
+    "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED")"
+  status=$?
+  graphql_calls="$(cat "$st/graphql.n")"
+  if [ "$out" != "REVIEWER_APPROVED" ] || [ "$status" -ne 0 ] || [ "$graphql_calls" != "2" ]; then
+    lifetime_ok=0
+    lifetime_detail="$lifetime_detail lone: status=$status graphql_calls=$graphql_calls out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state lifetime-cofire)"
+  set_seq "$st" graphql "$PRE" "$delta_comment"
+  set_seq "$st" reactions "$REACT_NONE" "$REACT_CODEX"
+  out="$(arm_poll "$st" "$SEED")"
+  status=$?
+  if [ "$out" != "REVIEWER_APPROVED" ] || [ "$status" -ne 0 ]; then
+    lifetime_ok=0
+    lifetime_detail="$lifetime_detail co-fire: status=$status out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  st="$(new_state lifetime-changed)"
+  set_seq "$st" graphql "$PRE" "$delta_comment"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$SEED")"
+  last_line="$(printf '%s\n' "$out" | tail -1)"
+  if ! printf '%s\n' "$out" | grep -qx 'CHANGED' || [ "$last_line" != "WATCH_TIMEOUT" ]; then
+    lifetime_ok=0
+    lifetime_detail="$lifetime_detail changed: out=$(printf '%s' "$out" | tr '\n' ';')"
+  fi
+
+  if [ "$lifetime_ok" -eq 1 ]; then
+    pass "approval:marker-ends-poll-process" "REVIEWER_APPROVED alone or co-fired is the last line, exit 0, no later poll; CHANGED keeps polling to WATCH_TIMEOUT"
+  else
+    failed "approval:marker-ends-poll-process" "$lifetime_detail"
+  fi
+else
+  skipped "approval:marker-ends-poll-process" "$SKIP_REASON"
+fi
+
+# ── 35. the QUIET-EXIT CHECK judges the pending seed exactly as the poll would ─────────
+# The approval marker ends the poll, so after a confirmation pass no poll is running. Activity
+# that landed after the pending seed is caught only by the --check the skill runs before the watch
+# goes quiet. Gated on SEED_SUPPORTED with no probe of its own: a script without --check reads the
+# flag as OWNER and prints POLL_ERROR, so every case goes red.
+#   (a) THE BITE: a `re-arm` seed captured over the pre-cycle-0 state with the Codex 👍, then a new
+#       Codex issue comment: exactly CHANGED, exit 0, one capture.
+#   (b) the same seed over the unchanged state: exactly UNCHANGED, exit 0, one capture.
+#   (c) parity: over each delta class, a derived MERGED and CLOSED state, an approval rise, and no
+#       delta, the check's line equals the expected marker AND the first line of a poll armed with
+#       the same seed over the same state (its WATCH_TIMEOUT read as UNCHANGED); exit 0, one capture.
+#   (d) fail-closed: a failed snapshot query (no retry), a missing seed, and a malformed seed (no gh
+#       call) each print exactly CHECK_ERROR, exit 1.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  check_seed="$(capture_seed checkseed re-arm "$PRE" "$REACT_CODEX")"
+
+  st="$(new_state check-delta)"
+  set_seq "$st" graphql "$delta_comment"
+  set_seq "$st" reactions "$REACT_CODEX"
+  out="$(run_check "$st" "$check_seed")"
+  status=$?
+  calls="$(gh_call_counts "$st")"
+  if [ "$out" = "CHANGED" ] && [ "$status" -eq 0 ] && [ "$calls" = "1 1 1" ]; then
+    pass "check:delta-after-pending-seed-detected" "comment after the pending re-arm seed -> CHANGED, exit 0, one capture"
+  else
+    failed "check:delta-after-pending-seed-detected" "expected exactly CHANGED exit 0 calls=1 1 1, got status=$status calls=$calls out=$(printf '%s' "$out" | tr '\n' ';') seed=$check_seed"
+  fi
+
+  st="$(new_state check-nodelta)"
+  set_seq "$st" graphql "$PRE"
+  set_seq "$st" reactions "$REACT_CODEX"
+  out="$(run_check "$st" "$check_seed")"
+  status=$?
+  calls="$(gh_call_counts "$st")"
+  if [ "$out" = "UNCHANGED" ] && [ "$status" -eq 0 ] && [ "$calls" = "1 1 1" ]; then
+    pass "check:no-delta-unchanged" "state unchanged since the pending seed -> UNCHANGED, exit 0, one capture"
+  else
+    failed "check:no-delta-unchanged" "expected exactly UNCHANGED exit 0 calls=1 1 1, got status=$status calls=$calls out=$(printf '%s' "$out" | tr '\n' ';') seed=$check_seed"
+  fi
+
+  parity_ok=1
+  parity_detail=""
+  parity_seed="$(capture_seed checkparityseed re-arm "$PRE" "$REACT_NONE")"
+  state_merged="$(derive_fixture state-merged "$PRE" '.data.repository.pullRequest.state = "MERGED"')"
+  state_closed="$(derive_fixture state-closed "$PRE" '.data.repository.pullRequest.state = "CLOSED"')"
+  for parity_row in "totals|$delta_total|$REACT_NONE|CHANGED" \
+    "checks|$delta_checks|$REACT_NONE|CHANGED" \
+    "merged|$state_merged|$REACT_NONE|STATE=MERGED" \
+    "closed|$state_closed|$REACT_NONE|STATE=CLOSED" \
+    "approval|$PRE|$REACT_CODEX|REVIEWER_APPROVED" \
+    "nodelta|$PRE|$REACT_NONE|UNCHANGED"; do
+    IFS='|' read -r parity_name parity_graphql parity_reactions parity_expected <<EOF
+$parity_row
+EOF
+    st="$(new_state "check-parity-$parity_name")"
+    set_seq "$st" graphql "$parity_graphql"
+    set_seq "$st" reactions "$parity_reactions"
+    check_out="$(run_check "$st" "$parity_seed")"
+    status=$?
+    calls="$(gh_call_counts "$st")"
+
+    st="$(new_state "check-parity-$parity_name-poll")"
+    set_seq "$st" graphql "$parity_graphql"
+    set_seq "$st" reactions "$parity_reactions"
+    poll_first="$(arm_poll "$st" "$parity_seed" | head -1)"
+    [ "$poll_first" != "WATCH_TIMEOUT" ] || poll_first="UNCHANGED"
+
+    if [ "$check_out" != "$poll_first" ] || [ "$check_out" != "$parity_expected" ] \
+      || [ "$status" -ne 0 ] || [ "$calls" != "1 1 1" ]; then
+      parity_ok=0
+      parity_detail="$parity_detail $parity_name: expected=$parity_expected check=$(printf '%s' "$check_out" | tr '\n' ';') poll_first=$poll_first status=$status calls=$calls"
+    fi
+  done
+  if [ "$parity_ok" -eq 1 ]; then
+    pass "check:parity-with-poll-first-iteration" "totals, checks, merged, closed, approval rise, no delta: check line == poll first line == expected, exit 0, one capture"
+  else
+    failed "check:parity-with-poll-first-iteration" "$parity_detail seed=$parity_seed"
+  fi
+
+  check_fail_ok=1
+  check_fail_detail=""
+  # INVARIANT: the seed is the LAST row field: it carries `|` itself, and `read` hands the last
+  # name the remainder of the line.
+  for check_fail_row in "ghfail|FAIL|1 0 0|$check_seed" \
+    "missing-seed|$PRE|0 0 0|" \
+    "malformed-seed|$PRE|0 0 0|not-a-baseline-token"; do
+    IFS='|' read -r check_fail_name check_fail_graphql check_fail_calls check_fail_seed <<EOF
+$check_fail_row
+EOF
+    st="$(new_state "check-fail-$check_fail_name")"
+    set_seq "$st" graphql "$check_fail_graphql"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(run_check "$st" "$check_fail_seed")"
+    status=$?
+    calls="$(gh_call_counts "$st")"
+    if [ "$out" != "CHECK_ERROR" ] || [ "$status" -ne 1 ] || [ "$calls" != "$check_fail_calls" ]; then
+      check_fail_ok=0
+      check_fail_detail="$check_fail_detail $check_fail_name: status=$status calls=$calls expected_calls=$check_fail_calls out=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$check_fail_ok" -eq 1 ]; then
+    pass "check:fails-closed" "gh failure (one call, no retry), missing seed and malformed seed (no gh call) -> CHECK_ERROR, exit 1"
+  else
+    failed "check:fails-closed" "$check_fail_detail"
+  fi
+else
+  for check_case_id in check:delta-after-pending-seed-detected check:no-delta-unchanged \
+    check:parity-with-poll-first-iteration check:fails-closed; do
+    skipped "$check_case_id" "$SKIP_REASON"
+  done
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

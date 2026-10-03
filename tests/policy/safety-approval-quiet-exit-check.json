@@ -1,0 +1,18 @@
+{
+  "rule": "Approval-clean exit gated on the QUIET-EXIT CHECK",
+  "description": "P3 coupling. After an approval, the review loop may end `clean` only once a one-shot compare against the pending seed reports nothing new, so a review or comment that lands while no poll is running cannot be silently skipped by the exit. The source pin in `plugin/skills/github-review-loop/SKILL.md` sits on ONE span carrying BOTH halves of that conditional rule: the discriminating condition (the reviewer finds nothing actionable) and the obligation it triggers (the loop ends `clean` only after the QUIET-EXIT CHECK reports nothing new since the pending seed). Either half alone is rewritable while the other stays green -- dropping the `only after the QUIET-EXIT CHECK` gate lets the approval end the loop unchecked, and rewriting the condition re-keys when the gate applies -- so both live inside the pinned span. The consumers pin the gate's other load-bearing references, not remedy prose: the skill's NON-productive-return sentence must still route a watch with no poll running through the QUIET-EXIT CHECK and arm on `UNCHANGED` with the PENDING seed, and `plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh` must still describe its `--check` mode as the ONE-SHOT compare for the skill's QUIET-EXIT CHECK, so severing the script mode from the skill step it implements is loud. What this fixture honestly guarantees is exactly that these three word sequences exist in these two named files; it claims word-sequence presence only and nothing about meaning. Residuals, stated plainly: (1) runtime execution is not covered -- a static pin cannot prove the overlord actually runs the check before ending `clean`, nor that `--check` computes the same marker decision as the poll; (2) a meaning inversion or rewrite-around that leaves the pinned bytes intact is invisible; (3) the script phrase appears in two comment blocks of the poll script, so deleting either one alone stays green; only removing both turns the suite red; (4) the pin sees only the two files it names, and no fixture in this directory can detect a NEW caller or a new exit path that ends the loop without running the check -- that is an absence defect per rule 7 of the pin-authoring contract and needs a structural check, not a presence pin.",
+  "source": {
+    "file": "plugin/skills/github-review-loop/SKILL.md",
+    "pattern": "If the reviewer finds nothing actionable, the loop ends `clean` only after the QUIET-EXIT CHECK (step 6) reports nothing new since the pending seed."
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/github-review-loop/SKILL.md",
+      "pattern": "If no poll is running, run the QUIET-EXIT CHECK; on `UNCHANGED`, arm per step 4 with the PENDING seed"
+    },
+    {
+      "file": "plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh",
+      "pattern": "ONE-SHOT compare for the skill's QUIET-EXIT CHECK"
+    }
+  ]
+}
