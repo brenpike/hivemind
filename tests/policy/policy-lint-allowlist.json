@@ -23,7 +23,7 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/fetch-normalize.sh",
-    "line": 262,
+    "line": 283,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — fail-OPEN-on-CONTENT posture (jq pipelines swallow malformed payloads to []); live failures route through fetchnorm_fail()/validate_live_response with explicit exit codes."
   },
   {
@@ -41,7 +41,7 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/prefilter.sh",
-    "line": 115,
+    "line": 135,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — pipefail is scoped per-pipeline inside subshells; fail-open posture; failures route through prefilter_fail() with explicit exit codes."
   },
   {
@@ -53,14 +53,14 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/reply-resolve.sh",
-    "line": 290,
+    "line": 315,
     "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — the resolve mutation is NON-BLOCKING (a failed resolve logs and still exits 0); set -e would abort on a deliberately-tolerated resolve failure. Hard failures route through replyresolve_fail()."
   },
   {
     "rule": "CHECK13",
     "path": "plugin/skills/github-review-loop/scripts/react-marker.sh",
-    "line": 127,
-    "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — the reaction mutation is IDEMPOTENCY-TOLERANT (an 'already reacted' gh response is treated as success), so set -e would abort on a deliberately-tolerated duplicate-reaction status; the reaction mutation hard-fails via react_marker_fail() with explicit exit codes; no non-blocking tolerance path needs set -e suppression."
+    "line": 141,
+    "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — every failure must surface as a REACTMARKER_ERROR token via react_marker_fail() with an explicit exit code; set -e would turn an unanticipated failing statement into a tokenless exit. The gh exit status is captured explicitly with $? and checked by hand."
   },
   {
     "rule": "CHECK13",
@@ -133,6 +133,18 @@
     "path": "plugin/skills/_shared/fetch-normalize-core.sh",
     "line": 17,
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure normalize-core functions (overflow tripwire + normalized candidate-set union) whose jq pipelines fail-OPEN-on-CONTENT to []; set -e/pipefail would abort those guarded paths. Callers own set -u and error routing."
+  },
+  {
+    "rule": "CHECK13",
+    "path": "plugin/skills/_shared/graphql-response.sh",
+    "line": 12,
+    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure GraphQL response-body validators (single-body check + paginated page-stream check) that print one failure token and return non-zero, never exit; callers own set -u and error routing."
+  },
+  {
+    "rule": "CHECK13",
+    "path": "plugin/skills/_shared/review-surface-shape.sh",
+    "line": 11,
+    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure review-activity skeleton shape predicate (single GraphQL response body check) that prints one failure token and returns non-zero, never exits; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",

@@ -119,12 +119,14 @@
 #     malformed content to empty — this is the INTENTIONAL fail-open-on-CONTENT
 #     behavior for trusted/already-gated payloads, not unguarded live boundaries.
 #   - FAIL-CLOSED on a LIVE-response operational failure (§5 validate_live_response):
-#     a live `gh` response that returns exit 0 with a non-empty `.errors` array, a
-#     null/absent `.data.repository.pullRequest`, an empty body, or a REQUESTED
-#     connection that is absent / null / has a null `nodes` (the connection-shape
-#     assertion — covering the three top-level connections AND the nested
-#     per-thread `reviewThreads.nodes[].comments`, so a parseable response that
-#     silently lost its nodes can no longer masquerade as a clean PR) — OR a live
+#     a live `gh` response that returns exit 0 with an empty body, a body that is
+#     not exactly one JSON object, any `.errors` value other than null / [] (a
+#     non-empty array, an object, a scalar), an absent / null / non-object
+#     `.data`, or a body that fails the shared review-surface skeleton check
+#     (hivemind_review_surface_shape_check: a non-object pullRequest, or a
+#     REQUESTED connection, top-level or nested per-thread, that is not an object
+#     with a `nodes` array, so a parseable response that silently lost its nodes
+#     can no longer masquerade as a clean PR) — OR a live
 #     `gh pr checks` response at ANY allowlisted status (0, 1, 8) whose stdout is
 #     NOT a JSON array, or a non-allowlisted status — fails CLOSED (non-zero + a
 #     stable FETCHNORM_ERROR reason). All three allowlisted CI statuses share ONE
@@ -178,8 +180,12 @@
 #   - stdout: the single normalized JSON array (always, on success).
 #   - exit 0 on success (including the fail-open empty-set case).
 #   - FETCHNORM_ERROR=<reason> on stdout + exit 1 ONLY on a bootstrap or LIVE-fetch failure
-#     (gh error, cannot-self-locate, missing/unparseable core/filter/identity module, bad input,
-#     or a LIVE-RESPONSE failure caught by validate_live_response) — never on an empty or
+#     (gh error, cannot-self-locate, missing/unparseable core/filter/identity module, a
+#     missing/unparseable shared GraphQL response check — missing-graphql-check /
+#     unparseable-graphql-check — a missing/unparseable shared review-surface check —
+#     missing-review-surface-check / unparseable-review-surface-check — bad input, or a
+#     LIVE-RESPONSE failure caught by
+#     validate_live_response) — never on an empty or
 #     malformed INJECTED payload (that is the fail-open empty-set path).
 #   - OVERFLOW diagnostic emitted on stderr when any connection totalCount > 50.
 #
@@ -196,20 +202,31 @@
 # explicit, deliberate divergence: live response = validated; injected = trusted.
 #
 # GraphQL mode (validate_live_response graphql <body> <status>):
+#   The first three rows are decided by the SHARED envelope validator
+#   hivemind_graphql_response_check (_shared/graphql-response.sh, a positive
+#   allowlist: accept iff exactly one JSON object, `.errors` null or [], `.data` an
+#   object); its bare token is emitted with the `graphql-` prefix.
 #   - exit-0 with empty/whitespace body (no JSON)            -> graphql-empty-body
-#   - non-empty `.errors` array (EVEN IF a pullRequest is also
-#     present — `.errors` is the operational-failure signal)  -> graphql-errors
-#   - null/absent `.data.repository.pullRequest` (covers
-#     repo-not-found AND PR-not-found AND auth)               -> graphql-null-pullrequest
-#   - a REQUESTED connection that is ABSENT, null, or whose `nodes` is null —
-#     including the NESTED per-thread `reviewThreads.nodes[].comments` — fails
-#     CLOSED                                                   -> graphql-missing-connection
+#   - unparseable, not exactly one JSON value, or not an
+#     object                                                  -> graphql-malformed
+#   - any `.errors` value other than null / [] — a non-empty
+#     array (incl. elements with no `message`), an object, or
+#     a scalar (EVEN IF a pullRequest is also present —
+#     `.errors` is the operational-failure signal)            -> graphql-errors
+#   - `.data` absent, null, or not an object                  -> graphql-missing-data
+#   The remaining rows are decided by the SHARED skeleton check
+#   hivemind_review_surface_shape_check (_shared/review-surface-shape.sh, type-strict;
+#   it owns the skeleton positions); its bare token is emitted with the `graphql-` prefix.
+#   - non-object `.data.repository` or `.data.repository.pullRequest`
+#     (covers repo-not-found AND PR-not-found AND auth)       -> graphql-null-pullrequest
+#   - a REQUESTED connection, top-level or NESTED per-thread, that is
+#     not an object or whose `nodes` is not an array          -> graphql-missing-connection
 #   - present pullRequest whose connections are all present but EMPTY
 #     (`nodes: []`)                                            -> PASSES (valid empty;
-#     downstream fail-open -> [] exit 0; do NOT over-reject valid-but-empty). The
-#     per-thread clause is vacuously true on `reviewThreads.nodes: []`.
-#   ORDER IS LOAD-BEARING: the connection-shape check runs LAST, so a null
-#   pullRequest and an `.errors` response keep their own stable reason strings.
+#     downstream fail-open -> [] exit 0; do NOT over-reject valid-but-empty).
+#   ORDER IS LOAD-BEARING: the envelope validator runs FIRST and the skeleton
+#   check runs SECOND (its precondition is a body that passed the envelope check),
+#   so an `.errors` response keeps its own stable reason string.
 #
 # CI mode (validate_live_response ci <body> <status>):
 #   - status is an ALLOWLIST of the documented check-carrying exit states whose
@@ -231,9 +248,13 @@
 #     content (--payload-file/--ci-payload-file). See §4 fail-open invariant.
 #
 # Reason tokens (STABLE — asserted by RS2-002, documented above):
-#   graphql-empty-body | graphql-errors | graphql-null-pullrequest
-#   graphql-missing-connection
+#   graphql-empty-body | graphql-malformed | graphql-errors | graphql-missing-data
+#   graphql-null-pullrequest | graphql-missing-connection
 #   ci-not-array | ci-operational-failure
+# Bootstrap tokens for the shared envelope validator and skeleton check (source-or-die,
+# before any fetch):
+#   missing-graphql-check | unparseable-graphql-check
+#   missing-review-surface-check | unparseable-review-surface-check
 #
 # 5b. LIVE-RESPONSE TEST SEAM (offline drive THROUGH the gate)
 # ------------------------------------------------------------
@@ -356,6 +377,17 @@ FETCHNORM_CORE="$SCRIPT_DIR/../../_shared/fetch-normalize-core.sh"
 [ -f "$FETCHNORM_CORE" ] || fetchnorm_fail "missing-core"
 # shellcheck source=../../_shared/fetch-normalize-core.sh
 . "$FETCHNORM_CORE" || fetchnorm_fail "unparseable-core"
+# Source the shared GraphQL response-envelope validator (hivemind_graphql_response_check),
+# the single owner of the top-level `errors` / `data` acceptance predicate used by
+# validate_live_response's graphql mode. Same ../../_shared/ resolution as the core above.
+[ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || fetchnorm_fail "missing-graphql-check"
+# shellcheck source=../../_shared/graphql-response.sh
+. "$SCRIPT_DIR/../../_shared/graphql-response.sh" || fetchnorm_fail "unparseable-graphql-check"
+# Source the shared review-surface skeleton check (hivemind_review_surface_shape_check), the
+# single owner of the pullRequest + connection shape predicate used after the envelope check.
+[ -f "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" ] || fetchnorm_fail "missing-review-surface-check"
+# shellcheck source=../../_shared/review-surface-shape.sh
+. "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" || fetchnorm_fail "unparseable-review-surface-check"
 
 # Timeout wrapper for gh API calls. Prefer coreutils `timeout`;
 # fall back to macOS Homebrew `gtimeout`; degrade gracefully (run unguarded) when
@@ -440,43 +472,23 @@ validate_live_response() {
   local mode="$1" body="$2" status="$3"
   case "$mode" in
     graphql)
-      # exit-0 with no JSON body is an operational failure, distinct from a valid
-      # empty-connections response (which still carries a pullRequest object).
-      case "$body" in
-        *[![:space:]]*) : ;;
-        *) echo "FETCHNORM_ERROR=graphql-empty-body"; return 1 ;;
-      esac
-      # A non-empty `.errors` array is THE operational-failure signal — fail
-      # closed even if a pullRequest is also present.
-      if printf '%s' "$body" | jq -e '(.errors // []) | length > 0' >/dev/null 2>&1; then
-        echo "FETCHNORM_ERROR=graphql-errors"
+      # Envelope gate via the shared validator: accept ONLY exactly one JSON object
+      # whose `.errors` is null or [] and whose `.data` is an object. Every other
+      # shape (blank body, unparseable, any non-empty `.errors` value of any type
+      # — EVEN IF a pullRequest is also present — or absent/null `.data`) fails
+      # closed with the validator's token prefixed `graphql-`.
+      local envelope_token
+      if ! envelope_token="$(hivemind_graphql_response_check "$body")"; then
+        echo "FETCHNORM_ERROR=graphql-$envelope_token"
         return 1
       fi
-      # A concrete pullRequest object MUST be present. null/absent covers
-      # repo-not-found, PR-not-found, and auth-stripped data.
-      if ! printf '%s' "$body" \
-        | jq -e '.data.repository.pullRequest | type == "object"' >/dev/null 2>&1; then
-        echo "FETCHNORM_ERROR=graphql-null-pullrequest"
-        return 1
-      fi
-      # Every connection this script's QUERY requests MUST be present AND
-      # array-shaped, including the NESTED per-thread comments connection. A
-      # response that parses and carries a pullRequest but has LOST a connection
-      # normalizes to an empty candidate set — indistinguishable downstream from a
-      # genuinely clean PR. `type == "array"` is total and strictly stronger than
-      # has(): absent key, null connection, and null `nodes` all yield "null" and
-      # fail; `nodes: []` and populated `nodes` yield "array" and pass; a scalar
-      # connection fails via the `?`. The all/2 clause is VACUOUSLY TRUE on
-      # `reviewThreads.nodes: []`, so a genuinely clean PR still passes.
-      # INVARIANT: this check runs LAST — live-graphql-null-pr and
-      # live-graphql-errors also fail this predicate, and their stable reason
-      # strings are preserved only because the earlier checks catch them first.
-      if ! printf '%s' "$body" | jq -e '.data.repository.pullRequest
-        | ((.reviewThreads?.nodes? | type) == "array")
-          and ((.comments?.nodes?  | type) == "array")
-          and ((.reviews?.nodes?   | type) == "array")
-          and all(.reviewThreads.nodes[]?; (.comments?.nodes? | type) == "array")' >/dev/null 2>&1; then
-        echo "FETCHNORM_ERROR=graphql-missing-connection"
+      # Skeleton gate via the shared check (precondition met: the envelope passed). A
+      # non-object pullRequest, or a requested connection (top-level or nested
+      # per-thread) that lost its object/`nodes` array shape, fails closed with the
+      # check's token prefixed `graphql-`; `nodes: []` everywhere passes.
+      local shape_token
+      if ! shape_token="$(hivemind_review_surface_shape_check "$body")"; then
+        echo "FETCHNORM_ERROR=graphql-$shape_token"
         return 1
       fi
       return 0 ;;
@@ -547,8 +559,9 @@ fetch_graphql_payload() {
     echo "FETCHNORM_ERROR=graphql-failed"
     return 1
   fi
-  # RESPONSE-CONTENT gate (RS2-001): reject exit-0 operational failures (errors
-  # array / null pullRequest / empty body) BEFORE the body crosses the boundary.
+  # RESPONSE-CONTENT gate (RS2-001): reject exit-0 operational failures (empty or
+  # malformed body / errors / missing data / null pullRequest / missing connection)
+  # BEFORE the body crosses the boundary.
   if ! validate_live_response graphql "$gql_body" "$gql_status"; then
     return 1
   fi

@@ -120,6 +120,8 @@ ENTRY_ROWS=(
     "plugin/skills/github-review-loop/scripts/fetch-normalize.sh|SCRIPT_DIR|fetchnorm_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/prefilter.sh|SCRIPT_DIR|prefilter_fail|cannot-self-locate"
     "plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|SCRIPT_DIR|poll_fail|cannot-self-locate"
+    "plugin/skills/github-review-loop/scripts/react-marker.sh|SCRIPT_DIR|react_marker_fail|cannot-self-locate"
+    "plugin/skills/github-review-loop/scripts/reply-resolve.sh|SCRIPT_DIR|replyresolve_fail|cannot-self-locate"
 )
 
 POLL_SCRIPT_PATH='plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh'
@@ -179,6 +181,14 @@ SOURCE_ROWS=(
     'plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|$plugin_root/skills/_shared/ledger-reconstruct-parse.sh|missing-shared-lib|unparseable-shared-lib|ledger-reconstruct-parse.sh'
     'plugin/skills/github-review-loop/scripts/ledger-reconstruct.sh|$plugin_root/skills/_shared/ledger-reconstruct-fold.sh|missing-shared-lib|unparseable-shared-lib|ledger-reconstruct-fold.sh'
     'plugin/skills/github-review-loop/scripts/fetch-normalize.sh|$FETCHNORM_CORE|missing-core|unparseable-core|fetch-normalize-core.sh'
+    'plugin/skills/github-review-loop/scripts/fetch-normalize.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
+    'plugin/skills/github-review-loop/scripts/prefilter.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
+    'plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
+    'plugin/skills/github-review-loop/scripts/react-marker.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
+    'plugin/skills/github-review-loop/scripts/reply-resolve.sh|$SCRIPT_DIR/../../_shared/graphql-response.sh|missing-graphql-check|unparseable-graphql-check|graphql-response.sh'
+    'plugin/skills/github-review-loop/scripts/fetch-normalize.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
+    'plugin/skills/github-review-loop/scripts/prefilter.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
+    'plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh|$SCRIPT_DIR/../../_shared/review-surface-shape.sh|missing-review-surface-check|unparseable-review-surface-check|review-surface-shape.sh'
 )
 
 # ── Table helpers ───────────────────────────────────────────────────────────
@@ -216,6 +226,8 @@ emitter_contract() {
         fetchnorm_fail)   EC_RC=1; EC_CHANNEL=out; EC_PREFIX='FETCHNORM_ERROR=' ;;
         prefilter_fail)   EC_RC=1; EC_CHANNEL=out; EC_PREFIX='PREFILTER_ERROR=' ;;
         poll_fail)        EC_RC=1; EC_CHANNEL=out; EC_PREFIX=''; EC_TOKEN='POLL_ERROR' ;;
+        react_marker_fail) EC_RC=1; EC_CHANNEL=err; EC_PREFIX='REACTMARKER_ERROR=' ;;
+        replyresolve_fail) EC_RC=1; EC_CHANNEL=out; EC_PREFIX='REPLYRESOLVE_ERROR=' ;;
         *) return 1 ;;
     esac
 }

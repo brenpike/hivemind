@@ -1,0 +1,1 @@
+this is not json: a live GraphQL body that does not parse must fail closed

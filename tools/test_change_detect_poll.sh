@@ -60,6 +60,16 @@
 # latest-review rows travel as one JSON object per row, so a login carrying a delimiter byte
 # cannot forge the account type. An empty filter slot defaults to `automated`.
 #
+# THE GRAPHQL RESPONSE CONTRACT (#393): gh exits 0 on several GraphQL error envelopes, so an
+# exit-0 response is usable only when the shared plugin/skills/_shared/graphql-response.sh check
+# accepts it. A snapshot body carrying a top-level `errors` value, or a `latestReviews` walk with
+# such a value on ANY page, fails the capture (SNAPSHOT_ERROR / POLL_ERROR) and never yields a
+# baseline, a delta, or an approval verdict. A snapshot body that has lost part of the
+# review-activity skeleton (a null pullRequest, a null or absent connection or `nodes` list, a null
+# thread, or a thread whose `comments` connection is lost) fails the capture the same way through
+# the shared plugin/skills/_shared/review-surface-shape.sh check, while a genuinely empty PR (every
+# `nodes` list `[]`) still yields a valid baseline.
+#
 # Usage:
 #   ./tools/test_change_detect_poll.sh
 
@@ -113,7 +123,10 @@ REACT_CODEX_EYES="$FIXTURES/reactions-codex-eyes.json"
 # When the call carries `--jq`, the stub applies the script's OWN `--jq` expression to each
 # served page with the real jq (`-r`, matching gh printing string results raw), so the
 # production transport expression runs; a jq error on any page exits non-zero, and a call
-# without `--jq` serves the raw bytes.
+# without `--jq` serves the raw bytes. Only the reactions read carries `--jq`: the snapshot query
+# and the `latestReviews` walk carry none, so both are served raw — a `.pages` walk as every
+# page's JSON object concatenated, exactly the stream the script hands to the shared
+# graphql-response.sh check before projecting any row itself.
 #
 # Call kinds: `reactions` (the REST reactions path), `latestreviews` (a `graphql` call carrying
 # `--paginate`, the paginated per-author latest-reviews walk), and `graphql` (the snapshot query).
@@ -340,6 +353,38 @@ identity_outcome_matches() {
     User) [ "$2" = "WATCH_TIMEOUT" ] ;;
     *) printf '%s\n' "$2" | grep -qx 'CHANGED' ;;
   esac
+}
+
+# capture_fails_closed <state_name> <graphql_entry> <latestreviews_entry> <seed> <filter>: 0 when
+# the capture fails CLOSED in BOTH modes — snapshot mode prints exactly SNAPSHOT_ERROR and exits
+# non-zero, and a poll armed with <seed> prints exactly POLL_ERROR and exits non-zero (so it never
+# emits a delta or an approval marker first). An empty <latestreviews_entry> leaves the walk
+# mirroring <graphql_entry>. On failure it prints the observed outcome and returns 1.
+capture_fails_closed() {
+  local name="$1" graphql_entry="$2" walk_entry="$3" seed="$4" filter="$5" st out status
+  st="$(new_state "$name-snapshot")"
+  set_seq "$st" graphql "$graphql_entry"
+  [ -z "$walk_entry" ] || set_seq "$st" latestreviews "$walk_entry"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(run_poll "$st" --snapshot initial "$OWNER" "$REPO_NAME" "$PR_NUMBER" "$MAX_WATCH" \
+    "$POLL_INTERVAL" "$filter" "$SELF_LOGIN")"
+  status=$?
+  if [ "$status" -eq 0 ] || [ "$out" != "SNAPSHOT_ERROR" ]; then
+    printf 'snapshot status=%s out=%s' "$status" "$(printf '%s' "$out" | tr '\n' ';')"
+    return 1
+  fi
+
+  st="$(new_state "$name-poll")"
+  set_seq "$st" graphql "$graphql_entry"
+  [ -z "$walk_entry" ] || set_seq "$st" latestreviews "$walk_entry"
+  set_seq "$st" reactions "$REACT_NONE"
+  out="$(arm_poll "$st" "$seed" "$filter")"
+  status=$?
+  if [ "$status" -eq 0 ] || [ "$out" != "POLL_ERROR" ]; then
+    printf 'poll status=%s out=%s' "$status" "$(printf '%s' "$out" | tr '\n' ';')"
+    return 1
+  fi
+  return 0
 }
 
 # ── Seed probe ──────────────────────────────────────────────────────────────────────
@@ -1151,6 +1196,152 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
   fi
 else
   skipped "approval:rest-user-typed-bot-thumbs-up-approves" "$SKIP_REASON"
+fi
+
+# ── 30. a snapshot body carrying a GraphQL `errors` value fails the capture CLOSED ────
+# gh exits 0 on several GraphQL error envelopes, and the fake gh serves each of these exit 0. The
+# pre-cycle-0 state keeps its full `data` and gains a top-level `errors` value: an array holding a
+# message object, an array holding an EMPTY object, and a bare object. The `data` alone would
+# yield a valid baseline and a silent poll; the shared graphql-response.sh check rejects every
+# variant, so snapshot mode is SNAPSHOT_ERROR and poll mode is POLL_ERROR, both exit 1.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  errors_ok=1
+  errors_detail=""
+  errors_index=0
+  for errors_value in '[{"message":"x"}]' '[{}]' '{}'; do
+    errors_index=$((errors_index + 1))
+    errors_fixture="$(derive_fixture "snapshot-errors-$errors_index" "$PRE" ".errors = $errors_value")"
+    if ! errors_outcome="$(capture_fails_closed "snapshot-errors-$errors_index" "$errors_fixture" "" \
+      "$SEED" "$REVIEWER_FILTER")"; then
+      errors_ok=0
+      errors_detail="$errors_detail errors=$errors_value $errors_outcome"
+    fi
+  done
+  if [ "$errors_ok" -eq 1 ]; then
+    pass "response:snapshot-graphql-errors-fail-closed" "errors [{message}], [{}] and {} -> SNAPSHOT_ERROR / POLL_ERROR, exit 1"
+  else
+    failed "response:snapshot-graphql-errors-fail-closed" "$errors_detail"
+  fi
+else
+  skipped "response:snapshot-graphql-errors-fail-closed" "$SKIP_REASON"
+fi
+
+# ── 31. a latestReviews walk with a GraphQL `errors` value on ANY page fails CLOSED ───
+# A 2-page walk ends in an APPROVED review from the Bot-typed `review-approved` registry member
+# that `review_page` emits, served exit 0; on its own (case 27) that walk fires REVIEWER_APPROVED
+# first under `automated`. Here one page also carries a
+# top-level `errors` value — page 2 (the page holding the approval) in one variant, page 1 in the
+# other. The shared graphql-response.sh pages check rejects the whole stream, so snapshot mode is
+# SNAPSHOT_ERROR and poll mode is POLL_ERROR, both exit 1, and no approval is ever judged from an
+# errored walk.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  walk_errors_ok=1
+  walk_errors_detail=""
+  walk_errors_seed="$(capture_seed walkerrorsseed initial "$PRE" "$REACT_NONE" automated)"
+  clean_head="$(review_page walk-errors-head 0 100 true)"
+  clean_tail="$(review_page walk-errors-tail 100 0 false APPROVED)"
+  errored_head="$(derive_fixture walk-errors-head-errored "$clean_head" '.errors = [{"message":"x"}]')"
+  errored_tail="$(derive_fixture walk-errors-tail-errored "$clean_tail" '.errors = [{"message":"x"}]')"
+  for errored_page in 2 1; do
+    if [ "$errored_page" -eq 2 ]; then
+      walk_errors_entry="$(review_pages walk-errors-page-2 "$clean_head" "$errored_tail")"
+    else
+      walk_errors_entry="$(review_pages walk-errors-page-1 "$errored_head" "$clean_tail")"
+    fi
+    if ! walk_errors_outcome="$(capture_fails_closed "walk-errors-page-$errored_page" "$PRE" \
+      "$walk_errors_entry" "$walk_errors_seed" automated)"; then
+      walk_errors_ok=0
+      walk_errors_detail="$walk_errors_detail errored_page=$errored_page $walk_errors_outcome"
+    fi
+  done
+  if [ "$walk_errors_ok" -eq 1 ]; then
+    pass "approval:latest-reviews-graphql-errors-fail-closed" "errors on page 2 or page 1 of an APPROVED walk -> SNAPSHOT_ERROR / POLL_ERROR, exit 1, never REVIEWER_APPROVED"
+  else
+    failed "approval:latest-reviews-graphql-errors-fail-closed" "$walk_errors_detail seed=$walk_errors_seed"
+  fi
+else
+  skipped "approval:latest-reviews-graphql-errors-fail-closed" "$SKIP_REASON"
+fi
+
+# ── 32. a snapshot body that lost part of the review-activity skeleton fails CLOSED ────
+# Each variant derives from the pre-cycle-0 state with NO `errors` value, so the shared
+# graphql-response.sh check accepts it. The first three are the hollow per-thread bodies the
+# snapshot projection reads as "no thread comment" (its optional iteration skips them) and would
+# idle the poll past real feedback: a thread whose `comments.nodes` is null, a thread with its
+# `comments` connection deleted, and a null thread element. The last two are locks a projection
+# error already fails today: a null `reviews` connection and a null `pullRequest`. The shared
+# review-surface-shape.sh check rejects every variant, so snapshot mode is SNAPSHOT_ERROR and poll
+# mode is POLL_ERROR, both exit 1.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  hollow_ok=1
+  hollow_detail=""
+  hollow_index=0
+  for hollow_program in \
+    '.data.repository.pullRequest.reviewThreads.nodes[0].comments.nodes = null' \
+    '.data.repository.pullRequest.reviewThreads.nodes[0] |= del(.comments)' \
+    '.data.repository.pullRequest.reviewThreads.nodes[0] = null' \
+    '.data.repository.pullRequest.reviews = null' \
+    '.data.repository.pullRequest = null'; do
+    hollow_index=$((hollow_index + 1))
+    hollow_fixture="$(derive_fixture "snapshot-hollow-$hollow_index" "$PRE" "$hollow_program")"
+    if ! hollow_outcome="$(capture_fails_closed "snapshot-hollow-$hollow_index" "$hollow_fixture" "" \
+      "$SEED" "$REVIEWER_FILTER")"; then
+      hollow_ok=0
+      hollow_detail="$hollow_detail program=[$hollow_program] $hollow_outcome"
+    fi
+  done
+  if [ "$hollow_ok" -eq 1 ]; then
+    pass "response:snapshot-hollow-surface-fail-closed" "null thread comments.nodes, deleted thread comments, null thread, null reviews, null pullRequest -> SNAPSHOT_ERROR / POLL_ERROR, exit 1"
+  else
+    failed "response:snapshot-hollow-surface-fail-closed" "$hollow_detail"
+  fi
+else
+  skipped "response:snapshot-hollow-surface-fail-closed" "$SKIP_REASON"
+fi
+
+# ── 33. a genuinely empty review surface still yields a valid baseline ────────────────
+# Discrimination for case 32: `nodes: []` is a clean PR, not a hollow one. Every connection empty
+# (totals 0), and a variant whose one thread holds an empty `comments.nodes`, each capture exactly
+# the expected BASELINE= line, exit 0, and a poll armed with that seed over the same state idles
+# silently to WATCH_TIMEOUT.
+if [ "$SEED_SUPPORTED" -eq 1 ]; then
+  empty_ok=1
+  empty_detail=""
+  empty_all="$(derive_fixture surface-empty-all "$PRE" \
+    '.data.repository.pullRequest |= (.comments = {"totalCount":0,"nodes":[]}
+      | .reviews = {"totalCount":0,"nodes":[]}
+      | .reviewThreads = {"totalCount":0,"nodes":[]})')"
+  empty_thread="$(derive_fixture surface-empty-thread "$empty_all" \
+    '.data.repository.pullRequest.reviewThreads = {"totalCount":1,"nodes":[{"comments":{"nodes":[]}}]}')"
+  for empty_case in "all|$empty_all|initial|OPEN|NONE|NONE|NONE|0|0|0|0|false" \
+    "thread|$empty_thread|initial|OPEN|NONE|NONE|NONE|0|0|1|0|false"; do
+    empty_name="${empty_case%%|*}"
+    empty_rest="${empty_case#*|}"
+    empty_fixture="${empty_rest%%|*}"
+    empty_expected="${empty_rest#*|}"
+    empty_raw="$(snapshot_raw "surface-empty-$empty_name" initial "$empty_fixture" "$REACT_NONE")"
+    empty_status=$?
+    if [ "$empty_status" -ne 0 ] || [ "$empty_raw" != "BASELINE=$empty_expected" ]; then
+      empty_ok=0
+      empty_detail="$empty_detail $empty_name: snapshot status=$empty_status out=$(printf '%s' "$empty_raw" | tr '\n' ';')"
+      continue
+    fi
+    st="$(new_state "surface-empty-$empty_name-poll")"
+    set_seq "$st" graphql "$empty_fixture"
+    set_seq "$st" reactions "$REACT_NONE"
+    out="$(arm_poll "$st" "$empty_expected")"
+    if [ "$out" != "WATCH_TIMEOUT" ]; then
+      empty_ok=0
+      empty_detail="$empty_detail $empty_name: poll out=$(printf '%s' "$out" | tr '\n' ';')"
+    fi
+  done
+  if [ "$empty_ok" -eq 1 ]; then
+    pass "response:empty-surface-valid-baseline" "all-empty connections and an empty-comment thread -> exact BASELINE=, exit 0; seeded poll silent to WATCH_TIMEOUT"
+  else
+    failed "response:empty-surface-valid-baseline" "$empty_detail"
+  fi
+else
+  skipped "response:empty-surface-valid-baseline" "$SKIP_REASON"
 fi
 
 # ── Summary ──────────────────────────────────────────────────────────────────────

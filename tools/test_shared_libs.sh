@@ -40,6 +40,7 @@ for required in "$LEDGER_PRESENT" \
                 "$SHARED_DIR/json-normalize.sh" \
                 "$SHARED_DIR/settings-merge.sh" "$SHARED_DIR/claude-mem-path.sh" \
                 "$SHARED_DIR/file-guard.sh" "$SHARED_DIR/test-detect.sh" \
+                "$SHARED_DIR/graphql-response.sh" "$SHARED_DIR/review-surface-shape.sh" \
                 "$CLASSIFY_FILTER" \
                 "$FN_REVIEW_HANDLED" "$FN_EXPECTED_REVIEW" "$FN_CI_CHECKS" "$FN_EXPECTED_CI" \
                 "$FN_OVERFLOW_THREADS" "$FN_MALFORMED"; do
@@ -87,6 +88,10 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite"
 # dependency before this source line.
 # shellcheck source=/dev/null
 . "$SHARED_DIR/test-detect.sh"
+# shellcheck source=/dev/null
+. "$SHARED_DIR/graphql-response.sh"
+# shellcheck source=/dev/null
+. "$SHARED_DIR/review-surface-shape.sh"
 
 PASS_COUNT=0
 FAIL_COUNT=0
@@ -3861,6 +3866,513 @@ if [ "$mx_fail" -eq 0 ]; then
 else
   failed "matrix:root-cluster-class-lock" "a seed-hive merge-predicate-gap site fix regressed (see matrix-N FAIL lines above)"
 fi
+
+# ── Section 17: graphql-response.sh — fail-closed GraphQL envelope validator (#393) ──
+echo ''
+echo '=== graphql-response.sh: hivemind_graphql_response_check / hivemind_graphql_pages_check (#393) ==='
+#
+# Every case asserts the full (return code, stdout) pair: success is `rc=0 out=` (prints nothing),
+# failure is `rc=1 out=<token>` with exactly one token. Token precedence under test:
+# empty-body > malformed > errors > missing-data.
+
+# gr_probe <fn> <body>: run one validator and render its outcome as `rc=<n> out=<stdout>`.
+gr_probe() {
+  local probe_fn="$1" probe_body="$2" probe_out probe_rc
+  probe_out="$("$probe_fn" "$probe_body")"
+  probe_rc=$?
+  printf 'rc=%s out=%s' "$probe_rc" "$probe_out"
+}
+
+# gr_case <case> <fn> <body> <expected-outcome>
+gr_case() {
+  assert_eq "$1" "$4" "$(gr_probe "$2" "$3")" "$2"
+}
+
+# 17a: single-body mode.
+gr_case "gqlresp:single-clean"              hivemind_graphql_response_check '{"data":{"viewer":{"login":"x"}}}' 'rc=0 out='
+gr_case "gqlresp:single-errors-empty-array" hivemind_graphql_response_check '{"errors":[],"data":{}}'           'rc=0 out='
+gr_case "gqlresp:single-errors-null"        hivemind_graphql_response_check '{"errors":null,"data":{}}'         'rc=0 out='
+gr_case "gqlresp:single-empty-string"       hivemind_graphql_response_check ''                                  'rc=1 out=empty-body'
+gr_case "gqlresp:single-blank-crlf"         hivemind_graphql_response_check $'  \r\n'                           'rc=1 out=empty-body'
+gr_case "gqlresp:single-not-json"           hivemind_graphql_response_check 'not json'                          'rc=1 out=malformed'
+gr_case "gqlresp:single-array-value"        hivemind_graphql_response_check '[1]'                               'rc=1 out=malformed'
+gr_case "gqlresp:single-two-values"         hivemind_graphql_response_check '{"a":1}{"b":2}'                    'rc=1 out=malformed'
+gr_case "gqlresp:single-errors-message"     hivemind_graphql_response_check '{"errors":[{"message":"Could not resolve to a PullRequest"}],"data":{}}' 'rc=1 out=errors'
+gr_case "gqlresp:single-errors-empty-obj"   hivemind_graphql_response_check '{"errors":[{}],"data":{}}'         'rc=1 out=errors'
+gr_case "gqlresp:single-errors-object"      hivemind_graphql_response_check '{"errors":{},"data":{}}'           'rc=1 out=errors'
+gr_case "gqlresp:single-errors-string"      hivemind_graphql_response_check '{"errors":"boom","data":{}}'       'rc=1 out=errors'
+gr_case "gqlresp:single-errors-false"       hivemind_graphql_response_check '{"errors":false,"data":{}}'        'rc=1 out=errors'
+gr_case "gqlresp:single-errors-zero"        hivemind_graphql_response_check '{"errors":0,"data":{}}'            'rc=1 out=errors'
+gr_case "gqlresp:single-errors-null-elem"   hivemind_graphql_response_check '{"errors":[null],"data":{}}'       'rc=1 out=errors'
+gr_case "gqlresp:single-data-null"          hivemind_graphql_response_check '{"data":null}'                     'rc=1 out=missing-data'
+gr_case "gqlresp:single-data-absent"        hivemind_graphql_response_check '{}'                                'rc=1 out=missing-data'
+gr_case "gqlresp:single-data-array"         hivemind_graphql_response_check '{"data":[]}'                       'rc=1 out=missing-data'
+gr_case "gqlresp:single-errors-over-data"   hivemind_graphql_response_check '{"errors":[{"message":"x"}],"data":null}' 'rc=1 out=errors'
+
+# 17b: paginated stream mode (pages concatenated with no separator, as `gh api graphql --paginate`
+# prints them without --jq / --slurp).
+gr_case "gqlresp:pages-two-clean"           hivemind_graphql_pages_check '{"data":{"n":1}}{"data":{"n":2}}'    'rc=0 out='
+gr_case "gqlresp:pages-clean-then-errors"   hivemind_graphql_pages_check '{"data":{"n":1}}{"errors":[{"message":"x"}],"data":{"n":2}}' 'rc=1 out=errors'
+gr_case "gqlresp:pages-errors-then-clean"   hivemind_graphql_pages_check '{"errors":[{"message":"x"}],"data":{"n":1}}{"data":{"n":2}}' 'rc=1 out=errors'
+gr_case "gqlresp:pages-clean-then-array"    hivemind_graphql_pages_check '{"data":{"n":1}}[1]'                 'rc=1 out=malformed'
+gr_case "gqlresp:pages-empty"               hivemind_graphql_pages_check ''                                    'rc=1 out=empty-body'
+gr_case "gqlresp:pages-one-clean"           hivemind_graphql_pages_check '{"data":{"n":1}}'                    'rc=0 out='
+gr_case "gqlresp:pages-clean-then-data-null" hivemind_graphql_pages_check '{"data":{"n":1}}{"data":null}'      'rc=1 out=missing-data'
+gr_case "gqlresp:pages-truncated"           hivemind_graphql_pages_check '{"data":{"n":1}}{"data":{"n"'        'rc=1 out=malformed'
+
+# 17c: purity. A sourced validator must `return`, never `exit`: the subshell reaches its trailing
+# printf only when the failing call returned control.
+gr_subshell_out="$( (hivemind_graphql_response_check 'not json' >/dev/null; printf 'returned:%s' "$?") )"
+assert_eq "gqlresp:purity-return-not-exit" "returned:1" "$gr_subshell_out" \
+  "failing hivemind_graphql_response_check returns 1 to its caller instead of exiting"
+gr_pages_subshell_out="$( (hivemind_graphql_pages_check '' >/dev/null; printf 'returned:%s' "$?") )"
+assert_eq "gqlresp:purity-pages-return-not-exit" "returned:1" "$gr_pages_subshell_out" \
+  "failing hivemind_graphql_pages_check returns 1 to its caller instead of exiting"
+
+# Success prints nothing on either stream; failure prints only its one token (jq diagnostics stay off
+# the caller's stderr).
+assert_eq "gqlresp:purity-success-silent" "" "$(hivemind_graphql_response_check '{"data":{}}' 2>&1)" \
+  "successful single check writes nothing to stdout or stderr"
+assert_eq "gqlresp:purity-pages-success-silent" "" "$(hivemind_graphql_pages_check '{"data":{}}{"data":{}}' 2>&1)" \
+  "successful pages check writes nothing to stdout or stderr"
+assert_eq "gqlresp:purity-failure-one-token" "malformed" "$(hivemind_graphql_response_check '{"data":' 2>&1)" \
+  "failing check writes exactly its token and no jq diagnostic"
+
+# Caller variables that share the validator's internal local names are left untouched.
+check_mode="caller-mode"
+response_body="caller-body"
+check_token="caller-token"
+envelope_program="caller-program"
+hivemind_graphql_response_check '{"errors":[{}],"data":{}}' >/dev/null
+hivemind_graphql_pages_check '{"data":{}}{"data":{}}' >/dev/null
+assert_eq "gqlresp:purity-caller-vars-unchanged" "caller-mode|caller-body|caller-token|caller-program" \
+  "$check_mode|$response_body|$check_token|$envelope_program" \
+  "validator locals do not leak into or overwrite the caller's variables"
+unset check_mode response_body check_token envelope_program
+
+# ── Section 18: review-loop GraphQL check closure (#393) ────────────────────────
+echo ''
+echo '=== review-loop GraphQL check closure: every `gh api graphql` script uses graphql-response.sh (#393) ==='
+#
+# A review-loop script is DISCOVERED when a non-comment line contains `gh api graphql`. Every
+# discovered script must (a) source a path ending in `_shared/graphql-response.sh"` on a non-comment
+# line and (b) call hivemind_graphql_response_check or hivemind_graphql_pages_check on a non-comment
+# line. The same predicate runs over the canaries (18b) and the real glob (18c), so the canaries prove
+# the real check flags an unchecked script and ignores a comment-only mention.
+#
+# RESIDUAL: this closure is file-level only. It proves each discovered script sources the lib and
+# calls a validator somewhere, not that every `gh api graphql` call site in that script routes its
+# body through the validator; per-call-site correctness is covered by the consumer behavior suites.
+
+# gqlclosure_classify_file <path>: print one verdict for a script: `undiscovered`, `checked`,
+# `missing-source`, `missing-call`, `missing-source+missing-call`, or `unreadable` (returns 1).
+gqlclosure_classify_file() {
+  local script_path="$1" code_lines grep_rc verdict_parts=""
+  code_lines="$(grep -v '^[[:space:]]*#' "$script_path" 2>/dev/null)"
+  grep_rc=$?
+  if [ "$grep_rc" -gt 1 ]; then
+    printf 'unreadable'
+    return 1
+  fi
+  if ! grep -q 'gh api graphql' <<<"$code_lines"; then
+    printf 'undiscovered'
+    return 0
+  fi
+  grep -Eq '^[[:space:]]*(\.|source)[[:space:]]+"[^"]*_shared/graphql-response\.sh"' <<<"$code_lines" \
+    || verdict_parts="missing-source"
+  grep -Eq 'hivemind_graphql_(response|pages)_check([^A-Za-z0-9_]|$)' <<<"$code_lines" \
+    || verdict_parts="${verdict_parts:+$verdict_parts+}missing-call"
+  printf '%s' "${verdict_parts:-checked}"
+}
+
+# gqlclosure_scan_scripts <path>...: print `<basename> <verdict>` per discovered script, one per line.
+gqlclosure_scan_scripts() {
+  local script_path script_verdict
+  for script_path in "$@"; do
+    [ -f "$script_path" ] || { printf '%s unreadable\n' "${script_path##*/}"; continue; }
+    script_verdict="$(gqlclosure_classify_file "$script_path")"
+    [ "$script_verdict" = "undiscovered" ] && continue
+    printf '%s %s\n' "${script_path##*/}" "$script_verdict"
+  done
+}
+
+# 18a: canary fixtures.
+gqlclosure_canary_dir="$WORKDIR/gqlclosure-canaries"
+mkdir -p "$gqlclosure_canary_dir"
+cat > "$gqlclosure_canary_dir/a-checked.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$SCRIPT_DIR/../../_shared/graphql-response.sh" || exit 1
+body="$(gh api graphql -f query=q)"
+hivemind_graphql_response_check "$body" >/dev/null || exit 1
+EOF
+cat > "$gqlclosure_canary_dir/b-unchecked.sh" <<'EOF'
+#!/usr/bin/env bash
+body="$(gh api graphql -f query=q)"
+printf '%s\n' "$body"
+EOF
+cat > "$gqlclosure_canary_dir/c-comment-only.sh" <<'EOF'
+#!/usr/bin/env bash
+# This script never runs `gh api graphql`; it only mentions it here.
+  # gh api graphql --paginate (indented comment mention)
+gh api repos/o/r/pulls
+EOF
+cat > "$gqlclosure_canary_dir/d-source-only.sh" <<'EOF'
+#!/usr/bin/env bash
+source "$SCRIPT_DIR/../../_shared/graphql-response.sh"
+gh api graphql -f query=q
+EOF
+cat > "$gqlclosure_canary_dir/e-call-only.sh" <<'EOF'
+#!/usr/bin/env bash
+[ -f "$SCRIPT_DIR/../../_shared/graphql-response.sh" ] || exit 1
+pages="$(gh api graphql --paginate -f query=q)"
+hivemind_graphql_pages_check "$pages" >/dev/null || exit 1
+EOF
+cat > "$gqlclosure_canary_dir/f-checked-in-comments-only.sh" <<'EOF'
+#!/usr/bin/env bash
+# . "$SCRIPT_DIR/../../_shared/graphql-response.sh"
+body="$(gh api graphql -f query=q)"
+  # hivemind_graphql_response_check "$body"
+EOF
+
+# 18b: the predicate over the canaries. A checked script is clean, an unchecked script is flagged
+# (each missing half independently), and a comment-only mention is not discovered. A `[ -f ]` probe
+# of the lib path is not a source line, and source/call text inside comments satisfies nothing.
+assert_eq "gqlclosure:canary-checked" "checked" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/a-checked.sh")"
+assert_eq "gqlclosure:canary-unchecked" "missing-source+missing-call" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/b-unchecked.sh")"
+assert_eq "gqlclosure:canary-comment-only-undiscovered" "undiscovered" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/c-comment-only.sh")"
+assert_eq "gqlclosure:canary-source-only" "missing-call" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/d-source-only.sh")"
+assert_eq "gqlclosure:canary-file-probe-is-not-source" "missing-source" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/e-call-only.sh")"
+assert_eq "gqlclosure:canary-comment-source-and-call" "missing-source+missing-call" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/f-checked-in-comments-only.sh")"
+assert_eq "gqlclosure:canary-unreadable" "unreadable rc=1" \
+  "$(gqlclosure_classify_file "$gqlclosure_canary_dir/absent.sh"; printf ' rc=%s' "$?")"
+assert_eq "gqlclosure:canary-scan" \
+  "a-checked.sh checked|b-unchecked.sh missing-source+missing-call|d-source-only.sh missing-call|e-call-only.sh missing-source|f-checked-in-comments-only.sh missing-source+missing-call" \
+  "$(gqlclosure_scan_scripts "$gqlclosure_canary_dir"/*.sh | paste -sd '|' -)" \
+  "scan lists every discovered canary with its verdict and skips the comment-only one"
+
+# 18c: the same scan over the real review-loop scripts.
+gqlclosure_report="$(gqlclosure_scan_scripts "$REPO_ROOT"/plugin/skills/github-review-loop/scripts/*.sh)"
+gqlclosure_discovered="$(cut -d' ' -f1 <<<"$gqlclosure_report" | paste -sd ' ' -)"
+echo "INFO [gqlclosure:real-discovered] $gqlclosure_discovered"
+if [ -n "$gqlclosure_report" ]; then
+  pass "gqlclosure:real-non-vacuous" "discovered set is non-empty"
+else
+  failed "gqlclosure:real-non-vacuous" "no review-loop script discovered calling gh api graphql (glob or predicate broke)"
+fi
+for gqlclosure_expected in fetch-normalize.sh pr-change-detect-poll.sh prefilter.sh react-marker.sh reply-resolve.sh; do
+  if grep -q "^$gqlclosure_expected " <<<"$gqlclosure_report"; then
+    pass "gqlclosure:real-discovers-$gqlclosure_expected" "discovered as a gh api graphql caller"
+  else
+    failed "gqlclosure:real-discovers-$gqlclosure_expected" "not discovered (actual set: '$gqlclosure_discovered')"
+  fi
+done
+gqlclosure_violations="$(grep -v ' checked$' <<<"$gqlclosure_report" | paste -sd '|' -)"
+assert_eq "gqlclosure:real-all-checked" "" "$gqlclosure_violations" \
+  "every discovered review-loop script sources graphql-response.sh and calls a validator"
+unset gqlclosure_canary_dir gqlclosure_report gqlclosure_discovered gqlclosure_expected gqlclosure_violations
+
+# ── Section 19: review-surface-shape.sh — PR review-activity skeleton predicate (#393) ──
+echo ''
+echo '=== review-surface-shape.sh: hivemind_review_surface_shape_check (#393) ==='
+#
+# Every case asserts the full (return code, stdout) pair via gr_case (Section 17): success is
+# `rc=0 out=`, failure is `rc=1 out=<token>`. Token precedence under test:
+# null-pullrequest > missing-connection. The base fixture carries exactly the selection set of
+# fetch-normalize.sh's QUERY (comments, reviews, reviewThreads with per-thread comments); each
+# variant is derived from it with one jq edit so a case differs from the clean skeleton in one place.
+rsshape_base='{"data":{"repository":{"pullRequest":{
+  "comments":{"totalCount":1,"nodes":[{"id":"IC_1","author":{"login":"alice","__typename":"User"},"body":"top-level note","url":"https://example.invalid/c1","reactionGroups":[{"content":"THUMBS_UP","viewerHasReacted":false}]}]},
+  "reviews":{"totalCount":1,"nodes":[{"id":"PRR_1","author":{"login":"alice","__typename":"User"},"body":"review summary","state":"COMMENTED","url":"https://example.invalid/r1","reactionGroups":[]}]},
+  "reviewThreads":{"totalCount":1,"nodes":[{"id":"PRRT_1","isResolved":false,"comments":{"totalCount":1,"nodes":[{"id":"PRRC_1","databaseId":101,"author":{"login":"alice","__typename":"User"},"body":"inline note"}]}}]}
+}}}}'
+rsshape_pr='.data.repository.pullRequest'
+
+# rsshape_case <case> <jq-edit> <expected-outcome>: derive one variant of the base fixture and assert
+# the check's outcome on it. A variant that fails to build is a FAIL in its own right, so a broken
+# jq edit can never feed a non-JSON body that would read as a null-pullrequest pass.
+rsshape_case() {
+  local case_name="$1" variant_edit="$2" expected_outcome="$3" variant_body
+  if ! variant_body="$(jq -c "$variant_edit" <<<"$rsshape_base" 2>/dev/null)" || [ -z "$variant_body" ]; then
+    failed "$case_name" "fixture variant failed to build from edit: $variant_edit"
+    return 0
+  fi
+  gr_case "$case_name" hivemind_review_surface_shape_check "$variant_body" "$expected_outcome"
+}
+
+# 19a: a clean skeleton passes, including every empty-nodes form of a genuinely clean PR.
+rsshape_case "rsshape:clean-skeleton"           '.'                                                   'rc=0 out='
+rsshape_case "rsshape:thread-comments-empty"    "$rsshape_pr.reviewThreads.nodes[0].comments.nodes = []" 'rc=0 out='
+rsshape_case "rsshape:all-nodes-empty" \
+  "$rsshape_pr.comments.nodes = [] | $rsshape_pr.reviews.nodes = [] | $rsshape_pr.reviewThreads.nodes = []" 'rc=0 out='
+
+# 19b: no pullRequest object.
+rsshape_case "rsshape:pullrequest-null"         "$rsshape_pr = null"                                  'rc=1 out=null-pullrequest'
+rsshape_case "rsshape:repository-null"          '.data.repository = null'                             'rc=1 out=null-pullrequest'
+rsshape_case "rsshape:pullrequest-array"        "$rsshape_pr = []"                                    'rc=1 out=null-pullrequest'
+gr_case      "rsshape:not-json"                 hivemind_review_surface_shape_check 'not json'        'rc=1 out=null-pullrequest'
+
+# 19c: a pullRequest object that has lost part of the skeleton.
+rsshape_case "rsshape:reviews-absent"           "del($rsshape_pr.reviews)"                            'rc=1 out=missing-connection'
+rsshape_case "rsshape:reviews-null"             "$rsshape_pr.reviews = null"                          'rc=1 out=missing-connection'
+rsshape_case "rsshape:comments-nodes-null"      "$rsshape_pr.comments.nodes = null"                   'rc=1 out=missing-connection'
+rsshape_case "rsshape:threads-nodes-null"       "$rsshape_pr.reviewThreads.nodes = null"              'rc=1 out=missing-connection'
+rsshape_case "rsshape:threads-nodes-null-elem"  "$rsshape_pr.reviewThreads.nodes = [null]"            'rc=1 out=missing-connection'
+rsshape_case "rsshape:thread-comments-absent"   "del($rsshape_pr.reviewThreads.nodes[0].comments)"   'rc=1 out=missing-connection'
+rsshape_case "rsshape:thread-comments-nodes-null" "$rsshape_pr.reviewThreads.nodes[0].comments.nodes = null" 'rc=1 out=missing-connection'
+rsshape_case "rsshape:connection-scalar"        "$rsshape_pr.reviews = 5"                             'rc=1 out=missing-connection'
+
+# 19c-strict: type-strict per position. Each case puts a wrong-typed value at one skeleton position
+# where the condition could otherwise yield NO output, which jq's all/2 counts as passing.
+rsshape_case "rsshape:threads-elem-scalar"      "$rsshape_pr.reviewThreads.nodes = [\"x\"]"          'rc=1 out=missing-connection'
+rsshape_case "rsshape:thread-comments-scalar"   "$rsshape_pr.reviewThreads.nodes[0].comments = 5"    'rc=1 out=missing-connection'
+rsshape_case "rsshape:thread-comments-nodes-object" \
+  "$rsshape_pr.reviewThreads.nodes[0].comments.nodes = {}"                                            'rc=1 out=missing-connection'
+rsshape_case "rsshape:threads-nodes-object"     "$rsshape_pr.reviewThreads.nodes = {}"                'rc=1 out=missing-connection'
+rsshape_case "rsshape:connection-array"         "$rsshape_pr.comments = []"                           'rc=1 out=missing-connection'
+rsshape_case "rsshape:data-scalar"              '.data = "x"'                                         'rc=1 out=null-pullrequest'
+rsshape_case "rsshape:repository-scalar"        '.data.repository = 5'                                'rc=1 out=null-pullrequest'
+gr_case      "rsshape:body-array"               hivemind_review_surface_shape_check '[]'              'rc=1 out=null-pullrequest'
+
+# 19d: purity. A sourced check must `return`, never `exit`: the subshell reaches its trailing printf
+# only when the failing call returned control.
+rsshape_subshell_out="$( (hivemind_review_surface_shape_check 'not json' >/dev/null; printf 'returned:%s' "$?") )"
+assert_eq "rsshape:purity-return-not-exit" "returned:1" "$rsshape_subshell_out" \
+  "failing hivemind_review_surface_shape_check returns 1 to its caller instead of exiting"
+
+# Success prints nothing on either stream; failure prints only its one token (jq diagnostics stay off
+# the caller's stderr).
+assert_eq "rsshape:purity-success-silent" "" "$(hivemind_review_surface_shape_check "$rsshape_base" 2>&1)" \
+  "successful check writes nothing to stdout or stderr"
+assert_eq "rsshape:purity-failure-one-token" "null-pullrequest" \
+  "$(hivemind_review_surface_shape_check '{"data":' 2>&1)" \
+  "failing check writes exactly its token and no jq diagnostic"
+
+# Caller variables that share the check's internal local names are left untouched.
+surface_body="caller-body"
+shape_token="caller-token"
+shape_program="caller-program"
+hivemind_review_surface_shape_check '{"data":{"repository":null}}' >/dev/null
+hivemind_review_surface_shape_check "$rsshape_base" >/dev/null
+assert_eq "rsshape:purity-caller-vars-unchanged" "caller-body|caller-token|caller-program" \
+  "$surface_body|$shape_token|$shape_program" \
+  "check locals do not leak into or overwrite the caller's variables"
+unset surface_body shape_token shape_program rsshape_base rsshape_pr rsshape_subshell_out
+
+# ── Section 20: review-surface shape check closure (#393) ───────────────────────
+echo ''
+echo '=== review-surface shape closure: every reviewThreads( reader uses review-surface-shape.sh (#393) ==='
+#
+# A review-loop script is DISCOVERED when a non-comment line contains `reviewThreads(`. Every
+# discovered script must (a) source a path ending in `_shared/review-surface-shape.sh"` on a
+# non-comment line and (b) call hivemind_review_surface_shape_check on a non-comment line. Two
+# no-second-copy checks run beside it: no review-loop script carries the predicate body on a
+# non-comment line (`(.nodes | type) == "array"`, or the old fetch-normalize form
+# `(.comments?.nodes? | type) == "array"`, whitespace-normalized), and the predicate signature
+# `def is_skeleton_connection:` (whitespace-normalized) appears on a non-comment line exactly once
+# across plugin/skills/**/*.sh and *.jq, in review-surface-shape.sh. The same predicates run over
+# the canaries (20b) and the real tree (20c).
+#
+# RESIDUAL: this closure is file-level only. It proves each discovered script sources the lib and
+# calls the check somewhere, not that every review-activity read in that script routes its body
+# through the check; per-call-site correctness is covered by the consumer behavior suites.
+
+# rsclosure_code_lines <path>: print the non-comment lines of a file; return 1 when it is unreadable.
+rsclosure_code_lines() {
+  local script_path="$1" code_lines grep_rc
+  code_lines="$(grep -v '^[[:space:]]*#' "$script_path" 2>/dev/null)"
+  grep_rc=$?
+  [ "$grep_rc" -gt 1 ] && return 1
+  printf '%s\n' "$code_lines"
+}
+
+# rsclosure_classify_file <path>: print one verdict for a script: `undiscovered`, `checked`,
+# `missing-source`, `missing-call`, `missing-source+missing-call`, or `unreadable` (returns 1).
+rsclosure_classify_file() {
+  local script_path="$1" code_lines verdict_parts=""
+  if ! code_lines="$(rsclosure_code_lines "$script_path")"; then
+    printf 'unreadable'
+    return 1
+  fi
+  if ! grep -qF 'reviewThreads(' <<<"$code_lines"; then
+    printf 'undiscovered'
+    return 0
+  fi
+  grep -Eq '^[[:space:]]*(\.|source)[[:space:]]+"[^"]*_shared/review-surface-shape\.sh"' <<<"$code_lines" \
+    || verdict_parts="missing-source"
+  grep -Eq 'hivemind_review_surface_shape_check([^A-Za-z0-9_]|$)' <<<"$code_lines" \
+    || verdict_parts="${verdict_parts:+$verdict_parts+}missing-call"
+  printf '%s' "${verdict_parts:-checked}"
+}
+
+# rsclosure_scan_scripts <path>...: print `<basename> <verdict>` per discovered script, one per line.
+rsclosure_scan_scripts() {
+  local script_path script_verdict
+  for script_path in "$@"; do
+    [ -f "$script_path" ] || { printf '%s unreadable\n' "${script_path##*/}"; continue; }
+    script_verdict="$(rsclosure_classify_file "$script_path")"
+    [ "$script_verdict" = "undiscovered" ] && continue
+    printf '%s %s\n' "${script_path##*/}" "$script_verdict"
+  done
+}
+
+# rsclosure_scan_local_copies <path>...: print `<basename> local-copy` for each file whose
+# whitespace-stripped non-comment lines carry the skeleton predicate body (either form), and
+# `<basename> unreadable` for a file that cannot be read. Prints nothing for a clean set.
+rsclosure_scan_local_copies() {
+  local script_path code_lines
+  for script_path in "$@"; do
+    if ! code_lines="$(rsclosure_code_lines "$script_path")"; then
+      printf '%s unreadable\n' "${script_path##*/}"
+      continue
+    fi
+    sed 's/[[:space:]]//g' <<<"$code_lines" \
+      | grep -qF -e '(.nodes|type)=="array"' -e '(.comments?.nodes?|type)=="array"' \
+      && printf '%s local-copy\n' "${script_path##*/}"
+  done
+  return 0
+}
+
+# rsclosure_signature_hits <path>...: print `<path>` once per non-comment line whose
+# whitespace-stripped form carries the predicate signature `def is_skeleton_connection:`, and
+# `<path> unreadable` for a file that cannot be read.
+rsclosure_signature_hits() {
+  local script_path code_lines code_line
+  for script_path in "$@"; do
+    if ! code_lines="$(rsclosure_code_lines "$script_path")"; then
+      printf '%s unreadable\n' "$script_path"
+      continue
+    fi
+    while IFS= read -r code_line; do
+      [[ "${code_line//[[:space:]]/}" == *'defis_skeleton_connection:'* ]] && printf '%s\n' "$script_path"
+    done <<<"$code_lines"
+  done
+  return 0
+}
+
+# 20a: canary fixtures.
+rsclosure_canary_dir="$WORKDIR/rsclosure-canaries"
+mkdir -p "$rsclosure_canary_dir"
+cat > "$rsclosure_canary_dir/a-checked.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" || exit 1
+query='pullRequest { reviewThreads(first: 50) { nodes { id } } }'
+hivemind_review_surface_shape_check "$body" >/dev/null || exit 1
+EOF
+cat > "$rsclosure_canary_dir/b-unchecked.sh" <<'EOF'
+#!/usr/bin/env bash
+query='pullRequest { reviewThreads(first: 50) { nodes { id } } }'
+printf '%s\n' "$query"
+EOF
+cat > "$rsclosure_canary_dir/c-comment-only.sh" <<'EOF'
+#!/usr/bin/env bash
+# This script never requests reviewThreads(first: 50); it only mentions it here.
+  # def is_skeleton_connection: (type == "object") and ((.nodes | type) == "array");
+  # (.comments?.nodes? | type) == "array"
+gh api repos/o/r/pulls
+EOF
+cat > "$rsclosure_canary_dir/d-source-only.sh" <<'EOF'
+#!/usr/bin/env bash
+source "$SCRIPT_DIR/../../_shared/review-surface-shape.sh"
+query='reviewThreads(first: 50) { nodes { id } }'
+EOF
+cat > "$rsclosure_canary_dir/e-call-only.sh" <<'EOF'
+#!/usr/bin/env bash
+[ -f "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" ] || exit 1
+query='reviewThreads(first: 50) { nodes { id } }'
+hivemind_review_surface_shape_check "$body" >/dev/null || exit 1
+EOF
+cat > "$rsclosure_canary_dir/f-local-copy.sh" <<'EOF'
+#!/usr/bin/env bash
+. "$SCRIPT_DIR/../../_shared/review-surface-shape.sh" || exit 1
+query='reviewThreads(first: 50) { nodes { id } }'
+hivemind_review_surface_shape_check "$body" >/dev/null || exit 1
+jq -e '(.reviewThreads | type) == "object" and ( .nodes|type )=="array"' <<<"$body"
+EOF
+cat > "$rsclosure_canary_dir/g-old-form-copy.sh" <<'EOF'
+#!/usr/bin/env bash
+jq -e '(.comments?.nodes?  |  type) == "array"' <<<"$body"
+EOF
+cat > "$rsclosure_canary_dir/h-signature-copy.jq" <<'EOF'
+# A second definition with different spacing still counts as a copy.
+def   is_skeleton_connection :  (type == "object");
+EOF
+
+# 20b: the predicates over the canaries. A checked script is clean, an unchecked script is flagged
+# (each missing half independently), and a comment-only mention is not discovered. A `[ -f ]` probe
+# of the lib path is not a source line. A local predicate body (either form, any spacing) is
+# flagged even in a checked script, and comment-only mentions of the body or signature satisfy
+# nothing and flag nothing.
+assert_eq "rsclosure:canary-checked" "checked" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/a-checked.sh")"
+assert_eq "rsclosure:canary-unchecked" "missing-source+missing-call" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/b-unchecked.sh")"
+assert_eq "rsclosure:canary-comment-only-undiscovered" "undiscovered" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/c-comment-only.sh")"
+assert_eq "rsclosure:canary-source-only" "missing-call" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/d-source-only.sh")"
+assert_eq "rsclosure:canary-file-probe-is-not-source" "missing-source" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/e-call-only.sh")"
+assert_eq "rsclosure:canary-local-copy-still-checked" "checked" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/f-local-copy.sh")"
+assert_eq "rsclosure:canary-unreadable" "unreadable rc=1" \
+  "$(rsclosure_classify_file "$rsclosure_canary_dir/absent.sh"; printf ' rc=%s' "$?")"
+assert_eq "rsclosure:canary-scan" \
+  "a-checked.sh checked|b-unchecked.sh missing-source+missing-call|d-source-only.sh missing-call|e-call-only.sh missing-source|f-local-copy.sh checked" \
+  "$(rsclosure_scan_scripts "$rsclosure_canary_dir"/*.sh | paste -sd '|' -)" \
+  "scan lists every discovered canary with its verdict and skips the undiscovered ones"
+assert_eq "rsclosure:canary-local-copy-scan" \
+  "f-local-copy.sh local-copy|g-old-form-copy.sh local-copy|absent.sh unreadable" \
+  "$(rsclosure_scan_local_copies "$rsclosure_canary_dir"/*.sh "$rsclosure_canary_dir/absent.sh" | paste -sd '|' -)" \
+  "both predicate-body forms are flagged at any spacing; comment-only mentions are not"
+assert_eq "rsclosure:canary-signature-hits" \
+  "$SHARED_DIR/review-surface-shape.sh|$rsclosure_canary_dir/h-signature-copy.jq" \
+  "$(rsclosure_signature_hits "$SHARED_DIR/review-surface-shape.sh" "$rsclosure_canary_dir"/*.sh \
+      "$rsclosure_canary_dir"/*.jq | paste -sd '|' -)" \
+  "a respaced second definition is a hit; a commented definition is not"
+
+# 20c: the same predicates over the real tree.
+rsclosure_report="$(rsclosure_scan_scripts "$REPO_ROOT"/plugin/skills/github-review-loop/scripts/*.sh)"
+rsclosure_discovered="$(cut -d' ' -f1 <<<"$rsclosure_report" | paste -sd ' ' -)"
+echo "INFO [rsclosure:real-discovered] $rsclosure_discovered"
+if [ -n "$rsclosure_report" ]; then
+  pass "rsclosure:real-non-vacuous" "discovered set is non-empty"
+else
+  failed "rsclosure:real-non-vacuous" "no review-loop script discovered requesting reviewThreads( (glob or predicate broke)"
+fi
+for rsclosure_expected in fetch-normalize.sh pr-change-detect-poll.sh prefilter.sh; do
+  if grep -q "^$rsclosure_expected " <<<"$rsclosure_report"; then
+    pass "rsclosure:real-discovers-$rsclosure_expected" "discovered as a reviewThreads( reader"
+  else
+    failed "rsclosure:real-discovers-$rsclosure_expected" "not discovered (actual set: '$rsclosure_discovered')"
+  fi
+done
+rsclosure_violations="$(grep -v ' checked$' <<<"$rsclosure_report" | paste -sd '|' -)"
+assert_eq "rsclosure:real-all-checked" "" "$rsclosure_violations" \
+  "every discovered review-loop script sources review-surface-shape.sh and calls the check"
+assert_eq "rsclosure:real-no-local-copy" "" \
+  "$(rsclosure_scan_local_copies "$REPO_ROOT"/plugin/skills/github-review-loop/scripts/*.sh \
+      "$REPO_ROOT"/plugin/skills/github-review-loop/scripts/*.jq | paste -sd '|' -)" \
+  "no review-loop script carries its own copy of the skeleton predicate body"
+rsclosure_signature_files=()
+while IFS= read -r rsclosure_signature_file; do
+  rsclosure_signature_files+=("$rsclosure_signature_file")
+done < <(find "$REPO_ROOT/plugin/skills" -type f \( -name '*.sh' -o -name '*.jq' \) | LC_ALL=C sort)
+if [ "${#rsclosure_signature_files[@]}" -gt 0 ]; then
+  pass "rsclosure:real-signature-scan-non-vacuous" "${#rsclosure_signature_files[@]} plugin/skills .sh/.jq files scanned"
+else
+  failed "rsclosure:real-signature-scan-non-vacuous" "no .sh/.jq file found under plugin/skills"
+fi
+assert_eq "rsclosure:real-signature-unique-to-lib" "$SHARED_DIR/review-surface-shape.sh" \
+  "$(rsclosure_signature_hits ${rsclosure_signature_files[@]+"${rsclosure_signature_files[@]}"} | paste -sd '|' -)" \
+  "def is_skeleton_connection: appears on exactly one non-comment line, in review-surface-shape.sh"
+unset rsclosure_canary_dir rsclosure_report rsclosure_discovered rsclosure_expected rsclosure_violations \
+  rsclosure_signature_files rsclosure_signature_file
 
 # ── Summary ─────────────────────────────────────────────────────────────────────
 echo ''

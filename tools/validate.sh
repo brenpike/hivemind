@@ -63,6 +63,7 @@ SUITE_TEST_BUMP_TYPE='test_bump_type.sh'
 SUITE_TEST_VALIDATE_SUITES='test_validate_suites.sh'
 SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
 SUITE_TEST_SCRIPT_BOOTSTRAP='test_script_bootstrap.sh'
+SUITE_TEST_PREFILTER='test_prefilter.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
 ALL_SUITES=(
@@ -90,6 +91,7 @@ ALL_SUITES=(
   "$SUITE_TEST_VALIDATE_SUITES"
   "$SUITE_TEST_CHANGE_DETECT_POLL"
   "$SUITE_TEST_SCRIPT_BOOTSTRAP"
+  "$SUITE_TEST_PREFILTER"
 )
 
 # KNOWN_SUITES: the tools/*.sh validation suites this dispatcher knows about. --self-test
@@ -118,6 +120,7 @@ KNOWN_SUITES=(
   test_validate_suites.sh
   test_change_detect_poll.sh
   test_script_bootstrap.sh
+  test_prefilter.sh
 )
 
 # NON_SUITE_TOOLS: tools/*.sh files that are NOT validation suites (so --self-test does not
@@ -299,7 +302,19 @@ run_suites() {
 #                                      -> test_brood_compat
 #   plugin/skills/_shared/*.sh, tests/brood/**          -> test_shared_libs
 #   plugin/skills/github-review-loop/scripts/*.jq      -> test_fix_history_classify, test_fetch_normalize,
-#                                                         test_shared_libs, test_change_detect_poll
+#                                                         test_shared_libs, test_change_detect_poll,
+#                                                         test_prefilter
+#   plugin/skills/github-review-loop/scripts/prefilter.sh, tests/fix-history/*
+#                                      -> test_prefilter
+#   plugin/skills/github-review-loop/scripts/*.sh       -> test_shared_libs (glob-closure test)
+#   plugin/skills/_shared/graphql-response.sh
+#                                      -> test_fetch_normalize, test_change_detect_poll, test_prefilter,
+#                                         test_react_marker, test_reply_resolve (+ test_shared_libs,
+#                                         test_script_bootstrap, policy_check via the generic globs)
+#   plugin/skills/_shared/review-surface-shape.sh
+#                                      -> test_fetch_normalize, test_prefilter, test_change_detect_poll
+#                                         (+ test_shared_libs, test_script_bootstrap, policy_check via the
+#                                         generic globs)
 #   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
@@ -523,6 +538,52 @@ map_path() {
     add_selected "$SUITE_TEST_FETCH_NORMALIZE" "$p (jq module executed by fetch-normalize)"
     add_selected "$SUITE_TEST_SHARED" "$p (jq module executed by shared fetch core)"
     add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (jq module executed by change-detect poll)"
+    add_selected "$SUITE_TEST_PREFILTER" "$p (jq module executed by prefilter)"
+    matched=1
+  fi
+
+  # test_prefilter: the prefilter script (.sh) + the tests/fix-history/* fixtures it reuses as inputs.
+  # The script is ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule below), but
+  # policy_check NEVER EXECUTES bash — so a prefilter edit must route to the behavioral suite.
+  # tests/fix-history/* is routed here in addition to test_fix_history_classify / test_fetch_normalize
+  # above: a fixture edit changes this suite's inputs too. (tools/test_prefilter.sh itself is covered
+  # by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/github-review-loop/scripts/prefilter.sh \
+     || "$p" == tools/test_prefilter.sh \
+     || "$p" == tests/fix-history/* ]]; then
+    add_selected "$SUITE_TEST_PREFILTER" "$p (prefilter script/fixture)"
+    matched=1
+  fi
+
+  # _shared/graphql-response.sh: the shared GraphQL errors validator sourced by the review-loop
+  # scripts. Its regressions surface in every consumer, so route to each consumer's behavior oracle:
+  # fetch-normalize, change-detect-poll, prefilter, react-marker, reply-resolve. (test_shared_libs,
+  # test_script_bootstrap and policy_check already match via the generic _shared/*.sh, plugin/**/*.sh
+  # and plugin/* rules.)
+  if [[ "$p" == plugin/skills/_shared/graphql-response.sh ]]; then
+    add_selected "$SUITE_TEST_FETCH_NORMALIZE" "$p (graphql-response lib sourced by fetch-normalize)"
+    add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (graphql-response lib sourced by change-detect poll)"
+    add_selected "$SUITE_TEST_PREFILTER" "$p (graphql-response lib sourced by prefilter)"
+    add_selected "$SUITE_TEST_REACT_MARKER" "$p (graphql-response lib sourced by react-marker)"
+    add_selected "$SUITE_TEST_REPLY_RESOLVE" "$p (graphql-response lib sourced by reply-resolve)"
+    matched=1
+  fi
+
+  # _shared/review-surface-shape.sh: the shared review-surface shape library sourced by the review-loop
+  # scripts. Route to the behavior oracles of its consumers: fetch-normalize, prefilter, change-detect-poll.
+  # (test_shared_libs, test_script_bootstrap and policy_check already match via the generic
+  # _shared/*.sh, plugin/**/*.sh and plugin/* rules.)
+  if [[ "$p" == plugin/skills/_shared/review-surface-shape.sh ]]; then
+    add_selected "$SUITE_TEST_FETCH_NORMALIZE" "$p (review-surface-shape lib sourced by fetch-normalize)"
+    add_selected "$SUITE_TEST_PREFILTER" "$p (review-surface-shape lib sourced by prefilter)"
+    add_selected "$SUITE_TEST_CHANGE_DETECT_POLL" "$p (review-surface-shape lib sourced by change-detect poll)"
+    matched=1
+  fi
+
+  # test_shared_libs: every review-loop script. A forthcoming glob-closure test in test_shared_libs
+  # asserts each review-loop script adopts the shared libs, so any scripts/*.sh edit must run it.
+  if [[ "$p" == plugin/skills/github-review-loop/scripts/*.sh ]]; then
+    add_selected "$SUITE_TEST_SHARED" "$p (review-loop script glob-closure)"
     matched=1
   fi
 
@@ -937,6 +998,7 @@ self_test() {
     ["test_validate_suites.sh"]="tools/test_validate_suites.sh"
     ["test_change_detect_poll.sh"]="tests/change-detect-poll/README.md"
     ["test_script_bootstrap.sh"]="plugin/skills/_shared/claude-mem-path.sh"
+    ["test_prefilter.sh"]="plugin/skills/github-review-loop/scripts/prefilter.sh"
   )
   local script_name expected_suite suite_path probe_path hit
   for script_name in "${KNOWN_SUITES[@]}"; do
