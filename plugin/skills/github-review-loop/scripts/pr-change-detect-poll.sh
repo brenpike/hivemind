@@ -695,6 +695,17 @@ fi
 # poll's own marker decision against the seed, one line out. A failed or
 # incomplete capture is CHECK_ERROR (exit 1); it is never retried, never sleeps,
 # never reads the deadline, and never advances or re-emits a seed.
+# RECORDED RESIDUAL (linked local-review finding 91655d29, iter2,
+# approval-exit lifecycle): activity between this check and the skill's
+# terminal report is unseen. Root cause: any watcher must stop at a terminal,
+# so a gap always exists after the last look; the same gap is WATCH_TIMEOUT's
+# final sleep interval and an expired arm's last interval, inherited from
+# main. Bounded impact: seconds or one poll interval, on a PR the loop no
+# longer owns; agents never merge, and the activity stays on the PR for the
+# human who merges. Obvious remediation considered and rejected on the merits:
+# keeping a poll alive past the terminal needs a Monitor running after the
+# loop returns (forbidden; nothing would consume its events) or TaskStop (the
+# dependency the self-exit removed).
 if [ "$MODE" = "check" ]; then
   reset_snapshot_vars
   compute_snapshot || poll_fail
