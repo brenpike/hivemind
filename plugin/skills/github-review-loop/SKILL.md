@@ -40,6 +40,16 @@ cycle re-arms a fresh full window, and a window that elapses with no actionable
 arrival ends the watch. The poll script's own deadline is PER-PROCESS, so a fresh
 arm IS a fresh window — the idle semantics live here, in the arm/re-arm discipline.
 
+**Window deadline.** The REMAINING idle budget of the current window has ONE
+source: the window deadline, an epoch-seconds value recorded when an arm OPENS a
+window and held until the next arm opens one. Exactly two arms open a window: the
+first arm after cycle 0 (step 4) and a productive re-arm (step 6). Each passes the
+full `max_watch_duration` and records `$(date +%s)` plus that value as the
+deadline. The other two arms CONTINUE the current window: an expired-arm re-arm
+(step 4) and the re-arm after a non-productive `REVIEWER_APPROVED` return (step
+6). Each passes `max(0, deadline - $(date +%s))` as its `max_watch_duration`
+argument, never the full value, and leaves the deadline unchanged.
+
 `max_remediation_cycles` is a FLOOR. The floor value is DECLARED and ENFORCED by
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, and no
 literal is restated here — query it with
@@ -100,8 +110,9 @@ duplicate-suppression.
 
 An arm that returns without printing a marker that ends the poll (a terminal
 marker or `REVIEWER_APPROVED`, step 5) means the arm EXPIRED, not that the watch
-ended: re-arm for the REMAINING idle budget of the current window, reusing the
-SAME seed the expired arm carried, per the Seed-Advance INVARIANT below.
+ended: re-arm for the REMAINING idle budget of the current window (computed per
+Window deadline above), reusing the SAME seed the expired arm carried, per the
+Seed-Advance INVARIANT below.
 
 **Arm kind.** Every seed is stamped `initial` or `re-arm` at capture, and the
 stamp travels INSIDE the token — so carrying a seed forward carries its kind
@@ -197,8 +208,9 @@ report.
 A PRODUCTIVE cycle — `findings_resolved ≥ 1` returned with `EXIT_REASON=none` —
 re-arms the idle window: stop the Monitor (none is running after a
 `REVIEWER_APPROVED` wake) and arm per step 4 with the PENDING seed captured
-before this cycle's dispatch (step 5) and a full fresh `max_watch_duration`; a
-re-arm is not a capture site, and the pending seed is never substituted for a
+before this cycle's dispatch (step 5) and a full fresh `max_watch_duration`,
+recording a new window deadline per Window deadline above; a re-arm is not a
+capture site, and the pending seed is never substituted for a
 fresh one, per the Seed-Advance INVARIANT (step 4).
 SUPERSEDED-ARM TIMEOUT. On a `CHANGED`-wake dispatch the Monitor is deliberately
 left armed across dispatch (step 5), so the pre-dispatch arm's
@@ -219,9 +231,10 @@ A NON-productive return (`findings_resolved = 0` with `EXIT_REASON=none`) keeps
 watching on the CURRENT window, and the window does not reset. After a `CHANGED`
 wake the Monitor was never stopped: leave it armed and DISCARD the pending seed.
 After a `REVIEWER_APPROVED` wake the poll already exited: arm per step 4 with the
-PENDING seed for the REMAINING idle budget of the current window, floored at 0
-(the poll rejects a negative budget as `POLL_ERROR`; 0 prints `WATCH_TIMEOUT`
-immediately). NEVER arm with the seed the exited arm carried — an `initial` seed
+PENDING seed for the REMAINING idle budget of the current window, computed from
+the recorded deadline per Window deadline above — never the full
+`max_watch_duration` — and floored at 0 (the poll rejects a negative budget as
+`POLL_ERROR`; 0 prints `WATCH_TIMEOUT` immediately). NEVER arm with the seed the exited arm carried — an `initial` seed
 re-fires the same approval and loops the confirmation pass. This arm is not a
 capture site, so the Seed-Advance INVARIANT holds. On any terminal
 `EXIT_REASON` the pending seed is discarded and any running Monitor stopped. Once the cycle
