@@ -1,18 +1,19 @@
 import { vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
-// Harness for booting the COMPILED website module (web/scripts/main.js) against
+// Harness for booting the COMPILED Swarm Glyph engine (web/scripts/main.js) against
 // a jsdom DOM with controllable fakes for the browser APIs main.ts touches.
 //
 // Decision: fakes are HAND-ROLLED (not jsdom-testing-mocks / vitest-canvas-mock).
-// Phase 2 needs precise, per-test control — toggle matchMedia legacy vs modern,
-// fire IntersectionObserver entries manually, delete IO to hit the absent branch,
-// and assert exact 2d-context lifecycle calls. A hand-rolled surface exposes all of
-// that directly; third-party libs would hide it behind their own conventions.
+// The suites need precise, per-test control: toggle matchMedia legacy vs modern,
+// fire IntersectionObserver entries manually on a chosen observer, delete IO to hit
+// the absent branch, drive rAF frames with explicit timestamps, and assert 2d-context
+// CALL occurrence. A hand-rolled surface exposes all of that directly; third-party libs
+// would hide it behind their own conventions.
 // ---------------------------------------------------------------------------
 
-// Absolute-from-repo-root path to the compiled artifact. main.ts has no exports and
-// self-boots on evaluation, so importing this file runs init() against the current DOM.
+// Path relative to this helper. main.ts has no exports and self-boots on evaluation,
+// so importing this file runs init() against the current DOM.
 const COMPILED_MAIN = '../../scripts/main.js';
 
 // ---------------------------------------------------------------------------
@@ -38,16 +39,14 @@ export interface MatchMediaOptions {
   // Initial value of MediaQueryList.matches (i.e. prefers-reduced-motion state).
   matches?: boolean;
   // When true, the MediaQueryList omits addEventListener and exposes only the
-  // deprecated addListener — exercising main.ts's legacy WebKit fallback path.
+  // deprecated addListener, exercising main.ts's legacy WebKit fallback path.
   legacy?: boolean;
 }
 
-let lastMediaQueryList: FakeMediaQueryList | null = null;
-
-// Install window.matchMedia. MUST be called BEFORE bootMain — main.js reads matchMedia
-// at module-eval time (top-level `const motionQuery = window.matchMedia(...)`), so an
-// absent fake makes the import throw. Returns the MediaQueryList the module will hold,
-// so a test can flip `.matches` and call `_fireChange` to drive live preference changes.
+// Install window.matchMedia. Call BEFORE bootMain: init() reads matchMedia once while
+// booting and holds the returned MediaQueryList. Returns that MediaQueryList so a test
+// can call `_fireChange` to drive live preference changes. Leaving matchMedia absent is
+// a supported engine path (motion on).
 export function installMatchMedia(opts: MatchMediaOptions = {}): FakeMediaQueryList {
   const matches = opts.matches ?? false;
   const legacy = opts.legacy ?? false;
@@ -72,7 +71,6 @@ export function installMatchMedia(opts: MatchMediaOptions = {}): FakeMediaQueryL
     mql.dispatchEvent = () => true;
   }
 
-  lastMediaQueryList = mql;
   Object.defineProperty(window, 'matchMedia', {
     configurable: true,
     writable: true,
@@ -97,12 +95,12 @@ export interface FakeIntersectionObserver {
 }
 
 // Registry of all IntersectionObserver instances main.js constructs during a boot.
-// main.js builds up to two: one for scroll-reveal, one for the swarm canvas.
+// The engine builds two: the sections observer and the decode observer.
 const intersectionObservers: FakeIntersectionObserver[] = [];
 
 // Install a controllable IntersectionObserver. Returns the registry array (shared
-// reference) so a test can reach into a created instance and call `.trigger(...)`
-// with synthetic entries to drive the reveal / canvas-visibility callbacks.
+// reference) so a test can locate a created instance (see findObserver) and call
+// `.trigger(...)` with synthetic entries.
 export function installIntersectionObserver(): FakeIntersectionObserver[] {
   intersectionObservers.length = 0;
 
@@ -143,11 +141,24 @@ export function installIntersectionObserver(): FakeIntersectionObserver[] {
   return intersectionObservers;
 }
 
+// Locate a created observer by its rootMargin option rather than by creation order.
+// The engine's sections observer uses '-48% 0px -48% 0px'; its decode observer '0px'.
+// Throws when no observer matches, so a missing observer fails loudly.
+export function findObserver(
+  registry: FakeIntersectionObserver[],
+  rootMargin: string,
+): FakeIntersectionObserver {
+  const found = registry.find((observer) => observer.options?.rootMargin === rootMargin);
+  if (!found) {
+    throw new Error(`No IntersectionObserver with rootMargin "${rootMargin}" was created`);
+  }
+  return found;
+}
+
 // Delete IntersectionObserver from the global to exercise main.js's absent branch
-// (`'IntersectionObserver' in window` → false). Call BEFORE bootMain.
+// (`typeof IntersectionObserver === 'function'` false). Call BEFORE bootMain.
 export function removeIntersectionObserver(): void {
   intersectionObservers.length = 0;
-  // Reflect.deleteProperty so a subsequent `'IntersectionObserver' in window` is false.
   Reflect.deleteProperty(window, 'IntersectionObserver');
   Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'IntersectionObserver');
 }
@@ -156,16 +167,16 @@ export function removeIntersectionObserver(): void {
 // requestAnimationFrame / cancelAnimationFrame fakes
 // ---------------------------------------------------------------------------
 
-// Install rAF/cAF fakes. Only needed when NOT using vi.useFakeTimers. When a test uses
-// fake timers and needs rAF, prefer:
-//   vi.useFakeTimers({ toFake: ['requestAnimationFrame', 'cancelAnimationFrame', ...] })
-// because Vitest does not fake rAF/cAF by default.
+// Install rAF/cAF fakes. resetHarnessGlobals deletes jsdom's own rAF, so a test that
+// does not call installRaf boots with requestAnimationFrame absent (the engine's
+// no-rAF early return).
 //
-// These fakes do NOT auto-run the callback — that would create an unbounded loop
-// (main.js's tick() re-schedules itself). The returned controller lets a test flush a
-// single frame deliberately, keeping rAF timing out of the assertions.
+// These fakes do NOT auto-run the callback: the engine's frame loop re-schedules itself,
+// so auto-run would loop unbounded. The returned controller lets a test flush a single
+// frame deliberately. `flushOne(ts)` passes an explicit timestamp for deterministic
+// time; omitted, it passes performance.now().
 export interface RafController {
-  flushOne: () => void;
+  flushOne: (ts?: number) => void;
   pending: () => number;
 }
 
@@ -191,12 +202,12 @@ export function installRaf(): RafController {
   });
 
   return {
-    flushOne() {
+    flushOne(ts?: number) {
       const entry = callbacks.entries().next();
       if (entry.done) return;
       const [id, cb] = entry.value;
       callbacks.delete(id);
-      cb(performance.now());
+      cb(ts ?? performance.now());
     },
     pending() {
       return callbacks.size;
@@ -208,25 +219,88 @@ export function installRaf(): RafController {
 // Canvas 2d context spy
 // ---------------------------------------------------------------------------
 
+type SpyFn = ReturnType<typeof vi.fn>;
+
+// Every 2d-context member web/src/main.ts touches, on the #swarm context, the glow
+// sprite contexts and the hero/glyph scratch contexts.
 export type Canvas2dSpy = {
-  clearRect: ReturnType<typeof vi.fn>;
-  beginPath: ReturnType<typeof vi.fn>;
-  arc: ReturnType<typeof vi.fn>;
-  fill: ReturnType<typeof vi.fn>;
-  fillStyle: string;
+  clearRect: SpyFn;
+  fillRect: SpyFn;
+  beginPath: SpyFn;
+  arc: SpyFn;
+  fill: SpyFn;
+  stroke: SpyFn;
+  moveTo: SpyFn;
+  lineTo: SpyFn;
+  quadraticCurveTo: SpyFn;
+  drawImage: SpyFn;
+  fillText: SpyFn;
+  setTransform: SpyFn;
+  save: SpyFn;
+  restore: SpyFn;
+  translate: SpyFn;
+  scale: SpyFn;
+  createRadialGradient: SpyFn;
+  getImageData: SpyFn;
+  measureText: SpyFn;
+  fillStyle: unknown;
+  strokeStyle: unknown;
+  globalCompositeOperation: string;
+  globalAlpha: number;
+  lineWidth: number;
+  lineCap: string;
+  lineJoin: string;
+  font: string;
+  textAlign: string;
+  textBaseline: string;
+  letterSpacing: string;
 };
 
-// Stub HTMLCanvasElement.getContext('2d') with a spy 2d context. jsdom returns null,
-// which would make main.js bail at `if (!ctx) return;`. Returns the spy so a test can
-// assert lifecycle CALLS (clearRect/beginPath/arc/fill) — never pixel output.
-export function installCanvas2dContext(): Canvas2dSpy {
-  const spy: Canvas2dSpy = {
+// Builds a fresh spy 2d context. getImageData returns a zeroed buffer sized to the
+// requested region (never smaller than one pixel); measureText reports a fixed width.
+function createCanvas2dSpy(): Canvas2dSpy {
+  return {
     clearRect: vi.fn(),
+    fillRect: vi.fn(),
     beginPath: vi.fn(),
     arc: vi.fn(),
     fill: vi.fn(),
+    stroke: vi.fn(),
+    moveTo: vi.fn(),
+    lineTo: vi.fn(),
+    quadraticCurveTo: vi.fn(),
+    drawImage: vi.fn(),
+    fillText: vi.fn(),
+    setTransform: vi.fn(),
+    save: vi.fn(),
+    restore: vi.fn(),
+    translate: vi.fn(),
+    scale: vi.fn(),
+    createRadialGradient: vi.fn(() => ({ addColorStop: vi.fn() })),
+    getImageData: vi.fn((_x: number, _y: number, w: number, h: number) => ({
+      data: new Uint8ClampedArray(Math.max(4, w * h * 4)),
+    })),
+    measureText: vi.fn(() => ({ width: 6 })),
     fillStyle: '',
+    strokeStyle: '',
+    globalCompositeOperation: 'source-over',
+    globalAlpha: 1,
+    lineWidth: 1,
+    lineCap: 'butt',
+    lineJoin: 'miter',
+    font: '',
+    textAlign: 'start',
+    textBaseline: 'alphabetic',
+    letterSpacing: '0px',
   };
+}
+
+// Stub HTMLCanvasElement.getContext('2d') with ONE shared spy 2d context, returned for
+// every canvas (the #swarm canvas and the detached sprite/scratch canvases alike).
+// jsdom returns null, which would make main.js take its no-context early return.
+// Returns the spy so a test can assert CALL occurrence, never pixel output.
+export function installCanvas2dContext(): Canvas2dSpy {
+  const spy = createCanvas2dSpy();
   Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
     configurable: true,
     writable: true,
@@ -255,26 +329,75 @@ export function dispatchVisibilityChange(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Boot-time listener tracking
+// ---------------------------------------------------------------------------
+
+interface TrackedListener {
+  target: EventTarget;
+  type: string;
+  listener: EventListenerOrEventListenerObject;
+  options?: boolean | EventListenerOptions;
+}
+
+// Listeners the engine registered on window, document and <html> during bootMain.
+// Those targets outlive a test (only body/head are wiped), so a previous boot's
+// visibilitychange or click handler would otherwise keep firing into the next test.
+const bootListeners: TrackedListener[] = [];
+
+// Replace target.addEventListener with a recording wrapper; returns a restore function
+// that puts the original property descriptor back (or removes the own property).
+function trackListenersOn(target: EventTarget): () => void {
+  const original = target.addEventListener;
+  const ownDescriptor = Object.getOwnPropertyDescriptor(target, 'addEventListener');
+  Object.defineProperty(target, 'addEventListener', {
+    configurable: true,
+    writable: true,
+    value: (
+      type: string,
+      listener: EventListenerOrEventListenerObject | null,
+      options?: boolean | AddEventListenerOptions,
+    ) => {
+      if (listener) bootListeners.push({ target, type, listener, options });
+      original.call(target, type, listener, options);
+    },
+  });
+  return () => {
+    if (ownDescriptor) Object.defineProperty(target, 'addEventListener', ownDescriptor);
+    else Reflect.deleteProperty(target, 'addEventListener');
+  };
+}
+
+// Remove every listener recorded by bootMain.
+function removeBootListeners(): void {
+  for (const tracked of bootListeners) {
+    tracked.target.removeEventListener(tracked.type, tracked.listener, tracked.options);
+  }
+  bootListeners.length = 0;
+}
+
+// ---------------------------------------------------------------------------
 // Reset
 // ---------------------------------------------------------------------------
 
 // Tear down every harness-installed global and registry. Called by setup before/after
 // each test so no fake leaks across tests. INVARIANT: this must remove anything the
-// installers add (matchMedia, IntersectionObserver, rAF/cAF, getContext, document.hidden).
+// installers and bootMain add (matchMedia, IntersectionObserver, rAF/cAF, getContext,
+// document.hidden, document.readyState, boot-time listeners).
 export function resetHarnessGlobals(): void {
+  removeBootListeners();
   Reflect.deleteProperty(window, 'matchMedia');
   Reflect.deleteProperty(window, 'IntersectionObserver');
   Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'IntersectionObserver');
   Reflect.deleteProperty(window, 'requestAnimationFrame');
   Reflect.deleteProperty(window, 'cancelAnimationFrame');
   Reflect.deleteProperty(HTMLCanvasElement.prototype, 'getContext');
+  Reflect.deleteProperty(document, 'readyState');
   // Restore document.hidden to a plain false value owned by the test harness.
   Object.defineProperty(document, 'hidden', {
     configurable: true,
     get: () => false,
   });
   intersectionObservers.length = 0;
-  lastMediaQueryList = null;
 }
 
 // ---------------------------------------------------------------------------
@@ -287,12 +410,14 @@ export interface BootOptions {
   readyState?: DocumentReadyState;
 }
 
-// Boot the compiled website module against the already-mounted DOM.
+// Boot the compiled engine against the already-mounted DOM.
 //
 // CONTRACT:
 //  1. Mount your fixture DOM (via fixtures/ loaders) and install whichever fakes the
 //     test needs BEFORE calling bootMain. bootMain installs NO fakes itself.
-//  2. bootMain sets document.readyState, then fresh-imports web/scripts/main.js.
+//  2. bootMain sets document.readyState, then fresh-imports web/scripts/main.js while
+//     recording the listeners it adds to window, document and <html> (removed again by
+//     resetHarnessGlobals).
 //
 // Fresh boot is achieved with vi.resetModules() + dynamic import(): the compiled module
 // has module-level side effects (it self-runs init()), and a second import in the same
@@ -305,12 +430,17 @@ export async function bootMain(opts: BootOptions = {}): Promise<void> {
     get: () => readyState,
   });
 
-  vi.resetModules();
-  await import(/* @vite-ignore */ COMPILED_MAIN);
+  const restorers = [window, document, document.documentElement].map(trackListenersOn);
+  try {
+    vi.resetModules();
+    await import(/* @vite-ignore */ COMPILED_MAIN);
 
-  // When readyState was 'loading', main.js registered a DOMContentLoaded listener
-  // instead of calling init() — fire it so init() runs against the fixture DOM.
-  if (readyState === 'loading') {
-    document.dispatchEvent(new Event('DOMContentLoaded'));
+    // When readyState was 'loading', main.js registered a DOMContentLoaded listener
+    // instead of calling init(); fire it so init() runs against the fixture DOM.
+    if (readyState === 'loading') {
+      document.dispatchEvent(new Event('DOMContentLoaded'));
+    }
+  } finally {
+    restorers.forEach((restore) => restore());
   }
 }

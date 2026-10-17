@@ -9,52 +9,60 @@ import {
 } from './helpers/boot-main';
 import { mountPage } from './fixtures';
 
-// Characterization suite for the legacy / absent-API fallback branches in main.ts.
-// Pins CURRENT observable behavior of: the deprecated WebKit addListener path in
-// onMotionChange (lines 35-41), and the IntersectionObserver-absent branches in both
-// initScrollReveal (immediate reveal) and initSwarmCanvas (direct start(), lines 352-354).
+// Characterization suite for the legacy / absent-API fallback branches in main.ts:
+// the deprecated WebKit addListener path for the reduced-motion listener, the
+// matchMedia-absent path (motion on), and the IntersectionObserver-absent path (scroll
+// fallback for sections, no decode registration).
 
 describe('fallback branches', () => {
   it('registers the motion-change listener via the deprecated addListener when addEventListener is absent', async () => {
-    // legacy:true omits addEventListener, leaving only the deprecated addListener.
     const mql = installMatchMedia({ matches: false, legacy: true });
     installIntersectionObserver();
     installRaf();
     installCanvas2dContext();
 
-    // Spy on the legacy registrar BEFORE boot so we can prove main.js used it.
     const addListenerSpy = vi.spyOn(mql, 'addListener');
 
     mountPage('index');
-    // onMotionChange is invoked by initScrollReveal, initGlowTargets, and initSwarmCanvas;
-    // with no addEventListener available it must fall through to addListener each time.
     await expect(bootMain()).resolves.toBeUndefined();
 
-    expect(addListenerSpy).toHaveBeenCalled();
-    // The listener registered is a function (the live-change handler).
+    expect(mql.addEventListener).toBeUndefined();
+    expect(addListenerSpy).toHaveBeenCalledTimes(1);
     expect(typeof addListenerSpy.mock.calls[0][0]).toBe('function');
   });
 
-  it('takes the immediate-reveal AND direct-start paths when IntersectionObserver is absent', async () => {
+  it('boots with motion on when matchMedia is absent', async () => {
+    installIntersectionObserver();
+    const raf = installRaf();
+    installCanvas2dContext();
+    expect(typeof window.matchMedia).toBe('undefined');
+
+    mountPage('index');
+    await expect(bootMain()).resolves.toBeUndefined();
+
+    const root = document.documentElement;
+    expect(root.classList.contains('swarm-ready')).toBe(true);
+    expect(root.classList.contains('swarm-live')).toBe(true);
+    expect(raf.pending()).toBe(1);
+  });
+
+  it('neither throws nor hides text when IntersectionObserver is absent', async () => {
     installMatchMedia({ matches: false });
     removeIntersectionObserver();
-    installRaf();
+    const raf = installRaf();
     installCanvas2dContext();
 
     mountPage('index');
-    // initScrollReveal sees no IO → immediate is-revealed fallback.
-    // initSwarmCanvas sees no IO → calls start() directly (lines 352-354) and begins
-    // ticking; installRaf keeps that from looping. Neither must throw.
     await expect(bootMain()).resolves.toBeUndefined();
 
-    const targets = document.querySelectorAll<HTMLElement>('.js-scroll-reveal');
-    expect(targets.length).toBeGreaterThan(0);
-    targets.forEach((el) => {
-      expect(el.classList.contains('is-revealed')).toBe(true);
-      expect(el.classList.contains('reveal-pending')).toBe(false);
+    const decodeTargets = document.querySelectorAll('.xg, .xs');
+    expect(decodeTargets.length).toBeGreaterThan(0);
+    decodeTargets.forEach((el) => {
+      expect(el.classList.contains('dx-wait')).toBe(false);
+      expect(el.classList.contains('dx-on')).toBe(false);
     });
-
-    // The hero canvas is still created (IO absence does not gate canvas creation).
-    expect(document.querySelector('canvas')).not.toBeNull();
+    expect(document.documentElement.classList.contains('swarm-live')).toBe(true);
+    expect(() => window.dispatchEvent(new Event('scroll'))).not.toThrow();
+    expect(() => raf.flushOne(1000)).not.toThrow();
   });
 });

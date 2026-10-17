@@ -1,4 +1,4 @@
-/* Hivemind site: Swarm Glyph design system. Base copied verbatim from web/prototypes/05-swarm-glyph.html; deep-page components follow the base breakpoints. */
+/* Hivemind site: Swarm Glyph design system. Base copied verbatim from docs/design/prototypes/05-swarm-glyph.html; deep-page components follow the base breakpoints. */
 :root {
   --void: #05040d;
   --violet: #8b5cff;
@@ -678,6 +678,8 @@ section[id] { scroll-margin-top: calc(var(--hdr) + 0.75rem); }
 
 /* ---------- deep pages: section + hero variants ---------- */
 .section--tight { padding: clamp(3rem, 8vw, 5.5rem) 0; }
+/* Block rhythm on tight (deep page) sections: 1rem equals the .card-grid gap. The homepage is untouched because it has no .section--tight. :where keeps one class of specificity so later component margins (.cta--section, .note) still win, and a block after a .plate collapses into the plate's larger margin-bottom. */
+:where(.section--tight) .wrap > * + *, :where(.section--tight) .flow > * + * { margin-top: 1rem; }
 .hero--page {
   min-height: auto;
   padding: clamp(3rem, 9vh, 5.5rem) 0 clamp(2rem, 6vh, 3.5rem);
@@ -757,6 +759,7 @@ section[id] { scroll-margin-top: calc(var(--hdr) + 0.75rem); }
 .tag--violet, .tag--cyan, .tag--ember, .tag--hot { margin-left: 0; }
 .card-top .tag { margin-left: auto; }
 .signals .tag { display: inline-block; margin-top: 0.5rem; margin-left: 0; }
+.tag + .tag { margin-left: 0.75rem; }
 .kicker--problem { color: var(--ember-text); }
 .kicker--solution { color: var(--violet-text); }
 .kicker--benefit { color: var(--cyan-text); }
@@ -789,7 +792,7 @@ section[id] { scroll-margin-top: calc(var(--hdr) + 0.75rem); }
 }
 .prose .kicker { margin-bottom: 0.4rem; }
 .prose .kicker + * { margin-top: 0; }
-.prose .dots { margin-top: 0.75rem; }
+.prose .dots, .card .dots { margin-top: 0.75rem; }
 .step-num { font-family: var(--mono); color: var(--cyan-text); margin-right: 0.5rem; }
 
 /* ---------- deep pages: split layout ---------- */
@@ -835,10 +838,11 @@ table.ref td {
 table.ref tr:last-child td { border-bottom: 0; }
 table.ref td code { overflow-wrap: anywhere; }
 table.ref--wide { min-width: 34rem; }
+.subpanel > .table-wrap { margin-top: 1rem; }
 
 /* ---------- deep pages: code panels (solid, never glass, no prompt mark) ---------- */
-.code-panel {
-  margin: 0;
+.code-panel,
+.code-panel.diagram {
   padding: 0.9rem 1rem;
   border-radius: 12px;
   background: rgba(3, 2, 9, 0.88);
@@ -847,7 +851,8 @@ table.ref--wide { min-width: 34rem; }
   -webkit-overflow-scrolling: touch;
   color-scheme: dark;
 }
-.code-panel:focus-visible {
+.code-panel:focus-visible,
+.code-panel.diagram:focus-visible {
   outline: 2px solid var(--cyan);
   outline-offset: 3px;
   border-radius: 12px;
@@ -861,7 +866,7 @@ pre.code-panel, .code-panel pre, .code-panel code {
   line-height: 1.55;
   color: var(--text);
 }
-/* .code-panel.diagram uses the same rules as .code-panel */
+/* .code-panel.diagram shares the .code-panel and .code-panel:focus-visible rules above (selector lists) */
 .t-key { color: var(--violet-text); }
 .t-str { color: var(--cyan-text); }
 .t-lit { color: var(--ember-text); }
