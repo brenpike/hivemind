@@ -323,7 +323,7 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
         <div class="bar"><p>Boot log // intercepted stream</p><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
         <ol class="log" aria-label="Boot log">
           <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">route-workflow:</span> classify request -&gt; standard-delivery</span></li>
-          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">ledger:</span> .hivemind/runs/&lt;run-id&gt;/state.json -&gt; every state result validated</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">ledger:</span> .hivemind/runs/&lt;run-id&gt;/state.json -&gt; state results normally validated</span></li>
           <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">cerebrate:</span> directive -&gt; STEP-NNN steps, file scopes, risks, delivery shape</span></li>
           <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">git_preflight:</span> ok -&gt; compliant working branch; never trunk</span></li>
           <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">next-wave:</span> ready steps -&gt; drones + changelings in parallel</span></li>
@@ -455,7 +455,7 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
 
       <ol class="proc" aria-label="How a standard-delivery run works">
         <li><span class="sl">01 Route</span><p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session. A trivial one-file change takes the Reflex fast path, which skips the router, the ledger and the cerebrate.</p></li>
-        <li><span class="sl">02 Record</span><p class="xs">The ledger lives at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, and every state result is validated against the workflow definition before the run advances.</p></li>
+        <li><span class="sl">02 Record</span><p class="xs">The ledger lives at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, and each state result is normally validated against the workflow definition before the run advances.</p></li>
         <li><span class="sl">03 Plan</span><p class="xs">The cerebrate returns the directive.</p></li>
         <li><span class="sl">04 Branch</span><p class="xs">Git preflight, then a compliant working branch: feature/, bugfix/, hotfix/, refactor/, chore/, docs/, test/, ci/. The swarm never commits to trunk.</p></li>
         <li><span class="sl">05 Build in waves</span><p class="xs"><code>hivemind:next-wave</code> selects every ready step whose dependencies are met and whose files do not overlap. Drones and changelings build those steps in parallel, with one checkpoint commit (a molt) per wave.</p></li>

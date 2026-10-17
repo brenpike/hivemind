@@ -219,7 +219,7 @@ You --> Overlord --> route-workflow --> standard-delivery
 ```
 
 1. **Route.** `hivemind:route-workflow` picks the workflow: `standard-delivery`, `analysis-only`, `pr-feedback-remediation`, `hatchery-dispatch`, or `exploratory-intent-session`. A **Reflex** (one owner, one known file, trivial change) takes the fast path and skips the router, the run ledger, and the cerebrate.
-2. **Record.** The overlord writes a run ledger to `.hivemind/runs/<run-id>/state.json`. Every state result is validated against the workflow definition before the run advances.
+2. **Record.** The overlord writes a run ledger to `.hivemind/runs/<run-id>/state.json`. Each state result is normally validated against the workflow definition before the run advances (a resumed run on a changed workflow version can fall back to judgment instead).
 3. **Plan.** At `plan`, the cerebrate returns the directive.
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
 5. **Build in waves.** `implement_next_step` asks `hivemind:next-wave` for the ready wave; `implement_step` dispatches it as parallel drones and changelings; `checkpoint` molts once for the whole wave.
