@@ -217,7 +217,7 @@ PR opened  (watched by default)
             <p class="kicker kicker--problem xs">Problem</p>
             <p>Tooling that demands full buy-in up front, including specific review services, memory systems, or communication styles, blocks incremental adoption. If one dependency is absent, nothing works.</p>
             <p class="kicker kicker--solution xs">Solution</p>
-            <p>Optional companion plugins: <code>claude-mem</code> for cross-session memory, <code>codex</code> for local pre-PR review, <code>caveman</code> for token-compressed output. All optional. The framework works without any of them; if not installed, steps that depend on them are skipped gracefully. The theme itself is optional flavor: <strong>the framework works with or without it.</strong></p>
+            <p>Optional companion plugins: <code>claude-mem</code> for cross-session memory, <code>codex</code> for local pre-PR review, <code>caveman</code> for token-compressed output. All optional. The framework works without any of them; if one is not enabled, steps that depend on them are skipped gracefully. The theme itself is optional flavor: <strong>the framework works with or without it.</strong></p>
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>Adopt incrementally. Start with the core pipeline; layer in companions when you need them.</p>
           </div>
@@ -236,17 +236,17 @@ PR opened  (watched by default)
         <div class="card-grid">
           <article class="panel card">
             <h3 class="xg">claude-mem</h3>
-            <p>Optional cross-session memory. When installed, the cerebrate reads claude-mem memory before every plan. Writes happen through automatic capture.</p>
+            <p>Optional cross-session memory. When enabled, the cerebrate reads claude-mem memory while planning and skips memory cleanly when claude-mem is absent. Writes happen through automatic capture.</p>
             <span class="tag tag--violet">Optional</span>
           </article>
           <article class="panel card">
             <h3 class="xg">codex</h3>
-            <p>Local pre-PR Codex review. Enables the <code>local-reviewer</code> agent. The post-PR watch is the default and runs without codex. If not installed, local review is skipped gracefully.</p>
+            <p>Local pre-PR Codex review. Enables the <code>local-reviewer</code> agent. The post-PR watch is the default and runs without codex. If codex is not enabled, local review is skipped gracefully.</p>
             <span class="tag tag--cyan">Optional</span>
           </article>
           <article class="panel card">
             <h3 class="xg">caveman</h3>
-            <p>Token-compressed communication. When installed, all framework agents output in caveman ultra mode, reducing token usage while preserving full technical accuracy.</p>
+            <p>Token-compressed communication. When enabled through <code>hivemind:seed-hive</code>, all framework agents output in caveman ultra mode, reducing token usage while preserving full technical accuracy.</p>
             <span class="tag tag--hot">Optional</span>
           </article>
         </div>

@@ -602,18 +602,18 @@
         <header class="panel plate">
           <p class="kicker xs">10 Companion Plugins</p>
           <h2 id="companions-heading" class="xg">Companion Plugins</h2>
-          <p class="xs">All companions are optional. Hivemind works without them. When installed, each unlocks additional capabilities.</p>
+          <p class="xs">All companions are optional. Hivemind works without them. Each one adds capabilities once it is enabled for the project, which <code>hivemind:seed-hive</code> does when you confirm that companion.</p>
         </header>
         <div class="card-grid">
           <article class="panel card">
             <h3 class="xg">claude-mem</h3>
-            <p>Optional cross-session memory and continuity. When installed, the cerebrate reads claude-mem memory via the MCP search tool before every plan. Writes happen through automatic capture, so no write tool is needed.</p>
+            <p>Optional cross-session memory and continuity. When enabled, the cerebrate reads claude-mem memory via the MCP search tools while planning, uses a forwarded <code>Memory context:</code> block instead when the overlord supplies one, and skips memory cleanly when claude-mem is absent. Writes happen through automatic capture, so no write tool is needed.</p>
             <p><a class="link" href="https://github.com/thedotmack/claude-mem" target="_blank" rel="noopener noreferrer" aria-label="claude-mem on GitHub (opens in new tab)">GitHub &#8599;</a></p>
             <span class="tag tag--violet">Optional</span>
           </article>
           <article class="panel card">
             <h3 class="xg">codex</h3>
-            <p>Local pre-PR Codex review. Enables the <code>local-reviewer</code> agent, backed by <code>hivemind:adaptation-cycle</code>. That is all codex unlocks: the post-PR watch is the default and runs without codex. If not installed, local review is skipped gracefully.</p>
+            <p>Local pre-PR Codex review. Enables the <code>local-reviewer</code> agent, backed by <code>hivemind:adaptation-cycle</code>. That is all codex unlocks: the post-PR watch is the default and runs without codex. If codex is not enabled, local review is skipped gracefully.</p>
             <div class="code-panel" role="region" aria-label="codex install commands" tabindex="0">
               <pre><code>/plugin marketplace add https://github.com/openai/codex-plugin-cc.git
 /plugin install codex@openai-codex
@@ -624,7 +624,7 @@
           </article>
           <article class="panel card">
             <h3 class="xg">caveman</h3>
-            <p>Token-compressed communication. When installed, all framework agents output in caveman ultra mode, dramatically reducing token usage while preserving full technical accuracy.</p>
+            <p>Token-compressed communication. When enabled through <code>hivemind:seed-hive</code>, all framework agents output in caveman ultra mode, dramatically reducing token usage while preserving full technical accuracy.</p>
             <div class="code-panel" role="region" aria-label="caveman settings.json snippet" tabindex="0">
               <pre><code><span class="t-key">"enabledPlugins"</span><span class="t-dim">: { </span><span class="t-str">"caveman@caveman"</span><span class="t-dim">: true },</span>
 <span class="t-key">"pluginConfigs"</span><span class="t-dim">: { </span><span class="t-str">"caveman@caveman"</span><span class="t-dim">: {</span>
