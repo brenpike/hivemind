@@ -311,6 +311,7 @@ docs/
   adr/                      # architecture decision records
   prds/                     # product requirement documents
   design/prototypes/        # archived design explorations (not deployed)
+  design/design-system.html # style system reference (not deployed)
   engineering-principles.md
 tools/                      # dev-only validation scripts (validate.sh dispatcher, policy linter, report validator)
 tests/                      # dev-only test fixtures and checks (policy, reports, plugin compatibility)
@@ -435,7 +436,7 @@ npm test
 
 `npm run build` compiles `web/src/` TypeScript into `web/scripts/`; `npm test` runs the vitest suite in `web/tests/`. `.github/workflows/pages.yml` runs the build and tests on pull requests that touch the site, and on pushes to `main` it also deploys `web/` to GitHub Pages.
 
-The site uses the Swarm Glyph design: one stylesheet (`web/styles/main.css`) and one TypeScript engine (`web/src/main.ts`) shared by all three pages, system fonts, no external requests, and it honours `prefers-reduced-motion`. The design explorations are archived in `docs/design/prototypes/` and are not deployed.
+The site uses the Swarm Glyph design: one stylesheet (`web/styles/main.css`) and one TypeScript engine (`web/src/main.ts`) shared by all three pages, system fonts, no external requests, and it honours `prefers-reduced-motion`. The design explorations are archived in `docs/design/prototypes/` and are not deployed. The style system (tokens, typography, components, motion, authoring rules) is documented in `docs/design/design-system.html`, a repo-only reference that loads the production stylesheet and engine and is not deployed or linked from the site.
 
 ## Plugin limitations
 

@@ -19,4 +19,4 @@ Every page follows these rules:
 
 The contract is pinned by `web/tests/dom-contract.test.ts`.
 
-The prototypes now live in `docs/design/prototypes/`.
+The prototypes now live in `docs/design/prototypes/`. The style reference is `docs/design/design-system.html`: repo only, never linked from these pages; run `npm run build` first for the motion demos.
