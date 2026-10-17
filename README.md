@@ -75,7 +75,7 @@ The seeded entries cover read/output helper Bash commands (`echo`, `printf`, `ca
 
 **After upgrading the plugin, re-run `/hivemind:seed-hive`.** A newer version may recommend `permissions.allow` entries your project does not have yet, and those entries are merged only when `seed-hive` runs, never automatically on upgrade. Skipping the re-run does not take away any capability (tool grants ship inside the plugin itself and load at session start) but it does leave those newer allow rules unmerged, so you will see interactive approval prompts on operations the template would otherwise have pre-approved. Re-running is always safe: the merge is idempotent and your existing entries are preserved.
 
-For prompt-free local Codex review (`hivemind:adaptation-cycle`), add your Codex cache path to the gitignored `.claude/settings.local.json`, never the tracked `.claude/settings.json`, because this entry hard-codes one machine's absolute `$HOME` path and the tracked file is shared across a team and across machines:
+The supported setup for local Codex review (`hivemind:adaptation-cycle`) is a per-contributor grant: add your Codex cache path to the gitignored `.claude/settings.local.json`, never the tracked `.claude/settings.json`, because this entry hard-codes one machine's absolute `$HOME` path and the tracked file is shared across a team and across machines:
 
 ```json
 "Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)"
