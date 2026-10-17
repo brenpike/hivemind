@@ -272,7 +272,7 @@ You --> Overlord --> Cerebrate (decompose)
 | :fire: **Flare** | Urgent: an agent hit something it can't resolve alone. The overlord stops and asks you. |
 | :zap: **Reflex** | Trivial task: one owner, one known file, no version impact. The overlord skips the router, the run ledger, and the cerebrate, and delegates the change directly. |
 | :dna: **Mutation Decay** | Two fixes are fighting each other (break-fix-break). The swarm stops. You decide. |
-| :hourglass: **Creep Stagnation** | The local review loop keeps finding less and less. Advisory exit (`diminishing-returns`); you decide whether to stop. |
+| :hourglass: **Creep Stagnation** | The local review loop keeps finding less and less. Advisory exit (`diminishing-returns`). The overlord decides to stop and open the PR on its own, journals the call, and asks you only if the promotion gate trips. |
 | :link: **Root-Cluster** | Several findings share one root cause. The reviewer stops patching them one by one and the overlord sends the cerebrate to plan one structural fix. |
 | :checkered_flag: **Merge-Advised** | The PR has converged and only a bounded tail remains. Advice to merge: agents never merge; you do. |
 
