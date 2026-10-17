@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Multi-agent orchestration framework for Claude Code. Coordinates specialized bioforms to plan, build, review, and ship code — so you don't have to manage the pipeline yourself.">
-  <title>Hivemind — Multi-agent orchestration for Claude Code</title>
-  <!-- All paths are relative — site serves under https://brenpike.github.io/hivemind/ -->
+  <meta name="description" content="Multi-agent orchestration framework for Claude Code. Coordinates specialized bioforms to plan, build, review, and ship code, so you don't have to manage the pipeline yourself.">
+  <title>Hivemind | Multi-agent orchestration for Claude Code</title>
+  <!-- All paths are relative. Site serves under https://brenpike.github.io/hivemind/ -->
   <link rel="stylesheet" href="./styles/main.css">
   <script type="module" src="./scripts/main.js"></script>
 </head>
@@ -17,11 +17,11 @@
        ===================================================================== -->
   <header class="site-nav" id="site-nav" role="banner">
     <div class="site-nav__inner">
-      <a href="./index.html" class="site-nav__logo" id="nav-logo-glow" aria-label="Hivemind — home">
+      <a href="./index.html" class="site-nav__logo" id="nav-logo-glow" aria-label="Hivemind home">
         Hivemind
       </a>
 
-      <!-- Mobile toggle — behavior wired in motion phase -->
+      <!-- Mobile toggle: behavior wired in motion phase -->
       <!-- [motion-hook] id="nav-toggle" data-nav-toggle controls drawer open/close -->
       <button
         class="site-nav__toggle"
@@ -60,12 +60,12 @@
 
     <!-- ===================================================================
          HERO
-         [motion-hook] id="hero" js-scroll-reveal not needed — above fold
-         [motion-hook] id="hero-wordmark" data-glow="cyan" — motion phase pulse
-         [motion-hook] id="hero-hex-1" class="hex-accent" — parallax shape
+         [motion-hook] id="hero" js-scroll-reveal not needed (above fold)
+         [motion-hook] id="hero-wordmark" data-glow="cyan", motion phase pulse
+         [motion-hook] id="hero-hex-1" class="hex-accent", parallax shape
          =================================================================== -->
     <section class="site-section scanline-overlay" id="hero" aria-labelledby="hero-heading">
-      <!-- Decorative background shape — purely visual -->
+      <!-- Decorative background shape, purely visual -->
       <div class="hex-accent" id="hero-hex-1" aria-hidden="true" style="top:-80px;right:-60px;"></div>
       <div class="hex-accent" id="hero-hex-2" aria-hidden="true" style="bottom:40px;left:-80px;width:200px;height:200px;opacity:0.03;background:radial-gradient(circle at 50% 50%, var(--color-accent-cyan) 0%, transparent 70%);"></div>
 
@@ -80,11 +80,11 @@
 
           <p style="font-size:var(--text-lg);color:var(--color-text-dim);margin-bottom:var(--space-7);line-height:1.5;max-width:640px;margin-inline:auto;">
             Multi-agent orchestration framework for Claude Code.
-            Coordinates specialized bioforms to plan, build, review, and ship code —
+            Coordinates specialized bioforms to plan, build, review, and ship code,
             so you don't have to manage the pipeline yourself.
           </p>
 
-          <!-- PRIMARY INSTALL CTA — above primary content fold -->
+          <!-- PRIMARY INSTALL CTA, above primary content fold -->
           <div style="margin-bottom:var(--space-6);">
             <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-text-faint);margin-bottom:var(--space-3);">Install inside Claude Code</p>
             <!-- [motion-hook] id="install-block" class="js-glow-target" data-glow="violet" -->
@@ -92,6 +92,7 @@
               <pre><code><span class="prompt">/</span>plugin marketplace add https://github.com/brenpike/hivemind.git
 <span class="prompt">/</span>plugin install hivemind@brenpike</code></pre>
             </div>
+            <p style="font-size:var(--text-sm);color:var(--color-text-dim);margin-top:var(--space-3);">Then run <code>/hivemind:seed-hive</code> once in each project.</p>
           </div>
 
           <div style="display:flex;gap:var(--space-4);justify-content:center;flex-wrap:wrap;">
@@ -109,7 +110,7 @@
 
 
     <!-- ===================================================================
-         BIOFORMS — The four agents
+         BIOFORMS: four bioforms plus two reviewer agents
          [motion-hook] .js-scroll-reveal data-reveal="fade-up" on each .card
          =================================================================== -->
     <section class="site-section" id="bioforms" aria-labelledby="bioforms-heading">
@@ -121,7 +122,7 @@
             Know Your Bioforms
           </h2>
           <p style="color:var(--color-text-dim);max-width:520px;margin-inline:auto;">
-            Four specialized agents. Each owns a distinct role in the pipeline.
+            Four bioforms plus two reviewer agents. Each owns a distinct role in the pipeline.
             None overlap. Together they close the loop from directive to PR.
           </p>
         </div>
@@ -134,9 +135,10 @@
             <div class="card__icon" aria-hidden="true">&#128065;</div>
             <h3 class="card__title">Overlord</h3>
             <p class="card__body">
-              The control plane. Routes your directives, owns the git lifecycle,
-              distributes work to specialists, and spawns brood sessions.
-              <strong style="color:var(--color-text);">Never writes code.</strong> Your main interface.
+              The control plane and session default. Routes each request to a workflow,
+              runs the workflow state machine and its run ledger, and owns branches,
+              checkpoint commits, version bumps, PRs, and review routing. Delegates all
+              implementation. <strong style="color:var(--color-text);">Never writes code.</strong> Your main interface.
             </p>
             <span class="badge badge--violet" style="margin-top:var(--space-4);">Orchestrator</span>
           </article>
@@ -147,9 +149,10 @@
             <div class="card__icon" aria-hidden="true">&#129504;</div>
             <h3 class="card__title">Cerebrate</h3>
             <p class="card__body">
-              Originates the plan. Scans the territory and produces the
-              <em>directive</em> — the intelligence the swarm executes.
-              Read-only: thinks, never writes.
+              Originates the plan. Researches the codebase and returns the
+              <em>directive</em>: STEP-NNN steps with exact file scopes, dependencies,
+              risks, and a delivery shape: single, multi, or brood.
+              Read-only: thinks, never writes files.
             </p>
             <span class="badge badge--cyan" style="margin-top:var(--space-4);">Strategist</span>
           </article>
@@ -160,8 +163,9 @@
             <div class="card__icon" aria-hidden="true">&#128296;</div>
             <h3 class="card__title">Drone</h3>
             <p class="card__body">
-              Builds code within its assigned scope. The workhorse of the swarm.
-              Executes implementation phases defined by the cerebrate's directive.
+              The workhorse and default owner of every step. Implements code, fixes bugs,
+              refactors, and updates tests and release metadata, strictly within its
+              assigned file scope.
             </p>
             <span class="badge badge--spore" style="margin-top:var(--space-4);">Builder</span>
           </article>
@@ -172,10 +176,37 @@
             <div class="card__icon" aria-hidden="true">&#127918;</div>
             <h3 class="card__title">Changeling</h3>
             <p class="card__body">
-              Handles UI, styling, and visual presentation within assigned scope.
+              Presentational UI/UX within assigned scope: markup, styling, layout,
+              design tokens, visual states, and presentational accessibility.
               Reshapes how things look and feel.
             </p>
             <span class="badge badge--magenta" style="margin-top:var(--space-4);">Shaper</span>
+          </article>
+
+          <!-- Local-Reviewer -->
+          <!-- [motion-hook] class="js-scroll-reveal" data-reveal="fade-up" data-delay="400" -->
+          <article class="card js-scroll-reveal" data-reveal="fade-up" data-delay="400" role="listitem">
+            <div class="card__icon" aria-hidden="true">&#128270;</div>
+            <h3 class="card__title">Local-Reviewer</h3>
+            <p class="card__body">
+              Pre-PR adversarial Codex review loop, up to 10 iterations. Fixes simple
+              findings itself (two files or fewer), escalates complex ones, and stops on
+              break-fix cycles. Needs the codex companion.
+            </p>
+            <span class="badge badge--cyan" style="margin-top:var(--space-4);">Pre-PR reviewer</span>
+          </article>
+
+          <!-- GitHub-Reviewer -->
+          <!-- [motion-hook] class="js-scroll-reveal" data-reveal="fade-up" data-delay="500" -->
+          <article class="card js-scroll-reveal" data-reveal="fade-up" data-delay="500" role="listitem">
+            <div class="card__icon" aria-hidden="true">&#128172;</div>
+            <h3 class="card__title">GitHub-Reviewer</h3>
+            <p class="card__body">
+              Post-PR, stateless, one-shot. Fetches and classifies review feedback,
+              fixes, pushes, replies, and resolves threads. Dispatched by
+              <code>hivemind:github-review-loop</code>.
+            </p>
+            <span class="badge badge--violet" style="margin-top:var(--space-4);">Post-PR reviewer</span>
           </article>
 
         </div>
@@ -192,7 +223,7 @@
 
 
     <!-- ===================================================================
-         LIFECYCLE — pipeline flow
+         LIFECYCLE: pipeline flow
          [motion-hook] .js-scroll-reveal on the lifecycle diagram
          =================================================================== -->
     <section class="site-section" id="lifecycle" aria-labelledby="lifecycle-heading">
@@ -208,42 +239,52 @@
             <ol style="display:flex;flex-direction:column;gap:var(--space-4);list-style:none;" aria-label="Pipeline steps">
               <li style="display:flex;gap:var(--space-3);">
                 <span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-accent-spore);min-width:1.5rem;padding-top:0.15em;" aria-hidden="true">01</span>
-                <span>You give the <strong>Overlord</strong> a task</span>
+                <span><strong>Route</strong>: the <strong>Overlord</strong> sends your request to a workflow; a <em>Reflex</em> fast path skips routing for trivial changes</span>
               </li>
               <li style="display:flex;gap:var(--space-3);">
                 <span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-accent-spore);min-width:1.5rem;padding-top:0.15em;" aria-hidden="true">02</span>
-                <span>The <strong>Cerebrate</strong> scans the territory and returns a directive</span>
+                <span><strong>Record</strong>: a run ledger tracks the run; every state result is validated against the workflow definition</span>
               </li>
               <li style="display:flex;gap:var(--space-3);">
                 <span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-accent-spore);min-width:1.5rem;padding-top:0.15em;" aria-hidden="true">03</span>
-                <span>The Overlord spawns specialists — <strong>Drones</strong> and <strong>Changelings</strong> — phase by phase</span>
+                <span><strong>Plan</strong>: the <strong>Cerebrate</strong> researches the codebase and returns a directive</span>
               </li>
               <li style="display:flex;gap:var(--space-3);">
                 <span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-accent-spore);min-width:1.5rem;padding-top:0.15em;" aria-hidden="true">04</span>
-                <span>Each phase produces <em>essence</em> — knowledge carried forward</span>
+                <span><strong>Branch</strong>: git preflight, then a compliant working branch; never a commit to trunk</span>
               </li>
               <li style="display:flex;gap:var(--space-3);">
                 <span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-accent-spore);min-width:1.5rem;padding-top:0.15em;" aria-hidden="true">05</span>
-                <span>An <strong>Adaptation Cycle</strong> reviews the work before shipping</span>
+                <span><strong>Build in waves</strong>: <strong>Drones</strong> and <strong>Changelings</strong> take ready, file-disjoint steps in parallel, one <em>molt</em> per wave</span>
               </li>
               <li style="display:flex;gap:var(--space-3);">
                 <span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-accent-spore);min-width:1.5rem;padding-top:0.15em;" aria-hidden="true">06</span>
-                <span>A PR is opened when the swarm stabilizes</span>
+                <span><strong>Gate</strong>: bump-type decides the version bump, then validation runs</span>
+              </li>
+              <li style="display:flex;gap:var(--space-3);">
+                <span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-accent-spore);min-width:1.5rem;padding-top:0.15em;" aria-hidden="true">07</span>
+                <span><strong>Review</strong>: the <strong>Local-Reviewer</strong> runs an adaptation cycle when codex is installed</span>
+              </li>
+              <li style="display:flex;gap:var(--space-3);">
+                <span style="font-family:var(--font-mono);font-size:var(--text-xs);color:var(--color-accent-spore);min-width:1.5rem;padding-top:0.15em;" aria-hidden="true">08</span>
+                <span><strong>Ship and watch</strong>: the PR opens and is watched by default. Agents never merge. You do.</span>
               </li>
             </ol>
           </div>
 
-          <!-- Lifecycle diagram — code block style -->
+          <!-- Lifecycle diagram, code block style -->
           <!-- [motion-hook] id="lifecycle-diagram" class="js-scroll-reveal" data-reveal="fade-left" -->
-          <div class="code-block js-scroll-reveal" id="lifecycle-diagram" data-reveal="fade-left" role="img" aria-label="Pipeline flow diagram: You to Overlord to Cerebrate producing a Directive, then Drone and Changeling building the Essence, then Adaptation Cycle review, then PR">
+          <div class="code-block js-scroll-reveal" id="lifecycle-diagram" data-reveal="fade-left" role="img" aria-label="Pipeline flow diagram: You to Overlord, which routes the request and records a run ledger; Cerebrate plans a Directive; a working branch is created; Drone and Changeling build in waves; bump-type and validation gates run; Local-Reviewer reviews when codex is installed; the PR opens and is watched by default">
             <pre><code>You
- └─▶ <span style="color:var(--color-accent-violet);">Overlord</span>
+ └─▶ <span style="color:var(--color-accent-violet);">Overlord</span>  (route, record)
       ├─▶ <span style="color:var(--color-accent-cyan);">Cerebrate</span>  (plan)
       │    └─▶ <span style="color:var(--color-text-dim);">Directive</span>
+      ├─▶ <span style="color:var(--color-text-dim);">Working branch</span>  (preflight)
       ├─▶ <span style="color:var(--color-accent-spore);">Drone</span> / <span style="color:var(--color-accent-magenta);">Changeling</span>  (build)
-      │    └─▶ <span style="color:var(--color-text-dim);">Essence</span>
-      ├─▶ <span style="color:var(--color-accent-cyan);">Adaptation Cycle</span>  (review)
-      └─▶ <span style="color:var(--color-accent-spore);">PR</span></code></pre>
+      │    └─▶ <span style="color:var(--color-text-dim);">Waves, one molt each</span>
+      ├─▶ <span style="color:var(--color-text-dim);">Gates</span>  (bump-type, validation)
+      ├─▶ <span style="color:var(--color-accent-cyan);">Local-Reviewer</span>  (review, if codex)
+      └─▶ <span style="color:var(--color-accent-spore);">PR</span>  (watched by default)</code></pre>
           </div>
 
         </div>
@@ -256,7 +297,7 @@
 
 
     <!-- ===================================================================
-         BROOD MODE — parallel execution
+         BROOD MODE: parallel execution
          [motion-hook] .js-scroll-reveal on brood diagram card
          =================================================================== -->
     <section class="site-section" id="brood-mode" aria-labelledby="brood-heading">
@@ -270,7 +311,7 @@
           <p style="color:var(--color-text-dim);max-width:560px;margin-inline:auto;">
             When work is big enough, the Overlord splits it into independent
             <strong style="color:var(--color-text);">strains</strong> and dispatches a
-            <strong style="color:var(--color-text);">brood</strong> — multiple parallel sessions,
+            <strong style="color:var(--color-text);">brood</strong>: parallel sessions,
             each running its own full lifecycle in a separate git worktree.
           </p>
         </div>
@@ -282,29 +323,34 @@
             <ul style="display:flex;flex-direction:column;gap:var(--space-3);color:var(--color-text-dim);" aria-label="Brood mode details">
               <li style="display:flex;gap:var(--space-3);">
                 <span style="color:var(--color-accent-violet);font-size:var(--text-md);" aria-hidden="true">&#9670;</span>
-                <span>Cerebrate decomposes work into independent strains — no shared state between them</span>
+                <span>Cerebrate decomposes work into independent strains with no shared state between them</span>
               </li>
               <li style="display:flex;gap:var(--space-3);">
                 <span style="color:var(--color-accent-violet);font-size:var(--text-md);" aria-hidden="true">&#9670;</span>
-                <span>Each strain runs its own overlord, cerebrate, drone/changeling pipeline in a tmux session</span>
+                <span>Approval gate: nothing spawns until you approve the strain list</span>
               </li>
               <li style="display:flex;gap:var(--space-3);">
                 <span style="color:var(--color-accent-violet);font-size:var(--text-md);" aria-hidden="true">&#9670;</span>
-                <span>Each strain lives in its own git worktree and produces its own branch and PR</span>
+                <span>Each strain runs its own overlord in its own worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and detached tmux session</span>
               </li>
               <li style="display:flex;gap:var(--space-3);">
                 <span style="color:var(--color-accent-violet);font-size:var(--text-md);" aria-hidden="true">&#9670;</span>
-                <span>The Overlord enters <em>hatchery</em> mode — monitoring from home base while strains evolve</span>
+                <span>Each strain produces its own branch and PR</span>
+              </li>
+              <li style="display:flex;gap:var(--space-3);">
+                <span style="color:var(--color-accent-violet);font-size:var(--text-md);" aria-hidden="true">&#9670;</span>
+                <span>The Overlord enters <em>hatchery</em> mode, watching strains via <code>hivemind:brood-status</code></span>
               </li>
             </ul>
           </div>
 
           <!-- Brood diagram -->
           <!-- [motion-hook] id="brood-diagram" class="js-scroll-reveal" data-reveal="fade-right" -->
-          <div class="code-block js-scroll-reveal" id="brood-diagram" data-reveal="fade-right" role="img" aria-label="Brood mode flow: You to Overlord to Cerebrate decomposing into three independent strains, each with its own branch and PR">
+          <div class="code-block js-scroll-reveal" id="brood-diagram" data-reveal="fade-right" role="img" aria-label="Brood mode flow: You to Overlord to Cerebrate decomposing into three independent strains; after your approval, each strain gets its own branch and PR">
             <pre><code>You
  └─▶ <span style="color:var(--color-accent-violet);">Overlord</span>  (hatchery mode)
       └─▶ <span style="color:var(--color-accent-cyan);">Cerebrate</span>  (decompose)
+           │  <span style="color:var(--color-text-dim);">you approve the strains</span>
            ├─▶ <span style="color:var(--color-accent-spore);">Strain A</span>  ┐
            │    └─▶ own branch, own PR
            ├─▶ <span style="color:var(--color-accent-spore);">Strain B</span>  ├─ parallel
@@ -323,7 +369,7 @@
 
 
     <!-- ===================================================================
-         SIGNALS — the four framework signals
+         SIGNALS: framework signals
          [motion-hook] .js-scroll-reveal data-reveal="fade-up" on signal cards
          =================================================================== -->
     <section class="site-section" id="signals" aria-labelledby="signals-heading">
@@ -346,7 +392,7 @@
             <div class="card__icon" aria-label="Fire">&#128293;</div>
             <h3 class="card__title">Flare</h3>
             <p class="card__body">
-              Urgent — agent hit something it cannot resolve alone.
+              Urgent: an agent hit something it cannot resolve alone.
               The Overlord stops and asks you.
             </p>
             <span class="badge badge--magenta" style="margin-top:var(--space-4);">Requires human input</span>
@@ -357,8 +403,7 @@
             <div class="card__icon" aria-label="Lightning bolt">&#9889;</div>
             <h3 class="card__title">Reflex</h3>
             <p class="card__body">
-              Simple task — the Overlord skips the Cerebrate
-              and spawns a Drone directly.
+              Trivial task: one owner, one known file, no version impact. The Overlord skips the router, the run ledger, and the Cerebrate, and delegates the change directly.
             </p>
             <span class="badge badge--spore" style="margin-top:var(--space-4);">Fast path</span>
           </article>
@@ -368,21 +413,43 @@
             <div class="card__icon" aria-label="DNA strand">&#129516;</div>
             <h3 class="card__title">Mutation Decay</h3>
             <p class="card__body">
-              Two fixes are fighting each other. The swarm stops.
+              Break-fix-break: fixes keep re-breaking each other. Mandatory stop.
               You decide which path to take.
             </p>
             <span class="badge badge--violet" style="margin-top:var(--space-4);">Conflict detected</span>
           </article>
 
-          <!-- Adaptation Cycle -->
+          <!-- Creep Stagnation -->
           <article class="card js-scroll-reveal" data-reveal="fade-up" data-delay="300" role="listitem">
-            <div class="card__icon" aria-label="Counterclockwise arrows">&#8635;</div>
-            <h3 class="card__title">Adaptation Cycle</h3>
+            <div class="card__icon" aria-label="Snail">&#128012;</div>
+            <h3 class="card__title">Creep Stagnation</h3>
             <p class="card__body">
-              Review in progress — the swarm is stabilizing
-              before shipping. Local Codex review runs automatically.
+              Diminishing returns: each review pass yields less.
+              An advisory early exit; the call comes back to you.
             </p>
-            <span class="badge badge--cyan" style="margin-top:var(--space-4);">Review in progress</span>
+            <span class="badge badge--cyan" style="margin-top:var(--space-4);">Advisory</span>
+          </article>
+
+          <!-- Root-Cluster -->
+          <article class="card js-scroll-reveal" data-reveal="fade-up" data-delay="400" role="listitem">
+            <div class="card__icon" aria-label="Seedling">&#127793;</div>
+            <h3 class="card__title">Root-Cluster</h3>
+            <p class="card__body">
+              Several findings share one root. Instead of patching each,
+              the swarm reaches for one structural fix.
+            </p>
+            <span class="badge badge--spore" style="margin-top:var(--space-4);">One structural fix</span>
+          </article>
+
+          <!-- Merge-Advised -->
+          <article class="card js-scroll-reveal" data-reveal="fade-up" data-delay="500" role="listitem">
+            <div class="card__icon" aria-label="Merge arrows">&#128256;</div>
+            <h3 class="card__title">Merge-Advised</h3>
+            <p class="card__body">
+              Only a bounded tail of findings remains on a hardened surface (the Stop-and-Merge rule).
+              The loop recommends merging. Humans merge.
+            </p>
+            <span class="badge badge--magenta" style="margin-top:var(--space-4);">Advisory</span>
           </article>
 
         </div>
@@ -395,7 +462,7 @@
 
 
     <!-- ===================================================================
-         INSTALL CTA — bottom of page repeat
+         INSTALL CTA: bottom of page repeat
          [motion-hook] id="install-cta" class="js-scroll-reveal" data-reveal="fade-up"
          =================================================================== -->
     <section class="site-section" id="install-cta" aria-labelledby="install-cta-heading">
@@ -407,7 +474,7 @@
             Ship faster with the swarm
           </h2>
           <p style="color:var(--color-text-dim);margin-bottom:var(--space-6);">
-            Two commands. Inside Claude Code.
+            Two commands inside Claude Code. Then run <code>/hivemind:seed-hive</code> once in each project.
           </p>
 
           <!-- [motion-hook] id="install-block-bottom" class="js-glow-target" data-glow="violet" -->
@@ -450,7 +517,7 @@
       </nav>
 
       <span class="site-footer__copy">
-        MIT &mdash; fonts: Orbitron &amp; JetBrains Mono (OFL 1.1)
+        MIT License. Fonts: Orbitron &amp; JetBrains Mono (OFL 1.1)
       </span>
     </div>
   </footer>

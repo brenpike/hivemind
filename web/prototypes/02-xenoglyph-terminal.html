@@ -6,7 +6,7 @@
 <meta name="robots" content="noindex">
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#020403">
-<title>Hivemind — Prototype 02: Xenoglyph Terminal</title>
+<title>Hivemind | Prototype 02: Xenoglyph Terminal</title>
 <meta name="description" content="Multi-agent orchestration framework for Claude Code, rendered as an intercepted alien transmission.">
 <style>
 :root{
@@ -310,7 +310,7 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
     <div class="hgrid">
       <div class="term copy">
         <p class="label">Decoded payload</p>
-        <p class="lead xs">Multi-agent orchestration framework for Claude Code. Coordinates specialized bioforms to plan, build, review, and ship code — so you don't have to manage the pipeline yourself.</p>
+        <p class="lead xs">Multi-agent orchestration framework for Claude Code. Coordinates specialized bioforms to plan, build, review, and ship code, so you don't have to manage the pipeline yourself.</p>
         <p class="over xs">You are the Overmind. The swarm acts on your intent.</p>
         <div class="btns">
           <a class="btn p" href="#install">Establish uplink</a>
@@ -330,7 +330,7 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
           <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">molt:</span> one checkpoint commit per wave</span></li>
           <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">gate:</span> bump-type -&gt; validate -&gt; local-reviewer loop</span></li>
           <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">open_pr:</span> watching Codex, Copilot, Claude reviewer feedback</span></li>
-          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">merge:</span> withheld. Agents never merge — you do.</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">merge:</span> withheld. Agents never merge. You do.</span></li>
           <li class="await" aria-hidden="true"><span class="lp">&gt;</span><span class="lt">awaiting overmind intent <span class="cur"></span></span></li>
         </ol>
       </div>
@@ -355,7 +355,7 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
           <div><dt>Function</dt><dd>Orchestrator</dd></div>
           <div><dt>Invoke</dt><dd><code>hivemind:overlord</code>, session default</dd></div>
         </dl>
-        <p class="xs">Routes each request to a workflow, runs the workflow state machine and its run ledger, and owns branches, checkpoint commits, version bumps, PRs and review routing. Delegates all implementation — it never writes code.</p>
+        <p class="xs">Routes each request to a workflow, runs the workflow state machine and its run ledger, and owns branches, checkpoint commits, version bumps, PRs and review routing. Delegates all implementation; it never writes code.</p>
       </article></li>
 
       <li style="--i:1"><article class="dos" aria-labelledby="e2">
@@ -368,7 +368,7 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
           <div><dt>Function</dt><dd>Strategist</dd></div>
           <div><dt>Access</dt><dd>Read-only</dd></div>
         </dl>
-        <p class="xs">Researches the codebase and returns the directive: STEP-NNN steps with exact file scopes, dependencies, risks and a delivery shape — single, multi or brood. Never writes files.</p>
+        <p class="xs">Researches the codebase and returns the directive: STEP-NNN steps with exact file scopes, dependencies, risks and a delivery shape (single, multi or brood). Never writes files.</p>
       </article></li>
 
       <li style="--i:2"><article class="dos" aria-labelledby="e3">
@@ -394,7 +394,7 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
           <div><dt>Function</dt><dd>Shaper</dd></div>
           <div><dt>Domain</dt><dd>Presentational UI/UX</dd></div>
         </dl>
-        <p class="xs">Shapes markup, styling, layout, design tokens, visual states and presentational accessibility — within an assigned file scope.</p>
+        <p class="xs">Shapes markup, styling, layout, design tokens, visual states and presentational accessibility, within an assigned file scope.</p>
       </article></li>
 
       <li style="--i:4"><article class="dos" aria-labelledby="e5">
@@ -458,10 +458,10 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
         <li><span class="sl">02 Record</span><p class="xs">The ledger lives at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, and every state result is validated against the workflow definition before the run advances.</p></li>
         <li><span class="sl">03 Plan</span><p class="xs">The cerebrate returns the directive.</p></li>
         <li><span class="sl">04 Branch</span><p class="xs">Git preflight, then a compliant working branch: feature/, bugfix/, hotfix/, refactor/, chore/, docs/, test/, ci/. The swarm never commits to trunk.</p></li>
-        <li><span class="sl">05 Build in waves</span><p class="xs"><code>hivemind:next-wave</code> selects every ready step whose dependencies are met and whose files do not overlap. Drones and changelings build those steps in parallel, with one checkpoint commit — a molt — per wave.</p></li>
+        <li><span class="sl">05 Build in waves</span><p class="xs"><code>hivemind:next-wave</code> selects every ready step whose dependencies are met and whose files do not overlap. Drones and changelings build those steps in parallel, with one checkpoint commit (a molt) per wave.</p></li>
         <li><span class="sl">06 Gate</span><p class="xs">A version-bump decision (<code>hivemind:bump-type</code>), then validation.</p></li>
         <li><span class="sl">07 Review</span><p class="xs">With codex installed, the local-reviewer runs its adversarial review loop.</p></li>
-        <li><span class="sl">08 Ship and watch</span><p class="xs">The overlord opens the PR and watches it by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour. Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge — you do.</p></li>
+        <li><span class="sl">08 Ship and watch</span><p class="xs">The overlord opens the PR and watches it by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour. Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge. You do.</p></li>
       </ol>
     </div>
 
@@ -507,7 +507,7 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
   <div class="wrap">
     <p class="kicker">05 // Install</p>
     <h2 id="install-title" class="xg">Establish uplink</h2>
-    <p class="intro xs">Three commands. Each one selects whole on click or tap — copy it with your usual shortcut.</p>
+    <p class="intro xs">Three commands. Each one selects whole on click or tap, so you can copy it with your usual shortcut.</p>
 
     <div class="term inst">
       <div class="bar"><p>uplink :: claude code</p><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
@@ -528,15 +528,15 @@ h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;let
           <li>gh</li>
           <li>jq</li>
           <li>the Claude Code CLI</li>
-          <li>tmux <span>— only for brood mode</span></li>
+          <li>tmux <span>(only for brood mode)</span></li>
         </ul>
       </div>
       <div>
         <h3 class="xg">Optional companions</h3>
         <ul>
-          <li>claude-mem <span>— memory</span></li>
-          <li>codex <span>— local pre-PR review</span></li>
-          <li>caveman <span>— compressed output</span></li>
+          <li>claude-mem <span>(memory)</span></li>
+          <li>codex <span>(local pre-PR review)</span></li>
+          <li>caveman <span>(compressed output)</span></li>
         </ul>
       </div>
     </div>

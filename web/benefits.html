@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Why adopt Hivemind? Six real problems the multi-agent pipeline solves — from managing the plan-to-PR flow to parallel execution and optional tooling.">
-  <title>Benefits — Hivemind</title>
-  <!-- All paths are relative — site serves under https://brenpike.github.io/hivemind/ -->
+  <meta name="description" content="Why adopt Hivemind? Six real problems the multi-agent pipeline solves, from managing the plan-to-PR flow to parallel execution and optional tooling.">
+  <title>Benefits | Hivemind</title>
+  <!-- All paths are relative. Site serves under https://brenpike.github.io/hivemind/ -->
   <link rel="stylesheet" href="./styles/main.css">
   <script type="module" src="./scripts/main.js"></script>
 </head>
@@ -17,11 +17,11 @@
        ===================================================================== -->
   <header class="site-nav" id="site-nav" role="banner">
     <div class="site-nav__inner">
-      <a href="./index.html" class="site-nav__logo" id="nav-logo-glow" aria-label="Hivemind — home">
+      <a href="./index.html" class="site-nav__logo" id="nav-logo-glow" aria-label="Hivemind home">
         Hivemind
       </a>
 
-      <!-- Mobile toggle — behavior wired in motion phase -->
+      <!-- Mobile toggle: behavior wired in motion phase -->
       <!-- [motion-hook] id="nav-toggle" data-nav-toggle controls drawer open/close -->
       <button
         class="site-nav__toggle"
@@ -60,8 +60,8 @@
 
     <!-- ===================================================================
          PAGE HERO
-         [motion-hook] id="ben-hero" — above fold, no scroll-reveal needed
-         [motion-hook] id="ben-hero-hex-1" class="hex-accent" — parallax shape
+         [motion-hook] id="ben-hero", above fold, no scroll-reveal needed
+         [motion-hook] id="ben-hero-hex-1" class="hex-accent", parallax shape
          =================================================================== -->
     <section class="site-section scanline-overlay" id="ben-hero" aria-labelledby="ben-hero-heading">
       <div class="hex-accent" id="ben-hero-hex-1" aria-hidden="true" style="top:-60px;right:-80px;"></div>
@@ -74,7 +74,7 @@
             Problems Solved
           </h1>
           <p style="font-size:var(--text-lg);color:var(--color-text-dim);line-height:1.5;max-width:620px;">
-            Six real friction points in the plan-to-PR workflow — and how the Hivemind pipeline addresses each one.
+            Six real friction points in the plan-to-PR workflow, and how the Hivemind pipeline addresses each one.
           </p>
         </div>
       </div>
@@ -98,7 +98,7 @@
 
 
     <!-- ===================================================================
-         BENEFIT 01 — PIPELINE OVERHEAD
+         BENEFIT 01: PIPELINE OVERHEAD
          [motion-hook] .js-scroll-reveal data-reveal="fade-up" on cards
          =================================================================== -->
     <section class="site-section site-section--tight" id="ben-pipeline" aria-labelledby="ben-pipeline-heading">
@@ -106,7 +106,7 @@
 
         <!-- [motion-hook] class="js-scroll-reveal" data-reveal="fade-up" data-delay="0" -->
         <div class="js-scroll-reveal" data-reveal="fade-up" data-delay="0">
-          <span class="eyebrow">01 — Pipeline overhead</span>
+          <span class="eyebrow">01 Pipeline overhead</span>
           <h2 id="ben-pipeline-heading" style="font-size:var(--text-2xl);margin-bottom:var(--space-5);">
             Managing the pipeline is its own job
           </h2>
@@ -121,14 +121,14 @@
             <div style="margin-bottom:var(--space-6);">
               <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-magenta);margin-bottom:var(--space-2);">Problem</p>
               <p style="color:var(--color-text-dim);">
-                Manually managing the plan → build → review → ship pipeline — deciding when to plan, when to build, when to stop and review — is cognitive overhead on top of the actual work.
+                Manually managing the plan → build → review → ship pipeline (deciding when to plan, when to build, when to stop and review) is cognitive overhead on top of the actual work.
               </p>
             </div>
 
             <div style="margin-bottom:var(--space-6);">
               <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-violet);margin-bottom:var(--space-2);">Solution</p>
               <p style="color:var(--color-text-dim);">
-                The overlord is the control plane that coordinates specialized bioforms to plan, build, review, and ship code — <strong style="color:var(--color-text);">so you don't have to manage the pipeline yourself.</strong>
+                The overlord is the control plane that coordinates specialized bioforms to plan, build, review, and ship code, <strong style="color:var(--color-text);">so you don't have to manage the pipeline yourself.</strong>
               </p>
             </div>
 
@@ -143,7 +143,7 @@
 
           <!-- ASCII diagram -->
           <!-- [motion-hook] id="ben-pipeline-diagram" class="js-scroll-reveal" data-reveal="fade-left" data-delay="200" -->
-          <div class="code-block js-scroll-reveal" id="ben-pipeline-diagram" data-reveal="fade-left" data-delay="200" role="img" aria-label="Pipeline: you give the overlord a task; the overlord routes to cerebrate, drone/changeling, adaptation cycle, then PR — you do not manage the hand-offs">
+          <div class="code-block js-scroll-reveal" id="ben-pipeline-diagram" data-reveal="fade-left" data-delay="200" role="img" aria-label="Pipeline: you give the overlord a task; the overlord routes to the cerebrate, a drone or changeling, the local-reviewer when codex is installed, then a PR that is watched by default. You do not manage the hand-offs.">
             <pre><code><span style="color:var(--color-text-dim);">Before:  You → plan → build → review → ship</span>
 <span style="color:var(--color-text-dim);">         (every hand-off is manual)</span>
 
@@ -151,8 +151,8 @@
 You → <span style="color:var(--color-accent-violet);">Overlord</span>
        ├─▶ <span style="color:var(--color-accent-cyan);">Cerebrate</span>       (plan)
        ├─▶ <span style="color:var(--color-accent-spore);">Drone</span> / <span style="color:var(--color-accent-magenta);">Changeling</span>  (build)
-       ├─▶ <span style="color:var(--color-accent-cyan);">Adaptation Cycle</span>  (review)
-       └─▶ <span style="color:var(--color-accent-spore);">PR</span></code></pre>
+       ├─▶ <span style="color:var(--color-accent-cyan);">Local-Reviewer</span>  (review, if codex)
+       └─▶ <span style="color:var(--color-accent-spore);">PR</span>  (watched by default)</code></pre>
           </div>
 
         </div>
@@ -164,7 +164,7 @@ You → <span style="color:var(--color-accent-violet);">Overlord</span>
 
 
     <!-- ===================================================================
-         BENEFIT 02 — PLANNING VS BUILDING
+         BENEFIT 02: PLANNING VS BUILDING
          [motion-hook] .js-scroll-reveal data-reveal="fade-up" on content
          =================================================================== -->
     <section class="site-section site-section--tight" id="ben-planning" aria-labelledby="ben-planning-heading">
@@ -172,7 +172,7 @@ You → <span style="color:var(--color-accent-violet);">Overlord</span>
 
         <!-- [motion-hook] class="js-scroll-reveal" data-reveal="fade-up" data-delay="0" -->
         <div class="js-scroll-reveal" data-reveal="fade-up" data-delay="0">
-          <span class="eyebrow">02 — Planning vs building</span>
+          <span class="eyebrow">02 Planning vs building</span>
           <h2 id="ben-planning-heading" style="font-size:var(--text-2xl);margin-bottom:var(--space-5);">
             Mixing planning and building leads to thrash
           </h2>
@@ -210,7 +210,7 @@ You → <span style="color:var(--color-accent-violet);">Overlord</span>
 
 
     <!-- ===================================================================
-         BENEFIT 03 — UNREVIEWED CODE
+         BENEFIT 03: UNREVIEWED CODE
          [motion-hook] .js-scroll-reveal data-reveal="fade-up" on content
          =================================================================== -->
     <section class="site-section site-section--tight" id="ben-review" aria-labelledby="ben-review-heading">
@@ -218,7 +218,7 @@ You → <span style="color:var(--color-accent-violet);">Overlord</span>
 
         <!-- [motion-hook] class="js-scroll-reveal" data-reveal="fade-up" data-delay="0" -->
         <div class="js-scroll-reveal" data-reveal="fade-up" data-delay="0">
-          <span class="eyebrow">03 — Unreviewed code</span>
+          <span class="eyebrow">03 Unreviewed code</span>
           <h2 id="ben-review-heading" style="font-size:var(--text-2xl);margin-bottom:var(--space-5);">
             Code ships without a review gate
           </h2>
@@ -233,26 +233,26 @@ You → <span style="color:var(--color-accent-violet);">Overlord</span>
             <div style="margin-bottom:var(--space-6);">
               <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-magenta);margin-bottom:var(--space-2);">Problem</p>
               <p style="color:var(--color-text-dim);">
-                Without a built-in review step, code reaches the PR — or production — without being challenged. Adding an external review step is manual work that gets skipped under pressure.
+                Without a built-in review step, code reaches the PR, or production, without being challenged. Adding an external review step is manual work that gets skipped under pressure.
               </p>
             </div>
 
             <div style="margin-bottom:var(--space-6);">
               <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-violet);margin-bottom:var(--space-2);">Solution</p>
               <p style="color:var(--color-text-dim);">
-                The adaptation cycle reviews before shipping. With the optional Codex companion, local pre-PR review runs automatically, and the <code>github-review-loop</code> skill handles post-PR feedback in a loop until the PR stabilises.
+                Two separate review layers. <strong style="color:var(--color-text);">Local pre-PR review</strong> needs the optional codex companion: the <code>local-reviewer</code> runs an adversarial Codex loop on the branch diff, fixing simple findings and escalating complex ones, before any PR exists. <strong style="color:var(--color-text);">The post-PR watch</strong> is the default and does not need codex: after opening the PR, the overlord runs <code>github-review-loop</code>, which fixes, pushes, replies to, and resolves actionable feedback from Codex, Copilot, or Claude reviewer bots until approval, merge, or close. Agents never merge.
               </p>
             </div>
 
             <div>
               <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-spore);margin-bottom:var(--space-2);">Benefit</p>
               <p style="color:var(--color-text-dim);">
-                A review gate built into the flow — not bolted on after the fact.
+                A review gate built into the flow, not bolted on after the fact.
               </p>
             </div>
 
             <div style="margin-top:var(--space-5);display:flex;gap:var(--space-3);flex-wrap:wrap;">
-              <span class="badge badge--cyan">hivemind:adaptation-cycle</span>
+              <span class="badge badge--cyan">hivemind:local-reviewer</span>
               <span class="badge badge--violet">hivemind:github-review-loop</span>
             </div>
 
@@ -260,18 +260,18 @@ You → <span style="color:var(--color-accent-violet);">Overlord</span>
 
           <!-- Review flow diagram -->
           <!-- [motion-hook] id="ben-review-diagram" class="js-scroll-reveal" data-reveal="fade-right" data-delay="200" -->
-          <div class="code-block js-scroll-reveal" id="ben-review-diagram" data-reveal="fade-right" data-delay="200" role="img" aria-label="Review flow: build complete feeds into adaptation cycle with Codex review; findings are classified and fixes delegated back before the PR is opened; after the PR the github-review-loop handles further feedback">
+          <div class="code-block js-scroll-reveal" id="ben-review-diagram" data-reveal="fade-right" data-delay="200" role="img" aria-label="Review flow: when codex is installed, the local-reviewer runs a Codex review on the branch diff before the PR, fixing simple findings and escalating complex ones; after the PR opens, github-review-loop watches it by default and fixes, pushes, replies to, and resolves reviewer-bot feedback until approval, merge, or close">
             <pre><code>Build complete
- └─▶ <span style="color:var(--color-accent-cyan);">Adaptation Cycle</span>
+ └─▶ <span style="color:var(--color-accent-cyan);">Local-Reviewer</span>  (pre-PR, needs codex)
       ├─▶ Codex review on branch diff
-      ├─▶ Findings classified
-      └─▶ Fixes delegated back
+      ├─▶ Simple findings fixed
+      └─▶ Complex findings escalated
 
-PR opened
+PR opened  (watched by default)
  └─▶ <span style="color:var(--color-accent-violet);">github-review-loop</span>
-      ├─▶ Watch for review feedback
-      ├─▶ Classify + fix
-      └─▶ Loop until stable</code></pre>
+      ├─▶ Codex / Copilot / Claude bot feedback
+      ├─▶ Fix, push, reply, resolve
+      └─▶ Until approval, merge, or close</code></pre>
           </div>
 
         </div>
@@ -283,7 +283,7 @@ PR opened
 
 
     <!-- ===================================================================
-         BENEFIT 04 — SERIALISED WORK
+         BENEFIT 04: SERIALISED WORK
          [motion-hook] .js-scroll-reveal data-reveal="fade-up" on content
          =================================================================== -->
     <section class="site-section site-section--tight" id="ben-parallelism" aria-labelledby="ben-parallelism-heading">
@@ -291,7 +291,7 @@ PR opened
 
         <!-- [motion-hook] class="js-scroll-reveal" data-reveal="fade-up" data-delay="0" -->
         <div class="js-scroll-reveal" data-reveal="fade-up" data-delay="0">
-          <span class="eyebrow">04 — Serialised work</span>
+          <span class="eyebrow">04 Serialised work</span>
           <h2 id="ben-parallelism-heading" style="font-size:var(--text-2xl);margin-bottom:var(--space-5);">
             Large work is slow when tasks run one at a time
           </h2>
@@ -313,18 +313,19 @@ PR opened
             <div style="margin-bottom:var(--space-6);">
               <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-violet);margin-bottom:var(--space-2);">Solution</p>
               <p style="color:var(--color-text-dim);">
-                Brood mode — the overlord splits work into independent <strong style="color:var(--color-text);">strains</strong> and dispatches a <strong style="color:var(--color-text);">brood</strong>: multiple parallel sessions, each running its own full lifecycle in a separate git worktree.
+                Parallelism at two scales. <strong style="color:var(--color-text);">Within a run</strong>, plan steps build in parallel waves: every ready, dependency-met, file-disjoint step is dispatched at once, with one checkpoint per wave. <strong style="color:var(--color-text);">Across runs</strong>, brood mode splits work into independent <strong style="color:var(--color-text);">strains</strong> and, once you approve them, dispatches a <strong style="color:var(--color-text);">brood</strong>: parallel overlord sessions, each running its own full lifecycle in a separate git worktree.
               </p>
             </div>
 
             <div>
               <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-spore);margin-bottom:var(--space-2);">Benefit</p>
               <p style="color:var(--color-text-dim);">
-                Parallel throughput on independent work. Each strain gets its own branch and PR.
+                Parallel throughput on independent work, inside a single run and across many. Each strain gets its own branch and PR.
               </p>
             </div>
 
             <div style="margin-top:var(--space-5);display:flex;gap:var(--space-3);flex-wrap:wrap;">
+              <span class="badge badge--violet">hivemind:next-wave</span>
               <span class="badge badge--spore">hivemind:spawn-brood</span>
               <span class="badge badge--cyan">hivemind:brood-status</span>
             </div>
@@ -333,8 +334,14 @@ PR opened
 
           <!-- Brood diagram -->
           <!-- [motion-hook] id="ben-brood-diagram" class="js-scroll-reveal" data-reveal="fade-left" data-delay="200" -->
-          <div class="code-block js-scroll-reveal" id="ben-brood-diagram" data-reveal="fade-left" data-delay="200" role="img" aria-label="Brood mode: overlord enters hatchery mode, cerebrate decomposes work into strain A, B, and C running in parallel, each with its own branch and PR">
-            <pre><code><span style="color:var(--color-accent-violet);">Overlord</span>  (hatchery mode)
+          <div class="code-block js-scroll-reveal" id="ben-brood-diagram" data-reveal="fade-left" data-delay="200" role="img" aria-label="Parallel work: within one run, file-disjoint steps build together in a wave with one checkpoint; in brood mode, the overlord enters hatchery mode and the cerebrate decomposes work into strains A, B, and C running in parallel, each with its own branch and PR">
+            <pre><code><span style="color:var(--color-text-dim);">Within a run</span>
+<span style="color:var(--color-accent-violet);">Overlord</span>
+ └─▶ Wave  <span style="color:var(--color-accent-spore);">STEP-001</span> + <span style="color:var(--color-accent-spore);">STEP-002</span>  (file-disjoint)
+      └─▶ one molt
+
+<span style="color:var(--color-text-dim);">Across runs</span>
+<span style="color:var(--color-accent-violet);">Overlord</span>  (hatchery mode)
  └─▶ <span style="color:var(--color-accent-cyan);">Cerebrate</span>  (decompose)
       │
       ├─▶ <span style="color:var(--color-accent-spore);">Strain A</span>  ─┐
@@ -354,7 +361,7 @@ PR opened
 
 
     <!-- ===================================================================
-         BENEFIT 05 — AD-HOC GIT HYGIENE
+         BENEFIT 05: AD-HOC GIT HYGIENE
          [motion-hook] .js-scroll-reveal data-reveal="fade-up" on cards
          =================================================================== -->
     <section class="site-section site-section--tight" id="ben-git" aria-labelledby="ben-git-heading">
@@ -362,7 +369,7 @@ PR opened
 
         <!-- [motion-hook] class="js-scroll-reveal" data-reveal="fade-up" data-delay="0" -->
         <div class="js-scroll-reveal" data-reveal="fade-up" data-delay="0">
-          <span class="eyebrow">05 — Ad-hoc git hygiene</span>
+          <span class="eyebrow">05 Ad-hoc git hygiene</span>
           <h2 id="ben-git-heading" style="font-size:var(--text-2xl);margin-bottom:var(--space-5);">
             Git workflow is inconsistent without a system
           </h2>
@@ -386,7 +393,7 @@ PR opened
             <div class="card__icon" aria-hidden="true">&#9913;&#65039;</div>
             <h3 class="card__title" style="color:var(--color-accent-spore);">Solution + Benefit</h3>
             <p class="card__body">
-              The overlord owns the git lifecycle — working branches, checkpoint commits (<em>molts</em>), and PR only after validation and versioning gates pass. Consistent, compliant history without manual discipline.
+              The overlord owns the git lifecycle: working branches, checkpoint commits (<em>molts</em>), and PR only after validation and versioning gates pass. Consistent, compliant history without manual discipline.
             </p>
             <div style="margin-top:var(--space-4);display:flex;gap:var(--space-3);flex-wrap:wrap;">
               <span class="badge badge--violet">hivemind:create-working-branch</span>
@@ -404,7 +411,7 @@ PR opened
 
 
     <!-- ===================================================================
-         BENEFIT 06 — TOOLING LOCK-IN
+         BENEFIT 06: TOOLING LOCK-IN
          [motion-hook] .js-scroll-reveal data-reveal="fade-up" on cards
          =================================================================== -->
     <section class="site-section site-section--tight" id="ben-lockout" aria-labelledby="ben-lockout-heading">
@@ -412,7 +419,7 @@ PR opened
 
         <!-- [motion-hook] class="js-scroll-reveal" data-reveal="fade-up" data-delay="0" -->
         <div class="js-scroll-reveal" data-reveal="fade-up" data-delay="0">
-          <span class="eyebrow">06 — Tooling lock-in</span>
+          <span class="eyebrow">06 Tooling lock-in</span>
           <h2 id="ben-lockout-heading" style="font-size:var(--text-2xl);margin-bottom:var(--space-5);">
             Rigid frameworks force you to adopt everything at once
           </h2>
@@ -428,14 +435,14 @@ PR opened
               <div style="margin-bottom:var(--space-6);">
                 <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-magenta);margin-bottom:var(--space-2);">Problem</p>
                 <p style="color:var(--color-text-dim);">
-                  Tooling that demands full buy-in up front — including specific review services, memory systems, or communication styles — blocks incremental adoption. If one dependency is absent, nothing works.
+                  Tooling that demands full buy-in up front, including specific review services, memory systems, or communication styles, blocks incremental adoption. If one dependency is absent, nothing works.
                 </p>
               </div>
 
               <div style="margin-bottom:var(--space-6);">
                 <p style="font-family:var(--font-mono);font-size:var(--text-xs);letter-spacing:0.15em;text-transform:uppercase;color:var(--color-accent-violet);margin-bottom:var(--space-2);">Solution</p>
                 <p style="color:var(--color-text-dim);">
-                  Optional companion plugins: <code>claude-mem</code> for cross-session memory, <code>codex</code> for local and GitHub-integrated review, <code>caveman</code> for token-compressed output. All optional. The framework works without any of them; if not installed, steps that depend on them are skipped gracefully. The theme itself is optional flavor — <strong style="color:var(--color-text);">the framework works with or without it.</strong>
+                  Optional companion plugins: <code>claude-mem</code> for cross-session memory, <code>codex</code> for local pre-PR review, <code>caveman</code> for token-compressed output. All optional. The framework works without any of them; if not installed, steps that depend on them are skipped gracefully. The theme itself is optional flavor: <strong style="color:var(--color-text);">the framework works with or without it.</strong>
                 </p>
               </div>
 
@@ -450,12 +457,13 @@ PR opened
 
             <!-- Companion stack -->
             <!-- [motion-hook] id="ben-companions-diagram" class="js-scroll-reveal" data-reveal="fade-left" data-delay="200" -->
-            <div class="code-block js-scroll-reveal" id="ben-companions-diagram" data-reveal="fade-left" data-delay="200" role="img" aria-label="Companion plugins are all optional layers on top of the core framework: claude-mem adds memory, codex adds review, caveman adds compression; removing any has no effect on the others">
+            <div class="code-block js-scroll-reveal" id="ben-companions-diagram" data-reveal="fade-left" data-delay="200" role="img" aria-label="Companion plugins are all optional layers on top of the core framework of six agents: claude-mem adds memory, codex adds local pre-PR review, caveman adds compression; removing any has no effect on the others">
               <pre><code><span style="color:var(--color-text-dim);">Core framework  ──────────────── always on</span>
- └─ overlord / cerebrate / drone / changeling
+ ├─ overlord / cerebrate / drone / changeling
+ └─ local-reviewer / github-reviewer
 
 <span style="color:var(--color-accent-cyan);">+ claude-mem</span>    <span style="color:var(--color-text-dim);">─── optional (memory)</span>
-<span style="color:var(--color-accent-violet);">+ codex</span>         <span style="color:var(--color-text-dim);">─── optional (review)</span>
+<span style="color:var(--color-accent-violet);">+ codex</span>         <span style="color:var(--color-text-dim);">─── optional (pre-PR review)</span>
 <span style="color:var(--color-accent-spore);">+ caveman</span>       <span style="color:var(--color-text-dim);">─── optional (compression)</span>
 
 <span style="color:var(--color-text-dim);">Remove any layer → rest still works</span></code></pre>
@@ -484,7 +492,7 @@ PR opened
             <div class="card__icon" aria-hidden="true">&#128270;</div>
             <h3 class="card__title">codex</h3>
             <p class="card__body">
-              Local and GitHub-integrated Codex review. Enables <code>local-reviewer</code> (pre-PR) and <code>github-review-loop</code> (post-PR). If not installed, review steps are skipped gracefully.
+              Local pre-PR Codex review. Enables the <code>local-reviewer</code> agent. The post-PR watch is the default and runs without codex. If not installed, local review is skipped gracefully.
             </p>
             <span class="badge badge--cyan" style="margin-top:var(--space-4);">Optional</span>
           </article>
@@ -495,7 +503,7 @@ PR opened
             <div class="card__icon" aria-hidden="true">&#128367;</div>
             <h3 class="card__title">caveman</h3>
             <p class="card__body">
-              Token-compressed communication. When installed, all framework agents output in caveman ultra mode — reducing token usage while preserving full technical accuracy.
+              Token-compressed communication. When installed, all framework agents output in caveman ultra mode, reducing token usage while preserving full technical accuracy.
             </p>
             <span class="badge badge--spore" style="margin-top:var(--space-4);">Optional</span>
           </article>
@@ -509,7 +517,7 @@ PR opened
 
 
     <!-- ===================================================================
-         BOTTOM CTA — INSTALL
+         BOTTOM CTA: INSTALL
          [motion-hook] id="ben-install" class="js-scroll-reveal" data-reveal="fade-up"
          =================================================================== -->
     <section class="site-section site-section--tight" id="ben-install" aria-labelledby="ben-install-heading">
@@ -521,7 +529,7 @@ PR opened
             Two commands inside Claude Code
           </h2>
           <p style="color:var(--color-text-dim);margin-bottom:var(--space-6);">
-            No external install step. Add the marketplace, install the plugin, done.
+            No external install step. Add the marketplace, install the plugin, then run <code>/hivemind:seed-hive</code> once in each project.
           </p>
 
           <!-- [motion-hook] id="ben-install-block" class="js-glow-target" data-glow="violet" -->
@@ -564,7 +572,7 @@ PR opened
       </nav>
 
       <span class="site-footer__copy">
-        MIT &mdash; fonts: Orbitron &amp; JetBrains Mono (OFL 1.1)
+        MIT License. Fonts: Orbitron &amp; JetBrains Mono (OFL 1.1)
       </span>
     </div>
   </footer>

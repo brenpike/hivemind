@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark">
+<title>Hivemind | Prototype gallery</title>
+<style>
+:root {
+  --bg: #0b0c10;
+  --surface: #13151b;
+  --surface-2: #181b22;
+  --line: #2a2e38;
+  --text: #ebecf1;
+  --muted: #b1b5c1;
+  --focus: #8fd6ff;
+  --radius: 16px;
+  --pad: clamp(16px, 4vw, 32px);
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { background: var(--bg); -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font: 400 1rem/1.6 var(--font);
+  overflow-x: hidden;
+}
+a { color: inherit; }
+
+/* ---------- focus + skip ---------- */
+:focus { outline: none; }
+:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.skip {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  background: var(--text);
+  color: var(--bg);
+  border-radius: 8px;
+  font-weight: 600;
+  text-decoration: none;
+  transform: translateY(-160%);
+}
+.skip:focus-visible { transform: none; outline-color: var(--focus); }
+
+/* ---------- ambient (decorative, transform/opacity only) ---------- */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+.ambient::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle at 1px 1px, rgba(255, 255, 255, .05) 1px, transparent 1.5px);
+  background-size: 28px 28px;
+}
+.spore {
+  position: absolute;
+  width: 60vmax;
+  height: 60vmax;
+  border-radius: 50%;
+  opacity: .14;
+  filter: blur(40px);
+  will-change: transform, opacity;
+}
+.spore--a {
+  left: -20vmax;
+  top: -24vmax;
+  background: radial-gradient(circle, #3bf7d4 0%, transparent 62%);
+  animation: drift-a 46s ease-in-out infinite alternate;
+}
+.spore--b {
+  right: -24vmax;
+  bottom: -28vmax;
+  background: radial-gradient(circle, #8b5cff 0%, transparent 62%);
+  animation: drift-b 58s ease-in-out infinite alternate;
+}
+@keyframes drift-a {
+  0%   { transform: translate(0, 0) scale(1); opacity: .10; }
+  100% { transform: translate(12vmax, 8vmax) scale(1.12); opacity: .17; }
+}
+@keyframes drift-b {
+  0%   { transform: translate(0, 0) scale(1.08); opacity: .15; }
+  100% { transform: translate(-10vmax, -6vmax) scale(.94); opacity: .09; }
+}
+
+/* ---------- layout ---------- */
+.wrap {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: 0 var(--pad);
+  padding-left: max(var(--pad), env(safe-area-inset-left));
+  padding-right: max(var(--pad), env(safe-area-inset-right));
+}
+header.site { padding-top: clamp(32px, 7vw, 72px); }
+.eyebrow {
+  margin: 0 0 12px;
+  font: 600 .8125rem/1.4 var(--mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.eyebrow .dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 10px;
+  border-radius: 50%;
+  background: #3bf7d4;
+  vertical-align: 1px;
+  animation: blink 3.6s ease-in-out infinite;
+}
+@keyframes blink { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+h1 {
+  margin: 0;
+  font-size: clamp(1.75rem, 5.2vw, 3rem);
+  line-height: 1.12;
+  letter-spacing: -.015em;
+  font-weight: 700;
+  overflow-wrap: break-word;
+}
+.lede {
+  max-width: 64ch;
+  margin: 16px 0 0;
+  color: var(--muted);
+  font-size: 1.0625rem;
+}
+.lede a, .note a, footer a {
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.back {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  margin-top: 20px;
+  padding: 0 18px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.back:hover { border-color: #4a5060; background: var(--surface-2); }
+
+main:focus { outline: none; }
+main.wrap { padding-top: clamp(28px, 5vw, 48px); padding-bottom: 24px; }
+
+/* ---------- cards ---------- */
+.grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: clamp(16px, 2.6vw, 24px);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+@media (min-width: 760px) {
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  height: 100%;
+  padding: clamp(18px, 3vw, 26px);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, var(--surface-2), var(--surface));
+  transition: transform .25s ease;
+}
+.card::before {
+  /* accent seam, colour only decorative: names + hex values carry meaning */
+  content: "";
+  position: absolute;
+  left: 18px;
+  right: 18px;
+  top: -1px;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  opacity: .7;
+  transition: opacity .25s ease;
+}
+.card:hover { transform: translateY(-3px); border-color: #3c4250; }
+.card:hover::before { opacity: 1; }
+.card:focus-within { border-color: var(--focus); }
+.card:focus-within::before { opacity: 1; }
+
+.card-num {
+  margin: 0 0 6px;
+  font: 600 .8125rem/1.4 var(--mono);
+  letter-spacing: .1em;
+  color: var(--muted);
+}
+.card .title {
+  margin: 0;
+  font-size: clamp(1.25rem, 2.6vw, 1.5rem);
+  line-height: 1.25;
+}
+.card .title a {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  text-decoration: none;
+}
+/* stretched link: whole card is the tap target */
+.card .title a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: var(--radius);
+}
+.card .title a:focus-visible { outline: none; }
+.card .title a:focus-visible::after {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+.card .title .arrow {
+  display: inline-block;
+  font-weight: 400;
+  color: var(--muted);
+  transition: transform .25s ease;
+}
+.card:hover .title .arrow,
+.card:focus-within .title .arrow { transform: translateX(4px); }
+
+.concept { margin: 8px 0 0; color: var(--text); }
+.label {
+  margin: 18px 0 8px;
+  font: 600 .75rem/1.4 var(--mono);
+  letter-spacing: .12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.motion {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.motion li {
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: .875rem;
+  line-height: 1.5;
+  color: var(--muted);
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.swatches {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(124px, 1fr));
+  gap: 8px;
+}
+.swatches li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.chip {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: var(--c);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .22);
+}
+.swatches .meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  font-size: .8125rem;
+  line-height: 1.3;
+}
+.swatches .meta span { overflow-wrap: anywhere; }
+.swatches code {
+  font: 500 .75rem/1.3 var(--mono);
+  color: var(--muted);
+}
+
+/* ---------- notes + footer ---------- */
+.note {
+  margin: clamp(24px, 4vw, 36px) 0 0;
+  padding: 16px 18px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: rgba(19, 21, 27, .7);
+  color: var(--muted);
+  max-width: 78ch;
+}
+.note strong { color: var(--text); }
+footer.wrap {
+  padding-top: 16px;
+  padding-bottom: calc(32px + env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  margin-top: 32px;
+  color: var(--muted);
+  font-size: .9375rem;
+}
+footer ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 20px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+footer a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  color: var(--text);
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+  .card:hover { transform: none; }
+  .card:hover .title .arrow,
+  .card:focus-within .title .arrow { transform: none; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to prototypes</a>
+
+<div class="ambient" aria-hidden="true">
+  <div class="spore spore--a"></div>
+  <div class="spore spore--b"></div>
+</div>
+
+<header class="site wrap">
+  <p class="eyebrow"><span class="dot" aria-hidden="true"></span>Design explorations</p>
+  <h1>Hivemind: alien facelift prototypes</h1>
+  <p class="lede">Four standalone design explorations for a possible new look. They are proposals only: the live site is unchanged.</p>
+  <a class="back" href="../index.html"><span aria-hidden="true">&larr;</span> Back to the live site</a>
+</header>
+
+<main id="main" class="wrap" tabindex="-1">
+  <h2 class="eyebrow" id="gallery-title">Prototypes</h2>
+  <ul class="grid" aria-labelledby="gallery-title">
+
+    <li>
+      <article class="card" style="--accent:#3bf7d4" aria-labelledby="p01">
+        <p class="card-num">01</p>
+        <h3 class="title" id="p01"><a href="./01-bioluminescent-membrane.html">Living Membrane <span class="arrow" aria-hidden="true">&rarr;</span></a></h3>
+        <p class="concept">Hivemind as a deep-sea organism: a bioluminescent membrane, vesicle-shaped cards and a tendril that carries the workflow.</p>
+        <h4 class="label">Motion</h4>
+        <ul class="motion">
+          <li>Canvas membrane with plankton and organelles</li>
+          <li>Signal pulses along tendrils</li>
+          <li>Morphing vesicle card outlines</li>
+          <li>Scroll-driven tendril with fallback</li>
+          <li>Tap ripples</li>
+        </ul>
+        <h4 class="label">Palette</h4>
+        <ul class="swatches">
+          <li><span class="chip" style="--c:#02060a" aria-hidden="true"></span><span class="meta"><span>Abyss</span><code>#02060a</code></span></li>
+          <li><span class="chip" style="--c:#04212b" aria-hidden="true"></span><span class="meta"><span>Deep teal</span><code>#04212b</code></span></li>
+          <li><span class="chip" style="--c:#3bf7d4" aria-hidden="true"></span><span class="meta"><span>Biolume cyan</span><code>#3bf7d4</code></span></li>
+          <li><span class="chip" style="--c:#3a8bff" aria-hidden="true"></span><span class="meta"><span>Plankton blue</span><code>#3a8bff</code></span></li>
+          <li><span class="chip" style="--c:#ff4fd8" aria-hidden="true"></span><span class="meta"><span>Jelly magenta</span><code>#ff4fd8</code></span></li>
+          <li><span class="chip" style="--c:#ffc65c" aria-hidden="true"></span><span class="meta"><span>Amber</span><code>#ffc65c</code></span></li>
+        </ul>
+      </article>
+    </li>
+
+    <li>
+      <article class="card" style="--accent:#7dff9b" aria-labelledby="p02">
+        <p class="card-num">02</p>
+        <h3 class="title" id="p02"><a href="./02-xenoglyph-terminal.html">Xenoglyph Terminal <span class="arrow" aria-hidden="true">&rarr;</span></a></h3>
+        <p class="concept">Hivemind as an intercepted alien transmission on a phosphor CRT, decoded from xenoglyphs into readable text.</p>
+        <h4 class="label">Motion</h4>
+        <ul class="motion">
+          <li>CRT scanlines and flicker layers</li>
+          <li>Glyph scramble decoder</li>
+          <li>Boot-log typing</li>
+          <li>Canvas oscilloscope</li>
+          <li>Tap a heading to re-scramble</li>
+        </ul>
+        <h4 class="label">Palette</h4>
+        <ul class="swatches">
+          <li><span class="chip" style="--c:#020403" aria-hidden="true"></span><span class="meta"><span>CRT black</span><code>#020403</code></span></li>
+          <li><span class="chip" style="--c:#7dff9b" aria-hidden="true"></span><span class="meta"><span>Phosphor</span><code>#7dff9b</code></span></li>
+          <li><span class="chip" style="--c:#ffb347" aria-hidden="true"></span><span class="meta"><span>Amber</span><code>#ffb347</code></span></li>
+          <li><span class="chip" style="--c:#b48cff" aria-hidden="true"></span><span class="meta"><span>Glyph violet</span><code>#b48cff</code></span></li>
+        </ul>
+      </article>
+    </li>
+
+    <li>
+      <article class="card" style="--accent:#8b5cff" aria-labelledby="p03">
+        <p class="card-num">03</p>
+        <h3 class="title" id="p03"><a href="./03-neural-swarm.html">Neural Swarm <span class="arrow" aria-hidden="true">&rarr;</span></a></h3>
+        <p class="concept">Hivemind as a living particle swarm that self-organises into the wordmark, the agent clusters and the workflow as you scroll.</p>
+        <h4 class="label">Motion</h4>
+        <ul class="motion">
+          <li>Canvas boids with a spatial hash</li>
+          <li>Particles sampled from the wordmark</li>
+          <li>Per-section formations and orbit</li>
+          <li>Pointer predator, long-press convergence</li>
+        </ul>
+        <h4 class="label">Palette</h4>
+        <ul class="swatches">
+          <li><span class="chip" style="--c:#05040d" aria-hidden="true"></span><span class="meta"><span>Void</span><code>#05040d</code></span></li>
+          <li><span class="chip" style="--c:#8b5cff" aria-hidden="true"></span><span class="meta"><span>Neural violet</span><code>#8b5cff</code></span></li>
+          <li><span class="chip" style="--c:#29e7ff" aria-hidden="true"></span><span class="meta"><span>Synapse cyan</span><code>#29e7ff</code></span></li>
+          <li><span class="chip" style="--c:#ff7a45" aria-hidden="true"></span><span class="meta"><span>Ember</span><code>#ff7a45</code></span></li>
+          <li><span class="chip" style="--c:#f4f1ff" aria-hidden="true"></span><span class="meta"><span>White-hot</span><code>#f4f1ff</code></span></li>
+        </ul>
+      </article>
+    </li>
+
+    <li>
+      <article class="card" style="--accent:#b8ff3c" aria-labelledby="p04">
+        <p class="card-num">04</p>
+        <h3 class="title" id="p04"><a href="./04-biomech-reliquary.html">Biomechanical Reliquary <span class="arrow" aria-hidden="true">&rarr;</span></a></h3>
+        <p class="concept">Hivemind as a biomechanical reliquary of bone, chrome and ichor, watched over by a living iris along a lit vertebral spine.</p>
+        <h4 class="label">Motion</h4>
+        <ul class="motion">
+          <li>SVG turbulence and displacement</li>
+          <li>Pointer-tracking iris with idle saccades</li>
+          <li>Scroll-lit vertebra spine</li>
+          <li>Scroll-driven carapace parting with fallback</li>
+          <li>Chrome sheen</li>
+        </ul>
+        <h4 class="label">Palette</h4>
+        <ul class="swatches">
+          <li><span class="chip" style="--c:#070707" aria-hidden="true"></span><span class="meta"><span>Obsidian</span><code>#070707</code></span></li>
+          <li><span class="chip" style="--c:#d9d2c3" aria-hidden="true"></span><span class="meta"><span>Bone</span><code>#d9d2c3</code></span></li>
+          <li><span class="chip" style="--c:#8c8f94" aria-hidden="true"></span><span class="meta"><span>Chrome</span><code>#8c8f94</code></span></li>
+          <li><span class="chip" style="--c:#1b1d20" aria-hidden="true"></span><span class="meta"><span>Graphite</span><code>#1b1d20</code></span></li>
+          <li><span class="chip" style="--c:#b8ff3c" aria-hidden="true"></span><span class="meta"><span>Ichor</span><code>#b8ff3c</code></span></li>
+          <li><span class="chip" style="--c:#7a0f1e" aria-hidden="true"></span><span class="meta"><span>Arterial</span><code>#7a0f1e</code></span></li>
+        </ul>
+      </article>
+    </li>
+
+  </ul>
+
+  <p class="note"><strong>Viewing on a phone?</strong> Each prototype is a single, self-contained HTML file that makes no external requests, so it can be opened standalone or uploaded as an artifact for mobile viewing.</p>
+</main>
+
+<footer class="wrap">
+  <ul>
+    <li><a href="../index.html">Live site</a></li>
+    <li><a href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer">Source on GitHub</a></li>
+  </ul>
+</footer>
+</body>
+</html>
