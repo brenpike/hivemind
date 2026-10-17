@@ -1175,7 +1175,7 @@ function init(): void {
     }
   }
 
-  /** Mounts the aria-hidden decode overlay on rec.el. */
+  /** Mounts the aria-hidden, inert decode overlay on rec.el; inert keeps cloned links out of focus order. */
   function mountDecode(rec: DecodeRecord): void {
     if (rec.ov) return;
     rec.glyphCells = []; rec.scrambleCells = []; rec.base = []; rec.lineTop = -1e9; rec.lineHalf = 6;
@@ -1184,6 +1184,7 @@ function init(): void {
     const overlay = document.createElement('span');
     overlay.className = 'dx-ov';
     overlay.setAttribute('aria-hidden', 'true');
+    overlay.setAttribute('inert', '');
     overlay.style.setProperty('--dx-c', rec.color);
     buildDecodeCells(rec.el, overlay, rec);
     rec.el.appendChild(overlay);

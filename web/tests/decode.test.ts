@@ -14,7 +14,7 @@ import { mountPage } from './fixtures';
 // Characterization suite for the xenoglyph decode on .xg (glyph headings) and .xs
 // (scramble text) in web/src/main.ts.
 //
-// CONTRACT ONLY: classes dx, dx-wait, dx-on; the aria-hidden .dx-ov overlay; id-free
+// CONTRACT ONLY: classes dx, dx-wait, dx-on; the aria-hidden, inert .dx-ov overlay; id-free
 // cloned descendants; the element's own text left intact. Scramble characters, glyph
 // picks, stagger delays and decode durations are random or timing-derived and are
 // DELIBERATELY UNCHARACTERIZED. Frames are flushed until the overlay is gone (capped),
@@ -99,6 +99,7 @@ describe('xenoglyph decode (contract)', () => {
     expect(overlays.length).toBe(1);
     expect(overlays[0].tagName).toBe('SPAN');
     expect(overlays[0].getAttribute('aria-hidden')).toBe('true');
+    expect(overlays[0].hasAttribute('inert')).toBe(true);
     expect(overlays[0].querySelectorAll('[id]').length).toBe(0);
     expect(probe.classList.contains('dx-on')).toBe(true);
     expect(probe.classList.contains('dx-wait')).toBe(false);
