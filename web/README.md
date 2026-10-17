@@ -16,6 +16,7 @@ Every page follows these rules:
 - Load no external resources.
 - Use relative paths only (the Pages base path is `/hivemind/`).
 - Use no em or en dashes.
+- Copy that tells readers to tap, hover, touch, click or press and hold sits inside `aria-hidden="true"`: those pointer effects are decorative, with no keyboard equivalent.
 
 The contract is pinned by `web/tests/dom-contract.test.ts`.
 

@@ -27,7 +27,8 @@ const DECODE_SELECTOR = '.xs, .xg';
 const DECODE_FORBIDDEN_ANCESTORS = ['table', 'pre', 'code', '.code-panel'];
 const NETWORK_ELEMENTS = ['link', 'script', 'img', 'source', 'iframe', 'video', 'audio'];
 const REMOTE_URL_PATTERN = /^(?:https?:|\/\/)/i;
-const DASH_PATTERN = /[\u2013\u2014]|&(?:mdash|ndash|#8212|#8211|#x2014|#x2013);/i;
+const POINTER_COPY_PATTERN = /\b(?:tap|hover|touch|click|press and hold)\b/i;
+const DASH_PATTERN =/[\u2013\u2014]|&(?:mdash|ndash|#8212|#8211|#x2014|#x2013);/i;
 
 const SECTION_IDS: Record<PageFile, string[]> = {
   'index.html': ['hero', 'agents', 'workflow', 'install'],
@@ -119,6 +120,15 @@ function listDashScanTargets(): string[] {
     ...listFilesRecursively(join(WEB_ROOT, 'src')),
     join(WEB_ROOT, 'README.md'),
   ];
+}
+
+function collectTextNodes(node: Node): Text[] {
+  if (node.nodeType === Node.TEXT_NODE) return [node as Text];
+  return Array.from(node.childNodes).flatMap(collectTextNodes);
+}
+
+function listPointerCopyNodes(doc: Document): Text[] {
+  return collectTextNodes(doc.body).filter((textNode) => POINTER_COPY_PATTERN.test(textNode.data));
 }
 
 function listRowKeys(table: Element): string[] {
@@ -260,6 +270,13 @@ describe.each(PAGE_FILES)('%s', (file) => {
     expect(unstyled).toEqual([]);
   });
 
+  it('A11Y: pointer-only instructions are hidden from assistive tech', () => {
+    const exposed = listPointerCopyNodes(doc)
+      .filter((textNode) => textNode.parentElement?.closest('[aria-hidden="true"]') === null)
+      .map((textNode) => textNode.data.trim());
+    expect(exposed).toEqual([]);
+  });
+
   it('has no style attributes', () => {
     expect(selectAll(doc, '[style]').map((element) => element.tagName)).toEqual([]);
   });
@@ -309,6 +326,10 @@ describe('cross page contract', () => {
     expect(doc.getElementById('agent-stage')).not.toBeNull();
     const clusters = selectAll(doc, '[data-cluster]').map((element) => element.getAttribute('data-cluster'));
     expect(clusters).toEqual(['0', '1', '2', '3', '4', '5']);
+  });
+
+  it('A11Y: index carries pointer-only instruction copy, so the hidden-from-AT check is not vacuous', () => {
+    expect(listPointerCopyNodes(loadPage('index.html')).length).toBeGreaterThan(0);
   });
 
   it.each(DEEP_PAGES)('FORMATIONS: %s canvas density is in (0, 1]', (file) => {

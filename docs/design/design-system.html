@@ -83,7 +83,7 @@
           <p class="eyebrow xs">Hivemind design system</p>
           <p class="lede xs">The colors, type, spacing, components and motion behind the Hivemind website, on one page, drawn by the real stylesheet and the real swarm engine.</p>
           <p class="note">Live formation: hero. The swarm spells the wordmark above. It first draws one alien glyph per letter, then, 1.5 s after the swarm starts, each letter morphs into its English shape left to right, 0.16 s apart, and lights up as its particles lock in. Tap the wordmark to replay it.</p>
-          <p class="hint">Move or touch to scatter the swarm. Press and hold to call it to you. Tap a heading to re-encode it.</p>
+          <p class="hint" aria-hidden="true">Move or touch to scatter the swarm. Press and hold to call it to you. Tap a heading to re-encode it.</p>
         </div>
         <nav class="panel toc" aria-label="Page sections">
           <ol role="list">
@@ -940,7 +940,7 @@
         <header class="panel plate">
           <p class="kicker xs">10 Live formation: agents</p>
           <h2 id="agents-title" class="xg">Hub and spokes</h2>
-          <p class="xs">When this section reaches the middle of the screen, the swarm gathers into six clusters around the sticky stage: a hub and five spokes on a ring, joined by curved edges that carry sparks. A label decodes under each cluster. Hover or tap a card to light its cluster.</p>
+          <p class="xs">When this section reaches the middle of the screen, the swarm gathers into six clusters around the sticky stage: a hub and five spokes on a ring, joined by curved edges that carry sparks. A label decodes under each cluster. <span aria-hidden="true">Hover or tap a card to light its cluster.</span></p>
         </header>
         <div class="agents-grid">
           <div class="stage" id="agent-stage" aria-hidden="true"></div>
@@ -1194,6 +1194,7 @@
               <tr><td>Press and hold</td><td>Hold for 420 ms without moving more than 12 px and the swarm converges on the pointer, circling it at 6 px plus up to 115 px (70 px below 640 px). Scattering stops while holding.</td></tr>
               <tr><td>Hold ramp</td><td>The hold strength eases toward full at rate 2.6 per second and back to zero at 3.5 per second, so it fades in and out.</td></tr>
               <tr><td>Cancel</td><td>Pointer cancel, window blur or the mouse leaving the page ends all pointer influence.</td></tr>
+              <tr><td>Keyboard</td><td>None by design. Scatter, press and hold, tap to re-encode, wordmark replay and card lighting are decorative and pointer only; no content depends on them, and their hint copy is aria-hidden.</td></tr>
             </tbody>
           </table>
         </div>
@@ -1378,6 +1379,7 @@
               <tr><td>Links</td><td>Every <code>#fragment</code> link must point at an id that exists.</td></tr>
               <tr><td>Section ids</td><td>Each page's section ids are pinned, in order, in the test.</td></tr>
               <tr><td>No dashes</td><td>No em or en dash characters (or their HTML entities) in pages, styles, source or the web README. Use commas, colons or parentheses.</td></tr>
+              <tr><td>Decorative hints</td><td>On site pages, text that tells readers to tap, hover, touch, click or press and hold sits inside <code>aria-hidden="true"</code>: those effects are decorative and pointer only.</td></tr>
               <tr><td>Content</td><td>All website copy must trace back to a claim in the repo root <code>README.md</code>. There is no automatic sync.</td></tr>
             </tbody>
           </table>

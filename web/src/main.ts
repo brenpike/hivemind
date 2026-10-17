@@ -1118,7 +1118,7 @@ function init(): void {
     }
   }
 
-  /** Binds hover (mouse) and tap toggle (touch, pen) lighting to one [data-cluster] card. */
+  /** Binds hover (mouse) and tap toggle (touch, pen) lighting to one [data-cluster] card. Pointer only by design, decorative, no keyboard equivalent; content never depends on it. */
   function bindCard(card: HTMLElement): void {
     const k = Number(card.getAttribute('data-cluster'));
     card.addEventListener('pointerenter', (evt) => { if (evt.pointerType === 'mouse') setLitCluster(k); }, passive);
@@ -1305,7 +1305,7 @@ function init(): void {
     decodeTasks.length = 0;
   }
 
-  /** Tap a heading for a brief re-encode; tap the wordmark to replay its glyph sequence. */
+  /** Tap a heading for a brief re-encode; tap the wordmark to replay its glyph sequence. Pointer only by design, decorative, no keyboard equivalent; content never depends on it. */
   function handleReencodeClick(evt: MouseEvent): void {
     if (!isLive) return;
     const target = evt.target;
