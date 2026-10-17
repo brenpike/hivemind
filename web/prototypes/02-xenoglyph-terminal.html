@@ -1,0 +1,871 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#020403">
+<title>Hivemind — Prototype 02: Xenoglyph Terminal</title>
+<meta name="description" content="Multi-agent orchestration framework for Claude Code, rendered as an intercepted alien transmission.">
+<style>
+:root{
+  --bg:#020403;--panel:#040a06;--panel-2:#07120b;--well:#010302;
+  --ph:#7dff9b;--text:#c2f5cf;--dim:#7cc893;--hi:#eafff0;
+  --amber:#ffb347;--violet:#b48cff;
+  --line:rgba(125,255,155,.18);--line-2:rgba(125,255,155,.36);
+  --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,"Liberation Mono",monospace;
+  --ab:-1px 0 rgba(255,48,96,.75),1px 0 rgba(0,226,255,.75),0 0 .55em rgba(125,255,155,.3);
+  --pl:max(1rem,env(safe-area-inset-left));--pr:max(1rem,env(safe-area-inset-right));
+}
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;background:var(--bg);scroll-behavior:smooth;scroll-padding-top:1rem}
+body{margin:0;min-height:100vh;min-height:100dvh;font-family:var(--mono);font-size:.9375rem;line-height:1.65;color:var(--text);
+  background-color:var(--bg);
+  background-image:radial-gradient(ellipse 90% 45% at 50% 0,rgba(125,255,155,.08),transparent 70%),radial-gradient(rgba(125,255,155,.06) 1px,transparent 1.6px);
+  background-size:100% 100%,22px 22px}
+@media (min-width:640px){body{font-size:1rem}}
+::selection{background:var(--ph);color:var(--bg)}
+a{color:var(--ph);text-decoration-thickness:1px;text-underline-offset:.22em}
+a:hover{color:var(--hi)}
+:focus-visible{outline:2px solid var(--amber);outline-offset:3px;box-shadow:0 0 0 6px rgba(255,179,71,.2)}
+code{font-family:inherit;font-size:1em;color:var(--amber)}
+p,dd,li{overflow-wrap:break-word;overflow-wrap:anywhere}
+p{margin:0 0 1em}
+h1,h2,h3{margin:0;overflow-wrap:break-word;font-weight:700;text-transform:uppercase;letter-spacing:.2em;line-height:1.15;color:var(--hc,var(--ph));text-shadow:var(--ab)}
+h2{font-size:clamp(1.3rem,1rem + 2.2vw,2.35rem)}
+h3{--hc:var(--hi);font-size:clamp(1rem,.92rem + .55vw,1.25rem)}
+.wrap{max-width:74rem;margin:0 auto;padding-left:var(--pl);padding-right:var(--pr)}
+@media (min-width:1024px){.wrap{padding-left:max(2rem,env(safe-area-inset-left));padding-right:max(2rem,env(safe-area-inset-right))}}
+.skip{position:absolute;z-index:100;left:var(--pl);top:-6rem;display:inline-flex;align-items:center;min-height:44px;padding:.6rem 1rem;background:var(--ph);color:var(--bg);font-weight:700;text-decoration:none}
+.skip:focus{top:max(.5rem,env(safe-area-inset-top))}
+#main:focus{outline:0;box-shadow:none}
+.sr{position:absolute;width:1px;height:1px;margin:-1px;padding:0;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0}
+
+/* ---------- CRT layers ---------- */
+.crt{position:fixed;top:0;left:0;width:100%;height:100vh;height:100dvh;z-index:60;pointer-events:none;overflow:hidden}
+.crt>div{position:absolute;top:0;right:0;bottom:0;left:0}
+.scan{background:repeating-linear-gradient(to bottom,transparent 0,transparent 3px,rgba(0,0,0,.3) 3px,rgba(0,0,0,.3) 4px)}
+@media (min-width:640px){.scan{background:repeating-linear-gradient(to bottom,transparent 0,transparent 2px,rgba(0,0,0,.26) 2px,rgba(0,0,0,.26) 3px)}}
+.roll{bottom:auto!important;height:30vh;background:linear-gradient(to bottom,transparent,rgba(125,255,155,.035) 60%,transparent);transform:translateY(-35vh);animation:roll 11s linear infinite}
+.flick{background:#000;opacity:0;animation:flick 9.7s linear infinite}
+.flick::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;background:var(--ph);opacity:0;animation:flick2 13.3s linear infinite}
+.frame{border-radius:12px/16px;background:radial-gradient(130% 100% at 50% 45%,transparent 58%,rgba(0,0,0,.5) 100%);
+  box-shadow:0 0 0 80px #000,inset 0 0 0 1px rgba(125,255,155,.07),inset 0 0 2.5rem rgba(0,0,0,.72),inset 0 0 2px 2px rgba(0,0,0,.9)}
+@media (min-width:640px){.frame{border-radius:22px/30px}}
+@keyframes roll{to{transform:translateY(135vh)}}
+@keyframes flick{0%,6.9%,8.2%,31%,32.8%,63%,64.1%,88%,89.2%,100%{opacity:0}7.2%{opacity:.07}7.6%{opacity:.02}31.3%{opacity:.1}31.9%{opacity:.03}63.4%{opacity:.05}88.4%{opacity:.08}}
+@keyframes flick2{0%,17%,17.9%,52%,53.4%,79%,79.6%,100%{opacity:0}17.3%{opacity:.03}52.5%{opacity:.045}53%{opacity:.01}79.2%{opacity:.03}}
+
+/* ---------- decode overlays ---------- */
+.xg,.xs,.lt{position:relative}
+.dx-ov{position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;overflow:hidden}
+.dx-on,.dx-on>*:not(.dx-ov),.tw,.tw>*:not(.dx-ov){color:transparent!important;text-shadow:none!important}
+.xg>.dx-ov{overflow:visible;color:var(--hc,var(--ph));text-shadow:var(--ab);filter:drop-shadow(0 0 4px rgba(180,140,255,.5))}
+.gc{position:relative;color:transparent;text-shadow:none}
+.gc svg{position:absolute;left:0;top:50%;width:.62em;height:.62em;margin-top:-.34em;color:var(--violet);overflow:visible}
+.gc.ok{color:inherit;text-shadow:inherit}
+.gc.ok svg{display:none}
+.xs>.dx-ov{color:var(--sc,var(--text))}
+.dx-ov .fr{color:var(--amber)}
+.dx-ov .rest{color:var(--violet)}
+.lt>.dx-ov{color:var(--text)}
+
+/* ---------- header ---------- */
+.top{position:relative;z-index:5;border-bottom:1px solid var(--line);background:rgba(2,4,3,.92)}
+.top .wrap{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0 1rem;padding-top:max(.25rem,env(safe-area-inset-top))}
+.brand{display:inline-flex;align-items:center;gap:.65rem;min-height:48px;color:var(--ph);text-decoration:none;font-weight:700;font-size:.85rem;letter-spacing:.22em}
+.brand svg{width:1.35rem;height:1.35rem;color:var(--violet);filter:drop-shadow(0 0 5px rgba(180,140,255,.6))}
+.brand small{font-weight:400;color:var(--dim);letter-spacing:.14em;font-size:.7rem}
+.nav ul{display:flex;flex-wrap:wrap;margin:0;padding:0;list-style:none}
+.nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 .6rem;color:var(--dim);text-decoration:none;font-size:.74rem;letter-spacing:.16em;text-transform:uppercase}
+.nav a::before{content:"/";margin-right:.45em;color:rgba(125,255,155,.35)}
+.nav a:hover{color:var(--ph);background:rgba(125,255,155,.07)}
+
+/* ---------- shared ---------- */
+section{padding:4rem 0}
+@media (min-width:1024px){section{padding:6rem 0}}
+.kicker{display:flex;align-items:center;gap:.7em;margin:0 0 .9rem;font-size:.72rem;letter-spacing:.24em;text-transform:uppercase;color:var(--amber)}
+.kicker::before{content:"";flex:none;width:.6em;height:.6em;background:currentColor;box-shadow:0 0 8px currentColor}
+.kicker::after{content:"";flex:1;height:1px;background:linear-gradient(90deg,rgba(255,179,71,.4),transparent)}
+.intro{max-width:44rem;margin:1.1rem 0 0;color:var(--text)}
+.term{background:var(--panel);border:1px solid var(--line-2);border-radius:10px;box-shadow:inset 0 0 2.5rem rgba(0,0,0,.6),0 0 0 1px rgba(0,0,0,.7),0 1.5rem 3rem -1.5rem rgba(0,0,0,.9)}
+.bar{display:flex;align-items:center;justify-content:space-between;gap:1rem;min-height:2.4rem;padding:.4rem 1rem;border-bottom:1px solid var(--line);font-size:.68rem;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+.bar p{margin:0}
+.dots{display:flex;gap:.35rem}
+.dots i{width:.5rem;height:.5rem;border:1px solid var(--line-2)}
+.dots i:first-child{background:var(--amber);border-color:var(--amber);animation:blink 1.6s steps(1) infinite}
+.cur{display:inline-block;width:.6em;height:1.1em;margin-left:2px;vertical-align:-.2em;background:var(--ph);box-shadow:0 0 8px rgba(125,255,155,.7);animation:blink 1.05s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+
+/* ---------- hero ---------- */
+#hero{padding:1rem 0 3.5rem}
+.scope{position:relative;overflow:hidden;height:clamp(18rem,58vh,36rem);height:clamp(18rem,58svh,36rem);border:1px solid var(--line-2);border-radius:14px/18px;touch-action:pan-y;
+  background-color:var(--well);
+  background-image:linear-gradient(rgba(125,255,155,.16) 1px,transparent 1px),linear-gradient(90deg,rgba(125,255,155,.16) 1px,transparent 1px),linear-gradient(rgba(125,255,155,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(125,255,155,.06) 1px,transparent 1px);
+  background-size:100% 50%,50% 100%,10% 12.5%,10% 12.5%;
+  box-shadow:inset 0 0 4rem rgba(0,0,0,.9),0 0 0 1px rgba(0,0,0,.8),0 0 3rem rgba(125,255,155,.07)}
+.scope::after{content:"";position:absolute;top:0;right:0;bottom:0;left:0;pointer-events:none;border-radius:inherit;background:radial-gradient(120% 90% at 50% 38%,rgba(125,255,155,.05),transparent 55%,rgba(0,0,0,.55) 100%)}
+#scope-cv{position:absolute;top:0;left:0;width:100%;height:100%;display:block;touch-action:pan-y}
+.ro{position:absolute;z-index:2;top:.7rem;left:.7rem;right:.7rem;display:flex;justify-content:space-between;gap:.5rem;font-size:.66rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);pointer-events:none}
+.ro span{padding:.15rem .45rem;background:rgba(1,3,2,.86);border:1px solid var(--line)}
+.ro b{font-weight:400;color:var(--amber)}
+.lock::before{content:"";display:inline-block;width:.5em;height:.5em;margin-right:.5em;background:var(--amber);animation:blink 1.3s steps(1) infinite}
+.st{position:absolute;z-index:2;left:0;right:0;bottom:0;padding:4.5rem 1rem 1rem;background:linear-gradient(to top,rgba(2,4,3,.96) 35%,rgba(2,4,3,.75) 65%,rgba(2,4,3,0))}
+.st .kicker{margin-bottom:.6rem}
+h1{--hc:var(--hi);font-size:clamp(2rem,14.5vw - .75rem,7.5rem);line-height:1;letter-spacing:.2em;
+  text-shadow:-1px 0 rgba(255,48,96,.8),1px 0 rgba(0,226,255,.8),0 0 .3em rgba(125,255,155,.45),0 0 .08em rgba(2,4,3,.9)}
+@media (min-width:640px){h1{text-shadow:-2px 0 rgba(255,48,96,.75),2px 0 rgba(0,226,255,.75),0 0 .3em rgba(125,255,155,.45)}.st{padding:5rem 1.75rem 1.5rem}.ro{top:1rem;left:1rem;right:1rem}}
+.hint{margin:.75rem 0 0;font-size:.68rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.hgrid{display:grid;gap:1rem;margin-top:1rem}
+@media (min-width:1024px){.hgrid{grid-template-columns:minmax(0,1fr) minmax(0,1.05fr);gap:1.5rem;margin-top:1.5rem}}
+.copy{padding:1.4rem 1.25rem}
+@media (min-width:640px){.copy{padding:2rem}}
+.copy .label{margin:0 0 .9rem;font-size:.68rem;letter-spacing:.2em;text-transform:uppercase;color:var(--dim)}
+.lead{font-size:clamp(1rem,.95rem + .45vw,1.2rem);line-height:1.6;color:var(--hi)}
+.over{--sc:var(--amber);color:var(--amber);letter-spacing:.04em}
+.btns{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1.5rem}
+.btn{flex:1 1 auto;display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:.7rem 1.15rem;border:1px solid var(--ph);border-radius:3px;background:rgba(125,255,155,.05);color:var(--ph);text-decoration:none;font-size:.76rem;font-weight:700;letter-spacing:.18em;text-transform:uppercase}
+@media (min-width:640px){.btn{flex:0 0 auto}}
+.btn:hover{background:rgba(125,255,155,.15);color:var(--hi)}
+.btn:active{transform:translateY(1px)}
+.btn.p{background:var(--ph);color:var(--bg);box-shadow:0 0 1.2rem rgba(125,255,155,.3)}
+.btn.p:hover{background:#b6ffc6;color:var(--bg)}
+.btn.g{border-color:var(--line-2);color:var(--dim)}
+.btn.g:hover{color:var(--ph);border-color:var(--ph)}
+.log{margin:0;padding:1rem;list-style:none;font-size:.8rem;line-height:1.55}
+@media (min-width:640px){.log{padding:1.25rem 1.4rem;font-size:.84rem}}
+.log li{display:grid;grid-template-columns:auto minmax(0,1fr);gap:1ch;padding:.18rem 0}
+.log .lp{color:var(--amber)}
+.log .k{color:var(--ph)}
+.log.typing .await{visibility:hidden}
+.await .lt{color:var(--dim)}
+
+/* ---------- dossiers ---------- */
+.dossiers{display:grid;gap:1rem;margin:2.25rem 0 0;padding:0;list-style:none}
+@media (min-width:640px){.dossiers{grid-template-columns:repeat(2,minmax(0,1fr));gap:1.25rem}}
+@media (min-width:1024px){.dossiers{grid-template-columns:repeat(3,minmax(0,1fr))}}
+@media (max-width:639px) and (min-height:560px){.dossiers li{position:sticky;top:calc(.6rem + var(--i,0) * .55rem)}}
+.dos{position:relative;height:100%;padding:0 1.15rem 1.2rem;background:var(--panel);border:1px solid var(--line-2);border-radius:10px;box-shadow:0 -14px 28px -10px rgba(0,0,0,.95),inset 0 0 2rem rgba(0,0,0,.5)}
+.dos::before,.dos::after{content:"";position:absolute;width:12px;height:12px;border:1px solid var(--violet);opacity:.7}
+.dos::before{top:-1px;left:-1px;border-right:0;border-bottom:0;border-top-left-radius:10px}
+.dos::after{bottom:-1px;right:-1px;border-left:0;border-top:0;border-bottom-right-radius:10px}
+.dtop{display:flex;align-items:center;justify-content:space-between;gap:.75rem;margin:0 -1.15rem 1rem;padding:.5rem 1.15rem;border-bottom:1px dashed var(--line);font-size:.64rem;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+.gid{display:inline-flex;gap:.3rem;color:var(--violet)}
+.gid svg{width:.95rem;height:.95rem}
+.dhead{display:flex;align-items:center;gap:.9rem;margin-bottom:1rem}
+.sigil{flex:none;width:3.4rem;height:3.4rem;color:var(--violet);filter:drop-shadow(0 0 6px rgba(180,140,255,.45))}
+.sigil>circle,.sigil>path{fill:none;stroke:rgba(180,140,255,.5);stroke-width:1}
+.dcls{margin:0 0 .3rem;font-size:.68rem;letter-spacing:.18em;text-transform:uppercase;color:var(--amber)}
+.dcls.c{color:var(--violet)}
+.meta{display:grid;gap:.15rem;margin:0 0 1rem;padding:.6rem .75rem;background:var(--well);border:1px solid var(--line);font-size:.78rem}
+.meta div{display:grid;grid-template-columns:7.5em minmax(0,1fr);gap:.75rem}
+.meta dt{color:var(--dim);text-transform:uppercase;letter-spacing:.12em;font-size:.68rem;line-height:2}
+.meta dd{margin:0;color:var(--hi)}
+.dos p.xs{margin:0;font-size:.88rem}
+
+/* ---------- workflow ---------- */
+.wf{display:grid;gap:1.5rem;margin-top:2.25rem}
+@media (min-width:1024px){.wf{grid-template-columns:minmax(0,.9fr) minmax(0,1.1fr);gap:2.5rem;align-items:start}.wf>.term{position:sticky;top:1.5rem}}
+.smw{position:relative;padding:.5rem 0}
+.sm{margin:0;padding:0;list-style:none}
+.sm li{position:relative;z-index:1;display:flex;align-items:center;gap:1.2ch;height:2.6rem;padding:0 1rem 0 1.6rem;border-top:1px dashed rgba(125,255,155,.1);white-space:nowrap;font-size:.8rem}
+.sm li:first-child{border-top:0}
+.sm .ix{color:var(--dim)}
+.sm .sn{overflow:hidden;text-overflow:ellipsis;color:var(--ph)}
+.sm .an{display:none;margin-left:auto;font-size:.66rem;letter-spacing:.12em;text-transform:uppercase;color:var(--dim)}
+@media (min-width:420px){.sm .an{display:inline}}
+.smc{position:absolute;top:.5rem;left:0;right:0;height:2.6rem;border-left:3px solid var(--ph);background:linear-gradient(90deg,rgba(125,255,155,.2),rgba(125,255,155,.03) 70%,transparent);box-shadow:inset 0 1px 0 rgba(125,255,155,.25),inset 0 -1px 0 rgba(125,255,155,.25);animation:smc 16s steps(10,end) infinite}
+.smc::before{content:">";position:absolute;left:.45rem;top:50%;margin-top:-.75em;line-height:1.5;font-size:.8rem;font-weight:700;color:var(--ph)}
+@keyframes smc{to{transform:translateY(1000%)}}
+.ledger{margin:0;padding:.7rem 1rem;border-top:1px solid var(--line);font-size:.7rem;color:var(--dim)}
+.proc{margin:0;padding:0;list-style:none;counter-reset:p}
+.proc li{position:relative;padding:0 0 1.5rem 1.6rem;border-left:1px solid var(--line-2);margin-left:.3rem}
+.proc li:last-child{border-left-color:transparent;padding-bottom:0}
+.proc li::before{content:"";position:absolute;left:-.33rem;top:.3rem;width:.6rem;height:.6rem;background:var(--bg);border:1px solid var(--ph);transform:rotate(45deg)}
+.sl{display:block;margin-bottom:.35rem;font-size:.72rem;font-weight:700;letter-spacing:.22em;text-transform:uppercase;color:var(--amber)}
+.proc p{margin:0}
+.brood{margin-top:3rem;padding:1.4rem 1.25rem;border-color:rgba(180,140,255,.4)}
+@media (min-width:640px){.brood{padding:2rem}}
+@media (min-width:1024px){.brood{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:0 3rem;align-items:center}}
+.brood h3{--hc:var(--violet);margin-bottom:1rem}
+.tree{max-width:100%;margin:1rem 0 0;padding:1rem;overflow-x:auto;background:var(--well);border:1px solid rgba(180,140,255,.25);font-family:inherit;font-size:.72rem;line-height:1.6;color:var(--violet)}
+.tree b{font-weight:400;color:var(--ph)}
+.tree i{font-style:normal;color:var(--dim)}
+@media (min-width:1024px){.tree{margin:0;grid-row:1 / span 3;grid-column:2;font-size:.8rem}}
+
+/* ---------- signals ---------- */
+.sigs{display:grid;gap:1px;margin:2.25rem 0 0;background:var(--line);border:1px solid var(--line-2)}
+@media (min-width:640px){.sigs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (min-width:1024px){.sigs{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.sigs>div{padding:1.2rem 1.15rem;background:var(--panel)}
+.sigs dt{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .75rem;margin-bottom:.6rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--hi);font-size:.9rem}
+.sev{padding:.1rem .45rem;border:1px solid currentColor;font-size:.62rem;font-weight:400;letter-spacing:.16em;color:var(--dim)}
+.sev.stop{color:var(--amber)}
+.sev.halt{color:var(--amber);background:rgba(255,179,71,.08)}
+.sigs dd{margin:0;font-size:.88rem}
+.auto{display:grid;gap:1px;margin-top:2rem;background:rgba(255,179,71,.35);border:1px solid rgba(255,179,71,.45)}
+@media (min-width:640px){.auto{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.auto>div{padding:1.3rem 1.2rem;background:var(--panel)}
+.auto h3{--hc:var(--amber);font-size:.85rem;margin-bottom:.75rem}
+.auto p{margin:0}
+
+/* ---------- install ---------- */
+.inst{margin-top:2.25rem}
+.cmds{margin:0;padding:1rem;list-style:none}
+@media (min-width:640px){.cmds{padding:1.4rem}}
+.cmds li+li{margin-top:1.1rem}
+.cm{margin:0 0 .4rem;font-size:.72rem;letter-spacing:.14em;text-transform:uppercase;color:var(--dim)}
+.cm::before{content:"# "}
+.pr{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:stretch}
+.ps{display:flex;align-items:center;padding:0 .7rem;border:1px solid var(--line);border-right:0;background:rgba(125,255,155,.06);color:var(--amber);font-weight:700}
+.cmd{display:flex;align-items:center;min-height:48px;padding:.65rem .8rem;background:var(--well);border:1px solid var(--line);color:var(--hi);overflow-wrap:anywhere;word-break:break-all;-webkit-user-select:all;user-select:all;cursor:text}
+.cmd:hover{border-color:var(--line-2);background:#020804}
+.idle{display:flex;align-items:center;gap:.7rem;color:var(--amber);font-weight:700}
+.need{display:grid;gap:1.25rem;margin-top:1.5rem}
+@media (min-width:640px){.need{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.need>div{padding:1.25rem 1.2rem;background:var(--panel);border:1px solid var(--line)}
+.need h3{font-size:.85rem;margin-bottom:.8rem}
+.need ul{margin:0;padding:0;list-style:none}
+.need li{padding:.25rem 0 .25rem 1.4em;text-indent:-1.4em}
+.need li::before{content:"\2500  ";color:var(--dim)}
+.need li span{color:var(--dim)}
+.lic{margin:1.5rem 0 0;font-size:.8rem;color:var(--dim)}
+
+/* ---------- footer ---------- */
+.foot{padding:2.5rem 0 max(2.5rem,env(safe-area-inset-bottom));border-top:1px solid var(--line);font-size:.8rem;color:var(--dim)}
+.eot{margin:0 0 1rem;letter-spacing:.3em;text-transform:uppercase;color:var(--ph)}
+.foot nav ul{display:flex;flex-wrap:wrap;gap:.5rem 1.25rem;margin:0 0 .75rem;padding:0;list-style:none}
+.foot a{display:inline-flex;align-items:center;min-height:44px}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .roll,.flick{display:none}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to transmission</a>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="g0" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3H17V17"/><circle cx="10" cy="10" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g1" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 17L10 3L17 17M3 10H17"/></symbol>
+    <symbol id="g2" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3V17H17M10 3V10"/></symbol>
+    <symbol id="g3" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3L10 10L17 3M10 10V17"/></symbol>
+    <symbol id="g4" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 10L10 3L17 10L10 17Z"/><circle cx="10" cy="10" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g5" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3L17 17M17 3L10 10"/></symbol>
+    <symbol id="g6" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M10 3V17M3 10H10M17 10V17"/></symbol>
+    <symbol id="g7" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3H17M10 10H17M3 17H10"/></symbol>
+    <symbol id="g8" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M17 3H3V17M10 10L17 17"/></symbol>
+    <symbol id="g9" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 17L17 3M3 3V10"/></symbol>
+    <symbol id="g10" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M10 3L3 10L10 17L17 10"/><circle cx="17" cy="3" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g11" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3H10V10H17V17"/></symbol>
+    <symbol id="g12" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 10V3H17V10"/><circle cx="10" cy="17" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g13" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 17V3L17 17"/><circle cx="17" cy="3" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g14" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M10 3V17M3 10H17"/><circle cx="3" cy="3" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g15" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3L17 10L3 17"/><circle cx="17" cy="17" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M17 3L3 17M3 3L10 10"/></symbol>
+    <symbol id="g17" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 10H10V3H17M10 17H17"/></symbol>
+    <symbol id="g18" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3V10H10V17H17"/><circle cx="17" cy="3" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g19" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 17V10L10 3L17 10V17M10 10V17"/></symbol>
+    <symbol id="g20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3H17M10 3V17M3 17H17"/></symbol>
+    <symbol id="g21" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M17 3V17H3M3 10H10"/></symbol>
+    <symbol id="g22" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 3L10 17L17 3"/><circle cx="10" cy="3" r="1.8" fill="currentColor" stroke="none"/></symbol>
+    <symbol id="g23" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="square"><path d="M3 10L17 3M3 17L17 10"/><circle cx="10" cy="10" r="1.8" fill="currentColor" stroke="none"/></symbol>
+  </defs>
+</svg>
+
+<div class="crt" aria-hidden="true"><div class="scan"></div><div class="roll"></div><div class="flick"></div><div class="frame"></div></div>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#hero"><svg viewBox="0 0 20 20" aria-hidden="true" focusable="false"><use href="#g4"/></svg>HIVEMIND <small>/ XENO-02</small></a>
+    <nav class="nav" aria-label="Primary">
+      <ul>
+        <li><a href="#agents">Entities</a></li>
+        <li><a href="#workflow">Workflow</a></li>
+        <li><a href="#signals">Signals</a></li>
+        <li><a href="#install">Install</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main" tabindex="-1">
+
+<section id="hero" aria-labelledby="hero-title">
+  <div class="wrap">
+    <div class="scope">
+      <canvas id="scope-cv" aria-hidden="true"></canvas>
+      <div class="ro" aria-hidden="true"><span class="lock">CH1 acq</span><span>F <b id="ro-f">4.93</b> &middot; A <b id="ro-a">0.50</b></span></div>
+      <div class="st">
+        <p class="kicker">Intercept 0x02 // Signal acquisition</p>
+        <h1 id="hero-title" class="xg">Hivemind</h1>
+        <p class="hint" aria-hidden="true">Point or drag: X tunes frequency &middot; Y tunes amplitude</p>
+      </div>
+    </div>
+
+    <div class="hgrid">
+      <div class="term copy">
+        <p class="label">Decoded payload</p>
+        <p class="lead xs">Multi-agent orchestration framework for Claude Code. Coordinates specialized bioforms to plan, build, review, and ship code — so you don't have to manage the pipeline yourself.</p>
+        <p class="over xs">You are the Overmind. The swarm acts on your intent.</p>
+        <div class="btns">
+          <a class="btn p" href="#install">Establish uplink</a>
+          <a class="btn" href="#agents">Decode entities</a>
+          <a class="btn g" href="https://github.com/brenpike/hivemind">Source</a>
+        </div>
+      </div>
+
+      <div class="term">
+        <div class="bar"><p>Boot log // intercepted stream</p><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+        <ol class="log" aria-label="Boot log">
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">route-workflow:</span> classify request -&gt; standard-delivery</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">ledger:</span> .hivemind/runs/&lt;run-id&gt;/state.json -&gt; every state result validated</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">cerebrate:</span> directive -&gt; STEP-NNN steps, file scopes, risks, delivery shape</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">git_preflight:</span> ok -&gt; compliant working branch; never trunk</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">next-wave:</span> ready steps -&gt; drones + changelings in parallel</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">molt:</span> one checkpoint commit per wave</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">gate:</span> bump-type -&gt; validate -&gt; local-reviewer loop</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">open_pr:</span> watching Codex, Copilot, Claude reviewer feedback</span></li>
+          <li><span class="lp" aria-hidden="true">&gt;</span><span class="lt"><span class="k">merge:</span> withheld. Agents never merge — you do.</span></li>
+          <li class="await" aria-hidden="true"><span class="lp">&gt;</span><span class="lt">awaiting overmind intent <span class="cur"></span></span></li>
+        </ol>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="agents" aria-labelledby="agents-title">
+  <div class="wrap">
+    <p class="kicker">02 // Intercepted entity dossiers</p>
+    <h2 id="agents-title" class="xg">Six entities detected</h2>
+    <p class="intro xs">Four bioforms and two composites, reconstructed from intercepted traffic: designation, function, and the boundary each one will not cross.</p>
+
+    <ul class="dossiers">
+      <li style="--i:0"><article class="dos" aria-labelledby="e1">
+        <div class="dtop" aria-hidden="true"><span>Dossier 0x01</span><span class="gid"><svg viewBox="0 0 20 20"><use href="#g4"/></svg><svg viewBox="0 0 20 20"><use href="#g20"/></svg><svg viewBox="0 0 20 20"><use href="#g0"/></svg></span></div>
+        <div class="dhead">
+          <svg class="sigil" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle cx="32" cy="32" r="28"/><path d="M32 0V8M32 56V64M0 32H8M56 32H64"/><use href="#g4" x="16" y="16" width="32" height="32"/></svg>
+          <div><p class="dcls">Entity 0x01 &middot; Bioform</p><h3 id="e1" class="xg">Overlord</h3></div>
+        </div>
+        <dl class="meta">
+          <div><dt>Function</dt><dd>Orchestrator</dd></div>
+          <div><dt>Invoke</dt><dd><code>hivemind:overlord</code>, session default</dd></div>
+        </dl>
+        <p class="xs">Routes each request to a workflow, runs the workflow state machine and its run ledger, and owns branches, checkpoint commits, version bumps, PRs and review routing. Delegates all implementation — it never writes code.</p>
+      </article></li>
+
+      <li style="--i:1"><article class="dos" aria-labelledby="e2">
+        <div class="dtop" aria-hidden="true"><span>Dossier 0x02</span><span class="gid"><svg viewBox="0 0 20 20"><use href="#g12"/></svg><svg viewBox="0 0 20 20"><use href="#g5"/></svg><svg viewBox="0 0 20 20"><use href="#g19"/></svg></span></div>
+        <div class="dhead">
+          <svg class="sigil" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle cx="32" cy="32" r="28"/><path d="M32 0V8M32 56V64M0 32H8M56 32H64"/><use href="#g19" x="16" y="16" width="32" height="32"/></svg>
+          <div><p class="dcls">Entity 0x02 &middot; Bioform</p><h3 id="e2" class="xg">Cerebrate</h3></div>
+        </div>
+        <dl class="meta">
+          <div><dt>Function</dt><dd>Strategist</dd></div>
+          <div><dt>Access</dt><dd>Read-only</dd></div>
+        </dl>
+        <p class="xs">Researches the codebase and returns the directive: STEP-NNN steps with exact file scopes, dependencies, risks and a delivery shape — single, multi or brood. Never writes files.</p>
+      </article></li>
+
+      <li style="--i:2"><article class="dos" aria-labelledby="e3">
+        <div class="dtop" aria-hidden="true"><span>Dossier 0x03</span><span class="gid"><svg viewBox="0 0 20 20"><use href="#g6"/></svg><svg viewBox="0 0 20 20"><use href="#g11"/></svg><svg viewBox="0 0 20 20"><use href="#g2"/></svg></span></div>
+        <div class="dhead">
+          <svg class="sigil" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle cx="32" cy="32" r="28"/><path d="M32 0V8M32 56V64M0 32H8M56 32H64"/><use href="#g6" x="16" y="16" width="32" height="32"/></svg>
+          <div><p class="dcls">Entity 0x03 &middot; Bioform</p><h3 id="e3" class="xg">Drone</h3></div>
+        </div>
+        <dl class="meta">
+          <div><dt>Function</dt><dd>Builder</dd></div>
+          <div><dt>Owns</dt><dd>Every step, by default</dd></div>
+        </dl>
+        <p class="xs">Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step.</p>
+      </article></li>
+
+      <li style="--i:3"><article class="dos" aria-labelledby="e4">
+        <div class="dtop" aria-hidden="true"><span>Dossier 0x04</span><span class="gid"><svg viewBox="0 0 20 20"><use href="#g10"/></svg><svg viewBox="0 0 20 20"><use href="#g23"/></svg><svg viewBox="0 0 20 20"><use href="#g15"/></svg></span></div>
+        <div class="dhead">
+          <svg class="sigil" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle cx="32" cy="32" r="28"/><path d="M32 0V8M32 56V64M0 32H8M56 32H64"/><use href="#g10" x="16" y="16" width="32" height="32"/></svg>
+          <div><p class="dcls">Entity 0x04 &middot; Bioform</p><h3 id="e4" class="xg">Changeling</h3></div>
+        </div>
+        <dl class="meta">
+          <div><dt>Function</dt><dd>Shaper</dd></div>
+          <div><dt>Domain</dt><dd>Presentational UI/UX</dd></div>
+        </dl>
+        <p class="xs">Shapes markup, styling, layout, design tokens, visual states and presentational accessibility — within an assigned file scope.</p>
+      </article></li>
+
+      <li style="--i:4"><article class="dos" aria-labelledby="e5">
+        <div class="dtop" aria-hidden="true"><span>Dossier 0x05</span><span class="gid"><svg viewBox="0 0 20 20"><use href="#g8"/></svg><svg viewBox="0 0 20 20"><use href="#g14"/></svg><svg viewBox="0 0 20 20"><use href="#g22"/></svg></span></div>
+        <div class="dhead">
+          <svg class="sigil" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle cx="32" cy="32" r="28"/><path d="M32 0V8M32 56V64M0 32H8M56 32H64"/><use href="#g14" x="16" y="16" width="32" height="32"/></svg>
+          <div><p class="dcls c">Entity 0x05 &middot; Composite</p><h3 id="e5" class="xg">Local-Reviewer</h3></div>
+        </div>
+        <dl class="meta">
+          <div><dt>Phase</dt><dd>Pre-PR</dd></div>
+          <div><dt>Requires</dt><dd>The codex companion</dd></div>
+        </dl>
+        <p class="xs">Runs an adversarial Codex review loop before the PR exists, up to 10 iterations. Fixes simple findings (2 files or fewer), escalates complex ones, and stops on break-fix cycles.</p>
+      </article></li>
+
+      <li style="--i:5"><article class="dos" aria-labelledby="e6">
+        <div class="dtop" aria-hidden="true"><span>Dossier 0x06</span><span class="gid"><svg viewBox="0 0 20 20"><use href="#g17"/></svg><svg viewBox="0 0 20 20"><use href="#g1"/></svg><svg viewBox="0 0 20 20"><use href="#g9"/></svg></span></div>
+        <div class="dhead">
+          <svg class="sigil" viewBox="0 0 64 64" aria-hidden="true" focusable="false"><circle cx="32" cy="32" r="28"/><path d="M32 0V8M32 56V64M0 32H8M56 32H64"/><use href="#g17" x="16" y="16" width="32" height="32"/></svg>
+          <div><p class="dcls c">Entity 0x06 &middot; Composite</p><h3 id="e6" class="xg">GitHub-Reviewer</h3></div>
+        </div>
+        <dl class="meta">
+          <div><dt>Phase</dt><dd>Post-PR</dd></div>
+          <div><dt>Mode</dt><dd>Stateless, one-shot</dd></div>
+        </dl>
+        <p class="xs">Fetches and classifies review feedback, fixes, pushes, replies and resolves threads. Dispatched by the <code>hivemind:github-review-loop</code> skill.</p>
+      </article></li>
+    </ul>
+  </div>
+</section>
+
+<section id="workflow" aria-labelledby="workflow-title">
+  <div class="wrap">
+    <p class="kicker">03 // Workflow: standard-delivery</p>
+    <h2 id="workflow-title" class="xg">State-machine transcript</h2>
+    <p class="intro xs">Every run is a state machine with a ledger. The cursor walks the real states; the decoded procedure explains each one.</p>
+
+    <div class="wf">
+      <div class="term">
+        <div class="bar"><p>run :: standard-delivery</p><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+        <div class="smw">
+          <div class="smc" aria-hidden="true"></div>
+          <ol class="sm" aria-label="Workflow states in order">
+            <li><span class="ix" aria-hidden="true">00</span><span class="sn">plan</span><span class="an">directive</span></li>
+            <li><span class="ix" aria-hidden="true">01</span><span class="sn">git_preflight</span><span class="an">preflight</span></li>
+            <li><span class="ix" aria-hidden="true">02</span><span class="sn">branch</span><span class="an">never trunk</span></li>
+            <li><span class="ix" aria-hidden="true">03</span><span class="sn">implement_step</span><span class="an">waves 1..n</span></li>
+            <li><span class="ix" aria-hidden="true">04</span><span class="sn">checkpoint</span><span class="an">molt / wave</span></li>
+            <li><span class="ix" aria-hidden="true">05</span><span class="sn">version_bump_decision</span><span class="an">bump-type</span></li>
+            <li><span class="ix" aria-hidden="true">06</span><span class="sn">validate</span><span class="an">gate</span></li>
+            <li><span class="ix" aria-hidden="true">07</span><span class="sn">local_review</span><span class="an">codex</span></li>
+            <li><span class="ix" aria-hidden="true">08</span><span class="sn">open_pr</span><span class="an">ship</span></li>
+            <li><span class="ix" aria-hidden="true">09</span><span class="sn">github_review_loop</span><span class="an">watch</span></li>
+          </ol>
+        </div>
+        <p class="ledger">ledger: .hivemind/runs/&lt;run-id&gt;/state.json</p>
+      </div>
+
+      <ol class="proc" aria-label="How a standard-delivery run works">
+        <li><span class="sl">01 Route</span><p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session. A trivial one-file change takes the Reflex fast path, which skips the router, the ledger and the cerebrate.</p></li>
+        <li><span class="sl">02 Record</span><p class="xs">The ledger lives at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, and every state result is validated against the workflow definition before the run advances.</p></li>
+        <li><span class="sl">03 Plan</span><p class="xs">The cerebrate returns the directive.</p></li>
+        <li><span class="sl">04 Branch</span><p class="xs">Git preflight, then a compliant working branch: feature/, bugfix/, hotfix/, refactor/, chore/, docs/, test/, ci/. The swarm never commits to trunk.</p></li>
+        <li><span class="sl">05 Build in waves</span><p class="xs"><code>hivemind:next-wave</code> selects every ready step whose dependencies are met and whose files do not overlap. Drones and changelings build those steps in parallel, with one checkpoint commit — a molt — per wave.</p></li>
+        <li><span class="sl">06 Gate</span><p class="xs">A version-bump decision (<code>hivemind:bump-type</code>), then validation.</p></li>
+        <li><span class="sl">07 Review</span><p class="xs">With codex installed, the local-reviewer runs its adversarial review loop.</p></li>
+        <li><span class="sl">08 Ship and watch</span><p class="xs">The overlord opens the PR and watches it by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour. Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge — you do.</p></li>
+      </ol>
+    </div>
+
+    <div class="term brood">
+      <h3 class="xg">Brood protocol</h3>
+      <p class="xs">The cerebrate splits big work into independent strains. After you approve, each strain runs as its own overlord in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and its own detached tmux session, with its own branch and PR.</p>
+      <p class="xs">The hatchery watches via <code>hivemind:brood-status</code>.</p>
+<pre class="tree" aria-hidden="true"><b>hatchery</b> <i>── awaits your approval</i>
+ │
+ ├──┬ <b>strain a</b>  own overlord
+ │  ├─ worktree &lt;brood-id&gt;/&lt;short&gt;
+ │  ├─ tmux     detached session
+ │  └─ branch ── PR
+ ├──┬ <b>strain b</b>  own overlord
+ │  └─ branch ── PR
+ └── <i>watch: hivemind:brood-status</i></pre>
+    </div>
+  </div>
+</section>
+
+<section id="signals" aria-labelledby="signals-title">
+  <div class="wrap">
+    <p class="kicker">04 // Anomaly signals</p>
+    <h2 id="signals-title" class="xg">Signals in the noise</h2>
+    <p class="intro xs">The swarm names what it detects. Some signals stop the run; some only advise.</p>
+    <dl class="sigs">
+      <div><dt>Flare <span class="sev halt">Halt &middot; asks you</span></dt><dd class="xs">An agent can't safely resolve something. The overlord stops and asks you.</dd></div>
+      <div><dt>Reflex <span class="sev">Fast path</span></dt><dd class="xs">The trivial fast path. One-file changes skip the router, the ledger and the cerebrate.</dd></div>
+      <div><dt>Mutation Decay <span class="sev stop">Mandatory stop</span></dt><dd class="xs">Fixes undo each other: break-fix-break. A mandatory stop.</dd></div>
+      <div><dt>Creep Stagnation <span class="sev">Advisory</span></dt><dd class="xs">Diminishing returns. An advisory early exit.</dd></div>
+      <div><dt>Root-Cluster <span class="sev">One fix</span></dt><dd class="xs">Several findings share one root. Plan one structural fix.</dd></div>
+      <div><dt>Merge-Advised <span class="sev">Humans merge</span></dt><dd class="xs">A bounded tail remains. The swarm recommends merge; humans merge.</dd></div>
+    </dl>
+
+    <div class="auto">
+      <div><h3 class="xg">Decided and journaled</h3><p class="xs">Routine judgment calls are decided and journaled.</p></div>
+      <div><h3 class="xg">Returned to you</h3><p class="xs">Irreversible, architectural or safety-relevant calls, and every merge, always come back to you.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install" aria-labelledby="install-title">
+  <div class="wrap">
+    <p class="kicker">05 // Install</p>
+    <h2 id="install-title" class="xg">Establish uplink</h2>
+    <p class="intro xs">Three commands. Each one selects whole on click or tap — copy it with your usual shortcut.</p>
+
+    <div class="term inst">
+      <div class="bar"><p>uplink :: claude code</p><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span></div>
+      <ol class="cmds">
+        <li><p class="cm">In Claude Code</p><div class="pr"><span class="ps" aria-hidden="true">&gt;</span><code class="cmd">/plugin marketplace add https://github.com/brenpike/hivemind.git</code></div></li>
+        <li><p class="cm">Then</p><div class="pr"><span class="ps" aria-hidden="true">&gt;</span><code class="cmd">/plugin install hivemind@brenpike</code></div></li>
+        <li><p class="cm">Then, in each project</p><div class="pr"><span class="ps" aria-hidden="true">&gt;</span><code class="cmd">/hivemind:seed-hive</code></div></li>
+        <li class="idle" aria-hidden="true"><span>&gt;</span><span class="cur"></span></li>
+      </ol>
+    </div>
+
+    <div class="need">
+      <div>
+        <h3 class="xg">Requirements</h3>
+        <ul>
+          <li>bash <span>(macOS, Linux or WSL)</span></li>
+          <li>git</li>
+          <li>gh</li>
+          <li>jq</li>
+          <li>the Claude Code CLI</li>
+          <li>tmux <span>— only for brood mode</span></li>
+        </ul>
+      </div>
+      <div>
+        <h3 class="xg">Optional companions</h3>
+        <ul>
+          <li>claude-mem <span>— memory</span></li>
+          <li>codex <span>— local pre-PR review</span></li>
+          <li>caveman <span>— compressed output</span></li>
+        </ul>
+      </div>
+    </div>
+    <p class="lic">MIT License. Source: <a href="https://github.com/brenpike/hivemind">github.com/brenpike/hivemind</a></p>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p class="eot">End of transmission</p>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="./index.html">All prototypes</a></li>
+        <li><a href="https://github.com/brenpike/hivemind">Repository on GitHub</a></li>
+      </ul>
+    </nav>
+    <p>Hivemind &middot; Prototype 02: Xenoglyph Terminal &middot; MIT License</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  var doc = document, win = window;
+  var mq = win.matchMedia ? win.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var reduced = !!(mq && mq.matches);
+  var hasIO = 'IntersectionObserver' in win;
+  var lowPower = (navigator.hardwareConcurrency || 8) <= 4;
+  var NS = 'http://www.w3.org/2000/svg', NG = 24, TAU = Math.PI * 2;
+  var POOL = 'ΑΒΓΔΖΘΛΞΠΣΦΨΩαβγδζθλξπσφψωБГДЖЗИЛПФЦЧШЩЭЮЯбгджзилпфцчшэюя─│┌┐└┘├┤┬┴┼═║╔╗╚╝╬░▒▓';
+
+  function rnd(n) { return (Math.random() * n) | 0; }
+  function rch() { return POOL.charAt(rnd(POOL.length)); }
+  function norm(s) { return s.replace(/\s+/g, ' ').trim(); }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function el(tag, cls) { var e = doc.createElement(tag); if (cls) e.className = cls; return e; }
+  function observe(target, cb, opts) {
+    if (!hasIO || !target) return;
+    new IntersectionObserver(function (es) { cb(es[es.length - 1].isIntersecting); }, opts || {}).observe(target);
+  }
+
+  /* ---------- oscilloscope ---------- */
+  var scope = (function () {
+    var wrap = doc.querySelector('.scope'), cv = doc.getElementById('scope-cv');
+    var ctx = cv && cv.getContext ? cv.getContext('2d') : null;
+    var api = { vis: true, live: function () { return false; }, frame: function () {}, still: function () {} };
+    if (!ctx) return api;
+    var W = 0, H = 0, dpr = 1, N = 200, ys = new Float32Array(201);
+    var ph = 0, ph2 = 0, nt = 0, idle = 0, hold = 0, pk = 0, pkP = 5, roT = 0, lastBit = 0;
+    var f = 4, A = 0.5, tf = 4, tA = 0.5;
+    var NOI = 96, nz = new Float32Array(NOI), bits = new Uint8Array(64), i;
+    for (i = 0; i < NOI; i++) nz[i] = Math.random() * 2 - 1;
+    for (i = 0; i < 64; i++) bits[i] = Math.random() < 0.5 ? 1 : 0;
+    var roF = doc.getElementById('ro-f'), roA = doc.getElementById('ro-a');
+
+    function noise(x) {
+      var k = Math.floor(x), fr = x - k, a = nz[((k % NOI) + NOI) % NOI], b = nz[(((k + 1) % NOI) + NOI) % NOI];
+      return a + (b - a) * fr * fr * (3 - 2 * fr);
+    }
+    function size() {
+      var r = cv.getBoundingClientRect();
+      dpr = Math.min(win.devicePixelRatio || 1, win.innerWidth < 640 ? 1.5 : 2);
+      var w = Math.max(1, Math.round(r.width * dpr)), h = Math.max(1, Math.round(r.height * dpr));
+      if (w === W && h === H) return;
+      W = cv.width = w; H = cv.height = h;
+      N = Math.round(clamp(r.width * r.height / 900, 90, 520));
+      if (lowPower) N = Math.round(N / 2);
+      ys = new Float32Array(N + 1);
+      if (reduced) still();
+    }
+    function trace(live) {
+      var bx = pk < 2.4 ? -0.1 + pk / 2.4 * 1.2 : 9, amp = H * 0.3 * A, mid = H * 0.44;
+      for (var j = 0; j <= N; j++) {
+        var x = j / N, d = (x - bx) / 0.035;
+        var y = 0.62 * Math.sin(TAU * f * x + ph) + 0.24 * Math.sin(TAU * f * 2.01 * x - ph * 1.3 + 1.1) + 0.1 * Math.sin(TAU * f * 5.3 * x + ph * 2.2);
+        y += 0.14 * noise(x * 16 + nt) + (live ? 0.025 * (Math.random() * 2 - 1) : 0);
+        y += 0.45 * Math.exp(-d * d) * Math.sin(TAU * 46 * x + ph * 3);
+        ys[j] = mid - y * amp;
+      }
+    }
+    function path(arr, base) {
+      ctx.beginPath();
+      for (var j = 0; j <= N; j++) {
+        var px = j / N * W, py = arr ? arr[j] : base(j / N);
+        if (j) ctx.lineTo(px, py); else ctx.moveTo(px, py);
+      }
+    }
+    function stroke(w, c) { ctx.lineWidth = w * dpr; ctx.strokeStyle = c; ctx.stroke(); }
+    function ch2(x) { var b = bits[(Math.floor(x * 28 + ph2) % 64 + 64) % 64]; return H * 0.2 - b * H * 0.05; }
+    function draw(live) {
+      trace(live);
+      ctx.lineJoin = 'round';
+      path(null, ch2);
+      stroke(4, 'rgba(255,179,71,.1)'); stroke(1.2, 'rgba(255,179,71,.75)');
+      path(ys);
+      stroke(8, 'rgba(125,255,155,.07)'); stroke(3, 'rgba(125,255,155,.25)'); stroke(1.4, 'rgba(220,255,228,.95)');
+    }
+    function readout() { if (roF) roF.textContent = (f * 1.37).toFixed(2); if (roA) roA.textContent = A.toFixed(2); }
+    function still() {
+      if (!W) return;
+      ctx.clearRect(0, 0, W, H);
+      f = tf = 4; A = tA = 0.55; ph = 0.8; ph2 = 3; nt = 2; pk = 1.4;
+      draw(false); readout();
+    }
+    function frame(dt) {
+      idle += dt;
+      if (hold > 0) hold -= dt;
+      else { tf = 3.6 + 1.8 * Math.sin(idle * 0.21) + 0.6 * Math.sin(idle * 0.77); tA = 0.5 + 0.22 * Math.sin(idle * 0.33 + 1.3); }
+      var k = 1 - Math.exp(-dt * 4.5);
+      f += (tf - f) * k; A += (tA - A) * k;
+      ph += dt * (1.6 + f * 0.45); nt += dt * 2.2; ph2 += dt * (1.4 + f * 0.3);
+      if (Math.floor(ph2) !== lastBit) { lastBit = Math.floor(ph2); bits[(lastBit + 63) & 63] = Math.random() < 0.5 ? 1 : 0; }
+      pk += dt; if (pk > pkP) { pk = 0; pkP = 4 + Math.random() * 4; }
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.fillStyle = 'rgba(0,0,0,' + (1 - Math.exp(-dt * 11)).toFixed(3) + ')';
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalCompositeOperation = 'source-over';
+      draw(true);
+      roT += dt; if (roT > 0.14) { roT = 0; readout(); }
+    }
+    function onP(e) {
+      if (reduced) return;
+      var r = cv.getBoundingClientRect(); if (!r.width || !r.height) return;
+      var nx = clamp((e.clientX - r.left) / r.width, 0, 1), ny = clamp((e.clientY - r.top) / r.height, 0, 1);
+      tf = 1 + nx * 11; tA = 0.1 + (1 - ny) * 0.85;
+      hold = e.pointerType === 'mouse' ? 1.2 : 2.6;
+    }
+    if (win.PointerEvent) {
+      wrap.addEventListener('pointermove', onP, { passive: true });
+      wrap.addEventListener('pointerdown', onP, { passive: true });
+    }
+    if (win.ResizeObserver) new win.ResizeObserver(size).observe(cv);
+    else win.addEventListener('resize', size, { passive: true });
+    size();
+    observe(wrap, function (v) { api.vis = v; if (v) kick(); });
+    api.live = function () { return api.vis && !reduced && !doc.hidden && W > 1; };
+    api.frame = frame; api.still = still;
+    return api;
+  })();
+
+  /* ---------- scheduler: one rAF loop, dt-based ---------- */
+  var tasks = [], raf = 0, last = 0;
+  function loop(now) {
+    raf = 0;
+    var dt = last ? Math.min((now - last) / 1000, 0.1) : 1 / 60, busy = false;
+    last = now;
+    for (var j = tasks.length - 1; j >= 0; j--) {
+      var r = tasks[j].step(dt);
+      if (r === 2) tasks.splice(j, 1); else if (r === 1) busy = true;
+    }
+    if (scope.live()) { scope.frame(dt); busy = true; }
+    if (busy && !doc.hidden) raf = win.requestAnimationFrame(loop); else last = 0;
+  }
+  function kick() { if (!raf && !doc.hidden && win.requestAnimationFrame) { last = 0; raf = win.requestAnimationFrame(loop); } }
+
+  /* ---------- glyph + scramble decoder ---------- */
+  var recs = [], byEl = new WeakMap();
+  function glyphOverlay(rec) {
+    var ov = el('span', 'dx-ov'), t = rec.text, cells = [];
+    for (var j = 0; j < t.length; j++) {
+      var ch = t.charAt(j);
+      if (ch === ' ') { ov.appendChild(doc.createTextNode(' ')); continue; }
+      var s = el('span', 'gc'), svg = doc.createElementNS(NS, 'svg'), u = doc.createElementNS(NS, 'use');
+      s.appendChild(doc.createTextNode(ch));
+      svg.setAttribute('viewBox', '0 0 20 20'); svg.setAttribute('focusable', 'false');
+      u.setAttribute('href', '#g' + rnd(NG));
+      svg.appendChild(u); s.appendChild(svg); ov.appendChild(s);
+      cells.push({ s: s, u: u, at: 0, ok: false });
+    }
+    rec.cells = cells;
+    return ov;
+  }
+  function scr(t) { var o = ''; for (var j = 0; j < t.length; j++) o += t.charAt(j) === ' ' ? ' ' : rch(); return o; }
+  function textOverlay(rec) {
+    var ov = el('span', 'dx-ov');
+    rec.a = el('span'); rec.b = el('span', 'fr'); rec.c = el('span', 'rest');
+    ov.appendChild(rec.a); ov.appendChild(rec.b); ov.appendChild(rec.c);
+    rec.tail = scr(rec.text); paintText(rec, 0);
+    return ov;
+  }
+  function paintText(rec, f) {
+    rec.a.textContent = rec.text.slice(0, f);
+    rec.b.textContent = rec.tail.slice(f, f + 3);
+    rec.c.textContent = rec.tail.slice(f + 3);
+  }
+  function mount(rec) {
+    if (rec.ov) return;
+    rec.text = norm(rec.el.textContent);
+    rec.ov = rec.glyph ? glyphOverlay(rec) : textOverlay(rec);
+    rec.ov.setAttribute('aria-hidden', 'true');
+    rec.el.appendChild(rec.ov);
+    rec.el.classList.add('dx-on');
+  }
+  function unmount(rec) {
+    rec.running = false;
+    if (rec.ov && rec.ov.parentNode) rec.ov.parentNode.removeChild(rec.ov);
+    rec.ov = rec.cells = null;
+    rec.el.classList.remove('dx-on');
+    var cb = rec.onDone; rec.onDone = null;
+    if (cb) cb();
+  }
+  function run(rec, dur, delay) {
+    mount(rec);
+    rec.running = rec.started = true;
+    var t = -delay, acc = 0, n = rec.glyph ? rec.cells.length : rec.text.length, front = -1, j;
+    if (rec.glyph) { var per = dur / Math.max(n, 1); for (j = 0; j < n; j++) rec.cells[j].at = j * per + Math.random() * per * 2.2; }
+    tasks.push({ step: function (dt) {
+      if (!rec.running) return 2;
+      if (!rec.vis) return 0;
+      t += dt * 1000;
+      if (t < 0) return 1;
+      acc += dt * 1000;
+      var tick = acc >= 55; if (tick) acc = 0;
+      if (rec.glyph) {
+        var left = 0;
+        for (var q = 0; q < n; q++) {
+          var c = rec.cells[q]; if (c.ok) continue;
+          if (t >= c.at) { c.ok = true; c.s.className = 'gc ok'; }
+          else { left++; if (tick && Math.random() < 0.6) c.u.setAttribute('href', '#g' + rnd(NG)); }
+        }
+        if (!left) { unmount(rec); return 2; }
+        return 1;
+      }
+      var p = Math.min(t / dur, 1);
+      if (p >= 1) { unmount(rec); return 2; }
+      var fr = Math.floor(n * p * (2 - p));
+      if (tick) rec.tail = scr(rec.text);
+      if (tick || fr !== front) { front = fr; paintText(rec, fr); }
+      return 1;
+    } });
+    kick();
+  }
+  function begin(rec, delay) {
+    if (rec.started || reduced) return;
+    var len = rec.text.length;
+    var dur = rec.glyph ? (rec.el.tagName === 'H1' ? 1400 : clamp(480 + len * 30, 600, 1500)) : clamp(len * 7, 700, 1700);
+    run(rec, dur, delay);
+  }
+  function finishAll() {
+    for (var j = 0; j < recs.length; j++) { recs[j].started = true; if (recs[j].ov) unmount(recs[j]); }
+    tasks.length = 0;
+    finishTyping();
+  }
+
+  var dio = hasIO && !reduced ? new IntersectionObserver(function (es) {
+    var k = 0;
+    for (var j = 0; j < es.length; j++) {
+      var rec = byEl.get(es[j].target); if (!rec) continue;
+      rec.vis = es[j].isIntersecting;
+      if (!rec.vis) continue;
+      if (!rec.started) begin(rec, (k++) * 110); else kick();
+    }
+  }, { rootMargin: '0px 0px -6% 0px' }) : null;
+
+  var targets = doc.querySelectorAll('.xg, .xs');
+  for (var ti = 0; ti < targets.length; ti++) {
+    var rec = { el: targets[ti], glyph: targets[ti].classList.contains('xg'), vis: false, started: false, running: false, ov: null, onDone: null };
+    recs.push(rec); byEl.set(rec.el, rec);
+    if (dio) { mount(rec); dio.observe(rec.el); }
+  }
+
+  /* ---------- boot log typing ---------- */
+  var log = doc.querySelector('.log'), lts = log ? log.querySelectorAll('li:not(.await) .lt') : [];
+  var typer = null, logVis = true, tOv = null;
+  function finishTyping() {
+    if (!log) return;
+    if (tOv && tOv.parentNode) tOv.parentNode.removeChild(tOv);
+    tOv = null; typer = null;
+    for (var j = 0; j < lts.length; j++) lts[j].classList.remove('tw');
+    log.classList.remove('typing');
+  }
+  function startTyping() {
+    if (!log || typer || !log.classList.contains('typing')) return;
+    if (reduced) { finishTyping(); return; }
+    var idx = 0, t = 0, wait = 0.3, txt = '', node = null, cnt = 0;
+    typer = { step: function (dt) {
+      if (!typer) return 2;
+      if (!logVis) return 0;
+      if (wait > 0) { wait -= dt; return 1; }
+      if (!tOv) {
+        if (idx >= lts.length) { finishTyping(); return 2; }
+        txt = norm(lts[idx].textContent);
+        tOv = el('span', 'dx-ov'); tOv.setAttribute('aria-hidden', 'true');
+        node = doc.createTextNode(''); tOv.appendChild(node); tOv.appendChild(el('span', 'cur'));
+        lts[idx].appendChild(tOv); t = 0; cnt = 0;
+      }
+      t += dt;
+      var n = Math.min(txt.length, Math.floor(t * 62));
+      if (n !== cnt) { cnt = n; node.nodeValue = txt.slice(0, n); }
+      if (cnt >= txt.length) {
+        tOv.parentNode.removeChild(tOv); tOv = null;
+        lts[idx].classList.remove('tw'); idx++;
+        wait = 0.16 + Math.random() * 0.34;
+      }
+      return 1;
+    } };
+    tasks.push(typer); kick();
+  }
+  if (log && dio) {
+    log.classList.add('typing');
+    for (var li = 0; li < lts.length; li++) lts[li].classList.add('tw');
+    observe(log, function (v) { logVis = v; if (v) kick(); });
+    var h1 = byEl.get(doc.getElementById('hero-title'));
+    if (h1) h1.onDone = startTyping; else startTyping();
+  }
+
+  /* ---------- tap a heading: brief re-scramble (decorative) ---------- */
+  doc.addEventListener('click', function (e) {
+    if (reduced || !dio) return;
+    var h = e.target && e.target.closest ? e.target.closest('.xg') : null;
+    var rec = h ? byEl.get(h) : null;
+    if (!rec || rec.running || !rec.started) return;
+    rec.vis = true;
+    run(rec, clamp(260 + rec.el.textContent.length * 22, 420, 900), 0);
+  });
+
+  /* ---------- lifecycle ---------- */
+  doc.addEventListener('visibilitychange', function () { if (!doc.hidden) kick(); });
+  function onRM() {
+    reduced = !!(mq && mq.matches);
+    if (reduced) { finishAll(); scope.still(); } else kick();
+  }
+  if (mq) { if (mq.addEventListener) mq.addEventListener('change', onRM); else if (mq.addListener) mq.addListener(onRM); }
+  if (reduced) scope.still();
+  if (!hasIO) for (var vi = 0; vi < recs.length; vi++) recs[vi].vis = true;
+  kick();
+})();
+</script>
+</body>
+</html>
