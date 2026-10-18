@@ -85,8 +85,8 @@ The current engine, which is also the fallback, keeps both ADR-0018 clauses. The
 
 This ADR decides none of these. Where a lean is given, it is recorded, not decided.
 
-- Workflow selection. Lean: keep a single classifier, run once per request as the workflow's first step. ADR-0018 decision 5 stays in force until this is settled. The answer must cover brood children, whose request text comes from issue bodies.
-- Permission model. Lean: exact-command allow rules in committed settings. How this relates to ADR-0010 and ADR-0019 is not settled.
+- Workflow selection. Lean: keep a single classifier that picks the workflow once per request, before launch. ADR-0018 decision 5 stays in force until this is settled. The answer must cover brood children, whose request text comes from issue bodies.
+- Permission model details. Decision 7 settles exact-command allow rules for git work. Still open: whether those rules live in committed or local settings, which rules brood children need under decision 12, and how this relates to ADR-0010 and ADR-0019. Lean: committed settings.
 - Build-step sources. Lean: `plugin/references/decision-autonomy-table.json` and `plugin/references/decision-brief-schema.json` on branch `origin/feature/autonomy-knob-decision-briefs`, with a CI drift check. The hard-stop source is not named yet. How this relates to ADR-0026 is not settled.
 - Where hard-stop rules live for work outside workflows (the fallback, trivial changes).
 - The cerebrate tool-list finding in the S4, S5 and S7 comment.
