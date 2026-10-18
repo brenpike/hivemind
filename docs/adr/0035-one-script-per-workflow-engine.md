@@ -42,17 +42,54 @@ Issue #409 holds the research and spikes behind this ADR:
 | Slim overlord | Talking to the user, launching workflows, relaying questions and resuming, the PR watch, the fallback |
 | Unchanged for now | The current engine, kept as the fallback |
 
-## Supersession of other ADRs
+## Scope relative to other ADRs
 
-Every existing ADR stays in force. For the new engine, only the clauses listed below are superseded, each within the scope stated with it. Anything not listed is open: it stays in force until an ADR names it as superseded. If the new engine seems to conflict with an unlisted clause, the clause wins and the conflict becomes an open item.
+Every earlier ADR keeps governing the current engine, which is also the fallback, and anything else it governs today. The one exception is brood child launch, which both engines share (see the ADR-0017 row).
 
-| Superseded clause | Scope | Replaced by |
-|---|---|---|
-| ADR-0018 decision 2, the part that makes workflow definitions JSON files | New engine only | Decision 1 |
-| ADR-0018 decision 8, the part that makes committed transition scripts the executor | New engine only | Decision 1 |
-| ADR-0017 2026-06-02 amendment (#170), brood children keep `--dangerously-skip-permissions` | Brood child launch, once decision 12 lands | Decision 12 |
+The new engine is governed by this ADR and by the ADRs and clauses that the table below marks `applies` or `partial`. The table has one row for each of ADR-0001 to ADR-0033. No other clause of those ADRs governs the new engine. Any ADR not in the table states its own scope.
 
-The current engine, which is also the fallback, keeps both ADR-0018 clauses. The run-ledger part of ADR-0018 decisions 2 and 8 is not superseded (see Open items, run record). ADR-0029 keeps governing the PR watch (decision 10).
+Scope values:
+
+- `applies`: the ADR governs the new engine the same way it governs the current engine.
+- `partial`: only the clauses the note lists after "Applies" govern the new engine.
+- `current engine only`: the ADR does not govern the new engine.
+- `superseded`: the ADR already governs neither engine.
+
+| ADR | Title | New engine | Note |
+|---|---|---|---|
+| 0001 | Two specialist reviewer agents | partial | Applies: separate local and GitHub reviewer agents. Current engine only: the ADR-0011 update note that `local-reviewer` keeps its own loop, since review loops move into workflow scripts. |
+| 0002 | Self-owning delegation for reviewers | superseded | Superseded by ADR-0005. |
+| 0003 | Immediate stop on planner escalation | superseded | Superseded by ADR-0006 and ADR-0026. |
+| 0004 | Fix mode reports clean without waiting for CI | applies | Part of the PR watch (decision 10). |
+| 0005 | Agent tool unavailable in subagents | applies | Review policy: reviewers fix at most 2 files themselves and escalate larger fixes. |
+| 0006 | Intent-based governance | partial | Applies: the "Where mechanical survived" list, and intent for the judgment inside each agent. Current engine only: prose workflow sequencing and routing between steps, which the new engine runs as code (decision 1). |
+| 0007 | Brood children unaware, hatchery a dashboard | applies | Brood topology, shared by both engines. |
+| 0008 | Swap cerebrate and overlord names | applies | Agent names, not engine behavior. |
+| 0009 | Foreground-blocking watch | superseded | Superseded by ADR-0011. |
+| 0010 | Permission allowlist posture | partial | Applies: the verified permission-engine facts in Findings and in the amendments. Current engine only: the allowlist posture (Decisions 1 to 6 and the amendments that change it). The new engine's allow rules are an open item (permission model details). |
+| 0011 | Review loop in a main-session skill | partial | Applies: the PR watch loop as a main-session skill with Monitor, run by the overlord, with `github-reviewer` as a stateless fix worker (decision 10). Current engine only: the Consequences note that `local-reviewer` keeps its own loop. |
+| 0012 | Path-agnostic artifact transforms | partial | Applies: `plan-to-prd` and `prd-to-issues` never decide the execution path. Current engine only: the clause that cerebrate overlap analysis alone picks single-branch or brood, since new-engine workflow selection is an open item. |
+| 0013 | Decoupled leaf pipeline skills | applies | Skill design, not engine behavior. |
+| 0014 | Read-only architecture blueprint skill | applies | Skill design, not engine behavior. In the new engine, a workflow runs the git lifecycle it names. |
+| 0015 | Deepening refactor execution skill | applies | Skill design, not engine behavior. |
+| 0016 | Structural containment of write-capable skills | partial | Applies: decision 1, the decision 4 invariant that no user-reachable write-capable context exists outside the lifecycle, and decision 5. Current engine only: decisions 2 and 3, which describe the current overlord's tools and spawn topology. |
+| 0017 | Brood spawn mechanism | applies | Brood launch is shared by both engines. Once decision 12 lands, the permission part of decision 2 (`--dangerously-skip-permissions` and the `skipDangerousModePermissionPrompt` setting) and the choice in the 2026-06-02 amendment (#170) to keep that flag are superseded for both engines. The detached tmux launch, the trusted-base precondition, and that amendment's reasons 2 and 3 stay in force. |
+| 0018 | Declarative workflow state machine | current engine only | Defines the JSON state machine, the router, the run ledger engine and its fallback. Decision 5 keeps governing the current engine; new-engine workflow selection is an open item. Brood state, including the manifest, is covered for both engines by ADR-0021. |
+| 0019 | Trust-boundary discipline | partial | Applies: the discipline for committed shell scripts (identifiers, not paths; paths derived from ground truth and checked for containment; hostile content projected to bounded tokens), including boundary 3 and the brood writers. Current engine only: boundaries 1 and 2, and the packaged JSON workflow definition as the sole transition source. |
+| 0020 | Single-responsibility shell libraries | applies | Covers shell code only. Its title's "new engine logic" means new shell logic, not this ADR's engine. |
+| 0021 | Per-brood-id namespacing | applies | Brood state, shared by both engines. |
+| 0022 | Local review parity | applies | Review policy. |
+| 0023 | Root-cause remediation doctrine | partial | Applies: decisions 1, 3 and 4, the 2026-09-18 amendment, and decision 2 as far as reviewers return `root-cluster-suspected`. Current engine only: decision 2's routing through the `review_remediation_plan` states. |
+| 0024 | No workflow-calls-workflow | current engine only | About the JSON engine's state types and its duplicated review states. |
+| 0025 | Young-surface recurrence, GitHub as ledger | applies | Review policy. |
+| 0026 | Decision autonomy and post-merge report | current engine only | Its tiers, 2x2, promotion gate, journal and report run on the current engine. The new engine's autonomy decision is code over the autonomy table (decision 1); how that relates to ADR-0026 is an open item (build-step sources). |
+| 0027 | Agent-invocable brood remote control | applies | Brood tooling, shared by both engines. |
+| 0028 | Seeded hooks in exec form | applies | Setup tooling, not engine behavior. |
+| 0029 | Default PR watch and idle window | applies | Governs the PR watch (decision 10). Its rules hold for both engines; the workflow states, terminal and ledger fields it names are the current engine's (see Open items, run record). |
+| 0030 | Opt-in post-merge decision report | current engine only | Gates the ADR-0026 report, which runs on the current engine. |
+| 0031 | Checked discovery for policy_check.sh | applies | Repo validation tooling, not engine behavior. |
+| 0032 | Defer reply marker sentinel | applies | GitHub review policy. |
+| 0033 | Automated reviewer identity registry | applies | GitHub review policy. |
 
 ## Considered Options
 
@@ -85,7 +122,7 @@ The current engine, which is also the fallback, keeps both ADR-0018 clauses. The
 
 This ADR decides none of these. Where a lean is given, it is recorded, not decided.
 
-- Workflow selection. Lean: keep a single classifier that picks the workflow once per request, before launch. ADR-0018 decision 5 stays in force until this is settled. The answer must cover brood children, whose request text comes from issue bodies.
+- Workflow selection. Lean: keep a single classifier that picks the workflow once per request, before launch. ADR-0018 decision 5 keeps governing the current engine; it does not govern the new engine. The answer must cover brood children, whose request text comes from issue bodies.
 - Permission model details. Decision 7 settles exact-command allow rules for git work. Still open: whether those rules live in committed or local settings, which rules brood children need under decision 12, and how this relates to ADR-0010 and ADR-0019. Lean: committed settings.
 - Build-step sources. Lean: `plugin/references/decision-autonomy-table.json` and `plugin/references/decision-brief-schema.json` on branch `origin/feature/autonomy-knob-decision-briefs`, with a CI drift check. The hard-stop source is not named yet. How this relates to ADR-0026 is not settled.
 - Where hard-stop rules live for work outside workflows (the fallback, trivial changes).
