@@ -1,0 +1,1054 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#02060a">
+<title>Hivemind | Prototype 01: Living Membrane</title>
+<script>(function () { 'use strict'; document.documentElement.classList.add('js'); })();</script>
+<style>
+:root {
+  --abyss: #02060a;
+  --teal: #04212b;
+  --cyan: #3bf7d4;
+  --blue: #3a8bff;
+  --mag: #ff4fd8;
+  --amber: #ffc65c;
+  --text: #d8fff7;
+  --soft: #c4ebe4;
+  --dim: #7fb3ad;
+  --font: ui-rounded, "SF Pro Rounded", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --pad: clamp(1.25rem, 5vw, 3rem);
+  --padL: calc(var(--pad) + env(safe-area-inset-left));
+  --padR: calc(var(--pad) + env(safe-area-inset-right));
+}
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; background: var(--abyss); }
+body {
+  margin: 0;
+  min-height: 100vh;
+  background:
+    radial-gradient(80rem 50rem at 110% 40%, rgba(4, 33, 43, .55), transparent 70%),
+    radial-gradient(60rem 40rem at -20% 75%, rgba(58, 139, 255, .06), transparent 70%),
+    var(--abyss);
+  color: var(--text);
+  font: 400 1.0625rem/1.65 var(--font);
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  overflow-x: clip;
+}
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+a { color: var(--cyan); text-underline-offset: .2em; }
+a:hover { color: var(--text); }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 3px; border-radius: 8px; }
+main:focus { outline: none; }
+code, pre, .mono { font-family: var(--mono); }
+code {
+  font-size: .86em;
+  color: #a6fbe9;
+  background: rgba(59, 247, 212, .08);
+  padding: .08em .38em;
+  border-radius: .45em;
+  overflow-wrap: anywhere;
+}
+h1, h2, h3 { font-weight: 300; margin: 0; }
+p { margin: 0 0 1em; }
+.skip {
+  position: absolute; left: var(--padL); top: -100px; z-index: 50;
+  padding: .75rem 1.1rem; min-height: 44px; border-radius: 999px;
+  background: var(--amber); color: var(--abyss); font-weight: 600; text-decoration: none;
+}
+.skip:focus { top: calc(env(safe-area-inset-top) + .75rem); }
+
+/* ---------- header ---------- */
+.site-head {
+  position: absolute; inset: 0 0 auto 0; z-index: 10;
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0 1rem;
+  padding: calc(env(safe-area-inset-top) + .5rem) var(--padR) .5rem var(--padL);
+  background: linear-gradient(to bottom, rgba(2, 6, 10, .92), rgba(2, 6, 10, .55) 70%, rgba(2, 6, 10, 0));
+}
+.brand {
+  display: inline-flex; align-items: center; gap: .6rem; min-height: 44px;
+  color: var(--text); text-decoration: none; font-size: 1.125rem; letter-spacing: .02em;
+}
+.brand svg { width: 28px; height: 28px; }
+.site-nav ul { display: flex; flex-wrap: wrap; list-style: none; margin: 0 -.55rem; padding: 0; }
+.site-nav a {
+  display: inline-flex; align-items: center; min-height: 44px; padding: 0 .55rem;
+  color: var(--soft); text-decoration: none; font-size: .9375rem;
+}
+.site-nav a:hover { color: var(--cyan); }
+
+/* ---------- hero ---------- */
+.hero {
+  position: relative; isolation: isolate; overflow: hidden;
+  min-height: 100vh; min-height: 100svh;
+  display: flex; align-items: flex-end;
+  padding: calc(env(safe-area-inset-top) + clamp(360px, 108vw, 600px)) var(--padR) calc(env(safe-area-inset-bottom) + 2rem) var(--padL);
+  background:
+    radial-gradient(70% 38% at 50% 26%, rgba(4, 33, 43, .95), transparent 72%),
+    radial-gradient(34% 22% at 54% 22%, rgba(59, 247, 212, .09), transparent 70%),
+    radial-gradient(40% 30% at 15% 90%, rgba(255, 79, 216, .05), transparent 70%),
+    var(--abyss);
+}
+.hero__canvas {
+  position: absolute; inset: 0; z-index: 0; width: 100%; height: 100%; display: block;
+  touch-action: pan-y pinch-zoom;
+}
+.hero::after {
+  content: ""; position: absolute; inset: 0; z-index: 1; pointer-events: none;
+  background: radial-gradient(120% 90% at 50% 40%, transparent 55%, rgba(0, 0, 0, .6) 100%);
+}
+.hero__decor { display: none; }
+.hero__panel {
+  position: relative; z-index: 2; width: 100%; max-width: 38rem;
+  padding: clamp(1.5rem, 4.5vw, 2.5rem);
+  background: rgba(2, 7, 11, .8);
+  -webkit-backdrop-filter: blur(14px) saturate(1.25);
+  backdrop-filter: blur(14px) saturate(1.25);
+  border-radius: 34px 52px 38px 58px / 46px 36px 56px 40px;
+  box-shadow: inset 0 0 0 1px rgba(59, 247, 212, .18), inset 0 0 40px rgba(59, 247, 212, .07), 0 30px 80px -40px rgba(59, 247, 212, .35);
+}
+.eyebrow {
+  font: 500 .75rem/1.4 var(--mono); letter-spacing: .2em; text-transform: uppercase; color: var(--cyan); margin: 0 0 .75rem;
+}
+.hero h1 {
+  font-size: clamp(3.25rem, 15vw, 7.5rem); line-height: .95; letter-spacing: -.04em; margin: 0 0 1.1rem; color: var(--text);
+}
+@supports ((-webkit-background-clip: text) or (background-clip: text)) {
+  .hero h1 {
+    background: linear-gradient(100deg, #d8fff7 8%, #3bf7d4 42%, #7fb6ff 72%, #ff8be4 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+}
+.hero__pitch { font-size: clamp(1.0625rem, 2.6vw, 1.25rem); color: var(--text); max-width: 34rem; }
+.hero__intent { color: var(--dim); font-size: 1rem; }
+.hero__intent strong { color: var(--amber); font-weight: 500; }
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.5rem; }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: .5rem;
+  min-height: 48px; padding: 0 1.4rem; border-radius: 999px;
+  font: 500 1rem/1 var(--font); text-decoration: none;
+  transition: transform .25s ease, opacity .25s ease;
+}
+.btn--main { background: var(--cyan); color: var(--abyss); box-shadow: 0 0 0 1px rgba(216, 255, 247, .4), 0 10px 40px -10px rgba(59, 247, 212, .7); }
+.btn--main:hover { color: var(--abyss); transform: translateY(-2px); }
+.btn--ghost { color: var(--text); background: rgba(2, 6, 10, .6); box-shadow: inset 0 0 0 1px rgba(59, 247, 212, .45); }
+.btn--ghost:hover { color: var(--cyan); transform: translateY(-2px); }
+.btn:active { transform: translateY(0) scale(.98); }
+
+/* ---------- sections ---------- */
+.section { position: relative; padding: clamp(4.5rem, 11vw, 8rem) var(--padR) 0 var(--padL); }
+.wrap { max-width: 74rem; margin: 0 auto; }
+.kicker { font: 500 .75rem/1.4 var(--mono); letter-spacing: .22em; text-transform: uppercase; color: var(--cyan); margin: 0 0 .9rem; }
+.section h2 { font-size: clamp(2.1rem, 6.5vw, 3.9rem); line-height: 1.05; letter-spacing: -.025em; margin: 0 0 1.1rem; }
+.lede { color: var(--dim); font-size: clamp(1.0625rem, 2.2vw, 1.25rem); max-width: 42rem; margin-bottom: 0; }
+
+/* vesicle: organic card with slow membrane morph and inner bioluminescent rim */
+.vesicle {
+  --c: 59 247 212;
+  --ct: #3bf7d4;
+  position: relative;
+  padding: clamp(1.6rem, 3.2vw, 2.1rem);
+  background:
+    radial-gradient(120% 85% at 0% 0%, rgb(var(--c) / .10), transparent 60%),
+    linear-gradient(165deg, #062a35 0%, #03151c 55%, #020a0f 100%);
+  border-radius: 44px 60px 48px 56px / 56px 44px 60px 48px;
+  box-shadow:
+    inset 0 0 0 1px rgb(var(--c) / .22),
+    inset 0 0 26px rgb(var(--c) / .14),
+    inset 0 -34px 60px -44px rgb(var(--c) / .55);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .vesicle { animation: morph var(--m, 22s) ease-in-out var(--md, 0s) infinite alternate; }
+}
+@keyframes morph {
+  0%   { border-radius: 44px 60px 48px 56px / 56px 44px 60px 48px; }
+  33%  { border-radius: 62px 38px 58px 42px / 40px 62px 44px 60px; }
+  66%  { border-radius: 36px 56px 40px 64px / 60px 50px 36px 52px; }
+  100% { border-radius: 56px 44px 64px 36px / 46px 58px 52px 40px; }
+}
+.vesicle h3 { font-size: 1.55rem; font-weight: 400; letter-spacing: -.01em; color: var(--text); }
+.vesicle p { color: var(--soft); }
+.vesicle p:last-child { margin-bottom: 0; }
+.tag { font: 500 .75rem/1.4 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--ct); margin: 0 0 .2rem; }
+
+.c-amber { --c: 255 198 92; --ct: #ffc65c; }
+.c-blue { --c: 58 139 255; --ct: #8ab8ff; }
+.c-cyan { --c: 59 247 212; --ct: #3bf7d4; }
+.c-mag { --c: 255 79 216; --ct: #ff9be8; }
+.c-violet { --c: 154 107 255; --ct: #c2a8ff; }
+.c-sky { --c: 95 208 255; --ct: #5fd0ff; }
+
+/* ---------- agents ---------- */
+.agents { display: grid; gap: 1.25rem; margin: 3rem 0 0; padding: 0; list-style: none; }
+@media (min-width: 640px) { .agents { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .agents { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 1.5rem; } }
+.agent { display: flex; flex-direction: column; }
+.agent__top { display: flex; align-items: center; gap: 1rem; margin-bottom: 1rem; }
+.agent__top > div { min-width: 0; }
+.agent__meta { font: .8125rem/1.5 var(--mono); color: var(--dim); margin: 0 0 .9rem; overflow-wrap: anywhere; }
+.agent__meta code { font-size: 1em; }
+.cell { width: 60px; height: 60px; flex: none; overflow: visible; }
+.cell__wall { fill: rgb(var(--c) / .08); stroke: rgb(var(--c) / .75); stroke-width: 1.5; }
+.cell__ring { fill: none; stroke: rgb(var(--c) / .5); stroke-width: 1.2; }
+.cell__core { fill: rgb(var(--c) / .5); }
+.cell__dot { fill: #f4fffc; }
+.cell__line { fill: none; stroke: rgb(var(--c)); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.pulse { transform-box: fill-box; transform-origin: center; }
+@media (prefers-reduced-motion: no-preference) {
+  .pulse { animation: pulse var(--p, 3s) ease-in-out infinite; }
+  .spin { transform-box: fill-box; transform-origin: center; animation: spin calc(var(--p, 3s) * 6) linear infinite; }
+}
+@keyframes pulse { 0%, 100% { transform: scale(.88); opacity: .7; } 50% { transform: scale(1.08); opacity: 1; } }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---------- workflow tendril ---------- */
+.flow { position: relative; margin-top: 3rem; }
+.flow__svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; pointer-events: none; opacity: 0; transition: opacity .8s ease; }
+.flow--ready .flow__svg { opacity: 1; }
+.flow__base { fill: none; stroke: rgba(59, 247, 212, .18); stroke-width: 1.5; stroke-dasharray: 2 7; stroke-linecap: round; }
+.flow__ink { fill: none; stroke: url(#inkGrad); stroke-width: 2.4; stroke-linecap: round; stroke-dasharray: 100 102; stroke-dashoffset: 0; }
+.flow__ink--glow { stroke-width: 11; opacity: .22; }
+.beats { list-style: none; margin: 0; padding: 0; }
+.beat { position: relative; padding-left: 3.5rem; margin-bottom: 1.25rem; }
+.beat:last-child { margin-bottom: 0; }
+.beat__node {
+  position: absolute; left: .5rem; top: 1.85rem; width: 1.5rem; height: 1.5rem; border-radius: 50%;
+  background: var(--abyss); box-shadow: 0 0 0 2px rgba(59, 247, 212, .4), 0 0 0 7px rgba(2, 6, 10, .9);
+}
+.beat__node::after {
+  content: ""; position: absolute; inset: -7px; border-radius: 50%;
+  background: radial-gradient(circle, #f4fffc 0 16%, #3bf7d4 30%, rgba(59, 247, 212, .25) 52%, rgba(59, 247, 212, 0) 72%);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .js.no-sda .beat__node::after { opacity: 0; transform: scale(.4); transition: opacity .6s ease, transform .6s ease; }
+  .js.no-sda .beat__node.is-lit::after { opacity: 1; transform: scale(1); }
+  @supports (animation-timeline: view()) {
+    .flow { view-timeline-name: --flow; }
+    .flow__ink {
+      animation-name: ink; animation-duration: 1ms; animation-timing-function: linear; animation-fill-mode: both;
+      animation-timeline: --flow; animation-range: cover 40vh cover calc(100% - 60vh);
+    }
+    .beat__node::after {
+      animation-name: node-lit; animation-duration: 1ms; animation-timing-function: linear; animation-fill-mode: both;
+      animation-timeline: view(); animation-range: cover 30% cover 40%;
+    }
+  }
+}
+@keyframes ink { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@keyframes node-lit { from { opacity: 0; transform: scale(.4); } to { opacity: 1; transform: scale(1); } }
+.beat .vesicle { padding-top: 1.5rem; }
+.beat h3 { font-size: 1.4rem; margin-bottom: .5rem; }
+.beat__n { font: 500 .8125rem/1 var(--mono); color: var(--ct); letter-spacing: .12em; margin-right: .5rem; vertical-align: .2em; }
+.beat:nth-child(1) .vesicle { --md: -3s; --m: 24s; }
+.beat:nth-child(2) .vesicle { --md: -9s; --m: 20s; }
+.beat:nth-child(3) .vesicle { --md: -14s; --m: 26s; }
+.beat:nth-child(4) .vesicle { --md: -5s; --m: 21s; }
+.beat:nth-child(5) .vesicle { --md: -11s; --m: 25s; }
+.beat:nth-child(6) .vesicle { --md: -2s; --m: 19s; }
+.beat:nth-child(7) .vesicle { --md: -16s; --m: 23s; }
+.beat:nth-child(8) .vesicle { --md: -7s; --m: 27s; }
+@media (min-width: 640px) {
+  .beat { padding-left: 4.75rem; }
+  .beat__node { left: 1.25rem; }
+}
+@media (min-width: 1024px) {
+  .beats { padding: 1rem 0 2rem; }
+  .beat { width: calc(50% - 4.5rem); padding-left: 0; margin-bottom: 0; }
+  .beat + .beat { margin-top: -2.25rem; }
+  .beat:nth-child(odd) { margin-right: auto; }
+  .beat:nth-child(even) { margin-left: auto; }
+  .beat:nth-child(odd) .beat__node { left: auto; right: -5.25rem; }
+  .beat:nth-child(even) .beat__node { left: -5.25rem; }
+}
+
+/* ---------- brood, signals, autonomy ---------- */
+.sub { margin-top: clamp(4rem, 9vw, 6.5rem); }
+.sub h2 { font-size: clamp(1.9rem, 5vw, 3rem); }
+.brood { display: grid; gap: 1.5rem; align-items: center; margin-top: 2rem; --m: 28s; --md: -6s; }
+.brood svg { width: 100%; max-width: 380px; height: auto; justify-self: center; }
+@media (min-width: 1024px) { .brood { grid-template-columns: 1.3fr 1fr; gap: 3rem; padding: 2.75rem 3rem; } }
+.bud { transform-box: fill-box; transform-origin: center; }
+@media (prefers-reduced-motion: no-preference) {
+  .bud { animation: bob var(--b, 6s) ease-in-out infinite; }
+}
+@keyframes bob { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(3px, -5px); } }
+.signals { display: grid; gap: 1rem; list-style: none; margin: 2rem 0 0; padding: 0; }
+@media (min-width: 640px) { .signals { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 1024px) { .signals { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.signal {
+  --c: 59 247 212; --ct: #3bf7d4;
+  display: flex; gap: 1rem; align-items: flex-start; padding: 1.25rem 1.25rem 1.3rem;
+  background: linear-gradient(160deg, #052530, #020b10);
+  border-radius: 26px 34px 28px 38px / 34px 26px 38px 28px;
+  box-shadow: inset 0 0 0 1px rgb(var(--c) / .2), inset 0 0 22px rgb(var(--c) / .1);
+}
+.signal svg { width: 40px; height: 40px; flex: none; fill: none; stroke: var(--ct); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.signal h3 { font-size: 1.125rem; font-weight: 500; margin-bottom: .25rem; color: var(--ct); }
+.signal p { margin: 0; color: var(--soft); font-size: .975rem; line-height: 1.55; }
+.autonomy { display: grid; gap: 1.5rem; margin-top: 2rem; --m: 25s; --md: -12s; }
+@media (min-width: 640px) { .autonomy { grid-template-columns: 1fr 1fr; gap: 2.5rem; } }
+.autonomy h3 { display: flex; align-items: center; gap: .65rem; font-size: 1.3rem; margin-bottom: .6rem; }
+.autonomy svg { width: 28px; height: 28px; flex: none; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* ---------- install spore pod ---------- */
+.pod-wrap { padding: 1.5rem 0 0; }
+.pod {
+  position: relative; isolation: isolate; max-width: 54rem; margin: 2.5rem auto 0;
+  padding: clamp(1.9rem, 6vw, 3.75rem);
+  --m: 30s; --md: -4s;
+}
+.pod::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; border-radius: inherit; pointer-events: none;
+  box-shadow: 0 0 0 1px rgba(59, 247, 212, .28), 0 0 70px 4px rgba(59, 247, 212, .22), 0 0 140px 20px rgba(58, 139, 255, .1);
+}
+.pod__spores { position: absolute; inset: 0; overflow: hidden; border-radius: inherit; pointer-events: none; z-index: -1; }
+.pod__spores i {
+  position: absolute; bottom: -8px; width: 5px; height: 5px; border-radius: 50%;
+  background: radial-gradient(circle, #f4fffc, rgba(59, 247, 212, .6) 45%, rgba(59, 247, 212, 0) 70%);
+  opacity: 0;
+}
+.pod__spores i:nth-child(1) { left: 8%; --s: 13s; --sd: -2s; }
+.pod__spores i:nth-child(2) { left: 22%; --s: 17s; --sd: -9s; }
+.pod__spores i:nth-child(3) { left: 37%; --s: 12s; --sd: -5s; }
+.pod__spores i:nth-child(4) { left: 51%; --s: 19s; --sd: -13s; }
+.pod__spores i:nth-child(5) { left: 64%; --s: 14s; --sd: -1s; }
+.pod__spores i:nth-child(6) { left: 78%; --s: 16s; --sd: -7s; }
+.pod__spores i:nth-child(7) { left: 90%; --s: 11s; --sd: -4s; }
+@media (prefers-reduced-motion: no-preference) {
+  .pod::before { animation: breathe 7.5s ease-in-out infinite; }
+  .pod__spores i { animation: spore var(--s, 14s) linear var(--sd, 0s) infinite; }
+}
+@keyframes breathe { 0%, 100% { transform: scale(.965); opacity: .55; } 50% { transform: scale(1.035); opacity: 1; } }
+@keyframes spore {
+  0% { transform: translate(0, 0); opacity: 0; }
+  12% { opacity: .9; }
+  80% { opacity: .5; }
+  100% { transform: translate(14px, -520px); opacity: 0; }
+}
+.pod h3 { font-size: 1.25rem; margin: 1.75rem 0 .75rem; }
+.pod h3:first-of-type { margin-top: 0; }
+.cmd {
+  margin: 0 0 .75rem; padding: .9rem 1.1rem; border-radius: 16px;
+  background: #01080c; box-shadow: inset 0 0 0 1px rgba(59, 247, 212, .25);
+  font: .9375rem/1.55 var(--mono); color: var(--text);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+  -webkit-user-select: all; user-select: all;
+}
+.cmd::before { content: "› "; color: var(--cyan); -webkit-user-select: none; user-select: none; }
+.pod ul { margin: 0; padding-left: 1.2rem; color: var(--soft); }
+.pod li { margin-bottom: .35rem; }
+.pod li::marker { color: var(--cyan); }
+
+/* ---------- footer ---------- */
+.site-foot {
+  margin-top: clamp(5rem, 12vw, 9rem);
+  padding: 2.5rem var(--padR) calc(env(safe-area-inset-bottom) + 2.5rem) var(--padL);
+  border-top: 1px solid rgba(59, 247, 212, .14);
+  background: linear-gradient(to bottom, rgba(4, 33, 43, .35), var(--abyss));
+}
+.site-foot .wrap { display: flex; flex-wrap: wrap; gap: 1rem 2rem; align-items: center; justify-content: space-between; }
+.site-foot p { margin: 0; color: var(--dim); }
+.site-foot ul { display: flex; flex-wrap: wrap; gap: 0 1.25rem; list-style: none; margin: 0; padding: 0; }
+.site-foot a { display: inline-flex; align-items: center; min-height: 44px; }
+
+@media (min-width: 1024px) {
+  .hero { align-items: center; padding-top: calc(env(safe-area-inset-top) + 7rem); padding-bottom: 4rem;
+    background:
+      radial-gradient(42% 52% at 70% 52%, rgba(4, 33, 43, .95), transparent 72%),
+      radial-gradient(22% 28% at 70% 50%, rgba(59, 247, 212, .09), transparent 70%),
+      radial-gradient(30% 30% at 10% 90%, rgba(255, 79, 216, .05), transparent 70%),
+      var(--abyss); }
+  .hero__panel { max-width: 34rem; }
+  .hero__decor {
+    display: block; position: absolute; z-index: 1; right: var(--padR); bottom: 2rem; pointer-events: none;
+    font: 500 .6875rem/1.6 var(--mono); letter-spacing: .18em; text-transform: uppercase; color: var(--dim); text-align: right;
+  }
+  .hero__decor span { display: block; width: 96px; height: 1px; margin: 0 0 .5rem auto; background: var(--dim); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-head">
+  <a class="brand" href="#hero">
+    <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false"><circle cx="16" cy="16" r="13" fill="rgba(59,247,212,.1)" stroke="#3bf7d4" stroke-width="1.5"/><circle cx="16" cy="16" r="5.5" fill="#ffc65c"/><circle cx="8.5" cy="11" r="2.2" fill="#3a8bff"/><circle cx="23" cy="10" r="2" fill="#ff4fd8"/><circle cx="22" cy="22.5" r="2.2" fill="#3bf7d4"/></svg>
+    <span>Hivemind</span>
+  </a>
+  <nav class="site-nav" aria-label="Primary">
+    <ul>
+      <li><a href="#agents">Agents</a></li>
+      <li><a href="#workflow">Workflow</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main id="main" tabindex="-1">
+  <section id="hero" class="hero" aria-labelledby="hero-title">
+    <canvas id="membrane" class="hero__canvas" aria-hidden="true"></canvas>
+    <div class="hero__decor" aria-hidden="true"><span></span>50 µm · live culture</div>
+    <div class="hero__panel">
+      <p class="eyebrow">Specimen 01 · Living Membrane</p>
+      <h1 id="hero-title">Hivemind</h1>
+      <p class="hero__pitch">Multi-agent orchestration framework for Claude Code. Coordinates specialized bioforms to plan, build, review, and ship code, so you don't have to manage the pipeline yourself.</p>
+      <p class="hero__intent">You are the <strong>Overmind</strong>. The swarm acts on your intent.</p>
+      <div class="actions">
+        <a class="btn btn--main" href="#install">Install the hive</a>
+        <a class="btn btn--ghost" href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer">View the source</a>
+      </div>
+    </div>
+  </section>
+
+  <section id="agents" class="section" aria-labelledby="agents-title">
+    <div class="wrap">
+      <p class="kicker">The organisms</p>
+      <h2 id="agents-title">Six minds, one cytoplasm</h2>
+      <p class="lede">Four bioforms do the work. Two composites review it. Each stays inside the membrane it is given.</p>
+      <ul class="agents">
+        <li class="agent vesicle c-amber" style="--m:24s;--md:-4s">
+          <div class="agent__top">
+            <svg class="cell" viewBox="0 0 64 64" aria-hidden="true" focusable="false" style="--p:3.8s"><circle class="cell__wall" cx="32" cy="32" r="28"/><circle class="cell__ring spin" cx="32" cy="32" r="20" stroke-dasharray="3 5"/><g class="pulse"><circle class="cell__core" cx="32" cy="32" r="12"/><circle class="cell__dot" cx="35" cy="29" r="4"/></g></svg>
+            <div><p class="tag">Orchestrator · bioform</p><h3>Overlord</h3></div>
+          </div>
+          <p class="agent__meta"><code>hivemind:overlord</code> · session default</p>
+          <p>Routes each request to a workflow, runs the workflow state machine and its run ledger, and owns branches, checkpoint commits, version bumps, PRs and review routing. Delegates all implementation and never writes code.</p>
+        </li>
+        <li class="agent vesicle c-blue" style="--m:21s;--md:-11s">
+          <div class="agent__top">
+            <svg class="cell" viewBox="0 0 64 64" aria-hidden="true" focusable="false" style="--p:5.2s"><circle class="cell__wall" cx="32" cy="32" r="28"/><g class="pulse"><path class="cell__line" d="M17 26c3-6 7-6 9 0s6 6 9 0 7-6 10 0"/><path class="cell__line" d="M17 35c3-6 7-6 9 0s6 6 9 0 7-6 10 0"/><path class="cell__line" d="M22 44c3-4 6-4 8 0s6 4 10 0"/><circle class="cell__dot" cx="32" cy="19" r="2.5"/></g></svg>
+            <div><p class="tag">Strategist · bioform</p><h3>Cerebrate</h3></div>
+          </div>
+          <p class="agent__meta">read-only</p>
+          <p>Researches the codebase and returns the directive: STEP-NNN steps with exact file scopes, dependencies, risks and a delivery shape (single, multi or brood). Never writes files.</p>
+        </li>
+        <li class="agent vesicle c-cyan" style="--m:19s;--md:-7s">
+          <div class="agent__top">
+            <svg class="cell" viewBox="0 0 64 64" aria-hidden="true" focusable="false" style="--p:2.1s"><circle class="cell__wall" cx="32" cy="32" r="22"/><path class="cell__line spin" d="M32 4v6M32 54v6M4 32h6M54 32h6M12.2 12.2l4.2 4.2M47.6 47.6l4.2 4.2M51.8 12.2l-4.2 4.2M12.2 51.8l4.2-4.2"/><g class="pulse"><ellipse class="cell__core" cx="32" cy="32" rx="12" ry="7"/><path class="cell__line" d="M23 32l3-4 3 8 3-8 3 8 3-8 3 4"/></g></svg>
+            <div><p class="tag">Builder · bioform</p><h3>Drone</h3></div>
+          </div>
+          <p class="agent__meta">default owner of every step</p>
+          <p>Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope.</p>
+        </li>
+        <li class="agent vesicle c-mag" style="--m:26s;--md:-15s">
+          <div class="agent__top">
+            <svg class="cell" viewBox="0 0 64 64" aria-hidden="true" focusable="false" style="--p:4.4s"><path class="cell__wall" d="M34 5c13 1 25 11 23 25s-7 28-23 29S6 51 6 35 20 4 34 5z"/><g class="pulse"><path class="cell__line" d="M32 33c0-4 6-4 6 0s-4 9-10 8-8-8-6-13 9-9 15-6"/><circle class="cell__dot" cx="44" cy="22" r="2.5"/><circle class="cell__core" cx="21" cy="44" r="4"/></g></svg>
+            <div><p class="tag">Shaper · bioform</p><h3>Changeling</h3></div>
+          </div>
+          <p class="agent__meta">presentational UI/UX</p>
+          <p>Shapes markup, styling, layout, design tokens, visual states and presentational accessibility, within an assigned file scope.</p>
+        </li>
+        <li class="agent vesicle c-violet" style="--m:23s;--md:-2s">
+          <div class="agent__top">
+            <svg class="cell" viewBox="0 0 64 64" aria-hidden="true" focusable="false" style="--p:6.3s"><circle class="cell__wall" cx="32" cy="32" r="28"/><g class="pulse"><path class="cell__core" d="M13 32c7-10 31-10 38 0-7 10-31 10-38 0z"/><circle class="cell__ring" cx="32" cy="32" r="7.5"/><ellipse class="cell__dot" cx="32" cy="32" rx="2" ry="6.5"/></g></svg>
+            <div><p class="tag">Pre-PR · composite</p><h3>Local-Reviewer</h3></div>
+          </div>
+          <p class="agent__meta">needs the codex companion</p>
+          <p>Runs an adversarial Codex review loop before the PR exists, up to 10 iterations. Fixes simple findings (2 files or fewer), escalates complex ones, and stops on break-fix cycles.</p>
+        </li>
+        <li class="agent vesicle c-sky" style="--m:27s;--md:-9s">
+          <div class="agent__top">
+            <svg class="cell" viewBox="0 0 64 64" aria-hidden="true" focusable="false" style="--p:3.1s"><path class="cell__line" d="M32 32L12 15M32 32L53 21M32 32L30 55" opacity=".6"/><circle class="cell__wall" cx="12" cy="15" r="6"/><circle class="cell__wall" cx="53" cy="21" r="6"/><circle class="cell__wall" cx="30" cy="55" r="6"/><circle class="cell__wall" cx="32" cy="32" r="15"/><g class="pulse"><circle class="cell__core" cx="32" cy="32" r="7"/><circle class="cell__dot" cx="34" cy="30" r="2.4"/></g></svg>
+            <div><p class="tag">Post-PR · composite</p><h3>GitHub-Reviewer</h3></div>
+          </div>
+          <p class="agent__meta">stateless · one-shot</p>
+          <p>Fetches and classifies review feedback, fixes, pushes, replies and resolves threads. Dispatched by the <code>hivemind:github-review-loop</code> skill.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section id="workflow" class="section" aria-labelledby="workflow-title">
+    <div class="wrap">
+      <p class="kicker">Standard-delivery</p>
+      <h2 id="workflow-title">How a run works</h2>
+      <p class="lede">One intent travels down a single tendril. Every beat is recorded, validated, and handed to the organism that owns it.</p>
+      <div class="flow">
+        <svg class="flow__svg" aria-hidden="true" focusable="false">
+          <defs>
+            <linearGradient id="inkGrad" x1="0" y1="0" x2="0" y2="1000" gradientUnits="userSpaceOnUse">
+              <stop offset="0" stop-color="#3bf7d4"/><stop offset=".38" stop-color="#3a8bff"/><stop offset=".72" stop-color="#ff4fd8"/><stop offset="1" stop-color="#ffc65c"/>
+            </linearGradient>
+          </defs>
+          <path class="flow__base"/>
+          <path class="flow__ink flow__ink--glow" pathLength="100"/>
+          <path class="flow__ink" pathLength="100"/>
+        </svg>
+        <ol class="beats">
+          <li class="beat"><span class="beat__node" aria-hidden="true"></span><div class="vesicle c-cyan">
+            <h3><span class="beat__n" aria-hidden="true">01</span>Route</h3>
+            <p><code>hivemind:route-workflow</code> picks <code>standard-delivery</code>, <code>analysis-only</code>, <code>pr-feedback-remediation</code>, <code>hatchery-dispatch</code> or <code>exploratory-intent-session</code>.</p>
+            <p>A trivial one-file change takes the Reflex fast path, which skips the router, the ledger and the cerebrate.</p>
+          </div></li>
+          <li class="beat"><span class="beat__node" aria-hidden="true"></span><div class="vesicle c-cyan">
+            <h3><span class="beat__n" aria-hidden="true">02</span>Record</h3>
+            <p>The ledger lives at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, and each state result is normally validated against the workflow definition before the run advances.</p>
+          </div></li>
+          <li class="beat"><span class="beat__node" aria-hidden="true"></span><div class="vesicle c-blue">
+            <h3><span class="beat__n" aria-hidden="true">03</span>Plan</h3>
+            <p>The cerebrate returns the directive.</p>
+          </div></li>
+          <li class="beat"><span class="beat__node" aria-hidden="true"></span><div class="vesicle c-blue">
+            <h3><span class="beat__n" aria-hidden="true">04</span>Branch</h3>
+            <p>Git preflight, then a compliant working branch: <code>feature/</code>, <code>bugfix/</code>, <code>hotfix/</code>, <code>refactor/</code>, <code>chore/</code>, <code>docs/</code>, <code>test/</code>, <code>ci/</code>. The swarm never commits to trunk.</p>
+          </div></li>
+          <li class="beat"><span class="beat__node" aria-hidden="true"></span><div class="vesicle c-mag">
+            <h3><span class="beat__n" aria-hidden="true">05</span>Build in waves</h3>
+            <p><code>hivemind:next-wave</code> selects every ready step whose dependencies are met and whose files do not overlap. Drones and changelings build those steps in parallel, with one checkpoint commit (a molt) per wave.</p>
+          </div></li>
+          <li class="beat"><span class="beat__node" aria-hidden="true"></span><div class="vesicle c-mag">
+            <h3><span class="beat__n" aria-hidden="true">06</span>Gate</h3>
+            <p>The version-bump decision (<code>hivemind:bump-type</code>), then validation.</p>
+          </div></li>
+          <li class="beat"><span class="beat__node" aria-hidden="true"></span><div class="vesicle c-violet">
+            <h3><span class="beat__n" aria-hidden="true">07</span>Review</h3>
+            <p>The local-reviewer runs its adversarial review loop. Needs the codex companion.</p>
+          </div></li>
+          <li class="beat"><span class="beat__node" aria-hidden="true"></span><div class="vesicle c-amber">
+            <h3><span class="beat__n" aria-hidden="true">08</span>Ship and watch</h3>
+            <p>The overlord opens the PR and watches it by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour.</p>
+            <p>Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge. You do.</p>
+          </div></li>
+        </ol>
+      </div>
+
+      <div id="brood" class="sub">
+        <p class="kicker">Budding</p>
+        <h2>The brood</h2>
+        <div class="brood vesicle c-violet">
+          <div>
+            <p>The cerebrate splits big work into independent strains. After you approve, each strain runs as its own overlord in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and its own detached tmux session, with its own branch and PR.</p>
+            <p>The hatchery watches via <code>hivemind:brood-status</code>.</p>
+          </div>
+          <svg viewBox="0 0 320 210" aria-hidden="true" focusable="false">
+            <defs><radialGradient id="bg1"><stop offset="0" stop-color="#ffc65c" stop-opacity=".9"/><stop offset=".55" stop-color="#ffc65c" stop-opacity=".25"/><stop offset="1" stop-color="#ffc65c" stop-opacity="0"/></radialGradient></defs>
+            <g fill="none" stroke="#3bf7d4" stroke-opacity=".45" stroke-width="2" stroke-linecap="round">
+              <path d="M110 92C150 70 170 46 214 44"/><path d="M116 105c40 0 80 0 126 0"/><path d="M110 118c40 22 60 46 104 48"/>
+            </g>
+            <circle cx="74" cy="105" r="50" fill="rgba(59,247,212,.07)" stroke="#3bf7d4" stroke-opacity=".7" stroke-width="1.5"/>
+            <circle cx="74" cy="105" r="28" fill="url(#bg1)"/>
+            <circle cx="74" cy="105" r="36" fill="none" stroke="#ffc65c" stroke-opacity=".4" stroke-dasharray="2 6"/>
+            <g class="bud" style="--b:6.2s"><circle cx="232" cy="44" r="25" fill="rgba(58,139,255,.12)" stroke="#8ab8ff" stroke-width="1.5"/><circle cx="232" cy="44" r="8" fill="#3a8bff" fill-opacity=".6"/></g>
+            <g class="bud" style="--b:7.4s"><circle cx="266" cy="105" r="27" fill="rgba(255,79,216,.12)" stroke="#ff9be8" stroke-width="1.5"/><circle cx="266" cy="105" r="9" fill="#ff4fd8" fill-opacity=".6"/></g>
+            <g class="bud" style="--b:5.6s"><circle cx="232" cy="166" r="25" fill="rgba(154,107,255,.12)" stroke="#c2a8ff" stroke-width="1.5"/><circle cx="232" cy="166" r="8" fill="#9a6bff" fill-opacity=".7"/></g>
+          </svg>
+        </div>
+      </div>
+
+      <div id="signals" class="sub">
+        <p class="kicker">Chemical signals</p>
+        <h2>What the swarm tells you</h2>
+        <ul class="signals">
+          <li class="signal c-amber">
+            <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M20 3v8M20 29v8M3 20h8M29 20h8M8 8l5.5 5.5M26.5 26.5L32 32M32 8l-5.5 5.5M13.5 26.5L8 32"/><circle cx="20" cy="20" r="4.5"/></svg>
+            <div><h3>Flare</h3><p>An agent can't safely resolve something; the overlord stops and asks you.</p></div>
+          </li>
+          <li class="signal c-cyan">
+            <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M23 3L9 22h10l-3 15 15-20H21z"/></svg>
+            <div><h3>Reflex</h3><p>The trivial fast path.</p></div>
+          </li>
+          <li class="signal c-mag">
+            <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M3 22c4-11 8-11 11 0s7 11 10 0"/><path d="M29 13l8 8M37 13l-8 8"/></svg>
+            <div><h3>Mutation Decay</h3><p>Fixes undo each other (break-fix-break). A mandatory stop.</p></div>
+          </li>
+          <li class="signal c-blue">
+            <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M3 33C9 13 15 10 22 10h15"/><path d="M3 37h34" stroke-dasharray="2 4"/></svg>
+            <div><h3>Creep Stagnation</h3><p>Diminishing returns. An advisory early exit.</p></div>
+          </li>
+          <li class="signal c-violet">
+            <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M20 23v14M20 23L7 5M20 23V3M20 23L33 5"/><circle cx="20" cy="23" r="3.5"/></svg>
+            <div><h3>Root-Cluster</h3><p>Several findings share one root; plan one structural fix.</p></div>
+          </li>
+          <li class="signal c-sky">
+            <svg viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M8 3c0 13 12 14 12 21v13M32 3c0 13-12 14-12 21"/></svg>
+            <div><h3>Merge-Advised</h3><p>A bounded tail remains; the swarm recommends merge. Humans merge.</p></div>
+          </li>
+        </ul>
+      </div>
+
+      <div id="autonomy" class="sub">
+        <p class="kicker">Autonomy</p>
+        <h2>Who decides</h2>
+        <div class="autonomy vesicle c-amber">
+          <div>
+            <h3><svg viewBox="0 0 28 28" aria-hidden="true" focusable="false" stroke="#3bf7d4"><path d="M6 4h13l3 3v17H6z"/><path d="M10 11h8M10 15h8M10 19h5"/></svg>Decided and journaled</h3>
+            <p>Routine judgment calls are decided and journaled.</p>
+          </div>
+          <div>
+            <h3><svg viewBox="0 0 28 28" aria-hidden="true" focusable="false" stroke="#ffc65c"><path d="M2 14c4-7 20-7 24 0-4 7-20 7-24 0z"/><circle cx="14" cy="14" r="4"/></svg>Always comes back to you</h3>
+            <p>Irreversible, architectural or safety-relevant calls, and every merge, always come back to you.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="install" class="section" aria-labelledby="install-title">
+    <div class="wrap pod-wrap">
+      <p class="kicker">Germination</p>
+      <h2 id="install-title">Install</h2>
+      <p class="lede">Plant the spore once in Claude Code, then seed every project you want the hive to live in.</p>
+      <div class="pod vesicle c-cyan">
+        <div class="pod__spores" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <h3>In Claude Code</h3>
+        <pre class="cmd"><code>/plugin marketplace add https://github.com/brenpike/hivemind.git</code></pre>
+        <pre class="cmd"><code>/plugin install hivemind@brenpike</code></pre>
+        <h3>Then, in each project</h3>
+        <pre class="cmd"><code>/hivemind:seed-hive</code></pre>
+        <h3>Requirements</h3>
+        <p>Requires bash (macOS, Linux or WSL), git, gh, jq and the Claude Code CLI; tmux only for brood mode.</p>
+        <h3>Optional companions</h3>
+        <ul>
+          <li><strong>claude-mem</strong>: memory</li>
+          <li><strong>codex</strong>: local pre-PR review</li>
+          <li><strong>caveman</strong>: compressed output</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <p>Hivemind · MIT License</p>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="./index.html">All prototypes</a></li>
+        <li><a href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer">github.com/brenpike/hivemind</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  var doc = document, win = window, root = doc.documentElement;
+  var TAU = Math.PI * 2;
+  var mq = win.matchMedia ? win.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var reduced = !!(mq && mq.matches);
+  var lowPower = (navigator.hardwareConcurrency || 8) <= 4;
+  var passive = { passive: true };
+  var clock = function () { return win.performance && win.performance.now ? win.performance.now() : Date.now(); };
+  var raf = win.requestAnimationFrame ? win.requestAnimationFrame.bind(win) : function (f) { return win.setTimeout(function () { f(clock()); }, 16); };
+  var motionFns = [];
+  if (mq) {
+    var onMotion = function (e) { reduced = !!e.matches; for (var i = 0; i < motionFns.length; i++) motionFns[i](); };
+    if (mq.addEventListener) mq.addEventListener('change', onMotion);
+    else if (mq.addListener) mq.addListener(onMotion);
+  }
+  function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+  function nz(x, s) { return Math.sin(x + s) * 0.5 + Math.sin(x * 2.31 + s * 1.7) * 0.3 + Math.sin(x * 4.17 + s * 2.9) * 0.2; }
+  var seed = 1;
+  function rnd() { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; }
+
+  /* ================= hero: living membrane ================= */
+  var hero = doc.getElementById('hero');
+  var cv = doc.getElementById('membrane');
+  var ctx = cv && cv.getContext ? cv.getContext('2d') : null;
+  if (hero && ctx && win.Path2D) organism();
+  flow();
+
+  function organism() {
+    var panel = hero.querySelector('.hero__panel');
+    var head = doc.querySelector('.site-head');
+    var CY = '59,247,212';
+    var AG = [
+      { n: 'OVERLORD', c: '255,198,92', r: 0.24, a: 0, d: 0, rate: 0.9 },
+      { n: 'CEREBRATE', c: '58,139,255', r: 0.15, a: -1.62, d: 0.6, rate: 1.3 },
+      { n: 'DRONE', c: '59,247,212', r: 0.13, a: -0.36, d: 0.62, rate: 1.9 },
+      { n: 'CHANGELING', c: '255,79,216', r: 0.13, a: 0.9, d: 0.6, rate: 1.6 },
+      { n: 'LOCAL-REVIEWER', c: '154,107,255', r: 0.12, a: 2.16, d: 0.6, rate: 1.1 },
+      { n: 'GITHUB-REVIEWER', c: '95,208,255', r: 0.12, a: 3.42, d: 0.62, rate: 1.4 }
+    ];
+    var i;
+    for (i = 0; i < AG.length; i++) { AG[i].s = i * 2.37 + 0.5; AG[i].x = 0; AG[i].y = 0; AG[i].rr = 1; AG[i].flash = 0; AG[i].spr = sprite(AG[i].c); }
+    var plankSpr = sprite('170,255,238');
+    var W = 0, H = 0, dpr = 1, cx = 0, cy = 0, R = 100, SQ = 0.92, M = 64, S = 20, small = false, labels = false;
+    var mx = new Float32Array(128), my = new Float32Array(128), tl = new Float32Array(128), tr = new Float32Array(128);
+    var tendrils = [], plankton = [], ripples = [], RL = 2.4;
+    var goo = doc.createElement('canvas'), g = goo.getContext('2d', { willReadFrequently: true }), gw = 1, gh = 1, gs = 0.25, gooOn = !!g;
+    var P = { x: 0, y: 0, on: false, amt: 0 };
+    var T = 9, last = 0, running = false, visible = true;
+
+    function sprite(c) {
+      var s = doc.createElement('canvas'); s.width = s.height = 64;
+      var x = s.getContext('2d'); if (!x) return s;
+      var gr = x.createRadialGradient(32, 32, 0, 32, 32, 32);
+      gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.18, 'rgba(' + c + ',1)');
+      gr.addColorStop(0.5, 'rgba(' + c + ',.28)'); gr.addColorStop(1, 'rgba(' + c + ',0)');
+      x.fillStyle = gr; x.fillRect(0, 0, 64, 64); return s;
+    }
+
+    function layout() {
+      var hr = hero.getBoundingClientRect();
+      W = Math.max(1, Math.round(hr.width)); H = Math.max(1, Math.round(hr.height));
+      small = W < 640;
+      dpr = Math.min(win.devicePixelRatio || 1, small ? 1.5 : 2);
+      cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr);
+      var pr = panel ? panel.getBoundingClientRect() : null;
+      var top = head ? head.getBoundingClientRect().bottom - hr.top : 0;
+      if (W >= 1024 && pr) {
+        var left = pr.right - hr.left;
+        cx = left + (W - left) * 0.5; cy = H * 0.52; R = Math.min((W - left) * 0.32, H * 0.32); labels = true;
+      } else {
+        var bottom = pr ? pr.top - hr.top : H * 0.6;
+        cx = W * 0.5; cy = (top + bottom) * 0.5 + 6; R = Math.min(W * 0.36, (bottom - top) * 0.39); labels = false;
+      }
+      R = Math.max(R, 56);
+      var k = lowPower ? 0.5 : 1;
+      M = Math.round((small ? 44 : 72) * (lowPower ? 0.75 : 1));
+      S = Math.max(8, Math.round((small ? 12 : 22) * k));
+      gs = (small ? 0.2 : 0.25) * (lowPower ? 0.8 : 1);
+      gw = Math.max(1, Math.round(W * gs)); gh = Math.max(1, Math.round(H * gs));
+      goo.width = gw; goo.height = gh;
+      seed = 11; tendrils = [];
+      var pairs = [[0, 1], [0, 2], [0, 3], [0, 4], [0, 5]];
+      if (!small) pairs = pairs.concat([[1, 2], [2, 3], [3, 4], [4, 5], [5, 1]]);
+      else if (!lowPower) pairs = pairs.concat([[1, 2], [3, 4]]);
+      for (i = 0; i < pairs.length; i++) {
+        tendrils.push({ a: AG[pairs[i][0]], b: AG[pairs[i][1]], f: 0.5 + rnd() * 0.9, ph: rnd() * TAU, sp: 0.1 + rnd() * 0.12,
+          dir: rnd() > 0.45 ? 1 : -1, s: rnd() * 10, cx: 0, cy: 0, w: 1, al: 0.3 });
+      }
+      var n = Math.round(clamp(150 * (W * H) / (1440 * 900), 28, 190) * k);
+      plankton = [];
+      for (i = 0; i < n; i++) {
+        plankton.push({ x: rnd() * W, y: rnd() * H, z: 0.25 + rnd() * 0.75, vx: (rnd() - 0.5) * 8, vy: -(2 + rnd() * 7), f: 0.6 + rnd() * 1.8, ph: rnd() * TAU });
+      }
+    }
+
+    function update(dt) {
+      T += dt;
+      P.amt += ((P.on ? 1 : 0) - P.amt) * Math.min(1, dt * 3);
+      for (i = ripples.length - 1; i >= 0; i--) { ripples[i].age += dt; if (ripples[i].age > RL) ripples.splice(i, 1); }
+      for (i = 0; i < AG.length; i++) AG[i].flash *= Math.exp(-dt * 2.2);
+      for (i = 0; i < plankton.length; i++) {
+        var p = plankton[i];
+        p.x += (p.vx * p.z + 5 * nz(T * 0.15, p.ph)) * dt; p.y += p.vy * p.z * dt;
+        if (p.y < -10) { p.y = H + 10; p.x = rnd() * W; }
+        if (p.x < -10) p.x = W + 10; else if (p.x > W + 10) p.x = -10;
+      }
+    }
+
+    function place(t) {
+      var o, x, y;
+      for (i = 0; i < AG.length; i++) {
+        o = AG[i];
+        var ang = o.a + 0.16 * nz(t * 0.06, o.s), dist = o.d * R * (1 + 0.07 * nz(t * 0.08, o.s + 3));
+        x = cx + Math.cos(ang) * dist + R * 0.045 * nz(t * 0.12, o.s + 7);
+        y = cy + Math.sin(ang) * dist * SQ + R * 0.045 * nz(t * 0.1, o.s + 11);
+        if (P.amt > 0.002) {
+          var dx = P.x - x, dy = P.y - y, dd = Math.sqrt(dx * dx + dy * dy) + 1;
+          var f = P.amt * 0.1 * Math.exp(-dd / (R * 0.8)); x += dx * f; y += dy * f;
+        }
+        o.x = x; o.y = y; o.rr = o.r * R * (1 + 0.07 * Math.sin(t * o.rate + o.s)) * (1 + o.flash * 0.12);
+      }
+      for (i = 0; i < tendrils.length; i++) {
+        var td = tendrils[i], A = td.a, B = td.b;
+        var ex = B.x - A.x, ey = B.y - A.y, len = Math.sqrt(ex * ex + ey * ey) || 1, bend = len * 0.24 * nz(t * 0.18, td.s);
+        td.cx = (A.x + B.x) / 2 - ey / len * bend; td.cy = (A.y + B.y) / 2 + ex / len * bend;
+        td.w = Math.min(A.rr, B.rr) * 0.34 * (0.55 + 0.45 * Math.sin(t * td.f + td.ph)) * (1 + B.flash * 0.6);
+        td.al = 0.32 + 0.2 * Math.sin(t * td.f * 0.7 + td.ph * 1.3);
+      }
+      var qx = P.x - cx, qy = (P.y - cy) / SQ, pTh = Math.atan2(qy, qx), pD = Math.sqrt(qx * qx + qy * qy);
+      var bulge = clamp((pD - R) * 0.6 + R * 0.08, 0, R * 0.32) * P.amt;
+      for (i = 0; i < M; i++) {
+        var th = i / M * TAU;
+        var r = R * (1 + 0.032 * Math.sin(2 * th + t * 0.5) + 0.024 * Math.sin(3 * th - t * 0.37 + 1.1) + 0.016 * Math.sin(5 * th + t * 0.61 + 2.3) + 0.009 * Math.sin(8 * th - t * 0.93 + 0.4));
+        if (bulge > 0.1) { var a = Math.atan2(Math.sin(th - pTh), Math.cos(th - pTh)); r += Math.exp(-a * a * 4) * bulge; }
+        var c = Math.cos(th), s = Math.sin(th);
+        for (var k = 0; k < ripples.length; k++) {
+          var rp = ripples[k], bx = cx + c * r - rp.x, by = cy + s * r * SQ - rp.y;
+          var gap = Math.sqrt(bx * bx + by * by) - (rp.age * R * 0.95 + 4), sig = R * 0.12;
+          r += Math.exp(-gap * gap / (2 * sig * sig)) * R * 0.06 * (1 - rp.age / RL);
+        }
+        mx[i] = cx + c * r; my[i] = cy + s * r * SQ;
+      }
+    }
+
+    function memPath(k) {
+      var p = new Path2D(), n = M, j;
+      var lx = cx + (mx[n - 1] - cx) * k, ly = cy + (my[n - 1] - cy) * k, fx = cx + (mx[0] - cx) * k, fy = cy + (my[0] - cy) * k;
+      p.moveTo((lx + fx) / 2, (ly + fy) / 2);
+      for (j = 0; j < n; j++) {
+        var q = (j + 1) % n;
+        var x = cx + (mx[j] - cx) * k, y = cy + (my[j] - cy) * k, nx = cx + (mx[q] - cx) * k, ny = cy + (my[q] - cy) * k;
+        p.quadraticCurveTo(x, y, (x + nx) / 2, (y + ny) / 2);
+      }
+      p.closePath(); return p;
+    }
+
+    function drawGoo() {
+      g.setTransform(1, 0, 0, 1, 0, 0); g.clearRect(0, 0, gw, gh);
+      g.setTransform(gs, 0, 0, gs, 0, 0);
+      var o, j;
+      for (j = 0; j < AG.length; j++) {
+        o = AG[j];
+        var rad = o.rr * (j === 0 ? 2.0 : 2.25), gr = g.createRadialGradient(o.x, o.y, 0, o.x, o.y, rad);
+        gr.addColorStop(0, 'rgba(' + o.c + ',1)'); gr.addColorStop(1, 'rgba(' + o.c + ',0)');
+        g.fillStyle = gr; g.beginPath(); g.arc(o.x, o.y, rad, 0, TAU); g.fill();
+      }
+      g.lineCap = 'round';
+      for (j = 0; j < tendrils.length; j++) {
+        var td = tendrils[j];
+        g.strokeStyle = 'rgba(' + td.b.c + ',.85)'; g.lineWidth = Math.max(td.w * 1.6, 1.6 / gs);
+        g.beginPath(); g.moveTo(td.a.x, td.a.y); g.quadraticCurveTo(td.cx, td.cy, td.b.x, td.b.y); g.stroke();
+      }
+      var img;
+      try { img = g.getImageData(0, 0, gw, gh); } catch (err) { gooOn = false; return; }
+      var d = img.data, n = d.length, T0 = 110, T1 = 150;
+      for (j = 3; j < n; j += 4) {
+        var a = d[j];
+        if (a < T0) { d[j] = 0; continue; }
+        var e = a < T1 ? 1 - (a - T0) / (T1 - T0) : 0;
+        if (e > 0) { d[j - 3] += e * 110; d[j - 2] += e * 110; d[j - 1] += e * 110; }
+        d[j] = 34 + e * 150 + (a - T0) * 0.12;
+      }
+      g.putImageData(img, 0, 0);
+      ctx.globalAlpha = 0.9; ctx.imageSmoothingEnabled = true;
+      ctx.drawImage(goo, 0, 0, gw, gh, 0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
+
+    function tendril(td, t, wm, alpha, fill) {
+      var A = td.a, B = td.b, n = S, j;
+      for (j = 0; j <= n; j++) {
+        var u = j / n, iu = 1 - u;
+        var x = iu * iu * A.x + 2 * iu * u * td.cx + u * u * B.x, y = iu * iu * A.y + 2 * iu * u * td.cy + u * u * B.y;
+        var dx = 2 * iu * (td.cx - A.x) + 2 * u * (B.x - td.cx), dy = 2 * iu * (td.cy - A.y) + 2 * u * (B.y - td.cy);
+        var l = Math.sqrt(dx * dx + dy * dy) || 1;
+        var ww = td.w * wm * (1 - 0.55 * Math.sin(Math.PI * u)) * (1 + 0.2 * Math.sin(u * 14 - t * 2.4 + td.ph)) * 0.5;
+        tl[j * 2] = x - dy / l * ww; tl[j * 2 + 1] = y + dx / l * ww;
+        tr[j * 2] = x + dy / l * ww; tr[j * 2 + 1] = y - dx / l * ww;
+      }
+      ctx.beginPath(); ctx.moveTo(tl[0], tl[1]);
+      for (j = 1; j <= n; j++) ctx.lineTo(tl[j * 2], tl[j * 2 + 1]);
+      for (j = n; j >= 0; j--) ctx.lineTo(tr[j * 2], tr[j * 2 + 1]);
+      ctx.closePath(); ctx.globalAlpha = alpha; ctx.fillStyle = fill; ctx.fill();
+    }
+
+    function circle(x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, TAU); }
+
+    function render(t, still) {
+      var j, k, o, p;
+      place(t);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+      ctx.clearRect(0, 0, W, H);
+      /* plankton */
+      ctx.fillStyle = 'rgb(170,255,238)';
+      for (j = 0; j < plankton.length; j++) {
+        p = plankton[j];
+        ctx.globalAlpha = (0.15 + 0.45 * p.z) * (0.55 + 0.45 * Math.sin(t * p.f + p.ph));
+        var sz = 0.6 + p.z * 1.5;
+        if (p.z > 0.88) ctx.drawImage(plankSpr, p.x - sz * 3, p.y - sz * 3, sz * 6, sz * 6); else ctx.fillRect(p.x, p.y, sz, sz);
+      }
+      ctx.globalAlpha = 1;
+      /* cytoplasm */
+      var mem = memPath(1), inner = memPath(0.955);
+      var fg = ctx.createRadialGradient(cx, cy - R * 0.2, R * 0.1, cx, cy, R * 1.15);
+      fg.addColorStop(0, 'rgba(6,46,58,.6)'); fg.addColorStop(0.7, 'rgba(4,33,43,.42)'); fg.addColorStop(0.95, 'rgba(59,247,212,.09)'); fg.addColorStop(1, 'rgba(59,247,212,0)');
+      ctx.fillStyle = fg; ctx.fill(mem);
+      ctx.globalCompositeOperation = 'lighter';
+      if (gooOn) drawGoo();
+      /* tendrils */
+      for (j = 0; j < tendrils.length; j++) {
+        var td = tendrils[j], lg = ctx.createLinearGradient(td.a.x, td.a.y, td.b.x, td.b.y);
+        lg.addColorStop(0, 'rgb(' + td.a.c + ')'); lg.addColorStop(1, 'rgb(' + td.b.c + ')');
+        tendril(td, t, 2.6, td.al * 0.28, lg);
+        tendril(td, t, 1, td.al, lg);
+        if (!small) tendril(td, t, 0.26, td.al * 0.8, 'rgb(216,255,247)');
+      }
+      ctx.globalAlpha = 1;
+      /* organelles */
+      for (j = 0; j < AG.length; j++) {
+        o = AG[j];
+        var x = o.x, y = o.y, r = o.rr, gl = 1 + o.flash * 1.4;
+        var h = ctx.createRadialGradient(x, y, 0, x, y, r * 3.4);
+        h.addColorStop(0, 'rgba(' + o.c + ',' + (0.2 * gl).toFixed(3) + ')'); h.addColorStop(0.45, 'rgba(' + o.c + ',' + (0.06 * gl).toFixed(3) + ')'); h.addColorStop(1, 'rgba(' + o.c + ',0)');
+        ctx.fillStyle = h; circle(x, y, r * 3.4); ctx.fill();
+        var b = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.05, x, y, r);
+        b.addColorStop(0, 'rgba(255,255,255,.7)'); b.addColorStop(0.3, 'rgba(' + o.c + ',.6)'); b.addColorStop(0.8, 'rgba(' + o.c + ',.18)'); b.addColorStop(1, 'rgba(' + o.c + ',0)');
+        ctx.fillStyle = b; circle(x, y, r); ctx.fill();
+        ctx.strokeStyle = 'rgba(' + (j === 0 ? CY : o.c) + ',.55)'; ctx.lineWidth = 1.1; circle(x, y, r * 0.94); ctx.stroke();
+        ctx.fillStyle = 'rgba(255,255,255,.8)';
+        for (k = 0; k < 4; k++) {
+          var an = t * (0.25 + k * 0.07) * (k % 2 ? 1 : -1) + k * 1.9 + o.s, rd = r * (0.38 + 0.14 * Math.sin(t * 0.8 + k + o.s));
+          ctx.globalAlpha = 0.5 + 0.4 * Math.sin(t * 1.3 + k * 2); circle(x + Math.cos(an) * rd, y + Math.sin(an) * rd, 1.3); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        if (j === 0) {
+          ctx.setLineDash([3, 7]); ctx.lineDashOffset = -t * 6; ctx.strokeStyle = 'rgba(' + CY + ',.45)'; ctx.lineWidth = 1.2; circle(x, y, r * 1.28); ctx.stroke();
+          ctx.setLineDash([1, 11]); ctx.lineDashOffset = t * 4; ctx.strokeStyle = 'rgba(255,198,92,.4)'; circle(x, y, r * 1.5); ctx.stroke();
+          ctx.setLineDash([]);
+          var nx = x + r * 0.18 * Math.sin(t * 0.4), ny = y - r * 0.12 * Math.cos(t * 0.33);
+          ctx.drawImage(o.spr, nx - r * 0.5, ny - r * 0.5, r, r);
+        }
+      }
+      /* signal pulses travelling along tendrils */
+      if (!still) {
+        for (j = 0; j < tendrils.length; j++) {
+          var tp = tendrils[j], u0 = (t * tp.sp + tp.ph / TAU) % 1;
+          if (tp.dir < 0) u0 = 1 - u0;
+          for (k = 0; k < 3; k++) {
+            var uu = u0 - tp.dir * k * 0.028;
+            if (uu < 0 || uu > 1) continue;
+            var iu = 1 - uu, px = iu * iu * tp.a.x + 2 * iu * uu * tp.cx + uu * uu * tp.b.x, py = iu * iu * tp.a.y + 2 * iu * uu * tp.cy + uu * uu * tp.b.y;
+            var ps = (15 - k * 4) * (1 + tp.b.flash * 0.6);
+            ctx.globalAlpha = (1 - k * 0.32) * 0.9; ctx.drawImage(tp.b.spr, px - ps / 2, py - ps / 2, ps, ps);
+          }
+        }
+        ctx.globalAlpha = 1;
+      }
+      /* membrane */
+      ctx.strokeStyle = 'rgba(' + CY + ',.06)'; ctx.lineWidth = 22; ctx.stroke(mem);
+      ctx.strokeStyle = 'rgba(' + CY + ',.14)'; ctx.lineWidth = 7; ctx.stroke(mem);
+      ctx.strokeStyle = 'rgba(180,255,240,.7)'; ctx.lineWidth = 1.3; ctx.stroke(mem);
+      ctx.setLineDash([2, 9]); ctx.lineDashOffset = t * 7; ctx.strokeStyle = 'rgba(255,79,216,.38)'; ctx.lineWidth = 1.6; ctx.stroke(inner); ctx.setLineDash([]);
+      ctx.beginPath();
+      for (j = 0; j < M; j += 3) {
+        var ta = j / M * TAU, cl = 5 + 4 * Math.sin(t * 2.2 + j * 0.7), sw = 2.2 * Math.sin(t * 3 + j);
+        ctx.moveTo(mx[j], my[j]);
+        ctx.lineTo(mx[j] + Math.cos(ta) * cl - Math.sin(ta) * sw, my[j] + Math.sin(ta) * cl + Math.cos(ta) * sw);
+      }
+      ctx.strokeStyle = 'rgba(' + CY + ',.38)'; ctx.lineWidth = 1; ctx.stroke();
+      /* tap ripples */
+      for (j = 0; j < ripples.length; j++) {
+        var rp = ripples[j], q = 1 - rp.age / RL, ra = q * q, rr = rp.age * R * 0.95 + 4;
+        ctx.lineWidth = 1.6; ctx.strokeStyle = 'rgba(' + CY + ',' + (ra * 0.7).toFixed(3) + ')'; circle(rp.x, rp.y, rr); ctx.stroke();
+        ctx.lineWidth = 1; ctx.strokeStyle = 'rgba(255,79,216,' + (ra * 0.35).toFixed(3) + ')'; circle(rp.x, rp.y, rr * 0.72); ctx.stroke();
+        ctx.strokeStyle = 'rgba(216,255,247,' + (ra * 0.22).toFixed(3) + ')'; circle(rp.x, rp.y, rr * 0.46); ctx.stroke();
+      }
+      /* specimen labels (decorative; real names live in the DOM) */
+      if (labels) {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.font = '500 10px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+        ctx.textAlign = 'center'; ctx.fillStyle = 'rgba(127,179,173,.8)';
+        for (j = 0; j < AG.length; j++) { o = AG[j]; ctx.fillText(o.n, o.x, o.y + o.rr * (j === 0 ? 1.62 : 1.18) + 13); }
+      }
+      ctx.globalCompositeOperation = 'source-over'; ctx.globalAlpha = 1;
+    }
+
+    function frame(ts) {
+      if (!running) return;
+      if (reduced || doc.hidden || !visible) { running = false; return; }
+      var dt = Math.min(0.05, Math.max(0, (ts - last) / 1000)); last = ts;
+      update(dt); render(T, false);
+      raf(frame);
+    }
+    function kick() {
+      if (running || reduced || doc.hidden || !visible) return;
+      running = true; last = clock(); raf(frame);
+    }
+    function still() { P.amt = 0; P.on = false; ripples.length = 0; render(T, true); }
+
+    function pt(e) { var r = cv.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top; if (isFinite(x) && isFinite(y)) { P.x = x; P.y = y; } }
+    cv.addEventListener('pointermove', function (e) { pt(e); P.on = true; }, passive);
+    cv.addEventListener('pointerdown', function (e) {
+      pt(e); P.on = true;
+      if (reduced) return;
+      ripples.push({ x: P.x, y: P.y, age: 0 }); if (ripples.length > 6) ripples.shift();
+      var best = null, bd = 1e9;
+      for (var j = 0; j < AG.length; j++) { var dx = AG[j].x - P.x, dy = AG[j].y - P.y, dd = Math.sqrt(dx * dx + dy * dy); if (dd < bd) { bd = dd; best = AG[j]; } }
+      if (best && bd < R * 0.6) best.flash = 1;
+      kick();
+    }, passive);
+    cv.addEventListener('pointerup', function (e) { if (e.pointerType !== 'mouse') P.on = false; }, passive);
+    cv.addEventListener('pointerleave', function () { P.on = false; }, passive);
+    cv.addEventListener('pointercancel', function () { P.on = false; }, passive);
+
+    if ('IntersectionObserver' in win) {
+      new win.IntersectionObserver(function (es) { visible = es[es.length - 1].isIntersecting; if (visible) kick(); }, { threshold: 0 }).observe(hero);
+    } else {
+      var chk = function () {
+        var r = hero.getBoundingClientRect(), v = r.bottom > 0 && r.top < (win.innerHeight || 0);
+        if (v !== visible) { visible = v; if (v) kick(); }
+      };
+      win.addEventListener('scroll', chk, passive);
+    }
+    doc.addEventListener('visibilitychange', function () { if (!doc.hidden) kick(); });
+    var rq = false;
+    win.addEventListener('resize', function () {
+      if (rq) return; rq = true;
+      raf(function () {
+        rq = false;
+        var hr = hero.getBoundingClientRect();
+        if (Math.abs(hr.width - W) < 1 && Math.abs(hr.height - H) < 1) return;
+        layout(); if (reduced) still(); else if (!running) render(T, false);
+      });
+    }, passive);
+    motionFns.push(function () { if (reduced) { running = false; still(); } else kick(); });
+
+    layout();
+    if (reduced) still(); else { render(T, false); kick(); }
+  }
+
+  /* ================= workflow tendril ================= */
+  function flow() {
+    var el = doc.querySelector('.flow');
+    if (!el) return;
+    var svg = el.querySelector('.flow__svg'), base = el.querySelector('.flow__base'), inks = el.querySelectorAll('.flow__ink');
+    var grad = doc.getElementById('inkGrad'), nodes = el.querySelectorAll('.beat__node'), j;
+    var sda = !!(win.CSS && win.CSS.supports && win.CSS.supports('animation-timeline: view()'));
+    if (!sda) root.classList.add('no-sda');
+
+    function build() {
+      var fr = el.getBoundingClientRect(), w = fr.width, h = fr.height;
+      if (!w || !h || !nodes.length) return;
+      var amp = (win.innerWidth || w) >= 1024 ? 64 : 12, pts = [];
+      for (j = 0; j < nodes.length; j++) {
+        var r = nodes[j].getBoundingClientRect();
+        pts.push([r.left + r.width / 2 - fr.left, r.top + r.height / 2 - fr.top]);
+      }
+      pts.push([pts[pts.length - 1][0], h]);
+      var prev = [pts[0][0], 0], d = 'M' + prev[0].toFixed(1) + ' 0';
+      for (j = 0; j < pts.length; j++) {
+        var p = pts[j], dy = p[1] - prev[1], s = (j % 2 ? 1 : -1) * amp;
+        d += ' C' + (prev[0] + s).toFixed(1) + ' ' + (prev[1] + dy * 0.35).toFixed(1) + ' ' + (p[0] - s).toFixed(1) + ' ' + (prev[1] + dy * 0.65).toFixed(1) + ' ' + p[0].toFixed(1) + ' ' + p[1].toFixed(1);
+        prev = p;
+      }
+      svg.setAttribute('viewBox', '0 0 ' + w.toFixed(1) + ' ' + h.toFixed(1));
+      base.setAttribute('d', d);
+      for (j = 0; j < inks.length; j++) inks[j].setAttribute('d', d);
+      if (grad) grad.setAttribute('y2', h.toFixed(1));
+      el.classList.add('flow--ready');
+    }
+
+    var tick = false;
+    function progress() {
+      tick = false;
+      if (sda || reduced) return;
+      var r = el.getBoundingClientRect(), V = win.innerHeight || 1, line = V * 0.6;
+      var off = (100 * (1 - clamp((line - r.top) / (r.height || 1), 0, 1))).toFixed(2);
+      for (j = 0; j < inks.length; j++) inks[j].style.strokeDashoffset = off;
+      for (j = 0; j < nodes.length; j++) {
+        var nr = nodes[j].getBoundingClientRect();
+        nodes[j].classList.toggle('is-lit', nr.top + nr.height / 2 <= line);
+      }
+    }
+    function onScroll() { if (!tick) { tick = true; raf(progress); } }
+    var bq = false;
+    function rebuild() { if (bq) return; bq = true; raf(function () { bq = false; build(); progress(); }); }
+
+    build();
+    if (!sda) { win.addEventListener('scroll', onScroll, passive); progress(); }
+    if ('ResizeObserver' in win) new win.ResizeObserver(rebuild).observe(el);
+    else win.addEventListener('resize', rebuild, passive);
+    motionFns.push(function () {
+      if (reduced) { for (j = 0; j < inks.length; j++) inks[j].style.strokeDashoffset = ''; }
+      else progress();
+    });
+  }
+})();
+</script>
+</body>
+</html>

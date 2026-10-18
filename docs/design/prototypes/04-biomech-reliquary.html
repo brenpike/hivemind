@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark">
+<meta name="description" content="Hivemind: a multi-agent orchestration framework for Claude Code. Design prototype 04, Biomechanical Reliquary.">
+<title>Hivemind | Prototype 04: Biomechanical Reliquary</title>
+<style>
+:root{
+  --ob:#070707;--bone:#d9d2c3;--chr:#8c8f94;--gr:#1b1d20;--ich:#b8ff3c;--art:#7a0f1e;--tx:#e8e2d4;
+  --mut:#b5ae9f;--edge:#2a2c30;
+  --serif:"Iowan Old Style","Palatino Linotype",Palatino,"Book Antiqua",Georgia,serif;
+  --sans:system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+  --gut:calc(34px + env(safe-area-inset-left,0px));
+  --pr:calc(16px + env(safe-area-inset-right,0px));
+}
+*,*::before,*::after{box-sizing:border-box}
+html{background:var(--ob);-webkit-text-size-adjust:100%;text-size-adjust:100%;scroll-behavior:smooth}
+body{margin:0;min-width:320px;overflow-x:clip;color:var(--tx);font:1rem/1.65 var(--sans);
+  background:
+    radial-gradient(110% 60% at 78% 0,#17181b 0,rgba(7,7,7,0) 62%),
+    radial-gradient(70% 45% at 0 100%,#14090b 0,rgba(7,7,7,0) 70%),
+    var(--ob)}
+a{color:var(--bone);text-decoration-color:rgba(217,210,195,.4);text-underline-offset:.2em}
+a:hover{color:var(--tx);text-decoration-color:var(--ich)}
+:focus-visible{outline:2px solid var(--ich);outline-offset:3px;border-radius:2px}
+main:focus{outline:none}
+code{font-family:var(--mono);font-size:.86em;color:var(--bone);background:#0d0e10;border:1px solid #232529;border-radius:3px;padding:.05em .35em;overflow-wrap:anywhere}
+h1,h2,h3{font-family:var(--serif);font-weight:400;text-transform:uppercase;color:var(--bone);margin:0}
+p{margin:0}
+svg{overflow:hidden}
+
+.skip{position:absolute;left:var(--gut);top:-100px;z-index:50;padding:.8rem 1.1rem;min-height:44px;background:var(--bone);color:var(--ob);font:600 .9rem/1.2 var(--sans);text-decoration:none}
+.skip:focus{top:calc(8px + env(safe-area-inset-top,0px))}
+
+/* ---------- spine ---------- */
+.spine{position:fixed;z-index:1;left:calc(4px + env(safe-area-inset-left,0px));top:0;width:22px;height:100vh;height:100dvh;pointer-events:none}
+.spine svg{display:block;width:100%;height:100%;overflow:visible}
+.v{fill:#16171a;stroke:#6c6f74;stroke-width:1.8;transform-box:fill-box;transform-origin:center;animation:vb 5.8s cubic-bezier(.45,0,.55,1) infinite}
+.vl{fill:rgba(184,255,60,.16);stroke:var(--ich);opacity:0;transition:opacity .5s ease}
+.vl.on{opacity:.85}
+#sp-c{fill:#202226}
+#sp-p{fill:var(--ich);opacity:.45;transform-box:fill-box;transform-origin:50% 0;transform:scaleY(0)}
+@keyframes vb{0%,100%{transform:scale(1)}50%{transform:scale(1.14,1.06)}}
+
+/* ---------- header ---------- */
+.top{position:relative;z-index:20;display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:0 1rem;
+  padding:calc(.35rem + env(safe-area-inset-top,0px)) var(--pr) .35rem var(--gut);
+  background:rgba(7,7,7,.88);border-bottom:1px solid #1d1f22;
+  -webkit-backdrop-filter:blur(10px) saturate(1.15);backdrop-filter:blur(10px) saturate(1.15)}
+.brand{display:inline-flex;align-items:center;gap:.65rem;min-height:44px;color:var(--bone);text-decoration:none;font:400 .95rem/1 var(--serif);letter-spacing:.32em;text-transform:uppercase}
+.brand svg{width:26px;height:26px;flex:none}
+.nav ul{display:flex;flex-wrap:wrap;margin:0 -.5rem;padding:0;list-style:none}
+.nav a{display:inline-flex;align-items:center;min-height:44px;padding:0 .5rem;color:var(--mut);text-decoration:none;font:500 .7rem/1 var(--mono);letter-spacing:.16em;text-transform:uppercase}
+.nav a:hover{color:var(--tx)}
+
+/* ---------- hero ---------- */
+.hero{position:relative;isolation:isolate;display:grid;gap:1.75rem;align-content:center;min-height:100vh;min-height:100svh;padding:1.5rem var(--pr) 5.5rem var(--gut);overflow:hidden}
+.hero::before{content:"";position:absolute;inset:0;z-index:-1;
+  background:repeating-radial-gradient(circle at 50% 30%,rgba(140,143,148,0) 0 46px,rgba(140,143,148,.06) 46px 47px);
+  -webkit-mask-image:radial-gradient(circle at 50% 30%,#000 0,rgba(0,0,0,0) 72%);mask-image:radial-gradient(circle at 50% 30%,#000 0,rgba(0,0,0,0) 72%)}
+.sigil-w{position:relative;justify-self:center;width:min(100%,440px)}
+.sigil-w::before{content:"";position:absolute;inset:6%;border-radius:50%;background:radial-gradient(circle,rgba(217,210,195,.1) 0,rgba(7,7,7,0) 66%)}
+.sigil{position:relative;display:block;width:100%;height:auto;aspect-ratio:1/1;touch-action:pan-y}
+.breathe,.spin,.spin-r{transform-box:fill-box;transform-origin:center}
+.breathe{animation:breathe 8s cubic-bezier(.45,0,.55,1) infinite}
+.spin{animation:spin 110s linear infinite}
+.spin-r{animation:spin 160s linear infinite reverse}
+.pulse{animation:pulse 3.2s ease-in-out infinite}
+@keyframes breathe{0%,100%{transform:scale(1)}50%{transform:scale(1.03)}}
+@keyframes spin{to{transform:rotate(360deg)}}
+@keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+@media (min-width:1024px) and (prefers-reduced-motion:no-preference){.warp{filter:url(#warp)}}
+.lowp .warp{filter:none}
+.hero-off .sigil *,.hero-off .live,.is-hidden *{animation-play-state:paused!important}
+
+.pitch{position:relative;max-width:36rem;padding:1.1rem 1rem 1.3rem;background:rgba(7,7,7,.74);border:1px solid #1d1f22;
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.pitch::before,.pitch::after{content:"";position:absolute;width:14px;height:14px;border:1px solid var(--chr)}
+.pitch::before{top:-1px;left:-1px;border-right:0;border-bottom:0}
+.pitch::after{bottom:-1px;right:-1px;border-left:0;border-top:0}
+.kick{display:flex;align-items:center;gap:.6rem;font:500 .7rem/1.4 var(--mono);letter-spacing:.24em;text-transform:uppercase;color:var(--chr)}
+.live{width:7px;height:7px;flex:none;border-radius:50%;background:var(--ich);box-shadow:0 0 10px rgba(184,255,60,.6);animation:pulse 2.4s ease-in-out infinite}
+.hero h1{margin:.55rem -.16em .9rem 0;font-size:clamp(2rem,9.2vw,6rem);line-height:.95;letter-spacing:.16em;text-shadow:0 1px 0 #000,0 0 28px rgba(217,210,195,.12)}
+.lede{font-size:1.05rem;color:var(--tx)}
+.over{margin-top:.9rem;padding-top:.9rem;border-top:1px solid #26282c;font:italic 1.08rem/1.5 var(--serif);color:var(--bone)}
+.cta{display:flex;flex-wrap:wrap;gap:.75rem;margin-top:1.4rem}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:48px;padding:0 1.35rem;border:1px solid var(--chr);color:var(--tx);text-decoration:none;
+  font:400 .8rem/1 var(--serif);letter-spacing:.24em;text-transform:uppercase;background:rgba(27,29,32,.6);transition:border-color .2s,background-color .2s}
+.btn:hover{border-color:var(--ich);color:var(--tx);background:rgba(27,29,32,.95)}
+.btn.pri{background:var(--bone);border-color:var(--bone);color:var(--ob)}
+.btn.pri:hover{background:var(--tx);border-color:var(--ich);color:var(--ob)}
+.descend{position:absolute;left:50%;bottom:calc(.75rem + env(safe-area-inset-bottom,0px));transform:translateX(-50%);display:inline-flex;flex-direction:column;align-items:center;justify-content:center;min-width:44px;min-height:44px;padding:.25rem .5rem;
+  color:var(--mut);text-decoration:none;font:500 .66rem/1 var(--mono);letter-spacing:.3em;text-transform:uppercase}
+.descend svg{width:14px;height:14px;margin-top:.35rem;fill:none;stroke:currentColor;stroke-width:1.5}
+
+/* ---------- sections ---------- */
+.sec{position:relative;padding:clamp(4.5rem,11vw,8rem) var(--pr) clamp(4rem,9vw,7rem) var(--gut);scroll-margin-top:56px}
+.sec+.sec{border-top:1px solid #15161a}
+.wrap{max-width:1180px;margin:0 auto}
+.sh{max-width:46rem;margin-bottom:2.5rem}
+.sh h2{margin:.6rem 0 0;font-size:clamp(1.65rem,6vw,3.1rem);line-height:1.08;letter-spacing:.18em;text-shadow:0 1px 0 #000}
+.sh .rule{display:block;width:min(100%,280px);height:9px;margin:1.1rem 0 1.1rem;
+  background:linear-gradient(90deg,var(--chr),rgba(140,143,148,0)) 0 4px/100% 1px no-repeat,
+             linear-gradient(45deg,transparent 35%,var(--bone) 36% 64%,transparent 65%) 0 0/9px 9px no-repeat}
+.intro{color:var(--mut);font-size:1.02rem;max-width:40rem}
+
+/* carapace plates part */
+@keyframes part{
+  0%{clip-path:polygon(50% 0,50% 0,51% 50%,50% 100%,50% 100%,49% 50%)}
+  50%{clip-path:polygon(36% 0,64% 0,94% 50%,64% 100%,36% 100%,6% 50%)}
+  100%{clip-path:polygon(-6% -6%,106% -6%,106% 50%,106% 106%,-6% 106%,-6% 50%)}}
+.js-io .carapace{clip-path:polygon(50% 0,50% 0,51% 50%,50% 100%,50% 100%,49% 50%)}
+.js-io .carapace.open{clip-path:polygon(-6% -6%,106% -6%,106% 50%,106% 106%,-6% 106%,-6% 50%);animation:part 1.25s cubic-bezier(.55,0,.2,1) both}
+
+/* ---------- chambers ---------- */
+.chambers{display:grid;grid-template-columns:minmax(0,1fr);gap:1.25rem;margin:0;padding:0;list-style:none}
+.cell{position:relative;height:100%;padding:0 1.35rem 1.5rem;background:linear-gradient(180deg,#131417 0,#0c0d0f 75%)}
+.pframe{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.cell::before,.cell::after{content:"";position:absolute;top:30%;bottom:16px;width:5px;opacity:.9;
+  background:repeating-linear-gradient(180deg,#3a3d42 0 2px,rgba(58,61,66,0) 2px 7px)}
+.cell::before{left:7px}.cell::after{right:7px}
+.crown{display:block;width:calc(100% + 1.4rem);margin:0 -.7rem .4rem;height:auto;aspect-ratio:240/96}
+.eg{fill:none;stroke:var(--bone);stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;--dot:var(--ich)}
+.es{fill:none;stroke:#000;stroke-width:2.4;stroke-linecap:round;--dot:#000}
+.dot{fill:var(--dot,var(--ich));stroke:none}
+.kind{font:500 .68rem/1.4 var(--mono);letter-spacing:.2em;text-transform:uppercase;color:var(--chr);text-align:center}
+.cell h3{margin:.45rem 0 .35rem;text-align:center;font-size:1.45rem;letter-spacing:.2em}
+.meta{text-align:center;font-size:.84rem;color:var(--mut);margin-bottom:1rem}
+.cell p.d{color:var(--tx);font-size:.97rem;line-height:1.6}
+.tag{display:inline-block;margin-left:.15rem;padding:0 .4em;border:1px solid #3a3d42;border-radius:2px;font:500 .62rem/1.7 var(--mono);letter-spacing:.14em;text-transform:uppercase;color:var(--mut);vertical-align:middle}
+
+/* ---------- workflow spine ---------- */
+.spinal{position:relative;margin:0;padding:0;list-style:none}
+.spinal::before{content:"";position:absolute;left:21px;top:14px;bottom:14px;width:2px;background:#24262a}
+.beat{position:relative;display:grid;grid-template-columns:44px minmax(0,1fr);gap:0 1rem;padding-bottom:2rem}
+.beat:last-child{padding-bottom:0}
+.beat::after{content:"";position:absolute;left:21px;top:30px;bottom:-2px;width:2px;background:var(--ich);opacity:.65;transform-origin:50% 0}
+.beat:last-child::after{display:none}
+.vb{position:relative;z-index:1;width:44px;height:30px;margin-top:.2rem;overflow:visible}
+.vbb{fill:#141518;stroke:#8c8f94;stroke-width:1.3}
+.g use{fill:rgba(184,255,60,.2);stroke:var(--ich);stroke-width:1.3}
+.bt{padding:1rem 1.1rem 1.15rem;background:rgba(12,13,15,.9);border:1px solid #222428}
+.bn{font:500 .68rem/1 var(--mono);letter-spacing:.24em;color:var(--chr)}
+.bt h3{margin:.45rem 0 .4rem;font-size:1.12rem;letter-spacing:.2em}
+.bt p:last-child{color:var(--tx);font-size:.96rem}
+.js-io .beat .g{opacity:0;transition:opacity .6s ease}
+.js-io .beat.lit .g{opacity:1}
+.js-io .beat::after{transform:scaleY(0);transition:transform 1.2s cubic-bezier(.5,0,.2,1) .2s}
+.js-io .beat.lit::after{transform:scaleY(1)}
+
+/* brood / signals / autonomy */
+.sub{margin-top:clamp(4rem,9vw,6.5rem)}
+.sub h3{font-size:clamp(1.3rem,4.4vw,1.9rem);letter-spacing:.2em;margin:.55rem 0 1rem}
+.brood{display:grid;gap:1.5rem;align-items:center;padding:1.4rem 1.2rem;background:rgba(12,13,15,.9);border:1px solid #222428;scroll-margin-top:72px}
+.brood p{color:var(--tx)}
+.bsvg{display:block;width:100%;max-width:440px;height:auto;justify-self:center}
+.pod{animation:pulse 4s ease-in-out infinite}
+.pod:nth-of-type(2){animation-delay:-1.3s}.pod:nth-of-type(3){animation-delay:-2.6s}
+.sigs{display:grid;grid-template-columns:minmax(0,1fr);gap:1rem;margin:0}
+.sig{position:relative;padding:1rem 1.1rem 1.1rem 3.6rem;background:rgba(12,13,15,.9);border:1px solid #222428;border-left:3px solid #3a3d42}
+.sig svg{position:absolute;left:1rem;top:1.05rem;width:26px;height:26px;fill:none;stroke:var(--bone);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.sig dt{font:400 1.05rem/1.3 var(--serif);letter-spacing:.16em;text-transform:uppercase;color:var(--bone)}
+.sig dd{margin:.35rem 0 0;color:var(--tx);font-size:.95rem}
+.sig .tag{margin:0 0 .4rem;display:inline-block}
+.sig.warn{border-left-color:var(--art)}
+.sig.warn .tag{border-color:#9b2a38}
+.sig.decay{border-left-color:var(--art);background:linear-gradient(90deg,rgba(122,15,30,.22),rgba(12,13,15,.9) 55%)}
+.sig.decay .tag{background:var(--art);border-color:var(--art);color:var(--tx)}
+.sig .fill{fill:var(--art)}
+.auto{padding:1.5rem 1.25rem;border:1px solid #2a2c30;background:linear-gradient(180deg,rgba(27,29,32,.9),rgba(12,13,15,.92))}
+.auto p{font:1.15rem/1.55 var(--serif);color:var(--tx)}
+.auto strong{font-weight:400;color:var(--bone);text-decoration:underline;text-decoration-color:var(--art);text-decoration-thickness:2px;text-underline-offset:.25em}
+
+/* ---------- install plate ---------- */
+.plate{position:relative;max-width:52rem;margin:0 auto;padding:2.2rem 1.25rem 2rem;
+  background:linear-gradient(180deg,#17181b 0,#0f1012 100%);
+  box-shadow:inset 0 1px 0 rgba(232,226,212,.07),inset 0 -1px 0 #000,0 30px 60px -30px #000}
+.plate::before{content:"";position:absolute;inset:10px;pointer-events:none;
+  background:
+    radial-gradient(circle at 50% 50%,#8c8f94 0 2px,#2a2c30 2.5px 4px,transparent 4.5px) 0 0/10px 10px no-repeat,
+    radial-gradient(circle at 50% 50%,#8c8f94 0 2px,#2a2c30 2.5px 4px,transparent 4.5px) 100% 0/10px 10px no-repeat,
+    radial-gradient(circle at 50% 50%,#8c8f94 0 2px,#2a2c30 2.5px 4px,transparent 4.5px) 0 100%/10px 10px no-repeat,
+    radial-gradient(circle at 50% 50%,#8c8f94 0 2px,#2a2c30 2.5px 4px,transparent 4.5px) 100% 100%/10px 10px no-repeat}
+.plate .sh{text-align:center;margin:0 auto 2rem}
+.plate .kick{justify-content:center}
+.plate .rule{margin-left:auto;margin-right:auto;background:
+  linear-gradient(90deg,rgba(140,143,148,0),var(--chr),rgba(140,143,148,0)) 0 4px/100% 1px no-repeat,
+  linear-gradient(45deg,transparent 35%,var(--bone) 36% 64%,transparent 65%) 50% 0/9px 9px no-repeat}
+.rite{margin:0;padding:0;list-style:none;counter-reset:r}
+.rite li{counter-increment:r;margin-bottom:1.35rem}
+.rite li>span{display:flex;gap:.7rem;align-items:baseline;font:400 .82rem/1.4 var(--serif);letter-spacing:.2em;text-transform:uppercase;color:var(--bone)}
+.rite li>span::before{content:counter(r,upper-roman);font:500 .7rem/1 var(--mono);letter-spacing:.1em;color:var(--chr);min-width:1.6em}
+pre{margin:.55rem 0 0;padding:.85rem 1rem;background:#060606;border:1px solid #2a2c30;border-left:2px solid var(--chr);
+  white-space:pre-wrap;overflow-wrap:anywhere;-webkit-user-select:all;user-select:all;cursor:text}
+pre code{background:none;border:0;padding:0;font-size:.9rem;color:var(--tx)}
+.req{margin:2rem 0 0;padding-top:1.4rem;border-top:1px solid #26282c;display:grid;gap:1rem}
+.req dt{font:500 .7rem/1.4 var(--mono);letter-spacing:.22em;text-transform:uppercase;color:var(--chr)}
+.req dd{margin:.3rem 0 0;color:var(--tx)}
+
+/* ---------- footer ---------- */
+.foot{padding:3rem var(--pr) calc(2.5rem + env(safe-area-inset-bottom,0px)) var(--gut);border-top:1px solid #1d1f22;background:#050505}
+.foot .wrap{display:flex;flex-wrap:wrap;gap:1rem 2rem;align-items:center;justify-content:space-between}
+.foot .fb{font:400 .95rem/1 var(--serif);letter-spacing:.32em;text-transform:uppercase;color:var(--bone)}
+.foot ul{display:flex;flex-wrap:wrap;gap:0 1.25rem;margin:0;padding:0;list-style:none}
+.foot a{display:inline-flex;align-items:center;min-height:44px}
+.lic{color:var(--mut);font-size:.88rem;width:100%}
+
+/* ---------- breakpoints ---------- */
+@media (min-width:640px){
+  :root{--gut:calc(52px + env(safe-area-inset-left,0px));--pr:calc(28px + env(safe-area-inset-right,0px))}
+  .top{position:sticky;top:0}
+  .spine{width:30px;left:calc(10px + env(safe-area-inset-left,0px))}
+  .pitch{padding:1.6rem 1.6rem 1.7rem}
+  .chambers,.sigs{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .plate{padding:3rem 2.5rem 2.6rem}
+  .brood{padding:1.8rem}
+  .auto{padding:2rem 2.2rem}
+}
+@media (min-width:1024px){
+  :root{--gut:calc(84px + env(safe-area-inset-left,0px));--pr:calc(48px + env(safe-area-inset-right,0px))}
+  .spine{width:38px;left:calc(22px + env(safe-area-inset-left,0px))}
+  .hero{grid-template-columns:minmax(0,1fr) minmax(0,1.12fr);column-gap:3rem;align-items:center;padding-top:2rem}
+  .hero::before{background:repeating-radial-gradient(circle at 72% 50%,rgba(140,143,148,0) 0 52px,rgba(140,143,148,.06) 52px 53px);
+    -webkit-mask-image:radial-gradient(circle at 72% 50%,#000 0,rgba(0,0,0,0) 62%);mask-image:radial-gradient(circle at 72% 50%,#000 0,rgba(0,0,0,0) 62%)}
+  .sigil-w{order:2;width:min(100%,78vh,680px)}
+  .chambers,.sigs{grid-template-columns:repeat(3,minmax(0,1fr))}
+  .spinal::before{left:50%;margin-left:-1px}
+  .beat{grid-template-columns:minmax(0,1fr) 72px minmax(0,1fr);gap:0 1.75rem;padding-bottom:0}
+  .beat+.beat{margin-top:-2.25rem}
+  .vb{grid-column:2;grid-row:1;justify-self:center;width:72px;height:48px;margin-top:0}
+  .beat .bt{grid-column:3;grid-row:1}
+  .beat:nth-child(odd) .bt{grid-column:1;text-align:right}
+  .beat::after{left:50%;margin-left:-1px;top:44px;bottom:12px}
+  .brood{grid-template-columns:minmax(0,1fr) minmax(0,1.1fr);padding:2.4rem}
+}
+
+/* scroll-driven reveal where supported */
+@supports (animation-timeline: view()){
+  @media (prefers-reduced-motion:no-preference){
+    .carapace{animation:part linear both;animation-timeline:view();animation-range:entry 0% cover 30%}
+    .beat{view-timeline-name:--beat}
+    .beat .g{animation:lit linear both;animation-timeline:--beat;animation-range:cover 18% cover 34%}
+    .beat::after{animation:grow linear both;animation-timeline:--beat;animation-range:cover 30% cover 62%}
+  }
+}
+@keyframes lit{from{opacity:0}to{opacity:1}}
+@keyframes grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+
+@media (prefers-reduced-motion:reduce){
+  html{scroll-behavior:auto}
+  *,*::before,*::after{animation:none!important;transition:none!important}
+  .carapace{clip-path:none!important}
+  .beat .g{opacity:1!important}
+  .beat::after{transform:none!important}
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<!-- shared symbol library (decorative) -->
+<svg id="lib" aria-hidden="true" focusable="false" width="0" height="0" style="position:absolute;width:0;height:0;overflow:hidden">
+  <defs>
+    <linearGradient id="sheen2" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#34363b"/><stop offset=".44" stop-color="#5d6066"/><stop offset=".5" stop-color="#ece6d8"/><stop offset=".56" stop-color="#5d6066"/><stop offset="1" stop-color="#34363b"/>
+      <animateTransform attributeName="gradientTransform" type="translate" values="-1 0;1 0;1 0" keyTimes="0;.42;1" dur="9s" repeatCount="indefinite" begin="indefinite"/>
+    </linearGradient>
+    <radialGradient id="halo"><stop offset="0" stop-color="#b8ff3c" stop-opacity=".45"/><stop offset="1" stop-color="#b8ff3c" stop-opacity="0"/></radialGradient>
+  </defs>
+  <symbol id="vt" viewBox="-20 -12 40 24">
+    <path d="M-8-7C-3-9 3-9 8-7L10 0L8 7C3 9-3 9-8 7L-10 0Z"/>
+    <path fill="none" d="M-10-1C-13-4-17-4-19-1M10-1C13-4 17-4 19-1M-8 4L-14 9M8 4L14 9M-3 0C-3-2 3-2 3 0C3 2-3 2-3 0Z"/>
+  </symbol>
+  <symbol id="crown" viewBox="0 0 240 96">
+    <path d="M14 96V62Q14 24 120 10Q226 24 226 62V96" fill="none" stroke="#3a3d42" stroke-width="7" stroke-dasharray="1.4 4.6"/>
+    <path d="M5 96V60Q5 15 120 1.5Q235 15 235 60V96" fill="none" stroke="url(#sheen2)" stroke-width="1.8"/>
+    <path d="M25 96V66Q25 34 120 20Q215 34 215 66V96" fill="none" stroke="#5d6066"/>
+    <path d="M120 90Q78 80 30 76M120 90Q84 66 46 46M120 90Q100 56 80 29M120 90V22M120 90Q140 56 160 29M120 90Q156 66 194 46M120 90Q162 80 210 76" fill="none" stroke="#8c8f94" stroke-opacity=".3" stroke-width=".8"/>
+    <circle cx="120" cy="58" r="30" fill="#0a0b0c" stroke="#3a3d42" stroke-width="1.2"/>
+    <circle cx="120" cy="58" r="34" fill="none" stroke="#5d6066" stroke-width="3" stroke-dasharray="1 3.3"/>
+  </symbol>
+  <symbol id="g-ov" viewBox="0 0 48 48"><path d="M5 27Q24 6 43 27Q24 46 5 27Z"/><circle cx="24" cy="27" r="8"/><path d="M14 13l3 6M24 6v9M34 13l-3 6"/><circle class="dot" cx="24" cy="27" r="2.6"/></symbol>
+  <symbol id="g-ce" viewBox="0 0 48 48"><path d="M24 8C12 8 8 18 12 24C6 31 12 41 22 38L24 41L26 38C36 41 42 31 36 24C40 18 36 8 24 8Z"/><path d="M24 11V37M16 17Q21 21 16 26M32 17Q27 21 32 26M15 31Q19 30 20 34M33 31Q29 30 28 34"/><circle class="dot" cx="24" cy="23" r="2.4"/></symbol>
+  <symbol id="g-dr" viewBox="0 0 48 48"><path d="M24 6L39 15V33L24 42L9 33V15Z"/><path d="M16 29Q24 39 32 29M24 13V22M17 18L21 22M31 18L27 22"/><circle class="dot" cx="24" cy="25" r="2.4"/></symbol>
+  <symbol id="g-ch" viewBox="0 0 48 48"><path d="M24 5L40 24L24 43L8 24Z"/><path d="M24 13C33 17 33 31 24 35C15 31 15 17 24 13Z"/><path d="M8 24H16M32 24H40"/><circle class="dot" cx="24" cy="24" r="2.4"/></symbol>
+  <symbol id="g-lr" viewBox="0 0 48 48"><circle cx="24" cy="24" r="17" stroke-width="4" pathLength="20" stroke-dasharray="1 1"/><path d="M13 24Q24 13 35 24Q24 35 13 24Z"/><circle class="dot" cx="24" cy="24" r="2.6"/></symbol>
+  <symbol id="g-gh" viewBox="0 0 48 48"><path d="M24 38V27L14 15M24 27L34 15"/><circle cx="14" cy="11" r="4"/><circle cx="34" cy="11" r="4"/><circle cx="24" cy="41" r="3.5"/><path d="M8 30Q24 20 40 30"/><circle class="dot" cx="24" cy="27" r="2.4"/></symbol>
+</svg>
+
+<div class="spine" aria-hidden="true">
+  <svg id="spine-svg" focusable="false" preserveAspectRatio="none">
+    <rect id="sp-c" x="10" y="0" width="2" height="100%"/>
+    <rect id="sp-p" x="10" y="0" width="2" height="100%"/>
+    <g id="sp-b"></g><g id="sp-l"></g>
+  </svg>
+</div>
+
+<header class="top">
+  <a class="brand" href="#hero">
+    <svg viewBox="-12 -12 24 24" aria-hidden="true" focusable="false"><circle r="10" fill="none" stroke="#8c8f94" stroke-width="3" pathLength="60" stroke-dasharray="1 1"/><circle r="5.5" fill="#1b1d20" stroke="#d9d2c3"/><path d="M0-4C1.6-1.5 1.6 1.5 0 4C-1.6 1.5-1.6-1.5 0-4Z" fill="#b8ff3c"/></svg>
+    Hivemind
+  </a>
+  <nav class="nav" aria-label="Primary">
+    <ul>
+      <li><a href="#agents">Agents</a></li>
+      <li><a href="#workflow">Workflow</a></li>
+      <li><a href="#brood">Brood</a></li>
+      <li><a href="#install">Install</a></li>
+      <li><a href="https://github.com/brenpike/hivemind">GitHub</a></li>
+    </ul>
+  </nav>
+</header>
+
+<main id="main" tabindex="-1">
+
+<section id="hero" class="hero" aria-labelledby="h-hero">
+  <div class="sigil-w">
+    <svg id="sigil" class="sigil" viewBox="-300 -300 600 600" aria-hidden="true" focusable="false">
+      <defs>
+        <linearGradient id="sheen" gradientUnits="userSpaceOnUse" x1="-260" y1="-260" x2="260" y2="260">
+          <stop offset="0" stop-color="#26282c"/><stop offset=".4" stop-color="#6c6f74"/><stop offset=".5" stop-color="#ece6d8"/><stop offset=".6" stop-color="#6c6f74"/><stop offset="1" stop-color="#1b1d20"/>
+          <animateTransform attributeName="gradientTransform" type="rotate" values="0;360" dur="18s" repeatCount="indefinite" begin="indefinite"/>
+        </linearGradient>
+        <radialGradient id="gI" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="170"><stop offset=".62" stop-color="#16171a"/><stop offset=".82" stop-color="#8c8f94"/><stop offset="1" stop-color="#e3dccd"/></radialGradient>
+        <radialGradient id="gO" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="300"><stop offset=".84" stop-color="#121316"/><stop offset=".93" stop-color="#7b7e83"/><stop offset="1" stop-color="#d9d2c3"/></radialGradient>
+        <radialGradient id="gIris" gradientUnits="userSpaceOnUse" cx="0" cy="0" r="62"><stop offset=".15" stop-color="#090b06"/><stop offset=".48" stop-color="#34421a"/><stop offset=".8" stop-color="#5d6066"/><stop offset="1" stop-color="#16171a"/></radialGradient>
+        <filter id="warp" x="-6%" y="-6%" width="112%" height="112%">
+          <feTurbulence type="fractalNoise" baseFrequency="0.011 0.017" numOctaves="2" seed="7" result="n">
+            <animate attributeName="baseFrequency" dur="28s" values="0.011 0.017;0.016 0.011;0.011 0.017" repeatCount="indefinite" begin="indefinite"/>
+          </feTurbulence>
+          <feDisplacementMap in="SourceGraphic" in2="n" scale="9" xChannelSelector="R" yChannelSelector="G"/>
+        </filter>
+        <path id="rI" fill="url(#gI)" stroke="#070707" stroke-width="1.2" d="M-7-108C-20-126-14-148 6-164C0-146-1-126 7-108Z">
+          <animate attributeName="d" dur="7s" repeatCount="indefinite" begin="indefinite" calcMode="spline" keyTimes="0;.5;1" keySplines=".45 0 .55 1;.45 0 .55 1"
+            values="M-7-108C-20-126-14-148 6-164C0-146-1-126 7-108Z;M-7-108C-31-119-31-142-11-157C-12-141-8-123 7-108Z;M-7-108C-20-126-14-148 6-164C0-146-1-126 7-108Z"/>
+        </path>
+        <path id="rO" fill="url(#gO)" stroke="#070707" d="M-6-256C-16-270-14-286 2-298C-2-284 0-270 6-256Z">
+          <animate attributeName="d" dur="9.5s" repeatCount="indefinite" begin="indefinite" calcMode="spline" keyTimes="0;.5;1" keySplines=".45 0 .55 1;.45 0 .55 1"
+            values="M-6-256C-16-270-14-286 2-298C-2-284 0-270 6-256Z;M-6-256C-23-263-27-281-15-293C-12-280-6-267 6-256Z;M-6-256C-16-270-14-286 2-298C-2-284 0-270 6-256Z"/>
+        </path>
+        <path id="c1" d="M-262-262C-196-250-236-160-166-166"/>
+        <path id="c2" d="M262-262C196-250 236-160 166-166"/>
+        <path id="c3" d="M-262 262C-250 196-160 236-166 166"/>
+        <path id="c4" d="M262 262C250 196 160 236 166 166"/>
+        <path id="c5" d="M-292 6C-270-34-262 34-236 0"/>
+        <path id="c6" d="M292 6C270-34 262 34 236 0"/>
+      </defs>
+
+      <g fill="none">
+        <g stroke="#0b0c0e" stroke-width="21" stroke-linecap="round"><use href="#c1"/><use href="#c2"/><use href="#c3"/><use href="#c4"/><use href="#c5"/><use href="#c6"/></g>
+        <g stroke="#2b2d31" stroke-width="13" stroke-linecap="round"><use href="#c1"/><use href="#c2"/><use href="#c3"/><use href="#c4"/><use href="#c5"/><use href="#c6"/></g>
+        <g stroke="#8c8f94" stroke-width="13" stroke-dasharray="1.6 4.4" stroke-opacity=".55"><use href="#c1"/><use href="#c2"/><use href="#c3"/><use href="#c4"/><use href="#c5"/><use href="#c6"/></g>
+        <g stroke="#d9d2c3" stroke-width="17" stroke-linecap="round" stroke-dasharray="9 71" stroke-opacity=".2">
+          <use href="#c1"><animate attributeName="stroke-dashoffset" values="0;-80" dur="3.4s" repeatCount="indefinite" begin="indefinite"/></use>
+          <use href="#c2"><animate attributeName="stroke-dashoffset" values="-27;-107" dur="3.4s" repeatCount="indefinite" begin="indefinite"/></use>
+          <use href="#c3"><animate attributeName="stroke-dashoffset" values="-53;-133" dur="3.4s" repeatCount="indefinite" begin="indefinite"/></use>
+          <use href="#c4"><animate attributeName="stroke-dashoffset" values="-13;-93" dur="3.4s" repeatCount="indefinite" begin="indefinite"/></use>
+          <use href="#c5"><animate attributeName="stroke-dashoffset" values="-40;-120" dur="2.9s" repeatCount="indefinite" begin="indefinite"/></use>
+          <use href="#c6"><animate attributeName="stroke-dashoffset" values="-66;-146" dur="2.9s" repeatCount="indefinite" begin="indefinite"/></use>
+        </g>
+        <g stroke="#b8ff3c" stroke-width="2.4" stroke-linecap="round" stroke-dasharray="3 257">
+          <use href="#c2"><animate attributeName="stroke-dashoffset" values="0;-260" dur="2.6s" repeatCount="indefinite" begin="indefinite"/></use>
+          <use href="#c3"><animate attributeName="stroke-dashoffset" values="-130;-390" dur="2.6s" repeatCount="indefinite" begin="indefinite"/></use>
+        </g>
+        <g fill="#141518" stroke="#8c8f94" stroke-width="1.5">
+          <circle cx="-262" cy="-262" r="14"/><circle cx="262" cy="-262" r="14"/><circle cx="-262" cy="262" r="14"/><circle cx="262" cy="262" r="14"/>
+          <circle cx="-292" cy="6" r="9"/><circle cx="292" cy="6" r="9"/>
+        </g>
+        <g fill="none" stroke="#d9d2c3" stroke-opacity=".5" stroke-width="4" stroke-dasharray="2 3">
+          <circle cx="-262" cy="-262" r="8"/><circle cx="262" cy="-262" r="8"/><circle cx="-262" cy="262" r="8"/><circle cx="262" cy="262" r="8"/>
+        </g>
+      </g>
+
+      <g class="breathe">
+        <g class="warp" fill="none">
+          <circle r="254" stroke="#8c8f94" stroke-opacity=".32"/>
+          <circle r="235" stroke="#0e0f11" stroke-width="31"/>
+          <circle r="235" stroke="url(#sheen)" stroke-width="26" pathLength="360" stroke-dasharray="1.1 .9"/>
+          <circle r="217" stroke="#8c8f94" stroke-opacity=".4"/>
+          <g id="ribs-o">
+            <use href="#rO"/><use href="#rO" transform="rotate(30)"/><use href="#rO" transform="rotate(60)"/><use href="#rO" transform="rotate(90)"/>
+            <use href="#rO" transform="rotate(120)"/><use href="#rO" transform="rotate(150)"/><use href="#rO" transform="rotate(180)"/><use href="#rO" transform="rotate(210)"/>
+            <use href="#rO" transform="rotate(240)"/><use href="#rO" transform="rotate(270)"/><use href="#rO" transform="rotate(300)"/><use href="#rO" transform="rotate(330)"/>
+          </g>
+        </g>
+        <g class="spin" fill="none">
+          <circle r="186" stroke="#0d0e10" stroke-width="24"/>
+          <circle r="186" stroke="#5d6066" stroke-width="18" pathLength="360" stroke-dasharray=".5 1.5"/>
+          <circle r="186" stroke="#d9d2c3" stroke-opacity=".55" stroke-width="22" pathLength="360" stroke-dasharray="5 85"/>
+        </g>
+        <g class="spin-r" fill="none">
+          <circle r="138" stroke="#d9d2c3" stroke-opacity=".42" stroke-width="10" pathLength="360" stroke-dasharray="11 4"/>
+        </g>
+        <g>
+          <use href="#rI"/><use href="#rI" transform="rotate(30)"/><use href="#rI" transform="rotate(60)"/><use href="#rI" transform="rotate(90)"/>
+          <use href="#rI" transform="rotate(120)"/><use href="#rI" transform="rotate(150)"/><use href="#rI" transform="rotate(180)"/><use href="#rI" transform="rotate(210)"/>
+          <use href="#rI" transform="rotate(240)"/><use href="#rI" transform="rotate(270)"/><use href="#rI" transform="rotate(300)"/><use href="#rI" transform="rotate(330)"/>
+        </g>
+        <circle class="pulse" cx="-166" cy="-166" r="4" fill="#b8ff3c"/>
+        <circle class="pulse" cx="166" cy="166" r="4" fill="#b8ff3c" style="animation-delay:-1.6s"/>
+        <circle r="104" fill="#040404" stroke="#3a3d42" stroke-width="3"/>
+        <circle r="97" fill="none" stroke="url(#sheen)" stroke-width="1.6"/>
+        <g id="iris">
+          <circle r="62" fill="url(#gIris)"/>
+          <circle r="46" fill="none" stroke="#8c8f94" stroke-opacity=".32" stroke-width="30" pathLength="360" stroke-dasharray=".6 2.4"/>
+          <circle r="62" fill="none" stroke="#8c8f94" stroke-width="1.6"/>
+          <circle r="28" fill="none" stroke="#b8ff3c" stroke-opacity=".5"/>
+          <g id="pupil"><path d="M0-40C9-20 9 20 0 40C-9 20-9-20 0-40Z" fill="#020202" stroke="#b8ff3c" stroke-opacity=".45"/></g>
+        </g>
+        <ellipse cx="-24" cy="-30" rx="10" ry="5" fill="#e8e2d4" fill-opacity=".3" transform="rotate(-38 -24 -30)"/>
+        <ellipse cx="30" cy="34" rx="3" ry="2" fill="#e8e2d4" fill-opacity=".22"/>
+      </g>
+    </svg>
+  </div>
+
+  <div class="pitch">
+    <p class="kick"><span class="live" aria-hidden="true"></span>Orchestration for Claude Code</p>
+    <h1 id="h-hero">Hivemind</h1>
+    <p class="lede">Multi-agent orchestration framework for Claude Code. Coordinates specialized bioforms to plan, build, review, and ship code, so you don't have to manage the pipeline yourself.</p>
+    <p class="over">You are the Overmind; the swarm acts on your intent.</p>
+    <div class="cta">
+      <a class="btn pri" href="#install">Install</a>
+      <a class="btn" href="https://github.com/brenpike/hivemind">View the repository</a>
+    </div>
+  </div>
+
+  <a class="descend" href="#agents">Descend<svg viewBox="0 0 14 14" aria-hidden="true" focusable="false"><path d="M2 4l5 5 5-5"/></svg></a>
+</section>
+
+<section id="agents" class="sec" aria-labelledby="h-agents">
+  <div class="wrap">
+    <header class="sh carapace">
+      <p class="kick">I · The reliquary</p>
+      <h2 id="h-agents">Six chambers</h2>
+      <span class="rule" aria-hidden="true"></span>
+      <p class="intro">Six agents. The first four are bioforms; the two reviewers are composites.</p>
+    </header>
+
+    <ul class="chambers">
+      <li class="carapace">
+        <article class="cell">
+          <svg class="pframe" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect x=".5" y=".5" width="99" height="99" fill="none" stroke="url(#sheen2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+          <svg class="crown" viewBox="0 0 240 96" aria-hidden="true" focusable="false"><use href="#crown"/><use class="es" href="#g-ov" x="97.6" y="35.8" width="46" height="46"/><use class="eg" href="#g-ov" x="97" y="35" width="46" height="46"/></svg>
+          <p class="kind">Bioform · Orchestrator</p>
+          <h3>Overlord</h3>
+          <p class="meta"><code>hivemind:overlord</code> <span class="tag">Session default</span></p>
+          <p class="d">Routes each request to a workflow, runs the workflow state machine and its run ledger, and owns branches, checkpoint commits, version bumps, PRs and review routing. It delegates all implementation and never writes code.</p>
+        </article>
+      </li>
+      <li class="carapace">
+        <article class="cell">
+          <svg class="pframe" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect x=".5" y=".5" width="99" height="99" fill="none" stroke="url(#sheen2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+          <svg class="crown" viewBox="0 0 240 96" aria-hidden="true" focusable="false"><use href="#crown"/><use class="es" href="#g-ce" x="97.6" y="35.8" width="46" height="46"/><use class="eg" href="#g-ce" x="97" y="35" width="46" height="46"/></svg>
+          <p class="kind">Bioform · Strategist</p>
+          <h3>Cerebrate</h3>
+          <p class="meta"><span class="tag">Read-only</span></p>
+          <p class="d">Researches the codebase and returns the directive: STEP-NNN steps with exact file scopes, dependencies, risks and a delivery shape (single, multi or brood). It never writes files.</p>
+        </article>
+      </li>
+      <li class="carapace">
+        <article class="cell">
+          <svg class="pframe" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect x=".5" y=".5" width="99" height="99" fill="none" stroke="url(#sheen2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+          <svg class="crown" viewBox="0 0 240 96" aria-hidden="true" focusable="false"><use href="#crown"/><use class="es" href="#g-dr" x="97.6" y="35.8" width="46" height="46"/><use class="eg" href="#g-dr" x="97" y="35" width="46" height="46"/></svg>
+          <p class="kind">Bioform · Builder</p>
+          <h3>Drone</h3>
+          <p class="meta"><span class="tag">Default step owner</span></p>
+          <p class="d">Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step.</p>
+        </article>
+      </li>
+      <li class="carapace">
+        <article class="cell">
+          <svg class="pframe" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect x=".5" y=".5" width="99" height="99" fill="none" stroke="url(#sheen2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+          <svg class="crown" viewBox="0 0 240 96" aria-hidden="true" focusable="false"><use href="#crown"/><use class="es" href="#g-ch" x="97.6" y="35.8" width="46" height="46"/><use class="eg" href="#g-ch" x="97" y="35" width="46" height="46"/></svg>
+          <p class="kind">Bioform · Shaper</p>
+          <h3>Changeling</h3>
+          <p class="meta"><span class="tag">Presentational</span></p>
+          <p class="d">Presentational UI/UX: markup, styling, layout, design tokens, visual states and presentational accessibility, within an assigned file scope.</p>
+        </article>
+      </li>
+      <li class="carapace">
+        <article class="cell">
+          <svg class="pframe" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect x=".5" y=".5" width="99" height="99" fill="none" stroke="url(#sheen2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+          <svg class="crown" viewBox="0 0 240 96" aria-hidden="true" focusable="false"><use href="#crown"/><use class="es" href="#g-lr" x="97.6" y="35.8" width="46" height="46"/><use class="eg" href="#g-lr" x="97" y="35" width="46" height="46"/></svg>
+          <p class="kind">Composite · Pre-PR</p>
+          <h3>Local-Reviewer</h3>
+          <p class="meta"><span class="tag">Needs codex</span></p>
+          <p class="d">An adversarial Codex review loop before the PR exists (up to 10 iterations). It fixes simple findings (2 files or fewer), escalates complex ones, and stops on break-fix cycles. Needs the codex companion.</p>
+        </article>
+      </li>
+      <li class="carapace">
+        <article class="cell">
+          <svg class="pframe" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect x=".5" y=".5" width="99" height="99" fill="none" stroke="url(#sheen2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+          <svg class="crown" viewBox="0 0 240 96" aria-hidden="true" focusable="false"><use href="#crown"/><use class="es" href="#g-gh" x="97.6" y="35.8" width="46" height="46"/><use class="eg" href="#g-gh" x="97" y="35" width="46" height="46"/></svg>
+          <p class="kind">Composite · Post-PR</p>
+          <h3>GitHub-Reviewer</h3>
+          <p class="meta"><span class="tag">Stateless</span> <span class="tag">One-shot</span></p>
+          <p class="d">Fetches and classifies review feedback, fixes, pushes, replies and resolves threads. Dispatched by the <code>hivemind:github-review-loop</code> skill.</p>
+        </article>
+      </li>
+    </ul>
+  </div>
+</section>
+
+<section id="workflow" class="sec" aria-labelledby="h-wf">
+  <div class="wrap">
+    <header class="sh carapace">
+      <p class="kick">II · The spine</p>
+      <h2 id="h-wf">How a run works</h2>
+      <span class="rule" aria-hidden="true"></span>
+      <p class="intro">One <code>standard-delivery</code> run, vertebra by vertebra.</p>
+    </header>
+
+    <ol class="spinal">
+      <li class="beat">
+        <svg class="vb" viewBox="-24 -16 48 32" aria-hidden="true" focusable="false"><use class="vbb" href="#vt" x="-20" y="-12" width="40" height="24"/><g class="g"><circle r="17" fill="url(#halo)"/><use href="#vt" x="-20" y="-12" width="40" height="24"/></g></svg>
+        <div class="bt"><p class="bn" aria-hidden="true">01</p><h3>Route</h3><p><code>hivemind:route-workflow</code> picks <code>standard-delivery</code>, <code>analysis-only</code>, <code>pr-feedback-remediation</code>, <code>hatchery-dispatch</code> or <code>exploratory-intent-session</code>. A trivial one-file change takes the Reflex fast path, which skips the router, the ledger and the cerebrate.</p></div>
+      </li>
+      <li class="beat">
+        <svg class="vb" viewBox="-24 -16 48 32" aria-hidden="true" focusable="false"><use class="vbb" href="#vt" x="-20" y="-12" width="40" height="24"/><g class="g"><circle r="17" fill="url(#halo)"/><use href="#vt" x="-20" y="-12" width="40" height="24"/></g></svg>
+        <div class="bt"><p class="bn" aria-hidden="true">02</p><h3>Record</h3><p>The ledger lives at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, and each state result is normally validated against the workflow definition before the run advances.</p></div>
+      </li>
+      <li class="beat">
+        <svg class="vb" viewBox="-24 -16 48 32" aria-hidden="true" focusable="false"><use class="vbb" href="#vt" x="-20" y="-12" width="40" height="24"/><g class="g"><circle r="17" fill="url(#halo)"/><use href="#vt" x="-20" y="-12" width="40" height="24"/></g></svg>
+        <div class="bt"><p class="bn" aria-hidden="true">03</p><h3>Plan</h3><p>The cerebrate returns the directive.</p></div>
+      </li>
+      <li class="beat">
+        <svg class="vb" viewBox="-24 -16 48 32" aria-hidden="true" focusable="false"><use class="vbb" href="#vt" x="-20" y="-12" width="40" height="24"/><g class="g"><circle r="17" fill="url(#halo)"/><use href="#vt" x="-20" y="-12" width="40" height="24"/></g></svg>
+        <div class="bt"><p class="bn" aria-hidden="true">04</p><h3>Branch</h3><p>Git preflight, then a compliant working branch (<code>feature/</code>, <code>bugfix/</code>, <code>hotfix/</code>, <code>refactor/</code>, <code>chore/</code>, <code>docs/</code>, <code>test/</code>, <code>ci/</code>). The swarm never commits to trunk.</p></div>
+      </li>
+      <li class="beat">
+        <svg class="vb" viewBox="-24 -16 48 32" aria-hidden="true" focusable="false"><use class="vbb" href="#vt" x="-20" y="-12" width="40" height="24"/><g class="g"><circle r="17" fill="url(#halo)"/><use href="#vt" x="-20" y="-12" width="40" height="24"/></g></svg>
+        <div class="bt"><p class="bn" aria-hidden="true">05</p><h3>Build in waves</h3><p><code>hivemind:next-wave</code> selects every ready step whose dependencies are met and whose files do not overlap. Drones and changelings build those steps in parallel, with one checkpoint commit (molt) per wave.</p></div>
+      </li>
+      <li class="beat">
+        <svg class="vb" viewBox="-24 -16 48 32" aria-hidden="true" focusable="false"><use class="vbb" href="#vt" x="-20" y="-12" width="40" height="24"/><g class="g"><circle r="17" fill="url(#halo)"/><use href="#vt" x="-20" y="-12" width="40" height="24"/></g></svg>
+        <div class="bt"><p class="bn" aria-hidden="true">06</p><h3>Gate</h3><p>A version-bump decision (<code>hivemind:bump-type</code>), then validation.</p></div>
+      </li>
+      <li class="beat">
+        <svg class="vb" viewBox="-24 -16 48 32" aria-hidden="true" focusable="false"><use class="vbb" href="#vt" x="-20" y="-12" width="40" height="24"/><g class="g"><circle r="17" fill="url(#halo)"/><use href="#vt" x="-20" y="-12" width="40" height="24"/></g></svg>
+        <div class="bt"><p class="bn" aria-hidden="true">07</p><h3>Review</h3><p>The local-reviewer runs its adversarial review loop. Needs the codex companion.</p></div>
+      </li>
+      <li class="beat">
+        <svg class="vb" viewBox="-24 -16 48 32" aria-hidden="true" focusable="false"><use class="vbb" href="#vt" x="-20" y="-12" width="40" height="24"/><g class="g"><circle r="17" fill="url(#halo)"/><use href="#vt" x="-20" y="-12" width="40" height="24"/></g></svg>
+        <div class="bt"><p class="bn" aria-hidden="true">08</p><h3>Ship and watch</h3><p>The overlord opens the PR and watches it by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour. Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge. You do.</p></div>
+      </li>
+    </ol>
+
+    <section id="brood" class="sub" aria-labelledby="h-brood">
+      <div class="brood carapace">
+        <svg class="bsvg" viewBox="0 0 320 150" aria-hidden="true" focusable="false">
+          <path d="M6 75H118" fill="none" stroke="#3a3d42" stroke-width="12" stroke-dasharray="8 3"/>
+          <path d="M6 75H118" fill="none" stroke="#8c8f94" stroke-width="1"/>
+          <path d="M120 75C170 75 180 26 244 26M120 75H244M120 75C170 75 180 124 244 124" fill="none" stroke="#8c8f94" stroke-width="1.5" stroke-dasharray="3 5"/>
+          <circle cx="120" cy="75" r="8" fill="#1b1d20" stroke="#d9d2c3" stroke-width="1.5"/>
+          <g fill="#121316" stroke="#d9d2c3" stroke-width="1.4">
+            <path d="M246 26C254 10 300 10 308 26C300 42 254 42 246 26Z"/>
+            <path d="M246 75C254 59 300 59 308 75C300 91 254 91 246 75Z"/>
+            <path d="M246 124C254 108 300 108 308 124C300 140 254 140 246 124Z"/>
+          </g>
+          <g fill="#b8ff3c"><circle class="pod" cx="277" cy="26" r="3.5"/><circle class="pod" cx="277" cy="75" r="3.5"/><circle class="pod" cx="277" cy="124" r="3.5"/></g>
+        </svg>
+        <div>
+          <p class="kick">Strains</p>
+          <h3 id="h-brood">The brood</h3>
+          <p>The cerebrate splits big work into independent strains. After you approve, each strain runs as its own overlord in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and its own detached tmux session, with its own branch and PR. The hatchery watches via <code>hivemind:brood-status</code>.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="sub" aria-labelledby="h-sig">
+      <div class="sh carapace" style="margin-bottom:1.5rem">
+        <p class="kick">Nerve signals</p>
+        <h3 id="h-sig">Signals</h3>
+      </div>
+      <dl class="sigs">
+        <div class="sig warn carapace">
+          <dt><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 2L22 12L12 22L2 12Z"/><circle class="fill" cx="12" cy="12" r="3.2"/></svg>Flare</dt>
+          <dd><span class="tag">Stop and ask</span><br>An agent can't safely resolve something; the overlord stops and asks you.</dd>
+        </div>
+        <div class="sig carapace">
+          <dt><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 5l7 7-7 7M12 5l7 7-7 7"/></svg>Reflex</dt>
+          <dd><span class="tag">Fast path</span><br>The trivial fast path.</dd>
+        </div>
+        <div class="sig decay carapace">
+          <dt><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle class="fill" cx="12" cy="12" r="10"/><path d="M7 7l10 10M17 7L7 17"/></svg>Mutation Decay</dt>
+          <dd><span class="tag">Mandatory stop</span><br>Fixes undo each other, break-fix-break; a mandatory stop.</dd>
+        </div>
+        <div class="sig carapace">
+          <dt><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M2 20C6 9 10 8 22 8"/><path d="M2 22H22"/></svg>Creep Stagnation</dt>
+          <dd><span class="tag">Advisory</span><br>Diminishing returns; an advisory early exit.</dd>
+        </div>
+        <div class="sig carapace">
+          <dt><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M5 3v5l7 7M19 3v5l-7 7M12 3v19"/></svg>Root-Cluster</dt>
+          <dd><span class="tag">One structural fix</span><br>Several findings share one root; plan one structural fix.</dd>
+        </div>
+        <div class="sig carapace">
+          <dt><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M6 3v6c0 4 6 4 6 9v3M18 3v6c0 4-6 4-6 9"/></svg>Merge-Advised</dt>
+          <dd><span class="tag">Humans merge</span><br>A bounded tail remains; the swarm recommends merge, and humans merge.</dd>
+        </div>
+      </dl>
+    </section>
+
+    <section class="sub" aria-labelledby="h-auto">
+      <div class="auto carapace">
+        <p class="kick">Autonomy</p>
+        <h3 id="h-auto">What comes back to you</h3>
+        <p>Routine judgment calls are decided and journaled. <strong>Irreversible, architectural or safety-relevant calls, and every merge, always come back to you.</strong></p>
+      </div>
+    </section>
+  </div>
+</section>
+
+<section id="install" class="sec" aria-labelledby="h-in">
+  <div class="wrap">
+    <div class="plate carapace">
+      <svg class="pframe" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true" focusable="false"><rect x=".5" y=".5" width="99" height="99" fill="none" stroke="url(#sheen2)" stroke-width="1.5" vector-effect="non-scaling-stroke"/></svg>
+      <header class="sh">
+        <p class="kick">III · The inscription</p>
+        <h2 id="h-in">Install</h2>
+        <span class="rule" aria-hidden="true"></span>
+      </header>
+      <ol class="rite">
+        <li><span>In Claude Code, add the marketplace</span><pre><code>/plugin marketplace add https://github.com/brenpike/hivemind.git</code></pre></li>
+        <li><span>Then install the plugin</span><pre><code>/plugin install hivemind@brenpike</code></pre></li>
+        <li><span>Then, in each project</span><pre><code>/hivemind:seed-hive</code></pre></li>
+      </ol>
+      <dl class="req">
+        <div><dt>Requires</dt><dd>bash (macOS, Linux or WSL), git, gh, jq and the Claude Code CLI; tmux only for brood mode.</dd></div>
+        <div><dt>Optional companions</dt><dd>claude-mem (memory), codex (local pre-PR review), caveman (compressed output).</dd></div>
+      </dl>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="foot">
+  <div class="wrap">
+    <p class="fb">Hivemind</p>
+    <ul>
+      <li><a href="./index.html">All prototypes</a></li>
+      <li><a href="https://github.com/brenpike/hivemind">Repository on GitHub</a></li>
+    </ul>
+    <p class="lic">Released under the MIT License.</p>
+  </div>
+</footer>
+
+<script>
+(function () {
+  'use strict';
+  var d = document, w = window, root = d.documentElement;
+  var NS = 'http://www.w3.org/2000/svg';
+  var mq = w.matchMedia ? w.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  var reduced = !!(mq && mq.matches);
+  var low = (navigator.hardwareConcurrency || 8) <= 4;
+  var hasIO = 'IntersectionObserver' in w;
+  var sdt = !!(w.CSS && CSS.supports && CSS.supports('animation-timeline', 'view()'));
+  var now = function () { return w.performance && performance.now ? performance.now() : Date.now(); };
+  if (low) root.classList.add('lowp');
+
+  function mkUse(href, attrs) {
+    var u = d.createElementNS(NS, 'use');
+    u.setAttribute('href', href);
+    for (var k in attrs) { if (Object.prototype.hasOwnProperty.call(attrs, k)) u.setAttribute(k, attrs[k]); }
+    return u;
+  }
+  function clear(el) { while (el.firstChild) el.removeChild(el.firstChild); }
+
+  /* outer ribcage: count scales with viewport area, halved on low-core devices */
+  var ribHost = d.getElementById('ribs-o'), ribN = 12;
+  function buildRibs() {
+    var n = Math.round(Math.sqrt(w.innerWidth * w.innerHeight) / 64);
+    n = Math.max(12, Math.min(22, n));
+    if (low) n = Math.max(8, Math.round(n / 2));
+    if (n === ribN) return;
+    ribN = n; clear(ribHost);
+    for (var i = 0; i < n; i++) ribHost.appendChild(mkUse('#rO', { transform: 'rotate(' + (360 * i / n).toFixed(2) + ')' }));
+  }
+
+  /* page-edge spine: vertebra count from viewport height, lit by scroll progress */
+  var spSvg = d.getElementById('spine-svg'), spB = d.getElementById('sp-b'), spL = d.getElementById('sp-l');
+  var cord = d.getElementById('sp-c'), cordP = d.getElementById('sp-p'), lit = [], litK = -1, ticking = false;
+  function buildSpine() {
+    var r = spSvg.getBoundingClientRect(), W = r.width || 22, H = r.height || w.innerHeight;
+    var vh = W * 0.6, p = vh * 1.14, n = Math.ceil(H / p) + 1, i, y, dl, b, l;
+    spSvg.setAttribute('viewBox', '0 0 ' + W.toFixed(1) + ' ' + H.toFixed(1));
+    [cord, cordP].forEach(function (el) { el.setAttribute('x', (W / 2 - 1).toFixed(1)); el.setAttribute('height', H.toFixed(1)); });
+    clear(spB); clear(spL); lit = []; litK = -1;
+    for (i = 0; i < n; i++) {
+      y = (i * p).toFixed(1); dl = (-i * 0.21).toFixed(2) + 's';
+      b = mkUse('#vt', { x: 0, y: y, width: W.toFixed(1), height: vh.toFixed(1), 'class': 'v' });
+      l = mkUse('#vt', { x: 0, y: y, width: W.toFixed(1), height: vh.toFixed(1), 'class': 'v vl' });
+      b.style.animationDelay = dl; l.style.animationDelay = dl;
+      spB.appendChild(b); spL.appendChild(l); lit.push(l);
+    }
+    updScroll();
+  }
+  function updScroll() {
+    ticking = false;
+    var max = root.scrollHeight - w.innerHeight;
+    var pr = max > 0 ? Math.min(1, Math.max(0, (w.pageYOffset || root.scrollTop) / max)) : 0;
+    cordP.style.transform = 'scaleY(' + pr.toFixed(4) + ')';
+    var k = Math.round(pr * lit.length);
+    if (k !== litK) {
+      for (var i = 0; i < lit.length; i++) lit[i].classList.toggle('on', i < k);
+      litK = k;
+    }
+  }
+  w.addEventListener('scroll', function () {
+    if (!ticking) { ticking = true; w.requestAnimationFrame(updScroll); }
+  }, { passive: true });
+
+  /* SMIL control */
+  var begun = [];
+  function startSmil(svg) {
+    if (!svg || !svg.pauseAnimations) return;
+    svg.unpauseAnimations();
+    if (begun.indexOf(svg) < 0) {
+      begun.push(svg);
+      var a = svg.querySelectorAll('animate,animateTransform');
+      for (var i = 0; i < a.length; i++) { if (a[i].beginElement) a[i].beginElement(); }
+    }
+  }
+  function stopSmil(svg) { if (svg && svg.pauseAnimations) svg.pauseAnimations(); }
+
+  /* hero iris: tracks pointer / tap; idle saccades */
+  var hero = d.getElementById('hero'), sig = d.getElementById('sigil');
+  var iris = d.getElementById('iris'), pupil = d.getElementById('pupil');
+  var MAX = 34, ix = 0, iy = 0, tx = 0, ty = 0, ps = 1, tps = 1, rate = 6;
+  var lastPtr = -1e9, nextSac = 0, last = 0, rid = 0, running = false, heroVis = true;
+  function apply() {
+    iris.setAttribute('transform', 'translate(' + ix.toFixed(2) + ' ' + iy.toFixed(2) + ')');
+    pupil.setAttribute('transform', 'scale(' + ps.toFixed(3) + ' 1)');
+  }
+  function tick(t) {
+    if (!running) return;
+    var dt = last ? Math.min(0.05, (t - last) / 1000) : 0.016;
+    last = t;
+    if (t - lastPtr > 2600 && t > nextSac) {
+      var a = Math.random() * Math.PI * 2, r = Math.random() * MAX * 0.85;
+      tx = Math.cos(a) * r; ty = Math.sin(a) * r * 0.8;
+      tps = 0.7 + Math.random() * 0.55; rate = 16;
+      nextSac = t + 700 + Math.random() * 2800;
+    }
+    var k = 1 - Math.exp(-dt * rate);
+    ix += (tx - ix) * k; iy += (ty - iy) * k;
+    ps += (tps - ps) * (1 - Math.exp(-dt * 5));
+    apply();
+    rid = w.requestAnimationFrame(tick);
+  }
+  function onPtr(e) {
+    if (!running) return;
+    var r = sig.getBoundingClientRect();
+    if (!r.width) return;
+    var s = 600 / r.width;
+    var dx = (e.clientX - r.left - r.width / 2) * s, dy = (e.clientY - r.top - r.height / 2) * s;
+    var dist = Math.sqrt(dx * dx + dy * dy) || 1, m = MAX * Math.tanh(dist / 240);
+    tx = dx / dist * m; ty = dy / dist * m;
+    tps = dist < 120 ? 0.5 : Math.min(1.25, 0.8 + dist / 1800);
+    rate = e.type === 'pointerdown' ? 11 : 6;
+    lastPtr = now();
+  }
+  function setHero() {
+    var on = heroVis && !d.hidden && !reduced;
+    root.classList.toggle('hero-off', !on);
+    if (on) {
+      startSmil(sig);
+      if (!running) { running = true; last = 0; rid = w.requestAnimationFrame(tick); }
+    } else {
+      stopSmil(sig);
+      running = false;
+      w.cancelAnimationFrame(rid);
+      if (reduced) { ix = iy = tx = ty = 0; ps = tps = 1; apply(); }
+    }
+  }
+  w.addEventListener('pointermove', onPtr, { passive: true });
+  w.addEventListener('pointerdown', onPtr, { passive: true });
+
+  /* chrome sheen on chambers + plate: only while those sections are on screen */
+  var lib = d.getElementById('lib'), vis = {}, sheenOn = hasIO ? 0 : 1;
+  function setSheen() {
+    if (sheenOn > 0 && !d.hidden && !reduced) startSmil(lib); else stopSmil(lib);
+  }
+
+  if (hasIO) {
+    new IntersectionObserver(function (es) {
+      heroVis = es[es.length - 1].isIntersecting; setHero();
+    }).observe(hero);
+    var so = new IntersectionObserver(function (es) {
+      es.forEach(function (e) { vis[e.target.id] = e.isIntersecting; });
+      sheenOn = (vis.agents ? 1 : 0) + (vis.install ? 1 : 0);
+      setSheen();
+    });
+    so.observe(d.getElementById('agents'));
+    so.observe(d.getElementById('install'));
+  }
+
+  /* carapace + vertebra fallback when scroll-driven animations are unsupported */
+  if (!sdt && hasIO && !reduced) {
+    var mkIO = function (cls, margin) {
+      return new IntersectionObserver(function (es, ob) {
+        es.forEach(function (e) {
+          if (e.isIntersecting) { e.target.classList.add(cls); ob.unobserve(e.target); }
+        });
+      }, { rootMargin: margin, threshold: 0 });
+    };
+    var cio = mkIO('open', '0px 0px -12% 0px'), bio = mkIO('lit', '0px 0px -42% 0px');
+    Array.prototype.forEach.call(d.querySelectorAll('.carapace'), function (el) { cio.observe(el); });
+    Array.prototype.forEach.call(d.querySelectorAll('.beat'), function (el) { bio.observe(el); });
+    root.classList.add('js-io');
+  }
+
+  d.addEventListener('visibilitychange', function () {
+    root.classList.toggle('is-hidden', d.hidden);
+    setHero(); setSheen();
+  });
+  if (mq) {
+    var onMq = function (e) { reduced = e.matches; setHero(); setSheen(); };
+    if (mq.addEventListener) mq.addEventListener('change', onMq); else if (mq.addListener) mq.addListener(onMq);
+  }
+  var rt = 0;
+  w.addEventListener('resize', function () {
+    clearTimeout(rt);
+    rt = setTimeout(function () { buildSpine(); buildRibs(); }, 180);
+  }, { passive: true });
+
+  buildRibs();
+  buildSpine();
+  apply();
+  setHero();
+  setSheen();
+})();
+</script>
+</body>
+</html>

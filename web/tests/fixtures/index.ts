@@ -7,7 +7,7 @@ import { dirname, resolve } from 'node:path';
 // Primary strategy (locked decision A'): use the REAL shipped HTML pages as
 // high-fidelity fixtures. They pin the actual id/class/data-attribute contract that
 // web/scripts/main.js depends on, so a structural change to the markup that would break
-// the JS surfaces here instead of silently in production.
+// the engine surfaces here instead of silently in production.
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_ROOT = resolve(HERE, '..', '..');
@@ -21,14 +21,14 @@ const PAGE_FILES: Record<PageName, string> = {
 };
 
 // Read a real page's <body> innerHTML from disk. We mount only the body so the page's
-// own <script type="module" src="./scripts/main.js"> in <head> does not double-load the
-// module (the harness controls module evaluation explicitly via bootMain).
+// own <script type="module" src="./scripts/main.js"> and head gate script in <head> do
+// not run (the harness controls module evaluation explicitly via bootMain).
 export function readPageBody(page: PageName): string {
   const filePath = resolve(WEB_ROOT, PAGE_FILES[page]);
   const html = readFileSync(filePath, 'utf8');
   const match = html.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   if (!match) {
-    throw new Error(`Fixture page "${page}" has no <body> — cannot mount fixture`);
+    throw new Error(`Fixture page "${page}" has no <body>; cannot mount fixture`);
   }
   return match[1];
 }
@@ -39,14 +39,12 @@ export function mountPage(page: PageName): void {
   document.body.innerHTML = readPageBody(page);
 }
 
-// Minimal/stripped DOM for missing-element early-return cases (Phase 2 nav early-return:
-// no #nav-toggle / .site-nav / #nav-drawer). Deliberately omits the nav contract so
-// initNavToggle hits its `if (!toggle || !nav || !drawer) return;` guard. No hero element,
-// so initSwarmCanvas also early-returns.
+// Minimal/stripped DOM for the no-canvas early return: no #swarm canvas, so init()
+// adds swarm-ready, removes swarm-live and returns before any other wiring.
 export function mountMinimalDom(): void {
   document.body.innerHTML = `
-    <main id="main-content">
-      <p>Minimal fixture — no nav, no hero, no reveal targets.</p>
+    <main id="main">
+      <p>Minimal fixture: no swarm canvas, no sections, no decode targets.</p>
     </main>
   `;
 }

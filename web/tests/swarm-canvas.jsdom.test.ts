@@ -5,86 +5,85 @@ import {
   installIntersectionObserver,
   installRaf,
   installCanvas2dContext,
+  findObserver,
+  setDocumentHidden,
+  dispatchVisibilityChange,
 } from './helpers/boot-main';
-import { mountPage, mountMinimalDom } from './fixtures';
+import { mountPage, mountMinimalDom, type PageName } from './fixtures';
 
-// Characterization suite for initSwarmCanvas (web/src/main.ts lines 229-380).
+// Characterization suite for the Swarm Glyph engine's canvas lifecycle (web/src/main.ts).
 //
-// CONTRACT ONLY. The swarm canvas is a decorative particle field. Per the project's
+// CONTRACT ONLY. The swarm is a decorative particle field. Per the project's
 // determinism policy, the following are DELIBERATELY UNCHARACTERIZED:
-//   - particle positions, velocities, counts, alpha values
+//   - particle positions, velocities, counts, sizes, colors
 //   - pixel output / rendered frames
 //   - requestAnimationFrame timing and frame cadence
-//   - any Math.random-driven value (color choice, spawn position, pulse speed)
-// We assert only: canvas element presence/absence, its aria-hidden attribute and inline
-// cssText, the jsdom-specific position behavior, and 2d-context lifecycle CALL occurrence.
+//   - any Math.random-driven value
+// We assert only: canvas presence, root classes (swarm-ready, swarm-live), pending rAF
+// presence/absence, observer wiring, decode overlay presence, and 2d-context CALL occurrence.
 
-describe('initSwarmCanvas (contract)', () => {
-  it('appends no canvas when there is no hero section', async () => {
+const SECTIONS_MARGIN = '-48% 0px -48% 0px';
+const DECODE_MARGIN = '0px';
+const PAGES: ReadonlyArray<PageName> = ['index', 'functionality', 'benefits'];
+
+// Simulates the page head gate, which adds swarm-live before the engine boots.
+function preGateSwarmLive(): void {
+  document.documentElement.classList.add('swarm-live');
+}
+
+describe('swarm canvas (contract)', () => {
+  it('leaves exactly one canvas in the document; glow sprites stay detached', async () => {
     installMatchMedia({ matches: false });
     installIntersectionObserver();
     installRaf();
+    installCanvas2dContext();
+
+    mountPage('index');
+    await bootMain();
+
+    const canvases = document.querySelectorAll('canvas');
+    expect(canvases.length).toBe(1);
+    expect(canvases[0].id).toBe('swarm');
+  });
+
+  it('paints statically and never goes live under reduced motion at load', async () => {
+    installMatchMedia({ matches: true });
+    installIntersectionObserver();
+    const raf = installRaf();
+    const ctxSpy = installCanvas2dContext();
+
+    mountPage('index');
+    preGateSwarmLive();
+    await bootMain();
+
+    const root = document.documentElement;
+    expect(root.classList.contains('swarm-ready')).toBe(true);
+    expect(root.classList.contains('swarm-live')).toBe(false);
+    expect(ctxSpy.fillRect).toHaveBeenCalled();
+    expect(raf.pending()).toBe(0);
+  });
+
+  it('takes the no-canvas early return on a page without #swarm', async () => {
+    installMatchMedia({ matches: false });
+    installIntersectionObserver();
+    const raf = installRaf();
     installCanvas2dContext();
 
     mountMinimalDom();
-    await bootMain();
+    preGateSwarmLive();
+    await expect(bootMain()).resolves.toBeUndefined();
 
-    expect(document.querySelector('canvas')).toBeNull();
+    const root = document.documentElement;
+    expect(root.classList.contains('swarm-ready')).toBe(true);
+    expect(root.classList.contains('swarm-live')).toBe(false);
+    expect(document.querySelector('svg.gdefs')).toBeNull();
+    expect(raf.pending()).toBe(0);
   });
 
-  it('appends no canvas when reduced-motion is on even with a hero present', async () => {
-    installMatchMedia({ matches: true });
-    installIntersectionObserver();
-    installRaf();
-    installCanvas2dContext();
-
-    mountPage('index');
-    await bootMain();
-
-    // Hero #hero exists, but the `if (prefersReducedMotion()) return;` gate fires
-    // before the canvas is created.
-    expect(document.getElementById('hero')).not.toBeNull();
-    expect(document.querySelector('canvas')).toBeNull();
-  });
-
-  it('prepends exactly one decorative canvas to the hero with the documented attributes', async () => {
+  it('takes the no-context early return when getContext yields null', async () => {
     installMatchMedia({ matches: false });
     installIntersectionObserver();
-    installRaf();
-    installCanvas2dContext();
-
-    mountPage('index');
-    await bootMain();
-
-    const hero = document.getElementById('hero')!;
-    const canvases = document.querySelectorAll('canvas');
-    expect(canvases.length).toBe(1);
-
-    const canvas = canvases[0] as HTMLCanvasElement;
-    // prepend() puts the canvas as the hero's first child.
-    expect(hero.firstElementChild).toBe(canvas);
-    expect(canvas.getAttribute('aria-hidden')).toBe('true');
-
-    // The documented inline cssText — pointer-events:none plus the absolute overlay.
-    const css = canvas.style.cssText;
-    expect(css).toContain('pointer-events: none');
-    expect(css).toContain('position: absolute');
-    expect(css).toContain('inset: 0');
-    expect(css).toContain('width: 100%');
-    expect(css).toContain('height: 100%');
-    expect(css).toContain('z-index: 0');
-
-    // PINNED QUIRK: under jsdom, getComputedStyle(hero).position returns '' (not
-    // 'static'), so the `if (heroStyle.position === 'static')` branch does NOT fire and
-    // hero.style.position is never set. In a real browser this would be set to 'relative'.
-    expect(hero.style.position).toBe('');
-  });
-
-  it('leaves the canvas orphaned in the DOM and stops when the 2d context is null', async () => {
-    installMatchMedia({ matches: false });
-    installIntersectionObserver();
-    installRaf();
-    // Force getContext to return null to drive the `if (!ctx) return;` early exit.
+    const raf = installRaf();
     Object.defineProperty(HTMLCanvasElement.prototype, 'getContext', {
       configurable: true,
       writable: true,
@@ -92,33 +91,131 @@ describe('initSwarmCanvas (contract)', () => {
     });
 
     mountPage('index');
-    await bootMain();
+    preGateSwarmLive();
+    await expect(bootMain()).resolves.toBeUndefined();
 
-    const hero = document.getElementById('hero')!;
-    const canvas = document.querySelector('canvas');
-
-    // PINNED QUIRK: the canvas is prepended to the hero BEFORE the `const ctx =
-    // canvas.getContext('2d'); if (!ctx) return;` check. So on a null context the
-    // <canvas> remains in the DOM (orphaned — no animation, no listeners wired), and
-    // init returns early. This is a latent quirk: a no-op canvas is left attached.
-    expect(canvas).not.toBeNull();
-    expect(hero.firstElementChild).toBe(canvas);
+    const root = document.documentElement;
+    expect(root.classList.contains('swarm-ready')).toBe(true);
+    expect(root.classList.contains('swarm-live')).toBe(false);
+    expect(document.querySelector('svg.gdefs')).toBeNull();
+    expect(document.querySelectorAll('.dx-wait').length).toBe(0);
+    expect(raf.pending()).toBe(0);
   });
 
-  it('clears the canvas via the 2d context on a live reduced-motion change', async () => {
-    const mql = installMatchMedia({ matches: false });
+  it('takes the no-rAF early return when requestAnimationFrame is absent', async () => {
+    installMatchMedia({ matches: false });
     installIntersectionObserver();
-    installRaf();
+    installCanvas2dContext();
+    expect(typeof window.requestAnimationFrame).toBe('undefined');
+
+    mountPage('index');
+    preGateSwarmLive();
+    await expect(bootMain()).resolves.toBeUndefined();
+
+    const root = document.documentElement;
+    expect(root.classList.contains('swarm-ready')).toBe(true);
+    expect(root.classList.contains('swarm-live')).toBe(false);
+    expect(document.querySelector('svg.gdefs')).toBeNull();
+    expect(document.querySelectorAll('.dx-wait').length).toBe(0);
+  });
+
+  it('stops and repaints statically on a live reduced-motion change, then resumes', async () => {
+    const mql = installMatchMedia({ matches: false });
+    const registry = installIntersectionObserver();
+    const raf = installRaf();
     const ctxSpy = installCanvas2dContext();
 
     mountPage('index');
     await bootMain();
 
-    // The live reduced-motion handler runs `stop(); ctx.clearRect(...)`. Assert only that
-    // clearRect was CALLED on the change — never arc/fill counts or coordinates.
-    const clearRectCallsBefore = ctxSpy.clearRect.mock.calls.length;
+    const decodeTargets = Array.from(document.querySelectorAll('.xg, .xs')).slice(0, 3);
+    findObserver(registry, DECODE_MARGIN).trigger(
+      decodeTargets.map((target) => ({ target, isIntersecting: true })),
+    );
+    expect(document.querySelectorAll('.dx-ov').length).toBeGreaterThan(0);
+
+    const root = document.documentElement;
+    const fillRectCallsBefore = ctxSpy.fillRect.mock.calls.length;
     mql._fireChange(true);
 
-    expect(ctxSpy.clearRect.mock.calls.length).toBeGreaterThan(clearRectCallsBefore);
+    expect(raf.pending()).toBe(0);
+    expect(root.classList.contains('swarm-live')).toBe(false);
+    expect(document.querySelectorAll('.dx-ov').length).toBe(0);
+    expect(ctxSpy.fillRect.mock.calls.length).toBeGreaterThan(fillRectCallsBefore);
+
+    mql._fireChange(false);
+
+    expect(root.classList.contains('swarm-live')).toBe(true);
+    expect(raf.pending()).toBe(1);
+  });
+
+  it('cancels the frame while hidden and reschedules when visible again', async () => {
+    installMatchMedia({ matches: false });
+    installIntersectionObserver();
+    const raf = installRaf();
+    installCanvas2dContext();
+
+    mountPage('index');
+    await bootMain();
+    expect(raf.pending()).toBe(1);
+
+    setDocumentHidden(true);
+    dispatchVisibilityChange();
+    expect(raf.pending()).toBe(0);
+
+    setDocumentHidden(false);
+    dispatchVisibilityChange();
+    expect(raf.pending()).toBe(1);
+  });
+
+  it('observes every [data-formation] section with the sections observer', async () => {
+    installMatchMedia({ matches: false });
+    const registry = installIntersectionObserver();
+    installRaf();
+    installCanvas2dContext();
+
+    mountPage('index');
+    await bootMain();
+
+    const sections = Array.from(document.querySelectorAll('[data-formation]'));
+    expect(sections.length).toBeGreaterThan(0);
+    expect(findObserver(registry, SECTIONS_MARGIN).observed).toEqual(sections);
+  });
+
+  it.each(PAGES)('runs frames through every formation on %s without throwing', async (page) => {
+    installMatchMedia({ matches: false });
+    const registry = installIntersectionObserver();
+    const raf = installRaf();
+    installCanvas2dContext();
+
+    mountPage(page);
+    await bootMain();
+
+    const sectionsObserver = findObserver(registry, SECTIONS_MARGIN);
+    let ts = 1000;
+    for (const section of Array.from(document.querySelectorAll('[data-formation]'))) {
+      sectionsObserver.trigger([{ target: section, isIntersecting: true }]);
+      for (let frame = 0; frame < 3; frame++) {
+        ts += 16;
+        expect(() => raf.flushOne(ts)).not.toThrow();
+      }
+    }
+    expect(raf.pending()).toBe(1);
+  });
+
+  it('keeps a single glyph defs block across a stop/start cycle', async () => {
+    const mql = installMatchMedia({ matches: false });
+    installIntersectionObserver();
+    installRaf();
+    installCanvas2dContext();
+
+    mountPage('index');
+    await bootMain();
+
+    mql._fireChange(true);
+    mql._fireChange(false);
+
+    expect(document.querySelectorAll('svg.gdefs').length).toBe(1);
+    expect(document.querySelectorAll('#g0').length).toBe(1);
   });
 });

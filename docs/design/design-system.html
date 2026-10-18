@@ -1,0 +1,1538 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#05040d">
+<title>Hivemind Design System</title>
+<script>(function () { 'use strict'; var root = document.documentElement; try { if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) { root.classList.add('swarm-live'); setTimeout(function () { if (!root.classList.contains('swarm-ready')) root.classList.remove('swarm-live'); }, 4000); } } catch (e) { /* static presentation stays */ } })();</script>
+<link rel="stylesheet" href="../../web/styles/main.css">
+<style>
+/* Page-local layout for this reference only. Every selector is ds- prefixed; no production class is restyled. */
+.ds-box { padding: 1.5rem 1.4rem; }
+.ds-box > * + * { margin-top: 0.85rem; }
+.ds-chip { display: block; height: 48px; margin-top: 0.9rem; border-radius: 12px; border: 1px solid var(--line); }
+.ds-sw-void { background: var(--void); }
+.ds-sw-violet { background: var(--violet); }
+.ds-sw-cyan { background: var(--cyan); }
+.ds-sw-ember { background: var(--ember); }
+.ds-sw-hot { background: var(--hot); }
+.ds-sw-text { background: var(--text); }
+.ds-sw-dim { background: var(--dim); }
+.ds-sw-violet-text { background: var(--violet-text); }
+.ds-sw-cyan-text { background: var(--cyan-text); }
+.ds-sw-ember-text { background: var(--ember-text); }
+.ds-sw-panel-solid { background: linear-gradient(var(--panel-solid), var(--panel-solid)), var(--void); }
+.ds-sw-panel-glass { background: linear-gradient(var(--panel-glass), var(--panel-glass)), var(--void); }
+.ds-sw-line { background: linear-gradient(var(--line), var(--line)), var(--void); }
+.ds-sw-6f8bff { background: #6f8bff; }
+.ds-sw-5fa8ff { background: #5fa8ff; }
+.ds-sw-ffb59a { background: #ffb59a; }
+.ds-sw-0b0920 { background: #0b0920; }
+.ds-sw-button { background: linear-gradient(120deg, var(--violet), #6f8bff 45%, var(--cyan)); }
+.ds-sw-rule { background: linear-gradient(90deg, var(--violet), var(--cyan)); }
+.ds-font-sans { font-family: var(--sans); }
+.ds-font-mono { font-family: var(--mono); }
+.ds-spec { display: grid; gap: 0.4rem; padding-top: 0.85rem; border-top: 1px solid rgba(139, 92, 255, 0.12); }
+.ds-spec-label { font-size: 0.82rem; color: var(--dim); }
+@media (min-width: 640px) {
+  .ds-box { padding: 1.9rem 2rem; }
+}
+</style>
+<script src="../../web/scripts/main.js" defer></script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="swarm" class="swarm" aria-hidden="true"></canvas>
+<div class="vignette" aria-hidden="true"></div>
+
+<div class="page">
+  <header class="site-head">
+    <a class="brand" href="#hero">
+      <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <g fill="none" stroke-linecap="round">
+          <path d="M16 16 L16 4 M16 16 L27.4 12.3 M16 16 L23 26 M16 16 L9 26 M16 16 L4.6 12.3" stroke="#29e7ff" stroke-opacity=".7" stroke-width="1.2"/>
+        </g>
+        <circle cx="16" cy="16" r="4.2" fill="#f4f1ff"/>
+        <circle cx="16" cy="4" r="2.4" fill="#29e7ff"/>
+        <circle cx="27.4" cy="12.3" r="2.4" fill="#8b5cff"/>
+        <circle cx="23" cy="26" r="2.4" fill="#ff7a45"/>
+        <circle cx="9" cy="26" r="2.4" fill="#ff7a45"/>
+        <circle cx="4.6" cy="12.3" r="2.4" fill="#8b5cff"/>
+      </svg>
+      <span>Hivemind</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <ul>
+        <li><a href="#color">Tokens</a></li>
+        <li><a href="#surfaces">Components</a></li>
+        <li><a href="#motion">Motion</a></li>
+        <li><a href="./design-system.html" aria-current="page">Design system</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main" tabindex="-1">
+
+    <section id="hero" class="hero hero--page" data-formation="hero" aria-labelledby="hero-title">
+      <div class="wrap hero-inner">
+        <h1 id="hero-title" class="wordmark wordmark--page">Swarm Glyph</h1>
+        <div class="panel hero-panel">
+          <p class="eyebrow xs">Hivemind design system</p>
+          <p class="lede xs">The colors, type, spacing, components and motion behind the Hivemind website, on one page, drawn by the real stylesheet and the real swarm engine.</p>
+          <p class="note">Live formation: hero. The swarm spells the wordmark above. It first draws one alien glyph per letter, then, 1.5 s after the swarm starts, each letter morphs into its English shape left to right, 0.16 s apart, and lights up as its particles lock in. Tap the wordmark to replay it.</p>
+          <p class="hint" aria-hidden="true">Move or touch to scatter the swarm. Press and hold to call it to you. Tap a heading to re-encode it.</p>
+        </div>
+        <nav class="panel toc" aria-label="Page sections">
+          <ol role="list">
+            <li><a href="#start"><span class="toc-num">01</span> Start here</a></li>
+            <li><a href="#color"><span class="toc-num">02</span> Color</a></li>
+            <li><a href="#type"><span class="toc-num">03</span> Type</a></li>
+            <li><a href="#layout"><span class="toc-num">04</span> Layout</a></li>
+            <li><a href="#surfaces"><span class="toc-num">05</span> Surfaces</a></li>
+            <li><a href="#text"><span class="toc-num">06</span> Text and actions</a></li>
+            <li><a href="#code"><span class="toc-num">07</span> Code and data</a></li>
+            <li><a href="#chrome"><span class="toc-num">08</span> Page chrome</a></li>
+            <li><a href="#formations"><span class="toc-num">09</span> Formations</a></li>
+            <li><a href="#agents"><span class="toc-num">10</span> Agents</a></li>
+            <li><a href="#workflow"><span class="toc-num">11</span> Workflow</a></li>
+            <li><a href="#install"><span class="toc-num">12</span> Install</a></li>
+            <li><a href="#motion"><span class="toc-num">13</span> Motion</a></li>
+            <li><a href="#reduced-motion"><span class="toc-num">14</span> Reduced motion</a></li>
+            <li><a href="#rules"><span class="toc-num">15</span> Rules</a></li>
+            <li><a href="#replicate"><span class="toc-num">16</span> Replicate</a></li>
+            <li><a href="#lineage"><span class="toc-num">17</span> Lineage</a></li>
+          </ol>
+        </nav>
+      </div>
+    </section>
+
+    <!-- ===================== 01 START ===================== -->
+    <section id="start" class="section section--tight" data-formation="ambient" aria-labelledby="start-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">01 Start here</p>
+          <h2 id="start-heading" class="xg">How to use this page</h2>
+          <p class="xs">Every swatch, font sample and component below is rendered by the production files, so what you see here is exactly what the website ships. Each component comes with markup you can copy.</p>
+        </header>
+        <div class="split">
+          <div class="panel prose">
+            <p class="kicker">Read me first</p>
+            <h3 class="xg">Viewing this page</h3>
+            <ul class="dots" aria-label="How to view this page">
+              <li>From the repo root run <code>npm ci</code>, then <code>npm run build</code>, then open <code>docs/design/design-system.html</code> directly in a browser. No server is needed.</li>
+              <li>If <code>web/scripts/main.js</code> is missing (not built yet), the static styles still render. The head script drops <code>swarm-live</code> after 4000 ms, so all text stays readable; only the motion is gone.</li>
+              <li>This page lives in the repo only. It is not deployed and is never linked from the website.</li>
+              <li>The source of truth is <code>web/styles/main.css</code> (look) and <code>web/src/main.ts</code> (motion). If this page and those files ever disagree, the files win.</li>
+              <li>This page loads <code>main.js</code> as a classic script, because browsers block module scripts opened from <code>file://</code>. That works only while <code>main.ts</code> has no <code>import</code> or <code>export</code>. If it ever gains one, this page needs <code>type="module"</code> and a local server.</li>
+            </ul>
+          </div>
+          <div class="table-wrap" role="region" aria-label="Glossary of terms used on this page" tabindex="0">
+            <table class="ref" aria-label="Glossary of terms used on this page">
+              <thead>
+                <tr>
+                  <th scope="col">Term</th>
+                  <th scope="col">Plain meaning</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr><td><code>token</code></td><td>A named value reused everywhere, such as <code>--violet</code>. Change it once in <code>:root</code> and every use updates.</td></tr>
+                <tr><td><code>component</code></td><td>A reusable piece of markup plus its class names, such as a card or a button.</td></tr>
+                <tr><td><code>modifier</code></td><td>An extra class with a double dash that varies a component, such as <code>tag--ember</code>.</td></tr>
+                <tr><td><code>breakpoint</code></td><td>A screen width where the layout changes. This system uses 399 px and below, 640 px and up, and 1024 px and up.</td></tr>
+                <tr><td><code>clamp()</code></td><td><code>clamp(min, preferred, max)</code>: a size that scales with the screen but never leaves the min to max range.</td></tr>
+                <tr><td><code>formation</code></td><td>The shape the particle swarm takes while a section is in the middle of the screen.</td></tr>
+                <tr><td><code>decode</code></td><td>The effect where a heading or line starts as alien glyphs or random letters and resolves into real text.</td></tr>
+                <tr><td><code>contrast</code></td><td>How readable text is on its background, as a ratio. WCAG AA asks for at least 4.5:1 for normal text and 3:1 for large text.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 02 COLOR ===================== -->
+    <section id="color" class="section section--tight" data-formation="ambient" aria-labelledby="color-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">02 Color</p>
+          <h2 id="color-heading" class="xg">Color tokens</h2>
+          <p class="xs">All colors are CSS custom properties in <code>:root</code> of <code>main.css</code>, read with <code>var()</code>, for example <code>var(--violet)</code>. The look is a near black void with three neon accents: violet, cyan and ember. Each accent has a lighter <strong>-text</strong> twin for readable type.</p>
+        </header>
+        <ul class="card-grid">
+          <li class="panel card">
+            <h3 class="xg">Void</h3>
+            <span class="ds-chip ds-sw-void" aria-hidden="true"></span>
+            <p><code>--void</code> <code>#05040d</code></p>
+            <p>Page and canvas background. Also the text color on the primary button and the skip link.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Violet</h3>
+            <span class="ds-chip ds-sw-violet" aria-hidden="true"></span>
+            <p><code>--violet</code> <code>#8b5cff</code></p>
+            <p>Main accent: glyphs, glows, borders, the start of every gradient, cluster 2. Not for body text.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Cyan</h3>
+            <span class="ds-chip ds-sw-cyan" aria-hidden="true"></span>
+            <p><code>--cyan</code> <code>#29e7ff</code></p>
+            <p>Focus ring, list dots, the end of every gradient, cluster 1, alternate glyph color.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Ember</h3>
+            <span class="ds-chip ds-sw-ember" aria-hidden="true"></span>
+            <p><code>--ember</code> <code>#ff7a45</code></p>
+            <p>Heat: the decode flash, the flare signal, cluster 4. Used sparingly.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Hot</h3>
+            <span class="ds-chip ds-sw-hot" aria-hidden="true"></span>
+            <p><code>--hot</code> <code>#f4f1ff</code></p>
+            <p>Headings, the wordmark, the skip link fill, the hub cluster 0.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Text</h3>
+            <span class="ds-chip ds-sw-text" aria-hidden="true"></span>
+            <p><code>--text</code> <code>#ece9ff</code></p>
+            <p>Default body text.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Dim</h3>
+            <span class="ds-chip ds-sw-dim" aria-hidden="true"></span>
+            <p><code>--dim</code> <code>#9a94c7</code></p>
+            <p>Secondary text: plate intros, nav links at rest, notes, descriptions.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Violet text</h3>
+            <span class="ds-chip ds-sw-violet-text" aria-hidden="true"></span>
+            <p><code>--violet-text</code> <code>#c4b0ff</code></p>
+            <p>Readable violet: solution kickers, violet tags, code keys, the command prompt mark.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Cyan text</h3>
+            <span class="ds-chip ds-sw-cyan-text" aria-hidden="true"></span>
+            <p><code>--cyan-text</code> <code>#8ff3ff</code></p>
+            <p>Readable cyan: kickers, eyebrows, inline code, table headers, contents numbers.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Ember text</h3>
+            <span class="ds-chip ds-sw-ember-text" aria-hidden="true"></span>
+            <p><code>--ember-text</code> <code>#ffb08f</code></p>
+            <p>Readable ember: problem kickers, ember tags, code literals, the decode front.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Panel solid</h3>
+            <span class="ds-chip ds-sw-panel-solid" aria-hidden="true"></span>
+            <p><code>--panel-solid</code> <code>rgba(10, 8, 25, 0.94)</code></p>
+            <p>Panel and header fill when the browser has no backdrop blur, and always the fill of <code>.table-wrap</code>. Over void it composites to <code>#0a0818</code>.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Panel glass</h3>
+            <span class="ds-chip ds-sw-panel-glass" aria-hidden="true"></span>
+            <p><code>--panel-glass</code> <code>rgba(10, 8, 25, 0.8)</code></p>
+            <p>Panel and header fill when backdrop blur is supported, with <code>blur(14px) saturate(150%)</code>.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Line</h3>
+            <span class="ds-chip ds-sw-line" aria-hidden="true"></span>
+            <p><code>--line</code> <code>rgba(139, 92, 255, 0.24)</code></p>
+            <p>Hairline borders: panels, the header rule, table header rules, these chips.</p>
+          </li>
+        </ul>
+        <ul class="card-grid">
+          <li class="panel card">
+            <h3 class="xg">Gradient mid</h3>
+            <span class="ds-chip ds-sw-6f8bff" aria-hidden="true"></span>
+            <p><code>#6f8bff</code> (literal, no token)</p>
+            <p>The middle stop, at 45%, of the primary button gradient.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Cluster 3 blue</h3>
+            <span class="ds-chip ds-sw-5fa8ff" aria-hidden="true"></span>
+            <p><code>#5fa8ff</code> (literal, no token)</p>
+            <p>Card light color for <code>.agent-card.c3</code>.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Cluster 5 peach</h3>
+            <span class="ds-chip ds-sw-ffb59a" aria-hidden="true"></span>
+            <p><code>#ffb59a</code> (literal, no token)</p>
+            <p>Card light color for <code>.agent-card.c5</code>.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Beat disc</h3>
+            <span class="ds-chip ds-sw-0b0920" aria-hidden="true"></span>
+            <p><code>#0b0920</code> (literal, no token)</p>
+            <p>Fill of the numbered disc on each workflow beat.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Button gradient</h3>
+            <span class="ds-chip ds-sw-button" aria-hidden="true"></span>
+            <p><code>linear-gradient(120deg, var(--violet), #6f8bff 45%, var(--cyan))</code></p>
+            <p>Fill of <code>.btn-primary</code>.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Underline gradient</h3>
+            <span class="ds-chip ds-sw-rule" aria-hidden="true"></span>
+            <p><code>linear-gradient(90deg, var(--violet), var(--cyan))</code></p>
+            <p>The 1 px hover underline on nav and contents links.</p>
+          </li>
+        </ul>
+        <div class="table-wrap" role="region" aria-label="Contrast ratios for each color" tabindex="0">
+          <table class="ref ref--wide" aria-label="Contrast ratios for each color">
+            <thead>
+              <tr>
+                <th scope="col">Color</th>
+                <th scope="col">On void</th>
+                <th scope="col">On panel</th>
+                <th scope="col">Use for text?</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>--violet</code></td><td>4.93</td><td>4.78</td><td>Only just passes AA. Use <code>--violet-text</code> for body text.</td></tr>
+              <tr><td><code>--cyan</code></td><td>13.57</td><td>13.17</td><td>Yes, but prefer <code>--cyan-text</code> for type.</td></tr>
+              <tr><td><code>--ember</code></td><td>7.89</td><td>7.66</td><td>Yes, but prefer <code>--ember-text</code> for type.</td></tr>
+              <tr><td><code>--hot</code></td><td>18.33</td><td>17.79</td><td>Yes: headings.</td></tr>
+              <tr><td><code>--text</code></td><td>17.16</td><td>16.65</td><td>Yes: body.</td></tr>
+              <tr><td><code>--dim</code></td><td>7.22</td><td>7.01</td><td>Yes: secondary text.</td></tr>
+              <tr><td><code>--violet-text</code></td><td>10.68</td><td>10.37</td><td>Yes.</td></tr>
+              <tr><td><code>--cyan-text</code></td><td>15.96</td><td>15.49</td><td>Yes.</td></tr>
+              <tr><td><code>--ember-text</code></td><td>11.52</td><td>11.18</td><td>Yes.</td></tr>
+              <tr><td><code>#6f8bff</code></td><td>6.62</td><td>6.42</td><td>Gradient stop only.</td></tr>
+              <tr><td><code>#5fa8ff</code></td><td>8.29</td><td>8.04</td><td>Card light only.</td></tr>
+              <tr><td><code>#ffb59a</code></td><td>11.97</td><td>11.62</td><td>Card light only.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">"On panel" means <code>--panel-solid</code> composited over <code>--void</code>, which is <code>#0a0818</code>. Button text: <code>--void</code> on the primary gradient measures 4.93 on the violet end, 6.62 at the <code>#6f8bff</code> middle and 13.57 on the cyan end, so it passes AA everywhere. Canvas only colors (drawn by <code>main.ts</code>, never in CSS): cluster labels <code>rgba(206,200,245)</code>, the letter being decoded <code>rgba(255,176,143)</code>, graph edges <code>rgba(41,231,255)</code>.</p>
+      </div>
+    </section>
+
+    <!-- ===================== 03 TYPE ===================== -->
+    <section id="type" class="section section--tight" data-formation="ambient" aria-labelledby="type-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">03 Type</p>
+          <h2 id="type-heading" class="xg">Typography</h2>
+          <p class="xs">Two system font stacks, no web fonts: the browser uses the first font in the list that is installed. Labels are small, uppercase and widely tracked (letter-spacing); headings are bold; body text is 1rem at 1.6 line height.</p>
+        </header>
+        <div class="split">
+          <div class="panel ds-box">
+            <p class="kicker">Sans</p>
+            <p class="ds-font-sans">The swarm acts on your intent. 0123456789</p>
+            <p class="note"><code>--sans</code>: <code>"Avenir Next", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif</code></p>
+          </div>
+          <div class="panel ds-box">
+            <p class="kicker">Mono</p>
+            <p class="ds-font-mono">/plugin install hivemind@brenpike 0123456789</p>
+            <p class="note"><code>--mono</code>: <code>ui-monospace, "SF Mono", "Cascadia Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace</code></p>
+          </div>
+        </div>
+        <div class="table-wrap" role="region" aria-label="Type scale" tabindex="0">
+          <table class="ref ref--wide" aria-label="Type scale">
+            <thead>
+              <tr>
+                <th scope="col">Selector</th>
+                <th scope="col">Font and size</th>
+                <th scope="col">Weight</th>
+                <th scope="col">Tracking and case</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>body</code></td><td>sans 1rem, line height 1.6</td><td>normal</td><td>none</td></tr>
+              <tr><td><code>h1, h2, h3</code></td><td>line height 1.15</td><td>700</td><td>set per component</td></tr>
+              <tr><td><code>.wordmark</code></td><td>sans <code>clamp(2.3rem, 15.5vw, 11.5rem)</code>; from 640 px <code>clamp(2.6rem, 14vw, 11.5rem)</code>; line height 1.05</td><td>700</td><td>0.06em (0.1em from 640 px), uppercase</td></tr>
+              <tr><td><code>.wordmark--page</code></td><td>sans <code>clamp(1.5rem, 7.2vw, 5.5rem)</code> at every width</td><td>700</td><td>0.06em, uppercase</td></tr>
+              <tr><td><code>.plate h2</code></td><td>sans <code>clamp(1.6rem, 5.4vw, 2.6rem)</code></td><td>700</td><td>0.04em</td></tr>
+              <tr><td><code>.lede</code></td><td>sans <code>clamp(1.02rem, 2.6vw, 1.2rem)</code>, line height 1.6</td><td>normal</td><td>none</td></tr>
+              <tr><td><code>.agent-card h3</code></td><td>sans 1.15rem</td><td>700</td><td>0.12em, uppercase</td></tr>
+              <tr><td><code>.card h3</code>, <code>.subpanel h3</code>, <code>.prose h3</code></td><td>sans 1.05rem</td><td>700</td><td>0.12em (card), 0.14em (subpanel, prose), uppercase</td></tr>
+              <tr><td><code>.beat h3</code></td><td>sans 1.02rem</td><td>700</td><td>0.14em, uppercase</td></tr>
+              <tr><td><code>.reqs h3</code></td><td>sans 0.9rem</td><td>700</td><td>0.16em, uppercase</td></tr>
+              <tr><td><code>.brand</code></td><td>sans 0.9rem</td><td>700</td><td>0.28em, uppercase</td></tr>
+              <tr><td><code>.site-nav a</code></td><td>sans 0.72rem (0.68rem at 399 px and below)</td><td>600</td><td>0.18em (0.12em at 399 px and below), uppercase</td></tr>
+              <tr><td><code>.overmind</code></td><td>sans 0.82rem</td><td>600</td><td>0.2em, uppercase</td></tr>
+              <tr><td><code>.btn</code></td><td>sans 0.76rem</td><td>700</td><td>0.18em, uppercase</td></tr>
+              <tr><td><code>.signals dt</code></td><td>sans 0.82rem</td><td>700</td><td>0.16em, uppercase</td></tr>
+              <tr><td><code>.cmd-label</code></td><td>sans 0.78rem</td><td>600</td><td>0.14em, uppercase</td></tr>
+              <tr><td><code>.foot-nav a</code></td><td>sans 0.78rem</td><td>600</td><td>0.14em, uppercase</td></tr>
+              <tr><td><code>.kicker</code></td><td>mono 0.72rem</td><td>normal</td><td>0.22em, uppercase</td></tr>
+              <tr><td><code>.eyebrow</code></td><td>mono 0.7rem</td><td>normal</td><td>0.26em, uppercase</td></tr>
+              <tr><td><code>.toc a</code></td><td>mono 0.72rem</td><td>normal</td><td>0.14em, uppercase</td></tr>
+              <tr><td><code>.kind</code></td><td>mono 0.72rem</td><td>normal</td><td>0.08em</td></tr>
+              <tr><td><code>.tag</code></td><td>mono 0.68rem</td><td>normal</td><td>0.14em, uppercase</td></tr>
+              <tr><td><code>table.ref th</code></td><td>mono 0.68rem (cells: 0.9rem sans)</td><td>normal</td><td>0.16em, uppercase</td></tr>
+              <tr><td><code>.link</code></td><td>mono 0.78rem</td><td>normal</td><td>0.14em, uppercase</td></tr>
+              <tr><td><code>code</code></td><td>mono 0.86em of its parent</td><td>normal</td><td>none</td></tr>
+              <tr><td><code>.code-panel</code> text</td><td>mono 0.78rem (0.84rem from 640 px), line height 1.55</td><td>normal</td><td>none</td></tr>
+              <tr><td><code>.cmd pre code</code></td><td>mono 0.8rem (0.86rem from 640 px), line height 1.55</td><td>normal</td><td>none</td></tr>
+              <tr><td><code>.desc</code>, <code>.beat p</code>, <code>.card p</code></td><td>sans 0.95rem</td><td>normal</td><td>none</td></tr>
+              <tr><td><code>.dots li</code>, <code>.reqs li</code></td><td>sans 0.93rem</td><td>normal</td><td>none</td></tr>
+              <tr><td><code>.note</code>, <code>.foot-inner p</code></td><td>sans 0.85rem</td><td>normal</td><td>none</td></tr>
+              <tr><td><code>.hint</code></td><td>sans 0.78rem</td><td>normal</td><td>0.06em</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel ds-box">
+          <h3 class="xg">Live text specimens</h3>
+          <div class="ds-spec">
+            <p class="ds-spec-label"><code>p.eyebrow</code>: tiny mono label above a hero lede</p>
+            <p class="eyebrow">Claude Code plugin</p>
+          </div>
+          <div class="ds-spec">
+            <p class="ds-spec-label"><code>p.kicker</code>: mono label above a heading</p>
+            <p class="kicker">The six forms</p>
+          </div>
+          <div class="ds-spec">
+            <p class="ds-spec-label"><code>p.lede</code>: the large opening sentence</p>
+            <p class="lede">Multi-agent orchestration framework for Claude Code.</p>
+          </div>
+          <div class="ds-spec">
+            <p class="ds-spec-label"><code>p.overmind</code>: the uppercase violet tagline</p>
+            <p class="overmind">You are the Overmind. The swarm acts on your intent.</p>
+          </div>
+          <div class="ds-spec">
+            <p class="ds-spec-label"><code>p.kind</code>: mono metadata line on an agent card</p>
+            <p class="kind">Bioform · <code>hivemind:overlord</code> · session default</p>
+          </div>
+          <div class="ds-spec">
+            <p class="ds-spec-label"><code>p.note</code>: small dim footnote</p>
+            <p class="note"><code>tmux</code> is needed only for brood mode.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 04 LAYOUT ===================== -->
+    <section id="layout" class="section section--tight" data-formation="ambient" aria-labelledby="layout-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">04 Layout</p>
+          <h2 id="layout-heading" class="xg">Spacing and layout</h2>
+          <p class="xs">The layout is mobile first: base styles are for phones, and two breakpoints (640 px and 1024 px) add columns and room. A third, 399 px and below, only tightens the header nav.</p>
+        </header>
+        <div class="table-wrap" role="region" aria-label="Layout tokens by breakpoint" tabindex="0">
+          <table class="ref ref--wide" aria-label="Layout tokens by breakpoint">
+            <thead>
+              <tr>
+                <th scope="col">Token</th>
+                <th scope="col">Base</th>
+                <th scope="col">640 px and up</th>
+                <th scope="col">1024 px and up</th>
+                <th scope="col">Used for</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>--hdr</code></td><td>0px</td><td>64px</td><td>64px</td><td>Header height; the header becomes sticky from 640 px.</td></tr>
+              <tr><td><code>--pad-l</code>, <code>--pad-r</code></td><td><code>max(1rem, env(safe-area-inset-left))</code></td><td>1.5rem or the safe area</td><td>2rem or the safe area</td><td>Side padding of <code>.wrap</code> and the header; respects phone notches.</td></tr>
+              <tr><td><code>--gut</code></td><td>52px</td><td>92px</td><td>132px</td><td>Left gutter of <code>.flow</code>, where the workflow spine and beat numbers sit.</td></tr>
+              <tr><td><code>--radius</code></td><td>18px</td><td>18px</td><td>18px</td><td>Corner radius of panels and tables. Inner boxes (code, signals) use 12px.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="note">At 399 px and below no token changes; only the header nav tightens (link padding <code>0 0.45rem</code>, 0.68rem text, 0.12em tracking).</p>
+        <div class="table-wrap" role="region" aria-label="Section and panel rhythm" tabindex="0">
+          <table class="ref ref--wide" aria-label="Section and panel rhythm">
+            <thead>
+              <tr>
+                <th scope="col">Selector</th>
+                <th scope="col">Spacing</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>.wrap</code></td><td>Max width 1200px, centered, side padding from <code>--pad-l</code> and <code>--pad-r</code>.</td></tr>
+              <tr><td><code>.section</code></td><td>Vertical padding <code>clamp(4rem, 11vw, 8rem)</code>. Homepage rhythm.</td></tr>
+              <tr><td><code>.section--tight</code></td><td>Vertical padding <code>clamp(3rem, 8vw, 5.5rem)</code>. Deep page rhythm, plus the stack rule below.</td></tr>
+              <tr><td><code>.hero</code></td><td>Full viewport height minus <code>--hdr</code>; padding <code>clamp(2.5rem, 8vh, 5rem)</code> top, <code>clamp(3rem, 8vh, 5rem)</code> bottom.</td></tr>
+              <tr><td><code>.hero--page</code></td><td>Height set by content; padding <code>clamp(3rem, 9vh, 5.5rem)</code> top, <code>clamp(2rem, 6vh, 3.5rem)</code> bottom.</td></tr>
+              <tr><td><code>.plate</code></td><td>Padding 1.5rem 1.4rem (1.9rem 2rem from 640 px), max width 46rem, margin below 1.75rem (1.5rem inside <code>.flow</code>).</td></tr>
+              <tr><td><code>.prose</code></td><td>Padding 1.5rem 1.4rem (1.9rem 2rem from 640 px); children are 0.85rem apart.</td></tr>
+              <tr><td><code>.card</code>, <code>.agent-card</code></td><td>Padding 1.3rem 1.25rem 1.35rem (1.5rem 1.6rem from 640 px).</td></tr>
+              <tr><td><code>.subpanel</code>, <code>.cmd-stack</code>, <code>.reqs</code></td><td>Padding 1.4rem 1.3rem (subpanel), 1.3rem 1.2rem (cmd-stack), 1.3rem 1.25rem (reqs); all 1.7rem 1.8rem from 640 px.</td></tr>
+              <tr><td><code>.flow</code>, <code>.toc</code></td><td>Max width 58rem, centered.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="table-wrap" role="region" aria-label="Grid columns by breakpoint" tabindex="0">
+          <table class="ref ref--wide" aria-label="Grid columns by breakpoint">
+            <thead>
+              <tr>
+                <th scope="col">Grid</th>
+                <th scope="col">Base</th>
+                <th scope="col">640 px and up</th>
+                <th scope="col">1024 px and up</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>.card-grid</code></td><td>1 column, 1rem gap</td><td>2 columns</td><td>3 columns</td></tr>
+              <tr><td><code>.card-grid.card-grid--2</code></td><td>1 column</td><td>2 columns</td><td>2 columns</td></tr>
+              <tr><td><code>.split</code></td><td>1 column, 1rem gap</td><td>1 column</td><td>2 equal columns, 2rem gap</td></tr>
+              <tr><td><code>.agents-grid</code></td><td>1 column, 1rem gap</td><td>1 column</td><td>2 equal columns, 2rem gap</td></tr>
+              <tr><td><code>.install-grid</code></td><td>1 column, 1rem gap</td><td>1 column</td><td>1.35fr and 1fr, 2rem gap, 3rem above</td></tr>
+              <tr><td><code>.subpanels</code></td><td>1 column, 1rem gap, 2.25rem above</td><td>1 column</td><td>2 columns; <code>.signals-panel</code> spans both</td></tr>
+              <tr><td><code>.signals</code></td><td>1 column, 0.85rem gap</td><td>2 columns</td><td>3 columns</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="split">
+          <div class="panel prose">
+            <h3 class="xg">The stack rule</h3>
+            <p>Inside a <code>.section--tight</code>, every direct child of <code>.wrap</code> or <code>.flow</code> after the first gets <strong>1rem</strong> of space above it, the same as the card grid gap. You never add spacing by hand.</p>
+            <p>The selector is wrapped in <code>:where()</code>, so it counts as one class. That decides who wins a tie: a component margin declared <strong>later</strong> in <code>main.css</code> (such as <code>.cta--section</code> or <code>.note</code>) wins, while a component declared <strong>earlier</strong> (such as <code>.subpanels</code>, <code>.install-grid</code> or <code>.cta</code>) loses its own top margin when used as a direct child.</p>
+            <p>A block after a <code>.plate</code> collapses into the plate's larger 1.75rem bottom margin. The homepage has no <code>.section--tight</code>, so the rule never touches it.</p>
+          </div>
+          <div class="code-panel" role="region" aria-label="Stack rule from main.css" tabindex="0">
+            <pre><code>:where(.section--tight) .wrap &gt; * + *,
+:where(.section--tight) .flow &gt; * + * { margin-top: 1rem; }</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 05 SURFACES ===================== -->
+    <section id="surfaces" class="section section--tight" data-formation="ambient" aria-labelledby="surfaces-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">05 Components: surfaces</p>
+          <h2 id="surfaces-heading" class="xg">Panels, plates and cards</h2>
+          <p class="xs">Everything readable sits on a dark glass panel so it stays legible over the swarm. Pair <code>.panel</code> (the glass) with one padding component (plate, prose, card, subpanel and so on).</p>
+        </header>
+
+        <div class="split">
+          <div class="panel ds-box">
+            <p>This box is a bare <code>.panel</code> plus page-local padding. The glass look comes from <code>.panel</code> alone.</p>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">panel</h3>
+            <p>Fill <code>--panel-glass</code> with <code>blur(14px) saturate(150%)</code> when the browser supports backdrop blur, otherwise <code>--panel-solid</code>. 1px <code>--line</code> border, <code>--radius</code> corners, a soft drop shadow and a faint top highlight. It has no padding of its own.</p>
+            <div class="code-panel" role="region" aria-label="Panel markup" tabindex="0">
+              <pre><code>&lt;div class="panel prose"&gt;...&lt;/div&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="split">
+          <header class="panel plate">
+            <p class="kicker">Kicker</p>
+            <h2>Plate heading</h2>
+            <p>Plate intro text is dim, up to 38rem wide. <strong>Strong words</strong> turn bright.</p>
+          </header>
+          <div class="panel prose">
+            <h3 class="xg">plate</h3>
+            <p>The header panel that opens every section: kicker, <code>h2</code>, one intro paragraph. On real pages the kicker and intro get <code>xs</code> and the <code>h2</code> gets <code>xg</code> for the decode effect.</p>
+            <div class="code-panel" role="region" aria-label="Plate markup" tabindex="0">
+              <pre><code>&lt;header class="panel plate"&gt;
+  &lt;p class="kicker xs"&gt;01 Install&lt;/p&gt;
+  &lt;h2 id="install-heading" class="xg"&gt;Install&lt;/h2&gt;
+  &lt;p class="xs"&gt;Intro text with &lt;strong&gt;emphasis&lt;/strong&gt;.&lt;/p&gt;
+&lt;/header&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="panel prose">
+            <p class="kicker">Steps</p>
+            <h3><span class="step-num">1.</span> Numbered heading</h3>
+            <p>Prose paragraphs are dim and 0.85rem apart. <strong>Strong</strong> turns bright.</p>
+            <ul class="dots" aria-label="Example list">
+              <li>Dotted list item</li>
+              <li>Another item</li>
+            </ul>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">prose and step-num</h3>
+            <p>A long form text panel. <code>.step-num</code> is a cyan mono number inside a heading. A <code>.kicker</code> directly above a heading pulls it close.</p>
+            <div class="code-panel" role="region" aria-label="Prose markup" tabindex="0">
+              <pre><code>&lt;div class="panel prose"&gt;
+  &lt;h3 class="xg"&gt;&lt;span class="step-num"&gt;1.&lt;/span&gt; Title&lt;/h3&gt;
+  &lt;p&gt;Body text.&lt;/p&gt;
+  &lt;ul class="dots" aria-label="Details"&gt;
+    &lt;li&gt;Item&lt;/li&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="card-grid">
+          <article class="panel card">
+            <h3>Card title</h3>
+            <p>Card body text at 0.95rem.</p>
+            <span class="tag tag--violet">Tag</span>
+          </article>
+          <article class="panel card">
+            <h3>Second card</h3>
+            <p>Cards share one row height inside the grid.</p>
+            <span class="tag tag--cyan">Cyan tag</span>
+          </article>
+          <article class="panel card">
+            <h3>Third card</h3>
+            <p>Three columns from 1024 px, two from 640 px, one below.</p>
+            <span class="tag tag--ember">Ember tag</span>
+          </article>
+        </div>
+        <div class="split">
+          <div class="panel prose">
+            <h3 class="xg">card and card-grid</h3>
+            <p><code>.card-grid</code> is a list grid; each <code>.panel.card</code> holds an <code>h3</code>, text and an optional tag. Add <code>card-grid--2</code> to cap it at two columns.</p>
+          </div>
+          <div class="code-panel" role="region" aria-label="Card grid markup" tabindex="0">
+            <pre><code>&lt;div class="card-grid card-grid--2"&gt;
+  &lt;article class="panel card"&gt;
+    &lt;h3 class="xg"&gt;Title&lt;/h3&gt;
+    &lt;p&gt;Body text.&lt;/p&gt;
+    &lt;span class="tag tag--violet"&gt;Tag&lt;/span&gt;
+  &lt;/article&gt;
+&lt;/div&gt;</code></pre>
+          </div>
+        </div>
+
+        <div class="split">
+          <article class="panel subpanel" aria-labelledby="ds-subpanel-title">
+            <p class="kicker">Kicker</p>
+            <h3 id="ds-subpanel-title">Subpanel</h3>
+            <p>A secondary panel inside a section. On the homepage, several sit in a <code>.subpanels</code> grid.</p>
+          </article>
+          <div class="panel prose">
+            <h3 class="xg">subpanel and split</h3>
+            <p><code>.subpanel</code> is a padded panel with a kicker, <code>h3</code> and text. <code>.split</code> is the two column layout used throughout this page: stacked on phones, side by side from 1024 px.</p>
+            <div class="code-panel" role="region" aria-label="Subpanel and split markup" tabindex="0">
+              <pre><code>&lt;div class="split"&gt;
+  &lt;article class="panel subpanel" aria-labelledby="x-title"&gt;
+    &lt;p class="kicker xs"&gt;Kicker&lt;/p&gt;
+    &lt;h3 id="x-title" class="xg"&gt;Title&lt;/h3&gt;
+    &lt;p&gt;Body text.&lt;/p&gt;
+  &lt;/article&gt;
+  &lt;div class="panel prose"&gt;...&lt;/div&gt;
+&lt;/div&gt;
+&lt;p class="note"&gt;Small dim footnote.&lt;/p&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+        <p class="note">This is a <code>.note</code>: a small dim footnote that keeps its own 0.75rem top margin even inside the stack rule.</p>
+      </div>
+    </section>
+
+    <!-- ===================== 06 TEXT AND ACTIONS ===================== -->
+    <section id="text" class="section section--tight" data-formation="ambient" aria-labelledby="text-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">06 Components: text and actions</p>
+          <h2 id="text-heading" class="xg">Labels, buttons and lists</h2>
+          <p class="xs">Small uppercase labels give structure; buttons and links are always at least 44 px tall so they are easy to tap.</p>
+        </header>
+
+        <div class="split">
+          <div class="panel ds-box">
+            <p class="kicker">Kicker</p>
+            <p class="kicker kicker--problem">Problem</p>
+            <p class="kicker kicker--solution">Solution</p>
+            <p class="kicker kicker--benefit">Benefit</p>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">kicker and modifiers</h3>
+            <p>Mono, 0.72rem, uppercase, cyan text. The three modifiers recolor it for problem (ember), solution (violet) and benefit (cyan) blocks on the benefits page.</p>
+            <div class="code-panel" role="region" aria-label="Kicker markup" tabindex="0">
+              <pre><code>&lt;p class="kicker xs"&gt;Kicker&lt;/p&gt;
+&lt;p class="kicker kicker--problem xs"&gt;Problem&lt;/p&gt;
+&lt;p class="kicker kicker--solution xs"&gt;Solution&lt;/p&gt;
+&lt;p class="kicker kicker--benefit xs"&gt;Benefit&lt;/p&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="panel hero-panel">
+            <p class="eyebrow">Claude Code plugin</p>
+            <p class="lede">The lede is the large opening sentence of a page.</p>
+            <p class="overmind">You are the Overmind.</p>
+            <div class="cta">
+              <a class="btn btn-primary" href="#install">Primary button</a>
+              <a class="btn btn-ghost" href="#rules">Ghost button</a>
+            </div>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">hero-panel, eyebrow, lede, buttons</h3>
+            <p>The centered hero panel holds an eyebrow, a lede, an optional overmind line and a <code>.cta</code> button row. <code>.btn-primary</code> is dark text on the violet to cyan gradient; <code>.btn-ghost</code> is a thin outlined pill. Both are 48 px tall, glow cyan on hover or focus and shrink to 97% when pressed. Use <code>cta cta--section</code> for a button row at the end of a section.</p>
+            <div class="code-panel" role="region" aria-label="Hero panel and button markup" tabindex="0">
+              <pre><code>&lt;div class="panel hero-panel"&gt;
+  &lt;p class="eyebrow xs"&gt;Eyebrow&lt;/p&gt;
+  &lt;p class="lede xs"&gt;Opening sentence.&lt;/p&gt;
+  &lt;div class="cta"&gt;
+    &lt;a class="btn btn-primary" href="#install"&gt;Install&lt;/a&gt;
+    &lt;a class="btn btn-ghost" href="./functionality.html"&gt;How it works&lt;/a&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="panel ds-box">
+            <p><span class="tag tag--violet">Violet</span><span class="tag tag--cyan">Cyan</span></p>
+            <p><span class="tag tag--ember">Ember</span><span class="tag tag--hot">Hot</span></p>
+            <p><a class="link" href="#lineage">A text link</a></p>
+            <ul class="dots" aria-label="Dotted list example">
+              <li>Dotted list item</li>
+              <li>Same cyan dot as the requirements list</li>
+            </ul>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">tag, link, dots</h3>
+            <p><code>.tag</code> is a mono uppercase label; the color modifiers set its color and drop its auto left margin. Adjacent tags get 0.75rem between them. Inside <code>.card-top</code> a tag is pushed to the right. <code>.link</code> is an underlined mono link, 44 px tall. <code>.dots</code> is a list with glowing cyan dots.</p>
+            <div class="code-panel" role="region" aria-label="Tag, link and dots markup" tabindex="0">
+              <pre><code>&lt;span class="tag tag--violet"&gt;Violet&lt;/span&gt;
+&lt;span class="tag tag--cyan"&gt;Cyan&lt;/span&gt;
+&lt;span class="tag tag--ember"&gt;Ember&lt;/span&gt;
+&lt;span class="tag tag--hot"&gt;Hot&lt;/span&gt;
+&lt;a class="link" href="./functionality.html"&gt;Read more&lt;/a&gt;
+&lt;ul class="dots" aria-label="Details"&gt;
+  &lt;li&gt;Item&lt;/li&gt;
+&lt;/ul&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <article class="panel subpanel signals-panel" aria-labelledby="ds-signals-title">
+          <h3 id="ds-signals-title" class="xg">signals</h3>
+          <dl class="signals">
+            <div class="sig-flare"><dt>Flare</dt><dd>Ember diamond.</dd></div>
+            <div class="sig-reflex"><dt>Reflex</dt><dd>Cyan circle.</dd></div>
+            <div class="sig-decay"><dt>Mutation Decay</dt><dd>Ember triangle.</dd></div>
+            <div class="sig-stagnation"><dt>Creep Stagnation</dt><dd>Violet bar.</dd></div>
+            <div class="sig-root"><dt>Root-Cluster</dt><dd>Cyan rounded diamond.</dd></div>
+            <div class="sig-merge"><dt>Merge-Advised</dt><dd>Hot ringed circle.</dd><dd><span class="tag tag--ember">Advisory</span></dd></div>
+          </dl>
+        </article>
+        <div class="split">
+          <div class="panel prose">
+            <h3 class="xg">How signals work</h3>
+            <p>A <code>dl.signals</code> grid (1, 2, then 3 columns). Each item is a <code>div</code> with one <code>sig-*</code> class; that class sets <code>--s</code>, the color, and the shape of the glowing mark drawn before the <code>dt</code>. A tag can go in an extra <code>dd</code>.</p>
+          </div>
+          <div class="code-panel" role="region" aria-label="Signals markup" tabindex="0">
+            <pre><code>&lt;div class="panel subpanel signals-panel"&gt;
+  &lt;dl class="signals"&gt;
+    &lt;div class="sig-flare"&gt;&lt;dt&gt;Flare&lt;/dt&gt;&lt;dd&gt;Meaning.&lt;/dd&gt;&lt;/div&gt;
+    &lt;div class="sig-merge"&gt;&lt;dt&gt;Merge-Advised&lt;/dt&gt;&lt;dd&gt;Meaning.&lt;/dd&gt;
+      &lt;dd&gt;&lt;span class="tag tag--ember"&gt;Advisory&lt;/span&gt;&lt;/dd&gt;&lt;/div&gt;
+  &lt;/dl&gt;
+&lt;/div&gt;</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 07 CODE AND DATA ===================== -->
+    <section id="code" class="section section--tight" data-formation="ambient" aria-labelledby="code-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">07 Components: code and data</p>
+          <h2 id="code-heading" class="xg">Code, commands and tables</h2>
+          <p class="xs">Code and tables always sit on solid fills, never glass, and scroll sideways instead of wrapping. Every scrolling box is focusable so keyboard users can scroll it.</p>
+        </header>
+
+        <div class="split">
+          <div class="code-panel" role="region" aria-label="Token color example" tabindex="0">
+            <pre><code><span class="t-dim">{</span>
+  <span class="t-key">"enabledPlugins"</span><span class="t-dim">: {</span>
+    <span class="t-str">"hivemind@brenpike"</span><span class="t-dim">: </span><span class="t-lit">true</span>
+  <span class="t-dim">},</span>
+  <span class="t-key">"agent"</span><span class="t-dim">: </span><span class="t-str">"hivemind:overlord"</span>
+<span class="t-dim">}</span>
+<span class="t-hot">t-hot: emphasis</span></code></pre>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">code-panel and t- tokens</h3>
+            <p>A solid dark box (<code>rgba(3, 2, 9, 0.88)</code>, cyan hairline, 12px corners) holding a <code>pre</code>. Color spans: <code>t-key</code> violet text, <code>t-str</code> cyan text, <code>t-lit</code> ember text, <code>t-dim</code> dim, <code>t-hot</code> hot. Escape <code>&lt;</code> as <code>&amp;lt;</code> inside.</p>
+            <div class="code-panel" role="region" aria-label="Code panel markup" tabindex="0">
+              <pre><code>&lt;div class="code-panel" role="region" aria-label="What this code is" tabindex="0"&gt;
+  &lt;pre&gt;&lt;code&gt;&lt;span class="t-key"&gt;"agent"&lt;/span&gt;: &lt;span class="t-str"&gt;"x"&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="code-panel diagram" role="img" aria-label="Diagram example: You to Overlord, which dispatches Cerebrate and Drone." tabindex="0">
+            <pre><code>You
+ └─▶ <span class="t-key">Overlord</span>
+      ├─▶ <span class="t-str">Cerebrate</span>  (plan)
+      └─▶ <span class="t-hot">Drone</span>      (build)</code></pre>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">code-panel diagram</h3>
+            <p>The same box used for a text drawing. Give it <code>role="img"</code> and an <code>aria-label</code> that says in words what the drawing shows, because screen readers cannot read box drawing characters.</p>
+            <div class="code-panel" role="region" aria-label="Diagram markup" tabindex="0">
+              <pre><code>&lt;div class="code-panel diagram" role="img" tabindex="0"
+     aria-label="Plain words description of the drawing."&gt;
+  &lt;pre&gt;&lt;code&gt;You
+ └─▶ &lt;span class="t-key"&gt;Overlord&lt;/span&gt;&lt;/code&gt;&lt;/pre&gt;
+&lt;/div&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="split">
+          <div class="panel cmd-stack">
+            <div class="cmd">
+              <p class="cmd-label"><span>01</span> Add the marketplace</p>
+              <pre><code>/plugin marketplace add https://github.com/brenpike/hivemind.git</code></pre>
+            </div>
+            <div class="cmd">
+              <p class="cmd-label"><span>02</span> Install the plugin</p>
+              <pre><code>/plugin install hivemind@brenpike</code></pre>
+            </div>
+            <p class="cmd-note">The command text selects in one click, ready to copy.</p>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">cmd-stack, cmd, cmd-label, cmd-note</h3>
+            <p>A stack of copyable commands. Each <code>.cmd</code> has a label (with a cyan mono number in a <code>span</code>) and a <code>pre</code> whose code selects all on one click and wraps instead of scrolling. A violet <code>›</code> prompt mark is added by CSS and hidden from screen readers.</p>
+            <div class="code-panel" role="region" aria-label="Command stack markup" tabindex="0">
+              <pre><code>&lt;div class="panel cmd-stack"&gt;
+  &lt;div class="cmd"&gt;
+    &lt;p class="cmd-label"&gt;&lt;span&gt;01&lt;/span&gt; What it does&lt;/p&gt;
+    &lt;pre&gt;&lt;code&gt;/plugin install hivemind@brenpike&lt;/code&gt;&lt;/pre&gt;
+  &lt;/div&gt;
+  &lt;p class="cmd-note"&gt;Small note.&lt;/p&gt;
+&lt;/div&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="table-wrap" role="region" aria-label="Reference table example" tabindex="0">
+          <table class="ref ref--wide" aria-label="Reference table example">
+            <thead>
+              <tr>
+                <th scope="col">Class</th>
+                <th scope="col">What it does</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>.table-wrap</code></td><td>Solid panel that scrolls sideways on narrow screens; focusable.</td></tr>
+              <tr><td><code>table.ref</code></td><td>Full width table, mono cyan headers, faint row rules, 0.9rem cells.</td></tr>
+              <tr><td><code>table.ref--wide</code></td><td>Minimum width 34rem, so wide tables scroll instead of crushing. From 640 px the first column never wraps.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="code-panel" role="region" aria-label="Table markup" tabindex="0">
+          <pre><code>&lt;div class="table-wrap" role="region" aria-label="What the table lists" tabindex="0"&gt;
+  &lt;table class="ref ref--wide" aria-label="What the table lists"&gt;
+    &lt;thead&gt;&lt;tr&gt;&lt;th scope="col"&gt;Name&lt;/th&gt;&lt;th scope="col"&gt;Meaning&lt;/th&gt;&lt;/tr&gt;&lt;/thead&gt;
+    &lt;tbody&gt;&lt;tr&gt;&lt;td&gt;&lt;code&gt;key&lt;/code&gt;&lt;/td&gt;&lt;td&gt;Value.&lt;/td&gt;&lt;/tr&gt;&lt;/tbody&gt;
+  &lt;/table&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 08 PAGE CHROME ===================== -->
+    <section id="chrome" class="section section--tight" data-formation="ambient" aria-labelledby="chrome-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">08 Components: page chrome</p>
+          <h2 id="chrome-heading" class="xg">Header, hero, contents and footer</h2>
+          <p class="xs">The parts every page shares. They are live on this page: the header at the top, the hero and contents list under it, the footer at the bottom. Press Tab once on a fresh load to see the skip link.</p>
+        </header>
+        <div class="split">
+          <div class="panel prose">
+            <h3 class="xg">site-head, brand, site-nav</h3>
+            <p>A glass bar with the brand mark on the left and the primary nav on the right. It scrolls away on phones and sticks to the top from 640 px, at 64 px tall. Nav links are dim and get a violet to cyan underline on hover or focus. The current page's link carries <code>aria-current="page"</code>, which keeps it bright and underlined.</p>
+            <p>The skip link (<code>a.skip</code>) is hidden above the screen until it gets keyboard focus, then slides in.</p>
+          </div>
+          <div class="code-panel" role="region" aria-label="Header markup" tabindex="0">
+            <pre><code>&lt;a class="skip" href="#main"&gt;Skip to content&lt;/a&gt;
+&lt;header class="site-head"&gt;
+  &lt;a class="brand" href="./index.html"&gt;&lt;svg ...&gt;&lt;/svg&gt;&lt;span&gt;Hivemind&lt;/span&gt;&lt;/a&gt;
+  &lt;nav class="site-nav" aria-label="Primary"&gt;
+    &lt;ul&gt;
+      &lt;li&gt;&lt;a href="./functionality.html" aria-current="page"&gt;How it works&lt;/a&gt;&lt;/li&gt;
+      &lt;li&gt;&lt;a href="./benefits.html"&gt;Benefits&lt;/a&gt;&lt;/li&gt;
+      &lt;li&gt;&lt;a href="#install"&gt;Install&lt;/a&gt;&lt;/li&gt;
+      &lt;li&gt;&lt;a href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer"&gt;GitHub&lt;/a&gt;&lt;/li&gt;
+    &lt;/ul&gt;
+  &lt;/nav&gt;
+&lt;/header&gt;</code></pre>
+          </div>
+        </div>
+        <div class="split">
+          <div class="panel prose">
+            <h3 class="xg">hero--page, wordmark--page, toc</h3>
+            <p>The homepage hero (<code>.hero</code>) fills the screen with a giant wordmark. Deep pages add <code>hero--page</code> (height set by content) and <code>wordmark--page</code> (a smaller wordmark, the same size at every width). The wordmark must be a single plain text node of at most 16 letters, because the swarm samples its letter shapes.</p>
+            <p><code>.toc</code> is the contents list under a deep page hero: a centered row of mono links, each with a cyan <code>.toc-num</code>.</p>
+          </div>
+          <div class="code-panel" role="region" aria-label="Deep page hero markup" tabindex="0">
+            <pre><code>&lt;section id="page-hero" class="hero hero--page" data-formation="hero" aria-labelledby="hero-title"&gt;
+  &lt;div class="wrap hero-inner"&gt;
+    &lt;h1 id="hero-title" class="wordmark wordmark--page"&gt;How It Works&lt;/h1&gt;
+    &lt;div class="panel hero-panel"&gt;
+      &lt;p class="eyebrow xs"&gt;Reference&lt;/p&gt;
+      &lt;p class="lede xs"&gt;One sentence about the page.&lt;/p&gt;
+    &lt;/div&gt;
+    &lt;nav class="panel toc" aria-label="Page sections"&gt;
+      &lt;ol role="list"&gt;
+        &lt;li&gt;&lt;a href="#install"&gt;&lt;span class="toc-num"&gt;01&lt;/span&gt; Install&lt;/a&gt;&lt;/li&gt;
+      &lt;/ol&gt;
+    &lt;/nav&gt;
+  &lt;/div&gt;
+&lt;/section&gt;</code></pre>
+          </div>
+        </div>
+        <div class="split">
+          <div class="panel prose">
+            <h3 class="xg">site-foot, foot-inner, foot-nav</h3>
+            <p>A panel at the bottom of the page with a short line of text and a row of underlined links, each 44 px tall.</p>
+          </div>
+          <div class="code-panel" role="region" aria-label="Footer markup" tabindex="0">
+            <pre><code>&lt;footer class="site-foot"&gt;
+  &lt;div class="wrap"&gt;
+    &lt;div class="panel foot-inner"&gt;
+      &lt;p&gt;&lt;strong&gt;Hivemind&lt;/strong&gt; · MIT License&lt;/p&gt;
+      &lt;nav class="foot-nav" aria-label="Footer"&gt;
+        &lt;a href="./index.html"&gt;Home&lt;/a&gt;
+      &lt;/nav&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/footer&gt;</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 09 FORMATIONS (ambient demo) ===================== -->
+    <section id="formations" class="section section--tight" data-formation="ambient" aria-labelledby="formations-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">09 Formations</p>
+          <h2 id="formations-heading" class="xg">The swarm follows the page</h2>
+          <p class="xs">Live formation: ambient (this section). Every particle drifts free with a wandering steer, flocks loosely with its neighbors, and is pulled back if it strays 30 px past the edge of the screen. Any section without a known formation behaves this way.</p>
+        </header>
+        <div class="table-wrap" role="region" aria-label="The five formations" tabindex="0">
+          <table class="ref ref--wide" aria-label="The five formations">
+            <thead>
+              <tr>
+                <th scope="col">data-formation</th>
+                <th scope="col">Markup it needs</th>
+                <th scope="col">What the swarm does</th>
+                <th scope="col">Left free</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>hero</code></td><td><code>#hero-title</code>, one text node</td><td>Fills the wordmark letters, after the glyph sequence.</td><td>14% (8% below 640 px)</td></tr>
+              <tr><td><code>agents</code></td><td><code>#agent-stage</code> and <code>[data-cluster]</code> cards</td><td>Hub and five spokes with curved edges, sparks and decoding labels.</td><td>7%</td></tr>
+              <tr><td><code>workflow</code></td><td>One <code>.flow</code> holding <code>.beat</code> items</td><td>A stream down the gutter spine, slowing at each beat.</td><td>12%</td></tr>
+              <tr><td><code>install</code></td><td>Exactly one <code>[data-orbit]</code></td><td>Four tilted elliptical shells orbiting that element.</td><td>10%</td></tr>
+              <tr><td><code>ambient</code></td><td>Nothing</td><td>Free drift.</td><td>All</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel prose">
+          <h3 class="xg">How a section takes over</h3>
+          <p>A section becomes active when it crosses a thin band in the middle of the screen (an IntersectionObserver with <code>rootMargin: '-48% 0px -48% 0px'</code>; a scroll listener does the same job in old browsers). Each switch restarts the formation: the pull toward the new shape eases in over 1.6 s and never drops below 12%. If a formation's target is missing (no wordmark, no <code>.flow</code>, no <code>[data-orbit]</code>), the swarm falls back to free drift. Without <code>#agent-stage</code> the agents formation uses the whole screen.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 10 AGENTS (live) ===================== -->
+    <section id="agents" class="section" data-formation="agents" aria-labelledby="agents-title">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">10 Live formation: agents</p>
+          <h2 id="agents-title" class="xg">Hub and spokes</h2>
+          <p class="xs">When this section reaches the middle of the screen, the swarm gathers into six clusters around the sticky stage: a hub and five spokes on a ring, joined by curved edges that carry sparks. A label decodes under each cluster. <span aria-hidden="true">Hover or tap a card to light its cluster.</span></p>
+        </header>
+        <div class="agents-grid">
+          <div class="stage" id="agent-stage" aria-hidden="true"></div>
+          <ul class="agent-list">
+            <li class="agent-card panel c0" data-cluster="0">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Overlord</h3><span class="tag">Hub</span></div>
+              <p class="kind xs"><code>.c0</code> · <code>--c: var(--hot)</code></p>
+              <p class="desc xs">The hub at the center. A quarter of the agent particles live here. On the canvas this cluster mixes hot with violet.</p>
+            </li>
+            <li class="agent-card panel c1" data-cluster="1">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Cerebrate</h3><span class="tag">Spoke 1</span></div>
+              <p class="kind xs"><code>.c1</code> · <code>--c: var(--cyan)</code></p>
+              <p class="desc xs">The top spoke. Spokes sit on a ring at 36% of the stage's shorter side, and each holds about 15% of the particles.</p>
+            </li>
+            <li class="agent-card panel c2" data-cluster="2">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Drone</h3><span class="tag">Spoke 2</span></div>
+              <p class="kind xs"><code>.c2</code> · <code>--c: var(--violet)</code></p>
+              <p class="desc xs">Even numbered clusters spin one way and odd numbered clusters the other, so neighbors counter rotate.</p>
+            </li>
+            <li class="agent-card panel c3" data-cluster="3">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Changeling</h3><span class="tag">Spoke 3</span></div>
+              <p class="kind xs"><code>.c3</code> · <code>--c: #5fa8ff</code></p>
+              <p class="desc xs">About 11% of each spoke's particles leave the cluster to travel its curved edge to the hub, glowing ember or cyan.</p>
+            </li>
+            <li class="agent-card panel c4" data-cluster="4">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Local-Reviewer</h3><span class="tag">Spoke 4</span></div>
+              <p class="kind xs"><code>.c4</code> · <code>--c: var(--ember)</code></p>
+              <p class="desc xs">Hover with a mouse, or tap with touch or pen: the card gets <code>is-lit</code>, its cluster swells by 28% and 60% of its particles brighten.</p>
+            </li>
+            <li class="agent-card panel c5" data-cluster="5">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">GitHub-Reviewer</h3><span class="tag">Spoke 5</span></div>
+              <p class="kind xs"><code>.c5</code> · <code>--c: #ffb59a</code></p>
+              <p class="desc xs">Labels start decoding 0.75 s after the formation arrives, each cluster 0.14 s after the one before.</p>
+            </li>
+          </ul>
+        </div>
+        <div class="split">
+          <ul class="agent-list">
+            <li class="agent-card panel c4 is-lit">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3>Static lit card</h3><span class="tag">is-lit</span></div>
+              <p class="kind">No <code>data-cluster</code>, so the engine leaves it alone</p>
+              <p class="desc">This is how a lit card looks: a 1px border and outer glow in the card's own color.</p>
+            </li>
+          </ul>
+          <div class="panel prose">
+            <h3 class="xg">agent-card and cluster lighting</h3>
+            <p>Each card sets two variables through its <code>c0</code> to <code>c5</code> class: <code>--c</code> (node, border, glow) and <code>--ct</code> (tag text). <code>data-cluster</code> must run 0 to 5 in the engine's label order: Overlord, Cerebrate, Drone, Changeling, Local-Reviewer, GitHub-Reviewer. Hover or <code>is-lit</code> fades the glow in over 0.25 s.</p>
+            <div class="code-panel" role="region" aria-label="Agent card markup" tabindex="0">
+              <pre><code>&lt;div class="agents-grid"&gt;
+  &lt;div class="stage" id="agent-stage" aria-hidden="true"&gt;&lt;/div&gt;
+  &lt;ul class="agent-list"&gt;
+    &lt;li class="agent-card panel c0" data-cluster="0"&gt;
+      &lt;div class="card-top"&gt;&lt;span class="node" aria-hidden="true"&gt;&lt;/span&gt;
+        &lt;h3 class="xg"&gt;Overlord&lt;/h3&gt;&lt;span class="tag"&gt;Orchestrator&lt;/span&gt;&lt;/div&gt;
+      &lt;p class="kind xs"&gt;Bioform&lt;/p&gt;
+      &lt;p class="desc xs"&gt;What it does.&lt;/p&gt;
+    &lt;/li&gt;
+    &lt;!-- c1 to c5, data-cluster 1 to 5 --&gt;
+  &lt;/ul&gt;
+&lt;/div&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 11 WORKFLOW (live) ===================== -->
+    <section id="workflow" class="section" data-formation="workflow" aria-labelledby="workflow-title">
+      <div class="wrap">
+        <div class="flow">
+          <header class="panel plate">
+            <p class="kicker xs">11 Live formation: workflow</p>
+            <h2 id="workflow-title" class="xg">A stream through the beats</h2>
+            <p class="xs">When this section reaches the middle of the screen, the swarm pours down a wavy spine in the left gutter, slowing and glowing at each numbered beat. The beats below describe the formation itself.</p>
+          </header>
+          <ol class="beats" aria-label="How the workflow formation moves">
+            <li class="beat panel">
+              <h3 class="xg">Join the spine</h3>
+              <p>The spine runs down the middle of the gutter, at half of the <code>.flow</code> left padding (<code>var(--gut)</code>).</p>
+            </li>
+            <li class="beat panel">
+              <h3 class="xg">Stream</h3>
+              <p>Each particle travels at 60 to 150 px per second, spread up to 12 px to either side of the spine (7 px below 640 px), with the spread pulsing by up to 35%. Between beats the spine curves left and right, up to 26 px.</p>
+            </li>
+            <li class="beat panel">
+              <h3 class="xg">Slow at each beat</h3>
+              <p>Each beat has a node 34 px below its top. Within 70 px of a node, particles slow to as little as 20% speed; within 15 px they turn ember or hot.</p>
+              <p>The numbered disc is CSS: a counter on <code>.beat::before</code>.</p>
+            </li>
+            <li class="beat panel">
+              <h3 class="xg">Loop</h3>
+              <p>A particle that leaves the bottom re-enters at the top. A bright flare rides the spine, crossing the visible stretch about every 9 s.</p>
+            </li>
+          </ol>
+          <div class="split">
+            <div class="panel prose">
+              <h3 class="xg">flow, beats, beat</h3>
+              <p>A workflow section holds exactly one <code>.flow</code> with at least one <code>.beat</code>. The <code>.flow</code> left padding is the gutter; beats are numbered automatically (01, 02, ...) and the number is hidden from screen readers.</p>
+            </div>
+            <div class="code-panel" role="region" aria-label="Workflow markup" tabindex="0">
+              <pre><code>&lt;section id="workflow" class="section" data-formation="workflow" aria-labelledby="workflow-title"&gt;
+  &lt;div class="wrap"&gt;
+    &lt;div class="flow"&gt;
+      &lt;header class="panel plate"&gt;...&lt;/header&gt;
+      &lt;ol class="beats"&gt;
+        &lt;li class="beat panel"&gt;
+          &lt;h3 class="xg"&gt;Route&lt;/h3&gt;
+          &lt;p&gt;What happens.&lt;/p&gt;
+        &lt;/li&gt;
+      &lt;/ol&gt;
+    &lt;/div&gt;
+  &lt;/div&gt;
+&lt;/section&gt;</code></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 12 INSTALL (live) ===================== -->
+    <section id="install" class="section" data-formation="install" aria-labelledby="install-title">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">12 Live formation: install</p>
+          <h2 id="install-title" class="xg">An orbit around one panel</h2>
+          <p class="xs">When this section reaches the middle of the screen, the swarm orbits the one element marked <code>data-orbit</code> (the command panel) in four tilted elliptical shells. The first shell sits 28 px outside it (14 px below 640 px), each next shell 22 px further out sideways (10 px), shells alternate direction, and the outer shell glows ember and hot.</p>
+        </header>
+        <div class="install-grid">
+          <div class="panel cmd-stack" data-orbit>
+            <div class="cmd">
+              <p class="cmd-label"><span>01</span> Install the dev tools</p>
+              <pre><code>npm ci</code></pre>
+            </div>
+            <div class="cmd">
+              <p class="cmd-label"><span>02</span> Build the engine</p>
+              <pre><code>npm run build</code></pre>
+            </div>
+            <div class="cmd">
+              <p class="cmd-label"><span>03</span> Run the contract tests</p>
+              <pre><code>npm test</code></pre>
+            </div>
+            <p class="cmd-note">Run from the repo root. The build compiles <code>web/src/main.ts</code> into <code>web/scripts/main.js</code>.</p>
+          </div>
+          <div class="panel reqs">
+            <div class="group">
+              <h3 class="xg">Source of truth</h3>
+              <ul>
+                <li><strong>web/styles/main.css</strong>: every token and component</li>
+                <li><strong>web/src/main.ts</strong>: the swarm and decode engine</li>
+                <li><strong>web/tests/dom-contract.test.ts</strong>: the page rules</li>
+              </ul>
+            </div>
+            <div class="group">
+              <h3 class="xg">reqs and group</h3>
+              <ul>
+                <li>A <strong>.reqs</strong> panel holds one or more <strong>.group</strong> blocks</li>
+                <li>Groups after the first get a violet divider</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+        <div class="code-panel" role="region" aria-label="Install section markup" tabindex="0">
+          <pre><code>&lt;div class="install-grid"&gt;
+  &lt;div class="panel cmd-stack" data-orbit&gt;...&lt;/div&gt;
+  &lt;div class="panel reqs"&gt;
+    &lt;div class="group"&gt;
+      &lt;h3 class="xg"&gt;Requires&lt;/h3&gt;
+      &lt;ul&gt;&lt;li&gt;&lt;strong&gt;bash&lt;/strong&gt; (macOS, Linux or WSL)&lt;/li&gt;&lt;/ul&gt;
+    &lt;/div&gt;
+    &lt;div class="group"&gt;...&lt;/div&gt;
+  &lt;/div&gt;
+&lt;/div&gt;</code></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 13 MOTION ===================== -->
+    <section id="motion" class="section section--tight" data-formation="ambient" aria-labelledby="motion-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">13 Motion</p>
+          <h2 id="motion-heading" class="xg">Motion guidelines</h2>
+          <p class="xs">Motion has two layers. The canvas swarm behind the page (<code>main.ts</code>) and the text decode on headings and intros (<code>main.ts</code> plus CSS). CSS transitions only move or fade things (transform and opacity); the only color animations are the two short flash keyframes.</p>
+        </header>
+
+        <div class="card-grid card-grid--2">
+          <article class="panel card">
+            <p class="kicker xs">Live demo: xg</p>
+            <h3 class="xg">Tap this heading to re-encode it</h3>
+            <p>Headings with <code>xg</code> start as alien glyphs and resolve letter by letter, each with a short ember flash. After the first decode, a tap or click replays a shorter one.</p>
+          </article>
+          <article class="panel card">
+            <p class="kicker xs">Live demo: xs</p>
+            <h3>Scramble decode</h3>
+            <p class="xs">Text with xs starts as random Greek, Cyrillic and box drawing characters. A bright ember front sweeps through from the start, fast at first and slowing at the end, and the real letters appear behind it.</p>
+          </article>
+        </div>
+        <p class="note">Scroll back up to watch other headings decode; each element decodes only while it is on screen. These demos are static under reduced motion or when <code>main.js</code> is not built.</p>
+
+        <div class="table-wrap" role="region" aria-label="Text decode timings" tabindex="0">
+          <table class="ref ref--wide" aria-label="Text decode timings">
+            <thead>
+              <tr>
+                <th scope="col">Decode</th>
+                <th scope="col">Timing</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>xg</code> duration</td><td><code>clamp(480 + 30 x length, 600, 1500)</code> ms. Each letter resolves at a random moment spread across that time.</td></tr>
+              <tr><td><code>xs</code> duration</td><td><code>clamp(7 x length, 700, 1700)</code> ms. The front moves with an ease out curve; the 3 characters at the front glow ember.</td></tr>
+              <tr><td>Stagger</td><td>Elements entering the screen together start 110 ms apart, capped at 6 steps (660 ms).</td></tr>
+              <tr><td>Hero delay</td><td>Text inside the hero section waits an extra 450 ms.</td></tr>
+              <tr><td>Glyph and character churn</td><td>Every 55 ms, each unresolved glyph swaps with 60% chance; each scrambled character swaps with 40% chance.</td></tr>
+              <tr><td>Letter flash</td><td><code>dx-flash</code> 0.55s ease-out, from ember with a glow to the final color.</td></tr>
+              <tr><td>Clean up</td><td>An <code>xg</code> overlay is removed 560 ms after its last letter; an <code>xs</code> overlay as soon as it finishes.</td></tr>
+              <tr><td>Tap to re-encode</td><td><code>xg</code> headings only, after their first decode: <code>clamp(260 + 22 x length, 420, 900)</code> ms.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-wrap" role="region" aria-label="Wordmark sequence timings" tabindex="0">
+          <table class="ref ref--wide" aria-label="Wordmark sequence timings">
+            <thead>
+              <tr>
+                <th scope="col">Wordmark</th>
+                <th scope="col">Timing</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Glyph phase</td><td>Ghost glyphs fade in (<code>wm-in</code> 1.1s ease-out) and the particles trace them. Every 0.5 s each waiting glyph has a 35% chance to swap shape.</td></tr>
+              <tr><td>First letter</td><td>Starts 1.5 s after the swarm starts; 0.8 s on a tap replay.</td></tr>
+              <tr><td>Letter spacing in time</td><td>Each next letter starts 0.16 s later, plus up to 0.07 s of randomness.</td></tr>
+              <tr><td>Morph</td><td>0.55 s per letter, with a smoothstep ease (slow, fast, slow). The ghost glyph fades out (0.45s opacity transition) as the morph begins.</td></tr>
+              <tr><td>Letter lights</td><td>At 35% of the morph the outline letter flashes (<code>wm-flash</code> 0.9s ease-out, ember stroke and glow fading to faint violet).</td></tr>
+              <tr><td>End</td><td>The overlay is removed 1.5 s after the last letter's start time, once every morph is done.</td></tr>
+              <tr><td>Colors</td><td>Particles are violet and cyan while tracing glyphs, ember and hot while morphing, then mostly hot and violet with some cyan.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-wrap" role="region" aria-label="Pointer interaction" tabindex="0">
+          <table class="ref ref--wide" aria-label="Pointer interaction">
+            <thead>
+              <tr>
+                <th scope="col">Pointer</th>
+                <th scope="col">Behavior</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Scatter</td><td>Particles within 125 px of the pointer (90 px below 640 px) flee it, allowed to move 1.9 times their normal top speed. A touch scatters only while the finger is down.</td></tr>
+              <tr><td>Press and hold</td><td>Hold for 420 ms without moving more than 12 px and the swarm converges on the pointer, circling it at 6 px plus up to 115 px (70 px below 640 px). Scattering stops while holding.</td></tr>
+              <tr><td>Hold ramp</td><td>The hold strength eases toward full at rate 2.6 per second and back to zero at 3.5 per second, so it fades in and out.</td></tr>
+              <tr><td>Cancel</td><td>Pointer cancel, window blur or the mouse leaving the page ends all pointer influence.</td></tr>
+              <tr><td>Keyboard</td><td>None by design. Scatter, press and hold, tap to re-encode, wordmark replay and card lighting are decorative and pointer only; no content depends on them, and their hint copy is aria-hidden.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-wrap" role="region" aria-label="Particle budget and performance" tabindex="0">
+          <table class="ref ref--wide" aria-label="Particle budget and performance">
+            <thead>
+              <tr>
+                <th scope="col">Budget</th>
+                <th scope="col">Rule</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Below 640 px</td><td>Screen area divided by (375 x 812), times 650, kept between 500 and 800 particles.</td></tr>
+              <tr><td>640 to 1023 px</td><td>Screen area divided by (820 x 1100), times 1300, kept between 900 and 1600.</td></tr>
+              <tr><td>1024 px and up</td><td>Screen area divided by (1440 x 900), times 2200, kept between 1800 and 2500.</td></tr>
+              <tr><td>Weak hardware</td><td>4 or fewer CPU cores halves the count. 2 or fewer cores, or 2 GB or less device memory, sets it to 300. Unknown core count counts as 8.</td></tr>
+              <tr><td>Page density</td><td><code>data-density</code> on the canvas multiplies the count, clamped to [0.2, 1], default 1. Deep pages use 0.6.</td></tr>
+              <tr><td>Final clamp</td><td>Never below 300 and never above <code>MAXN</code> = 2600.</td></tr>
+              <tr><td>Sharpness</td><td>Device pixel ratio is capped at 1.5 below 640 px, else 2.</td></tr>
+              <tr><td>Watchdog</td><td>After the first 1.5 s, frame work time is averaged over 2.5 s windows. Above 12 ms per frame (and more than 300 particles), the count drops to 75%.</td></tr>
+              <tr><td>Frame step</td><td>Time between frames is capped at 0.05 s, so a hiccup never makes particles jump.</td></tr>
+              <tr><td>Hidden tab</td><td>The loop stops while the tab is hidden and restarts cleanly when visible.</td></tr>
+              <tr><td>Observers</td><td>Formation switching uses <code>rootMargin: '-48% 0px -48% 0px'</code>; decode visibility uses <code>rootMargin: '0px'</code>.</td></tr>
+              <tr><td>Resize</td><td>Debounced by 120 ms. The canvas is only rebuilt when the width changes, the height grows, or the height shrinks by more than 140 px, so a phone's address bar showing and hiding does not reset it.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-wrap" role="region" aria-label="Flocking parameters" tabindex="0">
+          <table class="ref ref--wide" aria-label="Flocking parameters">
+            <thead>
+              <tr>
+                <th scope="col">Boids</th>
+                <th scope="col">Value</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Neighbor radius</td><td>26 px; at most 10 neighbors are read per particle.</td></tr>
+              <tr><td>Separation</td><td>Radius 9 px (7.5 px below 640 px; tighter in the hero to match the letter sampling). Weight 2400, or 700 once a particle is near its target.</td></tr>
+              <tr><td>Alignment</td><td>Weight 1.1 (match neighbors' velocity).</td></tr>
+              <tr><td>Cohesion</td><td>Weight 1.6 (move toward neighbors' center). Alignment and cohesion fade by up to 85% near a target.</td></tr>
+              <tr><td>Max speed</td><td>400 px per second (320 below 640 px).</td></tr>
+              <tr><td>Arrival</td><td>Desired speed is 3.4 times the distance to the target, up to 1.2 times max speed; steering gain 7. "Near" ramps up inside 90 px and adds extra drag so particles settle.</td></tr>
+              <tr><td>Drag</td><td><code>exp(-0.35 x dt)</code> per frame, rising to <code>exp(-(0.35 + 2.2 x near) x dt)</code> near a target.</td></tr>
+              <tr><td>Wander</td><td>Free particles steer along a slowly turning random direction with strength 150.</td></tr>
+              <tr><td>Hero swirl</td><td>While the hero formation ramps in, particles swirl around the wordmark center (560 sideways, 60 inward), fading out as the formation takes hold.</td></tr>
+              <tr><td>Particle size</td><td>5 to 11 px, with 2.5% of particles 7 px bigger; 0.9 scale in the hero (0.6 below 640 px), 0.8 elsewhere below 640 px, and 1.6 times when lit.</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="table-wrap" role="region" aria-label="CSS transitions and keyframes" tabindex="0">
+          <table class="ref ref--wide" aria-label="CSS transitions and keyframes">
+            <thead>
+              <tr>
+                <th scope="col">Selector</th>
+                <th scope="col">Animates</th>
+                <th scope="col">Timing</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td><code>.btn</code></td><td>transform (press to 97%)</td><td>0.15s ease</td></tr>
+              <tr><td><code>.skip</code></td><td>transform (slide in on focus)</td><td>0.2s ease</td></tr>
+              <tr><td><code>.btn::after</code></td><td>opacity (cyan glow ring)</td><td>0.2s ease</td></tr>
+              <tr><td><code>.site-nav a::after</code>, <code>.toc a::after</code></td><td>transform (underline grows from the left)</td><td>0.25s ease</td></tr>
+              <tr><td><code>.agent-card::after</code></td><td>opacity (cluster glow)</td><td>0.25s ease</td></tr>
+              <tr><td><code>.wm-gl</code></td><td>opacity (ghost glyph fades out)</td><td>0.45s ease</td></tr>
+              <tr><td><code>@keyframes wm-in</code> on <code>.wm-gl</code></td><td>opacity from 0</td><td>1.1s ease-out backwards</td></tr>
+              <tr><td><code>@keyframes dx-flash</code> on <code>.gc.ok</code></td><td>color and text-shadow, ember to the final color</td><td>0.55s ease-out</td></tr>
+              <tr><td><code>@keyframes wm-flash</code> on <code>.wm-l.ok</code></td><td>-webkit-text-stroke-color and text-shadow, ember to faint violet</td><td>0.9s ease-out</td></tr>
+              <tr><td><code>html</code></td><td>smooth scrolling for in-page links</td><td><code>scroll-behavior: smooth</code></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <ul class="card-grid">
+          <li class="panel card">
+            <h3 class="xg">Boids</h3>
+            <p>A classic flocking recipe: each particle steers by three simple rules (keep apart, match neighbors' heading, move toward the group) plus a pull to its formation target. Complex swarm shapes come from these local rules.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Spatial hash</h3>
+            <p>To find neighbors fast, the screen (plus a 120 px margin) is cut into 28 px cells, and particles are sorted into cells each frame. A particle only checks its own cell and the 8 around it.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Glyph lattice</h3>
+            <p>24 alien glyphs drawn on a 20 by 20 grid, used both as SVG symbols for the text decode and as canvas paths. The wordmark letters and the glyphs are painted offscreen and sampled on a staggered grid of points that particles fly to.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Scramble</h3>
+            <p>The decode puts an <code>aria-hidden</code> copy of the text on top, split into one span per character, and lets each span flicker before showing the real letter. The real text stays in the page, so screen readers and copy and paste are never affected.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Glow sprites</h3>
+            <p>Each color is pre-drawn once as a 64 px soft radial dot with a white core. Particles are copies of these images, drawn with <code>lighter</code> compositing so overlaps add up into brighter light, like real glow.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Trails</h3>
+            <p>Instead of clearing the canvas, each frame paints a translucent void color over it (26% per frame at 60 fps), so moving particles leave short fading streaks.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Time based motion</h3>
+            <p>Every movement is multiplied by <code>dt</code>, the seconds since the last frame, so the swarm moves at the same speed on a 60 Hz or a 120 Hz screen.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Smoothstep</h3>
+            <p>The easing curve <code>t x t x (3 - 2t)</code>: starts slow, speeds up, ends slow. Used for formation ramp in and the letter morphs.</p>
+          </li>
+          <li class="panel card">
+            <h3 class="xg">Real text first</h3>
+            <p>The canvas and every overlay are decoration marked <code>aria-hidden</code>. Without JavaScript the page is complete and readable.</p>
+          </li>
+        </ul>
+      </div>
+    </section>
+
+    <!-- ===================== 14 REDUCED MOTION ===================== -->
+    <section id="reduced-motion" class="section section--tight" data-formation="ambient" aria-labelledby="reduced-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">14 Reduced motion</p>
+          <h2 id="reduced-heading" class="xg">When people ask for less motion</h2>
+          <p class="xs">Operating systems have a "reduce motion" setting. The site honors it completely, and switches live if the setting changes while the page is open.</p>
+        </header>
+        <div class="table-wrap" role="region" aria-label="What changes under reduced motion" tabindex="0">
+          <table class="ref ref--wide" aria-label="What changes under reduced motion">
+            <thead>
+              <tr>
+                <th scope="col">Layer</th>
+                <th scope="col">Under reduced motion</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Head gate</td><td>Never adds <code>swarm-live</code>, so the page starts static.</td></tr>
+              <tr><td>CSS</td><td>Every transition and animation is off, smooth scroll becomes instant, the hint line is hidden, the wordmark is solid hot with its violet glow, and decode overlays are hidden.</td></tr>
+              <tr><td>Canvas</td><td>One still picture of the agent graph: hub, spokes and up to 1200 particles (450 below 640 px). Labels appear only on pages with <code>#agent-stage</code>; elsewhere the graph is drawn faintly (alpha 0.4) across the whole screen.</td></tr>
+              <tr><td>Cards</td><td>Hover or tap still lights a cluster; the still picture is redrawn with that cluster lit.</td></tr>
+              <tr><td>This page</td><td>All demos here are static: no wordmark sequence, no decode, no formations.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="panel prose">
+          <h3 class="xg">Fallbacks</h3>
+          <p>If the canvas, its 2D context, <code>requestAnimationFrame</code> or the glow sprites are unavailable, the engine removes <code>swarm-live</code> and the page stays static. If <code>main.js</code> never runs, the head gate's 4000 ms timer removes <code>swarm-live</code>, because the engine never added <code>swarm-ready</code>. Without IntersectionObserver there is no text decode.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 15 RULES ===================== -->
+    <section id="rules" class="section section--tight" data-formation="ambient" aria-labelledby="rules-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">15 Rules</p>
+          <h2 id="rules-heading" class="xg">Accessibility, content and page rules</h2>
+          <p class="xs">These rules come from <code>web/README.md</code> and are pinned by <code>web/tests/dom-contract.test.ts</code>; a page that breaks one fails the tests.</p>
+        </header>
+        <div class="table-wrap" role="region" aria-label="Page contract rules" tabindex="0">
+          <table class="ref ref--wide" aria-label="Page contract rules">
+            <thead>
+              <tr>
+                <th scope="col">Rule</th>
+                <th scope="col">Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td>Head gate</td><td>Exactly one inline script, in the head, before the stylesheet, mentioning <code>swarm-live</code>, <code>swarm-ready</code> and <code>prefers-reduced-motion</code>, byte identical on every page.</td></tr>
+              <tr><td>Assets</td><td>One stylesheet, <code>./styles/main.css</code>, and one module script, <code>./scripts/main.js</code>.</td></tr>
+              <tr><td>Head meta</td><td>Viewport, <code>color-scheme</code> and <code>theme-color</code> present; site pages never set robots noindex. (This page does, because it is not a site page.)</td></tr>
+              <tr><td>Shell</td><td><code>a.skip</code> to <code>#main</code>, a <code>main#main</code>, exactly one <code>canvas#swarm.swarm</code> and a <code>.vignette</code>, both <code>aria-hidden="true"</code>.</td></tr>
+              <tr><td>Nav</td><td>One <code>nav.site-nav</code> labelled Primary with the link texts How it works, Benefits, Install, GitHub. The homepage has no <code>aria-current</code>; a deep page has one, on its own nav link.</td></tr>
+              <tr><td><code>data-formation</code></td><td>Only <code>hero</code>, <code>agents</code>, <code>workflow</code>, <code>install</code>, <code>ambient</code>.</td></tr>
+              <tr><td>Hero</td><td>Exactly one hero section, with one <code>#hero-title.wordmark</code> whose only child is a trimmed text node of 1 to 16 letters (spaces do not count).</td></tr>
+              <tr><td><code>data-orbit</code></td><td>Every install section holds exactly one <code>[data-orbit]</code>.</td></tr>
+              <tr><td><code>.flow</code> and <code>.beat</code></td><td>Every workflow section holds exactly one <code>.flow</code> with at least one <code>.beat</code>.</td></tr>
+              <tr><td>Agents</td><td>The homepage carries <code>#agent-stage</code> and <code>data-cluster</code> 0 to 5 in order. Deep pages set <code>data-density</code> on the canvas, above 0 and at most 1.</td></tr>
+              <tr><td>Decode scope</td><td><code>xg</code> on <code>h2</code> and <code>h3</code> headings; <code>xs</code> on hero eyebrows and ledes, kickers and plate intros. Never inside <code>table</code>, <code>pre</code>, <code>code</code> or <code>.code-panel</code>, and never one decode element inside another.</td></tr>
+              <tr><td>Class allowlist</td><td>Every class on a page must have a selector in <code>main.css</code>. The single exception is <code>xs</code>, which only the engine reads.</td></tr>
+              <tr><td>No inline styles</td><td>No <code>style</code> attributes anywhere.</td></tr>
+              <tr><td>Zero network</td><td>No remote <code>src</code> or <code>href</code> on link, script, img, source, iframe, video or audio. The stylesheet loads nothing remote and imports nothing; <code>main.ts</code> makes no requests. Plain links to GitHub are fine.</td></tr>
+              <tr><td>Relative paths</td><td>No <code>href</code> or <code>src</code> starting with <code>/</code>; the site is served from the <code>/hivemind/</code> base path.</td></tr>
+              <tr><td>Links</td><td>Every <code>#fragment</code> link must point at an id that exists.</td></tr>
+              <tr><td>Section ids</td><td>Each page's section ids are pinned, in order, in the test.</td></tr>
+              <tr><td>No dashes</td><td>No em or en dash characters (or their HTML entities) in pages, styles, source or the web README. Use commas, colons or parentheses.</td></tr>
+              <tr><td>Decorative hints</td><td>On site pages, text that tells readers to tap, hover, touch, click or press and hold sits inside <code>aria-hidden="true"</code>: those effects are decorative and pointer only.</td></tr>
+              <tr><td>Content</td><td>All website copy must trace back to a claim in the repo root <code>README.md</code>. There is no automatic sync.</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="split">
+          <div class="panel prose">
+            <h3 class="xg">Accessibility checklist</h3>
+            <ul class="dots" aria-label="Accessibility checklist">
+              <li>Text meets WCAG AA contrast (see the color table). Use the <code>-text</code> colors for type.</li>
+              <li>Every tap target is at least 44 px tall (buttons 48 px).</li>
+              <li>Keyboard focus shows a 2px cyan outline, 3px away from the element.</li>
+              <li>Scrolling boxes (<code>.table-wrap</code>, <code>.code-panel</code>) get <code>role="region"</code>, an <code>aria-label</code> and <code>tabindex="0"</code>.</li>
+              <li>Text drawings get <code>role="img"</code> and a plain words <code>aria-label</code>.</li>
+              <li>Decoration is <code>aria-hidden</code>; CSS generated marks use the <code>content: ... / ""</code> form so screen readers skip them.</li>
+              <li>Links that open a new tab use <code>target="_blank" rel="noopener noreferrer"</code>.</li>
+              <li>Respect notches: side and top padding use <code>env(safe-area-inset-*)</code>.</li>
+            </ul>
+          </div>
+          <div class="panel prose">
+            <h3 class="xg">Writing style</h3>
+            <ul class="dots" aria-label="Writing style">
+              <li>Plain, short sentences. The themed words (overlord, drone, brood) are explained on first use.</li>
+              <li>Headings in Title or sentence case; CSS turns labels uppercase, so type them normally.</li>
+              <li>No em or en dashes.</li>
+              <li>Every claim traces to the repo root <code>README.md</code>.</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== 16 REPLICATE ===================== -->
+    <section id="replicate" class="section section--tight" data-formation="ambient" aria-labelledby="replicate-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">16 Replicate</p>
+          <h2 id="replicate-heading" class="xg">Start a new page</h2>
+          <p class="xs">Copy this skeleton into <code>web/</code>, fill the sections with the components above, then add the page to <code>PAGE_FILES</code> and <code>SECTION_IDS</code> in <code>web/tests/dom-contract.test.ts</code> and run <code>npm run build</code> and <code>npm test</code>.</p>
+        </header>
+        <div class="code-panel" role="region" aria-label="Minimal page skeleton" tabindex="0">
+          <pre><code>&lt;!DOCTYPE html&gt;
+&lt;html lang="en"&gt;
+&lt;head&gt;
+&lt;meta charset="utf-8"&gt;
+&lt;meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"&gt;
+&lt;meta name="description" content="One sentence about the page."&gt;
+&lt;meta name="color-scheme" content="dark"&gt;
+&lt;meta name="theme-color" content="#05040d"&gt;
+&lt;title&gt;Hivemind | Page title&lt;/title&gt;
+&lt;script&gt;(function () { 'use strict'; var root = document.documentElement; try { if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) { root.classList.add('swarm-live'); setTimeout(function () { if (!root.classList.contains('swarm-ready')) root.classList.remove('swarm-live'); }, 4000); } } catch (e) { /* static presentation stays */ } })();&lt;/script&gt;
+&lt;link rel="stylesheet" href="./styles/main.css"&gt;
+&lt;script type="module" src="./scripts/main.js"&gt;&lt;/script&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;a class="skip" href="#main"&gt;Skip to content&lt;/a&gt;
+&lt;canvas id="swarm" class="swarm" aria-hidden="true" data-density="0.6"&gt;&lt;/canvas&gt;
+&lt;div class="vignette" aria-hidden="true"&gt;&lt;/div&gt;
+
+&lt;div class="page"&gt;
+  &lt;header class="site-head"&gt;
+    &lt;a class="brand" href="./index.html"&gt;&lt;!-- copy the brand svg from index.html --&gt;&lt;span&gt;Hivemind&lt;/span&gt;&lt;/a&gt;
+    &lt;nav class="site-nav" aria-label="Primary"&gt;
+      &lt;ul&gt;
+        &lt;li&gt;&lt;a href="./functionality.html"&gt;How it works&lt;/a&gt;&lt;/li&gt;
+        &lt;li&gt;&lt;a href="./benefits.html"&gt;Benefits&lt;/a&gt;&lt;/li&gt;
+        &lt;li&gt;&lt;a href="./index.html#install"&gt;Install&lt;/a&gt;&lt;/li&gt;
+        &lt;li&gt;&lt;a href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer"&gt;GitHub&lt;/a&gt;&lt;/li&gt;
+      &lt;/ul&gt;
+    &lt;/nav&gt;
+  &lt;/header&gt;
+
+  &lt;main id="main" tabindex="-1"&gt;
+    &lt;section id="page-hero" class="hero hero--page" data-formation="hero" aria-labelledby="hero-title"&gt;
+      &lt;div class="wrap hero-inner"&gt;
+        &lt;h1 id="hero-title" class="wordmark wordmark--page"&gt;Page Title&lt;/h1&gt;
+        &lt;div class="panel hero-panel"&gt;
+          &lt;p class="eyebrow xs"&gt;Eyebrow&lt;/p&gt;
+          &lt;p class="lede xs"&gt;One sentence about the page.&lt;/p&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+
+    &lt;section id="page-topic" class="section section--tight" data-formation="ambient" aria-labelledby="page-topic-heading"&gt;
+      &lt;div class="wrap"&gt;
+        &lt;header class="panel plate"&gt;
+          &lt;p class="kicker xs"&gt;01 Topic&lt;/p&gt;
+          &lt;h2 id="page-topic-heading" class="xg"&gt;Topic&lt;/h2&gt;
+          &lt;p class="xs"&gt;Intro.&lt;/p&gt;
+        &lt;/header&gt;
+        &lt;div class="card-grid"&gt;
+          &lt;article class="panel card"&gt;
+            &lt;h3 class="xg"&gt;Card&lt;/h3&gt;
+            &lt;p&gt;Body text.&lt;/p&gt;
+          &lt;/article&gt;
+        &lt;/div&gt;
+      &lt;/div&gt;
+    &lt;/section&gt;
+  &lt;/main&gt;
+
+  &lt;footer class="site-foot"&gt;
+    &lt;div class="wrap"&gt;
+      &lt;div class="panel foot-inner"&gt;
+        &lt;p&gt;&lt;strong&gt;Hivemind&lt;/strong&gt; · MIT License · Agents never merge. You do.&lt;/p&gt;
+        &lt;nav class="foot-nav" aria-label="Footer"&gt;
+          &lt;a href="./index.html"&gt;Home&lt;/a&gt;
+        &lt;/nav&gt;
+      &lt;/div&gt;
+    &lt;/div&gt;
+  &lt;/footer&gt;
+&lt;/div&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+        </div>
+        <p class="note">On a deep page, mark the matching nav link with <code>aria-current="page"</code> (pointing at <code>./your-page.html</code>), and make every <code>#fragment</code> link resolve. To add a new formation section, follow the agents, workflow and install sections above.</p>
+      </div>
+    </section>
+
+    <!-- ===================== 17 LINEAGE ===================== -->
+    <section id="lineage" class="section section--tight" data-formation="ambient" aria-labelledby="lineage-heading">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker xs">17 Lineage</p>
+          <h2 id="lineage-heading" class="xg">Where Swarm Glyph came from</h2>
+          <p class="xs">The design was chosen from five alien themed prototypes. The base of <code>main.css</code> is copied from prototype 05; the deep page components were added later on the same breakpoints.</p>
+        </header>
+        <div class="card-grid card-grid--2">
+          <article class="panel card">
+            <h3 class="xg">Prototype gallery</h3>
+            <p>All five prototypes side by side.</p>
+            <p><a class="link" href="./prototypes/index.html">Open the gallery</a></p>
+          </article>
+          <article class="panel card">
+            <h3 class="xg">Prototype 05: Swarm Glyph</h3>
+            <p>The single file original this system grew from.</p>
+            <p><a class="link" href="./prototypes/05-swarm-glyph.html">Open prototype 05</a></p>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <div class="wrap">
+      <div class="panel foot-inner">
+        <p><strong>Hivemind design system</strong> · repo only, never deployed</p>
+        <nav class="foot-nav" aria-label="Footer">
+          <a href="#hero">Top</a>
+          <a href="./prototypes/index.html">Prototypes</a>
+          <a href="../../web/index.html">Website source</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,1500 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#05040d">
+<title>Hivemind | Prototype 03: Neural Swarm</title>
+<script>
+(function () {
+  'use strict';
+  try {
+    if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      document.documentElement.classList.add('swarm-live');
+    }
+  } catch (e) { /* static presentation stays */ }
+})();
+</script>
+<style>
+:root {
+  --void: #05040d;
+  --violet: #8b5cff;
+  --cyan: #29e7ff;
+  --ember: #ff7a45;
+  --hot: #f4f1ff;
+  --text: #ece9ff;
+  --dim: #9a94c7;
+  --violet-text: #c4b0ff;
+  --cyan-text: #8ff3ff;
+  --ember-text: #ffb08f;
+  --panel-solid: rgba(10, 8, 25, 0.94);
+  --panel-glass: rgba(10, 8, 25, 0.8);
+  --line: rgba(139, 92, 255, 0.24);
+  --sans: "Avenir Next", "Segoe UI Variable", "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+  --mono: ui-monospace, "SF Mono", "Cascadia Mono", "Cascadia Code", Menlo, Consolas, "Liberation Mono", monospace;
+  --hdr: 0px;
+  --pad-l: max(1rem, env(safe-area-inset-left));
+  --pad-r: max(1rem, env(safe-area-inset-right));
+  --radius: 18px;
+  --gut: 52px;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html {
+  background: var(--void);
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  scroll-behavior: smooth;
+}
+body {
+  margin: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  font-family: var(--sans);
+  font-size: 1rem;
+  line-height: 1.6;
+  background: var(--void);
+  overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+::selection { background: rgba(139, 92, 255, 0.55); color: #fff; }
+a { color: inherit; }
+code, pre { font-family: var(--mono); }
+h1, h2, h3 { margin: 0; font-weight: 700; line-height: 1.15; }
+p { margin: 0; }
+ul, ol, dl { margin: 0; padding: 0; }
+
+/* ---------- decorative layers ---------- */
+.swarm {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100vh;
+  display: block;
+  z-index: 0;
+  pointer-events: none;
+  touch-action: pan-y;
+  background: var(--void);
+}
+.vignette {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(120% 80% at 50% 35%, transparent 45%, rgba(5, 4, 13, 0.72) 100%),
+    radial-gradient(60% 40% at 85% 110%, rgba(255, 122, 69, 0.07), transparent 70%),
+    radial-gradient(50% 40% at 10% -10%, rgba(41, 231, 255, 0.06), transparent 70%);
+}
+.page { position: relative; z-index: 1; }
+
+/* ---------- focus + skip ---------- */
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+.skip {
+  position: fixed;
+  top: max(0.75rem, env(safe-area-inset-top));
+  left: max(0.75rem, env(safe-area-inset-left));
+  z-index: 50;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 1.1rem;
+  border-radius: 999px;
+  background: var(--hot);
+  color: var(--void);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-decoration: none;
+  transform: translateY(-200%);
+  transition: transform 0.2s ease;
+}
+.skip:focus, .skip:focus-visible { transform: translateY(0); }
+
+/* ---------- panels ---------- */
+.panel {
+  position: relative;
+  background: var(--panel-solid);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: 0 24px 60px -34px rgba(0, 0, 0, 0.95), inset 0 1px 0 rgba(244, 241, 255, 0.06);
+}
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .panel, .site-head {
+    background: var(--panel-glass);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    backdrop-filter: blur(14px) saturate(150%);
+  }
+}
+
+/* ---------- header ---------- */
+.site-head {
+  position: relative;
+  z-index: 20;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0 1rem;
+  padding: max(0.25rem, env(safe-area-inset-top)) var(--pad-r) 0.25rem var(--pad-l);
+  background: var(--panel-solid);
+  border-bottom: 1px solid var(--line);
+}
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 44px;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 0.9rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--hot);
+}
+.brand svg { width: 26px; height: 26px; flex: none; }
+.site-nav ul {
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 0.15rem;
+  margin-right: -0.6rem;
+}
+.site-nav a {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 0.6rem;
+  color: var(--dim);
+  text-decoration: none;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+.site-nav a::after {
+  content: "";
+  position: absolute;
+  left: 0.6rem;
+  right: 0.6rem;
+  bottom: 9px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--violet), var(--cyan));
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.25s ease;
+}
+.site-nav a:hover, .site-nav a:focus-visible { color: var(--text); }
+.site-nav a:hover::after, .site-nav a:focus-visible::after { transform: scaleX(1); }
+
+/* ---------- layout ---------- */
+.wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-left: var(--pad-l);
+  padding-right: var(--pad-r);
+}
+.section { padding: clamp(4rem, 11vw, 8rem) 0; }
+.plate { padding: 1.5rem 1.4rem; max-width: 46rem; margin-bottom: 1.75rem; }
+.kicker {
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--cyan-text);
+  margin-bottom: 0.75rem;
+}
+.plate h2 {
+  font-size: clamp(1.6rem, 5.4vw, 2.6rem);
+  letter-spacing: 0.04em;
+  color: var(--hot);
+}
+.plate p:not(.kicker) { margin-top: 0.85rem; color: var(--dim); max-width: 38rem; }
+.plate p:not(.kicker) strong { color: var(--text); font-weight: 600; }
+code {
+  font-size: 0.86em;
+  color: var(--cyan-text);
+  overflow-wrap: anywhere;
+}
+
+/* ---------- hero ---------- */
+.hero {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: calc(100vh - var(--hdr));
+  min-height: calc(100svh - var(--hdr));
+  padding: clamp(2.5rem, 8vh, 5rem) 0 clamp(3rem, 8vh, 5rem);
+  overflow: hidden;
+}
+@supports (overflow: clip) { .hero { overflow: clip; } }
+.hero-inner { width: 100%; }
+.wordmark {
+  display: block;
+  width: max-content;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0.04em 0 0.04em 0.06em;
+  font-size: clamp(2.3rem, 15.5vw, 11.5rem);
+  font-weight: 700;
+  line-height: 1.05;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  text-align: center;
+  color: var(--hot);
+  text-shadow: 0 0 28px rgba(139, 92, 255, 0.55), 0 0 2px rgba(5, 4, 13, 0.9);
+}
+.swarm-live .wordmark {
+  color: transparent;
+  -webkit-text-stroke: 1px rgba(139, 92, 255, 0.26);
+  text-shadow: none;
+}
+.hero-panel {
+  max-width: 40rem;
+  margin: clamp(1.75rem, 6vh, 3.5rem) auto 0;
+  padding: 1.5rem 1.4rem 1.4rem;
+  text-align: center;
+}
+.eyebrow {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  letter-spacing: 0.26em;
+  text-transform: uppercase;
+  color: var(--cyan-text);
+}
+.lede {
+  margin-top: 0.9rem;
+  font-size: clamp(1.02rem, 2.6vw, 1.2rem);
+  line-height: 1.6;
+  color: var(--text);
+}
+.overmind {
+  margin-top: 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--violet-text);
+}
+.cta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1.4rem;
+}
+.btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 0 1.4rem;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  text-decoration: none;
+  transition: transform 0.15s ease;
+}
+.btn::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  box-shadow: 0 0 0 1px rgba(41, 231, 255, 0.6), 0 0 28px -4px rgba(41, 231, 255, 0.7);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+.btn:hover::after, .btn:focus-visible::after { opacity: 1; }
+.btn:active { transform: scale(0.97); }
+.btn-primary {
+  color: var(--void);
+  background: linear-gradient(120deg, var(--violet), #6f8bff 45%, var(--cyan));
+}
+.btn-ghost {
+  color: var(--text);
+  background: rgba(244, 241, 255, 0.04);
+  border: 1px solid rgba(236, 233, 255, 0.38);
+}
+.hint {
+  display: none;
+  margin-top: 1.1rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.06em;
+  color: var(--dim);
+}
+.swarm-live .hint { display: block; }
+
+/* ---------- agents ---------- */
+.agents-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.stage {
+  position: -webkit-sticky;
+  position: sticky;
+  top: var(--hdr);
+  height: min(94vw, 58vh);
+  height: min(94vw, 58svh);
+  pointer-events: none;
+}
+.agent-list { list-style: none; display: grid; gap: 1rem; position: relative; z-index: 1; }
+.agent-card {
+  --c: var(--violet);
+  --ct: var(--violet-text);
+  padding: 1.3rem 1.25rem 1.35rem;
+}
+.agent-card::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  border: 1px solid var(--c);
+  box-shadow: 0 0 34px -8px var(--c), inset 0 0 24px -14px var(--c);
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+.agent-card:hover::after, .agent-card.is-lit::after { opacity: 1; }
+.agent-card.c0 { --c: var(--hot); --ct: var(--hot); }
+.agent-card.c1 { --c: var(--cyan); --ct: var(--cyan-text); }
+.agent-card.c2 { --c: var(--violet); --ct: var(--violet-text); }
+.agent-card.c3 { --c: #5fa8ff; --ct: var(--cyan-text); }
+.agent-card.c4 { --c: var(--ember); --ct: var(--ember-text); }
+.agent-card.c5 { --c: #ffb59a; --ct: var(--ember-text); }
+.card-top { display: flex; align-items: center; flex-wrap: wrap; gap: 0.4rem 0.7rem; }
+.node {
+  width: 12px;
+  height: 12px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--c);
+  box-shadow: 0 0 0 3px rgba(5, 4, 13, 0.9), 0 0 0 4px var(--c), 0 0 18px var(--c);
+}
+.agent-card h3 {
+  font-size: 1.15rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--hot);
+}
+.tag {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ct);
+}
+.kind {
+  margin-top: 0.55rem;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  color: var(--dim);
+}
+.agent-card p.desc { margin-top: 0.7rem; color: var(--text); font-size: 0.95rem; }
+
+/* ---------- workflow ---------- */
+.flow { position: relative; padding-left: var(--gut); max-width: 58rem; margin: 0 auto; }
+.flow .plate { margin-bottom: 1.5rem; }
+.beats { list-style: none; display: grid; gap: 1rem; counter-reset: beat; }
+.beat { counter-increment: beat; padding: 1.15rem 1.2rem 1.25rem; }
+.beat::before {
+  content: counter(beat, decimal-leading-zero);
+  content: counter(beat, decimal-leading-zero) / "";
+  position: absolute;
+  top: 18px;
+  left: calc(var(--gut) * -0.5 - 16px);
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: #0b0920;
+  border: 1px solid rgba(41, 231, 255, 0.6);
+  box-shadow: 0 0 0 4px rgba(5, 4, 13, 0.75), 0 0 22px -2px rgba(41, 231, 255, 0.55);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.beat h3 {
+  font-size: 1.02rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hot);
+}
+.beat p { margin-top: 0.5rem; color: var(--text); font-size: 0.95rem; }
+.beat p + p { color: var(--dim); }
+.subpanels { display: grid; gap: 1rem; margin-top: 2.25rem; }
+.subpanel { padding: 1.4rem 1.3rem; }
+.subpanel h3 {
+  font-size: 1.05rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hot);
+}
+.subpanel > p { margin-top: 0.65rem; color: var(--text); font-size: 0.95rem; }
+.subpanel .kicker { margin-bottom: 0.5rem; }
+.signals { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0.85rem; margin-top: 1rem; }
+.signals div {
+  padding: 0.85rem 0.9rem 0.9rem;
+  border-radius: 12px;
+  background: rgba(5, 4, 13, 0.55);
+  border: 1px solid rgba(139, 92, 255, 0.18);
+}
+.signals dt {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--hot);
+}
+.signals dt::before {
+  content: "";
+  width: 9px;
+  height: 9px;
+  flex: none;
+  background: var(--s, var(--violet));
+  box-shadow: 0 0 12px var(--s, var(--violet));
+}
+.sig-flare { --s: var(--ember); }
+.sig-flare dt::before { transform: rotate(45deg); }
+.sig-reflex { --s: var(--cyan); }
+.sig-reflex dt::before { border-radius: 50%; }
+.sig-decay { --s: var(--ember); }
+.sig-decay dt::before { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.sig-stagnation { --s: var(--violet); }
+.sig-stagnation dt::before { height: 4px; }
+.sig-root { --s: var(--cyan); }
+.sig-root dt::before { border-radius: 2px; transform: rotate(45deg) scale(0.9); }
+.sig-merge { --s: var(--hot); }
+.sig-merge dt::before { border-radius: 50%; box-shadow: 0 0 0 2px var(--void), 0 0 0 3px var(--hot); }
+.signals dd { margin: 0.4rem 0 0; color: var(--dim); font-size: 0.9rem; line-height: 1.55; }
+
+/* ---------- install ---------- */
+.install-grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 1rem; }
+.cmd-stack { padding: 1.3rem 1.2rem; display: grid; gap: 1.1rem; }
+.cmd-label {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text);
+}
+.cmd-label span { font-family: var(--mono); color: var(--cyan-text); letter-spacing: 0.08em; }
+.cmd pre {
+  margin: 0.5rem 0 0;
+  padding: 0.85rem 1rem;
+  border-radius: 12px;
+  background: rgba(3, 2, 9, 0.88);
+  border: 1px solid rgba(41, 231, 255, 0.22);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.cmd pre code {
+  display: block;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: var(--hot);
+  -webkit-user-select: all;
+  user-select: all;
+  cursor: text;
+}
+.cmd pre code::before { content: "› "; content: "› " / ""; color: var(--violet-text); }
+.cmd-note { font-size: 0.82rem; color: var(--dim); }
+.reqs { padding: 1.3rem 1.25rem; }
+.reqs h3 {
+  font-size: 0.9rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--hot);
+}
+.reqs h3 + * { margin-top: 0.6rem; }
+.reqs p, .reqs li { color: var(--text); font-size: 0.93rem; }
+.reqs ul { list-style: none; display: grid; gap: 0.45rem; }
+.reqs li { padding-left: 1.1rem; position: relative; }
+.reqs li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.62em;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cyan);
+  box-shadow: 0 0 8px var(--cyan);
+}
+.reqs li strong { color: var(--hot); font-weight: 600; }
+.reqs .group + .group { margin-top: 1.4rem; padding-top: 1.2rem; border-top: 1px solid rgba(139, 92, 255, 0.18); }
+
+/* ---------- footer ---------- */
+.site-foot {
+  padding: 0 0 max(1.5rem, env(safe-area-inset-bottom));
+}
+.foot-inner {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem 1.5rem;
+  padding: 1.1rem 1.25rem;
+}
+.foot-inner p { color: var(--dim); font-size: 0.85rem; }
+.foot-inner p strong { color: var(--text); font-weight: 600; }
+.foot-nav { display: flex; flex-wrap: wrap; gap: 0 0.5rem; margin: 0 -0.6rem; }
+.foot-nav a {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 0.6rem;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: underline;
+  text-decoration-color: rgba(139, 92, 255, 0.6);
+  text-underline-offset: 5px;
+}
+.foot-nav a:hover { color: var(--hot); text-decoration-color: var(--cyan); }
+
+/* ---------- breakpoints ---------- */
+@media (max-width: 399px) {
+  .site-nav ul { margin-right: -0.45rem; }
+  .site-nav a { padding: 0 0.45rem; font-size: 0.68rem; letter-spacing: 0.12em; }
+  .site-nav a::after { left: 0.45rem; right: 0.45rem; }
+}
+@media (min-width: 640px) {
+  :root { --hdr: 64px; --pad-l: max(1.5rem, env(safe-area-inset-left)); --pad-r: max(1.5rem, env(safe-area-inset-right)); --gut: 92px; }
+  .site-head {
+    position: -webkit-sticky;
+    position: sticky;
+    top: 0;
+    flex-wrap: nowrap;
+    height: var(--hdr);
+    padding-top: 0;
+    padding-bottom: 0;
+  }
+  .plate { padding: 1.9rem 2rem; }
+  .wordmark { font-size: clamp(2.6rem, 14vw, 11.5rem); letter-spacing: 0.1em; padding-left: 0.1em; }
+  .cmd pre code { font-size: 0.86rem; }
+  .hero-panel { padding: 2rem 2.2rem 1.8rem; }
+  .stage { height: min(72vw, 62vh); height: min(72vw, 62svh); }
+  .agent-card { padding: 1.5rem 1.6rem; }
+  .beat { padding: 1.3rem 1.6rem 1.4rem; }
+  .subpanel { padding: 1.7rem 1.8rem; }
+  .signals { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cmd-stack { padding: 1.7rem 1.8rem; }
+  .reqs { padding: 1.7rem 1.8rem; }
+}
+@media (min-width: 1024px) {
+  :root { --pad-l: max(2rem, env(safe-area-inset-left)); --pad-r: max(2rem, env(safe-area-inset-right)); --gut: 132px; }
+  .agents-grid { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2rem; align-items: start; }
+  .stage { height: calc(100vh - var(--hdr)); height: calc(100svh - var(--hdr)); }
+  .agent-list { padding: 8vh 0; }
+  .subpanels { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .subpanels .signals-panel { grid-column: 1 / -1; }
+  .signals { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .install-grid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 2rem; align-items: start; margin-top: 3rem; }
+}
+
+/* ---------- reduced motion ---------- */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { transition: none !important; animation: none !important; }
+  .hint { display: none !important; }
+  .swarm-live .wordmark { color: var(--hot); -webkit-text-stroke: 0; text-shadow: 0 0 28px rgba(139, 92, 255, 0.55); }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<canvas id="swarm" class="swarm" aria-hidden="true"></canvas>
+<div class="vignette" aria-hidden="true"></div>
+
+<div class="page">
+  <header class="site-head">
+    <a class="brand" href="#hero">
+      <svg viewBox="0 0 32 32" aria-hidden="true" focusable="false">
+        <g fill="none" stroke-linecap="round">
+          <path d="M16 16 L16 4 M16 16 L27.4 12.3 M16 16 L23 26 M16 16 L9 26 M16 16 L4.6 12.3" stroke="#29e7ff" stroke-opacity=".7" stroke-width="1.2"/>
+        </g>
+        <circle cx="16" cy="16" r="4.2" fill="#f4f1ff"/>
+        <circle cx="16" cy="4" r="2.4" fill="#29e7ff"/>
+        <circle cx="27.4" cy="12.3" r="2.4" fill="#8b5cff"/>
+        <circle cx="23" cy="26" r="2.4" fill="#ff7a45"/>
+        <circle cx="9" cy="26" r="2.4" fill="#ff7a45"/>
+        <circle cx="4.6" cy="12.3" r="2.4" fill="#8b5cff"/>
+      </svg>
+      <span>Hivemind</span>
+    </a>
+    <nav class="site-nav" aria-label="Primary">
+      <ul>
+        <li><a href="#agents">Agents</a></li>
+        <li><a href="#workflow">Workflow</a></li>
+        <li><a href="#install">Install</a></li>
+        <li><a href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer">GitHub</a></li>
+      </ul>
+    </nav>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <section id="hero" class="hero" data-formation="hero" aria-labelledby="hero-title">
+      <div class="wrap hero-inner">
+        <h1 id="hero-title" class="wordmark">Hivemind</h1>
+        <div class="panel hero-panel">
+          <p class="eyebrow">Prototype 03 · Neural Swarm</p>
+          <p class="lede">Multi-agent orchestration framework for Claude Code. Coordinates specialized bioforms to plan, build, review, and ship code, so you don't have to manage the pipeline yourself.</p>
+          <p class="overmind">You are the Overmind. The swarm acts on your intent.</p>
+          <div class="cta">
+            <a class="btn btn-primary" href="#install">Install the swarm</a>
+            <a class="btn btn-ghost" href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer">View on GitHub</a>
+          </div>
+          <p class="hint">Move or touch to scatter the swarm. Press and hold to call it to you.</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="agents" class="section" data-formation="agents" aria-labelledby="agents-title">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker">The six forms</p>
+          <h2 id="agents-title">One mind, six specialised forms</h2>
+          <p>Four bioforms and two reviewer composites. The <strong>overlord</strong> is the hub; every other form is a spoke it dispatches. Hover or tap a form to light its cluster.</p>
+        </header>
+        <div class="agents-grid">
+          <div class="stage" id="agent-stage" aria-hidden="true"></div>
+          <ul class="agent-list">
+            <li class="agent-card panel c0" data-cluster="0">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3>Overlord</h3><span class="tag">Orchestrator</span></div>
+              <p class="kind">Bioform · <code>hivemind:overlord</code> · session default</p>
+              <p class="desc">Routes each request to a workflow, runs the workflow state machine and its run ledger, and owns branches, checkpoint commits, version bumps, PRs and review routing. It delegates all implementation and never writes code.</p>
+            </li>
+            <li class="agent-card panel c1" data-cluster="1">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3>Cerebrate</h3><span class="tag">Strategist · read-only</span></div>
+              <p class="kind">Bioform</p>
+              <p class="desc">Researches the codebase and returns the directive: STEP-NNN steps with exact file scopes, dependencies, risks and a delivery shape (single, multi or brood). Never writes files.</p>
+            </li>
+            <li class="agent-card panel c2" data-cluster="2">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3>Drone</h3><span class="tag">Builder</span></div>
+              <p class="kind">Bioform</p>
+              <p class="desc">Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step.</p>
+            </li>
+            <li class="agent-card panel c3" data-cluster="3">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3>Changeling</h3><span class="tag">Shaper</span></div>
+              <p class="kind">Bioform</p>
+              <p class="desc">Presentational UI/UX: markup, styling, layout, design tokens, visual states and presentational accessibility, within an assigned file scope.</p>
+            </li>
+            <li class="agent-card panel c4" data-cluster="4">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3>Local-Reviewer</h3><span class="tag">Pre-PR</span></div>
+              <p class="kind">Reviewer composite</p>
+              <p class="desc">Runs an adversarial Codex review loop before the PR exists, up to 10 iterations. Fixes simple findings (2 files or fewer), escalates complex ones, and stops on break-fix cycles. Needs the codex companion.</p>
+            </li>
+            <li class="agent-card panel c5" data-cluster="5">
+              <div class="card-top"><span class="node" aria-hidden="true"></span><h3>GitHub-Reviewer</h3><span class="tag">Post-PR · one-shot</span></div>
+              <p class="kind">Reviewer composite · stateless</p>
+              <p class="desc">Fetches and classifies review feedback, fixes, pushes, replies and resolves threads. Dispatched by the <code>hivemind:github-review-loop</code> skill.</p>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow" class="section" data-formation="workflow" aria-labelledby="workflow-title">
+      <div class="wrap">
+        <div class="flow" id="flow">
+          <header class="panel plate">
+            <p class="kicker">standard-delivery</p>
+            <h2 id="workflow-title">How a run works</h2>
+            <p>Eight beats from your intent to a reviewed pull request. Each state result is normally validated against the workflow definition before the run advances.</p>
+          </header>
+          <ol class="beats">
+            <li class="beat panel">
+              <h3>Route</h3>
+              <p><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session.</p>
+              <p>A trivial one-file change takes the Reflex fast path, which skips the router, the ledger and the cerebrate.</p>
+            </li>
+            <li class="beat panel">
+              <h3>Record</h3>
+              <p>The ledger lives at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, and each state result is normally validated against the workflow definition before the run advances.</p>
+            </li>
+            <li class="beat panel">
+              <h3>Plan</h3>
+              <p>The cerebrate returns the directive.</p>
+            </li>
+            <li class="beat panel">
+              <h3>Branch</h3>
+              <p>Git preflight, then a compliant working branch: <code>feature/</code>, <code>bugfix/</code>, <code>hotfix/</code>, <code>refactor/</code>, <code>chore/</code>, <code>docs/</code>, <code>test/</code>, <code>ci/</code>.</p>
+              <p>The swarm never commits to trunk.</p>
+            </li>
+            <li class="beat panel">
+              <h3>Build in waves</h3>
+              <p><code>hivemind:next-wave</code> selects every ready step whose dependencies are met and whose files do not overlap. Drones and changelings build those steps in parallel, with one checkpoint commit (molt) per wave.</p>
+            </li>
+            <li class="beat panel">
+              <h3>Gate</h3>
+              <p>Version-bump decision (<code>hivemind:bump-type</code>), then validation.</p>
+            </li>
+            <li class="beat panel">
+              <h3>Review</h3>
+              <p>The local-reviewer runs its adversarial review loop. Needs the codex companion.</p>
+            </li>
+            <li class="beat panel">
+              <h3>Ship and watch</h3>
+              <p>The overlord opens the PR and watches it by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour.</p>
+              <p>Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge. You do.</p>
+            </li>
+          </ol>
+
+          <div class="subpanels">
+            <article class="panel subpanel" aria-labelledby="brood-title">
+              <p class="kicker">Parallel strains</p>
+              <h3 id="brood-title">Brood</h3>
+              <p>The cerebrate splits big work into independent strains. After you approve, each strain runs as its own overlord in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and its own detached tmux session, with its own branch and PR. The hatchery watches via <code>hivemind:brood-status</code>.</p>
+            </article>
+            <article class="panel subpanel" aria-labelledby="autonomy-title">
+              <p class="kicker">Who decides</p>
+              <h3 id="autonomy-title">Autonomy</h3>
+              <p>Routine judgment calls are decided and journaled. Irreversible, architectural or safety-relevant calls, and every merge, always come back to you.</p>
+            </article>
+            <article class="panel subpanel signals-panel" aria-labelledby="signals-title">
+              <p class="kicker">What the swarm tells you</p>
+              <h3 id="signals-title">Signals</h3>
+              <dl class="signals">
+                <div class="sig-flare"><dt>Flare</dt><dd>An agent can't safely resolve something; the overlord stops and asks you.</dd></div>
+                <div class="sig-reflex"><dt>Reflex</dt><dd>The trivial fast path.</dd></div>
+                <div class="sig-decay"><dt>Mutation Decay</dt><dd>Fixes undo each other, break-fix-break. A mandatory stop.</dd></div>
+                <div class="sig-stagnation"><dt>Creep Stagnation</dt><dd>Diminishing returns. An advisory early exit.</dd></div>
+                <div class="sig-root"><dt>Root-Cluster</dt><dd>Several findings share one root; plan one structural fix.</dd></div>
+                <div class="sig-merge"><dt>Merge-Advised</dt><dd>A bounded tail remains; the swarm recommends merge, humans merge.</dd></div>
+              </dl>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="install" class="section" data-formation="install" aria-labelledby="install-title">
+      <div class="wrap">
+        <header class="panel plate">
+          <p class="kicker">Join the swarm</p>
+          <h2 id="install-title">Install</h2>
+          <p>Three commands in Claude Code. Select a command to copy it.</p>
+        </header>
+        <div class="install-grid">
+          <div class="panel cmd-stack" id="cmd-stack">
+            <div class="cmd">
+              <p class="cmd-label"><span>01</span> Add the marketplace</p>
+              <pre><code>/plugin marketplace add https://github.com/brenpike/hivemind.git</code></pre>
+            </div>
+            <div class="cmd">
+              <p class="cmd-label"><span>02</span> Install the plugin</p>
+              <pre><code>/plugin install hivemind@brenpike</code></pre>
+            </div>
+            <div class="cmd">
+              <p class="cmd-label"><span>03</span> Seed each project</p>
+              <pre><code>/hivemind:seed-hive</code></pre>
+            </div>
+            <p class="cmd-note">Run the first two once in Claude Code, then seed the hive in each project.</p>
+          </div>
+          <div class="panel reqs">
+            <div class="group">
+              <h3>Requires</h3>
+              <ul>
+                <li><strong>bash</strong> (macOS, Linux or WSL)</li>
+                <li><strong>git</strong>, <strong>gh</strong> and <strong>jq</strong></li>
+                <li>The <strong>Claude Code CLI</strong></li>
+                <li><strong>tmux</strong>: only for brood mode</li>
+              </ul>
+            </div>
+            <div class="group">
+              <h3>Optional companions</h3>
+              <ul>
+                <li><strong>claude-mem</strong>: memory</li>
+                <li><strong>codex</strong>: local pre-PR review</li>
+                <li><strong>caveman</strong>: compressed output</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-foot">
+    <div class="wrap">
+      <div class="panel foot-inner">
+        <p><strong>Hivemind</strong> · MIT License · Agents never merge. You do.</p>
+        <nav class="foot-nav" aria-label="Footer">
+          <a href="./index.html">All prototypes</a>
+          <a href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer">Repository on GitHub</a>
+        </nav>
+      </div>
+    </div>
+  </footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  var doc = document, win = window, root = doc.documentElement;
+  var canvas = doc.getElementById('swarm');
+  var ctx = canvas && canvas.getContext ? canvas.getContext('2d', { alpha: false }) : null;
+  if (!ctx || !win.requestAnimationFrame) { root.classList.remove('swarm-live'); return; }
+
+  var heroWord = doc.getElementById('hero-title');
+  var stage = doc.getElementById('agent-stage');
+  var flow = doc.getElementById('flow');
+  var cmdStack = doc.getElementById('cmd-stack');
+  var header = doc.querySelector('.site-head');
+  var beatEls = flow ? flow.querySelectorAll('.beat') : [];
+  var cards = doc.querySelectorAll('[data-cluster]');
+  var passive = { passive: true };
+  var now = win.performance && win.performance.now ? function () { return win.performance.now(); } : function () { return Date.now(); };
+
+  var TAU = Math.PI * 2;
+  var VIOLET = 0, CYAN = 1, EMBER = 2, HOT = 3, FLARE = 4;
+  var RGB = [[139, 92, 255], [41, 231, 255], [255, 122, 69], [244, 241, 255], [255, 122, 69]];
+  var LABELS = ['OVERLORD', 'CEREBRATE', 'DRONE', 'CHANGELING', 'LOCAL-REVIEWER', 'GITHUB-REVIEWER'];
+  var CLUSTER_COL = [[HOT, VIOLET], [CYAN, CYAN], [VIOLET, VIOLET], [CYAN, VIOLET], [EMBER, EMBER], [EMBER, HOT]];
+  var MONO = 'ui-monospace, Menlo, Consolas, monospace';
+
+  var MAXN = 2600;
+  var px = new Float32Array(MAXN), py = new Float32Array(MAXN);
+  var vx = new Float32Array(MAXN), vy = new Float32Array(MAXN);
+  var tx = new Float32Array(MAXN), ty = new Float32Array(MAXN), tw = new Float32Array(MAXN);
+  var r1 = new Float32Array(MAXN), r2 = new Float32Array(MAXN), r3 = new Float32Array(MAXN);
+  var r4 = new Float32Array(MAXN), r5 = new Float32Array(MAXN), su = new Float32Array(MAXN);
+  var sz = new Float32Array(MAXN);
+  var col = new Uint8Array(MAXN), lit = new Uint8Array(MAXN);
+  var cellOf = new Int32Array(MAXN), order = new Int32Array(MAXN);
+  var cellStart = new Int32Array(2), cellFill = new Int32Array(1);
+  var CELL = 28, GM = 120, cols = 1, rows = 1;
+
+  var N = 0, W = 0, H = 0, dpr = 1, small = false, perfScale = 1;
+  var mode = 'hero', modeT = 0, time = 0, last = 0, raf = 0, live = false;
+  var heroPts = null, heroK = 0, heroW = 0, heroH = 0, heroCx = 0, heroCy = 0, heroStep = 6;
+  var nodes = [], flowW = 0, flowH = 0, spineX = 26, amp = 10;
+  var fLo = 0, fSpan = 1, fOx = 0, fTop = 0, flowAlpha = 0, wig = 0, nd = 1e9;
+  var cx = new Float32Array(6), cy = new Float32Array(6), cr = new Float32Array(6);
+  var qx = new Float32Array(6), qy = new Float32Array(6), litAmt = new Float32Array(6);
+  var litCluster = -1, graphAlpha = 0, bx = 0, by = 0;
+  var pointer = { x: -9999, y: -9999, on: false, down: false, locked: false, moved: false, t0: 0, x0: 0, y0: 0, hold: 0 };
+  var perfAcc = 0, perfFrames = 0, perfWindow = 0, booted = false;
+
+  function clamp(v, a, b) { return v < a ? a : (v > b ? b : v); }
+
+  /* ---------- glow sprites ---------- */
+  function makeSprite(c, core) {
+    var s = doc.createElement('canvas');
+    s.width = s.height = 64;
+    var g = s.getContext('2d');
+    var grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    var rgb = c[0] + ',' + c[1] + ',' + c[2];
+    grad.addColorStop(0, 'rgba(255,255,255,' + core + ')');
+    grad.addColorStop(0.12, 'rgba(' + rgb + ',0.95)');
+    grad.addColorStop(0.34, 'rgba(' + rgb + ',0.3)');
+    grad.addColorStop(0.68, 'rgba(' + rgb + ',0.06)');
+    grad.addColorStop(1, 'rgba(' + rgb + ',0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 64, 64);
+    return s;
+  }
+  var sprites = [];
+  for (var si = 0; si < RGB.length; si++) sprites.push(makeSprite(RGB[si], si === FLARE ? 1 : 0.8));
+
+  /* ---------- sizing ---------- */
+  function computeCount() {
+    var area = W * H, n;
+    if (W < 640) n = clamp(area / (375 * 812) * 650, 500, 800);
+    else if (W < 1024) n = clamp(area / (820 * 1100) * 1300, 900, 1600);
+    else n = clamp(area / (1440 * 900) * 2200, 1800, 2500);
+    var hc = navigator.hardwareConcurrency || 8;
+    if (hc <= 4) n *= 0.5;
+    if (hc <= 2 || (navigator.deviceMemory && navigator.deviceMemory <= 2)) n = 300;
+    return Math.round(clamp(n * perfScale, 300, MAXN));
+  }
+
+  function resize() {
+    var w = root.clientWidth || win.innerWidth;
+    var h = win.innerHeight;
+    var nd2 = Math.min(win.devicePixelRatio || 1, w < 640 ? 1.5 : 2);
+    if (w !== W || h > H || h < H - 140 || nd2 !== dpr || !H) {
+      W = w; H = h; dpr = nd2;
+      canvas.width = Math.round(W * dpr);
+      canvas.height = Math.round(H * dpr);
+      canvas.style.width = W + 'px';
+      canvas.style.height = H + 'px';
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.fillStyle = '#05040d';
+      ctx.fillRect(0, 0, W, H);
+    }
+    small = W < 640;
+    cols = Math.ceil((W + GM * 2) / CELL);
+    rows = Math.ceil((H + GM * 2) / CELL);
+    cellStart = new Int32Array(cols * rows + 1);
+    cellFill = new Int32Array(cols * rows);
+    N = computeCount();
+    heroW = 0; flowW = 0;
+    if (!live && booted) renderStatic();
+  }
+
+  function seed() {
+    for (var i = 0; i < MAXN; i++) {
+      r1[i] = Math.random(); r2[i] = Math.random(); r3[i] = Math.random();
+      r4[i] = Math.random(); r5[i] = Math.random(); su[i] = Math.random();
+      sz[i] = 5 + r3[i] * 6 + (r5[i] > 0.975 ? 7 : 0);
+      px[i] = Math.random() * (W || 800);
+      py[i] = Math.random() * (H || 600);
+      var a = Math.random() * TAU;
+      vx[i] = Math.cos(a) * 80; vy[i] = Math.sin(a) * 80;
+    }
+  }
+
+  /* ---------- hero: sample wordmark from offscreen rasterization ---------- */
+  function rasterHero(r) {
+    heroW = r.width; heroH = r.height; heroK = 0;
+    var w = Math.ceil(r.width), h = Math.ceil(r.height);
+    if (w < 8 || h < 8) return;
+    var oc = doc.createElement('canvas');
+    oc.width = w; oc.height = h;
+    var o = oc.getContext('2d');
+    if (!o) return;
+    var cs = win.getComputedStyle(heroWord);
+    o.font = cs.fontStyle + ' ' + cs.fontWeight + ' ' + cs.fontSize + ' ' + cs.fontFamily;
+    o.fillStyle = '#fff';
+    o.textBaseline = 'alphabetic';
+    var node = heroWord.firstChild, drawn = false;
+    var probe = doc.createElement('span');
+    probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline';
+    heroWord.appendChild(probe);
+    var base = probe.getBoundingClientRect().bottom - r.top;
+    heroWord.removeChild(probe);
+    if (node && node.nodeType === 3 && doc.createRange) {
+      var range = doc.createRange(), text = node.textContent, k, b;
+      for (k = 0; k < text.length; k++) {
+        range.setStart(node, k); range.setEnd(node, k + 1);
+        b = range.getBoundingClientRect();
+        if (!b.width) continue;
+        o.fillText(text.charAt(k).toUpperCase(), b.left - r.left, base);
+        drawn = true;
+      }
+    }
+    if (!drawn) {
+      o.textAlign = 'center'; o.textBaseline = 'middle';
+      o.fillText(heroWord.textContent.toUpperCase(), w / 2, h / 2);
+    }
+    var data = o.getImageData(0, 0, w, h).data, x, y, filled = 0;
+    for (y = 0; y < h; y += 2) for (x = 0; x < w; x += 2) if (data[(y * w + x) * 4 + 3] > 128) filled++;
+    if (!filled) return;
+    var need = Math.max(120, N * 0.86);
+    var step = Math.max(2, Math.sqrt(filled * 4 / need));
+    heroStep = step;
+    var pts = [], row = 0;
+    for (y = step * 0.5; y < h; y += step, row++) {
+      for (x = (row & 1) ? step * 0.5 : 0; x < w; x += step) {
+        var xi = x | 0, yi = y | 0;
+        if (data[(yi * w + xi) * 4 + 3] > 128) pts.push(x, y);
+      }
+    }
+    var cnt = pts.length / 2, i, j, t;
+    for (i = cnt - 1; i > 0; i--) {
+      j = (Math.random() * (i + 1)) | 0;
+      t = pts[i * 2]; pts[i * 2] = pts[j * 2]; pts[j * 2] = t;
+      t = pts[i * 2 + 1]; pts[i * 2 + 1] = pts[j * 2 + 1]; pts[j * 2 + 1] = t;
+    }
+    heroPts = new Float32Array(pts);
+    heroK = cnt;
+  }
+
+  function heroTargets() {
+    if (!heroWord) return freeAll();
+    var r = heroWord.getBoundingClientRect();
+    if (Math.abs(r.width - heroW) > 1 || Math.abs(r.height - heroH) > 1) rasterHero(r);
+    heroCx = r.left + r.width * 0.5; heroCy = r.top + r.height * 0.5;
+    for (var i = 0; i < N; i++) {
+      if (r1[i] < (small ? 0.08 : 0.14) || !heroK) { tw[i] = 0; col[i] = r2[i] < 0.55 ? VIOLET : CYAN; lit[i] = 0; continue; }
+      var k = (i % heroK) * 2;
+      tx[i] = r.left + heroPts[k] + Math.sin(time * 1.3 + r2[i] * 40) * 1.1;
+      ty[i] = r.top + heroPts[k + 1] + Math.cos(time * 1.1 + r3[i] * 40) * 1.1;
+      tw[i] = 1;
+      col[i] = r2[i] < 0.42 ? HOT : (r2[i] < 0.86 ? VIOLET : CYAN);
+      lit[i] = 0;
+    }
+  }
+
+  /* ---------- agents: six clusters, hub + spokes ---------- */
+  function clusterOf(a) {
+    if (a < 0.25) return 0;
+    var k = 1 + ((a - 0.25) / 0.15) | 0;
+    return k > 5 ? 5 : k;
+  }
+  function layoutClusters(rect, tm) {
+    var R = Math.min(rect.width, rect.height);
+    var mx = rect.left + rect.width * 0.5, my = rect.top + rect.height * 0.5;
+    var ring = R * 0.36;
+    cx[0] = mx + Math.sin(tm * 0.3) * R * 0.006; cy[0] = my; cr[0] = R * 0.115;
+    for (var k = 1; k < 6; k++) {
+      var a = -Math.PI / 2 + (k - 1) * TAU / 5 + Math.sin(tm * 0.12) * 0.04;
+      var rr = ring + Math.sin(tm * 0.5 + k * 1.7) * R * 0.012;
+      cx[k] = mx + Math.cos(a) * rr; cy[k] = my + Math.sin(a) * rr; cr[k] = R * 0.075;
+      var dx = cx[k] - cx[0], dy = cy[k] - cy[0], bend = Math.sin(tm * 0.45 + k * 2.1) * 0.12 + 0.06;
+      qx[k] = (cx[0] + cx[k]) * 0.5 - dy * bend;
+      qy[k] = (cy[0] + cy[k]) * 0.5 + dx * bend;
+    }
+  }
+  function bez(k, t) {
+    t = 0.08 + t * 0.84;
+    var m = 1 - t;
+    bx = m * m * cx[0] + 2 * m * t * qx[k] + t * t * cx[k];
+    by = m * m * cy[0] + 2 * m * t * qy[k] + t * t * cy[k];
+  }
+  function agentPoint(i, tm) {
+    var k = clusterOf(r1[i]);
+    col[i] = CLUSTER_COL[k][(i & 3) === 0 ? 1 : 0];
+    lit[i] = litAmt[k] > 0.5 && r4[i] < 0.6 ? 1 : 0;
+    if (r2[i] < 0.11 && k > 0) {
+      var t = (tm * (0.07 + r3[i] * 0.09) + r4[i]) % 1;
+      if (i & 1) t = 1 - t;
+      bez(k, t);
+      tx[i] = bx; ty[i] = by;
+      col[i] = (i & 1) ? EMBER : CYAN;
+      return;
+    }
+    var spin = (0.18 + (1 - r3[i]) * 0.45) * (k & 1 ? -1 : 1);
+    var ang = r4[i] * TAU + tm * spin;
+    var rad = cr[k] * (0.18 + Math.sqrt(r3[i]) * 0.92) * (1 + litAmt[k] * 0.28 + Math.sin(tm * 2 + r1[i] * 30) * 0.05);
+    tx[i] = cx[k] + Math.cos(ang) * rad;
+    ty[i] = cy[k] + Math.sin(ang) * rad * 0.92;
+  }
+  function agentTargets(dt) {
+    var r = stage ? stage.getBoundingClientRect() : { left: 0, top: 0, width: W, height: H };
+    layoutClusters(r, time);
+    for (var k = 0; k < 6; k++) litAmt[k] += ((k === litCluster ? 1 : 0) - litAmt[k]) * Math.min(1, dt * 6);
+    for (var i = 0; i < N; i++) {
+      if (r5[i] < 0.07) { tw[i] = 0; col[i] = r2[i] < 0.5 ? VIOLET : CYAN; lit[i] = 0; continue; }
+      agentPoint(i, time);
+      tw[i] = 1;
+    }
+  }
+
+  /* ---------- workflow: stream along the spine through eight beats ---------- */
+  function layoutFlow(r) {
+    flowW = r.width; flowH = r.height;
+    var pl = parseFloat(win.getComputedStyle(flow).paddingLeft) || 52;
+    spineX = pl * 0.5;
+    amp = Math.min(pl * 0.3, 26);
+    nodes = [];
+    for (var i = 0; i < beatEls.length; i++) nodes.push(beatEls[i].getBoundingClientRect().top - r.top + 34);
+  }
+  function flowSample(ly) {
+    var n = nodes.length, k;
+    nd = 1e9;
+    for (k = 0; k < n; k++) { var d = Math.abs(ly - nodes[k]); if (d < nd) nd = d; }
+    if (!n) { wig = Math.sin(ly * 0.012) * amp * 0.6; return; }
+    if (ly < nodes[0]) { wig = Math.sin((ly - nodes[0]) * 0.012) * amp * 0.6; return; }
+    if (ly >= nodes[n - 1]) { wig = Math.sin((ly - nodes[n - 1]) * 0.012) * amp * 0.6; return; }
+    for (k = 0; k < n - 1; k++) {
+      if (ly < nodes[k + 1]) {
+        wig = Math.sin((ly - nodes[k]) / (nodes[k + 1] - nodes[k]) * Math.PI) * amp * (k & 1 ? 1 : -1);
+        return;
+      }
+    }
+    wig = 0;
+  }
+  function flowTargets(dt) {
+    if (!flow) return freeAll();
+    var r = flow.getBoundingClientRect();
+    if (Math.abs(r.width - flowW) > 1 || Math.abs(r.height - flowH) > 1) layoutFlow(r);
+    var lo = Math.max(r.top, -40), hi = Math.min(r.bottom, H + 40);
+    if (hi - lo < 80) hi = lo + 80;
+    var span = hi - lo, ox = r.left + spineX, lane = small ? 7 : 12;
+    fLo = lo; fSpan = span; fOx = ox; fTop = r.top;
+    for (var i = 0; i < N; i++) {
+      if (r1[i] < 0.12) { tw[i] = 0; col[i] = r2[i] < 0.5 ? VIOLET : CYAN; lit[i] = 0; continue; }
+      var y = lo + su[i] * span;
+      flowSample(y - r.top);
+      var speed = (60 + r2[i] * 90) * (0.2 + 0.8 * Math.min(1, nd / 70));
+      su[i] += speed * dt / span;
+      if (su[i] >= 1) {
+        su[i] -= 1;
+        px[i] = ox + (r3[i] - 0.5) * 8; py[i] = lo - 6; vx[i] = 0; vy[i] = speed;
+        y = lo; flowSample(y - r.top);
+      }
+      var lat = (r3[i] + r4[i] - 1) * lane * (1 + 0.35 * Math.sin(time * 2 + y * 0.02));
+      tx[i] = ox + wig + lat; ty[i] = y; tw[i] = 1;
+      col[i] = nd < 15 ? (r4[i] < 0.5 ? EMBER : HOT) : (r2[i] < 0.62 ? CYAN : VIOLET);
+      lit[i] = 0;
+    }
+  }
+
+  /* ---------- install: orbit the command block ---------- */
+  function orbitTargets() {
+    if (!cmdStack) return freeAll();
+    var r = cmdStack.getBoundingClientRect();
+    var mx = r.left + r.width * 0.5, my = r.top + r.height * 0.5, hw = r.width * 0.5, hh = r.height * 0.5;
+    var ex0 = small ? 14 : 28, shellX = small ? 10 : 22, shellY = small ? 9 : 18;
+    for (var i = 0; i < N; i++) {
+      if (r1[i] < 0.1) { tw[i] = 0; col[i] = r2[i] < 0.5 ? VIOLET : CYAN; lit[i] = 0; continue; }
+      var sh = i & 3;
+      var rx = hw + ex0 + sh * shellX + r2[i] * shellX * 0.8;
+      var ry = hh + ex0 * 0.8 + sh * shellY + r2[i] * shellY * 0.7;
+      var w = (0.2 + 0.1 * (3 - sh)) * (sh & 1 ? -1 : 1) * (0.85 + r3[i] * 0.3);
+      var th = r4[i] * TAU + time * w;
+      var tilt = (sh - 1.5) * 0.06 + Math.sin(time * 0.1) * 0.03;
+      var ex = Math.cos(th) * rx, ey = Math.sin(th) * ry, ct = Math.cos(tilt), st = Math.sin(tilt);
+      tx[i] = mx + ex * ct - ey * st; ty[i] = my + ex * st + ey * ct; tw[i] = 1;
+      col[i] = sh === 3 ? (r5[i] < 0.3 ? EMBER : HOT) : (sh === 1 ? VIOLET : CYAN);
+      lit[i] = 0;
+    }
+  }
+
+  function freeAll() {
+    for (var i = 0; i < N; i++) { tw[i] = 0; col[i] = r2[i] < 0.5 ? VIOLET : CYAN; lit[i] = 0; }
+  }
+
+  function computeTargets(dt) {
+    if (mode === 'hero') heroTargets();
+    else if (mode === 'agents') agentTargets(dt);
+    else if (mode === 'workflow') flowTargets(dt);
+    else orbitTargets();
+    var h = pointer.hold;
+    if (h > 0.002) {
+      var reach = small ? 70 : 115;
+      for (var i = 0; i < N; i++) {
+        var a = r4[i] * TAU + time * (1.1 + r3[i]) * (i & 1 ? 1 : -1);
+        var rad = 6 + r2[i] * r2[i] * reach;
+        var gx = pointer.x + Math.cos(a) * rad, gy = pointer.y + Math.sin(a) * rad;
+        if (tw[i] > 0) { tx[i] += (gx - tx[i]) * h; ty[i] += (gy - ty[i]) * h; }
+        else { tx[i] = gx; ty[i] = gy; }
+        tw[i] += (1 - tw[i]) * h;
+      }
+    }
+  }
+
+  /* ---------- spatial hash ---------- */
+  function buildGrid() {
+    var nCells = cols * rows, i, c, gx, gy;
+    for (c = 0; c <= nCells; c++) cellStart[c] = 0;
+    for (i = 0; i < N; i++) {
+      gx = ((px[i] + GM) / CELL) | 0; gy = ((py[i] + GM) / CELL) | 0;
+      if (gx < 0) gx = 0; else if (gx >= cols) gx = cols - 1;
+      if (gy < 0) gy = 0; else if (gy >= rows) gy = rows - 1;
+      c = gy * cols + gx; cellOf[i] = c; cellStart[c + 1]++;
+    }
+    for (c = 0; c < nCells; c++) cellStart[c + 1] += cellStart[c];
+    for (c = 0; c < nCells; c++) cellFill[c] = cellStart[c];
+    for (i = 0; i < N; i++) { c = cellOf[i]; order[cellFill[c]++] = i; }
+  }
+
+  /* ---------- boids + arrival ---------- */
+  function simulate(dt) {
+    var t = Math.min(1, modeT / 1.6);
+    var form = Math.max(0.12, t * t * (3 - 2 * t));
+    form = Math.max(form, pointer.hold);
+    var maxS = small ? 320 : 400;
+    var sepR = small ? 7.5 : 9;
+    if (mode === 'hero' && pointer.hold < 0.5) sepR = Math.min(sepR, heroStep * 0.85);
+    var sepR2 = sepR * sepR, nbR2 = 26 * 26;
+    var flee = pointer.on && pointer.hold < 0.4, fr = small ? 90 : 125, fr2 = fr * fr;
+    var swirl = mode === 'hero' ? (1 - form) : 0;
+    var drag0 = Math.exp(-dt * 0.35);
+    for (var i = 0; i < N; i++) {
+      var x = px[i], y = py[i], ux = vx[i], uy = vy[i], ax = 0, ay = 0;
+      var c = cellOf[i], ccx = c % cols, ccy = (c / cols) | 0;
+      var sx = 0, sy = 0, alx = 0, aly = 0, chx = 0, chy = 0, cnt = 0;
+      outer:
+      for (var gy = ccy - 1; gy <= ccy + 1; gy++) {
+        if (gy < 0 || gy >= rows) continue;
+        for (var gx = ccx - 1; gx <= ccx + 1; gx++) {
+          if (gx < 0 || gx >= cols) continue;
+          var cc = gy * cols + gx, end = cellStart[cc + 1];
+          for (var j = cellStart[cc]; j < end; j++) {
+            var o = order[j];
+            if (o === i) continue;
+            var dx = x - px[o], dy = y - py[o], d2 = dx * dx + dy * dy;
+            if (d2 < nbR2 && d2 > 0.0001) {
+              cnt++; alx += vx[o]; aly += vy[o]; chx += px[o]; chy += py[o];
+              if (d2 < sepR2) { var inv = 1 / d2; sx += dx * inv; sy += dy * inv; }
+              if (cnt >= 10) break outer;
+            }
+          }
+        }
+      }
+      var w = tw[i], near = 0;
+      if (w > 0) {
+        var ddx = tx[i] - x, ddy = ty[i] - y, d = Math.sqrt(ddx * ddx + ddy * ddy) + 0.0001;
+        var des = Math.min(maxS * 1.2, d * 3.4);
+        var g = 7 * w * form;
+        ax += (ddx / d * des - ux) * g; ay += (ddy / d * des - uy) * g;
+        near = Math.max(0, 1 - d / 90) * w * form;
+      }
+      var flock = 1 - 0.85 * near;
+      if (cnt) {
+        var ic = 1 / cnt;
+        ax += (alx * ic - ux) * 1.1 * flock + (chx * ic - x) * 1.6 * flock;
+        ay += (aly * ic - uy) * 1.1 * flock + (chy * ic - y) * 1.6 * flock;
+      }
+      var sep = near > 0.5 ? 700 : 2400;
+      ax += sx * sep; ay += sy * sep;
+      if (w < 1) {
+        var wa = r4[i] * TAU + time * (0.5 + r3[i]) + Math.sin(time * 0.3 + r5[i] * 9) * 2;
+        var ww = 150 * (1 - w);
+        ax += Math.cos(wa) * ww; ay += Math.sin(wa) * ww;
+        if (x < -30) ax += (-30 - x) * 5; else if (x > W + 30) ax -= (x - W - 30) * 5;
+        if (y < -30) ay += (-30 - y) * 5; else if (y > H + 30) ay -= (y - H - 30) * 5;
+      }
+      if (swirl > 0) {
+        var hx = x - heroCx, hy = y - heroCy, hd = Math.sqrt(hx * hx + hy * hy) + 1;
+        ax += (-hy / hd) * 560 * swirl - hx / hd * 60 * swirl;
+        ay += (hx / hd) * 560 * swirl - hy / hd * 60 * swirl;
+      }
+      var lim = maxS;
+      if (flee) {
+        var fx = x - pointer.x, fy = y - pointer.y, f2 = fx * fx + fy * fy;
+        if (f2 < fr2) {
+          var fd = Math.sqrt(f2) + 0.001, fk = 1 - fd / fr, fs = fk * fk * 7000;
+          ax += fx / fd * fs; ay += fy / fd * fs; lim = maxS * 1.9;
+        }
+      }
+      ux += ax * dt; uy += ay * dt;
+      var sp = Math.sqrt(ux * ux + uy * uy);
+      if (sp > lim) { ux *= lim / sp; uy *= lim / sp; }
+      var drag = near > 0 ? Math.exp(-dt * (0.35 + 2.2 * near)) : drag0;
+      ux *= drag; uy *= drag;
+      vx[i] = ux; vy[i] = uy;
+      px[i] = x + ux * dt; py[i] = y + uy * dt;
+    }
+  }
+
+  /* ---------- render ---------- */
+  function drawGraph(alpha, tm, pulses) {
+    var k, p;
+    ctx.lineWidth = 1;
+    for (k = 1; k < 6; k++) {
+      var la = alpha * (0.14 + litAmt[k] * 0.42 + litAmt[0] * 0.2);
+      ctx.strokeStyle = 'rgba(41,231,255,' + la.toFixed(3) + ')';
+      ctx.beginPath();
+      ctx.moveTo(cx[0], cy[0]);
+      ctx.quadraticCurveTo(qx[k], qy[k], cx[k], cy[k]);
+      ctx.stroke();
+      var np = pulses + (litAmt[k] > 0.5 || litAmt[0] > 0.5 ? 2 : 0);
+      for (p = 0; p < np; p++) {
+        var t = (tm * (0.24 + (p & 1) * 0.07) + p / np + k * 0.137) % 1;
+        if (p & 1) t = 1 - t;
+        bez(k, t);
+        var s = (small ? 16 : 22) * alpha * (0.75 + 0.5 * Math.sin(t * Math.PI));
+        ctx.drawImage(sprites[FLARE], bx - s * 0.5, by - s * 0.5, s, s);
+      }
+    }
+  }
+  function drawLabels(alpha) {
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.font = '600 ' + (small ? 9 : 10) + 'px ' + MONO;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = small ? '1.5px' : '2.5px';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    for (var k = 0; k < 6; k++) {
+      ctx.fillStyle = 'rgba(206,200,245,' + (alpha * (0.6 + litAmt[k] * 0.4)).toFixed(3) + ')';
+      ctx.fillText(LABELS[k], cx[k], cy[k] + cr[k] * 1.2 + 6);
+    }
+  }
+
+  function draw(dt) {
+    var fade = 1 - Math.pow(0.74, dt * 60);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = 'rgba(5,4,13,' + fade.toFixed(3) + ')';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalCompositeOperation = 'lighter';
+    if (graphAlpha > 0.01) drawGraph(graphAlpha, time, 2);
+    var scale = mode === 'hero' ? (small ? 0.6 : 0.9) : (small ? 0.8 : 1);
+    for (var i = 0; i < N; i++) {
+      var x = px[i], y = py[i];
+      if (x < -20 || y < -20 || x > W + 20 || y > H + 20) continue;
+      var s = sz[i] * scale * (lit[i] ? 1.6 : 1);
+      ctx.drawImage(sprites[lit[i] && (i & 3) === 0 ? HOT : col[i]], x - s * 0.5, y - s * 0.5, s, s);
+    }
+    if (flowAlpha > 0.01) {
+      var hy = fLo + ((time * 0.11) % 1) * fSpan;
+      flowSample(hy - fTop);
+      var hs = (small ? 30 : 44) * flowAlpha;
+      ctx.drawImage(sprites[FLARE], fOx + wig - hs * 0.5, hy - hs * 0.5, hs, hs);
+    }
+    if (graphAlpha > 0.01) drawLabels(graphAlpha);
+  }
+
+  function renderStatic() {
+    if (!W) return;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.fillStyle = '#05040d';
+    ctx.fillRect(0, 0, W, H);
+    var rect = { left: 0, top: 0, width: W, height: H };
+    if (W >= 1024 && stage) {
+      var sr = stage.getBoundingClientRect(), hh = header ? header.getBoundingClientRect().height : 0;
+      rect = { left: sr.left, top: hh, width: sr.width, height: H - hh };
+    }
+    layoutClusters(rect, 0);
+    ctx.globalCompositeOperation = 'lighter';
+    drawGraph(0.85, 0.35, 2);
+    var n = Math.min(N, small ? 450 : 1200), sc = small ? 0.75 : 0.9;
+    for (var i = 0; i < n; i++) {
+      if (r5[i] < 0.07) continue;
+      agentPoint(i, 0);
+      var s = sz[i] * sc * (lit[i] ? 1.5 : 1);
+      ctx.drawImage(sprites[lit[i] && (i & 3) === 0 ? HOT : col[i]], tx[i] - s * 0.5, ty[i] - s * 0.5, s, s);
+    }
+    drawLabels(0.9);
+  }
+
+  /* ---------- loop ---------- */
+  function frame(ts) {
+    raf = 0;
+    if (!live || doc.hidden) return;
+    if (!last) last = ts;
+    var dt = (ts - last) / 1000;
+    last = ts;
+    if (dt > 0.05) dt = 0.05;
+    if (dt > 0) {
+      var t0 = now();
+      time += dt; modeT += dt;
+      var holding = pointer.down && (pointer.locked || (!pointer.moved && now() - pointer.t0 > 420));
+      if (holding) pointer.locked = true;
+      pointer.hold += ((holding ? 1 : 0) - pointer.hold) * Math.min(1, dt * (holding ? 2.6 : 3.5));
+      graphAlpha += ((mode === 'agents' ? 1 : 0) - graphAlpha) * Math.min(1, dt * 3);
+      flowAlpha += ((mode === 'workflow' ? 1 : 0) - flowAlpha) * Math.min(1, dt * 3);
+      computeTargets(dt);
+      buildGrid();
+      simulate(dt);
+      draw(dt);
+      var work = now() - t0;
+      if (time > 1.5) {
+        perfAcc += work; perfFrames++; perfWindow += dt;
+        if (perfWindow > 2.5) {
+          if (perfAcc / perfFrames > 12 && N > 300) { perfScale *= 0.75; N = computeCount(); heroW = 0; }
+          perfAcc = 0; perfFrames = 0; perfWindow = 0;
+        }
+      }
+    }
+    raf = win.requestAnimationFrame(frame);
+  }
+  function schedule() { if (!raf && live && !doc.hidden) raf = win.requestAnimationFrame(frame); }
+  function start() {
+    if (live) return;
+    live = true; last = 0;
+    root.classList.add('swarm-live');
+    heroW = 0;
+    schedule();
+  }
+  function stop() {
+    live = false;
+    if (raf) { win.cancelAnimationFrame(raf); raf = 0; }
+    root.classList.remove('swarm-live');
+    renderStatic();
+  }
+
+  function setMode(m) {
+    if (!m || m === mode) return;
+    mode = m; modeT = 0;
+  }
+
+  /* ---------- section observer ---------- */
+  var sections = doc.querySelectorAll('[data-formation]');
+  if ('IntersectionObserver' in win) {
+    var io = new IntersectionObserver(function (entries) {
+      for (var e = 0; e < entries.length; e++) {
+        if (entries[e].isIntersecting) setMode(entries[e].target.getAttribute('data-formation'));
+      }
+    }, { rootMargin: '-48% 0px -48% 0px', threshold: 0 });
+    for (var s = 0; s < sections.length; s++) io.observe(sections[s]);
+  } else {
+    win.addEventListener('scroll', function () {
+      var mid = (win.innerHeight || H) * 0.5;
+      for (var s2 = 0; s2 < sections.length; s2++) {
+        var b = sections[s2].getBoundingClientRect();
+        if (b.top <= mid && b.bottom >= mid) { setMode(sections[s2].getAttribute('data-formation')); break; }
+      }
+    }, passive);
+  }
+
+  /* ---------- pointer: predator + long-press convergence ---------- */
+  function onMove(e) {
+    pointer.x = e.clientX; pointer.y = e.clientY;
+    if (e.pointerType === 'mouse' || pointer.down) pointer.on = true;
+    if (pointer.down && !pointer.moved) {
+      var dx = e.clientX - pointer.x0, dy = e.clientY - pointer.y0;
+      if (dx * dx + dy * dy > 144) pointer.moved = true;
+    }
+  }
+  function onDown(e) {
+    if (e.isPrimary === false) return;
+    pointer.down = true; pointer.moved = false; pointer.locked = false;
+    pointer.t0 = now(); pointer.x0 = e.clientX; pointer.y0 = e.clientY;
+    onMove(e);
+  }
+  function onUp(e) {
+    pointer.down = false; pointer.locked = false;
+    if (e.pointerType !== 'mouse') pointer.on = false;
+  }
+  function onCancel() { pointer.down = false; pointer.locked = false; pointer.on = false; }
+  win.addEventListener('pointermove', onMove, passive);
+  win.addEventListener('pointerdown', onDown, passive);
+  win.addEventListener('pointerup', onUp, passive);
+  win.addEventListener('pointercancel', onCancel, passive);
+  root.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse') onCancel(); }, passive);
+  win.addEventListener('blur', onCancel, passive);
+
+  /* ---------- cards light their cluster (decorative) ---------- */
+  function setLit(k) {
+    litCluster = k;
+    for (var c = 0; c < cards.length; c++) cards[c].classList.toggle('is-lit', +cards[c].getAttribute('data-cluster') === k);
+    if (!live) {
+      for (var q = 0; q < 6; q++) litAmt[q] = q === k ? 1 : 0;
+      renderStatic();
+    }
+  }
+  function bindCard(card) {
+    var k = +card.getAttribute('data-cluster');
+    card.addEventListener('pointerenter', function (e) { if (e.pointerType === 'mouse') setLit(k); }, passive);
+    card.addEventListener('pointerleave', function (e) { if (e.pointerType === 'mouse' && litCluster === k) setLit(-1); }, passive);
+    card.addEventListener('pointerup', function (e) { if (e.pointerType !== 'mouse') setLit(litCluster === k ? -1 : k); }, passive);
+  }
+  for (var ci = 0; ci < cards.length; ci++) bindCard(cards[ci]);
+
+  /* ---------- lifecycle ---------- */
+  var rt = 0;
+  win.addEventListener('resize', function () { clearTimeout(rt); rt = setTimeout(resize, 120); }, passive);
+  doc.addEventListener('visibilitychange', function () {
+    if (doc.hidden) { if (raf) { win.cancelAnimationFrame(raf); raf = 0; } }
+    else { last = 0; schedule(); }
+  });
+
+  var mq = win.matchMedia ? win.matchMedia('(prefers-reduced-motion: reduce)') : null;
+  function applyMotion() { if (mq && mq.matches) stop(); else start(); }
+  resize();
+  seed();
+  booted = true;
+  applyMotion();
+  if (mq) {
+    if (mq.addEventListener) mq.addEventListener('change', applyMotion);
+    else if (mq.addListener) mq.addListener(applyMotion);
+  }
+})();
+</script>
+</body>
+</html>
