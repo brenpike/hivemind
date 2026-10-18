@@ -20,7 +20,7 @@ Issue #409 holds the research and spikes behind this ADR:
 
 ## Decision
 
-1. **One script per workflow (option B).** Rules and tables (the autonomy table, the decision-brief schema, hard stops) stay as data. A build step copies them into the scripts, because a running script cannot read files (desk research).
+1. **One script per workflow (option B).** Rules and tables stay as data: the hard stops, plus the autonomy table and the decision-brief schema, which come over unchanged from the #408 branch in the retry (#409 step 2). A build step copies them into the scripts, because a running script cannot read files (desk research).
 2. **Workflows ship as plugin workflows and run by namespaced name.** The user approves each workflow once, through "don't ask again" or a `Workflow(<plugin>:<name>)` allow rule (S7).
 3. **Runs start from plain user requests.** A slim, intent-only overlord launches the named workflow itself. Slash commands are not the entry point. Plain-request launching worked in 10 of 10 trials (launch reliability).
 4. **Fallback.** If a launch is refused or blocked, the overlord says so in one line and the current engine runs the work.
