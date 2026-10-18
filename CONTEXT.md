@@ -210,6 +210,10 @@ _Avoid_: signal detector, classifier, cluster checker
 The operator-selected posture for how many judgment calls the overlord takes on the Overmind's behalf: `high` (default, takes recommendations), `balanced` (the 5.x posture), or `low` (asks before every judgment call). Set with `HIVEMIND_AUTONOMY` and checked against that allowlist rather than by presence; an invalid value resolves to `low` with a warning. Selects the column of the decision-autonomy table; hard stops have no cell and surface at every level.
 _Avoid_: autonomy mode, trust level, permission level
 
+**Decision Site**:
+A workflow state, or one transition out of it, that a decision-autonomy table row is bound to through `resolved_at`. The overlord resolves a row's kind only at its decision sites; a decision raised anywhere else surfaces. `resume_on_start` is the one reserved site that is not a workflow state.
+_Avoid_: checkpoint, hook point, decision point (which is any judgment call, bound or not)
+
 **Decision Tier**:
 The A/B classification of an overlord decision, derived from the decision-autonomy table at the active **Autonomy Level**. Tier A = surfaced to the Overmind (every hard stop, plus every kind whose cell at the level is `surface`); Tier B = auto-decided and journaled (cells that are `auto`) unless the **Promotion Gate** trips.
 _Avoid_: priority, severity

@@ -105,7 +105,7 @@ CI runs via `.github/workflows/policy-check.yml` (job: `policy-check`), enforced
 - Putting plugin content at repo root instead of under `plugin/` — `${CLAUDE_PLUGIN_ROOT}` will not resolve where authors expect.
 - Adding/renaming a load-bearing governance section with named consumers (or editing a `tests/policy/safety-*.json`) without adding the consumer-assertion fixture → unprotected coupling (P3).
 - Authoring a `tests/policy/safety-*.json` fixture without reading the pin-authoring contract in `tests/policy/README.md` → overclaimed or wrong-clause pins that leave the suite green through a real regression.
-- Adding a new decision point without a row in `plugin/references/decision-autonomy-table.json` → it always surfaces.
+- Adding a new decision point without a row in `plugin/references/decision-autonomy-table.json`, or whose row's `resolved_at` does not name the state where it arises → it always surfaces; a row without `resolved_at` fails `tools/validate_workflows.sh`.
 
 ## Companion plugins referenced
 

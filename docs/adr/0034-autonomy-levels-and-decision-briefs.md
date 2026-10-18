@@ -86,6 +86,20 @@ The default behavior changes. An operator who sets nothing moves from the 5.0.3 
 
 `decision-autonomy-table.json` and `decision-brief-schema.json` are written to be reused as-is when the executor moves to the Claude Code Workflow tool. The schema passes straight to `agent(..., {schema})` as a structured-output contract, and the table becomes a lookup the workflow script performs. Neither file encodes anything specific to the current prose-driven executor.
 
+### 11. Each row binds its kind to its decision sites, checked against the workflow graph
+
+Two local-review findings had the same shape: consumer prose (overlord, cerebrate) drifted from the canonical resolution order in `plugin/governance/decision-autonomy.md` (Autonomy Level) at per-site wording. Each patch restated the order at one more site, and the next review found the next restatement. The root cause was that nothing said where a kind is decided, so every consumer re-derived it.
+
+Each table row now carries `resolved_at`, a non-empty array of decision sites. A site is a workflow state, written `<state>`; one transition out of that state, written `<state>.<outcome>`; or the reserved site `resume_on_start`, which has no state and no outcome. Hard stops carry no `resolved_at`: they hold at every site.
+
+Consumers carry one rule instead of per-site prose. The overlord's `**Decision sites.**` rule says that at every state it resolves every kind whose `resolved_at` names that state or the outcome being recorded and whose `when` holds, and it re-judges every brief a producer returns. Step 5 of the resolution order fails closed: a kind surfaces when it is not listed in the table OR its row's `resolved_at` does not name the site where the decision arises. A decision raised at a site the row does not name therefore always surfaces.
+
+`tools/validate_workflows.sh` (`validate_autonomy_bindings`) checks the binding at CI time against the union of states and per-state transition keys across `plugin/workflows/*.json`. It rejects an unbound row (R1), a dangling site (R2), a reserved site that carries an outcome (R3), a dangling outcome (R4), a hard stop that carries `resolved_at` (R5), and an unbound planner advance: a cerebrate planning-state outcome that is neither a terminal nor a `user_gate` target and that no row names exactly as `<state>.<outcome>` (R6). `--self-test` proves each rule rejects a broken fixture under `tests/workflow-defs/autonomy-broken/`, with the real table as the positive control.
+
+This is not the runtime lookup script Decision 4 rejects. It runs once in CI over static data, it never sees a live decision, and it does not decide any verdict. Agents still read the table directly and apply it by judgment at runtime.
+
+**Honest limit.** The checks prove that sites exist and that planner advances are bound. They do not prove a row is bound to the semantically right site, and whether a row's `when` applies to a given decision stays judgment. The inverse rule covers cerebrate planning states only, so another decision site can still go unbound without failing validation.
+
 ## Considered Options
 
 | Option | Rejected because |
@@ -101,6 +115,9 @@ The default behavior changes. An operator who sets nothing moves from the 5.0.3 
 | Let reviewers answer questions at `high` | Answering a human reviewer on GitHub speaks for the user publicly. That authority is not something a local autonomy setting can grant |
 | Name the schema `decision-brief.schema.json` | The CHECK8 stem class excludes `.`, so a bare reference to a double-extension file is never matched and passes unflagged |
 | MINOR bump, on the grounds that `balanced` preserves the old behavior | Preserving the old behavior requires the operator to act. The default changes for everyone who does nothing, and that is the MAJOR case |
+| Restate the resolution order in per-site prose at each consumer | This is the failure being fixed. Two review findings of one class showed that per-site wording drifts from the canonical order, and each restatement is one more place to drift |
+| A single overlord rule with no per-row binding | The rule would still need to say which kinds apply at which state, so the mapping returns as prose. Nothing could check it against the workflow graph, and a kind raised at an unexpected state would resolve by guesswork instead of failing closed |
+| A `decides` key on workflow states | Changes the workflow definition and so needs a workflow version bump, creating version skew for in-flight ledgers. It also puts the decision-kind vocabulary into the WHO/WHAT-only graph (ADR-0018) |
 | Allowlisted `HIVEMIND_AUTONOMY` (`high` default, invalid → `low`), table with no cells for hard stops, schema-backed briefs, no graph change (CHOSEN) | — |
 
 ## Consequences
@@ -113,6 +130,7 @@ The default behavior changes. An operator who sets nothing moves from the 5.0.3 
 - **ADR-0026 Decision 1 is amended, not deleted.** Tier membership now lives in the table. The Autonomy 2x2, the promotion gate, the disposition vocabulary, and the journal entry shape stand as ADR-0026 and its amendments leave them. ADR-0026 stays unedited as historical record.
 - **The override channel now carries four keys.** `HIVEMIND_LOCAL_REVIEW_MODEL`, `HIVEMIND_SKIP_PR_WATCH`, `HIVEMIND_ENABLE_DECISION_REPORT`, and `HIVEMIND_AUTONOMY` share one `env`-block convention, one settings-file pair, and one brood-inheritance property. `HIVEMIND_AUTONOMY` is the only one checked against a value allowlist rather than by presence or charset.
 - **Table misreads are observable.** The revisit trigger in Decision 4 is checked against existing journal data. No new instrumentation is needed to know when the prose-read approach has stopped working.
+- **A decision raised outside its row's decision sites surfaces.** A new decision point needs a table row whose `resolved_at` names the state where it arises. A row with no `resolved_at`, a dangling site or outcome, or a bound hard stop fails `tools/validate_workflows.sh`. Binding correctness and `when` applicability remain judgment.
 - **The plugin version moves to 6.0.0.** The default behavior change is MAJOR.
 
-References: `plugin/governance/decision-autonomy.md` (`## Decision Brief`), `plugin/references/decision-autonomy-table.json`, `plugin/references/decision-brief-schema.json`, `plugin/governance/versioning.md`, `plugin/workflows/standard-delivery.json`, `plugin/workflows/pr-feedback-remediation.json`, `plugin/workflows/analysis-only.json`, `CLAUDE.md`; amends ADR-0026 Decision 1; follows the operator-override precedent of ADR-0022, ADR-0029, and ADR-0030.
+References: `plugin/governance/decision-autonomy.md` (`## Decision Brief`), `plugin/references/decision-autonomy-table.json`, `plugin/references/decision-brief-schema.json`, `tools/validate_workflows.sh`, `plugin/governance/versioning.md`, `plugin/workflows/standard-delivery.json`, `plugin/workflows/pr-feedback-remediation.json`, `plugin/workflows/analysis-only.json`, `CLAUDE.md`; amends ADR-0026 Decision 1; follows the operator-override precedent of ADR-0022, ADR-0029, and ADR-0030.

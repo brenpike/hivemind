@@ -18,7 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `plugin/references/decision-brief-schema.json` (JSON Schema, structured-output compatible) and `plugin/references/decision-autonomy-table.json` (decision kind by level resolving to `surface` or `auto`; hard stops are cell-less).
 - Autonomy Level and Decision Brief sections in `plugin/governance/decision-autonomy.md`.
-- Optional `Decisions taken:` planner report section (validator and `report-format.md`).
+- Optional `Decisions taken:` planner report section (validator and `report-format.md`); the validator enforces placement immediately before `Open questions:` and at least one list item.
+- Decision-site bindings: every row in `plugin/references/decision-autonomy-table.json` carries `resolved_at`, naming the workflow states or transitions where its kind is decided. The overlord carries one `**Decision sites.**` rule, step 5 of the resolution order fails closed on an unbound site, and `tools/validate_workflows.sh` rejects unbound rows, dangling sites or outcomes, bound hard stops, and unbound planner advances.
 - Policy fixtures pinning the hard stops and the brief contract, and ADR-0034.
 
 ### Changed
