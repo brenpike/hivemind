@@ -1,6 +1,6 @@
 # hivemind website
 
-The repo-root `README.md` is the canonical source of truth for all website content. This site (`web/`) mirrors that content. There is no automated sync. Any content edit must trace back to a claim in `README.md`.
+The repo-root `README.md` is the canonical source of truth for all website content. This site (`web/`) mirrors that content. There is no automated sync. Any content edit must trace back to a claim in `README.md`. A companion's activation condition is stated only where that companion is described (the README's companion list and the companion sections of these pages); everywhere else, copy names the dependency, such as "needs the codex companion", and never states the condition under which a step runs.
 
 ## Design system
 

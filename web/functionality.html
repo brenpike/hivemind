@@ -418,7 +418,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Review</h3>
-              <p>When codex is installed, the local-reviewer runs its adversarial adaptation cycle on the branch diff before any PR exists. Without codex, this step is skipped.</p>
+              <p>The local-reviewer runs its adversarial adaptation cycle on the branch diff before any PR exists. It needs the codex companion; without it, this step is skipped.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Ship and watch</h3>
@@ -426,7 +426,7 @@
             </li>
           </ol>
 
-          <div class="code-panel diagram" id="lifecycle-diagram-func" role="img" aria-label="Lifecycle flow: You to Overlord, which routes the request and records a run ledger. Cerebrate produces a Directive. A working branch is created. Drone and Changeling build in waves with one molt per wave. Bump-type and validation gates run. Local-Reviewer reviews when codex is installed. The PR opens and github-review-loop watches it by default." tabindex="0">
+          <div class="code-panel diagram" id="lifecycle-diagram-func" role="img" aria-label="Lifecycle flow: You to Overlord, which routes the request and records a run ledger. Cerebrate produces a Directive. A working branch is created. Drone and Changeling build in waves with one molt per wave. Bump-type and validation gates run. Local-Reviewer reviews, which needs the codex companion. The PR opens and github-review-loop watches it by default." tabindex="0">
             <pre><code>You
  └─▶ <span class="t-key">Overlord</span>  (route, record)
       ├─▶ <span class="t-str">Cerebrate</span>       (plan)
@@ -602,7 +602,7 @@
         <header class="panel plate">
           <p class="kicker xs">10 Companion Plugins</p>
           <h2 id="companions-heading" class="xg">Companion Plugins</h2>
-          <p class="xs">All companions are optional. Hivemind works without them. Each one adds capabilities once it is enabled for the project, which <code>hivemind:seed-hive</code> does when you confirm that companion.</p>
+          <p class="xs">All companions are optional. Hivemind works without them. Each one adds capabilities once it is installed and enabled for the project. <code>hivemind:seed-hive</code> enables it when you confirm that companion.</p>
         </header>
         <div class="card-grid">
           <article class="panel card">

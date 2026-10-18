@@ -129,7 +129,7 @@ Three optional operator overrides are read from the `env` block of `.claude/sett
   /reload-plugins
   /codex:setup
   ```
-  When installed, it enables only the local pre-PR review: the `local-reviewer` agent, backed by `hivemind:adaptation-cycle`. If it is not installed, the overlord skips local review and goes straight to the PR. The post-PR watch (`hivemind:github-review-loop` plus the `github-reviewer` agent) does not need it; it works from GitHub review feedback.
+  Once it is installed and enabled for the project (`seed-hive` enables it when you confirm it), it adds only the local pre-PR review: the `local-reviewer` agent, backed by `hivemind:adaptation-cycle`. If it is not installed or not enabled, the overlord skips local review and goes straight to the PR. The post-PR watch (`hivemind:github-review-loop` plus the `github-reviewer` agent) does not need it; it works from GitHub review feedback.
 
 - [`caveman`](https://github.com/juliusbrussee/caveman) (`caveman@caveman`): token-compressed communication. Optional. When enabled through `seed-hive`, framework agents output in caveman ultra mode. `seed-hive` detects it and includes it in its companion confirmation, or add manually to `.claude/settings.json`:
   ```json
@@ -224,7 +224,7 @@ You --> Overlord --> route-workflow --> standard-delivery
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
 5. **Build in waves.** `implement_next_step` asks `hivemind:next-wave` for the ready wave; `implement_step` dispatches it as parallel drones and changelings; `checkpoint` molts once for the whole wave.
 6. **Gate.** `version_bump_decision` (via `hivemind:bump-type`; a required bump goes through `version_bump` and `version_checkpoint`), then `validate` runs the project's validation commands.
-7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review when the `codex` companion is installed; otherwise the step is skipped.
+7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped.
 8. **Ship and watch.** `open_pr` opens the PR, then `github_review_decision` and `github_review_loop` watch it by default, fixing, pushing, replying to, and resolving feedback from the Codex, Copilot, or Claude reviewer bots until approval, merge, close, or an idle hour. Opt out in your request or with `HIVEMIND_SKIP_PR_WATCH`. Agents never merge.
 
 **Waves.** Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; the overlord makes one checkpoint commit (one molt) per wave.

@@ -79,7 +79,7 @@
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>Less context-switching. A single interface. You give the overlord a task; the swarm handles the rest.</p>
           </div>
-          <div class="code-panel diagram" id="ben-pipeline-diagram" role="img" tabindex="0" aria-label="Pipeline: you give the overlord a task; the overlord routes to the cerebrate, a drone or changeling, the local-reviewer when codex is installed, then a PR that is watched by default. You do not manage the hand-offs.">
+          <div class="code-panel diagram" id="ben-pipeline-diagram" role="img" tabindex="0" aria-label="Pipeline: you give the overlord a task; the overlord routes to the cerebrate, a drone or changeling, the local-reviewer (which needs the codex companion), then a PR that is watched by default. You do not manage the hand-offs.">
 <pre><code><span class="t-dim">Before:  You → plan → build → review → ship</span>
 <span class="t-dim">         (every hand-off is manual)</span>
 
@@ -130,7 +130,7 @@ You → <span class="t-key">Overlord</span>
             <p>A review gate built into the flow, not bolted on after the fact.</p>
             <p><span class="tag tag--cyan">hivemind:local-reviewer</span> <span class="tag tag--violet">hivemind:github-review-loop</span></p>
           </div>
-          <div class="code-panel diagram" id="ben-review-diagram" role="img" tabindex="0" aria-label="Review flow: when codex is installed, the local-reviewer runs a Codex review on the branch diff before the PR, fixing simple findings and escalating complex ones; after the PR opens, github-review-loop watches it by default and fixes, pushes, replies to, and resolves reviewer-bot feedback until approval, merge, or close">
+          <div class="code-panel diagram" id="ben-review-diagram" role="img" tabindex="0" aria-label="Review flow: the local-reviewer, which needs the codex companion, runs a Codex review on the branch diff before the PR, fixing simple findings and escalating complex ones; after the PR opens, github-review-loop watches it by default and fixes, pushes, replies to, and resolves reviewer-bot feedback until approval, merge, or close">
 <pre><code>Build complete
  └─▶ <span class="t-str">Local-Reviewer</span>  (pre-PR, needs codex)
       ├─▶ Codex review on branch diff
