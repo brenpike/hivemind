@@ -84,6 +84,9 @@ PLANNER_COMPACT_INLINE_FIELDS=("Summary")
 
 PLANNER_COMPACT_LIST_SECTIONS=("Memory reused" "Steps" "Workflow loadout" "Open questions")
 
+# Recognized as a section boundary label; never required.
+PLANNER_OPTIONAL_LIST_SECTIONS=("Decisions taken")
+
 # Sub-fields stored as "Parent|Child1|Child2|..."
 PLANNER_COMPACT_SUB_FIELDS=("Versioning|Impact|Artifact(s)")
 
@@ -207,6 +210,7 @@ build_planner_labels() {
     local labels=()
     labels+=("${PLANNER_COMPACT_INLINE_FIELDS[@]}")
     labels+=("${PLANNER_COMPACT_LIST_SECTIONS[@]}")
+    labels+=("${PLANNER_OPTIONAL_LIST_SECTIONS[@]}")
     local entry
     for entry in "${PLANNER_COMPACT_SUB_FIELDS[@]}"; do
         IFS='|' read -ra parts <<< "$entry"

@@ -1,0 +1,8 @@
+{
+  "check": "decision-autonomy-table.json default_level = high and levels, hard_stops, rows are non-empty arrays",
+  "type": "json-field-value",
+  "file": "plugin/references/decision-autonomy-table.json",
+  "field": "default_level",
+  "expected": "high",
+  "required-arrays": ["levels", "hard_stops", "rows"]
+}

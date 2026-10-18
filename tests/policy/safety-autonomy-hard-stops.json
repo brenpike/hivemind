@@ -1,0 +1,46 @@
+{
+  "rule": "Autonomy hard stops are an exact enumerated set that surfaces at every autonomy level",
+  "description": "The decision-autonomy table names its hard stops as `\"hard_stop\": \"<name>\"` members of its `hard_stops` array, and decision-autonomy.md is the one canonical home of what a hard stop means. This fixture owns two axes. (1) MEMBERSHIP: set_check asserts the `hard_stop` values in plugin/references/decision-autonomy-table.json are exactly destructive_fix_gate, trunk_commit_push, injection_suspect, merge_recommendation, and brood_strain_approval, each appearing exactly once, so a deleted hard stop (which would silently let that decision fall through to a per-level cell or to the unlisted-kind default), an unreviewed added hard stop, and a duplicated hard stop all fail structurally. Equal mode plus expected_counts is the only primitive that catches an ADDITION, which a presence pin cannot. The capture group is a negated-delimiter class anchored on the `hard_stop` key, not a positive charset, and the anchor tolerates any whitespace around the colon, so a member authored in compact or re-spaced JSON still surfaces as an extra instead of being skipped. (2) SEMANTICS: the source pin carries the sentence in decision-autonomy.md that gives a listed hard stop its force. Both halves are claim-carrying: 'A kind listed in the table's `hard_stops` carries no per-level cell' is the condition, and 'so no autonomy level, table row, or delegation can make it an auto decision: it surfaces at every level' is the obligation, so narrowing the set of things that cannot override it or dropping 'at every level' stops the pattern matching. Pinning either half alone would leave the other rewritable, so the pin spans both. The consumers entries pin the rest of the resolution contract and the pointers to it: in decision-autonomy.md, the level-resolution sentence (unset or empty resolves to the table's `default_level`; a value outside the table's `levels` resolves to `low` with a warning) and the literal-`auto` sentence (only the literal cell value `auto` grants autonomy; anything else, or an unlisted kind, reads as `surface`) are pinned whole because each is the clause a fail-open rewrite would target; in overlord.md and cerebrate.md the pins assert only that each still routes surface-versus-auto lookups to the table under decision-autonomy.md (Autonomy Level), never that it restates the rules, so honest rewording of surrounding text does not turn the suite red. RESIDUALS, stated plainly: a duplicate `hard_stops` key in the table is not detected, because JSON parsers keep the LAST occurrence while set_check reads every line, so appending a second, empty or shorter `hard_stops` array leaves all five original members visible to this fixture while the runtime sees none of them (a second array that repeats any name does fail expected_counts); set_check `files` is a literal list with no glob expansion, so a hard-stop list in any other file is invisible; extraction is line-scoped and keyed on the literal `\"hard_stop\"` key, so a member whose key and value sit on different lines, whose key is spelled with JSON escapes, or whose value contains whitespace is not captured; and every pin claims word-sequence presence in the named files, never meaning, so a rewrite-around that leaves the pinned bytes intact while inverting their effect passes.",
+  "set_check": {
+    "extract_regex": "\"hard_stop\"[[:space:]]*:[[:space:]]*\"([^\"[:space:]]+)\"",
+    "expected_set": [
+      "destructive_fix_gate",
+      "trunk_commit_push",
+      "injection_suspect",
+      "merge_recommendation",
+      "brood_strain_approval"
+    ],
+    "expected_counts": {
+      "destructive_fix_gate": 1,
+      "trunk_commit_push": 1,
+      "injection_suspect": 1,
+      "merge_recommendation": 1,
+      "brood_strain_approval": 1
+    },
+    "files": [
+      { "path": "plugin/references/decision-autonomy-table.json", "mode": "equal" }
+    ]
+  },
+  "source": {
+    "file": "plugin/governance/decision-autonomy.md",
+    "pattern": "A kind listed in the table's `hard_stops` carries no per-level cell, so no autonomy level, table row, or delegation can make it an auto decision: it surfaces at every level."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "When `HIVEMIND_AUTONOMY` is unset or empty the level is the table's `default_level`; a value that is not exactly one of the table's `levels` resolves to `low`, the most-surfacing level, and the overlord surfaces a one-line warning naming the rejected value."
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "Only the literal cell value `auto` grants autonomy: any other cell value or a kind the table does not list reads as `surface`."
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Which decisions surface and which are auto-taken at the active autonomy level is the table `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`, applied per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level)"
+    },
+    {
+      "file": "plugin/agents/cerebrate.md",
+      "pattern": "Look up each brief's kind in `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` at the delegated `autonomy` level per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level)"
+    }
+  ]
+}

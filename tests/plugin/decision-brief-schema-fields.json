@@ -1,0 +1,6 @@
+{
+  "check": "decision-brief-schema.json has required root fields: type, properties, required",
+  "type": "json-fields",
+  "file": "plugin/references/decision-brief-schema.json",
+  "required": ["type", "properties", "required"]
+}

@@ -46,3 +46,15 @@ validated:
 evidence:
   EVD-001: [synopsis]
 ```
+
+## Planner Report — Optional Sections
+
+Planner reports (compact and full) may carry a `Decisions taken:` list section immediately before `Open questions:`. It is optional: a report without it stays valid.
+
+```text
+Decisions taken:
+- [choice] — [why] (assumes: [assumption the user can overrule|none])
+- None
+```
+
+One line per decision. Each line states the choice, why it was taken, and any assumption flagged for the user to overrule. `- None` is allowed.

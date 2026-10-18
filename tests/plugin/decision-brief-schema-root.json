@@ -1,0 +1,8 @@
+{
+  "check": "decision-brief-schema.json root is an object schema with a non-empty required array",
+  "type": "json-field-value",
+  "file": "plugin/references/decision-brief-schema.json",
+  "field": "type",
+  "expected": "object",
+  "required-arrays": ["required"]
+}
