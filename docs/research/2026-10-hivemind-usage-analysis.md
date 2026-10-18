@@ -53,7 +53,7 @@ The analysis ran on 2026-10-17, early in the session that later produced PR #408
 ### 1. The orchestrator spends more than the workers
 
 - 52% of the overlord's own tool calls are ledger bookkeeping. That is 2,270 small input files written for `record-state-result` plus about 1,945 Bash calls to run it.
-- Every plan step costs 3 recorded transitions (`implement_next_step`, `implement_step`, `checkpoint`). There were about 2,300 steps.
+- Each pass of the implement loop records 3 transitions (`implement_next_step`, `implement_step`, `checkpoint`). One pass covers a whole wave of independent plan steps, not one plan step. The ledgers hold 2,294 `implement_step` completions and 2,294 `checkpoint` completions (the "about 2,300" figure counts these wave passes, not plan steps). They also hold 2,339 `implement_next_step` results that started a wave and 800 final `implement_next_step` results that ended the loop. That is about 7,700 recorded transitions in the pre-PR implement loop. The post-PR loop is counted separately and is not included.
 - Output tokens: the overlord produced 13.9M. All subagents together produced 12.5M.
 - The overlord loads about 160 KB of prompt every turn: `overlord.md` is 54 KB, plus about 110 KB of governance docs.
 
@@ -141,7 +141,7 @@ Five GitHub Pages sessions all followed the same ad-hoc loop: make N variants, v
 
 ### Supporting figures
 
-- Main-thread tool calls by name: Bash 4,703, Write 2,489, Agent 1,269, Skill 355, Monitor 125, Read 36, TaskStop 19, SendMessage 5, AskUserQuestion 2.
+- Main-thread tool calls by name: Bash 4,703, Write 2,489, Agent 1,269, Skill 356, Monitor 125, Read 37, TaskStop 19, SendMessage 5, AskUserQuestion 2, ToolSearch 1, SendFeedback 1. These sum to 9,007, which is 8 below the 9,015 total. Skill and Read come from the later pass that produced the category table above. Bash, Write and Monitor come from an earlier pass over the same logs, which were still growing, and the by-name split was not re-run. The 8-call gap therefore sits in those three tools.
 - Total recorded cost across the 49 sessions: about $4.2k.
 - `standard-delivery.json` has 33 states.
 - Tool errors were minor. The largest groups were calls to tools not available in the session (Grep 27, TaskStop 17, the claude-mem search tool 15).
