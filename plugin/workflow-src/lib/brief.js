@@ -10,6 +10,9 @@
  *     taken  as above.
  *   askReasonLine(reason)
  *     reason an ask reason from decisionReasons(), other than 'auto'.
+ *   renderOpenQuestions(open)
+ *     open   non-empty array of {brief} for questions still unanswered when
+ *            the run stops asking. Entries of asks fit.
  *
  * Outputs
  *   renderQuestions  one message. Each ask becomes a question labelled Q1..Qn
@@ -25,6 +28,10 @@
  *   renderDecisions  the "Decided for you" block, labelled D1..Dn by
  *     position, or the empty string when taken is empty.
  *   askReasonLine    one plain sentence for the reason.
+ *   renderOpenQuestions  one block: a line saying the run stopped asking
+ *     after pauseLimit() rounds, then one line per question labelled Q1..Qn
+ *     by position, with its problem and the option the report assumes, or a
+ *     line saying there is no recommendation.
  *
  * Invariants
  *   Text comes from brief fields and fixed wording only. brief.id and
@@ -34,6 +41,8 @@
  *   No em dash and no markdown tables. An em dash inside a brief field is
  *   replaced by a comma. verbatim is shown exactly as given.
  *   Invalid arguments and unknown reasons throw.
+ *   renderOpenQuestions calls pauseLimit() from result.js, so it runs only
+ *   where result.js is loaded too, as in every built script.
  *
  * Why
  *   The user answers from this text alone, so every question carries what
@@ -94,6 +103,15 @@ function askReasonLine(reason) {
     default:
       throw new Error('askReasonLine: no line for reason ' + JSON.stringify(reason));
   }
+}
+
+function renderOpenQuestions(open) {
+  if (!Array.isArray(open) || open.length === 0) {
+    throw new Error('renderOpenQuestions: open must be a non-empty array');
+  }
+  const lines = ['I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:'];
+  open.forEach((entry, index) => lines.push(renderOpenQuestion(entry, index)));
+  return lines.join('\n');
 }
 
 function renderIntroLine(count) {
@@ -183,6 +201,15 @@ function renderVerbatim(verbatim) {
     return [];
   }
   return ['Exact text:', verbatim];
+}
+
+function renderOpenQuestion(entry, index) {
+  const brief = readField(entry, 'brief');
+  const recommendation = readField(brief, 'recommendation');
+  const optionId = readField(recommendation, 'option_id');
+  const hasChoice = readField(recommendation, 'strength') !== 'none' && typeof optionId === 'string' && optionId.trim() !== '';
+  const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'There is no recommendation.';
+  return '  Q' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' ' + choice;
 }
 
 function renderTakenDecision(entry, index) {

@@ -3,10 +3,12 @@
  *
  * Inputs
  *   pauseForUser({answerKey, message, resumeArgs, decisions})
- *     answerKey   non-empty string. The args key the user's reply goes under.
+ *     answerKey   non-empty string. The key in resumeArgs.answers that the
+ *                 user's reply goes under.
  *     message     non-empty string. The text the user reads.
  *     resumeArgs  plain JSON object. The args to relaunch with, before the
- *                 reply is added. It must not already have answerKey.
+ *                 reply is added. Its answers field is a plain object that
+ *                 does not have answerKey yet.
  *     decisions   array. The decisions the run took so far, in order.
  *   finish({outcome, message, decisions})
  *     outcome     'complete' or 'blocked'.
@@ -26,8 +28,9 @@
  *   Only the harness completion notice carries the result. A model's own
  *   summary of the run never counts.
  *   needs_user true: show message to the user as is. Then relaunch the same
- *   workflow with args set to resume_args plus one more key, answer_key,
- *   whose value is the user's reply word for word. Never answer for the user.
+ *   workflow with args set to resume_args, with answers[answer_key] set to
+ *   the user's reply word for word. That is the only shape a reply takes: a
+ *   reply anywhere else in args is not read. Never answer for the user.
  *   needs_user false: show message to the user as is. The run is over.
  *   decisions lists what the run decided for the user. message already
  *   states them, so the overlord shows message and does not act on decisions.
@@ -38,8 +41,8 @@
  *   Open questions never make a run end as 'blocked'.
  *   resume_args is the only state that crosses a pause, so the workflow keeps
  *   its pause count and earlier answers there.
- *   answer_key is never already in resume_args, so a reply cannot overwrite
- *   state the workflow needs.
+ *   resume_args.answers is always a plain object, and answer_key is never
+ *   already in it, so a reply cannot overwrite an earlier one.
  *   Invalid input throws instead of returning a partial result.
  *
  * Why
@@ -71,8 +74,12 @@ function pauseForUser({ answerKey, message, resumeArgs, decisions }) {
   if (typeof resumeArgs !== 'object' || resumeArgs === null || Array.isArray(resumeArgs)) {
     throw new Error('pauseForUser: resumeArgs must be a plain object');
   }
-  if (Object.prototype.hasOwnProperty.call(resumeArgs, answerKey)) {
-    throw new Error('pauseForUser: resumeArgs already has answerKey ' + JSON.stringify(answerKey));
+  const answers = resumeArgs.answers;
+  if (typeof answers !== 'object' || answers === null || Array.isArray(answers)) {
+    throw new Error('pauseForUser: resumeArgs.answers must be a plain object');
+  }
+  if (Object.prototype.hasOwnProperty.call(answers, answerKey)) {
+    throw new Error('pauseForUser: resumeArgs.answers already has answerKey ' + JSON.stringify(answerKey));
   }
   assertMessageAndDecisions('pauseForUser', message, decisions);
   return {

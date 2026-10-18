@@ -64,6 +64,7 @@ SUITE_TEST_VALIDATE_SUITES='test_validate_suites.sh'
 SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
 SUITE_TEST_SCRIPT_BOOTSTRAP='test_script_bootstrap.sh'
 SUITE_TEST_PREFILTER='test_prefilter.sh'
+SUITE_TEST_WORKFLOW_SCRIPTS='test_workflow_scripts.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
 ALL_SUITES=(
@@ -92,6 +93,7 @@ ALL_SUITES=(
   "$SUITE_TEST_CHANGE_DETECT_POLL"
   "$SUITE_TEST_SCRIPT_BOOTSTRAP"
   "$SUITE_TEST_PREFILTER"
+  "$SUITE_TEST_WORKFLOW_SCRIPTS"
 )
 
 # KNOWN_SUITES: the tools/*.sh validation suites this dispatcher knows about. --self-test
@@ -121,6 +123,7 @@ KNOWN_SUITES=(
   test_change_detect_poll.sh
   test_script_bootstrap.sh
   test_prefilter.sh
+  test_workflow_scripts.sh
 )
 
 # NON_SUITE_TOOLS: tools/*.sh files that are NOT validation suites (so --self-test does not
@@ -318,6 +321,10 @@ run_suites() {
 #   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
+#   plugin/workflow-src/**, plugin/workflows/*.js, plugin/agents/overlord.md,
+#     plugin/references/decision-autonomy-table.json, plugin/references/decision-brief-schema.json,
+#     tests/workflow-scripts/**
+#                                      -> test_workflow_scripts (build drift check + node tests)
 #   tests/reports/**                                    -> validate_reports
 #   plugin/agents/{cerebrate,local-reviewer,github-reviewer}.md,
 #     plugin/skills/github-review-loop/SKILL.md         -> validate_workflows (exit_reason contracts)
@@ -510,6 +517,23 @@ map_path() {
   if [[ "$p" == plugin/skills/bump-type/* \
      || "$p" == plugin/skills/_shared/bump-type-derive.sh ]]; then
     add_selected "$SUITE_TEST_BUMP_TYPE" "$p (bump-type engine skill/derive core)"
+    matched=1
+  fi
+
+  # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
+  # build, the two data files the build copies in, the overlord agent whose launch contract the node
+  # tests pin, and the node tests themselves. Every one of these except tests/workflow-scripts/* is
+  # ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check
+  # NEVER RUNS node, so without this rule a source edit that leaves the generated script stale, or a
+  # data/agent edit that breaks a node test, would only be caught on push-to-main.
+  # (tools/test_workflow_scripts.sh and tools/build_workflows.mjs are covered by the tools/** leg.)
+  if [[ "$p" == plugin/workflow-src/* \
+     || "$p" == plugin/workflows/*.js \
+     || "$p" == plugin/references/decision-autonomy-table.json \
+     || "$p" == plugin/references/decision-brief-schema.json \
+     || "$p" == plugin/agents/overlord.md \
+     || "$p" == tests/workflow-scripts/* ]]; then
+    add_selected "$SUITE_TEST_WORKFLOW_SCRIPTS" "$p (workflow-script source/build/data/test)"
     matched=1
   fi
 
@@ -999,6 +1023,7 @@ self_test() {
     ["test_change_detect_poll.sh"]="tests/change-detect-poll/README.md"
     ["test_script_bootstrap.sh"]="plugin/skills/_shared/claude-mem-path.sh"
     ["test_prefilter.sh"]="plugin/skills/github-review-loop/scripts/prefilter.sh"
+    ["test_workflow_scripts.sh"]="plugin/workflow-src/lib/decide.js"
   )
   local script_name expected_suite suite_path probe_path hit
   for script_name in "${KNOWN_SUITES[@]}"; do
@@ -1171,6 +1196,30 @@ self_test() {
       echo "PASS: engine script $engine_script -> test_engine.sh"
     else
       echo "FAIL: engine script $engine_script did NOT route to test_engine.sh"
+      fails=$((fails + 1))
+    fi
+  done
+
+  # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
+  #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
+  #    the generated-script, data-file or overlord selector were dropped. Probe each directly so
+  #    removing any one selector FAILS here.
+  local workflow_input
+  for workflow_input in \
+    "plugin/references/decision-autonomy-table.json" \
+    "plugin/references/decision-brief-schema.json" \
+    "plugin/workflows/analysis-only.js" \
+    "plugin/agents/overlord.md"; do
+    SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
+    map_path "$workflow_input" >/dev/null
+    hit=0
+    for entry in "${SELECTED[@]:-}"; do
+      if [[ "${entry%%$'\t'*}" == "$SUITE_TEST_WORKFLOW_SCRIPTS" ]]; then hit=1; break; fi
+    done
+    if [[ "$hit" -eq 1 ]]; then
+      echo "PASS: workflow-script input $workflow_input -> test_workflow_scripts.sh"
+    else
+      echo "FAIL: workflow-script input $workflow_input did NOT route to test_workflow_scripts.sh"
       fails=$((fails + 1))
     fi
   done

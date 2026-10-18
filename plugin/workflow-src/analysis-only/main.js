@@ -7,8 +7,8 @@
  *            an object {request, autonomy?, answers?};
  *            undefined.
  *          answers is read only when it is a plain object. The reply to round
- *          N is answers['round-N'], or the top-level 'round-N' key the overlord
- *          adds when it resumes the run per the result.js contract.
+ *          N is answers['round-N'] and nothing else, per the result.js
+ *          contract: a top-level 'round-N' key is not read.
  *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
  *
  * Outputs
@@ -95,7 +95,7 @@ function roundKey(round) {
 function readReply(argsObject, round) {
   const key = roundKey(round);
   const storedAnswers = isPlainObject(argsObject.answers) ? argsObject.answers : {};
-  return [storedAnswers[key], argsObject[key]].find(isNonEmptyString);
+  return isNonEmptyString(storedAnswers[key]) ? storedAnswers[key] : undefined;
 }
 
 function buildResumeArgs(argsObject, replies) {
@@ -180,21 +180,6 @@ function resolveQuestions(questions, level) {
 
 function listTakenBriefs(taken) {
   return taken.map((entry) => entry.brief);
-}
-
-function describeOpenQuestion(entry, index) {
-  const brief = isPlainObject(entry.brief) ? entry.brief : {};
-  const problem = isNonEmptyString(brief.problem) ? brief.problem : 'not given';
-  const recommendation = isPlainObject(brief.recommendation) ? brief.recommendation : {};
-  const hasChoice = recommendation.strength !== 'none' && isNonEmptyString(recommendation.option_id);
-  const choice = hasChoice ? 'The report assumes option ' + recommendation.option_id + '.' : 'There is no recommendation.';
-  return '  Q' + (index + 1) + '. ' + problem + ' ' + choice;
-}
-
-function renderOpenQuestions(asks) {
-  const lines = ['I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:'];
-  asks.forEach((entry, index) => lines.push(describeOpenQuestion(entry, index)));
-  return lines.join('\n');
 }
 
 function finishBlocked(message) {

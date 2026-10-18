@@ -633,6 +633,9 @@ function isRecommendationAnOption(brief) {
  *     taken  as above.
  *   askReasonLine(reason)
  *     reason an ask reason from decisionReasons(), other than 'auto'.
+ *   renderOpenQuestions(open)
+ *     open   non-empty array of {brief} for questions still unanswered when
+ *            the run stops asking. Entries of asks fit.
  *
  * Outputs
  *   renderQuestions  one message. Each ask becomes a question labelled Q1..Qn
@@ -648,6 +651,10 @@ function isRecommendationAnOption(brief) {
  *   renderDecisions  the "Decided for you" block, labelled D1..Dn by
  *     position, or the empty string when taken is empty.
  *   askReasonLine    one plain sentence for the reason.
+ *   renderOpenQuestions  one block: a line saying the run stopped asking
+ *     after pauseLimit() rounds, then one line per question labelled Q1..Qn
+ *     by position, with its problem and the option the report assumes, or a
+ *     line saying there is no recommendation.
  *
  * Invariants
  *   Text comes from brief fields and fixed wording only. brief.id and
@@ -657,6 +664,8 @@ function isRecommendationAnOption(brief) {
  *   No em dash and no markdown tables. An em dash inside a brief field is
  *   replaced by a comma. verbatim is shown exactly as given.
  *   Invalid arguments and unknown reasons throw.
+ *   renderOpenQuestions calls pauseLimit() from result.js, so it runs only
+ *   where result.js is loaded too, as in every built script.
  *
  * Why
  *   The user answers from this text alone, so every question carries what
@@ -717,6 +726,15 @@ function askReasonLine(reason) {
     default:
       throw new Error('askReasonLine: no line for reason ' + JSON.stringify(reason));
   }
+}
+
+function renderOpenQuestions(open) {
+  if (!Array.isArray(open) || open.length === 0) {
+    throw new Error('renderOpenQuestions: open must be a non-empty array');
+  }
+  const lines = ['I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:'];
+  open.forEach((entry, index) => lines.push(renderOpenQuestion(entry, index)));
+  return lines.join('\n');
 }
 
 function renderIntroLine(count) {
@@ -808,6 +826,15 @@ function renderVerbatim(verbatim) {
   return ['Exact text:', verbatim];
 }
 
+function renderOpenQuestion(entry, index) {
+  const brief = readField(entry, 'brief');
+  const recommendation = readField(brief, 'recommendation');
+  const optionId = readField(recommendation, 'option_id');
+  const hasChoice = readField(recommendation, 'strength') !== 'none' && typeof optionId === 'string' && optionId.trim() !== '';
+  const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'There is no recommendation.';
+  return '  Q' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' ' + choice;
+}
+
 function renderTakenDecision(entry, index) {
   const brief = readField(entry, 'brief');
   const recommendation = readField(brief, 'recommendation');
@@ -860,10 +887,12 @@ function renderYesNo(value) {
  *
  * Inputs
  *   pauseForUser({answerKey, message, resumeArgs, decisions})
- *     answerKey   non-empty string. The args key the user's reply goes under.
+ *     answerKey   non-empty string. The key in resumeArgs.answers that the
+ *                 user's reply goes under.
  *     message     non-empty string. The text the user reads.
  *     resumeArgs  plain JSON object. The args to relaunch with, before the
- *                 reply is added. It must not already have answerKey.
+ *                 reply is added. Its answers field is a plain object that
+ *                 does not have answerKey yet.
  *     decisions   array. The decisions the run took so far, in order.
  *   finish({outcome, message, decisions})
  *     outcome     'complete' or 'blocked'.
@@ -883,8 +912,9 @@ function renderYesNo(value) {
  *   Only the harness completion notice carries the result. A model's own
  *   summary of the run never counts.
  *   needs_user true: show message to the user as is. Then relaunch the same
- *   workflow with args set to resume_args plus one more key, answer_key,
- *   whose value is the user's reply word for word. Never answer for the user.
+ *   workflow with args set to resume_args, with answers[answer_key] set to
+ *   the user's reply word for word. That is the only shape a reply takes: a
+ *   reply anywhere else in args is not read. Never answer for the user.
  *   needs_user false: show message to the user as is. The run is over.
  *   decisions lists what the run decided for the user. message already
  *   states them, so the overlord shows message and does not act on decisions.
@@ -895,8 +925,8 @@ function renderYesNo(value) {
  *   Open questions never make a run end as 'blocked'.
  *   resume_args is the only state that crosses a pause, so the workflow keeps
  *   its pause count and earlier answers there.
- *   answer_key is never already in resume_args, so a reply cannot overwrite
- *   state the workflow needs.
+ *   resume_args.answers is always a plain object, and answer_key is never
+ *   already in it, so a reply cannot overwrite an earlier one.
  *   Invalid input throws instead of returning a partial result.
  *
  * Why
@@ -928,8 +958,12 @@ function pauseForUser({ answerKey, message, resumeArgs, decisions }) {
   if (typeof resumeArgs !== 'object' || resumeArgs === null || Array.isArray(resumeArgs)) {
     throw new Error('pauseForUser: resumeArgs must be a plain object');
   }
-  if (Object.prototype.hasOwnProperty.call(resumeArgs, answerKey)) {
-    throw new Error('pauseForUser: resumeArgs already has answerKey ' + JSON.stringify(answerKey));
+  const answers = resumeArgs.answers;
+  if (typeof answers !== 'object' || answers === null || Array.isArray(answers)) {
+    throw new Error('pauseForUser: resumeArgs.answers must be a plain object');
+  }
+  if (Object.prototype.hasOwnProperty.call(answers, answerKey)) {
+    throw new Error('pauseForUser: resumeArgs.answers already has answerKey ' + JSON.stringify(answerKey));
   }
   assertMessageAndDecisions('pauseForUser', message, decisions);
   return {
@@ -972,8 +1006,8 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *            an object {request, autonomy?, answers?};
  *            undefined.
  *          answers is read only when it is a plain object. The reply to round
- *          N is answers['round-N'], or the top-level 'round-N' key the overlord
- *          adds when it resumes the run per the result.js contract.
+ *          N is answers['round-N'] and nothing else, per the result.js
+ *          contract: a top-level 'round-N' key is not read.
  *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
  *
  * Outputs
@@ -1060,7 +1094,7 @@ function roundKey(round) {
 function readReply(argsObject, round) {
   const key = roundKey(round);
   const storedAnswers = isPlainObject(argsObject.answers) ? argsObject.answers : {};
-  return [storedAnswers[key], argsObject[key]].find(isNonEmptyString);
+  return isNonEmptyString(storedAnswers[key]) ? storedAnswers[key] : undefined;
 }
 
 function buildResumeArgs(argsObject, replies) {
@@ -1145,21 +1179,6 @@ function resolveQuestions(questions, level) {
 
 function listTakenBriefs(taken) {
   return taken.map((entry) => entry.brief);
-}
-
-function describeOpenQuestion(entry, index) {
-  const brief = isPlainObject(entry.brief) ? entry.brief : {};
-  const problem = isNonEmptyString(brief.problem) ? brief.problem : 'not given';
-  const recommendation = isPlainObject(brief.recommendation) ? brief.recommendation : {};
-  const hasChoice = recommendation.strength !== 'none' && isNonEmptyString(recommendation.option_id);
-  const choice = hasChoice ? 'The report assumes option ' + recommendation.option_id + '.' : 'There is no recommendation.';
-  return '  Q' + (index + 1) + '. ' + problem + ' ' + choice;
-}
-
-function renderOpenQuestions(asks) {
-  const lines = ['I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:'];
-  asks.forEach((entry, index) => lines.push(describeOpenQuestion(entry, index)));
-  return lines.join('\n');
 }
 
 function finishBlocked(message) {

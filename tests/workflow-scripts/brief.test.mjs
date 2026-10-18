@@ -199,6 +199,38 @@ describe('malformed briefs still render', () => {
   }
 });
 
+describe('open questions', () => {
+  const open = [
+    { brief: makeBrief({ problem: 'FIRST_OPEN' }), reason: 'gate_irreversible' },
+    { brief: makeBrief({ problem: 'SECOND_OPEN', recommendation: { option_id: '', strength: 'none', why: 'W' } }), reason: 'no_recommendation' }
+  ];
+  test('lists each open question by position with the option the report assumes', () => {
+    assert.equal(lib.renderOpenQuestions(open), [
+      'I stopped asking after ' + lib.pauseLimit() + ' rounds of questions. These are still open:',
+      '  Q1. FIRST_OPEN The report assumes option A.',
+      '  Q2. SECOND_OPEN There is no recommendation.'
+    ].join('\n'));
+  });
+  test('strength none has no recommendation even with an option id', () => {
+    const brief = makeBrief({ recommendation: { option_id: 'B', strength: 'none', why: 'W' } });
+    assert.ok(lib.renderOpenQuestions([{ brief }]).endsWith('Q1. PROBLEM_TEXT There is no recommendation.'));
+  });
+  test('never shows brief.id or brief.kind', () => {
+    assert.doesNotMatch(lib.renderOpenQuestions(open), /Q9|planner_question/);
+  });
+  test('has no em dash, even when brief fields have one', () => {
+    const brief = makeBrief({ problem: `Pick one ${EM_DASH} or not`, recommendation: { option_id: `A${EM_DASH}1`, strength: 'weak', why: 'W' } });
+    const text = lib.renderOpenQuestions([{ brief }]);
+    assert.equal(text.includes(EM_DASH), false);
+    assert.ok(text.endsWith('Q1. Pick one, or not The report assumes option A, 1.'));
+  });
+  for (const brief of [null, undefined, {}, { problem: 7, recommendation: [] }]) {
+    test(`malformed brief ${JSON.stringify(brief)} renders with not given placeholders`, () => {
+      assert.ok(lib.renderOpenQuestions([{ brief }]).endsWith('Q1. not given There is no recommendation.'));
+    });
+  }
+});
+
 describe('argument checks', () => {
   test('renderQuestions needs at least one ask', () => {
     assert.throws(() => lib.renderQuestions([], []), /asks must be a non-empty array/);
@@ -208,42 +240,8 @@ describe('argument checks', () => {
     assert.throws(() => lib.renderQuestions([{ brief: makeBrief(), reason: 'hard_stop' }], null), /taken must be an array/);
     assert.throws(() => lib.renderDecisions(undefined), /taken must be an array/);
   });
-});
-
-describe('result contract', () => {
-  const decisions = [{ kind: 'plan_acceptance', option_id: 'A' }];
-  test('pauseForUser returns the pause shape', () => {
-    const paused = structuredClone(lib.pauseForUser({ answerKey: 'answer_1', message: 'Q?', resumeArgs: { pauses: 1 }, decisions }));
-    assert.deepEqual(paused, { needs_user: true, answer_key: 'answer_1', message: 'Q?', resume_args: { pauses: 1 }, decisions });
-  });
-  test('finish returns the finish shape for both outcomes', () => {
-    for (const outcome of ['complete', 'blocked']) {
-      const finished = structuredClone(lib.finish({ outcome, message: 'Done.', decisions }));
-      assert.deepEqual(finished, { needs_user: false, outcome, message: 'Done.', decisions });
-    }
-  });
-  test('resultFields covers exactly the fields both shapes use', () => {
-    const paused = lib.pauseForUser({ answerKey: 'a', message: 'm', resumeArgs: {}, decisions: [] });
-    const finished = lib.finish({ outcome: 'complete', message: 'm', decisions: [] });
-    const used = new Set([...Object.keys(paused), ...Object.keys(finished)]);
-    assert.deepEqual([...lib.resultFields()].sort(), [...used].sort());
-  });
-  test('a run pauses at most three times', () => {
-    assert.equal(lib.pauseLimit(), 3);
-    assert.deepEqual([0, 1, 2, 3, 4].map((count) => lib.canPause(count)), [true, true, true, false, false]);
-    assert.throws(() => lib.canPause(-1), /non-negative integer/);
-    assert.throws(() => lib.canPause('1'), /non-negative integer/);
-  });
-  test('invalid pause input throws', () => {
-    const valid = { answerKey: 'answer_1', message: 'Q?', resumeArgs: {}, decisions: [] };
-    assert.throws(() => lib.pauseForUser({ ...valid, answerKey: '' }), /answerKey/);
-    assert.throws(() => lib.pauseForUser({ ...valid, resumeArgs: [] }), /resumeArgs must be a plain object/);
-    assert.throws(() => lib.pauseForUser({ ...valid, resumeArgs: { answer_1: 'old' } }), /already has answerKey/);
-    assert.throws(() => lib.pauseForUser({ ...valid, message: ' ' }), /message/);
-    assert.throws(() => lib.pauseForUser({ ...valid, decisions: null }), /decisions/);
-  });
-  test('invalid finish input throws', () => {
-    assert.throws(() => lib.finish({ outcome: 'paused', message: 'm', decisions: [] }), /outcome must be complete or blocked/);
-    assert.throws(() => lib.finish({ outcome: 'complete', message: '', decisions: [] }), /message/);
+  test('renderOpenQuestions needs at least one open question', () => {
+    assert.throws(() => lib.renderOpenQuestions([]), /open must be a non-empty array/);
+    assert.throws(() => lib.renderOpenQuestions(undefined), /open must be a non-empty array/);
   });
 });

@@ -63,7 +63,8 @@ function collectKeys(node, keys) {
 }
 
 function resumeWith(pausedResult, reply) {
-  return { ...pausedResult.resume_args, [pausedResult.answer_key]: reply };
+  const resumeArgs = pausedResult.resume_args;
+  return { ...resumeArgs, answers: { ...resumeArgs.answers, [pausedResult.answer_key]: reply } };
 }
 
 describe('analysis-only: no pause', () => {
@@ -116,15 +117,24 @@ describe('analysis-only: pause and resume', () => {
     assert.deepEqual(second.phases, ['Analyze', 'Revise']);
     assert.deepEqual(second.result, { needs_user: false, outcome: 'complete', message: 'REVISED_REPORT', decisions: [] });
   });
-  test('a reply under answers works the same as the top-level answer key', async () => {
+  test('a top-level round-1 key is not read, so the run pauses again', async () => {
     const results = {
       analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }),
       'revise-1': makeAnalysis({ report: 'REVISED_REPORT' })
     };
-    const topLevel = await runWorkflow({ request: REQUEST, 'round-1': 'REPLY_ONE' }, results);
-    const nested = await runWorkflow({ request: REQUEST, answers: { 'round-1': 'REPLY_ONE' } }, results);
-    assert.deepEqual(nested.calls, topLevel.calls);
-    assert.deepEqual(nested.result, topLevel.result);
+    const run = await runWorkflow({ request: REQUEST, 'round-1': 'REPLY_ONE' }, results);
+    assert.equal(run.result.needs_user, true);
+    assert.equal(run.result.answer_key, 'round-1');
+    assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
+    assert.deepEqual(labelsOf(run.calls), ['analyze']);
+  });
+  test('an empty reply under answers is not read, so the run pauses again', async () => {
+    const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }) };
+    for (const reply of ['', '  ', 7]) {
+      const run = await runWorkflow({ request: REQUEST, answers: { 'round-1': reply } }, results);
+      assert.equal(run.result.answer_key, 'round-1');
+      assert.deepEqual(labelsOf(run.calls), ['analyze']);
+    }
   });
   test('answers that are not a plain object are ignored', async () => {
     for (const answers of ['round-1', ['REPLY_ONE'], null]) {
@@ -170,6 +180,7 @@ describe('analysis-only: pause and resume', () => {
     assert.ok(capped.result.message.startsWith('LATEST_REPORT\n\n'));
     assert.ok(capped.result.message.includes('I stopped asking after 3 rounds of questions. These are still open:'));
     assert.ok(capped.result.message.includes('Q1. STILL_OPEN The report assumes option A.'));
+    assert.ok(capped.result.message.includes(lib.renderOpenQuestions([{ brief: makeGatedBrief('STILL_OPEN') }])));
   });
   test('a fourth reply is not read once the cap is reached', async () => {
     const gatedEveryRound = makeAnalysis({ questions: [makeGatedBrief('STILL_OPEN')] });

@@ -4,3 +4,9 @@
 tests/**/*.json text eol=lf
 # Pin jq filters to LF (same regression-proofing)
 *.jq text eol=lf
+# Pin workflow scripts, their sources and data, their node tests and node tools to LF (same regression-proofing)
+plugin/workflows/*.js text eol=lf
+plugin/workflow-src/** text eol=lf
+plugin/references/*.json text eol=lf
+tests/workflow-scripts/** text eol=lf
+tools/*.mjs text eol=lf
