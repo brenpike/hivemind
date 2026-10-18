@@ -219,6 +219,7 @@ Fill every open question and every decision you take on the user's behalf as a d
 - The decision site is the delegation's `state`; a delegation without `state` matches no site.
 - A brief that resolves `auto`: take the recommended option, list it under `Decisions taken:`, and carry its brief in `plan.decisions`.
 - A brief with any other verdict is an open question: list it under `Open questions:` and carry its brief in `plan.open_questions`.
+- In ANALYSIS mode (see Analysis Result Mapping), which emits no implementation plan, still append a `plan:` block whenever the analysis takes a decision or raises an open question; it carries only `decisions` and `open_questions`, with no `steps` and no `delivery`.
 - A path you could not resolve is a fact only the user holds: never decide it by guessing.
 - Treat each `decided:` answer on the delegation as a pre-supplied answer per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level).
 

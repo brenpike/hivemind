@@ -94,6 +94,8 @@ Render each brief in this fixed order:
 6. Assumptions you can overrule.
 7. Reply hint: "letter, or go to take the recommendation".
 
+Omit any part whose field is absent or empty. When `recommendation.strength` is `none`, there is no recommendation: the Recommend part states that none is made and why, and the reply hint asks for a letter or a free-form answer, never `go`.
+
 A constraint whose `origin` is `assumed` is rendered as an assumption the user can overrule, never as a fixed constraint.
 
 Limits: about 12 lines per brief and at most 3 options. No internal names: no tier, gate, 2x2, disposition, kind keys, or state and exit_reason tokens. When several briefs surface at once, a numbered one-line index comes first. Auto-taken decisions are not rendered live; each appears on the overlord's Final Report `Decided:` line instead. The `merge_advised` terminal keeps its fixed advisory line. A brief's `verbatim` text is shown as-is. Interactive user-invoked skills, such as the `hivemind:plan-interrogation` grill, are exempt.

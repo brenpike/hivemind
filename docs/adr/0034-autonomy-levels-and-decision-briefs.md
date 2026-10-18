@@ -52,6 +52,16 @@ Surfaced decisions follow `plugin/references/decision-brief-schema.json`, a JSON
 
 Assumed constraints appear in the brief as OVERRULABLE. A constraint the agent assumed is labeled as an assumption the user can strike, never presented as a given. This is the direct answer to "Who made the public API constraint?".
 
+**Recorded residual.** This is a decision, not open work, recorded here per `plugin/governance/remediation-doctrine.md` (Recorded Residual).
+
+- **Residual.** The schema does not enforce the three-option limit (`maxItems`) or cross-field constraints, such as `recommendation.option_id` naming a supplied option. Those limits live in the schema descriptions and in `plugin/governance/decision-autonomy.md` (Decision Brief).
+- **Linked findings.** Local review finding 6f1dd3cf; PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305713681.
+- **Root cause.** The structured-output JSON Schema subset accepts `minItems` of 0 or 1 only, with no other array bounds and no cross-field constraints. A schema carrying `maxItems` would not be usable as-is as a structured-output contract (Decision 10).
+- **Inherited.** The limit belongs to the structured-output subset, not to this change.
+- **Bounded impact.** A fourth option only makes a brief longer. The overlord renders at most 3 options under the governance rendering limit. A recommendation that names no supplied option is a case where no recommendation is possible (resolution step 4), so it surfaces.
+- **Rejected on the merits.** Adding `maxItems: 3` would break the schema's use as-is as a structured-output contract. Keeping a second, stricter copy of the schema only for validation would be a hand-kept copy that drifts.
+- **Promotion condition.** If the structured-output subset gains `maxItems`, add the bound and a schema test.
+
 ### 4. Agents read the table directly, with no lookup script
 
 Agents read the table as prose-loaded data and apply it by judgment. No jq lookup script sits in front of it.
