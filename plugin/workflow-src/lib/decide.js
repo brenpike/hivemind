@@ -24,6 +24,9 @@
  *   one that fires makes it ask. It takes only when every check passes.
  *   brief.kind and brief.id are never read. The kind comes from the call site.
  *   Criticality never makes it ask. A weak recommendation is taken.
+ *   A recommended option with reversible false asks gate_irreversible, even
+ *   when gate.irreversible is false: the option field is checked, not only
+ *   the gate flag.
  *   An unknown level resolves to 'low', the most cautious level.
  *   A brief is malformed when a field decide or the renderer reads is missing
  *   or has the wrong type, when options is empty, or when
@@ -80,7 +83,7 @@ function decide({ kind, level, brief }, table) {
   if (cell !== 'auto') {
     return askFor('bad_cell');
   }
-  if (brief.gate.irreversible) {
+  if (brief.gate.irreversible || isRecommendedOptionIrreversible(brief)) {
     return askFor('gate_irreversible');
   }
   if (brief.gate.architectural) {
@@ -143,6 +146,10 @@ function isWellFormedBrief(brief) {
     return false;
   }
   return hasFieldsOfType(brief.gate, ['irreversible', 'architectural', 'safety'], 'boolean');
+}
+
+function isRecommendedOptionIrreversible(brief) {
+  return brief.options.some((option) => option.id === brief.recommendation.option_id && option.reversible === false);
 }
 
 function isRecommendationAnOption(brief) {

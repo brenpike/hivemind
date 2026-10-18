@@ -51,7 +51,14 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 5. Capture local HEAD SHA: `git rev-parse HEAD`.
 6. Place the working branch on a remote that `gh pr create` can target:
    - if `push_remote` is provided: `git push -u <push_remote> <head>`. On failure, exit 1 with blocker.
-   - else if upstream tracking is set: run `git push`.
+   - else if upstream tracking is set: first confirm the upstream is the branch's own name, then run `git push`. An upstream under any other name, such as trunk, would make this push or the force-with-lease retry below target that branch. Capture the branch and its upstream ref OUT-OF-BAND in the same Bash call and reference them only as `"$var"`, the same technique as `hivemind:push-branch` requirement 4:
+     ```bash
+     b="$(git rev-parse --abbrev-ref HEAD)"
+     ref="$(git config --get "branch.$b.merge")"
+     [ "$ref" = "refs/heads/$b" ] || { printf 'blocker: upstream does not match the working branch' >&2; exit 1; }
+     git push
+     ```
+     Step 1 confirmed `head` is not `base`, so with the upstream at `refs/heads/<head>` neither the push nor the retry below can target trunk.
      - on success: continue with that remote.
      - on **non-fast-forward** failure: retry once with a refspec-scoped force-with-lease against the tracked upstream ref. Read remote and upstream ref via git plumbing (string-splitting on `/` is unsafe — branch names like `feature/foo` and rare remote names with `/` make any single-slash split incorrect):
        - `<remote>` = `git config --get branch.<head>.remote`

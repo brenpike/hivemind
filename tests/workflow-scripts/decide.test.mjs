@@ -110,6 +110,16 @@ describe('gate flags', () => {
     const lastTwo = { irreversible: false, architectural: true, safety: true };
     assert.equal(decideWith('plan_acceptance', 'high', makeBrief({ gate: lastTwo })).reason, 'gate_architectural');
   });
+  test('a recommended option with reversible false asks gate_irreversible even when gate.irreversible is false', () => {
+    const base = makeBrief();
+    const options = [{ ...base.options[0], reversible: false }, base.options[1]];
+    assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ options })), { action: 'ask', reason: 'gate_irreversible' });
+  });
+  test('an option with reversible false that is not recommended does not make it ask', () => {
+    const base = makeBrief();
+    const options = [base.options[0], { ...base.options[1], reversible: false }];
+    assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ options })), takeAuto);
+  });
   test('table_surface wins over a gate flag', () => {
     const gate = { irreversible: true, architectural: false, safety: false };
     assert.equal(decideWith('plan_acceptance', 'low', makeBrief({ gate })).reason, 'table_surface');
