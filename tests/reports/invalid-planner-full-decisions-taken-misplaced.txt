@@ -1,0 +1,41 @@
+Plan
+Summary: Refactor session storage from in-memory map to Redis-backed persistence with migration path.
+
+Memory reused:
+- Prior decision to use ioredis client from 2026-04-10 planning session
+
+Steps:
+- S1 Owner: coder
+  Files: src/session/store.ts, src/session/redis-adapter.ts
+  Outcome: session reads and writes go through Redis adapter
+  Depends on: none
+- S2 Owner: coder
+  Files: src/session/migrate.ts
+  Outcome: migration script moves existing sessions to Redis
+  Depends on: S1
+
+Edge cases:
+- S1: Redis connection failure must fall back to in-memory with warning log
+
+Shared-file risks:
+- src/session/store.ts: also referenced by auth middleware in step S1
+
+Versioning:
+- Impact: required
+- Artifact(s): session-service
+- Likely bump: minor
+- Release files likely needed: package.json
+
+Workflow loadout:
+- versioning.md
+
+Delivery:
+- Shape: single-plan
+- Branch/PR: feature/redis-session from main
+- Worktrees: no — single developer working sequentially
+
+Open questions:
+- None
+
+Decisions taken:
+- Use ioredis over node-redis for existing team familiarity (assumes: team already runs Redis in production)

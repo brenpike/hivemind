@@ -12,13 +12,15 @@ The levels and their per-kind cells live in `${CLAUDE_PLUGIN_ROOT}/references/de
 
 Only the literal cell value `auto` grants autonomy: any other cell value or a kind the table does not list reads as `surface`. A kind listed in the table's `hard_stops` carries no per-level cell, so no autonomy level, table row, or delegation can make it an auto decision: it surfaces at every level.
 
+Each row's `resolved_at` lists the decision sites where its kind is decided: a workflow state in `${CLAUDE_PLUGIN_ROOT}/workflows/`, written `<state>`; one transition out of it, written `<state>.<outcome>`; or the reserved site `resume_on_start`. At each decision site the overlord resolves every kind bound to that site whose `when` holds, before acting on the decision or recording the transition that acts on it. Hard stops carry no `resolved_at`: they hold at every site.
+
 Each decision resolves in this order, and the first step that applies decides it. Steps 1-5 each surface:
 
 1. the kind is a hard stop;
 2. the workflow state carries a `user_gate`;
 3. the **Promotion Gate** trips on the recommended action;
 4. a fact only the user holds is needed, or no recommendation is possible — including a tool call that failed after retry exhaustion (per `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Tool-Error Recovery`) and a validation failure that remediation did not resolve;
-5. the kind is not listed in the table;
+5. the kind is not listed in the table, or its row's `resolved_at` does not name the site where the decision arises;
 6. otherwise the table cell for the kind at the active level decides.
 
 A `surface` verdict at a state with no `user_gate` is an overlord judgment pause: the overlord surfaces the decision before recording the transition that acts on it. The overlord resolves the level once per run and passes it as `autonomy` on every delegation; a producer whose delegation carries no `autonomy` reads `low`. The decision journal is written at every level.

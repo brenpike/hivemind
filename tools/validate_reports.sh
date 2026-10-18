@@ -84,8 +84,10 @@ PLANNER_COMPACT_INLINE_FIELDS=("Summary")
 
 PLANNER_COMPACT_LIST_SECTIONS=("Memory reused" "Steps" "Workflow loadout" "Open questions")
 
-# Recognized as a section boundary label; never required.
-PLANNER_OPTIONAL_LIST_SECTIONS=("Decisions taken")
+# Sections stored as "Label|RequiredNext": recognized as a section boundary
+# label, never required; when present must hold a list item and be immediately
+# followed by the RequiredNext label.
+PLANNER_OPTIONAL_LIST_SECTIONS=("Decisions taken|Open questions")
 
 # Sub-fields stored as "Parent|Child1|Child2|..."
 PLANNER_COMPACT_SUB_FIELDS=("Versioning|Impact|Artifact(s)")
@@ -210,8 +212,11 @@ build_planner_labels() {
     local labels=()
     labels+=("${PLANNER_COMPACT_INLINE_FIELDS[@]}")
     labels+=("${PLANNER_COMPACT_LIST_SECTIONS[@]}")
-    labels+=("${PLANNER_OPTIONAL_LIST_SECTIONS[@]}")
     local entry
+    for entry in "${PLANNER_OPTIONAL_LIST_SECTIONS[@]}"; do
+        IFS='|' read -ra parts <<< "$entry"
+        labels+=("${parts[0]}")
+    done
     for entry in "${PLANNER_COMPACT_SUB_FIELDS[@]}"; do
         IFS='|' read -ra parts <<< "$entry"
         labels+=("${parts[0]}")
@@ -487,6 +492,53 @@ check_required_list_sections() {
         if ! $has_list_item; then
             _rls_diag_ref+=("Required section '$section' must contain at least one list item")
         fi
+    done
+}
+
+# ── Optional List Sections ───────────────────────────────────────────────
+
+check_optional_list_sections() {
+    local -n _ols_lines_ref=$1
+    local -n _ols_sections_ref=$2
+    local labels_str="$3"
+    local -n _ols_diag_ref=$4
+
+    local entry parts section required_next escaped_section
+    local i j has_list_item next_label_found next_label
+    for entry in "${_ols_sections_ref[@]}"; do
+        IFS='|' read -ra parts <<< "$entry"
+        section="${parts[0]}"
+        required_next="${parts[1]}"
+        escaped_section=$(regex_escape "$section")
+
+        for ((i = 0; i < ${#_ols_lines_ref[@]}; i++)); do
+            if [[ ! "${_ols_lines_ref[$i]}" =~ ^${escaped_section}:[[:space:]]* ]]; then
+                continue
+            fi
+
+            has_list_item=false
+            next_label_found=""
+            for ((j = i + 1; j < ${#_ols_lines_ref[@]}; j++)); do
+                if [[ "${_ols_lines_ref[$j]}" =~ ^[A-Za-z][^:]*:[[:space:]]* ]] \
+                    && [[ "${_ols_lines_ref[$j]}" =~ ^([^:]+): ]]; then
+                    next_label=$(trim "${BASH_REMATCH[1]}")
+                    if labels_contain "$next_label" "$labels_str"; then
+                        next_label_found="$next_label"
+                        break
+                    fi
+                fi
+                if [[ "${_ols_lines_ref[$j]}" =~ ^[[:space:]]*(-|[0-9]+\.)[[:space:]] ]]; then
+                    has_list_item=true
+                fi
+            done
+
+            if ! $has_list_item; then
+                _ols_diag_ref+=("Optional section '$section' must contain at least one list item")
+            fi
+            if [[ "$next_label_found" != "$required_next" ]]; then
+                _ols_diag_ref+=("Optional section '$section' must be immediately followed by '$required_next'")
+            fi
+        done
     done
 }
 
@@ -855,6 +907,8 @@ validate_planner_report() {
         required_list_sections+=("${PLANNER_FULL_EXTRA_LIST_SECTIONS[@]}")
     fi
     check_required_list_sections _pr_lines_ref required_list_sections "$labels_str" _pr_diag_ref
+
+    check_optional_list_sections _pr_lines_ref PLANNER_OPTIONAL_LIST_SECTIONS "$labels_str" _pr_diag_ref
 
     # Check required sub-field groups
     check_required_sub_fields _pr_lines_ref PLANNER_COMPACT_SUB_FIELDS _pr_diag_ref

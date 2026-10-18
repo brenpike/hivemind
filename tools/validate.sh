@@ -293,6 +293,8 @@ run_suites() {
 #
 # Globs verified against each tool:
 #   plugin/workflows/*.json            -> validate_workflows --strict + --self-test
+#   plugin/references/decision-autonomy-table.json
+#                                      -> validate_workflows --strict + --self-test (+ policy_check)
 #   plugin/skills/record-state-result/scripts/**, init-run-ledger/scripts/**, tests/engine/**,
 #     plugin/skills/_shared/containment.sh
 #                                      -> test_engine  (also validate_workflows reads tests/engine;
@@ -422,6 +424,14 @@ map_path() {
       matched=1
       ;;
   esac
+  # validate_workflows: decision-autonomy site bindings. The table is ALSO a plugin/* file
+  # (policy_check lints it via the wholesale rule below), but only validate_workflows checks its
+  # site bindings against the workflow definitions.
+  if [[ "$p" == plugin/references/decision-autonomy-table.json ]]; then
+    add_selected "$SUITE_WORKFLOWS_STRICT" "$p (decision-autonomy site bindings)"
+    add_selected "$SUITE_WORKFLOWS_SELFTEST" "$p (decision-autonomy site bindings)"
+    matched=1
+  fi
   # validate_workflows: workflow-def fixtures.
   if [[ "$p" == tests/workflow-defs/* ]]; then
     add_selected "$SUITE_WORKFLOWS_STRICT" "$p (workflow-def fixture)"
@@ -1171,6 +1181,25 @@ self_test() {
       echo "PASS: engine script $engine_script -> test_engine.sh"
     else
       echo "FAIL: engine script $engine_script did NOT route to test_engine.sh"
+      fails=$((fails + 1))
+    fi
+  done
+
+  # 9. The decision-autonomy table must route to validate_workflows (strict + self-test). The
+  #    KNOWN_SUITES probe (#1) reaches validate_workflows via plugin/workflows/*.json, so it would
+  #    stay green even if this route were dropped. Probe the table path directly.
+  local autonomy_suite
+  for autonomy_suite in "$SUITE_WORKFLOWS_STRICT" "$SUITE_WORKFLOWS_SELFTEST"; do
+    SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
+    map_path "plugin/references/decision-autonomy-table.json" >/dev/null
+    hit=0
+    for entry in "${SELECTED[@]:-}"; do
+      if [[ "${entry%%$'\t'*}" == "$autonomy_suite" ]]; then hit=1; break; fi
+    done
+    if [[ "$hit" -eq 1 ]]; then
+      echo "PASS: decision-autonomy-table.json -> $autonomy_suite"
+    else
+      echo "FAIL: decision-autonomy-table.json did NOT route to $autonomy_suite"
       fails=$((fails + 1))
     fi
   done

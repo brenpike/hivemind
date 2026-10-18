@@ -219,7 +219,7 @@ Fill every open question and every decision you take on the user's behalf as a d
 - When that section's full resolution order — not the table cell alone — yields `auto`, decide: take the recommended option, list it under `Decisions taken:`, and carry its brief in `plan.decisions`. Judge the brief's `gate` on the recommended option first; a hard stop or a tripped Promotion Gate is never `auto`, whatever the cell says.
 - Any other verdict makes it an open question: list it under `Open questions:` and carry its brief in `plan.open_questions`.
 - A path you could not resolve, or a fact only the user holds, is always an open question at every level — never decide it by guessing.
-- A delegation without `autonomy` reads `low`.
+- A delegation without `autonomy` reads `low`. The decision site is the delegation's `state`; a delegation without `state` matches no site.
 - A delegation's `decided:` answers are binding inputs: carry each as an assumed constraint (an `assumptions` entry with `origin: assumed`) in every brief it touches, and never reopen it as an open question. A `decided:` answer settles only the question it answers; every other brief still resolves per that section.
 
 ### Accuracy Note: `depends_on` and `files` Are Concurrency-Load-Bearing
