@@ -70,6 +70,13 @@ describe('overlord Engine section', () => {
       assert.match(engineSection, new RegExp('`[^`\\n]*\\b' + fieldName + '\\b[^`\\n]*`'), `${fieldName} is missing from ## Engine`);
     });
   }
+  test('Engine names the reply arg the resume adds to resume_args', () => {
+    const replyName = resultLib.replyField();
+    assert.ok(engineSection.includes('`resume_args` plus `' + replyName + '` set to the user\'s reply verbatim'), `${replyName} resume clause is missing from ## Engine`);
+  });
+  test('Engine no longer names the dropped answer_key field', () => {
+    assert.ok(!engineSection.includes('answer_key'));
+  });
   test('Engine states the fallback clause', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));
     assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));

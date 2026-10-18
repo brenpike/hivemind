@@ -2,13 +2,10 @@
  * result.js: the value a workflow run returns, and the pause contract.
  *
  * Inputs
- *   pauseForUser({answerKey, message, resumeArgs, decisions})
- *     answerKey   non-empty string. The key in resumeArgs.answers that the
- *                 user's reply goes under.
+ *   pauseForUser({message, resumeArgs, decisions})
  *     message     non-empty string. The text the user reads.
  *     resumeArgs  plain JSON object. The args to relaunch with, before the
- *                 reply is added. Its answers field is a plain object that
- *                 does not have answerKey yet.
+ *                 reply is added. It has no replyField() key.
  *     decisions   array. The decisions the run took so far, in order.
  *   finish({outcome, message, decisions})
  *     outcome     'complete' or 'blocked'.
@@ -18,9 +15,10 @@
  *     pausesSoFar non-negative integer. How many times this run has paused.
  *
  * Outputs
- *   pauseForUser  {needs_user: true, answer_key, message, resume_args, decisions}
+ *   pauseForUser  {needs_user: true, message, resume_args, decisions}
  *   finish        {needs_user: false, outcome, message, decisions}
  *   resultFields  every top-level field name a result can carry.
+ *   replyField    the args key a resumed run reads the reply from: 'reply'.
  *   pauseLimit    the most times one run may pause: 3.
  *   canPause      true when pausesSoFar is below pauseLimit().
  *
@@ -28,9 +26,9 @@
  *   Only the harness completion notice carries the result. A model's own
  *   summary of the run never counts.
  *   needs_user true: show message to the user as is. Then relaunch the same
- *   workflow with args set to resume_args, with answers[answer_key] set to
- *   the user's reply word for word. That is the only shape a reply takes: a
- *   reply anywhere else in args is not read. Never answer for the user.
+ *   run with args set to resume_args plus reply set to the user's reply word
+ *   for word. That is the only resume rule: nothing else in args is read as
+ *   a reply. Never answer for the user.
  *   needs_user false: show message to the user as is. The run is over.
  *   decisions lists what the run decided for the user. message already
  *   states them, so the overlord shows message and does not act on decisions.
@@ -40,9 +38,8 @@
  *   outcome 'complete' and its message lists the questions still open.
  *   Open questions never make a run end as 'blocked'.
  *   resume_args is the only state that crosses a pause, so the workflow keeps
- *   its pause count and earlier answers there.
- *   resume_args.answers is always a plain object, and answer_key is never
- *   already in it, so a reply cannot overwrite an earlier one.
+ *   its pause count and earlier answers there, in fields it alone reads.
+ *   resume_args never has a reply key, so a stale reply cannot be replayed.
  *   Invalid input throws instead of returning a partial result.
  *
  * Why
@@ -53,7 +50,11 @@
  */
 
 function resultFields() {
-  return ['needs_user', 'outcome', 'answer_key', 'message', 'resume_args', 'decisions'];
+  return ['needs_user', 'outcome', 'message', 'resume_args', 'decisions'];
+}
+
+function replyField() {
+  return 'reply';
 }
 
 function pauseLimit() {
@@ -67,24 +68,16 @@ function canPause(pausesSoFar) {
   return pausesSoFar < pauseLimit();
 }
 
-function pauseForUser({ answerKey, message, resumeArgs, decisions }) {
-  if (typeof answerKey !== 'string' || answerKey === '') {
-    throw new Error('pauseForUser: answerKey must be a non-empty string');
-  }
+function pauseForUser({ message, resumeArgs, decisions }) {
   if (typeof resumeArgs !== 'object' || resumeArgs === null || Array.isArray(resumeArgs)) {
     throw new Error('pauseForUser: resumeArgs must be a plain object');
   }
-  const answers = resumeArgs.answers;
-  if (typeof answers !== 'object' || answers === null || Array.isArray(answers)) {
-    throw new Error('pauseForUser: resumeArgs.answers must be a plain object');
-  }
-  if (Object.prototype.hasOwnProperty.call(answers, answerKey)) {
-    throw new Error('pauseForUser: resumeArgs.answers already has answerKey ' + JSON.stringify(answerKey));
+  if (Object.prototype.hasOwnProperty.call(resumeArgs, replyField())) {
+    throw new Error('pauseForUser: resumeArgs must not have a ' + replyField() + ' key');
   }
   assertMessageAndDecisions('pauseForUser', message, decisions);
   return {
     needs_user: true,
-    answer_key: answerKey,
     message: message,
     resume_args: resumeArgs,
     decisions: decisions

@@ -4,11 +4,15 @@
  * Inputs
  *   args   the Workflow args global. One of:
  *            a string: the request itself (slash-command form);
- *            an object {request, autonomy?, answers?};
+ *            an object {request, autonomy?, answers?, reply?};
  *            undefined.
- *          answers is read only when it is a plain object. The reply to round
- *          N is answers['round-N'] and nothing else, per the result.js
- *          contract: a top-level 'round-N' key is not read.
+ *          answers is this script's own field: it comes only from the
+ *          resume_args of an earlier pause, holds the reply to round N as
+ *          answers['round-N'], and is read only when it is a plain object.
+ *          reply is the user's reply to that pause, per the result.js
+ *          contract. It answers the first round with no stored answer, and
+ *          only when answers is present, since that marks a pending pause.
+ *          A top-level 'round-N' key is not read.
  *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
  *
  * Outputs
@@ -19,15 +23,22 @@
  *   Read-only: every planner prompt says to make no changes.
  *   Every question resolves through decide() with kind 'planner_question',
  *   fixed here. The brief's own kind is never used.
- *   The analyze prompt never carries answers, so a resumed run gets the
- *   analyze result from cache. The revise-N prompt depends only on earlier
- *   results and on the reply to round N.
+ *   The analyze prompt never carries answers or the reply, so a resumed run
+ *   gets the analyze result from cache. The revise-N prompt depends only on
+ *   earlier results and on the reply to round N.
  *   A run pauses at most pauseLimit() times. After that it completes and
  *   lists the questions still open. Open questions never end it blocked:
  *   only a missing request, a null planner result or a planner outcome
  *   'blocked' does.
  *   No run record: resume_args carries the request, the autonomy value and
- *   every reply so far, which is all a resumed run needs.
+ *   every reply so far, which is all a resumed run needs. It always has
+ *   answers, so a relaunch with it is a resume, and never has reply.
+ *   A reply is ignored when no pause is pending: when the run was not
+ *   launched with answers, or when it finishes before it reaches a round
+ *   with no stored answer.
+ *   Residual: answers is trusted as this script's own resume_args echo. The
+ *   overlord passes resume_args back unchanged, so the script does not check
+ *   that each stored answer came from a real pause.
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -92,10 +103,18 @@ function roundKey(round) {
   return 'round-' + round;
 }
 
-function readReply(argsObject, round) {
+function readStoredAnswers(argsObject) {
+  return isPlainObject(argsObject.answers) ? argsObject.answers : {};
+}
+
+function readStoredReply(storedAnswers, round) {
   const key = roundKey(round);
-  const storedAnswers = isPlainObject(argsObject.answers) ? argsObject.answers : {};
   return isNonEmptyString(storedAnswers[key]) ? storedAnswers[key] : undefined;
+}
+
+function readPendingReply(argsObject) {
+  const reply = argsObject[replyField()];
+  return isPlainObject(argsObject.answers) && isNonEmptyString(reply) ? reply : undefined;
 }
 
 function buildResumeArgs(argsObject, replies) {
@@ -197,6 +216,8 @@ async function runAnalysis(rawArgs) {
     return finishBlocked('No request was given, so there is nothing to analyze.');
   }
   const level = resolveLevel(argsObject.autonomy, AUTONOMY_TABLE);
+  const storedAnswers = readStoredAnswers(argsObject);
+  let pendingReply = readPendingReply(argsObject);
   const replies = [];
   phase('Analyze');
   let analysis = await agent(buildAnalyzePrompt(argsObject.request), plannerOptions('analyze', 'Analyze'));
@@ -213,10 +234,13 @@ async function runAnalysis(rawArgs) {
       return finishComplete([analysis.report, renderOpenQuestions(resolution.asks)], resolution.taken);
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
-    const reply = readReply(argsObject, round);
+    let reply = readStoredReply(storedAnswers, round);
+    if (reply === undefined) {
+      reply = pendingReply;
+      pendingReply = undefined;
+    }
     if (reply === undefined) {
       return pauseForUser({
-        answerKey: roundKey(round),
         message: questions,
         resumeArgs: buildResumeArgs(argsObject, replies),
         decisions: listTakenBriefs(resolution.taken)

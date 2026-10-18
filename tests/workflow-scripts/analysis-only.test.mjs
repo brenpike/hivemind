@@ -63,8 +63,7 @@ function collectKeys(node, keys) {
 }
 
 function resumeWith(pausedResult, reply) {
-  const resumeArgs = pausedResult.resume_args;
-  return { ...resumeArgs, answers: { ...resumeArgs.answers, [pausedResult.answer_key]: reply } };
+  return { ...pausedResult.resume_args, reply: reply };
 }
 
 describe('analysis-only: no pause', () => {
@@ -88,12 +87,12 @@ describe('analysis-only: no pause', () => {
 });
 
 describe('analysis-only: pause and resume', () => {
-  test('an architectural gate pauses with round-1 and the rendered questions', async () => {
+  test('an architectural gate pauses with the rendered questions and no answers yet', async () => {
     const gated = makeGatedBrief('GATED_PROBLEM');
     const taken = makeBrief({ problem: 'TAKEN_PROBLEM' });
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [gated, taken] }) });
     assert.equal(run.result.needs_user, true);
-    assert.equal(run.result.answer_key, 'round-1');
+    assert.deepEqual(Object.keys(run.result).sort(), ['decisions', 'message', 'needs_user', 'resume_args']);
     const expectedMessage = lib.renderQuestions([{ brief: gated, reason: 'gate_architectural' }], [{ brief: taken }]);
     assert.equal(run.result.message, expectedMessage);
     assert.ok(run.result.message.includes(ARCHITECTURAL_LINE));
@@ -117,6 +116,33 @@ describe('analysis-only: pause and resume', () => {
     assert.deepEqual(second.phases, ['Analyze', 'Revise']);
     assert.deepEqual(second.result, { needs_user: false, outcome: 'complete', message: 'REVISED_REPORT', decisions: [] });
   });
+  test('a reply with no pending pause is ignored, so a fresh launch pauses for round 1', async () => {
+    const results = {
+      analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }),
+      'revise-1': makeAnalysis({ report: 'REVISED_REPORT' })
+    };
+    const run = await runWorkflow({ request: REQUEST, reply: 'UNASKED_REPLY' }, results);
+    assert.equal(run.result.needs_user, true);
+    assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
+    assert.deepEqual(labelsOf(run.calls), ['analyze']);
+    assert.ok(!run.calls[0].prompt.includes('UNASKED_REPLY'));
+  });
+  test('a reply to a run with nothing to ask is ignored', async () => {
+    const run = await runWorkflow({ request: REQUEST, answers: {}, reply: 'UNASKED_REPLY' }, { analyze: makeAnalysis() });
+    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'REPORT_TEXT', decisions: [] });
+    assert.deepEqual(labelsOf(run.calls), ['analyze']);
+  });
+  test('a missing, empty or non-string reply pauses again with the same resume_args', async () => {
+    const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }) };
+    const first = await runWorkflow({ request: REQUEST }, results);
+    for (const reply of [undefined, '', '  ', 7, null, ['REPLY'], { text: 'REPLY' }]) {
+      const again = await runWorkflow(resumeWith(first.result, reply), results);
+      assert.equal(again.result.needs_user, true, JSON.stringify(reply));
+      assert.deepEqual(again.result.resume_args, first.result.resume_args);
+      assert.equal(again.result.message, first.result.message);
+      assert.deepEqual(labelsOf(again.calls), ['analyze']);
+    }
+  });
   test('a top-level round-1 key is not read, so the run pauses again', async () => {
     const results = {
       analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }),
@@ -124,7 +150,6 @@ describe('analysis-only: pause and resume', () => {
     };
     const run = await runWorkflow({ request: REQUEST, 'round-1': 'REPLY_ONE' }, results);
     assert.equal(run.result.needs_user, true);
-    assert.equal(run.result.answer_key, 'round-1');
     assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
     assert.deepEqual(labelsOf(run.calls), ['analyze']);
   });
@@ -132,18 +157,20 @@ describe('analysis-only: pause and resume', () => {
     const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }) };
     for (const reply of ['', '  ', 7]) {
       const run = await runWorkflow({ request: REQUEST, answers: { 'round-1': reply } }, results);
-      assert.equal(run.result.answer_key, 'round-1');
+      assert.equal(run.result.needs_user, true);
+      assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
       assert.deepEqual(labelsOf(run.calls), ['analyze']);
     }
   });
-  test('answers that are not a plain object are ignored', async () => {
+  test('answers that are not a plain object are ignored, and so is the reply with them', async () => {
     for (const answers of ['round-1', ['REPLY_ONE'], null]) {
-      const run = await runWorkflow({ request: REQUEST, answers }, { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }) });
-      assert.equal(run.result.answer_key, 'round-1');
+      const run = await runWorkflow({ request: REQUEST, answers, reply: 'REPLY_ONE' }, { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }) });
+      assert.equal(run.result.needs_user, true);
+      assert.deepEqual(labelsOf(run.calls), ['analyze']);
       assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
     }
   });
-  test('a second round pauses with round-2 and carries the first reply', async () => {
+  test('a second round pauses and carries the first reply in resume_args', async () => {
     const results = {
       analyze: makeAnalysis({ questions: [makeGatedBrief('FIRST_PROBLEM')] }),
       'revise-1': makeAnalysis({ report: 'REPORT_ONE', questions: [makeGatedBrief('SECOND_PROBLEM')] }),
@@ -152,7 +179,6 @@ describe('analysis-only: pause and resume', () => {
     const first = await runWorkflow({ request: REQUEST }, results);
     const second = await runWorkflow(resumeWith(first.result, 'REPLY_ONE'), results);
     assert.equal(second.result.needs_user, true);
-    assert.equal(second.result.answer_key, 'round-2');
     assert.deepEqual(second.result.resume_args, { request: REQUEST, answers: { 'round-1': 'REPLY_ONE' } });
     assert.ok(second.result.message.includes('SECOND_PROBLEM'));
     const third = await runWorkflow(resumeWith(second.result, 'REPLY_TWO'), results);
@@ -162,6 +188,7 @@ describe('analysis-only: pause and resume', () => {
     assert.ok(third.calls[2].prompt.includes('REPLY_TWO'));
     assert.ok(third.calls[2].prompt.includes('REPORT_ONE'));
     assert.ok(!third.calls[1].prompt.includes('REPLY_TWO'));
+    assert.ok(!third.calls[2].prompt.includes('REPLY_ONE'));
     assert.equal(third.result.outcome, 'complete');
     assert.equal(third.result.message, 'REPORT_TWO');
   });
@@ -172,7 +199,7 @@ describe('analysis-only: pause and resume', () => {
     const twoReplies = { request: REQUEST, answers: { 'round-1': 'R1', 'round-2': 'R2' } };
     const third = await runWorkflow(twoReplies, results);
     assert.equal(third.result.needs_user, true);
-    assert.equal(third.result.answer_key, 'round-3');
+    assert.deepEqual(third.result.resume_args, twoReplies);
     const capped = await runWorkflow(resumeWith(third.result, 'R3'), results);
     assert.deepEqual(labelsOf(capped.calls), ['analyze', 'revise-1', 'revise-2', 'revise-3']);
     assert.equal(capped.result.needs_user, false);
@@ -189,6 +216,11 @@ describe('analysis-only: pause and resume', () => {
     const run = await runWorkflow({ request: REQUEST, answers }, results);
     assert.equal(run.calls.length, 4);
     assert.equal(run.result.outcome, 'complete');
+    const threeAnswers = { 'round-1': 'R1', 'round-2': 'R2', 'round-3': 'R3' };
+    const withReply = await runWorkflow({ request: REQUEST, answers: threeAnswers, reply: 'R4' }, results);
+    assert.equal(withReply.calls.length, 4);
+    assert.ok(withReply.calls.every((call) => !call.prompt.includes('R4')));
+    assert.equal(withReply.result.outcome, 'complete');
   });
 });
 

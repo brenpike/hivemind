@@ -893,13 +893,10 @@ function renderYesNo(value) {
  * result.js: the value a workflow run returns, and the pause contract.
  *
  * Inputs
- *   pauseForUser({answerKey, message, resumeArgs, decisions})
- *     answerKey   non-empty string. The key in resumeArgs.answers that the
- *                 user's reply goes under.
+ *   pauseForUser({message, resumeArgs, decisions})
  *     message     non-empty string. The text the user reads.
  *     resumeArgs  plain JSON object. The args to relaunch with, before the
- *                 reply is added. Its answers field is a plain object that
- *                 does not have answerKey yet.
+ *                 reply is added. It has no replyField() key.
  *     decisions   array. The decisions the run took so far, in order.
  *   finish({outcome, message, decisions})
  *     outcome     'complete' or 'blocked'.
@@ -909,9 +906,10 @@ function renderYesNo(value) {
  *     pausesSoFar non-negative integer. How many times this run has paused.
  *
  * Outputs
- *   pauseForUser  {needs_user: true, answer_key, message, resume_args, decisions}
+ *   pauseForUser  {needs_user: true, message, resume_args, decisions}
  *   finish        {needs_user: false, outcome, message, decisions}
  *   resultFields  every top-level field name a result can carry.
+ *   replyField    the args key a resumed run reads the reply from: 'reply'.
  *   pauseLimit    the most times one run may pause: 3.
  *   canPause      true when pausesSoFar is below pauseLimit().
  *
@@ -919,9 +917,9 @@ function renderYesNo(value) {
  *   Only the harness completion notice carries the result. A model's own
  *   summary of the run never counts.
  *   needs_user true: show message to the user as is. Then relaunch the same
- *   workflow with args set to resume_args, with answers[answer_key] set to
- *   the user's reply word for word. That is the only shape a reply takes: a
- *   reply anywhere else in args is not read. Never answer for the user.
+ *   run with args set to resume_args plus reply set to the user's reply word
+ *   for word. That is the only resume rule: nothing else in args is read as
+ *   a reply. Never answer for the user.
  *   needs_user false: show message to the user as is. The run is over.
  *   decisions lists what the run decided for the user. message already
  *   states them, so the overlord shows message and does not act on decisions.
@@ -931,9 +929,8 @@ function renderYesNo(value) {
  *   outcome 'complete' and its message lists the questions still open.
  *   Open questions never make a run end as 'blocked'.
  *   resume_args is the only state that crosses a pause, so the workflow keeps
- *   its pause count and earlier answers there.
- *   resume_args.answers is always a plain object, and answer_key is never
- *   already in it, so a reply cannot overwrite an earlier one.
+ *   its pause count and earlier answers there, in fields it alone reads.
+ *   resume_args never has a reply key, so a stale reply cannot be replayed.
  *   Invalid input throws instead of returning a partial result.
  *
  * Why
@@ -944,7 +941,11 @@ function renderYesNo(value) {
  */
 
 function resultFields() {
-  return ['needs_user', 'outcome', 'answer_key', 'message', 'resume_args', 'decisions'];
+  return ['needs_user', 'outcome', 'message', 'resume_args', 'decisions'];
+}
+
+function replyField() {
+  return 'reply';
 }
 
 function pauseLimit() {
@@ -958,24 +959,16 @@ function canPause(pausesSoFar) {
   return pausesSoFar < pauseLimit();
 }
 
-function pauseForUser({ answerKey, message, resumeArgs, decisions }) {
-  if (typeof answerKey !== 'string' || answerKey === '') {
-    throw new Error('pauseForUser: answerKey must be a non-empty string');
-  }
+function pauseForUser({ message, resumeArgs, decisions }) {
   if (typeof resumeArgs !== 'object' || resumeArgs === null || Array.isArray(resumeArgs)) {
     throw new Error('pauseForUser: resumeArgs must be a plain object');
   }
-  const answers = resumeArgs.answers;
-  if (typeof answers !== 'object' || answers === null || Array.isArray(answers)) {
-    throw new Error('pauseForUser: resumeArgs.answers must be a plain object');
-  }
-  if (Object.prototype.hasOwnProperty.call(answers, answerKey)) {
-    throw new Error('pauseForUser: resumeArgs.answers already has answerKey ' + JSON.stringify(answerKey));
+  if (Object.prototype.hasOwnProperty.call(resumeArgs, replyField())) {
+    throw new Error('pauseForUser: resumeArgs must not have a ' + replyField() + ' key');
   }
   assertMessageAndDecisions('pauseForUser', message, decisions);
   return {
     needs_user: true,
-    answer_key: answerKey,
     message: message,
     resume_args: resumeArgs,
     decisions: decisions
@@ -1010,11 +1003,15 @@ function assertMessageAndDecisions(caller, message, decisions) {
  * Inputs
  *   args   the Workflow args global. One of:
  *            a string: the request itself (slash-command form);
- *            an object {request, autonomy?, answers?};
+ *            an object {request, autonomy?, answers?, reply?};
  *            undefined.
- *          answers is read only when it is a plain object. The reply to round
- *          N is answers['round-N'] and nothing else, per the result.js
- *          contract: a top-level 'round-N' key is not read.
+ *          answers is this script's own field: it comes only from the
+ *          resume_args of an earlier pause, holds the reply to round N as
+ *          answers['round-N'], and is read only when it is a plain object.
+ *          reply is the user's reply to that pause, per the result.js
+ *          contract. It answers the first round with no stored answer, and
+ *          only when answers is present, since that marks a pending pause.
+ *          A top-level 'round-N' key is not read.
  *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
  *
  * Outputs
@@ -1025,15 +1022,22 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *   Read-only: every planner prompt says to make no changes.
  *   Every question resolves through decide() with kind 'planner_question',
  *   fixed here. The brief's own kind is never used.
- *   The analyze prompt never carries answers, so a resumed run gets the
- *   analyze result from cache. The revise-N prompt depends only on earlier
- *   results and on the reply to round N.
+ *   The analyze prompt never carries answers or the reply, so a resumed run
+ *   gets the analyze result from cache. The revise-N prompt depends only on
+ *   earlier results and on the reply to round N.
  *   A run pauses at most pauseLimit() times. After that it completes and
  *   lists the questions still open. Open questions never end it blocked:
  *   only a missing request, a null planner result or a planner outcome
  *   'blocked' does.
  *   No run record: resume_args carries the request, the autonomy value and
- *   every reply so far, which is all a resumed run needs.
+ *   every reply so far, which is all a resumed run needs. It always has
+ *   answers, so a relaunch with it is a resume, and never has reply.
+ *   A reply is ignored when no pause is pending: when the run was not
+ *   launched with answers, or when it finishes before it reaches a round
+ *   with no stored answer.
+ *   Residual: answers is trusted as this script's own resume_args echo. The
+ *   overlord passes resume_args back unchanged, so the script does not check
+ *   that each stored answer came from a real pause.
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -1098,10 +1102,18 @@ function roundKey(round) {
   return 'round-' + round;
 }
 
-function readReply(argsObject, round) {
+function readStoredAnswers(argsObject) {
+  return isPlainObject(argsObject.answers) ? argsObject.answers : {};
+}
+
+function readStoredReply(storedAnswers, round) {
   const key = roundKey(round);
-  const storedAnswers = isPlainObject(argsObject.answers) ? argsObject.answers : {};
   return isNonEmptyString(storedAnswers[key]) ? storedAnswers[key] : undefined;
+}
+
+function readPendingReply(argsObject) {
+  const reply = argsObject[replyField()];
+  return isPlainObject(argsObject.answers) && isNonEmptyString(reply) ? reply : undefined;
 }
 
 function buildResumeArgs(argsObject, replies) {
@@ -1203,6 +1215,8 @@ async function runAnalysis(rawArgs) {
     return finishBlocked('No request was given, so there is nothing to analyze.');
   }
   const level = resolveLevel(argsObject.autonomy, AUTONOMY_TABLE);
+  const storedAnswers = readStoredAnswers(argsObject);
+  let pendingReply = readPendingReply(argsObject);
   const replies = [];
   phase('Analyze');
   let analysis = await agent(buildAnalyzePrompt(argsObject.request), plannerOptions('analyze', 'Analyze'));
@@ -1219,10 +1233,13 @@ async function runAnalysis(rawArgs) {
       return finishComplete([analysis.report, renderOpenQuestions(resolution.asks)], resolution.taken);
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
-    const reply = readReply(argsObject, round);
+    let reply = readStoredReply(storedAnswers, round);
+    if (reply === undefined) {
+      reply = pendingReply;
+      pendingReply = undefined;
+    }
     if (reply === undefined) {
       return pauseForUser({
-        answerKey: roundKey(round),
         message: questions,
         resumeArgs: buildResumeArgs(argsObject, replies),
         decisions: listTakenBriefs(resolution.taken)
