@@ -54,7 +54,14 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
    - Absent — emit `printf 'blocker: trunk-freshness session fact not provided by orchestrator' >&2; exit 1`.
 4. Confirm `working_branch` follows the branch taxonomy and naming rules.
 5. Confirm there are no unexpected unstaged/uncommitted changes that make switching unsafe.
-6. Create or switch to `working_branch` from `base` conditionally: if `working_branch` does NOT yet exist, create it from `base` via `git switch -c <working_branch> <base>`; if `working_branch` ALREADY exists (resume/retry, or the current worktree is already on it), switch to it without `-c` via `git switch <working_branch>` (do NOT pass `-c` or `<base>` — passing `-c` to an existing branch fails). Either form repoints the CURRENT worktree HEAD onto `working_branch` even when invoked while booted on a NON-trunk scratch ref (e.g. a brood child booted on `strain/<brood-id>/<short>`); the skill creates and removes NO worktrees (worktree ownership stays with `hivemind:spawn-brood`). Suppress command output (`>/dev/null 2>&1`).
+6. Create or switch to `working_branch` from `base` conditionally: if `working_branch` does NOT yet exist, create it from `base` via `git switch --no-track -c <working_branch> <base>`; if `working_branch` ALREADY exists (resume/retry, or the current worktree is already on it), switch to it without `-c` via `git switch <working_branch>` (do NOT pass `-c` or `<base>` — passing `-c` to an existing branch fails). Either form repoints the CURRENT worktree HEAD onto `working_branch` even when invoked while booted on a NON-trunk scratch ref (e.g. a brood child booted on `strain/<brood-id>/<short>`); the skill creates and removes NO worktrees (worktree ownership stays with `hivemind:spawn-brood`). Suppress command output (`>/dev/null 2>&1`).
+   After `git switch <working_branch>`, if an upstream is set and its name is not `<remote>/<working_branch>`, run `git branch --unset-upstream`. A branch that tracks trunk lets a plain `git push` or a force-with-lease retry against the tracked upstream target trunk. Capture the branch, its upstream remote, and its upstream ref OUT-OF-BAND into shell variables in the same Bash call and reference them only as `"$var"`, the same technique as `hivemind:push-branch` requirement 4; never paste an upstream or branch value into command text:
+   ```bash
+   b="$(git rev-parse --abbrev-ref HEAD)"
+   rem="$(git branch --list "$b" --format='%(upstream:remotename)')"
+   up="$(git branch --list "$b" --format='%(upstream)')"
+   if [ -n "$up" ] && [ "$up" != "refs/remotes/$rem/$b" ]; then git branch --unset-upstream >/dev/null 2>&1 || { printf 'blocker: could not unset upstream that does not match the working branch' >&2; exit 1; }; fi
+   ```
 7. After the `git switch` or `git checkout` command in step 6 succeeds, suppress its output (`>/dev/null 2>&1`) and emit explicit YAML as the final Bash tool call: `printf 'branch: %s\n' "$working_branch"`. This YAML line is the routing data. If any prerequisite check fails (missing inputs, unsafe state, bad branch name), emit blocker to stderr and exit 1.
 
 ## Silence Discipline
