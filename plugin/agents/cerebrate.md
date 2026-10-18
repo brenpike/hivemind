@@ -57,7 +57,7 @@ Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PL
 - delivery shape recommendation
 - versioning/release implications
 - review-remediation planning when delegated
-- deciding open questions with a stated recommendation when the autonomy table allows, and surfacing the rest; never guessing a fact
+- deciding open questions with a stated recommendation when `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level) resolves them `auto`, and surfacing the rest; never guessing a fact
 
 ## Do Not
 
@@ -214,13 +214,13 @@ The `plan:` block mirrors the prose blocks above (it does not replace them). Kee
 
 ### Decisions and Open Questions
 
-Fill every open question and every decision you take on the user's behalf as a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`. Look up each brief's kind in `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` at the delegated `autonomy` level per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level).
+Fill every open question and every decision you take on the user's behalf as a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`. Look up each brief's kind in `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` at the delegated `autonomy` level per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level). That section alone decides each brief's verdict; the bullets below only say where each verdict goes.
 
-- When that section's full resolution order — not the table cell alone — yields `auto`, decide: take the recommended option, list it under `Decisions taken:`, and carry its brief in `plan.decisions`. Judge the brief's `gate` on the recommended option first; a hard stop or a tripped Promotion Gate is never `auto`, whatever the cell says.
-- Any other verdict makes it an open question: list it under `Open questions:` and carry its brief in `plan.open_questions`.
-- A path you could not resolve, or a fact only the user holds, is always an open question at every level — never decide it by guessing.
-- A delegation without `autonomy` reads `low`. The decision site is the delegation's `state`; a delegation without `state` matches no site.
-- A delegation's `decided:` answers are binding inputs: carry each as an assumed constraint (an `assumptions` entry with `origin: assumed`) in every brief it touches, and never reopen it as an open question. A `decided:` answer settles only the question it answers; every other brief still resolves per that section.
+- The decision site is the delegation's `state`; a delegation without `state` matches no site.
+- A brief that resolves `auto`: take the recommended option, list it under `Decisions taken:`, and carry its brief in `plan.decisions`.
+- A brief with any other verdict is an open question: list it under `Open questions:` and carry its brief in `plan.open_questions`.
+- A path you could not resolve is a fact only the user holds: never decide it by guessing.
+- Treat each `decided:` answer on the delegation as a pre-supplied answer per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level).
 
 ### Accuracy Note: `depends_on` and `files` Are Concurrency-Load-Bearing
 

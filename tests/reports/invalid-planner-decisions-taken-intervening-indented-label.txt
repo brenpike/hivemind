@@ -1,0 +1,24 @@
+Plan
+Summary: Add input validation to the user registration endpoint.
+
+Memory reused:
+- None
+
+Steps:
+- S1 Owner: coder
+  Files: src/routes/register.ts
+  Outcome: registration rejects invalid email formats
+
+Versioning:
+- Impact: none
+- Artifact(s): none
+
+Workflow loadout:
+- all mandatory only
+
+Decisions taken:
+- Reject on regex mismatch at the route layer — keeps validation next to the handler (assumes: no shared validator module exists)
+
+  Summary: extra
+Open questions:
+- None

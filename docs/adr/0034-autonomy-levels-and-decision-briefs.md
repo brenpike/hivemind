@@ -62,7 +62,7 @@ A script would be thrown away at the planned Workflow-tool migration. It would a
 
 ### 5. Cerebrate resolves auto-cell questions itself, the overlord backstops, and the workflow graph does not change
 
-When a question the cerebrate would raise falls in an `auto` cell at the active level, the cerebrate takes its own recommendation and journals it. It does not emit `open_questions`. As a backstop, if an `open_questions` outcome reaches the overlord anyway and the question falls in an `auto` cell, the overlord re-delegates to the cerebrate once, telling it to resolve the question.
+When a question the cerebrate would raise resolves `auto` at the active level, the cerebrate takes its own recommendation and journals it. It does not emit `open_questions`. As a backstop, if an `open_questions` outcome reaches the overlord anyway and the question resolves `auto`, the overlord re-delegates to the cerebrate once, telling it to resolve the question. The meaning of the re-delegated `decided:` answer is defined once in `plugin/governance/decision-autonomy.md` (Autonomy Level), standing in for the table cell only.
 
 The workflow graph does NOT change. `open_questions` still maps to `blocked`. What changes is how often the cerebrate reaches that outcome. As a result there is no workflow version bump and no version skew for in-flight ledgers. A run started under 5.0.3 resumes against an identical graph.
 
@@ -98,7 +98,15 @@ Consumers carry one rule instead of per-site prose. The overlord's `**Decision s
 
 This is not the runtime lookup script Decision 4 rejects. It runs once in CI over static data, it never sees a live decision, and it does not decide any verdict. Agents still read the table directly and apply it by judgment at runtime.
 
-**Honest limit.** The checks prove that sites exist and that planner advances are bound. They do not prove a row is bound to the semantically right site, and whether a row's `when` applies to a given decision stays judgment. The inverse rule covers cerebrate planning states only, so another decision site can still go unbound without failing validation.
+**Recorded residual.** This is a decision, not open work, recorded here per `plugin/governance/remediation-doctrine.md` (Recorded Residual).
+
+- **Residual.** R1-R6 prove that sites exist and that planner advances are bound. They do not prove that a row's kind is the decision actually made at that site. R6 covers cerebrate planning states only, so another decision site can still go unbound without failing validation. Whether a row's `when` applies to a given decision also stays judgment.
+- **Linked finding.** Local review finding 1f40bf21 (iteration 3).
+- **Root cause.** Which kind is decided at a site is judgment (Decision 4), and the table is its only source. No check can derive the right kind from the workflow graph.
+- **Inherited.** Before this change no kind was bound to any site. The bindings narrow that gap and introduce none of it.
+- **Bounded impact.** A misbinding needs a reviewed table edit. A decision whose row does not name its site surfaces (resolution step 5). Remediation-plan acceptance surfaces at every level through the promotion gate's architectural clause. Worst case: a skipped plan-acceptance prompt at `low`, and only if the overlord also fails to recognize the decision, on a working branch before a human-merged PR. That is reversible.
+- **Rejected on the merits.** An expected kind-to-site map in the validator would be a second hand-kept copy of the table. A site-keyed table, or a `decides` key on workflow states, either leaves the site naming an unverifiable kind or is the graph change already rejected. An inverse rule over every transition fails because most transitions are not decisions, and it would force invented rows or a validator-held exemption list.
+- **Promotion condition.** If a misbinding is ever observed to lose a surface, file an issue.
 
 ## Considered Options
 
@@ -118,6 +126,7 @@ This is not the runtime lookup script Decision 4 rejects. It runs once in CI ove
 | Restate the resolution order in per-site prose at each consumer | This is the failure being fixed. Two review findings of one class showed that per-site wording drifts from the canonical order, and each restatement is one more place to drift |
 | A single overlord rule with no per-row binding | The rule would still need to say which kinds apply at which state, so the mapping returns as prose. Nothing could check it against the workflow graph, and a kind raised at an unexpected state would resolve by guesswork instead of failing closed |
 | A `decides` key on workflow states | Changes the workflow definition and so needs a workflow version bump, creating version skew for in-flight ledgers. It also puts the decision-kind vocabulary into the WHO/WHAT-only graph (ADR-0018) |
+| Let a `decided:` answer bind the planner unconditionally | It ranks a consumer input ahead of the hard stops, user gates, and the promotion gate, and puts the answer's meaning in consumer prose, where it drifts from the canonical order |
 | Allowlisted `HIVEMIND_AUTONOMY` (`high` default, invalid → `low`), table with no cells for hard stops, schema-backed briefs, no graph change (CHOSEN) | — |
 
 ## Consequences

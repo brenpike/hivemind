@@ -39,6 +39,7 @@
 # prove sites EXIST, not that a row is bound to the semantically right site, and the
 # inverse rule covers cerebrate planning states only — other decision sites can still
 # go unbound without failing here.
+# Recorded residual: docs/adr/0034-autonomy-levels-and-decision-briefs.md (Decision 11).
 #
 # Exit 0 when all definitions and fixtures pass. Non-zero with a clear per-file /
 # per-rule message on any failure.

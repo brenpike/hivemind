@@ -23,6 +23,8 @@ Each decision resolves in this order, and the first step that applies decides it
 5. the kind is not listed in the table, or its row's `resolved_at` does not name the site where the decision arises;
 6. otherwise the table cell for the kind at the active level decides.
 
+A pre-supplied answer is a recommendation the overlord has already resolved `auto` and passes back to a producer as a `decided:` answer when it re-delegates the state. It stands in for step 6 only, and only for the question it answers: steps 1-5 re-run at the producer's decision site, and the first of them that applies surfaces the question again. While none applies, the producer carries the answer in every brief it touches as a constraint whose `origin` is `assumed`, and does not raise that question again.
+
 A `surface` verdict at a state with no `user_gate` is an overlord judgment pause: the overlord surfaces the decision before recording the transition that acts on it. The overlord resolves the level once per run and passes it as `autonomy` on every delegation; a producer whose delegation carries no `autonomy` reads `low`. The decision journal is written at every level.
 
 ## Decision Tiers

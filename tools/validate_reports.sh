@@ -85,8 +85,12 @@ PLANNER_COMPACT_INLINE_FIELDS=("Summary")
 PLANNER_COMPACT_LIST_SECTIONS=("Memory reused" "Steps" "Workflow loadout" "Open questions")
 
 # Sections stored as "Label|RequiredNext": recognized as a section boundary
-# label, never required; when present must hold a list item and be immediately
-# followed by the RequiredNext label.
+# label, never required. Block grammar when present: the header line
+# (^Label:) carries no inline value; the block holds only blank lines and list
+# items (indented sub-bullets and numbered items allowed), at least one item;
+# the first line that is neither blank nor a list item ends the block and must
+# be the RequiredNext label (^RequiredNext:). Each repeated header is checked
+# as its own block.
 PLANNER_OPTIONAL_LIST_SECTIONS=("Decisions taken|Open questions")
 
 # Sub-fields stored as "Parent|Child1|Child2|..."
@@ -500,42 +504,46 @@ check_required_list_sections() {
 check_optional_list_sections() {
     local -n _ols_lines_ref=$1
     local -n _ols_sections_ref=$2
-    local labels_str="$3"
-    local -n _ols_diag_ref=$4
+    local -n _ols_diag_ref=$3
 
-    local entry parts section required_next escaped_section
-    local i j has_list_item next_label_found next_label
+    local entry parts section required_next escaped_section escaped_next
+    local i j has_list_item ended_on_next header_rest
     for entry in "${_ols_sections_ref[@]}"; do
         IFS='|' read -ra parts <<< "$entry"
         section="${parts[0]}"
         required_next="${parts[1]}"
         escaped_section=$(regex_escape "$section")
+        escaped_next=$(regex_escape "$required_next")
 
         for ((i = 0; i < ${#_ols_lines_ref[@]}; i++)); do
-            if [[ ! "${_ols_lines_ref[$i]}" =~ ^${escaped_section}:[[:space:]]* ]]; then
+            if [[ ! "${_ols_lines_ref[$i]}" =~ ^${escaped_section}:(.*)$ ]]; then
                 continue
+            fi
+            header_rest="${BASH_REMATCH[1]}"
+            if [[ "$header_rest" =~ [^[:space:]] ]]; then
+                _ols_diag_ref+=("Optional section '$section' header must not carry an inline value")
             fi
 
             has_list_item=false
-            next_label_found=""
+            ended_on_next=false
             for ((j = i + 1; j < ${#_ols_lines_ref[@]}; j++)); do
-                if [[ "${_ols_lines_ref[$j]}" =~ ^[A-Za-z][^:]*:[[:space:]]* ]] \
-                    && [[ "${_ols_lines_ref[$j]}" =~ ^([^:]+): ]]; then
-                    next_label=$(trim "${BASH_REMATCH[1]}")
-                    if labels_contain "$next_label" "$labels_str"; then
-                        next_label_found="$next_label"
-                        break
-                    fi
+                if [[ "${_ols_lines_ref[$j]}" =~ ^[[:space:]]*$ ]]; then
+                    continue
                 fi
                 if [[ "${_ols_lines_ref[$j]}" =~ ^[[:space:]]*(-|[0-9]+\.)[[:space:]] ]]; then
                     has_list_item=true
+                    continue
                 fi
+                if [[ "${_ols_lines_ref[$j]}" =~ ^${escaped_next}: ]]; then
+                    ended_on_next=true
+                fi
+                break
             done
 
             if ! $has_list_item; then
                 _ols_diag_ref+=("Optional section '$section' must contain at least one list item")
             fi
-            if [[ "$next_label_found" != "$required_next" ]]; then
+            if ! $ended_on_next; then
                 _ols_diag_ref+=("Optional section '$section' must be immediately followed by '$required_next'")
             fi
         done
@@ -908,7 +916,7 @@ validate_planner_report() {
     fi
     check_required_list_sections _pr_lines_ref required_list_sections "$labels_str" _pr_diag_ref
 
-    check_optional_list_sections _pr_lines_ref PLANNER_OPTIONAL_LIST_SECTIONS "$labels_str" _pr_diag_ref
+    check_optional_list_sections _pr_lines_ref PLANNER_OPTIONAL_LIST_SECTIONS _pr_diag_ref
 
     # Check required sub-field groups
     check_required_sub_fields _pr_lines_ref PLANNER_COMPACT_SUB_FIELDS _pr_diag_ref
