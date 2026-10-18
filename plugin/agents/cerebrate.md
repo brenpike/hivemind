@@ -57,7 +57,7 @@ Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PL
 - delivery shape recommendation
 - versioning/release implications
 - review-remediation planning when delegated
-- surfacing open questions instead of guessing
+- deciding open questions with a stated recommendation when the autonomy table allows, and surfacing the rest; never guessing a fact
 
 ## Do Not
 
@@ -124,8 +124,12 @@ Versioning:
 - Impact: [none|possible|required|unknown]
 - Artifact(s): [name|none|unknown]
 
+Decisions taken:
+- [choice] — [why] (assumes: [assumption the user can overrule|none])
+- None
+
 Open questions:
-- [question]
+- Q1: [problem] — recommend [option]
 - None
 ```
 
@@ -168,8 +172,12 @@ Delivery:
 - overlap_risk: [low|medium|high]      # required when delivery: brood
 - overlap_details: [text]              # required when delivery: brood
 
+Decisions taken:
+- [choice] — [why] (assumes: [assumption the user can overrule|none])
+- None
+
 Open questions:
-- [question]
+- Q1: [problem] — recommend [option]
 - None
 ```
 
@@ -198,9 +206,21 @@ plan:
       outcome: ""
       depends_on: []
       status: pending
+  decisions: []             # decision briefs taken on the user's behalf (see Decisions and Open Questions)
+  open_questions: []        # decision briefs left for the user (see Decisions and Open Questions)
 ```
 
 The `plan:` block mirrors the prose blocks above (it does not replace them). Keep the two consistent: every prose step has a matching `steps[]` entry, and `delivery.mode` matches the prose `delivery:` value.
+
+### Decisions and Open Questions
+
+Fill every open question and every decision you take on the user's behalf as a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`. Look up each brief's kind in `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` at the delegated `autonomy` level per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level).
+
+- When that lookup yields `auto`, decide: take the recommended option, list it under `Decisions taken:`, and carry its brief in `plan.decisions`.
+- Any other verdict makes it an open question: list it under `Open questions:` and carry its brief in `plan.open_questions`.
+- A path you could not resolve, or a fact only the user holds, is always an open question at every level — never decide it by guessing.
+- A delegation without `autonomy` reads `low`.
+- A delegation's `decided:` answers are binding inputs: carry each as an assumed constraint (an `assumptions` entry with `origin: assumed`) in every brief it touches, and never reopen it as an open question.
 
 ### Accuracy Note: `depends_on` and `files` Are Concurrency-Load-Bearing
 
@@ -287,4 +307,4 @@ blocker                  -> blocked
 
 ### Finalization Gate
 
-Do not finalize until every step has: one owner, exact file scope. Any plan that routes to an implementation loop — compact or full — additionally requires the machine-readable `plan:` block with populated `steps[]` (each step: `STEP-NNN` id, owner, files, outcome, depends_on); without it the overlord's implement loop has no steps. Full output additionally requires: `Depends on`, full versioning block, and delivery block. When the delivery block sets `delivery: brood` it must also carry `Strains`, `overlap_risk`, and `overlap_details` (and `plan.delivery` must mirror them). Every step with a `STEP-NNN` identifier is a phase boundary for the orchestrator.
+Do not finalize until every step has: one owner, exact file scope. Any plan that routes to an implementation loop — compact or full — additionally requires the machine-readable `plan:` block with populated `steps[]` (each step: `STEP-NNN` id, owner, files, outcome, depends_on); without it the overlord's implement loop has no steps. Full output additionally requires: `Depends on`, full versioning block, and delivery block. When the delivery block sets `delivery: brood` it must also carry `Strains`, `overlap_risk`, and `overlap_details` (and `plan.delivery` must mirror them). Every step with a `STEP-NNN` identifier is a phase boundary for the orchestrator. Every decision taken and every open question — each `Decisions taken:` and `Open questions:` line, and each `plan.decisions` and `plan.open_questions` entry — is a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`.

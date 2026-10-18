@@ -667,6 +667,10 @@
                   <td><code>HIVEMIND_ENABLE_DECISION_REPORT</code></td>
                   <td>When set to any non-empty value, the overlord shows the post-merge decision report. Unset or empty: the report is off; the decision journal is still written.</td>
                 </tr>
+                <tr>
+                  <td><code>HIVEMIND_AUTONOMY</code></td>
+                  <td>Sets how many judgment calls the overlord takes for you: <code>high</code> (default, takes its own recommendations), <code>balanced</code> (the 5.x posture), or <code>low</code> (asks before every judgment call). Any other value resolves to <code>low</code> with a warning. Destructive fixes, trunk pushes, suspected injection, merge recommendations, and brood approvals always ask.</td>
+                </tr>
               </tbody>
             </table>
           </div>

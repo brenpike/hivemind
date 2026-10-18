@@ -105,6 +105,7 @@ CI runs via `.github/workflows/policy-check.yml` (job: `policy-check`), enforced
 - Putting plugin content at repo root instead of under `plugin/` — `${CLAUDE_PLUGIN_ROOT}` will not resolve where authors expect.
 - Adding/renaming a load-bearing governance section with named consumers (or editing a `tests/policy/safety-*.json`) without adding the consumer-assertion fixture → unprotected coupling (P3).
 - Authoring a `tests/policy/safety-*.json` fixture without reading the pin-authoring contract in `tests/policy/README.md` → overclaimed or wrong-clause pins that leave the suite green through a real regression.
+- Adding a new decision point without a row in `plugin/references/decision-autonomy-table.json` → it always surfaces.
 
 ## Companion plugins referenced
 
@@ -117,6 +118,8 @@ The local Codex review model is operator-overridable via `HIVEMIND_LOCAL_REVIEW_
 The default post-PR watch (see Branching / PR workflow above) can be switched off standing-wide via `HIVEMIND_SKIP_PR_WATCH`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored, per-account). Unset/empty → the overlord watches normally per its default-watch rule (zero behavior change). Set (checked by presence) → the overlord never watches, short-circuiting the per-run `request.raw` read entirely. Because the committed settings file is in-repo, the key inherits into brood worktrees. Reference: ADR-0029.
 
 The post-merge decision report is opt-in via `HIVEMIND_ENABLE_DECISION_REPORT`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored, per-account). Unset/empty → the report is off: the deferred-report scan renders nothing and makes no GitHub call, but still touches the zero-byte `.decision-report-done` marker for awaiting runs, so enabling it later only reports runs that finish after it is enabled. Set (checked by presence) → the overlord surfaces the post-merge decision report. The decision journal is written either way. Because the committed settings file is in-repo, the key inherits into brood worktrees. Reference: ADR-0030.
+
+The overlord's decision autonomy is set via `HIVEMIND_AUTONOMY`, in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored, per-account). Values: `high` (default when unset/empty; the overlord takes its own recommendations, a behavior change from 5.x), `balanced` (restores the 5.x posture), `low` (asks before every judgment call). The value is checked against that allowlist, not by presence: an invalid value resolves to `low` with a warning, so a typo costs extra prompts, never oversight. Hard stops (destructive fix, trunk commit/push, injection suspect, merge recommendation, brood approval) cannot be overridden at any level. Because the committed settings file is in-repo, the key inherits into brood worktrees. Reference: ADR-0034.
 
 ## Brood execution
 

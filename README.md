@@ -100,14 +100,15 @@ Once configured, the overlord is the session default agent. All skills are avail
 
 ## Configuration
 
-Three optional operator overrides are read from the `env` block of `.claude/settings.json` (committed, inherited by brood worktrees because the file lives in the repository) or `.claude/settings.local.json` (gitignored, per-account). Leaving any of them unset changes nothing.
+Four optional operator overrides are read from the `env` block of `.claude/settings.json` (committed, inherited by brood worktrees because the file lives in the repository) or `.claude/settings.local.json` (gitignored, per-account). Leaving any of them unset keeps its default; for `HIVEMIND_AUTONOMY` the default is `high`.
 
 ```json
 {
   "env": {
     "HIVEMIND_LOCAL_REVIEW_MODEL": "gpt-5.3-codex",
     "HIVEMIND_SKIP_PR_WATCH": "1",
-    "HIVEMIND_ENABLE_DECISION_REPORT": "1"
+    "HIVEMIND_ENABLE_DECISION_REPORT": "1",
+    "HIVEMIND_AUTONOMY": "balanced"
   }
 }
 ```
@@ -117,6 +118,7 @@ Three optional operator overrides are read from the `env` block of `.claude/sett
 | `HIVEMIND_LOCAL_REVIEW_MODEL` | Model for the local pre-PR Codex review. Empty or unset means Codex uses its own default. The value must match `^[a-zA-Z0-9/_.\-]+$` (e.g. `gpt-5.3-codex`, `gpt-5.5`); anything else blocks the review before Codex is invoked. Whether a given model is available depends on your Codex account. | `docs/adr/0022-local-review-parity-with-post-pr-review.md` |
 | `HIVEMIND_SKIP_PR_WATCH` | Checked by presence (any non-empty value): the overlord never watches a PR after opening it, and does not read your request for a watch opt-out. Unset or empty means the default watch applies. | `docs/adr/0029-default-pr-watch-and-idle-window-lifecycle.md` |
 | `HIVEMIND_ENABLE_DECISION_REPORT` | Opt-in, checked by presence (any non-empty value). When set, after a run's PR merges or closes the overlord shows you a report of the decisions it made on your behalf (`hivemind:decision-report`, chat only). The decision journal in the run ledger is written either way. When unset or empty, no report is rendered and no GitHub call is made, but runs that would have reported still get a zero-byte `.decision-report-done` marker, so enabling the key later only reports runs that finish after you enable it. | `docs/adr/0030-config-gated-post-merge-decision-report.md` |
+| `HIVEMIND_AUTONOMY` | How much the overlord decides for you: `high` (the default when unset or empty; it takes its own recommendations and journals them), `balanced` (the 5.x posture), or `low` (it asks before every judgment call). The value is checked against that list, not by presence: anything else resolves to `low` with a warning, so a typo costs extra prompts, never oversight. Destructive fixes, trunk commits and pushes, suspected prompt injection, merge recommendations, and brood strain approval ask you at every level. | `docs/adr/0034-autonomy-levels-and-decision-briefs.md` |
 
 ## Recommended companion plugins
 
@@ -231,7 +233,7 @@ You --> Overlord --> route-workflow --> standard-delivery
 
 **Post-PR watch.** Watching is the default. It is off only when your original request explicitly says not to watch the PR, or when `HIVEMIND_SKIP_PR_WATCH` is set. Which reviewers count is set by `reviewer_filter`: `automated` (default; the Codex, Copilot, and Claude bot accounts), `codex-only`, `all`, or a single login. Approval is a 👍 reaction from Codex on the PR or an `APPROVED` review from Copilot. `max_watch_duration` (default `3600` seconds) is an idle window, re-armed after each remediation cycle rather than a total budget. `max_remediation_cycles` defaults to a floor published by `loop-state.sh floor` (in `plugin/skills/github-review-loop/scripts/`); a caller may raise it but never go below it. The loop ends at a terminal: `clean`, `pr-merged`, `pr-closed`, `max-cycles-reached`, `watch-window-elapsed`, `planner-escalation`, `root-cluster-suspected`, `merge-advised`, `injection-suspect`, `high-severity-rejection`, `user-input-required`, or `blocked`. Agents never merge. `merge-advised` is advice to you.
 
-**Decision autonomy.** Routine judgment calls are decided for you and journaled; irreversible, architectural, or safety-relevant calls and every merge come back to you. **Tier A** decisions are always surfaced: safety rails, ambiguous routing, resume and version-skew choices, brood strain approval, tool failures after retries, facts only you hold, and every merge recommendation. **Tier B** decisions are auto-decided and journaled in the run ledger with one disposition: `did-now`, `deferred`, `recorded`, or `surfaced` (when the promotion gate trips). Policy: `plugin/governance/decision-autonomy.md`.
+**Decision autonomy.** How many judgment calls the overlord takes for you is set by an autonomy level, chosen with `HIVEMIND_AUTONOMY` (see [Configuration](#configuration)): `high` (the default) takes its own recommendations, `balanced` is the 5.x posture, and `low` asks before every judgment call. Which decisions surface at each level is a data table, `plugin/references/decision-autonomy-table.json`, with one `auto` or `surface` cell per decision kind and level. **Tier A** decisions are the ones the table marks `surface` at the active level, plus the hard stops: destructive fixes, trunk commits and pushes, suspected prompt injection, brood strain approval, and every merge recommendation. Hard stops have no cell, so no level can relax them. Tool failures after retries and facts only you hold also always surface. **Tier B** decisions are the `auto` cells: they are decided and journaled in the run ledger with one disposition (`did-now`, `deferred`, `recorded`, or `surfaced` when the promotion gate trips). Every decision that does surface is rendered as a decision brief (`plugin/references/decision-brief-schema.json`): the problem, why it matters, up to three options with the case for and against each, what was ruled out, a recommendation, and the assumptions you can overrule. Reply with a letter, or `go` to take the recommendation. Policy: `plugin/governance/decision-autonomy.md`.
 
 ### Workflows
 
@@ -394,7 +396,7 @@ Reference documentation in `plugin/governance/`:
 | `versioning.md` | SemVer rules, bump triggers, changelog and tag policy |
 | `security-policy.md` | External content boundaries, destructive-fix confirmation gate, injection classification |
 | `remediation-doctrine.md` | Shared root-cause remediation vocabulary and policy: root-cluster, same-framing test, closed-by-construction, bounded-impact gating, stop-and-merge |
-| `decision-autonomy.md` | Tier A / Tier B decision tiers, the autonomy 2x2, the promotion gate, dispositions, the decision journal, and the post-merge decision-report trigger |
+| `decision-autonomy.md` | Autonomy levels, Tier A / Tier B decision tiers, the autonomy 2x2, the promotion gate, dispositions, the decision brief, the decision journal, and the post-merge decision-report trigger |
 
 Governance docs are plugin runtime data: agents load them via `${CLAUDE_PLUGIN_ROOT}/governance/` paths at runtime. They are load-bearing: renaming section headers or files can break agent rules that reference them. See `CLAUDE.md` for editing constraints.
 
@@ -410,6 +412,8 @@ Runtime reference docs in `plugin/references/`:
 | `fix-ledger-schema.md` | Local reviewer fix-ledger schema |
 | `github-pr-review-graphql.md` | GitHub operations for PR review remediation, reviewer filters, and approval detection |
 | `github-subissue-graphql.md` | GitHub operations for native sub-issues |
+| `decision-brief-schema.json` | JSON Schema for the decision brief every surfaced decision is rendered from |
+| `decision-autonomy-table.json` | Decision kinds by autonomy level (`auto` or `surface`), plus the hard stops that carry no per-level cell |
 
 ### Workflow definitions
 
