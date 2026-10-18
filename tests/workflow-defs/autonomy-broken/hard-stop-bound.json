@@ -1,0 +1,45 @@
+{
+  "$comment": "Broken autonomy fixture (R5): hard stop trunk_commit_push carries resolved_at. Breaks ONLY R5.",
+  "version": 1,
+  "levels": [
+    "high",
+    "balanced",
+    "low"
+  ],
+  "default_level": "high",
+  "hard_stops": [
+    {
+      "hard_stop": "trunk_commit_push",
+      "when": "A commit or push would land directly on the trunk branch.",
+      "resolved_at": [
+        "git_preflight"
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "kind": "plan_acceptance",
+      "high": "auto",
+      "balanced": "auto",
+      "low": "surface",
+      "resolved_at": [
+        "plan.single",
+        "plan.multi"
+      ],
+      "when": "Cerebrate returns a plan with no open questions."
+    },
+    {
+      "kind": "remediation_plan_acceptance",
+      "high": "surface",
+      "balanced": "surface",
+      "low": "surface",
+      "resolved_at": [
+        "review_remediation_plan.single",
+        "review_remediation_plan.multi",
+        "review_remediation_plan_postpr.single",
+        "review_remediation_plan_postpr.multi"
+      ],
+      "when": "A planner returns a remediation plan for a root cluster."
+    }
+  ]
+}

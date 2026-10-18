@@ -21,6 +21,25 @@
 # shape (schema_version, run.{id,workflow,workflow_version,status,mode}, state.current,
 # events array, blockers array, etc.).
 #
+# Per the decision-autonomy table (${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json),
+# asserts every row binds to decision sites that exist, checked against the UNION of
+# states and per-state transition keys across plugin/workflows/*.json. Contract per
+# ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Autonomy Level):
+#   - R1 every rows[] entry has resolved_at as a non-empty array of strings
+#   - R2 each entry's site (text before the first '.') is a declared state in some
+#        workflow or a reserved site (AUTONOMY_RESERVED_SITES)
+#   - R3 a reserved site carries no outcome part
+#   - R4 an entry's outcome (text after the first '.') is a transition key of that
+#        state in at least one workflow declaring it
+#   - R5 no hard_stops entry carries resolved_at
+#   - R6 (inverse) every outcome of a cerebrate PLANNING-mode state whose target is
+#        neither a declared terminal nor a user_gate state is bound by some row naming
+#        exactly "<state>.<outcome>" (a bare-state binding does not count)
+# A missing or unparseable table fails; it is never skipped. Honest limit: these rules
+# prove sites EXIST, not that a row is bound to the semantically right site, and the
+# inverse rule covers cerebrate planning states only — other decision sites can still
+# go unbound without failing here.
+#
 # Exit 0 when all definitions and fixtures pass. Non-zero with a clear per-file /
 # per-rule message on any failure.
 #
@@ -38,8 +57,11 @@
 # through the same validation rules and asserts that EACH is rejected (proving the
 # validator catches dangling targets, missing start, undeclared terminal, bad state
 # type, and non-object transitions). It also confirms the known-good fixture under
-# tests/workflow-defs/valid/ passes. Exit 0 only if every broken fixture is rejected
-# and every valid fixture passes.
+# tests/workflow-defs/valid/ passes. It then runs each deliberately-broken autonomy
+# table under tests/workflow-defs/autonomy-broken/ through validate_autonomy_bindings
+# and asserts EACH is rejected, with the real decision-autonomy table as the positive
+# control that MUST pass. Exit 0 only if every broken fixture is rejected and every
+# valid fixture (and the real table) passes.
 
 set -euo pipefail
 
@@ -70,6 +92,7 @@ SCRIPT_DIR="$(dirname "$(realpath "$0")")"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
 WORKFLOWS_DIR="$REPO_ROOT/plugin/workflows"
 ENGINE_FIXTURES_DIR="$REPO_ROOT/tests/engine"
+AUTONOMY_TABLE_FILE="$REPO_ROOT/plugin/references/decision-autonomy-table.json"
 
 # ── Dependency check ──────────────────────────────────────────────────────────
 
@@ -126,6 +149,12 @@ REVIEWER_FIX_SET=(clean injection-suspect user-input-required planner-escalation
 # hardcoded state-name row, so future cerebrate states are covered automatically.
 CEREBRATE_PLANNING_SET=(single multi brood open_questions blocked)
 CEREBRATE_ANALYSIS_SET=(complete open_questions blocked)
+
+# AUTONOMY_RESERVED_SITES : decision sites a decision-autonomy row may bind that are
+# NOT workflow states. Hard-coded here because the table's data cannot authorize its
+# own sites. Source of truth: plugin/agents/overlord.md (## Resume On Start) for
+# resume_on_start.
+AUTONOMY_RESERVED_SITES=(resume_on_start)
 
 # Contract rows: "<state-name>:<set-var-name>". A reviewer state with the given
 # name in a workflow definition must declare every outcome in the named set as a
@@ -397,6 +426,126 @@ validate_cerebrate_contract() {
     fi
 }
 
+# ── Decision-autonomy binding validation ─────────────────────────────────────────
+#
+# validate_autonomy_bindings <table_file> : checks rules R1-R6 (see header) for the
+# given decision-autonomy table against the UNION of states and per-state transition
+# keys across every plugin/workflows/*.json. Fails closed: a missing or unparseable
+# table, a non-array .rows/.hard_stops, no workflow definitions, or a jq evaluation
+# error each fail rather than skip. R6 reuses validate_cerebrate_contract's discovery
+# rule (agent hivemind:cerebrate) narrowed to PLANNING mode (keys a superset of
+# CEREBRATE_PLANNING_SET).
+validate_autonomy_bindings() {
+    local table_file="$1"
+    local label
+    label="${table_file#"$REPO_ROOT"/}"
+    local file_failures_before="$FAILURES"
+
+    if [[ ! -f "$table_file" ]]; then
+        fail "$label" "decision-autonomy table does not exist"
+        return
+    fi
+    if ! jq -e . "$table_file" >/dev/null 2>&1; then
+        fail "$label" "decision-autonomy table is not valid JSON"
+        return
+    fi
+    if [[ "$(jq -r '.rows | type' "$table_file")" != "array" ]]; then
+        fail "$label" "decision-autonomy table .rows is missing or not an array"
+        return
+    fi
+    if [[ "$(jq -r '(.hard_stops // []) | type' "$table_file")" != "array" ]]; then
+        fail "$label" "decision-autonomy table .hard_stops is not an array"
+        return
+    fi
+
+    local -a wf_files=()
+    local wf
+    while IFS= read -r -d '' wf; do
+        wf_files+=("$wf")
+    done < <(find "$WORKFLOWS_DIR" -maxdepth 1 -name '*.json' -type f -print0 2>/dev/null | sort -z)
+    if [[ ${#wf_files[@]} -eq 0 ]]; then
+        fail "$label" "no plugin/workflows/*.json definitions to bind decision sites against"
+        return
+    fi
+
+    local reserved_json planning_json violations
+    reserved_json="$(printf '%s\n' "${AUTONOMY_RESERVED_SITES[@]}" | jq -R . | jq -s .)"
+    planning_json="$(printf '%s\n' "${CEREBRATE_PLANNING_SET[@]}" | jq -R . | jq -s .)"
+    if ! violations="$(jq -r \
+        --slurpfile wfs <(cat "${wf_files[@]}") \
+        --argjson reserved "$reserved_json" \
+        --argjson planning "$planning_json" '
+        ($wfs
+         | reduce .[] as $wf ({};
+             reduce (($wf.states // {}) | to_entries[]) as $st (.;
+                 .[$st.key] = (((.[$st.key] // [])
+                     + (if ($st.value.transitions | type) == "object"
+                        then ($st.value.transitions | keys) else [] end)) | unique)))) as $sites
+        | [.rows[] | select(type == "object")
+           | (.resolved_at // []) | select(type == "array") | .[] | strings] as $bound
+        | (.rows | to_entries[]
+           | .key as $idx | .value as $row
+           | (if ($row | type) == "object" then ($row.kind // "#\($idx)") else "#\($idx)" end) as $name
+           | if ($row | type) != "object" then
+                 "R1 violation: row \u0027\($name)\u0027 is not an object"
+             elif ($row | has("resolved_at") | not) then
+                 "R1 violation: row \u0027\($name)\u0027 has no resolved_at"
+             elif ($row.resolved_at | type) != "array" then
+                 "R1 violation: row \u0027\($name)\u0027 resolved_at is not an array"
+             elif ($row.resolved_at | length) == 0 then
+                 "R1 violation: row \u0027\($name)\u0027 resolved_at is an empty array"
+             else
+                 $row.resolved_at[] as $entry
+                 | if ($entry | type) != "string" then
+                       "R1 violation: row \u0027\($name)\u0027 resolved_at entry \($entry | tojson) is not a string"
+                   else
+                       ($entry | index(".")) as $dot
+                       | (if $dot == null then $entry else $entry[0:$dot] end) as $site
+                       | (if $dot == null then null else $entry[($dot + 1):] end) as $outcome
+                       | if ($reserved | index($site)) != null then
+                             (if $outcome != null then
+                                  "R3 violation: row \u0027\($name)\u0027 entry \u0027\($entry)\u0027 gives reserved site \u0027\($site)\u0027 an outcome part"
+                              else empty end)
+                         elif ($sites | has($site) | not) then
+                             "R2 violation: row \u0027\($name)\u0027 entry \u0027\($entry)\u0027 names site \u0027\($site)\u0027, which is neither a declared workflow state nor a reserved site"
+                         elif $outcome != null and (($sites[$site] | index($outcome)) == null) then
+                             "R4 violation: row \u0027\($name)\u0027 entry \u0027\($entry)\u0027 names outcome \u0027\($outcome)\u0027, which is not a transition key of state \u0027\($site)\u0027 in any workflow"
+                         else empty end
+                   end
+             end),
+          ((.hard_stops // []) | to_entries[]
+           | select((.value | type) == "object" and (.value | has("resolved_at")))
+           | "R5 violation: hard_stops entry \u0027\(.value.hard_stop // "#\(.key)")\u0027 carries resolved_at; hard stops hold at every site"),
+          ($wfs[] | . as $wf
+           | ($wf.terminal // []) as $term
+           | ($wf.states // {}) | to_entries[]
+           | select(.value.agent == "hivemind:cerebrate")
+           | select((.value.transitions | type) == "object")
+           | .key as $state | .value.transitions as $tr
+           | select(($planning - ($tr | keys)) | length == 0)
+           | $tr | to_entries[]
+           | .key as $outcome | .value as $target
+           | select(($term | index($target)) == null)
+           | select(($wf.states[$target].type // "") != "user_gate")
+           | "\($state).\($outcome)" as $site_outcome
+           | select(($bound | index($site_outcome)) == null)
+           | "R6 violation: cerebrate planning state \u0027\($state)\u0027 outcome \u0027\($outcome)\u0027 advances to non-terminal, non-user_gate state \u0027\($target)\u0027 (workflow \u0027\($wf.id // "?")\u0027) but no row binds exactly \u0027\($site_outcome)\u0027")
+    ' "$table_file" 2>&1)"; then
+        fail "$label" "decision-autonomy binding check could not be evaluated: $violations"
+        return
+    fi
+
+    local violation
+    while IFS= read -r violation; do
+        [[ -n "$violation" ]] || continue
+        fail "$label" "autonomy-binding $violation"
+    done <<< "$violations"
+
+    if [[ "$FAILURES" -eq "$file_failures_before" ]]; then
+        echo "PASS [$label] decision-autonomy rows bind to declared decision sites"
+    fi
+}
+
 # ── Run-ledger fixture shape validation ─────────────────────────────────────────
 
 validate_ledger_fixture() {
@@ -447,6 +596,7 @@ run_self_test() {
     local defs_dir="$REPO_ROOT/tests/workflow-defs"
     local broken_dir="$defs_dir/broken"
     local valid_dir="$defs_dir/valid"
+    local autonomy_broken_dir="$defs_dir/autonomy-broken"
     local self_failures=0
 
     echo '=== Self-test: broken fixtures MUST be rejected ==='
@@ -502,6 +652,45 @@ run_self_test() {
     fi
 
     echo ''
+    echo '=== Self-test: broken autonomy tables MUST be rejected ==='
+    if [[ ! -d "$autonomy_broken_dir" ]]; then
+        echo "FAIL [self-test] missing broken-fixture directory: tests/workflow-defs/autonomy-broken"
+        self_failures=$((self_failures + 1))
+    else
+        local af
+        while IFS= read -r -d '' af; do
+            local af_label
+            af_label="${af#"$REPO_ROOT"/}"
+            local rc=0
+            ( FAILURES=0; validate_autonomy_bindings "$af"; [[ "$FAILURES" -gt 0 ]] ) >/dev/null 2>&1 || rc=$?
+            if [[ "$rc" -eq 0 ]]; then
+                local detail
+                detail="$( ( FAILURES=0; validate_autonomy_bindings "$af" ) 2>&1 | grep '^FAIL' || true )"
+                echo "PASS [self-test] correctly rejected: $af_label"
+                while IFS= read -r d; do [[ -n "$d" ]] && echo "    $d"; done <<< "$detail"
+            else
+                echo "FAIL [self-test] broken autonomy table was NOT rejected: $af_label"
+                self_failures=$((self_failures + 1))
+            fi
+        done < <(find "$autonomy_broken_dir" -maxdepth 1 -name '*.json' -type f -print0 | sort -z)
+    fi
+
+    echo ''
+    echo '=== Self-test: real decision-autonomy table MUST pass ==='
+    local table_label
+    table_label="${AUTONOMY_TABLE_FILE#"$REPO_ROOT"/}"
+    local table_rc=0
+    ( FAILURES=0; validate_autonomy_bindings "$AUTONOMY_TABLE_FILE"; [[ "$FAILURES" -eq 0 ]] ) >/dev/null 2>&1 || table_rc=$?
+    if [[ "$table_rc" -eq 0 ]]; then
+        echo "PASS [self-test] real table accepted: $table_label"
+    else
+        echo "FAIL [self-test] real table was rejected: $table_label"
+        ( FAILURES=0; validate_autonomy_bindings "$AUTONOMY_TABLE_FILE" ) 2>&1 | grep '^FAIL' \
+            | while IFS= read -r d; do [[ -n "$d" ]] && echo "    $d"; done
+        self_failures=$((self_failures + 1))
+    fi
+
+    echo ''
     echo '=== Self-test summary ==='
     if [[ "$self_failures" -gt 0 ]]; then
         echo "Self-test: $self_failures failure(s) — the validator did not behave as required."
@@ -544,6 +733,10 @@ else
         for f in "${def_files[@]}"; do
             validate_cerebrate_contract "$f"
         done
+
+        echo ''
+        echo '=== Decision-autonomy bindings: table rows to workflow decision sites ==='
+        validate_autonomy_bindings "$AUTONOMY_TABLE_FILE"
     fi
 fi
 
