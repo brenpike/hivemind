@@ -38,7 +38,7 @@ git fetch origin <trunk>:refs/remotes/origin/<trunk>
 git rev-list --left-right --count <local-trunk>...origin/<trunk>
 ```
 
-Output: two tab-separated integers. Both must be `0` to proceed. Non-zero = a `trunk_stale` decision per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level), with two options: fix-and-continue or proceed-at-risk. A fix that rewrites history stays a hard stop: it trips the irreversible clause of the Promotion Gate and surfaces at every level.
+Output: two tab-separated integers. Both must be `0` to proceed. Non-zero = a `trunk_stale` decision per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level), with two options: fix-and-continue or proceed-at-risk. A fix that rewrites history trips the irreversible clause of `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Promotion Gate).
 
 ## Version Bumps
 

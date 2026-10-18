@@ -207,7 +207,7 @@ _Avoid_: signal detector, classifier, cluster checker
 ### Decision Autonomy
 
 **Autonomy Level**:
-The operator-selected posture for how many judgment calls the overlord takes on the Overmind's behalf: `high` (default, takes recommendations), `balanced` (the 5.x posture), or `low` (asks before every judgment call). Set with `HIVEMIND_AUTONOMY` and checked against that allowlist rather than by presence; an invalid value resolves to `low` with a warning. Selects the column of the decision-autonomy table; hard stops have no cell and surface at every level.
+The operator-selected posture for how many judgment calls the overlord takes on the Overmind's behalf: `high` (default, decides the most itself), `balanced` (the 5.x posture), or `low` (asks before every judgment call). Set with `HIVEMIND_AUTONOMY` and checked against that allowlist rather than by presence; an invalid value resolves to `low` with a warning. Selects the column of the decision-autonomy table; hard stops have no cell and surface at every level.
 _Avoid_: autonomy mode, trust level, permission level
 
 **Decision Site**:
@@ -215,7 +215,7 @@ A workflow state, or one transition out of it, that a decision-autonomy table ro
 _Avoid_: checkpoint, hook point, decision point (which is any judgment call, bound or not)
 
 **Decision Tier**:
-The A/B classification of an overlord decision, derived from the decision-autonomy table at the active **Autonomy Level**. Tier A = surfaced to the Overmind (every hard stop, plus every kind whose cell at the level is `surface`); Tier B = auto-decided and journaled (cells that are `auto`) unless the **Promotion Gate** trips.
+The A/B classification of an overlord decision, named for the **Disposition** it resolves to at the active **Autonomy Level**: Tier A = `surfaced` to the Overmind; Tier B = `did-now`, `deferred`, or `recorded`, journaled without asking.
 _Avoid_: priority, severity
 
 **Decision Brief**:
@@ -223,7 +223,7 @@ The structured form every surfaced decision takes, validated against `decision-b
 _Avoid_: question dump, status summary
 
 **Promotion Gate**:
-The test that promotes a Tier-B decision back to a surface — trips when the recommended action is irreversible OR architectural blast radius OR safety-relevant (destructive-fix categories).
+The test that forces a decision to surface — trips when the recommended action is irreversible OR architectural blast radius OR safety-relevant (destructive-fix categories).
 _Avoid_: escalation gate, risk gate
 
 **Decision Journal**:
@@ -235,7 +235,7 @@ The OPT-IN post-merge narrative the overlord surfaces after a PR merges — only
 _Avoid_: summary, changelog
 
 **Disposition**:
-The outcome of a Tier-B decision — `did-now` (auto-executed), `deferred` (tracked follow-up), `recorded` (accepted residual — the reasoning is recorded in the repository next to the code; no tracker entry), or `surfaced` (returned to the Overmind).
+The one outcome every overlord decision resolves to — `did-now` (done now), `deferred` (tracked follow-up), `recorded` (accepted residual — the reasoning is recorded in the repository next to the code; no tracker entry), or `surfaced` (returned to the Overmind).
 _Avoid_: status, resolution
 
 ### Plugin Structure
@@ -407,11 +407,11 @@ _Avoid_: degraded mode, manual mode, safe mode
 - **Intent-Based Governance** defines which rules remain mechanical (**Unsafe Git State**, **Destructive Fix Gate**, **External Content Boundary**, report schemas) vs intent-described
 - An **Unsafe Git State** blocks all modifying agent operations until resolved
 
-- An **Overlord** records a **Decision Journal** entry for every Tier-B decision; the **Promotion Gate** decides whether the decision is auto-taken or surfaced to the **Overmind**
-- The active **Autonomy Level** selects which **Decision Tier** each decision kind falls in; a hard stop is **Tier A** at every level
+- An **Overlord** records a **Decision Journal** entry for every Tier-B decision; the **Autonomy Level** resolution order decides its **Disposition**
+- The active **Autonomy Level** selects the table column each decision resolves against; a hard stop is **Tier A** at every level
 - Every decision surfaced to the **Overmind** is rendered as a **Decision Brief**
 - A **Decision Report** is produced once per merged PR that contains ≥1 auto **Disposition** (`did-now`, `deferred`, or `recorded`) when the decision report is enabled via `HIVEMIND_ENABLE_DECISION_REPORT`, rendered in the consumer's ubiquitous language
-- **Remediation** Tier-B choices (planner-escalation, root-cluster routing) are auto-taken + journaled unless the **Promotion Gate** trips
+- **Remediation** routing choices (planner-escalation, root-cluster routing) resolve to a **Disposition** like any other decision
 
 - A **Brood** contains one or more **Strains**, each running in a separate git worktree
 - A **Brood-Plan** produces exactly one **Strain** per independent work bucket

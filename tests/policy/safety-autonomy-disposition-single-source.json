@@ -1,0 +1,74 @@
+{
+  "rule": "The Autonomy Level resolution order is the only chooser of a decision's disposition, and every consumer routes by the disposition it yields",
+  "description": "decision-autonomy.md (Autonomy Level) resolves every decision, in one ordered list, to exactly one disposition: `did-now`, `deferred`, `recorded`, or `surfaced`. Step 6 carries the table cell, the strength of the recommendation, whether the run can finish without the choice, and reversibility, so the Autonomy 2x2 lives inside the order rather than beside it. A second copy of that choice is the defect this fixture exists to catch: a consumer that reads the bare table cell and re-derives an action from it, such as treating an `auto` cell as an instruction to take the recommended option, silently drops the branches that defer, record, or surface a weak recommendation, and two copies drift. This fixture owns three axes. (1) CANONICAL CLAIM. The source pin carries the single-source sentence in decision-autonomy.md: the claim that this order is the only place a disposition is chosen and the obligation that every consumer routes by the disposition it yields and never re-derives one from the table cell, the gate, or the recommendation, in one span, so weakening the only-chooser claim or deleting the no-re-derivation obligation stops the match. Two canonical consumer pins in the same file carry what the order must still decide and where its output goes: the step-6 branch that sends a weak recommendation on a choice the run can finish without to `deferred` or `recorded`, which is the branch consumers dropped, so collapsing step 6 back to a bare verdict fails; and the transport sentence that maps each disposition to its planner `plan` key (`plan.decisions` for `did-now`, `plan.deferred` for `deferred`, `plan.recorded` for `recorded`, `plan.open_questions` for `surfaced`), so dropping a key or re-pairing a key with another disposition fails. A third canonical pin carries the overlord's obligation to file each returned `deferred` brief's tracked follow-up before recording the transition out of the state that returned it, so a deferred brief cannot become a silent drop by rewording that obligation away. (2) CONSUMER POINTERS. cerebrate.md must still carry each brief in the `plan` key that decision-autonomy.md (Decision Brief) names for its disposition, and overlord.md must still route each decision by the disposition it resolves to per decision-autonomy.md (Disposition Vocabulary). These are pointer pins, never remedy prose, so honest rewording of surrounding text does not turn the suite red. (3) NO SECOND COPY. set_check scans each named consumer file line by line for literals that only a re-copy of the choice would carry: the bare cell values `auto` and `surface` in backticks, the take-the-recommendation phrasings (`take the recommend`, `takes the recommend`, `take its recommend`, `takes its recommend`, `its own recommend`), the strength axis (`strong recommendation`, `weak recommendation`), and the deferrability axis (`non-deferrable`, `can finish without`, `cannot finish without`, `cannot proceed without`), and requires each to occur ZERO times in each file. subset mode never reports the members a clean file necessarily lacks; expected_counts carries the zero assertion. The capture group is a fixed literal alternation rather than a negated-delimiter class, the same exception the Bump Type engine single-source fixture (tests/policy/safety-bump-type-engine-single-source.json) takes, because the axis is ABSENCE of known literals, not membership of an enumerable marker set: there is no structural marker to anchor on, and every capture is by construction a member whose required count is zero. RESIDUALS, stated plainly: these pins claim word-sequence presence (and, for the set_check, absence of the listed literals) in the named files, never meaning, so a consumer that keeps every pinned pointer while re-deriving a disposition in fresh words passes. The absence literals are case-sensitive and line-scoped: a re-copy that paraphrases the choice, capitalizes a literal, or wraps one across a line break is invisible, because no fixture here can assert body-prose ABSENCE beyond fixed literals (`absent` is scoped to YAML frontmatter). This set_check is a complete-the-known-set tripwire for the restatements already seen, not the fix; the fix is the single resolution order itself. set_check `files` is a literal list with no glob expansion, so a re-copy planted in any other plugin file is invisible, and README.md, CLAUDE.md, CONTEXT.md, and web/functionality.html are outside the list by design, since human-facing docs may describe the choice in their own words.",
+  "set_check": {
+    "extract_regex": "(`auto`|`surface`|take the recommend|takes the recommend|take its recommend|takes its recommend|its own recommend|strong recommendation|weak recommendation|non-deferrable|can finish without|cannot finish without|cannot proceed without)",
+    "expected_set": [
+      "`auto`",
+      "`surface`",
+      "take the recommend",
+      "takes the recommend",
+      "take its recommend",
+      "takes its recommend",
+      "its own recommend",
+      "strong recommendation",
+      "weak recommendation",
+      "non-deferrable",
+      "can finish without",
+      "cannot finish without",
+      "cannot proceed without"
+    ],
+    "expected_counts": {
+      "`auto`": 0,
+      "`surface`": 0,
+      "take the recommend": 0,
+      "takes the recommend": 0,
+      "take its recommend": 0,
+      "takes its recommend": 0,
+      "its own recommend": 0,
+      "strong recommendation": 0,
+      "weak recommendation": 0,
+      "non-deferrable": 0,
+      "can finish without": 0,
+      "cannot finish without": 0,
+      "cannot proceed without": 0
+    },
+    "files": [
+      { "path": "plugin/agents/overlord.md", "mode": "subset" },
+      { "path": "plugin/agents/cerebrate.md", "mode": "subset" },
+      { "path": "plugin/agents/local-reviewer.md", "mode": "subset" },
+      { "path": "plugin/agents/github-reviewer.md", "mode": "subset" },
+      { "path": "plugin/governance/workflow.md", "mode": "subset" },
+      { "path": "plugin/governance/report-format.md", "mode": "subset" },
+      { "path": "plugin/references/run-ledger-schema.md", "mode": "subset" },
+      { "path": "plugin/references/decision-brief-schema.json", "mode": "subset" },
+      { "path": "plugin/skills/decision-report/SKILL.md", "mode": "subset" }
+    ]
+  },
+  "source": {
+    "file": "plugin/governance/decision-autonomy.md",
+    "pattern": "This order is the only place a disposition is chosen: every consumer routes a decision by the disposition it yields and never re-derives one from the table cell, the gate, or the recommendation."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "a weak recommendation on a choice the run can finish without yields `deferred` or `recorded`"
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "`plan.decisions` for `did-now`, `plan.deferred` for `deferred`, `plan.recorded` for `recorded`, `plan.open_questions` for `surfaced`"
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "The overlord files each returned `deferred` brief's tracked follow-up before recording the transition out of the state that returned it."
+    },
+    {
+      "file": "plugin/agents/cerebrate.md",
+      "pattern": "Carry each brief in the `plan` key `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief) names for its disposition"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Route each decision by the disposition it resolves to, per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Disposition Vocabulary)"
+    }
+  ]
+}

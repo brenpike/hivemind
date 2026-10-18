@@ -100,14 +100,11 @@ user reads the auto-decisions in that light.
    Choices: <options considered>
    Trade-offs: <tradeoffs across those options>
    Decided: <decision> — <rationale>
-   Why auto: <plain English, drawn from THIS entry, its confidence taken from the entry's
-     `rec_strength`: a strong recommendation with a clean safety check → I acted without
-     asking; or (a `did-now` with `rec_strength` weak) a weak call on a choice the run couldn't
-     wait on, and easy to undo → I took it and flagged its assumptions for you to overrule;
-     or no strong call → I carried the finding's full scope
-     onward instead of acting now; or I judged this was a decision rather than work, so I
-     recorded the reasoning instead of filing it as work; or why this one was surfaced to you
-     instead>
+   Why auto: <plain English, drawn from THIS entry: what its `disposition` did — `did-now`:
+     I acted without asking; `deferred`: I carried the finding's full scope onward instead of
+     acting now; `recorded`: I recorded the reasoning instead of filing it as work — and why,
+     from its `rationale`, with its confidence from its `rec_strength` and, when that is weak,
+     the assumptions you can overrule; or why this one was surfaced to you instead>
    Reversible: <yes/no from the entry, plus what undo would involve in domain terms>
    ```
    The `Why auto` gloss names a destination — where the finding was carried onward, or where the
