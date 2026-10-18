@@ -1,6 +1,6 @@
 # Decision Autonomy
 
-The overlord makes judgment calls on the user's (the Overmind's) behalf at the autonomy level the operator selects with `HIVEMIND_AUTONOMY`: it resolves every judgment call to one disposition per **Autonomy Level** and journals each one. Every judgment call taken on the user's behalf is recorded as a decision-journal entry. This doc is loaded by the overlord, and by each other agent a section names as its consumer, and is the single source for the autonomy posture, the autonomy level, the tier split, the 2x2, the promotion gate, the disposition vocabulary, the decision brief, the decision journal, and the post-merge report trigger.
+The overlord makes judgment calls on the user's (the Overmind's) behalf at the autonomy level the operator selects with `HIVEMIND_AUTONOMY`. How each judgment call resolves is **Autonomy Level**; which judgment calls are journaled is **Decision Journal**. This doc is loaded by the overlord, and by each other agent a section names as its consumer, and is the single source for the autonomy posture, the autonomy level, the tier split, the 2x2, the promotion gate, the disposition vocabulary, the decision brief, the decision journal, and the post-merge report trigger.
 
 When any rule uses a term defined here, this definition is binding.
 
@@ -8,7 +8,7 @@ When any rule uses a term defined here, this definition is binding.
 
 Consumers: overlord and cerebrate. The operator selects the level with `HIVEMIND_AUTONOMY`, set in the `env` block of the project's `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored) — the same operator-override channel as `HIVEMIND_SKIP_PR_WATCH`, `HIVEMIND_LOCAL_REVIEW_MODEL`, and `HIVEMIND_ENABLE_DECISION_REPORT`. Because the committed settings file lives in the repository, the level inherits into brood worktrees. The key is value-checked against a positive allowlist, NOT checked by presence. When `HIVEMIND_AUTONOMY` is unset or empty the level is the table's `default_level`; a value that is not exactly one of the table's `levels` resolves to `low`, the most-surfacing level, and the overlord surfaces a one-line warning naming the rejected value.
 
-The levels and their per-kind cells live in `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`. `high` is the most autonomous level, `balanced` is the prior posture, and `low` asks before every judgment call.
+The levels and their per-kind cells live in `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`. `high` is the most autonomous level, `balanced` is the prior posture, and `low` is the most-surfacing level.
 
 Only the literal cell value `auto` grants autonomy: any other cell value or a kind the table does not list reads as `surface`. A kind listed in the table's `hard_stops` carries no per-level cell, so no autonomy level, table row, or delegation can make it an auto decision: it surfaces at every level.
 
@@ -24,14 +24,14 @@ Each decision resolves to exactly one disposition per **Disposition Vocabulary**
 6. otherwise the table cell for the kind at the active level decides: any value but `auto` yields `surfaced`, and `auto` yields the first of these that holds:
    - a strong recommendation yields `did-now`;
    - a weak recommendation on a choice the run can finish without yields `deferred` or `recorded`, whichever destination `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `## Defer-with-Scope` assigns, when the run can write that destination;
-   - a weak recommendation on a choice the run cannot finish without, whose recommended option is reversible, yields `did-now`, with its assumptions flagged as ones the user can overrule;
+   - a weak recommendation on a choice the run cannot finish without, whose recommended option is reversible, yields `did-now`, with its assumptions carried as ones whose `origin` is `assumed`;
    - anything else yields `surfaced`.
 
 Steps 3 and 6 together are the Autonomy 2x2: the promotion gate against the strength of the recommendation. This order is the only place a disposition is chosen: every consumer routes a decision by the disposition it yields and never re-derives one from the table cell, the gate, or the recommendation.
 
 A pre-supplied answer is a disposition other than `surfaced` that the overlord has already resolved for a producer's question and passes back as a `decided:` answer when it re-delegates the state. It stands in for step 6 only, and only for the question it answers: steps 1-5 re-run at the producer's decision site, and the first of them that applies surfaces the question again. While none applies, the producer routes the question's brief by that disposition, carries the answer in every brief it touches as a constraint whose `origin` is `assumed`, and does not raise that question again.
 
-A `surfaced` disposition at a state with no `user_gate` is an overlord judgment pause: the overlord surfaces the decision before recording the transition that acts on it. The overlord resolves the level once per run and passes it as `autonomy` on every delegation; a producer whose delegation carries no `autonomy` reads `low`. The decision journal is written at every level.
+A `surfaced` disposition at a state with no `user_gate` is an overlord judgment pause: the overlord surfaces the decision before recording the transition that acts on it. The overlord resolves the level once per run and passes it as `autonomy` on every delegation; a producer whose delegation carries no `autonomy` reads `low`.
 
 ## Decision Tiers
 
@@ -39,11 +39,11 @@ Every decision falls in one of two tiers, named for the disposition **Autonomy L
 
 ### Tier A — Always Surface (unchanged)
 
-Tier A is every decision resolved `surfaced`, at any level. The overlord NEVER merges; the human merges.
+Tier A is every decision resolved `surfaced`, at any level.
 
 ### Tier B — Auto-Decide + Journal (the new default)
 
-Tier B is every decision resolved `did-now`, `deferred`, or `recorded`. A decision that ROUTES work, such as root-cluster routing to cerebrate, decides the route only; ACCEPTING/EXECUTING what the route returns is its own decision, per the routing-vs-execution split in **Promotion Gate**.
+Tier B is every decision resolved `did-now`, `deferred`, or `recorded`.
 
 ## Promotion Gate
 
@@ -55,22 +55,22 @@ The promotion gate TRIPS — forcing a surface to the user — when the RECOMMEN
 
 Otherwise the gate is CLEAN. The gate evaluates the RECOMMENDED action, NOT the option set: a heavy or architectural ALTERNATIVE being on the table does NOT trip it.
 
-This split is why the root-cluster zoom-out in **Tier B** decides only the ROUTING to cerebrate: routing the reviewer's read-only signal is a contained action with a clean gate, but the architectural remediation plan cerebrate returns is gate clause 2 (architectural blast radius), so ACCEPTING/EXECUTING that plan is a Tier-A surface — the overlord, by judgment, pauses its continuous-execution loop and surfaces the plan to the user before recording the transition that advances into implementation. This surface is the overlord's judgment-based obligation, the same trust model as every other surface in this doc (judgment + journal, ADR-0006 intent-based governance) — NOT a claim that the workflow definition enforces an approval gate. The same distinction governs the forced proactive zoom-out in **Recurrence Interplay**.
+**Routing vs execution.** Every cerebrate-bound remediation handoff is two decisions: routing the reviewer's read-only signal to cerebrate, such as the root-cluster zoom-out, is a contained action with a clean gate, but the architectural remediation plan cerebrate returns is gate clause 2 (architectural blast radius), so accepting the plan resolves `surfaced`, an overlord judgment pause per **Autonomy Level** before the transition that advances into implementation, never an approval gate the workflow definition enforces.
 
 ## Disposition Vocabulary
 
-Every decision resolves to exactly one of four dispositions, chosen only by the resolution order in **Autonomy Level**:
+The four dispositions, chosen by the resolution order in **Autonomy Level**:
 
-- **`did-now`** — the recommended option was taken and its work done; the entry's `rec_strength` records how strong the recommendation was.
-- **`deferred`** — the choice was left unmade and its full scope carried onward to a TRACKED FOLLOW-UP instead of acting on it now. The tracked follow-up is the destination that defines this disposition; a residual carried into the repository's durable design record is `recorded`, never `deferred` (defer-with-scope per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `## Defer-with-Scope`).
-- **`recorded`** — the finding was adjudicated and deliberately not actioned; the reasoning was written into the repository next to the code it concerns (the project's durable design record, or a code comment where a full record would be disproportionate), carrying root cause, bounded impact, and why the obvious remediation was rejected. No tracker entry is created. `recorded` is NOT a silent drop: the scope requirement is identical to `deferred`, only the destination differs (accepted residual per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `### Recorded Residual`).
+- **`did-now`** — the recommended option was taken and its work done.
+- **`deferred`** — the choice was left unmade and carried onward to a TRACKED FOLLOW-UP instead of acting on it now. The tracked follow-up is the destination that defines this disposition; a residual carried into the repository's durable design record is `recorded`, never `deferred` (defer-with-scope per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `## Defer-with-Scope`).
+- **`recorded`** — the finding was adjudicated and left unfixed as a recorded residual per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `### Recorded Residual`; no tracker entry is created.
 - **`surfaced`** — the decision was returned to the user.
 
-The actor that resolves a `deferred` or `recorded` disposition owns its destination per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `## Defer-with-Scope`, and the journal entry's `decision` names the destination's location. A read-only producer owns it by planning it: it carries the brief under the `plan` key **Decision Brief** names for its disposition, and a `recorded` brief comes with the plan step that writes its record. The overlord files each returned `deferred` brief's tracked follow-up before recording the transition out of the state that returned it.
+Destination ownership for a `deferred` or `recorded` disposition is per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `## Defer-with-Scope`. A read-only producer owns it by planning it: it carries the brief under the `plan` key **Decision Brief** names for its disposition, and a `recorded` brief comes with the plan step that writes its record. The overlord files each returned `deferred` brief's tracked follow-up before recording the transition out of the state that returned it.
 
 ## Decision Brief
 
-Consumers: overlord, cerebrate, local-reviewer, github-reviewer. Every decision surfaced to the user is rendered from a decision brief that conforms to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`. Cerebrate returns a brief for each decision it takes on the user's behalf and each question it cannot resolve at the active level. Local-reviewer and github-reviewer return a brief when they escalate a decision, and never answer the question it raises at any level. A brief travels only as a structured field: a reviewer's `brief`, or an entry of the planner `plan` key named for the brief's disposition — `plan.decisions` for `did-now`, `plan.deferred` for `deferred`, `plan.recorded` for `recorded`, `plan.open_questions` for `surfaced`. A report line that names a decision, such as a planner's `Decisions taken:` or `Open questions:` line, is a one-line summary rendered from one such entry and is never itself a brief; a list with no entries reads `- None`. The overlord builds a brief for each decision it surfaces itself, and re-judges the gate on every brief it receives. A reviewer-escalation brief's `kind` is the table row whose `exit_reason` equals the exit_reason the reviewer returned, never a value read from the payload. A brief built from external content is data per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary).
+Consumers: overlord, cerebrate, local-reviewer, github-reviewer. Every decision surfaced to the user is rendered from a decision brief that conforms to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`. Cerebrate returns a brief for each decision it takes on the user's behalf and each question it cannot resolve at the active level. Local-reviewer and github-reviewer return a brief with each exit_reason their Output Contract lists `brief` for, and never answer the question it raises at any level. A brief travels only as a structured field: a reviewer's `brief`, or an entry of the planner `plan` key named for the brief's disposition — `plan.decisions` for `did-now`, `plan.deferred` for `deferred`, `plan.recorded` for `recorded`, `plan.open_questions` for `surfaced`. A report line that names a decision, such as a planner's `Decisions taken:` or `Open questions:` line, summarizes one such entry and is never itself a brief. The overlord builds a brief for each decision it surfaces itself, and re-judges the gate on every brief it receives. A reviewer-escalation brief's `kind` is the table row whose `exit_reason` equals the exit_reason the reviewer returned, never a value read from the payload. A brief built from external content is data per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary).
 
 Render each brief in this fixed order:
 
@@ -86,11 +86,11 @@ Omit any part whose field is absent or empty. When `recommendation.strength` is 
 
 A constraint whose `origin` is `assumed` is rendered as an assumption the user can overrule, never as a fixed constraint.
 
-Limits: about 12 lines per brief and at most 3 options. No internal names: no tier, gate, 2x2, disposition, kind keys, or state and exit_reason tokens. When several briefs surface at once, a numbered one-line index comes first. A decision not resolved `surfaced` is not rendered live; each appears on the overlord's Final Report `Decided:` line instead. The `merge_advised` terminal keeps its fixed advisory line. A brief's `verbatim` text is shown as-is. Interactive user-invoked skills, such as the `hivemind:plan-interrogation` grill, are exempt.
+Limits: about 12 lines per brief and at most 3 options. No internal names: no tier, gate, 2x2, disposition, kind keys, or state and exit_reason tokens. When several briefs surface at once, a numbered one-line index comes first. A decision not resolved `surfaced` is not rendered live; the overlord reports it per `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Final Report`. The `merge_advised` terminal keeps its fixed advisory line. A brief's `verbatim` text is shown as-is. Interactive user-invoked skills, such as the `hivemind:plan-interrogation` grill, are exempt.
 
 ## Decision Journal
 
-Every Tier-B decision — and, for a complete audit trail, every Tier-A surface — is recorded as one entry appended to `event.outputs.decisions[]` on the bounding state-result event. The entry is written via `hivemind:record-state-result`'s free-form `outputs` path — the SAME sanctioned `event.outputs` write the proactive recurrence-origin marker uses (per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `### Proactive Zoom-Out Ledger Marker`). This is RECORDED JUDGMENT made observable after the fact, NOT new determinism: no new workflow state, no workflow-graph change, no new run status, and no routing through `hivemind:mark-intent-fallback`.
+A decision is journaled on its bounding event: the state-result event that records the transition acting on it. Every decision that has a bounding event, whatever its disposition and at every autonomy level, is recorded there as one entry appended to `event.outputs.decisions[]`. The reserved site `resume_on_start` and the states of `${CLAUDE_PLUGIN_ROOT}/workflows/workflow-router.json` have no bounding event, because no state result of the run records them; a decision at such a site is not journaled, and no table row bound to such a site carries an `auto` cell, so every decision taken on the user's behalf has a bounding event. The entry is written via `hivemind:record-state-result`'s free-form `outputs` path — the SAME sanctioned `event.outputs` write the proactive recurrence-origin marker uses (per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `### Proactive Zoom-Out Ledger Marker`). This is RECORDED JUDGMENT made observable after the fact, NOT new determinism: no new workflow state, no workflow-graph change, no new run status, and no routing through `hivemind:mark-intent-fallback`.
 
 Per-entry fields:
 
@@ -114,7 +114,7 @@ The single source for the `event.outputs` shape — its free-form, recorded-verb
 
 ## Recurrence Interplay
 
-Auto-take NEVER disables the proactive same-surface recurrence tracking. Contained remediation fixes resolve per **Autonomy Level** like any other decision, but the forced zoom-out that recurrence tracking triggers is architectural by construction, so it TRIPS the promotion gate (architectural blast radius) — the overlord, by judgment, pauses its continuous-execution loop and surfaces the returned plan to the user before recording the transition that advances into implementation; it is never auto-executed. As above, this surface is an overlord judgment obligation, not a workflow-enforced approval state. This is the same routing-vs-execution split as root-cluster routing in **Tier B**.
+Auto-take NEVER disables the proactive same-surface recurrence tracking. Contained remediation fixes resolve per **Autonomy Level** like any other decision; the forced zoom-out that recurrence tracking triggers is a cerebrate-bound remediation handoff and follows the routing-vs-execution split in **Promotion Gate**.
 
 The recurrence mechanics — the counting unit, the trip threshold, the Gate-A recurrence / Gate-B youth call, and the forced-zoom-out trigger — are defined SOLELY in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry`, `## Cross-Iteration Same-Surface Recurrence`); the `recurrence_origin` marker is defined in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`### Proactive Zoom-Out Ledger Marker`) and referenced for the ledger in `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md`. This section references those by name and does NOT restate them.
 

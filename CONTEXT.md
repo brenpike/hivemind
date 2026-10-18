@@ -206,6 +206,8 @@ _Avoid_: signal detector, classifier, cluster checker
 
 ### Decision Autonomy
 
+Canonical policy: `plugin/governance/decision-autonomy.md`.
+
 **Autonomy Level**:
 The operator-selected posture for how many judgment calls the overlord takes on the Overmind's behalf: `high` (default, decides the most itself), `balanced` (the 5.x posture), or `low` (asks before every judgment call). Set with `HIVEMIND_AUTONOMY` and checked against that allowlist rather than by presence; an invalid value resolves to `low` with a warning. Selects the column of the decision-autonomy table; hard stops have no cell and surface at every level.
 _Avoid_: autonomy mode, trust level, permission level
@@ -219,7 +221,7 @@ The A/B classification of an overlord decision, named for the **Disposition** it
 _Avoid_: priority, severity
 
 **Decision Brief**:
-The structured form every surfaced decision takes, validated against `decision-brief-schema.json`: problem, why it matters, options with the case for and against each, what was ruled out, a recommendation, and the assumptions the Overmind can overrule. A constraint the agent assumed is rendered as overrulable, never as a given.
+The structured form every surfaced decision takes, conforming to `decision-brief-schema.json`: problem, why it matters, options with the case for and against each, what was ruled out, a recommendation, and the assumptions the Overmind can overrule. A constraint the agent assumed is rendered as overrulable, never as a given.
 _Avoid_: question dump, status summary
 
 **Promotion Gate**:
@@ -227,7 +229,7 @@ The test that forces a decision to surface — trips when the recommended action
 _Avoid_: escalation gate, risk gate
 
 **Decision Journal**:
-The per-decision record (situation, options, trade-offs, recommendation strength, gate outcome, disposition, decision, rationale, reversibility) the overlord appends to the run ledger's `event.outputs.decisions[]` for every autonomous (and surfaced) decision.
+The per-decision record (situation, options, trade-offs, recommendation strength, gate outcome, disposition, decision, rationale, reversibility) the overlord appends to the run ledger's `event.outputs.decisions[]` for every decision that has a bounding event (policy: `plugin/governance/decision-autonomy.md` (Decision Journal)).
 _Avoid_: audit log, decision log
 
 **Decision Report**:
@@ -389,7 +391,7 @@ _Avoid_: degraded mode, manual mode, safe mode
 - A **Working Branch** maps to exactly one **Directive** and one PR
 - An **Adaptation Cycle** (review loop) may produce zero or more **Remediation** cycles
 - A **Mutation Decay** (break-fix-break cycle) terminates an **Adaptation Cycle** with mandatory **Flare** (escalation)
-- **Creep Stagnation** (diminishing-returns exit) ends an **Adaptation Cycle** advisorily — the local-reviewer recommends stopping; the **Overlord** surfaces the choice to the **Overmind**. Checked only after the **Mutation Decay** check clears AND after the fix step's checkpoint has committed every auto-fixable finding's fix, never while any actionable finding (critical/high, escalatable, or otherwise fixable) is open, and never at the iteration ceiling
+- **Creep Stagnation** (diminishing-returns exit) ends an **Adaptation Cycle** advisorily — the local-reviewer recommends stopping; the **Overlord** resolves the choice at the active **Autonomy Level**. Checked only after the **Mutation Decay** check clears AND after the fix step's checkpoint has committed every auto-fixable finding's fix, never while any actionable finding (critical/high, escalatable, or otherwise fixable) is open, and never at the iteration ceiling
 - A **Bump Trigger** fires at most one version increment per PR
 - Each agent loads specific **Governance Docs** per its `Load and follow` list
 - A **Bioform** is the collective genus; each **Overlord**, **Cerebrate**, **Drone**, and **Changeling** is a bioform

@@ -18,14 +18,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `plugin/references/decision-brief-schema.json` (JSON Schema, structured-output compatible) and `plugin/references/decision-autonomy-table.json` (decision kind by level resolving to `surface` or `auto`; hard stops are cell-less).
 - Autonomy Level and Decision Brief sections in `plugin/governance/decision-autonomy.md`. The Autonomy Level resolution order yields each decision's disposition (`did-now`, `deferred`, `recorded`, or `surfaced`), with the 2x2 folded into its last step, and is the only place a disposition is chosen.
-- Optional `Decisions taken:` planner report section (validator and `report-format.md`); the validator enforces placement immediately before `Open questions:` and at least one list item.
+- Optional `Decisions taken:` planner report section (validator and the cerebrate report templates); the validator enforces placement immediately before `Open questions:` and at least one list item.
 - Decision-site bindings: every row in `plugin/references/decision-autonomy-table.json` carries `resolved_at`, naming the workflow states or transitions where its kind is decided. The overlord carries one `**Decision sites.**` rule, step 5 of the resolution order fails closed on an unbound site, and `tools/validate_workflows.sh` rejects unbound rows, dangling sites or outcomes, bound hard stops, unbound planner advances, and a decision site named by more than one row, so each site names one kind.
 - Policy fixtures pinning the hard stops, the brief contract, and the single-source disposition rule (`tests/policy/safety-autonomy-disposition-single-source.json`, which also forbids the known restatement literals in the consumer files), and ADR-0034.
+- Validator rule R8 in `tools/validate_workflows.sh` rejects `auto` cells at pre-ledger decision sites (`resume_on_start` and workflow-router states).
+- Policy fixture `tests/policy/safety-decision-journal-single-source.json`, a sibling of the disposition fixture, pinning the Decision Journal to its one home in `plugin/governance/decision-autonomy.md`.
+- A cerebrate scoping rule for plans that change a rule (`plugin/agents/cerebrate.md`).
 
 ### Changed
 
 - **BREAKING:** New operator key `HIVEMIND_AUTONOMY` (`high` default, `balanced`, or `low`), set in the `env` block of `.claude/settings.json` or `.claude/settings.local.json`. At the default `high`, the overlord and cerebrate now decide planner open questions, option choices, and stale-trunk choices that previously surfaced to the user, each by the disposition the resolution order yields. Set `HIVEMIND_AUTONOMY=balanced` to restore the 5.x posture. An invalid value resolves to `low` with a warning. Merge recommendations, destructive fixes, trunk commit/push, injection-suspect content, brood strain approval, and review-remediation plan acceptance still surface at every level.
 - Every surfaced decision now renders as a decision brief: plain-language problem, how much it matters, steel-manned and straw-manned options, effort versus value, the recommendation and why, and overrulable assumptions. Reviewers carry a `brief` on `user-input-required` and `high-severity-rejection`. The overlord Final Report gains a `Decided:` line listing the auto-taken decisions. Planner briefs travel only under the four disposition-named `plan` keys (`plan.decisions`, `plan.deferred`, `plan.recorded`, `plan.open_questions`); the `Decisions taken:` and `Open questions:` lines are one-line summaries of them. The overlord files each returned deferred brief's tracked follow-up.
+- The Decision Journal is keyed on the bounding event: decisions raised at sites before the run ledger exists (`resume_on_start` and workflow-router states) are not journaled. Policy: `plugin/governance/decision-autonomy.md` (Decision Journal).
+- `plugin/governance/report-format.md` no longer carries a Planner Report section; the cerebrate report templates are its home.
+- Pointer sweep: agents, skills, governance consumers, and the human docs (README, CLAUDE.md, CONTEXT.md, the web pages, ADR-0034) now point to each rule's canonical home instead of restating it.
 
 ## [5.0.3] - 2026-10-02
 

@@ -547,7 +547,7 @@
             <div class="sig-flare"><dt>Flare</dt><dd>Urgent: an agent hit something it cannot resolve alone. The overlord stops, surfaces the problem, and asks you how to proceed.</dd><dd><span class="tag tag--ember">Requires human input</span></dd></div>
             <div class="sig-reflex"><dt>Reflex</dt><dd>Trivial task: one owner, one known file, no version impact. The overlord skips the router, the run ledger, and the cerebrate, and delegates the change directly.</dd><dd><span class="tag tag--hot">Fast path</span></dd></div>
             <div class="sig-decay"><dt>Mutation Decay</dt><dd>Fixes are fighting each other in a break-fix-break loop. Mandatory stop. You decide which direction to take.</dd><dd><span class="tag tag--violet">Conflict detected</span></dd></div>
-            <div class="sig-stagnation"><dt>Creep Stagnation</dt><dd>Diminishing returns: each review pass yields less. An advisory early exit: the overlord stops the loop and opens the PR on its own, journals the call, and asks you only if the promotion gate trips.</dd><dd><span class="tag tag--cyan">Advisory</span></dd></div>
+            <div class="sig-stagnation"><dt>Creep Stagnation</dt><dd>Diminishing returns: each review pass yields less. An advisory early exit: whether the overlord stops the loop and opens the PR on its own or asks you depends on the autonomy level (policy: <code>plugin/governance/decision-autonomy.md</code>).</dd><dd><span class="tag tag--cyan">Advisory</span></dd></div>
             <div class="sig-root"><dt>Root-Cluster</dt><dd>Several findings share one root. Instead of patching each instance, the swarm routes to one structural fix.</dd><dd><span class="tag tag--hot">One structural fix</span></dd></div>
             <div class="sig-merge"><dt>Merge-Advised</dt><dd>Only a bounded tail of findings remains on a hardened surface (the Stop-and-Merge rule). The loop recommends merging. Humans merge.</dd><dd><span class="tag tag--ember">Advisory</span></dd></div>
           </dl>
@@ -669,7 +669,7 @@
                 </tr>
                 <tr>
                   <td><code>HIVEMIND_AUTONOMY</code></td>
-                  <td>Sets how many judgment calls the overlord takes for you: <code>high</code> (default, decides the most for you), <code>balanced</code> (the 5.x posture), or <code>low</code> (asks before every judgment call). Any other value resolves to <code>low</code> with a warning. Destructive fixes, trunk pushes, suspected injection, merge recommendations, and brood approvals always ask.</td>
+                  <td>Sets how many judgment calls the overlord takes for you: <code>high</code> (default, decides the most for you), <code>balanced</code> (the 5.x posture), or <code>low</code> (asks before every judgment call). Any other value resolves to <code>low</code> with a warning. Destructive fixes, trunk pushes, suspected injection, merge recommendations, and brood approvals always ask (policy: <code>plugin/governance/decision-autonomy.md</code>).</td>
                 </tr>
               </tbody>
             </table>

@@ -42,25 +42,25 @@ ADR-0030's verb-in-name presence trap does not apply here. That trap exists beca
 
 ### 2. Surface rules are a data table, and hard stops have no cells
 
-Whether a decision surfaces is defined in `plugin/references/decision-autonomy-table.json`, indexed by decision kind × autonomy level, and each cell is `surface` or `auto`. Only a literal `auto` grants autonomy. Any other cell content, or a missing cell, means surface.
+Decided: whether a decision surfaces is data, `plugin/references/decision-autonomy-table.json`, indexed by decision kind × autonomy level, with one `surface` or `auto` cell each; text: `plugin/governance/decision-autonomy.md` (Autonomy Level).
 
-The hard stops have NO cells: `destructive_fix_gate`, `trunk_commit_push`, `injection_suspect`, `merge_recommendation`, and `brood_strain_approval`. No level can make them `auto`, because there is no cell to set. Their protection is structural, not something each level has to remember to repeat.
+Decided: the table's `hard_stops` have NO cells; text: `plugin/governance/decision-autonomy.md` (Autonomy Level). With no cell to set, their protection is structural, not something each level has to remember to repeat.
 
 ### 3. The decision brief is data, and its rendering contract lives in governance
 
 Surfaced decisions follow `plugin/references/decision-brief-schema.json`, a JSON Schema limited to the structured-output subset. The rules for rendering a brief live in `plugin/governance/decision-autonomy.md` (`## Decision Brief`). The schema fixes what a brief must carry. Governance fixes how it reads to the user.
 
-Assumed constraints appear in the brief as OVERRULABLE. A constraint the agent assumed is labeled as an assumption the user can strike, never presented as a given. This is the direct answer to "Who made the public API constraint?".
+Decided: assumed constraints appear in the brief as overrulable, the direct answer to "Who made the public API constraint?"; text: `plugin/governance/decision-autonomy.md` (Decision Brief).
 
-A brief travels only as a structured field: a reviewer's `brief`, or an entry of the planner `plan` key named for the brief's disposition, `plan.decisions` for `did-now`, `plan.deferred` for `deferred`, `plan.recorded` for `recorded`, and `plan.open_questions` for `surfaced` (Decision 12). A prose decision line is a one-line summary rendered from one entry, so the schema applies to the field and never to the line. An empty list reads `- None`. Reference: PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305754238.
+Decided: a brief travels only as a structured field, never as a prose line, so the schema applies to the field (Decision 12); text: `plugin/governance/decision-autonomy.md` (Decision Brief), with the planner report lines in the cerebrate report templates (`plugin/agents/cerebrate.md` (Output)). Reference: PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305754238.
 
 **Recorded residual.** This is a decision, not open work, recorded here per `plugin/governance/remediation-doctrine.md` (Recorded Residual).
 
-- **Residual.** The schema does not enforce the three-option limit (`maxItems`) or cross-field constraints, such as `recommendation.option_id` naming a supplied option. Those limits live in the schema descriptions and in `plugin/governance/decision-autonomy.md` (Decision Brief).
+- **Residual.** The schema does not enforce the three-option limit (`maxItems`) or cross-field constraints, such as `recommendation.option_id` naming a supplied option. Their home: `plugin/governance/decision-autonomy.md` (Decision Brief).
 - **Linked findings.** Local review finding 6f1dd3cf; PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305713681.
 - **Root cause.** The structured-output JSON Schema subset accepts `minItems` of 0 or 1 only, with no other array bounds and no cross-field constraints. A schema carrying `maxItems` would not be usable as-is as a structured-output contract (Decision 10).
 - **Inherited.** The limit belongs to the structured-output subset, not to this change.
-- **Bounded impact.** A fourth option only makes a brief longer. The overlord renders at most 3 options under the governance rendering limit. A recommendation that names no supplied option is a case where no recommendation is possible (resolution step 4), so it surfaces.
+- **Bounded impact.** A fourth option only makes a brief longer, and the rendering limit in `plugin/governance/decision-autonomy.md` (Decision Brief) bounds what the user sees. A recommendation that names no supplied option is judged a step-4 case of the resolution order in `plugin/governance/decision-autonomy.md` (Autonomy Level).
 - **Rejected on the merits.** Adding `maxItems: 3` would break the schema's use as-is as a structured-output contract. Keeping a second, stricter copy of the schema only for validation would be a hand-kept copy that drifts.
 - **Promotion condition.** If the structured-output subset gains `maxItems`, add the bound and a schema test.
 
@@ -74,7 +74,7 @@ A script would be thrown away at the planned Workflow-tool migration. It would a
 
 ### 5. Cerebrate resolves auto-cell questions itself, the overlord backstops, and the workflow graph does not change
 
-The cerebrate carries each brief under the `plan` key named for the disposition the resolution order gives it, so a question that resolves to anything but `surfaced` does not emit `open_questions`. As a backstop, the overlord re-judges every returned brief. When a re-judged disposition differs from the key the brief arrived under and none re-judges to `surfaced`, the overlord re-delegates to the cerebrate once, passing each re-judged disposition as a `decided:` answer. The meaning of the re-delegated `decided:` answer is defined once in `plugin/governance/decision-autonomy.md` (Autonomy Level), standing in for the table cell only.
+Decided: the cerebrate routes each brief by the disposition the resolution order gives it, so a question that resolves to anything but `surfaced` does not emit `open_questions`, and the overlord backstops it by re-judging every returned brief. Text: `plugin/agents/cerebrate.md` (Decisions and Open Questions), `plugin/agents/overlord.md` (Open-question backstop), and, for the meaning of a re-delegated `decided:` answer, `plugin/governance/decision-autonomy.md` (Autonomy Level).
 
 The workflow graph does NOT change. `open_questions` still maps to `blocked`. What changes is how often the cerebrate reaches that outcome. As a result there is no workflow version bump and no version skew for in-flight ledgers. A run started under 5.0.3 resumes against an identical graph.
 
@@ -84,7 +84,7 @@ Accepting a remediation plan stays `surface` at every level, including `high`. A
 
 ### 7. Reviewers produce briefs and never answer questions
 
-`local-reviewer` and `github-reviewer` may produce decision briefs. They never answer the questions those briefs raise, at any level. Answering a human reviewer on GitHub speaks for the user in a public, attributed channel, and no autonomy level grants that authority.
+Decided: `local-reviewer` and `github-reviewer` may produce decision briefs and never answer the questions those briefs raise, at any level; text: `plugin/governance/decision-autonomy.md` (Decision Brief), with the exit_reasons that carry `brief` in each reviewer's Output Contract (`plugin/agents/local-reviewer.md`, `plugin/agents/github-reviewer.md`). Why: answering a human reviewer on GitHub speaks for the user in a public, attributed channel, and no autonomy level grants that authority.
 
 ### 8. The schema file is named `decision-brief-schema.json`, not `decision-brief.schema.json`
 
@@ -102,13 +102,13 @@ The default behavior changes. An operator who sets nothing moves from the 5.0.3 
 
 Two local-review findings had the same shape: consumer prose (overlord, cerebrate) drifted from the canonical resolution order in `plugin/governance/decision-autonomy.md` (Autonomy Level) at per-site wording. Each patch restated the order at one more site, and the next review found the next restatement. The root cause was that nothing said where a kind is decided, so every consumer re-derived it.
 
-Each table row now carries `resolved_at`, a non-empty array of decision sites. A site is a workflow state, written `<state>`; one transition out of that state, written `<state>.<outcome>`; or the reserved site `resume_on_start`, which has no state and no outcome. Hard stops carry no `resolved_at`: they hold at every site.
+Decided: each table row carries `resolved_at`, a non-empty array of decision sites, and hard stops carry none; site forms and binding text: `plugin/governance/decision-autonomy.md` (Autonomy Level).
 
-Consumers carry one rule instead of per-site prose. The overlord's `**Decision sites.**` rule says that at every state it resolves every kind whose `resolved_at` names that state or the outcome being recorded and whose `when` holds, and it re-judges every brief a producer returns. Step 5 of the resolution order fails closed: a kind surfaces when it is not listed in the table OR its row's `resolved_at` does not name the site where the decision arises. A decision raised at a site the row does not name therefore always surfaces.
+Decided: consumers carry one pointer rule instead of per-site prose, and a decision raised at a site its row does not name fails closed. Text: `plugin/agents/overlord.md` (Decision sites) and step 5 of the resolution order in `plugin/governance/decision-autonomy.md` (Autonomy Level).
 
 `tools/validate_workflows.sh` (`validate_autonomy_bindings`) checks the binding at CI time against the union of states and per-state transition keys across `plugin/workflows/*.json`. It rejects an unbound row (R1), a dangling site (R2), a reserved site that carries an outcome (R3), a dangling outcome (R4), a hard stop that carries `resolved_at` (R5), and an unbound planner advance: a cerebrate planning-state outcome that is neither a terminal nor a `user_gate` target and that no row names exactly as `<state>.<outcome>` (R6). `--self-test` proves each rule rejects a broken fixture under `tests/workflow-defs/autonomy-broken/`, with the real table as the positive control.
 
-R7 rejects a decision site named by more than one row. A state and each of its outcomes are distinct sites, so a row naming `<state>` and another naming `<state>.<outcome>` do not collide. A site names at most one kind, and a row's `when` describes the kind rather than choosing between kinds at a shared site. Two rows, `plan_open_question` and `option_choice`, shared the same sites with the same cells, so they are now one row, `planner_question`, at `plan`, `brood_plan`, and `analyze`. `remediation_approach` is the only planner kind at the two remediation planning states, `review_remediation_plan` and `review_remediation_plan_postpr`. This keeps 5.0.3's auto remediation approach at `balanced`, and no oversight is lost because plan acceptance surfaces at every level (Decision 6). The table stays keyed by row. R7 only constrains the bindings, so no second copy of the table exists. Reference: PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305754237.
+R7 rejects a decision site named by more than one row. Decided: a site names at most one kind; text: `plugin/governance/decision-autonomy.md` (Autonomy Level). Two rows, `plan_open_question` and `option_choice`, shared the same sites with the same cells, so they are now one row, `planner_question`, at `plan`, `brood_plan`, and `analyze`. `remediation_approach` is the only planner kind at the two remediation planning states, `review_remediation_plan` and `review_remediation_plan_postpr`. This keeps 5.0.3's auto remediation approach at `balanced`, and no oversight is lost because plan acceptance surfaces at every level (Decision 6). The table stays keyed by row. R7 only constrains the bindings, so no second copy of the table exists. Reference: PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305754237.
 
 This is not the runtime lookup script Decision 4 rejects. It runs once in CI over static data, it never sees a live decision, and it does not decide any verdict. Agents still read the table directly and apply it by judgment at runtime.
 
@@ -126,9 +126,9 @@ This is not the runtime lookup script Decision 4 rejects. It runs once in CI ove
 
 Three PR #408 review threads had one shape: https://github.com/brenpike/hivemind/pull/408#discussion_r4305713684, https://github.com/brenpike/hivemind/pull/408#discussion_r4305838038, and https://github.com/brenpike/hivemind/pull/408#discussion_r4305913044. The last step of the resolution order in `plugin/governance/decision-autonomy.md` (Autonomy Level) returned a bare `auto` or `surface` verdict. What `auto` meant depended on the Autonomy 2x2, the strength of the recommendation against the promotion gate, plus whether the run could finish without the choice and whether the option was reversible. That rule lived in its own section and was restated again in the tier and disposition sections. Consumers read `auto` as "take the recommendation" and dropped the other branches, so the cerebrate and the overlord would act on a weak recommendation the run could have deferred or recorded. The root cause was that a verdict is not a disposition, and every consumer re-derived the disposition from the verdict.
 
-The resolution order now yields the disposition itself. Step 6 folds in the 2x2: a strong recommendation yields `did-now`; a weak recommendation on a choice the run can finish without yields `deferred` or `recorded`, by the destination `plugin/governance/remediation-doctrine.md` (Defer-with-Scope) assigns; a weak recommendation on a reversible choice the run cannot finish without yields `did-now` with its assumptions flagged; anything else yields `surfaced`. The order is the only place a disposition is chosen. The tiers are named for the disposition and add no rule of their own, and the separate 2x2 section is gone.
+Decided: the resolution order yields the disposition itself, with the 2x2 folded into its step 6, and is the only place a disposition is chosen; text: `plugin/governance/decision-autonomy.md` (Autonomy Level). The tiers are named for the disposition and add no rule of their own, and the separate 2x2 section is gone.
 
-Briefs travel under four planner `plan` keys, one per disposition: `plan.decisions`, `plan.deferred`, `plan.recorded`, and `plan.open_questions`. The actor that resolves a `deferred` or `recorded` disposition owns its destination. The cerebrate is read-only, so it owns a destination by planning it: a `recorded` brief comes with the plan step that writes its record. The overlord files each returned `deferred` brief's tracked follow-up before recording the transition out of the state that returned it. A `decided:` answer now carries a disposition other than `surfaced`, not a recommendation.
+Decided: briefs travel under four planner `plan` keys, one per disposition (text: `plugin/governance/decision-autonomy.md` (Decision Brief)), and the actor that resolves a `deferred` or `recorded` disposition owns its destination (text: `plugin/governance/decision-autonomy.md` (Disposition Vocabulary)). A `decided:` answer now carries a disposition, not a recommendation (text: `plugin/governance/decision-autonomy.md` (Autonomy Level)).
 
 The 2x2 had a "no recommendation" row. It is removed because no decision can reach it: step 4 already surfaces a decision for which no recommendation is possible.
 
@@ -143,6 +143,32 @@ The 2x2 had a "no recommendation" row. It is removed because no decision can rea
 - **Bounded impact.** A paraphrased restatement needs a reviewed edit to an agent or governance file. The human docs describe the levels to people and are not loaded by agents at runtime, so a restatement there cannot change a disposition.
 - **Rejected on the merits.** A semantic check would have to parse prose for meaning. Adding the human docs to the file list would forbid them from describing the behavior in plain words, which is their job.
 - **Promotion condition.** If a paraphrased restatement is ever observed to change a disposition, add a structural check in `tools/policy_check.sh`.
+
+### 13. Rules live once; consumers point
+
+Three PR #408 review threads had the Decision 12 shape again, in short or paraphrased form: https://github.com/brenpike/hivemind/pull/408#discussion_r4305913044, https://github.com/brenpike/hivemind/pull/408#discussion_r4307045423, and https://github.com/brenpike/hivemind/pull/408#discussion_r4307096301. Consumer text restated a canonical rule, and the restatement drifted from its home. One of them exposed a gap in the home itself: the Decision Journal recorded every decision on its bounding state-result event, but some decision sites have no such event. `classify.ambiguous` runs in `workflow-router` before `hivemind:init-run-ledger` creates the ledger, and `resume_on_start` is outside any state result.
+
+Decided: the Decision Journal is keyed on the bounding event, so a decision at a site with no bounding event is not journaled; text: `plugin/governance/decision-autonomy.md` (Decision Journal). `tools/validate_workflows.sh` rule R8 rejects an `auto` cell on any table row bound to such a site, so no decision the journal cannot record is taken on the user's behalf.
+
+Decided: every consumer of a rule, in agents, skills, governance, and the human docs, carries only a pointer to the rule's home; the pointer form is defined in `docs/engineering-principles.md` (P22). The cerebrate carries a scoping rule for plans that change a rule; text: `plugin/agents/cerebrate.md`.
+
+Decided: `tests/policy/safety-decision-journal-single-source.json` pins the journal rule as a sibling of `tests/policy/safety-autonomy-disposition-single-source.json` rather than an extension of it, because its `set_check` may include the canonical file, which the disposition fixture's consumer-only file list excludes.
+
+Considered options:
+
+- A generic near-verbatim restatement detector. Rejected: it would have caught none of the three findings, all short or paraphrased; n-gram matching false-positives on pointer paths; and a line-keyed baseline churns on every edit.
+- Carry-forward journaling, writing a pre-ledger decision onto the first ledger event. Rejected: it is undefined for a start-fresh resume, and it adds a rule.
+- A pre-ledger journal store. Rejected: it is new schema surface.
+- Extending the disposition fixture. Rejected in favor of a sibling fixture that may include the canonical file.
+
+**Recorded residual R1.** This is a decision, not open work, recorded here per `plugin/governance/remediation-doctrine.md` (Recorded Residual).
+
+- **Residual.** A paraphrased restatement cannot be detected mechanically.
+- **Linked findings.** PR #408 review threads https://github.com/brenpike/hivemind/pull/408#discussion_r4305913044, https://github.com/brenpike/hivemind/pull/408#discussion_r4307045423, and https://github.com/brenpike/hivemind/pull/408#discussion_r4307096301.
+- **Root cause.** Pins claim word presence only (`tests/policy/README.md`).
+- **Bounded impact.** A paraphrase needs a reviewed edit, and reviewed edits plus Codex review catch it.
+- **Rejected on the merits.** Semantic prose checks would have to parse prose for meaning.
+- **Promotion condition.** A repeat restatement finding after this sweep promotes this residual to a structural check.
 
 ## Considered Options
 
@@ -167,19 +193,23 @@ The 2x2 had a "no recommendation" row. It is removed because no decision can rea
 | Rank overlapping kinds by precedence | Keeps two kinds per site and adds a second ordering to keep in step with the table |
 | Keep the `auto`/`surface` verdict and restate the branches per consumer | This is the failure Decision 12 fixes. Consumers read `auto` as "take the recommendation" and dropped the defer, record, and surface branches, and each restatement is one more copy to drift |
 | Add a `disposition` field to the brief schema | A second, unverified copy of the disposition that the overlord re-judges anyway. The plan keys already carry the disposition with no schema change |
+| A generic near-verbatim restatement detector (Decision 13) | Would have caught none of the three findings, all short or paraphrased; n-gram matching false-positives on pointer paths; a line-keyed baseline churns on every edit |
+| Carry a pre-ledger decision forward to the first ledger event (Decision 13) | Undefined for a start-fresh resume, and adds a rule |
+| A pre-ledger journal store (Decision 13) | New schema surface |
+| Extend the disposition fixture to the journal rule (Decision 13) | A sibling fixture may include the canonical file in its `set_check`; the disposition fixture's file list is consumers only |
 | Allowlisted `HIVEMIND_AUTONOMY` (`high` default, invalid → `low`), table with no cells for hard stops, schema-backed briefs, no graph change (CHOSEN) | — |
 
 ## Consequences
 
-- **The default posture is `high`.** An operator who sets nothing gets the overlord deciding every kind whose `high` cell is `auto`, by the disposition the resolution order yields. The rubber-stamp round trips this record targets go away, and each auto-taken decision is still journaled.
+- **The default posture is `high`.** An operator who sets nothing gets the overlord deciding every kind whose `high` cell is `auto`, by the disposition the resolution order yields. The rubber-stamp round trips this record targets go away, and journaling follows `plugin/governance/decision-autonomy.md` (Decision Journal).
 - **`balanced` restores 5.0.3 exactly.** An operator who wants the previous posture sets one key. It inherits into brood worktrees through the committed settings file.
-- **Hard stops cannot be relaxed by data.** Destructive-fix gate, trunk commit/push, injection-suspect content, merge recommendations, and brood strain approval have no cell at any level. The overlord still never merges.
-- **Surfaced decisions have a fixed shape.** Every surfaced decision is a brief validated by the schema. Assumed constraints appear as overrulable, so a constraint the user never set can be struck instead of silently narrowing the options.
+- **Hard stops cannot be relaxed by data.** The table's `hard_stops` have no cell at any level. The overlord still never merges.
+- **Surfaced decisions have a fixed shape.** Every surfaced decision is a brief conforming to the schema. Assumed constraints appear as overrulable (`plugin/governance/decision-autonomy.md` (Decision Brief)), so a constraint the user never set can be struck instead of silently narrowing the options.
 - **The workflow graph and its version are unchanged.** `open_questions` still maps to `blocked`. In-flight ledgers resume without skew, and `hivemind:mark-intent-fallback` is not involved.
 - **ADR-0026 Decision 1 is amended, not deleted.** Tier membership now lives in the table. The Autonomy 2x2, the promotion gate, the disposition vocabulary, and the journal entry shape stand as ADR-0026 and its amendments leave them. ADR-0026 stays unedited as historical record; the 2x2 now lives inside the resolution order (Decision 12).
 - **The override channel now carries four keys.** `HIVEMIND_LOCAL_REVIEW_MODEL`, `HIVEMIND_SKIP_PR_WATCH`, `HIVEMIND_ENABLE_DECISION_REPORT`, and `HIVEMIND_AUTONOMY` share one `env`-block convention, one settings-file pair, and one brood-inheritance property. `HIVEMIND_AUTONOMY` is the only one checked against a value allowlist rather than by presence or charset.
 - **Table misreads are observable.** The revisit trigger in Decision 4 is checked against existing journal data. No new instrumentation is needed to know when the prose-read approach has stopped working.
-- **A decision raised outside its row's decision sites surfaces.** A new decision point needs a table row whose `resolved_at` names the state where it arises. A row with no `resolved_at`, a dangling site or outcome, a bound hard stop, or a site named by two rows fails `tools/validate_workflows.sh`. Binding correctness and `when` applicability remain judgment.
+- **A decision raised outside its row's decision sites surfaces.** A new decision point needs a table row whose `resolved_at` names the decision site where it arises (step 5 of the resolution order in `plugin/governance/decision-autonomy.md` (Autonomy Level)). A row with no `resolved_at`, a dangling site or outcome, a bound hard stop, or a site named by two rows fails `tools/validate_workflows.sh`. Binding correctness and `when` applicability remain judgment.
 - **The plugin version moves to 6.0.0.** The default behavior change is MAJOR.
 
 References: `plugin/governance/decision-autonomy.md` (`## Decision Brief`), `plugin/references/decision-autonomy-table.json`, `plugin/references/decision-brief-schema.json`, `tools/validate_workflows.sh`, `plugin/governance/versioning.md`, `plugin/workflows/standard-delivery.json`, `plugin/workflows/pr-feedback-remediation.json`, `plugin/workflows/analysis-only.json`, `CLAUDE.md`; amends ADR-0026 Decision 1; follows the operator-override precedent of ADR-0022, ADR-0029, and ADR-0030.

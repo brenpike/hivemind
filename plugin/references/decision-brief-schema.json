@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Decision Brief",
-  "description": "The fixed format every decision surfaced to the user must follow, rendered per ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Decision Brief). Usable as-is as a structured-output schema.",
+  "description": "Shape of a decision brief; when one is required and how it renders: ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Decision Brief). Usable as-is as a structured-output schema.",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "kind", "problem", "criticality", "options", "recommendation", "assumptions", "gate"],
@@ -12,7 +12,7 @@
     },
     "kind": {
       "type": "string",
-      "description": "A hard_stops or rows kind from ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json. An unlisted kind always surfaces."
+      "description": "A hard_stops or rows kind from ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json. Resolved per ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Autonomy Level)."
     },
     "problem": {
       "type": "string",
@@ -47,7 +47,7 @@
     "options": {
       "type": "array",
       "minItems": 1,
-      "description": "Only options that survive steel-manning and straw-manning. At most three.",
+      "description": "Only options that survive steel-manning and straw-manning. Count limit per ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Decision Brief).",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -141,7 +141,7 @@
           "origin": {
             "type": "string",
             "enum": ["user", "repo", "assumed"],
-            "description": "Source of the assumption. assumed means agent-inferred and is rendered as overrulable by the user."
+            "description": "Source of the assumption. assumed means agent-inferred; rendering per ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Decision Brief)."
           },
           "evidence": {
             "type": "string",
@@ -154,7 +154,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["irreversible", "architectural", "safety"],
-      "description": "Producer's read of the RECOMMENDED action against the Promotion Gate clauses. The overlord re-judges.",
+      "description": "Producer's read of the RECOMMENDED action against the Promotion Gate clauses.",
       "properties": {
         "irreversible": {
           "type": "boolean",
@@ -172,7 +172,7 @@
     },
     "verbatim": {
       "type": "string",
-      "description": "Optional. Text another rule requires shown unchanged, e.g. normalized brood strain text."
+      "description": "Optional. Text another rule requires shown to the user, e.g. normalized brood strain text; rendering per ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Decision Brief)."
     }
   }
 }

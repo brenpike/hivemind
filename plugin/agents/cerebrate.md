@@ -57,7 +57,7 @@ Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PL
 - delivery shape recommendation
 - versioning/release implications
 - review-remediation planning when delegated
-- resolving every decision you raise to the disposition `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level) gives it, and routing it per Decisions and Open Questions; never guessing a fact
+- decisions you raise, per Decisions and Open Questions; never guessing a fact
 
 ## Do Not
 
@@ -94,7 +94,8 @@ Absent vs. failing: a `No such tool available` return is absence — skip cleanl
 - Prefer the already-granted Read / Glob / Grep tools and the concrete read-only git tools listed in frontmatter over Bash. Bash is read-only inspection only; follow Bash Command Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Bash Command Discipline). Follow Shell Output Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Shell Output Discipline) — cerebrate emits none of the exempt routing fields anyway.
 - Use WebFetch/WebSearch only when the task references a specific external library/framework/API by name AND the answer is absent from the repo.
 - Read as far as the plan needs: every step's `files` list must name every path that step will touch, and you must be confident those scopes are complete. Scope precision is what makes the overlord's parallel waves safe, so under-reading is the expensive failure — not over-reading. Keep the cost down by starting from a file map (Glob/ls) and grepping before reading a file whole.
-- Any path you could not resolve is an open question per Decisions and Open Questions — never a guessed entry in a step's `files` list.
+- When a step changes a rule, contract, or definition, grep for every file that states or points to it and put each such file in a step's `files`; that step's `outcome` requires the rule to be stated only in its one home and every other site to point to that home without restating it.
+- Any path you could not resolve is handled per Decisions and Open Questions — never a guessed entry in a step's `files` list.
 - Retry tool failures once if transient per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Transient Failure). Otherwise return blocked.
 
 ## Versioning
@@ -217,13 +218,13 @@ The `plan:` block mirrors the prose blocks above (it does not replace them). Kee
 
 ### Decisions and Open Questions
 
-Fill every open question and every decision you take on the user's behalf as a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`. Look up each brief's kind in `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` at the delegated `autonomy` level per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level). That section alone decides each brief's disposition; the bullets below only say where each disposition goes.
+Return decision briefs per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief). Look up each brief's kind in `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` at the delegated `autonomy` level per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level). That section alone decides each brief's disposition; the bullets below only say where each disposition goes.
 
 - The decision site is the delegation's `state`; a delegation without `state` matches no site.
-- Carry each brief in the `plan` key `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief) names for its disposition, and plan what that disposition needs per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Disposition Vocabulary): a `did-now` brief's option is part of the plan, and a `recorded` brief comes with the step that writes its record, whose `outcome` names the brief's `id`.
+- Carry each brief in the `plan` key `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief) names for its disposition, and plan what that disposition needs per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Disposition Vocabulary): a `did-now` brief's option is part of the plan, and the step that writes a `recorded` brief's record names the brief's `id` in its `outcome`.
 - Summarize each `plan.open_questions` brief in one line under `Open questions:`, and every other brief in one line under `Decisions taken:`.
 - In ANALYSIS mode (see Analysis Result Mapping), which emits no implementation plan, still append a `plan:` block whenever the analysis carries a brief; it carries only the brief keys, with no `steps` and no `delivery`.
-- A path you could not resolve is a fact only the user holds: never decide it by guessing.
+- A path you could not resolve is a fact only the user holds; resolve it per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level), never by guessing.
 - Treat each `decided:` answer on the delegation as a pre-supplied answer per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level).
 
 ### Accuracy Note: `depends_on` and `files` Are Concurrency-Load-Bearing
@@ -311,4 +312,4 @@ blocker                  -> blocked
 
 ### Finalization Gate
 
-Do not finalize until every step has: one owner, exact file scope. Any plan that routes to an implementation loop — compact or full — additionally requires the machine-readable `plan:` block with populated `steps[]` (each step: `STEP-NNN` id, owner, files, outcome, depends_on); without it the overlord's implement loop has no steps. Full output additionally requires: `Depends on`, full versioning block, and delivery block. When the delivery block sets `delivery: brood` it must also carry `Strains`, `overlap_risk`, and `overlap_details` (and `plan.delivery` must mirror them). Every step with a `STEP-NNN` identifier is a phase boundary for the orchestrator. Every entry of a brief key in the `plan:` block is a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`; each `Decisions taken:` and `Open questions:` line is a one-line summary of one such entry per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief), and a list with no entries reads `- None`.
+Do not finalize until every step has: one owner, exact file scope. Any plan that routes to an implementation loop — compact or full — additionally requires the machine-readable `plan:` block with populated `steps[]` (each step: `STEP-NNN` id, owner, files, outcome, depends_on); without it the overlord's implement loop has no steps. Full output additionally requires: `Depends on`, full versioning block, and delivery block. When the delivery block sets `delivery: brood` it must also carry `Strains`, `overlap_risk`, and `overlap_details` (and `plan.delivery` must mirror them). Every step with a `STEP-NNN` identifier is a phase boundary for the orchestrator. Every brief key in the `plan:` block and every `Decisions taken:` and `Open questions:` line follows Decisions and Open Questions.
