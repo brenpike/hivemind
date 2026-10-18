@@ -12,6 +12,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.0.0] - 2026-10-18
+
+### Added
+
+- `plugin/references/decision-brief-schema.json` (JSON Schema, structured-output compatible) and `plugin/references/decision-autonomy-table.json` (decision kind by level resolving to `surface` or `auto`; hard stops are cell-less).
+- Autonomy Level and Decision Brief sections in `plugin/governance/decision-autonomy.md`.
+- Optional `Decisions taken:` planner report section (validator and `report-format.md`).
+- Policy fixtures pinning the hard stops and the brief contract, and ADR-0034.
+
+### Changed
+
+- **BREAKING:** New operator key `HIVEMIND_AUTONOMY` (`high` default, `balanced`, or `low`), set in the `env` block of `.claude/settings.json` or `.claude/settings.local.json`. At the default `high`, the overlord and cerebrate now auto-take the recommendation for planner open questions, option choices, and stale-trunk choices that previously surfaced to the user. Set `HIVEMIND_AUTONOMY=balanced` to restore the 5.x posture. An invalid value resolves to `low` with a warning. Merge recommendations, destructive fixes, trunk commit/push, injection-suspect content, brood strain approval, and review-remediation plan acceptance still surface at every level.
+- Every surfaced decision now renders as a decision brief: plain-language problem, how much it matters, steel-manned and straw-manned options, effort versus value, the recommendation and why, and overrulable assumptions. Reviewers carry a `brief` on `user-input-required` and `high-severity-rejection`. The overlord Final Report gains a `Decided:` line listing the auto-taken decisions.
+
 ## [5.0.3] - 2026-10-02
 
 ### Fixed
