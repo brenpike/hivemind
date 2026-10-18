@@ -40,8 +40,8 @@
     },
     {
       "kind": "resume_or_skew",
-      "high": "auto",
-      "balanced": "auto",
+      "high": "surface",
+      "balanced": "surface",
       "low": "surface",
       "when": "Broken-fixture row.",
       "resolved_at": [

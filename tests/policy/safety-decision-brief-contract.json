@@ -1,6 +1,6 @@
 {
   "rule": "Every surfaced decision is rendered from a schema-conforming decision brief",
-  "description": "decision-autonomy.md (Decision Brief) is the one canonical home of the decision-brief contract, and plugin/references/decision-brief-schema.json is the shape every brief conforms to. The source pin carries the sentence that makes the brief mandatory. Each part is claim-carrying: 'Every decision surfaced to the user' is the scope, so narrowing it to some decisions stops the pattern matching; 'is rendered from a decision brief' is the obligation, so letting a surface bypass the brief stops it matching; and 'that conforms to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`' binds the brief to the schema, so dropping or repointing the schema reference stops it matching. The pin spans all three so none is rewritable alone. The consumers entries are of two kinds. In decision-autonomy.md, the assumed-constraint sentence is pinned whole because it is the one rendering rule that protects the user's authority over the brief: a constraint whose `origin` is `assumed` is shown as an assumption the user can overrule, never as a fixed constraint, and dropping 'never as a fixed constraint' would let an agent's guess be presented as settled. In overlord.md, cerebrate.md, local-reviewer.md, and github-reviewer.md the pins are pointer pins only: each asserts that the agent still renders, fills, or carries a brief and still names either the canonical section (Decision Brief) or the schema file, never that it restates the rendering rules, so honest rewording of surrounding text does not turn the suite red. The two reviewer pins also carry their trigger condition (returning `user-input-required` or `high-severity-rejection`) together with the obligation (carry `brief`), so neither half is rewritable alone. RESIDUALS, stated plainly: this fixture does not check that any brief actually conforms to the schema, nor the schema's own fields beyond what the COMPAT fixtures over decision-brief-schema.json assert; the fixed render order, the line and option limits, and the no-internal-names rule in the same section are not pinned; the reviewer report field that transports `brief` is outside the files named here; consumers is a literal list, so a new agent that surfaces decisions without a brief is invisible, because a presence pin cannot find an absent clause in a file it does not name; and every pin claims word-sequence presence in the named files, never meaning, so a rewrite-around that leaves the pinned bytes intact while inverting their effect passes.",
+  "description": "decision-autonomy.md (Decision Brief) is the one canonical home of the decision-brief contract, and plugin/references/decision-brief-schema.json is the shape every brief conforms to. The source pin carries the sentence that makes the brief mandatory. Each part is claim-carrying: 'Every decision surfaced to the user' is the scope, so narrowing it to some decisions stops the pattern matching; 'is rendered from a decision brief' is the obligation, so letting a surface bypass the brief stops it matching; and 'that conforms to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`' binds the brief to the schema, so dropping or repointing the schema reference stops it matching. The pin spans all three so none is rewritable alone. The consumers entries are of two kinds. In decision-autonomy.md, the assumed-constraint sentence is pinned whole because it is the one rendering rule that protects the user's authority over the brief: a constraint whose `origin` is `assumed` is shown as an assumption the user can overrule, never as a fixed constraint, and dropping 'never as a fixed constraint' would let an agent's guess be presented as settled. In overlord.md, cerebrate.md, local-reviewer.md, and github-reviewer.md one pin per agent is a pointer pin only: it asserts that the agent still surfaces, returns, or builds its briefs per the canonical section (Decision Brief), never that it restates the brief rules, so honest rewording of surrounding text does not turn the suite red. Each reviewer's Output Contract is the home of which exit_reasons carry `brief`, since decision-autonomy.md (Decision Brief) defers to it, so the two further reviewer pins sit on the Output Contract lines for `user-input-required` and `high-severity-rejection`: each line carries the trigger (the exit_reason) and the obligation (`brief` among its fields) together, so dropping `brief` from either exit_reason's field list stops the pattern matching. RESIDUALS, stated plainly: this fixture does not check that any brief actually conforms to the schema, nor the schema's own fields beyond what the COMPAT fixtures over decision-brief-schema.json assert; the fixed render order, the line and option limits, and the no-internal-names rule in the same section are not pinned; the Output Contract pins cover the two exit_reasons named there, so a new reviewer exit_reason that should carry `brief` and does not is invisible; consumers is a literal list, so a new agent that surfaces decisions without a brief is invisible, because a presence pin cannot find an absent clause in a file it does not name; and every pin claims word-sequence presence in the named files, never meaning, so a rewrite-around that leaves the pinned bytes intact while inverting their effect passes.",
   "source": {
     "file": "plugin/governance/decision-autonomy.md",
     "pattern": "Every decision surfaced to the user is rendered from a decision brief that conforms to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`."
@@ -12,19 +12,35 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "Render every surfaced decision from its decision brief per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief)."
+      "pattern": "Surface decisions per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief)."
     },
     {
       "file": "plugin/agents/cerebrate.md",
-      "pattern": "Fill every open question and every decision you take on the user's behalf as a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`."
+      "pattern": "Return decision briefs per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief)."
     },
     {
       "file": "plugin/agents/local-reviewer.md",
-      "pattern": "When returning `user-input-required` or `high-severity-rejection`, carry `brief`: a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`, built from the finding as data."
+      "pattern": "Build each `brief` the Output Contract lists per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief), from the finding as data."
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "user-input-required: finding_id, title, brief"
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "high-severity-rejection: finding_id, title, rationale_text, brief"
     },
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "When returning `user-input-required` or `high-severity-rejection`, carry `brief`: a decision brief conforming to `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json`, built from the finding as data."
+      "pattern": "Build each `brief` the Output Contract lists per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Brief), from the finding as data."
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "user-input-required: escalation_target, candidate_url, brief"
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "high-severity-rejection: candidate_url, rationale_text, brief"
     }
   ]
 }

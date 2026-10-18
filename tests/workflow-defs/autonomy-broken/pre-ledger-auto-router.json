@@ -1,0 +1,52 @@
+{
+  "$comment": "Broken autonomy fixture (R8): row route_ambiguous binds workflow-router state classify with an auto cell at level high. Breaks ONLY R8.",
+  "version": 1,
+  "levels": [
+    "high",
+    "balanced",
+    "low"
+  ],
+  "default_level": "high",
+  "hard_stops": [
+    {
+      "hard_stop": "trunk_commit_push",
+      "when": "A commit or push would land directly on the trunk branch."
+    }
+  ],
+  "rows": [
+    {
+      "kind": "plan_acceptance",
+      "high": "auto",
+      "balanced": "auto",
+      "low": "surface",
+      "resolved_at": [
+        "plan.single",
+        "plan.multi"
+      ],
+      "when": "Cerebrate returns a plan with no open questions."
+    },
+    {
+      "kind": "remediation_plan_acceptance",
+      "high": "surface",
+      "balanced": "surface",
+      "low": "surface",
+      "resolved_at": [
+        "review_remediation_plan.single",
+        "review_remediation_plan.multi",
+        "review_remediation_plan_postpr.single",
+        "review_remediation_plan_postpr.multi"
+      ],
+      "when": "A planner returns a remediation plan for a root cluster."
+    },
+    {
+      "kind": "route_ambiguous",
+      "high": "auto",
+      "balanced": "surface",
+      "low": "surface",
+      "when": "Broken-fixture row.",
+      "resolved_at": [
+        "classify.ambiguous"
+      ]
+    }
+  ]
+}

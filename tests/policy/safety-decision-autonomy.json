@@ -15,7 +15,7 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "(Decision Tiers → Tier B)"
+      "pattern": "(Decision Journal)"
     },
     {
       "file": "plugin/references/run-ledger-schema.md",

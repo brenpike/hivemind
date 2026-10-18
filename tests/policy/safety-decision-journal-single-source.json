@@ -1,0 +1,62 @@
+{
+  "rule": "The decision-journal rule lives once, in decision-autonomy.md (Decision Journal), and every consumer points to it",
+  "description": "decision-autonomy.md (Decision Journal) is the one canonical home of which decisions are journaled, where, and with what fields. A second copy of that rule is the defect this fixture exists to catch: a consumer that restates which decisions it journals, such as journaling only the decisions taken on the user's behalf, silently narrows the journal for that consumer, and two copies drift. This fixture owns three axes. (1) CANONICAL CLAIM. The source pin carries the sentence that bounds the only exception to journaling: 'a decision at such a site is not journaled' is the exception, and 'no table row bound to such a site carries an `auto` cell, so every decision taken on the user's behalf has a bounding event' is the condition that keeps the exception from swallowing an auto decision, so widening the exception or dropping the no-`auto`-cell condition stops the pattern matching. Pinning either half alone would leave the other rewritable, so the pin spans both. A canonical consumer pin in the same file carries the journaling obligation itself: 'Every decision that has a bounding event, whatever its disposition and at every autonomy level' is the scope, so narrowing the journal to some dispositions or some levels stops the match, and 'is recorded there as one entry appended to `event.outputs.decisions[]`' is the obligation and its destination, so moving or dropping the write stops it matching. (2) CONSUMER POINTERS. overlord.md must still write the decision journal per decision-autonomy.md (Decision Journal), run-ledger-schema.md must still single-source the `decisions[]` array to decision-autonomy.md (## Decision Journal), and decision-report/SKILL.md must still take the journal entry fields from decision-autonomy.md (## Decision Journal). These are pointer pins, never remedy prose, so honest rewording of surrounding text does not turn the suite red. (3) NO SECOND COPY. set_check scans each named file line by line for literals that only a restatement of the journal rule would carry (`journals each`, `journal each`, `journals every`, `journal every`, `journal it with`, `and journal the`, `journaled with`, `journaled without`) and requires each to occur ZERO times in each file, the canonical file included, since the home states the rule without these phrasings. subset mode never reports the members a clean file necessarily lacks; expected_counts carries the zero assertion. The capture group is a fixed literal alternation rather than a negated-delimiter class, the same exception the disposition single-source fixture (tests/policy/safety-autonomy-disposition-single-source.json) and the Bump Type engine single-source fixture (tests/policy/safety-bump-type-engine-single-source.json) take, because the axis is ABSENCE of known literals, not membership of an enumerable marker set: there is no structural marker to anchor on, and every capture is by construction a member whose required count is zero. RESIDUALS, stated plainly: these pins claim word-sequence presence (and, for the set_check, absence of the listed literals) in the named files, never meaning, so a consumer that keeps every pinned pointer while restating the journal rule in fresh words passes. The absence literals are case-sensitive and line-scoped: a restatement that paraphrases the rule, capitalizes a literal, or wraps one across a line break is invisible, because no fixture here can assert body-prose ABSENCE beyond fixed literals (`absent` is scoped to YAML frontmatter). This set_check is a complete-the-known-set tripwire for the restatement phrasings already seen, not the fix; the fix is the single Decision Journal section itself. set_check `files` is a literal list with no glob expansion, so a restatement planted in any other plugin file is invisible, and README.md, CLAUDE.md, CONTEXT.md, and web/functionality.html are outside the list by design, since human-facing docs may describe the journal in their own words.",
+  "set_check": {
+    "extract_regex": "(journals each|journal each|journals every|journal every|journal it with|and journal the|journaled with|journaled without)",
+    "expected_set": [
+      "journals each",
+      "journal each",
+      "journals every",
+      "journal every",
+      "journal it with",
+      "and journal the",
+      "journaled with",
+      "journaled without"
+    ],
+    "expected_counts": {
+      "journals each": 0,
+      "journal each": 0,
+      "journals every": 0,
+      "journal every": 0,
+      "journal it with": 0,
+      "and journal the": 0,
+      "journaled with": 0,
+      "journaled without": 0
+    },
+    "files": [
+      { "path": "plugin/agents/overlord.md", "mode": "subset" },
+      { "path": "plugin/agents/cerebrate.md", "mode": "subset" },
+      { "path": "plugin/agents/local-reviewer.md", "mode": "subset" },
+      { "path": "plugin/agents/github-reviewer.md", "mode": "subset" },
+      { "path": "plugin/governance/decision-autonomy.md", "mode": "subset" },
+      { "path": "plugin/governance/workflow.md", "mode": "subset" },
+      { "path": "plugin/governance/report-format.md", "mode": "subset" },
+      { "path": "plugin/references/run-ledger-schema.md", "mode": "subset" },
+      { "path": "plugin/skills/decision-report/SKILL.md", "mode": "subset" },
+      { "path": "plugin/references/decision-brief-schema.json", "mode": "subset" },
+      { "path": "plugin/references/decision-autonomy-table.json", "mode": "subset" }
+    ]
+  },
+  "source": {
+    "file": "plugin/governance/decision-autonomy.md",
+    "pattern": "a decision at such a site is not journaled, and no table row bound to such a site carries an `auto` cell, so every decision taken on the user's behalf has a bounding event."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "Every decision that has a bounding event, whatever its disposition and at every autonomy level, is recorded there as one entry appended to `event.outputs.decisions[]`."
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Write the decision journal per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal)"
+    },
+    {
+      "file": "plugin/references/run-ledger-schema.md",
+      "pattern": "decision-autonomy.md (## Decision Journal)"
+    },
+    {
+      "file": "plugin/skills/decision-report/SKILL.md",
+      "pattern": "Their fields are per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (## Decision Journal)."
+    }
+  ]
+}

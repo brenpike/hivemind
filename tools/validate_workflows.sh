@@ -37,9 +37,12 @@
 #        exactly "<state>.<outcome>" (a bare-state binding does not count)
 #   - R7 no decision site is named by more than one row; a state and each of its
 #        outcomes are distinct sites
+#   - R8 no row binding a pre-ledger site (a reserved site, or a state of a workflow
+#        whose id is in AUTONOMY_PRE_LEDGER_WORKFLOWS) carries an "auto" cell at any
+#        of the table's .levels; a listed workflow id no definition declares fails
 # A missing or unparseable table fails; it is never skipped. Honest limit: these rules
-# prove sites EXIST and that each names at most one kind, not that the kind is
-# semantically right, and the
+# prove sites EXIST, that each names at most one kind, and that no pre-ledger site is
+# auto-disposed, not that the kind is semantically right, and the
 # inverse rule covers cerebrate planning states only — other decision sites can still
 # go unbound without failing here.
 # Recorded residual: docs/adr/0034-autonomy-levels-and-decision-briefs.md (Decision 11).
@@ -159,6 +162,11 @@ CEREBRATE_ANALYSIS_SET=(complete open_questions blocked)
 # own sites. Source of truth: plugin/agents/overlord.md (## Resume On Start) for
 # resume_on_start.
 AUTONOMY_RESERVED_SITES=(resume_on_start)
+
+# AUTONOMY_PRE_LEDGER_WORKFLOWS : ids of workflows whose states, with the reserved
+# sites, are the pre-ledger decision sites R8 checks.
+# Source of truth: ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Decision Journal)
+AUTONOMY_PRE_LEDGER_WORKFLOWS=(workflow-router)
 
 # Contract rows: "<state-name>:<set-var-name>". A reviewer state with the given
 # name in a workflow definition must declare every outcome in the named set as a
@@ -432,7 +440,7 @@ validate_cerebrate_contract() {
 
 # ── Decision-autonomy binding validation ─────────────────────────────────────────
 #
-# validate_autonomy_bindings <table_file> : checks rules R1-R7 (see header) for the
+# validate_autonomy_bindings <table_file> : checks rules R1-R8 (see header) for the
 # given decision-autonomy table against the UNION of states and per-state transition
 # keys across every plugin/workflows/*.json. Fails closed: a missing or unparseable
 # table, a non-array .rows/.hard_stops, no workflow definitions, or a jq evaluation
@@ -472,13 +480,15 @@ validate_autonomy_bindings() {
         return
     fi
 
-    local reserved_json planning_json violations
+    local reserved_json planning_json pre_ledger_json violations
     reserved_json="$(printf '%s\n' "${AUTONOMY_RESERVED_SITES[@]}" | jq -R . | jq -s .)"
     planning_json="$(printf '%s\n' "${CEREBRATE_PLANNING_SET[@]}" | jq -R . | jq -s .)"
+    pre_ledger_json="$(printf '%s\n' "${AUTONOMY_PRE_LEDGER_WORKFLOWS[@]}" | jq -R . | jq -s .)"
     if ! violations="$(jq -r \
         --slurpfile wfs <(cat "${wf_files[@]}") \
         --argjson reserved "$reserved_json" \
-        --argjson planning "$planning_json" '
+        --argjson planning "$planning_json" \
+        --argjson pre_ledger "$pre_ledger_json" '
         ($wfs
          | reduce .[] as $wf ({};
              reduce (($wf.states // {}) | to_entries[]) as $st (.;
@@ -542,7 +552,31 @@ validate_autonomy_bindings() {
             | {site: ., idx: $idx, name: $name}]
            | group_by(.site)[]
            | select((map(.idx) | unique | length) > 1)
-           | "R7 violation: decision site \u0027\(.[0].site)\u0027 is named by more than one row (\(map(.name) | unique | join(", "))); a site names at most one kind")
+           | "R7 violation: decision site \u0027\(.[0].site)\u0027 is named by more than one row (\(map(.name) | unique | join(", "))); a site names at most one kind"),
+          ([$wfs[] | select(.id as $id | ($pre_ledger | index($id)) != null)] as $pre_wfs
+           | ($pre_ledger - ($pre_wfs | map(.id))) as $missing_ids
+           | if ($missing_ids | length) > 0 then
+                 ($missing_ids[]
+                  | "R8 violation: pre-ledger workflow \u0027\(.)\u0027 is not declared by any plugin/workflows/*.json definition")
+             elif (.levels | type) != "array" then
+                 "R8 violation: table .levels is missing or not an array; level cells cannot be checked"
+             else
+                 .levels as $levels
+                 | (($reserved + [$pre_wfs[] | (.states // {}) | keys[]]) | unique) as $pre_sites
+                 | .rows | to_entries[]
+                 | .key as $idx | .value
+                 | select(type == "object")
+                 | . as $row
+                 | (.kind // "#\($idx)" | tostring) as $name
+                 | (.resolved_at // []) | select(type == "array") | .[] | strings
+                 | index(".") as $dot
+                 | (if $dot == null then . else .[0:$dot] end) as $site
+                 | select(($pre_sites | index($site)) != null)
+                 | $levels[] | strings
+                 | . as $level
+                 | select($row[$level] == "auto")
+                 | "R8 violation: row \u0027\($name)\u0027 binds pre-ledger site \u0027\($site)\u0027 with an `auto` cell at level \u0027\($level)\u0027; a decision there has no bounding event"
+             end)
     ' "$table_file" 2>&1)"; then
         fail "$label" "decision-autonomy binding check could not be evaluated: $violations"
         return

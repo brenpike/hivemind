@@ -36,7 +36,7 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "Which decisions surface and which are auto-taken at the active autonomy level is the table `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`, applied per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level)"
+      "pattern": "Which decisions surface is resolved per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Autonomy Level) against the table `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`"
     },
     {
       "file": "plugin/agents/cerebrate.md",
