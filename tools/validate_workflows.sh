@@ -35,8 +35,11 @@
 #   - R6 (inverse) every outcome of a cerebrate PLANNING-mode state whose target is
 #        neither a declared terminal nor a user_gate state is bound by some row naming
 #        exactly "<state>.<outcome>" (a bare-state binding does not count)
+#   - R7 no decision site is named by more than one row; a state and each of its
+#        outcomes are distinct sites
 # A missing or unparseable table fails; it is never skipped. Honest limit: these rules
-# prove sites EXIST, not that a row is bound to the semantically right site, and the
+# prove sites EXIST and that each names at most one kind, not that the kind is
+# semantically right, and the
 # inverse rule covers cerebrate planning states only — other decision sites can still
 # go unbound without failing here.
 # Recorded residual: docs/adr/0034-autonomy-levels-and-decision-briefs.md (Decision 11).
@@ -429,7 +432,7 @@ validate_cerebrate_contract() {
 
 # ── Decision-autonomy binding validation ─────────────────────────────────────────
 #
-# validate_autonomy_bindings <table_file> : checks rules R1-R6 (see header) for the
+# validate_autonomy_bindings <table_file> : checks rules R1-R7 (see header) for the
 # given decision-autonomy table against the UNION of states and per-state transition
 # keys across every plugin/workflows/*.json. Fails closed: a missing or unparseable
 # table, a non-array .rows/.hard_stops, no workflow definitions, or a jq evaluation
@@ -530,7 +533,16 @@ validate_autonomy_bindings() {
            | select(($wf.states[$target].type // "") != "user_gate")
            | "\($state).\($outcome)" as $site_outcome
            | select(($bound | index($site_outcome)) == null)
-           | "R6 violation: cerebrate planning state \u0027\($state)\u0027 outcome \u0027\($outcome)\u0027 advances to non-terminal, non-user_gate state \u0027\($target)\u0027 (workflow \u0027\($wf.id // "?")\u0027) but no row binds exactly \u0027\($site_outcome)\u0027")
+           | "R6 violation: cerebrate planning state \u0027\($state)\u0027 outcome \u0027\($outcome)\u0027 advances to non-terminal, non-user_gate state \u0027\($target)\u0027 (workflow \u0027\($wf.id // "?")\u0027) but no row binds exactly \u0027\($site_outcome)\u0027"),
+          ([.rows | to_entries[]
+            | .key as $idx | .value
+            | select(type == "object")
+            | (.kind // "#\($idx)" | tostring) as $name
+            | (.resolved_at // []) | select(type == "array") | .[] | strings
+            | {site: ., idx: $idx, name: $name}]
+           | group_by(.site)[]
+           | select((map(.idx) | unique | length) > 1)
+           | "R7 violation: decision site \u0027\(.[0].site)\u0027 is named by more than one row (\(map(.name) | unique | join(", "))); a site names at most one kind")
     ' "$table_file" 2>&1)"; then
         fail "$label" "decision-autonomy binding check could not be evaluated: $violations"
         return

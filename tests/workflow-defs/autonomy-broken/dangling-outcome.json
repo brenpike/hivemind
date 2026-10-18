@@ -1,5 +1,5 @@
 {
-  "$comment": "Broken autonomy fixture (R4): row option_choice binds plan.approved; plan declares no approved transition. Breaks ONLY R4.",
+  "$comment": "Broken autonomy fixture (R4): row planner_question binds plan.approved; plan declares no approved transition. Breaks ONLY R4.",
   "version": 1,
   "levels": [
     "high",
@@ -39,7 +39,7 @@
       "when": "A planner returns a remediation plan for a root cluster."
     },
     {
-      "kind": "option_choice",
+      "kind": "planner_question",
       "high": "auto",
       "balanced": "auto",
       "low": "surface",
