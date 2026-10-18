@@ -32,6 +32,7 @@ a later refactor safe, not to assert the code is "right".
    - which observer watches which elements, located by options (`rootMargin`)
    - which code branch was taken (IO present vs absent, reduced-motion on vs off,
      matchMedia modern vs legacy vs absent, canvas/context/rAF present vs absent)
+   - `performance.now` **call occurrence** during one dispatched event, never its values
 4. **NEVER pin nondeterministic internals.** Off-limits:
    - particle positions, velocities, counts, sizes or colors
    - pixel/numeric canvas output or drawing arguments
@@ -63,6 +64,7 @@ npm run build && npm test
 | `swarm-canvas.jsdom.test.ts` | Canvas lifecycle: one canvas in the document, reduced-motion static paint, no-canvas / null-context / no-rAF early returns, live reduced-motion stop and resume, visibility pause and resume, sections observer wiring, formation frame smoke on all three pages, single glyph defs across stop/start. |
 | `decode.test.ts` | Xenoglyph decode: reduced motion and IO-absent register nothing, overlay mount contract, overlay removal after frames, non-intersecting entries keep `dx-wait`. |
 | `cluster-lighting.test.ts` | `is-lit` on `[data-cluster]` cards for mouse hover and touch tap toggle, with motion on and under reduced motion. |
+| `pointer-press.test.ts` | Press guard: a pointerdown on a page scrollbar (target `<html>`, or at or beyond `documentElement.clientWidth`/`clientHeight`) never starts press-hold; content presses (mouse, touch) still do; inert under zero-size layout. |
 | `fallback-branches.test.ts` | Legacy `addListener` path, matchMedia-absent boot (motion on), IO-absent boot (no throw, text not hidden). |
 | `dom-contract.test.ts` | Static page contract (see `web/README.md`). |
 
@@ -106,6 +108,8 @@ for them rather than try to force real-browser behavior:
 - **Zero-size layout.** Every `getBoundingClientRect()` is all zeros and
   `documentElement.clientWidth` is 0 (the engine falls back to `window.innerWidth`).
   Formation geometry is degenerate, so formation tests are smoke only (no throw).
+  `pointer-press.test.ts` gives `<html>` a client box by defining own `clientWidth` and
+  `clientHeight` getters after boot and deleting them in `afterEach`.
 - **`visibilitychange` does not auto-fire in jsdom.** Set `document.hidden` via the
   helper and dispatch a synthetic `visibilitychange` event manually.
 - **`<html>`, `window` and `document` outlive a test.** Only body and head are wiped
@@ -122,7 +126,8 @@ jsdom cannot honestly test these; they are explicitly out of scope for this suit
 3. **Real `visibilitychange` firing** on real tab switches.
 4. **Real `IntersectionObserver` geometry/threshold** on actual scroll position
    (sections observer midline band, decode observer entry).
-5. **Real pointer input**: hover, tap, press-hold convergence on the swarm.
+5. **Real pointer input**: hover, tap, press-hold convergence on the swarm, the real
+   scrollbar press and drag event sequence.
 
 ## PLAYWRIGHT TRIPWIRE
 

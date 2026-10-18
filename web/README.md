@@ -7,6 +7,7 @@ The repo-root `README.md` is the canonical source of truth for all website conte
 Every page follows these rules:
 
 - Link `./styles/main.css` and `./scripts/main.js`.
+- Link `./favicon.svg` as the tab icon: `<link rel="icon" href="./favicon.svg" type="image/svg+xml">` right after the `<title>`, with a relative path.
 - Include the shared head gate script.
 - Use only classes defined in `main.css`.
 - Use no `style` attributes.
