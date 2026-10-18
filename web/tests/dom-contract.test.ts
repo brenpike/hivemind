@@ -180,6 +180,16 @@ describe.each(PAGE_FILES)('%s', (file) => {
     expect(moduleScripts.map((script) => script.getAttribute('src'))).toEqual(['./scripts/main.js']);
   });
 
+  it('HEAD: one SVG tab icon linked relative to the page', () => {
+    const iconLinks = selectAll(doc, 'link').filter((link) =>
+      (link.getAttribute('rel') ?? '').toLowerCase().split(/\s+/).includes('icon'),
+    );
+    expect(iconLinks).toHaveLength(1);
+    expect(iconLinks[0].parentElement?.tagName).toBe('HEAD');
+    expect(iconLinks[0].getAttribute('href')).toBe('./favicon.svg');
+    expect(iconLinks[0].getAttribute('type')).toBe('image/svg+xml');
+  });
+
   it('HEAD: viewport, color-scheme and theme-color meta present, no robots noindex', () => {
     expect(doc.querySelector('head meta[name="viewport"][content]')).not.toBeNull();
     expect(doc.querySelector('head meta[name="color-scheme"][content]')).not.toBeNull();
@@ -351,6 +361,22 @@ describe('cross page contract', () => {
     expect(source).not.toContain('XMLHttpRequest');
     const urls = source.match(/https?:\/\/[^\s'"`)<>]+/g) ?? [];
     expect(urls.filter((url) => url !== SVG_NAMESPACE_URL)).toEqual([]);
+  });
+
+  it('ZERO NETWORK: favicon.svg is a self-contained SVG', () => {
+    expect(existsSync(resolve(WEB_ROOT, 'favicon.svg'))).toBe(true);
+    const source = readWebFile('favicon.svg');
+    const svgDoc = new DOMParser().parseFromString(source, 'image/svg+xml');
+    expect(svgDoc.querySelector('parsererror')).toBeNull();
+    expect(svgDoc.documentElement.localName).toBe('svg');
+    expect(svgDoc.documentElement.getAttribute('viewBox')).not.toBeNull();
+    expect(source).not.toContain('<script');
+    expect(source).not.toContain('url(');
+    expect(source).not.toContain('@import');
+    expect(source).not.toMatch(/\bhref\s*=/i);
+    const urls = source.match(/https?:\/\/[^\s'"`)<>]+/g) ?? [];
+    expect(urls.filter((url) => url !== SVG_NAMESPACE_URL)).toEqual([]);
+    expect(DASH_PATTERN.test(source)).toBe(false);
   });
 
   it('GROUND TRUTH: agents table has one row per plugin agent', () => {

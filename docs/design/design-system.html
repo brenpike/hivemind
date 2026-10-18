@@ -7,6 +7,7 @@
 <meta name="color-scheme" content="dark">
 <meta name="theme-color" content="#05040d">
 <title>Hivemind Design System</title>
+<link rel="icon" href="../../web/favicon.svg" type="image/svg+xml">
 <script>(function () { 'use strict'; var root = document.documentElement; try { if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) { root.classList.add('swarm-live'); setTimeout(function () { if (!root.classList.contains('swarm-ready')) root.classList.remove('swarm-live'); }, 4000); } } catch (e) { /* static presentation stays */ } })();</script>
 <link rel="stylesheet" href="../../web/styles/main.css">
 <style>
@@ -37,6 +38,7 @@
 .ds-font-mono { font-family: var(--mono); }
 .ds-spec { display: grid; gap: 0.4rem; padding-top: 0.85rem; border-top: 1px solid rgba(139, 92, 255, 0.12); }
 .ds-spec-label { font-size: 0.82rem; color: var(--dim); }
+.ds-favicons { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 1rem; }
 @media (min-width: 640px) {
   .ds-box { padding: 1.9rem 2rem; }
 }
@@ -840,6 +842,8 @@
             <h3 class="xg">site-head, brand, site-nav</h3>
             <p>A glass bar with the brand mark on the left and the primary nav on the right. It scrolls away on phones and sticks to the top from 640 px, at 64 px tall. Nav links are dim and get a violet to cyan underline on hover or focus. The current page's link carries <code>aria-current="page"</code>, which keeps it bright and underlined.</p>
             <p>The skip link (<code>a.skip</code>) is hidden above the screen until it gets keyboard focus, then slides in.</p>
+            <p>The tab icon is <code>web/favicon.svg</code>: the brand mark with thicker spokes and bigger nodes on a void rounded square, so it stays readable at 16 px. Every page links it right after its title with <code>&lt;link rel="icon" href="./favicon.svg" type="image/svg+xml"&gt;</code>.</p>
+            <p class="ds-favicons"><img src="../../web/favicon.svg" width="16" height="16" alt="Tab icon at 16 px"><img src="../../web/favicon.svg" width="32" height="32" alt="Tab icon at 32 px"><img src="../../web/favicon.svg" width="64" height="64" alt="Tab icon at 64 px"></p>
           </div>
           <div class="code-panel" role="region" aria-label="Header markup" tabindex="0">
             <pre><code>&lt;a class="skip" href="#main"&gt;Skip to content&lt;/a&gt;
@@ -1429,6 +1433,7 @@
 &lt;meta name="color-scheme" content="dark"&gt;
 &lt;meta name="theme-color" content="#05040d"&gt;
 &lt;title&gt;Hivemind | Page title&lt;/title&gt;
+&lt;link rel="icon" href="./favicon.svg" type="image/svg+xml"&gt;
 &lt;script&gt;(function () { 'use strict'; var root = document.documentElement; try { if (!window.matchMedia || !window.matchMedia('(prefers-reduced-motion: reduce)').matches) { root.classList.add('swarm-live'); setTimeout(function () { if (!root.classList.contains('swarm-ready')) root.classList.remove('swarm-live'); }, 4000); } } catch (e) { /* static presentation stays */ } })();&lt;/script&gt;
 &lt;link rel="stylesheet" href="./styles/main.css"&gt;
 &lt;script type="module" src="./scripts/main.js"&gt;&lt;/script&gt;

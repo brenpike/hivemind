@@ -1089,9 +1089,17 @@ function init(): void {
     }
   }
 
-  /** Starts a potential press-hold convergence. */
+  /** True when a press lands off the page content: on a classic or overlay page scrollbar. */
+  function isOffContentPress(evt: PointerEvent): boolean {
+    if (evt.target === root) return true;
+    const cw = root.clientWidth, ch = root.clientHeight;
+    return (cw > 0 && evt.clientX >= cw) || (ch > 0 && evt.clientY >= ch);
+  }
+
+  /** Starts a potential press-hold convergence; a scrollbar press cancels pointer influence instead. */
   function handlePointerDown(evt: PointerEvent): void {
     if (evt.isPrimary === false) return;
+    if (isOffContentPress(evt)) { handlePointerCancel(); return; }
     pointer.down = true; pointer.moved = false; pointer.locked = false;
     pointer.t0 = nowMs(); pointer.x0 = evt.clientX; pointer.y0 = evt.clientY;
     handlePointerMove(evt);
