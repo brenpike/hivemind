@@ -52,6 +52,8 @@ Surfaced decisions follow `plugin/references/decision-brief-schema.json`, a JSON
 
 Assumed constraints appear in the brief as OVERRULABLE. A constraint the agent assumed is labeled as an assumption the user can strike, never presented as a given. This is the direct answer to "Who made the public API constraint?".
 
+A brief travels only as a structured field: `plan.decisions` or `plan.open_questions` entries, or a reviewer's `brief`. A prose decision line is a one-line summary rendered from one entry, so the schema applies to the field and never to the line. An empty list reads `- None`. Reference: PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305754238.
+
 **Recorded residual.** This is a decision, not open work, recorded here per `plugin/governance/remediation-doctrine.md` (Recorded Residual).
 
 - **Residual.** The schema does not enforce the three-option limit (`maxItems`) or cross-field constraints, such as `recommendation.option_id` naming a supplied option. Those limits live in the schema descriptions and in `plugin/governance/decision-autonomy.md` (Decision Brief).
@@ -106,12 +108,14 @@ Consumers carry one rule instead of per-site prose. The overlord's `**Decision s
 
 `tools/validate_workflows.sh` (`validate_autonomy_bindings`) checks the binding at CI time against the union of states and per-state transition keys across `plugin/workflows/*.json`. It rejects an unbound row (R1), a dangling site (R2), a reserved site that carries an outcome (R3), a dangling outcome (R4), a hard stop that carries `resolved_at` (R5), and an unbound planner advance: a cerebrate planning-state outcome that is neither a terminal nor a `user_gate` target and that no row names exactly as `<state>.<outcome>` (R6). `--self-test` proves each rule rejects a broken fixture under `tests/workflow-defs/autonomy-broken/`, with the real table as the positive control.
 
+R7 rejects a decision site named by more than one row. A state and each of its outcomes are distinct sites, so a row naming `<state>` and another naming `<state>.<outcome>` do not collide. A site names at most one kind, and a row's `when` describes the kind rather than choosing between kinds at a shared site. Two rows, `plan_open_question` and `option_choice`, shared the same sites with the same cells, so they are now one row, `planner_question`, at `plan`, `brood_plan`, and `analyze`. `remediation_approach` is the only planner kind at the two remediation planning states, `review_remediation_plan` and `review_remediation_plan_postpr`. This keeps 5.0.3's auto remediation approach at `balanced`, and no oversight is lost because plan acceptance surfaces at every level (Decision 6). The table stays keyed by row. R7 only constrains the bindings, so no second copy of the table exists. Reference: PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305754237.
+
 This is not the runtime lookup script Decision 4 rejects. It runs once in CI over static data, it never sees a live decision, and it does not decide any verdict. Agents still read the table directly and apply it by judgment at runtime.
 
 **Recorded residual.** This is a decision, not open work, recorded here per `plugin/governance/remediation-doctrine.md` (Recorded Residual).
 
-- **Residual.** R1-R6 prove that sites exist and that planner advances are bound. They do not prove that a row's kind is the decision actually made at that site. R6 covers cerebrate planning states only, so another decision site can still go unbound without failing validation. Whether a row's `when` applies to a given decision also stays judgment.
-- **Linked finding.** Local review finding 1f40bf21 (iteration 3).
+- **Residual.** R1-R7 prove that sites exist, that planner advances are bound, and that each site names at most one kind. They do not prove that a row's kind is the decision actually made at that site. R6 covers cerebrate planning states only, so another decision site can still go unbound without failing validation. Whether a row's `when` applies to a given decision also stays judgment.
+- **Linked findings.** Local review finding 1f40bf21 (iteration 3); PR #408 review thread https://github.com/brenpike/hivemind/pull/408#discussion_r4305754237.
 - **Root cause.** Which kind is decided at a site is judgment (Decision 4), and the table is its only source. No check can derive the right kind from the workflow graph.
 - **Inherited.** Before this change no kind was bound to any site. The bindings narrow that gap and introduce none of it.
 - **Bounded impact.** A misbinding needs a reviewed table edit. A decision whose row does not name its site surfaces (resolution step 5). Remediation-plan acceptance surfaces at every level through the promotion gate's architectural clause. Worst case: a skipped plan-acceptance prompt at `low`, and only if the overlord also fails to recognize the decision, on a working branch before a human-merged PR. That is reversible.
@@ -137,6 +141,8 @@ This is not the runtime lookup script Decision 4 rejects. It runs once in CI ove
 | A single overlord rule with no per-row binding | The rule would still need to say which kinds apply at which state, so the mapping returns as prose. Nothing could check it against the workflow graph, and a kind raised at an unexpected state would resolve by guesswork instead of failing closed |
 | A `decides` key on workflow states | Changes the workflow definition and so needs a workflow version bump, creating version skew for in-flight ledgers. It also puts the decision-kind vocabulary into the WHO/WHAT-only graph (ADR-0018) |
 | Let a `decided:` answer bind the planner unconditionally | It ranks a consumer input ahead of the hard stops, user gates, and the promotion gate, and puts the answer's meaning in consumer prose, where it drifts from the canonical order |
+| Merge only the two overlapping planner rows, or narrow their `when` predicates | Fixes the observed pair only. `remediation_approach` already overlapped both at the remediation planning states, and the next row added to a shared site would overlap again |
+| Rank overlapping kinds by precedence | Keeps two kinds per site and adds a second ordering to keep in step with the table |
 | Allowlisted `HIVEMIND_AUTONOMY` (`high` default, invalid → `low`), table with no cells for hard stops, schema-backed briefs, no graph change (CHOSEN) | — |
 
 ## Consequences
@@ -149,7 +155,7 @@ This is not the runtime lookup script Decision 4 rejects. It runs once in CI ove
 - **ADR-0026 Decision 1 is amended, not deleted.** Tier membership now lives in the table. The Autonomy 2x2, the promotion gate, the disposition vocabulary, and the journal entry shape stand as ADR-0026 and its amendments leave them. ADR-0026 stays unedited as historical record.
 - **The override channel now carries four keys.** `HIVEMIND_LOCAL_REVIEW_MODEL`, `HIVEMIND_SKIP_PR_WATCH`, `HIVEMIND_ENABLE_DECISION_REPORT`, and `HIVEMIND_AUTONOMY` share one `env`-block convention, one settings-file pair, and one brood-inheritance property. `HIVEMIND_AUTONOMY` is the only one checked against a value allowlist rather than by presence or charset.
 - **Table misreads are observable.** The revisit trigger in Decision 4 is checked against existing journal data. No new instrumentation is needed to know when the prose-read approach has stopped working.
-- **A decision raised outside its row's decision sites surfaces.** A new decision point needs a table row whose `resolved_at` names the state where it arises. A row with no `resolved_at`, a dangling site or outcome, or a bound hard stop fails `tools/validate_workflows.sh`. Binding correctness and `when` applicability remain judgment.
+- **A decision raised outside its row's decision sites surfaces.** A new decision point needs a table row whose `resolved_at` names the state where it arises. A row with no `resolved_at`, a dangling site or outcome, a bound hard stop, or a site named by two rows fails `tools/validate_workflows.sh`. Binding correctness and `when` applicability remain judgment.
 - **The plugin version moves to 6.0.0.** The default behavior change is MAJOR.
 
 References: `plugin/governance/decision-autonomy.md` (`## Decision Brief`), `plugin/references/decision-autonomy-table.json`, `plugin/references/decision-brief-schema.json`, `tools/validate_workflows.sh`, `plugin/governance/versioning.md`, `plugin/workflows/standard-delivery.json`, `plugin/workflows/pr-feedback-remediation.json`, `plugin/workflows/analysis-only.json`, `CLAUDE.md`; amends ADR-0026 Decision 1; follows the operator-override precedent of ADR-0022, ADR-0029, and ADR-0030.
