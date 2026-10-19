@@ -19,6 +19,14 @@ describe('result contract', () => {
       assert.deepEqual(finished, { needs_user: false, outcome, message: 'Done.', decisions });
     }
   });
+  test('message is the last key and resume_args precedes it, so a cut notice loses only message', () => {
+    const paused = lib.pauseForUser({ message: 'Q?', resumeArgs: { request: 'R' }, decisions });
+    assert.deepEqual([...Object.keys(paused)], ['needs_user', 'resume_args', 'decisions', 'message']);
+    for (const outcome of ['complete', 'blocked']) {
+      const finished = lib.finish({ outcome, message: 'Done.', decisions });
+      assert.deepEqual([...Object.keys(finished)], ['needs_user', 'outcome', 'decisions', 'message']);
+    }
+  });
   test('resultFields covers exactly the fields both shapes use', () => {
     const paused = lib.pauseForUser({ message: 'm', resumeArgs: {}, decisions: [] });
     const finished = lib.finish({ outcome: 'complete', message: 'm', decisions: [] });

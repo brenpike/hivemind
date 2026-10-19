@@ -1063,8 +1063,8 @@ function renderYesNo(value) {
  *     pausesSoFar non-negative integer. How many times this run has paused.
  *
  * Outputs
- *   pauseForUser  {needs_user: true, message, resume_args, decisions}
- *   finish        {needs_user: false, outcome, message, decisions}
+ *   pauseForUser  {needs_user: true, resume_args, decisions, message}
+ *   finish        {needs_user: false, outcome, decisions, message}
  *   resultFields  every top-level field name a result can carry.
  *   replyField    the args key a resumed run reads the reply from: 'reply'.
  *   pauseLimit    the most times one run may pause: 3.
@@ -1092,12 +1092,17 @@ function renderYesNo(value) {
  *   own echo and does not authenticate it. A forged resume_args gains
  *   nothing the overlord could not get by misquoting the reply.
  *   Invalid input throws instead of returning a partial result.
+ *   message is the last key and resume_args precedes it, because the harness
+ *   cuts a long completion notice at its end, so a cut can only lose the tail
+ *   of message. A resume_args larger than the notice limit is cut too, but its
+ *   size is bounded: the request plus at most pauseLimit() (3) replies.
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
  *   returning. One fixed shape lets the overlord relay and resume any
  *   workflow the same way, and the decisions travel in the final message
- *   instead of a separate journal.
+ *   instead of a separate journal. The key order puts message last so a cut
+ *   notice still carries needs_user, outcome, resume_args and decisions whole.
  */
 
 function resultFields() {
@@ -1129,9 +1134,9 @@ function pauseForUser({ message, resumeArgs, decisions }) {
   assertMessageAndDecisions('pauseForUser', message, decisions);
   return {
     needs_user: true,
-    message: message,
     resume_args: resumeArgs,
-    decisions: decisions
+    decisions: decisions,
+    message: message
   };
 }
 
@@ -1143,8 +1148,8 @@ function finish({ outcome, message, decisions }) {
   return {
     needs_user: false,
     outcome: outcome,
-    message: message,
-    decisions: decisions
+    decisions: decisions,
+    message: message
   };
 }
 
