@@ -46,7 +46,7 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 
 **Input gate.** Before any Bash call, validate `base` and, when provided, `push_remote` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: base or push_remote contains characters outside the safe allowlist`.
 
-1. Confirm current branch matches `head` and is not `base`.
+1. Confirm current branch matches `head` and is not `base`. Read the current branch with `git rev-parse --abbrev-ref HEAD` and compare it to `head` and `base` in your own reasoning, never in Bash, so the caller's `head` bytes never enter Bash source, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). On mismatch or trunk match, exit 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
 2. Confirm no unexpected unstaged changes.
 3. Confirm validation outcome per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) is one of: every declared command passed, OR `Not run (no validation commands defined)`. Exit 1 with blocker if the procedure returned the Worker Report — Blocked (`stage: validation`) or any declared command failed.
 4. Confirm required version/release metadata is included or not required.

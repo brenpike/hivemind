@@ -40,7 +40,7 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 
 ## Requirements
 
-1. Confirm current branch matches `head` and is not `base` (GIT-01 — never push trunk). On mismatch or trunk match, exit 1 with blocker.
+1. Confirm current branch matches `head` and is not `base` (GIT-01 — never push trunk). Read the current branch with `git rev-parse --abbrev-ref HEAD` and compare it to `head` and `base` in your own reasoning, never in Bash, so neither caller value enters Bash source, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). On mismatch or trunk match, exit 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
 2. Confirm git state is not unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State). On unsafe state, exit 1 with blocker.
 3. Capture local HEAD SHA: `git rev-parse HEAD`.
 4. Place the working branch on its remote. The branch, the configured remote, and the upstream branch are captured out of band inside the Bash call that uses them, and `push_remote` passes the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before any Bash call.
