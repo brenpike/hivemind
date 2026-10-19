@@ -68,6 +68,22 @@
 # this script writes, which is fixed by the explicit refspec above. Remote URL trust, hooks, and
 # credentials are git's and the operator's concern.
 #
+# RECORDED RESIDUAL (head of the later PR creation): open-plan-pr step 7 `gh pr create` takes its
+# head from the current branch, which this script verified in an earlier Bash call, so that
+# step acts on a branch check made in a different call.
+#   Root cause:  the PR head is implicit (current branch) and the branch check happened earlier.
+#   Inherited:   on main, step 7 already relied on an earlier step's branch check. This is not a
+#                new exposure introduced by routing pushes through this script.
+#   Bounded impact: PR creation writes no git ref (gh's own fallback push applies only to an
+#                unpushed branch and is gh-owned, not done by this script). The worst result is a
+#                visible, closable PR. Drift needs HEAD to change in the run owner's checkout
+#                between two consecutive calls, which single-owner run isolation rules out.
+#   Rejected remediations:
+#                - passing `--head`: defeats gh's push/fork fallback.
+#                - folding PR creation into this script: couples the push kernel to PR authoring
+#                  and moves the free-text title and body into script arguments.
+#   Linkage:     review findings a3c042d0 and bd3204af, with b0f99069 as lineage.
+#
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
 # compatible (no mapfile / associative arrays / ${var,,}).
