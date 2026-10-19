@@ -20,6 +20,8 @@ plugin/                           # plugin root (resolves to ${CLAUDE_PLUGIN_ROO
   skills/<skill-name>/SKILL.md
   skills/_shared/                 # cross-skill shared assets: reference docs (LANGUAGE.md, DEEPENING.md) plus shell libraries sourced by skill engine scripts
   governance/                     # *.md loaded by agents at runtime
+  workflows/                      # *.json current-engine definitions, *.js generated workflow scripts
+  workflow-src/                   # workflow script sources, built by tools/build_workflows.mjs
 README.md
 CLAUDE.md
 ```
@@ -49,11 +51,12 @@ Default branches:
 
 ## Validation
 
-No compiler or code-coverage suite — this is a Markdown plugin. The full validation suite (`tools/validate.sh --all`) enforces three categories of gates:
+No compiler or code-coverage suite. This is mostly a Markdown plugin; the only built files are the generated workflow scripts. The full validation suite (`tools/validate.sh --all`) enforces four categories of gates:
 
 1. **JSON manifests parse** — both `plugin/.claude-plugin/plugin.json` and `.claude-plugin/marketplace.json`.
 2. **Prose/contract linter** — `tools/policy_check.sh --strict`. Validates `plugin/` files against fixtures in `tests/policy/`, `tests/plugin/`, and `tests/workflows/`, and checks that `${CLAUDE_PLUGIN_ROOT}/...` path refs resolve. Advisory by default; `--strict` fails on any finding not in `tests/policy/policy-lint-allowlist.json`. Bare-path invariant enforced here (`CHECK8`).
 3. **Report-format linter** — `tools/validate_reports.sh --batch tests/reports/`. Validates agent report fixtures against report format contracts.
+4. **Workflow scripts**: the build drift check (`node tools/build_workflows.mjs --check`, generated `plugin/workflows/*.js` match their sources) plus the node tests in `tests/workflow-scripts/`, run by `tools/test_workflow_scripts.sh`. Needs Node 18 or later.
 
 ### Local pre-merge
 

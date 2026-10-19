@@ -49,7 +49,14 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
      b="$(git rev-parse --abbrev-ref HEAD)"; git push -u <allowlist-validated-remote> "HEAD:$b"
      ```
      On failure, exit 1 with blocker.
-   - else if upstream tracking is set: run `git push` (no remote/branch argument — nothing to interpolate).
+   - else if upstream tracking is set: first confirm the upstream is the branch's own name, then run `git push` (no remote/branch argument — nothing to interpolate). An upstream under any other name, such as trunk, would make this push or the force-with-lease retry below target that branch. Capture the branch and its upstream ref out-of-band in the same Bash call:
+     ```bash
+     b="$(git rev-parse --abbrev-ref HEAD)"
+     ref="$(git config --get "branch.$b.merge")"
+     [ "$ref" = "refs/heads/$b" ] || { printf 'blocker: upstream does not match the working branch' >&2; exit 1; }
+     git push
+     ```
+     Step 1 confirmed `head` is not `base`, so with the upstream at `refs/heads/<head>` neither the push nor the retry below can target trunk.
      - on success: continue with that remote.
      - on **non-fast-forward** failure: retry once with a refspec-scoped force-with-lease against the tracked upstream ref. Capture the remote and upstream branch out-of-band via git plumbing into shell vars in the SAME Bash call, then reference only `"$rem"` / `"$ub"` in the push (string-splitting on `/` is unsafe — branch names like `feature/foo` and rare remote names with `/` make any single-slash split incorrect; the `refs/heads/` strip is a fixed-prefix parameter expansion, not a re-paste of ref bytes):
        ```bash

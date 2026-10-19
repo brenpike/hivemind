@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.0.0] - 2026-10-18
+
+### Added
+
+- Autonomy table (`plugin/references/decision-autonomy-table.json`) and decision-brief schema (`plugin/references/decision-brief-schema.json`).
+- Decide, brief and result libs under `plugin/workflow-src`, and the built `plugin/workflows/analysis-only.js` script.
+- `tools/build_workflows.mjs` builds the workflow scripts, with a `--check` drift check.
+- Node tests under `tests/workflow-scripts`, run by `tools/test_workflow_scripts.sh` as part of `tools/validate.sh`.
+- Overlord Engine section and the Workflow tool.
+- ADR-0036 for the analysis-only workflow on the script engine. Refs #409.
+
+### Changed
+
+- BREAKING: on analysis requests, the overlord launches the new `hivemind:analysis-only` Workflow script (Claude Code Workflow tool) instead of the JSON state machine. Routine planner questions now take the planner's recommendation and are listed as decided for you. Only architectural, irreversible or safety-relevant questions (and hard stops) pause the run and show a decision brief. A planner question no longer ends the run as blocked. Migration: to keep the old engine for analysis requests, add `Workflow(hivemind:analysis-only)` to `permissions.deny`; the overlord then falls back to the current engine.
+
+### Fixed
+
+- `create-working-branch` now creates branches with `--no-track` and unsets an upstream that is not the branch's own, so plain push or force-with-lease cannot target trunk.
+- `open-plan-pr` first push now sets the branch's own upstream with `git push -u origin HEAD:<branch>`.
+
 ## [5.0.3] - 2026-10-02
 
 ### Fixed
