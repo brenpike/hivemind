@@ -77,6 +77,17 @@ describe('overlord Engine section', () => {
   test('Engine no longer names the dropped answer_key field', () => {
     assert.ok(!engineSection.includes('answer_key'));
   });
+  test('Engine reads the output file with the Read tool, never Bash, when the notice is cut', () => {
+    assert.ok(engineSection.includes('with the Read tool, never Bash'));
+  });
+  test('Engine says the notice can be cut or not parse and names the output file the notice names', () => {
+    assert.ok(engineSection.includes('may cut the result in the completion notice'));
+    assert.ok(engineSection.includes('is cut, or does not parse'));
+    assert.ok(engineSection.includes('read the output file the notice names'));
+  });
+  test('Engine takes message, needs_user and resume_args from the result object in the output file', () => {
+    assert.ok(engineSection.includes('take `message`, `needs_user` and `resume_args` from the `result` object in that file'));
+  });
   test('Engine states the fallback clause', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));
     assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
