@@ -64,7 +64,7 @@ Identifier gate: a branch, base, or remote name matches `^[A-Za-z0-9._/-]+$`, is
 
 Each Bash call is a fresh shell: a captured value is used inside the call that captured it, and a later call re-derives it rather than pasting it. A check made in one Bash call does not carry into the next, so a push runs in the same call, or the same committed script, as every check on the ref it writes. A value that names what an earlier call wrote, such as the commit the push-branch script reports on its `commit:` line, is the exception: a later call that verifies that write compares against the reported value, passed as a literal through the identifier gate, and never re-derives it, because re-deriving resolves a name that can move after the write.
 
-Consumers: `hivemind:push-branch`, `hivemind:open-plan-pr`, `hivemind:create-working-branch`, `hivemind:github-reviewer`. `hivemind:spawn-brood` and `hivemind:brood-status` apply the same gate to `branch` and `base` per Brood Spawn Bypass-Mode Mitigation control 3 above.
+Consumers: `hivemind:push-branch`, `hivemind:open-plan-pr`, `hivemind:create-working-branch`, `hivemind:github-reviewer` for its `pr`, `working_branch` and `base` inputs and its push (its other lifecycle calls are tracked in https://github.com/brenpike/hivemind/issues/416). `hivemind:spawn-brood` and `hivemind:brood-status` apply the same gate to `branch` and `base` per Brood Spawn Bypass-Mode Mitigation control 3 above.
 
 This rule defends against untrusted identifier text only. Repo hooks, local refs, git config, and the operator are trusted, so a change they make between a check and a write is outside this rule and is recorded as a residual, as in the push-branch script's NOT CHECKED header, not defended against.
 
