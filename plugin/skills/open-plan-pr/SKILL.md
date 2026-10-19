@@ -7,8 +7,7 @@ allowed-tools:
   - Bash(git log *)
   - Bash(git diff *)
   - Bash(git rev-parse *)
-  - Bash(git config --get *)
-  - Bash(git push *)
+  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh *)
   - Bash(gh pr create *)
   - Bash(gh pr view *)
   - Bash(printf *)
@@ -44,43 +43,22 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 
 ## Requirements
 
-**Input gate.** Before any Bash call, validate `base` and, when provided, `push_remote` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: base or push_remote contains characters outside the safe allowlist`.
+**Input gate.** Before any Bash call, validate `head`, `base` and, when provided, `push_remote` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: head, base or push_remote contains characters outside the safe allowlist`, which echoes no value.
 
-1. Confirm current branch matches `head` and is not `base`. Read the current branch with `git rev-parse --abbrev-ref HEAD` and compare it to `head` and `base` in your own reasoning, never in Bash, so the caller's `head` bytes never enter Bash source, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). On mismatch or trunk match, exit 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
+1. Confirm current branch matches `head` and is not `base`. The step 6 script makes this check in the same process as the push, so the check and the push act on one reading of the branch; no separate Bash call compares them here. On mismatch or trunk match, the script exits 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
 2. Confirm no unexpected unstaged changes.
 3. Confirm validation outcome per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) is one of: every declared command passed, OR `Not run (no validation commands defined)`. Exit 1 with blocker if the procedure returned the Worker Report — Blocked (`stage: validation`) or any declared command failed.
 4. Confirm required version/release metadata is included or not required.
-5. Capture local HEAD SHA: `git rev-parse HEAD`.
-6. Place the working branch on a remote that `gh pr create` can target:
-   - if `push_remote` is provided: run the push below, where `<allowlist-validated-remote>` is the `push_remote` value that passed the input gate and the branch is derived OUT-OF-BAND as HEAD (confirmed `== head` in step 1), so no branch bytes are pasted into command text:
-     ```bash
-     b="$(git rev-parse --abbrev-ref HEAD)"; git push -u <allowlist-validated-remote> "HEAD:$b"
-     ```
-     On failure, exit 1 with blocker.
-   - else if upstream tracking is set: first confirm the upstream is the branch's own name, then run `git push`. An upstream under any other name, such as trunk, would make this push or the force-with-lease retry below target that branch. Capture the branch and its upstream ref OUT-OF-BAND in the same Bash call and reference them only as `"$var"`, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline):
-     ```bash
-     b="$(git rev-parse --abbrev-ref HEAD)"
-     ref="$(git config --get "branch.$b.merge")"
-     [ "$ref" = "refs/heads/$b" ] || { printf 'blocker: upstream does not match the working branch' >&2; exit 1; }
-     git push
-     ```
-     Step 1 confirmed `head` is not `base`, so with the upstream at `refs/heads/<head>` neither the push nor the retry below can target trunk.
-     - on success: continue with that remote.
-     - on **non-fast-forward** failure: retry once with a refspec-scoped force-with-lease against the tracked upstream ref. Read remote and upstream ref via git plumbing (string-splitting on `/` is unsafe — branch names like `feature/foo` and rare remote names with `/` make any single-slash split incorrect), captured OUT-OF-BAND in the same Bash call:
-       ```bash
-       b="$(git rev-parse --abbrev-ref HEAD)"
-       rem="$(git config --get "branch.$b.remote")"
-       ref="$(git config --get "branch.$b.merge")"
-       ub="${ref#refs/heads/}"
-       git push --force-with-lease "$rem" "HEAD:$ub"
-       ```
-       The explicit `"HEAD:$ub"` refspec targets the actual tracked branch — not the same-named branch on the remote, which may differ when the local branch tracks a renamed upstream (`push.default=upstream` or explicit branch mapping). Force-with-lease without a value uses the remote-tracking ref as expected, so it succeeds only when the remote tip matches what the local clone last fetched, which covers intentional history rewrites (rebase, amend) without overwriting concurrent pushes.
-       - on FWL success: continue.
-       - on FWL failure: exit 1 with blocker. Remote has commits the local clone has not seen.
-     - on **auth / read-only / protected branch / hook-policy** failure: record warning and continue. `gh pr create` may route to a fork or alternate remote. Treat as auth/read-only/protected/hook-policy when stderr contains any of: `Permission denied`, `remote: Permission`, `protected branch`, `403`, `401`, `[remote rejected]`, `remote rejected`, `pre-receive hook`, `update hook`, `push declined`. Treat as non-fast-forward only when stderr contains `non-fast-forward` OR `(fetch first)`. Bare `rejected` is not a non-fast-forward marker on its own (`[remote rejected]` is server-side and is not resolved by force-with-lease).
-   - else (no upstream, no `push_remote`): when `git config --get remote.origin.url` succeeds, run `b="$(git rev-parse --abbrev-ref HEAD)"; git push -u origin "HEAD:$b"` so the first push sets the branch's own upstream. The branch is derived OUT-OF-BAND as HEAD (confirmed `== head` in step 1), so no branch bytes are pasted into command text. On failure, record a warning and continue to step 7.
-     - when `git config --get remote.origin.url` fails (no `origin` remote): defer to `gh pr create` in step 7. It prompts for push target and can fork the base repo.
-7. Run `gh pr create --base <allowlist-validated-base> ...`, where `<allowlist-validated-base>` is the `base` value that passed the input gate, with title, summary, validation notes, version/release notes, and unresolved issues. Do not pass `--head` — `--head` makes `gh` skip its push/fork fallback, which defeats step 6's fork-based and unpushed-branch handling. `gh pr create` uses the current branch as head by default; confirm step 1 already verified current branch matches the intended `head`.
+5. Capture local HEAD SHA: `git rev-parse HEAD`. Step 6 pushes this commit and reports it on its `commit:` line, since nothing between steps 5 and 6 commits.
+6. Place the working branch on its remote in ONE Bash call to the push-branch script, where `<allowlist-validated-head>`, `<allowlist-validated-base>` and `<allowlist-validated-remote>` are the `head`, `base` and `push_remote` values that passed the input gate. Pass `--remote` only when `push_remote` is provided:
+   ```bash
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject warn --no-upstream origin
+   ```
+   Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline).
+   - exit 1: blocked. The script's `blocker:` line on stderr is the reason.
+   - exit 0 with a `warning:` line: record it as a warning and continue to step 7. `gh pr create` may route to a fork or alternate remote, or prompt for a push target when no `origin` remote exists.
+   - exit 0 without a `warning:` line: the branch is on its remote; continue to step 7.
+7. Run `gh pr create --base <allowlist-validated-base> ...`, where `<allowlist-validated-base>` is the `base` value that passed the input gate, with title, summary, validation notes, version/release notes, and unresolved issues. Do not pass `--head` — `--head` makes `gh` skip its push/fork fallback, which defeats step 6's fork-based and unpushed-branch handling. `gh pr create` uses the current branch as head by default; the step 6 script already confirmed the current branch matches the intended `head`.
 8. **Final Bash tool call.** Verify PR head SHA matches local HEAD using allowed command patterns. Take the PR number from the trailing `/pull/<n>` segment of the step 7 URL and validate it against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before the Bash call; on failure, exit 1 with `blocker: PR number contains characters outside the safe allowlist`. Then run ONE Bash call, where `<allowlist-validated-pr-number>` is that validated PR number. HEAD is the step 5 SHA re-derived, since steps 6 and 7 never commit:
 
    ```bash
