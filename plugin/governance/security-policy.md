@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines prompt injection resistance, destructive fix confirmation gates, and injection-suspect classification for the hivemind plugin. All agents and skills that consume external content must follow this policy.
+Defines prompt injection resistance, shell identifier discipline, destructive fix confirmation gates, and injection-suspect classification for the hivemind plugin. All agents and skills that consume external content must follow this policy.
 
 ## External Content Boundary
 
@@ -51,6 +51,22 @@ The three boundaries this discipline governs:
 1. **overlord / navigator → engine.** `record-state-result.sh` takes a `run_id` (SAFE_ID_RE-validated, `.`/`..` rejected), DERIVES the ledger from the git checkout root, coherence-checks `ledger.run.id == run_id`, and DERIVES the workflow definition from the ledger's own `run.workflow` against the script's self-located packaged `workflows/` dir. No caller path is accepted. (Fixed: dissolves the forged-ledger-path arbitrary-overwrite P0 and the forged-definition transition-gate + plan-write-auth-bypass P0.)
 2. **init → packaged definition.** `init-run-ledger.sh` validates the supplied workflow id against its self-located packaged definition (exists + `.version` + `.start`) BEFORE creating the run dir, failing early on mismatch.
 3. **hostile `--dangerously-skip-permissions` child → coordinator.** The coordinator's read of untrusted cross-worktree child-ledger content is under this discipline via `brood-status-project.sh`: manifest-path identifier input, GROUND-TRUTH path derivation (the per-strain ledger anchor is the REAL worktree from `git worktree list --porcelain` selected by EXACT-MATCH of the manifest `worktree_path` against git's trusted reported path set — the manifest `worktree_path` is the lookup SELECTOR only, never a path anchor and never traversed; manifest `branch` is display/context only, and the PR probe keys on the git-reported LIVE branch), confinement chain `CHECKOUT_ROOT ⊇ git-worktree ⊇ ledger` via `_shared/containment.sh`, two-scalar bounded jq projection (run.status enum + state.current charset/length ≤64), MISSING/MALFORMED tokens, informational-only (never overrides observable status). The `CHECKOUT_ROOT` is now per-coordinator `git rev-parse --show-toplevel` (the CURRENT checkout the dashboard runs in), not a forced main-checkout resolution — the same anchor `spawn-brood.sh` writes against. The guarantee rests on the DISCIPLINE above, which holds for ANY `CHECKOUT_ROOT`, so it applies at EVERY hatchery level: the main coordinator's ceiling is unchanged because it still runs from the main checkout (untouchable by a child), and a child-hatchery applies the SAME discipline one level down. Nested-brood visibility is the recursive application of this same boundary — no boundary is widened (spawn-brood already supports recursive spawn; the nested read path is only visible at each hatchery level). The leaf symlink-swap micro-TOCTOU between the `[ -L ]` re-check and the `cat` is an ACCEPTED BOUNDED RESIDUAL — NOT structurally closed by per-brood namespacing (which isolates broods from each other, not the hatchery from its children, since the hatchery reads child ledgers by design): it is bounded by a post-read containment re-assert, never-echo-raw projection, and the informational-only contract (ADR-0021; ADR-0019 amendment).
+
+## Shell Identifier Discipline
+
+This rule covers every Bash command an agent or skill authors. A git or GitHub identifier (a branch, base, remote, upstream ref, commit SHA, or PR reference) never enters model-authored Bash source as an unvalidated literal.
+
+Double-quoting is not a shell-safety encoding. Bash expands `$(...)`, backticks, and `${...}` from literal bytes in command source even inside double quotes, and `git check-ref-format` accepts names that carry them. Bash does not re-evaluate those from a variable's contents.
+
+Capture out-of-band whenever a command can produce the identifier inside the same Bash call: command substitution into a shell variable, referenced only as `"$var"`. Any identifier that must enter command text as a literal, whether supplied by the caller or read from an earlier call's output, first passes the identifier gate in the agent's OWN reasoning BEFORE that Bash call, and a value that fails stops the procedure with a blocker that does not echo the value.
+
+Identifier gate: a branch, base, or remote name matches `^[A-Za-z0-9._/-]+$`, is non-empty, does not start with `-`, and contains no `..`; a PR reference is a PR number matching `^[0-9]+$` or a PR URL matching `^https://[A-Za-z0-9._/-]+$`. A commit SHA matches `^[0-9a-f]{40}$` or `^[0-9a-f]{64}$`.
+
+Each Bash call is a fresh shell: a captured value is used inside the call that captured it, and a later call re-derives it rather than pasting it. A check made in one Bash call does not carry into the next, so a push runs in the same call, or the same committed script, as every check on the ref it writes. A value that names what an earlier call wrote, such as the commit the push-branch script reports on its `commit:` line, is the exception: a later call that verifies that write compares against the reported value, passed as a literal through the identifier gate, and never re-derives it, because re-deriving resolves a name that can move after the write.
+
+Consumers: `hivemind:push-branch`, `hivemind:open-plan-pr`, `hivemind:create-working-branch`, `hivemind:github-reviewer` for its `pr`, `working_branch` and `base` inputs and its push (its other lifecycle calls are tracked in https://github.com/brenpike/hivemind/issues/416). `hivemind:spawn-brood` and `hivemind:brood-status` apply the same gate to `branch` and `base` per Brood Spawn Bypass-Mode Mitigation control 3 above.
+
+This rule defends against untrusted identifier text only. Repo hooks, local refs, git config, and the operator are trusted, so a change they make between a check and a write is outside this rule and is recorded as a residual, as in the push-branch script's NOT CHECKED header, not defended against.
 
 ## Destructive Fix Confirmation Gate
 
