@@ -82,7 +82,7 @@ describe('overlord Engine section', () => {
     const ruleSentences = [
       'The harness may cut the end of the result in the completion notice.',
       '`needs_user` and `resume_args` come before `message`, so act on them from the notice.',
-      '`message` puts the questions and the decisions first, so a cut loses only the end of the report.',
+      '`message` puts the questions and the decisions first, so on a finished run a cut lands in the report; a long pause message can still be cut inside its questions.',
       'When `message` is cut, show it as the notice holds it and say in one line that the full output is in the file the notice names.',
       'Never read that file.',
     ];

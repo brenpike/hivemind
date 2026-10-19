@@ -45,9 +45,10 @@
  *   overlord could not get by misquoting the reply. Resume-state tampering
  *   is by design, not a defect (ADR-0036 decision 13).
  *   Every message puts what the user must see first. A pause message is the
- *   questions only. A complete message lists the decided-for-you block, then
- *   any open-questions block, then the report last, because the harness cuts
- *   a long completion notice at its end (ADR-0036 decision 15, result.js).
+ *   questions, with any decided-for-you block. A complete message lists the
+ *   decided-for-you block, then any open-questions block, then the report
+ *   last, because the harness cuts a long completion notice at its end
+ *   (ADR-0036 decision 15, result.js).
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open

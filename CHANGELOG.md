@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- A workflow run's result now lists `message` last, after `needs_user`, `outcome`, `resume_args` and `decisions`, and `message` now puts what the user must see first: the pause questions, or the decided-for-you list and any open questions before the report. A completion notice the harness cuts at its end therefore loses the tail of the report before it loses them. The overlord acts on `needs_user` and `resume_args` from the notice and, when `message` is cut, shows it as the notice holds it and points the user to the full output file, which it never reads. ADR-0036 decision 11 now lists the approval prompts this slice actually asks in manual mode, and decision 15 records the cut-notice rule. Found by the live smoke test of 6.0.0. Refs #409.
+- A workflow run's result now lists `message` last, after `needs_user`, `outcome`, `resume_args` and `decisions`, and `message` now puts what the user must see first: the pause questions, or the decided-for-you list and any open questions before the report. On a finished run, a completion notice the harness cuts at its end therefore loses the tail of the report before it loses them; a long pause message can still be cut inside its questions. The overlord acts on `needs_user` and `resume_args` from the notice and, when `message` is cut, shows it as the notice holds it and points the user to the full output file, which it never reads. ADR-0036 decision 11 now lists the approval prompts this slice actually asks in manual mode, and decision 15 records the cut-notice rule. Found by the live smoke test of 6.0.0. Refs #409.
 
 ## [6.0.0] - 2026-10-18
 
