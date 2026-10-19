@@ -326,7 +326,8 @@ run_suites() {
 #   plugin/skills/push-branch/**, plugin/skills/_shared/allowlist.sh
 #                                      -> test_push_branch (allowlist.sh ALSO -> test_shared_libs)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
-#   plugin/workflow-src/**, plugin/workflows/*.js, plugin/agents/overlord.md,
+#   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json, plugin/agents/overlord.md,
+#     plugin/skills/route-workflow/SKILL.md,
 #     plugin/references/decision-autonomy-table.json, plugin/references/decision-brief-schema.json,
 #     tests/workflow-scripts/**
 #                                      -> test_workflow_scripts (build drift check + node tests)
@@ -540,13 +541,17 @@ map_path() {
 
   # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
   # build, the two data files the build copies in, the overlord agent whose launch contract the node
-  # tests pin, and the node tests themselves. Every one of these except tests/workflow-scripts/* is
+  # tests pin, the route-workflow skill and the plugin/workflows/*.json definitions whose catalog
+  # parity route-catalog.test.mjs pins (the *.json path ALSO keeps its validate_workflows suites by
+  # union), and the node tests themselves. Every one of these except tests/workflow-scripts/* is
   # ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check
   # NEVER RUNS node, so without this rule a source edit that leaves the generated script stale, or a
   # data/agent edit that breaks a node test, would only be caught on push-to-main.
   # (tools/test_workflow_scripts.sh and tools/build_workflows.mjs are covered by the tools/** leg.)
   if [[ "$p" == plugin/workflow-src/* \
      || "$p" == plugin/workflows/*.js \
+     || "$p" == plugin/workflows/*.json \
+     || "$p" == plugin/skills/route-workflow/SKILL.md \
      || "$p" == plugin/references/decision-autonomy-table.json \
      || "$p" == plugin/references/decision-brief-schema.json \
      || "$p" == plugin/agents/overlord.md \
@@ -1221,14 +1226,17 @@ self_test() {
 
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
-  #    the generated-script, data-file or overlord selector were dropped. Probe each directly so
+  #    the generated-script, data-file, overlord, route-workflow skill or workflow-definition
+  #    selector were dropped. Probe each directly so
   #    removing any one selector FAILS here.
   local workflow_input
   for workflow_input in \
     "plugin/references/decision-autonomy-table.json" \
     "plugin/references/decision-brief-schema.json" \
     "plugin/workflows/analysis-only.js" \
-    "plugin/agents/overlord.md"; do
+    "plugin/agents/overlord.md" \
+    "plugin/skills/route-workflow/SKILL.md" \
+    "plugin/workflows/analysis-only.json"; do
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
     map_path "$workflow_input" >/dev/null
     hit=0

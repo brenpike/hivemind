@@ -4,7 +4,7 @@ Read this file to understand the declarative workflow substrate: how workflow de
 
 ## What a workflow definition is
 
-A workflow definition is a declarative JSON file under `plugin/workflows/<id>.json` enumerating one workflow's legal states and named transitions. It is read-only at runtime and parsed by `jq`. It does not execute anything by itself — the overlord reads the selected definition and executes the current state using normal Hivemind delegation rules.
+A workflow definition is a declarative JSON file under `plugin/workflows/<id>.json` enumerating one workflow's legal states and named transitions. It is read-only at runtime and parsed by `jq`. It does not execute anything by itself — the engine skills (`hivemind:init-run-ledger`, `hivemind:record-state-result`) read the selected definition and print the current state's definition, which the overlord executes using normal Hivemind delegation rules.
 
 Workflow definitions are JSON (not YAML) because the deterministic engine reads and writes them with `jq`, the required runtime dependency (ADR-0017). `description` fields replace inline comments. All inter-agent and human-read contracts — router I/O, skill I/O, the cerebrate plan block, injected child-task metadata, delegation payloads — stay YAML for readability. No file is read by both `jq` and "only a human."
 

@@ -142,6 +142,19 @@
 #                           retry pinned to the SAME suggested_run_id re-claims the dir and writes a
 #                           valid ledger (run.id round-trips). Proves the orphaned-reservation P1 fix:
 #                           a transient failure does not permanently brick a stable (brood) run_id.
+#   UU. init-derives-version-and-start -> init inputs that OMIT workflow_version and start_state
+#                           succeed: the ledger carries the def's version and start, and stdout
+#                           adds `current_state: plan` and a `state_definition:` line whose JSON
+#                           equals the def's .states.plan.
+#   VV. init-start-mismatch-blocks-with-derived-version -> version omitted, a legacy start_state
+#                           that does not match the def's .start is supplied: blocker naming the
+#                           start mismatch, no run dir.
+#   WW. init-undeclared-start-state-blocks -> a def whose .start names no declared state: blocker
+#                           before any mkdir, no run dir.
+#   XX. record-prints-state-definition -> record stdout adds a `state_definition:` line equal to
+#                           the def's .states[next_state], for a non-terminal and a terminal target.
+#   YY. record-undeclared-target-unchanged -> a transition whose target the def does not declare:
+#                           blocker before mktemp, ledger byte-unchanged, no temp file.
 #
 # Prints PASS/FAIL per assertion. Exits non-zero if ANY assertion FAILs.
 #
@@ -3091,6 +3104,213 @@ assert_init_plan_steps_bad_depends_on_rejected() {
     fi
 }
 
+# new_fakeplugin_with_def <name> <jq-filter> -> prints the path to a COPY of $FAKEPLUGIN whose
+# workflows/engine-fixture.json is the fixture def rewritten by <jq-filter>. The copied engines
+# self-locate this copy (cp -r keeps real files, never symlinks), so a case can drive a def
+# shape the shared fixture does not carry without touching $FAKEPLUGIN.
+new_fakeplugin_with_def() {
+    local root="$WORKDIR/$1" filter="$2"
+    cp -r "$FAKEPLUGIN" "$root"
+    jq "$filter" "$WORKFLOW_DEF" > "$root/workflows/engine-fixture.json"
+    printf '%s' "$root"
+}
+
+# run_dir_count <gitroot> -> prints how many run dirs exist under <gitroot>/.hivemind/runs.
+run_dir_count() {
+    local runs="$1/.hivemind/runs"
+    if [[ -d "$runs" ]]; then
+        find "$runs" -mindepth 1 -maxdepth 1 -type d | wc -l | tr -d ' '
+    else
+        printf '0'
+    fi
+}
+
+# ── UU. init: omitted workflow_version/start_state derived; current_state + state_definition ──
+
+assert_init_derives_version_and_start() {
+    local name="UU:init-derives-version-and-start"
+    # The inputs carry NO workflow_version and NO start_state. init derives both from the
+    # self-located packaged def (version 1, start plan), writes them into the ledger, and
+    # prints current_state: plan plus a state_definition line equal to the def's .states.plan.
+    local gitroot inputs rc=0 out
+    gitroot="$(new_gitroot uu-git)"
+    inputs="$gitroot/uu-inputs.json"
+
+    jq -n \
+        --arg workflow engine-fixture \
+        --arg user_request "engine test init derives version and start" \
+        --arg normalized "engine test init derives version and start" \
+        '{workflow: $workflow, user_request: $user_request, normalized: $normalized}' \
+        > "$inputs"
+
+    out="$(cd "$gitroot" && bash "$FAKE_INIT_ENGINE" "$inputs" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        failed "$name" "init exited $rc with version/start omitted (expected 0): $out"
+        return
+    fi
+
+    local ledger version current printed_state printed_def def_matches
+    ledger="$(printf '%s\n' "$out" | sed -n 's/^ledger: //p')"
+    if [[ ! -f "$ledger" ]]; then
+        failed "$name" "init did not write a ledger at '$ledger'"
+        return
+    fi
+    version="$(jq -r '.run.workflow_version' "$ledger")"
+    current="$(jq -r '.state.current' "$ledger")"
+    printed_state="$(printf '%s\n' "$out" | sed -n 's/^current_state: //p')"
+    printed_def="$(printf '%s\n' "$out" | sed -n 's/^state_definition: //p')"
+    def_matches="$(jq -n --argjson printed "${printed_def:-null}" --slurpfile wf "$WORKFLOW_DEF" \
+        '$printed == $wf[0].states.plan' 2>/dev/null || echo false)"
+    if [[ "$version" == "1" && "$current" == "plan" && "$printed_state" == "plan" && "$def_matches" == "true" ]]; then
+        pass "$name" "derived workflow_version=1/start=plan; stdout current_state: plan and state_definition equals the def's .states.plan"
+    else
+        failed "$name" "expected version=1/current=plan/current_state=plan/def match; got version=$version current=$current current_state=$printed_state def_matches=$def_matches out=$(printf '%s' "$out" | tr '\n' '|')"
+    fi
+}
+
+# ── VV. init: supplied start_state mismatch still blocks with version derived ─
+
+assert_init_start_mismatch_blocks_with_derived_version() {
+    local name="VV:init-start-mismatch-blocks-with-derived-version"
+    # workflow_version is OMITTED (derived) but a legacy start_state that does NOT match the
+    # def's .start is supplied. The start-match blocker must still fire, before any mkdir: no run
+    # dir is left behind, and the blocker names the start mismatch (not a missing input).
+    local gitroot inputs rc=0 stderr_file
+    gitroot="$(new_gitroot vv-git)"
+    inputs="$gitroot/vv-inputs.json"
+    stderr_file="$WORKDIR/vv-stderr.txt"
+
+    jq -n \
+        --arg workflow engine-fixture \
+        --arg start_state build \
+        --arg user_request "engine test init start mismatch" \
+        --arg normalized "engine test init start mismatch" \
+        '{workflow: $workflow, start_state: $start_state, user_request: $user_request, normalized: $normalized}' \
+        > "$inputs"
+
+    ( cd "$gitroot" && bash "$FAKE_INIT_ENGINE" "$inputs" ) >/dev/null 2>"$stderr_file" || rc=$?
+
+    local dirs
+    dirs="$(run_dir_count "$gitroot")"
+    if [[ "$rc" -ne 0 && "$dirs" == "0" ]] && grep -qF "does not match start_state 'build'" "$stderr_file"; then
+        pass "$name" "mismatched start_state blocked (exit $rc) with no run dir; blocker names the start mismatch"
+    else
+        failed "$name" "expected non-zero exit + 0 run dirs + start-mismatch blocker; rc=$rc dirs=$dirs stderr=$(tr '\n' '|' < "$stderr_file")"
+    fi
+}
+
+# ── WW. init: start state missing from the definition blocks before mkdir ─────
+
+assert_init_undeclared_start_state_blocks() {
+    local name="WW:init-undeclared-start-state-blocks"
+    # A def whose .start names a state absent from .states. (a) Derived: inputs omit version and
+    # start, so init derives start=ghost. (b) Legacy: inputs supply workflow_version 1 and
+    # start_state ghost, which match the def. Either way init finds no state definition for
+    # ghost and blocks before any mkdir: no run dir, no ledger.
+    local plugin_root engine gitroot inputs rc_derived=0 rc_legacy=0
+    plugin_root="$(new_fakeplugin_with_def ww-plugin '.start = "ghost"')"
+    engine="$plugin_root/skills/init-run-ledger/scripts/init-run-ledger.sh"
+    gitroot="$(new_gitroot ww-git)"
+    inputs="$gitroot/ww-inputs.json"
+
+    jq -n \
+        --arg workflow engine-fixture \
+        --arg user_request "engine test init undeclared start state" \
+        --arg normalized "engine test init undeclared start state" \
+        '{workflow: $workflow, user_request: $user_request, normalized: $normalized}' \
+        > "$inputs"
+    ( cd "$gitroot" && bash "$engine" "$inputs" ) >/dev/null 2>&1 || rc_derived=$?
+
+    jq -n \
+        --arg workflow engine-fixture \
+        --argjson workflow_version 1 \
+        --arg start_state ghost \
+        --arg user_request "engine test init undeclared start state" \
+        --arg normalized "engine test init undeclared start state" \
+        '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized}' \
+        > "$inputs"
+    ( cd "$gitroot" && bash "$engine" "$inputs" ) >/dev/null 2>&1 || rc_legacy=$?
+
+    local dirs
+    dirs="$(run_dir_count "$gitroot")"
+    if [[ "$rc_derived" -ne 0 && "$rc_legacy" -ne 0 && "$dirs" == "0" ]]; then
+        pass "$name" "undeclared start state blocked when derived (exit $rc_derived) and when supplied (exit $rc_legacy); no run dir created"
+    else
+        failed "$name" "expected non-zero exits + 0 run dirs; rc_derived=$rc_derived rc_legacy=$rc_legacy dirs=$dirs"
+    fi
+}
+
+# ── XX. record: stdout state_definition equals the def's .states[next_state] ──
+
+assert_record_prints_state_definition() {
+    local name="XX:record-prints-state-definition"
+    # (a) plan --ready--> build (non-terminal): state_definition equals .states.build.
+    # (b) build --done--> complete (terminal): state_definition equals {"type":"terminal"}.
+    # Every pre-existing stdout line keeps its value: current_state still names next_state.
+    local gitroot run_id inputs rc=0 out printed_def def_matches printed_state
+    gitroot="$(new_gitroot xx-git)"
+    run_id="engine-case-xx"
+    stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN" >/dev/null
+    inputs="$gitroot/xx-inputs.json"
+
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test state_definition non-terminal" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+    out="$(cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" 2>&1)" || rc=$?
+    printed_state="$(printf '%s\n' "$out" | sed -n 's/^current_state: //p')"
+    printed_def="$(printf '%s\n' "$out" | sed -n 's/^state_definition: //p')"
+    def_matches="$(jq -n --argjson printed "${printed_def:-null}" --slurpfile wf "$WORKFLOW_DEF" \
+        '$printed == $wf[0].states.build' 2>/dev/null || echo false)"
+    if [[ "$rc" -ne 0 || "$printed_state" != "build" || "$def_matches" != "true" ]]; then
+        failed "$name" "(a) expected exit 0, current_state: build and state_definition equal to .states.build; rc=$rc current_state=$printed_state def_matches=$def_matches out=$(printf '%s' "$out" | tr '\n' '|')"
+        return
+    fi
+
+    rc=0
+    jq -n --arg run_id "$run_id" --arg state build --arg result done \
+        --arg summary "engine test state_definition terminal" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+    out="$(cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" 2>&1)" || rc=$?
+    printed_state="$(printf '%s\n' "$out" | sed -n 's/^current_state: //p')"
+    printed_def="$(printf '%s\n' "$out" | sed -n 's/^state_definition: //p')"
+    if [[ "$rc" -eq 0 && "$printed_state" == "complete" && "$printed_def" == '{"type":"terminal"}' ]]; then
+        pass "$name" "state_definition printed for non-terminal (.states.build) and terminal ({\"type\":\"terminal\"}) targets"
+    else
+        failed "$name" "(b) expected exit 0, current_state: complete, state_definition: {\"type\":\"terminal\"}; rc=$rc current_state=$printed_state state_definition=$printed_def"
+    fi
+}
+
+# ── YY. record: undeclared transition target blocks, ledger byte-unchanged ────
+
+assert_record_undeclared_target_unchanged() {
+    local name="YY:record-undeclared-target-unchanged"
+    # A def whose plan state has a transition to a state absent from .states. Recording that
+    # result must block before mktemp: non-zero exit, ledger byte-unchanged, no temp file left.
+    local plugin_root engine gitroot run_id ledger inputs before after rc=0
+    plugin_root="$(new_fakeplugin_with_def yy-plugin '.states.plan.transitions.vanish = "ghost"')"
+    engine="$plugin_root/skills/record-state-result/scripts/record-state-result.sh"
+    gitroot="$(new_gitroot yy-git)"
+    run_id="engine-case-yy"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/yy-inputs.json"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+
+    jq -n --arg run_id "$run_id" --arg state plan --arg result vanish \
+        --arg summary "engine test undeclared transition target" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+
+    ( cd "$gitroot" && bash "$engine" "$inputs" ) >/dev/null 2>&1 || rc=$?
+
+    after="$(sha256sum "$ledger" | awk '{print $1}')"
+    local temps
+    temps="$(find "$(dirname "$ledger")" -name '.state.json.*' | wc -l | tr -d ' ')"
+    if [[ "$rc" -ne 0 && "$before" == "$after" && "$temps" == "0" ]]; then
+        pass "$name" "undeclared target rejected (exit $rc); ledger byte-unchanged, no temp file"
+    else
+        failed "$name" "expected non-zero exit + unchanged ledger + no temp; rc=$rc changed=$([[ "$before" != "$after" ]] && echo yes || echo no) temps=$temps"
+    fi
+}
+
 # ── Drive all assertions ────────────────────────────────────────────────────
 
 echo '=== Engine behavior tests: derive-only engines against tests/engine/ fixtures (dual-root) ==='
@@ -3150,6 +3370,11 @@ assert_record_plan_steps_bad_id_rejected
 assert_record_plan_steps_bad_depends_on_rejected
 assert_init_plan_steps_bad_id_rejected
 assert_init_plan_steps_bad_depends_on_rejected
+assert_init_derives_version_and_start
+assert_init_start_mismatch_blocks_with_derived_version
+assert_init_undeclared_start_state_blocks
+assert_record_prints_state_definition
+assert_record_undeclared_target_unchanged
 
 echo ''
 echo '=== Summary ==='

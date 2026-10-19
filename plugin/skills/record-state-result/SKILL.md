@@ -144,7 +144,8 @@ The script validates, in order, ALL before any write:
 8. `ledger.state.current == state`.
 9. `state` exists in `definition.states` (state-existence — a renamed/removed state never
    guesses; this is NOT version-skew).
-10. `result` is a key under `states.<state>.transitions`; resolves `next_state`.
+10. `result` is a key under `states.<state>.transitions`; resolves `next_state`, which must be
+   declared in `definition.states`.
 11. PLAN-WRITE AUTHORIZATION — if `plan_steps` or `plan_path` was supplied (present and
    non-null), the recording state MUST be a cerebrate planning state
    (`states.<state>.agent == "hivemind:cerebrate"`, i.e. `plan` / `review_remediation_plan` /
@@ -219,8 +220,11 @@ validation failure the on-disk ledger is byte-unchanged.
    result: <result>
    current_state: <next_state>
    ledger: <path>
+   state_definition: <compact JSON of next_state from the packaged definition>
    ```
-   the caller advances ONLY to `current_state`. Exit 1: the script printed
+   the caller advances ONLY to `current_state` and executes it as `state_definition` defines
+   it, with no read of the workflow definition file. A `next_state` the definition does not
+   declare is a blocker raised before any write. Exit 1: the script printed
    `blocker: <reason>` on stderr and the ledger is byte-unchanged — surface it and stop.
 
 ## Pointers
@@ -241,7 +245,8 @@ as a workflow state or as one step inside a longer procedure:
   action is the Bash script call (step 3), which performs every atomic ledger write.
 - The procedure ends at the step 3 Bash script call, which hands the routing data back
   to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = caller advances to `current_state`; routing data is on stdout.
+- Exit 0 = caller advances to `current_state`, which the `state_definition` line defines;
+  routing data is on stdout.
   Exit 1 = blocked; the reason is on stderr and the ledger is unchanged.
 
 ## Do Not
