@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.0.1] - 2026-10-19
+
+### Fixed
+
+- When the harness cuts a workflow run's completion notice, the overlord now reads the run's output file with the Read tool, never Bash, and shows the full message, so the report, the decided-for-you list and pause briefs are no longer lost. ADR-0036 decision 11 now lists the approval prompts this slice actually asks in manual mode, and decision 15 records the cut-notice rule. Found by the live smoke test of 6.0.0. Refs #409.
+
 ## [6.0.0] - 2026-10-18
 
 ### Added
