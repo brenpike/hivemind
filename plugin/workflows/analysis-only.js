@@ -795,11 +795,17 @@ function isRecommendationAnOption(brief) {
  *     taken  array of {brief} for decisions decide() took. May be empty.
  *   renderDecisions(taken)
  *     taken  as above.
+ *   renderQuestionsCompact(asks, taken)
+ *     asks, taken  as for renderQuestions.
+ *   renderDecisionsCompact(taken)
+ *     taken  as above.
  *   askReasonLine(reason)
  *     reason an ask reason from decisionReasons(), other than 'auto'.
- *   renderOpenQuestions(open)
- *     open   non-empty array of {brief} for questions still unanswered when
- *            the run stops asking. Entries of asks fit.
+ *   renderOpenQuestions(open, stopReason)
+ *     open        non-empty array of {brief} for questions still unanswered
+ *                 when the run stops asking. Entries of asks fit.
+ *     stopReason  why the run stopped asking: 'pause_limit' (the default) or
+ *                 'reply_size'.
  *
  * Outputs
  *   renderQuestions  one message. Each ask becomes a question labelled Q1..Qn
@@ -814,10 +820,20 @@ function isRecommendationAnOption(brief) {
  *     the user to reply in their own words.
  *   renderDecisions  the "Decided for you" block, labelled D1..Dn by
  *     position, or the empty string when taken is empty.
+ *   renderQuestionsCompact  the shorter form of renderQuestions, with the
+ *     same intro line, Q1..Qn labels and last line. Each question shows only
+ *     its problem and the recommendation with its why. Taken decisions
+ *     follow as renderDecisionsCompact, with the same line saying the user
+ *     can change them in the same reply.
+ *   renderDecisionsCompact  the "Decided for you" block with one line per
+ *     decision, labelled D1..Dn by position: problem, chosen option id and
+ *     why, without the option summary. The empty string when taken is empty.
  *   askReasonLine    one plain sentence for the reason.
- *   renderOpenQuestions  one block: a line saying the run stopped asking
- *     after pauseLimit() rounds, then one line per question labelled Q1..Qn
- *     by position, with its problem and the option the report assumes, or a
+ *   renderOpenQuestions  one block: a line saying why the run stopped
+ *     asking, either after pauseLimit() rounds ('pause_limit') or because
+ *     the replies so far are too long to carry into another round
+ *     ('reply_size'), then one line per question labelled Q1..Qn by
+ *     position, with its problem and the option the report assumes, or a
  *     line saying there is no recommendation.
  *
  * Invariants
@@ -827,9 +843,11 @@ function isRecommendationAnOption(brief) {
  *   malformed brief still renders.
  *   No em dash and no markdown tables. An em dash inside a brief field is
  *   replaced by a comma. verbatim is shown exactly as given.
- *   Invalid arguments and unknown reasons throw.
- *   renderOpenQuestions calls pauseLimit() from result.js, so it runs only
- *   where result.js is loaded too, as in every built script.
+ *   Invalid arguments, unknown reasons and unknown stop reasons throw.
+ *   renderOpenQuestions with 'pause_limit' calls pauseLimit() from
+ *   result.js, so it runs only where result.js is loaded too, as in every
+ *   built script.
+ *   No size budget lives here: the caller picks the full or compact form.
  *
  * Why
  *   The user answers from this text alone, so every question carries what
@@ -865,6 +883,34 @@ function renderDecisions(taken) {
   return lines.join('\n');
 }
 
+function renderQuestionsCompact(asks, taken) {
+  if (!Array.isArray(asks) || asks.length === 0) {
+    throw new Error('renderQuestionsCompact: asks must be a non-empty array');
+  }
+  if (!Array.isArray(taken)) {
+    throw new Error('renderQuestionsCompact: taken must be an array');
+  }
+  const blocks = [renderIntroLine(asks.length)];
+  asks.forEach((entry, index) => blocks.push(renderCompactQuestion(entry, index)));
+  if (taken.length > 0) {
+    blocks.push(renderDecisionsCompact(taken) + '\nYou can change any of these in the same reply.');
+  }
+  blocks.push('Reply in your own words. You can point at a question by its label, like Q1.');
+  return blocks.join('\n\n');
+}
+
+function renderDecisionsCompact(taken) {
+  if (!Array.isArray(taken)) {
+    throw new Error('renderDecisionsCompact: taken must be an array');
+  }
+  if (taken.length === 0) {
+    return '';
+  }
+  const lines = ['Decided for you:'];
+  taken.forEach((entry, index) => lines.push(renderCompactDecision(entry, index)));
+  return lines.join('\n');
+}
+
 function askReasonLine(reason) {
   switch (reason) {
     case 'hard_stop':
@@ -892,13 +938,24 @@ function askReasonLine(reason) {
   }
 }
 
-function renderOpenQuestions(open) {
+function renderOpenQuestions(open, stopReason = 'pause_limit') {
   if (!Array.isArray(open) || open.length === 0) {
     throw new Error('renderOpenQuestions: open must be a non-empty array');
   }
-  const lines = ['I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:'];
+  const lines = [renderStopIntro(stopReason)];
   open.forEach((entry, index) => lines.push(renderOpenQuestion(entry, index)));
   return lines.join('\n');
+}
+
+function renderStopIntro(stopReason) {
+  switch (stopReason) {
+    case 'pause_limit':
+      return 'I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:';
+    case 'reply_size':
+      return 'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
+    default:
+      throw new Error('renderOpenQuestions: no intro for stop reason ' + JSON.stringify(stopReason));
+  }
 }
 
 function renderIntroLine(count) {
@@ -918,6 +975,14 @@ function renderQuestion(entry, index) {
   lines.push(...renderAssumptions(readField(brief, 'assumptions')));
   lines.push(...renderVerbatim(readField(brief, 'verbatim')));
   return lines.join('\n');
+}
+
+function renderCompactQuestion(entry, index) {
+  const brief = readField(entry, 'brief');
+  return [
+    'Q' + (index + 1) + '. ' + renderText(readField(brief, 'problem')),
+    renderRecommendation(readField(brief, 'recommendation'))
+  ].join('\n');
 }
 
 function renderSeriousness(criticality) {
@@ -1011,6 +1076,13 @@ function renderTakenDecision(entry, index) {
   ].join('\n');
 }
 
+function renderCompactDecision(entry, index) {
+  const brief = readField(entry, 'brief');
+  const recommendation = readField(brief, 'recommendation');
+  return '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
+    + renderText(readField(recommendation, 'option_id')) + '. Why: ' + renderText(readField(recommendation, 'why'));
+}
+
 function findOptionById(options, optionId) {
   if (!Array.isArray(options)) {
     return undefined;
@@ -1050,36 +1122,68 @@ function renderYesNo(value) {
  * result.js: the value a workflow run returns, and the pause contract.
  *
  * Inputs
- *   pauseForUser({message, resumeArgs, decisions})
- *     message     non-empty string. The text the user reads.
+ *   pauseForUser({resumeArgs, blocks})
  *     resumeArgs  plain JSON object. The args to relaunch with, before the
- *                 reply is added. It has no replyField() key.
- *     decisions   array. The decisions the run took so far, in order.
- *   finish({outcome, message, decisions})
+ *                 reply is added. It has no replyField() key and
+ *                 canCarry(resumeArgs) is true.
+ *     blocks      the text the user reads, as below.
+ *   finish({outcome, blocks})
  *     outcome     'complete' or 'blocked'.
- *     message     non-empty string. The run's final text for the user.
- *     decisions   array, as above.
+ *     blocks      the run's final text for the user, as below.
+ *   blocks        non-empty array of {text, compact, shorten}, highest
+ *                 priority first. text is a non-empty string. compact is
+ *                 optional: a non-empty, shorter form of text. shorten is
+ *                 optional and only ever true: text may be cut at its tail.
+ *                 Only the last block may have shorten.
  *   canPause(pausesSoFar)
  *     pausesSoFar non-negative integer. How many times this run has paused.
+ *   canCarry(resumeArgs)
+ *     resumeArgs  plain JSON object.
+ *   noticeLength(value)
+ *     value       any JSON value.
  *
  * Outputs
- *   pauseForUser  {needs_user: true, resume_args, decisions, message}
- *   finish        {needs_user: false, outcome, decisions, message}
+ *   pauseForUser  {needs_user: true, resume_args, message}
+ *   finish        {needs_user: false, outcome, message}
+ *   message       the blocks fitted to the completion notice, see Size.
  *   resultFields  every top-level field name a result can carry.
  *   replyField    the args key a resumed run reads the reply from: 'reply'.
  *   pauseLimit    the most times one run may pause: 3.
  *   canPause      true when pausesSoFar is below pauseLimit().
+ *   noticeBudget  the most notice chars a whole result may take.
+ *   noticeLength  the chars value takes in the completion notice.
+ *   canCarry      true when a pause result with resumeArgs and an empty
+ *                 message takes at most half of noticeBudget().
  *
  * Contract the overlord relays
  *   Only the harness completion notice carries the result. A model's own
  *   summary of the run never counts.
  *   needs_user true: show message to the user as is. Then relaunch the same
- *   run with args set to resume_args plus reply set to the user's reply word
- *   for word. That is the only resume rule: nothing else in args is read as
- *   a reply. Never answer for the user.
+ *   run with args built in this order: the launch args, then the keys of
+ *   resume_args over them, then reply set to the user's reply word for word.
+ *   That is the only resume rule: nothing else in args is read as a reply.
+ *   Never answer for the user.
  *   needs_user false: show message to the user as is. The run is over.
- *   decisions lists what the run decided for the user. message already
- *   states them, so the overlord shows message and does not act on decisions.
+ *
+ * Size
+ *   The harness cuts the completion notice at a fixed length of the escaped
+ *   result text. Every result pauseForUser or finish returns has a
+ *   noticeLength of at most noticeBudget(), so the notice is never cut.
+ *   The message is the first tier that fits the room the other fields leave:
+ *     T0  every block text, joined with blank lines. No marker.
+ *     T1  needs a shorten block. Earlier block texts as they are, then the
+ *         shorten block text cut at its tail, then the shortened marker.
+ *     T2  the compact marker line first, then every block other than the
+ *         shorten block in its compact form (text when it has none), then
+ *         the shorten block text cut to the room left, which may leave the
+ *         marker and the compact forms only.
+ *     T3  the T2 text without its marker, cut hard at its tail, then the
+ *         cut marker at the end.
+ *   Every marker says the text was shortened to fit the completion notice
+ *   and that the full text is in this run's per-agent results.
+ *   A cut never splits a surrogate pair.
+ *   canCarry keeps resume_args to half the budget, so a pause message always
+ *   has room for at least a marker.
  *
  * Invariants
  *   A run pauses at most pauseLimit() times. After that it finishes with
@@ -1090,24 +1194,20 @@ function renderYesNo(value) {
  *   resume_args never has a reply key, so a stale reply cannot be replayed.
  *   The overlord is a trusted relay, so a workflow trusts resume_args as its
  *   own echo and does not authenticate it. A forged resume_args gains
- *   nothing the overlord could not get by misquoting the reply.
+ *   nothing the overlord could not get by misquoting the reply
+ *   (ADR-0036 decision 13).
  *   Invalid input throws instead of returning a partial result.
- *   message is the last key and resume_args precedes it, because the harness
- *   cuts a long completion notice at its end, so a cut can only lose the tail
- *   of message. resume_args holds the request and the stored replies, so a
- *   request near the notice limit can still cut it. That is a recorded
- *   residual (ADR-0036 decision 15).
+ *   message is the last key, after needs_user and resume_args.
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
  *   returning. One fixed shape lets the overlord relay and resume any
- *   workflow the same way, and the decisions travel in the final message
- *   instead of a separate journal. The key order puts message last so a cut
- *   lands in message first.
+ *   workflow the same way. Fitting the message in the workflow keeps the
+ *   notice whole, so the overlord never needs the output file.
  */
 
 function resultFields() {
-  return ['needs_user', 'outcome', 'message', 'resume_args', 'decisions'];
+  return ['needs_user', 'outcome', 'resume_args', 'message'];
 }
 
 function replyField() {
@@ -1125,42 +1225,211 @@ function canPause(pausesSoFar) {
   return pausesSoFar < pauseLimit();
 }
 
-function pauseForUser({ message, resumeArgs, decisions }) {
-  if (typeof resumeArgs !== 'object' || resumeArgs === null || Array.isArray(resumeArgs)) {
+function noticeBudget() {
+  /*
+   * 8000: the measured cut. The harness cuts the result text of the
+   * completion notice at 8000 chars of the escaped JSON (issue 414 smoke:
+   * JSON parse of the cut notice fails at char 8000).
+   * 256: margin. The truncation suffix the harness appends was 176 to 177
+   * chars in the smoke and grows with the output file path, and the margin
+   * also covers whether the cut is at > 8000 or at >= 8000.
+   */
+  return 8000 - 256;
+}
+
+function noticeLength(value) {
+  /*
+   * The notice HTML-escapes the result text: each < becomes &lt; and each >
+   * becomes &gt;, 3 more chars each (issue 414 smoke notices). & is counted
+   * as &amp;, 4 more chars, whether or not the notice escapes it. Lengths
+   * are UTF-16 code units, as the cut counts them.
+   */
+  const jsonText = JSON.stringify(value);
+  if (typeof jsonText !== 'string') {
+    throw new Error('noticeLength: value must be JSON serializable');
+  }
+  return jsonText.length
+    + 3 * countCharacter(jsonText, '<')
+    + 3 * countCharacter(jsonText, '>')
+    + 4 * countCharacter(jsonText, '&');
+}
+
+function canCarry(resumeArgs) {
+  const emptyPause = { needs_user: true, resume_args: resumeArgs, message: '' };
+  return noticeLength(emptyPause) <= Math.floor(noticeBudget() / 2);
+}
+
+function pauseForUser({ resumeArgs, blocks }) {
+  if (!isResultRecord(resumeArgs)) {
     throw new Error('pauseForUser: resumeArgs must be a plain object');
   }
   if (Object.prototype.hasOwnProperty.call(resumeArgs, replyField())) {
     throw new Error('pauseForUser: resumeArgs must not have a ' + replyField() + ' key');
   }
-  assertMessageAndDecisions('pauseForUser', message, decisions);
-  return {
-    needs_user: true,
-    resume_args: resumeArgs,
-    decisions: decisions,
-    message: message
-  };
+  if (!canCarry(resumeArgs)) {
+    throw new Error('pauseForUser: resumeArgs is too long to carry in the completion notice');
+  }
+  assertBlocks('pauseForUser', blocks);
+  const paused = { needs_user: true, resume_args: resumeArgs, message: '' };
+  paused.message = fitMessage(blocks, roomForMessage(paused));
+  return assertWithinBudget(paused);
 }
 
-function finish({ outcome, message, decisions }) {
+function finish({ outcome, blocks }) {
   if (outcome !== 'complete' && outcome !== 'blocked') {
     throw new Error('finish: outcome must be complete or blocked, got ' + JSON.stringify(outcome));
   }
-  assertMessageAndDecisions('finish', message, decisions);
-  return {
-    needs_user: false,
-    outcome: outcome,
-    decisions: decisions,
-    message: message
-  };
+  assertBlocks('finish', blocks);
+  const finished = { needs_user: false, outcome: outcome, message: '' };
+  finished.message = fitMessage(blocks, roomForMessage(finished));
+  return assertWithinBudget(finished);
 }
 
-function assertMessageAndDecisions(caller, message, decisions) {
-  if (typeof message !== 'string' || message.trim() === '') {
-    throw new Error(caller + ': message must be a non-empty string');
+function noticeMarker(kind) {
+  const fullTextSentence = ' The full text is in this run\'s per-agent results.';
+  if (kind === 'shortened') {
+    return 'Note: the text above was shortened to fit the completion notice.' + fullTextSentence;
   }
-  if (!Array.isArray(decisions)) {
-    throw new Error(caller + ': decisions must be an array');
+  if (kind === 'compact') {
+    return 'Note: this text was shortened to fit the completion notice, so parts below are in compact form.'
+      + fullTextSentence;
   }
+  if (kind === 'cut') {
+    return 'Note: the text above was shortened by a hard cut to fit the completion notice.' + fullTextSentence;
+  }
+  throw new Error('noticeMarker: unknown kind ' + JSON.stringify(kind));
+}
+
+function fitMessage(blocks, room) {
+  const plainText = joinParagraphs(blocks.map((block) => block.text));
+  if (messageCost(plainText) <= room) {
+    return plainText;
+  }
+  const lastBlock = blocks[blocks.length - 1];
+  const leadTexts = blocks.slice(0, -1).map((block) => block.text);
+  const leadCompacts = blocks.slice(0, -1).map((block) => block.compact || block.text);
+  if (lastBlock.shorten === true) {
+    const shortened = fitTailCut(leadTexts, lastBlock.text, [noticeMarker('shortened')], room);
+    if (shortened !== null) {
+      return shortened;
+    }
+    const compacted = fitTailCut([noticeMarker('compact')].concat(leadCompacts), lastBlock.text, [], room);
+    if (compacted !== null) {
+      return compacted;
+    }
+    return fitHardCut(joinParagraphs(leadCompacts.concat([lastBlock.text])), room);
+  }
+  const compactText = joinParagraphs([noticeMarker('compact')].concat(blocks.map((block) => block.compact || block.text)));
+  if (messageCost(compactText) <= room) {
+    return compactText;
+  }
+  return fitHardCut(joinParagraphs(blocks.map((block) => block.compact || block.text)), room);
+}
+
+function fitTailCut(headParts, cutText, tailParts, room) {
+  if (messageCost(joinParagraphs(headParts.concat(tailParts))) > room) {
+    return null;
+  }
+  const cutLength = findLongestCut(cutText, room, (prefix) => joinParagraphs(headParts.concat([prefix], tailParts)));
+  return joinParagraphs(headParts.concat([cutText.slice(0, cutLength)], tailParts));
+}
+
+function fitHardCut(sourceText, room) {
+  const cutMarker = noticeMarker('cut');
+  if (messageCost(cutMarker) > room) {
+    throw new Error('fitMessage: no room for the cut marker');
+  }
+  const cutLength = findLongestCut(sourceText, room, (prefix) => joinParagraphs([prefix, cutMarker]));
+  return joinParagraphs([sourceText.slice(0, cutLength), cutMarker]);
+}
+
+function findLongestCut(cutText, room, assembleMessage) {
+  let lowLength = 0;
+  let highLength = Math.min(cutText.length, room);
+  while (lowLength < highLength) {
+    const middleLength = Math.ceil((lowLength + highLength) / 2);
+    const prefix = cutText.slice(0, keepSurrogatePair(cutText, middleLength));
+    if (messageCost(assembleMessage(prefix)) <= room) {
+      lowLength = middleLength;
+    } else {
+      highLength = middleLength - 1;
+    }
+  }
+  return keepSurrogatePair(cutText, lowLength);
+}
+
+function keepSurrogatePair(text, cutLength) {
+  if (cutLength > 0 && cutLength < text.length) {
+    const lastUnit = text.charCodeAt(cutLength - 1);
+    const nextUnit = text.charCodeAt(cutLength);
+    if (lastUnit >= 0xD800 && lastUnit <= 0xDBFF && nextUnit >= 0xDC00 && nextUnit <= 0xDFFF) {
+      return cutLength - 1;
+    }
+  }
+  return cutLength;
+}
+
+function joinParagraphs(parts) {
+  return parts.filter((part) => part !== '').join('\n\n');
+}
+
+function messageCost(text) {
+  return noticeLength(text) - noticeLength('');
+}
+
+function roomForMessage(emptyResult) {
+  return noticeBudget() - noticeLength(emptyResult);
+}
+
+function assertWithinBudget(result) {
+  if (noticeLength(result) > noticeBudget()) {
+    throw new Error('result: INVARIANT broken, the fitted result is over noticeBudget()');
+  }
+  return result;
+}
+
+function assertBlocks(caller, blocks) {
+  if (!Array.isArray(blocks) || blocks.length === 0) {
+    throw new Error(caller + ': blocks must be a non-empty array');
+  }
+  blocks.forEach((block, blockIndex) => assertBlock(caller, block, blockIndex === blocks.length - 1));
+}
+
+function assertBlock(caller, block, isLast) {
+  if (!isResultRecord(block)) {
+    throw new Error(caller + ': each block must be a plain object');
+  }
+  for (const key of Object.keys(block)) {
+    if (key !== 'text' && key !== 'compact' && key !== 'shorten') {
+      throw new Error(caller + ': block has an unknown key ' + JSON.stringify(key));
+    }
+  }
+  if (!isNonBlankText(block.text)) {
+    throw new Error(caller + ': block text must be a non-empty string');
+  }
+  if (Object.prototype.hasOwnProperty.call(block, 'compact') && !isNonBlankText(block.compact)) {
+    throw new Error(caller + ': block compact must be a non-empty string');
+  }
+  if (Object.prototype.hasOwnProperty.call(block, 'shorten')) {
+    if (block.shorten !== true) {
+      throw new Error(caller + ': block shorten must be true when present');
+    }
+    if (!isLast) {
+      throw new Error(caller + ': only the last block may have shorten');
+    }
+  }
+}
+
+function isNonBlankText(value) {
+  return typeof value === 'string' && value.trim() !== '';
+}
+
+function isResultRecord(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function countCharacter(text, character) {
+  return text.split(character).length - 1;
 }
 
 /*
@@ -1171,6 +1440,10 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *            a string: the request itself (slash-command form);
  *            an object {request, answers?, reply?};
  *            undefined.
+ *          request comes from the launch args only. A resumed run still
+ *          has it because the overlord relaunches with the launch args, then
+ *          the keys of resume_args over them, then reply (result.js
+ *          contract). Without the launch args there is no request.
  *          answers is this script's own field: it comes only from the
  *          resume_args of an earlier pause, holds the reply to round N as
  *          answers['round-N'], and is read only when it is a plain object.
@@ -1183,8 +1456,9 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
  *
  * Outputs
- *   pauseForUser(...) when a question needs the user's answer, otherwise
- *   finish(...). See result.js for both shapes.
+ *   pauseForUser({resumeArgs, blocks}) when a question needs the user's
+ *   answer, otherwise finish({outcome, blocks}). See result.js for both
+ *   shapes and for how blocks are fitted to the completion notice.
  *
  * Invariants
  *   Read-only: every planner prompt says to make no changes.
@@ -1193,13 +1467,20 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *   The analyze prompt never carries answers or the reply, so a resumed run
  *   gets the analyze result from cache. The revise-N prompt depends only on
  *   earlier results and on the reply to round N.
+ *   The revise-N prompt always shows the planner the full questions text,
+ *   even when the pause message was in compact form.
  *   A run pauses at most pauseLimit() times. After that it completes and
- *   lists the questions still open. Open questions never end it blocked:
- *   only a missing request, a null planner result or a planner outcome
- *   'blocked' does.
- *   No run record: resume_args carries the request and every reply so far,
- *   which is all a resumed run needs. It always has answers, so a relaunch
- *   with it is a resume, and never has reply or an autonomy key.
+ *   lists the questions still open, with stop reason 'pause_limit'.
+ *   A run also stops asking when the replies so far are too long to carry:
+ *   when canCarry fails for the resume_args a pause would return, it
+ *   completes instead and lists the questions still open, with stop reason
+ *   'reply_size'.
+ *   Open questions never end it blocked: only a missing request or a
+ *   planner result it cannot use does.
+ *   No run record: resume_args is {answers} alone, every reply so far. The
+ *   request is never in it, because the launch args already hold it. It
+ *   always has answers, so a relaunch with it is a resume, and never has
+ *   request, reply or an autonomy key.
  *   A reply is ignored when no pause is pending: when the run was not
  *   launched with answers, or when it finishes before it reaches a round
  *   with no stored answer.
@@ -1209,11 +1490,14 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *   or I/O to authenticate that state, and a forged answer gains nothing the
  *   overlord could not get by misquoting the reply. Resume-state tampering
  *   is by design, not a defect (ADR-0036 decision 13).
- *   Every message puts what the user must see first. A pause message is the
- *   questions, with any decided-for-you block. A complete message lists the
- *   decided-for-you block, then any open-questions block, then the report
- *   last, because the harness cuts a long completion notice at its end
- *   (ADR-0036 decision 15, result.js).
+ *   Every message is a list of blocks, highest priority first, which
+ *   result.js fits to the completion notice (ADR-0036 decision 15). A pause
+ *   message is one block: the questions with any decided-for-you block,
+ *   with renderQuestionsCompact as its compact form. A complete message is
+ *   the decided-for-you block, with renderDecisionsCompact as its compact
+ *   form, then any open-questions block, then the report last, the only
+ *   block that may be shortened. A blocked message is one block that may be
+ *   shortened.
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -1292,9 +1576,9 @@ function readPendingReply(argsObject) {
   return isPlainObject(argsObject.answers) && isNonEmptyString(reply) ? reply : undefined;
 }
 
-function buildResumeArgs(argsObject, replies) {
+function buildResumeArgs(replies) {
   const answers = Object.fromEntries(replies.map((reply, index) => [roundKey(index + 1), reply]));
-  return { request: argsObject.request, answers: answers };
+  return { answers: answers };
 }
 
 function formatDataBlock(name, text) {
@@ -1368,17 +1652,29 @@ function resolveQuestions(questions, level) {
   return { asks: asks, taken: taken };
 }
 
-function listTakenBriefs(taken) {
-  return taken.map((entry) => entry.brief);
-}
-
 function finishBlocked(message) {
-  return finish({ outcome: 'blocked', message: message, decisions: [] });
+  return finish({ outcome: 'blocked', blocks: [{ text: message, shorten: true }] });
 }
 
 function finishComplete(report, openQuestions, taken) {
-  const message = [renderDecisions(taken), openQuestions, report].filter((block) => block !== '').join('\n\n');
-  return finish({ outcome: 'complete', message: message, decisions: listTakenBriefs(taken) });
+  const blocks = [];
+  if (taken.length > 0) {
+    blocks.push({ text: renderDecisions(taken), compact: renderDecisionsCompact(taken) });
+  }
+  if (openQuestions !== '') {
+    blocks.push({ text: openQuestions });
+  }
+  blocks.push({ text: report, shorten: true });
+  return finish({ outcome: 'complete', blocks: blocks });
+}
+
+function pauseOrStopAsking(report, resolution, questions, replies) {
+  const resumeArgs = buildResumeArgs(replies);
+  if (!canCarry(resumeArgs)) {
+    return finishComplete(report, renderOpenQuestions(resolution.asks, 'reply_size'), resolution.taken);
+  }
+  const compactQuestions = renderQuestionsCompact(resolution.asks, resolution.taken);
+  return pauseForUser({ resumeArgs: resumeArgs, blocks: [{ text: questions, compact: compactQuestions }] });
 }
 
 async function runAnalysis(rawArgs) {
@@ -1402,7 +1698,7 @@ async function runAnalysis(rawArgs) {
       return finishComplete(analysis.report, '', resolution.taken);
     }
     if (!canPause(round - 1)) {
-      return finishComplete(analysis.report, renderOpenQuestions(resolution.asks), resolution.taken);
+      return finishComplete(analysis.report, renderOpenQuestions(resolution.asks, 'pause_limit'), resolution.taken);
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
     let reply = readStoredReply(storedAnswers, round);
@@ -1411,11 +1707,7 @@ async function runAnalysis(rawArgs) {
       pendingReply = undefined;
     }
     if (reply === undefined) {
-      return pauseForUser({
-        message: questions,
-        resumeArgs: buildResumeArgs(argsObject, replies),
-        decisions: listTakenBriefs(resolution.taken)
-      });
+      return pauseOrStopAsking(analysis.report, resolution, questions, replies);
     }
     replies.push(reply);
     phase('Revise');

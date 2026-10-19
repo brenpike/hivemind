@@ -40,7 +40,7 @@ function readSection(body, heading) {
 
 const { frontmatter, body } = splitFrontmatter(overlordText);
 const engineSection = readSection(body, '## Engine');
-const cutNoticeParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The harness may cut')) ?? '';
+const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The result is built to fit the completion notice.')) ?? '';
 
 describe('overlord frontmatter tools', () => {
   const toolNames = readToolNames(frontmatter);
@@ -71,42 +71,26 @@ describe('overlord Engine section', () => {
       assert.match(engineSection, new RegExp('`[^`\\n]*\\b' + fieldName + '\\b[^`\\n]*`'), `${fieldName} is missing from ## Engine`);
     });
   }
-  test('Engine names the reply arg the resume adds to resume_args', () => {
+  test('Engine resumes with the launch args, then resume_args, then the reply arg', () => {
     const replyName = resultLib.replyField();
-    assert.ok(engineSection.includes('`resume_args` plus `' + replyName + '` set to the user\'s reply verbatim'), `${replyName} resume clause is missing from ## Engine`);
+    assert.ok(engineSection.includes('with args set to the launch args plus `resume_args` plus `' + replyName + '` set to the user\'s reply verbatim'), `${replyName} resume clause is missing from ## Engine`);
   });
   test('Engine no longer names the dropped answer_key field', () => {
     assert.ok(!engineSection.includes('answer_key'));
   });
-  test('Engine ties the cut-notice trigger, the act-on-notice rule, the message-first rule, the show-as-held rule and never reading the file in one paragraph, in order', () => {
-    const ruleSentences = [
-      'The harness may cut the end of the result in the completion notice.',
-      '`needs_user` and `resume_args` come before `message`, so act on them from the notice.',
-      '`message` puts the questions and the decisions first, so on a finished run a cut lands in the report; a long pause message can still be cut inside its questions.',
-      'When `message` is cut, show it as the notice holds it and say in one line that the full output is in the file the notice names.',
-      'Never read that file.',
-    ];
-    let previousIndex = -1;
-    for (const ruleSentence of ruleSentences) {
-      const sentenceIndex = cutNoticeParagraph.indexOf(ruleSentence);
-      assert.ok(sentenceIndex > previousIndex, `cut-notice paragraph lacks, or misorders, ${ruleSentence}`);
-      previousIndex = sentenceIndex;
+  test('Engine no longer names the dropped decisions field', () => {
+    assert.ok(!engineSection.includes('decisions'));
+  });
+  test('Engine treats a cut notice as a defect that does not resume, fall back or read a file', () => {
+    assert.notEqual(defectParagraph, '', '## Engine has a paragraph starting The result is built to fit the completion notice.');
+    for (const phrase of ['that is a defect', 'do not resume', 'fall back', 'read any file']) {
+      assert.ok(defectParagraph.includes(phrase), `defect paragraph lacks ${phrase}`);
     }
   });
-  test('Engine cut-notice rule does not stop the resume or fall back', () => {
-    assert.notEqual(cutNoticeParagraph, '', '## Engine has a paragraph starting The harness may cut');
-    for (const phrase of ['do not resume', 'fall back', 'state machine', 'with the Read tool', 'read the output file']) {
-      assert.ok(!cutNoticeParagraph.includes(phrase), `cut-notice paragraph contains ${phrase}`);
+  test('Engine no longer carries the old cut-notice rule', () => {
+    for (const phrase of ['come before `message`', 'Never read that file.']) {
+      assert.ok(!engineSection.includes(phrase), `## Engine still contains ${phrase}`);
     }
-  });
-  test('result puts needs_user and resume_args before message, and message last', () => {
-    const pausedKeys = [...Object.keys(resultLib.pauseForUser({ message: 'Q?', resumeArgs: { request: 'R' }, decisions: [] }))];
-    const finishedKeys = [...Object.keys(resultLib.finish({ outcome: 'complete', message: 'done', decisions: [] }))];
-    for (const resultKeys of [pausedKeys, finishedKeys]) {
-      assert.ok(resultKeys.indexOf('needs_user') < resultKeys.indexOf('message'), `keys are ${JSON.stringify(resultKeys)}`);
-      assert.equal(resultKeys.at(-1), 'message', `keys are ${JSON.stringify(resultKeys)}`);
-    }
-    assert.ok(pausedKeys.indexOf('resume_args') < pausedKeys.indexOf('message'), `keys are ${JSON.stringify(pausedKeys)}`);
   });
   test('Engine does not mention Bash', () => {
     const bashCount = (engineSection.match(/Bash/g) ?? []).length;

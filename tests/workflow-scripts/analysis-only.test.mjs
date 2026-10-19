@@ -62,14 +62,47 @@ function collectKeys(node, keys) {
   return keys;
 }
 
-function resumeWith(pausedResult, reply) {
-  return { ...pausedResult.resume_args, reply: reply };
+function resumeWith(launchArgs, pausedResult, reply) {
+  return { ...launchArgs, ...pausedResult.resume_args, reply: reply };
+}
+
+function oracleNoticeLength(value) {
+  return JSON.stringify(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').length;
+}
+
+function assertWithinNotice(result) {
+  assert.ok(oracleNoticeLength(result) <= lib.noticeBudget(), `notice length ${oracleNoticeLength(result)} is over the budget`);
+  assert.deepEqual(JSON.parse(JSON.stringify(result)), result);
+}
+
+function makeLongTakenBrief(index) {
+  return makeBrief({
+    problem: 'TAKEN_' + index + ' ' + 'p'.repeat(60),
+    recommendation: { option_id: 'A', strength: 'strong', why: 'w'.repeat(40) }
+  });
+}
+
+function makeLongOption(id, caseLength) {
+  return {
+    id: id,
+    summary: 'Option ' + id + ' summary.',
+    steel_man: 'S'.repeat(caseLength),
+    straw_man: 'T'.repeat(caseLength),
+    effort: 'small',
+    value: 'high',
+    reversible: true
+  };
+}
+
+function makeLongGatedBrief(index, problemLength, caseLength) {
+  const gated = makeGatedBrief('GATED_' + index + ' ' + 'q'.repeat(problemLength));
+  return { ...gated, options: [makeLongOption('A', caseLength), makeLongOption('B', caseLength)] };
 }
 
 describe('analysis-only: no pause', () => {
   test('no questions finishes complete with the report and one agent call', async () => {
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis() });
-    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'REPORT_TEXT', decisions: [] });
+    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'REPORT_TEXT' });
     assert.deepEqual(labelsOf(run.calls), ['analyze']);
     assert.deepEqual(run.phases, ['Analyze']);
   });
@@ -82,7 +115,6 @@ describe('analysis-only: no pause', () => {
     assert.equal(run.result.outcome, 'complete');
     const expected = lib.renderDecisions([{ brief: strong }, { brief: weak }]) + '\n\nREPORT_TEXT';
     assert.equal(run.result.message, expected);
-    assert.deepEqual(run.result.decisions, [strong, weak]);
   });
 });
 
@@ -92,12 +124,11 @@ describe('analysis-only: pause and resume', () => {
     const taken = makeBrief({ problem: 'TAKEN_PROBLEM' });
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [gated, taken] }) });
     assert.equal(run.result.needs_user, true);
-    assert.deepEqual(Object.keys(run.result).sort(), ['decisions', 'message', 'needs_user', 'resume_args']);
+    assert.deepEqual(Object.keys(run.result).sort(), ['message', 'needs_user', 'resume_args']);
     const expectedMessage = lib.renderQuestions([{ brief: gated, reason: 'gate_architectural' }], [{ brief: taken }]);
     assert.equal(run.result.message, expectedMessage);
     assert.ok(run.result.message.includes(ARCHITECTURAL_LINE));
-    assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
-    assert.deepEqual(run.result.decisions, [taken]);
+    assert.deepEqual(run.result.resume_args, { answers: {} });
     assert.equal(run.calls.length, 1);
   });
   test('resume keeps the analyze prompt byte-identical and revise-1 sees the reply', async () => {
@@ -106,7 +137,7 @@ describe('analysis-only: pause and resume', () => {
       'revise-1': makeAnalysis({ report: 'REVISED_REPORT' })
     };
     const first = await runWorkflow({ request: REQUEST }, results);
-    const second = await runWorkflow(resumeWith(first.result, 'Take option B please.'), results);
+    const second = await runWorkflow(resumeWith({ request: REQUEST }, first.result, 'Take option B please.'), results);
     assert.equal(second.calls[0].prompt, first.calls[0].prompt);
     assert.ok(!second.calls[0].prompt.includes('Take option B please.'));
     assert.deepEqual(labelsOf(second.calls), ['analyze', 'revise-1']);
@@ -114,7 +145,7 @@ describe('analysis-only: pause and resume', () => {
     assert.ok(second.calls[1].prompt.includes('REPORT_TEXT'));
     assert.ok(second.calls[1].prompt.includes('GATED_PROBLEM'));
     assert.deepEqual(second.phases, ['Analyze', 'Revise']);
-    assert.deepEqual(second.result, { needs_user: false, outcome: 'complete', message: 'REVISED_REPORT', decisions: [] });
+    assert.deepEqual(second.result, { needs_user: false, outcome: 'complete', message: 'REVISED_REPORT' });
   });
   test('a reply with no pending pause is ignored, so a fresh launch pauses for round 1', async () => {
     const results = {
@@ -123,20 +154,20 @@ describe('analysis-only: pause and resume', () => {
     };
     const run = await runWorkflow({ request: REQUEST, reply: 'UNASKED_REPLY' }, results);
     assert.equal(run.result.needs_user, true);
-    assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
+    assert.deepEqual(run.result.resume_args, { answers: {} });
     assert.deepEqual(labelsOf(run.calls), ['analyze']);
     assert.ok(!run.calls[0].prompt.includes('UNASKED_REPLY'));
   });
   test('a reply to a run with nothing to ask is ignored', async () => {
     const run = await runWorkflow({ request: REQUEST, answers: {}, reply: 'UNASKED_REPLY' }, { analyze: makeAnalysis() });
-    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'REPORT_TEXT', decisions: [] });
+    assert.deepEqual(run.result, { needs_user: false, outcome: 'complete', message: 'REPORT_TEXT' });
     assert.deepEqual(labelsOf(run.calls), ['analyze']);
   });
   test('a missing, empty or non-string reply pauses again with the same resume_args', async () => {
     const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }) };
     const first = await runWorkflow({ request: REQUEST }, results);
     for (const reply of [undefined, '', '  ', 7, null, ['REPLY'], { text: 'REPLY' }]) {
-      const again = await runWorkflow(resumeWith(first.result, reply), results);
+      const again = await runWorkflow(resumeWith({ request: REQUEST }, first.result, reply), results);
       assert.equal(again.result.needs_user, true, JSON.stringify(reply));
       assert.deepEqual(again.result.resume_args, first.result.resume_args);
       assert.equal(again.result.message, first.result.message);
@@ -150,7 +181,7 @@ describe('analysis-only: pause and resume', () => {
     };
     const run = await runWorkflow({ request: REQUEST, 'round-1': 'REPLY_ONE' }, results);
     assert.equal(run.result.needs_user, true);
-    assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
+    assert.deepEqual(run.result.resume_args, { answers: {} });
     assert.deepEqual(labelsOf(run.calls), ['analyze']);
   });
   test('an empty reply under answers is not read, so the run pauses again', async () => {
@@ -158,7 +189,7 @@ describe('analysis-only: pause and resume', () => {
     for (const reply of ['', '  ', 7]) {
       const run = await runWorkflow({ request: REQUEST, answers: { 'round-1': reply } }, results);
       assert.equal(run.result.needs_user, true);
-      assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
+      assert.deepEqual(run.result.resume_args, { answers: {} });
       assert.deepEqual(labelsOf(run.calls), ['analyze']);
     }
   });
@@ -167,7 +198,7 @@ describe('analysis-only: pause and resume', () => {
       const run = await runWorkflow({ request: REQUEST, answers, reply: 'REPLY_ONE' }, { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }) });
       assert.equal(run.result.needs_user, true);
       assert.deepEqual(labelsOf(run.calls), ['analyze']);
-      assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
+      assert.deepEqual(run.result.resume_args, { answers: {} });
     }
   });
   test('a second round pauses and carries the first reply in resume_args', async () => {
@@ -177,11 +208,11 @@ describe('analysis-only: pause and resume', () => {
       'revise-2': makeAnalysis({ report: 'REPORT_TWO' })
     };
     const first = await runWorkflow({ request: REQUEST }, results);
-    const second = await runWorkflow(resumeWith(first.result, 'REPLY_ONE'), results);
+    const second = await runWorkflow(resumeWith({ request: REQUEST }, first.result, 'REPLY_ONE'), results);
     assert.equal(second.result.needs_user, true);
-    assert.deepEqual(second.result.resume_args, { request: REQUEST, answers: { 'round-1': 'REPLY_ONE' } });
+    assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'REPLY_ONE' } });
     assert.ok(second.result.message.includes('SECOND_PROBLEM'));
-    const third = await runWorkflow(resumeWith(second.result, 'REPLY_TWO'), results);
+    const third = await runWorkflow(resumeWith({ request: REQUEST }, second.result, 'REPLY_TWO'), results);
     assert.deepEqual(labelsOf(third.calls), ['analyze', 'revise-1', 'revise-2']);
     assert.equal(third.calls[0].prompt, first.calls[0].prompt);
     assert.equal(third.calls[1].prompt, second.calls[1].prompt);
@@ -201,12 +232,12 @@ describe('analysis-only: pause and resume', () => {
     const twoReplies = { request: REQUEST, answers: { 'round-1': 'R1', 'round-2': 'R2' } };
     const third = await runWorkflow(twoReplies, results);
     assert.equal(third.result.needs_user, true);
-    assert.deepEqual(third.result.resume_args, twoReplies);
-    const capped = await runWorkflow(resumeWith(third.result, 'R3'), results);
+    assert.deepEqual(third.result.resume_args, { answers: twoReplies.answers });
+    const capped = await runWorkflow(resumeWith({ request: REQUEST }, third.result, 'R3'), results);
     assert.deepEqual(labelsOf(capped.calls), ['analyze', 'revise-1', 'revise-2', 'revise-3']);
     assert.equal(capped.result.needs_user, false);
     assert.equal(capped.result.outcome, 'complete');
-    const expected = lib.renderDecisions([{ brief: taken }]) + '\n\n' + lib.renderOpenQuestions([{ brief: gated }]) + '\n\n' + 'LATEST_REPORT';
+    const expected = lib.renderDecisions([{ brief: taken }]) + '\n\n' + lib.renderOpenQuestions([{ brief: gated }], 'pause_limit') + '\n\n' + 'LATEST_REPORT';
     assert.equal(capped.result.message, expected);
     assert.ok(capped.result.message.includes('I stopped asking after 3 rounds of questions. These are still open:'));
     assert.ok(capped.result.message.includes('Q1. STILL_OPEN The report assumes option A.'));
@@ -271,8 +302,8 @@ describe('analysis-only: autonomy level', () => {
     const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }) };
     const run = await runWorkflow({ request: REQUEST, autonomy: 'low' }, results);
     assert.equal(run.result.needs_user, true);
-    assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
-    const resumed = await runWorkflow({ ...run.result.resume_args, autonomy: 'low', reply: 'REPLY_ONE' }, { ...results, 'revise-1': makeAnalysis() });
+    assert.deepEqual(run.result.resume_args, { answers: {} });
+    const resumed = await runWorkflow(resumeWith({ request: REQUEST, autonomy: 'low' }, run.result, 'REPLY_ONE'), { ...results, 'revise-1': makeAnalysis() });
     assert.equal(resumed.result.outcome, 'complete');
   });
   test('the brief kind never picks the rule', async () => {
@@ -293,7 +324,7 @@ describe('analysis-only: input', () => {
   test('string args are the request', async () => {
     const run = await runWorkflow(REQUEST, { analyze: makeAnalysis({ questions: [makeGatedBrief('P')] }) });
     assert.ok(run.calls[0].prompt.includes(REQUEST));
-    assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
+    assert.deepEqual(run.result.resume_args, { answers: {} });
   });
   for (const missing of [undefined, null, '', '   ', {}, { request: '' }, { request: 5 }, ['a request']]) {
     test(`missing request ${JSON.stringify(missing)} finishes blocked with no agent call`, async () => {
@@ -319,8 +350,7 @@ describe('analysis-only: planner failures', () => {
     assert.deepEqual(run.result, {
       needs_user: false,
       outcome: 'blocked',
-      message: 'The planner returned no result, so the analysis stopped.',
-      decisions: []
+      message: 'The planner returned no result, so the analysis stopped.'
     });
   });
   test('a null revise result finishes blocked', async () => {
@@ -385,6 +415,120 @@ describe('analysis-only: agent options and prompts', () => {
     const titles = run.meta.phases.map((entry) => entry.title);
     assert.deepEqual(titles, ['Analyze', 'Revise']);
     assert.ok(run.phases.every((title) => titles.includes(title)));
+  });
+});
+
+describe('analysis-only: notice budget', () => {
+  const SHORTENED_MARKER = 'Note: the text above was shortened to fit the completion notice.';
+  const COMPACT_MARKER = 'Note: this text was shortened to fit the completion notice, so parts below are in compact form.';
+  const CUT_MARKER = 'Note: the text above was shortened by a hard cut to fit the completion notice.';
+  test('a long report with many taken decisions keeps every decision and shortens the report', async () => {
+    const taken = Array.from({ length: 40 }, (_, index) => makeLongTakenBrief(index));
+    const report = 'REPORT_START ' + '<a href="x">&</a> '.repeat(3500);
+    assert.ok(report.length >= 60000);
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ report: report, questions: taken }) });
+    assertWithinNotice(run.result);
+    assert.equal(run.result.needs_user, false);
+    assert.equal(run.result.outcome, 'complete');
+    const message = run.result.message;
+    assert.ok(message.startsWith('Decided for you:'));
+    assert.ok(message.startsWith(lib.renderDecisions(taken.map((brief) => ({ brief: brief }))) + '\n\nREPORT_START'));
+    assert.ok(message.includes(SHORTENED_MARKER));
+    assert.ok(message.endsWith(lib.noticeMarker('shortened')));
+  });
+  test('many long gated questions pause in compact form with every label', async () => {
+    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 600));
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: gated }) });
+    assertWithinNotice(run.result);
+    assert.equal(run.result.needs_user, true);
+    assert.deepEqual(run.result.resume_args, { answers: {} });
+    const message = run.result.message;
+    assert.ok(message.startsWith(COMPACT_MARKER));
+    assert.ok(!message.includes('Case for:'));
+    for (let label = 1; label <= gated.length; label++) {
+      assert.ok(message.includes('Q' + label + '. GATED_' + (label - 1)), 'Q' + label);
+    }
+  });
+  test('gated questions too long even in compact form pause with a hard cut', async () => {
+    const gated = Array.from({ length: 60 }, (_, index) => makeLongGatedBrief(index, 200, 600));
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: gated }) });
+    assertWithinNotice(run.result);
+    assert.equal(run.result.needs_user, true);
+    assert.deepEqual(run.result.resume_args, { answers: {} });
+    const message = run.result.message;
+    assert.ok(message.startsWith('I need your answers on 60 questions before I go on.'));
+    assert.ok(message.endsWith(lib.noticeMarker('cut')));
+    assert.ok(message.includes(CUT_MARKER));
+    assert.ok(!message.includes(COMPACT_MARKER));
+  });
+  test('replies too long to carry stop asking and complete with the open questions', async () => {
+    const longReply = 'L'.repeat(5000);
+    const roundTwo = makeGatedBrief('SECOND_PROBLEM');
+    const results = {
+      analyze: makeAnalysis({ questions: [makeGatedBrief('FIRST_PROBLEM')] }),
+      'revise-1': makeAnalysis({ report: 'REPORT_ONE', questions: [roundTwo] })
+    };
+    const launches = [
+      { request: REQUEST, answers: { 'round-1': longReply } },
+      { request: REQUEST, answers: {}, reply: longReply }
+    ];
+    for (const launchArgs of launches) {
+      const run = await runWorkflow(launchArgs, results);
+      assertWithinNotice(run.result);
+      assert.deepEqual(labelsOf(run.calls), ['analyze', 'revise-1']);
+      assert.equal(run.result.needs_user, false);
+      assert.equal(run.result.outcome, 'complete');
+      assert.ok(!Object.prototype.hasOwnProperty.call(run.result, 'resume_args'));
+      const openQuestions = lib.renderOpenQuestions([{ brief: roundTwo }], 'reply_size');
+      assert.ok(openQuestions.startsWith('I stopped asking because your replies so far are too long'));
+      assert.equal(run.result.message, openQuestions + '\n\nREPORT_ONE');
+    }
+  });
+  test('a resume rebuilds the request from the launch args and gives revise the full questions', async () => {
+    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 600));
+    const results = {
+      analyze: makeAnalysis({ questions: gated }),
+      'revise-1': makeAnalysis({ report: 'REPORT_ONE', questions: [makeGatedBrief('SECOND_PROBLEM')] }),
+      'revise-2': makeAnalysis({ report: 'REPORT_TWO' })
+    };
+    const launchArgs = { request: REQUEST };
+    const first = await runWorkflow(launchArgs, results);
+    assert.ok(first.result.message.startsWith(COMPACT_MARKER));
+    assert.ok(!first.result.message.includes('Case for:'));
+    const second = await runWorkflow(resumeWith(launchArgs, first.result, 'REPLY_ONE'), results);
+    assert.equal(second.calls[0].prompt, first.calls[0].prompt);
+    assert.deepEqual(labelsOf(second.calls), ['analyze', 'revise-1']);
+    const revisePrompt = second.calls[1].prompt;
+    assert.ok(revisePrompt.includes('Case for: ' + 'S'.repeat(600)));
+    assert.ok(revisePrompt.includes('Q10. GATED_9'));
+    assert.equal(second.result.needs_user, true);
+    assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'REPLY_ONE' } });
+    assert.ok(!Object.prototype.hasOwnProperty.call(second.result.resume_args, 'request'));
+    const third = await runWorkflow(resumeWith(launchArgs, second.result, 'REPLY_TWO'), results);
+    assert.deepEqual(labelsOf(third.calls), ['analyze', 'revise-1', 'revise-2']);
+    assert.equal(third.calls[0].prompt, first.calls[0].prompt);
+    assert.equal(third.calls[1].prompt, revisePrompt);
+    assert.equal(third.result.message, 'REPORT_TWO');
+  });
+  test('resume_args and the reply without the launch args finish blocked with no agent call', async () => {
+    const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }) };
+    const first = await runWorkflow({ request: REQUEST }, results);
+    const run = await runWorkflow({ ...first.result.resume_args, reply: 'REPLY_ONE' }, results);
+    assert.equal(run.calls.length, 0);
+    assert.deepEqual(run.result, {
+      needs_user: false,
+      outcome: 'blocked',
+      message: 'No request was given, so there is nothing to analyze.'
+    });
+  });
+  test('a huge planner blocker finishes blocked within the budget, shortened', async () => {
+    const blocker = 'BLOCKER_START ' + '<&> '.repeat(10000);
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ outcome: 'blocked', blocker: blocker }) });
+    assertWithinNotice(run.result);
+    assert.equal(run.result.outcome, 'blocked');
+    assert.ok(run.result.message.startsWith('The planner could not do the analysis: BLOCKER_START'));
+    assert.ok(run.result.message.endsWith(lib.noticeMarker('shortened')));
+    assert.ok(run.result.message.includes(SHORTENED_MARKER));
   });
 });
 
