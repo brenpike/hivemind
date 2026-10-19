@@ -12,6 +12,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.0.3] - 2026-10-19
+
+### Fixed
+
+- The overlord's relay of a workflow result is now the decoded `message` only: the notice's HTML escaping (`&lt;`, `&gt;`, `&amp;`) is turned back into characters, with no line added before or after it and no comment on it. A notice counts as cut only when its result is not one complete JSON object, so the workflow's own shortened marker is no longer reported as a defect.
+- Routing and the current-engine fallback no longer make the model read plugin workflow files, which in manual mode raised permission prompts outside the project and ended the turn on a No. `hivemind:route-workflow` carries its own workflow catalog; `init-run-ledger` derives `workflow_version` and `start_state` from the packaged definition (supplied values are still checked); `init-run-ledger` and `record-state-result` print `current_state` and `state_definition`, which the overlord executes.
+- ADR-0036 decisions 16 and 17 record both; resume-on-start reads and a mechanical relay check are deferred. Found by the live smoke re-run of 6.0.2. Refs #409.
+
 ## [6.0.2] - 2026-10-19
 
 ### Fixed
