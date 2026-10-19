@@ -113,7 +113,7 @@
       "properties": {
         "option_id": {
           "type": "string",
-          "description": "Id of the recommended option. Empty string when strength is none."
+          "description": "Id of the recommended option. Never blank. When strength is none, still name an option id; the run asks the user either way."
         },
         "strength": {
           "type": "string",
@@ -172,7 +172,7 @@
     },
     "verbatim": {
       "type": "string",
-      "description": "Optional. Text another rule requires shown to the user, e.g. normalized brood strain text."
+      "description": "Optional. Omit when there is no such text. Text another rule requires shown to the user, e.g. normalized brood strain text."
     }
   }
 }

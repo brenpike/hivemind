@@ -26,6 +26,9 @@
  *   A property whose value is undefined counts as absent, as it does in JSON.
  *   type object means a plain object: not null and not an array.
  *   When type fails, the other keywords at that path are not checked.
+ *   Every string value whose schema has type string and no enum must hold a
+ *   non-whitespace character. An enum governs when present, so an enum may
+ *   list the empty string.
  *
  * Why
  *   A brief is written by a model and read by decide(). A hand-kept check
@@ -136,10 +139,17 @@ function listPresentKeys(record) {
   return Object.keys(record).filter((name) => record[name] !== undefined);
 }
 
+function isBlankSchemaString(schema, value) {
+  return schema.type === 'string' && schema.enum === undefined && value.trim() === '';
+}
+
 function collectSchemaErrors(schema, value, path, errors) {
   if (schema.type !== undefined && !matchesSchemaType(schema.type, value)) {
     errors.push(path + ': type ' + schema.type + ' expected');
     return;
+  }
+  if (isBlankSchemaString(schema, value)) {
+    errors.push(path + ': type string: blank');
   }
   if (schema.enum !== undefined && schema.enum.indexOf(value) === -1) {
     errors.push(path + ': enum: not one of ' + schema.enum.join(', '));

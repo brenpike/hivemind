@@ -129,11 +129,11 @@ describe('gate flags', () => {
 
 describe('recommendation', () => {
   test('strength none asks no_recommendation', () => {
-    const recommendation = { option_id: '', strength: 'none', why: 'Both are fine.' };
+    const recommendation = { option_id: 'A', strength: 'none', why: 'Both are fine.' };
     assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ recommendation })), { action: 'ask', reason: 'no_recommendation' });
   });
   test('a gate flag wins over strength none', () => {
-    const recommendation = { option_id: '', strength: 'none', why: 'Both are fine.' };
+    const recommendation = { option_id: 'A', strength: 'none', why: 'Both are fine.' };
     const gate = { irreversible: false, architectural: false, safety: true };
     assert.equal(decideWith('plan_acceptance', 'high', makeBrief({ recommendation, gate })).reason, 'gate_safety');
   });
@@ -229,7 +229,17 @@ describe('malformed brief', () => {
     'option effort outside enum': makeBrief({ options: [{ ...base.options[0], effort: 'huge' }] }),
     'option value outside enum': makeBrief({ options: [{ ...base.options[0], value: 'none' }] }),
     'ruled_out not an array': makeBrief({ ruled_out: 'none' }),
-    'ruled_out entry missing why': makeBrief({ ruled_out: [{ summary: 'Use XML.' }] })
+    'ruled_out entry missing why': makeBrief({ ruled_out: [{ summary: 'Use XML.' }] }),
+    'blank option id recommended by blank option_id': makeBrief({
+      options: [{ ...base.options[0], id: '' }],
+      recommendation: { ...base.recommendation, option_id: '' }
+    }),
+    'whitespace-only problem': makeBrief({ problem: ' \t ' }),
+    'whitespace-only option id': makeBrief({ options: [{ ...base.options[0], id: ' ' }, base.options[1]] }),
+    'blank option summary': makeBrief({ options: [{ ...base.options[0], summary: '' }, base.options[1]] }),
+    'blank recommendation why': makeBrief({ recommendation: { ...base.recommendation, why: '' } }),
+    'strength none with blank option_id': makeBrief({ recommendation: { option_id: '', strength: 'none', why: 'Both are fine.' } }),
+    'empty verbatim': makeBrief({ verbatim: '' })
   };
   for (const [name, brief] of Object.entries(malformed)) {
     test(`${name} asks malformed_brief`, () => {

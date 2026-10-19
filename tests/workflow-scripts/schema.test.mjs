@@ -23,6 +23,40 @@ function collectKeywords(schema, keywords) {
   return keywords;
 }
 
+function collectBlankableStringPaths(schema, path, paths) {
+  if (schema.type === 'string' && schema.enum === undefined) {
+    paths.push(path);
+  }
+  for (const [name, child] of Object.entries(schema.properties || {})) {
+    collectBlankableStringPaths(child, path + '.' + name, paths);
+  }
+  if (schema.items !== undefined) {
+    collectBlankableStringPaths(schema.items, path + '[0]', paths);
+  }
+  return paths;
+}
+
+function collectEnums(schema, enums) {
+  if (schema.enum !== undefined) {
+    enums.push(schema.enum);
+  }
+  Object.values(schema.properties || {}).forEach((child) => collectEnums(child, enums));
+  if (schema.items !== undefined) {
+    collectEnums(schema.items, enums);
+  }
+  return enums;
+}
+
+function setBriefPath(brief, path, value) {
+  const steps = [...path.slice(1).matchAll(/\.([A-Za-z_]+)|\[(\d+)\]/g)].map((match) => match[1] ?? Number(match[2]));
+  let node = brief;
+  for (const step of steps.slice(0, -1)) {
+    node = node[step];
+  }
+  node[steps[steps.length - 1]] = value;
+  return brief;
+}
+
 function makeBrief(overrides = {}) {
   return {
     id: 'Q1',
@@ -43,7 +77,7 @@ describe('validateSchema keywords', () => {
   const typeCases = [
     ['object', { a: 1 }, [[], null, 'x']],
     ['array', [1], [{}, 'x', null]],
-    ['string', '', [1, null, ['x'], undefined]],
+    ['string', 'x', [1, null, ['x'], undefined]],
     ['boolean', false, ['false', 0, null]],
     ['number', 1.5, ['1', NaN, Infinity, null]],
     ['integer', 2, [2.5, '2', null]],
@@ -100,6 +134,44 @@ describe('validateSchema keywords', () => {
   test('a failed type skips the other keywords at that path', () => {
     const schema = { type: 'object', required: ['a'], additionalProperties: false };
     assert.deepEqual(validate(schema, []).errors, ['$: type object expected']);
+  });
+});
+
+describe('validateSchema blank strings', () => {
+  for (const blank of ['', ' ', '\t\n', '\u00a0']) {
+    test(`type string rejects blank ${JSON.stringify(blank)}`, () => {
+      assert.deepEqual(validate({ type: 'string' }, blank), { ok: false, errors: ['$: type string: blank'] });
+    });
+  }
+  for (const filled of [' x ', 'x']) {
+    test(`type string accepts ${JSON.stringify(filled)}`, () => {
+      assert.deepEqual(validate({ type: 'string' }, filled), { ok: true, errors: [] });
+    });
+  }
+  test('a blank nested property is reported at its path', () => {
+    const schema = { type: 'object', properties: { a: { type: 'string' } } };
+    assert.deepEqual(validate(schema, { a: ' ' }).errors, ['$.a: type string: blank']);
+  });
+  test('a blank array item is reported at its index', () => {
+    const schema = { type: 'array', items: { type: 'string' } };
+    assert.deepEqual(validate(schema, ['a', '', 'b']).errors, ['$[1]: type string: blank']);
+  });
+  test('non-string types are unaffected', () => {
+    assert.equal(validate({ type: 'boolean' }, false).ok, true);
+    assert.equal(validate({ type: 'integer' }, 0).ok, true);
+    assert.equal(validate({ type: 'null' }, null).ok, true);
+    assert.equal(validate({ type: 'array' }, []).ok, true);
+    assert.equal(validate({ type: 'object' }, {}).ok, true);
+    assert.deepEqual(validate({ type: 'number' }, '').errors, ['$: type number expected']);
+  });
+  test('a schema with no type accepts a blank string', () => {
+    assert.deepEqual(validate({}, ''), { ok: true, errors: [] });
+  });
+  test('an enum that lists the empty string accepts it', () => {
+    assert.deepEqual(validate({ type: 'string', enum: ['', 'a'] }, ''), { ok: true, errors: [] });
+  });
+  test('an enum governs a blank not listed, with only the enum error', () => {
+    assert.deepEqual(validate({ type: 'string', enum: ['a'] }, '').errors, ['$: enum: not one of a']);
   });
 });
 
@@ -165,6 +237,23 @@ describe('the decision brief schema', () => {
   }
   test('an unlisted top-level key is rejected', () => {
     assert.deepEqual(validate(briefSchema, makeBrief({ extra: 1 })).errors, ['$: additionalProperties: unexpected extra']);
+  });
+  const blankablePaths = collectBlankableStringPaths(briefSchema, '$', []);
+  test('has string fields that must not be blank', () => {
+    assert.ok(blankablePaths.includes('$.problem'));
+    assert.ok(blankablePaths.includes('$.recommendation.option_id'));
+    assert.ok(blankablePaths.includes('$.options[0].id'));
+    assert.ok(blankablePaths.includes('$.verbatim'));
+  });
+  for (const path of blankablePaths) {
+    test(`a blank ${path} is rejected`, () => {
+      const brief = setBriefPath(makeBrief(), path, ' ');
+      assert.deepEqual(validate(briefSchema, brief).errors, [path + ': type string: blank']);
+    });
+  }
+  test('no enum lists a blank string', () => {
+    const blanks = collectEnums(briefSchema, []).flat().filter((entry) => typeof entry === 'string' && entry.trim() === '');
+    assert.deepEqual(blanks, []);
   });
   test('nested violations are reported with their paths', () => {
     const brief = makeBrief({
