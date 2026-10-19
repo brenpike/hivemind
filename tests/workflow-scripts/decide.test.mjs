@@ -7,9 +7,10 @@ import { loadLibs } from './harness.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const libDir = repoRoot + 'plugin/workflow-src/lib/';
-const libPaths = ['decide.js', 'brief.js', 'result.js'].map((name) => libDir + name);
+const libPaths = ['schema.js', 'decide.js', 'brief.js', 'result.js'].map((name) => libDir + name);
 const table = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-autonomy-table.json', 'utf8'));
-const lib = loadLibs([libDir + 'decide.js']);
+const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
+const lib = loadLibs([libDir + 'schema.js', libDir + 'decide.js']);
 
 function makeBrief(overrides = {}) {
   return {
@@ -29,7 +30,7 @@ function makeBrief(overrides = {}) {
 }
 
 function decideWith(kind, level, brief, decisionTable = table) {
-  return structuredClone(lib.decide({ kind, level, brief }, decisionTable));
+  return structuredClone(lib.decide({ kind, level, brief }, decisionTable, briefSchema));
 }
 
 const takeAuto = { action: 'take', reason: 'auto' };
@@ -216,13 +217,29 @@ describe('malformed brief', () => {
     'missing gate': makeBrief({ gate: undefined }),
     'gate flag not boolean': makeBrief({ gate: { irreversible: 'false', architectural: false, safety: false } }),
     'gate missing safety': makeBrief({ gate: { irreversible: false, architectural: false } }),
-    'verbatim not a string': makeBrief({ verbatim: 7 })
+    'verbatim not a string': makeBrief({ verbatim: 7 }),
+    'missing id': makeBrief({ id: undefined }),
+    'missing kind': makeBrief({ kind: undefined }),
+    'kind not a string': makeBrief({ kind: 3 }),
+    'extra top-level key': makeBrief({ score: 9 }),
+    'extra option key': makeBrief({ options: [{ ...base.options[0], cost: 'low' }] }),
+    'extra gate key': makeBrief({ gate: { ...base.gate, legal: false } }),
+    'criticality level outside enum': makeBrief({ criticality: { ...base.criticality, level: 'severe' } }),
+    'criticality likelihood outside enum': makeBrief({ criticality: { ...base.criticality, likelihood: 'rare' } }),
+    'option effort outside enum': makeBrief({ options: [{ ...base.options[0], effort: 'huge' }] }),
+    'option value outside enum': makeBrief({ options: [{ ...base.options[0], value: 'none' }] }),
+    'ruled_out not an array': makeBrief({ ruled_out: 'none' }),
+    'ruled_out entry missing why': makeBrief({ ruled_out: [{ summary: 'Use XML.' }] })
   };
   for (const [name, brief] of Object.entries(malformed)) {
     test(`${name} asks malformed_brief`, () => {
       assert.deepEqual(decideWith('plan_acceptance', 'high', brief), { action: 'ask', reason: 'malformed_brief' });
     });
   }
+  test('optional fields may be present', () => {
+    const brief = makeBrief({ verbatim: 'Shown as is.', ruled_out: [{ summary: 'Use XML.', why: 'Too heavy.' }] });
+    assert.deepEqual(decideWith('plan_acceptance', 'high', brief), takeAuto);
+  });
   test('optional fields may be absent', () => {
     const brief = makeBrief();
     delete brief.verbatim;
@@ -234,18 +251,9 @@ describe('malformed brief', () => {
   });
 });
 
-describe('brief.kind is never read', () => {
-  test('a brief with no kind and no id is taken', () => {
-    const brief = makeBrief();
-    delete brief.kind;
-    delete brief.id;
-    assert.deepEqual(decideWith('plan_acceptance', 'high', brief), takeAuto);
-  });
-  test('a throwing kind getter is never touched', () => {
-    const brief = makeBrief();
-    delete brief.kind;
-    Object.defineProperty(brief, 'kind', { enumerable: true, get() { throw new Error('brief.kind was read'); } });
-    assert.deepEqual(decideWith('plan_acceptance', 'high', brief), takeAuto);
+describe('brief.kind never picks the rule', () => {
+  test('a kind that names no table kind is taken', () => {
+    assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ kind: 'not_a_kind', id: 'ZZ' })), takeAuto);
   });
   test('a hard stop named in brief.kind does not make it ask', () => {
     assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ kind: hardStopKinds[0] })), takeAuto);
@@ -253,6 +261,26 @@ describe('brief.kind is never read', () => {
   test('an auto kind named in brief.kind does not make a surface kind take', () => {
     const decision = decideWith('remediation_plan_acceptance', 'high', makeBrief({ kind: 'plan_acceptance' }));
     assert.deepEqual(decision, { action: 'ask', reason: 'table_surface' });
+  });
+});
+
+describe('the schema is a parameter', () => {
+  test('decide without a schema throws, even for a hard stop', () => {
+    assert.throws(() => lib.decide({ kind: 'plan_acceptance', level: 'high', brief: makeBrief() }, table), /validateSchema: \$: schema must be an object/);
+    assert.throws(() => lib.decide({ kind: hardStopKinds[0], level: 'high', brief: makeBrief() }, table), /schema must be an object/);
+  });
+  test('decide with a schema keyword validateSchema does not support throws', () => {
+    const schema = { ...briefSchema, properties: { ...briefSchema.properties, problem: { type: 'string', minLength: 1 } } };
+    assert.throws(() => lib.decide({ kind: 'plan_acceptance', level: 'high', brief: makeBrief() }, table, schema), /unsupported keyword minLength/);
+  });
+  test('the brief check follows the schema given, not a copy', () => {
+    const required = [...briefSchema.required, 'owner'];
+    const properties = { ...briefSchema.properties, owner: { type: 'string' } };
+    const schema = { ...briefSchema, required, properties };
+    const decision = structuredClone(lib.decide({ kind: 'plan_acceptance', level: 'high', brief: makeBrief() }, table, schema));
+    assert.deepEqual(decision, { action: 'ask', reason: 'malformed_brief' });
+    const withOwner = structuredClone(lib.decide({ kind: 'plan_acceptance', level: 'high', brief: makeBrief({ owner: 'me' }) }, table, schema));
+    assert.deepEqual(withOwner, takeAuto);
   });
 });
 

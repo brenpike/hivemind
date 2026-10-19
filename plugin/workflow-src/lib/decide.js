@@ -5,11 +5,12 @@
  *   resolveLevel(value, table)
  *     value  the autonomy level asked for. May be absent.
  *     table  the parsed decision autonomy table (AUTONOMY_TABLE once built).
- *   decide({kind, level, brief}, table)
+ *   decide({kind, level, brief}, table, schema)
  *     kind   the decision kind. Fixed by the call site in code.
  *     level  the autonomy level. Resolved through resolveLevel.
- *     brief  a decision brief shaped by the decision brief schema.
+ *     brief  a decision brief, checked against schema.
  *     table  as above.
+ *     schema the parsed decision brief schema (BRIEF_SCHEMA once built).
  *
  * Outputs
  *   resolveLevel  table.default_level when value is undefined, null or the
@@ -19,23 +20,29 @@
  *   decisionReasons  every reason code decide can return, in check order.
  *
  * Invariants
- *   Pure: no clock, no randomness, no I/O. The table is a parameter.
+ *   Pure: no clock, no randomness, no I/O. The table and the schema are
+ *   parameters, never globals.
  *   Fails closed: each check runs in decisionReasons() order and the first
  *   one that fires makes it ask. It takes only when every check passes.
- *   brief.kind and brief.id are never read. The kind comes from the call site.
+ *   A missing schema, or one with a keyword validateSchema does not
+ *   support, throws on every call, so decide never takes on a partial check.
+ *   brief.kind and brief.id are checked by the schema but never pick the
+ *   rule. The kind comes from the call site.
  *   Criticality never makes it ask. A weak recommendation is taken.
  *   A recommended option with reversible false asks gate_irreversible, even
  *   when gate.irreversible is false: the option field is checked, not only
  *   the gate flag.
  *   An unknown level resolves to 'low', the most cautious level.
- *   A brief is malformed when a field decide or the renderer reads is missing
- *   or has the wrong type, when options is empty, or when
- *   recommendation.strength or an assumption origin is outside its enum.
+ *   A brief is malformed when validateSchema(schema, brief) reports any
+ *   error. Only the checks the schema cannot express are written here:
+ *   option ids are unique, recommendation.option_id names one of them,
+ *   strength none, and reversible false on the recommended option.
  *
  * Why
  *   The model that writes a brief must not pick the rule that lets it act.
  *   The rule is picked by the caller in code and resolved in one tested
- *   function, so every decision site behaves the same way.
+ *   function, so every decision site behaves the same way. The brief check
+ *   comes from the schema the model writes to, so the two cannot drift.
  */
 
 function decisionReasons() {
@@ -64,12 +71,13 @@ function resolveLevel(value, table) {
   return 'low';
 }
 
-function decide({ kind, level, brief }, table) {
+function decide({ kind, level, brief }, table, schema) {
+  const briefCheck = validateSchema(schema, brief);
   const resolvedLevel = resolveLevel(level, table);
   if (table.hard_stops.some((stop) => stop.hard_stop === kind)) {
     return askFor('hard_stop');
   }
-  if (!isWellFormedBrief(brief)) {
+  if (!briefCheck.ok) {
     return askFor('malformed_brief');
   }
   const row = table.rows.find((candidate) => candidate.kind === kind);
@@ -103,49 +111,6 @@ function decide({ kind, level, brief }, table) {
 
 function askFor(reason) {
   return { action: 'ask', reason: reason };
-}
-
-function isRecord(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function hasFieldsOfType(record, names, typeName) {
-  return isRecord(record) && names.every((name) => typeof record[name] === typeName);
-}
-
-function isWellFormedOption(option) {
-  return hasFieldsOfType(option, ['id', 'summary', 'steel_man', 'straw_man', 'effort', 'value'], 'string')
-    && typeof option.reversible === 'boolean';
-}
-
-function isWellFormedAssumption(assumption) {
-  return hasFieldsOfType(assumption, ['statement', 'origin', 'evidence'], 'string')
-    && ['user', 'repo', 'assumed'].indexOf(assumption.origin) !== -1;
-}
-
-function isWellFormedBrief(brief) {
-  if (!isRecord(brief) || typeof brief.problem !== 'string') {
-    return false;
-  }
-  if (brief.verbatim !== undefined && typeof brief.verbatim !== 'string') {
-    return false;
-  }
-  if (!hasFieldsOfType(brief.criticality, ['level', 'likelihood', 'blast_radius', 'if_ignored'], 'string')) {
-    return false;
-  }
-  if (!Array.isArray(brief.options) || brief.options.length === 0 || !brief.options.every(isWellFormedOption)) {
-    return false;
-  }
-  if (!hasFieldsOfType(brief.recommendation, ['option_id', 'strength', 'why'], 'string')) {
-    return false;
-  }
-  if (['strong', 'weak', 'none'].indexOf(brief.recommendation.strength) === -1) {
-    return false;
-  }
-  if (!Array.isArray(brief.assumptions) || !brief.assumptions.every(isWellFormedAssumption)) {
-    return false;
-  }
-  return hasFieldsOfType(brief.gate, ['irreversible', 'architectural', 'safety'], 'boolean');
 }
 
 function isRecommendedOptionIrreversible(brief) {

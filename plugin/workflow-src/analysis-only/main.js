@@ -188,7 +188,7 @@ function resolveQuestions(questions, level) {
   const asks = [];
   const taken = [];
   for (const brief of questions) {
-    const decision = decide({ kind: QUESTION_KIND, level: level, brief: brief }, AUTONOMY_TABLE);
+    const decision = decide({ kind: QUESTION_KIND, level: level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA);
     if (decision.action === 'take') {
       taken.push({ brief: brief });
     } else {

@@ -5,6 +5,7 @@
  *   node tools/build_workflows.mjs           write every built script
  *   node tools/build_workflows.mjs --check   rebuild in memory and exit 1
  *                                            when a committed script is stale
+ *                                            or has no source directory
  *
  * Sources
  *   Workflow ids are the directories of plugin/workflow-src/ other than lib.
@@ -18,6 +19,8 @@
  *   require( outside comments and strings, and declares each top-level
  *   function once, or the build throws.
  *   --check compares with the committed file after stripping CR.
+ *   --check lists plugin/workflows/*.js, never the .json engine files, and
+ *   names each one with no plugin/workflow-src/<id>/ directory as an orphan.
  *
  * Why
  *   A running workflow script cannot import or read files, so the build
@@ -31,7 +34,7 @@ const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const REBUILD_COMMAND = 'node tools/build_workflows.mjs';
 const SOURCE_DIR = 'plugin/workflow-src';
 const OUTPUT_DIR = 'plugin/workflows';
-const LIB_FILES = ['decide.js', 'brief.js', 'result.js'];
+const LIB_FILES = ['schema.js', 'decide.js', 'brief.js', 'result.js'];
 const DATA_CONSTANTS = [
   { name: 'AUTONOMY_TABLE', path: 'plugin/references/decision-autonomy-table.json' },
   { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json' }
@@ -156,6 +159,19 @@ function isStale(root, id) {
   return !existsSync(join(root, builtPath)) || readSource(root, builtPath) !== buildWorkflow(root, id);
 }
 
+export function findOrphanWorkflowIds(root) {
+  const workflowIds = discoverWorkflowIds(root);
+  return readdirSync(join(root, OUTPUT_DIR), { withFileTypes: true })
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
+    .map((entry) => entry.name.slice(0, -'.js'.length))
+    .filter((id) => !workflowIds.includes(id))
+    .sort();
+}
+
+function describeOrphan(id) {
+  return builtPathFor(id) + ' is an orphan: there is no ' + SOURCE_DIR + '/' + id + '/ source directory. Add the source or remove the script.';
+}
+
 export function findStaleWorkflows(root) {
   return discoverWorkflowIds(root).filter((id) => isStale(root, id)).map(builtPathFor);
 }
@@ -170,7 +186,7 @@ export function writeWorkflows(root) {
 
 /**
  * Runs the command line. Returns the exit code: 0 on success, 1 when --check
- * finds a stale script, 2 on an unknown argument.
+ * finds a stale or orphan script, 2 on an unknown argument.
  */
 export function runCli(argv, { root, stdout, stderr }) {
   const unknown = argv.filter((arg) => arg !== '--check');
@@ -180,8 +196,10 @@ export function runCli(argv, { root, stdout, stderr }) {
   }
   if (argv.includes('--check')) {
     const stale = findStaleWorkflows(root);
+    const orphanIds = findOrphanWorkflowIds(root);
     stale.forEach((builtPath) => stderr.write(builtPath + ' is stale. Rebuild with: ' + REBUILD_COMMAND + '\n'));
-    return stale.length > 0 ? 1 : 0;
+    orphanIds.forEach((id) => stderr.write(describeOrphan(id) + '\n'));
+    return stale.length > 0 || orphanIds.length > 0 ? 1 : 0;
   }
   writeWorkflows(root).forEach((builtPath) => stdout.write('wrote ' + builtPath + '\n'));
   return 0;

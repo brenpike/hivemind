@@ -12,6 +12,7 @@ export const meta = {
  *   plugin/workflow-src/analysis-only/meta.js
  *   plugin/references/decision-autonomy-table.json
  *   plugin/references/decision-brief-schema.json
+ *   plugin/workflow-src/lib/schema.js
  *   plugin/workflow-src/lib/decide.js
  *   plugin/workflow-src/lib/brief.js
  *   plugin/workflow-src/lib/result.js
@@ -469,17 +470,199 @@ const BRIEF_SCHEMA = {
 };
 
 /*
+ * schema.js: checks a value against the JSON Schema subset the decision
+ * brief schema uses.
+ *
+ * Inputs
+ *   validateSchema(schema, value)
+ *     schema  a JSON Schema object (BRIEF_SCHEMA once built).
+ *     value   any value, such as a decision brief from the model.
+ *   supportedSchemaKeywords()
+ *     no input.
+ *
+ * Outputs
+ *   validateSchema  {ok, errors}. errors lists one string per violation,
+ *                   each naming the path from '$' and the failed keyword.
+ *                   ok is true only when errors is empty.
+ *   supportedSchemaKeywords  every keyword validateSchema accepts.
+ *
+ * Invariants
+ *   Pure: no clock, no randomness, no I/O. The schema is a parameter.
+ *   Validation keywords: type (one string), enum, required, properties,
+ *   additionalProperties (false only), items, minItems. Annotation keywords
+ *   $schema, title and description are accepted and change nothing.
+ *   Fails closed: the whole schema is walked before the value is read, and
+ *   any other keyword, a non-object schema, or a keyword value of the wrong
+ *   shape throws. A schema edit that adds a keyword cannot pass unchecked.
+ *   A property whose value is undefined counts as absent, as it does in JSON.
+ *   type object means a plain object: not null and not an array.
+ *   When type fails, the other keywords at that path are not checked.
+ *
+ * Why
+ *   A brief is written by a model and read by decide(). A hand-kept check
+ *   drifts from the schema one field at a time. Checking against the schema
+ *   itself keeps the two the same by construction.
+ */
+
+function supportedSchemaKeywords() {
+  return [
+    '$schema',
+    'title',
+    'description',
+    'type',
+    'enum',
+    'required',
+    'properties',
+    'additionalProperties',
+    'items',
+    'minItems'
+  ];
+}
+
+function schemaTypeNames() {
+  return ['object', 'array', 'string', 'boolean', 'number', 'integer', 'null'];
+}
+
+function validateSchema(schema, value) {
+  assertSupportedSchema(schema, '$');
+  const errors = [];
+  collectSchemaErrors(schema, value, '$', errors);
+  return { ok: errors.length === 0, errors: errors };
+}
+
+function isSchemaRecord(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function failSchema(path, message) {
+  throw new Error('validateSchema: ' + path + ': ' + message);
+}
+
+function assertSupportedSchema(schema, path) {
+  if (!isSchemaRecord(schema)) {
+    failSchema(path, 'schema must be an object');
+  }
+  for (const keyword of Object.keys(schema)) {
+    if (supportedSchemaKeywords().indexOf(keyword) === -1) {
+      failSchema(path, 'unsupported keyword ' + keyword);
+    }
+  }
+  assertKeywordShapes(schema, path);
+  if (schema.properties !== undefined) {
+    for (const name of Object.keys(schema.properties)) {
+      assertSupportedSchema(schema.properties[name], path + '.' + name);
+    }
+  }
+  if (schema.items !== undefined) {
+    assertSupportedSchema(schema.items, path + '[]');
+  }
+}
+
+function isPrimitiveEnumValue(candidate) {
+  return candidate === null || ['string', 'number', 'boolean'].indexOf(typeof candidate) !== -1;
+}
+
+function assertKeywordShapes(schema, path) {
+  if (schema.type !== undefined && schemaTypeNames().indexOf(schema.type) === -1) {
+    failSchema(path, 'type must be one of ' + schemaTypeNames().join(', '));
+  }
+  if (schema.enum !== undefined && !(Array.isArray(schema.enum) && schema.enum.every(isPrimitiveEnumValue))) {
+    failSchema(path, 'enum must be an array of strings, numbers, booleans or null');
+  }
+  const requiredIsValid = Array.isArray(schema.required) && schema.required.every((name) => typeof name === 'string');
+  if (schema.required !== undefined && !requiredIsValid) {
+    failSchema(path, 'required must be an array of strings');
+  }
+  if (schema.properties !== undefined && !isSchemaRecord(schema.properties)) {
+    failSchema(path, 'properties must be an object');
+  }
+  if (schema.additionalProperties !== undefined && schema.additionalProperties !== false) {
+    failSchema(path, 'additionalProperties must be false');
+  }
+  if (schema.minItems !== undefined && !(Number.isInteger(schema.minItems) && schema.minItems >= 0)) {
+    failSchema(path, 'minItems must be a non-negative integer');
+  }
+}
+
+function matchesSchemaType(typeName, value) {
+  if (typeName === 'object') {
+    return isSchemaRecord(value);
+  }
+  if (typeName === 'array') {
+    return Array.isArray(value);
+  }
+  if (typeName === 'null') {
+    return value === null;
+  }
+  if (typeName === 'integer') {
+    return Number.isInteger(value);
+  }
+  if (typeName === 'number') {
+    return typeof value === 'number' && Number.isFinite(value);
+  }
+  return typeof value === typeName;
+}
+
+function listPresentKeys(record) {
+  return Object.keys(record).filter((name) => record[name] !== undefined);
+}
+
+function collectSchemaErrors(schema, value, path, errors) {
+  if (schema.type !== undefined && !matchesSchemaType(schema.type, value)) {
+    errors.push(path + ': type ' + schema.type + ' expected');
+    return;
+  }
+  if (schema.enum !== undefined && schema.enum.indexOf(value) === -1) {
+    errors.push(path + ': enum: not one of ' + schema.enum.join(', '));
+  }
+  if (isSchemaRecord(value)) {
+    collectObjectErrors(schema, value, path, errors);
+  }
+  if (Array.isArray(value)) {
+    collectArrayErrors(schema, value, path, errors);
+  }
+}
+
+function collectObjectErrors(schema, record, path, errors) {
+  const presentKeys = listPresentKeys(record);
+  const properties = schema.properties === undefined ? {} : schema.properties;
+  for (const name of schema.required === undefined ? [] : schema.required) {
+    if (presentKeys.indexOf(name) === -1) {
+      errors.push(path + ': required: missing ' + name);
+    }
+  }
+  for (const name of presentKeys) {
+    const isListed = Object.prototype.hasOwnProperty.call(properties, name);
+    if (isListed) {
+      collectSchemaErrors(properties[name], record[name], path + '.' + name, errors);
+    } else if (schema.additionalProperties === false) {
+      errors.push(path + ': additionalProperties: unexpected ' + name);
+    }
+  }
+}
+
+function collectArrayErrors(schema, list, path, errors) {
+  if (schema.minItems !== undefined && list.length < schema.minItems) {
+    errors.push(path + ': minItems: fewer than ' + schema.minItems + ' items');
+  }
+  if (schema.items !== undefined) {
+    list.forEach((item, index) => collectSchemaErrors(schema.items, item, path + '[' + index + ']', errors));
+  }
+}
+
+/*
  * decide.js: the only place an autonomy decision is resolved.
  *
  * Inputs
  *   resolveLevel(value, table)
  *     value  the autonomy level asked for. May be absent.
  *     table  the parsed decision autonomy table (AUTONOMY_TABLE once built).
- *   decide({kind, level, brief}, table)
+ *   decide({kind, level, brief}, table, schema)
  *     kind   the decision kind. Fixed by the call site in code.
  *     level  the autonomy level. Resolved through resolveLevel.
- *     brief  a decision brief shaped by the decision brief schema.
+ *     brief  a decision brief, checked against schema.
  *     table  as above.
+ *     schema the parsed decision brief schema (BRIEF_SCHEMA once built).
  *
  * Outputs
  *   resolveLevel  table.default_level when value is undefined, null or the
@@ -489,23 +672,29 @@ const BRIEF_SCHEMA = {
  *   decisionReasons  every reason code decide can return, in check order.
  *
  * Invariants
- *   Pure: no clock, no randomness, no I/O. The table is a parameter.
+ *   Pure: no clock, no randomness, no I/O. The table and the schema are
+ *   parameters, never globals.
  *   Fails closed: each check runs in decisionReasons() order and the first
  *   one that fires makes it ask. It takes only when every check passes.
- *   brief.kind and brief.id are never read. The kind comes from the call site.
+ *   A missing schema, or one with a keyword validateSchema does not
+ *   support, throws on every call, so decide never takes on a partial check.
+ *   brief.kind and brief.id are checked by the schema but never pick the
+ *   rule. The kind comes from the call site.
  *   Criticality never makes it ask. A weak recommendation is taken.
  *   A recommended option with reversible false asks gate_irreversible, even
  *   when gate.irreversible is false: the option field is checked, not only
  *   the gate flag.
  *   An unknown level resolves to 'low', the most cautious level.
- *   A brief is malformed when a field decide or the renderer reads is missing
- *   or has the wrong type, when options is empty, or when
- *   recommendation.strength or an assumption origin is outside its enum.
+ *   A brief is malformed when validateSchema(schema, brief) reports any
+ *   error. Only the checks the schema cannot express are written here:
+ *   option ids are unique, recommendation.option_id names one of them,
+ *   strength none, and reversible false on the recommended option.
  *
  * Why
  *   The model that writes a brief must not pick the rule that lets it act.
  *   The rule is picked by the caller in code and resolved in one tested
- *   function, so every decision site behaves the same way.
+ *   function, so every decision site behaves the same way. The brief check
+ *   comes from the schema the model writes to, so the two cannot drift.
  */
 
 function decisionReasons() {
@@ -534,12 +723,13 @@ function resolveLevel(value, table) {
   return 'low';
 }
 
-function decide({ kind, level, brief }, table) {
+function decide({ kind, level, brief }, table, schema) {
+  const briefCheck = validateSchema(schema, brief);
   const resolvedLevel = resolveLevel(level, table);
   if (table.hard_stops.some((stop) => stop.hard_stop === kind)) {
     return askFor('hard_stop');
   }
-  if (!isWellFormedBrief(brief)) {
+  if (!briefCheck.ok) {
     return askFor('malformed_brief');
   }
   const row = table.rows.find((candidate) => candidate.kind === kind);
@@ -573,49 +763,6 @@ function decide({ kind, level, brief }, table) {
 
 function askFor(reason) {
   return { action: 'ask', reason: reason };
-}
-
-function isRecord(value) {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function hasFieldsOfType(record, names, typeName) {
-  return isRecord(record) && names.every((name) => typeof record[name] === typeName);
-}
-
-function isWellFormedOption(option) {
-  return hasFieldsOfType(option, ['id', 'summary', 'steel_man', 'straw_man', 'effort', 'value'], 'string')
-    && typeof option.reversible === 'boolean';
-}
-
-function isWellFormedAssumption(assumption) {
-  return hasFieldsOfType(assumption, ['statement', 'origin', 'evidence'], 'string')
-    && ['user', 'repo', 'assumed'].indexOf(assumption.origin) !== -1;
-}
-
-function isWellFormedBrief(brief) {
-  if (!isRecord(brief) || typeof brief.problem !== 'string') {
-    return false;
-  }
-  if (brief.verbatim !== undefined && typeof brief.verbatim !== 'string') {
-    return false;
-  }
-  if (!hasFieldsOfType(brief.criticality, ['level', 'likelihood', 'blast_radius', 'if_ignored'], 'string')) {
-    return false;
-  }
-  if (!Array.isArray(brief.options) || brief.options.length === 0 || !brief.options.every(isWellFormedOption)) {
-    return false;
-  }
-  if (!hasFieldsOfType(brief.recommendation, ['option_id', 'strength', 'why'], 'string')) {
-    return false;
-  }
-  if (['strong', 'weak', 'none'].indexOf(brief.recommendation.strength) === -1) {
-    return false;
-  }
-  if (!Array.isArray(brief.assumptions) || !brief.assumptions.every(isWellFormedAssumption)) {
-    return false;
-  }
-  return hasFieldsOfType(brief.gate, ['irreversible', 'architectural', 'safety'], 'boolean');
 }
 
 function isRecommendedOptionIrreversible(brief) {
@@ -1190,7 +1337,7 @@ function resolveQuestions(questions, level) {
   const asks = [];
   const taken = [];
   for (const brief of questions) {
-    const decision = decide({ kind: QUESTION_KIND, level: level, brief: brief }, AUTONOMY_TABLE);
+    const decision = decide({ kind: QUESTION_KIND, level: level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA);
     if (decision.action === 'take') {
       taken.push({ brief: brief });
     } else {
