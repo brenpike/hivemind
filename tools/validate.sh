@@ -60,6 +60,7 @@ SUITE_TEST_SEED_HIVE='test_seed_hive.sh'
 SUITE_TEST_RC_BROOD='test_rc_brood.sh'
 SUITE_TEST_NEXT_WAVE='test_next_wave.sh'
 SUITE_TEST_BUMP_TYPE='test_bump_type.sh'
+SUITE_TEST_PUSH_BRANCH='test_push_branch.sh'
 SUITE_TEST_VALIDATE_SUITES='test_validate_suites.sh'
 SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
 SUITE_TEST_SCRIPT_BOOTSTRAP='test_script_bootstrap.sh'
@@ -89,6 +90,7 @@ ALL_SUITES=(
   "$SUITE_TEST_RC_BROOD"
   "$SUITE_TEST_NEXT_WAVE"
   "$SUITE_TEST_BUMP_TYPE"
+  "$SUITE_TEST_PUSH_BRANCH"
   "$SUITE_TEST_VALIDATE_SUITES"
   "$SUITE_TEST_CHANGE_DETECT_POLL"
   "$SUITE_TEST_SCRIPT_BOOTSTRAP"
@@ -119,6 +121,7 @@ KNOWN_SUITES=(
   test_rc_brood.sh
   test_next_wave.sh
   test_bump_type.sh
+  test_push_branch.sh
   test_validate_suites.sh
   test_change_detect_poll.sh
   test_script_bootstrap.sh
@@ -320,6 +323,8 @@ run_suites() {
 #                                         generic globs)
 #   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
+#   plugin/skills/push-branch/**, plugin/skills/_shared/allowlist.sh
+#                                      -> test_push_branch (allowlist.sh ALSO -> test_shared_libs)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
 #   plugin/workflow-src/**, plugin/workflows/*.js, plugin/agents/overlord.md,
 #     plugin/references/decision-autonomy-table.json, plugin/references/decision-brief-schema.json,
@@ -517,6 +522,19 @@ map_path() {
   if [[ "$p" == plugin/skills/bump-type/* \
      || "$p" == plugin/skills/_shared/bump-type-derive.sh ]]; then
     add_selected "$SUITE_TEST_BUMP_TYPE" "$p (bump-type engine skill/derive core)"
+    matched=1
+  fi
+
+  # test_push_branch: the push-branch skill (SKILL.md + scripts/push-branch.sh entrypoint) and the
+  # shared allowlist gate it sources (_shared/allowlist.sh). Both are ALSO plugin/* files
+  # (policy_check prose-lints them via the wholesale rule below), but policy_check NEVER EXECUTES
+  # bash — so without this rule a push-branch edit would only be prose-linted, never behaviorally
+  # exercised. allowlist.sh ALSO keeps its _shared/*.sh -> test_shared_libs routing above (same
+  # precedent as bump-type-derive.sh: a _shared lib routed to more than one behavior oracle).
+  # (tools/test_push_branch.sh itself is covered by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/push-branch/* \
+     || "$p" == plugin/skills/_shared/allowlist.sh ]]; then
+    add_selected "$SUITE_TEST_PUSH_BRANCH" "$p (push-branch skill/allowlist gate)"
     matched=1
   fi
 
@@ -1019,6 +1037,7 @@ self_test() {
     ["test_rc_brood.sh"]="plugin/skills/enable-brood-remote/SKILL.md"
     ["test_next_wave.sh"]="tests/next-wave/ledger-x.json"
     ["test_bump_type.sh"]="plugin/skills/bump-type/scripts/bump-type.sh"
+    ["test_push_branch.sh"]="plugin/skills/push-branch/scripts/push-branch.sh"
     ["test_validate_suites.sh"]="tools/test_validate_suites.sh"
     ["test_change_detect_poll.sh"]="tests/change-detect-poll/README.md"
     ["test_script_bootstrap.sh"]="plugin/skills/_shared/claude-mem-path.sh"

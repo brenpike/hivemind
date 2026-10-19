@@ -16,7 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Skills and agents no longer paste git identifiers straight into shell commands. A new Shell Identifier Discipline section in the security policy holds the one rule: a branch, base, remote, SHA or PR reference is either captured out of band into a shell variable and used only as `"$var"`, or passes an identifier gate before the Bash call, and a value that fails stops with a blocker that does not echo it. open-plan-pr (push, force-with-lease retry, `gh pr create --base`, final PR check), create-working-branch and github-reviewer now follow it, and push-branch points to it. Two policy fixtures pin the rule and the capture forms. The remaining paste sites are tracked in #416. Fixes #413.
+- Skills and agents no longer paste git identifiers straight into shell commands. A new Shell Identifier Discipline section in the security policy holds the one rule: a branch, base, remote, SHA or PR reference is either captured out of band into a shell variable and used only as `"$var"`, or passes an identifier gate before the Bash call, and a value that fails stops with a blocker that does not echo it. Fixes #413.
+- Every push (push-branch, open-plan-pr and github-reviewer) now runs through one committed script, `push-branch.sh`. It reads the branch, push remote and upstream once and checks them in the same process as the push and the force-with-lease retry, so no check from an earlier call is assumed. It always pushes the branch to its own name on an explicit remote.
+- open-plan-pr and create-working-branch gate their inputs. github-reviewer gates `pr`, `working_branch` and `base` and pushes through the script; its later lifecycle calls (steps 2, 5 and 8) and the other remaining paste sites are tracked in #416.
+- Policy fixtures pin the rule and the capture forms, and a behavior test covers the push script, including config and HEAD drift during a push.
 
 ## [6.0.1] - 2026-10-19
 

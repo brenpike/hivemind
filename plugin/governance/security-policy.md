@@ -62,7 +62,7 @@ Capture out-of-band whenever a command can produce the identifier inside the sam
 
 Identifier gate: a branch, base, or remote name matches `^[A-Za-z0-9._/-]+$`, is non-empty, does not start with `-`, and contains no `..`; a PR reference is a PR number matching `^[0-9]+$` or a PR URL matching `^https://[A-Za-z0-9._/-]+$`.
 
-Each Bash call is a fresh shell: a captured value is used inside the call that captured it, and a later call re-derives it rather than pasting it.
+Each Bash call is a fresh shell: a captured value is used inside the call that captured it, and a later call re-derives it rather than pasting it. A check made in one Bash call does not carry into the next, so a push runs in the same call, or the same committed script, as every check on the ref it writes.
 
 Consumers: `hivemind:push-branch`, `hivemind:open-plan-pr`, `hivemind:create-working-branch`, `hivemind:github-reviewer`. `hivemind:spawn-brood` and `hivemind:brood-status` apply the same gate to `branch` and `base` per Brood Spawn Bypass-Mode Mitigation control 3 above.
 
