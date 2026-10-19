@@ -225,24 +225,29 @@ describe('analysis-only: pause and resume', () => {
 });
 
 describe('analysis-only: autonomy level', () => {
-  test('level low asks a strongly recommended question', async () => {
-    const run = await runWorkflow({ request: REQUEST, autonomy: 'low' }, { analyze: makeAnalysis({ questions: [makeBrief()] }) });
-    assert.equal(run.result.needs_user, true);
-    assert.ok(run.result.message.includes(SURFACE_LINE));
-    assert.deepEqual(run.result.resume_args, { request: REQUEST, autonomy: 'low', answers: {} });
-  });
   test('the default level takes a strongly recommended question', async () => {
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [makeBrief()] }) });
     assert.equal(run.result.needs_user, false);
     assert.equal(run.result.outcome, 'complete');
   });
-  for (const invalid of ['max', 'HIGH', 7]) {
-    test(`invalid level ${JSON.stringify(invalid)} acts as low`, async () => {
-      const run = await runWorkflow({ request: REQUEST, autonomy: invalid }, { analyze: makeAnalysis({ questions: [makeBrief()] }) });
-      assert.equal(run.result.needs_user, true);
-      assert.ok(run.result.message.includes(SURFACE_LINE));
+  for (const autonomy of ['low', 'high', 'max', 7]) {
+    test(`an autonomy arg ${JSON.stringify(autonomy)} is ignored, so the run acts as default`, async () => {
+      const results = { analyze: makeAnalysis({ questions: [makeBrief()] }) };
+      const withArg = await runWorkflow({ request: REQUEST, autonomy: autonomy }, results);
+      const withoutArg = await runWorkflow({ request: REQUEST }, results);
+      assert.deepEqual(withArg.result, withoutArg.result);
+      assert.equal(withArg.result.needs_user, false);
+      assert.ok(!withArg.result.message.includes(SURFACE_LINE));
     });
   }
+  test('resume_args has no autonomy key when the launch args carry one', async () => {
+    const results = { analyze: makeAnalysis({ questions: [makeGatedBrief('GATED_PROBLEM')] }) };
+    const run = await runWorkflow({ request: REQUEST, autonomy: 'low' }, results);
+    assert.equal(run.result.needs_user, true);
+    assert.deepEqual(run.result.resume_args, { request: REQUEST, answers: {} });
+    const resumed = await runWorkflow({ ...run.result.resume_args, autonomy: 'low', reply: 'REPLY_ONE' }, { ...results, 'revise-1': makeAnalysis() });
+    assert.equal(resumed.result.outcome, 'complete');
+  });
   test('the brief kind never picks the rule', async () => {
     const hardStopKind = makeBrief({ kind: 'destructive_fix_gate' });
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [hardStopKind] }) });

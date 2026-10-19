@@ -931,6 +931,9 @@ function renderYesNo(value) {
  *   resume_args is the only state that crosses a pause, so the workflow keeps
  *   its pause count and earlier answers there, in fields it alone reads.
  *   resume_args never has a reply key, so a stale reply cannot be replayed.
+ *   The overlord is a trusted relay, so a workflow trusts resume_args as its
+ *   own echo and does not authenticate it. A forged resume_args gains
+ *   nothing the overlord could not get by misquoting the reply.
  *   Invalid input throws instead of returning a partial result.
  *
  * Why
@@ -1003,7 +1006,7 @@ function assertMessageAndDecisions(caller, message, decisions) {
  * Inputs
  *   args   the Workflow args global. One of:
  *            a string: the request itself (slash-command form);
- *            an object {request, autonomy?, answers?, reply?};
+ *            an object {request, answers?, reply?};
  *            undefined.
  *          answers is this script's own field: it comes only from the
  *          resume_args of an earlier pause, holds the reply to round N as
@@ -1011,7 +1014,9 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *          reply is the user's reply to that pause, per the result.js
  *          contract. It answers the first round with no stored answer, and
  *          only when answers is present, since that marks a pending pause.
- *          A top-level 'round-N' key is not read.
+ *          A top-level 'round-N' key is not read. An autonomy key is not
+ *          read: the level is always the table's default_level until the
+ *          user-set level comes in slice 3 (ADR-0036 decision 8).
  *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
  *
  * Outputs
@@ -1029,15 +1034,18 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *   lists the questions still open. Open questions never end it blocked:
  *   only a missing request, a null planner result or a planner outcome
  *   'blocked' does.
- *   No run record: resume_args carries the request, the autonomy value and
- *   every reply so far, which is all a resumed run needs. It always has
- *   answers, so a relaunch with it is a resume, and never has reply.
+ *   No run record: resume_args carries the request and every reply so far,
+ *   which is all a resumed run needs. It always has answers, so a relaunch
+ *   with it is a resume, and never has reply or an autonomy key.
  *   A reply is ignored when no pause is pending: when the run was not
  *   launched with answers, or when it finishes before it reaches a round
  *   with no stored answer.
- *   Residual: answers is trusted as this script's own resume_args echo. The
- *   overlord passes resume_args back unchanged, so the script does not check
- *   that each stored answer came from a real pause.
+ *   Trust boundary: the overlord is a trusted relay. It already chooses the
+ *   request it launches with, so args, including resume_args and its stored
+ *   answers, are trusted as this script's own echo. A script has no secret
+ *   or I/O to authenticate that state, and a forged answer gains nothing the
+ *   overlord could not get by misquoting the reply. Resume-state tampering
+ *   is by design, not a defect (ADR-0036 decision 13).
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -1117,12 +1125,8 @@ function readPendingReply(argsObject) {
 }
 
 function buildResumeArgs(argsObject, replies) {
-  const resumeArgs = { request: argsObject.request };
-  if (argsObject.autonomy !== undefined) {
-    resumeArgs.autonomy = argsObject.autonomy;
-  }
-  resumeArgs.answers = Object.fromEntries(replies.map((reply, index) => [roundKey(index + 1), reply]));
-  return resumeArgs;
+  const answers = Object.fromEntries(replies.map((reply, index) => [roundKey(index + 1), reply]));
+  return { request: argsObject.request, answers: answers };
 }
 
 function formatDataBlock(name, text) {
@@ -1214,7 +1218,7 @@ async function runAnalysis(rawArgs) {
   if (!isNonEmptyString(argsObject.request)) {
     return finishBlocked('No request was given, so there is nothing to analyze.');
   }
-  const level = resolveLevel(argsObject.autonomy, AUTONOMY_TABLE);
+  const level = resolveLevel(undefined, AUTONOMY_TABLE);
   const storedAnswers = readStoredAnswers(argsObject);
   let pendingReply = readPendingReply(argsObject);
   const replies = [];

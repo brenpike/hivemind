@@ -40,6 +40,9 @@
  *   resume_args is the only state that crosses a pause, so the workflow keeps
  *   its pause count and earlier answers there, in fields it alone reads.
  *   resume_args never has a reply key, so a stale reply cannot be replayed.
+ *   The overlord is a trusted relay, so a workflow trusts resume_args as its
+ *   own echo and does not authenticate it. A forged resume_args gains
+ *   nothing the overlord could not get by misquoting the reply.
  *   Invalid input throws instead of returning a partial result.
  *
  * Why
