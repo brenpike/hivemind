@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.0.2] - 2026-10-19
+
+### Fixed
+
+- Skills and agents no longer paste git identifiers straight into shell commands. A new Shell Identifier Discipline section in the security policy holds the one rule: a branch, base, remote, SHA or PR reference is either captured out of band into a shell variable and used only as `"$var"`, or passes an identifier gate before the Bash call, and a value that fails stops with a blocker that does not echo it. open-plan-pr (push, force-with-lease retry, `gh pr create --base`, final PR check), create-working-branch and github-reviewer now follow it, and push-branch points to it. Two policy fixtures pin the rule and the capture forms. The remaining paste sites are tracked in #416. Fixes #413.
+
 ## [6.0.1] - 2026-10-19
 
 ### Fixed
