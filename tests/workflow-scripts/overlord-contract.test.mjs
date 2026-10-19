@@ -40,6 +40,7 @@ function readSection(body, heading) {
 
 const { frontmatter, body } = splitFrontmatter(overlordText);
 const engineSection = readSection(body, '## Engine');
+const cutNoticeParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The harness may cut')) ?? '';
 
 describe('overlord frontmatter tools', () => {
   const toolNames = readToolNames(frontmatter);
@@ -78,30 +79,39 @@ describe('overlord Engine section', () => {
     assert.ok(!engineSection.includes('answer_key'));
   });
   test('Engine reads the output file with the Read tool, never Bash, when the notice is cut', () => {
-    assert.ok(engineSection.includes('with the Read tool, never Bash'));
-  });
-  test('Engine says the notice can be cut or not parse and names the output file the notice names', () => {
-    assert.ok(engineSection.includes('may cut the result in the completion notice'));
-    assert.ok(engineSection.includes('is cut, or does not parse'));
-    assert.ok(engineSection.includes('read the output file the notice names'));
-  });
-  test('Engine takes message, needs_user and resume_args from the result object in the output file', () => {
-    assert.ok(engineSection.includes('take `message`, `needs_user` and `resume_args` from the `result` object in that file'));
+    assert.ok(engineSection.includes('When `message` is cut, read the output file the notice names with the Read tool, never Bash, for the full `message`'));
   });
   test('Engine ties the cut-notice trigger, the Read of the output file and the same handling in one rule', () => {
-    assert.ok(engineSection.includes('When the notice is cut, or does not parse, read the output file the notice names with the Read tool, never Bash, and take `message`, `needs_user` and `resume_args` from the `result` object in that file. That is the same result, uncut; handle it as above.'));
+    assert.ok(cutNoticeParagraph.includes('may cut the end of the result in the completion notice'));
+    assert.ok(cutNoticeParagraph.includes('`needs_user` and `resume_args` come before `message`, so act on them from the notice'));
+    assert.ok(cutNoticeParagraph.includes('When `message` is cut, read the output file the notice names with the Read tool, never Bash, for the full `message`'));
+  });
+  test('Engine cut-notice rule does not stop the resume or fall back', () => {
+    assert.notEqual(cutNoticeParagraph, '', '## Engine has a paragraph starting The harness may cut');
+    for (const phrase of ['do not resume', 'fall back', 'state machine']) {
+      assert.ok(!cutNoticeParagraph.includes(phrase), `cut-notice paragraph contains ${phrase}`);
+    }
+  });
+  test('result puts needs_user and resume_args before message, and message last', () => {
+    const pausedKeys = [...Object.keys(resultLib.pauseForUser({ message: 'Q?', resumeArgs: { request: 'R' }, decisions: [] }))];
+    const finishedKeys = [...Object.keys(resultLib.finish({ outcome: 'complete', message: 'done', decisions: [] }))];
+    for (const resultKeys of [pausedKeys, finishedKeys]) {
+      assert.ok(resultKeys.indexOf('needs_user') < resultKeys.indexOf('message'), `keys are ${JSON.stringify(resultKeys)}`);
+      assert.equal(resultKeys.at(-1), 'message', `keys are ${JSON.stringify(resultKeys)}`);
+    }
+    assert.ok(pausedKeys.indexOf('resume_args') < pausedKeys.indexOf('message'), `keys are ${JSON.stringify(pausedKeys)}`);
   });
   test('Engine names Bash only to forbid it', () => {
     const bashCount = (engineSection.match(/Bash/g) ?? []).length;
     const neverBashCount = (engineSection.match(/never Bash/g) ?? []).length;
     assert.equal(bashCount, neverBashCount, 'every Bash in ## Engine is a never Bash');
   });
-  test('Engine reports a failed output-file recovery and does not resume', () => {
-    assert.ok(engineSection.includes('Unless that Read succeeds and the file holds a `result` object, say so in one line, show what the notice holds, and do not resume.'));
+  test('Engine reports a failed output-file Read and shows the message the notice holds', () => {
+    assert.ok(cutNoticeParagraph.includes('If that Read fails, say so in one line and show the message as the notice holds it.'));
   });
   test('Engine states the fallback clause', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));
     assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
-    assert.ok(engineSection.includes('does not fall back'));
+    assert.ok(engineSection.includes('A run that started, then failed or ended blocked, is reported as it ended and does not fall back.'));
   });
 });
