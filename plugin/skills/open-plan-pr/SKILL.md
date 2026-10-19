@@ -6,7 +6,6 @@ allowed-tools:
   - Bash(git branch *)
   - Bash(git log *)
   - Bash(git diff *)
-  - Bash(git rev-parse *)
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh *)
   - Bash(gh pr create *)
   - Bash(gh pr view *)
@@ -25,7 +24,7 @@ Before:
 - [ ] No unexpected unstaged changes
 
 After:
-- [ ] PR head SHA matches local HEAD
+- [ ] PR head branch and SHA match `head` and the step 6 `commit:` line
 - [ ] PR created with `--base` targeting resolved trunk
 - [ ] This skill's procedure ended at its own final Bash tool call (exit 0 = succeeded, exit 1 = blocked)
 
@@ -49,28 +48,29 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 2. Confirm no unexpected unstaged changes.
 3. Confirm validation outcome per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) is one of: every declared command passed, OR `Not run (no validation commands defined)`. Exit 1 with blocker if the procedure returned the Worker Report — Blocked (`stage: validation`) or any declared command failed.
 4. Confirm required version/release metadata is included or not required.
-5. Capture local HEAD SHA: `git rev-parse HEAD`. Step 6 pushes this commit and reports it on its `commit:` line, since nothing between steps 5 and 6 commits.
+5. The commit the PR must carry is the step 6 script's `commit:` line: the object id the script pushed, or on a warning path the one it would have pushed. No Bash call reads HEAD for it, before or after the push, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline).
 6. Place the working branch on its remote in ONE Bash call to the push-branch script, where `<allowlist-validated-head>`, `<allowlist-validated-base>` and `<allowlist-validated-remote>` are the `head`, `base` and `push_remote` values that passed the input gate. Pass `--remote` only when `push_remote` is provided:
    ```bash
    bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject warn --no-upstream origin
    ```
    Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline).
    - exit 1: blocked. The script's `blocker:` line on stderr is the reason.
-   - exit 0 with a `warning:` line: record it as a warning and continue to step 7. `gh pr create` may route to a fork or alternate remote, or prompt for a push target when no `origin` remote exists.
+   - exit 0 with a `warning:` line: record it as a warning and continue to step 7. Non-interactive `gh pr create` neither pushes nor prompts: it proceeds only when it finds the branch on a remote at the local commit, and otherwise stops.
    - exit 0 without a `warning:` line: the branch is on its remote; continue to step 7.
-7. Run `gh pr create --base <allowlist-validated-base> ...`, where `<allowlist-validated-base>` is the `base` value that passed the input gate, with title, summary, validation notes, version/release notes, and unresolved issues. Do not pass `--head` — `--head` makes `gh` skip its push/fork fallback, which defeats step 6's fork-based and unpushed-branch handling. `gh pr create` uses the current branch as head by default; the step 6 script already confirmed the current branch matches the intended `head`.
-8. **Final Bash tool call.** Verify PR head SHA matches local HEAD using allowed command patterns. Take the PR number from the trailing `/pull/<n>` segment of the step 7 URL and validate it against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before the Bash call; on failure, exit 1 with `blocker: PR number contains characters outside the safe allowlist`. Then run ONE Bash call, where `<allowlist-validated-pr-number>` is that validated PR number. HEAD is the step 5 SHA re-derived, since steps 6 and 7 never commit:
+7. Run `gh pr create --base <allowlist-validated-base> ...`, where `<allowlist-validated-base>` is the `base` value that passed the input gate, with title, summary, validation notes, version/release notes, and unresolved issues. Do not pass `--head`. Without `--head`, `gh` finds the head repository, including a fork, from the remote whose tracking ref matches the pushed commit, while `--head <branch>` names the base repository unless given `<owner>:<branch>`, which cannot be derived without parsing a remote URL. `gh` resolves the head itself, so step 8 checks the PR it created. See recorded residual R1 in `${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh`.
+8. **Final Bash tool call.** Verify the PR's head branch and head SHA against `head` and the step 6 commit. Take the PR number from the trailing `/pull/<n>` segment of the step 7 URL and validate it against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before the Bash call; on failure, exit 1 with `blocker: PR number contains characters outside the safe allowlist`. Take the commit from the step 6 `commit:` line and validate it as a commit SHA against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before the Bash call; on failure, exit 1 with `blocker: pushed commit is not a full commit SHA`. Then run ONE Bash call, where `<allowlist-validated-pr-number>` is that validated PR number, `<allowlist-validated-head>` is the `head` value that passed the input gate, and `<allowlist-validated-commit>` is that validated commit:
 
    ```bash
-   c="$(git rev-parse HEAD)"
+   n="$(gh pr view <allowlist-validated-pr-number> --json headRefName --jq '.headRefName')"
    p="$(gh pr view <allowlist-validated-pr-number> --json headRefOid --jq '.headRefOid')"
    u="$(gh pr view <allowlist-validated-pr-number> --json url --jq '.url')"
-   [ -n "$p" ] && [ -n "$u" ] || { printf 'blocker: could not read the PR head SHA or URL' >&2; exit 1; }
-   [ "$p" = "$c" ] || { printf 'blocker: PR head SHA mismatch, expected %s got %s' "$c" "$p" >&2; exit 1; }
+   [ -n "$n" ] && [ -n "$p" ] && [ -n "$u" ] || { printf 'blocker: could not read the PR head branch, head SHA, or URL' >&2; exit 1; }
+   [ "$n" = '<allowlist-validated-head>' ] || { printf 'blocker: PR head branch does not match head' >&2; exit 1; }
+   [ "$p" = '<allowlist-validated-commit>' ] || { printf 'blocker: PR head SHA mismatch, expected %s got %s' '<allowlist-validated-commit>' "$p" >&2; exit 1; }
    printf 'url: %s\nhead_ref_oid: %s\n' "$u" "$p"
    ```
 
-   On success (SHA matches), the YAML output (`url` + `head_ref_oid`) is the routing data. On mismatch, or when the PR head SHA or URL cannot be read, exits 1 with blocker in stderr.
+   On success (head branch matches `head` and head SHA matches the step 6 commit), the YAML output (`url` + `head_ref_oid`) is the routing data. Exits 1 with the blocker in stderr when the PR head branch, head SHA, or URL cannot be read (`blocker: could not read the PR head branch, head SHA, or URL`), when the head branch does not match `head` (`blocker: PR head branch does not match head`), or when the head SHA does not match the step 6 commit (`blocker: PR head SHA mismatch, ...`).
 
 ## Silence Discipline
 
