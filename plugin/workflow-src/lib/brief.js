@@ -8,11 +8,17 @@
  *     taken  array of {brief} for decisions decide() took. May be empty.
  *   renderDecisions(taken)
  *     taken  as above.
+ *   renderQuestionsCompact(asks, taken)
+ *     asks, taken  as for renderQuestions.
+ *   renderDecisionsCompact(taken)
+ *     taken  as above.
  *   askReasonLine(reason)
  *     reason an ask reason from decisionReasons(), other than 'auto'.
- *   renderOpenQuestions(open)
- *     open   non-empty array of {brief} for questions still unanswered when
- *            the run stops asking. Entries of asks fit.
+ *   renderOpenQuestions(open, stopReason)
+ *     open        non-empty array of {brief} for questions still unanswered
+ *                 when the run stops asking. Entries of asks fit.
+ *     stopReason  why the run stopped asking: 'pause_limit' (the default) or
+ *                 'reply_size'.
  *
  * Outputs
  *   renderQuestions  one message. Each ask becomes a question labelled Q1..Qn
@@ -27,10 +33,20 @@
  *     the user to reply in their own words.
  *   renderDecisions  the "Decided for you" block, labelled D1..Dn by
  *     position, or the empty string when taken is empty.
+ *   renderQuestionsCompact  the shorter form of renderQuestions, with the
+ *     same intro line, Q1..Qn labels and last line. Each question shows only
+ *     its problem and the recommendation with its why. Taken decisions
+ *     follow as renderDecisionsCompact, with the same line saying the user
+ *     can change them in the same reply.
+ *   renderDecisionsCompact  the "Decided for you" block with one line per
+ *     decision, labelled D1..Dn by position: problem, chosen option id and
+ *     why, without the option summary. The empty string when taken is empty.
  *   askReasonLine    one plain sentence for the reason.
- *   renderOpenQuestions  one block: a line saying the run stopped asking
- *     after pauseLimit() rounds, then one line per question labelled Q1..Qn
- *     by position, with its problem and the option the report assumes, or a
+ *   renderOpenQuestions  one block: a line saying why the run stopped
+ *     asking, either after pauseLimit() rounds ('pause_limit') or because
+ *     the replies so far are too long to carry into another round
+ *     ('reply_size'), then one line per question labelled Q1..Qn by
+ *     position, with its problem and the option the report assumes, or a
  *     line saying there is no recommendation.
  *
  * Invariants
@@ -40,9 +56,11 @@
  *   malformed brief still renders.
  *   No em dash and no markdown tables. An em dash inside a brief field is
  *   replaced by a comma. verbatim is shown exactly as given.
- *   Invalid arguments and unknown reasons throw.
- *   renderOpenQuestions calls pauseLimit() from result.js, so it runs only
- *   where result.js is loaded too, as in every built script.
+ *   Invalid arguments, unknown reasons and unknown stop reasons throw.
+ *   renderOpenQuestions with 'pause_limit' calls pauseLimit() from
+ *   result.js, so it runs only where result.js is loaded too, as in every
+ *   built script.
+ *   No size budget lives here: the caller picks the full or compact form.
  *
  * Why
  *   The user answers from this text alone, so every question carries what
@@ -78,6 +96,34 @@ function renderDecisions(taken) {
   return lines.join('\n');
 }
 
+function renderQuestionsCompact(asks, taken) {
+  if (!Array.isArray(asks) || asks.length === 0) {
+    throw new Error('renderQuestionsCompact: asks must be a non-empty array');
+  }
+  if (!Array.isArray(taken)) {
+    throw new Error('renderQuestionsCompact: taken must be an array');
+  }
+  const blocks = [renderIntroLine(asks.length)];
+  asks.forEach((entry, index) => blocks.push(renderCompactQuestion(entry, index)));
+  if (taken.length > 0) {
+    blocks.push(renderDecisionsCompact(taken) + '\nYou can change any of these in the same reply.');
+  }
+  blocks.push('Reply in your own words. You can point at a question by its label, like Q1.');
+  return blocks.join('\n\n');
+}
+
+function renderDecisionsCompact(taken) {
+  if (!Array.isArray(taken)) {
+    throw new Error('renderDecisionsCompact: taken must be an array');
+  }
+  if (taken.length === 0) {
+    return '';
+  }
+  const lines = ['Decided for you:'];
+  taken.forEach((entry, index) => lines.push(renderCompactDecision(entry, index)));
+  return lines.join('\n');
+}
+
 function askReasonLine(reason) {
   switch (reason) {
     case 'hard_stop':
@@ -105,13 +151,24 @@ function askReasonLine(reason) {
   }
 }
 
-function renderOpenQuestions(open) {
+function renderOpenQuestions(open, stopReason = 'pause_limit') {
   if (!Array.isArray(open) || open.length === 0) {
     throw new Error('renderOpenQuestions: open must be a non-empty array');
   }
-  const lines = ['I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:'];
+  const lines = [renderStopIntro(stopReason)];
   open.forEach((entry, index) => lines.push(renderOpenQuestion(entry, index)));
   return lines.join('\n');
+}
+
+function renderStopIntro(stopReason) {
+  switch (stopReason) {
+    case 'pause_limit':
+      return 'I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:';
+    case 'reply_size':
+      return 'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
+    default:
+      throw new Error('renderOpenQuestions: no intro for stop reason ' + JSON.stringify(stopReason));
+  }
 }
 
 function renderIntroLine(count) {
@@ -131,6 +188,14 @@ function renderQuestion(entry, index) {
   lines.push(...renderAssumptions(readField(brief, 'assumptions')));
   lines.push(...renderVerbatim(readField(brief, 'verbatim')));
   return lines.join('\n');
+}
+
+function renderCompactQuestion(entry, index) {
+  const brief = readField(entry, 'brief');
+  return [
+    'Q' + (index + 1) + '. ' + renderText(readField(brief, 'problem')),
+    renderRecommendation(readField(brief, 'recommendation'))
+  ].join('\n');
 }
 
 function renderSeriousness(criticality) {
@@ -222,6 +287,13 @@ function renderTakenDecision(entry, index) {
     '    Chose option ' + renderText(optionId) + ': ' + renderText(readField(chosen, 'summary')),
     '    Why: ' + renderText(readField(recommendation, 'why'))
   ].join('\n');
+}
+
+function renderCompactDecision(entry, index) {
+  const brief = readField(entry, 'brief');
+  const recommendation = readField(brief, 'recommendation');
+  return '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
+    + renderText(readField(recommendation, 'option_id')) + '. Why: ' + renderText(readField(recommendation, 'why'));
 }
 
 function findOptionById(options, optionId) {

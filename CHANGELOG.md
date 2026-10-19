@@ -12,6 +12,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.0.1] - 2026-10-19
+
+### Fixed
+
+- A workflow run's result now fits the completion notice by a code-enforced size budget: the message is shortened in priority order, questions and decided-for-you first, with markers pointing to the run's per-agent results. The result drops `decisions`, and `resume_args` no longer echoes the request. The overlord resumes with the launch args plus `resume_args` plus `reply`. Replies too long to carry end the run complete with the open questions listed. A cut notice is a reported defect (no resume, fallback or file read). ADR-0036 decision 11 now lists the approval prompts this slice actually asks in manual mode, and decision 15 records the size budget. Found by the live smoke test of 6.0.0. Refs #409.
+
 ## [6.0.0] - 2026-10-18
 
 ### Added

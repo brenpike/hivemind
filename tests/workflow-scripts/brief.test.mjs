@@ -245,3 +245,123 @@ describe('argument checks', () => {
     assert.throws(() => lib.renderOpenQuestions(undefined), /open must be a non-empty array/);
   });
 });
+
+function labelsOf(text) {
+  return text.split('\n')
+    .map((line) => line.match(/^\s*([QD]\d+)\./))
+    .filter((match) => match !== null)
+    .map((match) => match[1]);
+}
+
+describe('compact questions', () => {
+  const asks = ['FIRST', 'SECOND', 'THIRD'].map((problem, index) => ({
+    brief: makeBrief({ id: 'Q' + (7 - index), problem }),
+    reason: 'gate_irreversible'
+  }));
+  const taken = [
+    { brief: makeBrief({ id: 'D8', problem: 'TAKEN_ONE', recommendation: { option_id: 'B', strength: 'strong', why: 'TAKEN_WHY' } }) },
+    { brief: makeBrief({ id: 'D9', problem: 'TAKEN_TWO' }) }
+  ];
+  const full = lib.renderQuestions(asks, taken);
+  const compact = lib.renderQuestionsCompact(asks, taken);
+  test('labels equal the full form labels for questions and decisions', () => {
+    assert.deepEqual(labelsOf(compact), labelsOf(full));
+    assert.deepEqual(labelsOf(compact), ['Q1', 'Q2', 'Q3', 'D1', 'D2']);
+  });
+  test('keeps the intro line and the reply line of the full form', () => {
+    assert.equal(compact.split('\n')[0], full.split('\n')[0]);
+    assert.ok(compact.endsWith(REPLY_LINE));
+    assert.equal(compact.split('\n').filter((line) => line === REPLY_LINE).length, 1);
+  });
+  test('shows only the problem and the recommendation with its why', () => {
+    const text = lib.renderQuestionsCompact([{ brief: makeBrief(), reason: 'hard_stop' }], []);
+    assert.equal(text, [
+      'I need your answer on 1 question before I go on.',
+      '',
+      'Q1. PROBLEM_TEXT',
+      'Recommendation: option A (weak). Why: WHY_TEXT',
+      '',
+      REPLY_LINE
+    ].join('\n'));
+  });
+  test('omits the detail the full form carries', () => {
+    for (const needle of ['Case for:', 'How serious:', 'Assumptions', 'Exact text:']) {
+      assert.ok(full.includes(needle), `full form lacks ${needle}`);
+      assert.equal(compact.includes(needle), false, `compact form shows ${needle}`);
+    }
+  });
+  test('is no longer than the full form', () => {
+    assert.ok(compact.length <= full.length);
+  });
+  test('lists taken decisions compactly and says they can be changed in the same reply', () => {
+    assertInOrder(compact, ['Q3. THIRD', 'Decided for you:', 'D1. TAKEN_ONE', 'D2. TAKEN_TWO',
+      'You can change any of these in the same reply.', REPLY_LINE]);
+  });
+  test('without taken decisions has no decided block', () => {
+    assert.doesNotMatch(lib.renderQuestionsCompact(asks, []), /Decided for you|change any of these/);
+  });
+  test('never shows brief.id or brief.kind', () => {
+    assert.doesNotMatch(compact, /Q[4-9]|D[89]|planner_question/);
+  });
+  test('has no em dash, even when brief fields have one', () => {
+    const dashed = makeBrief({ problem: `Pick one ${EM_DASH} or not`, recommendation: { option_id: 'A', strength: 'strong', why: `Because${EM_DASH}cheap` } });
+    const text = lib.renderQuestionsCompact([{ brief: dashed, reason: 'gate_safety' }], [{ brief: dashed }]);
+    assert.equal(text.includes(EM_DASH), false);
+    assert.ok(text.includes('Q1. Pick one, or not'));
+    assert.ok(text.includes('Why: Because, cheap'));
+  });
+  for (const brief of [null, undefined, {}, { problem: 7, options: 'x', criticality: [], recommendation: null, assumptions: {} }]) {
+    test(`malformed brief ${JSON.stringify(brief)} renders with not given placeholders`, () => {
+      const text = lib.renderQuestionsCompact([{ brief, reason: 'malformed_brief' }], [{ brief }]);
+      assert.ok(text.includes('Q1. not given'));
+      assert.ok(text.includes('  D1. not given Chose option not given. Why: not given'));
+      assert.ok(text.endsWith(REPLY_LINE));
+    });
+  }
+});
+
+describe('compact decisions', () => {
+  const taken = [
+    { brief: makeBrief({ problem: 'TAKEN_ONE', recommendation: { option_id: 'B', strength: 'strong', why: 'TAKEN_WHY' } }) },
+    { brief: makeBrief({ problem: 'TAKEN_TWO' }) }
+  ];
+  test('renderDecisionsCompact lists one line per decision without the option summary', () => {
+    assert.equal(lib.renderDecisionsCompact(taken), [
+      'Decided for you:',
+      '  D1. TAKEN_ONE Chose option B. Why: TAKEN_WHY',
+      '  D2. TAKEN_TWO Chose option A. Why: WHY_TEXT'
+    ].join('\n'));
+  });
+  test('renderDecisionsCompact of nothing is empty', () => {
+    assert.equal(lib.renderDecisionsCompact([]), '');
+  });
+  test('labels equal the full form labels', () => {
+    assert.deepEqual(labelsOf(lib.renderDecisionsCompact(taken)), labelsOf(lib.renderDecisions(taken)));
+  });
+  test('argument checks', () => {
+    assert.throws(() => lib.renderDecisionsCompact(undefined), /renderDecisionsCompact: taken must be an array/);
+    assert.throws(() => lib.renderQuestionsCompact([], []), /renderQuestionsCompact: asks must be a non-empty array/);
+    assert.throws(() => lib.renderQuestionsCompact([{ brief: makeBrief(), reason: 'hard_stop' }], null), /renderQuestionsCompact: taken must be an array/);
+  });
+});
+
+describe('open questions stop reasons', () => {
+  const open = [{ brief: makeBrief({ problem: 'FIRST_OPEN' }) }];
+  const pauseIntro = 'I stopped asking after ' + lib.pauseLimit() + ' rounds of questions. These are still open:';
+  const sizeIntro = 'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
+  test('pause_limit keeps the default intro', () => {
+    assert.equal(lib.renderOpenQuestions(open, 'pause_limit'), lib.renderOpenQuestions(open));
+    assert.equal(lib.renderOpenQuestions(open, 'pause_limit').split('\n')[0], pauseIntro);
+  });
+  test('reply_size says the replies are too long to carry on', () => {
+    assert.equal(lib.renderOpenQuestions(open, 'reply_size'), [
+      sizeIntro,
+      '  Q1. FIRST_OPEN The report assumes option A.'
+    ].join('\n'));
+  });
+  for (const stopReason of ['nonsense', null, '']) {
+    test(`stop reason ${JSON.stringify(stopReason)} throws`, () => {
+      assert.throws(() => lib.renderOpenQuestions(open, stopReason), /renderOpenQuestions: no intro for stop reason/);
+    });
+  }
+});

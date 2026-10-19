@@ -6,6 +6,10 @@
  *            a string: the request itself (slash-command form);
  *            an object {request, answers?, reply?};
  *            undefined.
+ *          request comes from the launch args only. A resumed run still
+ *          has it because the overlord relaunches with the launch args, then
+ *          the keys of resume_args over them, then reply (result.js
+ *          contract). Without the launch args there is no request.
  *          answers is this script's own field: it comes only from the
  *          resume_args of an earlier pause, holds the reply to round N as
  *          answers['round-N'], and is read only when it is a plain object.
@@ -18,8 +22,9 @@
  *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
  *
  * Outputs
- *   pauseForUser(...) when a question needs the user's answer, otherwise
- *   finish(...). See result.js for both shapes.
+ *   pauseForUser({resumeArgs, blocks}) when a question needs the user's
+ *   answer, otherwise finish({outcome, blocks}). See result.js for both
+ *   shapes and for how blocks are fitted to the completion notice.
  *
  * Invariants
  *   Read-only: every planner prompt says to make no changes.
@@ -28,13 +33,20 @@
  *   The analyze prompt never carries answers or the reply, so a resumed run
  *   gets the analyze result from cache. The revise-N prompt depends only on
  *   earlier results and on the reply to round N.
+ *   The revise-N prompt always shows the planner the full questions text,
+ *   even when the pause message was in compact form.
  *   A run pauses at most pauseLimit() times. After that it completes and
- *   lists the questions still open. Open questions never end it blocked:
- *   only a missing request, a null planner result or a planner outcome
- *   'blocked' does.
- *   No run record: resume_args carries the request and every reply so far,
- *   which is all a resumed run needs. It always has answers, so a relaunch
- *   with it is a resume, and never has reply or an autonomy key.
+ *   lists the questions still open, with stop reason 'pause_limit'.
+ *   A run also stops asking when the replies so far are too long to carry:
+ *   when canCarry fails for the resume_args a pause would return, it
+ *   completes instead and lists the questions still open, with stop reason
+ *   'reply_size'.
+ *   Open questions never end it blocked: only a missing request or a
+ *   planner result it cannot use does.
+ *   No run record: resume_args is {answers} alone, every reply so far. The
+ *   request is never in it, because the launch args already hold it. It
+ *   always has answers, so a relaunch with it is a resume, and never has
+ *   request, reply or an autonomy key.
  *   A reply is ignored when no pause is pending: when the run was not
  *   launched with answers, or when it finishes before it reaches a round
  *   with no stored answer.
@@ -44,6 +56,14 @@
  *   or I/O to authenticate that state, and a forged answer gains nothing the
  *   overlord could not get by misquoting the reply. Resume-state tampering
  *   is by design, not a defect (ADR-0036 decision 13).
+ *   Every message is a list of blocks, highest priority first, which
+ *   result.js fits to the completion notice (ADR-0036 decision 15). A pause
+ *   message is one block: the questions with any decided-for-you block,
+ *   with renderQuestionsCompact as its compact form. A complete message is
+ *   the decided-for-you block, with renderDecisionsCompact as its compact
+ *   form, then any open-questions block, then the report last, the only
+ *   block that may be shortened. A blocked message is one block that may be
+ *   shortened.
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -122,9 +142,9 @@ function readPendingReply(argsObject) {
   return isPlainObject(argsObject.answers) && isNonEmptyString(reply) ? reply : undefined;
 }
 
-function buildResumeArgs(argsObject, replies) {
+function buildResumeArgs(replies) {
   const answers = Object.fromEntries(replies.map((reply, index) => [roundKey(index + 1), reply]));
-  return { request: argsObject.request, answers: answers };
+  return { answers: answers };
 }
 
 function formatDataBlock(name, text) {
@@ -198,17 +218,29 @@ function resolveQuestions(questions, level) {
   return { asks: asks, taken: taken };
 }
 
-function listTakenBriefs(taken) {
-  return taken.map((entry) => entry.brief);
-}
-
 function finishBlocked(message) {
-  return finish({ outcome: 'blocked', message: message, decisions: [] });
+  return finish({ outcome: 'blocked', blocks: [{ text: message, shorten: true }] });
 }
 
-function finishComplete(blocks, taken) {
-  const message = blocks.concat([renderDecisions(taken)]).filter((block) => block !== '').join('\n\n');
-  return finish({ outcome: 'complete', message: message, decisions: listTakenBriefs(taken) });
+function finishComplete(report, openQuestions, taken) {
+  const blocks = [];
+  if (taken.length > 0) {
+    blocks.push({ text: renderDecisions(taken), compact: renderDecisionsCompact(taken) });
+  }
+  if (openQuestions !== '') {
+    blocks.push({ text: openQuestions });
+  }
+  blocks.push({ text: report, shorten: true });
+  return finish({ outcome: 'complete', blocks: blocks });
+}
+
+function pauseOrStopAsking(report, resolution, questions, replies) {
+  const resumeArgs = buildResumeArgs(replies);
+  if (!canCarry(resumeArgs)) {
+    return finishComplete(report, renderOpenQuestions(resolution.asks, 'reply_size'), resolution.taken);
+  }
+  const compactQuestions = renderQuestionsCompact(resolution.asks, resolution.taken);
+  return pauseForUser({ resumeArgs: resumeArgs, blocks: [{ text: questions, compact: compactQuestions }] });
 }
 
 async function runAnalysis(rawArgs) {
@@ -229,10 +261,10 @@ async function runAnalysis(rawArgs) {
     }
     const resolution = resolveQuestions(analysis.questions, level);
     if (resolution.asks.length === 0) {
-      return finishComplete([analysis.report], resolution.taken);
+      return finishComplete(analysis.report, '', resolution.taken);
     }
     if (!canPause(round - 1)) {
-      return finishComplete([analysis.report, renderOpenQuestions(resolution.asks)], resolution.taken);
+      return finishComplete(analysis.report, renderOpenQuestions(resolution.asks, 'pause_limit'), resolution.taken);
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
     let reply = readStoredReply(storedAnswers, round);
@@ -241,11 +273,7 @@ async function runAnalysis(rawArgs) {
       pendingReply = undefined;
     }
     if (reply === undefined) {
-      return pauseForUser({
-        message: questions,
-        resumeArgs: buildResumeArgs(argsObject, replies),
-        decisions: listTakenBriefs(resolution.taken)
-      });
+      return pauseOrStopAsking(analysis.report, resolution, questions, replies);
     }
     replies.push(reply);
     phase('Revise');

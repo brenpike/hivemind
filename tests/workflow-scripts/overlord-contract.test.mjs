@@ -40,6 +40,7 @@ function readSection(body, heading) {
 
 const { frontmatter, body } = splitFrontmatter(overlordText);
 const engineSection = readSection(body, '## Engine');
+const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The result is built to fit the completion notice.')) ?? '';
 
 describe('overlord frontmatter tools', () => {
   const toolNames = readToolNames(frontmatter);
@@ -70,16 +71,34 @@ describe('overlord Engine section', () => {
       assert.match(engineSection, new RegExp('`[^`\\n]*\\b' + fieldName + '\\b[^`\\n]*`'), `${fieldName} is missing from ## Engine`);
     });
   }
-  test('Engine names the reply arg the resume adds to resume_args', () => {
+  test('Engine resumes with the launch args, then resume_args, then the reply arg', () => {
     const replyName = resultLib.replyField();
-    assert.ok(engineSection.includes('`resume_args` plus `' + replyName + '` set to the user\'s reply verbatim'), `${replyName} resume clause is missing from ## Engine`);
+    assert.ok(engineSection.includes('with args set to the launch args plus `resume_args` plus `' + replyName + '` set to the user\'s reply verbatim'), `${replyName} resume clause is missing from ## Engine`);
   });
   test('Engine no longer names the dropped answer_key field', () => {
     assert.ok(!engineSection.includes('answer_key'));
   });
+  test('Engine no longer names the dropped decisions field', () => {
+    assert.ok(!engineSection.includes('decisions'));
+  });
+  test('Engine treats a cut notice as a defect that does not resume, fall back or read a file', () => {
+    assert.notEqual(defectParagraph, '', '## Engine has a paragraph starting The result is built to fit the completion notice.');
+    for (const phrase of ['that is a defect', 'do not resume', 'fall back', 'read any file']) {
+      assert.ok(defectParagraph.includes(phrase), `defect paragraph lacks ${phrase}`);
+    }
+  });
+  test('Engine no longer carries the old cut-notice rule', () => {
+    for (const phrase of ['come before `message`', 'Never read that file.']) {
+      assert.ok(!engineSection.includes(phrase), `## Engine still contains ${phrase}`);
+    }
+  });
+  test('Engine does not mention Bash', () => {
+    const bashCount = (engineSection.match(/Bash/g) ?? []).length;
+    assert.equal(bashCount, 0, '## Engine mentions Bash');
+  });
   test('Engine states the fallback clause', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));
     assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
-    assert.ok(engineSection.includes('does not fall back'));
+    assert.ok(engineSection.includes('A run that started, then failed or ended blocked, is reported as it ended and does not fall back.'));
   });
 });
