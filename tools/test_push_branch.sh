@@ -6,17 +6,25 @@
 # The engine takes REQUIRED `--head <branch> --base <branch>` plus optional `--remote <name>`,
 # `--on-reject block|warn`, and `--no-upstream block|origin`. It reads the current branch, HEAD,
 # the upstream config, and the push remote ONCE, gates every value, then pushes the explicit
-# refspec refs/heads/<b>:refs/heads/<b> and (upstream mode only) retries a non-fast-forward once
-# with --force-with-lease on the SAME captured values. On success it prints
+# refspec <sha>^{commit}:refs/heads/<b> (the captured commit by object id, never `-u`) and
+# (upstream mode only) retries a non-fast-forward once with --force-with-lease on the SAME captured
+# values. After a successful push in explicit or origin mode it records branch.<b>.remote and
+# branch.<b>.merge itself. On success it prints
 #     branch: <b> / commit: <sha> [/ warning: <fixed text>]
 # on stdout, exit 0. On any blocker it prints `blocker: <fixed reason>` as the LAST stderr line,
 # NOTHING on stdout, exit 1.
 #
-# DRIFT REGRESSIONS: a client pre-push hook rewrites `branch.<b>.merge` to refs/heads/main, or
-# repoints HEAD at refs/heads/main, during the first (non-fast-forward) push. The retry must still
-# write only refs/heads/<b> with the captured branch and SHA, leaving the remote trunk untouched.
-# A procedure that re-read the branch or upstream between the push and the retry would aim the
-# forced retry at trunk.
+# DRIFT REGRESSIONS: a client pre-push hook rewrites `branch.<b>.merge` to refs/heads/main,
+# repoints HEAD at refs/heads/main, or rewrites the local refs/heads/<b> to the trunk commit, during
+# the first (non-fast-forward) push. The retry must still write only refs/heads/<b> with the
+# captured branch and SHA, leaving the remote trunk untouched. A procedure that re-read the branch,
+# the upstream, or the branch ref between the push and the retry would aim the forced retry at
+# trunk or write the trunk commit to the branch.
+#
+# PUSH SOURCE AND UPSTREAM RECORD: a local ref named after the head SHA (refs/tags/<sha>) must not
+# shadow the pushed commit; an origin-mode hook that repoints HEAD must not move the recorded
+# upstream off branch.<b>; and a config write that fails after the push blocks with the
+# upstream-record reason while the branch stays on its remote.
 #
 # ISOLATION: the REAL committed engine is run unmodified by absolute path (it self-locates its own
 # _shared/ library). Each case builds a THROWAWAY world under a mktemp WORKDIR: local bare repos
@@ -85,6 +93,7 @@ LOCAL_REMOTE_REASON='push remote is the local repository, not a remote'
 NO_UPSTREAM_REASON='no upstream and no remote supplied'
 REJECTED_REASON='push was rejected'
 LEASE_REASON='force-with-lease retry was rejected; the remote has commits this clone has not seen'
+UPSTREAM_RECORD_REASON='pushed, but the upstream could not be recorded'
 REJECT_WARNING='push was rejected; the branch is not on its remote'
 DEFERRED_WARNING='no upstream and no origin remote; push deferred'
 
@@ -498,7 +507,7 @@ test_triangular_push_default() {
     assert_remote_refs triangular-push-default-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
-# ── Drift regressions: config/HEAD rewritten between the push and the retry ──
+# ── Drift regressions: config/HEAD/branch ref rewritten between the push and the retry ──
 
 # run_drift_case <name> <hook drift line> -> the first push is non-fast-forward (local amend after
 # publish); the pre-push hook applies the drift on every attempt. The retry must write only
@@ -526,6 +535,46 @@ test_drift_head_repoint() {
     run_drift_case drift-head-repoint 'git symbolic-ref HEAD refs/heads/main'
     assert_equal drift-head-repoint-took-effect refs/heads/main \
         "$(run_git "$WORK_TREE" symbolic-ref HEAD)" "hook repointed HEAD"
+}
+
+test_drift_branch_ref_rewrite() {
+    run_drift_case drift-branch-ref-rewrite "git update-ref refs/heads/$BRANCH \$(git rev-parse refs/heads/main)"
+    assert_equal drift-branch-ref-rewrite-took-effect "$TRUNK_SHA" \
+        "$(run_git "$WORK_TREE" rev-parse "refs/heads/$BRANCH")" "hook rewrote refs/heads/$BRANCH"
+}
+
+# ── Push source and upstream record ──────────────────────────────────────────
+
+test_source_shadow_ref() {
+    local sha
+    create_world source-shadow-ref
+    sha="$(head_sha)"
+    run_git "$WORK_TREE" update-ref "refs/tags/$sha" "$TRUNK_SHA"
+    assert_success source-shadow-ref "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base main --remote origin
+    assert_remote_refs source-shadow-ref-writes-commit "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+test_origin_head_repoint_upstream() {
+    create_world origin-head-repoint-upstream
+    install_pre_push_hook 'git symbolic-ref HEAD refs/heads/main'
+    assert_success origin-head-repoint-upstream "$WORK_TREE" "$(head_sha)" '' \
+        --head "$BRANCH" --base main --no-upstream origin
+    assert_equal origin-head-repoint-upstream-remote origin "$(read_branch_config remote)" "branch.$BRANCH.remote"
+    assert_equal origin-head-repoint-upstream-merge "refs/heads/$BRANCH" "$(read_branch_config merge)" "branch.$BRANCH.merge"
+    assert_equal origin-head-repoint-upstream-trunk-untouched '' \
+        "$(run_git "$WORK_TREE" config --get branch.main.remote || true)" "branch.main.remote"
+}
+
+test_explicit_upstream_record_fails() {
+    local sha
+    create_world explicit-upstream-record-fails
+    sha="$(head_sha)"
+    install_pre_push_hook "touch '$WORK_TREE/.git/config.lock'"
+    assert_blocker explicit-upstream-record-fails-blocks "$WORK_TREE" "$UPSTREAM_RECORD_REASON" \
+        --head "$BRANCH" --base main --remote origin
+    assert_remote_refs explicit-upstream-record-fails-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+    assert_equal explicit-upstream-record-fails-unrecorded '' "$(read_branch_config remote)" "branch.$BRANCH.remote"
 }
 
 # ── Server-side rejection (--on-reject) ──────────────────────────────────────
@@ -602,6 +651,10 @@ test_triangular_push_remote
 test_triangular_push_default
 test_drift_merge_rewrite
 test_drift_head_repoint
+test_drift_branch_ref_rewrite
+test_source_shadow_ref
+test_origin_head_repoint_upstream
+test_explicit_upstream_record_fails
 test_upstream_rejection
 test_origin_rejection
 test_no_upstream_block

@@ -60,11 +60,13 @@ Double-quoting is not a shell-safety encoding. Bash expands `$(...)`, backticks,
 
 Capture out-of-band whenever a command can produce the identifier inside the same Bash call: command substitution into a shell variable, referenced only as `"$var"`. Any identifier that must enter command text as a literal, whether supplied by the caller or read from an earlier call's output, first passes the identifier gate in the agent's OWN reasoning BEFORE that Bash call, and a value that fails stops the procedure with a blocker that does not echo the value.
 
-Identifier gate: a branch, base, or remote name matches `^[A-Za-z0-9._/-]+$`, is non-empty, does not start with `-`, and contains no `..`; a PR reference is a PR number matching `^[0-9]+$` or a PR URL matching `^https://[A-Za-z0-9._/-]+$`.
+Identifier gate: a branch, base, or remote name matches `^[A-Za-z0-9._/-]+$`, is non-empty, does not start with `-`, and contains no `..`; a PR reference is a PR number matching `^[0-9]+$` or a PR URL matching `^https://[A-Za-z0-9._/-]+$`. A commit SHA matches `^[0-9a-f]{40}$` or `^[0-9a-f]{64}$`.
 
-Each Bash call is a fresh shell: a captured value is used inside the call that captured it, and a later call re-derives it rather than pasting it. A check made in one Bash call does not carry into the next, so a push runs in the same call, or the same committed script, as every check on the ref it writes.
+Each Bash call is a fresh shell: a captured value is used inside the call that captured it, and a later call re-derives it rather than pasting it. A check made in one Bash call does not carry into the next, so a push runs in the same call, or the same committed script, as every check on the ref it writes. A value that names what an earlier call wrote, such as the commit the push-branch script reports on its `commit:` line, is the exception: a later call that verifies that write compares against the reported value, passed as a literal through the identifier gate, and never re-derives it, because re-deriving resolves a name that can move after the write.
 
 Consumers: `hivemind:push-branch`, `hivemind:open-plan-pr`, `hivemind:create-working-branch`, `hivemind:github-reviewer`. `hivemind:spawn-brood` and `hivemind:brood-status` apply the same gate to `branch` and `base` per Brood Spawn Bypass-Mode Mitigation control 3 above.
+
+This rule defends against untrusted identifier text only. Repo hooks, local refs, git config, and the operator are trusted, so a change they make between a check and a write is outside this rule and is recorded as a residual, as in the push-branch script's NOT CHECKED header, not defended against.
 
 ## Destructive Fix Confirmation Gate
 
