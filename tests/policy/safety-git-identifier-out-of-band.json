@@ -1,0 +1,34 @@
+{
+  "rule": "Skill and agent git and gh commands reference captured identifiers only as quoted shell variables and paste only gate-validated placeholders",
+  "description": "`plugin/skills/push-branch/SKILL.md` requirement 4 is the source for the out-of-band command form that applies the Shell Identifier Discipline in `plugin/governance/security-policy.md`: `b=\"$(git rev-parse --abbrev-ref HEAD)\"; git push -u <allowlist-validated-remote> \"HEAD:$b\"` captures the branch by command substitution inside the same Bash call and references it only as `\"$b\"`, while the only literal in the command is the gate-validated remote placeholder. The source pin is one span carrying both the capture and the push that uses it, so pasting a branch literal into the refspec, unquoting the reference, or replacing the placeholder with an unvalidated remote turns the suite red. Six consumers pin the same discipline at the other named command forms. In `plugin/skills/open-plan-pr/SKILL.md`: the step 6 `push_remote` push, in the same form as the source; the step 6 force-with-lease retry block, one span from the `b=` capture through the `rem=`, `ref=`, and `ub=` captures to `git push --force-with-lease \"$rem\" \"HEAD:$ub\"`; the step 7 `gh pr create --base <allowlist-validated-base>` clause binding that placeholder to the `base` value that passed the input gate; and the step 8 block, one span from `c=\"$(git rev-parse HEAD)\"` through the `gh pr view <allowlist-validated-pr-number>` reads, the empty-read and SHA-mismatch blockers, and the final `printf` that emits only captured variables. In `plugin/skills/create-working-branch/SKILL.md` step 7, the routing YAML emission `b=\"$(git rev-parse --abbrev-ref HEAD)\"; printf 'branch: %s\\n' \"$b\"`. In `plugin/agents/github-reviewer.md` step 7, the push `b=\"$(git rev-parse --abbrev-ref HEAD)\"; git push origin \"HEAD:$b\"`. Replacing any captured variable with a pasted literal, or a gate-validated placeholder with a raw value, turns the suite red. What these pins honestly guarantee is exactly that these seven word sequences exist in these four named files; they claim nothing about meaning and nothing about what an agent actually runs. Residuals, stated plainly: (1) a meaning inversion around the pinned bytes, such as surrounding prose that offers a pasted-literal alternative to a pinned command, is invisible; (2) the pins cover only the named forms: any other command in these files, or a new command added beside a pinned one, that pastes an identifier stays green; the upstream-set guard blocks in open-plan-pr and push-branch are pinned by the working-branch no-track fixture, while the push-branch force-with-lease retry block, the push-branch requirement 5 routing emission, and the create-working-branch unset-upstream block are not pinned here; (3) a NEW skill or agent that authors git or gh commands with pasted identifiers is an absence defect that no fixture in this directory can see, per rule 7 of the pin-authoring contract, and no structural check for it exists in `tools/policy_check.sh`; (4) the pins prove the documented form exists, not that the executing agent runs it rather than a pasted variant; (5) the github-reviewer grant wording in `plugin/governance/safety-rails.md` is outside these pins.",
+  "source": {
+    "file": "plugin/skills/push-branch/SKILL.md",
+    "pattern": "b=\"$(git rev-parse --abbrev-ref HEAD)\"; git push -u <allowlist-validated-remote> \"HEAD:$b\""
+  },
+  "consumers": [
+    {
+      "file": "plugin/skills/open-plan-pr/SKILL.md",
+      "pattern": "b=\"$(git rev-parse --abbrev-ref HEAD)\"; git push -u <allowlist-validated-remote> \"HEAD:$b\""
+    },
+    {
+      "file": "plugin/skills/open-plan-pr/SKILL.md",
+      "pattern": "b=\"$(git rev-parse --abbrev-ref HEAD)\" rem=\"$(git config --get \"branch.$b.remote\")\" ref=\"$(git config --get \"branch.$b.merge\")\" ub=\"${ref#refs/heads/}\" git push --force-with-lease \"$rem\" \"HEAD:$ub\""
+    },
+    {
+      "file": "plugin/skills/open-plan-pr/SKILL.md",
+      "pattern": "Run `gh pr create --base <allowlist-validated-base> ...`, where `<allowlist-validated-base>` is the `base` value that passed the input gate"
+    },
+    {
+      "file": "plugin/skills/open-plan-pr/SKILL.md",
+      "pattern": "c=\"$(git rev-parse HEAD)\" p=\"$(gh pr view <allowlist-validated-pr-number> --json headRefOid --jq '.headRefOid')\" u=\"$(gh pr view <allowlist-validated-pr-number> --json url --jq '.url')\" [ -n \"$p\" ] && [ -n \"$u\" ] || { printf 'blocker: could not read the PR head SHA or URL' >&2; exit 1; } [ \"$p\" = \"$c\" ] || { printf 'blocker: PR head SHA mismatch, expected %s got %s' \"$c\" \"$p\" >&2; exit 1; } printf 'url: %s\\nhead_ref_oid: %s\\n' \"$u\" \"$p\""
+    },
+    {
+      "file": "plugin/skills/create-working-branch/SKILL.md",
+      "pattern": "b=\"$(git rev-parse --abbrev-ref HEAD)\"; printf 'branch: %s\\n' \"$b\""
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "b=\"$(git rev-parse --abbrev-ref HEAD)\"; git push origin \"HEAD:$b\""
+    }
+  ]
+}
