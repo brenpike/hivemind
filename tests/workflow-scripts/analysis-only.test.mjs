@@ -80,7 +80,7 @@ describe('analysis-only: no pause', () => {
     assert.equal(run.calls.length, 1);
     assert.equal(run.result.needs_user, false);
     assert.equal(run.result.outcome, 'complete');
-    const expected = 'REPORT_TEXT\n\n' + lib.renderDecisions([{ brief: strong }, { brief: weak }]);
+    const expected = lib.renderDecisions([{ brief: strong }, { brief: weak }]) + '\n\nREPORT_TEXT';
     assert.equal(run.result.message, expected);
     assert.deepEqual(run.result.decisions, [strong, weak]);
   });
@@ -194,7 +194,9 @@ describe('analysis-only: pause and resume', () => {
   });
   test('the pause cap completes with the open questions listed, never blocked', async () => {
     assert.equal(lib.pauseLimit(), 3);
-    const gatedEveryRound = makeAnalysis({ report: 'LATEST_REPORT', questions: [makeGatedBrief('STILL_OPEN')] });
+    const gated = makeGatedBrief('STILL_OPEN');
+    const taken = makeBrief({ problem: 'TAKEN_PROBLEM' });
+    const gatedEveryRound = makeAnalysis({ report: 'LATEST_REPORT', questions: [gated, taken] });
     const results = { analyze: gatedEveryRound, 'revise-1': gatedEveryRound, 'revise-2': gatedEveryRound, 'revise-3': gatedEveryRound };
     const twoReplies = { request: REQUEST, answers: { 'round-1': 'R1', 'round-2': 'R2' } };
     const third = await runWorkflow(twoReplies, results);
@@ -204,7 +206,8 @@ describe('analysis-only: pause and resume', () => {
     assert.deepEqual(labelsOf(capped.calls), ['analyze', 'revise-1', 'revise-2', 'revise-3']);
     assert.equal(capped.result.needs_user, false);
     assert.equal(capped.result.outcome, 'complete');
-    assert.ok(capped.result.message.startsWith('LATEST_REPORT\n\n'));
+    const expected = lib.renderDecisions([{ brief: taken }]) + '\n\n' + lib.renderOpenQuestions([{ brief: gated }]) + '\n\n' + 'LATEST_REPORT';
+    assert.equal(capped.result.message, expected);
     assert.ok(capped.result.message.includes('I stopped asking after 3 rounds of questions. These are still open:'));
     assert.ok(capped.result.message.includes('Q1. STILL_OPEN The report assumes option A.'));
     assert.ok(capped.result.message.includes(lib.renderOpenQuestions([{ brief: makeGatedBrief('STILL_OPEN') }])));
@@ -221,6 +224,30 @@ describe('analysis-only: pause and resume', () => {
     assert.equal(withReply.calls.length, 4);
     assert.ok(withReply.calls.every((call) => !call.prompt.includes('R4')));
     assert.equal(withReply.result.outcome, 'complete');
+  });
+});
+
+describe('analysis-only: message order', () => {
+  const DECIDED_HEADING = 'Decided for you:';
+  const OPEN_HEADING = 'I stopped asking after 3 rounds of questions';
+  test('a complete message puts the decisions before the report', async () => {
+    const taken = makeBrief({ problem: 'TAKEN_PROBLEM' });
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [taken] }) });
+    const message = run.result.message;
+    assert.ok(message.startsWith(lib.renderDecisions([{ brief: taken }])));
+    assert.ok(message.indexOf(DECIDED_HEADING) !== -1);
+    assert.ok(message.indexOf(DECIDED_HEADING) < message.indexOf('REPORT_TEXT'));
+  });
+  test('a capped message lists the decisions, then the open questions, then the report last', async () => {
+    const capping = makeAnalysis({ report: 'LATEST_REPORT', questions: [makeGatedBrief('STILL_OPEN'), makeBrief({ problem: 'TAKEN_PROBLEM' })] });
+    const results = { analyze: capping, 'revise-1': capping, 'revise-2': capping, 'revise-3': capping };
+    const run = await runWorkflow({ request: REQUEST, answers: { 'round-1': 'R1', 'round-2': 'R2', 'round-3': 'R3' } }, results);
+    const message = run.result.message;
+    assert.equal(run.result.outcome, 'complete');
+    assert.ok(message.indexOf(DECIDED_HEADING) !== -1);
+    assert.ok(message.indexOf(DECIDED_HEADING) < message.indexOf(OPEN_HEADING));
+    assert.ok(message.indexOf(OPEN_HEADING) < message.indexOf('LATEST_REPORT'));
+    assert.ok(message.endsWith('LATEST_REPORT'));
   });
 });
 

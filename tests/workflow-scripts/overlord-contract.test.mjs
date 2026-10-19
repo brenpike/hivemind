@@ -78,17 +78,24 @@ describe('overlord Engine section', () => {
   test('Engine no longer names the dropped answer_key field', () => {
     assert.ok(!engineSection.includes('answer_key'));
   });
-  test('Engine reads the output file with the Read tool, never Bash, when the notice is cut', () => {
-    assert.ok(engineSection.includes('When `message` is cut, read the output file the notice names with the Read tool, never Bash, for the full `message`'));
-  });
-  test('Engine ties the cut-notice trigger, the Read of the output file and the same handling in one rule', () => {
-    assert.ok(cutNoticeParagraph.includes('may cut the end of the result in the completion notice'));
-    assert.ok(cutNoticeParagraph.includes('`needs_user` and `resume_args` come before `message`, so act on them from the notice'));
-    assert.ok(cutNoticeParagraph.includes('When `message` is cut, read the output file the notice names with the Read tool, never Bash, for the full `message`'));
+  test('Engine ties the cut-notice trigger, the act-on-notice rule, the message-first rule, the show-as-held rule and never reading the file in one paragraph, in order', () => {
+    const ruleSentences = [
+      'The harness may cut the end of the result in the completion notice.',
+      '`needs_user` and `resume_args` come before `message`, so act on them from the notice.',
+      '`message` puts the questions and the decisions first, so a cut loses only the end of the report.',
+      'When `message` is cut, show it as the notice holds it and say in one line that the full output is in the file the notice names.',
+      'Never read that file.',
+    ];
+    let previousIndex = -1;
+    for (const ruleSentence of ruleSentences) {
+      const sentenceIndex = cutNoticeParagraph.indexOf(ruleSentence);
+      assert.ok(sentenceIndex > previousIndex, `cut-notice paragraph lacks, or misorders, ${ruleSentence}`);
+      previousIndex = sentenceIndex;
+    }
   });
   test('Engine cut-notice rule does not stop the resume or fall back', () => {
     assert.notEqual(cutNoticeParagraph, '', '## Engine has a paragraph starting The harness may cut');
-    for (const phrase of ['do not resume', 'fall back', 'state machine']) {
+    for (const phrase of ['do not resume', 'fall back', 'state machine', 'with the Read tool', 'read the output file']) {
       assert.ok(!cutNoticeParagraph.includes(phrase), `cut-notice paragraph contains ${phrase}`);
     }
   });
@@ -101,13 +108,9 @@ describe('overlord Engine section', () => {
     }
     assert.ok(pausedKeys.indexOf('resume_args') < pausedKeys.indexOf('message'), `keys are ${JSON.stringify(pausedKeys)}`);
   });
-  test('Engine names Bash only to forbid it', () => {
+  test('Engine does not mention Bash', () => {
     const bashCount = (engineSection.match(/Bash/g) ?? []).length;
-    const neverBashCount = (engineSection.match(/never Bash/g) ?? []).length;
-    assert.equal(bashCount, neverBashCount, 'every Bash in ## Engine is a never Bash');
-  });
-  test('Engine reports a failed output-file Read and shows the message the notice holds', () => {
-    assert.ok(cutNoticeParagraph.includes('If that Read fails, say so in one line and show the message as the notice holds it.'));
+    assert.equal(bashCount, 0, '## Engine mentions Bash');
   });
   test('Engine states the fallback clause', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));

@@ -46,15 +46,16 @@
  *   Invalid input throws instead of returning a partial result.
  *   message is the last key and resume_args precedes it, because the harness
  *   cuts a long completion notice at its end, so a cut can only lose the tail
- *   of message. A resume_args larger than the notice limit is cut too, but its
- *   size is bounded: the request plus at most pauseLimit() (3) replies.
+ *   of message. resume_args holds the request and the stored replies, so a
+ *   request near the notice limit can still cut it. That is a recorded
+ *   residual (ADR-0036 decision 15).
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
  *   returning. One fixed shape lets the overlord relay and resume any
  *   workflow the same way, and the decisions travel in the final message
  *   instead of a separate journal. The key order puts message last so a cut
- *   notice still carries needs_user, outcome, resume_args and decisions whole.
+ *   lands in message first.
  */
 
 function resultFields() {

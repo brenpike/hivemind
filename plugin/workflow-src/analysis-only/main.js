@@ -44,6 +44,10 @@
  *   or I/O to authenticate that state, and a forged answer gains nothing the
  *   overlord could not get by misquoting the reply. Resume-state tampering
  *   is by design, not a defect (ADR-0036 decision 13).
+ *   Every message puts what the user must see first. A pause message is the
+ *   questions only. A complete message lists the decided-for-you block, then
+ *   any open-questions block, then the report last, because the harness cuts
+ *   a long completion notice at its end (ADR-0036 decision 15, result.js).
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -206,8 +210,8 @@ function finishBlocked(message) {
   return finish({ outcome: 'blocked', message: message, decisions: [] });
 }
 
-function finishComplete(blocks, taken) {
-  const message = blocks.concat([renderDecisions(taken)]).filter((block) => block !== '').join('\n\n');
+function finishComplete(report, openQuestions, taken) {
+  const message = [renderDecisions(taken), openQuestions, report].filter((block) => block !== '').join('\n\n');
   return finish({ outcome: 'complete', message: message, decisions: listTakenBriefs(taken) });
 }
 
@@ -229,10 +233,10 @@ async function runAnalysis(rawArgs) {
     }
     const resolution = resolveQuestions(analysis.questions, level);
     if (resolution.asks.length === 0) {
-      return finishComplete([analysis.report], resolution.taken);
+      return finishComplete(analysis.report, '', resolution.taken);
     }
     if (!canPause(round - 1)) {
-      return finishComplete([analysis.report, renderOpenQuestions(resolution.asks)], resolution.taken);
+      return finishComplete(analysis.report, renderOpenQuestions(resolution.asks), resolution.taken);
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
     let reply = readStoredReply(storedAnswers, round);

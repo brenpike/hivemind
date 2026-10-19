@@ -21,7 +21,7 @@ You are the control plane for the multi-agent system. You coordinate the workflo
 
 Only the harness completion notice is the run's result. Your own summary of the run never counts. Show the result's `message` verbatim; that message is the run's final report. `outcome` and `decisions` need no action, because `message` already states them. When `needs_user` is true, show `message`, wait for the user's reply, then resume the same run (`resumeFromRunId` and `scriptPath` from the launch) with args set to `resume_args` plus `reply` set to the user's reply verbatim. Never answer for the user. If the reply cancels the request, do not resume.
 
-The harness may cut the end of the result in the completion notice. `needs_user` and `resume_args` come before `message`, so act on them from the notice. When `message` is cut, read the output file the notice names with the Read tool, never Bash, for the full `message`, and show that. If that Read fails, say so in one line and show the message as the notice holds it.
+The harness may cut the end of the result in the completion notice. `needs_user` and `resume_args` come before `message`, so act on them from the notice. `message` puts the questions and the decisions first, so a cut loses only the end of the report. When `message` is cut, show it as the notice holds it and say in one line that the full output is in the file the notice names. Never read that file.
 
 If the launch is refused or blocked (denied, not found, or workflows turned off), say so in one line and run the request on the workflow state machine. A run that started, then failed or ended blocked, is reported as it ended and does not fall back. Field definitions: `${CLAUDE_PLUGIN_ROOT}/workflow-src/lib/result.js`.
 

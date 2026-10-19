@@ -1094,15 +1094,16 @@ function renderYesNo(value) {
  *   Invalid input throws instead of returning a partial result.
  *   message is the last key and resume_args precedes it, because the harness
  *   cuts a long completion notice at its end, so a cut can only lose the tail
- *   of message. A resume_args larger than the notice limit is cut too, but its
- *   size is bounded: the request plus at most pauseLimit() (3) replies.
+ *   of message. resume_args holds the request and the stored replies, so a
+ *   request near the notice limit can still cut it. That is a recorded
+ *   residual (ADR-0036 decision 15).
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
  *   returning. One fixed shape lets the overlord relay and resume any
  *   workflow the same way, and the decisions travel in the final message
  *   instead of a separate journal. The key order puts message last so a cut
- *   notice still carries needs_user, outcome, resume_args and decisions whole.
+ *   lands in message first.
  */
 
 function resultFields() {
@@ -1208,6 +1209,10 @@ function assertMessageAndDecisions(caller, message, decisions) {
  *   or I/O to authenticate that state, and a forged answer gains nothing the
  *   overlord could not get by misquoting the reply. Resume-state tampering
  *   is by design, not a defect (ADR-0036 decision 13).
+ *   Every message puts what the user must see first. A pause message is the
+ *   questions only. A complete message lists the decided-for-you block, then
+ *   any open-questions block, then the report last, because the harness cuts
+ *   a long completion notice at its end (ADR-0036 decision 15, result.js).
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -1370,8 +1375,8 @@ function finishBlocked(message) {
   return finish({ outcome: 'blocked', message: message, decisions: [] });
 }
 
-function finishComplete(blocks, taken) {
-  const message = blocks.concat([renderDecisions(taken)]).filter((block) => block !== '').join('\n\n');
+function finishComplete(report, openQuestions, taken) {
+  const message = [renderDecisions(taken), openQuestions, report].filter((block) => block !== '').join('\n\n');
   return finish({ outcome: 'complete', message: message, decisions: listTakenBriefs(taken) });
 }
 
@@ -1393,10 +1398,10 @@ async function runAnalysis(rawArgs) {
     }
     const resolution = resolveQuestions(analysis.questions, level);
     if (resolution.asks.length === 0) {
-      return finishComplete([analysis.report], resolution.taken);
+      return finishComplete(analysis.report, '', resolution.taken);
     }
     if (!canPause(round - 1)) {
-      return finishComplete([analysis.report, renderOpenQuestions(resolution.asks)], resolution.taken);
+      return finishComplete(analysis.report, renderOpenQuestions(resolution.asks), resolution.taken);
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
     let reply = readStoredReply(storedAnswers, round);
