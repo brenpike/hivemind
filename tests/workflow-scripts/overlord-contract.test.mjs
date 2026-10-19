@@ -88,6 +88,17 @@ describe('overlord Engine section', () => {
   test('Engine takes message, needs_user and resume_args from the result object in the output file', () => {
     assert.ok(engineSection.includes('take `message`, `needs_user` and `resume_args` from the `result` object in that file'));
   });
+  test('Engine ties the cut-notice trigger, the Read of the output file and the same handling in one rule', () => {
+    assert.ok(engineSection.includes('When the notice is cut, or does not parse, read the output file the notice names with the Read tool, never Bash, and take `message`, `needs_user` and `resume_args` from the `result` object in that file. That is the same result, uncut; handle it as above.'));
+  });
+  test('Engine names Bash only to forbid it', () => {
+    const bashCount = (engineSection.match(/Bash/g) ?? []).length;
+    const neverBashCount = (engineSection.match(/never Bash/g) ?? []).length;
+    assert.equal(bashCount, neverBashCount, 'every Bash in ## Engine is a never Bash');
+  });
+  test('Engine reports a failed output-file recovery and does not resume', () => {
+    assert.ok(engineSection.includes('Unless that Read succeeds and the file holds a `result` object, say so in one line, show what the notice holds, and do not resume.'));
+  });
   test('Engine states the fallback clause', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));
     assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
