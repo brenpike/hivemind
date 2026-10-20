@@ -40,14 +40,16 @@
 #   sha  `git rev-parse --verify --quiet 'HEAD^{commit}'`, must be a full hex object id. With
 #        --expect-commit, it must equal that value, or the run stops with `HEAD is not the
 #        expected commit`.
-#   BASE keys on the refs base names, not on its spelling, through _shared/git-refusals.sh. The
-#        run stops with `current branch does not match head or equals base` when the base text
-#        names b (hivemind_ref_names_branch: ignoring ASCII case, it is b or ends with `/`
-#        followed by b), or when any ref base names in git's lookup order names b
-#        (hivemind_resolve_name_refs, symbolic refs followed to their end). A base git cannot
-#        read stops with `cannot read base`, and a failed compare with `cannot compare the
-#        current branch with base`. A base that names more than one ref does not stop the run:
-#        none of them is b. Base is read once and never again.
+#   BASE keys on ref identity, not on spelling, through _shared/git-refusals.sh (see its NAME
+#        LOOKUP paragraph for the lookup order and the match rule). The run stops with `current
+#        branch does not match head or equals base` when the base text is a spelling of b that
+#        needs no git command (hivemind_ref_names_branch: b, heads/b or refs/heads/b), or when
+#        any ref base names in git's lookup order is b's own ref, or b's image on a remote that
+#        `git remote` lists (hivemind_resolve_name_refs, symbolic refs followed to their end).
+#        So a base such as team/b or release/b does not stop the run. A base git cannot read
+#        stops with `cannot read base`, and a failed compare with `cannot compare the current
+#        branch with base`. A base that names more than one ref does not stop the run: none of
+#        them is b. Base is read once and never again.
 #   MODE explicit: --remote given; push to it, then record the upstream.
 #        upstream: branch.<b>.remote or branch.<b>.merge non-empty. Both must then be non-empty,
 #                  merge must equal refs/heads/<b>, remote is gated. Push remote is
@@ -108,10 +110,9 @@
 # rule defends against untrusted identifier text only; repo hooks, local refs, git config, and the
 # operator are trusted, and their changes between a check and a write are recorded residuals.
 #
-# The base stop shares the name rule with create-working-branch, so a base that ends with `/<b>`
-# but is another branch, such as release/<b>, also stops. The error goes one way only: the run
-# may stop on a safe push, but it never pushes a branch that the base names. Tracked with the
-# trunk stop's suffix rule in https://github.com/brenpike/hivemind/issues/409#issuecomment-6297715840.
+# The base stop compares refs exactly, by the rule in _shared/git-refusals.sh. It shares that
+# rule with create-working-branch and molt. A base that only ends with `/<b>`, such as
+# release/<b>, is another branch and does not stop the run.
 #
 # RECORDED RESIDUAL R1 (implicit PR head): moved to plugin/skills/open-plan-pr/scripts/open-plan-pr.sh.
 #

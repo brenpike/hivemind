@@ -22,14 +22,15 @@
 # first (`base or working_branch contains characters outside the safe allowlist`), then trunk
 # (`trunk contains characters outside the safe allowlist`). Then, still before any git command,
 # a branch equal to base stops with `working_branch equals base`, and a trunk that names the
-# branch stops with `working_branch equals trunk`. A name or ref names the branch when, ignoring
-# ASCII case, it is the branch or ends with `/` followed by the branch. Case is ignored because a
-# case-insensitive file system stores refs/heads/Main and refs/heads/main as one file. The `/`
-# rule holds because every git qualifier of a branch (refs/heads/, heads/, <remote>/,
-# refs/remotes/<remote>/) is a leading path in front of the branch name. A git identifier read
-# from the repository (the branch upstream, and each ref end read for trunk) is captured into a
-# shell variable and used only as "$var", per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md
-# (Shell Identifier Discipline).
+# branch stops with `working_branch equals trunk`. A name or ref names the branch by ref identity,
+# not by its text: see the NAME LOOKUP paragraph in _shared/git-refusals.sh. Without a git
+# command, that is the spellings <branch>, heads/<branch> and refs/heads/<branch>. A remote
+# spelling such as origin/<branch> is caught later, by the trunk ref check. A name that only
+# ends with `/<branch>`, such as team/<branch>, is another branch. Case is ignored because a
+# case-insensitive file system stores refs/heads/Main and refs/heads/main as one file. A git
+# identifier read from the repository (the branch upstream, and each ref end read for trunk) is
+# captured into a shell variable and used only as "$var", per
+# ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline).
 #
 # WHY (trunk): the script, not the caller's taxonomy check, holds the stop on a working branch
 # that is trunk, so no caller can switch HEAD onto trunk through it. A run that starts on trunk
@@ -55,8 +56,9 @@
 #   alias        refs/heads/<branch> is a symbolic ref, dangling or not (`working_branch is a
 #                symbolic ref`), read with `git symbolic-ref --quiet`. A branch name git cannot
 #                read as a branch ref stops with `cannot read working_branch`.
-#   trunk        a ref trunk names (see TRUNK REF below) names the branch (`working_branch equals
-#                trunk`). Every ref trunk names is checked for this first. Then, when the refs
+#   trunk        a ref trunk names (see TRUNK REF below) is the branch's own ref or its image on
+#                a remote that `git remote` lists (`working_branch equals trunk`). Every ref
+#                trunk names is checked for this first. Then, when the refs
 #                trunk names that exist are more than one ref, the run stops with `cannot read
 #                trunk`; a dangling end is not counted for this. When git cannot read
 #                refs/heads/<trunk>, or prints no end for a symbolic candidate, the run also
@@ -76,6 +78,10 @@
 # git prints it, even when that end does not exist yet. A candidate under refs/ that is not
 # symbolic names itself when `git show-ref --verify` finds it. Any other candidate names no ref.
 # Two candidates that end at the same ref name one ref. Trunk is never read again.
+#
+# ORDER NOTE: a trunk spelled as a remote, such as origin/<branch>, now stops at this trunk ref
+# check, not at the earlier no-git name check. It still stops before any change. Only the order
+# of blockers on an input with more than one fault changes. No blocker text changes.
 #
 # ACTION:
 #   already on the branch   no switch (created false). The upstream rule below still applies.
@@ -120,8 +126,8 @@
 # before any change, and never again, so a name read through HEAD, such as HEAD itself, is checked
 # against the branch HEAD was on before the run; after the run it names the working branch. git
 # 2.25 shows only the end of a symbolic-ref chain, so a link in the chain, such as one through
-# HEAD, cannot be seen. A trunk name that names no candidate ref and does not end with the branch
-# names no ref, object names included; nothing ties it to the branch. The six-rule lookup order
+# HEAD, cannot be seen. A trunk name that names no candidate ref names no ref, object names
+# included; nothing ties it to the branch. The six-rule lookup order
 # is mirrored from git, not asked of git, so a lookup rule a future git adds is missed. A
 # candidate other than refs/heads/<trunk> that git cannot read, such as a corrupt ref or a chain
 # deeper than git follows, names no ref. The base fetch, part of the base refusal and the last

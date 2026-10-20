@@ -374,10 +374,13 @@ test_branch_state() {
 
 # ── Base names the current branch ────────────────────────────────────────────
 
-# The base stop keys on the refs base names, not on its spelling. Every git qualifier of the
-# branch, in any case, a symbolic ref whose chain ends at the branch (dangling or not), and a
-# remote HEAD alias all stop with nothing pushed. A stop that compares spelling only lets every
-# refusal case here through to the push.
+# The base stop keys on ref identity, not on spelling. Base stops only when one of git's six
+# lookup candidates for it, or the end a candidate resolves to, is refs/heads/<b> or
+# refs/remotes/<remote>/<b> for a remote `git remote` lists, compared exactly after an ASCII case
+# fold. So every git qualifier of the branch, in any case, a symbolic ref whose chain ends at the
+# branch (dangling or not), and a remote HEAD alias all stop with nothing pushed, while a base that
+# only ends with `/<b>` passes. A stop that compares spelling only lets every refusal case here
+# through to the push.
 test_base_any_spelling() {
     local index spelling_name base_spelling
     local -a spelling_names=(refs-heads heads origin refs-remotes-origin upper-case mixed-case refs-heads-case)
@@ -437,6 +440,78 @@ test_base_names_other_refs() {
     assert_success base-alias-elsewhere-passes "$WORK_TREE" "$sha" '' \
         --head "$BRANCH" --base trunk-alias --remote origin
     assert_remote_refs base-alias-elsewhere-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+# assert_base_passes <name> <base> -> in the current world, asserts the engine pushes feat/x at
+# HEAD with --base <base> --remote origin, and that origin then carries feat/x and main.
+assert_base_passes() {
+    local name="$1" base_spelling="$2" sha
+    sha="$(head_sha)"
+    assert_success "$name-passes" "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base "$base_spelling" --remote origin
+    assert_remote_refs "$name-pushed" "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+# A base names the current branch only by ref identity. A base whose text ends with `/<b>` but
+# whose lookup candidates and their ends are other refs passes: the PR #421 repro (on main,
+# --base team/main with refs/heads/team/main present), an absent base, a refs/heads/ spelling of
+# another branch, a symbolic alias to another branch, and a stray remote-tracking ref under a
+# name `git remote` does not list. A stop that matches the text suffix refuses every case here.
+test_base_ref_identity_passes() {
+    local sha out rc=0 expected
+    create_world base-identity-codex-repro
+    run_git "$WORK_TREE" checkout -q main
+    run_git "$WORK_TREE" branch team/main
+    run_git "$WORK_TREE" commit --allow-empty -q -m on-main
+    sha="$(head_sha)"
+    printf -v expected 'branch: main\ncommit: %s\n' "$sha"
+    run_engine "$WORK_TREE" out "$WORKDIR/base-identity-codex-repro.err" \
+        --head main --base team/main --remote origin || rc=$?
+    assert_equal base-identity-codex-repro-exit 0 "$rc" "exit code"
+    assert_equal base-identity-codex-repro-passes "$expected" "$out" "stdout"
+    assert_remote_refs base-identity-codex-repro-pushed "$ORIGIN_DIR" "refs/heads/main $sha"
+
+    create_world base-identity-absent
+    assert_base_passes base-identity-absent "release/$BRANCH"
+
+    create_world base-identity-refs-heads-other
+    run_git "$WORK_TREE" branch "team/$BRANCH"
+    assert_base_passes base-identity-refs-heads-other "refs/heads/team/$BRANCH"
+
+    create_world base-identity-alias-other
+    run_git "$WORK_TREE" branch "team/$BRANCH"
+    run_git "$WORK_TREE" symbolic-ref refs/heads/trunk-alias "refs/heads/team/$BRANCH"
+    assert_base_passes base-identity-alias-other trunk-alias
+
+    create_world base-identity-stray-remote-ref
+    run_git "$WORK_TREE" update-ref "refs/remotes/gone/$BRANCH" "$TRUNK_SHA"
+    assert_base_passes base-identity-stray-remote-ref "gone/$BRANCH"
+}
+
+# A base that names the branch's image on a remote `git remote` lists stops with nothing pushed:
+# a configured remote other than the push remote, a remotes/ spelling, a case variant, a remote
+# added under a name that only looked like a branch prefix, and a remote name that contains `/`.
+test_base_remote_image_refused() {
+    local index spelling_name base_spelling
+    local -a spelling_names=(other-remote remotes-origin case-folded)
+    local -a base_spellings=("other/$BRANCH" "remotes/origin/$BRANCH" 'Origin/Feat/X')
+    create_world base-remote-image
+    install_pre_push_hook
+    for index in "${!base_spellings[@]}"; do
+        spelling_name="${spelling_names[$index]}"
+        base_spelling="${base_spellings[$index]}"
+        assert_blocker "base-remote-image-$spelling_name" "$WORK_TREE" "$MISMATCH_REASON" \
+            --head "$BRANCH" --base "$base_spelling" --remote origin
+    done
+    run_git "$WORK_TREE" remote add team "$WORLD_ROOT/team.git"
+    assert_blocker base-remote-image-added-remote "$WORK_TREE" "$MISMATCH_REASON" \
+        --head "$BRANCH" --base "team/$BRANCH" --remote origin
+    run_git "$WORK_TREE" remote add up/stream "$WORLD_ROOT/upstream.git"
+    assert_blocker base-remote-image-slash-remote "$WORK_TREE" "$MISMATCH_REASON" \
+        --head "$BRANCH" --base "up/stream/$BRANCH" --remote origin
+    assert_equal base-remote-image-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs base-remote-image-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+    assert_remote_refs base-remote-image-other-unchanged "$OTHER_DIR" ''
 }
 
 # ── Expected commit (--expect-commit) ────────────────────────────────────────
@@ -750,6 +825,8 @@ test_identifier_gate
 test_branch_state
 test_base_any_spelling
 test_base_names_other_refs
+test_base_ref_identity_passes
+test_base_remote_image_refused
 test_expect_commit
 test_explicit_sets_upstream
 test_explicit_non_ff_no_retry

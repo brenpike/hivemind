@@ -7,7 +7,10 @@
 # moves to the top of the work tree, reads the inputs file once (after the containment read-guard)
 # and checks its fields, then refuses an in-progress operation, unmerged paths, a detached or
 # unborn HEAD, a branch name that fails the identifier gate, a trunk that names the current
-# branch, and an unreadable trunk. A dirty path outside `files` is printed as an
+# branch, and an unreadable trunk. Trunk names the current branch only by ref identity: one of
+# git's six lookup candidates for it, or the end a candidate resolves to, is refs/heads/<b> or
+# refs/remotes/<remote>/<b> for a remote `git remote` lists, compared exactly after an ASCII case
+# fold. A trunk that only ends with `/<b>` does not. A dirty path outside `files` is printed as an
 # `outside: <JSON string>` stderr line before the blocker. With nothing listed dirty it prints
 # `committed: false`; otherwise it stages exactly the dirty listed paths, commits them with the
 # message built from the inputs, verifies the commit, and prints
@@ -468,6 +471,42 @@ test_trunk_refusals() {
     assert_committed trunk-ambiguous-proceeds "$(printf 'M\tf.txt')" 'feat(core): add thing'
 }
 
+# Trunk names the current branch only by ref identity. A trunk whose text ends with `/<b>` but
+# whose lookup candidates and their ends are other refs proceeds and commits: an existing branch,
+# an absent name, and a symbolic alias to another branch. A trunk that names the branch's image on
+# a remote `git remote` lists stops with nothing changed. A stop that matches the text suffix
+# refuses every proceed case here.
+test_trunk_ref_identity() {
+    local index case_name trunk_spelling
+    local -a case_names=(existing-branch absent symbolic-alias)
+    local -a trunk_spellings=("team/$BRANCH" "release/$BRANCH" trunk-alias)
+    for index in "${!trunk_spellings[@]}"; do
+        case_name="trunk-identity-${case_names[$index]}"
+        trunk_spelling="${trunk_spellings[$index]}"
+        create_world "$case_name"
+        if [[ "$trunk_spelling" != "release/$BRANCH" ]]; then
+            run_git "$WORK_TREE" branch "team/$BRANCH" main
+        fi
+        if [[ "$trunk_spelling" == trunk-alias ]]; then
+            run_git "$WORK_TREE" symbolic-ref refs/heads/trunk-alias "refs/heads/team/$BRANCH"
+        fi
+        printf 'changed\n' >"$WORK_TREE/f.txt"
+        write_basic_inputs '["f.txt"]'
+        assert_commit_run "$case_name-proceeds" "$WORK_TREE" "$INPUTS_REL" "$trunk_spelling"
+        assert_committed "$case_name-proceeds" "$(printf 'M\tf.txt')" 'feat(core): add thing'
+    done
+
+    create_world trunk-identity-remote-image
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
+    assert_refused_unchanged trunk-identity-remote-origin "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk "origin/$BRANCH" --inputs "$INPUTS_REL"
+    run_git "$WORK_TREE" remote add team "$WORLD_ROOT/team.git"
+    assert_refused_unchanged trunk-identity-remote-team "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk "team/$BRANCH" --inputs "$INPUTS_REL"
+}
+
 # ── Outside paths ───────────────────────────────────────────────────────────
 
 test_outside_paths() {
@@ -523,12 +562,13 @@ test_nothing_to_commit() {
 
 # ── Commits ─────────────────────────────────────────────────────────────────
 
-# assert_commit_run <name> <cwd> <inputs rel> -> runs the engine, asserts exit 0, empty stderr, and
-# the stdout block with the new HEAD and committed true.
+# assert_commit_run <name> <cwd> <inputs rel> [trunk] -> runs the engine with --trunk [trunk]
+# (default main), asserts exit 0, empty stderr, and the stdout block with the new HEAD and
+# committed true.
 assert_commit_run() {
-    local name="$1" run_cwd="$2" inputs_rel="$3"
+    local name="$1" run_cwd="$2" inputs_rel="$3" trunk_name="${4:-main}"
     local errfile="$WORKDIR/$name.err" out rc=0
-    run_engine "$run_cwd" out "$errfile" --trunk main --inputs "$inputs_rel" || rc=$?
+    run_engine "$run_cwd" out "$errfile" --trunk "$trunk_name" --inputs "$inputs_rel" || rc=$?
     if [[ "$rc" -ne 0 ]]; then
         failed "$name" "expected exit 0, got $rc (stderr: $(tr '\n' '|' <"$errfile"))"
         return 0
@@ -675,6 +715,7 @@ test_inputs_file_refusals
 test_inputs_field_refusals
 test_git_state_refusals
 test_trunk_refusals
+test_trunk_ref_identity
 test_outside_paths
 test_nothing_to_commit
 test_commits

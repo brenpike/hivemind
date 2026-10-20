@@ -53,13 +53,15 @@
 #   detached     HEAD is not a symbolic ref to refs/heads/<branch> (`HEAD is detached`).
 #   unborn       the current branch has no commit yet.
 #   branch name  the current branch fails hivemind_assert_identifier.
-#   trunk        trunk names the current branch: as text, ignoring ASCII case, it is the branch
-#                or ends with `/` followed by it, or a ref trunk names (git's six-rule lookup
-#                order, symbolic refs followed to their end) does (`the current branch is
-#                trunk`). When git cannot read refs/heads/<trunk>, or prints no end for a
-#                symbolic candidate, the run stops with `cannot read trunk`. A trunk that names
-#                more than one existing ref does not stop the run, and neither does a trunk that
-#                names no ref.
+#   trunk        trunk names the current branch by ref identity, not by its text (see the NAME
+#                LOOKUP paragraph in _shared/git-refusals.sh). It does when its spelling is the
+#                branch, heads/<branch> or refs/heads/<branch>, ignoring ASCII case, or when a
+#                ref trunk names (git's six-rule lookup order, symbolic refs followed to their
+#                end) is the branch's own ref or its image on a remote that `git remote` lists
+#                (`the current branch is trunk`). So team/<branch> is not trunk. When git
+#                cannot read refs/heads/<trunk>, or prints no end for a symbolic candidate, the
+#                run stops with `cannot read trunk`. A trunk that names more than one existing
+#                ref does not stop the run, and neither does a trunk that names no ref.
 #   outside      `git status --porcelain=v1 -z --untracked-files=all --no-renames` reports a
 #                dirty path that is not in files. Each such path is printed to stderr as an
 #                `outside: <JSON string>` line, in status order, then the blocker `the working

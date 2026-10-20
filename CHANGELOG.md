@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The push-branch base check now keys on the refs the base names, not only its spelling. Refs #409.
+- The trunk and base checks now compare refs, so `team/main` no longer counts as `main`. `main`, `heads/main`, `refs/heads/main` and `<remote>/main` for a listed remote still do. create-working-branch had this over-refusal since 6.1.0.
 
 ## [6.1.0] - 2026-10-20
 
