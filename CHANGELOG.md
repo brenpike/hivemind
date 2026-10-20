@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.1.0] - 2026-10-20
+
+### Added
+
+- New skill `hivemind:gather-facts` and schema `plugin/references/facts-schema.json`. One script reads branch state, history against a freshly fetched trunk, the branch's PRs, and the text of named issues or PRs. It writes one complete facts file per run. Long text is chunked so every line fits one read. Only a failed GitHub page or a missing merge-base stops planning. Refs #409.
+- `tools/validate.sh` and the script bootstrap suite are wired for the two new test suites. Refs #409.
+
+### Changed
+
+- `hivemind:create-working-branch` now runs a committed script. It refuses a dirty tree, or an in-progress merge, rebase, cherry-pick, revert or bisect, before switching branches. It adds `commit`, `created` and `warning` routing lines. The `branch` line is unchanged. Refs #409.
+
 ## [6.0.3] - 2026-10-19
 
 ### Fixed
