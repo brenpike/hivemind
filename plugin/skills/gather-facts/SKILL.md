@@ -10,7 +10,7 @@ shell: bash
 # Gather Facts
 
 Run the committed facts script once. It fetches trunk without changing any branch, HEAD, the
-index or a file, reads the branch as it is, and writes ONE complete facts file under
+index or a work-tree file, reads the branch as it is, and writes ONE complete facts file under
 `.hivemind/facts/`. Its stdout carries only fixed routing lines.
 
 Contract:

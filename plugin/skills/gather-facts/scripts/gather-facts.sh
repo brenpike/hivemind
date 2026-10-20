@@ -105,6 +105,11 @@
 #       author) are not chunked, so their lines are as long as the values.
 #   (e) past git's rename limit, renames show as a delete and an add.
 #   (f) in a partial clone, checking a pull request's head commit can make git fetch it.
+#   (g) the fetch in (2) rewrites FETCH_HEAD, git's record of the last fetch, as the fetch in
+#       ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (Trunk Freshness) does. No facts consumer
+#       reads it, and any later fetch or pull rewrites it again. --no-write-fetch-head was
+#       rejected: it needs git 2.29 or later, and on an older git every fetch would fail and
+#       report fetch_failed.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
