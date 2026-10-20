@@ -6,7 +6,8 @@
 #   plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh
 # through a PATH-shim fake `gh` that serves canned fixture bytes from tests/change-detect-poll/.
 # The REAL `jq` runs the script's REAL filters over those bytes, so the snapshot derivation under
-# test is the production one — only the transport is faked.
+# test is the production one — only the transport and the watch-deadline clock are faked (a
+# PATH-shim fake `date`, see "PATH-shim fake date" below).
 #
 # Mirrors tools/test_react_marker.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
 # -fail convention, extended with a THIRD counter (SKIP) for the cases that exercise the seeded
@@ -110,8 +111,10 @@ pass() { echo "PASS [$1] $2"; PASS_COUNT=$((PASS_COUNT + 1)); }
 failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 skipped() { echo "SKIP [$1] $2"; SKIP_COUNT=$((SKIP_COUNT + 1)); }
 
-# Poll args held fixed across cases. MAX_WATCH=3 / INTERVAL=1 yields three polls then
-# WATCH_TIMEOUT, so every case terminates in ~3s and the whole suite stays well under a minute.
+# Poll args held fixed across cases. MAX_WATCH=3 / INTERVAL=1 yields EXACTLY three polls then
+# WATCH_TIMEOUT: the fake `date` advances the deadline clock one virtual second per snapshot
+# query, so the window counts polls, not wall-clock seconds, and a case passes or fails the same
+# way under any CPU load.
 OWNER="hive-org"
 REPO_NAME="hive-repo"
 PR_NUMBER="4242"
@@ -243,6 +246,27 @@ done < "$entry"
 exit 0
 STUB
 chmod +x "$STUB_BIN/gh"
+
+# ── PATH-shim fake date ─────────────────────────────────────────────────────────────
+# The poll's watch window is a wall-clock deadline: `date +%s` once at arm time, then again
+# before every poll. Under CPU contention (validate.sh runs suites in parallel) the stubbed
+# captures can overrun a 3 s real window before the poll that carries a case's delta, so a case
+# expecting CHANGED or REVIEWER_APPROVED on poll 2 saw WATCH_TIMEOUT instead. Widening the window
+# is no fix: CHANGED does not end the process, so every CHANGED case would idle the whole wider
+# window out. The fake clock reads a fixed epoch plus the fake gh's snapshot-query counter
+# (`graphql.n`): every poll iteration issues exactly one snapshot query, so the deadline check
+# before poll N reads epoch + N-1 and MAX_WATCH counts polls. The real deadline arithmetic and
+# the real `sleep` between polls still run; only the clock's source is faked. Any other `date`
+# call exits non-zero so a new use of the clock cannot silently read the virtual one.
+cat > "$STUB_BIN/date" <<'STUB'
+#!/usr/bin/env bash
+set -u
+[ "$#" -eq 1 ] && [ "$1" = "+%s" ] || { echo "fake date: unsupported call: $*" >&2; exit 1; }
+[ -n "${FAKE_GH_STATE_DIR:-}" ] || { echo "fake date: FAKE_GH_STATE_DIR unset" >&2; exit 1; }
+capture_count=$(cat "$FAKE_GH_STATE_DIR/graphql.n") || exit 1
+printf '%s\n' "$((1700000000 + capture_count))"
+STUB
+chmod +x "$STUB_BIN/date"
 
 # new_state <name>: fresh fake-gh state dir with zeroed call counters.
 new_state() {
