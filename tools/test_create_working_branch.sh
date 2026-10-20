@@ -5,9 +5,11 @@
 # plugin/skills/_shared/allowlist.sh).
 #
 # The engine takes REQUIRED `--base <branch> --branch <branch> --classification <kind>
-# --trunk-freshness fresh|stale|skipped`. It refuses an in-progress merge, rebase, cherry-pick,
-# revert or bisect, unmerged paths, any staged, unstaged or untracked path, and a branch checked
-# out in another worktree, all before any change. It resolves the base once (local branch, then
+# --trunk-freshness fresh|stale|skipped --trunk <branch>`. Before any git command it gates base,
+# branch and trunk as identifiers, then refuses a branch equal to base and a branch equal to trunk
+# ignoring ASCII case (trunk is a name only and need not exist locally; base may equal trunk). It
+# refuses an in-progress merge, rebase, cherry-pick, revert or bisect, unmerged paths, any staged,
+# unstaged or untracked path, and a branch checked out in another worktree, all before any change. It resolves the base once (local branch, then
 # any commit name, then a fetch from origin), switches to an existing branch (removing an upstream
 # that is not <remote>/<branch>) or creates a new one with --no-track at the base commit, and
 # prints
@@ -73,9 +75,11 @@ failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 # ── Contracted strings (restated from the engine header; a change here is a contract change) ──
 
 BRANCH='feature/x'
-USAGE_REASON='invalid arguments; usage: create-working-branch.sh --base <branch> --branch <branch> --classification feature|bugfix|hotfix|refactor|chore|docs|test|ci --trunk-freshness fresh|stale|skipped'
+USAGE_REASON='invalid arguments; usage: create-working-branch.sh --base <branch> --branch <branch> --classification feature|bugfix|hotfix|refactor|chore|docs|test|ci --trunk-freshness fresh|stale|skipped --trunk <branch>'
 IDENTIFIER_REASON='base or working_branch contains characters outside the safe allowlist'
+TRUNK_IDENTIFIER_REASON='trunk contains characters outside the safe allowlist'
 EQUALS_BASE_REASON='working_branch equals base'
+EQUALS_TRUNK_REASON='working_branch equals trunk'
 NOT_A_CHECKOUT_REASON='not inside a git checkout'
 MERGE_REASON='a merge is in progress'
 REBASE_REASON='a rebase is in progress'
@@ -288,27 +292,33 @@ test_usage_errors() {
     create_world usage
     assert_refused_unchanged usage-no-args "$WORK_TREE" "$USAGE_REASON"
     assert_refused_unchanged usage-unknown-flag "$WORK_TREE" "$USAGE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --force yes
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main --force yes
     assert_refused_unchanged usage-duplicate-branch "$WORK_TREE" "$USAGE_REASON" \
-        --base main --branch "$BRANCH" --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_refused_unchanged usage-missing-value "$WORK_TREE" "$USAGE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness
+        --base main --trunk main --branch "$BRANCH" --classification feature --trunk-freshness
+    assert_refused_unchanged usage-missing-trunk "$WORK_TREE" "$USAGE_REASON" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+    assert_refused_unchanged usage-duplicate-trunk "$WORK_TREE" "$USAGE_REASON" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main --trunk main
+    assert_refused_unchanged usage-valueless-trunk "$WORK_TREE" "$USAGE_REASON" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk
     assert_refused_unchanged usage-missing-base "$WORK_TREE" "$USAGE_REASON" \
-        --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_refused_unchanged usage-missing-branch "$WORK_TREE" "$USAGE_REASON" \
-        --base main --classification feature --trunk-freshness fresh
+        --base main --classification feature --trunk-freshness fresh --trunk main
     assert_refused_unchanged usage-missing-classification "$WORK_TREE" "$USAGE_REASON" \
-        --base main --branch "$BRANCH" --trunk-freshness fresh
+        --base main --branch "$BRANCH" --trunk-freshness fresh --trunk main
     assert_refused_unchanged usage-missing-trunk-freshness "$WORK_TREE" "$USAGE_REASON" \
-        --base main --branch "$BRANCH" --classification feature
+        --base main --branch "$BRANCH" --classification feature --trunk main
     assert_refused_unchanged usage-positional "$WORK_TREE" "$USAGE_REASON" \
         main "$BRANCH" feature fresh
     assert_refused_unchanged enum-bad-classification "$WORK_TREE" "$USAGE_REASON" \
-        --base main --branch "$BRANCH" --classification feat --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feat --trunk-freshness fresh --trunk main
     assert_refused_unchanged enum-bad-trunk-freshness "$WORK_TREE" "$USAGE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness maybe
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness maybe --trunk main
     assert_refused_unchanged enum-raw-stale-form "$WORK_TREE" "$USAGE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness 'stale (3 behind)'
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness 'stale (3 behind)' --trunk main
 }
 
 test_identifier_and_enum_gate() {
@@ -321,13 +331,15 @@ test_identifier_and_enum_gate() {
         value_name="${value_names[$index]}"
         bad_value="${bad_values[$index]}"
         assert_refused_unchanged "gate-base-$value_name" "$WORK_TREE" "$IDENTIFIER_REASON" \
-            --base "$bad_value" --branch "$BRANCH" --classification feature --trunk-freshness fresh
+            --base "$bad_value" --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
         assert_refused_unchanged "gate-branch-$value_name" "$WORK_TREE" "$IDENTIFIER_REASON" \
-            --base main --branch "$bad_value" --classification feature --trunk-freshness fresh
+            --base main --branch "$bad_value" --classification feature --trunk-freshness fresh --trunk main
         assert_refused_unchanged "enum-classification-$value_name" "$WORK_TREE" "$USAGE_REASON" \
-            --base main --branch "$BRANCH" --classification "$bad_value" --trunk-freshness fresh
+            --base main --branch "$BRANCH" --classification "$bad_value" --trunk-freshness fresh --trunk main
         assert_refused_unchanged "enum-trunk-freshness-$value_name" "$WORK_TREE" "$USAGE_REASON" \
-            --base main --branch "$BRANCH" --classification feature --trunk-freshness "$bad_value"
+            --base main --branch "$BRANCH" --classification feature --trunk-freshness "$bad_value" --trunk main
+        assert_refused_unchanged "gate-trunk-$value_name" "$WORK_TREE" "$TRUNK_IDENTIFIER_REASON" \
+            --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk "$bad_value"
     done
     if [[ -e "$marker" ]]; then
         failed gate-no-side-effect "a gated value was expanded: $marker exists"
@@ -339,14 +351,51 @@ test_identifier_and_enum_gate() {
 test_branch_equals_base() {
     create_world equals-base
     assert_refused_unchanged branch-equals-base "$WORK_TREE" "$EQUALS_BASE_REASON" \
-        --base main --branch main --classification feature --trunk-freshness fresh
+        --base main --branch main --classification feature --trunk-freshness fresh --trunk main
+}
+
+test_branch_equals_trunk() {
+    create_world equals-trunk-off-trunk
+    run_git "$WORK_TREE" checkout -q -b scratch
+    assert_refused_unchanged branch-equals-trunk-off-trunk "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base release --branch main --classification feature --trunk-freshness fresh --trunk main
+
+    create_world equals-trunk
+    assert_refused_unchanged branch-equals-trunk-on-trunk "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base release --branch main --classification feature --trunk-freshness fresh --trunk main
+    assert_refused_unchanged branch-equals-trunk-remote-base "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base origin/main --branch main --classification feature --trunk-freshness fresh --trunk main
+    assert_refused_unchanged branch-equals-trunk-capitalized "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base main --branch Main --classification feature --trunk-freshness fresh --trunk main
+    assert_refused_unchanged branch-equals-trunk-upper-case "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base main --branch MAIN --classification feature --trunk-freshness fresh --trunk main
+    assert_refused_unchanged branch-equals-trunk-develop "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base main --branch develop --classification feature --trunk-freshness fresh --trunk develop
+}
+
+test_branch_differs_from_non_main_trunk() {
+    create_world trunk-develop
+    run_git "$WORK_TREE" checkout -q -b develop
+    assert_success trunk-develop-switch-to-main "$WORK_TREE" "$(expected_block main "$TRUNK_SHA" false)" \
+        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
+    assert_equal trunk-develop-switch-to-main-head refs/heads/main "$(read_head_ref)" "HEAD"
+    assert_success trunk-develop-new-branch "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base develop --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
+    assert_on_branch_without_upstream trunk-develop-new-branch "$TRUNK_SHA"
+
+    create_world trunk-not-local
+    assert_success trunk-not-local "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
+    assert_on_branch_without_upstream trunk-not-local "$TRUNK_SHA"
+    assert_equal trunk-not-local-absent '' \
+        "$(run_git "$WORK_TREE" for-each-ref refs/heads/develop refs/remotes/origin/develop)" "develop absent"
 }
 
 test_not_a_checkout() {
     local not_a_checkout="$WORKDIR/not-a-checkout"
     mkdir -p "$not_a_checkout"
     assert_blocker not-a-checkout "$not_a_checkout" "$NOT_A_CHECKOUT_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 # ── In-progress operations ───────────────────────────────────────────────────
@@ -356,9 +405,9 @@ test_merge_in_progress() {
     create_conflict_branches
     run_git "$WORK_TREE" merge -q c2 >/dev/null 2>&1 || true
     assert_refused_unchanged merge-in-progress "$WORK_TREE" "$MERGE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_refused_unchanged merge-in-progress-from-subdir "$WORK_TREE/sub" "$MERGE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 test_clean_merge_in_progress() {
@@ -368,7 +417,7 @@ test_clean_merge_in_progress() {
     run_git "$WORK_TREE" checkout -q main
     run_git "$WORK_TREE" merge -q --no-ff --no-commit side >/dev/null 2>&1
     assert_refused_unchanged clean-merge-in-progress "$WORK_TREE" "$MERGE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 test_rebase_in_progress() {
@@ -376,7 +425,7 @@ test_rebase_in_progress() {
     create_conflict_branches
     run_git "$WORK_TREE" rebase c2 >/dev/null 2>&1 || true
     assert_refused_unchanged rebase-in-progress "$WORK_TREE" "$REBASE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 test_cherry_pick_in_progress() {
@@ -384,7 +433,7 @@ test_cherry_pick_in_progress() {
     create_conflict_branches
     run_git "$WORK_TREE" cherry-pick c2 >/dev/null 2>&1 || true
     assert_refused_unchanged cherry-pick-in-progress "$WORK_TREE" "$CHERRY_PICK_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 test_revert_in_progress() {
@@ -392,14 +441,14 @@ test_revert_in_progress() {
     create_conflict_branches
     run_git "$WORK_TREE" revert --no-edit c1~1 >/dev/null 2>&1 || true
     assert_refused_unchanged revert-in-progress "$WORK_TREE" "$REVERT_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 test_bisect_in_progress() {
     create_world bisect
     run_git "$WORK_TREE" bisect start >/dev/null 2>&1
     assert_refused_unchanged bisect-in-progress "$WORK_TREE" "$BISECT_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 # ── Unmerged and dirty paths ─────────────────────────────────────────────────
@@ -412,7 +461,7 @@ test_unmerged_paths() {
         "0000000000000000000000000000000000000000" "$blob" "$blob" "$blob" \
         | run_git "$WORK_TREE" update-index --index-info
     assert_refused_unchanged unmerged-paths "$WORK_TREE" "$UNMERGED_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 test_dirty_kinds() {
@@ -420,28 +469,28 @@ test_dirty_kinds() {
     printf 'staged\n' >"$WORK_TREE/f.txt"
     run_git "$WORK_TREE" add f.txt
     assert_refused_unchanged dirty-staged "$WORK_TREE" "$STAGED_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 
     create_world dirty-staged-new
     printf 'new\n' >"$WORK_TREE/new.txt"
     run_git "$WORK_TREE" add new.txt
     assert_refused_unchanged dirty-staged-new "$WORK_TREE" "$STAGED_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 
     create_world dirty-unstaged
     printf 'unstaged\n' >"$WORK_TREE/f.txt"
     assert_refused_unchanged dirty-unstaged "$WORK_TREE" "$UNSTAGED_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 
     create_world dirty-deleted
     rm "$WORK_TREE/f.txt"
     assert_refused_unchanged dirty-deleted "$WORK_TREE" "$UNSTAGED_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 
     create_world dirty-untracked
     printf 'untracked\n' >"$WORK_TREE/sub/new.txt"
     assert_refused_unchanged dirty-untracked "$WORK_TREE" "$UNTRACKED_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_equal dirty-untracked-no-branch '' \
         "$(run_git "$WORK_TREE" for-each-ref "refs/heads/$BRANCH")" "refs/heads/$BRANCH absent"
 }
@@ -450,7 +499,7 @@ test_ignored_files_allowed() {
     create_world ignored
     printf 'ignored\n' >"$WORK_TREE/build.log"
     assert_success ignored-files-allowed "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream ignored-files-allowed "$TRUNK_SHA"
     assert_equal ignored-files-kept 'ignored' "$(cat "$WORK_TREE/build.log")" "ignored file content"
 }
@@ -460,7 +509,7 @@ test_ignored_files_allowed() {
 test_new_branch_from_local_base() {
     create_world new-local
     assert_success new-from-local-base "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream new-from-local-base "$TRUNK_SHA"
 }
 
@@ -470,7 +519,7 @@ test_new_branch_from_remote_tracking_base() {
     run_git "$WORK_TREE" fetch -q origin
     run_git "$WORK_TREE" config branch.autoSetupMerge always
     assert_success new-from-origin-main "$WORK_TREE" "$(expected_block "$BRANCH" "$ELSEWHERE_SHA" true)" \
-        --base origin/main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base origin/main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream new-from-origin-main "$ELSEWHERE_SHA"
     assert_equal new-from-origin-main-local-trunk-untouched "$TRUNK_SHA" \
         "$(run_git "$WORK_TREE" rev-parse refs/heads/main)" "refs/heads/main"
@@ -480,7 +529,7 @@ test_new_branch_from_detached_head() {
     create_world new-detached
     run_git "$WORK_TREE" checkout -q --detach main
     assert_success new-from-detached-head "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
-        --base main --branch "$BRANCH" --classification chore --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification chore --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream new-from-detached-head "$TRUNK_SHA"
 }
 
@@ -490,7 +539,7 @@ test_base_fetched_from_origin() {
     assert_equal base-on-origin-not-local '' \
         "$(run_git "$WORK_TREE" for-each-ref refs/remotes/origin/release refs/heads/release)" "release not in w"
     assert_success base-fetched-from-origin "$WORK_TREE" "$(expected_block "$BRANCH" "$ELSEWHERE_SHA" true)" \
-        --base release --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base release --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream base-fetched-from-origin "$ELSEWHERE_SHA"
     assert_equal base-fetched-tracking-ref "$ELSEWHERE_SHA" \
         "$(run_git "$WORK_TREE" rev-parse refs/remotes/origin/release)" "refs/remotes/origin/release"
@@ -501,10 +550,10 @@ test_base_fetched_from_origin() {
 test_unresolvable_base() {
     create_world unresolvable-base
     assert_refused_unchanged unresolvable-base-with-origin "$WORK_TREE" "$BASE_REASON" \
-        --base nosuch --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base nosuch --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     run_git "$WORK_TREE" remote remove origin
     assert_refused_unchanged unresolvable-base-no-origin "$WORK_TREE" "$BASE_REASON" \
-        --base nosuch --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base nosuch --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 # ── Existing branch ──────────────────────────────────────────────────────────
@@ -518,7 +567,7 @@ test_existing_branch_trunk_upstream_unset() {
     run_git "$WORK_TREE" checkout -q main
     set_upstream origin refs/heads/main
     assert_success existing-trunk-upstream "$WORK_TREE" "$(expected_block "$BRANCH" "$branch_sha" false)" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream existing-trunk-upstream "$branch_sha"
 }
 
@@ -527,7 +576,7 @@ test_existing_branch_local_upstream_unset() {
     run_git "$WORK_TREE" branch "$BRANCH"
     set_upstream . refs/heads/main
     assert_success existing-local-upstream "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" false)" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream existing-local-upstream "$TRUNK_SHA"
 }
 
@@ -536,7 +585,7 @@ test_existing_branch_half_upstream_unset() {
     run_git "$WORK_TREE" branch "$BRANCH"
     run_git "$WORK_TREE" config "branch.$BRANCH.merge" "refs/heads/$BRANCH"
     assert_success existing-half-upstream "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" false)" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream existing-half-upstream "$TRUNK_SHA"
 }
 
@@ -546,7 +595,7 @@ test_existing_branch_matching_upstream_kept() {
     run_git "$WORK_TREE" push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
     set_upstream origin "refs/heads/$BRANCH"
     assert_success existing-matching-upstream "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" false)" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_equal existing-matching-upstream-head "refs/heads/$BRANCH" "$(read_head_ref)" "HEAD"
     assert_equal existing-matching-upstream-remote origin "$(read_branch_config remote)" "branch.$BRANCH.remote"
     assert_equal existing-matching-upstream-merge "refs/heads/$BRANCH" "$(read_branch_config merge)" "branch.$BRANCH.merge"
@@ -560,7 +609,7 @@ test_already_on_branch_noop() {
     set_upstream origin "refs/heads/$BRANCH"
     before="$(repo_snapshot)"
     assert_success already-on-branch "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" false)" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     after="$(repo_snapshot)"
     assert_equal already-on-branch-noop "$before" "$after" "HEAD, refs, index, tree and branch config"
 }
@@ -570,7 +619,7 @@ test_already_on_branch_trunk_upstream_unset() {
     run_git "$WORK_TREE" checkout -q -b "$BRANCH"
     set_upstream origin refs/heads/main
     assert_success already-on-trunk-upstream "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" false)" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
     assert_on_branch_without_upstream already-on-trunk-upstream "$TRUNK_SHA"
 }
 
@@ -579,7 +628,7 @@ test_checked_out_in_other_worktree() {
     run_git "$WORK_TREE" branch "$BRANCH"
     run_git "$WORK_TREE" worktree add -q "$WORLD_ROOT/wt2" "$BRANCH" >/dev/null 2>&1
     assert_refused_unchanged checked-out-in-other-worktree "$WORK_TREE" "$WORKTREE_REASON" \
-        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
 }
 
 # ── Trunk freshness warnings ─────────────────────────────────────────────────
@@ -587,11 +636,11 @@ test_checked_out_in_other_worktree() {
 test_freshness_warnings() {
     create_world stale
     assert_success warning-stale "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true "$STALE_WARNING")" \
-        --base main --branch "$BRANCH" --classification bugfix --trunk-freshness stale
+        --base main --branch "$BRANCH" --classification bugfix --trunk-freshness stale --trunk main
 
     create_world skipped
     assert_success warning-skipped "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true "$SKIPPED_WARNING")" \
-        --trunk-freshness skipped --classification docs --branch "$BRANCH" --base main
+        --trunk-freshness skipped --classification docs --branch "$BRANCH" --base main --trunk main
 }
 
 # ── Run ──────────────────────────────────────────────────────────────────────
@@ -599,6 +648,8 @@ test_freshness_warnings() {
 test_usage_errors
 test_identifier_and_enum_gate
 test_branch_equals_base
+test_branch_equals_trunk
+test_branch_differs_from_non_main_trunk
 test_not_a_checkout
 test_merge_in_progress
 test_clean_merge_in_progress

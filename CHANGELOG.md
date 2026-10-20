@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `hivemind:create-working-branch` now runs a committed script. It refuses a dirty tree, or an in-progress merge, rebase, cherry-pick, revert or bisect, before switching branches. It adds `commit`, `created` and `warning` routing lines. The `branch` line is unchanged. Refs #409.
+- `hivemind:create-working-branch` now runs a committed script. It refuses a dirty tree, or an in-progress merge, rebase, cherry-pick, revert or bisect, before switching branches. It adds `commit`, `created` and `warning` routing lines. The `branch` line is unchanged. It takes the resolved `trunk` as a new input and refuses a working branch that is trunk, ignoring case. Refs #409.
 
 ## [6.0.3] - 2026-10-19
 

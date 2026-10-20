@@ -12,7 +12,10 @@
 # commits, deletions and renames, and the planner would repeat or miss work. So no list is
 # capped, and one facts file per run carries every commit and every changed path. Long free text
 # is split into chunks of at most 1000 characters, one chunk per JSON line, so no line is too big
-# for one Read page. A cut arises only from a failed GitHub page (complete false, total from
+# for one Read page. GitHub values that are not free text (url, base_ref, author) are kept whole,
+# and a page whose such value is blank or does not fit one chunk fails its shape check. That is a
+# shape check, not the rejected size bound below: GitHub keeps these values far shorter, so real
+# data never fails it. A cut arises only from a failed GitHub page (complete false, total from
 # totalCount) or from no merge-base (history unavailable), and both stop delivery planning.
 # Rejected: a size bound that stops the run when crossed (it adds stops), and pages the planner
 # would fetch one by one (the planner has no shell). Stdout carries only fixed-size routing lines,
@@ -101,8 +104,9 @@
 #   (c) a run of more than 999 whitespace characters stays inside one chunk, so that chunk can
 #       pass 1000 characters, and a path made only of whitespace gives a blank chunk that fails
 #       the schema check. Both keep the chunks equal to the text.
-#   (d) names and GitHub values that are not free text (branch, trunk, remote, base_ref, url,
-#       author) are not chunked, so their lines are as long as the values.
+#   (d) branch, trunk and remote are not chunked, so their lines are as long as the values. They
+#       are caller or local values, trusted under (a); trunk and remote also pass the identifier
+#       gate.
 #   (e) past git's rename limit, renames show as a delete and an add.
 #   (f) in a partial clone, checking a pull request's head commit can make git fetch it.
 #   (g) the fetch in (2) rewrites FETCH_HEAD, git's record of the last fetch, as the fetch in

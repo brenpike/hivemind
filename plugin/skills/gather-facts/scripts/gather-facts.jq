@@ -33,6 +33,9 @@
 #     Unicode code points.
 # Whitespace is the set JavaScript's String.prototype.trim removes, so the schema check's blank
 # rule and this chunker agree.
+# GitHub values that are not free text (a pull request's url and base ref, a reference or comment
+# url, an author login) are kept whole, never chunked or trimmed. A page fails the shape check
+# when one is blank or does not fit one chunk (a JSON cost above 1000).
 #
 # FAILURE. A git read this program cannot parse raises a jq error, so the script blocks instead of
 # writing partial facts.
@@ -52,8 +55,11 @@ def facts_json_cost:
   elif . < 32 or . == 127 then 6
   else 1 end;
 
-def facts_visible_ok:
-  type == "string" and (explode | any(.[]; facts_is_space | not));
+def facts_short_value_ok:
+  type == "string"
+  and (explode
+       | any(.[]; facts_is_space | not)
+         and (map(facts_json_cost) | add) <= facts_chunk_limit);
 
 def facts_sha_ok:
   type == "string" and test("^([0-9a-f]{40}|[0-9a-f]{64})$");
@@ -222,9 +228,9 @@ def facts_pr_node_ok:
   type == "object"
   and (.number | facts_count_ok)
   and (.state == "OPEN" or .state == "MERGED" or .state == "CLOSED")
-  and (.url | facts_visible_ok)
+  and (.url | facts_short_value_ok)
   and (.headRefOid | facts_sha_ok)
-  and (.baseRefName | facts_visible_ok)
+  and (.baseRefName | facts_short_value_ok)
   and ((.isCrossRepository | type) == "boolean");
 
 def facts_connection_ok(node_ok):
@@ -261,11 +267,11 @@ def facts_pr_absent($lookup):
   else {lookup: "unavailable", complete: false, total: 0, items: []} end;
 
 def facts_author_ok:
-  . == null or (type == "object" and (.login | facts_visible_ok));
+  . == null or (type == "object" and (.login | facts_short_value_ok));
 
 def facts_comment_ok:
   type == "object"
-  and (.url | facts_visible_ok)
+  and (.url | facts_short_value_ok)
   and ((.body | type) == "string" or .body == null)
   and (.author | facts_author_ok);
 
@@ -275,7 +281,7 @@ def facts_ref_node_ok:
        or (.__typename == "PullRequest"
            and (.state == "OPEN" or .state == "CLOSED" or .state == "MERGED")))
   and (.number | facts_count_ok)
-  and (.url | facts_visible_ok)
+  and (.url | facts_short_value_ok)
   and ((.title | type) == "string")
   and ((.body | type) == "string" or .body == null)
   and (.author | facts_author_ok)

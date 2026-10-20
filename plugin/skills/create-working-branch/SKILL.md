@@ -12,7 +12,7 @@ shell: bash
 Rules: `GIT-01` (no trunk commits), `GIT-02` (required git preflight)
 
 Before:
-- [ ] Orchestrator provided `base`, `working_branch`, and `classification`
+- [ ] Orchestrator provided `base`, `working_branch`, `classification`, and `trunk`
 - [ ] Orchestrator confirmed trunk freshness, user acknowledged stale trunk, or orchestrator recorded trunk-freshness: skipped
 - [ ] `base` branch exists locally or can be fetched
 - [ ] No uncommitted changes that make switching unsafe
@@ -20,6 +20,7 @@ Before:
 
 After:
 - [ ] Current branch is `working_branch`
+- [ ] Current branch is not `trunk`
 - [ ] Branch created from or confirmed on `base`
 - [ ] This skill's procedure ended at its own final Bash tool call (exit 0 = succeeded, exit 1 = blocked)
 
@@ -35,12 +36,15 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 - `working_branch`: requested working branch name (must follow branch taxonomy and naming rules).
 - `classification`: work classification (`feature|bugfix|hotfix|refactor|chore|docs|test|ci`).
 - `trunk-freshness`: resolved trunk freshness state from the orchestrator's preflight check per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Trunk Freshness). One of: `fresh`, `stale (N behind)`, `stale (diverged — local N ahead)`, `stale (diverged — local M ahead, N behind)`, or `skipped`. Absent = skill exits 1 with blocker.
+- `trunk`: the resolved trunk branch. The script refuses a `working_branch` equal to it.
 
 ## Requirements
 
 Every branch create or switch runs through `${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh`, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline).
 
 **Input gate.** Before any Bash call, validate `base` and `working_branch` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: base or working_branch contains characters outside the safe allowlist`.
+
+Validate `trunk` against the same gate; on failure, exit 1 with `blocker: trunk contains characters outside the safe allowlist`.
 
 1. Map the `trunk-freshness` session fact passed by the orchestrator per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Trunk Freshness) to the script value:
    - `trunk-freshness: fresh` maps to `fresh`.
@@ -51,10 +55,10 @@ Every branch create or switch runs through `${CLAUDE_PLUGIN_ROOT}/skills/create-
 3. **Final Bash tool call.** Run the branch script, where each `<allowlist-validated-...>` placeholder is the value that passed the input gate or the checks in steps 1 and 2:
 
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh --base <allowlist-validated-base> --branch <allowlist-validated-working-branch> --classification <allowlist-validated-classification> --trunk-freshness <allowlist-validated-trunk-freshness>
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh --base <allowlist-validated-base> --branch <allowlist-validated-working-branch> --classification <allowlist-validated-classification> --trunk-freshness <allowlist-validated-trunk-freshness> --trunk <allowlist-validated-trunk>
    ```
 
-   The script header defines the tree refusals, base resolution, branch creation and switching, upstream handling, and output; this skill does not restate them. Exit 0: stdout `branch: <working_branch>` is the routing data, followed by `commit:`, `created:`, and, for stale or skipped trunk freshness, a `warning:` line. Exit 1: blocked; relay the script's `blocker:` line from stderr.
+   The script header defines the tree refusals, the refusal of a `working_branch` equal to `trunk`, base resolution, branch creation and switching, upstream handling, and output; this skill does not restate them. Exit 0: stdout `branch: <working_branch>` is the routing data, followed by `commit:`, `created:`, and, for stale or skipped trunk freshness, a `warning:` line. Exit 1: blocked; relay the script's `blocker:` line from stderr.
 
 ## Silence Discipline
 
@@ -78,3 +82,4 @@ as a workflow state or as one step inside a longer procedure:
 - open a PR
 - continue when branch state is unsafe or indeterminate
 - invent values for `base`, `working_branch`, or `classification` — exit 1 with blocker if any are missing
+- invent a value for `trunk`; exit 1 with blocker if it is missing

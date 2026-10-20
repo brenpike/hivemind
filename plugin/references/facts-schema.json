@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Facts",
-  "description": "What gather-facts.sh reports about the branch so the planner can plan what is left. One complete file per run: no list is capped. Every list read from git or GitHub carries complete and total; every free text is split into chunks; every object from GitHub carries origin external.",
+  "description": "What gather-facts.sh reports about the branch so the planner can plan what is left. One complete file per run: no list is capped. Every list read from git or GitHub carries complete and total; every free text is split into chunks; every other GitHub string fits one chunk; every object from GitHub carries origin external.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -558,14 +558,16 @@
                 ]
               },
               "url": {
-                "type": "string"
+                "type": "string",
+                "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
               },
               "head_ref_oid": {
                 "type": "string",
                 "description": "The pull request head commit."
               },
               "base_ref": {
-                "type": "string"
+                "type": "string",
+                "description": "The base branch name. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
               },
               "is_cross_repository": {
                 "type": "boolean"
@@ -662,7 +664,8 @@
                     ]
                   },
                   "url": {
-                    "type": "string"
+                    "type": "string",
+                    "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
                   },
                   "title": {
                     "type": "object",
@@ -695,7 +698,7 @@
                   },
                   "author": {
                     "type": "string",
-                    "description": "The author login. Absent for a deleted account."
+                    "description": "The author login. Absent for a deleted account. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
                   },
                   "body": {
                     "type": "object",
@@ -764,10 +767,11 @@
                             },
                             "author": {
                               "type": "string",
-                              "description": "The author login. Absent for a deleted account."
+                              "description": "The author login. Absent for a deleted account. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
                             },
                             "url": {
-                              "type": "string"
+                              "type": "string",
+                              "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
                             },
                             "body": {
                               "type": "object",

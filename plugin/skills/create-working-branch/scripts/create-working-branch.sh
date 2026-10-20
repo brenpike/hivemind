@@ -8,15 +8,28 @@
 # INPUT (`--flag value` form only; each flag exactly once; unknown, duplicate, or missing flags
 # and invalid enum values all give the fixed usage blocker):
 #   --base <branch>              REQUIRED. Branch the working branch is created from.
-#   --branch <branch>            REQUIRED. Working branch name. Must differ from base.
+#   --branch <branch>            REQUIRED. Working branch name. Must differ from base and from
+#                                trunk.
 #   --classification <kind>      REQUIRED. feature|bugfix|hotfix|refactor|chore|docs|test|ci.
 #                                Checked as an enum only; the taxonomy and naming check is the
 #                                caller's, made before the call.
 #   --trunk-freshness <state>    REQUIRED. fresh|stale|skipped. stale and skipped add a warning.
-# base and branch pass hivemind_assert_identifier (_shared/allowlist.sh: non-empty, no leading
-# `-`, no `..`, charset ^[A-Za-z0-9._/-]+$) before any git command runs. A git identifier read
-# from the repository (the branch upstream) is captured into a shell variable and used only as
-# "$var", per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline).
+#   --trunk <branch>             REQUIRED. Resolved trunk branch name. Checked as a name only; it
+#                                need not exist locally.
+# base, branch and trunk pass hivemind_assert_identifier (_shared/allowlist.sh: non-empty, no
+# leading `-`, no `..`, charset ^[A-Za-z0-9._/-]+$) before any git command runs, base and branch
+# first (`base or working_branch contains characters outside the safe allowlist`), then trunk
+# (`trunk contains characters outside the safe allowlist`). Then, still before any git command,
+# a branch equal to base stops with `working_branch equals base`, and a branch equal to trunk,
+# ignoring ASCII case, stops with `working_branch equals trunk`. Case is ignored because a
+# case-insensitive file system stores refs/heads/Main and refs/heads/main as one file. A git
+# identifier read from the repository (the branch upstream) is captured into a shell variable
+# and used only as "$var", per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell
+# Identifier Discipline).
+#
+# WHY (trunk): the script, not the caller's taxonomy check, holds the stop on a working branch
+# that is trunk, so no caller can switch HEAD onto trunk through it. A run that starts on trunk
+# still moves off it, because only the target branch is compared with trunk.
 #
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
 #   in progress  a merge (MERGE_HEAD), rebase (rebase-merge, rebase-apply, REBASE_HEAD),
@@ -96,7 +109,7 @@ shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>
 export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
 
-usage_reason='invalid arguments; usage: create-working-branch.sh --base <branch> --branch <branch> --classification feature|bugfix|hotfix|refactor|chore|docs|test|ci --trunk-freshness fresh|stale|skipped'
+usage_reason='invalid arguments; usage: create-working-branch.sh --base <branch> --branch <branch> --classification feature|bugfix|hotfix|refactor|chore|docs|test|ci --trunk-freshness fresh|stale|skipped --trunk <branch>'
 
 base_name=''
 base_seen=false
@@ -106,6 +119,8 @@ classification=''
 classification_seen=false
 trunk_freshness=''
 trunk_freshness_seen=false
+trunk_name=''
+trunk_seen=false
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || blocker "$usage_reason"
   case "$1" in
@@ -129,6 +144,11 @@ while [ "$#" -gt 0 ]; do
       trunk_freshness="$2"
       trunk_freshness_seen=true
       ;;
+    --trunk)
+      [ "$trunk_seen" = false ] || blocker "$usage_reason"
+      trunk_name="$2"
+      trunk_seen=true
+      ;;
     *)
       blocker "$usage_reason"
       ;;
@@ -138,6 +158,7 @@ done
 
 [ "$base_seen" = true ] && [ "$branch_seen" = true ] || blocker "$usage_reason"
 [ "$classification_seen" = true ] && [ "$trunk_freshness_seen" = true ] || blocker "$usage_reason"
+[ "$trunk_seen" = true ] || blocker "$usage_reason"
 case "$classification" in
   feature|bugfix|hotfix|refactor|chore|docs|test|ci) ;;
   *) blocker "$usage_reason" ;;
@@ -153,7 +174,11 @@ esac
 identifier_reason='base or working_branch contains characters outside the safe allowlist'
 hivemind_assert_identifier "$base_name" || blocker "$identifier_reason"
 hivemind_assert_identifier "$branch_name" || blocker "$identifier_reason"
+hivemind_assert_identifier "$trunk_name" || blocker "trunk contains characters outside the safe allowlist"
 [ "$branch_name" != "$base_name" ] || blocker "working_branch equals base"
+branch_folded="$(printf '%s' "$branch_name" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
+trunk_folded="$(printf '%s' "$trunk_name" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
+[ "$branch_folded" != "$trunk_folded" ] || blocker "working_branch equals trunk"
 
 # read_config_value <key>
 #   Sets config_value to the value of <key> (empty when the key is unset). Any git config failure

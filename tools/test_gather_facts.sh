@@ -964,6 +964,92 @@ test_pull_requests() {
     assert_route prs-gh-missing-ready delivery ready
 }
 
+# ── GitHub values that are not free text fit one chunk ──────────────────────
+
+# with_value <jq path> <value> -> reads one JSON document on stdin, sets <jq path> to the string
+# <value>, prints it compact.
+with_value() {
+    jq -c --arg value "$2" "$1 = \$value"
+}
+
+# repeat_text <count> <character> -> prints <character> <count> times, no newline.
+repeat_text() {
+    local text_index
+    for text_index in $(seq 1 "$1"); do
+        printf '%s' "$2"
+    done
+}
+
+# assert_pr_refused <name> <node JSON> -> a first pull request page holding <node JSON> gives
+# lookup unavailable and delivery ready.
+assert_pr_refused() {
+    pr_page false 1 "$2" >"$GH_DIR/pr.pages"
+    run_engine "$1" "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok "$1"
+    assert_fact "$1-unavailable" '.pull_requests | [.lookup, .complete, (.items | length)] | @tsv' $'unavailable\tfalse\t0'
+    assert_route "$1-ready" delivery ready
+}
+
+# assert_ref_refused <name> <page JSON> -> a first reference page <page JSON> for --ref 5 gives
+# lookup unavailable and delivery ready.
+assert_ref_refused() {
+    printf '%s\n' "$2" >"$GH_DIR/ref-5.pages"
+    run_engine "$1" "$WORK_TREE" "$STUB_PATH" --trunk main --ref 5
+    assert_ok "$1"
+    assert_fact "$1-unavailable" '.references.items[0] | [.lookup, has("item")] | @tsv' $'unavailable\tfalse'
+    assert_route "$1-ready" delivery ready
+}
+
+test_short_values() {
+    create_world short
+    local oid long_value quote_value boundary_value ref_root='.data.repository.issueOrPullRequest'
+    oid="$(head_sha)"
+    long_value="$(repeat_text 1001 a)"
+    quote_value="$(repeat_text 501 '"')"
+    boundary_value="$(repeat_text 996 b)\"\""
+
+    assert_pr_refused short-pr-url "$(pr_node 1 OPEN "$oid" | with_value .url "$long_value")"
+    assert_pr_refused short-pr-base "$(pr_node 1 OPEN "$oid" | with_value .baseRefName "$long_value")"
+    assert_pr_refused short-pr-quotes "$(pr_node 1 OPEN "$oid" | with_value .url "$quote_value")"
+    assert_equal short-quotes-cost '501 1002' \
+        "$(jq -n -r --arg value "$quote_value" '[($value | length), ($value | tojson | length - 2)] | join(" ")')" \
+        "the 501-quote value has 501 characters and costs 1002"
+
+    assert_ref_refused short-ref-url "$(ref_page Issue 5 '' false 0 | with_value "$ref_root.url" "$long_value")"
+    assert_ref_refused short-ref-author \
+        "$(ref_page Issue 5 '' false 0 | jq -c --arg value "$long_value" "$ref_root.author = {login: \$value}")"
+    assert_ref_refused short-comment-url \
+        "$(ref_page Issue 5 '' false 1 "$(comment_node 'a comment' | with_value .url "$long_value")")"
+    assert_ref_refused short-comment-author \
+        "$(ref_page Issue 5 '' false 1 "$(comment_node 'a comment' | with_value .author.login "$long_value")")"
+
+    pr_page true 3 "$(pr_node 2 OPEN "$oid")" >"$GH_DIR/pr.pages"
+    pr_page false 3 "$(pr_node 3 OPEN "$oid" | with_value .url "$long_value")" >>"$GH_DIR/pr.pages"
+    run_engine short-later-page "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok short-later-page
+    assert_fact short-later-page-cut '.pull_requests | [.lookup, .complete, .total, (.items | length)] | @tsv' $'fetched\tfalse\t3\t1'
+    assert_route short-later-page-field cut pull_requests
+    assert_route short-later-page-stop delivery_stops cut_fields
+
+    assert_equal short-boundary-cost '998 1000' \
+        "$(jq -n -r --arg value "$boundary_value" '[($value | length), ($value | tojson | length - 2)] | join(" ")')" \
+        "the boundary value has 998 characters and costs 1000"
+    pr_page false 1 "$(pr_node 4 OPEN "$oid" | with_value .url "$boundary_value" | with_value .baseRefName "$boundary_value")" \
+        >"$GH_DIR/pr.pages"
+    printf '%s\n' "$(ref_page Issue 5 '' false 1 \
+        "$(comment_node 'a comment' | with_value .url "$boundary_value" | with_value .author.login "$boundary_value")" \
+        | with_value "$ref_root.url" "$boundary_value" \
+        | jq -c --arg value "$boundary_value" "$ref_root.author = {login: \$value}")" >"$GH_DIR/ref-5.pages"
+    run_engine short-boundary "$WORK_TREE" "$STUB_PATH" --trunk main --ref 5
+    assert_ok short-boundary
+    assert_fact short-boundary-pr '.pull_requests | [.lookup, .complete] + (.items[0] | [.url, .base_ref]) | @json' \
+        "$(jq -n -c --arg value "$boundary_value" '["fetched", true, $value, $value]')"
+    assert_fact short-boundary-ref '.references.items[0] | [.lookup] + (.item | [.url, .author, .comments.items[0].url, .comments.items[0].author]) | @json' \
+        "$(jq -n -c --arg value "$boundary_value" '["fetched", $value, $value, $value, $value]')"
+    assert_route short-boundary-ready delivery ready
+    assert_line_bound short-boundary-line-bound
+}
+
 # ── Concurrent runs, symlinked facts folder ─────────────────────────────────
 
 test_concurrency_and_containment() {
@@ -1055,6 +1141,7 @@ test_head_states
 test_big_history
 test_references
 test_pull_requests
+test_short_values
 test_concurrency_and_containment
 test_schema_validation
 
