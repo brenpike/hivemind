@@ -113,6 +113,7 @@ UNREADABLE_TRUNK_REASON='cannot read trunk'
 OUTSIDE_REASON='the working tree has dirty paths outside files'
 COMMIT_FAILED_REASON='the commit failed'
 STILL_DIRTY_REASON='a listed path is still dirty after the commit'
+COMMIT_OUTSIDE_REASON='the commit has a path outside files'
 
 # ── World helpers ───────────────────────────────────────────────────────────
 
@@ -645,6 +646,24 @@ test_hooks() {
     write_basic_inputs '["f.txt"]'
     assert_blocker hook-rewrites "$WORK_TREE" "$STILL_DIRTY_REASON" '' --trunk main --inputs "$INPUTS_REL"
     assert_equal hook-rewrites-committed "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD~1)" "the commit was made on the old HEAD"
+
+    create_world hook-stages-unlisted
+    printf '#!/bin/sh\nprintf "hooked\\n" >>g.txt\ngit add g.txt\n' >"$WORK_TREE/.git/hooks/pre-commit"
+    chmod +x "$WORK_TREE/.git/hooks/pre-commit"
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_blocker hook-stages-unlisted "$WORK_TREE" "$COMMIT_OUTSIDE_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_equal hook-stages-unlisted-parent "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD~1)" "the commit was made on the old HEAD"
+    assert_equal hook-stages-unlisted-paths "$(printf 'M\tf.txt\nM\tg.txt')" \
+        "$(run_git "$WORK_TREE" show --no-renames --name-status --format= HEAD)" "the hook's path is in the commit the blocker names"
+
+    create_world hook-stages-listed
+    printf '#!/bin/sh\nprintf "hooked\\n" >>f.txt\ngit add f.txt\n' >"$WORK_TREE/.git/hooks/pre-commit"
+    chmod +x "$WORK_TREE/.git/hooks/pre-commit"
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_commit_run hook-stages-listed "$WORK_TREE" "$INPUTS_REL"
+    assert_committed hook-stages-listed "$(printf 'M\tf.txt')" 'feat(core): add thing'
 }
 
 # ── Run ──────────────────────────────────────────────────────────────────────

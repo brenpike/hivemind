@@ -76,10 +76,12 @@
 #                             `git commit --cleanup=whitespace -F -` with the message piped from
 #                             jq, then the checks below.
 #   After a commit: HEAD must still be refs/heads/<branch>, HEAD must be a new commit whose one
-#   parent is the old HEAD, and no listed path may be dirty (`a listed path is still dirty after
-#   the commit`, as when a pre-commit hook rewrote a file without staging it). After a change,
-#   the only blockers are failed git actions and these result checks; none of them refuses the
-#   request.
+#   parent is the old HEAD, every path the new commit changes, read from the commit itself with
+#   `git diff-tree`, must be in files (`the commit has a path outside files`, as when a
+#   pre-commit hook staged another file), and no listed path may be dirty (`a listed path is
+#   still dirty after the commit`, as when a pre-commit hook rewrote a file without staging it).
+#   After a change, the only blockers are failed git actions and these result checks; none of
+#   them refuses the request.
 #
 # OUTPUT on success (exit 0), on stdout in ONE write:
 #   branch: <b>
@@ -95,10 +97,12 @@
 # NOT CHECKED: repo hooks, local refs, git config, and the operator are trusted under
 # ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline). A commit-msg
 # hook can rewrite the message, and a post-commit hook can change files or refs; the result
-# checks catch a moved HEAD and a dirty listed path, and anything else is a recorded residual.
-# The status read and the commit are not atomic: another process that stages an unlisted path
-# between them has it committed, and one that edits a listed path has the edit staged. A failed
-# commit leaves the listed paths staged; a rerun stages them again and changes nothing else.
+# checks catch a moved HEAD, a committed path outside files and a dirty listed path, and anything
+# else is a recorded residual. The status read and the commit are not atomic: a hook or another
+# process that stages an unlisted path between them has it committed, and the result check then
+# stops the run with that commit in place; one that edits a listed path has the edit staged. A
+# failed commit leaves the listed paths staged; a rerun stages them again and changes nothing
+# else.
 # jq decodes status paths as UTF-8, so a path with bytes that are not UTF-8 shows with
 # replacement characters on its outside line and can never be listed. A listed path that is an
 # untracked ignored file is not dirty, so it is not committed. A submodule path is a directory,
@@ -106,8 +110,8 @@
 # ignored, the inputs file itself is a dirty path outside files and the run stops there. The
 # trunk lookup order is mirrored from git, not asked of git, and git 2.25 shows only the end of
 # a symbolic-ref chain, with the same residuals as create-working-branch.sh. The private work
-# folder (mktemp -d under TMPDIR) holds the inputs copy and the status listing and is removed by
-# the EXIT trap.
+# folder (mktemp -d under TMPDIR) holds the inputs copy, the status listing and the commit's path
+# listing, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
@@ -189,6 +193,7 @@ remove_work_dir() {
 trap 'remove_work_dir; :' EXIT
 inputs_copy="$work_dir/inputs.json"
 status_file="$work_dir/status.z"
+commit_paths_file="$work_dir/commit-paths.z"
 
 # ── Inputs ──────────────────────────────────────────────────────────────────
 
@@ -404,6 +409,16 @@ is_full_object_id "$new_head" || blocker "HEAD does not resolve to a commit afte
 [ "$new_head" != "$old_head" ] || blocker "the commit did not make a new commit"
 parent_line="$(git rev-list --parents --max-count=1 "$new_head" 2>/dev/null)" || blocker "cannot read the new commit"
 [ "$parent_line" = "$new_head $old_head" ] || blocker "the parent of the new commit is not the old HEAD"
+
+# The paths the new commit changes, NUL-separated, read from the commit and not from the status
+# taken before it, so a path a hook or another process staged after the status read is seen.
+git diff-tree -r -z --no-renames --name-only "$old_head" "$new_head" >"$commit_paths_file" 2>/dev/null \
+  || blocker "cannot read the new commit"
+unlisted_count="$(jq -r --rawfile commit_text "$commit_paths_file" '
+(.files | map({key: ., value: true}) | from_entries) as $listed_set
+| [$commit_text | split("\u0000")[] | select(length > 0) | select($listed_set[.] != true)] | length
+' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the new commit"
+[ "$unlisted_count" = 0 ] || blocker "the commit has a path outside files"
 
 read_status_listing
 remaining_count="$(jq -r --rawfile status_text "$status_file" "$entries_program"' | map(select(.listed)) | length' "$inputs_copy" 2>/dev/null)" \
