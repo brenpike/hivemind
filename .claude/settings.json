@@ -58,7 +58,9 @@
       "Edit(.hivemind/runs/.record-inputs-*.json)",
       "Edit(.hivemind/runs/.markfb-inputs-*.json)",
       "Edit(.hivemind/spawn-inputs.*.json)",
-      "Edit(.hivemind/seed-inputs-*.json)"
+      "Edit(.hivemind/seed-inputs-*.json)",
+      "Edit(.hivemind/molt-inputs-*.json)",
+      "Edit(.hivemind/pr-inputs-*.json)"
     ]
   },
   "hooks": {

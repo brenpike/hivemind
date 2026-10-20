@@ -161,6 +161,11 @@
   },
   {
     "rule": "CHECK13",
+    "path": "plugin/skills/_shared/git-refusals.sh",
+    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted because a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Read-only git checks a git script makes before any change (branch name rule, name ref walk, in-progress operation, unmerged paths, dirty kinds), reported through return codes and HIVEMIND_* globals; callers own set -u and map results to their own blocker() (this lib never exits)."
+  },
+  {
+    "rule": "CHECK13",
     "path": "tests/policy/fixtures/check13-exception-canary.sh",
     "reason": "Decision-canary fixture for the CHECK 13 marker-key canary: never executed, and it lives outside plugin/ so the production scan never reaches it. The canary resolves this entry against the fixture's scanned P18 marker line to witness that a CHECK13 exception keys on rule + path plus a present marker."
   }

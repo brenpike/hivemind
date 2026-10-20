@@ -1,6 +1,6 @@
 {
   "rule": "navigator-transport-permission-rules-pinned",
-  "description": "P3 consumer-assertion: the overlord's navigator-transport grants (the .hivemind/* input-file handoffs used by seed-hive, spawn-brood, init-run-ledger, record-state-result, mark-intent-fallback and the review loop) are PROMPT PRE-APPROVAL rules — Edit(<pattern>) entries in .claude/settings.json and in hivemind_settings_permissions_template() in plugin/skills/_shared/settings-merge.sh. They deliver NO path scoping: an allow rule pre-approves, it never denies, and an absent rule yields an interactive prompt rather than a refusal. The transport-path constraint ITSELF is enforced by the fixed-literal prefix + invocation-token file_path authored in the trusted skill body. This fixture pins the rules because respelling Edit( as Write( silently UNMATCHES them: from Claude Code 2.1.210 onward a Write(<pattern>) rule is accepted by settings parsing but NEVER matched by file permission checks, so the pre-approval stops suppressing the prompt while looking correct. extract_regex captures BOTH spellings so a Write( regression surfaces as an EXTRA (plus a MISSING for the lost Edit( literal) instead of vanishing from the set; equal mode also fails if a rule is deleted from either file or if the two files drift apart.",
+  "description": "P3 consumer-assertion: the overlord's navigator-transport grants (the .hivemind/* input-file handoffs used by seed-hive, spawn-brood, init-run-ledger, record-state-result, mark-intent-fallback, molt, open-plan-pr and the review loop) are PROMPT PRE-APPROVAL rules — Edit(<pattern>) entries in .claude/settings.json and in hivemind_settings_permissions_template() in plugin/skills/_shared/settings-merge.sh. They deliver NO path scoping: an allow rule pre-approves, it never denies, and an absent rule yields an interactive prompt rather than a refusal. The transport-path constraint ITSELF is enforced by the fixed-literal prefix + invocation-token file_path authored in the trusted skill body. This fixture pins the rules because respelling Edit( as Write( silently UNMATCHES them: from Claude Code 2.1.210 onward a Write(<pattern>) rule is accepted by settings parsing but NEVER matched by file permission checks, so the pre-approval stops suppressing the prompt while looking correct. extract_regex captures BOTH spellings so a Write( regression surfaces as an EXTRA (plus a MISSING for the lost Edit( literal) instead of vanishing from the set; equal mode also fails if a rule is deleted from either file or if the two files drift apart.",
   "set_check": {
     "extract_regex": "((?:Edit|Write)\\(\\.hivemind\\/[^)]*\\))",
     "expected_set": [
@@ -9,7 +9,9 @@
       "Edit(.hivemind/runs/.record-inputs-*.json)",
       "Edit(.hivemind/runs/.markfb-inputs-*.json)",
       "Edit(.hivemind/spawn-inputs.*.json)",
-      "Edit(.hivemind/seed-inputs-*.json)"
+      "Edit(.hivemind/seed-inputs-*.json)",
+      "Edit(.hivemind/molt-inputs-*.json)",
+      "Edit(.hivemind/pr-inputs-*.json)"
     ],
     "files": [
       { "path": "plugin/skills/_shared/settings-merge.sh", "mode": "equal" },

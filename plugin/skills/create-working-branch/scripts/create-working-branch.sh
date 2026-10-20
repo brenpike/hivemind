@@ -137,7 +137,9 @@
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
 # compatible (no mapfile / associative arrays / ${var,,}). Plain `git` from the current folder,
-# never `git -C` (ADR-0037 decision 25).
+# never `git -C` (ADR-0037 decision 25). The name rule, the in-progress, unmerged and dirty
+# checks, and the TRUNK REF walk come from _shared/git-refusals.sh; this script maps their
+# results to its own blockers.
 
 set -euo pipefail
 trap ':' EXIT
@@ -151,6 +153,8 @@ script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d"
 shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve skills/_shared from the script directory; refusing to proceed"
 [ -f "$shared_dir/allowlist.sh" ] || blocker "required shared library missing: skills/_shared/allowlist.sh; refusing to proceed"
 . "$shared_dir/allowlist.sh" || blocker "failed to source skills/_shared/allowlist.sh (unparseable); refusing to proceed"
+[ -f "$shared_dir/git-refusals.sh" ] || blocker "required shared library missing: skills/_shared/git-refusals.sh; refusing to proceed"
+. "$shared_dir/git-refusals.sh" || blocker "failed to source skills/_shared/git-refusals.sh (unparseable); refusing to proceed"
 
 export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
@@ -222,23 +226,13 @@ hivemind_assert_identifier "$base_name" || blocker "$identifier_reason"
 hivemind_assert_identifier "$branch_name" || blocker "$identifier_reason"
 hivemind_assert_identifier "$trunk_name" || blocker "trunk contains characters outside the safe allowlist"
 [ "$branch_name" != "$base_name" ] || blocker "working_branch equals base"
-branch_folded="$(printf '%s' "$branch_name" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
-
-# names_working_branch <ref text>
-#   Succeeds when <ref text>, ignoring ASCII case, is the working branch or ends with `/` followed
-#   by it. Runs in the main shell so blocker exits it.
-names_working_branch() {
-  local ref_text_folded
-  ref_text_folded="$(printf '%s' "$1" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
-  case "$ref_text_folded" in
-    "$branch_folded"|*/"$branch_folded") return 0 ;;
-  esac
-  return 1
-}
-
-if names_working_branch "$trunk_name"; then
-  blocker "working_branch equals trunk"
-fi
+trunk_match_rc=0
+hivemind_ref_names_branch "$trunk_name" "$branch_name" || trunk_match_rc=$?
+case "$trunk_match_rc" in
+  0) blocker "working_branch equals trunk" ;;
+  1) ;;
+  *) blocker "cannot compare working_branch with trunk" ;;
+esac
 
 # read_config_value <key>
 #   Sets config_value to the value of <key> (empty when the key is unset). Any git config failure
@@ -268,42 +262,45 @@ unset_config_key() {
   esac
 }
 
-# refuse_if_git_path_exists <git-path name> <reason>
-#   Blocks with <reason> when `git rev-parse --git-path <name>` names an existing file or
-#   directory. Runs in the main shell so blocker exits it.
-refuse_if_git_path_exists() {
-  local git_path_name="$1"
-  local refusal_reason="$2"
-  local resolved_path
-  resolved_path="$(git rev-parse --git-path "$git_path_name" 2>/dev/null)" || blocker "cannot read the repository state"
-  [ -n "$resolved_path" ] || blocker "cannot read the repository state"
-  if [ -e "$resolved_path" ]; then
-    blocker "$refusal_reason"
-  fi
+# refuse_operation_in_progress
+#   Blocks when hivemind_find_operation_in_progress finds a merge, rebase, cherry-pick, revert,
+#   sequence or bisect, with its fixed reason. Runs in the main shell so blocker exits it.
+refuse_operation_in_progress() {
+  local operation_rc=0
+  hivemind_find_operation_in_progress || operation_rc=$?
+  case "$operation_rc" in
+    0) ;;
+    1) blocker "$HIVEMIND_OPERATION_REASON" ;;
+    *) blocker "cannot read the repository state" ;;
+  esac
+}
+
+# refuse_unmerged_paths
+#   Blocks when the index has unmerged paths. Runs in the main shell so blocker exits it.
+refuse_unmerged_paths() {
+  local unmerged_rc=0
+  hivemind_check_unmerged_paths || unmerged_rc=$?
+  case "$unmerged_rc" in
+    0) ;;
+    1) blocker "the index has unmerged paths" ;;
+    *) blocker "cannot read the index" ;;
+  esac
 }
 
 # refuse_dirty_tree
-#   Blocks when `git status` reports a staged, unstaged, or untracked path. Ignored files are not
-#   reported and are allowed. Each status line starts with the two-letter XY code.
+#   Blocks when `git status` reports a staged, unstaged, or untracked path, checked in that
+#   order. Ignored files are not reported and are allowed. Runs in the main shell so blocker
+#   exits it.
 refuse_dirty_tree() {
-  local status_output status_line status_code
-  local has_staged=false has_unstaged=false has_untracked=false
-  status_output="$(GIT_OPTIONAL_LOCKS=0 git status --porcelain=v1 --untracked-files=normal 2>/dev/null)" || blocker "cannot read the working tree status"
-  while IFS= read -r status_line; do
-    [ -n "$status_line" ] || continue
-    status_code="${status_line:0:2}"
-    if [ "$status_code" = '??' ]; then
-      has_untracked=true
-      continue
-    fi
-    [ "${status_code:0:1}" = ' ' ] || has_staged=true
-    [ "${status_code:1:1}" = ' ' ] || has_unstaged=true
-  done <<EOF
-$status_output
-EOF
-  [ "$has_staged" = false ] || blocker "the index has staged changes"
-  [ "$has_unstaged" = false ] || blocker "the working tree has unstaged changes"
-  [ "$has_untracked" = false ] || blocker "the working tree has untracked files"
+  local dirty_rc=0
+  hivemind_read_dirty_kinds || dirty_rc=$?
+  case "$dirty_rc" in
+    0|1) ;;
+    *) blocker "cannot read the working tree status" ;;
+  esac
+  [ "$HIVEMIND_DIRTY_STAGED" = false ] || blocker "the index has staged changes"
+  [ "$HIVEMIND_DIRTY_UNSTAGED" = false ] || blocker "the working tree has unstaged changes"
+  [ "$HIVEMIND_DIRTY_UNTRACKED" = false ] || blocker "the working tree has untracked files"
 }
 
 # refuse_symbolic_branch
@@ -320,69 +317,20 @@ refuse_symbolic_branch() {
   esac
 }
 
-# read_trunk_candidate <candidate>
-#   Sets candidate_end to the ref <candidate> names, or to empty when it names none, and
-#   candidate_exists to true when that ref exists. A symbolic candidate names the end of its chain
-#   as `git symbolic-ref --quiet` prints it, dangling or not. A candidate under refs/ that is not
-#   symbolic names itself when `git show-ref --verify` finds it. Any other candidate names no ref.
-#   A candidate git cannot read names no ref, except refs/heads/<trunk>, which stops with `cannot
-#   read trunk`. Runs in the main shell so blocker exits it.
-candidate_end=''
-candidate_exists=false
-read_trunk_candidate() {
-  local candidate_name="$1"
-  local symbolic_rc=0 verify_rc=0
-  candidate_exists=false
-  candidate_end="$(git symbolic-ref --quiet "$candidate_name" 2>/dev/null)" || symbolic_rc=$?
-  case "$symbolic_rc" in
-    0)
-      [ -n "$candidate_end" ] || blocker "cannot read trunk"
-      git show-ref --verify --quiet "$candidate_end" >/dev/null 2>&1 || verify_rc=$?
-      [ "$verify_rc" -ne 0 ] || candidate_exists=true
-      return 0
-      ;;
-    1) candidate_end='' ;;
-    *)
-      candidate_end=''
-      [ "$candidate_name" != "refs/heads/$trunk_name" ] || blocker "cannot read trunk"
-      return 0
-      ;;
+# refuse_trunk_ref
+#   Reads every ref trunk names, once, with hivemind_resolve_name_refs. Blocks when any of them
+#   names the branch, when git cannot read trunk, then when the ones that exist are more than one
+#   ref. Runs in the main shell so blocker exits it.
+refuse_trunk_ref() {
+  local trunk_rc=0
+  hivemind_resolve_name_refs "$trunk_name" "$branch_name" || trunk_rc=$?
+  case "$trunk_rc" in
+    0) ;;
+    1) blocker "working_branch equals trunk" ;;
+    3) blocker "cannot compare working_branch with trunk" ;;
+    *) blocker "cannot read trunk" ;;
   esac
-  case "$candidate_name" in
-    refs/*) ;;
-    *) return 0 ;;
-  esac
-  git show-ref --verify --quiet "$candidate_name" >/dev/null 2>&1 || verify_rc=$?
-  case "$verify_rc" in
-    0)
-      candidate_end="$candidate_name"
-      candidate_exists=true
-      ;;
-    1) ;;
-    *) [ "$candidate_name" != "refs/heads/$trunk_name" ] || blocker "cannot read trunk" ;;
-  esac
-}
-
-# resolve_trunk_ref
-#   Reads every ref trunk names, once, in git's lookup order for a name (gitrevisions). Blocks
-#   when any of them names the branch (names_working_branch), then when the ones that exist are
-#   more than one ref. Runs in the main shell so blocker exits it.
-resolve_trunk_ref() {
-  local candidate_name existing_end='' trunk_ambiguous=false
-  for candidate_name in "$trunk_name" "refs/$trunk_name" "refs/tags/$trunk_name" \
-    "refs/heads/$trunk_name" "refs/remotes/$trunk_name" "refs/remotes/$trunk_name/HEAD"; do
-    read_trunk_candidate "$candidate_name"
-    [ -n "$candidate_end" ] || continue
-    if names_working_branch "$candidate_end"; then
-      blocker "working_branch equals trunk"
-    fi
-    [ "$candidate_exists" = true ] || continue
-    if [ -n "$existing_end" ] && [ "$existing_end" != "$candidate_end" ]; then
-      trunk_ambiguous=true
-    fi
-    existing_end="$candidate_end"
-  done
-  [ "$trunk_ambiguous" = false ] || blocker "cannot read trunk"
+  [ "$HIVEMIND_NAME_AMBIGUOUS" = false ] || blocker "cannot read trunk"
 }
 
 # resolve_commit <revision>
@@ -439,21 +387,11 @@ command -v git >/dev/null 2>&1 || blocker "git not found on PATH"
 inside_work_tree="$(git rev-parse --is-inside-work-tree 2>/dev/null)" || blocker "not inside a git checkout"
 [ "$inside_work_tree" = true ] || blocker "not inside a git checkout"
 
-refuse_if_git_path_exists MERGE_HEAD "a merge is in progress"
-refuse_if_git_path_exists rebase-merge "a rebase is in progress"
-refuse_if_git_path_exists rebase-apply "a rebase is in progress"
-refuse_if_git_path_exists REBASE_HEAD "a rebase is in progress"
-refuse_if_git_path_exists CHERRY_PICK_HEAD "a cherry-pick is in progress"
-refuse_if_git_path_exists REVERT_HEAD "a revert is in progress"
-refuse_if_git_path_exists sequencer "a cherry-pick or revert sequence is in progress"
-refuse_if_git_path_exists BISECT_START "a bisect is in progress"
-refuse_if_git_path_exists BISECT_LOG "a bisect is in progress"
-
-unmerged_paths="$(git ls-files -u 2>/dev/null)" || blocker "cannot read the index"
-[ -z "$unmerged_paths" ] || blocker "the index has unmerged paths"
+refuse_operation_in_progress
+refuse_unmerged_paths
 refuse_dirty_tree
 refuse_symbolic_branch
-resolve_trunk_ref
+refuse_trunk_ref
 
 head_ref_rc=0
 head_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null)" || head_ref_rc=$?
