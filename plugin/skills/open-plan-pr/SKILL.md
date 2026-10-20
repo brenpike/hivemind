@@ -2,14 +2,13 @@
 name: open-plan-pr
 description: Opens a pull request for a successfully completed approved plan after final verification. Use when validation and versioning gates have passed and the plan is ready for PR.
 allowed-tools:
+  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh *)
   - Bash(git status *)
   - Bash(git branch *)
   - Bash(git log *)
   - Bash(git diff *)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh *)
-  - Bash(gh pr create *)
-  - Bash(gh pr view *)
   - Bash(printf *)
+  - Write   # inert inputs-file only: authors per-invocation-unique path .hivemind/pr-inputs-<token>.json; see security-policy.md "Inert Inputs-File Navigator Pattern" + ADR-0017/0018/0019
 shell: bash
 ---
 
@@ -24,8 +23,8 @@ Before:
 - [ ] No unexpected unstaged changes
 
 After:
-- [ ] PR head branch and SHA match `head` and the step 6 `commit:` line
-- [ ] PR created with `--base` targeting resolved trunk
+- [ ] The script checked the PR head branch and SHA against `head` and the commit it pushed
+- [ ] PR created or reused with `base` (resolved trunk) as its target
 - [ ] This skill's procedure ended at its own final Bash tool call (exit 0 = succeeded, exit 1 = blocked)
 
 Open a pull request for the completed approved plan.
@@ -40,37 +39,47 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 - `head`: working branch (current branch).
 - `push_remote`: optional explicit remote name. Omit unless the user named one.
 
+## Optional Inputs
+
+The caller may pass these. When one is absent, the script works as it does without it.
+
+- `expect_commit`: the full SHA of the commit the PR must carry, such as the commit every gate held for. The script stops before the push when HEAD is another commit. When it is absent, the script pushes the commit HEAD is on.
+
 ## Requirements
+
+Every push and every PR open runs through `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`. The script reads the PR title and body from an inputs file that this skill writes with the Write tool, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern), so no title or body text goes into a shell command. This skill never pushes, opens a PR, or reads a PR with its own commands.
 
 **Input gate.** Before any Bash call, validate `head`, `base` and, when provided, `push_remote` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: head, base or push_remote contains characters outside the safe allowlist`, which echoes no value.
 
+When `expect_commit` is provided, validate it as a commit SHA against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before any Bash call; on failure, exit 1 with `blocker: expected commit is not a full object id`, which echoes no value.
+
 1. Confirm current branch matches `head` and is not `base`. The step 6 script makes this check in the same process as the push, so the check and the push act on one reading of the branch; no separate Bash call compares them here. On mismatch or trunk match, the script exits 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
-2. Confirm no unexpected unstaged changes.
+2. Confirm no unexpected unstaged changes. The script refuses a dirty tree before any change.
 3. Confirm validation outcome per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) is one of: every declared command passed, OR `Not run (no validation commands defined)`. Exit 1 with blocker if the procedure returned the Worker Report — Blocked (`stage: validation`) or any declared command failed.
 4. Confirm required version/release metadata is included or not required.
-5. The commit the PR must carry is the step 6 script's `commit:` line: the object id the script pushed, or on a warning path the one it would have pushed. No Bash call reads HEAD for it, before or after the push, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline).
-6. Place the working branch on its remote in ONE Bash call to the push-branch script, where `<allowlist-validated-head>`, `<allowlist-validated-base>` and `<allowlist-validated-remote>` are the `head`, `base` and `push_remote` values that passed the input gate. Pass `--remote` only when `push_remote` is provided:
-   ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject warn --no-upstream origin
-   ```
-   Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline).
-   - exit 1: blocked. The script's `blocker:` line on stderr is the reason.
-   - exit 0 with a `warning:` line: record it as a warning and continue to step 7. Non-interactive `gh pr create` neither pushes nor prompts: it proceeds only when it finds the branch on a remote at the local commit, and otherwise stops.
-   - exit 0 without a `warning:` line: the branch is on its remote; continue to step 7.
-7. Run `gh pr create --base <allowlist-validated-base> ...`, where `<allowlist-validated-base>` is the `base` value that passed the input gate, with title, summary, validation notes, version/release notes, and unresolved issues. Do not pass `--head`. Without `--head`, `gh` finds the head repository, including a fork, from the remote whose tracking ref matches the pushed commit, while `--head <branch>` names the base repository unless given `<owner>:<branch>`, which cannot be derived without parsing a remote URL. `gh` resolves the head itself, so step 8 checks the PR it created. See recorded residual R1 in `${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh`.
-8. **Final Bash tool call.** Verify the PR's head branch and head SHA against `head` and the step 6 commit. Take the PR number from the trailing `/pull/<n>` segment of the step 7 URL and validate it against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before the Bash call; on failure, exit 1 with `blocker: PR number contains characters outside the safe allowlist`. Take the commit from the step 6 `commit:` line and validate it as a commit SHA against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before the Bash call; on failure, exit 1 with `blocker: pushed commit is not a full commit SHA`. Then run ONE Bash call, where `<allowlist-validated-pr-number>` is that validated PR number, `<allowlist-validated-head>` is the `head` value that passed the input gate, and `<allowlist-validated-commit>` is that validated commit:
+5. Write the PR title and body. The title is one line. The body holds the summary, validation notes, version/release notes, and unresolved issues. Neither may contain a string the `## Do Not` list forbids; that check is this skill's own.
 
-   ```bash
-   n="$(gh pr view <allowlist-validated-pr-number> --json headRefName --jq '.headRefName')"
-   p="$(gh pr view <allowlist-validated-pr-number> --json headRefOid --jq '.headRefOid')"
-   u="$(gh pr view <allowlist-validated-pr-number> --json url --jq '.url')"
-   [ -n "$n" ] && [ -n "$p" ] && [ -n "$u" ] || { printf 'blocker: could not read the PR head branch, head SHA, or URL' >&2; exit 1; }
-   [ "$n" = '<allowlist-validated-head>' ] || { printf 'blocker: PR head branch does not match head' >&2; exit 1; }
-   [ "$p" = '<allowlist-validated-commit>' ] || { printf 'blocker: PR head SHA mismatch, expected %s got %s' '<allowlist-validated-commit>' "$p" >&2; exit 1; }
-   printf 'url: %s\nhead_ref_oid: %s\n' "$u" "$p"
+   Then write the inputs file with the Write tool. `file_path` is `.hivemind/pr-inputs-<token>.json`, where `<token>` is a new value for each invocation, made only of letters, digits and `-`, such as a UTC timestamp plus a random part (`20261020T141500Z-a1b2c3`). `content` is one JSON object:
+
+   ```json
+   {
+     "title": "<title>",
+     "body": "<body>",
+     "draft": false
+   }
    ```
 
-   On success (head branch matches `head` and head SHA matches the step 6 commit), the YAML output (`url` + `head_ref_oid`) is the routing data. Exits 1 with the blocker in stderr when the PR head branch, head SHA, or URL cannot be read (`blocker: could not read the PR head branch, head SHA, or URL`), when the head branch does not match `head` (`blocker: PR head branch does not match head`), or when the head SHA does not match the step 6 commit (`blocker: PR head SHA mismatch, ...`).
+   Set `draft` to `true` only when the user asked for a draft PR; otherwise leave it out. The script header lists the rule for each field. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
+   Transport Degradation Is a Hard Stop).
+6. **Final Bash tool call.** Run the PR script, where each `<allowlist-validated-...>` placeholder is the input value that passed its gate above and `<token>` is the token from step 5. Pass `--remote` only when `push_remote` is provided, and `--expect-commit` only when `expect_commit` is provided:
+
+   ```bash
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] [--expect-commit <allowlist-validated-commit>] --inputs .hivemind/pr-inputs-<token>.json
+   ```
+
+   The script pushes through the push-branch script, as a child process, before it opens or reuses the PR. Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). The script header defines the refusals, the push, the reuse of an open PR, the create call, the PR check, and the output; this skill does not restate them. The script never passes `--head` to `gh pr create`; see recorded residual R1 in `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`.
+   - exit 0: stdout `url: <url>` and `head_ref_oid: <sha>` are the routing data, followed by `created: true|false` and, when the push warned, a `warning:` line. `created: false` means the script reused the open PR on the pushed commit and left its title and body unchanged. Record a `warning:` line as a warning.
+   - exit 1: blocked; relay the script's stderr. The `blocker:` line is last.
 
 ## Silence Discipline
 
@@ -79,7 +88,7 @@ agent's turn — the skill returns control to whatever invoked it, whether that 
 as a workflow state or as one step inside a longer procedure:
 
 - This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The procedure ends at the step 8 Bash tool call, which hands the routing data back to the
+- The procedure ends at the step 6 Bash tool call, which hands the routing data back to the
   caller; the caller then continues from the point at which it invoked this skill.
 - Exit 0 = orchestrator proceeds. Routing data (if any) is in stdout.
 - Exit 1 = blocked. Emit reason: `printf 'blocker: <reason>' >&2; exit 1`
@@ -93,3 +102,10 @@ as a workflow state or as one step inside a longer procedure:
 - continue past step 6 with an unverified push state
 - invent missing validation
 - include any of the following strings (any case) in commit messages or PR content: `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship
+- push, open a PR, or read a PR with your own commands; only the script does
+- paste the title or the body into a Bash command
+- use the Write tool for anything other than the `.hivemind/pr-inputs-<token>.json` inputs file
+- author the inputs file through any transport other than the Write tool: no heredoc, no shell
+  redirection, no inline script. A Write that does not succeed is a hard stop, not a workaround;
+  see `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`
+  (Transport Degradation Is a Hard Stop).
