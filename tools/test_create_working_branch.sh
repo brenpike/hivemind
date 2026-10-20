@@ -9,7 +9,8 @@
 # branch and trunk as identifiers, then refuses a branch equal to base and a branch equal to trunk
 # ignoring ASCII case (trunk is a name only and need not exist locally; base may equal trunk). It
 # refuses an in-progress merge, rebase, cherry-pick, revert or bisect, unmerged paths, any staged,
-# unstaged or untracked path, and a branch checked out in another worktree, all before any change. It resolves the base once (local branch, then
+# unstaged or untracked path, a branch whose ref is symbolic or is the end of trunk's symbolic ref,
+# and a branch checked out in another worktree, all before any change. It resolves the base once (local branch, then
 # any commit name, then a fetch from origin), switches to an existing branch (removing an upstream
 # that is not <remote>/<branch>) or creates a new one with --no-track at the base commit, and
 # prints
@@ -80,6 +81,9 @@ IDENTIFIER_REASON='base or working_branch contains characters outside the safe a
 TRUNK_IDENTIFIER_REASON='trunk contains characters outside the safe allowlist'
 EQUALS_BASE_REASON='working_branch equals base'
 EQUALS_TRUNK_REASON='working_branch equals trunk'
+SYMBOLIC_BRANCH_REASON='working_branch is a symbolic ref'
+UNREADABLE_BRANCH_REASON='cannot read working_branch'
+UNREADABLE_TRUNK_REASON='cannot read trunk'
 NOT_A_CHECKOUT_REASON='not inside a git checkout'
 MERGE_REASON='a merge is in progress'
 REBASE_REASON='a rebase is in progress'
@@ -373,6 +377,53 @@ test_branch_equals_trunk() {
         --base main --branch develop --classification feature --trunk-freshness fresh --trunk develop
 }
 
+# A symbolic refs/heads/<branch> would let HEAD's commits land on the ref it points at, so the
+# branch's own ref must not be symbolic, and trunk's symbolic ref must not end at the branch.
+test_trunk_alias() {
+    create_world alias-existing
+    run_git "$WORK_TREE" checkout -q -b scratch
+    run_git "$WORK_TREE" symbolic-ref "refs/heads/$BRANCH" refs/heads/main
+    assert_refused_unchanged alias-branch-points-at-trunk "$WORK_TREE" "$SYMBOLIC_BRANCH_REASON" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
+    assert_refused_unchanged alias-branch-points-at-other "$WORK_TREE" "$SYMBOLIC_BRANCH_REASON" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
+
+    create_world alias-dangling
+    run_git "$WORK_TREE" checkout -q -b scratch
+    run_git "$WORK_TREE" symbolic-ref "refs/heads/$BRANCH" refs/heads/develop
+    assert_refused_unchanged alias-branch-dangling "$WORK_TREE" "$SYMBOLIC_BRANCH_REASON" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
+    assert_equal alias-branch-dangling-trunk-absent '' \
+        "$(run_git "$WORK_TREE" for-each-ref refs/heads/develop)" "develop absent"
+
+    create_world alias-already-on
+    run_git "$WORK_TREE" symbolic-ref "refs/heads/$BRANCH" refs/heads/main
+    run_git "$WORK_TREE" symbolic-ref HEAD "refs/heads/$BRANCH"
+    assert_refused_unchanged alias-already-on-branch "$WORK_TREE" "$SYMBOLIC_BRANCH_REASON" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
+
+    create_world alias-trunk
+    run_git "$WORK_TREE" checkout -q -b scratch
+    run_git "$WORK_TREE" symbolic-ref refs/heads/master refs/heads/main
+    assert_refused_unchanged alias-trunk-ends-at-branch "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base scratch --branch main --classification feature --trunk-freshness fresh --trunk master
+    run_git "$WORK_TREE" symbolic-ref refs/heads/legacy refs/heads/master
+    assert_refused_unchanged alias-trunk-chain-ends-at-branch "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base scratch --branch main --classification feature --trunk-freshness fresh --trunk legacy
+    run_git "$WORK_TREE" symbolic-ref refs/heads/upper refs/heads/MAIN
+    assert_refused_unchanged alias-trunk-ends-at-branch-case "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base scratch --branch main --classification feature --trunk-freshness fresh --trunk upper
+    assert_success alias-trunk-elsewhere "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk master
+    assert_on_branch_without_upstream alias-trunk-elsewhere "$TRUNK_SHA"
+
+    create_world alias-unreadable
+    assert_refused_unchanged alias-unreadable-branch "$WORK_TREE" "$UNREADABLE_BRANCH_REASON" \
+        --base main --branch feature/x.lock --classification feature --trunk-freshness fresh --trunk main
+    assert_refused_unchanged alias-unreadable-trunk "$WORK_TREE" "$UNREADABLE_TRUNK_REASON" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main.lock
+}
+
 test_branch_differs_from_non_main_trunk() {
     create_world trunk-develop
     run_git "$WORK_TREE" checkout -q -b develop
@@ -649,6 +700,7 @@ test_usage_errors
 test_identifier_and_enum_gate
 test_branch_equals_base
 test_branch_equals_trunk
+test_trunk_alias
 test_branch_differs_from_non_main_trunk
 test_not_a_checkout
 test_merge_in_progress

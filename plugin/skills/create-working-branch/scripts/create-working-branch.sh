@@ -29,7 +29,11 @@
 #
 # WHY (trunk): the script, not the caller's taxonomy check, holds the stop on a working branch
 # that is trunk, so no caller can switch HEAD onto trunk through it. A run that starts on trunk
-# still moves off it, because only the target branch is compared with trunk.
+# still moves off it, because only the target branch is compared with trunk. The stop compares
+# refs as well as names: a commit on HEAD updates the ref at the end of HEAD's symbolic-ref chain,
+# so a symbolic refs/heads/<branch> that points at trunk would carry commits onto trunk under
+# another name. The alias refusal below makes the ref HEAD's commits update the branch's own ref,
+# and keeps trunk's own symbolic ref, if it has one, from ending at that ref.
 #
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
 #   in progress  a merge (MERGE_HEAD), rebase (rebase-merge, rebase-apply, REBASE_HEAD),
@@ -40,6 +44,12 @@
 #   dirty        `git status --porcelain=v1 --untracked-files=normal` reports a staged, unstaged,
 #                or untracked path. Ignored files are allowed. The run never commits, stashes, or
 #                discards an edit it did not make, so a dirty tree stops here.
+#   alias        refs/heads/<branch> is a symbolic ref, dangling or not (`working_branch is a
+#                symbolic ref`), or refs/heads/<trunk> is a symbolic ref whose chain ends at
+#                refs/heads/<branch>, ignoring ASCII case (`working_branch equals trunk`). Both
+#                are read with `git symbolic-ref --quiet`, which follows a chain to its end. A
+#                name git cannot read as a branch ref stops with `cannot read working_branch` or
+#                `cannot read trunk`.
 #   worktree     the branch is checked out in another worktree.
 #   base         the base does not resolve to a commit (see BASE below).
 #
@@ -246,6 +256,30 @@ EOF
   [ "$has_untracked" = false ] || blocker "the working tree has untracked files"
 }
 
+# refuse_trunk_alias
+#   Blocks when refs/heads/<branch> is a symbolic ref, or when refs/heads/<trunk> is a symbolic
+#   ref whose chain ends at refs/heads/<branch>, ignoring ASCII case. `git symbolic-ref --quiet`
+#   exits 0 for a symbolic ref, dangling or not, printing the end of its chain, and 1 for a ref
+#   that is not symbolic or does not exist. Runs in the main shell so blocker exits it.
+refuse_trunk_alias() {
+  local alias_rc=0 trunk_end trunk_end_folded
+  git symbolic-ref --quiet "refs/heads/$branch_name" >/dev/null 2>&1 || alias_rc=$?
+  case "$alias_rc" in
+    0) blocker "working_branch is a symbolic ref" ;;
+    1) ;;
+    *) blocker "cannot read working_branch" ;;
+  esac
+  alias_rc=0
+  trunk_end="$(git symbolic-ref --quiet "refs/heads/$trunk_name" 2>/dev/null)" || alias_rc=$?
+  case "$alias_rc" in
+    0) ;;
+    1) return 0 ;;
+    *) blocker "cannot read trunk" ;;
+  esac
+  trunk_end_folded="$(printf '%s' "$trunk_end" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
+  [ "$trunk_end_folded" != "refs/heads/$branch_folded" ] || blocker "working_branch equals trunk"
+}
+
 # resolve_commit <revision>
 #   Sets resolved_commit to the full object id <revision> names as a commit, or to empty when it
 #   names none.
@@ -313,6 +347,7 @@ refuse_if_git_path_exists BISECT_LOG "a bisect is in progress"
 unmerged_paths="$(git ls-files -u 2>/dev/null)" || blocker "cannot read the index"
 [ -z "$unmerged_paths" ] || blocker "the index has unmerged paths"
 refuse_dirty_tree
+refuse_trunk_alias
 
 head_ref_rc=0
 head_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null)" || head_ref_rc=$?
