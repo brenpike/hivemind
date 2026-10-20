@@ -96,3 +96,13 @@ This ADR governs the new engine as far as this slice builds it: the `analysis-on
 - https://github.com/brenpike/hivemind/issues/408
 - `docs/adr/0035-one-script-per-workflow-engine.md`
 - `docs/adr/0026-decision-autonomy-and-post-merge-report.md`
+
+## Amendment 2026-10-20: string length rule
+
+This amendment changes Decision 14 in one place. The rest of ADR-0036 is unchanged.
+
+- **The validator also supports `minLength`.** It counts Unicode code points. A string schema with `minLength` or an enum is governed by it. The non-whitespace rule in Decision 14 now applies only to `type: string` with neither `minLength` nor an enum. The decision-brief schema uses neither, so brief checks are unchanged.
+- **Every other keyword still throws.** The validator supports only the keywords the schemas use, as Decision 14 says.
+- **Reason.** Facts chunks must be able to hold only whitespace, so long runs of whitespace can split under a bounded line (ADR-0037, slice 2 PR2a). A whitespace-only chunk is valid there. An empty chunk is not.
+
+Text: `plugin/workflow-src/lib/schema.js`, `plugin/references/facts-schema.json`.

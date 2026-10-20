@@ -470,8 +470,8 @@ const BRIEF_SCHEMA = {
 };
 
 /*
- * schema.js: checks a value against the JSON Schema subset the decision
- * brief schema uses.
+ * schema.js: checks a value against the JSON Schema subset the plugin's
+ * schemas use, such as the decision brief schema.
  *
  * Inputs
  *   validateSchema(schema, value)
@@ -489,17 +489,20 @@ const BRIEF_SCHEMA = {
  * Invariants
  *   Pure: no clock, no randomness, no I/O. The schema is a parameter.
  *   Validation keywords: type (one string), enum, required, properties,
- *   additionalProperties (false only), items, minItems. Annotation keywords
- *   $schema, title and description are accepted and change nothing.
+ *   additionalProperties (false only), items, minItems, minLength. Annotation
+ *   keywords $schema, title and description are accepted and change nothing.
  *   Fails closed: the whole schema is walked before the value is read, and
  *   any other keyword, a non-object schema, or a keyword value of the wrong
  *   shape throws. A schema edit that adds a keyword cannot pass unchecked.
  *   A property whose value is undefined counts as absent, as it does in JSON.
  *   type object means a plain object: not null and not an array.
  *   When type fails, the other keywords at that path are not checked.
- *   Every string value whose schema has type string and no enum must hold a
- *   non-whitespace character. An enum governs when present, so an enum may
- *   list the empty string.
+ *   minLength counts Unicode code points, not UTF-16 units, and applies to
+ *   any string value, with or without type. It ignores non-string values.
+ *   Every string value whose schema has type string, no enum and no
+ *   minLength must hold a non-whitespace character. An enum or a minLength
+ *   governs when present, so an enum may list the empty string and a
+ *   minLength may accept a whitespace-only string.
  *
  * Why
  *   A brief is written by a model and read by decide(). A hand-kept check
@@ -518,7 +521,8 @@ function supportedSchemaKeywords() {
     'properties',
     'additionalProperties',
     'items',
-    'minItems'
+    'minItems',
+    'minLength'
   ];
 }
 
@@ -585,6 +589,9 @@ function assertKeywordShapes(schema, path) {
   if (schema.minItems !== undefined && !(Number.isInteger(schema.minItems) && schema.minItems >= 0)) {
     failSchema(path, 'minItems must be a non-negative integer');
   }
+  if (schema.minLength !== undefined && !(Number.isInteger(schema.minLength) && schema.minLength >= 0)) {
+    failSchema(path, 'minLength must be a non-negative integer');
+  }
 }
 
 function matchesSchemaType(typeName, value) {
@@ -611,7 +618,16 @@ function listPresentKeys(record) {
 }
 
 function isBlankSchemaString(schema, value) {
-  return schema.type === 'string' && schema.enum === undefined && value.trim() === '';
+  const isGoverned = schema.enum !== undefined || schema.minLength !== undefined;
+  return schema.type === 'string' && !isGoverned && value.trim() === '';
+}
+
+function countSchemaCodePoints(text) {
+  return [...text].length;
+}
+
+function isShortSchemaString(schema, value) {
+  return schema.minLength !== undefined && typeof value === 'string' && countSchemaCodePoints(value) < schema.minLength;
 }
 
 function collectSchemaErrors(schema, value, path, errors) {
@@ -621,6 +637,9 @@ function collectSchemaErrors(schema, value, path, errors) {
   }
   if (isBlankSchemaString(schema, value)) {
     errors.push(path + ': type string: blank');
+  }
+  if (isShortSchemaString(schema, value)) {
+    errors.push(path + ': minLength: fewer than ' + schema.minLength + ' characters');
   }
   if (schema.enum !== undefined && schema.enum.indexOf(value) === -1) {
     errors.push(path + ': enum: not one of ' + schema.enum.join(', '));
