@@ -33,6 +33,13 @@
 # once, with escape-dense full-cost chunks at every text site. test_line_gate gives a trunk,
 # remote and branch name past the bound and expects the line blocker with nothing published.
 #
+# THE SCALE TESTS (test_scaling) check that the engine's work grows in line with its input. Each
+# case runs the engine on a small world and on one 4 times larger: a commit subject of 250,000 and
+# 1,000,000 U+0001 bytes, 10,000 and 40,000 untracked paths, 5,000 and 20,000 history paths. The
+# larger run must take less than SCALE_RATIO_LIMIT times the smaller one (a quadratic cost gives
+# about 16 times) and less than SCALE_SECONDS_LIMIT seconds. Times are wall clock seconds from
+# bash's time keyword and are printed with each result.
+#
 # Prints PASS/FAIL per assertion. Exits non-zero if ANY assertion FAILs.
 #
 # Usage:
@@ -1085,7 +1092,7 @@ test_short_values() {
 CORPUS_SEED=20261020
 
 # CORPUS_GENERATOR: node program. Args: seed, gather-facts.jq, out folder, work tree, branch, blob
-# sha. Reads the facts_is_space code points from gather-facts.jq, makes 40 texts, and writes
+# sha. Reads the facts_space_points code points from gather-facts.jq, makes 40 texts, and writes
 # corpus.json (texts, title_index, body_index, history_paths, untracked_path), subjects.stream (a
 # fast-import stream of one commit per text on the branch, CR and LF removed) and paths.z
 # (update-index -z --index-info records naming the blob), and creates the whitespace-only
@@ -1097,16 +1104,9 @@ const [seedText, programPath, outDir, workTree, branchName, blobSha] = process.a
 function failGenerator(message) {
   throw new Error(message + " (seed " + seedText + ")");
 }
-const spaceMatch = /def facts_is_space:([^;]*);/.exec(fs.readFileSync(programPath, "utf8"));
-if (spaceMatch === null) failGenerator("facts_is_space not found in " + programPath);
-const spacePoints = [];
-for (const term of spaceMatch[1].matchAll(/\(\. >= (\d+) and \. <= (\d+)\)|\. == (\d+)/g)) {
-  if (term[3] !== undefined) {
-    spacePoints.push(Number(term[3]));
-  } else {
-    for (let point = Number(term[1]); point <= Number(term[2]); point += 1) spacePoints.push(point);
-  }
-}
+const spaceMatch = /def facts_space_points: \[([0-9, ]+)\];/.exec(fs.readFileSync(programPath, "utf8"));
+if (spaceMatch === null) failGenerator("facts_space_points not found in " + programPath);
+const spacePoints = spaceMatch[1].split(",").map((term) => Number(term.trim()));
 if (spacePoints.length !== 25) failGenerator("read " + spacePoints.length + " whitespace code points, expected 25");
 let randomState = Number(seedText) >>> 0;
 function nextRandom() {
@@ -1472,6 +1472,109 @@ test_concurrency_and_containment() {
     assert_equal symlinked-ignore-outside-empty '' "$(ls -A "$outside")" "a symlinked .gitignore is never written through"
 }
 
+# ── Scale: the engine's work grows in line with its input ───────────────────
+
+SCALE_RATIO_LIMIT=10
+SCALE_SECONDS_LIMIT=15
+
+# timed_engine <name> <cwd> <PATH> <engine args...> -> run_engine under bash's time keyword; sets
+# LAST_SECONDS to the wall clock seconds. LC_ALL=C keeps the decimal point a dot, so the value
+# parses as JSON.
+LAST_SECONDS=''
+timed_engine() {
+    local TIMEFORMAT=%R
+    local LC_ALL=C
+    local timing_file="$WORKDIR/$1.seconds"
+    { time run_engine "$@"; } 2>"$timing_file"
+    LAST_SECONDS="$(tail -n 1 "$timing_file")"
+}
+
+# assert_scaled <name> <small seconds> <large seconds> -> the large run took less than
+# SCALE_RATIO_LIMIT times the small one and less than SCALE_SECONDS_LIMIT seconds.
+assert_scaled() {
+    local verdict verdict_word scale_ratio
+    verdict="$(jq -n -r --argjson small "$2" --argjson large "$3" \
+        --argjson ratio_limit "$SCALE_RATIO_LIMIT" --argjson seconds_limit "$SCALE_SECONDS_LIMIT" \
+        '([$small, 0.01] | max) as $floor
+         | (if $large < $ratio_limit * $floor and $large < $seconds_limit then "ok" else "bad" end) as $word
+         | [$word, ($large / $floor * 100 | floor / 100)] | @tsv')"
+    IFS=$'\t' read -r verdict_word scale_ratio <<<"$verdict"
+    local scale_text="small ${2}s, large ${3}s, ratio ${scale_ratio}x (limits ${SCALE_RATIO_LIMIT}x and ${SCALE_SECONDS_LIMIT}s)"
+    if [[ "$verdict_word" == ok ]]; then
+        pass "$1" "$scale_text"
+    else
+        failed "$1" "$scale_text"
+    fi
+}
+
+# many_files <dir> <count> -> creates the empty files f1 to f<count> in <dir>.
+many_files() {
+    mkdir -p "$1"
+    printf 'f%d\n' $(seq 1 "$2") | (cd "$1" && xargs touch)
+}
+
+# subject_world <name> <bytes> -> create_world, then one more commit on the branch, made by
+# fast-import, whose subject is <bytes> U+0001 bytes. The commit keeps the tree, so nothing is
+# dirty.
+subject_world() {
+    create_world "$1"
+    local stream_file="$WORLD_ROOT/subject.stream"
+    {
+        printf 'commit refs/heads/%s\ncommitter t <t@example.invalid> 1700000000 +0000\ndata %d\n' \
+            "$BRANCH" "$(($2 + 1))"
+        head -c "$2" /dev/zero | tr '\000' '\001'
+        printf '\nfrom refs/heads/%s^0\n\n' "$BRANCH"
+    } >"$stream_file"
+    run_git "$WORK_TREE" fast-import --quiet <"$stream_file"
+}
+
+test_scaling() {
+    local small_seconds
+
+    subject_world scale-subject-small 250000
+    timed_engine scale-subject-small "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok scale-subject-small
+    assert_fact scale-subject-small-chunks '.history.commits.items[-1].subject | [.length, (.chunks | length)] | @json' \
+        '[250000,1507]'
+    small_seconds="$LAST_SECONDS"
+    subject_world scale-subject-large 1000000
+    timed_engine scale-subject-large "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok scale-subject-large
+    assert_fact scale-subject-large-chunks '.history.commits.items[-1].subject | [.length, (.chunks | length)] | @json' \
+        '[1000000,6025]'
+    assert_scaled scale-subject "$small_seconds" "$LAST_SECONDS"
+
+    create_world scale-dirty-small
+    many_files "$WORK_TREE/many" 10000
+    timed_engine scale-dirty-small "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok scale-dirty-small
+    assert_fact scale-dirty-small-total '.dirty.paths.total' 10000
+    small_seconds="$LAST_SECONDS"
+    create_world scale-dirty-large
+    many_files "$WORK_TREE/many" 40000
+    timed_engine scale-dirty-large "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok scale-dirty-large
+    assert_fact scale-dirty-large-total '.dirty.paths.total' 40000
+    assert_scaled scale-dirty "$small_seconds" "$LAST_SECONDS"
+
+    create_world scale-history-small
+    many_files "$WORK_TREE/many" 5000
+    run_git "$WORK_TREE" add -A
+    run_git "$WORK_TREE" commit -q -m many
+    timed_engine scale-history-small "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok scale-history-small
+    assert_fact scale-history-small-total '.history.paths.total' 5000
+    small_seconds="$LAST_SECONDS"
+    create_world scale-history-large
+    many_files "$WORK_TREE/many" 20000
+    run_git "$WORK_TREE" add -A
+    run_git "$WORK_TREE" commit -q -m many
+    timed_engine scale-history-large "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok scale-history-large
+    assert_fact scale-history-large-total '.history.paths.total' 20000
+    assert_scaled scale-history "$small_seconds" "$LAST_SECONDS"
+}
+
 # ── Schema check of every facts file ────────────────────────────────────────
 
 test_schema_validation() {
@@ -1520,6 +1623,7 @@ test_line_bound_property
 test_line_bound_every_field
 test_line_gate
 test_concurrency_and_containment
+test_scaling
 test_schema_validation
 
 echo
