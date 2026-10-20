@@ -123,7 +123,7 @@
             "no_local_trunk",
             "no_trunk"
           ],
-          "description": "The local trunk against the freshly fetched remote-tracking trunk."
+          "description": "The local trunk against the remote-tracking trunk, after a fetch of trunk. fetch_failed when that fetch fails or leaves no remote-tracking trunk; remote_trunk, when present, and a remote_trunk history base are then the last fetched value, not a fresh one."
         },
         "trunk_ahead": {
           "type": "integer",
@@ -139,7 +139,7 @@
         },
         "remote_trunk": {
           "type": "string",
-          "description": "The remote-tracking trunk commit, when it exists."
+          "description": "The remote-tracking trunk commit, when it exists. Under fetch_failed it is the last fetched value, not a fresh one."
         }
       }
     },
@@ -323,7 +323,7 @@
             "local_trunk",
             "none"
           ],
-          "description": "The trunk ref the merge-base was taken against."
+          "description": "The trunk ref the merge-base was taken against. Under fetch_failed, remote_trunk is the last fetched value, not a fresh one."
         },
         "merge_base": {
           "type": "string",
