@@ -117,8 +117,8 @@
 #                  shared process binds nothing. The push stays in push-branch.sh, called as a
 #                  child, so the push kernel stays apart from PR authoring, and the free-text
 #                  title and body reach this script through the inputs file, never as arguments.
-#   Linkage:     review findings f781f8c8, 87f850de, a3c042d0, and bd3204af, with b0f99069 as
-#                lineage.
+#   Linkage:     review findings f781f8c8, 87f850de, a3c042d0, bd3204af, 08991c85, and
+#                09ca6d9d, with b0f99069 as lineage.
 #
 # NOT CHECKED: repo hooks, local refs, git config, gh config and auth, and the operator are
 # trusted under ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier

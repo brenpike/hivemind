@@ -94,15 +94,39 @@
 #      discards git's own stderr. Blocker text never echoes a caller- or repository-supplied
 #      value; an outside line carries a repository path only as a JSON string.
 #
+# RECORDED RESIDUAL R1 (commit content race): the script reads the tree state once. Then
+# `git commit` takes whatever the shared live index holds at that moment. A hook or another
+# process that stages a path between the check and the commit gets that path into the commit.
+#   Root cause:  the commit reads the live index, and no check binds the index to the state this
+#                script read earlier.
+#   Inherited:   a plain `git commit` already behaves this way. Routing the commit through this
+#                script did not add the exposure.
+#   Bounded impact: the result check reads the commit's own paths with `git diff-tree`, so a
+#                false success report is not possible. It stops the run with `the commit has a
+#                path outside files`, so the caller never goes on with that commit. The extra
+#                commit stays on the branch. It is visible and local, and it is not pushed. Only
+#                repo hooks and the operator act on the index, and both are trusted under
+#                ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier
+#                Discipline).
+#   Rejected remediations:
+#                - `git commit-tree` plus a guarded `git update-ref`, with no hooks: it skips the
+#                  hooks that repos rely on.
+#                - `git commit --only -- <paths>`: hooks still stage into the temporary index, so
+#                  the hook case stays detect-only, and how hook tools handle a partial commit is
+#                  unverified.
+#                - a guarded `git update-ref` rollback after a failed check: post-commit hooks
+#                  have already run by then. Deferred, not needed while the actors are trusted.
+#   Linkage:     local review findings 84d5a88e and b19d1dde.
+#
 # NOT CHECKED: repo hooks, local refs, git config, and the operator are trusted under
 # ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline). A commit-msg
 # hook can rewrite the message, and a post-commit hook can change files or refs; the result
 # checks catch a moved HEAD, a committed path outside files and a dirty listed path, and anything
 # else is a recorded residual. The status read and the commit are not atomic: a hook or another
 # process that stages an unlisted path between them has it committed, and the result check then
-# stops the run with that commit in place; one that edits a listed path has the edit staged. A
-# failed commit leaves the listed paths staged; a rerun stages them again and changes nothing
-# else.
+# stops the run with that commit in place (see RECORDED RESIDUAL R1); one that edits a listed
+# path has the edit staged. A failed commit leaves the listed paths staged; a rerun stages them
+# again and changes nothing else.
 # jq decodes status paths as UTF-8, so a path with bytes that are not UTF-8 shows with
 # replacement characters on its outside line and can never be listed. A listed path that is an
 # untracked ignored file is not dirty, so it is not committed. A submodule path is a directory,
