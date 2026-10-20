@@ -280,8 +280,8 @@ describe('the schema is a parameter', () => {
     assert.throws(() => lib.decide({ kind: hardStopKinds[0], level: 'high', brief: makeBrief() }, table), /schema must be an object/);
   });
   test('decide with a schema keyword validateSchema does not support throws', () => {
-    const schema = { ...briefSchema, properties: { ...briefSchema.properties, problem: { type: 'string', minLength: 1 } } };
-    assert.throws(() => lib.decide({ kind: 'plan_acceptance', level: 'high', brief: makeBrief() }, table, schema), /unsupported keyword minLength/);
+    const schema = { ...briefSchema, properties: { ...briefSchema.properties, problem: { type: 'string', format: 'email' } } };
+    assert.throws(() => lib.decide({ kind: 'plan_acceptance', level: 'high', brief: makeBrief() }, table, schema), /unsupported keyword format/);
   });
   test('the brief check follows the schema given, not a copy', () => {
     const required = [...briefSchema.required, 'owner'];

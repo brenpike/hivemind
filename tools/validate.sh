@@ -61,6 +61,8 @@ SUITE_TEST_RC_BROOD='test_rc_brood.sh'
 SUITE_TEST_NEXT_WAVE='test_next_wave.sh'
 SUITE_TEST_BUMP_TYPE='test_bump_type.sh'
 SUITE_TEST_PUSH_BRANCH='test_push_branch.sh'
+SUITE_TEST_GATHER_FACTS='test_gather_facts.sh'
+SUITE_TEST_CREATE_WORKING_BRANCH='test_create_working_branch.sh'
 SUITE_TEST_VALIDATE_SUITES='test_validate_suites.sh'
 SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
 SUITE_TEST_SCRIPT_BOOTSTRAP='test_script_bootstrap.sh'
@@ -91,6 +93,8 @@ ALL_SUITES=(
   "$SUITE_TEST_NEXT_WAVE"
   "$SUITE_TEST_BUMP_TYPE"
   "$SUITE_TEST_PUSH_BRANCH"
+  "$SUITE_TEST_GATHER_FACTS"
+  "$SUITE_TEST_CREATE_WORKING_BRANCH"
   "$SUITE_TEST_VALIDATE_SUITES"
   "$SUITE_TEST_CHANGE_DETECT_POLL"
   "$SUITE_TEST_SCRIPT_BOOTSTRAP"
@@ -122,6 +126,8 @@ KNOWN_SUITES=(
   test_next_wave.sh
   test_bump_type.sh
   test_push_branch.sh
+  test_gather_facts.sh
+  test_create_working_branch.sh
   test_validate_suites.sh
   test_change_detect_poll.sh
   test_script_bootstrap.sh
@@ -325,11 +331,18 @@ run_suites() {
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
 #   plugin/skills/push-branch/**, plugin/skills/_shared/allowlist.sh
 #                                      -> test_push_branch (allowlist.sh ALSO -> test_shared_libs)
+#   plugin/skills/gather-facts/**, plugin/references/facts-schema.json,
+#     plugin/workflow-src/lib/schema.js, tests/workflow-scripts/harness.mjs,
+#     plugin/skills/_shared/{allowlist,containment,graphql-response}.sh
+#                                      -> test_gather_facts (facts-schema.json ALSO -> test_workflow_scripts;
+#                                         the _shared libs keep their other routes by union)
+#   plugin/skills/create-working-branch/**, plugin/skills/_shared/allowlist.sh
+#                                      -> test_create_working_branch
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
 #   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json, plugin/agents/overlord.md,
 #     plugin/skills/route-workflow/SKILL.md,
 #     plugin/references/decision-autonomy-table.json, plugin/references/decision-brief-schema.json,
-#     tests/workflow-scripts/**
+#     plugin/references/facts-schema.json, tests/workflow-scripts/**
 #                                      -> test_workflow_scripts (build drift check + node tests)
 #   tests/reports/**                                    -> validate_reports
 #   plugin/agents/{cerebrate,local-reviewer,github-reviewer}.md,
@@ -539,11 +552,46 @@ map_path() {
     matched=1
   fi
 
+  # test_gather_facts: the gather-facts skill (SKILL.md + scripts/gather-facts.sh entrypoint + its
+  # jq assembly program), the three _shared libs the entrypoint sources (allowlist.sh,
+  # containment.sh, graphql-response.sh), and the schema check chain the suite runs under node: the
+  # facts contract (plugin/references/facts-schema.json), the validator that reads it
+  # (plugin/workflow-src/lib/schema.js) and the node harness that loads the validator
+  # (tests/workflow-scripts/harness.mjs). Every one of these except harness.mjs is ALSO a plugin/*
+  # file (policy_check prose-lints it via the wholesale rule below), but policy_check NEVER EXECUTES
+  # bash or node, so without this rule an edit would only be prose-linted, never behaviorally
+  # exercised. The _shared libs, schema.js, harness.mjs and facts-schema.json keep their other
+  # routes by union (same precedent as allowlist.sh -> test_push_branch: a shared file routed to
+  # every behavior oracle that runs it). (tools/test_gather_facts.sh itself is covered by the
+  # tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/gather-facts/* \
+     || "$p" == plugin/references/facts-schema.json \
+     || "$p" == plugin/workflow-src/lib/schema.js \
+     || "$p" == tests/workflow-scripts/harness.mjs \
+     || "$p" == plugin/skills/_shared/allowlist.sh \
+     || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == plugin/skills/_shared/graphql-response.sh ]]; then
+    add_selected "$SUITE_TEST_GATHER_FACTS" "$p (gather-facts skill/shared lib/schema check)"
+    matched=1
+  fi
+
+  # test_create_working_branch: the create-working-branch skill (SKILL.md + scripts/
+  # create-working-branch.sh entrypoint) and the shared allowlist gate it sources
+  # (_shared/allowlist.sh). Both are ALSO plugin/* files (policy_check prose-lints them via the
+  # wholesale rule below), but policy_check NEVER EXECUTES bash — so without this rule an edit would
+  # only be prose-linted, never behaviorally exercised. allowlist.sh keeps its other routes by union.
+  # (tools/test_create_working_branch.sh itself is covered by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/create-working-branch/* \
+     || "$p" == plugin/skills/_shared/allowlist.sh ]]; then
+    add_selected "$SUITE_TEST_CREATE_WORKING_BRANCH" "$p (create-working-branch skill/allowlist gate)"
+    matched=1
+  fi
+
   # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
-  # build, the two data files the build copies in, the overlord agent whose launch contract the node
-  # tests pin, the route-workflow skill and the plugin/workflows/*.json definitions whose catalog
-  # parity route-catalog.test.mjs pins (the *.json path ALSO keeps its validate_workflows suites by
-  # union), and the node tests themselves. Every one of these except tests/workflow-scripts/* is
+  # build, the two data files the build copies in, the facts contract the node tests validate, the
+  # overlord agent whose launch contract the node tests pin, the route-workflow skill and the
+  # plugin/workflows/*.json definitions whose catalog parity route-catalog.test.mjs pins (the *.json
+  # path ALSO keeps its validate_workflows suites by union), and the node tests themselves. Every one of these except tests/workflow-scripts/* is
   # ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check
   # NEVER RUNS node, so without this rule a source edit that leaves the generated script stale, or a
   # data/agent edit that breaks a node test, would only be caught on push-to-main.
@@ -554,6 +602,7 @@ map_path() {
      || "$p" == plugin/skills/route-workflow/SKILL.md \
      || "$p" == plugin/references/decision-autonomy-table.json \
      || "$p" == plugin/references/decision-brief-schema.json \
+     || "$p" == plugin/references/facts-schema.json \
      || "$p" == plugin/agents/overlord.md \
      || "$p" == tests/workflow-scripts/* ]]; then
     add_selected "$SUITE_TEST_WORKFLOW_SCRIPTS" "$p (workflow-script source/build/data/test)"
@@ -1043,6 +1092,8 @@ self_test() {
     ["test_next_wave.sh"]="tests/next-wave/ledger-x.json"
     ["test_bump_type.sh"]="plugin/skills/bump-type/scripts/bump-type.sh"
     ["test_push_branch.sh"]="plugin/skills/push-branch/scripts/push-branch.sh"
+    ["test_gather_facts.sh"]="plugin/skills/gather-facts/scripts/gather-facts.sh"
+    ["test_create_working_branch.sh"]="plugin/skills/create-working-branch/scripts/create-working-branch.sh"
     ["test_validate_suites.sh"]="tools/test_validate_suites.sh"
     ["test_change_detect_poll.sh"]="tests/change-detect-poll/README.md"
     ["test_script_bootstrap.sh"]="plugin/skills/_shared/claude-mem-path.sh"
@@ -1233,6 +1284,7 @@ self_test() {
   for workflow_input in \
     "plugin/references/decision-autonomy-table.json" \
     "plugin/references/decision-brief-schema.json" \
+    "plugin/references/facts-schema.json" \
     "plugin/workflows/analysis-only.js" \
     "plugin/agents/overlord.md" \
     "plugin/skills/route-workflow/SKILL.md" \
@@ -1247,6 +1299,37 @@ self_test() {
       echo "PASS: workflow-script input $workflow_input -> test_workflow_scripts.sh"
     else
       echo "FAIL: workflow-script input $workflow_input did NOT route to test_workflow_scripts.sh"
+      fails=$((fails + 1))
+    fi
+  done
+
+  # 10. Each consumer leg of the gather-facts and create-working-branch suites that the
+  #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
+  #     script, so it would stay green if the schema-chain, shared-lib or harness selector were
+  #     dropped. Probe each <path>|<suite> pair directly so removing any one selector FAILS here.
+  local consumer_pair consumer_path consumer_suite
+  for consumer_pair in \
+    "plugin/references/facts-schema.json|$SUITE_TEST_GATHER_FACTS" \
+    "plugin/workflow-src/lib/schema.js|$SUITE_TEST_GATHER_FACTS" \
+    "tests/workflow-scripts/harness.mjs|$SUITE_TEST_GATHER_FACTS" \
+    "plugin/skills/_shared/allowlist.sh|$SUITE_TEST_GATHER_FACTS" \
+    "plugin/skills/_shared/containment.sh|$SUITE_TEST_GATHER_FACTS" \
+    "plugin/skills/_shared/graphql-response.sh|$SUITE_TEST_GATHER_FACTS" \
+    "plugin/skills/gather-facts/SKILL.md|$SUITE_TEST_GATHER_FACTS" \
+    "plugin/skills/_shared/allowlist.sh|$SUITE_TEST_CREATE_WORKING_BRANCH" \
+    "plugin/skills/create-working-branch/SKILL.md|$SUITE_TEST_CREATE_WORKING_BRANCH"; do
+    consumer_path="${consumer_pair%%|*}"
+    consumer_suite="${consumer_pair#*|}"
+    SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
+    map_path "$consumer_path" >/dev/null
+    hit=0
+    for entry in "${SELECTED[@]:-}"; do
+      if [[ "${entry%%$'\t'*}" == "$consumer_suite" ]]; then hit=1; break; fi
+    done
+    if [[ "$hit" -eq 1 ]]; then
+      echo "PASS: consumer leg $consumer_path -> $consumer_suite"
+    else
+      echo "FAIL: consumer leg $consumer_path did NOT route to $consumer_suite"
       fails=$((fails + 1))
     fi
   done

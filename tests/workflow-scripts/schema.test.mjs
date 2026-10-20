@@ -175,8 +175,41 @@ describe('validateSchema blank strings', () => {
   });
 });
 
+describe('validateSchema minLength', () => {
+  test('accepts a string at the boundary and rejects one below it', () => {
+    assert.deepEqual(validate({ type: 'string', minLength: 2 }, 'ab'), { ok: true, errors: [] });
+    assert.deepEqual(validate({ type: 'string', minLength: 2 }, 'a'), { ok: false, errors: ['$: minLength: fewer than 2 characters'] });
+  });
+  test('counts Unicode code points, not UTF-16 units', () => {
+    assert.deepEqual(validate({ type: 'string', minLength: 1 }, '\u{1F600}'), { ok: true, errors: [] });
+    assert.deepEqual(validate({ type: 'string', minLength: 2 }, '\u{1F600}').errors, ['$: minLength: fewer than 2 characters']);
+  });
+  for (const whitespace of [' ', '\t\n', '\u00a0']) {
+    test(`type string with minLength 1 accepts whitespace-only ${JSON.stringify(whitespace)}`, () => {
+      assert.deepEqual(validate({ type: 'string', minLength: 1 }, whitespace), { ok: true, errors: [] });
+    });
+  }
+  test('an empty string gives only the minLength error', () => {
+    assert.deepEqual(validate({ type: 'string', minLength: 1 }, '').errors, ['$: minLength: fewer than 1 characters']);
+  });
+  test('minLength 0 accepts the empty string', () => {
+    assert.deepEqual(validate({ type: 'string', minLength: 0 }, ''), { ok: true, errors: [] });
+  });
+  test('minLength with no type applies to a string and ignores a number', () => {
+    assert.deepEqual(validate({ minLength: 2 }, 5), { ok: true, errors: [] });
+    assert.deepEqual(validate({ minLength: 2 }, 'a').errors, ['$: minLength: fewer than 2 characters']);
+  });
+  test('a short nested array item is reported at its index', () => {
+    const schema = { type: 'array', items: { type: 'string', minLength: 1 } };
+    assert.deepEqual(validate(schema, ['a', '', ' ']).errors, ['$[1]: minLength: fewer than 1 characters']);
+  });
+  test('a type failure skips minLength', () => {
+    assert.deepEqual(validate({ type: 'string', minLength: 3 }, 1).errors, ['$: type string expected']);
+  });
+});
+
 describe('validateSchema fails closed on the schema', () => {
-  for (const keyword of ['oneOf', 'pattern', 'maxItems', 'const', '$ref', 'minLength', 'default']) {
+  for (const keyword of ['oneOf', 'pattern', 'maxItems', 'const', '$ref', 'multipleOf', 'default']) {
     test(`unsupported keyword ${keyword} throws`, () => {
       const isUnsupported = (error) => error.message === 'validateSchema: $: unsupported keyword ' + keyword;
       assert.throws(() => lib.validateSchema({ type: 'string', [keyword]: 1 }, 'x'), isUnsupported);
@@ -202,6 +235,8 @@ describe('validateSchema fails closed on the schema', () => {
     'items an array': { items: [] },
     'minItems negative': { minItems: -1 },
     'minItems not an integer': { minItems: 1.5 },
+    'minLength negative': { minLength: -1 },
+    'minLength not an integer': { minLength: 1.5 },
     'property schema not an object': { properties: { a: true } }
   };
   for (const [name, schema] of Object.entries(badShapes)) {
@@ -211,7 +246,7 @@ describe('validateSchema fails closed on the schema', () => {
   }
   test('supportedSchemaKeywords lists exactly the supported keywords', () => {
     assert.deepEqual([...lib.supportedSchemaKeywords()].sort(), [
-      '$schema', 'additionalProperties', 'description', 'enum', 'items', 'minItems', 'properties', 'required', 'title', 'type'
+      '$schema', 'additionalProperties', 'description', 'enum', 'items', 'minItems', 'minLength', 'properties', 'required', 'title', 'type'
     ]);
   });
 });

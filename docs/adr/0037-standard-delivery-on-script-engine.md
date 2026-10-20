@@ -192,7 +192,7 @@ S11-d loaded both plugins with `--plugin-dir` from folders outside the repo, use
 - A wave that ends blocked is committed before the run stops, so the branch can hold a worker's partial edits. The run's message names that commit.
 - Any commit after a gate runs the gates it invalidates again, up to the `gate_rerun` bound (invariant 2). Each validation fix round costs a fix, a commit runner, a bump check and a validation run, and one made after local review also costs another local review.
 - The plan's one classification types every commit the workflow makes, so bump-type sees the plan's kind of change, not each step's.
-- A branch whose history the facts must cut stops before planning (invariant 4). PR2 settles how long a history fits (see Deferred items).
+- A branch whose history the facts cannot fully carry stops before planning (invariant 4). PR2a settled this: the facts are one complete file per run, no list is capped, and long text is chunked. The facts script checks every line of the file it writes against one bound, whatever field it holds, so each line fits one Read page. A chunk can be whitespace only (see the ADR-0036 amendment 2026-10-20). A cut arises only from a failed GitHub page or no merge-base, and both stop planning (see Deferred items).
 
 ## Risks
 
@@ -208,7 +208,7 @@ S11-d loaded both plugins with `--plugin-dir` from folders outside the repo, use
 | PR | Content | Depends on |
 |---|---|---|
 | PR1 | This ADR and the ADR-0010 amendment | Calls 1 to 3, S11, S12 |
-| PR2 | Git and facts engines shared by both engines: committed scripts behind create-working-branch, molt and open-plan-pr, with the refusals invariant 1 names; an optional expected commit for `push-branch.sh` (invariant 2); a new facts skill and script, and `plugin/references/facts-schema.json` with the labels of invariant 4, covering the "Facts to plan" row; shell tests; validate.sh mapping. May split into facts and branch, then commit and PR open | PR1 |
+| PR2 | Git and facts engines shared by both engines: committed scripts behind create-working-branch, molt and open-plan-pr, with the refusals invariant 1 names; an optional expected commit for `push-branch.sh` (invariant 2); a new facts skill and script, and `plugin/references/facts-schema.json` with the labels of invariant 4, covering the "Facts to plan" row; shell tests; validate.sh mapping. May split into facts and branch, then commit and PR open. Split: PR2a (facts and branch), PR2b (commit and PR open, `push-branch.sh` expected commit) | PR1 |
 | PR3 | Planner posture (decision 1): drop Bash from cerebrate and its prose, fix the CLAUDE.md line, replace the overclaimed pin, have the overlord pass the facts output to the planner and add a facts step to analysis-only, both under invariant 4 | PR2 |
 | PR4 | Engine libraries: `waves.js` with parity tests, a routing-line parser, `plugin/references/plan-schema.json` with the plan inputs the hand-off table lists, the labels of invariant 4 and each step's declared effects outside the repo (decision 3), the build's draft marker | PR1 |
 | PR5 | Prompt reduction: seed-template additions, resume by name, launch and resume text with no runner instructions, routing outcome kept out of chat | PR1 |
@@ -222,7 +222,7 @@ PR3 and PR4 touch disjoint files and can proceed in parallel, and so can PR4 and
 
 | Item | Target |
 |---|---|
-| How the facts carry a long branch history that the planner depends on: a size bound with a stop, pages, or a complete facts file the planner reads (invariant 4), with a test past the bound. Whatever PR2 picks, a cut history stops the run before planning. Review thread: https://github.com/brenpike/hivemind/pull/419#discussion_r4321114456 | Slice 2, PR2 and PR6 |
+| Settled by slice 2 PR2 (PR2a): how the facts carry a long branch history that the planner depends on. One complete facts file per run; no list is capped; long text is chunked, and the facts script checks every line of the file it writes against one bound, whatever field it holds, so each line fits one Read page. A chunk can be whitespace only (see the ADR-0036 amendment 2026-10-20). A cut arises only from a failed GitHub page or no merge-base, and both stop planning (invariant 4). See the header of `plugin/skills/gather-facts/scripts/gather-facts.sh` (the bound and the check) and `plugin/references/facts-schema.json`. Review thread: https://github.com/brenpike/hivemind/pull/419#discussion_r4321114456 | Settled (PR2a); PR6 consumes it |
 | Whether the seed template also gets `Skill(...)` rules for the skills runners invoke. Without them, each such Skill call prompts once in manual mode (S11-a, S11-f) | Slice 2, PR5 |
 | Check that `Read(~/.claude/plugins/cache/brenpike/hivemind/**)` in the committed `.claude/settings.json` stops a typed hivemind agent's Read of a marketplace install inside a workflow, and record the result in ADR-0010 before the seed template gets the rule (decision 9) | Slice 2, PR5 |
 | Each drone run creates an empty `.claude/agent-memory/hivemind-drone/` folder in the consumer repo (`memory: project`; S11-g). An observed side effect to examine before delivery runs many drones per run. Under invariant 1, a file a drone writes there is a dirty path outside every step's list, so the commit script stops the run | Slice 2, PR8 |
