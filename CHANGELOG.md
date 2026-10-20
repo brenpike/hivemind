@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `hivemind:create-working-branch` now runs a committed script. It refuses a dirty tree, or an in-progress merge, rebase, cherry-pick, revert or bisect, before switching branches. It adds `commit`, `created` and `warning` routing lines. The `branch` line is unchanged. It takes the resolved `trunk` as a new input and refuses a working branch that is trunk however trunk is spelled. It compares the ref git resolves trunk to, before and after the switch, so `refs/heads/main`, `heads/main` and `origin/main` count as `main`. A trunk name git reads as more than one ref stops the run. Refs #409.
+- `hivemind:create-working-branch` now runs a committed script. It refuses a dirty tree, or an in-progress merge, rebase, cherry-pick, revert or bisect, before switching branches. It adds `commit`, `created` and `warning` routing lines. The `branch` line is unchanged. It takes the resolved `trunk` as a new input and refuses a working branch that is trunk however trunk is spelled. It reads the ref trunk names once, before any change, in git's own lookup order, and follows a symbolic ref to its end even when that end does not exist yet, so `refs/heads/main`, `heads/main` and `origin/main` count as `main` and every refusal comes before any change. A trunk name git reads as more than one ref stops the run. Refs #409.
 
 ## [6.0.3] - 2026-10-19
 

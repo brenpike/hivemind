@@ -11,10 +11,12 @@
 # may equal trunk). It refuses an in-progress merge, rebase, cherry-pick, revert or bisect,
 # unmerged paths, any staged, unstaged or untracked path, a branch whose ref is symbolic or is the
 # end of trunk's symbolic ref, a trunk git resolves to a ref that names the branch or to more than
-# one ref, and a branch checked out in another worktree, all before any change. It resolves the base once (local branch, then
-# any commit name, then a fetch from origin), switches to an existing branch (removing an upstream
-# that is not <remote>/<branch>) or creates a new one with --no-track at the base commit, checks
-# the ref git resolves trunk to again on the final state, and prints
+# one ref, and a branch checked out in another worktree. It reads trunk's ref once, before any
+# change, in git's lookup order, following symbolic refs to their end even when the end does not
+# exist yet, and makes every refusal before any change. It resolves the base once (local branch,
+# then any commit name, then a fetch from origin), switches to an existing branch (removing an
+# upstream that is not <remote>/<branch>) or creates a new one with --no-track at the base
+# commit, and prints
 #     branch: <b> / commit: <sha> / created: true|false [/ warning: <fixed text>]
 # on stdout, exit 0. On any blocker it prints `blocker: <fixed reason>` as the ONLY stderr line,
 # NOTHING on stdout, exit 1.
@@ -427,9 +429,12 @@ test_trunk_alias() {
 
 # The trunk stop keys on the ref git resolves trunk to, not on the caller's spelling. Every git
 # qualifier of a branch (refs/heads/, heads/, <remote>/, refs/remotes/<remote>/) and every
-# symbolic ref whose chain ends at the branch names the same ref, so each one stops. A stop that
-# compares spelling only fails every case here except the guard cases at the end, which pass
-# both before and after the stop keys on resolved refs.
+# symbolic ref whose chain ends at the branch names the same ref, so each one stops. Trunk's ref
+# is read once, before any change, in git's lookup order, following symbolic refs to their end
+# even when the end does not exist yet, so a trunk whose chain ends at the branch the run would
+# create stops with nothing changed. A trunk that resolves to another branch (HEAD on scratch) or
+# to no ref (an object name) does not stop. A stop that compares spelling only fails every
+# refusal case here except trunk-guard-symbolic-chain; the success cases pass under both.
 test_trunk_any_spelling() {
     local index spelling_name trunk_spelling branch_spelling
     local -a spelling_names=(refs-heads heads origin remotes-origin refs-remotes-origin refs-heads-case origin-case)
@@ -473,14 +478,51 @@ test_trunk_any_spelling() {
     assert_refused_unchanged trunk-remote-alias "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
         --base scratch --branch main --classification feature --trunk-freshness fresh --trunk upstream
 
-    create_world trunk-final-state
+    spelling_names=(refs-heads-master heads-master refs-heads-legacy master)
+    trunk_spellings=(refs/heads/master heads/master refs/heads/legacy master)
+    for index in "${!trunk_spellings[@]}"; do
+        spelling_name="${spelling_names[$index]}"
+        trunk_spelling="${trunk_spellings[$index]}"
+        create_world "trunk-dangling-$spelling_name"
+        run_git "$WORK_TREE" checkout -q -b scratch
+        run_git "$WORK_TREE" symbolic-ref refs/heads/master refs/heads/develop
+        run_git "$WORK_TREE" symbolic-ref refs/heads/legacy refs/heads/master
+        assert_refused_unchanged "trunk-dangling-$spelling_name" "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+            --base main --branch develop --classification feature --trunk-freshness fresh --trunk "$trunk_spelling"
+        assert_equal "trunk-dangling-$spelling_name-head" refs/heads/scratch "$(read_head_ref)" "HEAD"
+        assert_equal "trunk-dangling-$spelling_name-no-branch" '' \
+            "$(run_git "$WORK_TREE" for-each-ref refs/heads/develop)" "refs/heads/develop absent"
+    done
+
+    create_world trunk-dangling-remote-head
     run_git "$WORK_TREE" checkout -q -b scratch
-    run_git "$WORK_TREE" symbolic-ref refs/heads/master refs/heads/develop
-    assert_blocker trunk-final-state "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
-        --base main --branch develop --classification feature --trunk-freshness fresh --trunk refs/heads/master
-    assert_equal trunk-final-state-head refs/heads/develop "$(read_head_ref)" "HEAD"
-    assert_equal trunk-final-state-at-base "$TRUNK_SHA" \
-        "$(run_git "$WORK_TREE" rev-parse refs/heads/develop)" "refs/heads/develop"
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/upstream/HEAD refs/heads/develop
+    assert_refused_unchanged trunk-dangling-remote-head "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base main --branch develop --classification feature --trunk-freshness fresh --trunk upstream
+
+    create_world trunk-dangling-root-ref
+    run_git "$WORK_TREE" checkout -q -b scratch
+    run_git "$WORK_TREE" symbolic-ref TRUNK_HEAD refs/heads/develop
+    assert_refused_unchanged trunk-dangling-root-ref "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base main --branch develop --classification feature --trunk-freshness fresh --trunk TRUNK_HEAD
+
+    create_world trunk-head-elsewhere
+    run_git "$WORK_TREE" checkout -q -b scratch
+    assert_success trunk-head-elsewhere "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk HEAD
+    assert_on_branch_without_upstream trunk-head-elsewhere "$TRUNK_SHA"
+
+    create_world trunk-object-name
+    run_git "$WORK_TREE" checkout -q -b scratch
+    assert_success trunk-object-name "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk "$TRUNK_SHA"
+    assert_on_branch_without_upstream trunk-object-name "$TRUNK_SHA"
+
+    create_world trunk-guard-root-file
+    run_git "$WORK_TREE" checkout -q -b scratch
+    assert_success trunk-guard-root-file "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk config
+    assert_on_branch_without_upstream trunk-guard-root-file "$TRUNK_SHA"
 
     create_world trunk-ambiguous
     run_git "$WORK_TREE" tag main
