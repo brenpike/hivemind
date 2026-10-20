@@ -437,7 +437,10 @@ test_trunk_alias() {
 # even when the end does not exist yet, so a trunk whose chain ends at the branch the run would
 # create stops with nothing changed. A trunk that resolves to another branch (HEAD on scratch) or
 # to no ref (an object name) does not stop. A stop that compares spelling only fails every
-# refusal case here except trunk-guard-symbolic-chain; the success cases pass under both.
+# refusal case here except trunk-guard-symbolic-chain; the success cases pass under both. A branch
+# argument is a ref by identity too: heads/main and refs/heads/main name the distinct branches
+# refs/heads/heads/main and refs/heads/refs/heads/main, so creating them succeeds and leaves
+# refs/heads/main untouched.
 test_trunk_any_spelling() {
     local index spelling_name trunk_spelling branch_spelling
     local -a spelling_names=(refs-heads heads origin remotes-origin refs-remotes-origin refs-heads-case origin-case)
@@ -540,8 +543,11 @@ test_trunk_any_spelling() {
         branch_spelling="${branch_spellings[$index]}"
         create_world "trunk-qualified-branch-$spelling_name"
         run_git "$WORK_TREE" checkout -q -b scratch
-        assert_refused_unchanged "trunk-qualified-branch-$spelling_name" "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        assert_success "trunk-qualified-branch-$spelling_name" "$WORK_TREE" "$(expected_block "$branch_spelling" "$TRUNK_SHA" true)" \
             --base scratch --branch "$branch_spelling" --classification feature --trunk-freshness fresh --trunk main
+        assert_equal "trunk-qualified-branch-$spelling_name-head" "refs/heads/$branch_spelling" "$(read_head_ref)" "HEAD"
+        assert_equal "trunk-qualified-branch-$spelling_name-unchanged" "$TRUNK_SHA" \
+            "$(run_git "$WORK_TREE" rev-parse refs/heads/main)" "refs/heads/main at trunk commit"
     done
 
     create_world trunk-guard-symbolic-chain

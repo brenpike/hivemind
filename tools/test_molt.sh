@@ -441,6 +441,7 @@ test_git_state_refusals() {
 test_trunk_refusals() {
     local trunk_spelling index=0
     create_world on-trunk
+    run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
     run_git "$WORK_TREE" checkout -q main
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
