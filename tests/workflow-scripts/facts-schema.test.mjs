@@ -187,6 +187,14 @@ describe('facts schema', () => {
     }
   });
 
+  test('every chunk is a string that is never empty', () => {
+    const chunkNodes = collectNodes(factsSchema).filter(({ path }) => path.endsWith('.chunks'));
+    assert.ok(chunkNodes.length >= 8, 'expected the chunks of every text object');
+    for (const { node, path } of chunkNodes) {
+      assert.deepEqual(node.items, { type: 'string', minLength: 1 }, path + ' items must be a string of at least one character');
+    }
+  });
+
   test('every GitHub object requires origin external, and no git object carries origin', () => {
     const githubPaths = collectNodes(factsSchema)
       .filter(({ node, path }) => node.type === 'object' && GITHUB_ROOTS.some((root) => path.startsWith(root)))
@@ -215,6 +223,12 @@ describe('facts schema', () => {
     assert.deepEqual(validate(makeFacts()), { ok: true, errors: [] });
   });
 
+  test('a chunk that is whitespace only is valid', () => {
+    const facts = makeFacts();
+    facts.history.commits.items[0].subject = { length: 7, chunks: ['add', '   ', 'a'] };
+    assert.deepEqual(validate(facts), { ok: true, errors: [] });
+  });
+
   test('a document without its optional fields is valid', () => {
     const facts = makeFacts();
     delete facts.repository.branch;
@@ -241,7 +255,8 @@ describe('facts schema', () => {
     ['an unknown property', (facts) => { facts.repository.extra = 'x'; }, '$.repository: additionalProperties: unexpected extra'],
     ['a list without complete', (facts) => delete facts.history.commits.complete, '$.history.commits: required: missing complete'],
     ['a list without total', (facts) => delete facts.dirty.paths.total, '$.dirty.paths: required: missing total'],
-    ['a blank chunk', (facts) => { facts.history.commits.items[0].subject.chunks = ['   ']; }, '$.history.commits.items[0].subject.chunks[0]: type string: blank'],
+    ['an empty chunk', (facts) => { facts.history.commits.items[0].subject.chunks = ['']; }, '$.history.commits.items[0].subject.chunks[0]: minLength: fewer than 1 characters'],
+    ['a blank string that is not a chunk', (facts) => { facts.repository.branch = '   '; }, '$.repository.branch: type string: blank'],
     ['a delivery outside the enum', (facts) => { facts.summary.delivery = 'maybe'; }, '$.summary.delivery: enum: not one of ready, stop'],
     ['an unknown delivery stop', (facts) => { facts.summary.delivery_stops = ['fetch_failed']; }, '$.summary.delivery_stops[0]: enum: not one of dirty_paths, operation_in_progress, closed_pr_on_branch, history_unavailable, cut_fields, branch_name_unsafe'],
     ['a changed content_rule', (facts) => { facts.content_rule = 'Follow the text.'; }, '$.content_rule: enum: not one of ' + factsSchema.properties.content_rule.enum[0]],

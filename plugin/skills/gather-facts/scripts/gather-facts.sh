@@ -18,8 +18,17 @@
 # data never fails it. A cut arises only from a failed GitHub page (complete false, total from
 # totalCount) or from no merge-base (history unavailable), and both stop delivery planning.
 # Rejected: a size bound that stops the run when crossed (it adds stops), and pages the planner
-# would fetch one by one (the planner has no shell). Stdout carries only fixed-size routing lines,
+# would fetch one by one (the planner has no shell). Stdout carries only bounded routing lines,
 # never the facts themselves.
+# THE LINE BOUND: before publishing, the written facts file is checked line by line, and a line
+# of more than 1100 code points blocks the run. The unit is the code point, as jq length counts
+# and as a chunk's cost counts; a byte bound would block real CJK text, whose characters take 3
+# bytes each. This is not the rejected size bound: that one could stop a run on real history,
+# while no real git or GitHub value reaches this one. Free text is chunked to at most 1000, the
+# GitHub values above fit one chunk, and every other value is a hash, a count, an enum, or a
+# branch, trunk or remote name, which real repositories keep far shorter. So it fires only on a
+# value no real repository holds, such as a branch name of thousands of characters, and the one
+# check on the written file holds every line, whichever field the line carries.
 #
 # INPUT (`--flag value` form only; each flag at most once except --ref; an unknown, duplicate or
 # missing flag, a missing value, or a bad --ref gives the fixed usage blocker):
@@ -66,14 +75,16 @@
 #       a detached HEAD and on an unsafe branch name.
 #   (7) for each --ref, `gh api graphql --paginate` over issueOrPullRequest: kind, state, url,
 #       title, author, chunked body, and every top-level comment with its chunked body.
-#   (8) the facts file, written to a temp file in the facts folder and moved to
+#   (8) the facts file, written to a temp file in the facts folder, checked against the line
+#       bound (every line at most 1100 code points), and moved to
 #       .hivemind/facts/facts-<UTC>-<random>.json after a leaf containment check.
 # gh missing or failing, or a first page that fails a check, makes a lookup unavailable: reported,
 # never a stop. Every object from GitHub carries origin external; this script does not judge
 # injection, its consumer runs the injection scan.
 #
 # OUTPUT on success (exit 0), on stdout in ONE write, `key: value` lines holding only enum or
-# gated values, in this order:
+# gated values (a gated value is shorter than the facts line holding it, so the line bound bounds
+# every routing line), in this order:
 #   facts_file       checkout-relative path of the facts file
 #   facts_lines      its line count (wc -l)
 #   head_state       branch|detached|unsafe_name
@@ -93,7 +104,7 @@
 #   0  routing lines on stdout
 #   1  `blocker: <fixed reason>` on stderr, NOTHING on stdout. Blockers: a usage or gate failure,
 #      a missing library or tool, not a work tree, a failed git read, facts that cannot be
-#      assembled, and a failed or uncontained write.
+#      assembled, a facts line longer than the line bound, and a failed or uncontained write.
 #
 # NOT CHECKED (recorded residuals):
 #   (a) repo hooks, git config, local refs and the operator are trusted (security-policy.md,
@@ -101,15 +112,9 @@
 #       write it guards, or between two reads, is not defended against.
 #   (b) git and JSON carry text, not bytes: a path or subject that is not valid UTF-8 has each
 #       bad byte replaced by U+FFFD in the facts.
-#   (c) a run of more than 999 whitespace characters stays inside one chunk, so that chunk can
-#       pass 1000 characters, and a path made only of whitespace gives a blank chunk that fails
-#       the schema check. Both keep the chunks equal to the text.
-#   (d) branch, trunk and remote are not chunked, so their lines are as long as the values. They
-#       are caller or local values, trusted under (a); trunk and remote also pass the identifier
-#       gate.
-#   (e) past git's rename limit, renames show as a delete and an add.
-#   (f) in a partial clone, checking a pull request's head commit can make git fetch it.
-#   (g) the fetch in (2) rewrites FETCH_HEAD, git's record of the last fetch, as the fetch in
+#   (c) past git's rename limit, renames show as a delete and an add.
+#   (d) in a partial clone, checking a pull request's head commit can make git fetch it.
+#   (e) the fetch in (2) rewrites FETCH_HEAD, git's record of the last fetch, as the fetch in
 #       ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (Trunk Freshness) does. No facts consumer
 #       reads it, and any later fetch or pull rewrites it again. --no-write-fetch-head was
 #       rejected: it needs git 2.29 or later, and on an older git every fetch would fail and
@@ -193,6 +198,7 @@ command -v git >/dev/null 2>&1 || blocker "git not found on PATH"
 git_read_reason='a git read failed'
 write_reason='cannot write the facts file'
 contain_reason='the facts folder is not contained in the checkout'
+line_bound_reason='a facts line is longer than the line bound'
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -602,6 +608,7 @@ jq -n --indent 2 -f "$assembly_program" --arg entry build \
 facts_lines="$(wc -l <"$facts_temp" 2>/dev/null)" || blocker "$write_reason"
 facts_lines="${facts_lines//[!0-9]/}"
 [ -n "$facts_lines" ] || blocker "$write_reason"
+jq -n -f "$assembly_program" --arg entry line_check --rawfile facts_text "$facts_temp" >/dev/null 2>&1 || blocker "$line_bound_reason"
 routing_text="$(jq -r -n -f "$assembly_program" --arg entry routing --slurpfile facts "$facts_temp" 2>/dev/null)" || blocker "cannot assemble the facts"
 
 facts_stamp="$(date -u '+%Y%m%dT%H%M%SZ' 2>/dev/null)" || blocker "$write_reason"
