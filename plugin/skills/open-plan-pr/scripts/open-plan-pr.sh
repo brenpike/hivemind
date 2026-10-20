@@ -120,6 +120,23 @@
 #   Linkage:     review findings f781f8c8, 87f850de, a3c042d0, bd3204af, 08991c85, and
 #                09ca6d9d, with b0f99069 as lineage.
 #
+# RECORDED RESIDUAL R2 (https-only PR URL gate): REUSE and CREATE above accept a PR URL only
+# when it passes the identifier gate (^https://[A-Za-z0-9._/-]+$) and ends in `/pull/<n>`. A
+# GitHub host that gh reports with `http://` or with a port (`host:8443`) fails that gate.
+#   Root cause:  this script gates the whole PR URL with the https-only, no-port PR URL pattern
+#                from ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier
+#                Discipline).
+#   Inherited:   no. On main, open-plan-pr checked only the trailing PR number, so a stop after
+#                the create call on such hosts is new with this script.
+#   Bounded impact: github.com is not affected. Such hosts are already unsupported across the
+#                plugin: the github-reviewer `pr` input uses the same gate, so the review loop
+#                would stop there anyway. The run stops loudly after the create call, and a
+#                rerun stops in REUSE. The extra PR is visible and can be closed.
+#   Rejected remediations:
+#                - widening the policy gate to allow `http://` or a port: that changes the
+#                  security contract and loosens input checking for every consumer.
+#   Linkage:     review thread r4331321536.
+#
 # NOT CHECKED: repo hooks, local refs, git config, gh config and auth, and the operator are
 # trusted under ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier
 # Discipline). gh picks the repository for every call from the git remotes and its own config;
