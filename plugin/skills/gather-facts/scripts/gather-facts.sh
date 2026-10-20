@@ -119,6 +119,16 @@
 #       reads it, and any later fetch or pull rewrites it again. --no-write-fetch-head was
 #       rejected: it needs git 2.29 or later, and on an older git every fetch would fail and
 #       report fetch_failed.
+#   (f) the work grows linearly with what the repository holds, and nothing bounds it: a commit
+#       subject, path or path list of any size is read in full. Measured times from the scale
+#       tests in tools/test_gather_facts.sh (jq 1.6, full engine run including git): a
+#       1,000,000-character U+0001 subject 4.5 s; 40,000 untracked paths 4.3 s; 20,000 history
+#       paths 2.9 s. In each case 4x the input takes well under 10x the time (3.4x, 2.4x,
+#       1.6x). Per-character cost: about 1.4 s and 69 MB per 2,000,000 escape-dense characters
+#       (U+0001, written as \u0001), and about 0.6 s for ASCII, on jq 1.6. Repository content
+#       is trusted as in (a) (${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md), so the cost
+#       is slowness only. A run that cannot finish blocks and publishes nothing. A size bound
+#       was rejected above because it adds stops.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
