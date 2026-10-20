@@ -2,12 +2,7 @@
 name: create-working-branch
 description: Creates or confirms the compliant working branch for the current approved plan. Use when starting implementation on an approved plan and the working branch needs to be created or verified.
 allowed-tools:
-  - Bash(git status *)
-  - Bash(git branch *)
-  - Bash(git rev-parse *)
-  - Bash(git checkout *)
-  - Bash(git switch *)
-  - Bash(git fetch *)
+  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh *)
   - Bash(printf *)
 shell: bash
 ---
@@ -43,28 +38,23 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 
 ## Requirements
 
+Every branch create or switch runs through `${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh`, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline).
+
 **Input gate.** Before any Bash call, validate `base` and `working_branch` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: base or working_branch contains characters outside the safe allowlist`.
 
-1. Confirm current branch.
-2. Confirm `base` exists locally or fetch it.
-3. Check the `trunk-freshness` session fact passed by the orchestrator per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Trunk Freshness).
-   - `trunk-freshness: fresh` — proceed normally, no warning.
-   - `trunk-freshness: stale (N behind)` — emit a warning that trunk is stale but proceed (user already acknowledged at preflight).
-   - `trunk-freshness: stale (diverged — local N ahead)` — emit a warning that local trunk has unpushed commits but proceed (user already acknowledged at preflight).
-   - `trunk-freshness: stale (diverged — local M ahead, N behind)` — emit a warning that local trunk has diverged from origin but proceed (user already acknowledged at preflight).
-   - `trunk-freshness: skipped` — proceed with a note that freshness was intentionally skipped.
-   - Absent — emit `printf 'blocker: trunk-freshness session fact not provided by orchestrator' >&2; exit 1`.
-4. Confirm `working_branch` follows the branch taxonomy and naming rules.
-5. Confirm there are no unexpected unstaged/uncommitted changes that make switching unsafe.
-6. Create or switch to `working_branch` from `base` conditionally: if `working_branch` does NOT yet exist, create it from `base` via `git switch --no-track -c <working_branch> <base>`; if `working_branch` ALREADY exists (resume/retry, or the current worktree is already on it), switch to it without `-c` via `git switch <working_branch>` (do NOT pass `-c` or `<base>` — passing `-c` to an existing branch fails). Either form repoints the CURRENT worktree HEAD onto `working_branch` even when invoked while booted on a NON-trunk scratch ref (e.g. a brood child booted on `strain/<brood-id>/<short>`); the skill creates and removes NO worktrees (worktree ownership stays with `hivemind:spawn-brood`). Suppress command output (`>/dev/null 2>&1`). `<working_branch>` and `<base>` in these commands are the values that passed the input gate; every other identifier (the branch, its upstream remote, its upstream ref) is captured out of band.
-   After `git switch <working_branch>`, if an upstream is set and its name is not `<remote>/<working_branch>`, run `git branch --unset-upstream`. A branch that tracks trunk lets a plain `git push` or a force-with-lease retry against the tracked upstream target trunk. Capture the branch, its upstream remote, and its upstream ref OUT-OF-BAND into shell variables in the same Bash call and reference them only as `"$var"`, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); never paste the captured upstream or branch value into command text:
+1. Map the `trunk-freshness` session fact passed by the orchestrator per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Trunk Freshness) to the script value:
+   - `trunk-freshness: fresh` maps to `fresh`.
+   - `trunk-freshness: stale (...)`, in any of the forms listed in Required Inputs, maps to `stale` (user already acknowledged at preflight).
+   - `trunk-freshness: skipped` maps to `skipped`.
+   - Absent: emit `printf 'blocker: trunk-freshness session fact not provided by orchestrator' >&2; exit 1`.
+2. Confirm `working_branch` follows the branch taxonomy and naming rules in `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Branch Taxonomy, Branch Naming), and that `classification` is one of the values in Required Inputs. On failure, exit 1 with blocker.
+3. **Final Bash tool call.** Run the branch script, where each `<allowlist-validated-...>` placeholder is the value that passed the input gate or the checks in steps 1 and 2:
+
    ```bash
-   b="$(git rev-parse --abbrev-ref HEAD)"
-   rem="$(git branch --list "$b" --format='%(upstream:remotename)')"
-   up="$(git branch --list "$b" --format='%(upstream)')"
-   if [ -n "$up" ] && [ "$up" != "refs/remotes/$rem/$b" ]; then git branch --unset-upstream >/dev/null 2>&1 || { printf 'blocker: could not unset upstream that does not match the working branch' >&2; exit 1; }; fi
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh --base <allowlist-validated-base> --branch <allowlist-validated-working-branch> --classification <allowlist-validated-classification> --trunk-freshness <allowlist-validated-trunk-freshness>
    ```
-7. After the `git switch` or `git checkout` command in step 6 succeeds, suppress its output (`>/dev/null 2>&1`) and emit explicit YAML as the final Bash tool call: `b="$(git rev-parse --abbrev-ref HEAD)"; printf 'branch: %s\n' "$b"`. This YAML line is the routing data. If any prerequisite check fails (missing inputs, unsafe state, bad branch name), emit blocker to stderr and exit 1.
+
+   The script header defines the tree refusals, base resolution, branch creation and switching, upstream handling, and output; this skill does not restate them. Exit 0: stdout `branch: <working_branch>` is the routing data, followed by `commit:`, `created:`, and, for stale or skipped trunk freshness, a `warning:` line. Exit 1: blocked; relay the script's `blocker:` line from stderr.
 
 ## Silence Discipline
 
@@ -72,11 +62,11 @@ This is a pipeline skill. The rules below govern this skill's own procedure, not
 agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
 as a workflow state or as one step inside a longer procedure:
 
-- This skill's procedure produces zero chat text of its own, apart from the requirement 3
-  trunk-freshness warning — its remaining steps are tool calls only.
-- The procedure ends at the requirement 7 Bash tool call, which hands the routing data back
+- This skill's procedure produces zero chat text of its own; its steps are tool calls only.
+  The trunk-freshness warning is the script's `warning:` stdout line.
+- The procedure ends at the requirement 3 Bash tool call, which hands the routing data back
   to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = orchestrator proceeds. Routing data (if any) is in stdout.
+- Exit 0 = orchestrator proceeds. Routing data (`branch`, `commit`, `created`, and any `warning`) is in stdout.
 - Exit 1 = blocked. Emit reason: `printf 'blocker: <reason>' >&2; exit 1`
 - Never include a `status:` field in any output.
 

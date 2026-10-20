@@ -352,6 +352,7 @@ All skills are invoked using the namespaced form:
 | `hivemind:creep-spread` | Analyze project artifacts and generate a populated CONTEXT.md (or CONTEXT-MAP.md for multi-context repos) with domain terms extracted from code, docs, and config |
 | `hivemind:molt` | Commit a completed phase, milestone, version bump, or review-remediation item |
 | `hivemind:create-working-branch` | Create or confirm a compliant working branch before implementation |
+| `hivemind:gather-facts` | Report the branch as it is: branch state, its history against a freshly fetched trunk, the branch's PRs, and the text of any issue or PR the request names, in one complete facts file |
 | `hivemind:adaptation-cycle` | Run a pre-PR local Codex review on the current branch diff and return normalized findings. Review-only (it fixes nothing); invoked by the `local-reviewer` agent only |
 | `hivemind:github-review-loop` | Watch a PR in the main session and dispatch the fix-mode `github-reviewer` per actionable event; owns the post-PR review loop |
 | `hivemind:detect-remediation-signals` | Shared root-cluster / break-fix / diminishing-returns / stop-and-merge detector over a fix-ledger; emits one verdict both reviewers map to their own exit_reason |
