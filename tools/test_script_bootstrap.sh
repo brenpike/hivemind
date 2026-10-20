@@ -108,6 +108,8 @@ BUMP_TYPE_USAGE_REASON='missing positional base ref; usage: bump-type.sh <base> 
 ENTRY_ROWS=(
     "plugin/skills/bump-type/scripts/bump-type.sh|script_dir|blocker|$SELF_LOCATE_REASON"
     "plugin/skills/push-branch/scripts/push-branch.sh|script_dir|blocker|$SELF_LOCATE_REASON"
+    "plugin/skills/gather-facts/scripts/gather-facts.sh|script_dir|blocker|$SELF_LOCATE_REASON"
+    "plugin/skills/create-working-branch/scripts/create-working-branch.sh|script_dir|blocker|$SELF_LOCATE_REASON"
     "plugin/skills/record-state-result/scripts/record-state-result.sh|script_dir|blocker|$SELF_LOCATE_REASON"
     "plugin/skills/init-run-ledger/scripts/init-run-ledger.sh|script_dir|blocker|$SELF_LOCATE_REASON"
     "plugin/skills/next-wave/scripts/next-wave.sh|script_dir|blocker|$SELF_LOCATE_REASON"
@@ -138,6 +140,8 @@ LIB_ROWS=(
 STAGE2_ROWS=(
     "plugin/skills/bump-type/scripts/bump-type.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
     "plugin/skills/push-branch/scripts/push-branch.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
+    "plugin/skills/gather-facts/scripts/gather-facts.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
+    "plugin/skills/create-working-branch/scripts/create-working-branch.sh|shared_dir|../../_shared|cannot resolve skills/_shared from the script directory; refusing to proceed"
     "plugin/skills/brood-status/scripts/brood-status-collect.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/brood-status/scripts/brood-status-project.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
     "plugin/skills/init-run-ledger/scripts/init-run-ledger.sh|plugin_root|../../..|$PLUGIN_ROOT_REASON"
@@ -163,6 +167,10 @@ SOURCE_ROWS=(
     "$(build_std_source_row plugin/skills/bump-type/scripts/bump-type.sh '$shared_dir' allowlist.sh)"
     "$(build_std_source_row plugin/skills/bump-type/scripts/bump-type.sh '$shared_dir' bump-type-derive.sh)"
     "$(build_std_source_row plugin/skills/push-branch/scripts/push-branch.sh '$shared_dir' allowlist.sh)"
+    "$(build_std_source_row plugin/skills/gather-facts/scripts/gather-facts.sh '$shared_dir' allowlist.sh)"
+    "$(build_std_source_row plugin/skills/gather-facts/scripts/gather-facts.sh '$shared_dir' containment.sh)"
+    "$(build_std_source_row plugin/skills/gather-facts/scripts/gather-facts.sh '$shared_dir' graphql-response.sh)"
+    "$(build_std_source_row plugin/skills/create-working-branch/scripts/create-working-branch.sh '$shared_dir' allowlist.sh)"
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-status-collect.sh '$plugin_root/skills/_shared' brood-status-derive.sh)"
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-status-project.sh '$plugin_root/skills/_shared' containment.sh)"
     "$(build_std_source_row plugin/skills/brood-status/scripts/brood-status-project.sh '$plugin_root/skills/_shared' allowlist.sh)"
