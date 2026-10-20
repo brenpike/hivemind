@@ -8,7 +8,7 @@
   "consumers": [
     {
       "file": "plugin/skills/create-working-branch/scripts/create-working-branch.sh",
-      "pattern": "resolve_commit \"refs/heads/$branch_name\" branch_created=false if [ \"$already_on_branch\" = true ]; then apply_upstream_rule elif [ -n \"$resolved_commit\" ]; then git switch --quiet --no-guess \"$branch_name\" >/dev/null || blocker \"could not switch to working_branch\" apply_upstream_rule else git switch --quiet --no-track -c \"$branch_name\" \"$base_commit\" >/dev/null || blocker \"could not create working_branch from base\""
+      "pattern": "resolve_commit \"refs/heads/$branch_name\" branch_created=false if [ \"$already_on_branch\" = true ]; then apply_upstream_rule elif [ -n \"$resolved_commit\" ]; then git switch --quiet --no-guess \"$branch_name\" >/dev/null 2>&1 || blocker \"could not switch to working_branch\" apply_upstream_rule else git switch --quiet --no-track -c \"$branch_name\" \"$base_commit\" >/dev/null 2>&1 || blocker \"could not create working_branch from base\""
     },
     {
       "file": "plugin/skills/create-working-branch/scripts/create-working-branch.sh",
