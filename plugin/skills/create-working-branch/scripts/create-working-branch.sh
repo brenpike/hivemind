@@ -14,26 +14,31 @@
 #                                Checked as an enum only; the taxonomy and naming check is the
 #                                caller's, made before the call.
 #   --trunk-freshness <state>    REQUIRED. fresh|stale|skipped. stale and skipped add a warning.
-#   --trunk <branch>             REQUIRED. Resolved trunk branch name. Checked as a name only; it
-#                                need not exist locally.
+#   --trunk <branch>             REQUIRED. Resolved trunk branch name. It may be absent locally;
+#                                when git resolves it, it must resolve to exactly one ref.
 # base, branch and trunk pass hivemind_assert_identifier (_shared/allowlist.sh: non-empty, no
 # leading `-`, no `..`, charset ^[A-Za-z0-9._/-]+$) before any git command runs, base and branch
 # first (`base or working_branch contains characters outside the safe allowlist`), then trunk
 # (`trunk contains characters outside the safe allowlist`). Then, still before any git command,
-# a branch equal to base stops with `working_branch equals base`, and a branch equal to trunk,
-# ignoring ASCII case, stops with `working_branch equals trunk`. Case is ignored because a
-# case-insensitive file system stores refs/heads/Main and refs/heads/main as one file. A git
-# identifier read from the repository (the branch upstream) is captured into a shell variable
-# and used only as "$var", per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell
-# Identifier Discipline).
+# a branch equal to base stops with `working_branch equals base`, and a trunk that names the
+# branch stops with `working_branch equals trunk`. A name or ref names the branch when, ignoring
+# ASCII case, it is the branch or ends with `/` followed by the branch. Case is ignored because a
+# case-insensitive file system stores refs/heads/Main and refs/heads/main as one file. The `/`
+# rule holds because every git qualifier of a branch (refs/heads/, heads/, <remote>/,
+# refs/remotes/<remote>/) is a leading path in front of the branch name. A git identifier read
+# from the repository (the branch upstream, and the ref git resolves trunk to) is captured into a
+# shell variable and used only as "$var", per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md
+# (Shell Identifier Discipline).
 #
 # WHY (trunk): the script, not the caller's taxonomy check, holds the stop on a working branch
 # that is trunk, so no caller can switch HEAD onto trunk through it. A run that starts on trunk
-# still moves off it, because only the target branch is compared with trunk. The stop compares
-# refs as well as names: a commit on HEAD updates the ref at the end of HEAD's symbolic-ref chain,
-# so a symbolic refs/heads/<branch> that points at trunk would carry commits onto trunk under
-# another name. The alias refusal below makes the ref HEAD's commits update the branch's own ref,
-# and keeps trunk's own symbolic ref, if it has one, from ending at that ref.
+# still moves off it, because only the target branch is compared with trunk. The stop keys on
+# the refs git resolves, not on the caller's spelling: the same branch has many spellings, and
+# git turns each one into the same ref. The stop compares refs as well as names: a commit on HEAD
+# updates the ref at the end of HEAD's symbolic-ref chain, so a symbolic refs/heads/<branch> that
+# points at trunk would carry commits onto trunk under another name. The alias refusal below
+# makes the ref HEAD's commits update the branch's own ref, and keeps trunk's own symbolic ref,
+# if it has one, from ending at that ref.
 #
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
 #   in progress  a merge (MERGE_HEAD), rebase (rebase-merge, rebase-apply, REBASE_HEAD),
@@ -45,11 +50,16 @@
 #                or untracked path. Ignored files are allowed. The run never commits, stashes, or
 #                discards an edit it did not make, so a dirty tree stops here.
 #   alias        refs/heads/<branch> is a symbolic ref, dangling or not (`working_branch is a
-#                symbolic ref`), or refs/heads/<trunk> is a symbolic ref whose chain ends at
-#                refs/heads/<branch>, ignoring ASCII case (`working_branch equals trunk`). Both
-#                are read with `git symbolic-ref --quiet`, which follows a chain to its end. A
-#                name git cannot read as a branch ref stops with `cannot read working_branch` or
-#                `cannot read trunk`.
+#                symbolic ref`), or refs/heads/<trunk> is a symbolic ref whose chain ends at a
+#                ref that names the branch (`working_branch equals trunk`). Both are read with
+#                `git symbolic-ref --quiet`, which follows a chain to its end. A name git cannot
+#                read as a branch ref stops with `cannot read working_branch` or `cannot read
+#                trunk`.
+#   trunk        `git rev-parse --verify --quiet --symbolic-full-name <trunk>` resolves trunk the
+#                way git resolves any name, to the ref at the end of its symbolic-ref chain, and
+#                that ref names the branch (`working_branch equals trunk`). A trunk that resolves
+#                to more than one ref, or to an object that is not a ref, stops with `cannot read
+#                trunk`. A trunk that resolves to nothing passes.
 #   worktree     the branch is checked out in another worktree.
 #   base         the base does not resolve to a commit (see BASE below).
 #
@@ -68,7 +78,9 @@
 #   identifier gate and is not `.` and branch.<b>.merge is refs/heads/<b>, that is, when the
 #   upstream is <remote>/<branch>. Any other upstream, including a half-set one, is removed by
 #   unsetting both keys.
-#   Afterwards HEAD must be refs/heads/<branch> and resolve to a commit.
+#   Afterwards HEAD must be refs/heads/<branch> and resolve to a commit, and the trunk check runs
+#   again on the final state. That stop comes after the switch, so HEAD stays on the branch and
+#   no commit is made.
 #   Only the current worktree's HEAD moves, also from a detached HEAD or a non-trunk scratch
 #   branch such as a brood child's boot branch. No worktree is created or removed; worktree
 #   ownership stays with spawn-brood.
@@ -96,7 +108,9 @@
 # NOT CHECKED: a post-checkout hook or the operator can change HEAD, the index, or files after
 # the switch. Repo hooks, local refs, git config, and the operator are trusted under
 # ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline); the final
-# HEAD check catches a moved HEAD, and anything else is a recorded residual.
+# HEAD check catches a moved HEAD, and anything else is a recorded residual. A trunk name git
+# does not resolve, before or after the switch, and that does not end with the branch, names no
+# ref; nothing ties it to the branch.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
@@ -187,8 +201,22 @@ hivemind_assert_identifier "$branch_name" || blocker "$identifier_reason"
 hivemind_assert_identifier "$trunk_name" || blocker "trunk contains characters outside the safe allowlist"
 [ "$branch_name" != "$base_name" ] || blocker "working_branch equals base"
 branch_folded="$(printf '%s' "$branch_name" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
-trunk_folded="$(printf '%s' "$trunk_name" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
-[ "$branch_folded" != "$trunk_folded" ] || blocker "working_branch equals trunk"
+
+# names_working_branch <ref text>
+#   Succeeds when <ref text>, ignoring ASCII case, is the working branch or ends with `/` followed
+#   by it. Runs in the main shell so blocker exits it.
+names_working_branch() {
+  local ref_text_folded
+  ref_text_folded="$(printf '%s' "$1" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
+  case "$ref_text_folded" in
+    "$branch_folded"|*/"$branch_folded") return 0 ;;
+  esac
+  return 1
+}
+
+if names_working_branch "$trunk_name"; then
+  blocker "working_branch equals trunk"
+fi
 
 # read_config_value <key>
 #   Sets config_value to the value of <key> (empty when the key is unset). Any git config failure
@@ -258,11 +286,11 @@ EOF
 
 # refuse_trunk_alias
 #   Blocks when refs/heads/<branch> is a symbolic ref, or when refs/heads/<trunk> is a symbolic
-#   ref whose chain ends at refs/heads/<branch>, ignoring ASCII case. `git symbolic-ref --quiet`
-#   exits 0 for a symbolic ref, dangling or not, printing the end of its chain, and 1 for a ref
-#   that is not symbolic or does not exist. Runs in the main shell so blocker exits it.
+#   ref whose chain ends at a ref that names the branch (names_working_branch). `git symbolic-ref
+#   --quiet` exits 0 for a symbolic ref, dangling or not, printing the end of its chain, and 1 for
+#   a ref that is not symbolic or does not exist. Runs in the main shell so blocker exits it.
 refuse_trunk_alias() {
-  local alias_rc=0 trunk_end trunk_end_folded
+  local alias_rc=0 trunk_end
   git symbolic-ref --quiet "refs/heads/$branch_name" >/dev/null 2>&1 || alias_rc=$?
   case "$alias_rc" in
     0) blocker "working_branch is a symbolic ref" ;;
@@ -276,8 +304,28 @@ refuse_trunk_alias() {
     1) return 0 ;;
     *) blocker "cannot read trunk" ;;
   esac
-  trunk_end_folded="$(printf '%s' "$trunk_end" | tr 'A-Z' 'a-z')" || blocker "cannot compare working_branch with trunk"
-  [ "$trunk_end_folded" != "refs/heads/$branch_folded" ] || blocker "working_branch equals trunk"
+  if names_working_branch "$trunk_end"; then
+    blocker "working_branch equals trunk"
+  fi
+}
+
+# refuse_trunk_resolution
+#   Blocks when the ref git resolves trunk to names the branch (names_working_branch). `git
+#   rev-parse --verify --quiet --symbolic-full-name` exits 0 and prints the end of the symbolic-ref
+#   chain for a name that resolves to exactly one ref, exits 0 and prints nothing for an ambiguous
+#   name or an object that is not a ref, and exits 1 for a name that resolves to nothing. Runs in
+#   the main shell so blocker exits it.
+refuse_trunk_resolution() {
+  local resolve_rc=0 trunk_ref
+  trunk_ref="$(git rev-parse --verify --quiet --symbolic-full-name "$trunk_name" 2>/dev/null)" || resolve_rc=$?
+  case "$resolve_rc" in
+    0) [ -n "$trunk_ref" ] || blocker "cannot read trunk" ;;
+    1) return 0 ;;
+    *) blocker "cannot read trunk" ;;
+  esac
+  if names_working_branch "$trunk_ref"; then
+    blocker "working_branch equals trunk"
+  fi
 }
 
 # resolve_commit <revision>
@@ -348,6 +396,7 @@ unmerged_paths="$(git ls-files -u 2>/dev/null)" || blocker "cannot read the inde
 [ -z "$unmerged_paths" ] || blocker "the index has unmerged paths"
 refuse_dirty_tree
 refuse_trunk_alias
+refuse_trunk_resolution
 
 head_ref_rc=0
 head_ref="$(git symbolic-ref --quiet HEAD 2>/dev/null)" || head_ref_rc=$?
@@ -397,6 +446,7 @@ is_full_object_id "$head_commit" || blocker "HEAD does not resolve to a commit"
 if [ "$branch_created" = true ] && [ "$head_commit" != "$base_commit" ]; then
   blocker "new working_branch is not at the base commit"
 fi
+refuse_trunk_resolution
 
 if [ -n "$warning_text" ]; then
   printf 'branch: %s\ncommit: %s\ncreated: %s\nwarning: %s\n' "$branch_name" "$head_commit" "$branch_created" "$warning_text"
