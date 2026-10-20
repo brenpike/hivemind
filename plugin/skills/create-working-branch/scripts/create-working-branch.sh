@@ -126,7 +126,13 @@
 # candidate other than refs/heads/<trunk> that git cannot read, such as a corrupt ref or a chain
 # deeper than git follows, names no ref. The base fetch, part of the base refusal and the last
 # refusal, writes refs/remotes/origin/<base>, FETCH_HEAD and objects before its result is checked.
-# Those are not changes in this sense, and a rerun gives the same result.
+# Those are not changes in this sense, and a rerun gives the same result. The `working_branch
+# equals base` stop compares the names as given, so a base that spells the branch another way,
+# such as refs/heads/<branch>, passes it, and the run switches onto the branch the caller named;
+# later commits then land on that branch, which is also the base. The impact is bounded: the
+# caller named that branch, and the trunk stop, which keys on every ref trunk names, still keeps
+# trunk off. Comparing the base's canonical ref would add a stop, and the stops here are not to
+# grow, so this is a recorded residual.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
