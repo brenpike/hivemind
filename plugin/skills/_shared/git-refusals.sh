@@ -27,38 +27,68 @@
 #
 # API
 #
-#   hivemind_ref_names_branch <ref text> <branch>
-#     Succeeds when <ref text>, ignoring ASCII case, is <branch> or ends with `/` followed by
-#     <branch>. Case is ignored because a case-insensitive file system stores refs/heads/Main and
-#     refs/heads/main as one file. The `/` rule holds because every git qualifier of a branch
-#     (refs/heads/, heads/, <remote>/, refs/remotes/<remote>/) is a leading path in front of the
-#     branch name. Runs no git command.
+#   NAME LOOKUP: the two name functions below look a name up the way git does (gitrevisions),
+#   six candidates in this order: <name>, refs/<name>, refs/tags/<name>, refs/heads/<name>,
+#   refs/remotes/<name>, refs/remotes/<name>/HEAD. hivemind__set_name_candidates builds this
+#   list and is its one copy. A name names a branch by ref identity, never by its text: a
+#   candidate, or the end a candidate resolves to, must equal one of the branch's refs. A text
+#   suffix is not enough, so team/main, release/feature/x and refs/heads/team/main do not name
+#   main or feature/x. Every comparison is exact string equality after an ASCII case fold (see
+#   RECORDED RESIDUAL R1 below).
+#
+#   hivemind_ref_names_branch <name text> <branch>
+#     Succeeds when one NAME LOOKUP candidate of <name text> equals refs/heads/<branch>, both
+#     ASCII case folded. So only the spellings <branch>, heads/<branch> and refs/heads/<branch>
+#     match. Runs no git command, so it cannot see a remote image or a symbolic ref;
+#     hivemind_resolve_name_refs does.
 #     Returns 0 names the branch, 1 does not, 2 cannot compare (an empty <branch>, or the case
 #     fold failed).
 #
 #   hivemind_resolve_name_refs <name> <branch>
-#     Reads every ref <name> names, once, with git's own lookup order for a name (gitrevisions),
-#     six rules: <name>, refs/<name>, refs/tags/<name>, refs/heads/<name>, refs/remotes/<name>,
-#     refs/remotes/<name>/HEAD. A candidate that `git symbolic-ref --quiet` reads as a symbolic
-#     ref names the end of its chain as git prints it, even when that end does not exist yet. A
-#     candidate under refs/ that is not symbolic names itself when `git show-ref --verify` finds
-#     it. Any other candidate names no ref. Two candidates that end at the same ref name one ref.
-#     A candidate other than refs/heads/<name> that git cannot read names no ref.
-#     With a non-empty <branch>, the walk stops at the first candidate whose ref names the branch
-#     (hivemind_ref_names_branch), dangling or not. Pass an empty <branch> to read the refs with
-#     no branch check. Callers pass a trunk or base name as <name>.
+#     Reads every ref <name> names, once, walking the NAME LOOKUP candidates in order. A
+#     candidate that `git symbolic-ref --quiet` reads as a symbolic ref names the end of its
+#     chain as git prints it, even when that end does not exist yet. A candidate under refs/
+#     that is not symbolic names itself when `git show-ref --verify` finds it. Any other
+#     candidate names no ref. Two candidates that end at the same ref name one ref. A candidate
+#     other than refs/heads/<name> that git cannot read names no ref.
+#     With a non-empty <branch>, it first reads `git remote` once and builds the branch refs:
+#     refs/heads/<branch>, plus refs/remotes/<remote>/<branch> for each remote git lists. A
+#     remote name may contain `/` and is used whole, never split. No remote is assumed: origin
+#     counts only when git lists it. Then, for each candidate in lookup order, the walk stops
+#     with 1 when the candidate itself (existing or not) equals a branch ref, and next when the
+#     end it names (dangling or not) does. Pass an empty <branch> to read the refs with no
+#     branch check and no `git remote` read. Callers pass a trunk or base name as <name>.
 #     Returns 0 the walk ended, 1 a ref names the branch, 2 cannot read <name> (git cannot read
 #     refs/heads/<name>, or prints no end for a symbolic candidate), 3 cannot compare a ref with
-#     the branch. Codes 1, 2 and 3 come from the first candidate, in lookup order, that raises
-#     one. On return 0 it also sets:
+#     the branch (`git remote` failed, or a case fold failed). `git remote` is read before the
+#     walk. Codes 1, 2 and 3 from the walk come from the first candidate, in lookup order, that
+#     raises one. On return 0 it also sets:
 #       HIVEMIND_NAME_AMBIGUOUS  true when the refs <name> names that exist are more than one
 #                                ref (a dangling end is not counted), else false. Reported
 #                                apart from the return code; the caller decides whether to
 #                                refuse it.
 #       HIVEMIND_NAME_REF        the one existing ref <name> names, or empty when it names no
 #                                existing ref or is ambiguous.
-#     HIVEMIND_CANDIDATE_END and HIVEMIND_CANDIDATE_EXISTS hold the last candidate read. They
-#     are internal to the walk and carry no contract.
+#     HIVEMIND_CANDIDATE_END and HIVEMIND_CANDIDATE_EXISTS hold the last candidate read, and
+#     HIVEMIND__NAME_CANDIDATES holds the last NAME LOOKUP list built. They are internal to the
+#     walk and carry no contract.
+#
+#   REMOTE IMAGE LAYOUT: the branch refs above assume each remote fetches with git's default
+#   layout, refs/remotes/<remote>/*. A remote whose fetch refspec maps its branches elsewhere
+#   is not seen as an image of the branch. Deferred:
+#   https://github.com/brenpike/hivemind/issues/409#issuecomment-6303470852
+#
+#   RECORDED RESIDUAL R1 (case fold): both name functions fold ASCII case before they compare.
+#     Root cause:  a case-insensitive file system stores refs/heads/Main and refs/heads/main as
+#                  one file, so there the two spellings are one branch.
+#     Bounded impact: on a case-sensitive file system two case-variant branches (Main and main)
+#                  are two refs, and the fold treats them as one. A check then over-refuses: it
+#                  blocks Main when trunk is main. It never lets a branch through that it
+#                  should refuse, so it fails safe. Inherited from 6.1.0.
+#     Rejected remediation:
+#                  - keying the fold on core.ignorecase: that setting describes only this
+#                    checkout's file system, not the remote host or any other clone.
+#     Linked:      PR #421 review comment r4330910585, PR #420 review comment r4328340771.
 #
 #   hivemind_find_operation_in_progress
 #     Looks up, in this order, each with `git rev-parse --git-path` so a linked worktree reads
@@ -87,18 +117,51 @@
 #     unstaged, or an untracked path is reported. Returns 0 clean, 1 at least one kind is true,
 #     2 cannot read the working tree status (all three are then false).
 
-# hivemind_ref_names_branch <ref text> <branch>
-#   See API above.
-hivemind_ref_names_branch() {
+# hivemind__fold_ascii_case <text>
+#   Prints <text> with ASCII A-Z folded to a-z. Returns the status of the fold. INTERNAL (double
+#   underscore): not a caller entry point.
+hivemind__fold_ascii_case() {
+  printf '%s' "$1" | LC_ALL=C tr 'A-Z' 'a-z'
+}
+
+# hivemind__set_name_candidates <name>
+#   Sets HIVEMIND__NAME_CANDIDATES to the NAME LOOKUP list for <name>, in order. INTERNAL (double
+#   underscore): not a caller entry point.
+hivemind__set_name_candidates() {
+  local name_text="$1"
+  HIVEMIND__NAME_CANDIDATES=("$name_text" "refs/$name_text" "refs/tags/$name_text" \
+    "refs/heads/$name_text" "refs/remotes/$name_text" "refs/remotes/$name_text/HEAD")
+}
+
+# hivemind__matches_any_ref <ref> <branch ref>...
+#   Returns 0 when <ref> equals one <branch ref> exactly, else 1. INTERNAL (double underscore):
+#   not a caller entry point.
+hivemind__matches_any_ref() {
   local ref_text="$1"
+  local branch_ref
+  shift
+  for branch_ref in "$@"; do
+    [ "$ref_text" != "$branch_ref" ] || return 0
+  done
+  return 1
+}
+
+# hivemind_ref_names_branch <name text> <branch>
+#   See API above. INVARIANT: every NAME LOOKUP prefix is lower case ASCII, so the candidates
+#   built from the folded name equal the folded candidates.
+hivemind_ref_names_branch() {
+  local name_text="$1"
   local branch_text="$2"
-  local ref_folded branch_folded
+  local name_folded branch_folded candidate_name
   [ -n "$branch_text" ] || return 2
-  ref_folded="$(printf '%s' "$ref_text" | LC_ALL=C tr 'A-Z' 'a-z')" || return 2
-  branch_folded="$(printf '%s' "$branch_text" | LC_ALL=C tr 'A-Z' 'a-z')" || return 2
-  case "$ref_folded" in
-    "$branch_folded"|*/"$branch_folded") return 0 ;;
-  esac
+  name_folded="$(hivemind__fold_ascii_case "$name_text")" || return 2
+  branch_folded="$(hivemind__fold_ascii_case "$branch_text")" || return 2
+  hivemind__set_name_candidates "$name_folded"
+  for candidate_name in "${HIVEMIND__NAME_CANDIDATES[@]}"; do
+    if hivemind__matches_any_ref "$candidate_name" "refs/heads/$branch_folded"; then
+      return 0
+    fi
+  done
   return 1
 }
 
@@ -148,23 +211,40 @@ hivemind__read_name_candidate() {
 hivemind_resolve_name_refs() {
   local name_text="$1"
   local branch_text="$2"
-  local candidate_name existing_end='' candidate_rc match_rc
+  local candidate_name candidate_folded end_folded existing_end='' candidate_rc
+  local remote_listing remote_folded remote_name branch_folded
+  local -a branch_refs
   HIVEMIND_NAME_AMBIGUOUS=false
   HIVEMIND_NAME_REF=''
-  for candidate_name in "$name_text" "refs/$name_text" "refs/tags/$name_text" \
-    "refs/heads/$name_text" "refs/remotes/$name_text" "refs/remotes/$name_text/HEAD"; do
+  if [ -n "$branch_text" ]; then
+    remote_listing="$(git remote 2>/dev/null)" || return 3
+    remote_folded="$(hivemind__fold_ascii_case "$remote_listing")" || return 3
+    branch_folded="$(hivemind__fold_ascii_case "$branch_text")" || return 3
+    branch_refs=("refs/heads/$branch_folded")
+    while IFS= read -r remote_name; do
+      [ -n "$remote_name" ] || continue
+      branch_refs+=("refs/remotes/$remote_name/$branch_folded")
+    done <<EOF
+$remote_folded
+EOF
+  fi
+  hivemind__set_name_candidates "$name_text"
+  for candidate_name in "${HIVEMIND__NAME_CANDIDATES[@]}"; do
+    if [ -n "$branch_text" ]; then
+      candidate_folded="$(hivemind__fold_ascii_case "$candidate_name")" || return 3
+      if hivemind__matches_any_ref "$candidate_folded" "${branch_refs[@]}"; then
+        return 1
+      fi
+    fi
     candidate_rc=0
     hivemind__read_name_candidate "$candidate_name" "$name_text" || candidate_rc=$?
     [ "$candidate_rc" -eq 0 ] || return 2
     [ -n "$HIVEMIND_CANDIDATE_END" ] || continue
     if [ -n "$branch_text" ]; then
-      match_rc=0
-      hivemind_ref_names_branch "$HIVEMIND_CANDIDATE_END" "$branch_text" || match_rc=$?
-      case "$match_rc" in
-        0) return 1 ;;
-        1) ;;
-        *) return 3 ;;
-      esac
+      end_folded="$(hivemind__fold_ascii_case "$HIVEMIND_CANDIDATE_END")" || return 3
+      if hivemind__matches_any_ref "$end_folded" "${branch_refs[@]}"; then
+        return 1
+      fi
     fi
     [ "$HIVEMIND_CANDIDATE_EXISTS" = true ] || continue
     if [ -n "$existing_end" ] && [ "$existing_end" != "$HIVEMIND_CANDIDATE_END" ]; then
