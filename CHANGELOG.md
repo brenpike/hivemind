@@ -12,6 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.2.0] - 2026-10-20
+
+### Added
+
+- `hivemind:molt` commit script, `plugin/skills/molt/scripts/molt.sh`. It refuses before it changes anything, names any dirty path outside the list, and prints a `committed:` line.
+- `hivemind:open-plan-pr` script. It pushes through `push-branch`, reuses an open PR on the same head, base and commit, or creates the PR and verifies it.
+- `push-branch.sh` takes `--expect-commit <sha>`.
+- Shared git refusals library, `plugin/skills/_shared/git-refusals.sh`.
+- Two seeded inputs-file rules: `Edit(.hivemind/molt-inputs-*.json)` and `Edit(.hivemind/pr-inputs-*.json)`.
+
+### Changed
+
+- The molt and open-plan-pr skills are now inputs-file navigators.
+- molt `commit:` is now the full SHA.
+- Nothing to commit is no longer blocked. molt reports `committed: false`.
+- molt refuses when a dirty path is not in the list.
+- Consumers re-run `hivemind:seed-hive` to add the two transport rules.
+
+### Fixed
+
+- The push-branch base check now keys on the refs the base names, not only its spelling. Refs #409.
+
 ## [6.1.0] - 2026-10-20
 
 ### Added

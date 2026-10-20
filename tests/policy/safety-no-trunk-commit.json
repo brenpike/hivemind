@@ -1,6 +1,6 @@
 {
   "rule": "No trunk commits",
-  "description": "P3 coupling. The overlord consumer pins the overlord's own trunk-safety sentence — `Never commit directly to the resolved trunk branch; never push without first confirming the current branch is not trunk.` — the claim-carrying clause of THIS rule at the consumer site. Its first clause deliberately coincides with this fixture's source pattern in safety-rails.md: that is the same rule correctly witnessed at two sites, not a foreign-pattern paste — do not 'fix' the coincidence by widening one side. Honest guarantee: deleting the trunk-commit prohibition from either file turns the suite red; a rewrite-around or meaning inversion that keeps these bytes intact is outside what a presence pin can see. The molt consumer pins its operative no-trunk preflight step — `Confirm current branch is not `trunk`` — the normative clause that enforces this rule at commit time, not the `trunk` input's parameter description, which merely defines what the input means and can stay intact after the preflight is deleted.",
+  "description": "P3 coupling. The overlord consumer pins the overlord's own trunk-safety sentence — `Never commit directly to the resolved trunk branch; never push without first confirming the current branch is not trunk.` — the claim-carrying clause of THIS rule at the consumer site. Its first clause deliberately coincides with this fixture's source pattern in safety-rails.md: that is the same rule correctly witnessed at two sites, not a foreign-pattern paste — do not 'fix' the coincidence by widening one side. Honest guarantee: deleting the trunk-commit prohibition from either file turns the suite red; a rewrite-around or meaning inversion that keeps these bytes intact is outside what a presence pin can see. The molt consumer pins its operative no-trunk preflight step — `Confirm current branch is not `trunk`` — the normative clause that enforces this rule at commit time, not the `trunk` input's parameter description, which merely defines what the input means and can stay intact after the preflight is deleted. Every molt commit runs through `plugin/skills/molt/scripts/molt.sh`, so two consumers in that script pin the check that enforces this rule at commit time: the `refuse_trunk_branch` function, one span carrying both trunk tests (trunk names the current branch as text, and a ref that trunk names resolves to the current branch), the blocker `the current branch is trunk` for each, and the stops when the comparison or the trunk read fails; and its call site, one span carrying the current branch name gate followed by the `refuse_trunk_branch` call. Deleting either test, either trunk blocker, or the call turns the suite red. Residuals, stated plainly: the pins do not prove that the call runs before the staging and commit lines, nor what the shared `hivemind_ref_names_branch` and `hivemind_resolve_name_refs` helpers in `plugin/skills/_shared/git-refusals.sh` compute; that behavior is asserted by `tools/test_molt.sh`.",
   "source": {
     "file": "plugin/governance/safety-rails.md",
     "pattern": "Never commit directly to the resolved trunk branch"
@@ -13,6 +13,14 @@
     {
       "file": "plugin/skills/molt/SKILL.md",
       "pattern": "Confirm current branch is not `trunk`"
+    },
+    {
+      "file": "plugin/skills/molt/scripts/molt.sh",
+      "pattern": "refuse_trunk_branch() { local name_rc=0 trunk_rc=0 hivemind_ref_names_branch \"$trunk_name\" \"$branch_name\" || name_rc=$? case \"$name_rc\" in 0) blocker \"the current branch is trunk\" ;; 1) ;; *) blocker \"cannot compare the current branch with trunk\" ;; esac hivemind_resolve_name_refs \"$trunk_name\" \"$branch_name\" || trunk_rc=$? case \"$trunk_rc\" in 0) ;; 1) blocker \"the current branch is trunk\" ;; 3) blocker \"cannot compare the current branch with trunk\" ;; *) blocker \"cannot read trunk\" ;; esac }"
+    },
+    {
+      "file": "plugin/skills/molt/scripts/molt.sh",
+      "pattern": "hivemind_assert_identifier \"$branch_name\" || blocker \"the current branch name contains characters outside the safe allowlist\" refuse_trunk_branch"
     }
   ]
 }
