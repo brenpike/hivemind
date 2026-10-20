@@ -41,6 +41,8 @@ function readSection(body, heading) {
 const { frontmatter, body } = splitFrontmatter(overlordText);
 const engineSection = readSection(body, '## Engine');
 const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The result is built to fit the completion notice.')) ?? '';
+const relayParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Only the harness completion notice is the run\'s result.')) ?? '';
+const stateExecutionSection = readSection(body, '## Workflow State Execution');
 
 describe('overlord frontmatter tools', () => {
   const toolNames = readToolNames(frontmatter);
@@ -100,5 +102,38 @@ describe('overlord Engine section', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));
     assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
     assert.ok(engineSection.includes('A run that started, then failed or ended blocked, is reported as it ended and does not fall back.'));
+  });
+});
+
+describe('overlord relay and cut rules', () => {
+  test('the relay paragraph HTML-unescapes message', () => {
+    assert.notEqual(relayParagraph, '', '## Engine has a paragraph starting Only the harness completion notice is the run\'s result.');
+    for (const phrase of ['HTML-escapes its result', 'JSON string value', '`&lt;`', '`&gt;`', '`&amp;`']) {
+      assert.ok(relayParagraph.includes(phrase), `relay paragraph lacks ${phrase}`);
+    }
+  });
+  test('the relay paragraph makes message the whole reply with nothing added', () => {
+    for (const phrase of ['verbatim as your whole reply', 'no line before or after it', 'no character changed', 'no comment on what it says']) {
+      assert.ok(relayParagraph.includes(phrase), `relay paragraph lacks ${phrase}`);
+    }
+  });
+  test('the defect paragraph decides cut from the envelope, not from message text', () => {
+    assert.ok(defectParagraph.includes('not one complete JSON object'), 'defect paragraph lacks not one complete JSON object');
+    assert.ok(defectParagraph.includes('text inside `message`'), 'defect paragraph lacks text inside `message`');
+    assert.ok(defectParagraph.includes('never makes a notice cut'), 'defect paragraph lacks never makes a notice cut');
+  });
+  test('Engine no longer points at result.js', () => {
+    assert.ok(!engineSection.includes('result.js'), '## Engine still points at result.js');
+  });
+});
+
+describe('overlord workflow definition reads', () => {
+  test('overlord.md has no pointer into the workflows directory', () => {
+    assert.ok(!overlordText.includes('${CLAUDE_PLUGIN_ROOT}/workflows/'), 'overlord.md still points into ${CLAUDE_PLUGIN_ROOT}/workflows/');
+  });
+  test('Workflow State Execution takes the state from the engine output lines', () => {
+    for (const phrase of ['`current_state`', '`state_definition`', '`hivemind:init-run-ledger`', '`hivemind:record-state-result`']) {
+      assert.ok(stateExecutionSection.includes(phrase), `## Workflow State Execution lacks ${phrase}`);
+    }
   });
 });

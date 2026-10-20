@@ -24,6 +24,11 @@
 # definition file must EXIST, its .version must equal workflow_version, and its .start must
 # equal start_state. The definition is read ONLY to validate these three facts — it does not
 # drive transitions. The caller never supplies a definition path.
+# workflow_version and start_state are OPTIONAL inputs. An absent value is DERIVED from the
+# packaged definition's .version / .start, so the caller needs no read of the definition. A
+# supplied value (legacy caller) must still equal the definition's value, else blocker. The
+# start state's own definition (.states[start], compact JSON) is read before any mkdir; a
+# start state missing from the definition is a blocker and leaves no run dir.
 #
 # INJECTION POSTURE: every ledger field is serialized with `jq -n` using --arg
 # (strings) / --argjson (pre-validated JSON), NEVER string-interpolated into the jq
@@ -45,8 +50,10 @@
 #   Inputs JSON shape (authoritative schema in SKILL.md § Inputs JSON):
 #     {
 #       "workflow":         "<selected workflow id; matches plugin/workflows/<id>.json>",
-#       "workflow_version": <int — definition version at init time>,
-#       "start_state":      "<workflow's start state (state.current at init)>",
+#       "workflow_version": <optional int; derived from the definition's .version when
+#                           absent; a supplied value must equal it>,
+#       "start_state":      "<optional; derived from the definition's .start when absent;
+#                            a supplied value must equal it. Becomes state.current at init>",
 #       "user_request":     "<raw user request — UNTRUSTED data, serialized only>",
 #       "normalized":       "<overlord's normalized summary of the request>",
 #       "parent": {
@@ -85,6 +92,8 @@
 #     writes state.json, prints YAML routing lines to stdout and exits 0:
 #       run_id: <id>
 #       ledger: <checkout-root>/.hivemind/runs/<id>/state.json
+#       current_state: <start state>
+#       state_definition: <compact JSON of the start state from the packaged definition>
 #   - On any failure: prints `blocker: <reason>` to stderr, exits 1, writes no ledger.
 #
 # EXIT CONTRACT:
@@ -205,7 +214,8 @@ esac
 
 # Parse every field into the SAME inert variables the downstream logic already uses.
 # Strings via `jq -r '.field // ""'`; the workflow_version stays a JSON number (read as
-# its string form here, then integer-guarded below before becoming an --argjson number);
+# its string form here, empty when absent, then integer-guarded below before becoming an
+# --argjson number);
 # plan_steps is read as a JSON array via `jq '.plan_steps // []'` (preserving its JSON
 # type for the --argjson serialization). parent.kind defaults to "none" when absent.
 workflow="$(jq -r '.workflow // ""' "$INPUTS_FILE")"
@@ -224,15 +234,12 @@ plan_path="$(jq -r '.plan_path // ""' "$INPUTS_FILE")"
 
 # ── Required-input validation ─────────────────────────────────────────────────
 [ -n "$workflow" ]         || blocker "inputs file is missing required workflow"
-[ -n "$workflow_version" ] || blocker "inputs file is missing required workflow_version"
-[ -n "$start_state" ]      || blocker "inputs file is missing required start_state"
 [ -n "$user_request" ]     || blocker "inputs file is missing required user_request"
 [ -n "$normalized" ]       || blocker "inputs file is missing required normalized"
 
-# workflow_version must be an integer (it becomes a JSON number via --argjson).
-case "$workflow_version" in
-  ''|*[!0-9]*) blocker "workflow_version must be a non-negative integer, got: $workflow_version" ;;
-esac
+# workflow_version and start_state are optional: an absent value is derived from the packaged
+# definition below (Packaged-definition validation), where the integer guard on the final
+# workflow_version also runs, still before any mkdir.
 
 # parent.kind selects the parent variant.
 case "$parent_kind" in
@@ -354,7 +361,9 @@ ledger_path="$run_dir/state.json"
 # safe single path component (the suggested-run-id / brood branches may not have guarded it)
 # before it becomes a path; reject ./.. explicitly. The definition is read ONLY to confirm
 # it exists and that its version/start match the supplied values — it does not drive
-# transitions, and the caller never supplies its path.
+# transitions, and the caller never supplies its path. An absent workflow_version or
+# start_state takes the definition's value, and the start state's definition is read for the
+# success output.
 printf '%s' "$workflow" | grep -Eq "$SAFE_ID_RE" \
   || blocker "workflow is not a safe path component: $workflow"
 case "$workflow" in
@@ -363,11 +372,24 @@ esac
 def="$workflows_dir/$workflow.json"
 [ -f "$def" ] || blocker "packaged workflow definition does not exist: $def"
 def_version="$(jq -r '.version // ""' "$def")"
+[ -n "$workflow_version" ] || workflow_version="$def_version"
+# workflow_version must be an integer (it becomes a JSON number via --argjson). Runs on the
+# final value, so a non-integer supplied value and a non-integer packaged .version both block.
+case "$workflow_version" in
+  ''|*[!0-9]*) blocker "workflow_version must be a non-negative integer, got: $workflow_version" ;;
+esac
 [ "$def_version" = "$workflow_version" ] \
   || blocker "packaged workflow definition version '$def_version' does not match workflow_version '$workflow_version'"
 def_start="$(jq -r '.start // ""' "$def")"
+[ -n "$start_state" ] || start_state="$def_start"
 [ "$def_start" = "$start_state" ] \
   || blocker "packaged workflow definition start '$def_start' does not match start_state '$start_state'"
+# The start state's own definition, printed on success so the caller needs no read of the
+# definition file. Read before any mkdir: a start state the definition does not declare is a
+# blocker that leaves no run dir. A jq failure leaves the value empty and blocks the same way.
+start_state_definition="$(jq -c --arg s "$start_state" '.states[$s] // null' "$def" 2>/dev/null)"
+[ -n "$start_state_definition" ] && [ "$start_state_definition" != "null" ] \
+  || blocker "packaged workflow definition declares no state '$start_state' for start_state; no run dir created"
 
 # ── Atomic run-dir reservation (closes the F2 reservation TOCTOU) ──────────────
 # The earlier `[ -e "$ledger_path" ]` check is a friendly EARLY blocker for the common
@@ -484,4 +506,6 @@ CLAIMED_DIR=""
 # ── Success routing ───────────────────────────────────────────────────────────
 printf 'run_id: %s\n' "$run_id"
 printf 'ledger: %s\n' "$ledger_path"
+printf 'current_state: %s\n' "$start_state"
+printf 'state_definition: %s\n' "$start_state_definition"
 exit 0

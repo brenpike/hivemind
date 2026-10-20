@@ -24,12 +24,13 @@ Rules: ADR-0018 §A (ledger is JSON); §C (engine is the committed script).
 
 The caller resolves and passes these; the skill does not invent them.
 
-- `workflow`: the selected workflow id (matches an `<id>.json` under
-  `${CLAUDE_PLUGIN_ROOT}/workflows/`).
-- `workflow_version`: the definition `version` at init time (non-negative integer).
-- `start_state`: the workflow's `start` state (becomes `state.current` at init).
+- `workflow`: the selected workflow id (for example `standard-delivery`).
 - `user_request`: the raw user request — UNTRUSTED data, serialized only.
 - `normalized`: the caller's normalized summary of the request.
+
+The caller does not supply `workflow_version` or `start_state` and reads no workflow
+definition file. The script derives both from the packaged definition and prints the start
+state with its definition (Procedure step 4).
 
 Optional (brood child / id control):
 
@@ -72,9 +73,7 @@ a field after that read is the field's own contract. Shape:
 
 ```json
 {
-  "workflow": "<required> selected workflow id (matches <id>.json under workflows/)",
-  "workflow_version": 1,
-  "start_state": "<required> the workflow's start state",
+  "workflow": "<required> selected workflow id",
   "user_request": "<required> raw user request (UNTRUSTED, serialized only)",
   "normalized": "<required> caller's normalized summary",
   "parent": {
@@ -91,8 +90,10 @@ a field after that read is the field's own contract. Shape:
 ```
 
 Field rules:
-- `workflow`, `start_state`, `user_request`, `normalized` are required non-empty strings.
-- `workflow_version` is a required JSON number (non-negative integer).
+- `workflow`, `user_request`, `normalized` are required non-empty strings.
+- `workflow_version` and `start_state` are not caller fields: the script takes them from the
+  packaged definition's `version` and `start`. An inputs file that still carries them (a
+  legacy caller) is checked against the definition, and a mismatch is a blocker.
 - `parent` is optional; `parent.kind` defaults to `none` when the block is absent.
   When `parent.kind` is `brood`, `parent.run_id`, `parent.brood_id`, `parent.strain_id`,
   and `parent.manifest` are all required.
@@ -113,9 +114,8 @@ canonical value); else a safe `suggested_run_id` verbatim; else derived
 
 1. **Build the inputs object** in your reasoning from the Required Inputs. Each untrusted
    value (`user_request`, `normalized`, any `plan_steps` text) is structured JSON data,
-   never spliced into command source. `start_state` MUST be the `start` value declared in
-   the chosen workflow definition (`<id>.json` under `${CLAUDE_PLUGIN_ROOT}/workflows/`) —
-   derive it from that file.
+   never spliced into command source. Leave out `workflow_version` and `start_state`: the
+   script derives both, so no workflow definition file is read for them.
 
 2. **Write the inputs file** via the Write tool to a PER-INVOCATION-UNIQUE gitignored path
    `.hivemind/runs/.init-inputs-<token>.json`. Init has NO `run_id` yet — the ledger is being
@@ -143,22 +143,27 @@ canonical value); else a safe `suggested_run_id` verbatim; else derived
    ```
    EXECUTE (do not Read) the script — it owns dependency check, input validation,
    packaged-definition validation, run-id derivation, directory creation, and the atomic
-   temp-write + rename of `state.json`. BEFORE creating the run dir, the script validates the
-   packaged workflow definition against the script's self-located `workflows/` dir
-   (`workflows/<workflow>.json` must EXIST, its `.version` must equal `workflow_version`, and
-   its `.start` must equal `start_state`) and fails early with a blocker on any mismatch, so a
-   bad `workflow`/`workflow_version`/`start_state` never leaves an orphan run dir. The caller
-   supplies NO definition path — it is derived from the workflow id against the packaged dir.
+   temp-write + rename of `state.json`. BEFORE creating the run dir, the script locates the
+   packaged workflow definition in its self-located `workflows/` dir (`workflows/<workflow>.json`
+   must EXIST), takes `workflow_version` from its `.version` and the start state from its
+   `.start`, and reads that start state's definition from its `.states`. A missing definition,
+   a start state the definition does not declare, or a legacy supplied `workflow_version` or
+   `start_state` that does not match the definition is a blocker raised early, so it never
+   leaves an orphan run dir. The caller supplies NO definition path — it is derived from
+   the workflow id against the packaged dir.
 
 4. **Interpret the result.** Exit 0: the script printed YAML routing lines on stdout —
    ```yaml
    run_id: <id>
    ledger: <checkout-root>/.hivemind/runs/<id>/state.json
+   current_state: <start state>
+   state_definition: <compact JSON of the start state from the packaged definition>
    ```
    the run dir is anchored to the git checkout root (`git rev-parse --show-toplevel`), not the
    CWD, so resume-on-start finds it regardless of which subdir init ran from; init requires being
-   inside a git checkout. the caller proceeds with that ledger. Exit 1: the script printed `blocker: <reason>`
-   on stderr and wrote no ledger — surface it and stop.
+   inside a git checkout. the caller proceeds with that ledger and executes `current_state` as
+   `state_definition` defines it, with no read of the workflow definition file. Exit 1: the
+   script printed `blocker: <reason>` on stderr and wrote no ledger — surface it and stop.
 
 ## Pointers
 
@@ -178,13 +183,16 @@ as a workflow state or as one step inside a longer procedure:
   is the Bash script call (step 3).
 - The procedure ends at the step 3 Bash script call, which hands the routing data back
   to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = caller proceeds; routing data (`run_id:`, `ledger:`) is on stdout.
+- Exit 0 = caller proceeds; routing data (`run_id:`, `ledger:`, `current_state:`,
+  `state_definition:`) is on stdout.
   Exit 1 = blocked; the reason is on stderr.
 
 ## Do Not
 
-- invent values for `workflow`, `workflow_version`, `start_state`, `user_request`, or
-  `normalized` — the script exits 1 with a blocker if any required input is missing.
+- invent values for `workflow`, `user_request`, or `normalized`. The script exits 1 with a
+  blocker if any required input is missing.
+- read a workflow definition file to find `workflow_version`, `start_state`, or a state's
+  definition. The script derives them and prints the start state's definition.
 - write the ledger by hand or with any tool other than the script.
 - use the Write tool for anything other than the `.hivemind/runs/.init-inputs-<token>.json`
   inputs file.

@@ -12,6 +12,9 @@
 #   - top-level keys id, version, start present
 #   - start exists in .states
 #   - every transition target is a declared state
+#   - start (when present), every state key, every transition result key and
+#     every transition target is a string matching ^[A-Za-z0-9._-]+$ over the
+#     WHOLE string (no embedded or trailing newline)
 #   - every NON-terminal state has a .transitions object (a JSON object)
 #   - every declared terminal exists in .states with type "terminal"
 #   - (inverse) every terminal-typed state appears in the .terminal array
@@ -37,8 +40,8 @@
 # --self-test runs each deliberately-broken fixture under tests/workflow-defs/broken/
 # through the same validation rules and asserts that EACH is rejected (proving the
 # validator catches dangling targets, missing start, undeclared terminal, bad state
-# type, and non-object transitions). It also confirms the known-good fixture under
-# tests/workflow-defs/valid/ passes. Exit 0 only if every broken fixture is rejected
+# type, non-object transitions, and unsafe ids). It also confirms the known-good
+# fixture under tests/workflow-defs/valid/ passes. Exit 0 only if every broken fixture is rejected
 # and every valid fixture passes.
 
 set -euo pipefail
@@ -80,6 +83,12 @@ fi
 
 # v1 legal state types (workflow-state-machine.md → V1 state types).
 V1_STATE_TYPES='["decision","agent","skill","user_gate","terminal"]'
+
+# Safe id pattern for start, state names, transition results and transition
+# targets. Same literal as SAFE_ID_RE in init-run-ledger.sh, record-state-result.sh,
+# mark-intent-fallback.sh and next-wave.sh, which print state ids raw in their
+# stdout routing lines.
+SAFE_ID_RE='^[A-Za-z0-9._-]+$'
 
 # ── Producer-to-workflow contract vocabularies ──────────────────────────────────
 #
@@ -226,6 +235,27 @@ validate_workflow_definition() {
     ' "$def_file")"
     [[ -z "$dangling_targets" ]] \
         || fail "$label" "transition target(s) point to undeclared states: $dangling_targets"
+
+    # Rule: start, state keys, transition result keys and transition targets are
+    # safe ids. The whole check stays inside jq: jq 1.6 `$` matches before a
+    # trailing newline, so `safe` also rejects a trailing "\n", and every offender
+    # is printed via tojson so the FAIL line stays one line.
+    local unsafe_ids
+    unsafe_ids="$(jq -r --arg re "$SAFE_ID_RE" '
+        def safe: type == "string" and test($re) and (endswith("\n") | not);
+        [ (if has("start") and (.start | safe | not) then "start=\(.start | tojson)" else empty end),
+          (.states | to_entries[]
+           | .key as $from
+           | (if ($from | safe) then empty else "state \($from | tojson)" end),
+             ((if (.value.transitions | type) == "object" then .value.transitions else {} end)
+              | to_entries[]
+              | (if (.key | safe) then empty else "\($from | tojson) result \(.key | tojson)" end),
+                (if (.value | safe) then empty else "\($from | tojson).\(.key | tojson)->\(.value | tojson)" end)))
+        ]
+        | join(", ")
+    ' "$def_file")"
+    [[ -z "$unsafe_ids" ]] \
+        || fail "$label" "id(s) not matching $SAFE_ID_RE over the whole string: $unsafe_ids"
 
     # Rule: every declared terminal exists in .states with type "terminal".
     # (.terminal is optional structurally, but when present each name must resolve.)

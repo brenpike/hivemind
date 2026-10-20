@@ -22,7 +22,8 @@
 #      this is state-existence, NOT version-skew), else blocker + exit 1, UNCHANGED.
 #   5. The allowed-result set is read DIRECTLY from definition.states[<state>].transitions
 #      (keys). --result MUST be one of those keys, else blocker + exit 1, UNCHANGED.
-#   6. next_state = transitions[result].
+#   6. next_state = transitions[result]. next_state must be declared in definition.states
+#      (its compact definition is printed on success), else blocker + exit 1, UNCHANGED.
 #   7. Append an event {at,state,result,next_state,summary,outputs,plan_epoch}. plan_epoch
 #      is an ENGINE-WRITTEN top-level int (NOT a free-form outputs rider): every appended
 #      event carries it, so a caller can neither forge nor omit it. See item 12.
@@ -134,7 +135,9 @@
 #       result: <result>
 #       current_state: <next_state>
 #       ledger: <path>
-#     Exits 0.
+#       state_definition: <compact JSON of next_state from the packaged definition>
+#     Exits 0. A next_state the definition does not declare is a blocker raised before any
+#     write (ledger byte-unchanged).
 #   - On any failure / illegal transition: prints `blocker: <reason>` to stderr, exits 1,
 #     ledger byte-unchanged.
 #
@@ -429,6 +432,14 @@ next_state="$(jq -r --arg s "$state" --arg r "$result" \
 [ -n "$next_state" ] && [ "$next_state" != "null" ] \
   || blocker "transition '$result' from state '$state' resolves to an empty target"
 
+# (5b) read next_state's own definition (compact JSON) for the success output, so the caller
+# needs no read of the definition file. Before mktemp or any write: a target the definition
+# does not declare is a blocker with the ledger byte-unchanged. A jq failure leaves the value
+# empty and blocks the same way.
+next_state_definition="$(jq -c --arg n "$next_state" '.states[$n] // null' "$workflow" 2>/dev/null)"
+[ -n "$next_state_definition" ] && [ "$next_state_definition" != "null" ] \
+  || blocker "transition '$result' from state '$state' targets '$next_state', which workflow '$workflow_id' does not declare; ledger unchanged"
+
 # (6) PLAN-WRITE AUTHORIZATION: --plan-steps / --plan-path may ONLY be honored when the
 # state being recorded is a cerebrate planning state (definition.states[<state>].agent ==
 # "hivemind:cerebrate"). This authorizes exactly the cerebrate agent states (plan /
@@ -573,4 +584,5 @@ printf 'previous_state: %s\n' "$state"
 printf 'result: %s\n' "$result"
 printf 'current_state: %s\n' "$next_state"
 printf 'ledger: %s\n' "$ledger"
+printf 'state_definition: %s\n' "$next_state_definition"
 exit 0
