@@ -25,6 +25,14 @@
 # facts-schema.json through plugin/workflow-src/lib/schema.js loaded by
 # tests/workflow-scripts/harness.mjs. That needs Node 18 or later; without it the runner fails.
 #
+# THE LINE BOUND (every line of a facts file at most 1100 code points) is checked three ways.
+# test_line_bound_property feeds a corpus from a seeded generator (CORPUS_SEED, no clock; the seed
+# is printed on any failure) through the real engine as GitHub texts, commit subjects and paths,
+# reading the whitespace set from gather-facts.jq, and a node oracle that does not use jq checks
+# each text against its source. test_line_bound_every_field fills every field near its bound at
+# once, with escape-dense full-cost chunks at every text site. test_line_gate gives a trunk,
+# remote and branch name past the bound and expects the line blocker with nothing published.
+#
 # Prints PASS/FAIL per assertion. Exits non-zero if ANY assertion FAILs.
 #
 # Usage:
@@ -37,6 +45,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd -P)"
 ENGINE="$REPO_ROOT/plugin/skills/gather-facts/scripts/gather-facts.sh"
+ASSEMBLY="$REPO_ROOT/plugin/skills/gather-facts/scripts/gather-facts.jq"
 SCHEMA="$REPO_ROOT/plugin/references/facts-schema.json"
 SCHEMA_LIB="$REPO_ROOT/plugin/workflow-src/lib/schema.js"
 HARNESS="$REPO_ROOT/tests/workflow-scripts/harness.mjs"
@@ -54,7 +63,7 @@ if ! [[ "$node_major" =~ ^[0-9]+$ ]] || (( node_major < MIN_NODE_MAJOR )); then
     echo "FAIL: node ${node_version} found; Node ${MIN_NODE_MAJOR} or later is required for the schema check" >&2
     exit 2
 fi
-for required_input in "$ENGINE" "$SCHEMA" "$SCHEMA_LIB" "$HARNESS"; do
+for required_input in "$ENGINE" "$ASSEMBLY" "$SCHEMA" "$SCHEMA_LIB" "$HARNESS"; do
     [[ -f "$required_input" ]] || { echo "FAIL: required input missing: $required_input" >&2; exit 2; }
 done
 
@@ -90,6 +99,7 @@ USAGE_REASON='invalid arguments; usage: gather-facts.sh --trunk <name> [--remote
 IDENTIFIER_REASON='trunk or remote contains characters outside the safe allowlist'
 NOT_WORK_TREE_REASON='not inside a git work tree'
 CONTAIN_REASON='the facts folder is not contained in the checkout'
+LINE_REASON='a facts line is longer than the line bound'
 
 # ── Tool folders: links to what the engine needs, and the fake gh ───────────
 
@@ -330,6 +340,26 @@ assert_line_bound() {
     else
         failed "$1" "longest line is $max_line_bytes bytes, past 1100"
     fi
+}
+
+# assert_line_chars <name> -> every line of LAST_FACTS is at most 1100 Unicode code points.
+assert_line_chars() {
+    local max_line_chars
+    max_line_chars="$(jq -R -n '[inputs | length] | max // 0' "$LAST_FACTS" 2>/dev/null)" || max_line_chars='unreadable'
+    if [[ "$max_line_chars" =~ ^[0-9]+$ && "$max_line_chars" -le 1100 ]]; then
+        pass "$1" "longest line is $max_line_chars code points"
+    else
+        failed "$1" "longest line: $max_line_chars, not at most 1100 code points"
+    fi
+}
+
+# assert_unpublished <name> -> the facts folder of `w` holds no facts-*.json and no temp file or
+# work folder.
+assert_unpublished() {
+    local facts_folder="$WORK_TREE/.hivemind/facts"
+    assert_equal "$1-unpublished" '' "$(find "$facts_folder" -name 'facts-*.json' -print)" "no facts-*.json published"
+    assert_equal "$1-no-temp" '' "$(find "$facts_folder" -name '.*' ! -name .gitignore -print)" \
+        "no temp file or work folder left"
 }
 
 # snapshot_tree <gitroot> -> prints local branches, HEAD, the index entries, status, tags and
@@ -1050,6 +1080,350 @@ test_short_values() {
     assert_line_bound short-boundary-line-bound
 }
 
+# ── The line bound: a seeded corpus through every text source ───────────────
+
+CORPUS_SEED=20261020
+
+# CORPUS_GENERATOR: node program. Args: seed, gather-facts.jq, out folder, work tree, branch, blob
+# sha. Reads the facts_is_space code points from gather-facts.jq, makes 40 texts, and writes
+# corpus.json (texts, title_index, body_index, history_paths, untracked_path), subjects.stream (a
+# fast-import stream of one commit per text on the branch, CR and LF removed) and paths.z
+# (update-index -z --index-info records naming the blob), and creates the whitespace-only
+# untracked file in the work tree.
+CORPUS_GENERATOR='
+const fs = require("node:fs");
+const path = require("node:path");
+const [seedText, programPath, outDir, workTree, branchName, blobSha] = process.argv.slice(1);
+function failGenerator(message) {
+  throw new Error(message + " (seed " + seedText + ")");
+}
+const spaceMatch = /def facts_is_space:([^;]*);/.exec(fs.readFileSync(programPath, "utf8"));
+if (spaceMatch === null) failGenerator("facts_is_space not found in " + programPath);
+const spacePoints = [];
+for (const term of spaceMatch[1].matchAll(/\(\. >= (\d+) and \. <= (\d+)\)|\. == (\d+)/g)) {
+  if (term[3] !== undefined) {
+    spacePoints.push(Number(term[3]));
+  } else {
+    for (let point = Number(term[1]); point <= Number(term[2]); point += 1) spacePoints.push(point);
+  }
+}
+if (spacePoints.length !== 25) failGenerator("read " + spacePoints.length + " whitespace code points, expected 25");
+let randomState = Number(seedText) >>> 0;
+function nextRandom() {
+  randomState = (randomState + 0x6d2b79f5) >>> 0;
+  let mixedState = randomState;
+  mixedState = Math.imul(mixedState ^ (mixedState >>> 15), mixedState | 1);
+  mixedState ^= mixedState + Math.imul(mixedState ^ (mixedState >>> 7), mixedState | 61);
+  return ((mixedState ^ (mixedState >>> 14)) >>> 0) / 4294967296;
+}
+function pickIndex(count) {
+  return Math.floor(nextRandom() * count);
+}
+function pickBetween(low, high) {
+  return low + pickIndex(high - low + 1);
+}
+function visibleCharacter() {
+  const characterKind = pickIndex(7);
+  if (characterKind === 0) return String.fromCodePoint(pickBetween(0x21, 0x7e));
+  if (characterKind === 1) return String.fromCodePoint(0x22);
+  if (characterKind === 2) return String.fromCodePoint(0x5c);
+  if (characterKind === 3) return String.fromCodePoint(0x01);
+  if (characterKind === 4) return String.fromCodePoint(0x7f);
+  if (characterKind === 5) return String.fromCodePoint(pickBetween(0x4e00, 0x9fff));
+  return String.fromCodePoint(pickBetween(0x1f600, 0x1f64f));
+}
+function visibleSegment() {
+  const segmentLength = pickBetween(1, 200);
+  let segmentText = "";
+  for (let index = 0; index < segmentLength; index += 1) segmentText += visibleCharacter();
+  return segmentText;
+}
+function whitespaceRun(runLength, fixedPoint) {
+  let runText = "";
+  for (let index = 0; index < runLength; index += 1) {
+    const runPoint = fixedPoint === undefined ? spacePoints[pickIndex(spacePoints.length)] : fixedPoint;
+    runText += String.fromCodePoint(runPoint);
+  }
+  return runText;
+}
+function randomRun() {
+  const runBounds = [[0, 3], [4, 50], [51, 300], [301, 1100], [1101, 2500], [2501, 6000]][pickIndex(6)];
+  const runLength = pickBetween(runBounds[0], runBounds[1]);
+  return whitespaceRun(runLength, pickIndex(2) === 0 ? spacePoints[pickIndex(spacePoints.length)] : undefined);
+}
+function randomText() {
+  let generatedText = pickIndex(3) === 0 ? randomRun() : "";
+  const segmentCount = pickBetween(1, 3);
+  for (let segment = 0; segment < segmentCount; segment += 1) {
+    generatedText += visibleSegment();
+    if (segment < segmentCount - 1) generatedText += randomRun();
+  }
+  if (pickIndex(3) === 0) generatedText += randomRun();
+  return generatedText;
+}
+const allSpaces = spacePoints.map((point) => String.fromCodePoint(point)).join("");
+const texts = [
+  allSpaces + whitespaceRun(2000),
+  visibleSegment() + whitespaceRun(3200, 0x20) + visibleSegment(),
+  visibleSegment() + whitespaceRun(1100, 0x0b) + visibleSegment(),
+  whitespaceRun(1500) + visibleSegment() + randomRun() + visibleSegment(),
+  visibleSegment() + whitespaceRun(6000),
+  spacePoints.map((point) => visibleSegment() + whitespaceRun(pickBetween(1, 400), point)).join("") + visibleSegment(),
+  "",
+];
+while (texts.length < 40) texts.push(randomText());
+const lineBreaks = new RegExp("[" + String.fromCodePoint(0x0d, 0x0a) + "]", "g");
+function subjectCommitParts(text, index) {
+  const messageBytes = Buffer.from(text.replace(lineBreaks, ""), "utf8");
+  const parentLine = index === 0 ? "from refs/heads/" + branchName + "^0" : "from :" + index;
+  return [Buffer.from("commit refs/heads/" + branchName + "\nmark :" + (index + 1)
+    + "\ncommitter t <t@example.invalid> " + (1800000000 + index) + " +0000\ndata " + messageBytes.length + "\n"),
+    messageBytes, Buffer.from("\n" + parentLine + "\n\n")];
+}
+fs.writeFileSync(path.join(outDir, "subjects.stream"), Buffer.concat(texts.flatMap(subjectCommitParts)));
+const historyPaths = [...new Set(texts
+  .map((text) => text.split("/").join("_"))
+  .filter((name) => name !== "")
+  .map((name) => (name === "." || name === ".." ? "_" + name : name)))];
+fs.writeFileSync(path.join(outDir, "paths.z"),
+  historyPaths.map((name) => "100644 " + blobSha + "\t" + name + "\0").join(""));
+const untrackedPath = allSpaces + String.fromCodePoint(0x3000).repeat(60);
+if (Buffer.byteLength(untrackedPath) > 255) failGenerator("the untracked name passes 255 bytes");
+fs.writeFileSync(path.join(workTree, untrackedPath), "untracked\n");
+fs.writeFileSync(path.join(outDir, "corpus.json"), JSON.stringify({
+  texts, title_index: 3, body_index: 1, history_paths: historyPaths, untracked_path: untrackedPath,
+}));
+'
+
+# CORPUS_ORACLE: node program, no jq. Args: seed, facts file, corpus.json, the NUL-separated
+# subjects git prints with %s, and the regression body. Prints one `PASS|FAIL<TAB>case<TAB>text`
+# line per check. A text re-joins its expected source (right-trimmed GitHub text, git's subject
+# right-trimmed, the exact path), its length is that source's code points, and each chunk is
+# non-empty and costs at most 1000 as jq writes it (JSON.stringify, with U+007F written as an
+# escape of 6). Every line holds at most 1100 code points.
+CORPUS_ORACLE='
+const fs = require("node:fs");
+const [seedText, factsPath, corpusPath, subjectsPath, regressionPath] = process.argv.slice(1);
+const factsText = fs.readFileSync(factsPath, "utf8");
+const facts = JSON.parse(factsText);
+const corpus = JSON.parse(fs.readFileSync(corpusPath, "utf8"));
+const deleteCharacter = String.fromCodePoint(0x7f);
+function writtenCost(chunk) {
+  return [...JSON.stringify(chunk)].length - 2 + 5 * (chunk.split(deleteCharacter).length - 1);
+}
+function textProblems(label, textObject, expectedText) {
+  if (!textObject || !Array.isArray(textObject.chunks)) return [label + ": no text object"];
+  const problems = [];
+  if (textObject.chunks.join("") !== expectedText) problems.push(label + ": chunks do not re-join the source");
+  if (textObject.length !== [...expectedText].length) {
+    problems.push(label + ": length " + textObject.length + ", expected " + [...expectedText].length);
+  }
+  textObject.chunks.forEach((chunk, index) => {
+    if (chunk === "") problems.push(label + ": chunk " + index + " is empty");
+    if (writtenCost(chunk) > 1000) problems.push(label + ": chunk " + index + " costs " + writtenCost(chunk));
+  });
+  return problems;
+}
+function pathProblems(label, items, expectedNames) {
+  const expectedSet = new Set(expectedNames);
+  const seenNames = new Set();
+  const problems = [];
+  for (const [index, item] of items.entries()) {
+    const joinedName = item.path.chunks.join("");
+    if (!expectedSet.has(joinedName)) {
+      problems.push(label + " item " + index + ": the path is not an expected name");
+    } else {
+      seenNames.add(joinedName);
+      problems.push(...textProblems(label + " item " + index, item.path, joinedName));
+    }
+  }
+  if (items.length !== expectedNames.length || seenNames.size !== expectedNames.length) {
+    problems.push(label + ": " + items.length + " items, " + seenNames.size + " distinct, expected " + expectedNames.length);
+  }
+  return problems;
+}
+function report(caseName, problems, summary) {
+  if (problems.length === 0) {
+    console.log("PASS\t" + caseName + "\t" + summary);
+  } else {
+    console.log("FAIL\t" + caseName + "\t" + problems.slice(0, 3).join("; ")
+      + " (" + problems.length + " problems, seed " + seedText + ")");
+  }
+}
+const corpusRef = facts.references.items[0];
+const corpusItem = corpusRef.lookup === "fetched" ? corpusRef.item : {};
+const githubProblems = textProblems("title", corpusItem.title, corpus.texts[corpus.title_index].trimEnd())
+  .concat(textProblems("body", corpusItem.body, corpus.texts[corpus.body_index].trimEnd()));
+const commentItems = corpusItem.comments ? corpusItem.comments.items : [];
+if (commentItems.length !== corpus.texts.length) githubProblems.push(commentItems.length + " comments, expected " + corpus.texts.length);
+corpus.texts.forEach((text, index) => {
+  githubProblems.push(...textProblems("comment " + index, commentItems[index] && commentItems[index].body, text.trimEnd()));
+});
+report("property-github", githubProblems, corpus.texts.length + " texts as title, body and comments re-join their right-trimmed source");
+const regressionText = fs.readFileSync(regressionPath, "utf8");
+const regressionRef = facts.references.items[1];
+const regressionBody = regressionRef.lookup === "fetched" ? regressionRef.item.body : undefined;
+const regressionProblems = textProblems("regression body", regressionBody, regressionText);
+if (regressionBody && regressionBody.chunks.length < 6) {
+  regressionProblems.push("regression body has " + regressionBody.chunks.length + " chunks, expected at least 6");
+}
+report("property-regression-b86d0065", regressionProblems, "x, 5000 spaces, y splits into at least 6 chunks that re-join");
+const gitSubjects = fs.readFileSync(subjectsPath, "utf8").split("\0");
+if (gitSubjects[gitSubjects.length - 1] === "") gitSubjects.pop();
+const commitItems = facts.history.commits.items;
+const subjectProblems = [];
+if (gitSubjects.length !== corpus.texts.length + 2) subjectProblems.push(gitSubjects.length + " git subjects, expected " + (corpus.texts.length + 2));
+if (commitItems.length !== gitSubjects.length) subjectProblems.push(commitItems.length + " commits, git has " + gitSubjects.length);
+if (!gitSubjects.some((subject) => subject.includes(" ".repeat(3000)))) subjectProblems.push("no git subject holds the 3000-space run");
+gitSubjects.forEach((subject, index) => {
+  subjectProblems.push(...textProblems("subject " + index, commitItems[index] && commitItems[index].subject, subject.trimEnd()));
+});
+report("property-subjects", subjectProblems, gitSubjects.length + " subjects re-join git %s right-trimmed");
+report("property-history-paths", pathProblems("history", facts.history.paths.items, corpus.history_paths),
+  corpus.history_paths.length + " history paths re-join their exact names");
+report("property-dirty-paths", pathProblems("dirty", facts.dirty.paths.items, corpus.history_paths.concat([corpus.untracked_path])),
+  (corpus.history_paths.length + 1) + " dirty paths re-join their exact names");
+const longLines = factsText.split("\n").map((line) => [...line].length).filter((lineLength) => lineLength > 1100);
+report("property-lines", longLines.length === 0 ? [] : [longLines.length + " lines past 1100 code points, longest " + Math.max(...longLines)],
+  "every facts line at most 1100 code points");
+'
+
+# report_oracle <oracle output> -> one PASS or FAIL per `PASS|FAIL<TAB>case<TAB>text` line.
+report_oracle() {
+    local verdict_word case_name verdict_text
+    while IFS=$'\t' read -r verdict_word case_name verdict_text; do
+        if [[ "$verdict_word" == PASS ]]; then
+            pass "$case_name" "$verdict_text"
+        else
+            failed "$case_name" "$verdict_text"
+        fi
+    done <<<"$1"
+}
+
+test_line_bound_property() {
+    create_world corpus
+    local corpus_dir="$WORLD_ROOT/corpus" paths_index="$WORLD_ROOT/corpus/paths.index"
+    local blob_sha paths_tree paths_commit oracle_output
+    local regression_file="$WORLD_ROOT/regression-body.txt"
+    mkdir -p "$corpus_dir"
+    blob_sha="$(run_git "$WORK_TREE" hash-object -w --stdin </dev/null)"
+    node -e "$CORPUS_GENERATOR" "$CORPUS_SEED" "$ASSEMBLY" "$corpus_dir" "$WORK_TREE" "$BRANCH" "$blob_sha"
+    run_git "$WORK_TREE" fast-import --quiet <"$corpus_dir/subjects.stream"
+    GIT_INDEX_FILE="$paths_index" run_git "$WORK_TREE" read-tree HEAD
+    GIT_INDEX_FILE="$paths_index" run_git "$WORK_TREE" update-index -z --index-info <"$corpus_dir/paths.z"
+    paths_tree="$(GIT_INDEX_FILE="$paths_index" run_git "$WORK_TREE" write-tree)"
+    paths_commit="$(run_git "$WORK_TREE" commit-tree -p HEAD -m paths "$paths_tree")"
+    run_git "$WORK_TREE" update-ref "refs/heads/$BRANCH" "$paths_commit"
+    ref_page Issue 6 '' false 0 | jq -c --slurpfile corpus "$corpus_dir/corpus.json" '$corpus[0] as $source
+        | .data.repository.issueOrPullRequest |= (.title = $source.texts[$source.title_index]
+            | .body = $source.texts[$source.body_index]
+            | .comments.totalCount = ($source.texts | length)
+            | .comments.nodes = [$source.texts[]
+                | {url: "https://github.com/o/r/issues/6#c", body: ., author: {login: "someone"}}])' \
+        >"$GH_DIR/ref-6.pages"
+    printf 'x%sy' "$(repeat_text 5000 ' ')" >"$regression_file"
+    ref_page Issue 7 "$regression_file" false 0 >"$GH_DIR/ref-7.pages"
+    run_engine property "$WORK_TREE" "$STUB_PATH" --trunk main --ref 6 --ref 7
+    assert_ok property
+    assert_line_chars property-line-chars
+    run_git "$WORK_TREE" log -z --reverse --topo-order --no-show-signature --no-color --format=%s \
+        refs/remotes/origin/main..HEAD >"$corpus_dir/subjects.z"
+    oracle_output="$(node -e "$CORPUS_ORACLE" "$CORPUS_SEED" "$LAST_FACTS" "$corpus_dir/corpus.json" \
+        "$corpus_dir/subjects.z" "$regression_file")" \
+        || oracle_output="$oracle_output"$'\n'"FAIL"$'\t'"property-oracle"$'\t'"the oracle stopped (seed $CORPUS_SEED)"
+    report_oracle "$oracle_output"
+}
+
+# ── The line bound: every field near its bound in one run ───────────────────
+
+# component_name <character> <components> <component length> -> prints <components> runs of
+# <character>, each <component length> long, joined by `/`.
+component_name() {
+    local component_text joined_name='' component_index
+    component_text="$(repeat_text "$3" "$1")"
+    for component_index in $(seq 1 "$2"); do
+        joined_name="$joined_name${joined_name:+/}$component_text"
+    done
+    printf '%s' "$joined_name"
+}
+
+test_line_bound_every_field() {
+    create_world every-field
+    local long_branch long_remote long_trunk dense_value dense_text dense_component path_stem
+    local ref_root='.data.repository.issueOrPullRequest'
+    long_branch="$(component_name b 4 249)"
+    long_remote="$(component_name r 4 249)"
+    dense_value="$(repeat_text 100 $'"\\\001')"
+    dense_text="$(repeat_text 200 $'"\\\001')"
+    dense_component="$(repeat_text 124 '"\')"
+    path_stem="$dense_component/$dense_component/$dense_component"
+    mkdir -p "$WORK_TREE/$dense_component/$dense_component"
+    printf 'moved\n' >"$WORK_TREE/${path_stem}x"
+    run_git "$WORK_TREE" add -A
+    run_git "$WORK_TREE" commit -q -m 'dense path'
+    run_git "$WORK_TREE" branch -q -f main HEAD
+    run_git "$WORK_TREE" checkout -q -b "$long_branch"
+    mv "$WORK_TREE/${path_stem}x" "$WORK_TREE/${path_stem}y"
+    run_git "$WORK_TREE" add -A
+    run_git "$WORK_TREE" commit -q --cleanup=verbatim -m "$dense_text"
+    mv "$WORK_TREE/${path_stem}y" "$WORK_TREE/${path_stem}w"
+    run_git "$WORK_TREE" add -A
+    printf 'untracked\n' >"$WORK_TREE/${path_stem}z"
+    pr_page false 1 "$(pr_node 1 OPEN "$(head_sha)" | with_value .url "$dense_value" | with_value .baseRefName "$dense_value")" \
+        >"$GH_DIR/pr.pages"
+    printf '%s\n' "$(ref_page Issue 5 '' false 1 \
+        "$(comment_node "$dense_text" | with_value .url "$dense_value" | with_value .author.login "$dense_value")" \
+        | with_value "$ref_root.url" "$dense_value" | with_value "$ref_root.title" "$dense_text" \
+        | with_value "$ref_root.body" "$dense_text" \
+        | jq -c --arg value "$dense_value" "$ref_root.author = {login: \$value}")" >"$GH_DIR/ref-5.pages"
+    assert_equal every-field-dense-costs '1000 2000 1000' \
+        "$(jq -n -r --arg value "$dense_value" --arg text "$dense_text" --arg path "${path_stem}x" \
+            '[$value, $text, ($path | explode | .[0:501] | implode)] | map(tojson | length - 2) | join(" ")')" \
+        "the dense value costs 1000, the dense text 2000, and the dense path's first 501 characters 1000"
+    run_engine every-field "$WORK_TREE" "$STUB_PATH" --trunk main --remote "$long_remote" --ref 5
+    assert_ok every-field
+    assert_line_chars every-field-line-chars
+    assert_equal every-field-names $'999\t999' \
+        "$(facts_value '[.repository.branch, .repository.remote] | map(length) | @tsv')" "branch and remote of 999 characters"
+    assert_equal every-field-short-values $'6\t1000' \
+        "$(facts_value '[(.pull_requests.items[0] | .url, .base_ref),
+            (.references.items[0].item | .url, .author, .comments.items[0].url, .comments.items[0].author)]
+            | [length, (map(tojson | length - 2) | unique | join(","))] | @tsv')" \
+        "pull request url and base_ref, reference url and author, comment url and author each cost 1000"
+    assert_equal every-field-full-chunks $'9\t1000' \
+        "$(facts_value '[(.history.commits.items[0].subject, .history.paths.items[0].path,
+              .history.paths.items[0].old_path, (.dirty.paths.items[] | .path, (.old_path // empty)),
+              (.references.items[0].item | .title, .body, .comments.items[0].body)) | .chunks[0]]
+            | [length, (map(tojson | length - 2) | unique | join(","))] | @tsv')" \
+        "the first chunk at each of the 9 text sites costs 1000"
+    assert_equal every-field-sites $'renamed\trenamed,untracked' \
+        "$(facts_value '[.history.paths.items[0].status, (.dirty.paths.items | map(.index_status) | sort | join(","))] | @tsv')" \
+        "a history rename, a staged rename and an untracked path"
+
+    create_world every-field-trunk
+    long_trunk="$(component_name t 4 249)"
+    run_engine every-field-trunk "$WORK_TREE" "$STUB_PATH" --trunk "$long_trunk"
+    assert_ok every-field-trunk
+    assert_line_chars every-field-trunk-line-chars
+    assert_fact every-field-trunk-name '.repository.trunk | length' 999
+}
+
+# ── The line bound blocks a value past it ───────────────────────────────────
+
+test_line_gate() {
+    create_world line-gate-trunk
+    assert_blocker line-gate-trunk "$WORK_TREE" "$STUB_PATH" "$LINE_REASON" --trunk "$(repeat_text 1100 a)"
+    assert_unpublished line-gate-trunk
+    create_world line-gate-remote
+    assert_blocker line-gate-remote "$WORK_TREE" "$STUB_PATH" "$LINE_REASON" \
+        --trunk main --remote "$(repeat_text 1100 r)"
+    assert_unpublished line-gate-remote
+    create_world line-gate-branch
+    run_git "$WORK_TREE" checkout -q -b "$(component_name b 5 240)"
+    assert_blocker line-gate-branch "$WORK_TREE" "$STUB_PATH" "$LINE_REASON" --trunk main
+    assert_unpublished line-gate-branch
+}
+
 # ── Concurrent runs, symlinked facts folder ─────────────────────────────────
 
 test_concurrency_and_containment() {
@@ -1142,6 +1516,9 @@ test_big_history
 test_references
 test_pull_requests
 test_short_values
+test_line_bound_property
+test_line_bound_every_field
+test_line_gate
 test_concurrency_and_containment
 test_schema_validation
 
