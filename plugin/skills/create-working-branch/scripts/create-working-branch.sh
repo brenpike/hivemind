@@ -3,7 +3,8 @@
 # create-working-branch: THIN executable entrypoint (ADR-0020) that creates or confirms the
 # working branch in ONE process. It reads the tree state, trunk's ref, the current branch, the
 # base commit, and the branch's upstream once, refuses before any change, then switches HEAD onto
-# the branch and verifies the result with the values it checked.
+# the branch and verifies the result with the values it checked. A change is a write to a branch
+# ref, HEAD, the index, the work tree or git config.
 #
 # INPUT (`--flag value` form only; each flag exactly once; unknown, duplicate, or missing flags
 # and invalid enum values all give the fixed usage blocker):
@@ -41,7 +42,8 @@
 # trunk names, symbolic or not, dangling or not. Trunk is read once, before any change, so a
 # chain whose end is the branch the run would create stops before the run creates it.
 #
-# REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
+# REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1).
+# A change is a write to a branch ref, HEAD, the index, the work tree or git config:
 #   in progress  a merge (MERGE_HEAD), rebase (rebase-merge, rebase-apply, REBASE_HEAD),
 #                cherry-pick (CHERRY_PICK_HEAD), revert (REVERT_HEAD), cherry-pick or revert
 #                sequence (sequencer), or bisect (BISECT_START, BISECT_LOG), each looked up with
@@ -122,7 +124,9 @@
 # names no ref, object names included; nothing ties it to the branch. The six-rule lookup order
 # is mirrored from git, not asked of git, so a lookup rule a future git adds is missed. A
 # candidate other than refs/heads/<trunk> that git cannot read, such as a corrupt ref or a chain
-# deeper than git follows, names no ref.
+# deeper than git follows, names no ref. The base fetch, part of the base refusal and the last
+# refusal, writes refs/remotes/origin/<base>, FETCH_HEAD and objects before its result is checked.
+# Those are not changes in this sense, and a rerun gives the same result.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
