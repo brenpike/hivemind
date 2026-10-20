@@ -65,8 +65,10 @@
 #   warning: <fixed text>        only for --trunk-freshness stale or skipped
 # EXIT CONTRACT:
 #   0  routing lines on stdout
-#   1  `blocker: <fixed reason>` on stderr (after any relayed git stderr), NOTHING on stdout.
-#      Blocker text never echoes a caller- or repository-supplied value.
+#   1  `blocker: <fixed reason>` as the ONLY stderr line, NOTHING on stdout. Every git call
+#      discards git's own stderr, so no git message (whose wording varies by git version and
+#      load) precedes or follows it. Blocker text never echoes a caller- or repository-supplied
+#      value.
 #
 # NOT CHECKED: a post-checkout hook or the operator can change HEAD, the index, or files after
 # the switch. Repo hooks, local refs, git config, and the operator are trusted under
@@ -309,7 +311,7 @@ fi
 if [ -z "$resolved_commit" ]; then
   read_config_value "remote.origin.url"
   [ -n "$config_value" ] || blocker "$base_reason"
-  git fetch --quiet --no-tags origin "+refs/heads/$base_name:refs/remotes/origin/$base_name" >/dev/null || blocker "$base_reason"
+  git fetch --quiet --no-tags origin "+refs/heads/$base_name:refs/remotes/origin/$base_name" </dev/null >/dev/null 2>&1 || blocker "$base_reason"
   resolve_commit "refs/remotes/origin/$base_name"
 fi
 base_commit="$resolved_commit"
@@ -320,10 +322,10 @@ branch_created=false
 if [ "$already_on_branch" = true ]; then
   apply_upstream_rule
 elif [ -n "$resolved_commit" ]; then
-  git switch --quiet --no-guess "$branch_name" >/dev/null || blocker "could not switch to working_branch"
+  git switch --quiet --no-guess "$branch_name" >/dev/null 2>&1 || blocker "could not switch to working_branch"
   apply_upstream_rule
 else
-  git switch --quiet --no-track -c "$branch_name" "$base_commit" >/dev/null || blocker "could not create working_branch from base"
+  git switch --quiet --no-track -c "$branch_name" "$base_commit" >/dev/null 2>&1 || blocker "could not create working_branch from base"
   branch_created=true
 fi
 

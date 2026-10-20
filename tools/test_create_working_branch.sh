@@ -12,7 +12,7 @@
 # that is not <remote>/<branch>) or creates a new one with --no-track at the base commit, and
 # prints
 #     branch: <b> / commit: <sha> / created: true|false [/ warning: <fixed text>]
-# on stdout, exit 0. On any blocker it prints `blocker: <fixed reason>` as the LAST stderr line,
+# on stdout, exit 0. On any blocker it prints `blocker: <fixed reason>` as the ONLY stderr line,
 # NOTHING on stdout, exit 1.
 #
 # ISOLATION: the REAL committed engine is run unmodified by absolute path (it self-locates its own
@@ -23,8 +23,8 @@
 # discovery from escaping WORKDIR (the not-a-checkout case).
 #
 # Every success case asserts exit 0 and the FULL stdout block (exact equality, including the
-# trailing newline). Every blocker case asserts exit 1, EMPTY stdout, exactly one `blocker:`
-# line on stderr, and that line (the last stderr line) equal to the contracted reason. Refusal
+# trailing newline). Every blocker case asserts exit 1, EMPTY stdout, exactly one stderr line,
+# and that line a `blocker:` line equal to the contracted reason (no git stderr around it). Refusal
 # cases also assert that HEAD, every ref, the index, the tree status and the branch config are
 # unchanged.
 #
@@ -230,12 +230,12 @@ assert_success() {
 }
 
 # assert_blocker <name> <cwd> <reason> <engine args...>
-# Runs the engine, asserts exit 1, EMPTY stdout, exactly one `blocker:` stderr line, and the last
-# stderr line equal to `blocker: <reason>`.
+# Runs the engine, asserts exit 1, EMPTY stdout, exactly one stderr line, and that line equal to
+# `blocker: <reason>`.
 assert_blocker() {
     local name="$1" run_cwd="$2" reason="$3"
     shift 3
-    local errfile="$WORKDIR/$name.err" out rc=0 last_err_line blocker_lines
+    local errfile="$WORKDIR/$name.err" out rc=0 last_err_line blocker_lines err_lines
     run_engine "$run_cwd" out "$errfile" "$@" || rc=$?
     if [[ "$rc" -ne 1 ]]; then
         failed "$name" "expected exit 1, got $rc (stdout: $(printf '%s' "$out" | tr '\n' '|'))"
@@ -247,10 +247,11 @@ assert_blocker() {
     fi
     last_err_line="$(tail -n 1 "$errfile")"
     blocker_lines="$(grep -c '^blocker: ' "$errfile" || true)"
-    if [[ "$last_err_line" == "blocker: $reason" && "$blocker_lines" -eq 1 ]]; then
+    err_lines="$(wc -l <"$errfile" | tr -d ' ')"
+    if [[ "$last_err_line" == "blocker: $reason" && "$blocker_lines" -eq 1 && "$err_lines" -eq 1 ]]; then
         pass "$name" "$last_err_line"
     else
-        failed "$name" "expected one stderr line 'blocker: $reason' last; got $blocker_lines blocker line(s), last: $last_err_line"
+        failed "$name" "expected one stderr line 'blocker: $reason' last; got $blocker_lines blocker line(s) in $err_lines stderr line(s), last: $last_err_line"
     fi
 }
 
