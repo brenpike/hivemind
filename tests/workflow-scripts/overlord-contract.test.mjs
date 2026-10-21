@@ -77,6 +77,28 @@ describe('overlord Engine section', () => {
     const replyName = resultLib.replyField();
     assert.ok(engineSection.includes('with args set to the launch args plus `resume_args` plus `' + replyName + '` set to the user\'s reply verbatim'), `${replyName} resume clause is missing from ## Engine`);
   });
+  test('Engine resumes the same run by name with resumeFromRunId', () => {
+    for (const phrase of ['resume the same run by name', '`name` set to the name you launched (`hivemind:<id>`)', '`resumeFromRunId` from the launch']) {
+      assert.ok(engineSection.includes(phrase), `## Engine resume clause lacks ${phrase}`);
+    }
+  });
+  test('Engine names scriptPath only in never-clauses', () => {
+    const scriptPathSentences = engineSection.split(/(?<=[.!?])\s+/).filter((sentence) => sentence.includes('scriptPath'));
+    assert.notEqual(scriptPathSentences.length, 0, '## Engine has no never-clause for scriptPath');
+    for (const sentence of scriptPathSentences) {
+      assert.match(sentence, /\b[Nn]ever\b[^.]*`scriptPath`/, `## Engine names scriptPath outside a never-clause: ${sentence}`);
+    }
+  });
+  test('Engine limits launch and resume args and adds no runner instructions', () => {
+    for (const phrase of ['Launch args hold only `request`, `trunk` and `references`.', 'Resume args hold only the launch args plus `resume_args` plus `reply`.', 'Add no instruction, note or summary for the workflow\'s agents', 'They take their task only from the script.']) {
+      assert.ok(engineSection.includes(phrase), `## Engine args clause lacks ${phrase}`);
+    }
+  });
+  test('Engine keeps the routing outcome out of chat', () => {
+    for (const phrase of ['Keep its routing outcome out of chat.', 'Act on it without printing it.']) {
+      assert.ok(engineSection.includes(phrase), `## Engine routing clause lacks ${phrase}`);
+    }
+  });
   test('Engine no longer names the dropped answer_key field', () => {
     assert.ok(!engineSection.includes('answer_key'));
   });
