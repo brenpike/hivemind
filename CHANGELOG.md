@@ -12,6 +12,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.6.0] - 2026-10-21
+
+### Added
+
+- Draft standard-delivery workflow on the script engine (`plugin/workflow-src/standard-delivery/`, with a `DRAFT` marker so it is not built yet): facts, injection scan, plan, decide or ask, branch, waves and a commit after every wave. Its contract table (rows SD-01 to SD-19) holds step invariants 1, 3 and 4, with one test per row.
+- The `external_effect` hard stop: a plan step that declares an irreversible effect outside the repo asks before the first wave (ADR-0037 decision 3).
+- Shared libraries `plugin/workflow-src/lib/args.js`, `plugin/workflow-src/lib/facts.js` (including the gather-facts routing spec and the relay consistency check) and `plugin/workflow-src/lib/identifier.js`.
+- `plan-schema.json` gains `base` and `trunk_freshness`.
+- cerebrate's plan block carries the plan-schema inputs and per-step `external_effects`.
+- `plugin/agents/drone.md`: a git-script task exception to the git-state hard stop.
+
+### Changed
+
+- `analysis-only` uses the shared libraries. `plugin/workflows/analysis-only.js` is rebuilt and behavior is unchanged.
+- The workflow build requires every entry under `plugin/workflows/` to be a regular file.
+- create-working-branch accepts a bare `stale` trunk freshness.
+- `validate.sh` routes the agent files, molt and the shared shell libraries the new node tests read.
+- ADR-0037: the scan coverage residual covers standard-delivery's facts relay.
+
 ## [6.5.0] - 2026-10-21
 
 ### Added
