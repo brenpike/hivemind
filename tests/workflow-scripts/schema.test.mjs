@@ -208,8 +208,109 @@ describe('validateSchema minLength', () => {
   });
 });
 
+describe('validateSchema maxLength', () => {
+  test('accepts a string at the boundary and rejects one above it', () => {
+    assert.deepEqual(validate({ type: 'string', maxLength: 2 }, 'ab'), { ok: true, errors: [] });
+    assert.deepEqual(validate({ type: 'string', maxLength: 2 }, 'abc'), { ok: false, errors: ['$: maxLength: more than 2 characters'] });
+  });
+  test('counts Unicode code points, not UTF-16 units', () => {
+    assert.deepEqual(validate({ type: 'string', maxLength: 1 }, '\u{1F600}'), { ok: true, errors: [] });
+    assert.deepEqual(validate({ type: 'string', maxLength: 1 }, '\u{1F600}\u{1F600}').errors, ['$: maxLength: more than 1 characters']);
+  });
+  test('maxLength 0 accepts only the empty string when no type is given', () => {
+    assert.deepEqual(validate({ maxLength: 0 }, ''), { ok: true, errors: [] });
+    assert.deepEqual(validate({ maxLength: 0 }, 'a').errors, ['$: maxLength: more than 0 characters']);
+  });
+  test('maxLength with no type applies to a string and ignores other values', () => {
+    for (const other of [12345, null, true, ['a', 'b', 'c'], { a: 'abc' }]) {
+      assert.deepEqual(validate({ maxLength: 2 }, other), { ok: true, errors: [] }, JSON.stringify(other));
+    }
+    assert.deepEqual(validate({ maxLength: 2 }, 'abc').errors, ['$: maxLength: more than 2 characters']);
+  });
+  test('maxLength does not govern the blank-string rule', () => {
+    assert.deepEqual(validate({ type: 'string', maxLength: 5 }, ' ').errors, ['$: type string: blank']);
+  });
+  test('minLength and maxLength together bound a string', () => {
+    const schema = { type: 'string', minLength: 2, maxLength: 3 };
+    assert.equal(validate(schema, 'ab').ok, true);
+    assert.equal(validate(schema, 'abc').ok, true);
+    assert.deepEqual(validate(schema, 'a').errors, ['$: minLength: fewer than 2 characters']);
+    assert.deepEqual(validate(schema, 'abcd').errors, ['$: maxLength: more than 3 characters']);
+  });
+  test('a long nested property is reported at its path', () => {
+    const schema = { type: 'object', properties: { a: { type: 'string', maxLength: 1 } } };
+    assert.deepEqual(validate(schema, { a: 'xy' }).errors, ['$.a: maxLength: more than 1 characters']);
+  });
+  test('a type failure skips maxLength', () => {
+    assert.deepEqual(validate({ type: 'integer', maxLength: 1 }, 'abc').errors, ['$: type integer expected']);
+  });
+});
+
+describe('validateSchema anyOf', () => {
+  const stringOrNull = { anyOf: [{ type: 'string' }, { type: 'null' }] };
+  test('accepts a value that matches any one branch', () => {
+    assert.deepEqual(validate(stringOrNull, 'x'), { ok: true, errors: [] });
+    assert.deepEqual(validate(stringOrNull, null), { ok: true, errors: [] });
+  });
+  test('accepts a value that matches more than one branch', () => {
+    assert.deepEqual(validate({ anyOf: [{ type: 'number' }, { type: 'integer' }] }, 2), { ok: true, errors: [] });
+  });
+  test('a value that matches no branch gives exactly one error and no branch errors', () => {
+    assert.deepEqual(validate(stringOrNull, 1), { ok: false, errors: ['$: anyOf: matches no branch'] });
+  });
+  test('a branch fails on any of its keywords, not only type', () => {
+    const schema = { anyOf: [{ type: 'string', maxLength: 1 }, { type: 'string', enum: ['long'] }] };
+    assert.equal(validate(schema, 'a').ok, true);
+    assert.equal(validate(schema, 'long').ok, true);
+    assert.deepEqual(validate(schema, 'other').errors, ['$: anyOf: matches no branch']);
+  });
+  test('the blank-string rule applies inside a branch', () => {
+    assert.deepEqual(validate(stringOrNull, ' ').errors, ['$: anyOf: matches no branch']);
+  });
+  test('object branch errors do not leak', () => {
+    const schema = {
+      anyOf: [
+        { type: 'object', required: ['a'], additionalProperties: false, properties: { a: { type: 'string' } } },
+        { type: 'object', required: ['b'], additionalProperties: false, properties: { b: { type: 'integer' } } }
+      ]
+    };
+    assert.equal(validate(schema, { a: 'x' }).ok, true);
+    assert.equal(validate(schema, { b: 1 }).ok, true);
+    assert.deepEqual(validate(schema, { a: 1, c: 2 }), { ok: false, errors: ['$: anyOf: matches no branch'] });
+  });
+  test('nested anyOf works', () => {
+    const schema = { anyOf: [{ type: 'null' }, { anyOf: [{ type: 'boolean' }, { type: 'integer' }] }] };
+    for (const good of [null, true, 3]) {
+      assert.deepEqual(validate(schema, good), { ok: true, errors: [] }, JSON.stringify(good));
+    }
+    assert.deepEqual(validate(schema, 'x').errors, ['$: anyOf: matches no branch']);
+  });
+  test('anyOf errors are reported at their path alongside sibling errors', () => {
+    const schema = { type: 'object', required: ['b'], properties: { a: stringOrNull, b: {} } };
+    assert.deepEqual(validate(schema, { a: 1 }).errors, ['$: required: missing b', '$.a: anyOf: matches no branch']);
+    const list = { type: 'array', items: stringOrNull };
+    assert.deepEqual(validate(list, ['x', 2, null]).errors, ['$[1]: anyOf: matches no branch']);
+  });
+  test('anyOf combines with other keywords at the same path', () => {
+    const schema = { type: 'string', minLength: 2, anyOf: [{ enum: ['ab'] }, { enum: ['cd'] }] };
+    assert.equal(validate(schema, 'ab').ok, true);
+    assert.deepEqual(validate(schema, 'x').errors, ['$: minLength: fewer than 2 characters', '$: anyOf: matches no branch']);
+  });
+  test('a type failure skips anyOf', () => {
+    assert.deepEqual(validate({ type: 'object', anyOf: [{ type: 'string' }] }, 1).errors, ['$: type object expected']);
+  });
+  test('an unreachable bad branch still throws', () => {
+    const schema = { anyOf: [{ type: 'string' }, { type: 'string', pattern: 'x' }] };
+    assert.throws(() => lib.validateSchema(schema, 'x'), (error) => error.message === 'validateSchema: $.anyOf[1]: unsupported keyword pattern');
+  });
+  test('a bad branch inside an absent property still throws', () => {
+    const schema = { type: 'object', properties: { a: { anyOf: [{ type: 'null' }, { anyOf: [{ type: 'text' }] }] } } };
+    assert.throws(() => lib.validateSchema(schema, {}), /^Error: validateSchema: \$\.a\.anyOf\[1\]\.anyOf\[0\]: type must be one of/);
+  });
+});
+
 describe('validateSchema fails closed on the schema', () => {
-  for (const keyword of ['oneOf', 'pattern', 'maxItems', 'const', '$ref', 'multipleOf', 'default']) {
+  for (const keyword of ['oneOf', 'allOf', 'not', 'if', 'then', 'else', 'pattern', 'maxItems', 'const', '$ref', 'multipleOf', 'default']) {
     test(`unsupported keyword ${keyword} throws`, () => {
       const isUnsupported = (error) => error.message === 'validateSchema: $: unsupported keyword ' + keyword;
       assert.throws(() => lib.validateSchema({ type: 'string', [keyword]: 1 }, 'x'), isUnsupported);
@@ -237,6 +338,14 @@ describe('validateSchema fails closed on the schema', () => {
     'minItems not an integer': { minItems: 1.5 },
     'minLength negative': { minLength: -1 },
     'minLength not an integer': { minLength: 1.5 },
+    'maxLength negative': { maxLength: -1 },
+    'maxLength not an integer': { maxLength: 1.5 },
+    'maxLength a string': { maxLength: '2' },
+    'anyOf not an array': { anyOf: { type: 'string' } },
+    'anyOf empty': { anyOf: [] },
+    'anyOf with a non-object branch': { anyOf: [{ type: 'string' }, true] },
+    'anyOf with a null branch': { anyOf: [null] },
+    'anyOf with an array branch': { anyOf: [[]] },
     'property schema not an object': { properties: { a: true } }
   };
   for (const [name, schema] of Object.entries(badShapes)) {
@@ -246,7 +355,8 @@ describe('validateSchema fails closed on the schema', () => {
   }
   test('supportedSchemaKeywords lists exactly the supported keywords', () => {
     assert.deepEqual([...lib.supportedSchemaKeywords()].sort(), [
-      '$schema', 'additionalProperties', 'description', 'enum', 'items', 'minItems', 'minLength', 'properties', 'required', 'title', 'type'
+      '$schema', 'additionalProperties', 'anyOf', 'description', 'enum', 'items', 'maxLength', 'minItems', 'minLength', 'properties',
+      'required', 'title', 'type'
     ]);
   });
 });

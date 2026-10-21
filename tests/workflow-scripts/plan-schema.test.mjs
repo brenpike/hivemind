@@ -1,0 +1,191 @@
+import { test, describe } from 'node:test';
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { loadLibs } from './harness.mjs';
+
+const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
+const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/schema.js']);
+const planSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/plan-schema.json', 'utf8'));
+
+const EXTERNAL_LABEL = 'Can carry external content.';
+const SUBSET_KEYWORDS = [
+  '$schema',
+  'title',
+  'description',
+  'type',
+  'enum',
+  'required',
+  'properties',
+  'additionalProperties',
+  'items',
+  'minItems'
+];
+
+function validate(value) {
+  return structuredClone(lib.validateSchema(planSchema, value));
+}
+
+function walkSchema(schema, path, visit) {
+  visit(schema, path);
+  for (const [name, child] of Object.entries(schema.properties || {})) {
+    walkSchema(child, path + '.' + name, visit);
+  }
+  if (schema.items !== undefined) {
+    walkSchema(schema.items, path + '[]', visit);
+  }
+}
+
+function collectNodes(schema) {
+  const nodes = [];
+  walkSchema(schema, '$', (node, path) => nodes.push({ node, path }));
+  return nodes;
+}
+
+function readScript(relativePath) {
+  return readFileSync(repoRoot + relativePath, 'utf8').replace(/\r/g, '');
+}
+
+function parseCaseValues(scriptText, variableName) {
+  const lines = scriptText.split('\n');
+  const header = 'case "$' + variableName + '" in';
+  const start = lines.findIndex((line) => line.trim() === header);
+  assert.ok(start !== -1, 'no line ' + header);
+  const firstArm = lines[start + 1].trim();
+  const pattern = firstArm.slice(0, firstArm.indexOf(')'));
+  assert.ok(pattern.length > 0, 'no pattern after ' + header);
+  return pattern.split('|');
+}
+
+function makePlan() {
+  return {
+    summary: 'Add the plan schema.',
+    branch: 'feature/409-plan-schema',
+    classification: 'feature',
+    breaking: false,
+    versioning: { bump_trigger: 'yes', no_bump_match: 'no' },
+    delivery: 'multi',
+    steps: [
+      {
+        id: 'STEP-001',
+        owner: 'hivemind:drone',
+        files: ['plugin/references/plan-schema.json'],
+        outcome: 'The schema exists.',
+        depends_on: [],
+        external_effects: []
+      },
+      {
+        id: 'STEP-002',
+        owner: 'hivemind:changeling',
+        files: ['README.md', 'docs/notes.md'],
+        outcome: 'The docs name the schema.',
+        depends_on: ['STEP-001'],
+        external_effects: [{ summary: 'Publish the package to the registry.', reversible: false }]
+      }
+    ]
+  };
+}
+
+describe('plan schema', () => {
+  test('stays in the structured-output subset of schema.js', () => {
+    const supported = lib.supportedSchemaKeywords();
+    for (const { node, path } of collectNodes(planSchema)) {
+      for (const keyword of Object.keys(node)) {
+        assert.ok(SUBSET_KEYWORDS.includes(keyword), path + ' uses keyword ' + keyword + ' outside the subset');
+        assert.ok(supported.includes(keyword), path + ' uses keyword ' + keyword + ' that schema.js does not support');
+      }
+      if (node.minItems !== undefined) {
+        assert.ok(node.minItems <= 1, path + ' minItems must be at most 1');
+      }
+    }
+    assert.doesNotThrow(() => lib.validateSchema(planSchema, makePlan()));
+  });
+
+  test('every object has additionalProperties false and requires every declared property', () => {
+    for (const { node, path } of collectNodes(planSchema)) {
+      if (node.type !== 'object') {
+        continue;
+      }
+      assert.equal(node.additionalProperties, false, path + ' must set additionalProperties false');
+      assert.ok(node.properties !== undefined, path + ' must declare properties');
+      assert.deepEqual([...node.required].sort(), Object.keys(node.properties).sort(), path + ' must require exactly its properties');
+    }
+  });
+
+  test('the external content label is on every string without an enum and on no other node', () => {
+    const labelled = [];
+    for (const { node, path } of collectNodes(planSchema)) {
+      assert.equal(typeof node.description, 'string', path + ' must have a description');
+      const isOpenString = node.type === 'string' && node.enum === undefined;
+      const hasLabel = node.description.startsWith(EXTERNAL_LABEL);
+      assert.equal(hasLabel, isOpenString, path + (isOpenString ? ' must start with the label' : ' must not carry the label'));
+      if (hasLabel) {
+        labelled.push(path);
+      }
+    }
+    assert.deepEqual(labelled, [
+      '$.summary',
+      '$.branch',
+      '$.steps[].id',
+      '$.steps[].files[]',
+      '$.steps[].outcome',
+      '$.steps[].depends_on[]',
+      '$.steps[].external_effects[].summary'
+    ]);
+  });
+
+  test('the top-level description defines the label and says the plan is whole', () => {
+    const description = planSchema.description;
+    assert.ok(description.includes('"' + EXTERNAL_LABEL + '"'), 'must quote the label');
+    assert.ok(description.includes('External Content Boundary'), 'must name the External Content Boundary');
+    assert.ok(description.includes('${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md'), 'must name security-policy.md');
+    assert.ok(description.includes('never into a shell command'), 'must keep labelled fields out of shell commands');
+    assert.ok(description.includes('returns the plan whole'), 'must say the plan is returned whole');
+  });
+
+  test('no node declares complete or total', () => {
+    for (const { node, path } of collectNodes(planSchema)) {
+      for (const name of ['complete', 'total']) {
+        assert.ok(!Object.hasOwn(node.properties || {}, name), path + ' must not declare ' + name);
+        assert.ok(!(node.required || []).includes(name), path + ' must not require ' + name);
+      }
+    }
+  });
+
+  test('classification matches the enum in create-working-branch.sh', () => {
+    const script = readScript('plugin/skills/create-working-branch/scripts/create-working-branch.sh');
+    assert.deepEqual(planSchema.properties.classification.enum, parseCaseValues(script, 'classification'));
+  });
+
+  test('the versioning flags match the enums in bump-type.sh', () => {
+    const script = readScript('plugin/skills/bump-type/scripts/bump-type.sh');
+    const versioning = planSchema.properties.versioning.properties;
+    assert.deepEqual(versioning.bump_trigger.enum, parseCaseValues(script, 'bump_trigger'));
+    assert.deepEqual(versioning.no_bump_match.enum, parseCaseValues(script, 'no_bump_match'));
+  });
+
+  test('a full sample plan is valid', () => {
+    assert.deepEqual(validate(makePlan()), { ok: true, errors: [] });
+  });
+
+  const invalidCases = [
+    ['a plan without branch', (plan) => delete plan.branch, '$: required: missing branch'],
+    ['a classification outside the enum', (plan) => { plan.classification = 'feat'; }, '$.classification: enum: not one of feature, bugfix, hotfix, refactor, chore, docs, test, ci'],
+    ['a brood delivery', (plan) => { plan.delivery = 'brood'; }, '$.delivery: enum: not one of single, multi'],
+    ['a step without external_effects', (plan) => delete plan.steps[0].external_effects, '$.steps[0]: required: missing external_effects'],
+    ['an effect without reversible', (plan) => delete plan.steps[1].external_effects[0].reversible, '$.steps[1].external_effects[0]: required: missing reversible'],
+    ['an empty step list', (plan) => { plan.steps = []; }, '$.steps: minItems: fewer than 1 items'],
+    ['a step with no files', (plan) => { plan.steps[0].files = []; }, '$.steps[0].files: minItems: fewer than 1 items'],
+    ['an unknown key', (plan) => { plan.base = 'main'; }, '$: additionalProperties: unexpected base']
+  ];
+
+  for (const [name, mutate, expectedError] of invalidCases) {
+    test('rejects ' + name, () => {
+      const plan = makePlan();
+      mutate(plan);
+      const verdict = validate(plan);
+      assert.equal(verdict.ok, false);
+      assert.ok(verdict.errors.includes(expectedError), 'errors: ' + JSON.stringify(verdict.errors));
+    });
+  }
+});

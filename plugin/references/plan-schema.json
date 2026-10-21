@@ -1,0 +1,155 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Plan",
+  "description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, and never into a shell command.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary",
+    "branch",
+    "classification",
+    "breaking",
+    "versioning",
+    "delivery",
+    "steps"
+  ],
+  "properties": {
+    "summary": {
+      "type": "string",
+      "description": "Can carry external content. What the plan delivers."
+    },
+    "branch": {
+      "type": "string",
+      "description": "Can carry external content. The working branch the run delivers on. A run that starts on a branch other than trunk names that branch."
+    },
+    "classification": {
+      "type": "string",
+      "enum": [
+        "feature",
+        "bugfix",
+        "hotfix",
+        "refactor",
+        "chore",
+        "docs",
+        "test",
+        "ci"
+      ],
+      "description": "The work classification. The branch step passes it to create-working-branch, and each commit takes its type from it."
+    },
+    "breaking": {
+      "type": "boolean",
+      "description": "True when the change breaks compatibility. Each commit then carries the breaking marker."
+    },
+    "versioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bump_trigger",
+        "no_bump_match"
+      ],
+      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination). The bump step passes them to bump-type unchanged.",
+      "properties": {
+        "bump_trigger": {
+          "type": "string",
+          "enum": [
+            "yes",
+            "no"
+          ],
+          "description": "yes when the change satisfies any Bump Trigger bullet. Passed to bump-type as --bump-trigger."
+        },
+        "no_bump_match": {
+          "type": "string",
+          "enum": [
+            "yes",
+            "no"
+          ],
+          "description": "yes when the change matches one or more bullets of the list of changes that need no bump by default. Passed to bump-type as --no-bump-match."
+        }
+      }
+    },
+    "delivery": {
+      "type": "string",
+      "enum": [
+        "single",
+        "multi"
+      ],
+      "description": "How the plan delivers. Both values run as one branch and one pull request. Brood is not a value."
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "description": "The plan's steps. depends_on sets their order.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "owner",
+          "files",
+          "outcome",
+          "depends_on",
+          "external_effects"
+        ],
+        "description": "One step of the plan, done by one worker.",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Can carry external content. The step id, unique in the plan. depends_on names steps by it."
+          },
+          "owner": {
+            "type": "string",
+            "enum": [
+              "hivemind:drone",
+              "hivemind:changeling"
+            ],
+            "description": "The worker agent that does the step."
+          },
+          "files": {
+            "type": "array",
+            "minItems": 1,
+            "description": "Every repository path the step may create or edit. The wave's commit takes exactly these paths.",
+            "items": {
+              "type": "string",
+              "description": "Can carry external content. One repository path."
+            }
+          },
+          "outcome": {
+            "type": "string",
+            "description": "Can carry external content. What is true when the step is done."
+          },
+          "depends_on": {
+            "type": "array",
+            "description": "The steps that must finish before this one starts. Empty means none.",
+            "items": {
+              "type": "string",
+              "description": "Can carry external content. The id of a step in this plan."
+            }
+          },
+          "external_effects": {
+            "type": "array",
+            "description": "Each effect the step has outside the repo, such as a deploy, a publish, a migration or other write to shared data, or a write to an outside service over the network. Empty means the step declares no effect outside the repo.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "summary",
+                "reversible"
+              ],
+              "description": "One effect outside the repo.",
+              "properties": {
+                "summary": {
+                  "type": "string",
+                  "description": "Can carry external content. What the effect does and where."
+                },
+                "reversible": {
+                  "type": "boolean",
+                  "description": "False when the effect cannot be undone. A plan that declares such an effect goes to the user before the first wave."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

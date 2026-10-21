@@ -18,25 +18,35 @@
  * Invariants
  *   Pure: no clock, no randomness, no I/O. The schema is a parameter.
  *   Validation keywords: type (one string), enum, required, properties,
- *   additionalProperties (false only), items, minItems, minLength. Annotation
- *   keywords $schema, title and description are accepted and change nothing.
+ *   additionalProperties (false only), items, minItems, minLength, maxLength,
+ *   anyOf. Annotation keywords $schema, title and description are accepted
+ *   and change nothing.
  *   Fails closed: the whole schema is walked before the value is read, and
  *   any other keyword, a non-object schema, or a keyword value of the wrong
  *   shape throws. A schema edit that adds a keyword cannot pass unchecked.
+ *   anyOf must be a non-empty array of schema objects, and every branch is
+ *   walked even when no value reaches it, so a bad unreachable branch throws.
  *   A property whose value is undefined counts as absent, as it does in JSON.
  *   type object means a plain object: not null and not an array.
- *   When type fails, the other keywords at that path are not checked.
- *   minLength counts Unicode code points, not UTF-16 units, and applies to
- *   any string value, with or without type. It ignores non-string values.
+ *   When type fails, the other keywords at that path are not checked,
+ *   anyOf included.
+ *   minLength and maxLength count Unicode code points, not UTF-16 units, and
+ *   apply to any string value, with or without type. They ignore non-string
+ *   values.
+ *   A value passes anyOf when at least one branch gives no errors. Otherwise
+ *   anyOf adds exactly one error at that path, and no branch error is kept.
  *   Every string value whose schema has type string, no enum and no
  *   minLength must hold a non-whitespace character. An enum or a minLength
  *   governs when present, so an enum may list the empty string and a
- *   minLength may accept a whitespace-only string.
+ *   minLength may accept a whitespace-only string. maxLength does not govern.
  *
  * Why
  *   A brief is written by a model and read by decide(). A hand-kept check
  *   drifts from the schema one field at a time. Checking against the schema
  *   itself keeps the two the same by construction.
+ *   anyOf is the one combinator here because the structured outputs docs list
+ *   anyOf as supported and do not list if, then, else, oneOf or not. A schema
+ *   that uses anyOf can still be an agent output schema.
  */
 
 function supportedSchemaKeywords() {
@@ -51,7 +61,9 @@ function supportedSchemaKeywords() {
     'additionalProperties',
     'items',
     'minItems',
-    'minLength'
+    'minLength',
+    'maxLength',
+    'anyOf'
   ];
 }
 
@@ -92,6 +104,9 @@ function assertSupportedSchema(schema, path) {
   if (schema.items !== undefined) {
     assertSupportedSchema(schema.items, path + '[]');
   }
+  if (schema.anyOf !== undefined) {
+    schema.anyOf.forEach((branch, index) => assertSupportedSchema(branch, path + '.anyOf[' + index + ']'));
+  }
 }
 
 function isPrimitiveEnumValue(candidate) {
@@ -120,6 +135,12 @@ function assertKeywordShapes(schema, path) {
   }
   if (schema.minLength !== undefined && !(Number.isInteger(schema.minLength) && schema.minLength >= 0)) {
     failSchema(path, 'minLength must be a non-negative integer');
+  }
+  if (schema.maxLength !== undefined && !(Number.isInteger(schema.maxLength) && schema.maxLength >= 0)) {
+    failSchema(path, 'maxLength must be a non-negative integer');
+  }
+  if (schema.anyOf !== undefined && !(Array.isArray(schema.anyOf) && schema.anyOf.length > 0)) {
+    failSchema(path, 'anyOf must be a non-empty array of schemas');
   }
 }
 
@@ -159,6 +180,16 @@ function isShortSchemaString(schema, value) {
   return schema.minLength !== undefined && typeof value === 'string' && countSchemaCodePoints(value) < schema.minLength;
 }
 
+function isLongSchemaString(schema, value) {
+  return schema.maxLength !== undefined && typeof value === 'string' && countSchemaCodePoints(value) > schema.maxLength;
+}
+
+function matchesSchemaBranch(branch, value, path) {
+  const branchErrors = [];
+  collectSchemaErrors(branch, value, path, branchErrors);
+  return branchErrors.length === 0;
+}
+
 function collectSchemaErrors(schema, value, path, errors) {
   if (schema.type !== undefined && !matchesSchemaType(schema.type, value)) {
     errors.push(path + ': type ' + schema.type + ' expected');
@@ -170,8 +201,14 @@ function collectSchemaErrors(schema, value, path, errors) {
   if (isShortSchemaString(schema, value)) {
     errors.push(path + ': minLength: fewer than ' + schema.minLength + ' characters');
   }
+  if (isLongSchemaString(schema, value)) {
+    errors.push(path + ': maxLength: more than ' + schema.maxLength + ' characters');
+  }
   if (schema.enum !== undefined && schema.enum.indexOf(value) === -1) {
     errors.push(path + ': enum: not one of ' + schema.enum.join(', '));
+  }
+  if (schema.anyOf !== undefined && !schema.anyOf.some((branch) => matchesSchemaBranch(branch, value, path))) {
+    errors.push(path + ': anyOf: matches no branch');
   }
   if (isSchemaRecord(value)) {
     collectObjectErrors(schema, value, path, errors);
