@@ -2,23 +2,37 @@
  * build_workflows.mjs: builds each plugin/workflows/<id>.js from its sources.
  *
  * Usage
- *   node tools/build_workflows.mjs           write every built script
+ *   node tools/build_workflows.mjs           write every live built script
+ *                                            and print a skipped line for
+ *                                            each draft
  *   node tools/build_workflows.mjs --check   rebuild in memory and exit 1
  *                                            when a committed script is stale
- *                                            or has no source directory
+ *                                            or has no source directory, or
+ *                                            when a draft has a committed
+ *                                            script
  *
  * Sources
  *   Workflow ids are the directories of plugin/workflow-src/ other than lib.
+ *   A workflow is a draft when its directory holds a regular file named
+ *   DRAFT. Its contents are not read. A draft is never written to
+ *   plugin/workflows/, so it lands in pieces without going live (ADR-0037).
+ *   Every other workflow is live.
  *   Each built script is, in order: <id>/meta.js, a GENERATED banner, the
  *   data constants from plugin/references/, the shared libraries from
- *   plugin/workflow-src/lib/, and <id>/main.js.
+ *   plugin/workflow-src/lib/ in LIB_FILES order, and <id>/main.js.
  *
  * Invariants
  *   CR is stripped from every input and the output is written with LF only.
  *   The built script starts with `export const meta`, has no import or
  *   require( outside comments and strings, and declares each top-level
  *   function once, or the build throws.
- *   --check compares with the committed file after stripping CR.
+ *   An entry named DRAFT that is not a regular file (a directory, a
+ *   symlink, anything else) fails the build in both modes.
+ *   --check compares each live workflow with its committed file after
+ *   stripping CR, so a lost DRAFT marker shows as a stale or missing script.
+ *   --check builds each draft in memory, so a draft that fails to build
+ *   fails --check, and fails when plugin/workflows/<id>.js exists for a
+ *   draft, so a stray DRAFT marker on a live workflow fails too.
  *   --check lists plugin/workflows/*.js, never the .json engine files, and
  *   names each one with no plugin/workflow-src/<id>/ directory as an orphan.
  *
@@ -26,7 +40,7 @@
  *   A running workflow script cannot import or read files, so the build
  *   copies data and libraries in, and --check keeps the copies in step.
  */
-import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -34,7 +48,8 @@ const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const REBUILD_COMMAND = 'node tools/build_workflows.mjs';
 const SOURCE_DIR = 'plugin/workflow-src';
 const OUTPUT_DIR = 'plugin/workflows';
-const LIB_FILES = ['schema.js', 'decide.js', 'brief.js', 'result.js'];
+const DRAFT_MARKER = 'DRAFT';
+export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'waves.js', 'routing.js']);
 const DATA_CONSTANTS = [
   { name: 'AUTONOMY_TABLE', path: 'plugin/references/decision-autonomy-table.json' },
   { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json' }
@@ -53,6 +68,35 @@ export function discoverWorkflowIds(root) {
 
 export function builtPathFor(id) {
   return OUTPUT_DIR + '/' + id + '.js';
+}
+
+export function draftMarkerPathFor(id) {
+  return SOURCE_DIR + '/' + id + '/' + DRAFT_MARKER;
+}
+
+/**
+ * Returns true when plugin/workflow-src/<id>/DRAFT is a regular file, false
+ * when there is no entry by that name. Throws when the entry is anything
+ * else, a symlink included.
+ */
+export function isDraftWorkflow(root, id) {
+  const markerPath = draftMarkerPathFor(id);
+  const stats = lstatSync(join(root, markerPath), { throwIfNoEntry: false });
+  if (stats === undefined) {
+    return false;
+  }
+  if (!stats.isFile()) {
+    throw new Error(markerPath + ' must be a regular file; remove it or replace it with an empty file');
+  }
+  return true;
+}
+
+export function listLiveWorkflowIds(root) {
+  return discoverWorkflowIds(root).filter((id) => !isDraftWorkflow(root, id));
+}
+
+export function listDraftWorkflowIds(root) {
+  return discoverWorkflowIds(root).filter((id) => isDraftWorkflow(root, id));
 }
 
 function listSourcePaths(id) {
@@ -173,11 +217,25 @@ function describeOrphan(id) {
 }
 
 export function findStaleWorkflows(root) {
-  return discoverWorkflowIds(root).filter((id) => isStale(root, id)).map(builtPathFor);
+  return listLiveWorkflowIds(root).filter((id) => isStale(root, id)).map(builtPathFor);
+}
+
+/**
+ * Builds each draft in memory, so a draft that fails to build throws, and
+ * returns the ids of the drafts that have a committed built script.
+ */
+export function findBuiltDraftIds(root) {
+  const draftIds = listDraftWorkflowIds(root);
+  draftIds.forEach((id) => buildWorkflow(root, id));
+  return draftIds.filter((id) => existsSync(join(root, builtPathFor(id))));
+}
+
+function describeBuiltDraft(id) {
+  return builtPathFor(id) + ' exists but ' + draftMarkerPathFor(id) + ' marks the workflow as a draft. Remove the script, or remove the marker to make the workflow live.';
 }
 
 export function writeWorkflows(root) {
-  return discoverWorkflowIds(root).map((id) => {
+  return listLiveWorkflowIds(root).map((id) => {
     const builtPath = builtPathFor(id);
     writeFileSync(join(root, builtPath), buildWorkflow(root, id));
     return builtPath;
@@ -186,7 +244,8 @@ export function writeWorkflows(root) {
 
 /**
  * Runs the command line. Returns the exit code: 0 on success, 1 when --check
- * finds a stale or orphan script, 2 on an unknown argument.
+ * finds a stale or orphan script or a draft with a built script, 2 on an
+ * unknown argument. A build error throws.
  */
 export function runCli(argv, { root, stdout, stderr }) {
   const unknown = argv.filter((arg) => arg !== '--check');
@@ -197,11 +256,14 @@ export function runCli(argv, { root, stdout, stderr }) {
   if (argv.includes('--check')) {
     const stale = findStaleWorkflows(root);
     const orphanIds = findOrphanWorkflowIds(root);
+    const builtDraftIds = findBuiltDraftIds(root);
     stale.forEach((builtPath) => stderr.write(builtPath + ' is stale. Rebuild with: ' + REBUILD_COMMAND + '\n'));
     orphanIds.forEach((id) => stderr.write(describeOrphan(id) + '\n'));
-    return stale.length > 0 || orphanIds.length > 0 ? 1 : 0;
+    builtDraftIds.forEach((id) => stderr.write(describeBuiltDraft(id) + '\n'));
+    return stale.length > 0 || orphanIds.length > 0 || builtDraftIds.length > 0 ? 1 : 0;
   }
   writeWorkflows(root).forEach((builtPath) => stdout.write('wrote ' + builtPath + '\n'));
+  listDraftWorkflowIds(root).forEach((id) => stdout.write('skipped ' + builtPathFor(id) + ': ' + draftMarkerPathFor(id) + ' marks it as a draft\n'));
   return 0;
 }
 

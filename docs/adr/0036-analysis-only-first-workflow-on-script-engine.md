@@ -106,3 +106,16 @@ This amendment changes Decision 14 in one place. The rest of ADR-0036 is unchang
 - **Reason.** Facts chunks must be able to hold only whitespace, so long runs of whitespace can split under a bounded line (ADR-0037, slice 2 PR2a). A whitespace-only chunk is valid there. An empty chunk is not.
 
 Text: `plugin/workflow-src/lib/schema.js`, `plugin/references/facts-schema.json`.
+
+## Amendment 2026-10-21: field correlation and a length bound
+
+This amendment changes Decision 14 in one place. The rest of ADR-0036 is unchanged.
+
+- **The validator also supports `anyOf` and `maxLength`.** A value passes `anyOf` when at least one branch gives no errors. When no branch matches, `anyOf` adds one error and no branch error leaks. Every branch is walked even when no value reaches it, so a bad branch throws.
+- **Why `anyOf`.** The structured outputs docs list `anyOf` as supported. They do not list `if`, `then`, `else`, `oneOf` or `not`. A schema that uses `anyOf` can still be an agent output schema.
+- **`maxLength` counts code points,** as `minLength` does. The blank-string rule is unchanged: only an enum and `minLength` govern it, and `maxLength` does not.
+- **The facts schema uses both.** `anyOf` ties a tag to its fields (Codex finding eec297af on PR #420), for example `branch` only with `head_state: branch`. `maxLength` sets the one-chunk bound on the six GitHub short fields and on every chunk.
+- **The decision-brief schema is unchanged.** Brief checks are the same.
+- **Every other keyword still throws.** The validator supports only the keywords the schemas use, as Decision 14 says.
+
+Text: `plugin/workflow-src/lib/schema.js`, `plugin/references/facts-schema.json`.

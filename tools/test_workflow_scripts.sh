@@ -13,6 +13,11 @@
 # Requires Node 18 or later (node:test and `node --test <files>`). Fails closed with a
 # message naming node when node is absent or older.
 #
+# Also requires bash, git and jq on PATH: the waves parity test (waves.test.mjs) runs
+# plugin/skills/next-wave/scripts/next-wave.sh under bash as its oracle, inside a scratch
+# checkout it creates with git, and that engine reads the ledger with jq. Fails closed with a
+# message naming the first missing tool.
+#
 # Output: on success, only the drift-check result and the node:test summary counts are
 # printed. On failure, the full output of the failing step is printed. Exits non-zero on
 # any failure.
@@ -32,6 +37,13 @@ command -v node >/dev/null 2>&1 || {
   echo "FAIL: node is required (Node ${MIN_NODE_MAJOR} or later) but was not found on PATH" >&2
   exit 2
 }
+
+for required_tool in bash git jq; do
+  command -v "$required_tool" >/dev/null 2>&1 || {
+    echo "FAIL: $required_tool is required (the waves parity test runs next-wave.sh) but was not found on PATH" >&2
+    exit 2
+  }
+done
 
 node_version="$(node -p 'process.versions.node')"
 node_major="${node_version%%.*}"

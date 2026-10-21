@@ -146,7 +146,52 @@
           "type": "string",
           "description": "The remote-tracking trunk commit, when it exists. Under fetch_failed it is the last fetched value, not a fresh one."
         }
-      }
+      },
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "required": [
+            "branch"
+          ],
+          "description": "head_state branch: branch is present.",
+          "properties": {
+            "head_state": {
+              "enum": [
+                "branch"
+              ]
+            },
+            "branch": {},
+            "head": {},
+            "trunk": {},
+            "remote": {},
+            "trunk_freshness": {},
+            "trunk_ahead": {},
+            "trunk_behind": {},
+            "local_trunk": {},
+            "remote_trunk": {}
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "head_state detached or unsafe_name: branch is absent.",
+          "properties": {
+            "head_state": {
+              "enum": [
+                "detached",
+                "unsafe_name"
+              ]
+            },
+            "head": {},
+            "trunk": {},
+            "remote": {},
+            "trunk_freshness": {},
+            "trunk_ahead": {},
+            "trunk_behind": {},
+            "local_trunk": {},
+            "remote_trunk": {}
+          }
+        }
+      ]
     },
     "dirty": {
       "type": "object",
@@ -201,10 +246,11 @@
                       },
                       "chunks": {
                         "type": "array",
-                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only.",
+                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only. Each chunk costs at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks each chunk's characters, not its written size.",
                         "items": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 1000
                         }
                       }
                     }
@@ -248,7 +294,7 @@
                       "length",
                       "chunks"
                     ],
-                    "description": "The path before a rename or copy in the index.",
+                    "description": "The path before a rename or copy in the index. Present only when index_status is renamed or copied.",
                     "properties": {
                       "length": {
                         "type": "integer",
@@ -256,15 +302,57 @@
                       },
                       "chunks": {
                         "type": "array",
-                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only.",
+                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only. Each chunk costs at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks each chunk's characters, not its written size.",
                         "items": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 1000
                         }
                       }
                     }
                   }
-                }
+                },
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "required": [
+                      "old_path"
+                    ],
+                    "description": "index_status renamed or copied: old_path is present.",
+                    "properties": {
+                      "path": {},
+                      "index_status": {
+                        "enum": [
+                          "renamed",
+                          "copied"
+                        ]
+                      },
+                      "worktree_status": {},
+                      "unmerged": {},
+                      "old_path": {}
+                    }
+                  },
+                  {
+                    "additionalProperties": false,
+                    "description": "Any other index_status: old_path is absent.",
+                    "properties": {
+                      "path": {},
+                      "index_status": {
+                        "enum": [
+                          "unmodified",
+                          "modified",
+                          "type_changed",
+                          "added",
+                          "deleted",
+                          "unmerged",
+                          "untracked"
+                        ]
+                      },
+                      "worktree_status": {},
+                      "unmerged": {}
+                    }
+                  }
+                ]
               }
             }
           }
@@ -387,10 +475,11 @@
                       },
                       "chunks": {
                         "type": "array",
-                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only.",
+                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only. Each chunk costs at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks each chunk's characters, not its written size.",
                         "items": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 1000
                         }
                       }
                     }
@@ -443,10 +532,11 @@
                       },
                       "chunks": {
                         "type": "array",
-                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only.",
+                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only. Each chunk costs at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks each chunk's characters, not its written size.",
                         "items": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 1000
                         }
                       }
                     }
@@ -468,7 +558,7 @@
                       "length",
                       "chunks"
                     ],
-                    "description": "The path before a rename.",
+                    "description": "The path before a rename. Present only when status is renamed.",
                     "properties": {
                       "length": {
                         "type": "integer",
@@ -476,17 +566,18 @@
                       },
                       "chunks": {
                         "type": "array",
-                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only.",
+                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only. Each chunk costs at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks each chunk's characters, not its written size.",
                         "items": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 1000
                         }
                       }
                     }
                   },
                   "similarity": {
                     "type": "integer",
-                    "description": "Rename similarity in percent."
+                    "description": "Rename similarity in percent. Present only when status is renamed."
                   },
                   "binary": {
                     "type": "boolean",
@@ -494,18 +585,150 @@
                   },
                   "added": {
                     "type": "integer",
-                    "description": "Lines added. Absent when binary."
+                    "description": "Lines added. Present only when binary is false."
                   },
                   "removed": {
                     "type": "integer",
-                    "description": "Lines removed. Absent when binary."
+                    "description": "Lines removed. Present only when binary is false."
                   }
-                }
+                },
+                "anyOf": [
+                  {
+                    "additionalProperties": false,
+                    "required": [
+                      "old_path",
+                      "similarity",
+                      "added",
+                      "removed"
+                    ],
+                    "description": "A renamed text path: old_path, similarity, added and removed are present.",
+                    "properties": {
+                      "path": {},
+                      "status": {
+                        "enum": [
+                          "renamed"
+                        ]
+                      },
+                      "old_path": {},
+                      "similarity": {},
+                      "binary": {
+                        "enum": [
+                          false
+                        ]
+                      },
+                      "added": {},
+                      "removed": {}
+                    }
+                  },
+                  {
+                    "additionalProperties": false,
+                    "required": [
+                      "old_path",
+                      "similarity"
+                    ],
+                    "description": "A renamed binary path: old_path and similarity are present, added and removed are absent.",
+                    "properties": {
+                      "path": {},
+                      "status": {
+                        "enum": [
+                          "renamed"
+                        ]
+                      },
+                      "old_path": {},
+                      "similarity": {},
+                      "binary": {
+                        "enum": [
+                          true
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "additionalProperties": false,
+                    "required": [
+                      "added",
+                      "removed"
+                    ],
+                    "description": "Any other text path: added and removed are present, old_path and similarity are absent.",
+                    "properties": {
+                      "path": {},
+                      "status": {
+                        "enum": [
+                          "added",
+                          "modified",
+                          "deleted",
+                          "type_changed"
+                        ]
+                      },
+                      "binary": {
+                        "enum": [
+                          false
+                        ]
+                      },
+                      "added": {},
+                      "removed": {}
+                    }
+                  },
+                  {
+                    "additionalProperties": false,
+                    "description": "Any other binary path: old_path, similarity, added and removed are absent.",
+                    "properties": {
+                      "path": {},
+                      "status": {
+                        "enum": [
+                          "added",
+                          "modified",
+                          "deleted",
+                          "type_changed"
+                        ]
+                      },
+                      "binary": {
+                        "enum": [
+                          true
+                        ]
+                      }
+                    }
+                  }
+                ]
               }
             }
           }
         }
-      }
+      },
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "required": [
+            "merge_base"
+          ],
+          "description": "status available: merge_base is present.",
+          "properties": {
+            "status": {
+              "enum": [
+                "available"
+              ]
+            },
+            "base": {},
+            "merge_base": {},
+            "commits": {},
+            "paths": {}
+          }
+        },
+        {
+          "additionalProperties": false,
+          "description": "status unavailable: merge_base is absent.",
+          "properties": {
+            "status": {
+              "enum": [
+                "unavailable"
+              ]
+            },
+            "base": {},
+            "commits": {},
+            "paths": {}
+          }
+        }
+      ]
     },
     "pull_requests": {
       "type": "object",
@@ -569,7 +792,8 @@
               },
               "url": {
                 "type": "string",
-                "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
+                "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks the value's characters, not its written size.",
+                "maxLength": 1000
               },
               "head_ref_oid": {
                 "type": "string",
@@ -577,7 +801,8 @@
               },
               "base_ref": {
                 "type": "string",
-                "description": "The base branch name. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
+                "description": "The base branch name. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks the value's characters, not its written size.",
+                "maxLength": 1000
               },
               "is_cross_repository": {
                 "type": "boolean"
@@ -675,7 +900,8 @@
                   },
                   "url": {
                     "type": "string",
-                    "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
+                    "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks the value's characters, not its written size.",
+                    "maxLength": 1000
                   },
                   "title": {
                     "type": "object",
@@ -704,17 +930,19 @@
                       },
                       "chunks": {
                         "type": "array",
-                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only.",
+                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only. Each chunk costs at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks each chunk's characters, not its written size.",
                         "items": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 1000
                         }
                       }
                     }
                   },
                   "author": {
                     "type": "string",
-                    "description": "The author login. Absent for a deleted account. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
+                    "description": "The author login. Absent for a deleted account. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks the value's characters, not its written size.",
+                    "maxLength": 1000
                   },
                   "body": {
                     "type": "object",
@@ -743,10 +971,11 @@
                       },
                       "chunks": {
                         "type": "array",
-                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only.",
+                        "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only. Each chunk costs at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks each chunk's characters, not its written size.",
                         "items": {
                           "type": "string",
-                          "minLength": 1
+                          "minLength": 1,
+                          "maxLength": 1000
                         }
                       }
                     }
@@ -789,11 +1018,13 @@
                             },
                             "author": {
                               "type": "string",
-                              "description": "The author login. Absent for a deleted account. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
+                              "description": "The author login. Absent for a deleted account. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks the value's characters, not its written size.",
+                              "maxLength": 1000
                             },
                             "url": {
                               "type": "string",
-                              "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds."
+                              "description": "The GitHub url. Fits one chunk: at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks the value's characters, not its written size.",
+                              "maxLength": 1000
                             },
                             "body": {
                               "type": "object",
@@ -822,10 +1053,11 @@
                                 },
                                 "chunks": {
                                   "type": "array",
-                                  "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only.",
+                                  "description": "The text in order. Joined, they equal the text. A chunk is never empty but can be whitespace only. Each chunk costs at most 1000 characters once written as JSON, a bound gather-facts holds. maxLength checks each chunk's characters, not its written size.",
                                   "items": {
                                     "type": "string",
-                                    "minLength": 1
+                                    "minLength": 1,
+                                    "maxLength": 1000
                                   }
                                 }
                               }
@@ -837,7 +1069,37 @@
                   }
                 }
               }
-            }
+            },
+            "anyOf": [
+              {
+                "additionalProperties": false,
+                "required": [
+                  "item"
+                ],
+                "description": "lookup fetched: item is present.",
+                "properties": {
+                  "number": {},
+                  "lookup": {
+                    "enum": [
+                      "fetched"
+                    ]
+                  },
+                  "item": {}
+                }
+              },
+              {
+                "additionalProperties": false,
+                "description": "lookup unavailable: item is absent.",
+                "properties": {
+                  "number": {},
+                  "lookup": {
+                    "enum": [
+                      "unavailable"
+                    ]
+                  }
+                }
+              }
+            ]
           }
         }
       }

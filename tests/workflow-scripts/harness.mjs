@@ -7,9 +7,14 @@
  *   libs is a property of it.
  *
  * loadWorkflow(builtPath)
- *   Reads a built workflow script and strips CR. Asserts the file has exactly
- *   one `export const meta` and that it is the first statement, then rewrites
- *   it to `const meta`. Returns {run}.
+ *   Reads a built workflow script and returns loadWorkflowSource(source,
+ *   builtPath).
+ *
+ * loadWorkflowSource(source, label)
+ *   Takes a workflow script as text, such as one built in memory, and strips
+ *   CR. label names the script in errors and stack traces. Asserts the text
+ *   has exactly one `export const meta` and that it is the first statement,
+ *   then rewrites it to `const meta`. Returns {run}.
  *   run({args, results}) runs the body as an async function in a fresh
  *   context and resolves to {result, meta, calls, phases, logs, failures}.
  *     args     the `args` global.
@@ -77,17 +82,21 @@ function stripLeadingComments(text) {
 }
 
 export function loadWorkflow(builtPath) {
-  const source = readScript(builtPath);
-  const metaCount = (source.match(/export\s+const\s+meta\b/g) || []).length;
+  return loadWorkflowSource(readScript(builtPath), builtPath);
+}
+
+export function loadWorkflowSource(source, label) {
+  const text = source.replace(/\r/g, '');
+  const metaCount = (text.match(/export\s+const\s+meta\b/g) || []).length;
   if (metaCount !== 1) {
-    throw new Error(`${builtPath}: expected exactly one "export const meta", found ${metaCount}`);
+    throw new Error(`${label}: expected exactly one "export const meta", found ${metaCount}`);
   }
-  const metaIndex = source.search(/^export const meta\b/m);
-  if (metaIndex === -1 || stripLeadingComments(source.slice(0, metaIndex)) !== '') {
-    throw new Error(`${builtPath}: "export const meta" must be the first statement`);
+  const metaIndex = text.search(/^export const meta\b/m);
+  if (metaIndex === -1 || stripLeadingComments(text.slice(0, metaIndex)) !== '') {
+    throw new Error(`${label}: "export const meta" must be the first statement`);
   }
-  const body = source.slice(0, metaIndex) + source.slice(metaIndex).replace(/^export const meta\b/, 'const meta');
-  return { run: (options) => runWorkflowBody(builtPath, body, options || {}) };
+  const body = text.slice(0, metaIndex) + text.slice(metaIndex).replace(/^export const meta\b/, 'const meta');
+  return { run: (options) => runWorkflowBody(label, body, options || {}) };
 }
 
 function resolveScriptedResult(results, prompt, opts, callIndex) {
@@ -156,12 +165,12 @@ function createWorkflowGlobals(args, results) {
   return { globals, record };
 }
 
-async function runWorkflowBody(builtPath, body, { args, results = {} }) {
+async function runWorkflowBody(label, body, { args, results = {} }) {
   const { globals, record } = createWorkflowGlobals(args, results);
   const context = createGuardedContext(globals);
   const wrapped = '(async function (exposeMetaReader) { function readHarnessMeta() { return meta; } '
     + 'exposeMetaReader(readHarnessMeta); ' + body + '\n})';
-  const runBody = vm.runInContext(wrapped, context, { filename: builtPath });
+  const runBody = vm.runInContext(wrapped, context, { filename: label });
   let metaReader;
   const result = await runBody((reader) => {
     metaReader = reader;
