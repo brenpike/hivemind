@@ -95,6 +95,8 @@
 #   trunk_ahead      count
 #   trunk_behind     count
 #   cut              none, or a comma list of pull_requests,references
+#   external_texts   count N of external texts in the facts file; each has a text_id, t1 to tN in
+#                    file order (gather-facts.jq, TEXT IDS). 0 means nothing to scan
 #   delivery         ready|stop
 #   delivery_stops   none, or a comma list from dirty_paths, operation_in_progress,
 #                    closed_pr_on_branch, history_unavailable, cut_fields, branch_name_unsafe

@@ -53,6 +53,20 @@
 # url, an author login) are kept whole, never chunked or trimmed. A page fails the shape check
 # when one is blank or does not fit one chunk (a JSON cost above 1000).
 #
+# TEXT IDS. An external text is an object whose origin is external and that holds chunks. Once
+# the whole body is built, one pass walks the document in order and gives each external text a
+# text_id: t1 for the first, then t2, up to tN. The key comes right after origin. An empty text
+# still gets an id. summary.external_texts is N, and the routing line external_texts reports it.
+# The pass lists no field names, so a new external text gets an id with no change here. A consumer
+# that scans each text by its id can then check its results one to one against t1 to tN, instead
+# of trusting the scanner's own list (Codex finding
+# 112d44116e2c8f4bdaddf668808866add9ec1394a4b1a70c98091117b4c7f59c).
+# NO TEXT ID (recorded residual): the short GitHub values above (a url, an author login, a pull
+# request's base_ref) are not free text, so they get no text_id. GitHub writes the url. A login
+# uses GitHub's own charset. A base_ref must name a branch that exists, and only a repository
+# writer can create one. They have the same standing as commit subjects. They are still external
+# data under content_rule, and the shape check above fails a page when one is blank or too long.
+#
 # LINES. Every line of the written facts file holds at most 1100 Unicode code points (jq length,
 # the unit a chunk's cost counts in, since tojson's length is also counted in code points). A chunk
 # line is its indent, quotes and comma around at most 1000, so it fits; line_check checks the
@@ -419,18 +433,31 @@ def facts_delivery_stops($facts; $cut):
    if ($cut | length) > 0 then "cut_fields" else empty end,
    if $facts.repository.head_state == "unsafe_name" then "branch_name_unsafe" else empty end];
 
+def facts_external_text_paths:
+  [path(.. | select(type == "object" and .origin == "external" and has("chunks")))];
+
+# The body with a text_id on each external text, in document order, and the count of them.
+def facts_identified_texts:
+  facts_external_text_paths as $text_paths
+  | {count: ($text_paths | length),
+     body: (reduce range(0; $text_paths | length) as $text_index (.;
+              setpath($text_paths[$text_index];
+                {origin: "external", text_id: "t\($text_index + 1)"} + getpath($text_paths[$text_index]))))};
+
 def facts_build($named):
-  {repository: facts_repository($named),
-   dirty: {paths: facts_complete_list($named.status_z | facts_dirty_items),
-           operations: facts_complete_list($named.operations | split(" ") | map(select(. != "")))},
-   history: facts_history($named),
-   pull_requests: facts_pull_requests($named),
-   references: facts_complete_list($named.references)} as $body
+  ({repository: facts_repository($named),
+    dirty: {paths: facts_complete_list($named.status_z | facts_dirty_items),
+            operations: facts_complete_list($named.operations | split(" ") | map(select(. != "")))},
+    history: facts_history($named),
+    pull_requests: facts_pull_requests($named),
+    references: facts_complete_list($named.references)} | facts_identified_texts) as $identified
+  | $identified.body as $body
   | facts_cut_fields($body) as $cut
   | facts_delivery_stops($body; $cut) as $stops
   | {schema_version: 1,
      content_rule: facts_content_rule,
      summary: {cut: $cut,
+               external_texts: $identified.count,
                delivery: (if ($stops | length) == 0 then "ready" else "stop" end),
                delivery_stops: $stops}}
     + $body;
@@ -447,6 +474,7 @@ def facts_routing_lines:
      "trunk_ahead: \(.repository.trunk_ahead)",
      "trunk_behind: \(.repository.trunk_behind)",
      "cut: \(.summary.cut | facts_routing_list)",
+     "external_texts: \(.summary.external_texts)",
      "delivery: \(.summary.delivery)",
      "delivery_stops: \(.summary.delivery_stops | facts_routing_list)"]
   | join("\n");

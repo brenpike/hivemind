@@ -146,4 +146,8 @@ describe('overlord workflow definition reads', () => {
       assert.ok(stateExecutionSection.includes(phrase), `## Workflow State Execution lacks ${phrase}`);
     }
   });
+  test('Workflow State Execution sends the scan rule to the gather-facts consumer rules', () => {
+    assert.ok(stateExecutionSection.includes('the scan its consumer rules require does not pass'), '## Workflow State Execution does not defer the scan rule to the skill consumer rules');
+    assert.ok(stateExecutionSection.includes('the texts the scan did not account for'), '## Workflow State Execution does not surface the texts the scan did not account for');
+  });
 });

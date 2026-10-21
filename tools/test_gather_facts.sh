@@ -243,6 +243,7 @@ run_engine() {
         LAST_FACTS="$run_cwd/$facts_relative"
         printf '%s\n' "$LAST_FACTS" >>"$FACTS_LIST"
         check_text_invariants "$name"
+        check_text_ids "$name"
     fi
 }
 
@@ -283,6 +284,26 @@ check_text_invariants() {
         pass "$1-text" "every text's chunks join to its length, each chunk at most 1000"
     else
         failed "$1-text" "a text object breaks the chunk invariants"
+    fi
+}
+
+# check_text_ids <name> -> the objects with a text_id are exactly the external texts (origin
+# external and chunks), their ids are t1..tN in document order, each right after origin, and
+# summary.external_texts and the external_texts routing line both equal N.
+check_text_ids() {
+    local text_count route_count
+    text_count="$(jq -r '[.. | objects | select(has("text_id"))] as $tagged
+        | [.. | objects | select(.origin == "external" and has("chunks"))] as $texts
+        | if $tagged == $texts
+             and [$texts[].text_id] == [range(1; ($texts | length) + 1) | "t\(.)"]
+             and all($texts[]; keys_unsorted[0:2] == ["origin", "text_id"])
+             and .summary.external_texts == ($texts | length)
+          then $texts | length else "bad" end' "$LAST_FACTS")"
+    route_count="$(route_value external_texts)"
+    if [[ "$text_count" =~ ^[0-9]+$ && "$route_count" == "$text_count" ]]; then
+        pass "$1-text-ids" "external texts carry ids t1..tN in order with N = $text_count, as summary and routing say"
+    else
+        failed "$1-text-ids" "text ids or their count are wrong: facts '$text_count', routing '$route_count'"
     fi
 }
 
@@ -532,7 +553,7 @@ test_freshness() {
     create_world fresh
     run_engine fresh "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok fresh
-    assert_equal fresh-keys 'facts_file,facts_lines,head_state,branch,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,cut,delivery,delivery_stops' \
+    assert_equal fresh-keys 'facts_file,facts_lines,head_state,branch,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,cut,external_texts,delivery,delivery_stops' \
         "$(route_keys)" "routing keys and order"
     assert_route fresh-state trunk_freshness fresh
     assert_route fresh-branch branch "$BRANCH"
@@ -541,6 +562,8 @@ test_freshness() {
     assert_route fresh-ready delivery ready
     assert_route fresh-no-stops delivery_stops none
     assert_route fresh-no-cut cut none
+    assert_route fresh-no-texts external_texts 0
+    assert_fact fresh-no-text-ids '[.. | objects | select(has("text_id"))] | length' 0
     assert_fact fresh-remote '.repository.remote' origin
     assert_fact fresh-base '.history.base' remote_trunk
     local facts_lines
@@ -814,7 +837,7 @@ test_head_states() {
     run_engine unsafe-name "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok unsafe-name
     assert_route unsafe-name-state head_state unsafe_name
-    assert_equal unsafe-name-keys 'facts_file,facts_lines,head_state,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,cut,delivery,delivery_stops' \
+    assert_equal unsafe-name-keys 'facts_file,facts_lines,head_state,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,cut,external_texts,delivery,delivery_stops' \
         "$(route_keys)" "no branch line"
     assert_fact unsafe-name-no-branch-key '.repository | has("branch")' false
     assert_route unsafe-name-stop delivery_stops branch_name_unsafe
@@ -915,6 +938,13 @@ test_references() {
     assert_fact refs-null-body '.references.items[1].item.body | [.length, (.chunks | length)] | @tsv' $'0\t0'
     assert_fact refs-missing '.references.items[2] | [.number, .lookup, has("item")] | @tsv' $'9\tunavailable\tfalse'
     assert_route refs-no-cut cut none
+    assert_route refs-text-count external_texts 9
+    assert_fact refs-text-count-summary '.summary.external_texts' 9
+    assert_fact refs-text-id-order '[.references.items[0].item | .title.text_id, .body.text_id, (.comments.items[].body.text_id)]
+        + [.references.items[1].item | .title.text_id, .body.text_id, (.comments.items[].body.text_id)] | join(",")' \
+        't1,t2,t3,t4,t5,t6,t7,t8,t9'
+    assert_fact refs-blank-comment-id '.references.items[0].item.comments.items[1].body.text_id' t4
+    assert_fact refs-short-values-no-id '[.references.items[].item | select(. != null) | ., .comments.items[] | has("text_id")] | any' false
     assert_route refs-ready delivery ready
     assert_equal refs-gh-fields 'ref -F owner={owner} -F repo={repo} -F number=7 -f' \
         "$(grep '^ref ' "$GH_DIR/calls.log" | head -n 1 | sed 's/ --paginate//; s/^ref api graphql/ref/')" "ref call uses gh placeholders"
@@ -949,6 +979,8 @@ test_pull_requests() {
     assert_fact prs-relations '[.pull_requests.items[] | "\(.number)=\(.state)/\(.relation)"] | join(",")' \
         '1=open/in_history,2=merged/unrelated,3=merged/unknown,4=open/ahead_of_head'
     assert_fact prs-origin '[.pull_requests.items[].origin] | unique | join(",")' external
+    assert_fact prs-no-text-id '[.pull_requests.items[] | has("text_id")] | any' false
+    assert_route prs-no-texts external_texts 0
     assert_route prs-ready delivery ready
     assert_equal prs-gh-fields "pr -F owner={owner} -F repo={repo} -f branch=$BRANCH -f" \
         "$(head -n 1 "$GH_DIR/calls.log" | sed 's/ --paginate//; s/^pr api graphql/pr/')" "pr call uses gh placeholders"

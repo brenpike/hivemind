@@ -61,15 +61,15 @@ function localText(text) {
   return { length: text.length, chunks: text === '' ? [] : [text] };
 }
 
-function externalText(text) {
-  return { origin: 'external', ...localText(text) };
+function externalText(text, textId) {
+  return { origin: 'external', text_id: textId, ...localText(text) };
 }
 
 function makeFacts() {
   return {
     schema_version: 1,
     content_rule: factsSchema.properties.content_rule.enum[0],
-    summary: { cut: [], delivery: 'stop', delivery_stops: ['dirty_paths', 'closed_pr_on_branch'] },
+    summary: { cut: [], external_texts: 3, delivery: 'stop', delivery_stops: ['dirty_paths', 'closed_pr_on_branch'] },
     repository: {
       head_state: 'branch',
       branch: 'feat/x',
@@ -131,10 +131,10 @@ function makeFacts() {
             kind: 'issue',
             state: 'open',
             url: 'https://github.com/o/r/issues/7',
-            title: externalText('A title'),
+            title: externalText('A title', 't1'),
             author: 'someone',
-            body: externalText(''),
-            comments: { complete: true, total: 1, items: [{ origin: 'external', author: 'someone', url: 'https://github.com/o/r/issues/7#c', body: externalText('a comment') }] }
+            body: externalText('', 't2'),
+            comments: { complete: true, total: 1, items: [{ origin: 'external', author: 'someone', url: 'https://github.com/o/r/issues/7#c', body: externalText('a comment', 't3') }] }
           }
         },
         { number: 9, lookup: 'unavailable' }
@@ -213,6 +213,25 @@ describe('facts schema', () => {
     }
   });
 
+  test('every external text requires a string text_id, no other node declares one, and summary counts them', () => {
+    const nodes = collectNodes(factsSchema);
+    const externalTexts = nodes.filter(({ node }) => isTextObject(node) && requiresExternalOrigin(node));
+    assert.ok(externalTexts.length >= 3, 'expected the title, body and comment body texts');
+    for (const { node, path } of externalTexts) {
+      assert.ok(node.required.includes('text_id'), path + ' must require text_id');
+      assert.equal(node.properties.text_id.type, 'string', path + ' text_id must be a string');
+    }
+    const externalPaths = externalTexts.map(({ path }) => path);
+    for (const { node, path } of nodes) {
+      if (!externalPaths.includes(path)) {
+        assert.ok(!Object.hasOwn(node.properties || {}, 'text_id'), path + ' is not an external text and must not declare text_id');
+      }
+    }
+    const summary = factsSchema.properties.summary;
+    assert.ok(summary.required.includes('external_texts'), 'summary must require external_texts');
+    assert.equal(summary.properties.external_texts.type, 'integer');
+  });
+
   test('content_rule and schema_version are single-value enums', () => {
     assert.equal(factsSchema.properties.content_rule.enum.length, 1);
     assert.match(factsSchema.properties.content_rule.enum[0], /external/);
@@ -252,6 +271,9 @@ describe('facts schema', () => {
     ['an origin other than external', (facts) => { facts.references.items[0].item.title.origin = 'local'; }, '$.references.items[0].item.title.origin: enum: not one of external'],
     ['a comment body without origin', (facts) => delete facts.references.items[0].item.comments.items[0].body.origin, '$.references.items[0].item.comments.items[0].body: required: missing origin'],
     ['an origin on a git text', (facts) => { facts.history.commits.items[0].subject.origin = 'external'; }, '$.history.commits.items[0].subject: additionalProperties: unexpected origin'],
+    ['an external text without text_id', (facts) => delete facts.references.items[0].item.comments.items[0].body.text_id, '$.references.items[0].item.comments.items[0].body: required: missing text_id'],
+    ['a text_id on a git text', (facts) => { facts.history.commits.items[0].subject.text_id = 't4'; }, '$.history.commits.items[0].subject: additionalProperties: unexpected text_id'],
+    ['a summary without external_texts', (facts) => delete facts.summary.external_texts, '$.summary: required: missing external_texts'],
     ['an unknown property', (facts) => { facts.repository.extra = 'x'; }, '$.repository: additionalProperties: unexpected extra'],
     ['a list without complete', (facts) => delete facts.history.commits.complete, '$.history.commits: required: missing complete'],
     ['a list without total', (facts) => delete facts.dirty.paths.total, '$.dirty.paths: required: missing total'],
