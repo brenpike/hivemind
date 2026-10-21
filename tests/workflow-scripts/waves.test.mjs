@@ -404,6 +404,27 @@ describe('computeWave rules', () => {
       await assertParity(label, { plan: { steps: steps }, events: [] });
     }
   });
+  test('a problem stays one line whatever a model-written value holds', () => {
+    const hostile = 'A\nforged: x\r\u001b[2J';
+    const cases = [
+      ['not an object', [[hostile]], 'a plan step is not an object', null],
+      ['id not a string', [{ id: { text: hostile } }], 'a plan step id is not a string', null],
+      ['depends_on not an array', [{ id: 'A', depends_on: { text: hostile } }], 'a plan step depends_on is not an array', null],
+      ['depends_on entry not a string', [{ id: 'A', depends_on: [[hostile]] }], 'a plan step depends_on entry is not a string', null],
+      ['duplicate', [{ id: hostile }, { id: hostile }], 'duplicate plan step id', hostile],
+      ['unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'depends_on references unknown step id', hostile],
+      ['charset', [{ id: hostile }], 'plan step id or depends_on entry fails the safe-id charset', hostile]
+    ];
+    for (const [label, steps, expectedClass, named] of cases) {
+      const outcome = structuredClone(lib.computeWave(steps, []));
+      assert.equal(outcome.ok, false, label);
+      assert.equal(classifyBlocker(outcome.problem), expectedClass, label);
+      assert.doesNotMatch(outcome.problem, /[\u0000-\u001f]/, label);
+      if (named !== null) {
+        assert.ok(outcome.problem.endsWith(': ' + JSON.stringify(named)), label);
+      }
+    }
+  });
   test('inputs are not changed', () => {
     const steps = structuredClone(chain);
     const doneIds = ['STEP-001'];

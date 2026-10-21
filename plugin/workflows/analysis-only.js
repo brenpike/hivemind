@@ -1511,6 +1511,9 @@ function countCharacter(text, character) {
  *                  all_done   true when remaining is 0.
  *                {ok: false, problem} when the plan is not valid, or when
  *                steps remain but none can run. problem is one plain line.
+ *                Every plan value it names is JSON-encoded, so a line feed
+ *                or control character in a model-written id cannot break
+ *                the line.
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. Inputs are never changed.
@@ -1519,7 +1522,9 @@ function countCharacter(text, character) {
  *   its VALIDATION in the same order (shape gate, empty, missing id,
  *   duplicate id, unknown dependency, cycle, safe-id charset) and its
  *   defensive stall check. tests/workflow-scripts/waves.test.mjs runs both on
- *   the same plans and requires the same outcome. A change to the rule lands
+ *   the same plans and requires the same outcome: the same wave, or a problem
+ *   of the same class, which is its text before any value it names. A
+ *   change to the rule lands
  *   in next-wave.sh and here together.
  *   Only two things differ from next-wave.sh:
  *     The input is a list of done ids, not a run ledger. Deriving that list
@@ -1568,11 +1573,11 @@ function findWavePlanProblem(steps) {
   }
   const duplicateId = findDuplicateStepId(steps);
   if (duplicateId !== null) {
-    return 'duplicate plan step id: ' + duplicateId;
+    return 'duplicate plan step id: ' + JSON.stringify(duplicateId);
   }
   const unknownDependency = findUnknownDependency(steps);
   if (unknownDependency !== null) {
-    return 'depends_on references unknown step id: ' + unknownDependency;
+    return 'depends_on references unknown step id: ' + JSON.stringify(unknownDependency);
   }
   if (hasDependencyCycle(steps)) {
     return 'dependency cycle detected among plan steps';
