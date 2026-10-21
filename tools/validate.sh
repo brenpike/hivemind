@@ -340,8 +340,9 @@ run_suites() {
 #   plugin/skills/gather-facts/**, plugin/references/facts-schema.json,
 #     plugin/workflow-src/lib/schema.js, tests/workflow-scripts/harness.mjs,
 #     plugin/skills/_shared/{allowlist,containment,graphql-response}.sh
-#                                      -> test_gather_facts (facts-schema.json ALSO -> test_workflow_scripts;
-#                                         the _shared libs keep their other routes by union)
+#                                      -> test_gather_facts (facts-schema.json and scripts/gather-facts.sh
+#                                         ALSO -> test_workflow_scripts; the _shared libs keep their
+#                                         other routes by union)
 #   plugin/skills/create-working-branch/**, plugin/skills/_shared/{allowlist,git-refusals}.sh
 #                                      -> test_create_working_branch
 #   plugin/skills/molt/**, plugin/skills/_shared/{allowlist,containment,git-refusals}.sh
@@ -634,7 +635,9 @@ map_path() {
 
   # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
   # build, the two data files the build copies in, the facts contract the node tests validate, the
-  # overlord agent whose launch contract the node tests pin, the route-workflow skill and the
+  # overlord agent whose launch contract the node tests pin, the gather-facts entrypoint whose facts-file
+  # path pattern analysis-only.test.mjs cross-checks (its other gather-facts files route only to
+  # test_gather_facts), the route-workflow skill and the
   # plugin/workflows/*.json definitions whose catalog parity route-catalog.test.mjs pins (the *.json
   # path ALSO keeps its validate_workflows suites by union), and the node tests themselves. Every one of these except tests/workflow-scripts/* is
   # ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check
@@ -648,6 +651,7 @@ map_path() {
      || "$p" == plugin/references/decision-autonomy-table.json \
      || "$p" == plugin/references/decision-brief-schema.json \
      || "$p" == plugin/references/facts-schema.json \
+     || "$p" == plugin/skills/gather-facts/scripts/gather-facts.sh \
      || "$p" == plugin/agents/overlord.md \
      || "$p" == tests/workflow-scripts/* ]]; then
     add_selected "$SUITE_TEST_WORKFLOW_SCRIPTS" "$p (workflow-script source/build/data/test)"
@@ -1332,6 +1336,7 @@ self_test() {
     "plugin/references/decision-autonomy-table.json" \
     "plugin/references/decision-brief-schema.json" \
     "plugin/references/facts-schema.json" \
+    "plugin/skills/gather-facts/scripts/gather-facts.sh" \
     "plugin/workflows/analysis-only.js" \
     "plugin/agents/overlord.md" \
     "plugin/skills/route-workflow/SKILL.md" \
