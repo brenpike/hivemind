@@ -23,7 +23,7 @@ Before:
 - [ ] No unexpected unstaged changes
 
 After:
-- [ ] The script checked the PR head branch and SHA against `head` and the commit it pushed
+- [ ] The script checked the PR head repository, branch and SHA against the push remote's repository, `head` and the commit it pushed
 - [ ] PR created or reused with `base` (resolved trunk) as its target
 - [ ] This skill's procedure ended at its own final Bash tool call (exit 0 = succeeded, exit 1 = blocked)
 
@@ -77,8 +77,8 @@ When `expect_commit` is provided, validate it as a commit SHA against the identi
    bash ${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] [--expect-commit <allowlist-validated-commit>] --inputs .hivemind/pr-inputs-<token>.json
    ```
 
-   The script pushes through the push-branch script, as a child process, before it opens or reuses the PR. Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). The script header defines the refusals, the push, the reuse of an open PR, the create call, the PR check, and the output; this skill does not restate them. The script never passes `--head` to `gh pr create`; see recorded residual R1 in `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`.
-   - exit 0: stdout `url: <url>` and `head_ref_oid: <sha>` are the routing data, followed by `created: true|false` and, when the push warned, a `warning:` line. `created: false` means the script reused the open PR on the pushed commit and left its title and body unchanged. Record a `warning:` line as a warning.
+   The script pushes through the push-branch script, as a child process, before it opens or reuses the PR. Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). The script header defines the refusals, the push, the reuse of an open PR, the create call, the PR check, and the output; this skill does not restate them. The script never passes `--head` to `gh pr create`; see recorded residuals R1 and R3 in `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`.
+   - exit 0: stdout `url: <url>` and `head_ref_oid: <sha>` are the routing data, followed by `created: true|false` and, when the push warned, a `warning:` line. `created: false` means the script reused the open PR from the push remote's repository on the pushed commit and left its title and body unchanged. The `warning:` line appears when the push warned or the head repository was not checked. Record a `warning:` line as a warning.
    - exit 1: blocked; relay the script's stderr. The `blocker:` line is last.
 
 ## Silence Discipline
