@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.5.0] - 2026-10-21
+
+### Added
+
+- `plugin/references/plan-schema.json`: the plan payload for standard-delivery on the script engine. It holds the branch, the classification, the breaking flag, the bump judgments, single or multi delivery, and steps with file scopes, dependencies and declared effects outside the repo. Strings that can carry external content are labelled.
+- Engine libraries `plugin/workflow-src/lib/waves.js` (the ready wave, tested for parity against `next-wave.sh`) and `plugin/workflow-src/lib/routing.js` (parses relayed routing lines against an allowlist spec).
+- Build draft marker: a regular file `plugin/workflow-src/<id>/DRAFT` keeps a workflow out of `plugin/workflows/`. `--check` builds drafts in memory.
+
+### Changed
+
+- The workflow schema validator supports `anyOf` and `maxLength` (counted in code points). ADR-0036 amendment 2026-10-21.
+- `facts-schema.json` ties each tag to the fields it allows (for example `branch` only with `head_state` branch). It bounds the six short GitHub fields and every chunk at 1000 characters.
+- `plugin/workflows/analysis-only.js` is rebuilt with the new libraries. Behavior is unchanged.
+- The workflow-scripts suite needs bash, git and jq, and `validate.sh` routes the files its tests read.
+
 ## [6.4.0] - 2026-10-21
 
 ### Added
