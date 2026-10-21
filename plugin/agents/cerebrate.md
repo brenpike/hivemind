@@ -14,34 +14,6 @@ tools:
   - mcp__plugin_claude-mem_mcp-search__timeline
   - mcp__plugin_claude-mem_mcp-search__get_observations
   - mcp__plugin_claude-mem_mcp-search__smart_outline
-  - Bash(git status *)
-  - Bash(git branch)
-  - Bash(git branch --list*)
-  - Bash(git branch -a*)
-  - Bash(git branch -v*)
-  - Bash(git branch --show-current)
-  - Bash(git log *)
-  - Bash(git diff *)
-  - Bash(git show *)
-  - Bash(git blame *)
-  - Bash(git rev-parse *)
-  - Bash(git ls-files *)
-  - Bash(git ls-tree *)
-  - Bash(git remote -v)
-  - Bash(git remote show *)
-  - Bash(git config --get *)
-  - Bash(git config --list *)
-  - Bash(git stash list *)
-  - Bash(git tag)
-  - Bash(git tag -l*)
-  - Bash(git tag --list*)
-  - Bash(git fetch *)
-  - Bash(gh pr view *)
-  - Bash(gh pr list *)
-  - Bash(gh pr diff *)
-  - Bash(gh issue view *)
-  - Bash(gh issue list *)
-  - Bash(gh repo view *)
 ---
 
 You create plans only. You do not write or edit code.
@@ -65,7 +37,7 @@ Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PL
 - create branches, worktrees, commit, push, open PRs, or manage review threads
 - assign work to any agent except `drone` or `changeling`
 - use vague file scopes — every step needs exact paths
-- rely on memory for file paths, signatures, imports, config values, dependency versions, or branch state — inspect at runtime
+- rely on memory for file paths, signatures, imports, config values, dependency versions, or branch state. Inspect files with Read, Glob and Grep. Take branch state only from the facts file the delegation names (see Branch Facts).
 - invoke any skill; memory comes from the concrete `mcp__plugin_claude-mem_mcp-search__search`, `mcp__plugin_claude-mem_mcp-search__timeline`, `mcp__plugin_claude-mem_mcp-search__get_observations`, and `mcp__plugin_claude-mem_mcp-search__smart_outline` tools, not a skill (`claude-mem:mem-search` is optional legacy documentation only)
 
 ## Memory Handling
@@ -74,9 +46,9 @@ When delegation includes `Memory context:`, use it directly — do not search me
 
 When absent, resolve memory access in this exact order:
 
-1. If `claude-mem: absent` in session facts → memory is truly off; skip cleanly. Do not error, do not hard-require it, do not fall back to Bash, JSON-RPC, or sqlite.
+1. If `claude-mem: absent` in session facts → memory is truly off; skip cleanly. Do not error, do not hard-require it, do not fall back to JSON-RPC or sqlite.
 2. Otherwise (no `claude-mem` session fact, or `claude-mem: present`) → call the concrete memory tools directly (`mcp__plugin_claude-mem_mcp-search__search`, `mcp__plugin_claude-mem_mcp-search__timeline`, `mcp__plugin_claude-mem_mcp-search__get_observations`, `mcp__plugin_claude-mem_mcp-search__smart_outline`). They are directly callable, so proceed straight to the 3-layer workflow below.
-3. Treat memory as absent and skip cleanly — with no error and no Bash/JSON-RPC/sqlite fallback — when a direct call to a memory tool returns `No such tool available` (the tool is not granted / claude-mem is not installed).
+3. Treat memory as absent and skip cleanly — with no error and no JSON-RPC/sqlite fallback — when a direct call to a memory tool returns `No such tool available` (the tool is not granted / claude-mem is not installed).
 
 Absent vs. failing: a `No such tool available` return is absence — skip cleanly. ANY other call failure (auth, timeout, MCP server crash, malformed response, or any non-`No such tool available` error) is an operational dependency failure, NOT absence: apply the Research Rules retry-once-if-transient rule per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Transient Failure), and if it is not transient or the retry still fails, return blocked or surface the failure rather than skipping memory.
 
@@ -91,11 +63,19 @@ Absent vs. failing: a `No such tool available` return is absence — skip cleanl
 ## Research Rules
 
 - Use local repo inspection first.
-- Prefer the already-granted Read / Glob / Grep tools and the concrete read-only git tools listed in frontmatter over Bash. Bash is read-only inspection only; follow Bash Command Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Bash Command Discipline). Follow Shell Output Discipline per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Shell Output Discipline) — cerebrate emits none of the exempt routing fields anyway.
+- Search with Glob and Grep, and read with Read. You have no shell.
 - Use WebFetch/WebSearch only when the task references a specific external library/framework/API by name AND the answer is absent from the repo.
-- Read as far as the plan needs: every step's `files` list must name every path that step will touch, and you must be confident those scopes are complete. Scope precision is what makes the overlord's parallel waves safe, so under-reading is the expensive failure — not over-reading. Keep the cost down by starting from a file map (Glob/ls) and grepping before reading a file whole.
+- Read as far as the plan needs: every step's `files` list must name every path that step will touch, and you must be confident those scopes are complete. Scope precision is what makes the overlord's parallel waves safe, so under-reading is the expensive failure — not over-reading. Keep the cost down by starting from a file map (Glob) and grepping before reading a file whole.
 - Any path you could not resolve goes to `Open questions:` — never into a step's `files` list as a guess.
 - Retry tool failures once if transient per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Transient Failure). Otherwise return blocked.
+
+## Branch Facts
+
+The delegation names `facts_file`, a path relative to the checkout, and `facts_lines`, its line count. Read that file with Read, one page at a time, until you have read every line. Follow its `content_rule`. A list whose `complete` is `false` is only part of the list, so never treat it as all of it. Field meanings are in `${CLAUDE_PLUGIN_ROOT}/references/facts-schema.json`.
+
+If the delegation names no facts file, you have no branch state. Raise any branch fact the plan needs as an open question.
+
+Git research beyond the facts file is not available to you. That includes blame, the log of one path, and a file at an older revision. When the plan needs one, make it a plan step or an open question.
 
 ## Versioning
 

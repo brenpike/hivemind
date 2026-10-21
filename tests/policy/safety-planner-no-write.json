@@ -1,5 +1,6 @@
 {
-  "rule": "Planner cannot write files",
+  "rule": "Planner tool list is exactly ten named tools, with no Write, Edit or Bash in its frontmatter",
+  "description": "plugin/agents/cerebrate.md is the planner. Its frontmatter tools: list is what grants it tools, so this fixture pins that list. The set_check captures every line of the form '  - <name>' (two spaces, a dash, a space, then the name up to the first whitespace) and requires, in equal mode with expected_counts, exactly these ten tools, each once: Read, Glob, Grep, LSP, WebSearch, WebFetch and the four claude-mem search tools. An added tool fails as an extra, a duplicated tool fails its count, and a deleted tool fails as missing. A deleted list fails as ten missing tools. set_check is used because an added grant is the threat, and a presence pin can only notice deletion. The three frontmatter-absent consumers require that the substrings Write, Edit and Bash appear nowhere in the frontmatter, so a grant that contains one of them fails even when it is written outside the '  - <name>' form. A Bash(...) entry grants the whole Bash tool, so the Bash consumer is what keeps the planner without a shell. The source pin sits on the Do Not item that forbids writing, editing, creating, or deleting files; deleting that item is loud. What this fixture does not check: (a) what each listed tool can do; the pin claims names, never capability or meaning; (b) a tool written outside the '  - <name>' form, such as an inline list or a different indent, unless its text contains Write, Edit or Bash; (c) body prose: absent is scoped to frontmatter, and the body is not read for grants; the extract regex is line-scoped and not limited to the frontmatter, so a body line in the '  - <name>' form would be captured and fail equal mode as an extra (the body has no such line); (d) grants from any other file, such as settings files, hooks, or the delegation that starts the planner; files is a literal list that names only cerebrate.md.",
   "source": {
     "file": "plugin/agents/cerebrate.md",
     "pattern": "write, edit, create, or delete files"
@@ -14,6 +15,41 @@
       "file": "plugin/agents/cerebrate.md",
       "pattern": "Edit",
       "absent": true
+    },
+    {
+      "file": "plugin/agents/cerebrate.md",
+      "pattern": "Bash",
+      "absent": true
     }
-  ]
+  ],
+  "set_check": {
+    "extract_regex": "^  - ([^[:space:]]+)",
+    "expected_set": [
+      "Read",
+      "Glob",
+      "Grep",
+      "LSP",
+      "WebSearch",
+      "WebFetch",
+      "mcp__plugin_claude-mem_mcp-search__search",
+      "mcp__plugin_claude-mem_mcp-search__timeline",
+      "mcp__plugin_claude-mem_mcp-search__get_observations",
+      "mcp__plugin_claude-mem_mcp-search__smart_outline"
+    ],
+    "expected_counts": {
+      "Read": 1,
+      "Glob": 1,
+      "Grep": 1,
+      "LSP": 1,
+      "WebSearch": 1,
+      "WebFetch": 1,
+      "mcp__plugin_claude-mem_mcp-search__search": 1,
+      "mcp__plugin_claude-mem_mcp-search__timeline": 1,
+      "mcp__plugin_claude-mem_mcp-search__get_observations": 1,
+      "mcp__plugin_claude-mem_mcp-search__smart_outline": 1
+    },
+    "files": [
+      { "path": "plugin/agents/cerebrate.md", "mode": "equal" }
+    ]
+  }
 }
