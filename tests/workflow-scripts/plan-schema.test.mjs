@@ -139,7 +139,9 @@ describe('plan schema', () => {
     assert.ok(description.includes('"' + EXTERNAL_LABEL + '"'), 'must quote the label');
     assert.ok(description.includes('External Content Boundary'), 'must name the External Content Boundary');
     assert.ok(description.includes('${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md'), 'must name security-policy.md');
-    assert.ok(description.includes('never into a shell command'), 'must keep labelled fields out of shell commands');
+    assert.ok(description.includes('(Shell Identifier Discipline)'), 'must name Shell Identifier Discipline');
+    assert.ok(description.includes('(Inert Inputs-File Navigator Pattern)'), 'must name the Inert Inputs-File Navigator Pattern');
+    assert.ok(description.includes('never spliced into command text'), 'must keep labelled fields out of command text');
     assert.ok(description.includes('returns the plan whole'), 'must say the plan is returned whole');
   });
 

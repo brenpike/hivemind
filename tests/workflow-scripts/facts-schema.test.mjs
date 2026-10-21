@@ -7,9 +7,33 @@ import { loadLibs } from './harness.mjs';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/schema.js']);
 const factsSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/facts-schema.json', 'utf8'));
+const factsProgram = readFileSync(repoRoot + 'plugin/skills/gather-facts/scripts/gather-facts.jq', 'utf8');
 
 const GITHUB_ROOTS = ['$.pull_requests.items[]', '$.references.items[].item'];
 const ENUM_LISTS = ['$.summary.cut', '$.summary.delivery_stops'];
+const SHORT_FIELDS = [
+  '$.pull_requests.items[].url',
+  '$.pull_requests.items[].base_ref',
+  '$.references.items[].item.url',
+  '$.references.items[].item.author',
+  '$.references.items[].item.comments.items[].url',
+  '$.references.items[].item.comments.items[].author'
+];
+const FREE_OPTIONAL = [
+  '$.repository.remote',
+  '$.repository.local_trunk',
+  '$.repository.remote_trunk',
+  '$.references.items[].item.author',
+  '$.references.items[].item.comments.items[].author'
+];
+
+function readChunkLimit() {
+  const found = factsProgram.match(/^def facts_chunk_limit: (\d+);\r?$/m);
+  assert.ok(found, 'gather-facts.jq must define facts_chunk_limit');
+  return Number(found[1]);
+}
+
+const CHUNK_LIMIT = readChunkLimit();
 
 function validate(value) {
   return structuredClone(lib.validateSchema(factsSchema, value));
@@ -23,6 +47,7 @@ function walkSchema(schema, path, visit) {
   if (schema.items !== undefined) {
     walkSchema(schema.items, path + '[]', visit);
   }
+  (schema.anyOf || []).forEach((branch, index) => walkSchema(branch, path + '.anyOf[' + index + ']', visit));
 }
 
 function collectNodes(schema) {
@@ -55,6 +80,82 @@ function requiresExternalOrigin(node) {
     && origin !== undefined
     && origin.type === 'string'
     && JSON.stringify(origin.enum) === JSON.stringify(['external']);
+}
+
+function listTagNames(node) {
+  const firstBranch = node.anyOf[0];
+  return Object.keys(firstBranch.properties).filter((name) => firstBranch.properties[name].enum !== undefined);
+}
+
+function listTagValues(node, name) {
+  const property = node.properties[name];
+  if (property.enum !== undefined) {
+    return property.enum;
+  }
+  assert.equal(property.type, 'boolean', name + ' must be an enum or a boolean to serve as a tag');
+  return [true, false];
+}
+
+function extendCombinations(combinations, name, values) {
+  return combinations.flatMap((combination) => values.map((value) => ({ ...combination, [name]: value })));
+}
+
+function listTagCombinations(node) {
+  return listTagNames(node).reduce((combinations, name) => extendCombinations(combinations, name, listTagValues(node, name)), [{}]);
+}
+
+function branchMatchesTags(branch, combination) {
+  return Object.entries(combination).every(([name, value]) => branch.properties[name].enum.includes(value));
+}
+
+function assertBranchProperty(node, tagNames, name, child, propertyPath) {
+  assert.ok(Object.hasOwn(node.properties, name), propertyPath + ' is not declared on the parent');
+  if (!tagNames.includes(name)) {
+    assert.deepEqual(child, {}, propertyPath + ' must be an empty placeholder');
+    return;
+  }
+  assert.deepEqual(Object.keys(child), ['enum'], propertyPath + ' must hold only its tag values');
+  for (const value of child.enum) {
+    assert.ok(listTagValues(node, name).includes(value), propertyPath + ' lists ' + value + ', which the parent does not allow');
+  }
+}
+
+function assertBranchAllowlist(node, branch, branchPath) {
+  const tagNames = listTagNames(node);
+  assert.equal(branch.additionalProperties, false, branchPath + ' must set additionalProperties false');
+  for (const [name, child] of Object.entries(branch.properties)) {
+    assertBranchProperty(node, tagNames, name, child, branchPath + '.' + name);
+  }
+  for (const name of [...tagNames, ...node.required]) {
+    assert.ok(Object.hasOwn(branch.properties, name), branchPath + ' must list ' + name);
+  }
+  for (const name of branch.required || []) {
+    assert.ok(Object.hasOwn(branch.properties, name), branchPath + ' requires unlisted ' + name);
+  }
+}
+
+function classifyOptional(node, name) {
+  const branches = node.anyOf || [];
+  const requiredCount = branches.filter((branch) => (branch.required || []).includes(name)).length;
+  const listedCount = branches.filter((branch) => Object.hasOwn(branch.properties, name)).length;
+  if (requiredCount === 0 && listedCount === branches.length) {
+    return 'free';
+  }
+  if (requiredCount > 0 && requiredCount === listedCount && listedCount < branches.length) {
+    return 'correlated';
+  }
+  return 'mixed';
+}
+
+function setFactValue(facts, path, value) {
+  const keys = path.replace(/\[(\d+)\]/g, '.$1').slice(2).split('.');
+  const holder = keys.slice(0, -1).reduce((record, key) => record[key], facts);
+  holder[keys[keys.length - 1]] = value;
+}
+
+function makeCodePoints(count) {
+  const prefix = 'https://x/';
+  return prefix + '\u{1F600}'.repeat(count - prefix.length);
 }
 
 function localText(text) {
@@ -187,11 +288,63 @@ describe('facts schema', () => {
     }
   });
 
-  test('every chunk is a string that is never empty', () => {
+  test('every chunk is a string that is never empty and fits the chunk bound', () => {
     const chunkNodes = collectNodes(factsSchema).filter(({ path }) => path.endsWith('.chunks'));
     assert.ok(chunkNodes.length >= 8, 'expected the chunks of every text object');
     for (const { node, path } of chunkNodes) {
-      assert.deepEqual(node.items, { type: 'string', minLength: 1 }, path + ' items must be a string of at least one character');
+      const expected = { type: 'string', minLength: 1, maxLength: CHUNK_LIMIT };
+      assert.deepEqual(node.items, expected, path + ' items must be a string of 1 to ' + CHUNK_LIMIT + ' characters');
+    }
+  });
+
+  test('the chunk bound is facts_chunk_limit, on the six short GitHub fields and nowhere else outside chunks', () => {
+    assert.equal(CHUNK_LIMIT, 1000);
+    const bounded = collectNodes(factsSchema)
+      .filter(({ node, path }) => node.maxLength !== undefined && !path.endsWith('.chunks[]'));
+    assert.deepEqual(bounded.map(({ path }) => path).sort(), [...SHORT_FIELDS].sort());
+    for (const { node, path } of bounded) {
+      assert.equal(node.type, 'string', path + ' must be a string');
+      assert.equal(node.maxLength, CHUNK_LIMIT, path + ' must carry the chunk bound');
+      assert.match(node.description, /once written as JSON/, path + ' must keep the written JSON bound');
+      assert.match(node.description, /maxLength checks the value's characters/, path + ' must say what maxLength checks');
+    }
+  });
+
+  test('every anyOf branch is an allowlist of parent properties with tag enums and empty placeholders', () => {
+    const tagged = collectNodes(factsSchema).filter(({ node }) => node.anyOf !== undefined);
+    assert.equal(tagged.length, 5, 'expected the five presence rules');
+    for (const { node, path } of tagged) {
+      assert.equal(node.type, 'object', path + ' anyOf must sit on an object');
+      assert.ok(listTagNames(node).length > 0, path + ' anyOf must have a tag field');
+      node.anyOf.forEach((branch, index) => assertBranchAllowlist(node, branch, path + '.anyOf[' + index + ']'));
+    }
+  });
+
+  test('every optional property is tag-correlated or on the free optional list', () => {
+    const seenFree = [];
+    for (const { node, path } of collectNodes(factsSchema)) {
+      if (node.type !== 'object') {
+        continue;
+      }
+      const optionalNames = Object.keys(node.properties).filter((name) => !(node.required || []).includes(name));
+      for (const name of optionalNames) {
+        const propertyPath = path + '.' + name;
+        const expected = FREE_OPTIONAL.includes(propertyPath) ? 'free' : 'correlated';
+        assert.equal(classifyOptional(node, name), expected, propertyPath + ' must be ' + expected);
+        if (expected === 'free') {
+          seenFree.push(propertyPath);
+        }
+      }
+    }
+    assert.deepEqual(seenFree.sort(), [...FREE_OPTIONAL].sort());
+  });
+
+  test('every combination of tag values matches exactly one branch', () => {
+    for (const { node, path } of collectNodes(factsSchema).filter(({ node }) => node.anyOf !== undefined)) {
+      for (const combination of listTagCombinations(node)) {
+        const matching = node.anyOf.filter((branch) => branchMatchesTags(branch, combination));
+        assert.equal(matching.length, 1, path + ' ' + JSON.stringify(combination) + ' must match exactly one branch');
+      }
     }
   });
 
@@ -294,4 +447,69 @@ describe('facts schema', () => {
       assert.ok(verdict.errors.includes(expectedError), 'errors: ' + JSON.stringify(verdict.errors));
     });
   }
+
+  const presenceValidCases = [
+    ['head_state unsafe_name without branch', (facts) => { facts.repository.head_state = 'unsafe_name'; delete facts.repository.branch; }],
+    ['a renamed binary history path', (facts) => { Object.assign(facts.history.paths.items[0], { binary: true, added: undefined, removed: undefined }); }],
+    ['a modified text history path', (facts) => { Object.assign(facts.history.paths.items[1], { status: 'modified', binary: false, added: 1, removed: 2 }); }],
+    ['a copied dirty path with old_path', (facts) => { facts.dirty.paths.items[0].index_status = 'copied'; }],
+    ['an untracked dirty path without old_path', (facts) => { Object.assign(facts.dirty.paths.items[0], { index_status: 'untracked', old_path: undefined }); }]
+  ];
+
+  for (const [name, mutate] of presenceValidCases) {
+    test('accepts ' + name, () => {
+      const facts = makeFacts();
+      mutate(facts);
+      assert.deepEqual(validate(facts), { ok: true, errors: [] });
+    });
+  }
+
+  const presenceInvalidCases = [
+    ['head_state branch without branch', (facts) => delete facts.repository.branch, '$.repository'],
+    ['head_state detached with branch', (facts) => { facts.repository.head_state = 'detached'; }, '$.repository'],
+    ['head_state unsafe_name with branch', (facts) => { facts.repository.head_state = 'unsafe_name'; }, '$.repository'],
+    ['history available without merge_base', (facts) => delete facts.history.merge_base, '$.history'],
+    ['history unavailable with merge_base', (facts) => { facts.history.status = 'unavailable'; }, '$.history'],
+    ['a renamed history path without old_path', (facts) => delete facts.history.paths.items[0].old_path, '$.history.paths.items[0]'],
+    ['a renamed history path without similarity', (facts) => delete facts.history.paths.items[0].similarity, '$.history.paths.items[0]'],
+    ['a text history path without added', (facts) => delete facts.history.paths.items[0].added, '$.history.paths.items[0]'],
+    ['a text history path without removed', (facts) => delete facts.history.paths.items[0].removed, '$.history.paths.items[0]'],
+    ['a binary history path with added', (facts) => { facts.history.paths.items[1].added = 1; }, '$.history.paths.items[1]'],
+    ['a binary history path with removed', (facts) => { facts.history.paths.items[1].removed = 1; }, '$.history.paths.items[1]'],
+    ['a history path that is not renamed with old_path', (facts) => { facts.history.paths.items[1].old_path = localText('was.bin'); }, '$.history.paths.items[1]'],
+    ['a history path that is not renamed with similarity', (facts) => { facts.history.paths.items[1].similarity = 90; }, '$.history.paths.items[1]'],
+    ['a renamed dirty path without old_path', (facts) => delete facts.dirty.paths.items[0].old_path, '$.dirty.paths.items[0]'],
+    ['a copied dirty path without old_path', (facts) => { Object.assign(facts.dirty.paths.items[0], { index_status: 'copied', old_path: undefined }); }, '$.dirty.paths.items[0]'],
+    ['a modified dirty path with old_path', (facts) => { facts.dirty.paths.items[0].index_status = 'modified'; }, '$.dirty.paths.items[0]'],
+    ['a fetched reference without item', (facts) => delete facts.references.items[0].item, '$.references.items[0]'],
+    ['an unavailable reference with item', (facts) => { facts.references.items[0].lookup = 'unavailable'; }, '$.references.items[0]']
+  ];
+
+  for (const [name, mutate, path] of presenceInvalidCases) {
+    test('rejects ' + name + ' with one anyOf error', () => {
+      const facts = makeFacts();
+      mutate(facts);
+      assert.deepEqual(validate(facts), { ok: false, errors: [path + ': anyOf: matches no branch'] });
+    });
+  }
+
+  for (const field of SHORT_FIELDS) {
+    const valuePath = field.replace(/\[\]/g, '[0]');
+    test(valuePath + ' of ' + CHUNK_LIMIT + ' code points passes and one more fails', () => {
+      const facts = makeFacts();
+      setFactValue(facts, valuePath, makeCodePoints(CHUNK_LIMIT));
+      assert.deepEqual(validate(facts), { ok: true, errors: [] });
+      setFactValue(facts, valuePath, makeCodePoints(CHUNK_LIMIT + 1));
+      assert.deepEqual(validate(facts), { ok: false, errors: [valuePath + ': maxLength: more than ' + CHUNK_LIMIT + ' characters'] });
+    });
+  }
+
+  test('a chunk of ' + CHUNK_LIMIT + ' code points passes and one more fails', () => {
+    const facts = makeFacts();
+    const chunksPath = '$.history.commits.items[0].subject.chunks';
+    setFactValue(facts, chunksPath, [makeCodePoints(CHUNK_LIMIT)]);
+    assert.deepEqual(validate(facts), { ok: true, errors: [] });
+    setFactValue(facts, chunksPath, [makeCodePoints(CHUNK_LIMIT + 1)]);
+    assert.deepEqual(validate(facts), { ok: false, errors: [chunksPath + '[0]: maxLength: more than ' + CHUNK_LIMIT + ' characters'] });
+  });
 });

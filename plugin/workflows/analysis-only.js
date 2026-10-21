@@ -18,6 +18,8 @@ export const meta = {
  *   plugin/workflow-src/lib/decide.js
  *   plugin/workflow-src/lib/brief.js
  *   plugin/workflow-src/lib/result.js
+ *   plugin/workflow-src/lib/waves.js
+ *   plugin/workflow-src/lib/routing.js
  *   plugin/workflow-src/analysis-only/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
  */
@@ -491,25 +493,35 @@ const BRIEF_SCHEMA = {
  * Invariants
  *   Pure: no clock, no randomness, no I/O. The schema is a parameter.
  *   Validation keywords: type (one string), enum, required, properties,
- *   additionalProperties (false only), items, minItems, minLength. Annotation
- *   keywords $schema, title and description are accepted and change nothing.
+ *   additionalProperties (false only), items, minItems, minLength, maxLength,
+ *   anyOf. Annotation keywords $schema, title and description are accepted
+ *   and change nothing.
  *   Fails closed: the whole schema is walked before the value is read, and
  *   any other keyword, a non-object schema, or a keyword value of the wrong
  *   shape throws. A schema edit that adds a keyword cannot pass unchecked.
+ *   anyOf must be a non-empty array of schema objects, and every branch is
+ *   walked even when no value reaches it, so a bad unreachable branch throws.
  *   A property whose value is undefined counts as absent, as it does in JSON.
  *   type object means a plain object: not null and not an array.
- *   When type fails, the other keywords at that path are not checked.
- *   minLength counts Unicode code points, not UTF-16 units, and applies to
- *   any string value, with or without type. It ignores non-string values.
+ *   When type fails, the other keywords at that path are not checked,
+ *   anyOf included.
+ *   minLength and maxLength count Unicode code points, not UTF-16 units, and
+ *   apply to any string value, with or without type. They ignore non-string
+ *   values.
+ *   A value passes anyOf when at least one branch gives no errors. Otherwise
+ *   anyOf adds exactly one error at that path, and no branch error is kept.
  *   Every string value whose schema has type string, no enum and no
  *   minLength must hold a non-whitespace character. An enum or a minLength
  *   governs when present, so an enum may list the empty string and a
- *   minLength may accept a whitespace-only string.
+ *   minLength may accept a whitespace-only string. maxLength does not govern.
  *
  * Why
  *   A brief is written by a model and read by decide(). A hand-kept check
  *   drifts from the schema one field at a time. Checking against the schema
  *   itself keeps the two the same by construction.
+ *   anyOf is the one combinator here because the structured outputs docs list
+ *   anyOf as supported and do not list if, then, else, oneOf or not. A schema
+ *   that uses anyOf can still be an agent output schema.
  */
 
 function supportedSchemaKeywords() {
@@ -524,7 +536,9 @@ function supportedSchemaKeywords() {
     'additionalProperties',
     'items',
     'minItems',
-    'minLength'
+    'minLength',
+    'maxLength',
+    'anyOf'
   ];
 }
 
@@ -565,6 +579,9 @@ function assertSupportedSchema(schema, path) {
   if (schema.items !== undefined) {
     assertSupportedSchema(schema.items, path + '[]');
   }
+  if (schema.anyOf !== undefined) {
+    schema.anyOf.forEach((branch, index) => assertSupportedSchema(branch, path + '.anyOf[' + index + ']'));
+  }
 }
 
 function isPrimitiveEnumValue(candidate) {
@@ -593,6 +610,12 @@ function assertKeywordShapes(schema, path) {
   }
   if (schema.minLength !== undefined && !(Number.isInteger(schema.minLength) && schema.minLength >= 0)) {
     failSchema(path, 'minLength must be a non-negative integer');
+  }
+  if (schema.maxLength !== undefined && !(Number.isInteger(schema.maxLength) && schema.maxLength >= 0)) {
+    failSchema(path, 'maxLength must be a non-negative integer');
+  }
+  if (schema.anyOf !== undefined && !(Array.isArray(schema.anyOf) && schema.anyOf.length > 0)) {
+    failSchema(path, 'anyOf must be a non-empty array of schemas');
   }
 }
 
@@ -632,6 +655,16 @@ function isShortSchemaString(schema, value) {
   return schema.minLength !== undefined && typeof value === 'string' && countSchemaCodePoints(value) < schema.minLength;
 }
 
+function isLongSchemaString(schema, value) {
+  return schema.maxLength !== undefined && typeof value === 'string' && countSchemaCodePoints(value) > schema.maxLength;
+}
+
+function matchesSchemaBranch(branch, value, path) {
+  const branchErrors = [];
+  collectSchemaErrors(branch, value, path, branchErrors);
+  return branchErrors.length === 0;
+}
+
 function collectSchemaErrors(schema, value, path, errors) {
   if (schema.type !== undefined && !matchesSchemaType(schema.type, value)) {
     errors.push(path + ': type ' + schema.type + ' expected');
@@ -643,8 +676,14 @@ function collectSchemaErrors(schema, value, path, errors) {
   if (isShortSchemaString(schema, value)) {
     errors.push(path + ': minLength: fewer than ' + schema.minLength + ' characters');
   }
+  if (isLongSchemaString(schema, value)) {
+    errors.push(path + ': maxLength: more than ' + schema.maxLength + ' characters');
+  }
   if (schema.enum !== undefined && schema.enum.indexOf(value) === -1) {
     errors.push(path + ': enum: not one of ' + schema.enum.join(', '));
+  }
+  if (schema.anyOf !== undefined && !schema.anyOf.some((branch) => matchesSchemaBranch(branch, value, path))) {
+    errors.push(path + ': anyOf: matches no branch');
   }
   if (isSchemaRecord(value)) {
     collectObjectErrors(schema, value, path, errors);
@@ -1451,6 +1490,480 @@ function isResultRecord(value) {
 
 function countCharacter(text, character) {
   return text.split(character).length - 1;
+}
+
+/*
+ * waves.js: computes the next ready wave of plan steps.
+ *
+ * Inputs
+ *   computeWave(steps, doneIds)
+ *     steps    the plan steps, in plan order. Each step is an object with
+ *              id (string), files (array of path strings) and depends_on
+ *              (array of step ids, or null, or absent).
+ *     doneIds  the ids of the steps already done. Entries that are not
+ *              strings, or that name no step, are ignored.
+ *
+ * Outputs
+ *   computeWave  {ok: true, all_done, wave, remaining} when the plan is valid:
+ *                  remaining  the count of steps not done.
+ *                  wave       the step ids to run now, in plan order. Empty
+ *                             only when all_done is true.
+ *                  all_done   true when remaining is 0.
+ *                {ok: false, problem} when the plan is not valid, or when
+ *                steps remain but none can run. problem is one plain line.
+ *
+ * Invariants
+ *   Pure: no clock, no randomness, no I/O. Inputs are never changed.
+ *   The rule's home and parity oracle is
+ *   plugin/skills/next-wave/scripts/next-wave.sh: COMPUTATION items 3 to 5,
+ *   its VALIDATION in the same order (shape gate, empty, missing id,
+ *   duplicate id, unknown dependency, cycle, safe-id charset) and its
+ *   defensive stall check. tests/workflow-scripts/waves.test.mjs runs both on
+ *   the same plans and requires the same outcome. A change to the rule lands
+ *   in next-wave.sh and here together.
+ *   Only two things differ from next-wave.sh:
+ *     The input is a list of done ids, not a run ledger. Deriving that list
+ *     (epoch scope, event projection) is the caller's job.
+ *     The safe-id check is strict at the end of the string. jq's `$` also
+ *     matches before a final line feed, so next-wave.sh accepts an id such as
+ *     "STEP-001" followed by a line feed. computeWave rejects it.
+ *
+ * Why
+ *   Both engines must dispatch the same waves from the same plan. The rule
+ *   lives in one place, next-wave.sh, and this mirror is held to it by the
+ *   parity test rather than by review.
+ */
+
+function computeWave(steps, doneIds) {
+  const problem = findWavePlanProblem(steps);
+  if (problem !== '') {
+    return { ok: false, problem: problem };
+  }
+  if (!Array.isArray(doneIds)) {
+    return { ok: false, problem: 'done ids is not an array' };
+  }
+  const doneSet = new Set(doneIds.filter((doneId) => typeof doneId === 'string'));
+  const notDone = steps.filter((step) => !doneSet.has(step.id));
+  const ready = notDone.filter((step) => readStepDependencies(step).every((dependency) => doneSet.has(dependency)));
+  const wave = pickGreedyWave(ready, steps);
+  if (notDone.length > 0 && wave.length === 0) {
+    return { ok: false, problem: 'remaining steps exist but no step is ready (unsatisfiable dependencies)' };
+  }
+  return { ok: true, all_done: notDone.length === 0, wave: wave, remaining: notDone.length };
+}
+
+function findWavePlanProblem(steps) {
+  if (!Array.isArray(steps)) {
+    return 'plan.steps is not an array';
+  }
+  const shapeProblem = findStepShapeProblem(steps);
+  if (shapeProblem !== '') {
+    return shapeProblem;
+  }
+  if (steps.length === 0) {
+    return 'plan.steps is empty or absent; nothing to schedule';
+  }
+  if (steps.some((step) => step.id === '')) {
+    return 'a plan step is missing an id';
+  }
+  const duplicateId = findDuplicateStepId(steps);
+  if (duplicateId !== null) {
+    return 'duplicate plan step id: ' + duplicateId;
+  }
+  const unknownDependency = findUnknownDependency(steps);
+  if (unknownDependency !== null) {
+    return 'depends_on references unknown step id: ' + unknownDependency;
+  }
+  if (hasDependencyCycle(steps)) {
+    return 'dependency cycle detected among plan steps';
+  }
+  const unsafeId = findUnsafeStepId(steps);
+  if (unsafeId !== null) {
+    return 'plan step id or depends_on entry fails the safe-id charset: ' + JSON.stringify(unsafeId);
+  }
+  return '';
+}
+
+function findStepShapeProblem(steps) {
+  for (const step of steps) {
+    const stepProblem = describeStepShapeProblem(step);
+    if (stepProblem !== '') {
+      return stepProblem;
+    }
+  }
+  return '';
+}
+
+function describeStepShapeProblem(step) {
+  if (!isWaveStepRecord(step)) {
+    return 'a plan step is not an object: ' + JSON.stringify(step);
+  }
+  if (!Object.prototype.hasOwnProperty.call(step, 'id')) {
+    return 'a plan step is missing an id';
+  }
+  if (typeof step.id !== 'string') {
+    return 'a plan step id is not a string: ' + JSON.stringify(step.id);
+  }
+  if (step.depends_on === undefined || step.depends_on === null) {
+    return '';
+  }
+  if (!Array.isArray(step.depends_on)) {
+    return 'a plan step depends_on is not an array: ' + JSON.stringify(step.depends_on);
+  }
+  const badIndex = step.depends_on.findIndex((dependency) => typeof dependency !== 'string');
+  if (badIndex !== -1) {
+    return 'a plan step depends_on entry is not a string: ' + JSON.stringify(step.depends_on[badIndex]);
+  }
+  return '';
+}
+
+function isWaveStepRecord(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function readStepDependencies(step) {
+  return Array.isArray(step.depends_on) ? step.depends_on : [];
+}
+
+function findDuplicateStepId(steps) {
+  const seenIds = new Set();
+  for (const step of steps) {
+    if (seenIds.has(step.id)) {
+      return step.id;
+    }
+    seenIds.add(step.id);
+  }
+  return null;
+}
+
+function findUnknownDependency(steps) {
+  const stepIds = new Set(steps.map((step) => step.id));
+  for (const step of steps) {
+    const unknown = readStepDependencies(step).find((dependency) => !stepIds.has(dependency));
+    if (unknown !== undefined) {
+      return unknown;
+    }
+  }
+  return null;
+}
+
+function hasDependencyCycle(steps) {
+  const dependenciesById = new Map(steps.map((step) => [step.id, readStepDependencies(step)]));
+  let remainingIds = steps.map((step) => step.id);
+  for (let pass = 0; pass < steps.length; pass += 1) {
+    const remainingSet = new Set(remainingIds);
+    remainingIds = remainingIds.filter((stepId) => dependenciesById.get(stepId).some((dependency) => remainingSet.has(dependency)));
+  }
+  return remainingIds.length > 0;
+}
+
+function findUnsafeStepId(steps) {
+  for (const step of steps) {
+    const candidates = [step.id].concat(readStepDependencies(step));
+    const unsafe = candidates.find((candidate) => !isSafeStepId(candidate));
+    if (unsafe !== undefined) {
+      return unsafe;
+    }
+  }
+  return null;
+}
+
+function isSafeStepId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9._-]+$/.test(value);
+}
+
+function pickGreedyWave(ready, steps) {
+  const wave = [];
+  const claimedFiles = new Set();
+  for (const step of ready) {
+    if (scopeConflictsWithAll(step, steps)) {
+      if (wave.length === 0) {
+        wave.push(step.id);
+        return wave;
+      }
+      continue;
+    }
+    if (step.files.some((file) => claimedFiles.has(file))) {
+      continue;
+    }
+    wave.push(step.id);
+    step.files.forEach((file) => claimedFiles.add(file));
+  }
+  return wave;
+}
+
+function scopeConflictsWithAll(step, steps) {
+  if (!Array.isArray(step.files) || step.files.length === 0) {
+    return true;
+  }
+  if (step.files.some((file) => typeof file !== 'string' || file === '')) {
+    return true;
+  }
+  if (!step.files.every(isCanonicalScopePath)) {
+    return true;
+  }
+  return step.files.some((file) => isDirectoryOfOtherStepFile(file, step.id, steps));
+}
+
+function isCanonicalScopePath(file) {
+  if (/[*?[]/.test(file)) {
+    return false;
+  }
+  return file.split('/').every((component) => component !== '' && component !== '.' && component !== '..');
+}
+
+function isDirectoryOfOtherStepFile(file, stepId, steps) {
+  const prefix = file + '/';
+  return steps.some((other) => other.id !== stepId
+    && Array.isArray(other.files)
+    && other.files.some((otherFile) => typeof otherFile === 'string' && otherFile.startsWith(prefix)));
+}
+
+/*
+ * routing.js: reads the routing lines a committed script prints, as a runner
+ * relays them in one text field.
+ *
+ * Inputs
+ *   parseRoutingLines(text, spec)
+ *     text  string. The script's stdout, word for word.
+ *     spec  plain object, a positive allowlist. Each own key is a routing
+ *           key and maps to an entry:
+ *             {pattern, required}  a value line. pattern is a RegExp the
+ *                                  whole value must match. required is a
+ *                                  boolean.
+ *             {block, required}    a block line with no inline value,
+ *                                  followed by its two-space indented
+ *                                  lines. block is a spec of the same shape
+ *                                  whose entries are value lines only.
+ *           Every key matches routingKeyPattern(). A block spec may be
+ *           empty; the top-level spec may be empty.
+ *
+ * Grammar
+ *   Lines end in LF. The text may end in one LF, or in none. The empty text
+ *   has no lines.
+ *   No CR anywhere, no blank line, no leading whitespace on a top-level line.
+ *   A line is `key: value`, split at the first `: `, or `key:` for a block
+ *   key, which has no inline value.
+ *   A block line is a top-level `key:` line. The lines right after it that
+ *   start with exactly two spaces then a non-space are its lines, in the
+ *   same `key: value` form. An indented line anywhere else is malformed.
+ *   Keys match routingKeyPattern().
+ *
+ * Outputs
+ *   parseRoutingLines  {ok: true, values} when the text holds every
+ *                      required key and nothing else is wrong. values maps
+ *                      each key present to its value string, and each block
+ *                      key present to an object of its own values.
+ *                      Otherwise {ok: false, problem, key} or
+ *                      {ok: false, problem, line}:
+ *                        missing    key: a required key is absent. A
+ *                                   required key inside a block is named
+ *                                   `block.key`.
+ *                        malformed  line: the line breaks the grammar, or
+ *                                   its value fails its pattern, or a block
+ *                                   key has an inline value, or a value key
+ *                                   has none.
+ *                        unknown    line: the key is not in the spec.
+ *                        duplicate  line: the key was already given, at
+ *                                   the same level of the same block.
+ *                      line is the 1-based line number.
+ *   routingProblems    every problem code, in no particular order.
+ *   routingKeyPattern  the RegExp every key matches.
+ *
+ * Invariants
+ *   Pure: no clock, no randomness, no I/O.
+ *   A pattern is always checked as a full match of the value, even when the
+ *   spec RegExp has no anchors. Its g, y and m flags are dropped.
+ *   A problem never echoes a value or an unknown key. It names a spec key or
+ *   a line number only.
+ *   Lines are checked top to bottom and the first line problem is returned.
+ *   Missing keys are checked only when every line is clean, top-level keys
+ *   in spec order first, then the required keys of each block given.
+ *   A spec key is looked up as an own property, so a key such as
+ *   constructor is unknown unless the spec names it.
+ *   An invalid spec, or text that is not a string, throws.
+ *
+ * Why
+ *   A workflow cannot run a script itself. A runner runs it and relays its
+ *   stdout, and the workflow must block when that relay lost, added or bent
+ *   a line. One generic parser checks every script's lines the same way.
+ *   Each script's header stays the home of its own output contract, and the
+ *   spec for it lands with the step that reads it.
+ */
+
+function routingProblems() {
+  return ['missing', 'malformed', 'unknown', 'duplicate'];
+}
+
+function routingKeyPattern() {
+  return /^[a-z][a-z0-9_]*$/;
+}
+
+function parseRoutingLines(text, spec) {
+  if (typeof text !== 'string') {
+    throw new Error('parseRoutingLines: text must be a string');
+  }
+  const compiledSpec = compileRoutingSpec(spec, 'spec', true);
+  const lines = splitRoutingText(text);
+  const values = {};
+  const seenKeys = new Set();
+  let openBlock = null;
+  for (let index = 0; index < lines.length; index++) {
+    const lineNumber = index + 1;
+    const line = lines[index];
+    if (line === '' || line.includes('\r')) {
+      return routingLineProblem('malformed', lineNumber);
+    }
+    if (/^\s/.test(line)) {
+      if (openBlock === null || !/^ {2}\S/.test(line)) {
+        return routingLineProblem('malformed', lineNumber);
+      }
+      const blockProblem = readRoutingEntry(line.slice(2), openBlock.entries, openBlock.seenKeys, openBlock.values);
+      if (blockProblem !== null) {
+        return routingLineProblem(blockProblem, lineNumber);
+      }
+      continue;
+    }
+    const topProblem = readRoutingEntry(line, compiledSpec, seenKeys, values);
+    if (topProblem !== null) {
+      return routingLineProblem(topProblem, lineNumber);
+    }
+    openBlock = openRoutingBlock(line, compiledSpec, values);
+  }
+  const missingKey = findMissingRoutingKey(compiledSpec, values);
+  if (missingKey !== null) {
+    return { ok: false, problem: 'missing', key: missingKey };
+  }
+  return { ok: true, values: values };
+}
+
+function splitRoutingText(text) {
+  if (text === '') {
+    return [];
+  }
+  const body = text.endsWith('\n') ? text.slice(0, -1) : text;
+  return body.split('\n');
+}
+
+function readRoutingEntry(line, entries, seenKeys, values) {
+  const parsed = splitRoutingLine(line);
+  if (parsed === null || !routingKeyPattern().test(parsed.key)) {
+    return 'malformed';
+  }
+  if (!entries.has(parsed.key)) {
+    return 'unknown';
+  }
+  if (seenKeys.has(parsed.key)) {
+    return 'duplicate';
+  }
+  seenKeys.add(parsed.key);
+  const entry = entries.get(parsed.key);
+  if (entry.block !== null) {
+    if (parsed.value !== null) {
+      return 'malformed';
+    }
+    values[parsed.key] = {};
+    return null;
+  }
+  if (parsed.value === null || !entry.pattern.test(parsed.value)) {
+    return 'malformed';
+  }
+  values[parsed.key] = parsed.value;
+  return null;
+}
+
+function splitRoutingLine(line) {
+  const separatorIndex = line.indexOf(': ');
+  if (separatorIndex >= 0) {
+    return { key: line.slice(0, separatorIndex), value: line.slice(separatorIndex + 2) };
+  }
+  if (line.endsWith(':')) {
+    return { key: line.slice(0, -1), value: null };
+  }
+  return null;
+}
+
+function openRoutingBlock(line, compiledSpec, values) {
+  const key = splitRoutingLine(line).key;
+  const entry = compiledSpec.get(key);
+  if (entry.block === null) {
+    return null;
+  }
+  return { entries: entry.block, seenKeys: new Set(), values: values[key] };
+}
+
+function findMissingRoutingKey(compiledSpec, values) {
+  for (const [key, entry] of compiledSpec) {
+    if (entry.required && !Object.prototype.hasOwnProperty.call(values, key)) {
+      return key;
+    }
+  }
+  for (const [key, entry] of compiledSpec) {
+    if (entry.block === null || !Object.prototype.hasOwnProperty.call(values, key)) {
+      continue;
+    }
+    const missingInBlock = findMissingRoutingKey(entry.block, values[key]);
+    if (missingInBlock !== null) {
+      return key + '.' + missingInBlock;
+    }
+  }
+  return null;
+}
+
+function routingLineProblem(problem, lineNumber) {
+  return { ok: false, problem: problem, line: lineNumber };
+}
+
+function isRoutingRecord(value) {
+  return Object.prototype.toString.call(value) === '[object Object]';
+}
+
+function compileRoutingSpec(spec, where, allowBlocks) {
+  if (!isRoutingRecord(spec)) {
+    throw new Error('parseRoutingLines: ' + where + ' must be a plain object');
+  }
+  const entries = new Map();
+  for (const key of Object.keys(spec)) {
+    if (!routingKeyPattern().test(key)) {
+      throw new Error('parseRoutingLines: ' + where + ' has a key that is not a routing key: ' + JSON.stringify(key));
+    }
+    entries.set(key, compileRoutingEntry(spec[key], where + '.' + key, allowBlocks));
+  }
+  return entries;
+}
+
+function compileRoutingEntry(entry, where, allowBlocks) {
+  if (!isRoutingRecord(entry)) {
+    throw new Error('parseRoutingLines: ' + where + ' must be a plain object');
+  }
+  for (const field of Object.keys(entry)) {
+    if (field !== 'pattern' && field !== 'block' && field !== 'required') {
+      throw new Error('parseRoutingLines: ' + where + ' has an unknown field ' + JSON.stringify(field));
+    }
+  }
+  if (typeof entry.required !== 'boolean') {
+    throw new Error('parseRoutingLines: ' + where + '.required must be a boolean');
+  }
+  const hasPattern = Object.prototype.hasOwnProperty.call(entry, 'pattern');
+  const hasBlock = Object.prototype.hasOwnProperty.call(entry, 'block');
+  if (hasPattern === hasBlock) {
+    throw new Error('parseRoutingLines: ' + where + ' must have exactly one of pattern and block');
+  }
+  if (hasBlock) {
+    if (!allowBlocks) {
+      throw new Error('parseRoutingLines: ' + where + ' is a block inside a block');
+    }
+    return { required: entry.required, pattern: null, block: compileRoutingSpec(entry.block, where + '.block', false) };
+  }
+  return { required: entry.required, pattern: anchorRoutingPattern(entry.pattern, where), block: null };
+}
+
+function anchorRoutingPattern(pattern, where) {
+  if (Object.prototype.toString.call(pattern) !== '[object RegExp]') {
+    throw new Error('parseRoutingLines: ' + where + '.pattern must be a RegExp');
+  }
+  const keptFlags = pattern.flags.replace(/[gym]/g, '');
+  return new RegExp('^(?:' + pattern.source + ')$', keptFlags);
 }
 
 /*

@@ -340,9 +340,9 @@ run_suites() {
 #   plugin/skills/gather-facts/**, plugin/references/facts-schema.json,
 #     plugin/workflow-src/lib/schema.js, tests/workflow-scripts/harness.mjs,
 #     plugin/skills/_shared/{allowlist,containment,graphql-response}.sh
-#                                      -> test_gather_facts (facts-schema.json and scripts/gather-facts.sh
-#                                         ALSO -> test_workflow_scripts; the _shared libs keep their
-#                                         other routes by union)
+#                                      -> test_gather_facts (facts-schema.json, scripts/gather-facts.sh
+#                                         and scripts/gather-facts.jq ALSO -> test_workflow_scripts;
+#                                         the _shared libs keep their other routes by union)
 #   plugin/skills/create-working-branch/**, plugin/skills/_shared/{allowlist,git-refusals}.sh
 #                                      -> test_create_working_branch
 #   plugin/skills/molt/**, plugin/skills/_shared/{allowlist,containment,git-refusals}.sh
@@ -355,8 +355,15 @@ run_suites() {
 #   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json, plugin/agents/overlord.md,
 #     plugin/skills/route-workflow/SKILL.md,
 #     plugin/references/decision-autonomy-table.json, plugin/references/decision-brief-schema.json,
-#     plugin/references/facts-schema.json, tests/workflow-scripts/**
-#                                      -> test_workflow_scripts (build drift check + node tests)
+#     plugin/references/facts-schema.json, plugin/references/plan-schema.json,
+#     plugin/skills/gather-facts/scripts/{gather-facts.sh,gather-facts.jq},
+#     plugin/skills/next-wave/scripts/next-wave.sh, tests/next-wave/**,
+#     plugin/skills/_shared/{containment,ledger-engine-io}.sh,
+#     plugin/skills/create-working-branch/scripts/create-working-branch.sh,
+#     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**
+#                                      -> test_workflow_scripts (build drift check + node tests;
+#                                         every path except tests/workflow-scripts/** keeps its
+#                                         other routes by union)
 #   tests/reports/**                                    -> validate_reports
 #   plugin/agents/{cerebrate,local-reviewer,github-reviewer}.md,
 #     plugin/skills/github-review-loop/SKILL.md         -> validate_workflows (exit_reason contracts)
@@ -634,15 +641,22 @@ map_path() {
   fi
 
   # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
-  # build, the two data files the build copies in, the facts contract the node tests validate, the
-  # overlord agent whose launch contract the node tests pin, the gather-facts entrypoint whose facts-file
-  # path pattern analysis-only.test.mjs cross-checks (its other gather-facts files route only to
-  # test_gather_facts), the route-workflow skill and the
-  # plugin/workflows/*.json definitions whose catalog parity route-catalog.test.mjs pins (the *.json
-  # path ALSO keeps its validate_workflows suites by union), and the node tests themselves. Every one of these except tests/workflow-scripts/* is
-  # ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule below), but policy_check
-  # NEVER RUNS node, so without this rule a source edit that leaves the generated script stale, or a
-  # data/agent edit that breaks a node test, would only be caught on push-to-main.
+  # build, the two data files the build copies in, the facts and plan contracts the node tests
+  # validate, the overlord agent whose launch contract the node tests pin, the gather-facts
+  # entrypoint whose facts-file path pattern analysis-only.test.mjs cross-checks and the jq
+  # assembly program facts-schema.test.mjs checks against the facts contract (the other
+  # gather-facts files route only to test_gather_facts), the create-working-branch.sh and
+  # bump-type.sh enums plan-schema.test.mjs pins, the next-wave.sh engine waves.test.mjs runs as
+  # its parity oracle together with the two _shared libs that engine sources (containment.sh,
+  # ledger-engine-io.sh) and the tests/next-wave/* fixtures it replays, the route-workflow skill
+  # and the plugin/workflows/*.json definitions whose catalog parity route-catalog.test.mjs pins,
+  # and the node tests themselves. Every path here except the node tests keeps its other routes
+  # by union (for example *.json keeps validate_workflows, next-wave.sh and its fixtures keep
+  # test_next_wave, the _shared libs keep test_engine and the rest). Every one of these except
+  # tests/workflow-scripts/* and tests/next-wave/* is ALSO a plugin/* file (policy_check
+  # prose-lints it via the wholesale rule below), but policy_check NEVER RUNS node, so without
+  # this rule a source edit that leaves the generated script stale, or a data/agent/script edit
+  # that breaks a node test, would only be caught on push-to-main.
   # (tools/test_workflow_scripts.sh and tools/build_workflows.mjs are covered by the tools/** leg.)
   if [[ "$p" == plugin/workflow-src/* \
      || "$p" == plugin/workflows/*.js \
@@ -651,7 +665,15 @@ map_path() {
      || "$p" == plugin/references/decision-autonomy-table.json \
      || "$p" == plugin/references/decision-brief-schema.json \
      || "$p" == plugin/references/facts-schema.json \
+     || "$p" == plugin/references/plan-schema.json \
      || "$p" == plugin/skills/gather-facts/scripts/gather-facts.sh \
+     || "$p" == plugin/skills/gather-facts/scripts/gather-facts.jq \
+     || "$p" == plugin/skills/next-wave/scripts/next-wave.sh \
+     || "$p" == tests/next-wave/* \
+     || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == plugin/skills/_shared/ledger-engine-io.sh \
+     || "$p" == plugin/skills/create-working-branch/scripts/create-working-branch.sh \
+     || "$p" == plugin/skills/bump-type/scripts/bump-type.sh \
      || "$p" == plugin/agents/overlord.md \
      || "$p" == tests/workflow-scripts/* ]]; then
     add_selected "$SUITE_TEST_WORKFLOW_SCRIPTS" "$p (workflow-script source/build/data/test)"
@@ -1328,15 +1350,23 @@ self_test() {
 
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
-  #    the generated-script, data-file, overlord, route-workflow skill or workflow-definition
-  #    selector were dropped. Probe each directly so
+  #    the generated-script, data-file, overlord, route-workflow skill, workflow-definition or
+  #    node-test-read script/fixture selector were dropped. Probe each directly so
   #    removing any one selector FAILS here.
   local workflow_input
   for workflow_input in \
     "plugin/references/decision-autonomy-table.json" \
     "plugin/references/decision-brief-schema.json" \
     "plugin/references/facts-schema.json" \
+    "plugin/references/plan-schema.json" \
     "plugin/skills/gather-facts/scripts/gather-facts.sh" \
+    "plugin/skills/gather-facts/scripts/gather-facts.jq" \
+    "plugin/skills/next-wave/scripts/next-wave.sh" \
+    "tests/next-wave/ledger-x.json" \
+    "plugin/skills/_shared/containment.sh" \
+    "plugin/skills/_shared/ledger-engine-io.sh" \
+    "plugin/skills/create-working-branch/scripts/create-working-branch.sh" \
+    "plugin/skills/bump-type/scripts/bump-type.sh" \
     "plugin/workflows/analysis-only.js" \
     "plugin/agents/overlord.md" \
     "plugin/skills/route-workflow/SKILL.md" \

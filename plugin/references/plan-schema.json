@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Plan",
-  "description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, and never into a shell command.",
+  "description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md. It reaches a shell command only as one argument that first passes the identifier gate there (Shell Identifier Discipline), or through an inputs file the script reads as data (Inert Inputs-File Navigator Pattern), and is never spliced into command text.",
   "type": "object",
   "additionalProperties": false,
   "required": [

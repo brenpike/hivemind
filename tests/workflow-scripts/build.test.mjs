@@ -1,17 +1,31 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { appendFileSync, cpSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { loadWorkflow } from './harness.mjs';
-import { buildWorkflow, builtPathFor, discoverWorkflowIds, findOrphanWorkflowIds, runCli, stripCommentsAndStrings } from '../../tools/build_workflows.mjs';
+import { loadWorkflow, loadWorkflowSource } from './harness.mjs';
+import {
+  LIB_FILES,
+  buildWorkflow,
+  builtPathFor,
+  discoverWorkflowIds,
+  findOrphanWorkflowIds,
+  isDraftWorkflow,
+  listDraftWorkflowIds,
+  listLiveWorkflowIds,
+  runCli,
+  stripCommentsAndStrings
+} from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const builderPath = join(repoRoot, 'tools/build_workflows.mjs');
 const REBUILD_COMMAND = 'node tools/build_workflows.mjs';
 const workflowIds = discoverWorkflowIds(repoRoot);
+const liveIds = listLiveWorkflowIds(repoRoot);
+const draftIds = listDraftWorkflowIds(repoRoot);
+const DRAFT_ID = 'draft-check';
 const scratchRoots = [];
 
 function readBuilt(id) {
@@ -24,6 +38,25 @@ function makeScratchCopy() {
   for (const dir of ['plugin/workflow-src', 'plugin/references', 'plugin/workflows']) {
     cpSync(join(repoRoot, dir), join(scratchRoot, dir), { recursive: true });
   }
+  return scratchRoot;
+}
+
+/**
+ * Adds plugin/workflow-src/draft-check/ to a scratch copy: a copy of
+ * analysis-only renamed to draft-check, with a DRAFT marker.
+ */
+function addScratchDraft(scratchRoot) {
+  const draftDir = join(scratchRoot, 'plugin/workflow-src', DRAFT_ID);
+  cpSync(join(scratchRoot, 'plugin/workflow-src/analysis-only'), draftDir, { recursive: true });
+  const metaPath = join(draftDir, 'meta.js');
+  writeFileSync(metaPath, readFileSync(metaPath, 'utf8').replace('name: \'analysis-only\'', 'name: \'' + DRAFT_ID + '\''));
+  writeFileSync(join(draftDir, 'DRAFT'), 'contents are not read\n');
+  return draftDir;
+}
+
+function makeScratchDraftCopy() {
+  const scratchRoot = makeScratchCopy();
+  addScratchDraft(scratchRoot);
   return scratchRoot;
 }
 
@@ -150,9 +183,112 @@ describe('build_workflows guards', () => {
   test('stripCommentsAndStrings keeps code and drops comments and literals', () => {
     assert.equal(stripCommentsAndStrings('a /* x */ b // y\nc \'d\' "e" `f`'), 'a  b \nc "" "" ""');
   });
+  test('LIB_FILES is every .js in plugin/workflow-src/lib/', () => {
+    const libFiles = readdirSync(join(repoRoot, 'plugin/workflow-src/lib'), { withFileTypes: true })
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
+      .map((entry) => entry.name)
+      .sort();
+    assert.deepEqual([...LIB_FILES].sort(), libFiles);
+  });
+  test('live ids and draft ids split the workflow ids', () => {
+    assert.deepEqual([...liveIds, ...draftIds].sort(), workflowIds);
+    assert.ok(liveIds.every((id) => !draftIds.includes(id)));
+    assert.ok(liveIds.includes('analysis-only'));
+  });
 });
 
-for (const id of workflowIds) {
+describe('build_workflows drafts', () => {
+  test('a DRAFT regular file marks a draft and its contents are not read', () => {
+    const scratchRoot = makeScratchDraftCopy();
+    writeFileSync(join(scratchRoot, 'plugin/workflow-src', DRAFT_ID, 'DRAFT'), '');
+    assert.equal(isDraftWorkflow(scratchRoot, DRAFT_ID), true);
+    assert.equal(isDraftWorkflow(scratchRoot, 'analysis-only'), false);
+    assert.deepEqual(listDraftWorkflowIds(scratchRoot), [...draftIds, DRAFT_ID].sort());
+    assert.deepEqual(listLiveWorkflowIds(scratchRoot), liveIds);
+  });
+  test('write skips the draft and prints a skipped line', () => {
+    const scratchRoot = makeScratchDraftCopy();
+    const build = runCliIn(scratchRoot, []);
+    assert.equal(build.code, 0);
+    assert.ok(build.stdout.includes('wrote plugin/workflows/analysis-only.js'), build.stdout);
+    assert.ok(build.stdout.includes('skipped plugin/workflows/' + DRAFT_ID + '.js'), build.stdout);
+    assert.ok(build.stdout.includes('plugin/workflow-src/' + DRAFT_ID + '/DRAFT'), build.stdout);
+    assert.ok(!build.stdout.includes('wrote plugin/workflows/' + DRAFT_ID + '.js'), build.stdout);
+    assert.equal(existsSync(join(scratchRoot, builtPathFor(DRAFT_ID))), false);
+  });
+  test('--check passes on a draft with no built file', () => {
+    const run = runCliIn(makeScratchDraftCopy(), ['--check']);
+    assert.equal(run.code, 0, run.stderr);
+    assert.equal(run.stderr, '');
+  });
+  test('--check fails when a draft has a built file, naming the file and the marker', () => {
+    const scratchRoot = makeScratchDraftCopy();
+    writeFileSync(join(scratchRoot, builtPathFor(DRAFT_ID)), buildWorkflow(scratchRoot, DRAFT_ID));
+    const run = runCliIn(scratchRoot, ['--check']);
+    assert.equal(run.code, 1);
+    assert.ok(run.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js exists but plugin/workflow-src/' + DRAFT_ID + '/DRAFT'), run.stderr);
+    assert.ok(!run.stderr.includes('orphan'), run.stderr);
+  });
+  test('--check fails on a stray DRAFT marker on a live workflow', () => {
+    const scratchRoot = makeScratchCopy();
+    writeFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/DRAFT'), '');
+    const run = runCliIn(scratchRoot, ['--check']);
+    assert.equal(run.code, 1);
+    assert.ok(run.stderr.includes('plugin/workflows/analysis-only.js exists but plugin/workflow-src/analysis-only/DRAFT'), run.stderr);
+  });
+  test('--check fails on a draft that does not build', () => {
+    const scratchRoot = makeScratchDraftCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src', DRAFT_ID, 'main.js'), '\nimport x from \'y\';\n');
+    assert.throws(() => runCliIn(scratchRoot, ['--check']), new RegExp(DRAFT_ID + ': the built script uses import or require'));
+  });
+  test('removing the marker reports the script missing, and a stale one stale', () => {
+    const scratchRoot = makeScratchDraftCopy();
+    rmSync(join(scratchRoot, 'plugin/workflow-src', DRAFT_ID, 'DRAFT'));
+    const missing = runCliIn(scratchRoot, ['--check']);
+    assert.equal(missing.code, 1);
+    assert.ok(missing.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js is stale'), missing.stderr);
+    writeFileSync(join(scratchRoot, builtPathFor(DRAFT_ID)), readBuilt('analysis-only'));
+    const stale = runCliIn(scratchRoot, ['--check']);
+    assert.equal(stale.code, 1);
+    assert.ok(stale.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js is stale'), stale.stderr);
+  });
+  test('a DRAFT entry that is not a regular file fails both modes', () => {
+    const directoryRoot = makeScratchDraftCopy();
+    const directoryMarker = join(directoryRoot, 'plugin/workflow-src', DRAFT_ID, 'DRAFT');
+    rmSync(directoryMarker);
+    mkdirSync(directoryMarker);
+    const symlinkRoot = makeScratchDraftCopy();
+    const symlinkMarker = join(symlinkRoot, 'plugin/workflow-src', DRAFT_ID, 'DRAFT');
+    rmSync(symlinkMarker);
+    symlinkSync(join(symlinkRoot, 'plugin/workflow-src', DRAFT_ID, 'meta.js'), symlinkMarker);
+    for (const scratchRoot of [directoryRoot, symlinkRoot]) {
+      for (const argv of [[], ['--check']]) {
+        assert.throws(() => runCliIn(scratchRoot, argv), /plugin\/workflow-src\/draft-check\/DRAFT must be a regular file/);
+      }
+    }
+  });
+  test('the in-memory draft loads and its meta.name equals its id', async () => {
+    const scratchRoot = makeScratchDraftCopy();
+    const source = buildWorkflow(scratchRoot, DRAFT_ID);
+    const run = await loadWorkflowSource(source, DRAFT_ID + ' (in memory)').run({ args: undefined, results: {} });
+    assert.equal(run.meta.name, DRAFT_ID);
+  });
+});
+
+for (const id of draftIds) {
+  describe('draft plugin/workflow-src/' + id + '/', () => {
+    test('builds in memory and has no built file', () => {
+      assert.doesNotThrow(() => buildWorkflow(repoRoot, id));
+      assert.equal(existsSync(join(repoRoot, builtPathFor(id))), false);
+    });
+    test('meta.name equals the directory name', async () => {
+      const run = await loadWorkflowSource(buildWorkflow(repoRoot, id), id + ' (in memory)').run({ args: undefined, results: {} });
+      assert.equal(run.meta.name, id);
+    });
+  });
+}
+
+for (const id of liveIds) {
   describe('built ' + builtPathFor(id), () => {
     const source = readBuilt(id);
     test('matches a fresh build', () => {
@@ -167,14 +303,14 @@ for (const id of workflowIds) {
       const bannerStart = source.indexOf('/*\n * GENERATED by tools/build_workflows.mjs');
       assert.ok(metaEnd !== -1 && bannerStart === metaEnd + 5, 'banner must follow meta');
       const banner = source.slice(bannerStart, source.indexOf('*/', bannerStart));
-      for (const name of ['workflow-src/' + id + '/meta.js', 'workflow-src/' + id + '/main.js', 'workflow-src/lib/schema.js', 'workflow-src/lib/decide.js', 'decision-autonomy-table.json']) {
+      for (const name of ['workflow-src/' + id + '/meta.js', 'workflow-src/' + id + '/main.js', ...LIB_FILES.map((file) => 'workflow-src/lib/' + file), 'decision-autonomy-table.json']) {
         assert.ok(banner.includes(name), name);
       }
       assert.ok(banner.includes('Do not edit by hand'));
       assert.ok(banner.includes(REBUILD_COMMAND));
     });
     test('data constants and libraries come in build order', () => {
-      const markers = ['const AUTONOMY_TABLE = ', 'const BRIEF_SCHEMA = ', 'function validateSchema(', 'function decisionReasons(', 'function renderQuestions(', 'function resultFields('];
+      const markers = ['const AUTONOMY_TABLE = ', 'const BRIEF_SCHEMA = ', 'function validateSchema(', 'function decisionReasons(', 'function renderQuestions(', 'function resultFields(', 'function computeWave(', 'function parseRoutingLines('];
       const positions = markers.map((marker) => source.indexOf(marker));
       assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
       assert.deepEqual([...positions].sort((left, right) => left - right), positions);

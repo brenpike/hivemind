@@ -4,10 +4,11 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs } from './harness.mjs';
+import { LIB_FILES } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const libDir = repoRoot + 'plugin/workflow-src/lib/';
-const libPaths = ['schema.js', 'decide.js', 'brief.js', 'result.js'].map((name) => libDir + name);
+const libPaths = LIB_FILES.map((name) => libDir + name);
 const table = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-autonomy-table.json', 'utf8'));
 const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
 const lib = loadLibs([libDir + 'schema.js', libDir + 'decide.js']);
