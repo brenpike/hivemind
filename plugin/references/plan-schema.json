@@ -7,6 +7,8 @@
   "required": [
     "summary",
     "branch",
+    "base",
+    "trunk_freshness",
     "classification",
     "breaking",
     "versioning",
@@ -21,6 +23,24 @@
     "branch": {
       "type": "string",
       "description": "Can carry external content. The working branch the run delivers on. A run that starts on a branch other than trunk names that branch."
+    },
+    "base": {
+      "type": "string",
+      "description": "Can carry external content. The branch the working branch is created from: trunk unless the work stacks on another branch. Never the working branch itself. The branch step passes it to create-working-branch."
+    },
+    "trunk_freshness": {
+      "type": "string",
+      "enum": [
+        "fresh",
+        "behind",
+        "ahead",
+        "diverged",
+        "no_remote",
+        "fetch_failed",
+        "no_local_trunk",
+        "no_trunk"
+      ],
+      "description": "Copied from repository.trunk_freshness in the facts file the plan was made from. The workflow checks it against the facts step and decides trunk freshness from the facts, not from this field."
     },
     "classification": {
       "type": "string",

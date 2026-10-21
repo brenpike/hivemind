@@ -7,6 +7,7 @@ import { loadLibs } from './harness.mjs';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/schema.js']);
 const planSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/plan-schema.json', 'utf8'));
+const factsSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/facts-schema.json', 'utf8'));
 
 const EXTERNAL_LABEL = 'Can carry external content.';
 const SUBSET_KEYWORDS = [
@@ -61,6 +62,8 @@ function makePlan() {
   return {
     summary: 'Add the plan schema.',
     branch: 'feature/409-plan-schema',
+    base: 'main',
+    trunk_freshness: 'fresh',
     classification: 'feature',
     breaking: false,
     versioning: { bump_trigger: 'yes', no_bump_match: 'no' },
@@ -126,6 +129,7 @@ describe('plan schema', () => {
     assert.deepEqual(labelled, [
       '$.summary',
       '$.branch',
+      '$.base',
       '$.steps[].id',
       '$.steps[].files[]',
       '$.steps[].outcome',
@@ -166,19 +170,26 @@ describe('plan schema', () => {
     assert.deepEqual(versioning.no_bump_match.enum, parseCaseValues(script, 'no_bump_match'));
   });
 
+  test('trunk_freshness matches the enum in facts-schema.json', () => {
+    const factsFreshness = factsSchema.properties.repository.properties.trunk_freshness;
+    assert.deepEqual(planSchema.properties.trunk_freshness.enum, factsFreshness.enum);
+  });
+
   test('a full sample plan is valid', () => {
     assert.deepEqual(validate(makePlan()), { ok: true, errors: [] });
   });
 
   const invalidCases = [
     ['a plan without branch', (plan) => delete plan.branch, '$: required: missing branch'],
+    ['a plan without base', (plan) => delete plan.base, '$: required: missing base'],
+    ['a trunk_freshness outside the enum', (plan) => { plan.trunk_freshness = 'stale'; }, '$.trunk_freshness: enum: not one of fresh, behind, ahead, diverged, no_remote, fetch_failed, no_local_trunk, no_trunk'],
     ['a classification outside the enum', (plan) => { plan.classification = 'feat'; }, '$.classification: enum: not one of feature, bugfix, hotfix, refactor, chore, docs, test, ci'],
     ['a brood delivery', (plan) => { plan.delivery = 'brood'; }, '$.delivery: enum: not one of single, multi'],
     ['a step without external_effects', (plan) => delete plan.steps[0].external_effects, '$.steps[0]: required: missing external_effects'],
     ['an effect without reversible', (plan) => delete plan.steps[1].external_effects[0].reversible, '$.steps[1].external_effects[0]: required: missing reversible'],
     ['an empty step list', (plan) => { plan.steps = []; }, '$.steps: minItems: fewer than 1 items'],
     ['a step with no files', (plan) => { plan.steps[0].files = []; }, '$.steps[0].files: minItems: fewer than 1 items'],
-    ['an unknown key', (plan) => { plan.base = 'main'; }, '$: additionalProperties: unexpected base']
+    ['an unknown key', (plan) => { plan.target = 'main'; }, '$: additionalProperties: unexpected target']
   ];
 
   for (const [name, mutate, expectedError] of invalidCases) {

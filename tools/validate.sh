@@ -360,7 +360,14 @@ run_suites() {
 #     plugin/skills/next-wave/scripts/next-wave.sh, tests/next-wave/**,
 #     plugin/skills/_shared/{containment,ledger-engine-io}.sh,
 #     plugin/skills/create-working-branch/scripts/create-working-branch.sh,
-#     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**
+#     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**,
+#     plugin/agents/drone.md (standard-delivery.test.mjs reads its git-script task clause),
+#     plugin/agents/cerebrate.md (cerebrate-plan.test.mjs reads its plan block),
+#     plugin/skills/molt/scripts/molt.sh (standard-delivery.test.mjs runs it),
+#     plugin/skills/_shared/allowlist.sh (identifier.test.mjs parity; also sourced by the
+#       gather-facts.sh, create-working-branch.sh and molt.sh the node tests run),
+#     plugin/skills/_shared/git-refusals.sh (sourced by create-working-branch.sh and molt.sh),
+#     plugin/skills/_shared/graphql-response.sh (sourced by gather-facts.sh)
 #                                      -> test_workflow_scripts (build drift check + node tests;
 #                                         every path except tests/workflow-scripts/** keeps its
 #                                         other routes by union)
@@ -650,9 +657,17 @@ map_path() {
   # its parity oracle together with the two _shared libs that engine sources (containment.sh,
   # ledger-engine-io.sh) and the tests/next-wave/* fixtures it replays, the route-workflow skill
   # and the plugin/workflows/*.json definitions whose catalog parity route-catalog.test.mjs pins,
-  # and the node tests themselves. Every path here except the node tests keeps its other routes
-  # by union (for example *.json keeps validate_workflows, next-wave.sh and its fixtures keep
-  # test_next_wave, the _shared libs keep test_engine and the rest). Every one of these except
+  # the drone agent whose git-script task clause standard-delivery.test.mjs matches against the
+  # runner sentence, the cerebrate agent whose plan block cerebrate-plan.test.mjs checks names the
+  # plan-schema fields, the molt.sh entrypoint standard-delivery.test.mjs runs in scratch repos,
+  # the _shared/allowlist.sh whose identifier rules identifier.test.mjs pins by parity, the
+  # _shared libs the scripts those tests run source (allowlist.sh by gather-facts.sh,
+  # create-working-branch.sh and molt.sh; git-refusals.sh by create-working-branch.sh and molt.sh;
+  # graphql-response.sh by gather-facts.sh), and the node tests themselves. Every path here except
+  # the node tests keeps its other routes by union (for example *.json keeps validate_workflows,
+  # next-wave.sh and its fixtures keep test_next_wave, cerebrate.md keeps validate_workflows,
+  # molt.sh keeps test_molt, the _shared libs keep test_engine, test_push_branch,
+  # test_create_working_branch, test_molt, test_gather_facts and the rest). Every one of these except
   # tests/workflow-scripts/* and tests/next-wave/* is ALSO a plugin/* file (policy_check
   # prose-lints it via the wholesale rule below), but policy_check NEVER RUNS node, so without
   # this rule a source edit that leaves the generated script stale, or a data/agent/script edit
@@ -675,6 +690,12 @@ map_path() {
      || "$p" == plugin/skills/create-working-branch/scripts/create-working-branch.sh \
      || "$p" == plugin/skills/bump-type/scripts/bump-type.sh \
      || "$p" == plugin/agents/overlord.md \
+     || "$p" == plugin/agents/drone.md \
+     || "$p" == plugin/agents/cerebrate.md \
+     || "$p" == plugin/skills/molt/scripts/molt.sh \
+     || "$p" == plugin/skills/_shared/allowlist.sh \
+     || "$p" == plugin/skills/_shared/git-refusals.sh \
+     || "$p" == plugin/skills/_shared/graphql-response.sh \
      || "$p" == tests/workflow-scripts/* ]]; then
     add_selected "$SUITE_TEST_WORKFLOW_SCRIPTS" "$p (workflow-script source/build/data/test)"
     matched=1
@@ -1350,8 +1371,9 @@ self_test() {
 
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
-  #    the generated-script, data-file, overlord, route-workflow skill, workflow-definition or
-  #    node-test-read script/fixture selector were dropped. Probe each directly so
+  #    the generated-script, data-file, agent (overlord, drone, cerebrate), route-workflow skill,
+  #    workflow-definition, node-test-read or node-test-run script/fixture, or sourced _shared lib
+  #    selector were dropped. Probe each directly so
   #    removing any one selector FAILS here.
   local workflow_input
   for workflow_input in \
@@ -1369,6 +1391,12 @@ self_test() {
     "plugin/skills/bump-type/scripts/bump-type.sh" \
     "plugin/workflows/analysis-only.js" \
     "plugin/agents/overlord.md" \
+    "plugin/agents/drone.md" \
+    "plugin/agents/cerebrate.md" \
+    "plugin/skills/molt/scripts/molt.sh" \
+    "plugin/skills/_shared/allowlist.sh" \
+    "plugin/skills/_shared/git-refusals.sh" \
+    "plugin/skills/_shared/graphql-response.sh" \
     "plugin/skills/route-workflow/SKILL.md" \
     "plugin/workflows/analysis-only.json"; do
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
