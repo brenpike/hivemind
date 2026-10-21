@@ -236,6 +236,81 @@ describe('facts list and count checks', () => {
   });
 });
 
+describe('isConsistentFactsRelay', () => {
+  const trunkValues = parseFacts(trunkStdout).values;
+
+  function relayWith(changes) {
+    const values = { ...trunkValues, ...changes };
+    Object.keys(changes).filter((key) => changes[key] === undefined).forEach((key) => delete values[key]);
+    return values;
+  }
+
+  test('accepts the values of real gather-facts.sh stdout on trunk', () => {
+    assert.equal(lib.isConsistentFactsRelay(trunkValues, 'main'), true);
+  });
+  test('accepts the values of real dirty and detached runs', () => {
+    writeFileSync(join(gitRoot, 'untracked.txt'), 'dirty\n');
+    const dirty = parseFacts(runGatherFacts()).values;
+    rmSync(join(gitRoot, 'untracked.txt'));
+    runGit(['checkout', '-q', '--detach']);
+    const detached = parseFacts(runGatherFacts()).values;
+    runGit(['checkout', '-q', 'main']);
+    assert.equal(lib.isConsistentFactsRelay(dirty, 'main'), true);
+    assert.equal(lib.isConsistentFactsRelay(detached, 'main'), true);
+  });
+  test('accepts every consistent stop, freshness and cut form', () => {
+    for (const changes of [
+      { head_state: 'unsafe_name', branch: undefined, delivery: 'stop', delivery_stops: 'branch_name_unsafe' },
+      { cut: 'references,pull_requests', delivery: 'stop', delivery_stops: 'cut_fields' },
+      { trunk_freshness: 'no_trunk', delivery: 'stop', delivery_stops: 'history_unavailable' },
+      { trunk_freshness: 'fresh' },
+      { trunk_freshness: 'ahead', trunk_ahead: '2' },
+      { trunk_freshness: 'behind', trunk_behind: '3' },
+      { trunk_freshness: 'diverged', trunk_ahead: '1', trunk_behind: '4' },
+      { trunk_freshness: 'fetch_failed' },
+      { trunk_freshness: 'no_local_trunk' },
+      { external_texts: '12' },
+      { delivery: 'stop', delivery_stops: lib.factsDeliveryStops().join(','), cut: 'pull_requests', head_state: 'unsafe_name', branch: undefined }
+    ]) {
+      assert.equal(lib.isConsistentFactsRelay(relayWith(changes), 'main'), true, JSON.stringify(changes));
+    }
+  });
+  for (const [label, changes, trunk] of [
+    ['a trunk line other than the launch trunk', {}, 'master'],
+    ['a trunk spelled another way', {}, 'refs/heads/main'],
+    ['no branch line with head_state branch', { branch: undefined }, 'main'],
+    ['a branch line with head_state detached', { head_state: 'detached' }, 'main'],
+    ['delivery ready with a stop', { delivery_stops: 'dirty_paths' }, 'main'],
+    ['delivery stop with no stop', { delivery: 'stop' }, 'main'],
+    ['a cut with no cut_fields stop', { cut: 'references' }, 'main'],
+    ['a cut_fields stop with no cut', { delivery: 'stop', delivery_stops: 'cut_fields' }, 'main'],
+    ['unsafe_name with no branch_name_unsafe stop', { head_state: 'unsafe_name', branch: undefined }, 'main'],
+    ['branch_name_unsafe with head_state branch', { delivery: 'stop', delivery_stops: 'branch_name_unsafe' }, 'main'],
+    ['no_trunk with no history_unavailable stop', { trunk_freshness: 'no_trunk' }, 'main'],
+    ['fresh with a count', { trunk_freshness: 'fresh', trunk_behind: '1' }, 'main'],
+    ['ahead with no ahead count', { trunk_freshness: 'ahead' }, 'main'],
+    ['ahead with a behind count', { trunk_freshness: 'ahead', trunk_ahead: '1', trunk_behind: '1' }, 'main'],
+    ['behind with an ahead count', { trunk_freshness: 'behind', trunk_ahead: '1', trunk_behind: '1' }, 'main'],
+    ['diverged with one count', { trunk_freshness: 'diverged', trunk_ahead: '1' }, 'main'],
+    ['no_remote with a count', { trunk_ahead: '1' }, 'main'],
+    ['a repeated cut field', { cut: 'references,references', delivery: 'stop', delivery_stops: 'cut_fields' }, 'main'],
+    ['a repeated stop', { delivery: 'stop', delivery_stops: 'dirty_paths,dirty_paths' }, 'main'],
+    ['an external_texts count past a safe integer', { external_texts: String(Number.MAX_SAFE_INTEGER + 1) }, 'main'],
+    ['a value that fails its pattern', { head: 'abc' }, 'main'],
+    ['a missing required value', { facts_lines: undefined }, 'main'],
+    ['a key outside the spec', { remote: 'origin' }, 'main']
+  ]) {
+    test(`rejects ${label}`, () => {
+      assert.equal(lib.isConsistentFactsRelay(relayWith(changes), trunk), false);
+    });
+  }
+  test('rejects a value that is not a plain object', () => {
+    for (const value of [null, undefined, 'facts', [trunkValues]]) {
+      assert.equal(lib.isConsistentFactsRelay(value, 'main'), false, JSON.stringify(value));
+    }
+  });
+});
+
 describe('facts messages take the run noun', () => {
   test('malformed, blocked and cut messages', () => {
     assert.equal(lib.malformedFactsMessage(RUN_NOUN), 'The facts step returned malformed facts, ' + STOPPED);

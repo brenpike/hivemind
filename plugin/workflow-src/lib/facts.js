@@ -52,6 +52,27 @@
  *       twice, in any order.
  *   isTextCount(value)  true when value matches the external_texts pattern
  *       and is a safe integer.
+ *   isConsistentFactsRelay(values, trunk)
+ *       true when values, the parseRoutingLines values of a relayed
+ *       gather-facts stdout, hold only spec keys, each matching its
+ *       pattern, and agree with each other and with trunk, the launch
+ *       trunk, as gather-facts.sh and gather-facts.jq write them:
+ *         the trunk line equals trunk;
+ *         the branch line is present exactly when head_state is branch;
+ *         delivery is ready exactly when delivery_stops is none;
+ *         cut is not none exactly when delivery_stops lists cut_fields;
+ *         head_state is unsafe_name exactly when delivery_stops lists
+ *         branch_name_unsafe;
+ *         trunk_freshness no_trunk comes with history_unavailable;
+ *         trunk_ahead and trunk_behind fit trunk_freshness: both 0 but for
+ *         ahead (ahead only), behind (behind only) and diverged (both);
+ *         no cut or delivery_stops entry repeats;
+ *         external_texts is a safe integer.
+ *       Anything else, a value that is not a plain object included, is
+ *       false.
+ *   hasFactsStop(stops, stop), matchesFreshnessCounts(freshness, ahead,
+ *   behind)
+ *       the helpers of isConsistentFactsRelay.
  *   malformedFactsMessage(runNoun), blockedFactsMessage(runNoun, blocker),
  *   cutFactsMessage(runNoun, cut)
  *       the facts step problems. The blocked message ends with blocker, or
@@ -94,7 +115,11 @@
  *   of which passed their patterns.
  *   With runNoun 'analysis' every message and prompt is the analysis-only
  *   text, byte for byte.
- *   Uses isNonEmptyString and describeRunNoun (args.js),
+ *   isConsistentFactsRelay is the one home of the cross-line check on a
+ *   relayed facts stdout. It cannot catch a forged relay that is still
+ *   consistent: that is the recorded residual 'Scan coverage relies on the
+ *   facts runner's count' of ADR-0037. analysis-only never calls it.
+ *   Uses isPlainObject, isNonEmptyString and describeRunNoun (args.js),
  *   gitIdentifierPattern (identifier.js) and validateSchema (schema.js).
  *
  * Why
@@ -208,6 +233,49 @@ function isDeliveryStopList(value) {
 
 function isTextCount(value) {
   return matchesFactsLine('external_texts', value) && Number.isSafeInteger(Number(value));
+}
+
+function hasFactsStop(stops, stop) {
+  return stops.split(',').includes(stop);
+}
+
+function matchesFreshnessCounts(freshness, ahead, behind) {
+  const isAhead = ahead !== '0';
+  const isBehind = behind !== '0';
+  if (freshness === 'ahead') {
+    return isAhead && !isBehind;
+  }
+  if (freshness === 'behind') {
+    return !isAhead && isBehind;
+  }
+  if (freshness === 'diverged') {
+    return isAhead && isBehind;
+  }
+  return !isAhead && !isBehind;
+}
+
+function isConsistentFactsRelay(values, trunk) {
+  if (!isPlainObject(values)) {
+    return false;
+  }
+  const spec = gatherFactsRoutingSpec();
+  const hasOnlySpecKeys = Object.keys(values).every((key) => Object.prototype.hasOwnProperty.call(spec, key));
+  const hasBranch = Object.prototype.hasOwnProperty.call(values, 'branch');
+  const matchesEveryLine = Object.keys(spec).every((key) => (key === 'branch' && !hasBranch) || matchesFactsLine(key, values[key]));
+  if (!hasOnlySpecKeys || !matchesEveryLine) {
+    return false;
+  }
+  if (!isCutList(values.cut) || !isDeliveryStopList(values.delivery_stops) || !isTextCount(values.external_texts)) {
+    return false;
+  }
+  const stops = values.delivery_stops;
+  return values.trunk === trunk
+    && hasBranch === (values.head_state === 'branch')
+    && (values.delivery === 'ready') === (stops === 'none')
+    && (values.cut !== 'none') === hasFactsStop(stops, 'cut_fields')
+    && (values.head_state === 'unsafe_name') === hasFactsStop(stops, 'branch_name_unsafe')
+    && (values.trunk_freshness !== 'no_trunk' || hasFactsStop(stops, 'history_unavailable'))
+    && matchesFreshnessCounts(values.trunk_freshness, values.trunk_ahead, values.trunk_behind);
 }
 
 function malformedFactsMessage(runNoun) {
