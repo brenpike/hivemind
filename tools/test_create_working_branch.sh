@@ -6,12 +6,15 @@
 #
 # The engine takes REQUIRED `--base <branch> --branch <branch> --classification <kind>
 # --trunk-freshness fresh|stale|skipped --trunk <branch>`. Before any git command it gates base,
-# branch and trunk as identifiers, then refuses a branch equal to base and a trunk that, ignoring
-# ASCII case, is the branch or ends with `/` followed by it (trunk need not exist locally; base
-# may equal trunk). It refuses an in-progress merge, rebase, cherry-pick, revert or bisect,
-# unmerged paths, any staged, unstaged or untracked path, a branch whose ref is symbolic or is the
-# end of trunk's symbolic ref, a trunk git resolves to a ref that names the branch or to more than
-# one ref, and a branch checked out in another worktree. It reads trunk's ref once, before any
+# branch and trunk as identifiers, then refuses a branch equal to base and a trunk one of whose
+# six git lookup candidates, ignoring ASCII case, is refs/heads/<branch> (trunk need not exist
+# locally; base may equal trunk). It refuses an in-progress merge, rebase, cherry-pick, revert or
+# bisect, unmerged paths, any staged, unstaged or untracked path, a branch whose ref is symbolic or
+# is the end of trunk's symbolic ref, a trunk that names the branch by ref identity or names more
+# than one ref, and a branch checked out in another worktree. Trunk names the branch when a lookup
+# candidate, or the end a candidate resolves to, is refs/heads/<branch> or
+# refs/remotes/<remote>/<branch> for a remote `git remote` lists, compared exactly after an ASCII
+# case fold. A trunk that only ends with `/<branch>` does not. It reads trunk's ref once, before any
 # change, in git's lookup order, following symbolic refs to their end even when the end does not
 # exist yet, and makes every refusal before any change. It resolves the base once (local branch,
 # then any commit name, then a fetch from origin), switches to an existing branch (removing an
@@ -434,7 +437,10 @@ test_trunk_alias() {
 # even when the end does not exist yet, so a trunk whose chain ends at the branch the run would
 # create stops with nothing changed. A trunk that resolves to another branch (HEAD on scratch) or
 # to no ref (an object name) does not stop. A stop that compares spelling only fails every
-# refusal case here except trunk-guard-symbolic-chain; the success cases pass under both.
+# refusal case here except trunk-guard-symbolic-chain; the success cases pass under both. A branch
+# argument is a ref by identity too: heads/main and refs/heads/main name the distinct branches
+# refs/heads/heads/main and refs/heads/refs/heads/main, so creating them succeeds and leaves
+# refs/heads/main untouched.
 test_trunk_any_spelling() {
     local index spelling_name trunk_spelling branch_spelling
     local -a spelling_names=(refs-heads heads origin remotes-origin refs-remotes-origin refs-heads-case origin-case)
@@ -537,8 +543,11 @@ test_trunk_any_spelling() {
         branch_spelling="${branch_spellings[$index]}"
         create_world "trunk-qualified-branch-$spelling_name"
         run_git "$WORK_TREE" checkout -q -b scratch
-        assert_refused_unchanged "trunk-qualified-branch-$spelling_name" "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        assert_success "trunk-qualified-branch-$spelling_name" "$WORK_TREE" "$(expected_block "$branch_spelling" "$TRUNK_SHA" true)" \
             --base scratch --branch "$branch_spelling" --classification feature --trunk-freshness fresh --trunk main
+        assert_equal "trunk-qualified-branch-$spelling_name-head" "refs/heads/$branch_spelling" "$(read_head_ref)" "HEAD"
+        assert_equal "trunk-qualified-branch-$spelling_name-unchanged" "$TRUNK_SHA" \
+            "$(run_git "$WORK_TREE" rev-parse refs/heads/main)" "refs/heads/main at trunk commit"
     done
 
     create_world trunk-guard-symbolic-chain
@@ -589,6 +598,53 @@ test_branch_differs_from_non_main_trunk() {
     assert_on_branch_without_upstream trunk-not-local "$TRUNK_SHA"
     assert_equal trunk-not-local-absent '' \
         "$(run_git "$WORK_TREE" for-each-ref refs/heads/develop refs/remotes/origin/develop)" "develop absent"
+}
+
+# Trunk names the branch only by ref identity. A trunk whose text ends with `/<branch>` but whose
+# lookup candidates and their ends are other refs does not stop: a branch named team/main, an
+# absent or present release/feature/x, a refs/heads/ spelling of another branch, a symbolic alias
+# to another branch, and a stray remote-tracking ref under a name `git remote` does not list. Once
+# `git remote` lists team, trunk team/main names the branch's image on it and stops with nothing
+# changed. A stop that matches the text suffix refuses every success case here.
+test_trunk_ref_identity() {
+    local index case_name trunk_spelling
+    local -a case_names=(team-branch refs-heads-team symbolic-alias stray-remote-ref)
+    local -a trunk_spellings=(team/main refs/heads/team/main trunk-alias gone/main)
+    for index in "${!trunk_spellings[@]}"; do
+        case_name="trunk-identity-${case_names[$index]}"
+        trunk_spelling="${trunk_spellings[$index]}"
+        create_world "$case_name"
+        run_git "$WORK_TREE" checkout -q -b scratch
+        case "$trunk_spelling" in
+            gone/main) run_git "$WORK_TREE" update-ref refs/remotes/gone/main "$TRUNK_SHA" ;;
+            *) run_git "$WORK_TREE" branch team/main main ;;
+        esac
+        if [[ "$trunk_spelling" == trunk-alias ]]; then
+            run_git "$WORK_TREE" symbolic-ref refs/heads/trunk-alias refs/heads/team/main
+        fi
+        assert_success "$case_name" "$WORK_TREE" "$(expected_block main "$TRUNK_SHA" false)" \
+            --base scratch --branch main --classification feature --trunk-freshness fresh --trunk "$trunk_spelling"
+        assert_equal "$case_name-head" refs/heads/main "$(read_head_ref)" "HEAD"
+    done
+
+    create_world trunk-identity-release-absent
+    assert_success trunk-identity-release-absent "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk "release/$BRANCH"
+    assert_on_branch_without_upstream trunk-identity-release-absent "$TRUNK_SHA"
+    assert_equal trunk-identity-release-absent-trunk-absent '' \
+        "$(run_git "$WORK_TREE" for-each-ref "refs/heads/release/$BRANCH")" "release/$BRANCH absent"
+
+    create_world trunk-identity-release-present
+    run_git "$WORK_TREE" branch "release/$BRANCH" main
+    assert_success trunk-identity-release-present "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk "release/$BRANCH"
+    assert_on_branch_without_upstream trunk-identity-release-present "$TRUNK_SHA"
+
+    create_world trunk-identity-remote-image
+    run_git "$WORK_TREE" checkout -q -b scratch
+    run_git "$WORK_TREE" remote add team "$WORLD_ROOT/team.git"
+    assert_refused_unchanged trunk-identity-remote-image "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base scratch --branch main --classification feature --trunk-freshness fresh --trunk team/main
 }
 
 test_not_a_checkout() {
@@ -852,6 +908,7 @@ test_branch_equals_trunk
 test_trunk_alias
 test_trunk_any_spelling
 test_branch_differs_from_non_main_trunk
+test_trunk_ref_identity
 test_not_a_checkout
 test_merge_in_progress
 test_clean_merge_in_progress

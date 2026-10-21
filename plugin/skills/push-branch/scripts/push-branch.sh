@@ -18,19 +18,41 @@
 # INPUT (`--flag value` form only; each flag at most once; unknown, duplicate, or missing flags
 # and invalid enum values all give the fixed usage blocker):
 #   --head <branch>              REQUIRED. Expected current branch.
-#   --base <branch>              REQUIRED. Trunk; the current branch must not equal it.
+#   --base <branch>              REQUIRED. Trunk; neither the base nor any ref it names may name
+#                                the current branch (see BASE below).
 #   --remote <name>              OPTIONAL. Explicit push remote (explicit mode).
+#   --expect-commit <sha>        OPTIONAL. The commit HEAD must be. Checked in this process,
+#                                before any push, so the commit pushed is the one the caller's
+#                                gates held for (ADR-0037 invariant 2).
 #   --on-reject block|warn       OPTIONAL, default block. Upstream and origin modes only: a
 #                                rejected push blocks, or with `warn` exits 0 with a warning.
 #   --no-upstream block|origin   OPTIONAL, default block. With no upstream and no --remote: block,
 #                                or push to `origin` when `remote.origin.url` is set (origin mode),
 #                                or defer with a warning when it is not.
+#   --report-remote yes|no       OPTIONAL, default no. With `yes`, add the `remote:` line to the
+#                                output whenever a push ran (see OUTPUT). Consumer:
+#                                plugin/skills/open-plan-pr/scripts/open-plan-pr.sh.
 # head, base, and remote pass hivemind_assert_identifier (_shared/allowlist.sh: non-empty, no
-# leading `-`, no `..`, charset ^[A-Za-z0-9._/-]+$) before any git command runs.
+# leading `-`, no `..`, charset ^[A-Za-z0-9._/-]+$) before any git command runs. Then, still
+# before any git command, an expect-commit value that is not a full 40- or 64-digit lowercase hex
+# object id stops with `expected commit is not a full object id`.
 #
 # READ ONCE:
-#   b    `git symbolic-ref --quiet --short HEAD`, gated; must equal head and differ from base.
-#   sha  `git rev-parse --verify --quiet 'HEAD^{commit}'`, must be a full hex object id.
+#   b    `git symbolic-ref --quiet --short HEAD`, gated; must equal head, and base must not name
+#        it (see BASE below).
+#   sha  `git rev-parse --verify --quiet 'HEAD^{commit}'`, must be a full hex object id. With
+#        --expect-commit, it must equal that value, or the run stops with `HEAD is not the
+#        expected commit`.
+#   BASE keys on ref identity, not on spelling, through _shared/git-refusals.sh (see its NAME
+#        LOOKUP paragraph for the lookup order and the match rule). The run stops with `current
+#        branch does not match head or equals base` when the base text is a spelling of b that
+#        needs no git command (hivemind_ref_names_branch: b, heads/b or refs/heads/b), or when
+#        any ref base names in git's lookup order is b's own ref, or b's image on a remote that
+#        `git remote` lists (hivemind_resolve_name_refs, symbolic refs followed to their end).
+#        So a base such as team/b or release/b does not stop the run. A base git cannot read
+#        stops with `cannot read base`, and a failed compare with `cannot compare the current
+#        branch with base`. A base that names more than one ref does not stop the run: none of
+#        them is b. Base is read once and never again.
 #   MODE explicit: --remote given; push to it, then record the upstream.
 #        upstream: branch.<b>.remote or branch.<b>.merge non-empty. Both must then be non-empty,
 #                  merge must equal refs/heads/<b>, remote is gated. Push remote is
@@ -69,7 +91,13 @@
 # OUTPUT on success (exit 0), on stdout in ONE write, after any upstream record:
 #   branch: <b>
 #   commit: <sha>
+#   remote: <push remote>        only with --report-remote yes and only when a push ran (success,
+#                                or a rejection warned under --on-reject warn): the remote the
+#                                push used in explicit, upstream, or origin mode. A deferred push
+#                                prints no remote line. Consumer:
+#                                plugin/skills/open-plan-pr/scripts/open-plan-pr.sh.
 #   warning: <fixed text>        only when a rejection was warned or the push was deferred
+# With --report-remote no, or without the flag, the output has no remote line.
 # EXIT CONTRACT:
 #   0  routing lines on stdout
 #   1  `blocker: <fixed reason>` on stderr (after any relayed git stderr), NOTHING on stdout.
@@ -91,29 +119,11 @@
 # rule defends against untrusted identifier text only; repo hooks, local refs, git config, and the
 # operator are trusted, and their changes between a check and a write are recorded residuals.
 #
-# RECORDED RESIDUAL R1 (implicit head of the later PR creation): open-plan-pr step 7 runs
-# `gh pr create` without `--head`, so gh resolves the PR head from the current branch in its own
-# process, after this script has exited. No check made here binds that resolution.
-#   Root cause:  the PR head is implicit, and gh resolves it in a different process.
-#   Inherited:   on main, step 7 already relied on an earlier step's branch check. This is not a
-#                new exposure introduced by routing pushes through this script.
-#   Bounded impact: non-interactive gh never pushes, prompts, or forks; it aborts when the branch
-#                is not on a remote at the local commit. open-plan-pr step 8 compares GitHub's
-#                headRefName and headRefOid against the gated head input and this script's
-#                `commit:` line, never against a re-read of local state, so a drifted head is
-#                blocked, not accepted. Drift needs HEAD to change in the run owner's worktree
-#                between two consecutive calls, and only repo-owned hooks or the operator act in
-#                the run owner's worktree. The worst result is a visible, closable PR.
-#   Rejected remediations:
-#                - passing `--head <branch>`: gh then uses the base repository unless given
-#                  `<owner>:<branch>`, and deriving the owner means hand-parsing a remote URL,
-#                  which breaks fork and triangular remotes.
-#                - folding PR creation into this script: gh still resolves its own head unless
-#                  `--head` is passed, so one process binds nothing. It also couples the push
-#                  kernel to PR authoring and moves the free-text title and body into script
-#                  arguments.
-#   Linkage:     review findings f781f8c8, 87f850de, a3c042d0, and bd3204af, with b0f99069 as
-#                lineage.
+# The base stop compares refs exactly, by the rule in _shared/git-refusals.sh. It shares that
+# rule with create-working-branch and molt. A base that only ends with `/<b>`, such as
+# release/<b>, is another branch and does not stop the run.
+#
+# RECORDED RESIDUAL R1 (implicit PR head): moved to plugin/skills/open-plan-pr/scripts/open-plan-pr.sh.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
@@ -131,11 +141,13 @@ script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d"
 shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve skills/_shared from the script directory; refusing to proceed"
 [ -f "$shared_dir/allowlist.sh" ] || blocker "required shared library missing: skills/_shared/allowlist.sh; refusing to proceed"
 . "$shared_dir/allowlist.sh" || blocker "failed to source skills/_shared/allowlist.sh (unparseable); refusing to proceed"
+[ -f "$shared_dir/git-refusals.sh" ] || blocker "required shared library missing: skills/_shared/git-refusals.sh; refusing to proceed"
+. "$shared_dir/git-refusals.sh" || blocker "failed to source skills/_shared/git-refusals.sh (unparseable); refusing to proceed"
 
 export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
 
-usage_reason='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin]'
+usage_reason='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] [--expect-commit <sha>] [--report-remote yes|no]'
 
 head_name=''
 head_seen=false
@@ -147,6 +159,10 @@ on_reject='block'
 on_reject_seen=false
 no_upstream='block'
 no_upstream_seen=false
+expect_commit=''
+expect_commit_seen=false
+report_remote='no'
+report_remote_seen=false
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || blocker "$usage_reason"
   case "$1" in
@@ -175,6 +191,16 @@ while [ "$#" -gt 0 ]; do
       no_upstream="$2"
       no_upstream_seen=true
       ;;
+    --expect-commit)
+      [ "$expect_commit_seen" = false ] || blocker "$usage_reason"
+      expect_commit="$2"
+      expect_commit_seen=true
+      ;;
+    --report-remote)
+      [ "$report_remote_seen" = false ] || blocker "$usage_reason"
+      report_remote="$2"
+      report_remote_seen=true
+      ;;
     *)
       blocker "$usage_reason"
       ;;
@@ -191,12 +217,30 @@ case "$no_upstream" in
   block|origin) ;;
   *) blocker "$usage_reason" ;;
 esac
+case "$report_remote" in
+  yes|no) ;;
+  *) blocker "$usage_reason" ;;
+esac
 
 identifier_reason='head, base, or remote contains characters outside the safe allowlist'
 hivemind_assert_identifier "$head_name" || blocker "$identifier_reason"
 hivemind_assert_identifier "$base_name" || blocker "$identifier_reason"
 if [ "$remote_seen" = true ]; then
   hivemind_assert_identifier "$remote_name" || blocker "$identifier_reason"
+fi
+
+# is_full_object_id <value>
+#   Succeeds when <value> is a full 40- or 64-digit lowercase hex object id.
+is_full_object_id() {
+  local object_id="$1"
+  case "$object_id" in
+    ''|*[!0-9a-f]*) return 1 ;;
+  esac
+  [ "${#object_id}" -eq 40 ] || [ "${#object_id}" -eq 64 ]
+}
+
+if [ "$expect_commit_seen" = true ]; then
+  is_full_object_id "$expect_commit" || blocker "expected commit is not a full object id"
 fi
 
 # read_config_value <key>
@@ -288,13 +332,35 @@ esac
 hivemind_assert_identifier "$current_branch" || blocker "current branch contains characters outside the safe allowlist"
 
 head_sha="$(git rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null)" || blocker "HEAD does not resolve to a commit"
-case "$head_sha" in
-  ''|*[!0-9a-f]*) blocker "HEAD does not resolve to a commit" ;;
-esac
-[ "${#head_sha}" -eq 40 ] || [ "${#head_sha}" -eq 64 ] || blocker "HEAD does not resolve to a commit"
+is_full_object_id "$head_sha" || blocker "HEAD does not resolve to a commit"
 
-if [ "$current_branch" != "$head_name" ] || [ "$current_branch" = "$base_name" ]; then
-  blocker "current branch does not match head or equals base"
+mismatch_reason='current branch does not match head or equals base'
+[ "$current_branch" = "$head_name" ] || blocker "$mismatch_reason"
+
+# refuse_base_names_branch
+#   Blocks when the base text, or any ref base names, names the current branch. Base is read once,
+#   with hivemind_resolve_name_refs. A base that names more than one ref passes. Runs in the main
+#   shell so blocker exits it.
+refuse_base_names_branch() {
+  local base_text_rc=0 base_ref_rc=0
+  hivemind_ref_names_branch "$base_name" "$current_branch" || base_text_rc=$?
+  case "$base_text_rc" in
+    0) blocker "$mismatch_reason" ;;
+    1) ;;
+    *) blocker "cannot compare the current branch with base" ;;
+  esac
+  hivemind_resolve_name_refs "$base_name" "$current_branch" || base_ref_rc=$?
+  case "$base_ref_rc" in
+    0) ;;
+    1) blocker "$mismatch_reason" ;;
+    3) blocker "cannot compare the current branch with base" ;;
+    *) blocker "cannot read base" ;;
+  esac
+}
+refuse_base_names_branch
+
+if [ "$expect_commit_seen" = true ]; then
+  [ "$head_sha" = "$expect_commit" ] || blocker "HEAD is not the expected commit"
 fi
 
 push_mode=''
@@ -365,8 +431,12 @@ if [ "$push_class" = 'success' ] && [ "$push_mode" != 'upstream' ]; then
   write_config_value "branch.$current_branch.merge" "refs/heads/$current_branch"
 fi
 
+remote_line=''
+if [ "$report_remote" = 'yes' ]; then
+  remote_line="remote: $push_remote"$'\n'
+fi
 if [ -n "$warning_text" ]; then
-  printf 'branch: %s\ncommit: %s\nwarning: %s\n' "$current_branch" "$head_sha" "$warning_text"
+  printf 'branch: %s\ncommit: %s\n%swarning: %s\n' "$current_branch" "$head_sha" "$remote_line" "$warning_text"
 else
-  printf 'branch: %s\ncommit: %s\n' "$current_branch" "$head_sha"
+  printf 'branch: %s\ncommit: %s\n%s' "$current_branch" "$head_sha" "$remote_line"
 fi

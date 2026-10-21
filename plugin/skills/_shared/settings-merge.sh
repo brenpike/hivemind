@@ -347,7 +347,7 @@ unset __settings_merge_shared_dir
 #      exactly what `.devcontainer/postCreate.sh` already does.
 # The full rationale for this invariant lives in ADR-0010.
 #
-# INVARIANT (NO-PATH-ANCHOR-IN-PERMISSION-RULES): the six navigator-transport rules below that
+# INVARIANT (NO-PATH-ANCHOR-IN-PERMISSION-RULES): the eight navigator-transport rules below that
 # target `.hivemind/` paths stay RELATIVE BY DECISION. They must NOT be anchored the way the
 # SubagentStart hook command is (see HOOK COMMAND ANCHORING in the header) — the two surfaces are
 # not analogous:
@@ -386,6 +386,8 @@ Edit(.hivemind/runs/.record-inputs-*.json)
 Edit(.hivemind/runs/.markfb-inputs-*.json)
 Edit(.hivemind/spawn-inputs.*.json)
 Edit(.hivemind/seed-inputs-*.json)
+Edit(.hivemind/molt-inputs-*.json)
+Edit(.hivemind/pr-inputs-*.json)
 TEMPLATE
 }
 

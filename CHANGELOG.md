@@ -12,6 +12,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.2.0] - 2026-10-20
+
+### Added
+
+- `hivemind:molt` commit script, `plugin/skills/molt/scripts/molt.sh`. It refuses before it changes anything, names any dirty path outside the list, and prints a `committed:` line.
+- `hivemind:open-plan-pr` script. It pushes through `push-branch`, reuses an open PR on the same head, base and commit, or creates the PR and verifies it.
+- `push-branch.sh` takes `--expect-commit <sha>`.
+- `push-branch.sh` takes `--report-remote yes`, which adds a `remote:` line naming the remote it pushed to.
+- Shared git refusals library, `plugin/skills/_shared/git-refusals.sh`.
+- Two seeded inputs-file rules: `Edit(.hivemind/molt-inputs-*.json)` and `Edit(.hivemind/pr-inputs-*.json)`.
+
+### Changed
+
+- The molt and open-plan-pr skills are now inputs-file navigators.
+- molt `commit:` is now the full SHA.
+- Nothing to commit is no longer blocked. molt reports `committed: false`.
+- molt refuses when a dirty path is not in the list.
+- Consumers re-run `hivemind:seed-hive` to add the two transport rules.
+
+### Fixed
+
+- The push-branch base check now keys on the refs the base names, not only its spelling. Refs #409.
+- The trunk and base checks now compare refs, so `team/main` no longer counts as `main`. `main`, `heads/main`, `refs/heads/main` and `<remote>/main` for a listed remote still do. create-working-branch had this over-refusal since 6.1.0.
+- open-plan-pr binds the PR to the repository its push landed in, by GitHub repository id, not only by branch name and commit. A PR from another repository on the same branch and commit is never reused or accepted. When gh cannot read the push remote as a GitHub repository, no PR is reused and the run warns.
+
 ## [6.1.0] - 2026-10-20
 
 ### Added

@@ -4,14 +4,18 @@
 # (plugin/skills/push-branch/scripts/push-branch.sh, gate library plugin/skills/_shared/allowlist.sh).
 #
 # The engine takes REQUIRED `--head <branch> --base <branch>` plus optional `--remote <name>`,
-# `--on-reject block|warn`, and `--no-upstream block|origin`. It reads the current branch, HEAD,
+# `--on-reject block|warn`, `--no-upstream block|origin`, `--expect-commit <sha>`, and
+# `--report-remote yes|no`. It refuses
+# when the base text or any ref the base names names the current branch, and, with
+# --expect-commit, when HEAD is another commit, before any push. It reads the current branch, HEAD,
 # the upstream config, and the push remote ONCE, gates every value, then pushes the explicit
 # refspec <sha>^{commit}:refs/heads/<b> (the captured commit by object id, never `-u`) and
 # (upstream mode only) retries a non-fast-forward once with --force-with-lease on the SAME captured
 # values. After a successful push in explicit or origin mode it records branch.<b>.remote and
 # branch.<b>.merge itself. On success it prints
-#     branch: <b> / commit: <sha> [/ warning: <fixed text>]
-# on stdout, exit 0. On any blocker it prints `blocker: <fixed reason>` as the LAST stderr line,
+#     branch: <b> / commit: <sha> [/ remote: <push remote>] [/ warning: <fixed text>]
+# on stdout, exit 0. The remote line appears only with --report-remote yes and only when a push
+# ran. On any blocker it prints `blocker: <fixed reason>` as the LAST stderr line,
 # NOTHING on stdout, exit 1.
 #
 # DRIFT REGRESSIONS: a client pre-push hook rewrites `branch.<b>.merge` to refs/heads/main,
@@ -81,7 +85,7 @@ failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 # ── Contracted strings (restated from the engine header; a change here is a contract change) ──
 
 BRANCH='feat/x'
-USAGE_REASON='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin]'
+USAGE_REASON='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] [--expect-commit <sha>] [--report-remote yes|no]'
 IDENTIFIER_REASON='head, base, or remote contains characters outside the safe allowlist'
 DETACHED_REASON='HEAD is detached'
 CURRENT_BRANCH_REASON='current branch contains characters outside the safe allowlist'
@@ -94,6 +98,9 @@ NO_UPSTREAM_REASON='no upstream and no remote supplied'
 REJECTED_REASON='push was rejected'
 LEASE_REASON='force-with-lease retry was rejected; the remote has commits this clone has not seen'
 UPSTREAM_RECORD_REASON='pushed, but the upstream could not be recorded'
+EXPECT_FORMAT_REASON='expected commit is not a full object id'
+EXPECT_MISMATCH_REASON='HEAD is not the expected commit'
+UNREADABLE_BASE_REASON='cannot read base'
 REJECT_WARNING='push was rejected; the branch is not on its remote'
 DEFERRED_WARNING='no upstream and no origin remote; push deferred'
 
@@ -240,6 +247,29 @@ assert_success() {
     fi
 }
 
+# assert_success_with_remote <name> <cwd> <sha> <remote> <warning or empty> <engine args...>
+# Runs the engine, asserts exit 0 and stdout exactly the routing block for feat/x at <sha> with
+# the `remote: <remote>` line right after `commit:`.
+assert_success_with_remote() {
+    local name="$1" run_cwd="$2" sha="$3" remote="$4" warning="$5"
+    shift 5
+    local errfile="$WORKDIR/$name.err" out rc=0 expected
+    printf -v expected 'branch: %s\ncommit: %s\nremote: %s\n' "$BRANCH" "$sha" "$remote"
+    if [[ -n "$warning" ]]; then
+        printf -v expected '%swarning: %s\n' "$expected" "$warning"
+    fi
+    run_engine "$run_cwd" out "$errfile" "$@" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        failed "$name" "expected exit 0, got $rc (stderr: $(tail -n 3 "$errfile" | tr '\n' '|'))"
+        return 0
+    fi
+    if [[ "$out" == "$expected" ]]; then
+        pass "$name" "$(printf '%s' "$out" | tr '\n' '|')"
+    else
+        failed "$name" "stdout mismatch; expected: $(printf '%s' "$expected" | tr '\n' '|') actual: $(printf '%s' "$out" | tr '\n' '|')"
+    fi
+}
+
 # assert_blocker <name> <cwd> <reason> <engine args...>
 # Runs the engine, asserts exit 1, EMPTY stdout, exactly one `blocker:` stderr line, and the last
 # stderr line equal to `blocker: <reason>`.
@@ -365,6 +395,184 @@ test_branch_state() {
     assert_blocker current-branch-outside-allowlist "$WORK_TREE" "$CURRENT_BRANCH_REASON" \
         --head "$BRANCH" --base main --remote origin
     assert_remote_refs branch-state-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+# ── Base names the current branch ────────────────────────────────────────────
+
+# The base stop keys on ref identity, not on spelling. Base stops only when one of git's six
+# lookup candidates for it, or the end a candidate resolves to, is refs/heads/<b> or
+# refs/remotes/<remote>/<b> for a remote `git remote` lists, compared exactly after an ASCII case
+# fold. So every git qualifier of the branch, in any case, a symbolic ref whose chain ends at the
+# branch (dangling or not), and a remote HEAD alias all stop with nothing pushed, while a base that
+# only ends with `/<b>` passes. A stop that compares spelling only lets every refusal case here
+# through to the push.
+test_base_any_spelling() {
+    local index spelling_name base_spelling
+    local -a spelling_names=(refs-heads heads origin refs-remotes-origin upper-case mixed-case refs-heads-case)
+    local -a base_spellings=("refs/heads/$BRANCH" "heads/$BRANCH" "origin/$BRANCH" \
+        "refs/remotes/origin/$BRANCH" 'FEAT/X' 'Feat/x' 'Refs/Heads/Feat/X')
+    create_world base-spelling
+    install_pre_push_hook
+    for index in "${!base_spellings[@]}"; do
+        spelling_name="${spelling_names[$index]}"
+        base_spelling="${base_spellings[$index]}"
+        assert_blocker "base-spelling-$spelling_name" "$WORK_TREE" "$MISMATCH_REASON" \
+            --head "$BRANCH" --base "$base_spelling" --remote origin
+    done
+    run_git "$WORK_TREE" symbolic-ref refs/heads/release "refs/heads/$BRANCH"
+    assert_blocker base-symbolic-alias "$WORK_TREE" "$MISMATCH_REASON" \
+        --head "$BRANCH" --base release --remote origin
+    run_git "$WORK_TREE" symbolic-ref refs/heads/legacy refs/heads/release
+    assert_blocker base-symbolic-chain "$WORK_TREE" "$MISMATCH_REASON" \
+        --head "$BRANCH" --base legacy --remote origin
+    run_git "$WORK_TREE" symbolic-ref refs/heads/upper refs/heads/FEAT/X
+    assert_blocker base-symbolic-alias-dangling-case "$WORK_TREE" "$MISMATCH_REASON" \
+        --head "$BRANCH" --base upper --remote origin
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD "refs/remotes/origin/$BRANCH"
+    assert_blocker base-remote-head-alias "$WORK_TREE" "$MISMATCH_REASON" \
+        --head "$BRANCH" --base origin --remote origin
+    assert_blocker base-unreadable "$WORK_TREE" "$UNREADABLE_BASE_REASON" \
+        --head "$BRANCH" --base main.lock --remote origin
+    assert_equal base-refusals-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs base-refusals-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+# A base that names other refs passes: a branch that only ends with the base name, a base that
+# names more than one ref (a tag and a branch), and a symbolic alias whose chain ends elsewhere.
+test_base_names_other_refs() {
+    local sha out rc=0 expected
+    create_world base-trunk-suffix
+    run_git "$WORK_TREE" checkout -q -b feat/main
+    sha="$(head_sha)"
+    printf -v expected 'branch: feat/main\ncommit: %s\n' "$sha"
+    run_engine "$WORK_TREE" out "$WORKDIR/base-trunk-suffix.err" \
+        --head feat/main --base main --remote origin || rc=$?
+    assert_equal base-trunk-suffix-exit 0 "$rc" "exit code"
+    assert_equal base-trunk-suffix-passes "$expected" "$out" "stdout"
+    assert_remote_refs base-trunk-suffix-pushed "$ORIGIN_DIR" \
+        "$(printf 'refs/heads/feat/main %s\nrefs/heads/main %s' "$sha" "$TRUNK_SHA")"
+
+    create_world base-ambiguous
+    sha="$(head_sha)"
+    run_git "$WORK_TREE" tag main refs/heads/main
+    assert_success base-ambiguous-passes "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base main --remote origin
+    assert_remote_refs base-ambiguous-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+
+    create_world base-alias-elsewhere
+    sha="$(head_sha)"
+    run_git "$WORK_TREE" symbolic-ref refs/heads/trunk-alias refs/heads/main
+    assert_success base-alias-elsewhere-passes "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base trunk-alias --remote origin
+    assert_remote_refs base-alias-elsewhere-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+# assert_base_passes <name> <base> -> in the current world, asserts the engine pushes feat/x at
+# HEAD with --base <base> --remote origin, and that origin then carries feat/x and main.
+assert_base_passes() {
+    local name="$1" base_spelling="$2" sha
+    sha="$(head_sha)"
+    assert_success "$name-passes" "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base "$base_spelling" --remote origin
+    assert_remote_refs "$name-pushed" "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+# A base names the current branch only by ref identity. A base whose text ends with `/<b>` but
+# whose lookup candidates and their ends are other refs passes: the PR #421 repro (on main,
+# --base team/main with refs/heads/team/main present), an absent base, a refs/heads/ spelling of
+# another branch, a symbolic alias to another branch, and a stray remote-tracking ref under a
+# name `git remote` does not list. A stop that matches the text suffix refuses every case here.
+test_base_ref_identity_passes() {
+    local sha out rc=0 expected
+    create_world base-identity-codex-repro
+    run_git "$WORK_TREE" checkout -q main
+    run_git "$WORK_TREE" branch team/main
+    run_git "$WORK_TREE" commit --allow-empty -q -m on-main
+    sha="$(head_sha)"
+    printf -v expected 'branch: main\ncommit: %s\n' "$sha"
+    run_engine "$WORK_TREE" out "$WORKDIR/base-identity-codex-repro.err" \
+        --head main --base team/main --remote origin || rc=$?
+    assert_equal base-identity-codex-repro-exit 0 "$rc" "exit code"
+    assert_equal base-identity-codex-repro-passes "$expected" "$out" "stdout"
+    assert_remote_refs base-identity-codex-repro-pushed "$ORIGIN_DIR" "refs/heads/main $sha"
+
+    create_world base-identity-absent
+    assert_base_passes base-identity-absent "release/$BRANCH"
+
+    create_world base-identity-refs-heads-other
+    run_git "$WORK_TREE" branch "team/$BRANCH"
+    assert_base_passes base-identity-refs-heads-other "refs/heads/team/$BRANCH"
+
+    create_world base-identity-alias-other
+    run_git "$WORK_TREE" branch "team/$BRANCH"
+    run_git "$WORK_TREE" symbolic-ref refs/heads/trunk-alias "refs/heads/team/$BRANCH"
+    assert_base_passes base-identity-alias-other trunk-alias
+
+    create_world base-identity-stray-remote-ref
+    run_git "$WORK_TREE" update-ref "refs/remotes/gone/$BRANCH" "$TRUNK_SHA"
+    assert_base_passes base-identity-stray-remote-ref "gone/$BRANCH"
+}
+
+# A base that names the branch's image on a remote `git remote` lists stops with nothing pushed:
+# a configured remote other than the push remote, a remotes/ spelling, a case variant, a remote
+# added under a name that only looked like a branch prefix, and a remote name that contains `/`.
+test_base_remote_image_refused() {
+    local index spelling_name base_spelling
+    local -a spelling_names=(other-remote remotes-origin case-folded)
+    local -a base_spellings=("other/$BRANCH" "remotes/origin/$BRANCH" 'Origin/Feat/X')
+    create_world base-remote-image
+    install_pre_push_hook
+    for index in "${!base_spellings[@]}"; do
+        spelling_name="${spelling_names[$index]}"
+        base_spelling="${base_spellings[$index]}"
+        assert_blocker "base-remote-image-$spelling_name" "$WORK_TREE" "$MISMATCH_REASON" \
+            --head "$BRANCH" --base "$base_spelling" --remote origin
+    done
+    run_git "$WORK_TREE" remote add team "$WORLD_ROOT/team.git"
+    assert_blocker base-remote-image-added-remote "$WORK_TREE" "$MISMATCH_REASON" \
+        --head "$BRANCH" --base "team/$BRANCH" --remote origin
+    run_git "$WORK_TREE" remote add up/stream "$WORLD_ROOT/upstream.git"
+    assert_blocker base-remote-image-slash-remote "$WORK_TREE" "$MISMATCH_REASON" \
+        --head "$BRANCH" --base "up/stream/$BRANCH" --remote origin
+    assert_equal base-remote-image-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs base-remote-image-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+    assert_remote_refs base-remote-image-other-unchanged "$OTHER_DIR" ''
+}
+
+# ── Expected commit (--expect-commit) ────────────────────────────────────────
+
+# The engine pushes only when HEAD is the commit the caller's gates held for. The value must be
+# a full 40- or 64-digit lowercase hex object id, checked before any git command, and HEAD is
+# compared with it in the same process as the push, so a refusal pushes nothing.
+test_expect_commit() {
+    local sha upper_sha index malformed_name
+    create_world expect-commit
+    sha="$(head_sha)"
+    upper_sha="$(printf '%s' "$sha" | tr 'a-f' 'A-F')"
+    install_pre_push_hook
+    assert_blocker expect-commit-duplicate "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --expect-commit "$sha" --expect-commit "$sha"
+    assert_blocker expect-commit-missing-value "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --expect-commit
+    local -a malformed_names=(short one-short one-long upper-case non-hex empty ref-name)
+    local -a malformed_values=("${sha:0:12}" "${sha:0:39}" "${sha}0" "$upper_sha" \
+        "${sha:0:39}g" '' HEAD)
+    for index in "${!malformed_values[@]}"; do
+        malformed_name="${malformed_names[$index]}"
+        assert_blocker "expect-commit-malformed-$malformed_name" "$WORK_TREE" "$EXPECT_FORMAT_REASON" \
+            --head "$BRANCH" --base main --remote origin --expect-commit "${malformed_values[$index]}"
+    done
+    assert_blocker expect-commit-mismatch "$WORK_TREE" "$EXPECT_MISMATCH_REASON" \
+        --head "$BRANCH" --base main --remote origin --expect-commit "$TRUNK_SHA"
+    assert_blocker expect-commit-mismatch-64 "$WORK_TREE" "$EXPECT_MISMATCH_REASON" \
+        --head "$BRANCH" --base main --remote origin --expect-commit "${sha}${sha:0:24}"
+    assert_equal expect-commit-refusals-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs expect-commit-refusals-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
+
+    assert_success expect-commit-match "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base main --remote origin --expect-commit "$sha"
+    assert_equal expect-commit-match-pushed-once 1 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs expect-commit-match-writes-commit "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
 
 # ── Explicit mode (--remote) ─────────────────────────────────────────────────
@@ -635,11 +843,125 @@ test_no_upstream_origin_absent() {
     assert_remote_refs no-upstream-origin-deferred-other-untouched "$OTHER_DIR" ''
 }
 
+# ── Remote report (--report-remote) ──────────────────────────────────────────
+
+# With --report-remote yes the engine prints `remote: <push remote>` right after `commit:`
+# whenever a push ran, naming the remote the push actually used: the upstream remote, then
+# branch.<b>.pushRemote or remote.pushDefault ahead of it, the explicit --remote, or origin in
+# origin mode. A warned rejection keeps the remote line ahead of the warning; a deferred push
+# prints none. With `no` the output is the default block, byte for byte.
+test_report_remote_usage() {
+    create_world report-remote-usage
+    install_pre_push_hook
+    assert_blocker report-remote-bad-value "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --report-remote maybe
+    assert_blocker report-remote-bad-value-case "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --report-remote YES
+    assert_blocker report-remote-duplicate "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --report-remote yes --report-remote yes
+    assert_blocker report-remote-missing-value "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --report-remote
+    assert_equal report-remote-usage-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs report-remote-usage-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_upstream() {
+    local sha
+    create_world report-remote-upstream
+    publish_branch_with_upstream
+    run_git "$WORK_TREE" commit --allow-empty -q -m two
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-upstream "$WORK_TREE" "$sha" origin '' \
+        --head "$BRANCH" --base main --report-remote yes
+    assert_remote_refs report-remote-upstream-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+test_report_remote_push_remote() {
+    local sha
+    create_world report-remote-push-remote
+    set_upstream origin "refs/heads/$BRANCH"
+    run_git "$WORK_TREE" config "branch.$BRANCH.pushRemote" other
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-push-remote "$WORK_TREE" "$sha" other '' \
+        --head "$BRANCH" --base main --report-remote yes
+    assert_remote_refs report-remote-push-remote-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
+    assert_remote_refs report-remote-push-remote-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_push_default() {
+    local sha
+    create_world report-remote-push-default
+    set_upstream origin "refs/heads/$BRANCH"
+    run_git "$WORK_TREE" config remote.pushDefault other
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-push-default "$WORK_TREE" "$sha" other '' \
+        --head "$BRANCH" --base main --report-remote yes
+    assert_remote_refs report-remote-push-default-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
+    assert_remote_refs report-remote-push-default-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_explicit() {
+    local sha
+    create_world report-remote-explicit
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-explicit "$WORK_TREE" "$sha" other '' \
+        --head "$BRANCH" --base main --remote other --report-remote yes
+    assert_remote_refs report-remote-explicit-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
+    assert_remote_refs report-remote-explicit-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_origin_mode() {
+    local sha
+    create_world report-remote-origin-mode
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-origin-mode "$WORK_TREE" "$sha" origin '' \
+        --head "$BRANCH" --base main --no-upstream origin --report-remote yes
+    assert_remote_refs report-remote-origin-mode-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+test_report_remote_reject_warn() {
+    create_world report-remote-reject-warn
+    set_upstream origin "refs/heads/$BRANCH"
+    install_reject_hook "$ORIGIN_DIR"
+    assert_success_with_remote report-remote-reject-warn "$WORK_TREE" "$(head_sha)" origin "$REJECT_WARNING" \
+        --head "$BRANCH" --base main --on-reject warn --report-remote yes
+    assert_remote_refs report-remote-reject-warn-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_deferred() {
+    create_world report-remote-deferred
+    run_git "$WORK_TREE" remote remove origin
+    install_pre_push_hook
+    assert_success report-remote-deferred "$WORK_TREE" "$(head_sha)" "$DEFERRED_WARNING" \
+        --head "$BRANCH" --base main --no-upstream origin --report-remote yes
+    assert_equal report-remote-deferred-no-push 0 "$(count_push_attempts)" "push attempts"
+}
+
+test_report_remote_no_equals_default() {
+    local sha no_out default_out no_rc=0 default_rc=0
+    create_world report-remote-no
+    sha="$(head_sha)"
+    assert_success report-remote-no "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base main --remote origin --report-remote no
+    run_engine "$WORK_TREE" no_out "$WORKDIR/report-remote-no-repeat.err" \
+        --head "$BRANCH" --base main --report-remote no || no_rc=$?
+    run_engine "$WORK_TREE" default_out "$WORKDIR/report-remote-default-repeat.err" \
+        --head "$BRANCH" --base main || default_rc=$?
+    assert_equal report-remote-no-exit 0 "$no_rc" "exit code with --report-remote no"
+    assert_equal report-remote-default-exit 0 "$default_rc" "exit code without --report-remote"
+    assert_equal report-remote-no-equals-default "$default_out" "$no_out" "stdout with --report-remote no"
+}
+
 # ── Run ──────────────────────────────────────────────────────────────────────
 
 test_usage_errors
 test_identifier_gate
 test_branch_state
+test_base_any_spelling
+test_base_names_other_refs
+test_base_ref_identity_passes
+test_base_remote_image_refused
+test_expect_commit
 test_explicit_sets_upstream
 test_explicit_non_ff_no_retry
 test_explicit_rejections
@@ -660,6 +982,15 @@ test_origin_rejection
 test_no_upstream_block
 test_no_upstream_origin
 test_no_upstream_origin_absent
+test_report_remote_usage
+test_report_remote_upstream
+test_report_remote_push_remote
+test_report_remote_push_default
+test_report_remote_explicit
+test_report_remote_origin_mode
+test_report_remote_reject_warn
+test_report_remote_deferred
+test_report_remote_no_equals_default
 
 echo
 echo "push-branch engine tests: $PASS_COUNT passed, $FAIL_COUNT failed"

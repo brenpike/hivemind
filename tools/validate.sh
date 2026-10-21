@@ -63,6 +63,8 @@ SUITE_TEST_BUMP_TYPE='test_bump_type.sh'
 SUITE_TEST_PUSH_BRANCH='test_push_branch.sh'
 SUITE_TEST_GATHER_FACTS='test_gather_facts.sh'
 SUITE_TEST_CREATE_WORKING_BRANCH='test_create_working_branch.sh'
+SUITE_TEST_MOLT='test_molt.sh'
+SUITE_TEST_OPEN_PLAN_PR='test_open_plan_pr.sh'
 SUITE_TEST_VALIDATE_SUITES='test_validate_suites.sh'
 SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
 SUITE_TEST_SCRIPT_BOOTSTRAP='test_script_bootstrap.sh'
@@ -95,6 +97,8 @@ ALL_SUITES=(
   "$SUITE_TEST_PUSH_BRANCH"
   "$SUITE_TEST_GATHER_FACTS"
   "$SUITE_TEST_CREATE_WORKING_BRANCH"
+  "$SUITE_TEST_MOLT"
+  "$SUITE_TEST_OPEN_PLAN_PR"
   "$SUITE_TEST_VALIDATE_SUITES"
   "$SUITE_TEST_CHANGE_DETECT_POLL"
   "$SUITE_TEST_SCRIPT_BOOTSTRAP"
@@ -128,6 +132,8 @@ KNOWN_SUITES=(
   test_push_branch.sh
   test_gather_facts.sh
   test_create_working_branch.sh
+  test_molt.sh
+  test_open_plan_pr.sh
   test_validate_suites.sh
   test_change_detect_poll.sh
   test_script_bootstrap.sh
@@ -329,15 +335,21 @@ run_suites() {
 #                                         generic globs)
 #   plugin/skills/bump-type/**, plugin/skills/_shared/bump-type-derive.sh
 #                                      -> test_bump_type (derive core ALSO -> test_shared_libs)
-#   plugin/skills/push-branch/**, plugin/skills/_shared/allowlist.sh
-#                                      -> test_push_branch (allowlist.sh ALSO -> test_shared_libs)
+#   plugin/skills/push-branch/**, plugin/skills/_shared/{allowlist,git-refusals}.sh
+#                                      -> test_push_branch (both libs ALSO -> test_shared_libs)
 #   plugin/skills/gather-facts/**, plugin/references/facts-schema.json,
 #     plugin/workflow-src/lib/schema.js, tests/workflow-scripts/harness.mjs,
 #     plugin/skills/_shared/{allowlist,containment,graphql-response}.sh
 #                                      -> test_gather_facts (facts-schema.json ALSO -> test_workflow_scripts;
 #                                         the _shared libs keep their other routes by union)
-#   plugin/skills/create-working-branch/**, plugin/skills/_shared/allowlist.sh
+#   plugin/skills/create-working-branch/**, plugin/skills/_shared/{allowlist,git-refusals}.sh
 #                                      -> test_create_working_branch
+#   plugin/skills/molt/**, plugin/skills/_shared/{allowlist,containment,git-refusals}.sh
+#                                      -> test_molt
+#   plugin/skills/open-plan-pr/**, plugin/skills/push-branch/**,
+#     plugin/skills/_shared/{allowlist,containment,git-refusals}.sh
+#                                      -> test_open_plan_pr (push-branch runs as a real child; it
+#                                         keeps its test_push_branch route by union)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
 #   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json, plugin/agents/overlord.md,
 #     plugin/skills/route-workflow/SKILL.md,
@@ -545,9 +557,11 @@ map_path() {
   # bash — so without this rule a push-branch edit would only be prose-linted, never behaviorally
   # exercised. allowlist.sh ALSO keeps its _shared/*.sh -> test_shared_libs routing above (same
   # precedent as bump-type-derive.sh: a _shared lib routed to more than one behavior oracle).
-  # (tools/test_push_branch.sh itself is covered by the tools/** full-suite leg.)
+  # git-refusals.sh is the shared git-state refusal lib push-branch.sh also sources; it routes here
+  # by the same rule. (tools/test_push_branch.sh itself is covered by the tools/** full-suite leg.)
   if [[ "$p" == plugin/skills/push-branch/* \
-     || "$p" == plugin/skills/_shared/allowlist.sh ]]; then
+     || "$p" == plugin/skills/_shared/allowlist.sh \
+     || "$p" == plugin/skills/_shared/git-refusals.sh ]]; then
     add_selected "$SUITE_TEST_PUSH_BRANCH" "$p (push-branch skill/allowlist gate)"
     matched=1
   fi
@@ -576,14 +590,45 @@ map_path() {
   fi
 
   # test_create_working_branch: the create-working-branch skill (SKILL.md + scripts/
-  # create-working-branch.sh entrypoint) and the shared allowlist gate it sources
-  # (_shared/allowlist.sh). Both are ALSO plugin/* files (policy_check prose-lints them via the
+  # create-working-branch.sh entrypoint) and the two shared libs it sources (_shared/allowlist.sh,
+  # _shared/git-refusals.sh). All are ALSO plugin/* files (policy_check prose-lints them via the
   # wholesale rule below), but policy_check NEVER EXECUTES bash — so without this rule an edit would
-  # only be prose-linted, never behaviorally exercised. allowlist.sh keeps its other routes by union.
+  # only be prose-linted, never behaviorally exercised. The libs keep their other routes by union.
   # (tools/test_create_working_branch.sh itself is covered by the tools/** full-suite leg.)
   if [[ "$p" == plugin/skills/create-working-branch/* \
-     || "$p" == plugin/skills/_shared/allowlist.sh ]]; then
-    add_selected "$SUITE_TEST_CREATE_WORKING_BRANCH" "$p (create-working-branch skill/allowlist gate)"
+     || "$p" == plugin/skills/_shared/allowlist.sh \
+     || "$p" == plugin/skills/_shared/git-refusals.sh ]]; then
+    add_selected "$SUITE_TEST_CREATE_WORKING_BRANCH" "$p (create-working-branch skill/shared lib)"
+    matched=1
+  fi
+
+  # test_molt: the molt skill (SKILL.md + scripts/molt.sh entrypoint) and the three shared libs the
+  # entrypoint sources (_shared/allowlist.sh, _shared/containment.sh, _shared/git-refusals.sh). All
+  # are ALSO plugin/* files (policy_check prose-lints them via the wholesale rule below), but
+  # policy_check NEVER EXECUTES bash — so without this rule an edit would only be prose-linted, never
+  # behaviorally exercised. The libs keep their other routes by union.
+  # (tools/test_molt.sh itself is covered by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/molt/* \
+     || "$p" == plugin/skills/_shared/allowlist.sh \
+     || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == plugin/skills/_shared/git-refusals.sh ]]; then
+    add_selected "$SUITE_TEST_MOLT" "$p (molt skill/shared lib)"
+    matched=1
+  fi
+
+  # test_open_plan_pr: the open-plan-pr skill (SKILL.md + scripts/open-plan-pr.sh entrypoint), the
+  # push-branch skill whose push-branch.sh the suite runs as a REAL child process, and the three
+  # shared libs both entrypoints source (_shared/allowlist.sh, _shared/containment.sh,
+  # _shared/git-refusals.sh). All are ALSO plugin/* files (policy_check prose-lints them via the
+  # wholesale rule below), but policy_check NEVER EXECUTES bash — so without this rule an edit would
+  # only be prose-linted, never behaviorally exercised. push-branch/** and the libs keep their other
+  # routes by union. (tools/test_open_plan_pr.sh itself is covered by the tools/** full-suite leg.)
+  if [[ "$p" == plugin/skills/open-plan-pr/* \
+     || "$p" == plugin/skills/push-branch/* \
+     || "$p" == plugin/skills/_shared/allowlist.sh \
+     || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == plugin/skills/_shared/git-refusals.sh ]]; then
+    add_selected "$SUITE_TEST_OPEN_PLAN_PR" "$p (open-plan-pr skill/push-branch child/shared lib)"
     matched=1
   fi
 
@@ -1094,6 +1139,8 @@ self_test() {
     ["test_push_branch.sh"]="plugin/skills/push-branch/scripts/push-branch.sh"
     ["test_gather_facts.sh"]="plugin/skills/gather-facts/scripts/gather-facts.sh"
     ["test_create_working_branch.sh"]="plugin/skills/create-working-branch/scripts/create-working-branch.sh"
+    ["test_molt.sh"]="plugin/skills/molt/scripts/molt.sh"
+    ["test_open_plan_pr.sh"]="plugin/skills/open-plan-pr/scripts/open-plan-pr.sh"
     ["test_validate_suites.sh"]="tools/test_validate_suites.sh"
     ["test_change_detect_poll.sh"]="tests/change-detect-poll/README.md"
     ["test_script_bootstrap.sh"]="plugin/skills/_shared/claude-mem-path.sh"
@@ -1303,10 +1350,11 @@ self_test() {
     fi
   done
 
-  # 10. Each consumer leg of the gather-facts and create-working-branch suites that the
-  #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
-  #     script, so it would stay green if the schema-chain, shared-lib or harness selector were
-  #     dropped. Probe each <path>|<suite> pair directly so removing any one selector FAILS here.
+  # 10. Each consumer leg of the gather-facts, create-working-branch, push-branch, molt and
+  #     open-plan-pr suites that the KNOWN_SUITES probe (#1) does not reach must route to its
+  #     suite. #1 probes each entrypoint script, so it would stay green if the schema-chain,
+  #     shared-lib, harness or push-branch child selector were dropped. Probe each <path>|<suite>
+  #     pair directly so removing any one selector FAILS here.
   local consumer_pair consumer_path consumer_suite
   for consumer_pair in \
     "plugin/references/facts-schema.json|$SUITE_TEST_GATHER_FACTS" \
@@ -1317,7 +1365,18 @@ self_test() {
     "plugin/skills/_shared/graphql-response.sh|$SUITE_TEST_GATHER_FACTS" \
     "plugin/skills/gather-facts/SKILL.md|$SUITE_TEST_GATHER_FACTS" \
     "plugin/skills/_shared/allowlist.sh|$SUITE_TEST_CREATE_WORKING_BRANCH" \
-    "plugin/skills/create-working-branch/SKILL.md|$SUITE_TEST_CREATE_WORKING_BRANCH"; do
+    "plugin/skills/create-working-branch/SKILL.md|$SUITE_TEST_CREATE_WORKING_BRANCH" \
+    "plugin/skills/_shared/git-refusals.sh|$SUITE_TEST_CREATE_WORKING_BRANCH" \
+    "plugin/skills/_shared/git-refusals.sh|$SUITE_TEST_PUSH_BRANCH" \
+    "plugin/skills/_shared/allowlist.sh|$SUITE_TEST_MOLT" \
+    "plugin/skills/_shared/containment.sh|$SUITE_TEST_MOLT" \
+    "plugin/skills/_shared/git-refusals.sh|$SUITE_TEST_MOLT" \
+    "plugin/skills/molt/SKILL.md|$SUITE_TEST_MOLT" \
+    "plugin/skills/_shared/allowlist.sh|$SUITE_TEST_OPEN_PLAN_PR" \
+    "plugin/skills/_shared/containment.sh|$SUITE_TEST_OPEN_PLAN_PR" \
+    "plugin/skills/_shared/git-refusals.sh|$SUITE_TEST_OPEN_PLAN_PR" \
+    "plugin/skills/push-branch/scripts/push-branch.sh|$SUITE_TEST_OPEN_PLAN_PR" \
+    "plugin/skills/open-plan-pr/SKILL.md|$SUITE_TEST_OPEN_PLAN_PR"; do
     consumer_path="${consumer_pair%%|*}"
     consumer_suite="${consumer_pair#*|}"
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
