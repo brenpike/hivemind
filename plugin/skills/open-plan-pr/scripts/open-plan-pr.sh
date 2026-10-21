@@ -53,25 +53,39 @@
 #                tree has untracked files. Ignored files are allowed.
 #   push script  skills/push-branch/scripts/push-branch.sh is missing.
 #   lookup       `gh pr list` for open PRs with this head and base fails, or prints anything other
-#                than a JSON array of PR objects (`cannot look up the open PRs for head`).
+#                than a JSON array of PR objects, each with a headRepository that is null or an
+#                object with a string id (`cannot look up the open PRs for head`).
 # push-branch.sh then makes its own refusals before its push: the current branch, the base, the
 # expected commit, and the upstream. Its stderr is relayed, and its `blocker:` line ends the run.
 #
 # PUSH: one child call, `bash <plugin root>/skills/push-branch/scripts/push-branch.sh --head <head>
-# --base <base> [--remote <remote>] --on-reject warn --no-upstream origin [--expect-commit <sha>]`.
-# Its stdout must be exactly `branch: <head>`, then `commit: <full object id>` (equal to
-# --expect-commit when given), then at most one `warning:` line with one of push-branch.sh's two
-# fixed warnings. Anything else stops the run with `the push script printed unexpected output`.
-# The `commit:` value is the pushed commit: every later check compares against it, never against
-# a re-read of local state, per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell
-# Identifier Discipline).
+# --base <base> --report-remote yes [--remote <remote>] --on-reject warn --no-upstream origin
+# [--expect-commit <sha>]`. Its stdout must be exactly `branch: <head>`, then `commit: <full
+# object id>` (equal to --expect-commit when given), then one of two endings. When a push ran:
+# `remote: <name>`, then at most `warning: <rejected warning>`. When the push was deferred:
+# `warning: <deferred warning>` and no remote line. The remote name must pass the identifier gate
+# and equal --remote when given. The two warnings are push-branch.sh's fixed texts. Anything else
+# stops the run with `the push script printed unexpected output`. The `commit:` value is the
+# pushed commit: every later check compares against it, never against a re-read of local state,
+# per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline).
 #
-# REUSE: after the push, `gh pr list` is read again. An open PR whose headRefName is head, whose
-# baseRefName is base, and whose headRefOid is the pushed commit is reused: `created: false`, and
-# its title, body, and draft state are left unchanged. When an open PR has the head and base but
-# another head SHA, the list is read again, up to 5 reads in all, HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY
-# seconds apart (default 2), because GitHub updates a PR's head SHA a moment after a push. When
-# no read finds a PR on the pushed commit, CREATE runs. More than one open PR carrying the pushed
+# HEAD REPOSITORY: the GitHub node id of the repository the push landed in. It is known only when
+# the push did not warn, `git remote get-url --push --all <reported remote>` prints exactly one
+# URL, that URL starts with `https://` and has no `@`, or starts with `ssh://` or `git@`, and
+# `gh repo view --json id -- <url>` exits 0. A value with no URL prefix is never passed, because
+# gh reads it as OWNER/REPO. When gh exits 0 but prints anything other than one object whose id
+# is a string of [A-Za-z0-9_=+/-] characters, the run stops with `cannot read the GitHub
+# repository of the push remote`. Every other miss leaves the id unknown (see R3).
+#
+# REUSE: only when the head repository id is known. After the push, `gh pr list` is read again.
+# An open PR whose headRefName is head, whose baseRefName is base, whose headRepository id is the
+# head repository id, and whose headRefOid is the pushed commit is reused: `created: false`, and
+# its title, body, and draft state are left unchanged. A PR from another head repository, such as
+# a fork, or with a null headRepository (a deleted fork), is never reused and never causes a
+# re-read. When an open PR has the head, base and head repository but another head SHA, the list
+# is read again, up to 5 reads in all, HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY seconds apart (default
+# 2), because GitHub updates a PR's head SHA a moment after a push. When no read finds a PR on the
+# pushed commit, or the id is unknown, CREATE runs. More than one open PR carrying the pushed
 # commit stops the run.
 #
 # CREATE: when no open PR carries the pushed commit, `gh pr create --base <base> --title=<title>
@@ -79,19 +93,26 @@
 # line, a PR URL that passes the identifier gate (^https://[A-Za-z0-9._/-]+$) and ends in
 # `/pull/<n>`. gh's stderr is relayed.
 #
-# VERIFY: `gh pr view <n> --json headRefName,headRefOid`. headRefName must equal head and
-# headRefOid must equal the pushed commit; a mismatch is a blocker, never a retry.
+# VERIFY: `gh pr view <n> --json headRefName,headRefOid,headRepository`. headRepository must be
+# null or an object with a string id. headRefName must equal head, then headRefOid must equal the
+# pushed commit, then, when the head repository id is known, headRepository must be non-null with
+# that id (`PR head repository does not match the push remote`). A mismatch is a blocker, never a
+# retry.
 #
 # OUTPUT on success (exit 0), on stdout in ONE write:
 #   url: <PR url>
 #   head_ref_oid: <pushed commit>
 #   created: true|false
-#   warning: <push-branch.sh warning>     only when the push warned
+#   warning: <text>     only when the push warned (push-branch.sh's warning), or when the push
+#                       did not warn and the head repository id is unknown (`gh cannot read the
+#                       push remote as a GitHub repository; the PR head repository was not
+#                       checked`)
 # EXIT CONTRACT:
 #   0  routing lines on stdout
 #   1  NOTHING on stdout. stderr carries any relayed push-branch.sh or gh stderr, then
 #      `blocker: <fixed reason>` as the LAST line. Blocker text never echoes a caller-supplied,
-#      repository, or GitHub value. A blocker after PUSH means the branch may be on its remote.
+#      repository, or GitHub value. A blocker after PUSH means the branch may be on its remote;
+#      HEAD REPOSITORY and VERIFY above name the blockers this script adds after the push.
 #
 # RECORDED RESIDUAL R1 (implicit head of the PR creation): CREATE above runs `gh pr create`
 # without `--head`, so gh resolves the PR head from the current branch in its own process, after
@@ -103,22 +124,33 @@
 #                moving PR creation into this script.
 #   Bounded impact: non-interactive gh never pushes, prompts, or forks; it aborts when the branch
 #                is not on a remote at the local commit. VERIFY above compares GitHub's
-#                headRefName and headRefOid against the gated head input and push-branch.sh's
-#                `commit:` line, never against a re-read of local state, so a drifted head is
-#                blocked, not accepted. Drift needs HEAD to change in the run owner's worktree
-#                between the push and the create call, and only repo-owned hooks or the operator
-#                act in the run owner's worktree. The worst result is a visible, closable PR.
+#                headRefName, headRefOid and, when it is known, headRepository id against the
+#                gated head input, push-branch.sh's `commit:` line, and the id of the repository
+#                the push landed in, never against a re-read of local state, so a drifted head or
+#                a head in another repository is blocked, not accepted. Drift needs HEAD to change
+#                in the run owner's worktree between the push and the create call, and only
+#                repo-owned hooks or the operator act in the run owner's worktree. The worst
+#                result is a visible, closable PR.
 #   Rejected remediations:
-#                - passing `--head <branch>`: gh then uses the base repository unless given
-#                  `<owner>:<branch>`, and deriving the owner means hand-parsing a remote URL,
-#                  which breaks fork and triangular remotes.
+#                - passing `--head <owner>:<branch>`: it names the head by owner login, not by
+#                  repository. gh does not support an organization owner there, and one
+#                  organization can hold several forks with one branch name (cli/cli#10093). It
+#                  fails Closed-by-Construction: it adds the owner to a text key instead of
+#                  binding the repository.
+#                - passing `--head <branch>`: exact only when the push repository is the base
+#                  repository gh pr create uses, and gh offers no way to read that base (gh repo
+#                  view ignores GH_REPO, which gh pr create honors).
+#                - creating the PR with the GraphQL createPullRequest mutation and a
+#                  headRepositoryId through gh api: it binds the head by id, but it replaces gh
+#                  pr create with a hand-built mutation and changes every create pin and test,
+#                  for a case VERIFY now blocks.
 #                - running the push and the PR creation in one process: this script now runs
 #                  both, but gh still resolves its own head unless `--head` is passed, so the
 #                  shared process binds nothing. The push stays in push-branch.sh, called as a
 #                  child, so the push kernel stays apart from PR authoring, and the free-text
 #                  title and body reach this script through the inputs file, never as arguments.
 #   Linkage:     review findings f781f8c8, 87f850de, a3c042d0, bd3204af, 08991c85, and
-#                09ca6d9d, with b0f99069 as lineage.
+#                09ca6d9d, with b0f99069 as lineage; review thread r4331751745.
 #
 # RECORDED RESIDUAL R2 (https-only PR URL gate): REUSE and CREATE above accept a PR URL only
 # when it passes the identifier gate (^https://[A-Za-z0-9._/-]+$) and ends in `/pull/<n>`. A
@@ -137,14 +169,36 @@
 #                  security contract and loosens input checking for every consumer.
 #   Linkage:     review thread r4331321536.
 #
+# RECORDED RESIDUAL R3 (head repository not checked when its id is unknown): when HEAD
+# REPOSITORY above leaves the id unknown, REUSE is skipped and VERIFY checks only headRefName and
+# headRefOid, so the head repository of the created PR is not checked.
+#   Root cause:  the id is read from the push URL with gh, and gh cannot read every URL git can
+#                push to.
+#   Inherited:   yes. On main, open-plan-pr checked only the head branch name and commit, never
+#                the head repository.
+#   Bounded impact: it applies only to a push remote whose URL is an ssh host alias, a local
+#                path, or a non-GitHub host, to a gh failure, or to a push that did not land
+#                (rejected or deferred). Nothing is reused in that case, so a PR from another
+#                repository is never taken as this one. When the push landed, the output carries
+#                a warning that the head repository was not checked. The check made is the same
+#                as on main.
+#   Rejected remediations:
+#                - translating ssh host aliases by hand: that means parsing ssh config, which gh
+#                  and git own, and it would still miss other URL forms.
+#                - stopping when the id is unknown: it adds stops, compared with main, for
+#                  remotes that work today.
+#   Linkage:     review thread r4331751745.
+#
 # NOT CHECKED: repo hooks, local refs, git config, gh config and auth, and the operator are
 # trusted under ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier
 # Discipline). gh picks the repository for every call from the git remotes and its own config;
 # this script never names it. The lookup, the push, and the create call are not atomic: a PR
 # opened by someone else between them makes the create call fail, and the run stops after the
 # push. A run that stops after the push leaves the branch on its remote; a rerun pushes again,
-# which changes nothing, and then reuses or creates the PR. An open PR on a fork with the same
-# branch name has another head SHA, so it is never reused. When `.hivemind/` is not ignored, the
+# which changes nothing, and then reuses or creates the PR. REUSE keys on the head repository
+# id, so an open PR from another repository, such as a fork with the same branch name and the
+# same commit, is never reused. The push URL behind that id is read again from git config after
+# the push, and git config is trusted. When `.hivemind/` is not ignored, the
 # inputs file itself is an untracked file and the run stops there. The private work folder
 # (mktemp -d under TMPDIR) holds the inputs copy, the body file, and the gh and push-branch.sh
 # output, and is removed by the EXIT trap.
@@ -285,6 +339,7 @@ list_file="$work_dir/list.json"
 push_err_file="$work_dir/push.err"
 create_err_file="$work_dir/create.err"
 view_file="$work_dir/view.json"
+repo_file="$work_dir/repo.json"
 
 # ── Inputs ──────────────────────────────────────────────────────────────────
 
@@ -364,24 +419,29 @@ refuse_dirty_tree
 
 # ── Open PR lookup ──────────────────────────────────────────────────────────
 
-# Reads the open PR list in the list file. Fails unless it is an array of PR objects. Prints
-# `<PRs with head and base> <of those, PRs on the pushed commit> <url of the one such PR, or ->`.
+# Reads the open PR list in the list file. Fails unless it is an array of PR objects, each with a
+# headRepository that is null or an object with a string id. Prints `<PRs with head, base and the
+# head repository id> <of those, PRs on the pushed commit> <url of the one such PR, or ->`.
 list_program='
+def has_head_repository: .headRepository == null
+  or ((.headRepository | type) == "object" and (.headRepository.id | type) == "string");
 if type != "array" then error("not an array")
 elif (all(.[]; type == "object"
     and (.number | type) == "number"
     and (.url | type) == "string"
     and (.headRefName | type) == "string"
     and (.headRefOid | type) == "string"
-    and (.baseRefName | type) == "string") | not) then error("not PR objects")
+    and (.baseRefName | type) == "string"
+    and has_head_repository) | not) then error("not PR objects")
 else
-  [.[] | select(.headRefName == $head and .baseRefName == $base)] as $named
+  [.[] | select(.headRefName == $head and .baseRefName == $base
+    and .headRepository != null and .headRepository.id == $repo)] as $named
   | [$named[] | select(.headRefOid == $commit)] as $carrying
   | "\($named | length) \($carrying | length) \(if ($carrying | length) == 1 then $carrying[0].url else "-" end)"
 end
 '
 
-# read_open_prs <pushed commit or empty>
+# read_open_prs <pushed commit or empty> <head repository id or empty>
 #   Runs `gh pr list` for open PRs with head and base and sets named_count, carrying_count, and
 #   carrying_url from list_program. Returns 1 when gh fails or its output is not a PR list.
 named_count=0
@@ -389,11 +449,12 @@ carrying_count=0
 carrying_url=''
 read_open_prs() {
   local commit_text="$1"
+  local repo_id_text="$2"
   local summary_line
   gh pr list --head "$head_name" --base "$base_name" --state open --limit 100 \
-    --json number,url,headRefName,headRefOid,baseRefName </dev/null >"$list_file" 2>/dev/null || return 1
+    --json number,url,headRefName,headRefOid,baseRefName,headRepository </dev/null >"$list_file" 2>/dev/null || return 1
   summary_line="$(jq -r --arg head "$head_name" --arg base "$base_name" --arg commit "$commit_text" \
-    "$list_program" "$list_file" 2>/dev/null)" || return 1
+    --arg repo "$repo_id_text" "$list_program" "$list_file" 2>/dev/null)" || return 1
   case "$summary_line" in
     *' '*' '*) ;;
     *) return 1 ;;
@@ -405,11 +466,11 @@ read_open_prs() {
   return 0
 }
 
-read_open_prs '' || blocker "cannot look up the open PRs for head"
+read_open_prs '' '' || blocker "cannot look up the open PRs for head"
 
 # ── Push ────────────────────────────────────────────────────────────────────
 
-push_args=(--head "$head_name" --base "$base_name")
+push_args=(--head "$head_name" --base "$base_name" --report-remote yes)
 if [ "$remote_seen" = true ]; then
   push_args+=(--remote "$remote_name")
 fi
@@ -433,9 +494,11 @@ if [ "$push_rc" -ne 0 ]; then
 fi
 
 # parse_push_output
-#   Sets pushed_commit and push_warning from push-branch.sh's stdout, or blocks when it is not
-#   exactly the lines the header names. Runs in the main shell so blocker exits it.
+#   Sets pushed_commit, pushed_remote, and push_warning from push-branch.sh's stdout, or blocks
+#   when it is not exactly the lines the header names. Runs in the main shell so blocker exits it.
 pushed_commit=''
+pushed_remote=''
+remote_line_seen=false
 push_warning=''
 parse_push_output() {
   local unexpected_reason='the push script printed unexpected output'
@@ -452,9 +515,18 @@ parse_push_output() {
         ;;
       3)
         case "$push_line" in
-          "warning: $reject_warning"|"warning: $deferred_warning") push_warning="${push_line#warning: }" ;;
+          'remote: '*)
+            pushed_remote="${push_line#remote: }"
+            remote_line_seen=true
+            ;;
+          "warning: $deferred_warning") push_warning="$deferred_warning" ;;
           *) blocker "$unexpected_reason" ;;
         esac
+        ;;
+      4)
+        [ "$remote_line_seen" = true ] || blocker "$unexpected_reason"
+        [ "$push_line" = "warning: $reject_warning" ] || blocker "$unexpected_reason"
+        push_warning="$reject_warning"
         ;;
       *) blocker "$unexpected_reason" ;;
     esac
@@ -466,8 +538,47 @@ EOF
   if [ "$expect_commit_seen" = true ]; then
     [ "$pushed_commit" = "$expect_commit" ] || blocker "$unexpected_reason"
   fi
+  [ "$line_index" -ge 3 ] || blocker "$unexpected_reason"
+  if [ "$remote_line_seen" = true ]; then
+    hivemind_assert_identifier "$pushed_remote" || blocker "$unexpected_reason"
+    if [ "$remote_seen" = true ]; then
+      [ "$pushed_remote" = "$remote_name" ] || blocker "$unexpected_reason"
+    fi
+  fi
 }
 parse_push_output
+
+# ── Head repository ─────────────────────────────────────────────────────────
+
+# read_push_repository_id
+#   Sets push_repo_id to the GitHub node id of the repository the push landed in, read from the
+#   push URL of the reported remote. Leaves it empty when the id is unknown. Blocks when gh reads
+#   the URL but prints anything other than one object with a safe string id. Runs in the main
+#   shell so blocker exits it.
+push_repo_id=''
+read_push_repository_id() {
+  local push_url_text repo_id_text
+  local repo_reason='cannot read the GitHub repository of the push remote'
+  [ -z "$push_warning" ] || return 0
+  push_url_text="$(git remote get-url --push --all "$pushed_remote" 2>/dev/null)" || return 0
+  case "$push_url_text" in
+    ''|*$'\n'*) return 0 ;;
+  esac
+  case "$push_url_text" in
+    https://*@*) return 0 ;;
+    https://*|ssh://*|git@*) ;;
+    *) return 0 ;;
+  esac
+  gh repo view --json id -- "$push_url_text" </dev/null >"$repo_file" 2>/dev/null || return 0
+  repo_id_text="$(jq -r -s 'if length == 1 and (.[0] | type) == "object" and (.[0].id | type) == "string"
+    and (.[0].id | test("\\A[A-Za-z0-9_=+/-]+\\z")) then .[0].id else error("not a repository id") end' \
+    "$repo_file" 2>/dev/null)" || blocker "$repo_reason"
+  push_repo_id="$repo_id_text"
+}
+read_push_repository_id
+if [ -z "$push_repo_id" ] && [ -z "$push_warning" ]; then
+  push_warning='gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
+fi
 
 # is_pr_url <value>
 #   Succeeds when <value> passes the PR URL identifier gate and ends in /pull/<n>.
@@ -479,16 +590,20 @@ is_pr_url() {
 
 # ── Reuse ───────────────────────────────────────────────────────────────────
 
-read_count=0
-while :; do
-  read_count=$((read_count + 1))
-  read_open_prs "$pushed_commit" || blocker "the open PRs could not be read after the push"
-  [ "$carrying_count" -le 1 ] || blocker "more than one open PR carries the pushed commit"
-  [ "$carrying_count" -eq 0 ] || break
-  [ "$named_count" -gt 0 ] || break
-  [ "$read_count" -lt "$reread_limit" ] || break
-  sleep "$reread_delay"
-done
+carrying_count=0
+carrying_url=''
+if [ -n "$push_repo_id" ]; then
+  read_count=0
+  while :; do
+    read_count=$((read_count + 1))
+    read_open_prs "$pushed_commit" "$push_repo_id" || blocker "the open PRs could not be read after the push"
+    [ "$carrying_count" -le 1 ] || blocker "more than one open PR carries the pushed commit"
+    [ "$carrying_count" -eq 0 ] || break
+    [ "$named_count" -gt 0 ] || break
+    [ "$read_count" -lt "$reread_limit" ] || break
+    sleep "$reread_delay"
+  done
+fi
 
 if [ "$carrying_count" -eq 1 ]; then
   is_pr_url "$carrying_url" || blocker "PR URL contains characters outside the safe allowlist"
@@ -510,9 +625,11 @@ else
   hivemind_assert_identifier "$pr_number" || blocker "PR number contains characters outside the safe allowlist"
 
   # ── Verify ────────────────────────────────────────────────────────────────
-  gh pr view "$pr_number" --json headRefName,headRefOid </dev/null >"$view_file" 2>/dev/null \
+  gh pr view "$pr_number" --json headRefName,headRefOid,headRepository </dev/null >"$view_file" 2>/dev/null \
     || blocker "could not read the PR head branch or head SHA"
-  view_shape="$(jq -r 'if type == "object" and (.headRefName | type) == "string" and (.headRefOid | type) == "string" then "ok" else "bad" end' "$view_file" 2>/dev/null)" \
+  view_shape="$(jq -r 'if type == "object" and (.headRefName | type) == "string" and (.headRefOid | type) == "string"
+    and (.headRepository == null or ((.headRepository | type) == "object" and (.headRepository.id | type) == "string"))
+    then "ok" else "bad" end' "$view_file" 2>/dev/null)" \
     || blocker "could not read the PR head branch or head SHA"
   [ "$view_shape" = ok ] || blocker "could not read the PR head branch or head SHA"
   head_match="$(jq -r --arg head "$head_name" '.headRefName == $head' "$view_file" 2>/dev/null)" \
@@ -521,9 +638,15 @@ else
   oid_match="$(jq -r --arg commit "$pushed_commit" '.headRefOid == $commit' "$view_file" 2>/dev/null)" \
     || blocker "could not read the PR head branch or head SHA"
   [ "$oid_match" = true ] || blocker "PR head SHA does not match the pushed commit"
+  if [ -n "$push_repo_id" ]; then
+    repo_match="$(jq -r --arg repo "$push_repo_id" '.headRepository != null and .headRepository.id == $repo' "$view_file" 2>/dev/null)" \
+      || blocker "could not read the PR head branch or head SHA"
+    [ "$repo_match" = true ] || blocker "PR head repository does not match the push remote"
+  fi
   created_value=true
 fi
 
+# The warning line carries push-branch.sh's warning or the HEAD REPOSITORY warning.
 if [ -n "$push_warning" ]; then
   printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\nwarning: %s\n' "$pr_url" "$pushed_commit" "$created_value" "$push_warning"
 else

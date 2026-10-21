@@ -15,10 +15,13 @@
 # is `blocker: <fixed reason>`.
 #
 # ISOLATION: the REAL committed engine and the REAL push-branch.sh run unmodified by absolute path.
-# Each case builds a THROWAWAY world under a mktemp WORKDIR: a local bare repo `origin.git` and a
-# working checkout `w` on feat/x, so no network and no real remote is reached. A stub `gh` is
-# first on PATH: it records each call's argv and the body file it is given, and serves scripted
-# responses, so no real GitHub call is ever made. The gh-missing case runs with a PATH of only
+# Each case builds a THROWAWAY world under a mktemp WORKDIR: a local bare repo `github/o/r.git` and
+# a working checkout `w` on feat/x whose origin is `git@github.com:o/r.git`. An offline fake ssh
+# transport (GIT_SSH_COMMAND, GIT_SSH_VARIANT=simple) maps `git@github.com:<path>` to the world's
+# `github/<path>` bare repo, so pushes stay local and no network and no real remote is reached.
+# A stub `gh` is first on PATH: it records each call's argv and the body file it is given, and
+# serves scripted responses, so no real GitHub call is ever made. It answers `gh repo view` with
+# `{"id":"R_o"}` unless a case scripts it. The gh-missing case runs with a PATH of only
 # the tools the scripts need. Host git config is excluded: GIT_CONFIG_NOSYSTEM=1, HOME and
 # XDG_CONFIG_HOME point into WORKDIR (a private ~/.gitconfig carries the identity), and
 # GIT_CEILING_DIRECTORIES stops discovery from escaping WORKDIR. The strict parse of the child's
@@ -120,6 +123,30 @@ EOF
 chmod +x "$WORKDIR/stub-bin/gh"
 export PATH="$WORKDIR/stub-bin:$PATH"
 
+# Fake ssh transport. With GIT_SSH_VARIANT=simple git runs it as `<script> <host> <command>`. It
+# serves `git-receive-pack '<path>'` and `git-upload-pack '<path>'` for git@github.com from the
+# bare repo $FAKE_SSH_ROOT/<path>, and fails any other host or command.
+cat >"$WORKDIR/stub-bin/fake-ssh" <<'EOF'
+#!/usr/bin/env bash
+set -eu
+unset GIT_PROTOCOL
+[ "$#" -eq 2 ] || { echo 'fake ssh: unexpected arguments' >&2; exit 255; }
+[ "$1" = 'git@github.com' ] || { echo 'fake ssh: unknown host' >&2; exit 255; }
+case "$2" in
+    "git-receive-pack '"*"'") ssh_service='receive-pack' ;;
+    "git-upload-pack '"*"'") ssh_service='upload-pack' ;;
+    *) echo 'fake ssh: unknown command' >&2; exit 255 ;;
+esac
+ssh_path="${2#* \'}"
+ssh_path="${ssh_path%\'}"
+ssh_path="${ssh_path#/}"
+exec git "$ssh_service" "$FAKE_SSH_ROOT/$ssh_path"
+EOF
+chmod +x "$WORKDIR/stub-bin/fake-ssh"
+export GIT_SSH_COMMAND="$WORKDIR/stub-bin/fake-ssh"
+export GIT_SSH_VARIANT=simple
+unset GIT_SSH
+
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -160,11 +187,15 @@ URL_REASON='PR URL contains characters outside the safe allowlist'
 VIEW_REASON='could not read the PR head branch or head SHA'
 HEAD_MISMATCH_REASON='PR head branch does not match head'
 OID_MISMATCH_REASON='PR head SHA does not match the pushed commit'
+REPO_MISMATCH_REASON='PR head repository does not match the push remote'
+REPO_VIEW_REASON='cannot read the GitHub repository of the push remote'
+REPO_UNKNOWN_WARNING='gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
 PUSH_MISMATCH_REASON='current branch does not match head or equals base'
 EXPECT_MISMATCH_REASON='HEAD is not the expected commit'
 REJECT_WARNING='push was rejected; the branch is not on its remote'
 DEFERRED_WARNING='no upstream and no origin remote; push deferred'
-LIST_ARGS="$(printf 'pr\nlist\n--head\n%s\n--base\nmain\n--state\nopen\n--limit\n100\n--json\nnumber,url,headRefName,headRefOid,baseRefName' "$BRANCH")"
+LIST_ARGS="$(printf 'pr\nlist\n--head\n%s\n--base\nmain\n--state\nopen\n--limit\n100\n--json\nnumber,url,headRefName,headRefOid,baseRefName,headRepository' "$BRANCH")"
+ORIGIN_URL='git@github.com:o/r.git'
 
 # ── World helpers ───────────────────────────────────────────────────────────
 
@@ -175,19 +206,22 @@ run_git() {
     git -C "$gitroot" "$@"
 }
 
-# create_world <name> -> builds $WORKDIR/<name>/{origin.git,w,gh}. origin carries main; `w` has
-# remote origin, no upstream, and HEAD on feat/x one commit ahead of main (unpushed). main has a
-# .gitignore that ignores .hivemind/. Sets WORLD_ROOT, WORK_TREE, ORIGIN_DIR, INPUTS_PATH,
-# GH_STUB_DIR (exported), TRUNK_SHA and HEAD_SHA, and writes a valid inputs file.
+# create_world <name> -> builds $WORKDIR/<name>/{github/o/r.git,w,gh}. origin carries main; `w`
+# has remote origin at ORIGIN_URL (served by the fake ssh transport), no upstream, and HEAD on
+# feat/x one commit ahead of main (unpushed). main has a .gitignore that ignores .hivemind/. Sets
+# WORLD_ROOT, WORK_TREE, ORIGIN_DIR, INPUTS_PATH, GH_STUB_DIR and FAKE_SSH_ROOT (exported),
+# TRUNK_SHA and HEAD_SHA, writes a valid inputs file, and scripts `gh repo view` to print R_o.
 create_world() {
     WORLD_ROOT="$WORKDIR/$1"
     WORK_TREE="$WORLD_ROOT/w"
-    ORIGIN_DIR="$WORLD_ROOT/origin.git"
+    export FAKE_SSH_ROOT="$WORLD_ROOT/github"
+    ORIGIN_DIR="$FAKE_SSH_ROOT/o/r.git"
     INPUTS_PATH="$WORK_TREE/$INPUTS_REL"
     export GH_STUB_DIR="$WORLD_ROOT/gh"
-    mkdir -p "$WORK_TREE/sub" "$GH_STUB_DIR"
-    run_git "$WORLD_ROOT" init -q --bare origin.git
+    mkdir -p "$WORK_TREE/sub" "$GH_STUB_DIR" "$FAKE_SSH_ROOT/o"
+    run_git "$FAKE_SSH_ROOT/o" init -q --bare r.git
     run_git "$ORIGIN_DIR" symbolic-ref HEAD refs/heads/main
+    stub_respond repo-view '' '{"id":"R_o"}'$'\n'
     run_git "$WORK_TREE" init -q
     run_git "$WORK_TREE" symbolic-ref HEAD refs/heads/main
     printf '.hivemind/\n' >"$WORK_TREE/.gitignore"
@@ -195,7 +229,7 @@ create_world() {
     printf 'base\n' >"$WORK_TREE/f.txt"
     run_git "$WORK_TREE" add .gitignore sub/keep.txt f.txt
     run_git "$WORK_TREE" commit -q -m init
-    run_git "$WORK_TREE" remote add origin "$ORIGIN_DIR"
+    run_git "$WORK_TREE" remote add origin "$ORIGIN_URL"
     run_git "$WORK_TREE" push -q origin refs/heads/main:refs/heads/main
     TRUNK_SHA="$(run_git "$WORK_TREE" rev-parse refs/heads/main)"
     run_git "$WORK_TREE" checkout -q -b "$BRANCH"
@@ -213,7 +247,8 @@ write_inputs() {
 }
 
 # stub_respond <call key> <k or empty> <stdout text> [rc] [stderr text] -> scripts the stub's
-# response to call k of <call key> (pr-list, pr-create, pr-view), or to every call when k is empty.
+# response to call k of <call key> (pr-list, pr-create, pr-view, repo-view), or to every call when
+# k is empty.
 stub_respond() {
     local response_base="$GH_STUB_DIR/$1"
     [[ -z "$2" ]] || response_base="$response_base.$2"
@@ -224,17 +259,27 @@ stub_respond() {
     fi
 }
 
-# pr_entry <number> <head> <base> <oid> -> one PR object as gh pr list prints it.
-pr_entry() {
-    printf '{"number":%s,"url":"https://github.com/o/r/pull/%s","headRefName":"%s","headRefOid":"%s","baseRefName":"%s"}' \
-        "$1" "$1" "$2" "$4" "$3"
+# repo_json <repo id or null> -> the headRepository value gh prints: null, or an object with id.
+repo_json() {
+    if [[ "$1" == null ]]; then
+        printf 'null'
+    else
+        printf '{"id":"%s","name":"r"}' "$1"
+    fi
 }
 
-# stub_create_ok [head] [oid] -> gh pr create prints PR_URL; gh pr view reports <head> (default
-# BRANCH) at <oid> (default HEAD_SHA).
+# pr_entry <number> <head> <base> <oid> [repo id or null] -> one PR object as gh pr list prints
+# it, with headRepository <repo id> (default R_o).
+pr_entry() {
+    printf '{"number":%s,"url":"https://github.com/o/r/pull/%s","headRefName":"%s","headRefOid":"%s","baseRefName":"%s","headRepository":%s}' \
+        "$1" "$1" "$2" "$4" "$3" "$(repo_json "${5:-R_o}")"
+}
+
+# stub_create_ok [head] [oid] [repo id or null] -> gh pr create prints PR_URL; gh pr view reports
+# <head> (default BRANCH) at <oid> (default HEAD_SHA) in <repo id> (default R_o).
 stub_create_ok() {
     stub_respond pr-create '' "$PR_URL"$'\n'
-    stub_respond pr-view '' "{\"headRefName\":\"${1:-$BRANCH}\",\"headRefOid\":\"${2:-$HEAD_SHA}\"}"$'\n'
+    stub_respond pr-view '' "{\"headRefName\":\"${1:-$BRANCH}\",\"headRefOid\":\"${2:-$HEAD_SHA}\",\"headRepository\":$(repo_json "${3:-R_o}")}"$'\n'
 }
 
 # call_count <call key> -> prints how many times the stub served <call key>.
@@ -583,8 +628,11 @@ test_create() {
         "body file in the private work folder"
     assert_equal create-no-head '' "$(printf '%s\n' "$create_args" | grep -e '--head' || true)" "no --head"
     assert_equal create-body "$(printf 'Summary\n\n- one\nx')" "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'x')" "body passed verbatim"
-    assert_equal create-view-args "$(printf 'pr\nview\n7\n--json\nheadRefName,headRefOid')" \
+    assert_equal create-view-args "$(printf 'pr\nview\n7\n--json\nheadRefName,headRefOid,headRepository')" \
         "$(cat "$GH_STUB_DIR/pr-view.1.args")" "gh pr view argv"
+    assert_equal create-repo-view-args "$(printf 'repo\nview\n--json\nid\n--\n%s' "$ORIGIN_URL")" \
+        "$(cat "$GH_STUB_DIR/repo-view.1.args")" "gh repo view argv"
+    assert_equal create-repo-view-calls 1 "$(call_count repo-view)" "one gh repo view"
     assert_equal create-work-dir-removed '' "$(ls "$TMPDIR")" "private work folder removed"
 
     create_world create-expect
@@ -697,8 +745,9 @@ test_reuse() {
     assert_equal reuse-many-no-create 0 "$(call_count pr-create)" "no gh pr create"
 
     create_world reuse-bad-url
-    stub_respond pr-list '' "[{\"number\":7,\"url\":\"https://github.com/o/r/pull/7\$(x)\",\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"baseRefName\":\"main\"}]"
+    stub_respond pr-list '' "[{\"number\":7,\"url\":\"https://github.com/o/r/pull/7\$(x)\",\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"baseRefName\":\"main\",\"headRepository\":{\"id\":\"R_o\"}}]"
     assert_blocker reuse-bad-url "$WORK_TREE" "$URL_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal reuse-bad-url-no-create 0 "$(call_count pr-create)" "no gh pr create"
 
     create_world reread-fails
     stub_respond pr-list 1 '[]'
@@ -706,6 +755,123 @@ test_reuse() {
     assert_blocker reread-fails "$WORK_TREE" "$REREAD_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
     assert_branch_pushed reread-fails-pushed
     assert_equal reread-fails-no-create 0 "$(call_count pr-create)" "no gh pr create"
+}
+
+# ── Head repository ─────────────────────────────────────────────────────────
+
+test_head_repository() {
+    local bad_entry bad_view index=0
+    create_world repo-fork-same-commit
+    stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$HEAD_SHA" R_f)]"
+    stub_create_ok
+    assert_success repo-fork-same-commit "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal repo-fork-same-commit-reads 2 "$(call_count pr-list)" "a fork PR causes no re-read"
+    assert_equal repo-fork-same-commit-create 1 "$(call_count pr-create)" "a fork PR on the pushed commit is not reused"
+
+    create_world repo-fork-and-own
+    stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$HEAD_SHA" R_f),$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    assert_success repo-fork-and-own "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal repo-fork-and-own-no-create 0 "$(call_count pr-create)" "own PR reused beside a fork PR"
+
+    create_world repo-deleted-fork
+    stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$HEAD_SHA" null)]"
+    stub_create_ok
+    assert_success repo-deleted-fork "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal repo-deleted-fork-reads 2 "$(call_count pr-list)" "a null head repository is not reused"
+
+    for bad_entry in '"R_o"' '{"id":5}' '{"name":"r"}' '[]' 'true'; do
+        index=$((index + 1))
+        create_world "repo-lookup-bad-$index"
+        stub_respond pr-list '' "[{\"number\":7,\"url\":\"$PR_URL\",\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"baseRefName\":\"main\",\"headRepository\":$bad_entry}]"
+        assert_refused_unchanged "repo-lookup-bad-$index" "$WORK_TREE" "$LOOKUP_REASON" \
+            --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    done
+
+    create_world repo-view-mismatch
+    stub_respond pr-list '' '[]'
+    stub_create_ok "$BRANCH" "$HEAD_SHA" R_x
+    assert_blocker repo-view-mismatch "$WORK_TREE" "$REPO_MISMATCH_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+
+    create_world repo-view-null
+    stub_respond pr-list '' '[]'
+    stub_create_ok "$BRANCH" "$HEAD_SHA" null
+    assert_blocker repo-view-null "$WORK_TREE" "$REPO_MISMATCH_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+
+    create_world repo-view-bad-type
+    stub_respond pr-list '' '[]'
+    stub_respond pr-create '' "$PR_URL"$'\n'
+    stub_respond pr-view '' "{\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"headRepository\":\"R_o\"}"
+    assert_blocker repo-view-bad-type "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+
+    create_world repo-view-bad-type-unknown
+    stub_respond pr-list '' '[]'
+    stub_respond repo-view '' '' 1
+    stub_respond pr-create '' "$PR_URL"$'\n'
+    stub_respond pr-view '' "{\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"headRepository\":\"R_o\"}"
+    assert_blocker repo-view-bad-type-unknown "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+
+    create_world repo-gh-fails
+    stub_respond pr-list '' '[]'
+    stub_respond repo-view '' '' 1 'GraphQL: Could not resolve to a Repository'
+    stub_create_ok "$BRANCH" "$HEAD_SHA" R_x
+    assert_success repo-gh-fails "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal repo-gh-fails-reads 1 "$(call_count pr-list)" "no read after the push when the id is unknown"
+    assert_branch_pushed repo-gh-fails-pushed
+
+    create_world repo-gh-fails-own-pr
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    stub_respond repo-view '' '' 1
+    stub_respond pr-create '' '' 1 "a pull request for branch \"$BRANCH\" into branch \"main\" already exists"
+    assert_blocker repo-gh-fails-own-pr "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal repo-gh-fails-own-pr-reads 1 "$(call_count pr-list)" "no text-keyed reuse when the id is unknown"
+    assert_equal repo-gh-fails-own-pr-create 1 "$(call_count pr-create)" "create ran"
+
+    create_world repo-local-path
+    run_git "$WORK_TREE" remote set-url origin "$ORIGIN_DIR"
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success repo-local-path "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal repo-local-path-no-repo-view 0 "$(call_count repo-view)" "a local path is never passed to gh"
+    assert_branch_pushed repo-local-path-pushed
+
+    create_world repo-ssh-scheme
+    run_git "$WORK_TREE" remote set-url origin 'ssh://git@github.com/o/r.git'
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success repo-ssh-scheme "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal repo-ssh-scheme-args "$(printf 'repo\nview\n--json\nid\n--\nssh://git@github.com/o/r.git')" \
+        "$(cat "$GH_STUB_DIR/repo-view.1.args")" "gh repo view reads the ssh:// URL"
+
+    index=0
+    for bad_view in 'not json' '{"id":5}' '{"id":"a b"}' '{"id":""}' '{"id":"R_o\n"}' '[]' '{"name":"r"}' \
+        '{"id":"R_o"}{"id":"R_x"}' ''; do
+        index=$((index + 1))
+        create_world "repo-view-bad-$index"
+        stub_respond pr-list '' '[]'
+        stub_respond repo-view '' "$bad_view"
+        stub_create_ok
+        assert_blocker "repo-view-bad-$index" "$WORK_TREE" "$REPO_VIEW_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        assert_branch_pushed "repo-view-bad-$index-pushed"
+        assert_equal "repo-view-bad-$index-no-create" 0 "$(call_count pr-create)" "no gh pr create"
+    done
+
+    create_world repo-triangular
+    mkdir -p "$FAKE_SSH_ROOT/f"
+    run_git "$FAKE_SSH_ROOT/f" init -q --bare r.git
+    run_git "$WORK_TREE" remote add fork 'git@github.com:f/r.git'
+    run_git "$WORK_TREE" push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
+    run_git "$WORK_TREE" config "branch.$BRANCH.remote" origin
+    run_git "$WORK_TREE" config "branch.$BRANCH.merge" "refs/heads/$BRANCH"
+    run_git "$WORK_TREE" config "branch.$BRANCH.pushRemote" fork
+    stub_respond repo-view '' '{"id":"R_f"}'$'\n'
+    stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$HEAD_SHA"),$(pr_entry 7 "$BRANCH" main "$HEAD_SHA" R_f)]"
+    assert_success repo-triangular "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal repo-triangular-args "$(printf 'repo\nview\n--json\nid\n--\ngit@github.com:f/r.git')" \
+        "$(cat "$GH_STUB_DIR/repo-view.1.args")" "gh repo view reads the push remote URL"
+    assert_equal repo-triangular-fork-ref "$HEAD_SHA" \
+        "$(git --git-dir="$FAKE_SSH_ROOT/f/r.git" rev-parse "refs/heads/$BRANCH")" "push landed in the fork"
 }
 
 # ── Create and verify failures ──────────────────────────────────────────────
@@ -791,7 +957,8 @@ test_push_outcomes() {
     create_world no-origin-reuse
     run_git "$WORK_TREE" remote remove origin
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
-    assert_success no-origin-reuse "$WORK_TREE" "$(expected_block false "$DEFERRED_WARNING")" \
+    stub_respond pr-create '' '' 1 "a pull request for branch \"$BRANCH\" into branch \"main\" already exists"
+    assert_blocker no-origin-reuse "$WORK_TREE" "$CREATE_FAILED_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
 
     create_world expect-mismatch
@@ -831,7 +998,7 @@ EOF
     create_world fake-push-ok
     stub_respond pr-list '' '[]'
     stub_create_ok
-    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\n' "$BRANCH" "$HEAD_SHA")" \
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
         assert_success fake-push-ok "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
 
     for fake_out in \
@@ -855,8 +1022,97 @@ EOF
     create_world fake-push-expect
     stub_respond pr-list '' '[]'
     stub_create_ok
-    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\n' "$BRANCH" "$HEAD_SHA")" assert_blocker fake-push-expect \
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" assert_blocker fake-push-expect \
         "$WORK_TREE" "$UNEXPECTED_PUSH_REASON" --head "$BRANCH" --base main --expect-commit "$TRUNK_SHA" --inputs "$INPUTS_REL"
+
+    index=0
+    for fake_out in \
+        "$(printf 'branch: %s\ncommit: %s' "$BRANCH" "$HEAD_SHA")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote: ' "$BRANCH" "$HEAD_SHA")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote:origin' "$BRANCH" "$HEAD_SHA")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote: -x' "$BRANCH" "$HEAD_SHA")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote: a..b' "$BRANCH" "$HEAD_SHA")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote: o r' "$BRANCH" "$HEAD_SHA")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote: origin\nremote: origin' "$BRANCH" "$HEAD_SHA")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote: origin\nwarning: %s' "$BRANCH" "$HEAD_SHA" "$DEFERRED_WARNING")" \
+        "$(printf 'branch: %s\ncommit: %s\nwarning: %s\nremote: origin' "$BRANCH" "$HEAD_SHA" "$DEFERRED_WARNING")" \
+        "$(printf 'branch: %s\ncommit: %s\nwarning: %s\nwarning: %s' "$BRANCH" "$HEAD_SHA" "$DEFERRED_WARNING" "$REJECT_WARNING")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote: origin\nwarning: something else' "$BRANCH" "$HEAD_SHA")" \
+        "$(printf 'branch: %s\ncommit: %s\nremote: origin\nwarning: %s\nextra' "$BRANCH" "$HEAD_SHA" "$REJECT_WARNING")" \
+        "$(printf 'branch: %s\nremote: origin\ncommit: %s' "$BRANCH" "$HEAD_SHA")"; do
+        index=$((index + 1))
+        create_world "fake-push-remote-bad-$index"
+        stub_respond pr-list '' '[]'
+        stub_create_ok
+        FAKE_PUSH_OUT="$fake_out" assert_blocker "fake-push-remote-bad-$index" "$WORK_TREE" "$UNEXPECTED_PUSH_REASON" \
+            --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        assert_equal "fake-push-remote-bad-$index-no-create" 0 "$(call_count pr-create)" "no gh pr create"
+    done
+
+    create_world fake-push-remote-other
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: other\n' "$BRANCH" "$HEAD_SHA")" assert_blocker fake-push-remote-other \
+        "$WORK_TREE" "$UNEXPECTED_PUSH_REASON" --head "$BRANCH" --base main --remote origin --inputs "$INPUTS_REL"
+
+    create_world fake-push-remote-explicit
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" assert_success fake-push-remote-explicit \
+        "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --remote origin --inputs "$INPUTS_REL"
+
+    create_world fake-push-rejected
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\nwarning: %s\n' "$BRANCH" "$HEAD_SHA" "$REJECT_WARNING")" \
+        assert_success fake-push-rejected "$WORK_TREE" "$(expected_block true "$REJECT_WARNING")" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal fake-push-rejected-no-repo-view 0 "$(call_count repo-view)" "no gh repo view after a rejected push"
+    assert_equal fake-push-rejected-reads 1 "$(call_count pr-list)" "no reuse after a rejected push"
+
+    create_world fake-push-deferred
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nwarning: %s\n' "$BRANCH" "$HEAD_SHA" "$DEFERRED_WARNING")" \
+        assert_success fake-push-deferred "$WORK_TREE" "$(expected_block true "$DEFERRED_WARNING")" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal fake-push-deferred-no-repo-view 0 "$(call_count repo-view)" "no gh repo view after a deferred push"
+
+    create_world fake-push-two-urls
+    run_git "$WORK_TREE" remote set-url --add --push origin "$ORIGIN_URL"
+    run_git "$WORK_TREE" remote set-url --add --push origin 'git@github.com:o/r2.git'
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
+        assert_success fake-push-two-urls "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal fake-push-two-urls-no-repo-view 0 "$(call_count repo-view)" "two push URLs are never passed to gh"
+
+    create_world fake-push-https-userinfo
+    run_git "$WORK_TREE" remote set-url --push origin 'https://u@github.com/o/r.git'
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
+        assert_success fake-push-https-userinfo "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal fake-push-https-userinfo-no-repo-view 0 "$(call_count repo-view)" "an https URL with @ is never passed to gh"
+
+    create_world fake-push-https
+    run_git "$WORK_TREE" remote set-url --push origin 'https://github.com/o/r.git'
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
+        assert_success fake-push-https "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal fake-push-https-args "$(printf 'repo\nview\n--json\nid\n--\nhttps://github.com/o/r.git')" \
+        "$(cat "$GH_STUB_DIR/repo-view.1.args")" "gh repo view reads the push URL"
+
+    create_world fake-push-unknown-remote
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: gone\n' "$BRANCH" "$HEAD_SHA")" \
+        assert_success fake-push-unknown-remote "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal fake-push-unknown-remote-no-repo-view 0 "$(call_count repo-view)" "a remote with no URL is never passed to gh"
 
     create_world fake-push-blocker
     stub_respond pr-list '' '[]'
@@ -914,6 +1170,7 @@ test_create
 test_title_not_expanded
 test_draft
 test_reuse
+test_head_repository
 test_create_failures
 test_push_outcomes
 test_push_output_parse
