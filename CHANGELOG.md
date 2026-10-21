@@ -12,6 +12,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.4.0] - 2026-10-21
+
+### Added
+
+- seed-hive seeds `Skill(hivemind:route-workflow)`, so the main session no longer prompts on the per-request routing call. Consumers re-run `/hivemind:seed-hive` to add the new rule.
+
+### Changed
+
+- The overlord resumes a workflow run by name (`name` plus `resumeFromRunId`), never through `scriptPath`, and never reads the run's stored script copy.
+- The overlord's launch and resume args carry only their named fields, with no instruction for the workflow's agents.
+- The overlord keeps the routing outcome out of chat.
+- ADR-0037: the check of a seeded `Read(~/.claude/plugins/cache/...)` rule against a marketplace install, and the check of skill `allowed-tools` Edit pre-approval, move to the slice 2 PR8 live smoke. No Read rule is seeded until that check passes.
+
 ## [6.3.0] - 2026-10-21
 
 ### Added
