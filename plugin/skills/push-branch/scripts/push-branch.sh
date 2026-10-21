@@ -29,6 +29,9 @@
 #   --no-upstream block|origin   OPTIONAL, default block. With no upstream and no --remote: block,
 #                                or push to `origin` when `remote.origin.url` is set (origin mode),
 #                                or defer with a warning when it is not.
+#   --report-remote yes|no       OPTIONAL, default no. With `yes`, add the `remote:` line to the
+#                                output whenever a push ran (see OUTPUT). Consumer:
+#                                plugin/skills/open-plan-pr/scripts/open-plan-pr.sh.
 # head, base, and remote pass hivemind_assert_identifier (_shared/allowlist.sh: non-empty, no
 # leading `-`, no `..`, charset ^[A-Za-z0-9._/-]+$) before any git command runs. Then, still
 # before any git command, an expect-commit value that is not a full 40- or 64-digit lowercase hex
@@ -88,7 +91,13 @@
 # OUTPUT on success (exit 0), on stdout in ONE write, after any upstream record:
 #   branch: <b>
 #   commit: <sha>
+#   remote: <push remote>        only with --report-remote yes and only when a push ran (success,
+#                                or a rejection warned under --on-reject warn): the remote the
+#                                push used in explicit, upstream, or origin mode. A deferred push
+#                                prints no remote line. Consumer:
+#                                plugin/skills/open-plan-pr/scripts/open-plan-pr.sh.
 #   warning: <fixed text>        only when a rejection was warned or the push was deferred
+# With --report-remote no, or without the flag, the output has no remote line.
 # EXIT CONTRACT:
 #   0  routing lines on stdout
 #   1  `blocker: <fixed reason>` on stderr (after any relayed git stderr), NOTHING on stdout.
@@ -138,7 +147,7 @@ shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>
 export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
 
-usage_reason='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] [--expect-commit <sha>]'
+usage_reason='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] [--expect-commit <sha>] [--report-remote yes|no]'
 
 head_name=''
 head_seen=false
@@ -152,6 +161,8 @@ no_upstream='block'
 no_upstream_seen=false
 expect_commit=''
 expect_commit_seen=false
+report_remote='no'
+report_remote_seen=false
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || blocker "$usage_reason"
   case "$1" in
@@ -185,6 +196,11 @@ while [ "$#" -gt 0 ]; do
       expect_commit="$2"
       expect_commit_seen=true
       ;;
+    --report-remote)
+      [ "$report_remote_seen" = false ] || blocker "$usage_reason"
+      report_remote="$2"
+      report_remote_seen=true
+      ;;
     *)
       blocker "$usage_reason"
       ;;
@@ -199,6 +215,10 @@ case "$on_reject" in
 esac
 case "$no_upstream" in
   block|origin) ;;
+  *) blocker "$usage_reason" ;;
+esac
+case "$report_remote" in
+  yes|no) ;;
   *) blocker "$usage_reason" ;;
 esac
 
@@ -411,8 +431,12 @@ if [ "$push_class" = 'success' ] && [ "$push_mode" != 'upstream' ]; then
   write_config_value "branch.$current_branch.merge" "refs/heads/$current_branch"
 fi
 
+remote_line=''
+if [ "$report_remote" = 'yes' ]; then
+  remote_line="remote: $push_remote"$'\n'
+fi
 if [ -n "$warning_text" ]; then
-  printf 'branch: %s\ncommit: %s\nwarning: %s\n' "$current_branch" "$head_sha" "$warning_text"
+  printf 'branch: %s\ncommit: %s\n%swarning: %s\n' "$current_branch" "$head_sha" "$remote_line" "$warning_text"
 else
-  printf 'branch: %s\ncommit: %s\n' "$current_branch" "$head_sha"
+  printf 'branch: %s\ncommit: %s\n%s' "$current_branch" "$head_sha" "$remote_line"
 fi

@@ -4,7 +4,8 @@
 # (plugin/skills/push-branch/scripts/push-branch.sh, gate library plugin/skills/_shared/allowlist.sh).
 #
 # The engine takes REQUIRED `--head <branch> --base <branch>` plus optional `--remote <name>`,
-# `--on-reject block|warn`, `--no-upstream block|origin`, and `--expect-commit <sha>`. It refuses
+# `--on-reject block|warn`, `--no-upstream block|origin`, `--expect-commit <sha>`, and
+# `--report-remote yes|no`. It refuses
 # when the base text or any ref the base names names the current branch, and, with
 # --expect-commit, when HEAD is another commit, before any push. It reads the current branch, HEAD,
 # the upstream config, and the push remote ONCE, gates every value, then pushes the explicit
@@ -12,8 +13,9 @@
 # (upstream mode only) retries a non-fast-forward once with --force-with-lease on the SAME captured
 # values. After a successful push in explicit or origin mode it records branch.<b>.remote and
 # branch.<b>.merge itself. On success it prints
-#     branch: <b> / commit: <sha> [/ warning: <fixed text>]
-# on stdout, exit 0. On any blocker it prints `blocker: <fixed reason>` as the LAST stderr line,
+#     branch: <b> / commit: <sha> [/ remote: <push remote>] [/ warning: <fixed text>]
+# on stdout, exit 0. The remote line appears only with --report-remote yes and only when a push
+# ran. On any blocker it prints `blocker: <fixed reason>` as the LAST stderr line,
 # NOTHING on stdout, exit 1.
 #
 # DRIFT REGRESSIONS: a client pre-push hook rewrites `branch.<b>.merge` to refs/heads/main,
@@ -83,7 +85,7 @@ failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 # ── Contracted strings (restated from the engine header; a change here is a contract change) ──
 
 BRANCH='feat/x'
-USAGE_REASON='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] [--expect-commit <sha>]'
+USAGE_REASON='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] [--expect-commit <sha>] [--report-remote yes|no]'
 IDENTIFIER_REASON='head, base, or remote contains characters outside the safe allowlist'
 DETACHED_REASON='HEAD is detached'
 CURRENT_BRANCH_REASON='current branch contains characters outside the safe allowlist'
@@ -230,6 +232,29 @@ assert_success() {
     shift 4
     local errfile="$WORKDIR/$name.err" out rc=0 expected
     printf -v expected 'branch: %s\ncommit: %s\n' "$BRANCH" "$sha"
+    if [[ -n "$warning" ]]; then
+        printf -v expected '%swarning: %s\n' "$expected" "$warning"
+    fi
+    run_engine "$run_cwd" out "$errfile" "$@" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        failed "$name" "expected exit 0, got $rc (stderr: $(tail -n 3 "$errfile" | tr '\n' '|'))"
+        return 0
+    fi
+    if [[ "$out" == "$expected" ]]; then
+        pass "$name" "$(printf '%s' "$out" | tr '\n' '|')"
+    else
+        failed "$name" "stdout mismatch; expected: $(printf '%s' "$expected" | tr '\n' '|') actual: $(printf '%s' "$out" | tr '\n' '|')"
+    fi
+}
+
+# assert_success_with_remote <name> <cwd> <sha> <remote> <warning or empty> <engine args...>
+# Runs the engine, asserts exit 0 and stdout exactly the routing block for feat/x at <sha> with
+# the `remote: <remote>` line right after `commit:`.
+assert_success_with_remote() {
+    local name="$1" run_cwd="$2" sha="$3" remote="$4" warning="$5"
+    shift 5
+    local errfile="$WORKDIR/$name.err" out rc=0 expected
+    printf -v expected 'branch: %s\ncommit: %s\nremote: %s\n' "$BRANCH" "$sha" "$remote"
     if [[ -n "$warning" ]]; then
         printf -v expected '%swarning: %s\n' "$expected" "$warning"
     fi
@@ -818,6 +843,115 @@ test_no_upstream_origin_absent() {
     assert_remote_refs no-upstream-origin-deferred-other-untouched "$OTHER_DIR" ''
 }
 
+# ── Remote report (--report-remote) ──────────────────────────────────────────
+
+# With --report-remote yes the engine prints `remote: <push remote>` right after `commit:`
+# whenever a push ran, naming the remote the push actually used: the upstream remote, then
+# branch.<b>.pushRemote or remote.pushDefault ahead of it, the explicit --remote, or origin in
+# origin mode. A warned rejection keeps the remote line ahead of the warning; a deferred push
+# prints none. With `no` the output is the default block, byte for byte.
+test_report_remote_usage() {
+    create_world report-remote-usage
+    install_pre_push_hook
+    assert_blocker report-remote-bad-value "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --report-remote maybe
+    assert_blocker report-remote-bad-value-case "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --report-remote YES
+    assert_blocker report-remote-duplicate "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --report-remote yes --report-remote yes
+    assert_blocker report-remote-missing-value "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin --report-remote
+    assert_equal report-remote-usage-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs report-remote-usage-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_upstream() {
+    local sha
+    create_world report-remote-upstream
+    publish_branch_with_upstream
+    run_git "$WORK_TREE" commit --allow-empty -q -m two
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-upstream "$WORK_TREE" "$sha" origin '' \
+        --head "$BRANCH" --base main --report-remote yes
+    assert_remote_refs report-remote-upstream-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+test_report_remote_push_remote() {
+    local sha
+    create_world report-remote-push-remote
+    set_upstream origin "refs/heads/$BRANCH"
+    run_git "$WORK_TREE" config "branch.$BRANCH.pushRemote" other
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-push-remote "$WORK_TREE" "$sha" other '' \
+        --head "$BRANCH" --base main --report-remote yes
+    assert_remote_refs report-remote-push-remote-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
+    assert_remote_refs report-remote-push-remote-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_push_default() {
+    local sha
+    create_world report-remote-push-default
+    set_upstream origin "refs/heads/$BRANCH"
+    run_git "$WORK_TREE" config remote.pushDefault other
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-push-default "$WORK_TREE" "$sha" other '' \
+        --head "$BRANCH" --base main --report-remote yes
+    assert_remote_refs report-remote-push-default-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
+    assert_remote_refs report-remote-push-default-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_explicit() {
+    local sha
+    create_world report-remote-explicit
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-explicit "$WORK_TREE" "$sha" other '' \
+        --head "$BRANCH" --base main --remote other --report-remote yes
+    assert_remote_refs report-remote-explicit-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
+    assert_remote_refs report-remote-explicit-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_origin_mode() {
+    local sha
+    create_world report-remote-origin-mode
+    sha="$(head_sha)"
+    assert_success_with_remote report-remote-origin-mode "$WORK_TREE" "$sha" origin '' \
+        --head "$BRANCH" --base main --no-upstream origin --report-remote yes
+    assert_remote_refs report-remote-origin-mode-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
+}
+
+test_report_remote_reject_warn() {
+    create_world report-remote-reject-warn
+    set_upstream origin "refs/heads/$BRANCH"
+    install_reject_hook "$ORIGIN_DIR"
+    assert_success_with_remote report-remote-reject-warn "$WORK_TREE" "$(head_sha)" origin "$REJECT_WARNING" \
+        --head "$BRANCH" --base main --on-reject warn --report-remote yes
+    assert_remote_refs report-remote-reject-warn-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+test_report_remote_deferred() {
+    create_world report-remote-deferred
+    run_git "$WORK_TREE" remote remove origin
+    install_pre_push_hook
+    assert_success report-remote-deferred "$WORK_TREE" "$(head_sha)" "$DEFERRED_WARNING" \
+        --head "$BRANCH" --base main --no-upstream origin --report-remote yes
+    assert_equal report-remote-deferred-no-push 0 "$(count_push_attempts)" "push attempts"
+}
+
+test_report_remote_no_equals_default() {
+    local sha no_out default_out no_rc=0 default_rc=0
+    create_world report-remote-no
+    sha="$(head_sha)"
+    assert_success report-remote-no "$WORK_TREE" "$sha" '' \
+        --head "$BRANCH" --base main --remote origin --report-remote no
+    run_engine "$WORK_TREE" no_out "$WORKDIR/report-remote-no-repeat.err" \
+        --head "$BRANCH" --base main --report-remote no || no_rc=$?
+    run_engine "$WORK_TREE" default_out "$WORKDIR/report-remote-default-repeat.err" \
+        --head "$BRANCH" --base main || default_rc=$?
+    assert_equal report-remote-no-exit 0 "$no_rc" "exit code with --report-remote no"
+    assert_equal report-remote-default-exit 0 "$default_rc" "exit code without --report-remote"
+    assert_equal report-remote-no-equals-default "$default_out" "$no_out" "stdout with --report-remote no"
+}
+
 # ── Run ──────────────────────────────────────────────────────────────────────
 
 test_usage_errors
@@ -848,6 +982,15 @@ test_origin_rejection
 test_no_upstream_block
 test_no_upstream_origin
 test_no_upstream_origin_absent
+test_report_remote_usage
+test_report_remote_upstream
+test_report_remote_push_remote
+test_report_remote_push_default
+test_report_remote_explicit
+test_report_remote_origin_mode
+test_report_remote_reject_warn
+test_report_remote_deferred
+test_report_remote_no_equals_default
 
 echo
 echo "push-branch engine tests: $PASS_COUNT passed, $FAIL_COUNT failed"
