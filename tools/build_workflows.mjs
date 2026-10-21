@@ -7,9 +7,11 @@
  *                                            each draft
  *   node tools/build_workflows.mjs --check   rebuild in memory and exit 1
  *                                            when a committed script is stale
- *                                            or has no source directory, or
+ *                                            or has no source directory,
  *                                            when a draft has a committed
- *                                            script
+ *                                            script, or when an entry under
+ *                                            plugin/workflows/ is not a
+ *                                            regular file
  *
  * Sources
  *   Workflow ids are the directories of plugin/workflow-src/ other than lib.
@@ -35,12 +37,22 @@
  *   draft, so a stray DRAFT marker on a live workflow fails too.
  *   --check lists plugin/workflows/*.js, never the .json engine files, and
  *   names each one with no plugin/workflow-src/<id>/ directory as an orphan.
+ *   Every entry under plugin/workflows/ must be a regular file. --check
+ *   names each one that is not (a symlink, a directory or anything else),
+ *   whatever its name, .js, .json or other, and exits 1. It never reads
+ *   through such an entry, so it is not also reported stale. Write mode
+ *   checks every target before it writes any, and throws when a target
+ *   exists and is not a regular file, so it never writes through a symlink.
  *
  * Why
  *   A running workflow script cannot import or read files, so the build
  *   copies data and libraries in, and --check keeps the copies in step.
+ *   The overlord launches the committed scripts by path, so a symlink there
+ *   could run content that --check never compared, and a write through one
+ *   would change a file outside plugin/workflows/. Only regular files are
+ *   allowed, and nothing else is followed.
  */
-import { existsSync, lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -49,10 +61,11 @@ const REBUILD_COMMAND = 'node tools/build_workflows.mjs';
 const SOURCE_DIR = 'plugin/workflow-src';
 const OUTPUT_DIR = 'plugin/workflows';
 const DRAFT_MARKER = 'DRAFT';
-export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'waves.js', 'routing.js']);
+export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'waves.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js']);
 const DATA_CONSTANTS = [
   { name: 'AUTONOMY_TABLE', path: 'plugin/references/decision-autonomy-table.json' },
-  { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json' }
+  { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json' },
+  { name: 'PLAN_SCHEMA', path: 'plugin/references/plan-schema.json' }
 ];
 
 function readSource(root, relativePath) {
@@ -198,9 +211,47 @@ export function buildWorkflow(root, id) {
   return output;
 }
 
+/**
+ * Returns the kind of the entry at relativePath without following a
+ * symlink: missing, file, symlink, directory or other.
+ */
+export function readEntryKind(root, relativePath) {
+  const stats = lstatSync(join(root, relativePath), { throwIfNoEntry: false });
+  if (stats === undefined) {
+    return 'missing';
+  }
+  if (stats.isFile()) {
+    return 'file';
+  }
+  if (stats.isSymbolicLink()) {
+    return 'symlink';
+  }
+  return stats.isDirectory() ? 'directory' : 'other';
+}
+
+/**
+ * Returns {path, kind} for each entry under plugin/workflows/ that is not a
+ * regular file, by name.
+ */
+export function findNonRegularOutputs(root) {
+  return readdirSync(join(root, OUTPUT_DIR))
+    .sort()
+    .map((name) => ({ path: OUTPUT_DIR + '/' + name, kind: readEntryKind(root, OUTPUT_DIR + '/' + name) }))
+    .filter((entry) => entry.kind !== 'file');
+}
+
+function describeNonRegularOutput(entry) {
+  const kindText = entry.kind === 'other' ? 'not a file, a directory or a symlink' : 'a ' + entry.kind;
+  return entry.path + ' is ' + kindText + '. Every entry under ' + OUTPUT_DIR + '/ must be a regular file. Remove it, then rebuild with: ' + REBUILD_COMMAND;
+}
+
 function isStale(root, id) {
   const builtPath = builtPathFor(id);
-  return !existsSync(join(root, builtPath)) || readSource(root, builtPath) !== buildWorkflow(root, id);
+  const kind = readEntryKind(root, builtPath);
+  if (kind === 'missing') {
+    return true;
+  }
+  return kind === 'file' && readSource(root, builtPath) !== buildWorkflow(root, id);
 }
 
 export function findOrphanWorkflowIds(root) {
@@ -227,25 +278,40 @@ export function findStaleWorkflows(root) {
 export function findBuiltDraftIds(root) {
   const draftIds = listDraftWorkflowIds(root);
   draftIds.forEach((id) => buildWorkflow(root, id));
-  return draftIds.filter((id) => existsSync(join(root, builtPathFor(id))));
+  return draftIds.filter((id) => readEntryKind(root, builtPathFor(id)) !== 'missing');
 }
 
 function describeBuiltDraft(id) {
   return builtPathFor(id) + ' exists but ' + draftMarkerPathFor(id) + ' marks the workflow as a draft. Remove the script, or remove the marker to make the workflow live.';
 }
 
+/**
+ * Writes every live built script. Throws before any write when a target
+ * exists and is not a regular file.
+ */
 export function writeWorkflows(root) {
-  return listLiveWorkflowIds(root).map((id) => {
+  const liveIds = listLiveWorkflowIds(root);
+  liveIds.forEach((id) => assertWritableTarget(root, builtPathFor(id)));
+  return liveIds.map((id) => {
     const builtPath = builtPathFor(id);
     writeFileSync(join(root, builtPath), buildWorkflow(root, id));
     return builtPath;
   });
 }
 
+function assertWritableTarget(root, builtPath) {
+  const kind = readEntryKind(root, builtPath);
+  if (kind !== 'missing' && kind !== 'file') {
+    throw new Error(describeNonRegularOutput({ path: builtPath, kind: kind }));
+  }
+}
+
 /**
  * Runs the command line. Returns the exit code: 0 on success, 1 when --check
- * finds a stale or orphan script or a draft with a built script, 2 on an
- * unknown argument. A build error throws.
+ * finds a stale or orphan script, a draft with a built script or an entry
+ * under plugin/workflows/ that is not a regular file, 2 on an unknown
+ * argument. A build error throws, as does a write through a target that is
+ * not a regular file.
  */
 export function runCli(argv, { root, stdout, stderr }) {
   const unknown = argv.filter((arg) => arg !== '--check');
@@ -257,10 +323,13 @@ export function runCli(argv, { root, stdout, stderr }) {
     const stale = findStaleWorkflows(root);
     const orphanIds = findOrphanWorkflowIds(root);
     const builtDraftIds = findBuiltDraftIds(root);
+    const nonRegular = findNonRegularOutputs(root);
     stale.forEach((builtPath) => stderr.write(builtPath + ' is stale. Rebuild with: ' + REBUILD_COMMAND + '\n'));
     orphanIds.forEach((id) => stderr.write(describeOrphan(id) + '\n'));
     builtDraftIds.forEach((id) => stderr.write(describeBuiltDraft(id) + '\n'));
-    return stale.length > 0 || orphanIds.length > 0 || builtDraftIds.length > 0 ? 1 : 0;
+    nonRegular.forEach((entry) => stderr.write(describeNonRegularOutput(entry) + '\n'));
+    const failures = stale.length + orphanIds.length + builtDraftIds.length + nonRegular.length;
+    return failures > 0 ? 1 : 0;
   }
   writeWorkflows(root).forEach((builtPath) => stdout.write('wrote ' + builtPath + '\n'));
   listDraftWorkflowIds(root).forEach((id) => stdout.write('skipped ' + builtPathFor(id) + ': ' + draftMarkerPathFor(id) + ' marks it as a draft\n'));
