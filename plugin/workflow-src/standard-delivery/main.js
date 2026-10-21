@@ -100,7 +100,7 @@ function contractRows() {
     { id: 'SD-05', step: 'Facts to plan', check: 'describeDeliveryStops', rule: 'A delivery stop stops the run before planning, naming each stop in fixed plain wording; dirty paths say the run never commits, stashes or discards an edit it did not make.' },
     { id: 'SD-06', step: 'Scan', check: 'runPassScan', rule: 'When external_texts is above 0 the shared scan step runs, and an injection suspect or a coverage failure stops the run before planning.' },
     { id: 'SD-07', step: 'Plan', check: 'runDeliveryPass', rule: 'Every planner call follows the facts step of its own pass, and a pass starts only at launch, after needs_replan or after a branch switch.' },
-    { id: 'SD-08', step: 'Plan', check: 'describePlanProblem', rule: 'The plan result fits the plan result schema, its steps pass computeWave, its trunk_freshness equals the facts, its branch and base pass isGitIdentifier, and when the facts were taken on a branch other than trunk its branch equals that branch.' },
+    { id: 'SD-08', step: 'Plan', check: 'describePlanProblem', rule: 'The plan result fits the plan result schema before any of its fields is read, its steps pass computeWave, its trunk_freshness equals the facts, its branch and base pass isGitIdentifier, and when the facts were taken on a branch other than trunk its branch equals that branch.' },
     { id: 'SD-09', step: 'Plan', check: 'runPlanningPass', rule: 'Planner questions resolve through decide() kind planner_question and the plan through decide() kind plan_acceptance; every ask of a pass goes in one pause, a reply goes to a revise pass, and at the pause limit the run finishes complete, lists the open questions and runs nothing further.' },
     { id: 'SD-10', step: 'Plan to branch', check: 'resolveTrunkFreshness', rule: 'Trunk freshness fresh gives fresh and no_remote gives skipped; every other value resolves through decide() kind trunk_stale, where a take gives stale and is listed and an ask pauses.' },
     { id: 'SD-11', step: 'Plan to waves', check: 'resolveExternalEffects', rule: 'Before the first wave each irreversible effect a step declares asks through decide() kind external_effect with its summary as verbatim data, a question already replied to is not asked again, and reversible effects are listed in the final message.' },
@@ -443,11 +443,15 @@ function describePlanProblem(planResult, facts, trunk) {
   if (!isPlainObject(planResult)) {
     return 'The planner returned no result, so ' + describeRunNoun(RUN_NOUN) + ' stopped.';
   }
+  const schemaProblem = 'The planner returned a plan that does not fit the plan schema, so ' + describeRunNoun(RUN_NOUN) + ' stopped.';
+  if (!validateSchema(PLAN_RESULT_SCHEMA, planResult).ok) {
+    return schemaProblem;
+  }
   if (planResult.outcome === 'blocked') {
     return 'The planner could not plan the delivery: ' + describeBlocker(planResult.blocker);
   }
-  if (!validateSchema(PLAN_RESULT_SCHEMA, planResult).ok || planResult.plan === undefined) {
-    return 'The planner returned a plan that does not fit the plan schema, so ' + describeRunNoun(RUN_NOUN) + ' stopped.';
+  if (planResult.plan === undefined) {
+    return schemaProblem;
   }
   const plan = planResult.plan;
   const wave = computeWave(plan.steps, []);

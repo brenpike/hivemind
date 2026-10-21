@@ -577,6 +577,7 @@ const ROW_TESTS = {
     for (const [label, result, message] of [
       ['a blocked planner', { outcome: 'blocked', blocker: 'No such module.', questions: [] }, 'The planner could not plan the delivery: No such module.'],
       ['a blocked planner with no reason', { outcome: 'blocked', questions: [] }, 'The planner could not plan the delivery: it gave no reason.'],
+      ['a blocked result that fails the schema', { outcome: 'blocked', blocker: 'No such module.' }, schemaProblem],
       ['no result', null, 'The planner returned no result, so the delivery stopped.'],
       ['a complete result with no plan', { outcome: 'complete', questions: [] }, schemaProblem],
       ['a plan with no steps', planResult(makePlan({ steps: [] })), schemaProblem],
