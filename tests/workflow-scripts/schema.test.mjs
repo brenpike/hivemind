@@ -113,6 +113,15 @@ describe('validateSchema keywords', () => {
     assert.equal(validate(schema, { a: 1, b: undefined }).ok, true);
     assert.deepEqual(validate(schema, { a: 1, b: 2 }).errors, ['$: additionalProperties: unexpected b']);
   });
+  test('an unexpected key is named as is only when it is plain, so each error is one line', () => {
+    const schema = { type: 'object', additionalProperties: false, properties: { a: { type: 'object', additionalProperties: false } } };
+    assert.deepEqual(validate(schema, { 'Plain_key-9': 1 }).errors, ['$: additionalProperties: unexpected Plain_key-9']);
+    for (const key of ['x\nforged: y', 'a\rb', '\u001b[2J', 'a b', '', 'a.b']) {
+      const errors = validate(schema, { a: { [key]: 1 } }).errors;
+      assert.deepEqual(errors, ['$.a: additionalProperties: unexpected ' + JSON.stringify(key)], JSON.stringify(key));
+      assert.doesNotMatch(errors[0], /[\u0000-\u001f]/, JSON.stringify(key));
+    }
+  });
   test('without additionalProperties unlisted keys are allowed', () => {
     assert.equal(validate({ type: 'object', properties: { a: {} } }, { b: 2 }).ok, true);
   });

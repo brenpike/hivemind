@@ -487,7 +487,11 @@ const BRIEF_SCHEMA = {
  * Outputs
  *   validateSchema  {ok, errors}. errors lists one string per violation,
  *                   each naming the path from '$' and the failed keyword.
- *                   ok is true only when errors is empty.
+ *                   ok is true only when errors is empty. Each error is one
+ *                   line. Every name in it comes from the schema, except an
+ *                   unexpected key, which comes from the value: it is named
+ *                   as is when it holds only letters, digits, _ and -, and
+ *                   JSON-encoded otherwise.
  *   supportedSchemaKeywords  every keyword validateSchema accepts.
  *
  * Invariants
@@ -706,9 +710,13 @@ function collectObjectErrors(schema, record, path, errors) {
     if (isListed) {
       collectSchemaErrors(properties[name], record[name], path + '.' + name, errors);
     } else if (schema.additionalProperties === false) {
-      errors.push(path + ': additionalProperties: unexpected ' + name);
+      errors.push(path + ': additionalProperties: unexpected ' + describeUnexpectedSchemaKey(name));
     }
   }
+}
+
+function describeUnexpectedSchemaKey(name) {
+  return /^[A-Za-z0-9_-]+$/.test(name) ? name : JSON.stringify(name);
 }
 
 function collectArrayErrors(schema, list, path, errors) {
