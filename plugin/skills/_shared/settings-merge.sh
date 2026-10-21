@@ -359,6 +359,13 @@ unset __settings_merge_shared_dir
 #   3. `Bash(...)` rules match command TEXT, not filesystem paths, so a path anchor is meaningless
 #      in them by construction.
 # ADR-0010 carries the full rationale. Do not "fix" these rules by anchoring them.
+#
+# SKILL RULE: `Skill(hivemind:route-workflow)` stops the main-session permission prompt on the
+# read-only route-workflow call that the overlord makes for each request. The rule names no
+# machine and no plugin version, so the same text is right for every teammate and every
+# release. Like every rule here, it reaches a consumer only when they re-run
+# `hivemind:seed-hive` (see REACH above). ADR-0037 decision 9 and ADR-0010 finding S11-f carry
+# the rationale.
 hivemind_settings_permissions_template() {
   cat <<'TEMPLATE'
 Bash(echo *)
@@ -388,6 +395,7 @@ Edit(.hivemind/spawn-inputs.*.json)
 Edit(.hivemind/seed-inputs-*.json)
 Edit(.hivemind/molt-inputs-*.json)
 Edit(.hivemind/pr-inputs-*.json)
+Skill(hivemind:route-workflow)
 TEMPLATE
 }
 
