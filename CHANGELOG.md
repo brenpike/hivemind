@@ -12,6 +12,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.3.0] - 2026-10-21
+
+### Added
+
+- analysis-only starts with a facts step that runs `hivemind:gather-facts`, and a scan step that runs `hivemind:injection-scan` on the text of named issues and PRs. It stops only on a cut, on malformed facts, or on injection-suspect text, never on `delivery_stops`.
+- analysis-only takes optional `trunk` and `references` launch args.
+
+### Changed
+
+- The overlord runs `hivemind:gather-facts` before every planner delegation on the state machine and passes `facts_file` and `facts_lines`. It stops before planning on a failed facts run, a cut, or injection-suspect text. `delivery_stops` stop nothing on this engine.
+- The planner (cerebrate) has no shell. Its tools are Read, Glob, Grep, LSP, WebSearch, WebFetch and the claude-mem search tools. Glob and Grep now work. Branch state comes only from the facts file. Git research beyond the facts becomes a plan step or an open question.
+- gather-facts: a caller decides for itself whether `delivery_stops` stop it. The caller that hands facts to a planner scans external text first.
+
+### Removed
+
+- cerebrate's Bash and every `Bash(git ...)` and `Bash(gh ...)` tool entry.
+
+### Fixed
+
+- The CLAUDE.md and README read-only claims for the planner, and the planner pin, which now checks the exact tool set and no Bash. Refs #409.
+
 ## [6.2.0] - 2026-10-20
 
 ### Added
