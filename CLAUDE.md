@@ -33,7 +33,7 @@ Anything the runtime loads must live under `plugin/`.
 ## Editing rules specific to this repo
 
 - **Path refs across plugin files MUST use `${CLAUDE_PLUGIN_ROOT}/...`.** Bare `governance/foo.md` or `agents/foo.md` paths break when consumers install the plugin. Grep for bare paths before merging.
-- **Agent frontmatter limits:** Claude Code plugin system does not honor `mcpServers` or `permissionMode` in agent frontmatter. Read-only enforcement on cerebrate is done by restricting `tools:` list, not by `permissionMode`. Don't re-add these fields.
+- **Agent frontmatter limits:** Claude Code plugin system does not honor `mcpServers` or `permissionMode` in agent frontmatter. Read-only enforcement on cerebrate is its `tools:` list, not `permissionMode`. That list holds no Bash, Write or Edit. A `Bash(...)` entry grants the whole Bash tool (ADR-0010, amendment 2026-10-20), so never add one. `tests/policy/safety-planner-no-write.json` pins the list. Don't re-add these fields.
 - **Skills are namespaced as `hivemind:<skill>`** when consumed. Internal cross-references in skill/agent bodies should use the namespaced form so docs match runtime behavior.
 - **Governance docs are load-bearing.** Renaming a section header inside `plugin/governance/*.md` may break agent rules that reference that header by name (e.g. `(Required Git Preflight)`, `(Definitions → Trivial change)`). Search for header references before renaming.
 

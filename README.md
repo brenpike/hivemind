@@ -356,7 +356,7 @@ All skills are invoked using the namespaced form:
 | `hivemind:adaptation-cycle` | Run a pre-PR local Codex review on the current branch diff and return normalized findings. Review-only (it fixes nothing); invoked by the `local-reviewer` agent only |
 | `hivemind:github-review-loop` | Watch a PR in the main session and dispatch the fix-mode `github-reviewer` per actionable event; owns the post-PR review loop |
 | `hivemind:detect-remediation-signals` | Shared root-cluster / break-fix / diminishing-returns / stop-and-merge detector over a fix-ledger; emits one verdict both reviewers map to their own exit_reason |
-| `hivemind:injection-scan` | Scan external-content items for prompt-injection / instruction-override attempts against the security-policy taxonomy; shared judgment skill used by both reviewer agents |
+| `hivemind:injection-scan` | Scan external-content items for prompt-injection / instruction-override attempts against the security-policy taxonomy; shared judgment skill used by both reviewer agents. Also scans issue and PR text in the branch facts before the planner reads it |
 | `hivemind:open-plan-pr` | Open a pull request after completion, validation, and versioning gates pass |
 | `hivemind:push-branch` | Push the current working branch to its remote (no PR creation); used to land remediation commits before resuming a review loop |
 | `hivemind:plan-interrogation` | Interactive plan interview: challenges a plan against the project's domain model, sharpens terminology, and updates documentation (CONTEXT.md, ADRs) as decisions crystallise |
@@ -444,7 +444,7 @@ The site uses the Swarm Glyph design: one stylesheet (`web/styles/main.css`) and
 The following agent frontmatter fields are not supported by the Claude Code plugin system and are omitted from plugin agent definitions:
 
 - `mcpServers`: configure MCP servers at the project or global level instead
-- `permissionMode`: read-only enforcement is achieved by limiting the cerebrate's `tools` frontmatter to read-only commands; see the cerebrate's `tools` list in `plugin/agents/cerebrate.md`
+- `permissionMode`: read-only enforcement is the cerebrate's `tools` frontmatter, which holds no Bash, Write or Edit; see the `tools` list in `plugin/agents/cerebrate.md`. A `Bash(...)` entry would grant the whole Bash tool, so the list has none
 
 ## License
 

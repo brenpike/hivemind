@@ -98,6 +98,11 @@ describe('overlord Engine section', () => {
     const bashCount = (engineSection.match(/Bash/g) ?? []).length;
     assert.equal(bashCount, 0, '## Engine mentions Bash');
   });
+  test('Engine launch args name the trunk and references', () => {
+    for (const phrase of ['"trunk": "<the resolved trunk>"', '"references": [']) {
+      assert.ok(engineSection.includes(phrase), `## Engine launch args lack ${phrase}`);
+    }
+  });
   test('Engine states the fallback clause', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));
     assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
@@ -133,6 +138,11 @@ describe('overlord workflow definition reads', () => {
   });
   test('Workflow State Execution takes the state from the engine output lines', () => {
     for (const phrase of ['`current_state`', '`state_definition`', '`hivemind:init-run-ledger`', '`hivemind:record-state-result`']) {
+      assert.ok(stateExecutionSection.includes(phrase), `## Workflow State Execution lacks ${phrase}`);
+    }
+  });
+  test('Workflow State Execution gathers facts before cerebrate and stops on a cut', () => {
+    for (const phrase of ['`hivemind:gather-facts`', '`facts_file`', '`facts_lines`', '`cut`']) {
       assert.ok(stateExecutionSection.includes(phrase), `## Workflow State Execution lacks ${phrase}`);
     }
   });
