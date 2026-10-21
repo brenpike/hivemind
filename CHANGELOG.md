@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The CLAUDE.md and README read-only claims for the planner, and the planner pin, which now checks the exact tool set and no Bash. Refs #409.
+- analysis-only's facts and scan drones no longer stop blocked on trunk or for lack of a branch or base. A drone task that edits no tracked files and makes no git writes runs on any branch, and both prompts say so.
 
 ## [6.2.0] - 2026-10-20
 

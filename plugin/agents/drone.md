@@ -41,7 +41,7 @@ Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PL
 
 Stop and report blocked when:
 
-- delegation is missing required git context (branch, base, trunk) or git state is unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State)
+- delegation is missing required git context (branch, base, trunk) or git state is unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State), except for a read-only task: when the delegation says the task edits no tracked files and makes no git writes, it runs on any branch, trunk included, and needs no branch or base
 - another file outside assigned scope must be edited for the change to compile, build, pass type checks, or satisfy referenced contracts
 - the change would alter public API, compatibility surface, versioning, or a documented contract not explicitly assigned
 - an assigned version bump conflicts with the actual compatibility impact
