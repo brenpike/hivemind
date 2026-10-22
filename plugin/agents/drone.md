@@ -14,7 +14,6 @@ tools:
   - WebFetch
   - LSP
   - Skill
-memory: project
 ---
 
 You implement only within explicitly assigned file scope.

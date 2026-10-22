@@ -77,6 +77,15 @@
 #                             index then equals HEAD, it prints `committed: false`. Else
 #                             `git commit --cleanup=whitespace -F -` with the message piped from
 #                             jq, then the checks below.
+#   A failed commit           before `git add` the script records the index entries of the paths
+#                             it stages (`git ls-files -s -z`, literal pathspecs). When the commit
+#                             fails and HEAD is still the old HEAD, one `git update-index -z
+#                             --index-info` writes each recorded entry back and removes each entry
+#                             those pathspecs now match that was not recorded (a zero object id as
+#                             long as the old HEAD's). It then reads the entries again and they
+#                             must equal the record (`the commit failed and the index could not be
+#                             restored` otherwise). Nothing else in the index, HEAD, the refs or
+#                             the work tree changes.
 #   After a commit: HEAD must still be refs/heads/<branch>, HEAD must be a new commit whose one
 #   parent is the old HEAD, every path the new commit changes, read from the commit itself with
 #   `git diff-tree`, must be in files (`the commit has a path outside files`, as when a
@@ -93,8 +102,14 @@
 #   0  routing lines on stdout
 #   1  NOTHING on stdout. stderr carries zero or more `outside: <JSON string>` lines (only for
 #      the outside refusal), then `blocker: <fixed reason>` as the LAST line. Every git call
-#      discards git's own stderr. Blocker text never echoes a caller- or repository-supplied
-#      value; an outside line carries a repository path only as a JSON string.
+#      discards git's own stderr except `git commit`, whose stderr goes to the private work
+#      folder. When the commit fails and git printed text there, the blocker is the fixed reason
+#      followed by `: git said <JSON string>`: the text with leading and trailing white space
+#      removed, cut to its last 500 Unicode code points with `...` put in front when cut, then
+#      encoded by jq `tojson`, so a newline or control character is escaped and the blocker stays
+#      one line. When git printed nothing the blocker is the fixed reason alone. Apart from that
+#      git text, blocker text never echoes a caller- or repository-supplied value; an outside line
+#      carries a repository path only as a JSON string.
 #
 # RECORDED RESIDUAL R1 (commit content race): the script reads the tree state once. Then
 # `git commit` takes whatever the shared live index holds at that moment. A hook or another
@@ -127,8 +142,10 @@
 # else is a recorded residual. The status read and the commit are not atomic: a hook or another
 # process that stages an unlisted path between them has it committed, and the result check then
 # stops the run with that commit in place (see RECORDED RESIDUAL R1); one that edits a listed
-# path has the edit staged. A failed commit leaves the listed paths staged; a rerun stages them
-# again and changes nothing else.
+# path has the edit staged. An entry written back after a failed commit has no cached file stat,
+# so git reads the file again on its next refresh, and it loses the intent-to-add, skip-worktree
+# and assume-unchanged marks; a hook that changed the index under those pathspecs before failing
+# has that change undone too.
 # jq decodes status paths as UTF-8, so a path with bytes that are not UTF-8 shows with
 # replacement characters on its outside line and can never be listed. A listed path that is an
 # untracked ignored file is not dirty, so it is not committed. A submodule path is a directory,
@@ -136,8 +153,8 @@
 # ignored, the inputs file itself is a dirty path outside files and the run stops there. The
 # trunk lookup order is mirrored from git, not asked of git, and git 2.25 shows only the end of
 # a symbolic-ref chain, with the same residuals as create-working-branch.sh. The private work
-# folder (mktemp -d under TMPDIR) holds the inputs copy, the status listing and the commit's path
-# listing, and is removed by the EXIT trap.
+# folder (mktemp -d under TMPDIR) holds the inputs copy, the status listing, the index entry
+# records, the commit's error text and the commit's path listing, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
@@ -220,6 +237,10 @@ trap 'remove_work_dir; :' EXIT
 inputs_copy="$work_dir/inputs.json"
 status_file="$work_dir/status.z"
 commit_paths_file="$work_dir/commit-paths.z"
+index_before_file="$work_dir/index-before.z"
+index_after_file="$work_dir/index-after.z"
+restore_info_file="$work_dir/restore-info.z"
+commit_error_file="$work_dir/commit-error.txt"
 
 # ── Inputs ──────────────────────────────────────────────────────────────────
 
@@ -401,6 +422,8 @@ done <<EOF
 $add_listing
 EOF
 if [ "${#add_paths[@]}" -gt 0 ]; then
+  GIT_LITERAL_PATHSPECS=1 git ls-files -s -z -- "${add_paths[@]}" >"$index_before_file" 2>/dev/null \
+    || blocker "cannot read the index"
   GIT_LITERAL_PATHSPECS=1 git add -A -- "${add_paths[@]}" >/dev/null 2>&1 || blocker "could not stage the listed paths"
 fi
 
@@ -423,8 +446,60 @@ message_program='
 + (if ((.body // "") | test("[^ \t\n]")) then "\n\n" + .body else "" end)
 + "\n"
 '
-jq -j "$message_program" "$inputs_copy" 2>/dev/null | git commit --quiet --cleanup=whitespace -F - >/dev/null 2>&1 \
-  || blocker "the commit failed"
+# Removal lines for `git update-index -z --index-info`: one for each path the pathspecs match now
+# that has no entry in the record taken before `git add`.
+# INVARIANT: the text before the TAB of an `ls-files -s` entry is ASCII, so the byte offset jq 1.6
+# `index` gives is the code point offset.
+removal_program='
+def entry_paths($text): $text | split("\u0000")[] | select(length > 0) | .[(index("\t") + 1):];
+([entry_paths($before_text)] | map({key: ., value: true}) | from_entries) as $recorded_set
+| entry_paths($after_text) | select($recorded_set[.] != true) | "0 " + $zero_oid + "\t" + . + "\u0000"
+'
+
+# restore_staged_entries
+#   Puts back the index entries of the paths `git add` staged, from the record taken before it:
+#   removal lines for new entries, then the recorded entries byte for byte, in one
+#   `git update-index -z --index-info`. Fails when HEAD is no longer the old HEAD, when a git or
+#   jq step fails, or when the entries read again differ from the record.
+restore_staged_entries() {
+  local current_head
+  [ "${#add_paths[@]}" -gt 0 ] || return 0
+  current_head="$(git rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null)" || return 1
+  [ "$current_head" = "$old_head" ] || return 1
+  GIT_LITERAL_PATHSPECS=1 git ls-files -s -z -- "${add_paths[@]}" >"$index_after_file" 2>/dev/null || return 1
+  jq -n -j --rawfile before_text "$index_before_file" --rawfile after_text "$index_after_file" \
+    --arg zero_oid "${old_head//?/0}" "$removal_program" >"$restore_info_file" 2>/dev/null || return 1
+  cat -- "$index_before_file" >>"$restore_info_file" 2>/dev/null || return 1
+  git update-index -z --index-info <"$restore_info_file" >/dev/null 2>&1 || return 1
+  GIT_LITERAL_PATHSPECS=1 git ls-files -s -z -- "${add_paths[@]}" >"$index_after_file" 2>/dev/null || return 1
+  cmp -s "$index_before_file" "$index_after_file"
+}
+
+# The blocker text after a failed commit: $reason, then `: git said <JSON string>` when the
+# commit's stderr has a non-space character (see EXIT CONTRACT).
+commit_error_program='
+($error_text | sub("\\A\\s+"; "") | sub("\\s+\\z"; "")) as $trimmed
+| if $trimmed == "" then $reason
+  else ($trimmed | explode) as $code_points
+  | $reason + ": git said "
+    + (if ($code_points | length) > 500 then "..." + ($code_points[-500:] | implode) else $trimmed end | tojson)
+  end
+'
+
+# block_failed_commit
+#   Puts back the staged index entries, then blocks with the reason and git's commit error text.
+block_failed_commit() {
+  local failure_reason='the commit failed' blocker_text
+  restore_staged_entries || failure_reason='the commit failed and the index could not be restored'
+  blocker_text="$(jq -n -r --arg reason "$failure_reason" --rawfile error_text "$commit_error_file" \
+    "$commit_error_program" 2>/dev/null)" || blocker "$failure_reason"
+  blocker "$blocker_text"
+}
+
+commit_rc=0
+jq -j "$message_program" "$inputs_copy" 2>/dev/null | git commit --quiet --cleanup=whitespace -F - >/dev/null 2>"$commit_error_file" \
+  || commit_rc=$?
+[ "$commit_rc" = 0 ] || block_failed_commit
 
 # ── Result checks ───────────────────────────────────────────────────────────
 
