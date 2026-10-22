@@ -2551,6 +2551,27 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run).slice(-6), ['review-1-1', 'review-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + head + '.'), run.result.message);
     });
+    test('a review commit that reports a moved head with nothing committed records the range from the previous head', async () => {
+      const results = happyResults({
+        'review-1-1': { ...REVIEW_CLEAN, findings_resolved: 1, fix_commits_exist: true },
+        'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
+        'bump-type-1-2': bumpRelay(),
+        'validate-1-2': VALIDATE_PASSED,
+        'validate-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' })
+      });
+      const run = await runWorkflow(LAUNCH, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const commits = 'Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD;
+      assert.equal(run.result.message.split('\n\n').find((part) => part.startsWith('Commits this run made:')), commits, run.result.message);
+      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      assert.ok(inputs.body.includes(commits + '\n'), inputs.body);
+      assert.ok(inputs.comment.includes(commits + '\n'), inputs.comment);
+    });
+    test('a commit step that reports the same head with nothing committed records nothing', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(run.result.message.split('\n\n').find((part) => part.startsWith('Commits this run made:')), 'Commits this run made:\n- ' + OTHER, run.result.message);
+    });
   },
   'SD-35': () => {
     test('localReviewRoutes keys are the local-reviewer Output Contract exit reasons in order', () => {
@@ -2795,7 +2816,7 @@ const ROW_TESTS = {
       const rerun = main.buildGateRerunBrief(['bump', 'validate', 'review'], { held: { bump: THIRD, validate: OTHER, review: THIRD } }, FOURTH, false);
       assert.ok(rerun.problem.startsWith('Commit ' + FOURTH + ' landed after the version bump, validation and local review held on an earlier commit.'), rerun.problem);
       assert.ok(run.result.message.includes(rerun.problem), run.result.message);
-      assert.ok(run.result.message.includes('Commits this run made:\n- ' + OTHER + '\n- ' + FOURTH), run.result.message);
+      assert.ok(run.result.message.includes('Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD + '\n- ' + FOURTH), run.result.message);
     });
     test('a gate that is not configured is never stale', async () => {
       const results = fixFlowResults();

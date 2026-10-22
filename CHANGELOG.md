@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `analysis-only` is rebuilt and behavior is unchanged.
 - `validate.sh` routes the new paths.
 - `plan-schema.json` marks each repository path field, and the standard-delivery plan check refuses a marked path that the molt.sh files rule refuses, before any worker runs.
+- On the draft standard-delivery workflow, a commit step that commits nothing but reports a moved head records the range from the previous head, so commits made outside the commit runner, such as local review fixes, are listed in the run record.
 
 ## [6.6.0] - 2026-10-21
 

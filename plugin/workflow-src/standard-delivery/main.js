@@ -57,7 +57,11 @@
  *   Branch  a runner invokes hivemind:create-working-branch.
  *   Waves   workers run each computeWave() wave in parallel().
  *   Commit  a runner invokes hivemind:molt after every wave, and after
- *           every gate step that can change files.
+ *           every gate step that can change files. A commit it makes enters
+ *           the run commits. When it commits nothing but reports a commit
+ *           other than the previous head, as after local review fix commits,
+ *           the range <previous head>..<new head> enters the run commits, so
+ *           a commit made outside the commit runner reaches the run record.
  *   Bump    a gate, after the last wave. A haiku runner invokes
  *           hivemind:bump-type with the pass's facts trunk_commit as base and
  *           the plan's two versioning answers, and relays its stdout, which
@@ -287,7 +291,7 @@ function contractRows() {
     { id: 'SD-31', step: 'Gates', check: 'configuredGateIds', rule: 'With local_review false the local review gate is not configured: it never runs, never stops the run, never counts as held, and every message after the last wave lists it as a gate that did not run.' },
     { id: 'SD-32', step: 'Validation to local review', check: 'buildReviewPrompt', rule: 'Once validation holds, hivemind:local-reviewer gets base, working_branch, trunk and max_iterations 10 in a JSON inputs block under the boundary sentence, with no request text, label review-P-N and phase Review.' },
     { id: 'SD-33', step: 'Review result', check: 'describeReviewProblem', rule: 'The review result fits REVIEW_SCHEMA, whose fields are the local-reviewer Output Contract fields with each Codex-derived text field labelled as able to carry external content, and it carries every field its exit_reason names; any other result stops the run blocked.' },
-    { id: 'SD-34', step: 'Local review to its commit', check: 'runReviewGate', rule: 'Whatever the reviewer returned, the commit runner then runs with an empty file list and stops the run on any edit left behind, and the review gate holds on the commit it reports.' },
+    { id: 'SD-34', step: 'Local review to its commit', check: 'runReviewGate', rule: 'Whatever the reviewer returned, the commit runner then runs with an empty file list and stops the run on any edit left behind, and the review gate holds on the commit it reports; when a commit step commits nothing but reports a commit other than the previous head, the range <previous head>..<new head> enters the run commits, so the final message, the pull request body and the pull request comment list commits the reviewer made, and a commit step that reports the same head with nothing committed adds nothing.' },
     { id: 'SD-35', step: 'Review routes', check: 'localReviewRoutes', rule: 'localReviewRoutes() maps every exit_reason of the local-reviewer Output Contract and nothing else, and clean holds the gate.' },
     { id: 'SD-36', step: 'Review stops', check: 'describeReviewStop', rule: 'max-iterations-reached, break-fix-break, injection-suspect and blocked stop the run blocked in plain words, each reviewer value JSON-encoded and the excerpt cut to maxExcerptLength() characters.' },
     { id: 'SD-37', step: 'Review questions', check: 'finishReviewQuestion', rule: 'user-input-required and high-severity-rejection end the run complete with the reviewer question open in plain words under stop reason before_pr, its values JSON-encoded (ADR-0037 decision 17, until slice 3).' },
@@ -1454,6 +1458,8 @@ async function runCommitStep(run, plan, files, label, stepName) {
   }
   if (checked.values.committed === 'true') {
     run.commits.push(checked.values.commit);
+  } else if (run.head !== undefined && checked.values.commit !== run.head) {
+    run.commits.push(run.head + '..' + checked.values.commit);
   }
   run.head = checked.values.commit;
   return checked;
