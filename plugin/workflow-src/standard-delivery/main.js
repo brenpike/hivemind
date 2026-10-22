@@ -168,6 +168,20 @@
  *   runner finds nothing to commit and the PR shows no version change.
  *   Rejected: a containment check in a committed bump script covers the
  *   bump only, while plan step files keep the same exposure.
+ *   Every plan value at a field whose PLAN_SCHEMA description starts with
+ *   repositoryPathMark() must pass isRepositoryPath (review finding
+ *   461fe942). findRepositoryPathProblem walks the schema for the mark, so
+ *   a new path field is checked once it carries the mark, and
+ *   describePlanProblem runs it after the schema check and before
+ *   computeWave, so a bad path stops the run before the branch step and
+ *   any later agent call. The rule is the files rule of molt.sh, its home,
+ *   and a parity test runs one corpus through both and requires the same
+ *   verdicts, so a change lands in both. The check is lexical, so a
+ *   symlinked path or one that names a directory is left to molt.sh. Fix
+ *   round files are not plan fields: they reach only molt.sh, which
+ *   applies the same rule before any change. isGitIdentifier stays on
+ *   artifact_files for the git show splice in the bump prompt, since the
+ *   path rule allows spaces, shell characters and a leading '-'.
  *   Open questions never end the run blocked: after pauseLimit() pauses,
  *   when the replies are too long to carry, or when an exact question
  *   cannot be shown whole, it finishes complete, lists the questions still
@@ -243,7 +257,7 @@ function contractRows() {
     { id: 'SD-05', step: 'Facts to plan', check: 'describeDeliveryStops', rule: 'A delivery stop stops the run before planning, naming each stop in fixed plain wording; dirty paths say the run never commits, stashes or discards an edit it did not make.' },
     { id: 'SD-06', step: 'Scan', check: 'runPassScan', rule: 'When external_texts is above 0 the shared scan step runs, and an injection suspect or a coverage failure stops the run before planning.' },
     { id: 'SD-07', step: 'Plan', check: 'runDeliveryPass', rule: 'Every planner call follows the facts step of its own pass, and a pass starts only at launch, after needs_replan, after a branch switch or after a taken local review escalation or root cluster.' },
-    { id: 'SD-08', step: 'Plan', check: 'describePlanProblem', rule: 'The plan result fits the schema of its call, the plan result schema or on a revise pass that schema with settled, before any of its fields is read, its steps pass computeWave, its trunk_freshness equals the facts, its branch, its base and each versioning.artifact_files path pass isGitIdentifier, and when the facts were taken on a branch other than trunk its branch equals that branch.' },
+    { id: 'SD-08', step: 'Plan', check: 'describePlanProblem', rule: 'The plan result fits the schema of its call, the plan result schema or on a revise pass that schema with settled, before any of its fields is read, every value at a field PLAN_SCHEMA marks as a repository path passes isRepositoryPath, the molt.sh files rule, before computeWave, its steps pass computeWave, its trunk_freshness equals the facts, its branch, its base and each versioning.artifact_files path also pass isGitIdentifier, and when the facts were taken on a branch other than trunk its branch equals that branch.' },
     { id: 'SD-09', step: 'Plan', check: 'runPlanningPass', rule: 'Planner questions resolve through decide() kind planner_question and the plan through decide() kind plan_acceptance; every ask of a pass goes in one pause, a reply goes to a revise pass, the revise result names, by label, the shown questions the reply settled, only those count as answered and every other question goes in the next pause, and at the pause limit the run finishes complete, lists the open questions and runs nothing further.' },
     { id: 'SD-10', step: 'Plan to branch', check: 'resolveTrunkFreshness', rule: 'Trunk freshness fresh gives fresh and no_remote gives skipped; every other value resolves through decide() kind trunk_stale, where a take gives stale and is listed and an ask pauses.' },
     { id: 'SD-11', step: 'Plan to waves', check: 'resolveExternalEffects', rule: 'Before the first wave each irreversible effect a step declares asks through decide() kind external_effect with its summary as verbatim data; an effect question the reply settled is not asked again, one it did not settle is asked again before any wave, and reversible effects are listed in the final message.' },
@@ -621,6 +635,47 @@ function externalLabel() {
   return 'Can carry external content.';
 }
 
+function repositoryPathMark() {
+  return externalLabel() + ' Repository path.';
+}
+
+function toAsciiLowerCase(text) {
+  return text.replace(/[A-Z]/g, (letter) => String.fromCharCode(letter.charCodeAt(0) + 32));
+}
+
+function isRepositoryPath(value) {
+  if (typeof value !== 'string' || value.length === 0 || value.startsWith('/')) {
+    return false;
+  }
+  const isOneLine = Array.from(value).every((character) => character.codePointAt(0) >= 32 && character.codePointAt(0) !== 127);
+  return isOneLine && value.split('/').every((part) => !['', '.', '..', '.git'].includes(toAsciiLowerCase(part)));
+}
+
+function findRepositoryPathProblem(schema, value, location) {
+  const isMarked = typeof schema.description === 'string' && schema.description.startsWith(repositoryPathMark());
+  if (isMarked && !isRepositoryPath(value)) {
+    return location;
+  }
+  if (schema.properties !== undefined && isPlainObject(value)) {
+    const presentNames = Object.keys(schema.properties).filter((name) => Object.prototype.hasOwnProperty.call(value, name));
+    for (const name of presentNames) {
+      const childProblem = findRepositoryPathProblem(schema.properties[name], value[name], location === '' ? name : location + '.' + name);
+      if (childProblem !== '') {
+        return childProblem;
+      }
+    }
+  }
+  if (schema.items !== undefined && Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const itemProblem = findRepositoryPathProblem(schema.items, value[index], location + '[' + index + ']');
+      if (itemProblem !== '') {
+        return itemProblem;
+      }
+    }
+  }
+  return '';
+}
+
 function describeReviewField(name, entry) {
   const exits = Object.keys(reviewExitFields()).filter((exitReason) => reviewExitFields()[exitReason].includes(name));
   const prefix = entry.isExternal ? externalLabel() + ' ' : '';
@@ -897,6 +952,10 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
     return schemaProblem;
   }
   const plan = planResult.plan;
+  const pathLocation = findRepositoryPathProblem(PLAN_SCHEMA, plan, '');
+  if (pathLocation !== '') {
+    return 'The plan names a path at ' + pathLocation + ' that is not a plain path inside the repository, so ' + describeRunNoun(RUN_NOUN) + ' stopped.';
+  }
   const wave = computeWave(plan.steps, []);
   if (!wave.ok) {
     return 'The plan steps cannot be scheduled, so ' + describeRunNoun(RUN_NOUN) + ' stopped: ' + wave.problem;

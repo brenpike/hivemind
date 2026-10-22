@@ -10,6 +10,7 @@ const planSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/plan-sc
 const factsSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/facts-schema.json', 'utf8'));
 
 const EXTERNAL_LABEL = 'Can carry external content.';
+const PATH_MARK = EXTERNAL_LABEL + ' Repository path.';
 const SUBSET_KEYWORDS = [
   '$schema',
   'title',
@@ -137,6 +138,29 @@ describe('plan schema', () => {
       '$.steps[].depends_on[]',
       '$.steps[].external_effects[].summary'
     ]);
+  });
+
+  test('the repository path mark is on exactly the path fields', () => {
+    const marked = collectNodes(planSchema).filter(({ node }) => node.description.startsWith(PATH_MARK));
+    assert.deepEqual(marked.map(({ path }) => path), ['$.versioning.artifact_files[]', '$.steps[].files[]']);
+    for (const { node, path } of marked) {
+      assert.equal(node.type, 'string', path + ' must be a string');
+      assert.equal(node.enum, undefined, path + ' must have no enum');
+    }
+  });
+
+  test('every string node that names a path carries the repository path mark', () => {
+    for (const { node, path } of collectNodes(planSchema)) {
+      if (node.type === 'string' && /\bpath\b/i.test(node.description)) {
+        assert.ok(node.description.startsWith(PATH_MARK), path + ' names a path but does not carry the mark');
+      }
+    }
+  });
+
+  test('the top-level description defines the repository path mark and names molt.sh', () => {
+    const description = planSchema.description;
+    assert.ok(description.includes('"' + PATH_MARK + '"'), 'must quote the mark');
+    assert.ok(description.includes('${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh'), 'must name molt.sh');
   });
 
   test('the top-level description defines the label and says the plan is whole', () => {

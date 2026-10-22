@@ -138,6 +138,55 @@ function reviseResult(result, settled) {
   return { ...result, settled: settled };
 }
 
+/**
+ * Collects the key path of each schema node whose description starts with
+ * the repository path mark, with index 0 for each array.
+ */
+function collectPathFields(schema, keyPath, fields) {
+  if (typeof schema.description === 'string' && schema.description.startsWith(main.repositoryPathMark())) {
+    fields.push(keyPath);
+  }
+  for (const [name, child] of Object.entries(schema.properties || {})) {
+    collectPathFields(child, [...keyPath, name], fields);
+  }
+  if (schema.items !== undefined) {
+    collectPathFields(schema.items, [...keyPath, 0], fields);
+  }
+  return fields;
+}
+
+function describeKeyPath(keyPath) {
+  return keyPath.map((key, index) => (typeof key === 'number' ? '[' + key + ']' : (index === 0 ? '' : '.') + key)).join('');
+}
+
+function planWithValueAt(keyPath, value) {
+  const plan = makePlan();
+  const parent = keyPath.slice(0, -1).reduce((container, key) => container[key], plan);
+  parent[keyPath[keyPath.length - 1]] = value;
+  return plan;
+}
+
+function pathProblem(location) {
+  return 'The plan names a path at ' + location + ' that is not a plain path inside the repository, so the delivery stopped.';
+}
+
+/**
+ * Runs molt.sh on an inputs file whose files list holds only the value and
+ * returns true when the files rule refuses it, false when the run gets past
+ * every inputs check to the trunk refusal of the scratch repo on main.
+ */
+function moltRefusesPath(scratch, value, index) {
+  const inputsPath = '.hivemind/parity-' + index + '.json';
+  writeRepoFile(scratch, inputsPath, JSON.stringify({ type: 'chore', subject: 'check the path rule', files: [value] }));
+  const run = spawnSync('bash', [moltPath, '--trunk', 'main', '--inputs', inputsPath], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
+  const lastLine = run.stderr.trim().split('\n').pop();
+  if (lastLine === 'blocker: files must be an array of exact paths relative to the top of the work tree') {
+    return true;
+  }
+  assert.equal(lastLine, 'blocker: the current branch is trunk', 'molt.sh on ' + JSON.stringify(value) + ': ' + run.stderr);
+  return false;
+}
+
 function effectPlan(summary, reversible) {
   return makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { external_effects: [{ summary: summary, reversible: reversible }] })] });
 }
@@ -923,7 +972,8 @@ const ROW_TESTS = {
       ['a trunk freshness other than the facts', planResult(makePlan({ trunk_freshness: 'behind' })), 'The plan copies a trunk freshness other than the facts, so the delivery stopped.'],
       ['an unsafe branch', planResult(makePlan({ branch: 'feature/..x' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
       ['an unsafe base', planResult(makePlan({ base: '-main' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
-      ...[['VERSION', 'my file.json'], ['VERSION;touch x'], ['$(touch x)/VERSION'], ['-VERSION'], ['a/../VERSION']].map((artifactFiles) => [
+      ['a version file path with a .. part', planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['a/../VERSION'] } })), pathProblem('versioning.artifact_files[0]')],
+      ...[['VERSION', 'my file.json'], ['VERSION;touch x'], ['$(touch x)/VERSION'], ['-VERSION']].map((artifactFiles) => [
         'an unsafe version file path in ' + JSON.stringify(artifactFiles),
         planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles } })),
         'The plan names a version file path that is not a safe git path, so the delivery stopped.'
@@ -974,6 +1024,67 @@ const ROW_TESTS = {
         assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1']);
       });
     }
+    const pathFields = collectPathFields(planSchema, [], []);
+    const refusedPaths = ['/tmp/x', '../x', 'x/..', 'a/./b', '.git/x', '.GIT/config', 'a//b', 'a/', 'a\u0000b', 'a\u0001b', 'a\tb', 'a\u007fb'];
+    const acceptedPaths = ['src/cache.js', 'a/.gitignore', '.github/x.yml', '.gitx', 'x.git', 'my file.json', '-x', 'a\\b', 'C:/x', 'a\u0085b', '.g\u0131t'];
+    test('the plan schema marks repository path fields and its description quotes the mark', () => {
+      assert.ok(pathFields.length > 0);
+      assert.ok(planSchema.description.includes('"' + main.repositoryPathMark() + '"'));
+    });
+    for (const keyPath of pathFields) {
+      const location = describeKeyPath(keyPath);
+      for (const value of refusedPaths) {
+        test(`a path ${JSON.stringify(value)} at ${location} blocks before the branch step`, async () => {
+          const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(planWithValueAt(keyPath, value)) });
+          assertBlockedBeforeWaves(run, pathProblem(location));
+          assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1']);
+        });
+      }
+      for (const value of ['', '  ']) {
+        test(`a blank path ${JSON.stringify(value)} at ${location} blocks with the schema message`, async () => {
+          const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(planWithValueAt(keyPath, value)) });
+          assertBlockedBeforeWaves(run, schemaProblem);
+          assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1']);
+        });
+      }
+    }
+    test('a revise result with a bad path blocks at the revise step', async () => {
+      const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
+      const revised = reviseResult(planResult(makePlan({ steps: [makeStep('STEP-001', ['../x'])] })), ['Q1']);
+      const args = { ...LAUNCH, answers: { 'round-1': 'Take option A.' } };
+      const run = await runWorkflow(args, happyResults({ 'plan-1': gated, 'revise-1': revised }));
+      assertBlockedBeforeWaves(run, pathProblem('steps[0].files[0]'));
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1']);
+    });
+    test('the path check follows the mark, not the field names', () => {
+      const marked = structuredClone(planSchema);
+      collectPathFields(marked, [], []).forEach((keyPath) => {
+        const node = keyPath.reduce((schemaNode, key) => (typeof key === 'number' ? schemaNode.items : schemaNode.properties[key]), marked);
+        node.description = 'Can carry external content. One path.';
+      });
+      marked.properties.summary.description = main.repositoryPathMark() + ' What the plan delivers.';
+      const plan = makePlan({ summary: '/x', steps: [makeStep('STEP-001', ['/tmp/x'])] });
+      assert.equal(main.findRepositoryPathProblem(marked, plan, ''), 'summary');
+      assert.equal(main.findRepositoryPathProblem(marked, makePlan({ steps: [makeStep('STEP-001', ['/tmp/x'])] }), ''), '');
+    });
+    test('isRepositoryPath gives the verdict of the molt.sh files rule on one corpus', () => {
+      const scratch = makeScratchRepo();
+      const corpus = [...acceptedPaths, ...refusedPaths];
+      const workflowVerdicts = corpus.map((value) => !main.isRepositoryPath(value));
+      const moltVerdicts = corpus.map((value, index) => moltRefusesPath(scratch, value, index));
+      assert.deepEqual(workflowVerdicts, moltVerdicts);
+      assert.deepEqual(workflowVerdicts, [...acceptedPaths.map(() => false), ...refusedPaths.map(() => true)]);
+      for (const value of [undefined, null, 5, ['a'], {}]) {
+        assert.equal(main.isRepositoryPath(value), false, JSON.stringify(value));
+      }
+    });
+    test('a step path with a space, a leading dot folder or a leading - passes the plan check', () => {
+      const resultSchema = main.buildPlanResultSchema(planSchema, briefSchema);
+      for (const value of ['my file.json', '.github/ci.yml', '-x']) {
+        const plan = makePlan({ steps: [makeStep('STEP-001', [value])] });
+        assert.equal(main.describePlanProblem(planResult(plan), resultSchema, parsedFacts(), 'main'), undefined, value);
+      }
+    });
   },
   'SD-09': () => {
     test('taken planner questions and the plan acceptance are listed in the final message', async () => {
