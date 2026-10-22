@@ -1333,6 +1333,53 @@ const ROW_TESTS = {
       const labels = labelsOf(run);
       assert.equal(new Set(labels).size, labels.length, JSON.stringify(labels));
     });
+  },
+  'SD-20': () => {
+    const longOptions = makeBrief().options.map((option) => ({ ...option, steel_man: 'S'.repeat(4000) }));
+    const longQuestion = makeBrief({ problem: 'LONG_PROBLEM', options: longOptions, gate: { irreversible: false, architectural: true, safety: false } });
+    test('only external_effect asks are exact', () => {
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const plan = effectPlan('Publish to the registry.', false);
+      const resolution = main.resolvePlanAsks(planResult(plan, [makeGatedBrief('GATED_PROBLEM')]), parsedFacts(), run);
+      const exactFlags = resolution.asks.map((ask) => ask.exact === true);
+      assert.deepEqual([...exactFlags], [false, true]);
+      assert.equal(resolution.asks[1].brief.kind, 'external_effect');
+    });
+    test('a pause forced into compact form keeps each irreversible effect exact text verbatim', async () => {
+      const summaries = ['Publish version 2 to the package registry.', 'Send the release email to every customer.'];
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { external_effects: summaries.map((summary) => ({ summary: summary, reversible: false })) })] });
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(plan, [longQuestion]) });
+      assert.equal(run.result.needs_user, true);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1']);
+      const message = run.result.message;
+      assert.ok(message.startsWith(lib.noticeMarker('compact') + '\n\n'), message.slice(0, 300));
+      assert.ok(!message.includes('S'.repeat(100)), 'the pause is in compact form');
+      assert.ok(message.includes('Q1. LONG_PROBLEM'), message);
+      summaries.forEach((summary) => assert.ok(message.includes('Exact text:\n' + summary + '\n'), message));
+    });
+    test('a long effect summary stays whole while the compact form drops the long planner detail', async () => {
+      const summary = 'Run this migration on the production database: ' + 'step m; '.repeat(500);
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(effectPlan(summary, false), [longQuestion]) });
+      assert.equal(run.result.needs_user, true);
+      assert.ok(run.result.message.startsWith(lib.noticeMarker('compact') + '\n\n'), run.result.message.slice(0, 300));
+      assert.ok(run.result.message.includes('Exact text:\n' + summary), run.result.message.slice(0, 300));
+      assert.ok(!run.result.message.includes(lib.noticeMarker('cut')));
+    });
+    test('an effect summary too long to show whole finishes complete with no branch or wave call', async () => {
+      const summary = 'Run this migration: ' + 'M'.repeat(9000);
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(effectPlan(summary, false)) }));
+      assert.equal(run.result.needs_user, false);
+      assert.equal(run.result.outcome, 'complete');
+      const openQuestions = lib.renderOpenQuestions([{ brief: main.buildExternalEffectBrief('STEP-001', summary) }], 'exact_text_size');
+      assert.ok(run.result.message.startsWith('The delivery ran no further step, because questions are still open.\n\n' + openQuestions + '\n\n'), run.result.message.slice(0, 600));
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1']);
+    });
+    test('a pause with no effect ask is not whole: an over-long question is cut as before', async () => {
+      const hugeQuestion = makeGatedBrief('HUGE_PROBLEM ' + 'h'.repeat(9000));
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [hugeQuestion]) });
+      assert.equal(run.result.needs_user, true);
+      assert.ok(run.result.message.endsWith(lib.noticeMarker('cut')), run.result.message.slice(-300));
+    });
   }
 };
 

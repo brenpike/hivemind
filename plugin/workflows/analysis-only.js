@@ -1071,8 +1071,10 @@ function isRecommendationAnOption(brief) {
  *
  * Inputs
  *   renderQuestions(asks, taken)
- *     asks   non-empty array of {brief, reason}. brief is a decision brief;
- *            reason is the ask reason decide() returned for it.
+ *     asks   non-empty array of {brief, reason, exact}. brief is a decision
+ *            brief; reason is the ask reason decide() returned for it.
+ *            exact is optional and set by workflow code only: true when the
+ *            user must see the verbatim text of the brief to answer.
  *     taken  array of {brief} for decisions decide() took. May be empty.
  *   renderDecisions(taken)
  *     taken  as above.
@@ -1088,8 +1090,8 @@ function isRecommendationAnOption(brief) {
  *   renderOpenQuestions(open, stopReason)
  *     open        non-empty array of {brief} for questions still unanswered
  *                 when the run stops asking. Entries of asks fit.
- *     stopReason  why the run stopped asking: 'pause_limit' (the default) or
- *                 'reply_size'.
+ *     stopReason  why the run stopped asking: 'pause_limit' (the default),
+ *                 'reply_size', 'exact_text_size' or 'before_pr'.
  *
  * Outputs
  *   renderQuestions  one message. Each ask becomes a question labelled Q1..Qn
@@ -1106,7 +1108,8 @@ function isRecommendationAnOption(brief) {
  *     position, or the empty string when taken is empty.
  *   renderQuestionsCompact  the shorter form of renderQuestions, with the
  *     same intro line, Q1..Qn labels and last line. Each question shows only
- *     its problem and the recommendation with its why. Taken decisions
+ *     its problem and the recommendation with its why, and for an exact
+ *     entry also the "Exact text:" lines of the full form. Taken decisions
  *     follow as renderDecisionsCompact, with the same line saying the user
  *     can change them in the same reply.
  *   renderDecisionsCompact  the "Decided for you" block with one line per
@@ -1116,11 +1119,14 @@ function isRecommendationAnOption(brief) {
  *   questionLabel    the label renderQuestions, renderQuestionsCompact and
  *     renderOpenQuestions show by position: 'Q' + (index + 1).
  *   renderOpenQuestions  one block: a line saying why the run stopped
- *     asking, either after pauseLimit() rounds ('pause_limit') or because
- *     the replies so far are too long to carry into another round
- *     ('reply_size'), then one line per question labelled Q1..Qn by
- *     position, with its problem and the option the report assumes, or a
- *     line saying there is no recommendation.
+ *     asking: after pauseLimit() rounds ('pause_limit'), because the
+ *     replies so far are too long to carry into another round
+ *     ('reply_size'), because the exact text of a question is too long to
+ *     show in full ('exact_text_size'), or because the run stopped before
+ *     the pull request for questions that need the user's answer, so the
+ *     user runs the request again with it ('before_pr'). Then one line per
+ *     question labelled Q1..Qn by position, with its problem and the option
+ *     the report assumes, or a line saying there is no recommendation.
  *
  * Invariants
  *   Text comes from brief fields and fixed wording only. brief.id and
@@ -1241,6 +1247,10 @@ function renderStopIntro(stopReason) {
       return 'I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:';
     case 'reply_size':
       return 'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
+    case 'exact_text_size':
+      return 'I stopped asking because the exact text of a question is too long to show you in full. These are still open:';
+    case 'before_pr':
+      return 'I stopped before the pull request because these questions need your answer. Run the request again with your answer. These are still open:';
     default:
       throw new Error('renderOpenQuestions: no intro for stop reason ' + JSON.stringify(stopReason));
   }
@@ -1274,10 +1284,14 @@ function renderQuestion(entry, index) {
 
 function renderCompactQuestion(entry, index) {
   const brief = readField(entry, 'brief');
-  return [
+  const lines = [
     questionLabel(index) + '. ' + renderText(readField(brief, 'problem')),
     renderRecommendation(readField(brief, 'recommendation'))
-  ].join('\n');
+  ];
+  if (readField(entry, 'exact') === true) {
+    lines.push(...renderVerbatim(readField(brief, 'verbatim')));
+  }
+  return lines.join('\n');
 }
 
 function renderSeriousness(criticality) {
@@ -1422,14 +1436,22 @@ function renderYesNo(value) {
  *                 reply is added. It has no replyField() key and
  *                 canCarry(resumeArgs) is true.
  *     blocks      the text the user reads, as below.
- *   finish({outcome, blocks})
+ *   finish({outcome, blocks, pr})
  *     outcome     'complete' or 'blocked'.
  *     blocks      the run's final text for the user, as below.
- *   blocks        non-empty array of {text, compact, shorten}, highest
- *                 priority first. text is a non-empty string. compact is
- *                 optional: a non-empty, shorter form of text. shorten is
- *                 optional and only ever true: text may be cut at its tail.
- *                 Only the last block may have shorten.
+ *     pr          optional. The pull request the run opened or reused:
+ *                 {url, head_ref_oid, created}, no other key. url matches
+ *                 ^https://[A-Za-z0-9._/-]+/pull/[0-9]+$, head_ref_oid is 40
+ *                 or 64 lowercase hex chars, created is a boolean.
+ *   blocks        non-empty array of {text, compact, shorten, whole},
+ *                 highest priority first. text is a non-empty string.
+ *                 compact is optional: a non-empty, shorter form of text.
+ *                 shorten is optional and only ever true: text may be cut at
+ *                 its tail. Only the last block may have shorten. whole is
+ *                 optional and only ever true: the block is never cut. A
+ *                 whole block cannot have shorten.
+ *   canShowWhole({resumeArgs, blocks})
+ *     resumeArgs, blocks  as for pauseForUser.
  *   canPause(pausesSoFar)
  *     pausesSoFar non-negative integer. How many times this run has paused.
  *   canCarry(resumeArgs)
@@ -1439,8 +1461,11 @@ function renderYesNo(value) {
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
- *   finish        {needs_user: false, outcome, message}
+ *   finish        {needs_user: false, outcome, pr?, message}, with pr only
+ *                 when it was given.
  *   message       the blocks fitted to the completion notice, see Size.
+ *   canShowWhole  true exactly when pauseForUser fits every whole block,
+ *                 so it returns instead of throwing.
  *   resultFields  every top-level field name a result can carry.
  *   replyField    the args key a resumed run reads the reply from: 'reply'.
  *   pauseLimit    the most times one run may pause: 3.
@@ -1473,7 +1498,11 @@ function renderYesNo(value) {
  *         the shorten block text cut to the room left, which may leave the
  *         marker and the compact forms only.
  *     T3  the T2 text without its marker, cut hard at its tail, then the
- *         cut marker at the end.
+ *         cut marker at the end. The cut falls only after the last whole
+ *         block: every block up to and including it stays intact.
+ *   A whole block shows as its text, or as its compact form in T2 and T3,
+ *   and is never cut. When even the T3 text cannot keep every whole block
+ *   intact, pauseForUser and finish throw.
  *   Every marker says the text was shortened to fit the completion notice
  *   and that the full text is in this run's per-agent results.
  *   A cut never splits a surrogate pair.
@@ -1492,17 +1521,19 @@ function renderYesNo(value) {
  *   nothing the overlord could not get by misquoting the reply
  *   (ADR-0036 decision 13).
  *   Invalid input throws instead of returning a partial result.
- *   message is the last key, after needs_user and resume_args.
+ *   message is the last key, after needs_user, outcome, resume_args and pr.
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
  *   returning. One fixed shape lets the overlord relay and resume any
  *   workflow the same way. Fitting the message in the workflow keeps the
- *   notice whole, so the overlord never needs the output file.
+ *   notice whole, so the overlord never needs the output file. A whole
+ *   block carries text the user must read in full to answer, so the fit
+ *   keeps it by its key, not by a rule in a prompt.
  */
 
 function resultFields() {
-  return ['needs_user', 'outcome', 'resume_args', 'message'];
+  return ['needs_user', 'outcome', 'resume_args', 'pr', 'message'];
 }
 
 function replyField() {
@@ -1555,29 +1586,71 @@ function canCarry(resumeArgs) {
 }
 
 function pauseForUser({ resumeArgs, blocks }) {
-  if (!isResultRecord(resumeArgs)) {
-    throw new Error('pauseForUser: resumeArgs must be a plain object');
-  }
-  if (Object.prototype.hasOwnProperty.call(resumeArgs, replyField())) {
-    throw new Error('pauseForUser: resumeArgs must not have a ' + replyField() + ' key');
-  }
-  if (!canCarry(resumeArgs)) {
-    throw new Error('pauseForUser: resumeArgs is too long to carry in the completion notice');
-  }
-  assertBlocks('pauseForUser', blocks);
-  const paused = { needs_user: true, resume_args: resumeArgs, message: '' };
-  paused.message = fitMessage(blocks, roomForMessage(paused));
+  const paused = buildEmptyPause('pauseForUser', resumeArgs, blocks);
+  paused.message = fitWholeMessage('pauseForUser', blocks, roomForMessage(paused));
   return assertWithinBudget(paused);
 }
 
-function finish({ outcome, blocks }) {
+function canShowWhole({ resumeArgs, blocks }) {
+  const paused = buildEmptyPause('canShowWhole', resumeArgs, blocks);
+  return fitMessage(blocks, roomForMessage(paused)) !== null;
+}
+
+function finish({ outcome, blocks, pr }) {
   if (outcome !== 'complete' && outcome !== 'blocked') {
     throw new Error('finish: outcome must be complete or blocked, got ' + JSON.stringify(outcome));
   }
   assertBlocks('finish', blocks);
-  const finished = { needs_user: false, outcome: outcome, message: '' };
-  finished.message = fitMessage(blocks, roomForMessage(finished));
+  const finished = { needs_user: false, outcome: outcome };
+  if (pr !== undefined) {
+    assertPullRequest(pr);
+    finished.pr = { url: pr.url, head_ref_oid: pr.head_ref_oid, created: pr.created };
+  }
+  finished.message = '';
+  finished.message = fitWholeMessage('finish', blocks, roomForMessage(finished));
   return assertWithinBudget(finished);
+}
+
+function buildEmptyPause(caller, resumeArgs, blocks) {
+  if (!isResultRecord(resumeArgs)) {
+    throw new Error(caller + ': resumeArgs must be a plain object');
+  }
+  if (Object.prototype.hasOwnProperty.call(resumeArgs, replyField())) {
+    throw new Error(caller + ': resumeArgs must not have a ' + replyField() + ' key');
+  }
+  if (!canCarry(resumeArgs)) {
+    throw new Error(caller + ': resumeArgs is too long to carry in the completion notice');
+  }
+  assertBlocks(caller, blocks);
+  return { needs_user: true, resume_args: resumeArgs, message: '' };
+}
+
+function fitWholeMessage(caller, blocks, room) {
+  const message = fitMessage(blocks, room);
+  if (message === null) {
+    throw new Error(caller + ': the whole blocks do not fit the completion notice');
+  }
+  return message;
+}
+
+function assertPullRequest(pr) {
+  if (!isResultRecord(pr)) {
+    throw new Error('finish: pr must be a plain object');
+  }
+  for (const key of Object.keys(pr)) {
+    if (key !== 'url' && key !== 'head_ref_oid' && key !== 'created') {
+      throw new Error('finish: pr has an unknown key ' + JSON.stringify(key));
+    }
+  }
+  if (typeof pr.url !== 'string' || !/^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/.test(pr.url)) {
+    throw new Error('finish: pr url must be a pull request URL');
+  }
+  if (typeof pr.head_ref_oid !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(pr.head_ref_oid)) {
+    throw new Error('finish: pr head_ref_oid must be 40 or 64 lowercase hex chars');
+  }
+  if (typeof pr.created !== 'boolean') {
+    throw new Error('finish: pr created must be a boolean');
+  }
 }
 
 function noticeMarker(kind) {
@@ -1612,13 +1685,24 @@ function fitMessage(blocks, room) {
     if (compacted !== null) {
       return compacted;
     }
-    return fitHardCut(joinParagraphs(leadCompacts.concat([lastBlock.text])), room);
+    return fitHardCut(leadCompacts.concat([lastBlock.text]), countWholeLead(blocks), room);
   }
-  const compactText = joinParagraphs([noticeMarker('compact')].concat(blocks.map((block) => block.compact || block.text)));
+  const compactParts = blocks.map((block) => block.compact || block.text);
+  const compactText = joinParagraphs([noticeMarker('compact')].concat(compactParts));
   if (messageCost(compactText) <= room) {
     return compactText;
   }
-  return fitHardCut(joinParagraphs(blocks.map((block) => block.compact || block.text)), room);
+  return fitHardCut(compactParts, countWholeLead(blocks), room);
+}
+
+function countWholeLead(blocks) {
+  let wholeCount = 0;
+  blocks.forEach((block, blockIndex) => {
+    if (block.whole === true) {
+      wholeCount = blockIndex + 1;
+    }
+  });
+  return wholeCount;
 }
 
 function fitTailCut(headParts, cutText, tailParts, room) {
@@ -1629,13 +1713,18 @@ function fitTailCut(headParts, cutText, tailParts, room) {
   return joinParagraphs(headParts.concat([cutText.slice(0, cutLength)], tailParts));
 }
 
-function fitHardCut(sourceText, room) {
+function fitHardCut(parts, wholeCount, room) {
   const cutMarker = noticeMarker('cut');
   if (messageCost(cutMarker) > room) {
     throw new Error('fitMessage: no room for the cut marker');
   }
-  const cutLength = findLongestCut(sourceText, room, (prefix) => joinParagraphs([prefix, cutMarker]));
-  return joinParagraphs([sourceText.slice(0, cutLength), cutMarker]);
+  const wholeParts = parts.slice(0, wholeCount);
+  if (messageCost(joinParagraphs(wholeParts.concat([cutMarker]))) > room) {
+    return null;
+  }
+  const sourceText = joinParagraphs(parts.slice(wholeCount));
+  const cutLength = findLongestCut(sourceText, room, (prefix) => joinParagraphs(wholeParts.concat([prefix, cutMarker])));
+  return joinParagraphs(wholeParts.concat([sourceText.slice(0, cutLength), cutMarker]));
 }
 
 function findLongestCut(cutText, room, assembleMessage) {
@@ -1695,8 +1784,16 @@ function assertBlock(caller, block, isLast) {
     throw new Error(caller + ': each block must be a plain object');
   }
   for (const key of Object.keys(block)) {
-    if (key !== 'text' && key !== 'compact' && key !== 'shorten') {
+    if (key !== 'text' && key !== 'compact' && key !== 'shorten' && key !== 'whole') {
       throw new Error(caller + ': block has an unknown key ' + JSON.stringify(key));
+    }
+  }
+  if (Object.prototype.hasOwnProperty.call(block, 'whole')) {
+    if (block.whole !== true) {
+      throw new Error(caller + ': block whole must be true when present');
+    }
+    if (Object.prototype.hasOwnProperty.call(block, 'shorten')) {
+      throw new Error(caller + ': a whole block cannot have shorten');
     }
   }
   if (!isNonBlankText(block.text)) {

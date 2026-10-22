@@ -76,9 +76,13 @@
  *   settled enum allows only the labels shown, and at the pause limit
  *   nothing runs. Rejected: a free-text reply has no code parse, and a
  *   pause per effect adds stops (review finding d5619285, option C).
- *   Open questions never end the run blocked: after pauseLimit() pauses, or
- *   when the replies are too long to carry, it finishes complete, lists the
- *   questions still open and runs nothing further.
+ *   Open questions never end the run blocked: after pauseLimit() pauses,
+ *   when the replies are too long to carry, or when an exact question
+ *   cannot be shown whole, it finishes complete, lists the questions still
+ *   open and runs nothing further.
+ *   An irreversible effect is asked as an exact entry, so the pause keeps
+ *   its exact text whole in every fit tier (lib/result.js whole blocks): the
+ *   user never answers an effect question without its verbatim text.
  *   Trust boundary: the overlord is a trusted relay, as in analysis-only
  *   (ADR-0036 decision 13).
  *
@@ -120,7 +124,8 @@ function contractRows() {
     { id: 'SD-16', step: 'Waves', check: 'describeBlockedWave', rule: 'A blocked or failed worker stops the run after the wave commit, naming the commit.' },
     { id: 'SD-17', step: 'A wave to planning', check: 'requestStepReplan', rule: 'A needs_replan wave is committed, then the run gathers facts and plans what is left with the done ids reset, at most maxReplans() times, and then stops naming the reason.' },
     { id: 'SD-18', step: 'Prompts', check: 'gitScriptSentence', rule: 'Runner prompts carry no request text; read-only runners carry the runner read-only sentence and git-script runners the git-script sentence, both matching the exemptions in ${CLAUDE_PLUGIN_ROOT}/agents/drone.md.' },
-    { id: 'SD-19', step: 'Result', check: 'buildRunBlocks', rule: 'The final message lists every taken decision, the reversible effects and the commits, and a resume replays every earlier prompt byte for byte.' }
+    { id: 'SD-19', step: 'Result', check: 'buildRunBlocks', rule: 'The final message lists every taken decision, the reversible effects and the commits, and a resume replays every earlier prompt byte for byte.' },
+    { id: 'SD-20', step: 'Pause', check: 'pauseDelivery', rule: 'Each external_effect ask is exact, so a pause holding one keeps its questions block whole and the compact form shows each irreversible effect exact text verbatim; when canShowWhole is false the run finishes complete through finishOpenQuestions with stop reason exact_text_size and runs nothing further.' }
   ];
 }
 
@@ -556,7 +561,11 @@ function resolveDecision(kind, brief, key, run, resolution) {
     resolution.taken.push({ brief: brief });
     return 'take';
   }
-  resolution.asks.push({ brief: brief, reason: decision.reason, key: key });
+  const ask = { brief: brief, reason: decision.reason, key: key };
+  if (kind === EXTERNAL_EFFECT_KIND) {
+    ask.exact = true;
+  }
+  resolution.asks.push(ask);
   return 'ask';
 }
 
@@ -664,9 +673,16 @@ function pauseDelivery(resolution, questions, run) {
   if (!canCarry(resumeArgs)) {
     return finishOpenQuestions(resolution, 'reply_size', run);
   }
-  const blocks = [{ text: questions, compact: renderQuestionsCompact(resolution.asks, resolution.taken) }];
+  const questionsBlock = { text: questions, compact: renderQuestionsCompact(resolution.asks, resolution.taken) };
+  if (resolution.asks.some((ask) => ask.exact === true)) {
+    questionsBlock.whole = true;
+  }
+  const blocks = [questionsBlock];
   if (run.waveCount > 0) {
     blocks.push({ text: renderCommits(run.commits) });
+  }
+  if (!canShowWhole({ resumeArgs: resumeArgs, blocks: blocks })) {
+    return finishOpenQuestions(resolution, 'exact_text_size', run);
   }
   return pauseForUser({ resumeArgs: resumeArgs, blocks: blocks });
 }
