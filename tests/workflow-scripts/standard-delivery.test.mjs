@@ -118,6 +118,10 @@ function planResult(plan = makePlan(), questions = []) {
   return { outcome: 'complete', plan: plan, questions: questions };
 }
 
+function reviseResult(result, settled) {
+  return { ...result, settled: settled };
+}
+
 function effectPlan(summary, reversible) {
   return makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { external_effects: [{ summary: summary, reversible: reversible }] })] });
 }
@@ -625,6 +629,16 @@ const ROW_TESTS = {
       assert.ok(briefDialect !== undefined);
       assert.deepEqual(schema.properties.questions.items, briefWithoutDialect);
     });
+    for (const [label, settled] of [['no settled', undefined], ['a label past the shown count', ['Q2']]]) {
+      test(`a revise result with ${label} blocks before the branch step with the schema message`, async () => {
+        const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
+        const revised = settled === undefined ? planResult() : reviseResult(planResult(), settled);
+        const args = { ...LAUNCH, answers: { 'round-1': 'Take option A.' } };
+        const run = await runWorkflow(args, happyResults({ 'plan-1': gated, 'revise-1': revised }));
+        assertBlockedBeforeWaves(run, schemaProblem);
+        assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1']);
+      });
+    }
   },
   'SD-09': () => {
     test('taken planner questions and the plan acceptance are listed in the final message', async () => {
@@ -657,7 +671,7 @@ const ROW_TESTS = {
     });
     test('a reply goes to a revise pass and the run goes on', async () => {
       const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]) });
-      const results = happyResults({ 'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': planResult() });
+      const results = happyResults({ 'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': reviseResult(planResult(), ['Q1']) });
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Take option B.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const revise = callOf(run, 'revise-1');
@@ -670,7 +684,8 @@ const ROW_TESTS = {
     test('at the pause limit the run finishes complete, lists the open questions and runs nothing further', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
       const args = { ...LAUNCH, answers: { 'round-1': 'one', 'round-2': 'two', 'round-3': 'three' } };
-      const run = await runWorkflow(args, { 'facts-1': factsRelay(), 'plan-1': gated, 'revise-1': gated, 'revise-2': gated, 'revise-3': gated });
+      const revised = reviseResult(gated, []);
+      const run = await runWorkflow(args, { 'facts-1': factsRelay(), 'plan-1': gated, 'revise-1': revised, 'revise-2': revised, 'revise-3': revised });
       assert.equal(run.result.needs_user, false);
       assert.equal(run.result.outcome, 'complete');
       assert.ok(run.result.message.startsWith('The delivery ran no further step, because questions are still open.\n\nI stopped asking after 3 rounds of questions.'), run.result.message);
@@ -679,7 +694,7 @@ const ROW_TESTS = {
     test('replies too long to carry finish complete with the open questions', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
       const args = { ...LAUNCH, answers: { 'round-1': 'x'.repeat(5000) } };
-      const run = await runWorkflow(args, { 'facts-1': factsRelay(), 'plan-1': gated, 'revise-1': gated });
+      const run = await runWorkflow(args, { 'facts-1': factsRelay(), 'plan-1': gated, 'revise-1': reviseResult(gated, []) });
       assert.equal(run.result.outcome, 'complete');
       assert.ok(run.result.message.includes('I stopped asking because your replies so far are too long to carry'), run.result.message);
     });
@@ -693,9 +708,65 @@ const ROW_TESTS = {
       const paused = await runWorkflow(LAUNCH, happyResults(), surfaced);
       assert.equal(paused.result.needs_user, true);
       assert.ok(paused.result.message.includes('Q1. Start delivering the plan'));
-      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, go.'), happyResults({ 'revise-1': planResult() }), surfaced);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, go.'), happyResults({ 'revise-1': reviseResult(planResult(), ['Q1']) }), surfaced);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
+    });
+    test('a reply that settles only the plan acceptance asks the trunk question again', async () => {
+      const surfaced = buildWithSurfaceKinds(['plan_acceptance', 'trunk_stale']);
+      const behindPlan = planResult(makePlan({ trunk_freshness: 'behind' }));
+      const results = happyResults({
+        'facts-1': factsRelay({ trunk_freshness: 'behind', trunk_behind: '4' }),
+        'plan-1': behindPlan,
+        'revise-1': reviseResult(behindPlan, ['Q1']),
+        'revise-2': reviseResult(behindPlan, ['Q1']),
+        'branch-1': branchRelay({ warning: main.branchWarningTexts().stale })
+      });
+      const paused = await runWorkflow(LAUNCH, results, surfaced);
+      assert.ok(paused.result.message.startsWith('I need your answers on 2 questions before I go on.'), paused.result.message);
+      assert.ok(paused.result.message.includes('Q1. Start delivering the plan'), paused.result.message);
+      assert.ok(paused.result.message.includes('Q2. The trunk may not be up to date'), paused.result.message);
+      const second = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Accept the plan.'), results, surfaced);
+      assert.equal(second.result.needs_user, true);
+      assert.deepEqual(labelsOf(second), ['facts-1', 'plan-1', 'revise-1']);
+      assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'Accept the plan.' } });
+      assert.ok(second.result.message.startsWith('I need your answer on 1 question before I go on.'), second.result.message);
+      assert.ok(second.result.message.includes('Q1. The trunk may not be up to date'), second.result.message);
+      assert.ok(!second.result.message.includes('Start delivering the plan'), second.result.message);
+      const run = await runWorkflow(resumeWith(LAUNCH, second.result, 'Go on from the trunk.'), results, surfaced);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'revise-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1']);
+      assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'stale');
+    });
+    test('the revise call schema is the plan result schema with a required settled enum of the shown labels', async () => {
+      const plan = effectPlan('Publish to the registry.', false);
+      const results = happyResults({ 'plan-1': planResult(plan, [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': reviseResult(planResult(plan), ['Q1', 'Q2']) });
+      const run = await runWorkflow({ ...LAUNCH, answers: { 'round-1': 'Yes to both.' } }, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const planCallSchema = callOf(run, 'plan-1').opts.schema;
+      const reviseCall = callOf(run, 'revise-1');
+      const reviseSchema = reviseCall.opts.schema;
+      assert.ok(!Object.keys(planCallSchema.properties).includes('settled'));
+      assert.deepEqual(planCallSchema.required, ['outcome', 'questions']);
+      assert.deepEqual(reviseSchema.required, ['outcome', 'questions', 'settled']);
+      assert.equal(reviseSchema.additionalProperties, false);
+      const { settled: settledProperty, ...planProperties } = reviseSchema.properties;
+      assert.deepEqual(planProperties, planCallSchema.properties);
+      assert.equal(settledProperty.type, 'array');
+      assert.ok(settledProperty.description.startsWith('The label, like Q1, of each shown question the reply settles.'), settledProperty.description);
+      assert.deepEqual(settledProperty.items, { type: 'string', enum: ['Q1', 'Q2'] });
+      assert.ok(reviseCall.prompt.includes('Set settled to the label, like Q1, of each shown question the reply settles.'), reviseCall.prompt);
+    });
+    test('an effect never settled stays open at the pause limit and nothing runs', async () => {
+      const summary = 'Publish to the registry.';
+      const revised = reviseResult(planResult(effectPlan(summary, false)), []);
+      const args = { ...LAUNCH, answers: { 'round-1': 'one', 'round-2': 'two', 'round-3': 'three' } };
+      const run = await runWorkflow(args, happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': revised, 'revise-2': revised, 'revise-3': revised }));
+      assert.equal(run.result.needs_user, false);
+      assert.equal(run.result.outcome, 'complete');
+      assert.ok(run.result.message.startsWith('The delivery ran no further step, because questions are still open.\n\nI stopped asking after 3 rounds of questions.'), run.result.message);
+      assert.ok(run.result.message.includes('\n  Q1. Plan step "STEP-001" has an effect outside the repo that cannot be undone'), run.result.message);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'revise-2', 'revise-3']);
     });
   },
   'SD-10': () => {
@@ -743,7 +814,7 @@ const ROW_TESTS = {
       const results = happyResults({
         'facts-1': factsRelay({ trunk_freshness: 'behind', trunk_behind: '4' }),
         'plan-1': planResult(makePlan({ trunk_freshness: 'behind' })),
-        'revise-1': planResult(makePlan({ trunk_freshness: 'behind' })),
+        'revise-1': reviseResult(planResult(makePlan({ trunk_freshness: 'behind' })), ['Q1']),
         'branch-1': branchRelay({ warning: main.branchWarningTexts().stale })
       });
       const paused = await runWorkflow(LAUNCH, results, surfaced);
@@ -776,14 +847,14 @@ const ROW_TESTS = {
       assert.ok(run.result.message.includes('Why I am asking: ' + lib.askReasonLine('hard_stop')), run.result.message);
     });
     test('a replied effect is not asked again when the revised plan keeps it', async () => {
-      const results = happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': planResult(effectPlan(summary, false)) });
+      const results = happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': reviseResult(planResult(effectPlan(summary, false)), ['Q1']) });
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, publish it.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1']);
     });
     test('a changed effect is asked again', async () => {
-      const results = happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': planResult(effectPlan('Publish to a staging registry.', false)) });
+      const results = happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': reviseResult(planResult(effectPlan('Publish to a staging registry.', false)), ['Q1']) });
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Only staging.'), results);
       assert.equal(run.result.needs_user, true);
@@ -791,10 +862,34 @@ const ROW_TESTS = {
       assert.ok(run.result.message.includes('Exact text:\nPublish to a staging registry.'));
     });
     test('a revised plan that drops the effect goes on', async () => {
-      const results = happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': planResult() });
+      const results = happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': reviseResult(planResult(), []) });
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Do not publish.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
+    });
+    function partlySettledResults(settled) {
+      const plan = effectPlan(summary, false);
+      return happyResults({ 'plan-1': planResult(plan, [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': reviseResult(planResult(plan), settled) });
+    }
+    test('an effect the reply did not settle is asked again before any wave', async () => {
+      const results = partlySettledResults(['Q1']);
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.ok(paused.result.message.includes('Q1. GATED_PROBLEM'), paused.result.message);
+      assert.ok(paused.result.message.includes('Q2. Plan step "STEP-001" has an effect outside the repo'), paused.result.message);
+      const reply = 'Take option B on the key format.';
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+      assert.equal(run.result.needs_user, true);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1']);
+      assert.deepEqual(run.result.resume_args, { answers: { 'round-1': reply } });
+      assert.ok(run.result.message.includes('Exact text:\n' + summary), run.result.message);
+      assert.ok(labelsOf(run).every((label) => !/^(branch|work|commit)-/.test(label)), JSON.stringify(labelsOf(run)));
+    });
+    test('an effect the reply settled with the other question goes on to the branch step and the waves', async () => {
+      const results = partlySettledResults(['Q1', 'Q2']);
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Option B, and yes, publish it.'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1']);
     });
     test('a reversible effect is not asked and is listed in the final message', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(effectPlan('Post a preview link.', true)) }));
@@ -1214,7 +1309,7 @@ const ROW_TESTS = {
         'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
         'facts-2': onPlanBranchFacts(OTHER),
         'plan-2': planResult(effectPlan('Run the data migration.', false)),
-        'revise-1': planResult(effectPlan('Run the data migration.', false)),
+        'revise-1': reviseResult(planResult(effectPlan('Run the data migration.', false)), ['Q1']),
         'branch-2': branchRelay({ created: 'false', commit: OTHER }),
         'work-2-STEP-001': WORKER_DONE,
         'commit-2-1': commitRelay({ commit: THIRD })
