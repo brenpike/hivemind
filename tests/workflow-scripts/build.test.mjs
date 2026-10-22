@@ -8,6 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { loadWorkflow, loadWorkflowSource } from './harness.mjs';
 import {
   LIB_FILES,
+  MAX_BUILT_SCRIPT_LENGTH,
+  WORKFLOW_APPROVAL_LIMIT,
   buildWorkflow,
   builtPathFor,
   discoverWorkflowIds,
@@ -17,7 +19,9 @@ import {
   listDraftWorkflowIds,
   listLiveWorkflowIds,
   runCli,
-  stripCommentsAndStrings
+  stripComments,
+  stripCommentsAndStrings,
+  tokenizeSource
 } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -251,6 +255,19 @@ describe('build_workflows guards', () => {
   test('stripCommentsAndStrings keeps code and drops comments and literals', () => {
     assert.equal(stripCommentsAndStrings('a /* x */ b // y\nc \'d\' "e" `f`'), 'a  b \nc "" "" ""');
   });
+  test('stripCommentsAndStrings hides a regex literal and keeps template substitution code', () => {
+    assert.equal(stripCommentsAndStrings('x = /import/; y = `a${require(z)}b`'), 'x = ""; y = ""require(z)""');
+  });
+  test('a syntax error in the built script fails the build', () => {
+    const scratchRoot = makeScratchCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nconst = 1;\n');
+    assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), /analysis-only: the built script does not parse/);
+  });
+  test('an unterminated literal in a source fails the build, naming the file', () => {
+    const scratchRoot = makeScratchCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nlog(`open);\n');
+    assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), /plugin\/workflow-src\/analysis-only\/main\.js: unterminated template literal/);
+  });
   test('LIB_FILES is every .js in plugin/workflow-src/lib/', () => {
     const libFiles = readdirSync(join(repoRoot, 'plugin/workflow-src/lib'), { withFileTypes: true })
       .filter((entry) => entry.isFile() && entry.name.endsWith('.js'))
@@ -263,6 +280,88 @@ describe('build_workflows guards', () => {
     assert.ok(liveIds.every((id) => !draftIds.includes(id)));
     assert.ok(liveIds.includes('analysis-only'));
   });
+});
+
+describe('build_workflows stripComments', () => {
+  const unchanged = [
+    ['line and block markers inside single quotes', 'x = \'a // b /* c */\';'],
+    ['line and block markers inside double quotes', 'x = "a // b /* c */";'],
+    ['line and block markers inside a template', 'x = `a // b /* c */`;'],
+    ['a block marker string inside a substitution', 'x = `${ \'/*\' }`;'],
+    ['a template nested in a substitution', 'x = `a${ `b${ c }/*` }// d`;'],
+    ['a regex of escaped slashes', 'x = /\\/\\//;'],
+    ['a slash and a star inside a regex class', 'x = /[/*]/g;'],
+    ['a quote inside a regex', 'x = /\'/;'],
+    ['a regex after return', 'function f() {\n  return /a\\/b/.test(s);\n}'],
+    ['chained division', 'x = a / b / c;'],
+    ['division after ) and ]', 'x = (a) / b[0] / 2;'],
+    ['line starts and blank lines in code', 'function a() {\n  return 1;\n}\n\nasync function b() {}\n']
+  ];
+  for (const [name, source] of unchanged) {
+    test('keeps ' + name + ' unchanged', () => {
+      assert.equal(stripComments(source), source);
+    });
+  }
+  const stripped = [
+    ['a line comment after division', 'x = a / b // c', 'x = a / b'],
+    ['a block comment inside a substitution', 'x = `${ /* c */ 1 }`;', 'x = `${ 1 }`;'],
+    ['a block comment holding a newline, keeping one newline', 'return /*\n*/ x', 'return\n x'],
+    ['a block comment between tokens, keeping them apart', 'a/* c */b', 'a b'],
+    ['a block comment before code, keeping its indent', '  /* c */ x();', '  x();'],
+    ['a comment-only line', 'function a() {\n  // c\n  return 1;\n}', 'function a() {\n  return 1;\n}'],
+    ['a doc comment above a function', 'x();\n\n/**\n * d\n */\nfunction a() {}\n', 'x();\n\nfunction a() {}\n'],
+    ['a comment after a regex', 'x = /a/g; // c\ny();', 'x = /a/g;\ny();']
+  ];
+  for (const [name, source, expected] of stripped) {
+    test('strips ' + name, () => {
+      assert.equal(stripComments(source), expected);
+    });
+  }
+  const unterminated = [
+    ['template', 'x = `abc', /unterminated template literal at line 1/],
+    ['template substitution', 'x = `${ a', /unterminated template literal substitution/],
+    ['string', 'x = \'abc\ny = 1;', /unterminated string literal at line 1/],
+    ['block comment', 'x = 1;\n/* c', /unterminated block comment at line 2/],
+    ['regex', 'x = /abc\n', /unterminated regex literal at line 1/]
+  ];
+  for (const [name, source, pattern] of unterminated) {
+    test('throws on an unterminated ' + name, () => {
+      assert.throws(() => stripComments(source), pattern);
+    });
+  }
+  test('keeps every literal of every source byte for byte', () => {
+    const sourcePaths = [...workflowIds.flatMap((id) => [id + '/meta.js', id + '/main.js']), ...LIB_FILES.map((file) => 'lib/' + file)];
+    const listLiterals = (source) => tokenizeSource(source).filter((token) => token.kind !== 'code' && token.kind !== 'comment').map((token) => token.text);
+    for (const sourcePath of sourcePaths) {
+      const source = readFileSync(join(repoRoot, 'plugin/workflow-src', sourcePath), 'utf8').replace(/\r/g, '');
+      const output = stripComments(source);
+      assert.deepEqual(listLiterals(output), listLiterals(source), sourcePath);
+      assert.ok(tokenizeSource(output).every((token) => token.kind !== 'comment'), sourcePath);
+    }
+  });
+});
+
+describe('build_workflows length budget', () => {
+  test('the limits are pinned', () => {
+    assert.equal(WORKFLOW_APPROVAL_LIMIT, 200000);
+    assert.equal(MAX_BUILT_SCRIPT_LENGTH, 190000);
+  });
+  test('a script over the budget fails the build and --check, naming the id and the length', () => {
+    const scratchRoot = makeScratchCopy();
+    const mainPath = join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js');
+    const mainBefore = readFileSync(mainPath, 'utf8').replace(/\r/g, '');
+    const mainAfter = mainBefore + '\nlog(\'' + 'x'.repeat(MAX_BUILT_SCRIPT_LENGTH) + '\');\n';
+    writeFileSync(mainPath, mainAfter);
+    const length = readBuilt('analysis-only').length + stripComments(mainAfter).trim().length - stripComments(mainBefore).trim().length;
+    const pattern = new RegExp('analysis-only: the built script is ' + length + ' characters, over the budget of 190000');
+    assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), pattern);
+    assert.throws(() => runCliIn(scratchRoot, ['--check']), pattern);
+  });
+  for (const id of liveIds) {
+    test(builtPathFor(id) + ' is within the budget', () => {
+      assert.ok(readFileSync(join(repoRoot, builtPathFor(id)), 'utf8').length <= MAX_BUILT_SCRIPT_LENGTH);
+    });
+  }
 });
 
 describe('build_workflows drafts', () => {
@@ -382,6 +481,20 @@ for (const id of liveIds) {
       const positions = markers.map((marker) => source.indexOf(marker));
       assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
       assert.deepEqual([...positions].sort((left, right) => left - right), positions);
+    });
+    test('each data constant is one line of JSON equal to its file', () => {
+      const constants = [['AUTONOMY_TABLE', 'decision-autonomy-table.json'], ['BRIEF_SCHEMA', 'decision-brief-schema.json'], ['PLAN_SCHEMA', 'plan-schema.json']];
+      for (const [name, file] of constants) {
+        const line = source.split('\n').find((candidate) => candidate.startsWith('const ' + name + ' = '));
+        assert.ok(line !== undefined && line.endsWith(';'), name);
+        const data = JSON.parse(line.slice(('const ' + name + ' = ').length, -1));
+        assert.deepEqual(data, JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8')), name);
+      }
+    });
+    test('has no comment other than the GENERATED banner', () => {
+      const comments = tokenizeSource(source).filter((token) => token.kind === 'comment');
+      assert.equal(comments.length, 1);
+      assert.ok(comments[0].text.startsWith('/*\n * GENERATED by tools/build_workflows.mjs'));
     });
     test('has no import or require', () => {
       assert.ok(!/\bimport\b/.test(source));
