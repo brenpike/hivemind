@@ -155,6 +155,19 @@
  *   to the user. Rejected for now: a committed bump script that reads each
  *   file at trunk_commit from an inputs file costs a script, a skill and
  *   tests for a case no known project has.
+ *   A version file path that passes isGitIdentifier can still lead through
+ *   a symlink out of the checkout (review finding 8a9a66f3). That is the
+ *   filesystem-alias residual ADR-0037 records for plan step files: the
+ *   drone holds the whole Bash tool, and this script cannot read the file
+ *   system, so no check here can close it. The impact is bounded: the bump
+ *   reads each path with git show at trunk_commit, and the git tree holds a
+ *   symlink as its link text and no path below one, so a path through a
+ *   symlink in trunk yields no version and the drone stops blocked; a
+ *   symlink added on the branch is in a branch commit the PR shows; only a
+ *   drone that ignores its task writes through a link, and then the commit
+ *   runner finds nothing to commit and the PR shows no version change.
+ *   Rejected: a containment check in a committed bump script covers the
+ *   bump only, while plan step files keep the same exposure.
  *   Open questions never end the run blocked: after pauseLimit() pauses,
  *   when the replies are too long to carry, or when an exact question
  *   cannot be shown whole, it finishes complete, lists the questions still
@@ -178,6 +191,17 @@
  *   title stays plain text: GitHub renders titles with code spans only and
  *   takes no mentions from them, and a wrapper would reach the squash
  *   commit subject.
+ *   The commit and PR runners write their own inputs file and pass its
+ *   path to molt.sh or open-plan-pr.sh (review finding fb4c129c). This
+ *   script cannot read that file, so the commit message, file list, title,
+ *   body and comment that reach git and GitHub rest on the runner copying
+ *   its inputs block, as every relayed value does (ADR-0037 Risks: runner
+ *   safety rests on the committed scripts). The impact is bounded: each
+ *   script refuses an inputs file that resolves outside the checkout or
+ *   breaks a field rule, molt.sh refuses any dirty path outside its list,
+ *   the workflow checks every routing line, and the PR text is in front of
+ *   the user before the merge. Rejected: a token in place of the path,
+ *   since the runner still writes the file the token names.
  *
  * Why
  *   Delivery transitions cost no model turn when they are code. The git
