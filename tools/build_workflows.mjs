@@ -23,7 +23,8 @@
  *   data constants from plugin/references/, the shared libraries from
  *   plugin/workflow-src/lib/ in LIB_FILES order, and <id>/main.js.
  *   Comments are stripped from meta.js, each library and main.js by
- *   stripComments, and each data constant is JSON on one line.
+ *   stripComments, and each data constant is JSON.stringify(data, null, 1):
+ *   one key or element per line, indented one space per level.
  *
  * Invariants
  *   CR is stripped from every input and the output is written with LF only.
@@ -32,6 +33,13 @@
  *   once, compiles as the body of an async function, and is at most
  *   MAX_BUILT_SCRIPT_LENGTH characters long, or the build throws, in both
  *   modes.
+ *   The built script also keeps every line at most MAX_BUILT_LINE_LENGTH
+ *   characters, keeps the sum of its squared line lengths at most
+ *   MAX_BUILT_LINE_SQUARES, never contains the preview truncation marker
+ *   text, and has no run of more than WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT
+ *   combining or zero-width characters, or the build throws, in both modes.
+ *   Lengths are JavaScript string lengths of the lines split on LF, and an
+ *   empty line counts 0.
  *   An entry named DRAFT that is not a regular file (a directory, a
  *   symlink, anything else) fails the build in both modes.
  *   --check compares each live workflow with its committed file after
@@ -84,6 +92,32 @@ const DATA_CONSTANTS = [
  */
 export const WORKFLOW_APPROVAL_LIMIT = 200000;
 export const MAX_BUILT_SCRIPT_LENGTH = 190000;
+
+/**
+ * Claude Code 2.1.308 offers only "No" in the Workflow approval dialog when:
+ *   (1) the script is longer than WORKFLOW_APPROVAL_LIMIT;
+ *   (2) the script is flagged as forged, which the build cannot control;
+ *   (3) the sanitized preview holds the marker `… [+N graphemes]`. The
+ *       preview cuts any line longer than WORKFLOW_PREVIEW_LINE_LIMIT. It
+ *       spends a budget of WORKFLOW_PREVIEW_SQUARES_LIMIT on the squared
+ *       length of each line, and once that is spent it cuts any line longer
+ *       than 1024 and later replaces whole lines. The marker text written
+ *       into the script trips the same check;
+ *   (4) the script holds a run of more than
+ *       WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT combining or zero-width
+ *       characters.
+ * These are undocumented constants of that release, and an update may lower
+ * them. The build fails above MAX_BUILT_LINE_LENGTH and MAX_BUILT_LINE_SQUARES,
+ * so the margins let the pull request that crosses a budget fail while its
+ * script is still approvable.
+ */
+export const WORKFLOW_PREVIEW_LINE_LIMIT = 4096;
+export const WORKFLOW_PREVIEW_SQUARES_LIMIT = 67108864;
+export const WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT = 8;
+export const MAX_BUILT_LINE_LENGTH = 2048;
+export const MAX_BUILT_LINE_SQUARES = 50000000;
+const PREVIEW_MARKER_TEXT = '… [+';
+const COMBINING_RUN_PATTERN = /[\p{M}\p{Cf}]+/gu;
 
 function readSource(root, relativePath) {
   return readFileSync(join(root, relativePath), 'utf8').replace(/\r/g, '');
@@ -151,7 +185,7 @@ function renderBanner(id) {
 
 function renderDataConstant(root, constant) {
   const data = JSON.parse(readSource(root, constant.path));
-  return 'const ' + constant.name + ' = ' + JSON.stringify(data) + ';';
+  return 'const ' + constant.name + ' = ' + JSON.stringify(data, null, 1) + ';';
 }
 
 const REGEX_AFTER_KEYWORDS = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
@@ -449,6 +483,35 @@ function assertParses(id, output) {
   }
 }
 
+function findLongestCombiningRun(line) {
+  return [...line.matchAll(COMBINING_RUN_PATTERN)].reduce((longest, match) => Math.max(longest, [...match[0]].length), 0);
+}
+
+function assertPreviewLine(id, line, lineNumber) {
+  if (line.length > MAX_BUILT_LINE_LENGTH) {
+    throw new Error(id + ': line ' + lineNumber + ' of the built script is ' + line.length + ' characters, over the line budget of ' + MAX_BUILT_LINE_LENGTH + ' (the Workflow approval preview cuts a line over ' + WORKFLOW_PREVIEW_LINE_LIMIT + ')');
+  }
+  if (line.includes(PREVIEW_MARKER_TEXT)) {
+    throw new Error(id + ': line ' + lineNumber + ' of the built script holds the text "' + PREVIEW_MARKER_TEXT + '", which the budget allows 0 times (the Workflow approval preview offers only "No" when its preview holds the truncation marker)');
+  }
+  const longestRun = findLongestCombiningRun(line);
+  if (longestRun > WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT) {
+    throw new Error(id + ': line ' + lineNumber + ' of the built script has a run of ' + longestRun + ' combining or zero-width characters, over the budget of ' + WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT + ' (the Workflow approval limit is a run of ' + WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT + ')');
+  }
+}
+
+/**
+ * Throws when the lines of a built script would make the Claude Code
+ * Workflow approval dialog offer only "No": see WORKFLOW_PREVIEW_LINE_LIMIT.
+ */
+function assertPreviewLines(id, lines) {
+  lines.forEach((line, position) => assertPreviewLine(id, line, position + 1));
+  const squares = lines.reduce((sum, line) => sum + line.length * line.length, 0);
+  if (squares > MAX_BUILT_LINE_SQUARES) {
+    throw new Error(id + ': the sum of the squared line lengths of the built script is ' + squares + ', over the budget of ' + MAX_BUILT_LINE_SQUARES + ' (the Workflow approval preview limit is ' + WORKFLOW_PREVIEW_SQUARES_LIMIT + ')');
+  }
+}
+
 function assertBuiltScript(id, output) {
   if (!output.startsWith('export const meta = {')) {
     throw new Error(id + ': meta.js must start with `export const meta = {`');
@@ -456,6 +519,7 @@ function assertBuiltScript(id, output) {
   if (output.length > MAX_BUILT_SCRIPT_LENGTH) {
     throw new Error(id + ': the built script is ' + output.length + ' characters, over the budget of ' + MAX_BUILT_SCRIPT_LENGTH + ' (the Workflow approval limit is ' + WORKFLOW_APPROVAL_LIMIT + ')');
   }
+  assertPreviewLines(id, output.split('\n'));
   const code = stripCommentsAndStrings(output);
   if (/\bimport\b/.test(code) || /\brequire\s*\(/.test(code)) {
     throw new Error(id + ': the built script uses import or require( as code; workflow scripts cannot load modules');

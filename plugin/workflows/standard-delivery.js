@@ -36,11 +36,663 @@ export const meta = {
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
  */
 
-const AUTONOMY_TABLE = {"$comment":"${CLAUDE_PLUGIN_ROOT}/workflow-src/lib/decide.js is the only place a decision is resolved. resolved_at binds each row to its decision sites.","version":1,"levels":["high","balanced","low"],"default_level":"high","hard_stops":[{"hard_stop":"destructive_fix_gate","when":"A review or remediation fix would match a category of the Destructive Fix Gate per ${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md (Destructive Fix Gate)."},{"hard_stop":"trunk_commit_push","when":"A commit or push would land directly on the trunk branch instead of a working branch."},{"hard_stop":"injection_suspect","when":"An injection scan flags external content as a suspected prompt injection attempt."},{"hard_stop":"merge_recommendation","when":"A run reaches the point where the overlord would recommend merging the pull request, and the user decides whether to merge."},{"hard_stop":"brood_strain_approval","when":"A brood strain would start or proceed on work that requires the user to approve the strain first."},{"hard_stop":"external_effect","when":"A plan declares an irreversible effect outside the repo, such as a deploy, publish, migration or write to an outside service, and the run reaches the plan's first wave."}],"rows":[{"kind":"plan_acceptance","high":"auto","balanced":"auto","low":"surface","resolved_at":["plan.single","plan.multi","standard-delivery.plan"],"when":"Cerebrate returns a plan with no open questions and the overlord decides whether to start implementing it."},{"kind":"planner_question","high":"auto","balanced":"surface","low":"surface","resolved_at":["plan","brood_plan","analyze","standard-delivery.plan"],"when":"A planner raises a decision in a plan or an analysis, either an open question or a choice among several viable options, and the overlord resolves it before proceeding."},{"kind":"remediation_approach","high":"auto","balanced":"auto","low":"surface","resolved_at":["review_remediation_plan","review_remediation_plan_postpr"],"when":"A planner raises a decision while planning the remediation of review findings, such as which of several valid fixes to take, and the overlord resolves it before proceeding."},{"kind":"planner_escalation_routing","high":"auto","balanced":"auto","low":"surface","resolved_at":["local_review.planner-escalation","github_review_loop.planner-escalation","github_reviewer_fix.planner-escalation","implement_step.needs_replan","implement_step_postpr.needs_replan","standard-delivery.local_review"],"when":"A worker or a reviewer escalates a blocker to the planner and the overlord decides where that escalation is routed."},{"kind":"root_cluster_routing","high":"auto","balanced":"auto","low":"surface","resolved_at":["local_review.root-cluster-suspected","github_review_loop.root-cluster-suspected","github_reviewer_fix.root-cluster-suspected","standard-delivery.local_review"],"when":"Accumulated findings are detected as a root cluster and the overlord decides whether to route them to a zoomed-out planner pass."},{"kind":"remediation_plan_acceptance","high":"surface","balanced":"surface","low":"surface","resolved_at":["review_remediation_plan.single","review_remediation_plan.multi","review_remediation_plan_postpr.single","review_remediation_plan_postpr.multi","standard-delivery.plan"],"when":"A planner returns a remediation plan for a root cluster and the overlord decides whether to accept it and implement."},{"kind":"diminishing_returns_exit","high":"auto","balanced":"auto","low":"surface","resolved_at":["local_review.diminishing-returns","standard-delivery.local_review"],"when":"The review loop detects diminishing returns and the overlord decides whether to stop remediating and exit the loop."},{"kind":"validation_remediation","high":"auto","balanced":"auto","low":"surface","resolved_at":["validate","validate_postpr","standard-delivery.validate"],"when":"Any validate state fails and the overlord decides how to remediate before the run moves past validation."},{"kind":"version_bump_type","high":"auto","balanced":"auto","low":"surface","resolved_at":["version_bump_decision.required","version_bump_decision.not_required","standard-delivery.bump"],"when":"The bump-type derivation yields a verdict and the overlord decides which version bump type to apply."},{"kind":"version_bump_indeterminable","high":"surface","balanced":"surface","low":"surface","resolved_at":["version_bump_decision.ambiguous","standard-delivery.bump"],"when":"The bump-type derivation cannot determine a bump type from the commits and the overlord needs a decision."},{"kind":"trunk_stale","high":"auto","balanced":"surface","low":"surface","resolved_at":["git_preflight","standard-delivery.branch"],"when":"The Trunk Freshness check at git preflight reports a non-zero count and the overlord decides how to proceed."},{"kind":"gate_rerun","high":"auto","balanced":"auto","low":"surface","resolved_at":["standard-delivery.gates"],"when":"A commit lands after a gate held and the run goes back through every gate that ended on an earlier commit."},{"kind":"route_ambiguous","high":"surface","balanced":"surface","low":"surface","resolved_at":["classify.ambiguous"],"when":"Route-workflow reports an ambiguous classification and the overlord cannot select a single handling workflow."},{"kind":"resume_or_skew","high":"surface","balanced":"surface","low":"surface","resolved_at":["resume_on_start"],"when":"The overlord resumes a prior run or detects version skew in a run ledger and must decide whether to continue or restart."},{"kind":"review_question","high":"surface","balanced":"surface","low":"surface","exit_reason":"user-input-required","resolved_at":["local_review.user-input-required","github_review_loop.user-input-required","github_reviewer_fix.user-input-required"],"when":"A reviewer comment asks the user a question that only the user can answer, so the review loop cannot continue."},{"kind":"high_severity_rejection","high":"surface","balanced":"surface","low":"surface","exit_reason":"high-severity-rejection","resolved_at":["local_review.high-severity-rejection","github_review_loop.high-severity-rejection","github_reviewer_fix.high-severity-rejection"],"when":"The overlord would reject a high-severity review finding and decides whether the loop proceeds."}]};
+const AUTONOMY_TABLE = {
+ "$comment": "${CLAUDE_PLUGIN_ROOT}/workflow-src/lib/decide.js is the only place a decision is resolved. resolved_at binds each row to its decision sites.",
+ "version": 1,
+ "levels": [
+  "high",
+  "balanced",
+  "low"
+ ],
+ "default_level": "high",
+ "hard_stops": [
+  {
+   "hard_stop": "destructive_fix_gate",
+   "when": "A review or remediation fix would match a category of the Destructive Fix Gate per ${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md (Destructive Fix Gate)."
+  },
+  {
+   "hard_stop": "trunk_commit_push",
+   "when": "A commit or push would land directly on the trunk branch instead of a working branch."
+  },
+  {
+   "hard_stop": "injection_suspect",
+   "when": "An injection scan flags external content as a suspected prompt injection attempt."
+  },
+  {
+   "hard_stop": "merge_recommendation",
+   "when": "A run reaches the point where the overlord would recommend merging the pull request, and the user decides whether to merge."
+  },
+  {
+   "hard_stop": "brood_strain_approval",
+   "when": "A brood strain would start or proceed on work that requires the user to approve the strain first."
+  },
+  {
+   "hard_stop": "external_effect",
+   "when": "A plan declares an irreversible effect outside the repo, such as a deploy, publish, migration or write to an outside service, and the run reaches the plan's first wave."
+  }
+ ],
+ "rows": [
+  {
+   "kind": "plan_acceptance",
+   "high": "auto",
+   "balanced": "auto",
+   "low": "surface",
+   "resolved_at": [
+    "plan.single",
+    "plan.multi",
+    "standard-delivery.plan"
+   ],
+   "when": "Cerebrate returns a plan with no open questions and the overlord decides whether to start implementing it."
+  },
+  {
+   "kind": "planner_question",
+   "high": "auto",
+   "balanced": "surface",
+   "low": "surface",
+   "resolved_at": [
+    "plan",
+    "brood_plan",
+    "analyze",
+    "standard-delivery.plan"
+   ],
+   "when": "A planner raises a decision in a plan or an analysis, either an open question or a choice among several viable options, and the overlord resolves it before proceeding."
+  },
+  {
+   "kind": "remediation_approach",
+   "high": "auto",
+   "balanced": "auto",
+   "low": "surface",
+   "resolved_at": [
+    "review_remediation_plan",
+    "review_remediation_plan_postpr"
+   ],
+   "when": "A planner raises a decision while planning the remediation of review findings, such as which of several valid fixes to take, and the overlord resolves it before proceeding."
+  },
+  {
+   "kind": "planner_escalation_routing",
+   "high": "auto",
+   "balanced": "auto",
+   "low": "surface",
+   "resolved_at": [
+    "local_review.planner-escalation",
+    "github_review_loop.planner-escalation",
+    "github_reviewer_fix.planner-escalation",
+    "implement_step.needs_replan",
+    "implement_step_postpr.needs_replan",
+    "standard-delivery.local_review"
+   ],
+   "when": "A worker or a reviewer escalates a blocker to the planner and the overlord decides where that escalation is routed."
+  },
+  {
+   "kind": "root_cluster_routing",
+   "high": "auto",
+   "balanced": "auto",
+   "low": "surface",
+   "resolved_at": [
+    "local_review.root-cluster-suspected",
+    "github_review_loop.root-cluster-suspected",
+    "github_reviewer_fix.root-cluster-suspected",
+    "standard-delivery.local_review"
+   ],
+   "when": "Accumulated findings are detected as a root cluster and the overlord decides whether to route them to a zoomed-out planner pass."
+  },
+  {
+   "kind": "remediation_plan_acceptance",
+   "high": "surface",
+   "balanced": "surface",
+   "low": "surface",
+   "resolved_at": [
+    "review_remediation_plan.single",
+    "review_remediation_plan.multi",
+    "review_remediation_plan_postpr.single",
+    "review_remediation_plan_postpr.multi",
+    "standard-delivery.plan"
+   ],
+   "when": "A planner returns a remediation plan for a root cluster and the overlord decides whether to accept it and implement."
+  },
+  {
+   "kind": "diminishing_returns_exit",
+   "high": "auto",
+   "balanced": "auto",
+   "low": "surface",
+   "resolved_at": [
+    "local_review.diminishing-returns",
+    "standard-delivery.local_review"
+   ],
+   "when": "The review loop detects diminishing returns and the overlord decides whether to stop remediating and exit the loop."
+  },
+  {
+   "kind": "validation_remediation",
+   "high": "auto",
+   "balanced": "auto",
+   "low": "surface",
+   "resolved_at": [
+    "validate",
+    "validate_postpr",
+    "standard-delivery.validate"
+   ],
+   "when": "Any validate state fails and the overlord decides how to remediate before the run moves past validation."
+  },
+  {
+   "kind": "version_bump_type",
+   "high": "auto",
+   "balanced": "auto",
+   "low": "surface",
+   "resolved_at": [
+    "version_bump_decision.required",
+    "version_bump_decision.not_required",
+    "standard-delivery.bump"
+   ],
+   "when": "The bump-type derivation yields a verdict and the overlord decides which version bump type to apply."
+  },
+  {
+   "kind": "version_bump_indeterminable",
+   "high": "surface",
+   "balanced": "surface",
+   "low": "surface",
+   "resolved_at": [
+    "version_bump_decision.ambiguous",
+    "standard-delivery.bump"
+   ],
+   "when": "The bump-type derivation cannot determine a bump type from the commits and the overlord needs a decision."
+  },
+  {
+   "kind": "trunk_stale",
+   "high": "auto",
+   "balanced": "surface",
+   "low": "surface",
+   "resolved_at": [
+    "git_preflight",
+    "standard-delivery.branch"
+   ],
+   "when": "The Trunk Freshness check at git preflight reports a non-zero count and the overlord decides how to proceed."
+  },
+  {
+   "kind": "gate_rerun",
+   "high": "auto",
+   "balanced": "auto",
+   "low": "surface",
+   "resolved_at": [
+    "standard-delivery.gates"
+   ],
+   "when": "A commit lands after a gate held and the run goes back through every gate that ended on an earlier commit."
+  },
+  {
+   "kind": "route_ambiguous",
+   "high": "surface",
+   "balanced": "surface",
+   "low": "surface",
+   "resolved_at": [
+    "classify.ambiguous"
+   ],
+   "when": "Route-workflow reports an ambiguous classification and the overlord cannot select a single handling workflow."
+  },
+  {
+   "kind": "resume_or_skew",
+   "high": "surface",
+   "balanced": "surface",
+   "low": "surface",
+   "resolved_at": [
+    "resume_on_start"
+   ],
+   "when": "The overlord resumes a prior run or detects version skew in a run ledger and must decide whether to continue or restart."
+  },
+  {
+   "kind": "review_question",
+   "high": "surface",
+   "balanced": "surface",
+   "low": "surface",
+   "exit_reason": "user-input-required",
+   "resolved_at": [
+    "local_review.user-input-required",
+    "github_review_loop.user-input-required",
+    "github_reviewer_fix.user-input-required"
+   ],
+   "when": "A reviewer comment asks the user a question that only the user can answer, so the review loop cannot continue."
+  },
+  {
+   "kind": "high_severity_rejection",
+   "high": "surface",
+   "balanced": "surface",
+   "low": "surface",
+   "exit_reason": "high-severity-rejection",
+   "resolved_at": [
+    "local_review.high-severity-rejection",
+    "github_review_loop.high-severity-rejection",
+    "github_reviewer_fix.high-severity-rejection"
+   ],
+   "when": "The overlord would reject a high-severity review finding and decides whether the loop proceeds."
+  }
+ ]
+};
 
-const BRIEF_SCHEMA = {"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Decision Brief","description":"Shape of a decision brief. Usable as-is as a structured-output schema.","type":"object","additionalProperties":false,"required":["id","kind","problem","criticality","options","recommendation","assumptions","gate"],"properties":{"id":{"type":"string","description":"Short answerable id for the decision, e.g. Q1."},"kind":{"type":"string","description":"A hard_stops or rows kind from ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json."},"problem":{"type":"string","description":"The decision in plain language, one or two sentences, no internal mechanism names."},"criticality":{"type":"object","additionalProperties":false,"required":["level","likelihood","blast_radius","if_ignored"],"description":"How much this decision matters.","properties":{"level":{"type":"string","enum":["low","medium","high","critical"],"description":"Overall criticality of the decision."},"likelihood":{"type":"string","enum":["edge_case","occasional","common","certain"],"description":"How likely the problem is to bite."},"blast_radius":{"type":"string","description":"What and how much is affected if it goes wrong. One short sentence."},"if_ignored":{"type":"string","description":"What happens if the decision is not made or is ignored. One short sentence."}}},"options":{"type":"array","minItems":1,"description":"Only options that survive steel-manning and straw-manning.","items":{"type":"object","additionalProperties":false,"required":["id","summary","steel_man","straw_man","effort","value","reversible"],"properties":{"id":{"type":"string","description":"Option id: A, B, or C."},"summary":{"type":"string","description":"What this option does, in plain language."},"steel_man":{"type":"string","description":"The strongest honest case for this option."},"straw_man":{"type":"string","description":"The strongest honest case against this option, or how it fails."},"effort":{"type":"string","enum":["trivial","small","medium","large"],"description":"Effort to carry out this option."},"value":{"type":"string","enum":["low","medium","high"],"description":"Value delivered by this option."},"reversible":{"type":"boolean","description":"True when this option can be undone cheaply."}}}},"ruled_out":{"type":"array","description":"Optional. Options considered and eliminated.","items":{"type":"object","additionalProperties":false,"required":["summary","why"],"properties":{"summary":{"type":"string","description":"What the eliminated option would have done."},"why":{"type":"string","description":"Why it was ruled out."}}}},"recommendation":{"type":"object","additionalProperties":false,"required":["option_id","strength","why"],"description":"The producer's recommendation.","properties":{"option_id":{"type":"string","description":"Id of the recommended option. Never blank. When strength is none, still name an option id; the run asks the user either way."},"strength":{"type":"string","enum":["strong","weak","none"],"description":"Confidence in the recommendation."},"why":{"type":"string","description":"Reasoning tied to criticality and to effort versus value."}}},"assumptions":{"type":"array","description":"Assumptions the brief rests on.","items":{"type":"object","additionalProperties":false,"required":["statement","origin","evidence"],"properties":{"statement":{"type":"string","description":"The assumption, stated plainly."},"origin":{"type":"string","enum":["user","repo","assumed"],"description":"Source of the assumption. assumed means agent-inferred."},"evidence":{"type":"string","description":"Quote or path for user or repo origin; the reason for assumed origin."}}}},"gate":{"type":"object","additionalProperties":false,"required":["irreversible","architectural","safety"],"description":"Producer's read of the RECOMMENDED action against the Promotion Gate clauses.","properties":{"irreversible":{"type":"boolean","description":"True when the recommended action is irreversible."},"architectural":{"type":"boolean","description":"True when the recommended action is architectural."},"safety":{"type":"boolean","description":"True when the recommended action touches safety."}}},"verbatim":{"type":"string","description":"Optional. Omit when there is no such text. Text another rule requires shown to the user, e.g. normalized brood strain text."}}};
+const BRIEF_SCHEMA = {
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Decision Brief",
+ "description": "Shape of a decision brief. Usable as-is as a structured-output schema.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "id",
+  "kind",
+  "problem",
+  "criticality",
+  "options",
+  "recommendation",
+  "assumptions",
+  "gate"
+ ],
+ "properties": {
+  "id": {
+   "type": "string",
+   "description": "Short answerable id for the decision, e.g. Q1."
+  },
+  "kind": {
+   "type": "string",
+   "description": "A hard_stops or rows kind from ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json."
+  },
+  "problem": {
+   "type": "string",
+   "description": "The decision in plain language, one or two sentences, no internal mechanism names."
+  },
+  "criticality": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "level",
+    "likelihood",
+    "blast_radius",
+    "if_ignored"
+   ],
+   "description": "How much this decision matters.",
+   "properties": {
+    "level": {
+     "type": "string",
+     "enum": [
+      "low",
+      "medium",
+      "high",
+      "critical"
+     ],
+     "description": "Overall criticality of the decision."
+    },
+    "likelihood": {
+     "type": "string",
+     "enum": [
+      "edge_case",
+      "occasional",
+      "common",
+      "certain"
+     ],
+     "description": "How likely the problem is to bite."
+    },
+    "blast_radius": {
+     "type": "string",
+     "description": "What and how much is affected if it goes wrong. One short sentence."
+    },
+    "if_ignored": {
+     "type": "string",
+     "description": "What happens if the decision is not made or is ignored. One short sentence."
+    }
+   }
+  },
+  "options": {
+   "type": "array",
+   "minItems": 1,
+   "description": "Only options that survive steel-manning and straw-manning.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "id",
+     "summary",
+     "steel_man",
+     "straw_man",
+     "effort",
+     "value",
+     "reversible"
+    ],
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "Option id: A, B, or C."
+     },
+     "summary": {
+      "type": "string",
+      "description": "What this option does, in plain language."
+     },
+     "steel_man": {
+      "type": "string",
+      "description": "The strongest honest case for this option."
+     },
+     "straw_man": {
+      "type": "string",
+      "description": "The strongest honest case against this option, or how it fails."
+     },
+     "effort": {
+      "type": "string",
+      "enum": [
+       "trivial",
+       "small",
+       "medium",
+       "large"
+      ],
+      "description": "Effort to carry out this option."
+     },
+     "value": {
+      "type": "string",
+      "enum": [
+       "low",
+       "medium",
+       "high"
+      ],
+      "description": "Value delivered by this option."
+     },
+     "reversible": {
+      "type": "boolean",
+      "description": "True when this option can be undone cheaply."
+     }
+    }
+   }
+  },
+  "ruled_out": {
+   "type": "array",
+   "description": "Optional. Options considered and eliminated.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "summary",
+     "why"
+    ],
+    "properties": {
+     "summary": {
+      "type": "string",
+      "description": "What the eliminated option would have done."
+     },
+     "why": {
+      "type": "string",
+      "description": "Why it was ruled out."
+     }
+    }
+   }
+  },
+  "recommendation": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "option_id",
+    "strength",
+    "why"
+   ],
+   "description": "The producer's recommendation.",
+   "properties": {
+    "option_id": {
+     "type": "string",
+     "description": "Id of the recommended option. Never blank. When strength is none, still name an option id; the run asks the user either way."
+    },
+    "strength": {
+     "type": "string",
+     "enum": [
+      "strong",
+      "weak",
+      "none"
+     ],
+     "description": "Confidence in the recommendation."
+    },
+    "why": {
+     "type": "string",
+     "description": "Reasoning tied to criticality and to effort versus value."
+    }
+   }
+  },
+  "assumptions": {
+   "type": "array",
+   "description": "Assumptions the brief rests on.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "statement",
+     "origin",
+     "evidence"
+    ],
+    "properties": {
+     "statement": {
+      "type": "string",
+      "description": "The assumption, stated plainly."
+     },
+     "origin": {
+      "type": "string",
+      "enum": [
+       "user",
+       "repo",
+       "assumed"
+      ],
+      "description": "Source of the assumption. assumed means agent-inferred."
+     },
+     "evidence": {
+      "type": "string",
+      "description": "Quote or path for user or repo origin; the reason for assumed origin."
+     }
+    }
+   }
+  },
+  "gate": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "irreversible",
+    "architectural",
+    "safety"
+   ],
+   "description": "Producer's read of the RECOMMENDED action against the Promotion Gate clauses.",
+   "properties": {
+    "irreversible": {
+     "type": "boolean",
+     "description": "True when the recommended action is irreversible."
+    },
+    "architectural": {
+     "type": "boolean",
+     "description": "True when the recommended action is architectural."
+    },
+    "safety": {
+     "type": "boolean",
+     "description": "True when the recommended action touches safety."
+    }
+   }
+  },
+  "verbatim": {
+   "type": "string",
+   "description": "Optional. Omit when there is no such text. Text another rule requires shown to the user, e.g. normalized brood strain text."
+  }
+ }
+};
 
-const PLAN_SCHEMA = {"$schema":"https://json-schema.org/draft/2020-12/schema","title":"Plan","description":"The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md. It reaches a shell command only as one argument that first passes the identifier gate there (Shell Identifier Discipline), or through an inputs file the script reads as data (Inert Inputs-File Navigator Pattern), and is never spliced into command text. A field whose description starts with \"Can carry external content. Repository path.\" holds one path relative to the top of the repository. The plan check refuses the plan, before the branch step and any later agent call, when such a path is empty, starts with /, has an empty, ., .. or .git (any case) part, or holds a control character, as the files rule of ${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh does.","type":"object","additionalProperties":false,"required":["summary","branch","base","trunk_freshness","classification","breaking","versioning","delivery","steps"],"properties":{"summary":{"type":"string","description":"Can carry external content. What the plan delivers."},"branch":{"type":"string","description":"Can carry external content. The working branch the run delivers on. A run that starts on a branch other than trunk names that branch."},"base":{"type":"string","description":"Can carry external content. The branch the working branch is created from: trunk unless the work stacks on another branch. Never the working branch itself. The branch step passes it to create-working-branch."},"trunk_freshness":{"type":"string","enum":["fresh","behind","ahead","diverged","no_remote","fetch_failed","no_local_trunk","no_trunk"],"description":"Copied from repository.trunk_freshness in the facts file the plan was made from. The workflow checks it against the facts step and decides trunk freshness from the facts, not from this field."},"classification":{"type":"string","enum":["feature","bugfix","hotfix","refactor","chore","docs","test","ci"],"description":"The work classification. The branch step passes it to create-working-branch, and each commit takes its type from it."},"breaking":{"type":"boolean","description":"True when the change breaks compatibility. Each commit then carries the breaking marker."},"versioning":{"type":"object","additionalProperties":false,"required":["bump_trigger","no_bump_match","artifact_files"],"description":"The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The bump step passes the two answers to bump-type unchanged.","properties":{"bump_trigger":{"type":"string","enum":["yes","no"],"description":"yes when the change satisfies any Bump Trigger bullet. Passed to bump-type as --bump-trigger."},"no_bump_match":{"type":"string","enum":["yes","no"],"description":"yes when the change matches one or more bullets of the list of changes that need no bump by default. Passed to bump-type as --no-bump-match."},"artifact_files":{"type":"array","description":"Each repository path holding a version the bump step sets, as the project's versioning docs name it. Empty when the project names none. The bump commit takes exactly these paths.","items":{"type":"string","description":"Can carry external content. Repository path. One file that holds a version."}}}},"delivery":{"type":"string","enum":["single","multi"],"description":"How the plan delivers. Both values run as one branch and one pull request. Brood is not a value."},"steps":{"type":"array","minItems":1,"description":"The plan's steps. depends_on sets their order.","items":{"type":"object","additionalProperties":false,"required":["id","owner","files","outcome","depends_on","external_effects"],"description":"One step of the plan, done by one worker.","properties":{"id":{"type":"string","description":"Can carry external content. The step id, unique in the plan. depends_on names steps by it."},"owner":{"type":"string","enum":["hivemind:drone","hivemind:changeling"],"description":"The worker agent that does the step."},"files":{"type":"array","minItems":1,"description":"Every repository path the step may create or edit. The wave's commit takes exactly these paths.","items":{"type":"string","description":"Can carry external content. Repository path. One file the step may create or edit."}},"outcome":{"type":"string","description":"Can carry external content. What is true when the step is done."},"depends_on":{"type":"array","description":"The steps that must finish before this one starts. Empty means none.","items":{"type":"string","description":"Can carry external content. The id of a step in this plan."}},"external_effects":{"type":"array","description":"Each effect the step has outside the repo, such as a deploy, a publish, a migration or other write to shared data, or a write to an outside service over the network. Empty means the step declares no effect outside the repo.","items":{"type":"object","additionalProperties":false,"required":["summary","reversible"],"description":"One effect outside the repo.","properties":{"summary":{"type":"string","description":"Can carry external content. What the effect does and where."},"reversible":{"type":"boolean","description":"False when the effect cannot be undone. A plan that declares such an effect goes to the user before the first wave."}}}}}}}}};
+const PLAN_SCHEMA = {
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "Plan",
+ "description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md. It reaches a shell command only as one argument that first passes the identifier gate there (Shell Identifier Discipline), or through an inputs file the script reads as data (Inert Inputs-File Navigator Pattern), and is never spliced into command text. A field whose description starts with \"Can carry external content. Repository path.\" holds one path relative to the top of the repository. The plan check refuses the plan, before the branch step and any later agent call, when such a path is empty, starts with /, has an empty, ., .. or .git (any case) part, or holds a control character, as the files rule of ${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh does.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "summary",
+  "branch",
+  "base",
+  "trunk_freshness",
+  "classification",
+  "breaking",
+  "versioning",
+  "delivery",
+  "steps"
+ ],
+ "properties": {
+  "summary": {
+   "type": "string",
+   "description": "Can carry external content. What the plan delivers."
+  },
+  "branch": {
+   "type": "string",
+   "description": "Can carry external content. The working branch the run delivers on. A run that starts on a branch other than trunk names that branch."
+  },
+  "base": {
+   "type": "string",
+   "description": "Can carry external content. The branch the working branch is created from: trunk unless the work stacks on another branch. Never the working branch itself. The branch step passes it to create-working-branch."
+  },
+  "trunk_freshness": {
+   "type": "string",
+   "enum": [
+    "fresh",
+    "behind",
+    "ahead",
+    "diverged",
+    "no_remote",
+    "fetch_failed",
+    "no_local_trunk",
+    "no_trunk"
+   ],
+   "description": "Copied from repository.trunk_freshness in the facts file the plan was made from. The workflow checks it against the facts step and decides trunk freshness from the facts, not from this field."
+  },
+  "classification": {
+   "type": "string",
+   "enum": [
+    "feature",
+    "bugfix",
+    "hotfix",
+    "refactor",
+    "chore",
+    "docs",
+    "test",
+    "ci"
+   ],
+   "description": "The work classification. The branch step passes it to create-working-branch, and each commit takes its type from it."
+  },
+  "breaking": {
+   "type": "boolean",
+   "description": "True when the change breaks compatibility. Each commit then carries the breaking marker."
+  },
+  "versioning": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "bump_trigger",
+    "no_bump_match",
+    "artifact_files"
+   ],
+   "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The bump step passes the two answers to bump-type unchanged.",
+   "properties": {
+    "bump_trigger": {
+     "type": "string",
+     "enum": [
+      "yes",
+      "no"
+     ],
+     "description": "yes when the change satisfies any Bump Trigger bullet. Passed to bump-type as --bump-trigger."
+    },
+    "no_bump_match": {
+     "type": "string",
+     "enum": [
+      "yes",
+      "no"
+     ],
+     "description": "yes when the change matches one or more bullets of the list of changes that need no bump by default. Passed to bump-type as --no-bump-match."
+    },
+    "artifact_files": {
+     "type": "array",
+     "description": "Each repository path holding a version the bump step sets, as the project's versioning docs name it. Empty when the project names none. The bump commit takes exactly these paths.",
+     "items": {
+      "type": "string",
+      "description": "Can carry external content. Repository path. One file that holds a version."
+     }
+    }
+   }
+  },
+  "delivery": {
+   "type": "string",
+   "enum": [
+    "single",
+    "multi"
+   ],
+   "description": "How the plan delivers. Both values run as one branch and one pull request. Brood is not a value."
+  },
+  "steps": {
+   "type": "array",
+   "minItems": 1,
+   "description": "The plan's steps. depends_on sets their order.",
+   "items": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": [
+     "id",
+     "owner",
+     "files",
+     "outcome",
+     "depends_on",
+     "external_effects"
+    ],
+    "description": "One step of the plan, done by one worker.",
+    "properties": {
+     "id": {
+      "type": "string",
+      "description": "Can carry external content. The step id, unique in the plan. depends_on names steps by it."
+     },
+     "owner": {
+      "type": "string",
+      "enum": [
+       "hivemind:drone",
+       "hivemind:changeling"
+      ],
+      "description": "The worker agent that does the step."
+     },
+     "files": {
+      "type": "array",
+      "minItems": 1,
+      "description": "Every repository path the step may create or edit. The wave's commit takes exactly these paths.",
+      "items": {
+       "type": "string",
+       "description": "Can carry external content. Repository path. One file the step may create or edit."
+      }
+     },
+     "outcome": {
+      "type": "string",
+      "description": "Can carry external content. What is true when the step is done."
+     },
+     "depends_on": {
+      "type": "array",
+      "description": "The steps that must finish before this one starts. Empty means none.",
+      "items": {
+       "type": "string",
+       "description": "Can carry external content. The id of a step in this plan."
+      }
+     },
+     "external_effects": {
+      "type": "array",
+      "description": "Each effect the step has outside the repo, such as a deploy, a publish, a migration or other write to shared data, or a write to an outside service over the network. Empty means the step declares no effect outside the repo.",
+      "items": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "summary",
+        "reversible"
+       ],
+       "description": "One effect outside the repo.",
+       "properties": {
+        "summary": {
+         "type": "string",
+         "description": "Can carry external content. What the effect does and where."
+        },
+        "reversible": {
+         "type": "boolean",
+         "description": "False when the effect cannot be undone. A plan that declares such an effect goes to the user before the first wave."
+        }
+       }
+      }
+     }
+    }
+   }
+  }
+ }
+};
 
 function supportedSchemaKeywords() {
   return [

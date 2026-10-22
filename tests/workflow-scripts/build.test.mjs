@@ -8,8 +8,13 @@ import { fileURLToPath } from 'node:url';
 import { loadWorkflow, loadWorkflowSource } from './harness.mjs';
 import {
   LIB_FILES,
+  MAX_BUILT_LINE_LENGTH,
+  MAX_BUILT_LINE_SQUARES,
   MAX_BUILT_SCRIPT_LENGTH,
   WORKFLOW_APPROVAL_LIMIT,
+  WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT,
+  WORKFLOW_PREVIEW_LINE_LIMIT,
+  WORKFLOW_PREVIEW_SQUARES_LIMIT,
   buildWorkflow,
   builtPathFor,
   discoverWorkflowIds,
@@ -63,6 +68,34 @@ function makeScratchDraftCopy() {
   const scratchRoot = makeScratchCopy();
   addScratchDraft(scratchRoot);
   return scratchRoot;
+}
+
+function sumLineSquares(source) {
+  return source.split('\n').reduce((sum, line) => sum + line.length * line.length, 0);
+}
+
+function findLongestLineLength(source) {
+  return source.split('\n').reduce((longest, line) => Math.max(longest, line.length), 0);
+}
+
+function findLongestCombiningRun(source) {
+  return [...source.matchAll(/[\p{M}\p{Cf}]+/gu)].reduce((longest, match) => Math.max(longest, [...match[0]].length), 0);
+}
+
+/**
+ * Returns a log statement line of exactly length characters.
+ */
+function makeLogLine(length) {
+  return 'log(\'' + 'x'.repeat(length - 'log(\'\');'.length) + '\');';
+}
+
+function appendAnalysisMainLines(scratchRoot, lines) {
+  appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\n' + lines.join('\n') + '\n');
+}
+
+function assertBuildAndCheckThrow(scratchRoot, pattern) {
+  assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), pattern);
+  assert.throws(() => runCliIn(scratchRoot, ['--check']), pattern);
 }
 
 function createStream() {
@@ -345,6 +378,11 @@ describe('build_workflows length budget', () => {
   test('the limits are pinned', () => {
     assert.equal(WORKFLOW_APPROVAL_LIMIT, 200000);
     assert.equal(MAX_BUILT_SCRIPT_LENGTH, 190000);
+    assert.equal(WORKFLOW_PREVIEW_LINE_LIMIT, 4096);
+    assert.equal(WORKFLOW_PREVIEW_SQUARES_LIMIT, 67108864);
+    assert.equal(WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT, 8);
+    assert.equal(MAX_BUILT_LINE_LENGTH, 2048);
+    assert.equal(MAX_BUILT_LINE_SQUARES, 50000000);
   });
   test('a script over the budget fails the build and --check, naming the id and the length', () => {
     const scratchRoot = makeScratchCopy();
@@ -357,9 +395,48 @@ describe('build_workflows length budget', () => {
     assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), pattern);
     assert.throws(() => runCliIn(scratchRoot, ['--check']), pattern);
   });
+  test('a line over the line budget fails the build and --check, naming the id, the line and the length', () => {
+    const scratchRoot = makeScratchCopy();
+    appendAnalysisMainLines(scratchRoot, [makeLogLine(MAX_BUILT_LINE_LENGTH + 1)]);
+    assertBuildAndCheckThrow(scratchRoot, /analysis-only: line \d+ of the built script is 2049 characters, over the line budget of 2048 \(the Workflow approval preview cuts a line over 4096\)/);
+  });
+  test('squared line lengths over the budget fail the build and --check, naming the id and the sum', () => {
+    const scratchRoot = makeScratchCopy();
+    const lines = Array.from({ length: 13 }, () => makeLogLine(2000));
+    appendAnalysisMainLines(scratchRoot, lines);
+    const squares = sumLineSquares(readBuilt('analysis-only')) + 13 * 2000 * 2000;
+    assert.ok(squares > MAX_BUILT_LINE_SQUARES);
+    assert.ok(readBuilt('analysis-only').length + 13 * 2001 < MAX_BUILT_SCRIPT_LENGTH);
+    assertBuildAndCheckThrow(scratchRoot, new RegExp('analysis-only: the sum of the squared line lengths of the built script is ' + squares + ', over the budget of 50000000 \\(the Workflow approval preview limit is 67108864\\)'));
+  });
+  test('the preview truncation marker text fails the build and --check, naming the id and the line', () => {
+    const scratchRoot = makeScratchCopy();
+    appendAnalysisMainLines(scratchRoot, ['log(\'… [+3 graphemes]\');']);
+    assertBuildAndCheckThrow(scratchRoot, /analysis-only: line \d+ of the built script holds the text "… \[\+", which the budget allows 0 times/);
+  });
+  test('a run of 9 combining characters fails the build and --check, naming the id, the line and the run', () => {
+    const scratchRoot = makeScratchCopy();
+    appendAnalysisMainLines(scratchRoot, ['log(\'a' + '́'.repeat(9) + '\');']);
+    assertBuildAndCheckThrow(scratchRoot, /analysis-only: line \d+ of the built script has a run of 9 combining or zero-width characters, over the budget of 8 \(the Workflow approval limit is a run of 8\)/);
+  });
+  test('a run of exactly 8 combining characters and a line of exactly 2048 characters build', () => {
+    const scratchRoot = makeScratchCopy();
+    appendAnalysisMainLines(scratchRoot, ['log(\'a' + '́'.repeat(8) + '\');', makeLogLine(MAX_BUILT_LINE_LENGTH)]);
+    const source = buildWorkflow(scratchRoot, 'analysis-only');
+    assert.equal(findLongestLineLength(source), MAX_BUILT_LINE_LENGTH);
+    assert.equal(findLongestCombiningRun(source), 8);
+    const check = runCliIn(scratchRoot, ['--check']);
+    assert.equal(check.code, 1);
+    assert.equal(check.stderr, 'plugin/workflows/analysis-only.js is stale. Rebuild with: ' + REBUILD_COMMAND + '\n');
+  });
   for (const id of liveIds) {
-    test(builtPathFor(id) + ' is within the budget', () => {
-      assert.ok(readFileSync(join(repoRoot, builtPathFor(id)), 'utf8').length <= MAX_BUILT_SCRIPT_LENGTH);
+    test(builtPathFor(id) + ' is within every budget', () => {
+      const source = readBuilt(id);
+      assert.ok(source.length <= MAX_BUILT_SCRIPT_LENGTH, String(source.length));
+      assert.ok(findLongestLineLength(source) <= MAX_BUILT_LINE_LENGTH, String(findLongestLineLength(source)));
+      assert.ok(sumLineSquares(source) <= MAX_BUILT_LINE_SQUARES, String(sumLineSquares(source)));
+      assert.ok(!source.includes('… [+'));
+      assert.ok(findLongestCombiningRun(source) <= WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT, String(findLongestCombiningRun(source)));
     });
   }
 });
@@ -482,13 +559,16 @@ for (const id of liveIds) {
       assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
       assert.deepEqual([...positions].sort((left, right) => left - right), positions);
     });
-    test('each data constant is one line of JSON equal to its file', () => {
+    test('each data constant is JSON indented one space, over more than one line, equal to its file', () => {
       const constants = [['AUTONOMY_TABLE', 'decision-autonomy-table.json'], ['BRIEF_SCHEMA', 'decision-brief-schema.json'], ['PLAN_SCHEMA', 'plan-schema.json']];
       for (const [name, file] of constants) {
-        const line = source.split('\n').find((candidate) => candidate.startsWith('const ' + name + ' = '));
-        assert.ok(line !== undefined && line.endsWith(';'), name);
-        const data = JSON.parse(line.slice(('const ' + name + ' = ').length, -1));
-        assert.deepEqual(data, JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8')), name);
+        const fileData = JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8'));
+        const prefix = 'const ' + name + ' = ';
+        assert.ok(source.includes(prefix + JSON.stringify(fileData, null, 1) + ';'), name);
+        const start = source.indexOf(prefix) + prefix.length;
+        const jsonText = source.slice(start, source.indexOf('\n};', start) + 2);
+        assert.ok(jsonText.includes('\n'), name);
+        assert.deepEqual(JSON.parse(jsonText), fileData, name);
       }
     });
     test('has no comment other than the GENERATED banner', () => {
