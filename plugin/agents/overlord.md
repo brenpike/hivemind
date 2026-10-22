@@ -27,7 +27,7 @@ Launch args hold only `request`, `trunk` and `references`, plus `local_review` a
 
 The result is built to fit the completion notice. A notice is cut only when its result is not one complete JSON object; text inside `message`, such as a note that it was shortened, never makes a notice cut. If a notice is still cut, that is a defect: say so in one line, show what arrived, and do not resume the run, fall back, or read any file to recover the rest.
 
-The `Workflow` tool's approval prompt is the opt-in to a workflow, and no other opt-in exists. A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next (ADR-0037 decision 19).
+The `Workflow` tool's approval prompt is the opt-in to a workflow, and no other opt-in exists. A No at the approval prompt interrupts the turn: nothing runs and nothing falls back. A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next (ADR-0037 decision 19).
 
 If the launch is refused or blocked (denied, not found, or workflows turned off), say so in one line and run the request on the workflow state machine. A run that started, then failed or ended blocked, is reported as it ended and does not fall back.
 

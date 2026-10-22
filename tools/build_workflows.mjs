@@ -318,9 +318,20 @@ function lexClosingBrace(lexer) {
   lexer.regexAllowed = true;
 }
 
+/**
+ * INVARIANT: a regex literal never directly follows ++ or --. After the
+ * postfix form a / is division, and after the prefix form the next token is
+ * an operand, so ++ and -- are each read as one token that leaves
+ * regexAllowed false. A third + or - after them is its own punctuator.
+ */
 function lexPunctuator(lexer, character) {
   if (character === '{') {
     lexer.braceStack.push('brace');
+  }
+  if ((character === '+' || character === '-') && lexer.source[lexer.index + 1] === character) {
+    lexer.index += 2;
+    lexer.regexAllowed = false;
+    return;
   }
   lexer.index += 1;
   if (!/\s/.test(character)) {
@@ -351,10 +362,10 @@ function lexNext(lexer) {
  * template or regex, whose texts join back to source. A template literal
  * with substitutions is one template token per piece, with the code of each
  * substitution between them as code and comment tokens. A / starts a regex
- * literal at the start of source, after a punctuator other than ) and ], and
- * after the keywords in REGEX_AFTER_KEYWORDS; after any other word or a
- * literal it is division. Throws on an unterminated comment, string,
- * template or regex literal.
+ * literal at the start of source, after a punctuator other than ), ], ++
+ * and --, and after the keywords in REGEX_AFTER_KEYWORDS; after any other
+ * word, a literal, ++ or -- it is division. Throws on an unterminated
+ * comment, string, template or regex literal.
  */
 export function tokenizeSource(source) {
   const lexer = { source: source, index: 0, codeStart: 0, tokens: [], braceStack: [], regexAllowed: true };

@@ -291,6 +291,10 @@ describe('build_workflows guards', () => {
   test('stripCommentsAndStrings hides a regex literal and keeps template substitution code', () => {
     assert.equal(stripCommentsAndStrings('x = /import/; y = `a${require(z)}b`'), 'x = ""; y = ""require(z)""');
   });
+  test('stripCommentsAndStrings reads a / after ++ or -- as division, never a regex', () => {
+    assert.equal(stripCommentsAndStrings('x = a++ / 2 / 3; y = b-- / c / d;'), 'x = a++ / 2 / 3; y = b-- / c / d;');
+    assert.equal(stripCommentsAndStrings('x = a+++/import/.source;'), 'x = a+++"".source;');
+  });
   test('a syntax error in the built script fails the build', () => {
     const scratchRoot = makeScratchCopy();
     appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nconst = 1;\n');
@@ -328,6 +332,8 @@ describe('build_workflows stripComments', () => {
     ['a regex after return', 'function f() {\n  return /a\\/b/.test(s);\n}'],
     ['chained division', 'x = a / b / c;'],
     ['division after ) and ]', 'x = (a) / b[0] / 2;'],
+    ['division after a postfix ++', 'x = a++ / 2 / 3;'],
+    ['a regex after + following ++', 'x = a+++/b/.source.length;'],
     ['line starts and blank lines in code', 'function a() {\n  return 1;\n}\n\nasync function b() {}\n']
   ];
   for (const [name, source] of unchanged) {
@@ -343,7 +349,11 @@ describe('build_workflows stripComments', () => {
     ['a block comment before code, keeping its indent', '  /* c */ x();', '  x();'],
     ['a comment-only line', 'function a() {\n  // c\n  return 1;\n}', 'function a() {\n  return 1;\n}'],
     ['a doc comment above a function', 'x();\n\n/**\n * d\n */\nfunction a() {}\n', 'x();\n\nfunction a() {}\n'],
-    ['a comment after a regex', 'x = /a/g; // c\ny();', 'x = /a/g;\ny();']
+    ['a comment after a regex', 'x = /a/g; // c\ny();', 'x = /a/g;\ny();'],
+    ['a line comment after division after a postfix ++', 'x = a++ / 2 // c', 'x = a++ / 2'],
+    ['a line comment after division after a postfix --', 'x = b-- / c // d', 'x = b-- / c'],
+    ['a line comment after division after a prefix ++ operand', 'x = ++a / 2 // c', 'x = ++a / 2'],
+    ['a comment after a regex following ++ and +', 'x = a+++/b/g.source; // c', 'x = a+++/b/g.source;']
   ];
   for (const [name, source, expected] of stripped) {
     test('strips ' + name, () => {

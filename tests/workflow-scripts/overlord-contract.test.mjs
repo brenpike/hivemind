@@ -211,8 +211,8 @@ describe('overlord pull request hand-off and opt-in', () => {
     assert.ok(engineSection.includes('Do not enter the workflow state machine for the launched request and do not create a run ledger for it.'));
     assert.ok(handOffParagraph.includes('covers only the launched request'));
   });
-  test('Engine states the approval prompt opt-in and the permissions.deny opt-out', () => {
-    for (const phrase of ['The `Workflow` tool\'s approval prompt is the opt-in to a workflow, and no other opt-in exists.', 'A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next']) {
+  test('Engine states the approval prompt opt-in, that a No interrupts the turn, and the permissions.deny opt-out', () => {
+    for (const phrase of ['The `Workflow` tool\'s approval prompt is the opt-in to a workflow, and no other opt-in exists.', 'A No at the approval prompt interrupts the turn: nothing runs and nothing falls back.', 'A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next']) {
       assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
     }
   });
