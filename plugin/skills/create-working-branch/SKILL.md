@@ -13,7 +13,7 @@ Rules: `GIT-01` (no trunk commits), `GIT-02` (required git preflight)
 
 Before:
 - [ ] Orchestrator provided `base`, `working_branch`, `classification`, and `trunk`
-- [ ] Orchestrator confirmed trunk freshness, user acknowledged stale trunk, or orchestrator recorded trunk-freshness: skipped
+- [ ] Orchestrator confirmed trunk freshness, user acknowledged stale trunk, a caller that decided a stale trunk passed a bare `stale`, or orchestrator recorded trunk-freshness: skipped
 - [ ] `base` branch exists locally or can be fetched
 - [ ] No uncommitted changes that make switching unsafe
 - [ ] `working_branch` name follows branch taxonomy
@@ -35,7 +35,7 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 - `base`: base branch the working branch is created from (typically the resolved trunk; may differ for stacked work).
 - `working_branch`: requested working branch name (must follow branch taxonomy and naming rules).
 - `classification`: work classification (`feature|bugfix|hotfix|refactor|chore|docs|test|ci`).
-- `trunk-freshness`: resolved trunk freshness state from the orchestrator's preflight check per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Trunk Freshness). One of: `fresh`, `stale (N behind)`, `stale (diverged — local N ahead)`, `stale (diverged — local M ahead, N behind)`, or `skipped`. Absent = skill exits 1 with blocker.
+- `trunk-freshness`: resolved trunk freshness state from the orchestrator's preflight check per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Trunk Freshness). One of: `fresh`, `stale (N behind)`, `stale (diverged — local N ahead)`, `stale (diverged — local M ahead, N behind)`, `stale`, or `skipped`. A bare `stale` comes from a caller that decided a stale trunk, such as the script engine's `trunk_stale` decision. Absent = skill exits 1 with blocker.
 - `trunk`: the resolved trunk branch. The script refuses a `working_branch` equal to it.
 
 ## Requirements
@@ -49,6 +49,7 @@ Validate `trunk` against the same gate; on failure, exit 1 with `blocker: trunk 
 1. Map the `trunk-freshness` session fact passed by the orchestrator per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Trunk Freshness) to the script value:
    - `trunk-freshness: fresh` maps to `fresh`.
    - `trunk-freshness: stale (...)`, in any of the forms listed in Required Inputs, maps to `stale` (user already acknowledged at preflight).
+   - `trunk-freshness: stale`, bare, maps to `stale` (the caller already decided a stale trunk).
    - `trunk-freshness: skipped` maps to `skipped`.
    - Absent: emit `printf 'blocker: trunk-freshness session fact not provided by orchestrator' >&2; exit 1`.
 2. Confirm `working_branch` follows the branch taxonomy and naming rules in `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Branch Taxonomy, Branch Naming), and that `classification` is one of the values in Required Inputs. On failure, exit 1 with blocker.

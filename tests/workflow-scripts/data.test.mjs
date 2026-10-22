@@ -2,10 +2,12 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { loadLibs } from './harness.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const table = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-autonomy-table.json', 'utf8'));
 const schema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
+const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/schema.js', repoRoot + 'plugin/workflow-src/lib/decide.js']);
 
 function collectSchemaNodes(node, path, nodes) {
   nodes.push({ node, path });
@@ -40,6 +42,15 @@ describe('autonomy table', () => {
       }
     });
   }
+  test('external_effect is a hard stop, so it asks at every level', () => {
+    const stop = table.hard_stops.find((entry) => entry.hard_stop === 'external_effect');
+    assert.ok(stop !== undefined, 'external_effect is not a hard stop');
+    assert.equal(table.rows.some((row) => row.kind === 'external_effect'), false, 'external_effect must not be a row with level cells');
+    for (const level of table.levels) {
+      const verdict = structuredClone(lib.decide({ kind: 'external_effect', level, brief: null }, table, schema));
+      assert.deepEqual(verdict, { action: 'ask', reason: 'hard_stop' }, 'external_effect at ' + level);
+    }
+  });
   test('row kinds and hard stop names are unique and disjoint', () => {
     const names = [...table.rows.map((row) => row.kind), ...table.hard_stops.map((stop) => stop.hard_stop)];
     assert.ok(names.every((name) => typeof name === 'string' && name !== ''));

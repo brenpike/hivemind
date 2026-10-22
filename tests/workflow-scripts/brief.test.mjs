@@ -365,3 +365,35 @@ describe('open questions stop reasons', () => {
     });
   }
 });
+
+describe('questionLabel', () => {
+  test('labels a position as Q followed by position plus one', () => {
+    assert.equal(lib.questionLabel(0), 'Q1');
+    assert.equal(lib.questionLabel(1), 'Q2');
+    assert.equal(lib.questionLabel(2), 'Q3');
+  });
+  for (const index of [-1, 1.5, '0', undefined]) {
+    test(`index ${JSON.stringify(index)} throws`, () => {
+      assert.throws(() => lib.questionLabel(index), /questionLabel: index must be a non-negative integer/);
+    });
+  }
+  const entries = [0, 1, 2].map((position) => ({ brief: makeBrief({ problem: `PROBLEM_${position}` }), reason: 'gate_irreversible' }));
+  test('renderQuestions shows questionLabel by position', () => {
+    const text = lib.renderQuestions(entries, []);
+    entries.forEach((entry, index) => {
+      assert.ok(text.includes(`${lib.questionLabel(index)}. PROBLEM_${index}`), `label ${index}`);
+    });
+  });
+  test('renderQuestionsCompact shows questionLabel by position', () => {
+    const text = lib.renderQuestionsCompact(entries, []);
+    entries.forEach((entry, index) => {
+      assert.ok(text.includes(`${lib.questionLabel(index)}. PROBLEM_${index}`), `label ${index}`);
+    });
+  });
+  test('renderOpenQuestions shows questionLabel by position', () => {
+    const text = lib.renderOpenQuestions(entries);
+    entries.forEach((entry, index) => {
+      assert.ok(text.includes(`  ${lib.questionLabel(index)}. PROBLEM_${index}`), `label ${index}`);
+    });
+  });
+});
