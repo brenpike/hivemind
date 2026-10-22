@@ -1,7 +1,7 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -3237,11 +3237,13 @@ for (const [rowId, defineTests] of Object.entries(ROW_TESTS)) {
   describe(rowId, defineTests);
 }
 
-describe('standard-delivery draft', () => {
-  test('DRAFT is a regular file, so no built script is written', () => {
-    assert.ok(lstatSync(join(sourceDir, 'DRAFT')).isFile());
-    assert.equal(isDraftWorkflow(repoRoot, WORKFLOW_ID), true);
-    assert.equal(existsSync(join(repoRoot, builtPathFor(WORKFLOW_ID))), false);
+describe('standard-delivery live', () => {
+  test('no DRAFT marker, so the committed built script equals a fresh build', () => {
+    assert.equal(existsSync(join(sourceDir, 'DRAFT')), false);
+    assert.equal(isDraftWorkflow(repoRoot, WORKFLOW_ID), false);
+    const builtPath = join(repoRoot, builtPathFor(WORKFLOW_ID));
+    assert.ok(existsSync(builtPath));
+    assert.equal(readText(builtPath), builtSource);
   });
   test('meta names the workflow and its phases', async () => {
     const run = await workflow.run({ args: undefined, results: {} });

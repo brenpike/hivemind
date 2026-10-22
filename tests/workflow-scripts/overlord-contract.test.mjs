@@ -2,11 +2,31 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 import { loadLibs } from './harness.mjs';
+import { buildWorkflow } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const overlordText = readFileSync(repoRoot + 'plugin/agents/overlord.md', 'utf8').replace(/\r/g, '');
 const resultLib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
+const DELIVERY_ID = 'standard-delivery';
+const DELIVERY_ARGS_LEAD = 'When `<id>` is `standard-delivery`, the launch args also hold ';
+const VALID_LAUNCH_VALUES = { request: 'Add a cache to the facts step', trunk: 'main', references: [12], local_review: false, draft: true };
+const INVALID_LAUNCH_VALUES = { request: '   ', trunk: '-main', references: ['twelve'], local_review: 'yes', draft: 'no' };
+
+/**
+ * Builds standard-delivery in memory and runs it without its last
+ * statement, so its top-level functions can be called directly.
+ */
+function loadDeliveryFunctions() {
+  const source = buildWorkflow(repoRoot, DELIVERY_ID);
+  const lastStatement = '\nreturn await runDelivery(args);\n';
+  assert.ok(source.endsWith(lastStatement), 'standard-delivery main.js ends with the runDelivery call');
+  const body = source.replace(/^export const meta\b/, 'const meta').slice(0, -lastStatement.length + 1);
+  const context = vm.createContext({});
+  vm.runInContext(body, context, { filename: DELIVERY_ID + ' functions' });
+  return context;
+}
 
 function splitFrontmatter(text) {
   const match = text.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
@@ -43,6 +63,18 @@ const engineSection = readSection(body, '## Engine');
 const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The result is built to fit the completion notice.')) ?? '';
 const relayParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Only the harness completion notice is the run\'s result.')) ?? '';
 const stateExecutionSection = readSection(body, '## Workflow State Execution');
+const engineSentences = engineSection.split(/(?<=[.!?])\s+/);
+const handOffParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('After you show `message`, when the result carries `pr`,')) ?? '';
+
+function readDeliveryLaunchArgNames() {
+  const template = engineSection.match(/with args `(\{[^`]*\})`/);
+  assert.ok(template, '## Engine has a launch args template');
+  const templateNames = [...template[1].matchAll(/"([a-z_]+)":/g)].map((match) => match[1]);
+  const deliverySentence = engineSentences.find((sentence) => sentence.startsWith(DELIVERY_ARGS_LEAD));
+  assert.ok(deliverySentence, `## Engine lacks a sentence starting ${DELIVERY_ARGS_LEAD}`);
+  const deliveryNames = [...deliverySentence.slice(DELIVERY_ARGS_LEAD.length).matchAll(/`([a-z_]+)`/g)].map((match) => match[1]);
+  return [...templateNames, ...deliveryNames];
+}
 
 describe('overlord frontmatter tools', () => {
   const toolNames = readToolNames(frontmatter);
@@ -90,7 +122,7 @@ describe('overlord Engine section', () => {
     }
   });
   test('Engine limits launch and resume args and adds no runner instructions', () => {
-    for (const phrase of ['Launch args hold only `request`, `trunk` and `references`.', 'Resume args hold only the launch args plus `resume_args` plus `reply`.', 'Add no instruction, note or summary for the workflow\'s agents', 'They take their task only from the script.']) {
+    for (const phrase of ['Launch args hold only `request`, `trunk` and `references`, plus `local_review` and `draft` when `<id>` is `standard-delivery`.', 'Resume args hold only the launch args plus `resume_args` plus `reply`.', 'Add no instruction, note or summary for the workflow\'s agents', 'They take their task only from the script.']) {
       assert.ok(engineSection.includes(phrase), `## Engine args clause lacks ${phrase}`);
     }
   });
@@ -129,6 +161,60 @@ describe('overlord Engine section', () => {
     assert.ok(engineSection.includes('If the launch is refused or blocked'));
     assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
     assert.ok(engineSection.includes('A run that started, then failed or ended blocked, is reported as it ended and does not fall back.'));
+  });
+});
+
+describe('overlord standard-delivery launch args', () => {
+  const deliveryFunctions = loadDeliveryFunctions();
+  const launchArgNames = readDeliveryLaunchArgNames();
+  test('Engine names local_review and draft for standard-delivery', () => {
+    assert.ok(launchArgNames.includes('local_review'), `launch args are ${JSON.stringify(launchArgNames)}`);
+    assert.ok(launchArgNames.includes('draft'), `launch args are ${JSON.stringify(launchArgNames)}`);
+    for (const phrase of ['`local_review` is `false` when the Codex plugin is not available in this session or the request asks to skip local review, and `true` otherwise.', '`draft` is `true` only when the request asks for a draft pull request, and `false` otherwise.']) {
+      assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
+    }
+  });
+  test('a launch with every Engine launch arg valid passes readDeliveryLaunch', () => {
+    const launchArgs = {};
+    for (const argName of launchArgNames) {
+      assert.ok(Object.hasOwn(VALID_LAUNCH_VALUES, argName), `no valid test value for the launch arg ${argName}`);
+      launchArgs[argName] = VALID_LAUNCH_VALUES[argName];
+    }
+    const launch = deliveryFunctions.readDeliveryLaunch(launchArgs);
+    assert.equal(launch.problem, undefined, `readDeliveryLaunch refused ${JSON.stringify(launchArgs)}: ${launch.problem}`);
+    assert.equal(launch.localReview, VALID_LAUNCH_VALUES.local_review);
+    assert.equal(launch.draft, VALID_LAUNCH_VALUES.draft);
+  });
+  for (const argName of launchArgNames) {
+    test(`a bad ${argName} launch arg makes readDeliveryLaunch return a problem`, () => {
+      assert.ok(Object.hasOwn(INVALID_LAUNCH_VALUES, argName), `no invalid test value for the launch arg ${argName}`);
+      const launchArgs = { ...VALID_LAUNCH_VALUES, [argName]: INVALID_LAUNCH_VALUES[argName] };
+      const launch = deliveryFunctions.readDeliveryLaunch(launchArgs);
+      assert.equal(typeof launch.problem, 'string', `readDeliveryLaunch accepted ${argName} ${JSON.stringify(INVALID_LAUNCH_VALUES[argName])}`);
+    });
+  }
+});
+
+describe('overlord pull request hand-off and opt-in', () => {
+  test('the pr hand-off names the watch pointer, pr-feedback-remediation and intake watch', () => {
+    assert.notEqual(handOffParagraph, '', '## Engine has a paragraph starting After you show `message`, when the result carries `pr`,');
+    for (const phrase of ['`## Review Remediation Posture` (Default post-PR watch)', '`HIVEMIND_SKIP_PR_WATCH`', 'run `pr-feedback-remediation` on the workflow state machine', 'with its intake outcome `watch`', 'as the Reflex tail does', 'With no `pr`, there is no watch.']) {
+      assert.ok(handOffParagraph.includes(phrase), `pr hand-off paragraph lacks ${phrase}`);
+    }
+  });
+  test('the pr hand-off does not restate the watch predicate', () => {
+    for (const phrase of ['if and only if', '`not_requested`', '`watch_requested`']) {
+      assert.ok(!handOffParagraph.includes(phrase), `pr hand-off paragraph restates the watch predicate: ${phrase}`);
+    }
+  });
+  test('the never-enter rule covers only the launched request', () => {
+    assert.ok(engineSection.includes('Do not enter the workflow state machine for the launched request and do not create a run ledger for it.'));
+    assert.ok(handOffParagraph.includes('covers only the launched request'));
+  });
+  test('Engine states the approval prompt opt-in and the permissions.deny opt-out', () => {
+    for (const phrase of ['The `Workflow` tool\'s approval prompt is the opt-in to a workflow, and no other opt-in exists.', 'A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next']) {
+      assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
+    }
   });
 });
 

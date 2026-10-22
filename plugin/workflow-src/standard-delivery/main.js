@@ -1,5 +1,5 @@
 /*
- * standard-delivery main.js: the body of the draft standard-delivery
+ * standard-delivery main.js: the body of the standard-delivery
  * workflow script. It delivers a request on one working branch: branch
  * facts, a checked plan, questions decided or asked, the working branch,
  * each wave of plan steps with its commit, then the version bump,
@@ -7,8 +7,7 @@
  * pull request. The run ends at the pull request: once every configured
  * gate held on one commit, it pushes that commit and opens or reuses the
  * pull request, and ends complete naming it. Watching the pull request is
- * the overlord's, not this script's (ADR-0037 PR8). The DRAFT marker keeps
- * the script out of plugin/workflows/.
+ * the overlord's, not this script's (ADR-0037 decision 4).
  *
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only

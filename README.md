@@ -203,6 +203,8 @@ Two more agents handle review. They are composites rather than bioforms: each on
 
 ### The Lifecycle
 
+When the Workflow tool is available, `standard-delivery` runs as the `hivemind:standard-delivery` workflow script: facts, plan, branch, waves with a commit each, version bump, validation, local review, and the PR. It keeps no run ledger, and the decisions it takes go on the PR body. The overlord then watches the PR as described below. The state machine shown here is the fallback, used when the launch is denied (a `Workflow(hivemind:standard-delivery)` entry in `permissions.deny`) or the Workflow tool is absent, as in brood children.
+
 A `standard-delivery` run, from request to watched PR:
 
 ```
