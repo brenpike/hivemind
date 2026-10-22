@@ -4,7 +4,8 @@
 # remote and opens its pull request, or reuses the open one, in ONE process. It reads the inputs
 # file once, refuses before any change, pushes through push-branch.sh as a child process, then
 # reuses or creates the PR and verifies it against the values it checked. A change is a push, a
-# write to a branch ref, HEAD, the index, the work tree or git config, or a PR created on GitHub.
+# write to a branch ref, HEAD, the index, the work tree or git config, a PR created on GitHub, or
+# a comment posted on a PR.
 #
 # INPUT (`--flag value` form only; each flag at most once; unknown, duplicate, or missing flags
 # give the fixed usage blocker):
@@ -31,10 +32,13 @@
 #   body      REQUIRED. Text with no control character other than newline and tab. It may be
 #             empty.
 #   draft     optional. true or false. true opens the PR as a draft. A reused PR is not changed.
+#   comment   optional. Text with a character other than space, newline and tab, and no control
+#             character other than newline and tab. It is posted only on a reused PR (REUSE).
 # No other field is allowed. The title reaches gh as one `--title=<value>` argument from a quoted
-# shell variable, and the body as a file in the private work folder (`--body-file=<path>`), so
-# neither is ever part of shell source. The rule that the PR content carries no attribution
-# string is the caller's judgment (the open-plan-pr SKILL.md), not checked here.
+# shell variable, and the body and the comment as files in the private work folder
+# (`--body-file=<path>`), so none of them is ever part of shell source or an argument's text. The
+# rule that the PR content carries no attribution string is the caller's judgment (the
+# open-plan-pr SKILL.md), not checked here.
 #
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
 #   delay        HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY, when set, is not a whole number of seconds.
@@ -87,6 +91,12 @@
 # 2), because GitHub updates a PR's head SHA a moment after a push. When no read finds a PR on the
 # pushed commit, or the id is unknown, CREATE runs. More than one open PR carrying the pushed
 # commit stops the run.
+#   When the inputs carry comment, the script then posts it on the reused PR: `gh pr comment <n>
+# --body-file=<private file>`, where <n> is the number at the end of the reused PR URL and passes
+# the identifier gate. The comment text never reaches gh as an argument. gh's stderr is relayed,
+# and a failed post stops the run with `the PR comment could not be posted`. Each run that reuses
+# a PR posts its own comment, by design: a rerun that reuses the PR posts the comment again.
+# CREATE never posts the comment.
 #
 # CREATE: when no open PR carries the pushed commit, `gh pr create --base <base> --title=<title>
 # --body-file=<private file> [--draft]`. It never passes `--head` (see R1). Its stdout must be one
@@ -103,16 +113,22 @@
 #   url: <PR url>
 #   head_ref_oid: <pushed commit>
 #   created: true|false
+#   commented: true|false
+#                       only when the inputs carry comment: true when the comment was posted on
+#                       a reused PR, false when the PR was created
 #   warning: <text>     only when the push warned (push-branch.sh's warning), or when the push
 #                       did not warn and the head repository id is unknown (`gh cannot read the
 #                       push remote as a GitHub repository; the PR head repository was not
 #                       checked`)
+# Without comment in the inputs, there is no `commented:` line and the output is as above.
 # EXIT CONTRACT:
 #   0  routing lines on stdout
 #   1  NOTHING on stdout. stderr carries any relayed push-branch.sh or gh stderr, then
 #      `blocker: <fixed reason>` as the LAST line. Blocker text never echoes a caller-supplied,
 #      repository, or GitHub value. A blocker after PUSH means the branch may be on its remote;
-#      HEAD REPOSITORY and VERIFY above name the blockers this script adds after the push.
+#      HEAD REPOSITORY, REUSE and VERIFY above name the blockers this script adds after the push.
+#      After `the PR comment could not be posted`, the reused PR is open on the pushed commit and
+#      the comment may be missing from it.
 #
 # RECORDED RESIDUAL R1 (implicit head of the PR creation): CREATE above runs `gh pr create`
 # without `--head`, so gh resolves the PR head from the current branch in its own process, after
@@ -200,8 +216,8 @@
 # same commit, is never reused. The push URL behind that id is read again from git config after
 # the push, and git config is trusted. When `.hivemind/` is not ignored, the
 # inputs file itself is an untracked file and the run stops there. The private work folder
-# (mktemp -d under TMPDIR) holds the inputs copy, the body file, and the gh and push-branch.sh
-# output, and is removed by the EXIT trap.
+# (mktemp -d under TMPDIR) holds the inputs copy, the body file, the comment file, and the gh
+# and push-branch.sh output, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
@@ -338,6 +354,8 @@ body_file="$work_dir/body.md"
 list_file="$work_dir/list.json"
 push_err_file="$work_dir/push.err"
 create_err_file="$work_dir/create.err"
+comment_file="$work_dir/comment.md"
+comment_err_file="$work_dir/comment.err"
 view_file="$work_dir/view.json"
 repo_file="$work_dir/repo.json"
 
@@ -351,16 +369,18 @@ jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUT
 # The field rules from the header, in order. Prints the fixed reason of the first rule the
 # inputs break, or an empty line when every rule holds.
 validate_program='
-def known_keys: ["title", "body", "draft"];
+def known_keys: ["title", "body", "draft", "comment"];
 def is_one_line: explode | all(.[]; . >= 32 and . != 127);
 def is_text_block: explode | all(.[]; . == 9 or . == 10 or (. >= 32 and . != 127));
 if type != "object" then "inputs must be a JSON object"
-elif (keys - known_keys | length) > 0 then "inputs have a field other than title, body and draft"
+elif (keys - known_keys | length) > 0 then "inputs have a field other than title, body, draft and comment"
 elif (.title | type) != "string" then "title must be one line of text"
 elif (.title | is_one_line | not) or (.title | test("[^ ]") | not) then "title must be one line of text"
 elif (.body | type) != "string" then "body must be text with no control characters other than newline and tab"
 elif (.body | is_text_block | not) then "body must be text with no control characters other than newline and tab"
 elif has("draft") and (.draft | type) != "boolean" then "draft must be true or false"
+elif has("comment") and (.comment | type) != "string" then "comment must be non-blank text with no control characters other than newline and tab"
+elif has("comment") and ((.comment | is_text_block | not) or (.comment | test("[^ \t\n]") | not)) then "comment must be non-blank text with no control characters other than newline and tab"
 else "" end
 '
 inputs_reason="$(jq -r "$validate_program" "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
@@ -369,6 +389,11 @@ inputs_reason="$(jq -r "$validate_program" "$inputs_copy" 2>/dev/null)" || block
 title_text="$(jq -r '.title' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
 draft_value="$(jq -r '.draft == true' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
 jq -j '.body' "$inputs_copy" >"$body_file" 2>/dev/null || blocker "cannot read the inputs file"
+comment_given="$(jq -r 'has("comment")' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
+if [ "$comment_given" = true ]; then
+  jq -j '.comment' "$inputs_copy" >"$comment_file" 2>/dev/null || blocker "cannot read the inputs file"
+fi
+commented_value=false
 
 # ── Git state ───────────────────────────────────────────────────────────────
 
@@ -609,6 +634,15 @@ if [ "$carrying_count" -eq 1 ]; then
   is_pr_url "$carrying_url" || blocker "PR URL contains characters outside the safe allowlist"
   pr_url="$carrying_url"
   created_value=false
+  if [ "$comment_given" = true ]; then
+    comment_number="${pr_url##*/}"
+    hivemind_assert_identifier "$comment_number" || blocker "PR number contains characters outside the safe allowlist"
+    comment_rc=0
+    gh pr comment "$comment_number" --body-file="$comment_file" </dev/null >/dev/null 2>"$comment_err_file" || comment_rc=$?
+    [ ! -s "$comment_err_file" ] || cat -- "$comment_err_file" >&2
+    [ "$comment_rc" -eq 0 ] || blocker "the PR comment could not be posted"
+    commented_value=true
+  fi
 else
   # ── Create ────────────────────────────────────────────────────────────────
   create_rc=0
@@ -646,9 +680,18 @@ else
   created_value=true
 fi
 
-# The warning line carries push-branch.sh's warning or the HEAD REPOSITORY warning.
-if [ -n "$push_warning" ]; then
-  printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\nwarning: %s\n' "$pr_url" "$pushed_commit" "$created_value" "$push_warning"
+# The warning line carries push-branch.sh's warning or the HEAD REPOSITORY warning. The
+# commented line appears only when the inputs carry comment.
+if [ "$comment_given" = true ]; then
+  if [ -n "$push_warning" ]; then
+    printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\ncommented: %s\nwarning: %s\n' "$pr_url" "$pushed_commit" "$created_value" "$commented_value" "$push_warning"
+  else
+    printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\ncommented: %s\n' "$pr_url" "$pushed_commit" "$created_value" "$commented_value"
+  fi
 else
-  printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\n' "$pr_url" "$pushed_commit" "$created_value"
+  if [ -n "$push_warning" ]; then
+    printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\nwarning: %s\n' "$pr_url" "$pushed_commit" "$created_value" "$push_warning"
+  else
+    printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\n' "$pr_url" "$pushed_commit" "$created_value"
+  fi
 fi

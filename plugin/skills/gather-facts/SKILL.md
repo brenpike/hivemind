@@ -47,8 +47,8 @@ value.
    ```
 
    Exit 0: stdout holds the routing lines `facts_file`, `facts_lines`, `head_state`, `branch`
-   (only on a branch), `head`, `trunk`, `trunk_freshness`, `trunk_ahead`, `trunk_behind`, `cut`,
-   `external_texts`, `delivery` and `delivery_stops`. A `cut` other than `none` means no
+   (only on a branch), `head`, `trunk`, `trunk_freshness`, `trunk_ahead`, `trunk_behind`,
+   `trunk_commit`, `cut`, `external_texts`, `delivery` and `delivery_stops`. A `cut` other than `none` means no
    planner starts on these facts. `external_texts` is N, the count of texts in the file that
    carry a `text_id`, which runs `t1` to `tN`. `delivery` and `delivery_stops` report the
    delivery gate. Whether a caller stops on it is that caller's own rule. Exit 1: blocked; relay the script's `blocker:` line from stderr.

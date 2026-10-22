@@ -553,12 +553,13 @@ test_freshness() {
     create_world fresh
     run_engine fresh "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok fresh
-    assert_equal fresh-keys 'facts_file,facts_lines,head_state,branch,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,cut,external_texts,delivery,delivery_stops' \
+    assert_equal fresh-keys 'facts_file,facts_lines,head_state,branch,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops' \
         "$(route_keys)" "routing keys and order"
     assert_route fresh-state trunk_freshness fresh
     assert_route fresh-branch branch "$BRANCH"
     assert_route fresh-head head "$(head_sha)"
     assert_route fresh-trunk trunk main
+    assert_route fresh-trunk-commit trunk_commit "$TRUNK_SHA"
     assert_route fresh-ready delivery ready
     assert_route fresh-no-stops delivery_stops none
     assert_route fresh-no-cut cut none
@@ -576,6 +577,7 @@ test_freshness() {
     assert_route behind-state trunk_freshness behind
     assert_route behind-counts trunk_ahead 0
     assert_route behind-count trunk_behind 1
+    assert_route behind-trunk-commit trunk_commit "$NEW_TRUNK_SHA"
 
     create_world ahead
     advance_local_trunk
@@ -595,6 +597,7 @@ test_freshness() {
     run_engine no-remote "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_route no-remote-state trunk_freshness no_remote
     assert_fact no-remote-base '.history.base' local_trunk
+    assert_route no-remote-trunk-commit trunk_commit "$TRUNK_SHA"
     assert_fact no-remote-history '.history.status' available
     assert_fact no-remote-no-remote-key '.repository | has("remote")' false
     assert_route no-remote-ready delivery ready
@@ -605,6 +608,7 @@ test_freshness() {
     assert_fact no-trunk-history '.history.status' unavailable
     assert_fact no-trunk-commits '[.history.commits.complete, .history.commits.total] | @tsv' $'false\t0'
     assert_route no-trunk-stop delivery_stops history_unavailable
+    assert_route no-trunk-trunk-commit trunk_commit none
 
     create_world fetch-failed
     run_git "$WORK_TREE" remote set-url origin "$WORLD_ROOT/missing.git"
@@ -613,6 +617,12 @@ test_freshness() {
     assert_route fetch-failed-counts trunk_behind 0
     assert_fact fetch-failed-base '.history.base' remote_trunk
     assert_route fetch-failed-not-a-stop delivery ready
+    assert_route fetch-failed-trunk-commit trunk_commit "$TRUNK_SHA"
+
+    advance_local_trunk
+    run_engine fetch-failed-local-moved "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_route fetch-failed-local-moved-state trunk_freshness fetch_failed
+    assert_route fetch-failed-local-moved-commit trunk_commit "$TRUNK_SHA"
 
     create_world no-local-trunk
     run_git "$WORK_TREE" branch -q -D main
@@ -837,7 +847,7 @@ test_head_states() {
     run_engine unsafe-name "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok unsafe-name
     assert_route unsafe-name-state head_state unsafe_name
-    assert_equal unsafe-name-keys 'facts_file,facts_lines,head_state,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,cut,external_texts,delivery,delivery_stops' \
+    assert_equal unsafe-name-keys 'facts_file,facts_lines,head_state,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops' \
         "$(route_keys)" "no branch line"
     assert_fact unsafe-name-no-branch-key '.repository | has("branch")' false
     assert_route unsafe-name-stop delivery_stops branch_name_unsafe

@@ -31,8 +31,9 @@ const LAUNCH = { request: REQUEST };
 const HEAD = '1'.repeat(40);
 const OTHER = '2'.repeat(40);
 const THIRD = '3'.repeat(40);
+const TRUNK_COMMIT = '4'.repeat(40);
 const FACTS_FILE = '.hivemind/facts/facts-20261021T120000Z-0123456789ab.json';
-const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head', 'trunk', 'trunk_freshness', 'trunk_ahead', 'trunk_behind', 'cut', 'external_texts', 'delivery', 'delivery_stops'];
+const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head', 'trunk', 'trunk_freshness', 'trunk_ahead', 'trunk_behind', 'trunk_commit', 'cut', 'external_texts', 'delivery', 'delivery_stops'];
 const WORKER_DONE = { outcome: 'complete', summary: 'Done.' };
 const MALFORMED_FACTS = 'The facts step returned malformed facts, so the delivery stopped before planning.';
 const NOT_READY = 'The branch is not ready for delivery, so the delivery stopped before planning:';
@@ -74,6 +75,7 @@ function factsStdout(changes = {}) {
     trunk_freshness: 'fresh',
     trunk_ahead: '0',
     trunk_behind: '0',
+    trunk_commit: TRUNK_COMMIT,
     cut: 'none',
     external_texts: '0',
     delivery: 'ready',
@@ -107,7 +109,7 @@ function makePlan(changes = {}) {
     trunk_freshness: 'fresh',
     classification: 'feature',
     breaking: false,
-    versioning: { bump_trigger: 'no', no_bump_match: 'no' },
+    versioning: { bump_trigger: 'no', no_bump_match: 'no', artifact_files: [] },
     delivery: 'single',
     steps: [makeStep('STEP-001', ['src/cache.js'])],
     ...changes

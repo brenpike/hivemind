@@ -113,6 +113,9 @@ describe('gatherFactsRoutingSpec against real gather-facts.sh stdout', () => {
   test('the run made no gh call', () => {
     assert.equal(existsSync(ghMarker), false);
   });
+  test('trunk_commit is the trunk the history is read against, here the local trunk', () => {
+    assert.equal(parseFacts(trunkStdout).values.trunk_commit, headSha);
+  });
   test('the stdout lines come in spec order', () => {
     assert.deepEqual(trunkLines.map((line) => line.split(': ')[0]), Object.keys(lib.gatherFactsRoutingSpec()));
   });
@@ -195,6 +198,7 @@ describe('gatherFactsRoutingSpec shape', () => {
     ['facts_file', [FACTS_FILE], ['.hivemind/facts/facts-x.json', '.hivemind/facts/facts-20261021T101500Z-0123456789AB.json', '../.hivemind/facts/facts-20261021T101500Z-0123456789ab.json', '.hivemind/facts/facts-20261021T101500Z-0123456789ab.json.bak']],
     ['facts_lines', ['1', '812'], ['0', '012', '-1']],
     ['head', ['a'.repeat(40), 'b'.repeat(64)], ['a'.repeat(39), 'a'.repeat(41), 'A'.repeat(40)]],
+    ['trunk_commit', ['none', 'a'.repeat(40), 'b'.repeat(64)], ['None', 'a'.repeat(39), 'a'.repeat(41), 'A'.repeat(40), 'none,' + 'a'.repeat(40), '']],
     ['branch', ['main', 'feature/x-1'], ['-x', 'a..b', 'a b', '']],
     ['trunk', ['main', 'release/1.2'], ['-main', 'ma..in', 'ma$in']],
     ['trunk_ahead', ['0', '7'], ['01', '-1', '1.0']],
@@ -304,6 +308,24 @@ describe('isConsistentFactsRelay', () => {
       assert.equal(lib.isConsistentFactsRelay(relayWith(changes), trunk), false);
     });
   }
+  test('accepts trunk_commit none with a history_unavailable stop, and a commit with or without one', () => {
+    for (const changes of [
+      { trunk_commit: 'none', trunk_freshness: 'no_trunk', delivery: 'stop', delivery_stops: 'history_unavailable' },
+      { trunk_commit: 'none', delivery: 'stop', delivery_stops: 'dirty_paths,history_unavailable' },
+      { trunk_commit: 'c'.repeat(40), trunk_freshness: 'no_local_trunk', delivery: 'stop', delivery_stops: 'history_unavailable' },
+      { trunk_commit: 'd'.repeat(64) }
+    ]) {
+      assert.equal(lib.isConsistentFactsRelay(relayWith(changes), 'main'), true, JSON.stringify(changes));
+    }
+  });
+  test('rejects trunk_commit none with no history_unavailable stop', () => {
+    for (const changes of [
+      { trunk_commit: 'none' },
+      { trunk_commit: 'none', delivery: 'stop', delivery_stops: 'dirty_paths' }
+    ]) {
+      assert.equal(lib.isConsistentFactsRelay(relayWith(changes), 'main'), false, JSON.stringify(changes));
+    }
+  });
   test('rejects a value that is not a plain object', () => {
     for (const value of [null, undefined, 'facts', [trunkValues]]) {
       assert.equal(lib.isConsistentFactsRelay(value, 'main'), false, JSON.stringify(value));

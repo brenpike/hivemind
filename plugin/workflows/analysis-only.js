@@ -110,7 +110,8 @@ const AUTONOMY_TABLE = {
         "github_review_loop.planner-escalation",
         "github_reviewer_fix.planner-escalation",
         "implement_step.needs_replan",
-        "implement_step_postpr.needs_replan"
+        "implement_step_postpr.needs_replan",
+        "standard-delivery.local_review"
       ],
       "when": "A worker or a reviewer escalates a blocker to the planner and the overlord decides where that escalation is routed."
     },
@@ -122,7 +123,8 @@ const AUTONOMY_TABLE = {
       "resolved_at": [
         "local_review.root-cluster-suspected",
         "github_review_loop.root-cluster-suspected",
-        "github_reviewer_fix.root-cluster-suspected"
+        "github_reviewer_fix.root-cluster-suspected",
+        "standard-delivery.local_review"
       ],
       "when": "Accumulated findings are detected as a root cluster and the overlord decides whether to route them to a zoomed-out planner pass."
     },
@@ -135,7 +137,8 @@ const AUTONOMY_TABLE = {
         "review_remediation_plan.single",
         "review_remediation_plan.multi",
         "review_remediation_plan_postpr.single",
-        "review_remediation_plan_postpr.multi"
+        "review_remediation_plan_postpr.multi",
+        "standard-delivery.plan"
       ],
       "when": "A planner returns a remediation plan for a root cluster and the overlord decides whether to accept it and implement."
     },
@@ -145,7 +148,8 @@ const AUTONOMY_TABLE = {
       "balanced": "auto",
       "low": "surface",
       "resolved_at": [
-        "local_review.diminishing-returns"
+        "local_review.diminishing-returns",
+        "standard-delivery.local_review"
       ],
       "when": "The review loop detects diminishing returns and the overlord decides whether to stop remediating and exit the loop."
     },
@@ -156,7 +160,8 @@ const AUTONOMY_TABLE = {
       "low": "surface",
       "resolved_at": [
         "validate",
-        "validate_postpr"
+        "validate_postpr",
+        "standard-delivery.validate"
       ],
       "when": "Any validate state fails and the overlord decides how to remediate before the run moves past validation."
     },
@@ -167,7 +172,8 @@ const AUTONOMY_TABLE = {
       "low": "surface",
       "resolved_at": [
         "version_bump_decision.required",
-        "version_bump_decision.not_required"
+        "version_bump_decision.not_required",
+        "standard-delivery.bump"
       ],
       "when": "The bump-type derivation yields a verdict and the overlord decides which version bump type to apply."
     },
@@ -177,7 +183,8 @@ const AUTONOMY_TABLE = {
       "balanced": "surface",
       "low": "surface",
       "resolved_at": [
-        "version_bump_decision.ambiguous"
+        "version_bump_decision.ambiguous",
+        "standard-delivery.bump"
       ],
       "when": "The bump-type derivation cannot determine a bump type from the commits and the overlord needs a decision."
     },
@@ -191,6 +198,16 @@ const AUTONOMY_TABLE = {
         "standard-delivery.branch"
       ],
       "when": "The Trunk Freshness check at git preflight reports a non-zero count and the overlord decides how to proceed."
+    },
+    {
+      "kind": "gate_rerun",
+      "high": "auto",
+      "balanced": "auto",
+      "low": "surface",
+      "resolved_at": [
+        "standard-delivery.gates"
+      ],
+      "when": "A commit lands after a gate held and the run goes back through every gate that ended on an earlier commit."
     },
     {
       "kind": "route_ambiguous",
@@ -551,9 +568,10 @@ const PLAN_SCHEMA = {
       "additionalProperties": false,
       "required": [
         "bump_trigger",
-        "no_bump_match"
+        "no_bump_match",
+        "artifact_files"
       ],
-      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination). The bump step passes them to bump-type unchanged.",
+      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The bump step passes the two answers to bump-type unchanged.",
       "properties": {
         "bump_trigger": {
           "type": "string",
@@ -570,6 +588,14 @@ const PLAN_SCHEMA = {
             "no"
           ],
           "description": "yes when the change matches one or more bullets of the list of changes that need no bump by default. Passed to bump-type as --no-bump-match."
+        },
+        "artifact_files": {
+          "type": "array",
+          "description": "Each repository path holding a version the bump step sets, as the project's versioning docs name it. Empty when the project names none. The bump commit takes exactly these paths.",
+          "items": {
+            "type": "string",
+            "description": "Can carry external content. One repository path holding a version."
+          }
         }
       }
     },
@@ -2428,8 +2454,8 @@ function isGitIdentifier(value) {
  *       plugin/skills/gather-facts/scripts/gather-facts.sh. Its keys are
  *       the keys of that script's OUTPUT header in its order: facts_file,
  *       facts_lines, head_state, branch, head, trunk, trunk_freshness,
- *       trunk_ahead, trunk_behind, cut, external_texts, delivery,
- *       delivery_stops. Every key is required but branch. Every pattern is
+ *       trunk_ahead, trunk_behind, trunk_commit, cut, external_texts,
+ *       delivery, delivery_stops. Every key is required but branch. Every pattern is
  *       anchored at both ends and has no flags:
  *         facts_file  .hivemind/facts/facts-<UTC>-<random>.json as the
  *                     script names it: 8 digits, T, 6 digits, Z, a dash
@@ -2437,6 +2463,7 @@ function isGitIdentifier(value) {
  *         facts_lines a positive count with no leading zero.
  *         branch, trunk  gitIdentifierPattern() (identifier.js).
  *         head        40 or 64 lowercase hex digits.
+ *         trunk_commit  40 or 64 lowercase hex digits, or none.
  *         trunk_ahead, trunk_behind, external_texts  a count, 0 or one
  *                     with no leading zero.
  *         head_state, trunk_freshness, delivery  one value of its enum.
@@ -2466,6 +2493,7 @@ function isGitIdentifier(value) {
  *         head_state is unsafe_name exactly when delivery_stops lists
  *         branch_name_unsafe;
  *         trunk_freshness no_trunk comes with history_unavailable;
+ *         trunk_commit none comes with history_unavailable;
  *         trunk_ahead and trunk_behind fit trunk_freshness: both 0 but for
  *         ahead (ahead only), behind (behind only) and diverged (both);
  *         no cut or delivery_stops entry repeats;
@@ -2602,6 +2630,7 @@ function gatherFactsRoutingSpec() {
     trunk_freshness: { pattern: wholeFactsPattern(factsEnumSource(factsTrunkFreshnessValues())), required: true },
     trunk_ahead: { pattern: count, required: true },
     trunk_behind: { pattern: count, required: true },
+    trunk_commit: { pattern: wholeFactsPattern('none|[0-9a-f]{40}|[0-9a-f]{64}'), required: true },
     cut: { pattern: wholeFactsPattern(factsListSource(factsCutFields())), required: true },
     external_texts: { pattern: count, required: true },
     delivery: { pattern: wholeFactsPattern(factsEnumSource(factsDeliveryValues())), required: true },
@@ -2677,6 +2706,7 @@ function isConsistentFactsRelay(values, trunk) {
     && (values.cut !== 'none') === hasFactsStop(stops, 'cut_fields')
     && (values.head_state === 'unsafe_name') === hasFactsStop(stops, 'branch_name_unsafe')
     && (values.trunk_freshness !== 'no_trunk' || hasFactsStop(stops, 'history_unavailable'))
+    && (values.trunk_commit !== 'none' || hasFactsStop(stops, 'history_unavailable'))
     && matchesFreshnessCounts(values.trunk_freshness, values.trunk_ahead, values.trunk_behind);
 }
 

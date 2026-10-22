@@ -367,7 +367,13 @@ run_suites() {
 #     plugin/skills/_shared/allowlist.sh (identifier.test.mjs parity; also sourced by the
 #       gather-facts.sh, create-working-branch.sh and molt.sh the node tests run),
 #     plugin/skills/_shared/git-refusals.sh (sourced by create-working-branch.sh and molt.sh),
-#     plugin/skills/_shared/graphql-response.sh (sourced by gather-facts.sh)
+#     plugin/skills/_shared/graphql-response.sh (sourced by gather-facts.sh),
+#     plugin/skills/open-plan-pr/scripts/open-plan-pr.sh and
+#       plugin/skills/push-branch/scripts/push-branch.sh (standard-delivery.test.mjs runs them),
+#     plugin/skills/_shared/bump-type-derive.sh (sourced by the bump-type.sh the node tests run),
+#     plugin/agents/local-reviewer.md (its exit_reason enum is pinned against the review route table),
+#     plugin/governance/{safety-rails,definitions}.md (runner sentences are pinned against their
+#       grant and Validation Procedure clauses)
 #                                      -> test_workflow_scripts (build drift check + node tests;
 #                                         every path except tests/workflow-scripts/** keeps its
 #                                         other routes by union)
@@ -663,11 +669,18 @@ map_path() {
   # the _shared/allowlist.sh whose identifier rules identifier.test.mjs pins by parity, the
   # _shared libs the scripts those tests run source (allowlist.sh by gather-facts.sh,
   # create-working-branch.sh and molt.sh; git-refusals.sh by create-working-branch.sh and molt.sh;
-  # graphql-response.sh by gather-facts.sh), and the node tests themselves. Every path here except
+  # graphql-response.sh by gather-facts.sh; bump-type-derive.sh by bump-type.sh), the
+  # open-plan-pr.sh and push-branch.sh entrypoints standard-delivery.test.mjs runs, the
+  # local-reviewer agent whose exit_reason enum is pinned against the review route table, the
+  # safety-rails and definitions governance docs whose grant and Validation Procedure clauses the
+  # runner sentences are pinned against, and the node tests themselves. Every path here except
   # the node tests keeps its other routes by union (for example *.json keeps validate_workflows,
-  # next-wave.sh and its fixtures keep test_next_wave, cerebrate.md keeps validate_workflows,
-  # molt.sh keeps test_molt, the _shared libs keep test_engine, test_push_branch,
-  # test_create_working_branch, test_molt, test_gather_facts and the rest). Every one of these except
+  # next-wave.sh and its fixtures keep test_next_wave, cerebrate.md and local-reviewer.md keep
+  # validate_workflows, molt.sh keeps test_molt, open-plan-pr.sh keeps test_open_plan_pr,
+  # push-branch.sh keeps test_push_branch and test_open_plan_pr, bump-type-derive.sh keeps
+  # test_bump_type, the governance docs keep policy_check, the _shared libs keep test_engine,
+  # test_push_branch, test_create_working_branch, test_molt, test_gather_facts and the rest).
+  # Every one of these except
   # tests/workflow-scripts/* and tests/next-wave/* is ALSO a plugin/* file (policy_check
   # prose-lints it via the wholesale rule below), but policy_check NEVER RUNS node, so without
   # this rule a source edit that leaves the generated script stale, or a data/agent/script edit
@@ -696,6 +709,12 @@ map_path() {
      || "$p" == plugin/skills/_shared/allowlist.sh \
      || "$p" == plugin/skills/_shared/git-refusals.sh \
      || "$p" == plugin/skills/_shared/graphql-response.sh \
+     || "$p" == plugin/skills/_shared/bump-type-derive.sh \
+     || "$p" == plugin/skills/open-plan-pr/scripts/open-plan-pr.sh \
+     || "$p" == plugin/skills/push-branch/scripts/push-branch.sh \
+     || "$p" == plugin/agents/local-reviewer.md \
+     || "$p" == plugin/governance/safety-rails.md \
+     || "$p" == plugin/governance/definitions.md \
      || "$p" == tests/workflow-scripts/* ]]; then
     add_selected "$SUITE_TEST_WORKFLOW_SCRIPTS" "$p (workflow-script source/build/data/test)"
     matched=1
@@ -1371,9 +1390,10 @@ self_test() {
 
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
-  #    the generated-script, data-file, agent (overlord, drone, cerebrate), route-workflow skill,
-  #    workflow-definition, node-test-read or node-test-run script/fixture, or sourced _shared lib
-  #    selector were dropped. Probe each directly so
+  #    the generated-script, data-file, agent (overlord, drone, cerebrate, local-reviewer),
+  #    governance doc (safety-rails, definitions), route-workflow skill, workflow-definition,
+  #    node-test-read or node-test-run script/fixture (open-plan-pr.sh, push-branch.sh), or
+  #    sourced _shared lib (bump-type-derive.sh) selector were dropped. Probe each directly so
   #    removing any one selector FAILS here.
   local workflow_input
   for workflow_input in \
@@ -1397,6 +1417,12 @@ self_test() {
     "plugin/skills/_shared/allowlist.sh" \
     "plugin/skills/_shared/git-refusals.sh" \
     "plugin/skills/_shared/graphql-response.sh" \
+    "plugin/skills/_shared/bump-type-derive.sh" \
+    "plugin/skills/open-plan-pr/scripts/open-plan-pr.sh" \
+    "plugin/skills/push-branch/scripts/push-branch.sh" \
+    "plugin/agents/local-reviewer.md" \
+    "plugin/governance/safety-rails.md" \
+    "plugin/governance/definitions.md" \
     "plugin/skills/route-workflow/SKILL.md" \
     "plugin/workflows/analysis-only.json"; do
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''

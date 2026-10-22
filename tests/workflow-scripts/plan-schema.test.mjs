@@ -66,7 +66,7 @@ function makePlan() {
     trunk_freshness: 'fresh',
     classification: 'feature',
     breaking: false,
-    versioning: { bump_trigger: 'yes', no_bump_match: 'no' },
+    versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['plugin/.claude-plugin/plugin.json'] },
     delivery: 'multi',
     steps: [
       {
@@ -130,6 +130,7 @@ describe('plan schema', () => {
       '$.summary',
       '$.branch',
       '$.base',
+      '$.versioning.artifact_files[]',
       '$.steps[].id',
       '$.steps[].files[]',
       '$.steps[].outcome',
@@ -182,6 +183,7 @@ describe('plan schema', () => {
   const invalidCases = [
     ['a plan without branch', (plan) => delete plan.branch, '$: required: missing branch'],
     ['a plan without base', (plan) => delete plan.base, '$: required: missing base'],
+    ['a plan without versioning.artifact_files', (plan) => delete plan.versioning.artifact_files, '$.versioning: required: missing artifact_files'],
     ['a trunk_freshness outside the enum', (plan) => { plan.trunk_freshness = 'stale'; }, '$.trunk_freshness: enum: not one of fresh, behind, ahead, diverged, no_remote, fetch_failed, no_local_trunk, no_trunk'],
     ['a classification outside the enum', (plan) => { plan.classification = 'feat'; }, '$.classification: enum: not one of feature, bugfix, hotfix, refactor, chore, docs, test, ci'],
     ['a brood delivery', (plan) => { plan.delivery = 'brood'; }, '$.delivery: enum: not one of single, multi'],

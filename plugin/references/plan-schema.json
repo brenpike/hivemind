@@ -65,9 +65,10 @@
       "additionalProperties": false,
       "required": [
         "bump_trigger",
-        "no_bump_match"
+        "no_bump_match",
+        "artifact_files"
       ],
-      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination). The bump step passes them to bump-type unchanged.",
+      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The bump step passes the two answers to bump-type unchanged.",
       "properties": {
         "bump_trigger": {
           "type": "string",
@@ -84,6 +85,14 @@
             "no"
           ],
           "description": "yes when the change matches one or more bullets of the list of changes that need no bump by default. Passed to bump-type as --no-bump-match."
+        },
+        "artifact_files": {
+          "type": "array",
+          "description": "Each repository path holding a version the bump step sets, as the project's versioning docs name it. Empty when the project names none. The bump commit takes exactly these paths.",
+          "items": {
+            "type": "string",
+            "description": "Can carry external content. One repository path holding a version."
+          }
         }
       }
     },
