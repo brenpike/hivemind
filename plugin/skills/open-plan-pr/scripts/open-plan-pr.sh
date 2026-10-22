@@ -95,8 +95,8 @@
 # --body-file=<private file>`, where <n> is the number at the end of the reused PR URL and passes
 # the identifier gate. The comment text never reaches gh as an argument. gh's stderr is relayed,
 # and a failed post stops the run with `the PR comment could not be posted`. Each run that reuses
-# a PR posts its own comment, by design: a rerun that reuses the PR posts the comment again.
-# CREATE never posts the comment.
+# a PR posts its own comment, by design: a rerun that reuses the PR posts the comment again
+# (see R4). CREATE never posts the comment.
 #
 # CREATE: when no open PR carries the pushed commit, `gh pr create --base <base> --title=<title>
 # --body-file=<private file> [--draft]`. It never passes `--head` (see R1). Its stdout must be one
@@ -204,6 +204,28 @@
 #                - stopping when the id is unknown: it adds stops, compared with main, for
 #                  remotes that work today.
 #   Linkage:     review thread r4331751745.
+#
+# RECORDED RESIDUAL R4 (one decisions comment per reusing run): REUSE above posts the comment
+# input on a reused PR in every run that reuses it, so the PR can carry the comment more than
+# once.
+#   Root cause:  each run that reuses an open PR posts its own decisions comment. A new run after
+#                an ADR-0037 decision 2 restart reuses the PR and posts again. A resume by name
+#                gets the runner result from cache (ADR-0037 decision 8), so it does not post
+#                again.
+#   Inherited:   no. The comment input is new with this script; on main, open-plan-pr had no
+#                comment input and posted nothing on a reused PR.
+#   Bounded impact: at most one redundant comment, and one notification, per new run. No wrong
+#                state, no data loss, no security effect. The PR, its branch and the pushed commit
+#                are unchanged.
+#   Rejected remediations:
+#                - a dedup marker in the comment text: anyone who can comment can forge one, and a
+#                  forged marker would suppress the run's decision record that ADR-0037 decision 3
+#                  requires.
+#                - comparing the comment text with the existing comments: it needs a paginated
+#                  read of external comment bodies plus an author check, and it changes the
+#                  `commented` contract.
+#                - an idempotency key: GitHub offers none for comments.
+#   Linkage:     local review finding 2a8f6742.
 #
 # NOT CHECKED: repo hooks, local refs, git config, gh config and auth, and the operator are
 # trusted under ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier

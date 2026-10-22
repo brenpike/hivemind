@@ -526,6 +526,34 @@ function isPullRequestText(text, keepsLines) {
   });
 }
 
+/**
+ * Reads text the CommonMark way for backtick fenced code blocks: an opening
+ * line of three or more backticks after at most three spaces, closed by a
+ * line of at least as many backticks after at most three spaces and then
+ * only spaces. Returns the lines outside every fence and whether every fence
+ * closed.
+ */
+function readFencedText(text) {
+  const outside = [];
+  let openFence = '';
+  for (const line of text.split('\n')) {
+    if (openFence === '') {
+      const opening = line.match(/^ {0,3}(`{3,})[^`]*$/);
+      if (opening === null) {
+        outside.push(line);
+      } else {
+        openFence = opening[1];
+      }
+      continue;
+    }
+    const closing = line.match(/^ {0,3}(`{3,}) *$/);
+    if (closing !== null && closing[1].length >= openFence.length) {
+      openFence = '';
+    }
+  }
+  return { outside: outside, closed: openFence === '' };
+}
+
 function gatesBlock(lines) {
   return ['Gates:', ...lines.map((line) => '- ' + line)].join('\n');
 }
@@ -2705,7 +2733,8 @@ const ROW_TESTS = {
       ['a breaking bugfix', makePlan({ classification: 'bugfix', breaking: true }), 'fix!: Add the cache layer.'],
       ['a summary whose first line is blank', makePlan({ summary: '\n  \n  Cache the reads.  \nThen the writes.' }), 'feat: Cache the reads.'],
       ['a summary with a tab and control characters', makePlan({ summary: 'Cache\tthe\u0007reads\u0085now.\r\nMore.' }), 'feat: Cache the reads now.'],
-      ['a blank summary', makePlan({ summary: '  ' }), 'feat:']
+      ['a blank summary', makePlan({ summary: '  ' }), 'feat:'],
+      ['a summary with an at-mention and a code span', makePlan({ summary: 'Ping @octocat about `x`.' }), 'feat: Ping @octocat about `x`.']
     ]) {
       test(`${label} gives the title ${JSON.stringify(title)}`, () => {
         assert.equal(main.buildPullRequestTitle(plan), title);
@@ -2736,8 +2765,46 @@ const ROW_TESTS = {
       const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
       const gates = gatesBlock(['the version bump: no bump, held on commit ' + OTHER, 'validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
       const decisions = lib.renderDecisions([{ brief: strong }, { brief: main.buildPlanAcceptanceBrief(plan) }, { brief: main.buildBumpTypeBrief(parsedBump()) }]);
-      assert.equal(inputs.body, [plan.summary, gates, 'Commits this run made:\n- ' + OTHER, 'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."', decisions].join('\n\n'));
-      assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', gates, decisions].join('\n\n'));
+      assert.equal(inputs.body, ['```\n' + plan.summary + '\n```', gates, 'Commits this run made:\n- ' + OTHER, '```\nEffects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."\n```', '```\n' + decisions + '\n```'].join('\n\n'));
+      assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', gates, '```\n' + decisions + '\n```'].join('\n\n'));
+    });
+    test('renderLiteralBlock fences the text unchanged with one backtick more than its longest backtick run, at least three', () => {
+      for (const [text, block] of [
+        ['', '```\n\n```'],
+        ['a', '```\na\n```'],
+        ['a`b', '```\na`b\n```'],
+        ['```', '````\n```\n````'],
+        ['x ```` y\n`````', '``````\nx ```` y\n`````\n``````']
+      ]) {
+        const rendered = main.renderLiteralBlock(text);
+        assert.equal(rendered, block);
+        const fenceLength = rendered.indexOf('\n');
+        assert.equal(rendered.slice(fenceLength + 1, rendered.length - fenceLength - 1), text);
+      }
+    });
+    test('an at-mention in the plan text sits only inside closed fences of the body and the comment, and the gates and commits stay outside', async () => {
+      const summary = 'Ping @octocat with ```` code ```` now.\n```';
+      const step = makeStep('STEP-001', ['src/@octocat.js'], { outcome: 'Tell @octocat it is done.', external_effects: [{ summary: 'Post to @octocat.', reversible: true }] });
+      const plan = makePlan({ summary: summary, steps: [step] });
+      const options = makeBrief().options.map((option) => ({ ...option, summary: option.summary + ' Ask @octocat.' }));
+      const question = makeBrief({ problem: 'Ask @octocat for a key.', options: options, recommendation: { option_id: 'A', strength: 'strong', why: 'As @octocat said.' } });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [question]) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const gateLines = ['Gates:', '- the version bump: no bump, held on commit ' + OTHER, '- validation: passed, held on commit ' + OTHER, '- local review: clean, held on commit ' + OTHER];
+      for (const text of [inputs.body, inputs.comment]) {
+        const fenced = readFencedText(text);
+        assert.ok(fenced.closed, text);
+        assert.ok(fenced.outside.every((line) => !line.includes('@octocat')), JSON.stringify(fenced.outside));
+        gateLines.forEach((line) => assert.ok(fenced.outside.includes(line), line));
+        for (const shown of ['Ask @octocat for a key.', 'Hash the path. Ask @octocat.', 'As @octocat said.']) {
+          assert.ok(text.includes(shown), shown);
+        }
+      }
+      assert.ok(inputs.body.startsWith('`````\n' + summary + '\n`````\n\n'), inputs.body);
+      assert.ok(inputs.body.includes('"Post to @octocat."'), inputs.body);
+      const bodyOutside = readFencedText(inputs.body).outside;
+      ['Commits this run made:', '- ' + OTHER].forEach((line) => assert.ok(bodyOutside.includes(line), line));
     });
     test('a bump type, a validation not run and a local review not configured are each named', async () => {
       const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
@@ -2782,7 +2849,7 @@ const ROW_TESTS = {
       for (const text of [inputs.body, inputs.comment]) {
         assert.ok(isPullRequestText(text, true), JSON.stringify(text));
       }
-      assert.ok(inputs.body.startsWith('Cache  the\treads. \nThen  the  writes. \n\n'), JSON.stringify(inputs.body));
+      assert.ok(inputs.body.startsWith('```\nCache  the\treads. \nThen  the  writes. \n```\n\n'), JSON.stringify(inputs.body));
       assert.ok(inputs.comment.includes('Pick  a key. [31m'), inputs.comment);
     });
     test('decisions go compact when the full form would pass maxPullRequestTextLength()', async () => {
@@ -2794,7 +2861,7 @@ const ROW_TESTS = {
       const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
       const compact = lib.renderDecisionsCompact([{ brief: question }, { brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }]);
       for (const text of [inputs.body, inputs.comment]) {
-        assert.ok(text.endsWith('\n\n' + compact), text.slice(-400));
+        assert.ok(text.endsWith('\n\n```\n' + compact + '\n```'), text.slice(-400));
         assert.ok(text.length <= 60000 && !text.includes('S'.repeat(100)));
       }
     });
