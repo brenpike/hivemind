@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Fixed
+
+## [7.0.0] - 2026-10-22
+
+### Added
+
 - Docs: ADR-0010 amendment 2026-10-22, and the ADR-0037 PR8 live smoke records.
 
 ### Changed
