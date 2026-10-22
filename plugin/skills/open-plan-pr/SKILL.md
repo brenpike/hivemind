@@ -47,6 +47,7 @@ The caller may pass these. When one is absent, the script works as it does witho
 - `title`: the PR title. When it is given, step 5 writes it verbatim as the `title` field.
 - `body`: the PR body. When it is given, step 5 writes it verbatim as the `body` field.
 - `comment`: text for the open PR the script reuses. When it is given, step 5 writes it verbatim as the `comment` field. The script posts it only on a reused PR; a created PR gets no comment.
+- `draft`: `true` or `false`, the caller's choice of a draft PR. When it is given, step 5 writes it as the `draft` field, in place of judging whether the user asked for a draft PR.
 
 When `expect_commit` is given, the caller has already checked validation and version metadata on that commit, so steps 3 and 4 take the caller's check.
 
@@ -74,7 +75,7 @@ When `expect_commit` is provided, validate it as a commit SHA against the identi
    }
    ```
 
-   Set `draft` to `true` only when the user asked for a draft PR; otherwise leave it out. Add a `"comment": "<comment>"` field only when `comment` is given. The script header lists the rule for each field. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
+   When `draft` is given, write it as the `draft` field. Otherwise set `draft` to `true` only when the user asked for a draft PR, and leave it out when they did not. Add a `"comment": "<comment>"` field only when `comment` is given. The script header lists the rule for each field. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
    Transport Degradation Is a Hard Stop).
 6. **Final Bash tool call.** Run the PR script, where each `<allowlist-validated-...>` placeholder is the input value that passed its gate above and `<token>` is the token from step 5. Pass `--remote` only when `push_remote` is provided, and `--expect-commit` only when `expect_commit` is provided:
 

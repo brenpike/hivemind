@@ -13,11 +13,14 @@
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only
  *          reads it: a string (the request), an object {request, trunk?,
- *          references?, local_review?, answers?, reply?}, or undefined.
- *          request, trunk, references and local_review come from the launch
- *          args only. local_review is true or false: absent means true, so
- *          the local review gate is configured unless the launch turns it
- *          off, and any other value stops the run. answers and reply
+ *          references?, local_review?, draft?, answers?, reply?}, or
+ *          undefined. request, trunk, references, local_review and draft
+ *          come from the launch args only. local_review is true or false:
+ *          absent means true, so the local review gate is configured unless
+ *          the launch turns it off, and any other value stops the run. draft
+ *          is true or false: absent means false, so the pull request opens
+ *          ready for review unless the launch asks for a draft, and any
+ *          other value stops the run. answers and reply
  *          follow the result.js pause contract: answers['round-N'] holds the
  *          reply to round N, and reply answers the first round with no
  *          stored answer, only when answers is present. An autonomy key is
@@ -84,8 +87,8 @@
  *   PR      once every configured gate held on one commit H, a haiku
  *           runner invokes hivemind:open-plan-pr once under the push grant
  *           and the git-script sentence. Its inputs block holds only head,
- *           base, expect_commit H, and the title, body and comment the code
- *           builds. This runner is the only push the workflow makes, so
+ *           base, expect_commit H, the title, body and comment the code
+ *           builds, and draft from the launch. This runner is the only push the workflow makes, so
  *           every push carries expect_commit. Its stdout parses with
  *           openPlanPrRoutingSpec(), head_ref_oid must equal H, and the run
  *           finishes complete with pr. The body is the plan summary and the
@@ -280,6 +283,7 @@ function contractRows() {
     { id: 'SD-28', step: 'Gate labels', check: 'gateLabel', rule: 'Gate step labels come only from the pass, the gate step and its run count (bump-type-P-N, bump-P-N, bump-commit-P-N, validate-P-N, validate-commit-P-N, fix-P-N, fix-commit-P-N, review-P-N, review-commit-P-N), so every label is unique and a run again replays every prompt byte for byte.' },
     { id: 'SD-29', step: 'Decisions', check: 'resolveDecision', rule: 'Every decide() kind main.js uses is a hard stop or a row of the autonomy table whose resolved_at names a standard-delivery site.' },
     { id: 'SD-30', step: 'Launch', check: 'readLocalReview', rule: 'The local_review launch arg is absent, true or false; absent means configured, and any other value stops the run before any agent call.' },
+    { id: 'SD-48', step: 'Launch', check: 'readDraft', rule: 'The draft launch arg is absent, true or false; absent means false, any other value stops the run before any agent call, and the value is the draft field of the open-plan-pr inputs block.' },
     { id: 'SD-31', step: 'Gates', check: 'configuredGateIds', rule: 'With local_review false the local review gate is not configured: it never runs, never stops the run, never counts as held, and every message after the last wave lists it as a gate that did not run.' },
     { id: 'SD-32', step: 'Validation to local review', check: 'buildReviewPrompt', rule: 'Once validation holds, hivemind:local-reviewer gets base, working_branch, trunk and max_iterations 10 in a JSON inputs block under the boundary sentence, with no request text, label review-P-N and phase Review.' },
     { id: 'SD-33', step: 'Review result', check: 'describeReviewProblem', rule: 'The review result fits REVIEW_SCHEMA, whose fields are the local-reviewer Output Contract fields with each Codex-derived text field labelled as able to carry external content, and it carries every field its exit_reason names; any other result stops the run blocked.' },
@@ -291,7 +295,7 @@ function contractRows() {
     { id: 'SD-39', step: 'Local review to planning', check: 'requestReviewReplan', rule: 'planner-escalation and root-cluster-suspected resolve through decide() kinds planner_escalation_routing and root_cluster_routing; an ask ends the run under stop reason before_pr, and a take starts a new pass through the facts step with the review result as replan data, counted against maxReplans().' },
     { id: 'SD-40', step: 'Remediation plan', check: 'resolvePlanAcceptance', rule: 'Once local review sent the run back to planning, every later plan acceptance resolves through decide() kind remediation_plan_acceptance, which always asks, through the pause and revise path.' },
     { id: 'SD-41', step: 'Gates', check: 'resolveGateRerun', rule: 'A commit the reviewer makes sends the run back through the version bump and validation, and a commit made after local review held sends it back through local review as well.' },
-    { id: 'SD-42', step: 'Gates to the PR', check: 'buildPullRequestPrompt', rule: 'Once every configured gate held on one commit H, a haiku runner invokes hivemind:open-plan-pr once, with label pr-P and phase PR, under the push grant sentence and the git-script sentence, with a JSON inputs block of only head (the plan branch), base (the plan base), expect_commit H, title, body and comment; it is the only push the workflow makes, so every push carries expect_commit.' },
+    { id: 'SD-42', step: 'Gates to the PR', check: 'buildPullRequestPrompt', rule: 'Once every configured gate held on one commit H, a haiku runner invokes hivemind:open-plan-pr once, with label pr-P and phase PR, under the push grant sentence and the git-script sentence, with a JSON inputs block of only head (the plan branch), base (the plan base), expect_commit H, title, body, comment and draft (the draft launch arg); it is the only push the workflow makes, so every push carries expect_commit.' },
     { id: 'SD-43', step: 'Push grant', check: 'pushGrantSentence', rule: 'The push grant sentence grants one push of the working branch and one pull request opened or reused, made only by the hivemind:open-plan-pr script, and no commit, matching the delegated-implementer grant of safety-rails.md and the push sentence of drone.md.' },
     { id: 'SD-44', step: 'PR title', check: 'buildPullRequestTitle', rule: 'The title is one line with no control character and at most maxTitleLength() characters, plain text with no Markdown wrapper, built from the plan commit type, the breaking marker and the first line of the plan summary.' },
     { id: 'SD-45', step: 'PR body and comment', check: 'buildPullRequestTexts', rule: 'The body holds the plan summary and the run record, and the comment its lead and the run record, where the run record is every part buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate with its result and the commit it held on or not configured for this run, and every taken decision; neither carries a control character other than newline and tab or any reviewer text, each of the summary, the reversible effects and the decisions sits in its own fenced block whose fence is one backtick longer than its longest backtick run, at least three, the gates, the commits and the comment lead stay plain, the decisions go compact when a text would pass maxPullRequestTextLength() characters, and a text still too long stops the run blocked naming its size before any push.' },
@@ -746,7 +750,11 @@ function readDeliveryLaunch(rawArgs) {
   if (reviewInput.problem !== undefined) {
     return reviewInput;
   }
-  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.localReview };
+  const draftInput = readDraft(argsObject);
+  if (draftInput.problem !== undefined) {
+    return draftInput;
+  }
+  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.localReview, draft: draftInput.draft };
 }
 
 function readLocalReview(argsObject) {
@@ -759,12 +767,23 @@ function readLocalReview(argsObject) {
   return { problem: 'The local_review launch arg must be true or false, so ' + describeRunNoun(RUN_NOUN) + ' did not start.' };
 }
 
+function readDraft(argsObject) {
+  if (argsObject.draft === undefined) {
+    return { draft: false };
+  }
+  if (argsObject.draft === true || argsObject.draft === false) {
+    return { draft: argsObject.draft };
+  }
+  return { problem: 'The draft launch arg must be true or false, so ' + describeRunNoun(RUN_NOUN) + ' did not start.' };
+}
+
 function createRunState(launch) {
   return {
     request: launch.request,
     trunk: launch.trunk,
     references: launch.references,
     localReview: launch.localReview,
+    draft: launch.draft,
     remediation: false,
     level: resolveLevel(undefined, AUTONOMY_TABLE),
     storedAnswers: readStoredAnswers(launch.argsObject),
@@ -2082,7 +2101,7 @@ function buildPullRequestTexts(run, plan, gates) {
   return { title: buildPullRequestTitle(plan), body: body.text, comment: comment.text };
 }
 
-function buildPullRequestPrompt(plan, head, texts) {
+function buildPullRequestPrompt(plan, head, texts, draft) {
   return [
     'Invoke the hivemind:open-plan-pr skill once, with the inputs in the inputs block below, to push the working branch and open its pull request or reuse the open one.',
     pushGrantSentence(),
@@ -2091,7 +2110,7 @@ function buildPullRequestPrompt(plan, head, texts) {
     ...relayInstructionLines(),
     'Make no change yourself beyond the skill run, and make no commit.',
     '',
-    formatDataBlock('inputs', { head: plan.branch, base: plan.base, expect_commit: head, title: texts.title, body: texts.body, comment: texts.comment })
+    formatDataBlock('inputs', { head: plan.branch, base: plan.base, expect_commit: head, title: texts.title, body: texts.body, comment: texts.comment, draft: draft })
   ].join('\n');
 }
 
@@ -2119,7 +2138,7 @@ async function runPullRequestStep(run, plan, gates) {
     return { result: finishDeliveryBlocked(texts.problem, run) };
   }
   phase('PR');
-  const relay = await agent(buildPullRequestPrompt(plan, run.head, texts), runnerOptions('pr-' + run.pass, 'PR'));
+  const relay = await agent(buildPullRequestPrompt(plan, run.head, texts, run.draft), runnerOptions('pr-' + run.pass, 'PR'));
   const checked = checkPullRequestRelay(relay, run.head);
   if (checked.problem !== undefined) {
     return { result: finishDeliveryBlocked(checked.problem, run) };

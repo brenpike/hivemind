@@ -556,7 +556,7 @@ function realPrRunner(scratch) {
     const inputs = readDataBlock(prompt, 'inputs');
     const inputsPath = '.hivemind/pr-inputs-test.json';
     mkdirSync(join(scratch.repo, '.hivemind'), { recursive: true });
-    writeFileSync(join(scratch.repo, inputsPath), JSON.stringify({ title: inputs.title, body: inputs.body, comment: inputs.comment }));
+    writeFileSync(join(scratch.repo, inputsPath), JSON.stringify({ title: inputs.title, body: inputs.body, comment: inputs.comment, draft: inputs.draft }));
     return runScriptIn(scratch, openPlanPrPath, ['--head', inputs.head, '--base', inputs.base, '--expect-commit', inputs.expect_commit, '--inputs', inputsPath]);
   };
 }
@@ -2345,6 +2345,38 @@ const ROW_TESTS = {
       assert.ok(mainSource.indexOf('readLocalReview(argsObject)') > mainSource.indexOf('isGitIdentifier(launchInputs.trunk)'));
     });
   },
+  'SD-48': () => {
+    for (const value of ['yes', 'true', 1, 0, null, {}]) {
+      test(`draft ${JSON.stringify(value)} blocks with no agent call`, async () => {
+        const run = await runWorkflow({ ...LAUNCH, draft: value }, happyResults());
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The draft launch arg must be true or false, so the delivery did not start.' });
+        assert.deepEqual(run.calls, []);
+      });
+    }
+    for (const [label, args, draft] of [['an absent draft', LAUNCH, false], ['a string launch', REQUEST, false], ['draft false', { ...LAUNCH, draft: false }, false], ['draft true', { ...LAUNCH, draft: true }, true]]) {
+      test(`${label} puts draft ${draft} in the PR inputs block`, async () => {
+        const run = await runWorkflow(args, happyResults());
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').draft, draft);
+      });
+    }
+    test('the launch check is readDraft, after readLocalReview', () => {
+      assert.deepEqual({ ...main.readDraft({}) }, { draft: false });
+      assert.deepEqual({ ...main.readDraft({ draft: true }) }, { draft: true });
+      assert.ok(mainSource.indexOf('readDraft(argsObject)') > mainSource.indexOf('readLocalReview(argsObject)'));
+    });
+    test('real open-plan-pr.sh opens a draft PR for draft true and a ready PR for an absent draft', async () => {
+      for (const [args, wantDraft] of [[{ ...LAUNCH, draft: true }, true], [LAUNCH, false]]) {
+        const scratch = makeScratchRepo();
+        const origin = addBareOrigin(scratch);
+        const logDir = writeCreatePathGh(scratch, origin);
+        const run = await runWorkflow(args, realResults(scratch, { 'plan-1': planResult(makePlan()), 'pr-1': realPrRunner(scratch) }));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        const createArgs = readFileSync(join(logDir, 'create.args'), 'utf8').split('\n');
+        assert.equal(createArgs.includes('--draft'), wantDraft, JSON.stringify(createArgs));
+      }
+    });
+  },
   'SD-31': () => {
     const notConfigured = 'Gates that did not run:\n- local review: the run was launched with local_review false, so the gate is not configured and does not count as held.';
     test('with local_review false no review runs, the gate does not count as held, and it is listed', async () => {
@@ -2773,7 +2805,7 @@ const ROW_TESTS = {
     });
   },
   'SD-42': () => {
-    test('once every gate held on H, the PR runner invokes open-plan-pr with only head, base, expect_commit H, title, body and comment', async () => {
+    test('once every gate held on H, the PR runner invokes open-plan-pr with only head, base, expect_commit H, title, body, comment and draft', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.equal(labelsOf(run).at(-1), 'pr-1');
@@ -2790,7 +2822,7 @@ const ROW_TESTS = {
       assert.equal(call.opts.phase, 'PR');
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'stdout', 'stderr']);
       const inputs = readDataBlock(call.prompt, 'inputs');
-      assert.deepEqual(Object.keys(inputs), ['head', 'base', 'expect_commit', 'title', 'body', 'comment']);
+      assert.deepEqual(Object.keys(inputs), ['head', 'base', 'expect_commit', 'title', 'body', 'comment', 'draft']);
       assert.deepEqual({ head: inputs.head, base: inputs.base, expect_commit: inputs.expect_commit }, { head: 'feature/cache', base: 'main', expect_commit: OTHER });
       const outside = withoutDataBlock(call.prompt, 'inputs');
       assert.ok(!outside.includes('feature/cache') && !outside.includes(OTHER), outside);

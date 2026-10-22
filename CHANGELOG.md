@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `plan-schema.json` gains `versioning.artifact_files`.
 - The `gate_rerun` row in the decision-autonomy table.
 - open-plan-pr takes an optional `comment`. It is posted only on a reused PR.
+- A `draft` launch arg on the draft standard-delivery workflow, passed to open-plan-pr, which takes an optional `draft` input that sets the draft field when given. Contract row SD-48.
 - Result `whole` blocks and `exact` ask entries, so the exact text of an irreversible effect is never cut from a pause.
 
 ### Changed
