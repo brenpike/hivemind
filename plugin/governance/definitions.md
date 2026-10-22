@@ -46,7 +46,7 @@ A failure is transient if and only if its root cause is: HTTP 5xx, HTTP 429, TCP
 
 ## Validation Procedure
 
-The OVERLORD / run-level gate, executed once at the `validate` workflow state. Execute every command listed in the project's `CLAUDE.md` validation section. No duration cap. If a command cannot run, return Blocked naming the command and reason. If `CLAUDE.md` lists no validation commands, validation is "Not run" and the report must say so.
+The OVERLORD / run-level gate, executed once at the `validate` workflow state. On the script engine, the workflow's validate step delegates this procedure to a drone as its whole task, once per gate run (ADR-0037 invariant 2), and that run is this procedure, not a Worker Self-Check. Execute every command listed in the project's `CLAUDE.md` validation section. No duration cap. If a command cannot run, return Blocked naming the command and reason. If `CLAUDE.md` lists no validation commands, validation is "Not run" and the report must say so.
 
 ## Worker Self-Check
 

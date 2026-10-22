@@ -51,6 +51,12 @@ describe('autonomy table', () => {
       assert.deepEqual(verdict, { action: 'ask', reason: 'hard_stop' }, 'external_effect at ' + level);
     }
   });
+  test('gate_rerun takes at high and balanced, asks at low, and is resolved at the gates step', () => {
+    const row = table.rows.find((entry) => entry.kind === 'gate_rerun');
+    assert.ok(row !== undefined, 'gate_rerun is not a row');
+    assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface']);
+    assert.deepEqual(row.resolved_at, ['standard-delivery.gates']);
+  });
   test('row kinds and hard stop names are unique and disjoint', () => {
     const names = [...table.rows.map((row) => row.kind), ...table.hard_stops.map((stop) => stop.hard_stop)];
     assert.ok(names.every((name) => typeof name === 'string' && name !== ''));

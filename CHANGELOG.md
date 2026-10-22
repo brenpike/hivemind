@@ -12,6 +12,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [6.7.0] - 2026-10-22
+
+### Added
+
+- The delivery tail on the draft standard-delivery workflow: a version bump set from the fetched trunk commit, validation with bounded fix rounds, a local review gate with a route table and the `local_review` launch arg, and PR open or reuse. Taken decisions and gates go in the PR body, or in a PR comment on a reused PR. The gate loop reruns with `gate_rerun`, and the result carries `pr`. The contract table adds rows SD-20 to SD-47.
+- gather-facts emits a `trunk_commit` routing line.
+- `plan-schema.json` gains `versioning.artifact_files`.
+- The `gate_rerun` row in the decision-autonomy table.
+- open-plan-pr takes an optional `comment`. It is posted only on a reused PR.
+- A `draft` launch arg on the draft standard-delivery workflow, passed to open-plan-pr, which takes an optional `draft` input that sets the draft field when given. Contract row SD-48.
+- Result `whole` blocks and `exact` ask entries, so the exact text of an irreversible effect is never cut from a pause.
+
+### Changed
+
+- ADR-0037 decision 26 is amended: the bump is set from the fetched trunk, not the merge-base.
+- The delegated-implementer grant covers a push, only through open-plan-pr or push-branch.
+- `plugin/agents/drone.md` gains a validation fix task clause.
+- The Validation Procedure in `definitions.md` names the script-engine validate step.
+- The bump-type `base` may be a commit id.
+- `analysis-only` is rebuilt and behavior is unchanged.
+- `validate.sh` routes the new paths.
+- `plan-schema.json` marks each repository path field, and the standard-delivery plan check refuses a marked path that the molt.sh files rule refuses, before any worker runs.
+- On the draft standard-delivery workflow, a commit step that commits nothing but reports a moved head records the range from the previous head, so commits made outside the commit runner, such as local review fixes, are listed in the run record.
+
 ## [6.6.0] - 2026-10-21
 
 ### Added

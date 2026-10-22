@@ -3,8 +3,10 @@
  *
  * Inputs
  *   renderQuestions(asks, taken)
- *     asks   non-empty array of {brief, reason}. brief is a decision brief;
- *            reason is the ask reason decide() returned for it.
+ *     asks   non-empty array of {brief, reason, exact}. brief is a decision
+ *            brief; reason is the ask reason decide() returned for it.
+ *            exact is optional and set by workflow code only: true when the
+ *            user must see the verbatim text of the brief to answer.
  *     taken  array of {brief} for decisions decide() took. May be empty.
  *   renderDecisions(taken)
  *     taken  as above.
@@ -20,8 +22,8 @@
  *   renderOpenQuestions(open, stopReason)
  *     open        non-empty array of {brief} for questions still unanswered
  *                 when the run stops asking. Entries of asks fit.
- *     stopReason  why the run stopped asking: 'pause_limit' (the default) or
- *                 'reply_size'.
+ *     stopReason  why the run stopped asking: 'pause_limit' (the default),
+ *                 'reply_size', 'exact_text_size' or 'before_pr'.
  *
  * Outputs
  *   renderQuestions  one message. Each ask becomes a question labelled Q1..Qn
@@ -38,7 +40,8 @@
  *     position, or the empty string when taken is empty.
  *   renderQuestionsCompact  the shorter form of renderQuestions, with the
  *     same intro line, Q1..Qn labels and last line. Each question shows only
- *     its problem and the recommendation with its why. Taken decisions
+ *     its problem and the recommendation with its why, and for an exact
+ *     entry also the "Exact text:" lines of the full form. Taken decisions
  *     follow as renderDecisionsCompact, with the same line saying the user
  *     can change them in the same reply.
  *   renderDecisionsCompact  the "Decided for you" block with one line per
@@ -48,11 +51,14 @@
  *   questionLabel    the label renderQuestions, renderQuestionsCompact and
  *     renderOpenQuestions show by position: 'Q' + (index + 1).
  *   renderOpenQuestions  one block: a line saying why the run stopped
- *     asking, either after pauseLimit() rounds ('pause_limit') or because
- *     the replies so far are too long to carry into another round
- *     ('reply_size'), then one line per question labelled Q1..Qn by
- *     position, with its problem and the option the report assumes, or a
- *     line saying there is no recommendation.
+ *     asking: after pauseLimit() rounds ('pause_limit'), because the
+ *     replies so far are too long to carry into another round
+ *     ('reply_size'), because the exact text of a question is too long to
+ *     show in full ('exact_text_size'), or because the run stopped before
+ *     the pull request for questions that need the user's answer, so the
+ *     user runs the request again with it ('before_pr'). Then one line per
+ *     question labelled Q1..Qn by position, with its problem and the option
+ *     the report assumes, or a line saying there is no recommendation.
  *
  * Invariants
  *   Text comes from brief fields and fixed wording only. brief.id and
@@ -173,6 +179,10 @@ function renderStopIntro(stopReason) {
       return 'I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:';
     case 'reply_size':
       return 'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
+    case 'exact_text_size':
+      return 'I stopped asking because the exact text of a question is too long to show you in full. These are still open:';
+    case 'before_pr':
+      return 'I stopped before the pull request because these questions need your answer. Run the request again with your answer. These are still open:';
     default:
       throw new Error('renderOpenQuestions: no intro for stop reason ' + JSON.stringify(stopReason));
   }
@@ -206,10 +216,14 @@ function renderQuestion(entry, index) {
 
 function renderCompactQuestion(entry, index) {
   const brief = readField(entry, 'brief');
-  return [
+  const lines = [
     questionLabel(index) + '. ' + renderText(readField(brief, 'problem')),
     renderRecommendation(readField(brief, 'recommendation'))
-  ].join('\n');
+  ];
+  if (readField(entry, 'exact') === true) {
+    lines.push(...renderVerbatim(readField(brief, 'verbatim')));
+  }
+  return lines.join('\n');
 }
 
 function renderSeriousness(criticality) {

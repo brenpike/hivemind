@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Plan",
-  "description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md. It reaches a shell command only as one argument that first passes the identifier gate there (Shell Identifier Discipline), or through an inputs file the script reads as data (Inert Inputs-File Navigator Pattern), and is never spliced into command text.",
+  "description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md. It reaches a shell command only as one argument that first passes the identifier gate there (Shell Identifier Discipline), or through an inputs file the script reads as data (Inert Inputs-File Navigator Pattern), and is never spliced into command text. A field whose description starts with \"Can carry external content. Repository path.\" holds one path relative to the top of the repository. The plan check refuses the plan, before the branch step and any later agent call, when such a path is empty, starts with /, has an empty, ., .. or .git (any case) part, or holds a control character, as the files rule of ${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh does.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -65,9 +65,10 @@
       "additionalProperties": false,
       "required": [
         "bump_trigger",
-        "no_bump_match"
+        "no_bump_match",
+        "artifact_files"
       ],
-      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination). The bump step passes them to bump-type unchanged.",
+      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The bump step passes the two answers to bump-type unchanged.",
       "properties": {
         "bump_trigger": {
           "type": "string",
@@ -84,6 +85,14 @@
             "no"
           ],
           "description": "yes when the change matches one or more bullets of the list of changes that need no bump by default. Passed to bump-type as --no-bump-match."
+        },
+        "artifact_files": {
+          "type": "array",
+          "description": "Each repository path holding a version the bump step sets, as the project's versioning docs name it. Empty when the project names none. The bump commit takes exactly these paths.",
+          "items": {
+            "type": "string",
+            "description": "Can carry external content. Repository path. One file that holds a version."
+          }
         }
       }
     },
@@ -130,7 +139,7 @@
             "description": "Every repository path the step may create or edit. The wave's commit takes exactly these paths.",
             "items": {
               "type": "string",
-              "description": "Can carry external content. One repository path."
+              "description": "Can carry external content. Repository path. One file the step may create or edit."
             }
           },
           "outcome": {

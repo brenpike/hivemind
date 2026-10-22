@@ -94,6 +94,9 @@
 #   trunk_freshness  as in (3)
 #   trunk_ahead      count
 #   trunk_behind     count
+#   trunk_commit     the trunk commit the history is read against, as in (5): the remote-tracking
+#                    trunk (after fetch_failed, its last fetched value), else the local trunk,
+#                    else none
 #   cut              none, or a comma list of pull_requests,references
 #   external_texts   count N of external texts in the facts file; each has a text_id, t1 to tN in
 #                    file order (gather-facts.jq, TEXT IDS). 0 means nothing to scan

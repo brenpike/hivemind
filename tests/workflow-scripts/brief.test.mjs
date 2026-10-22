@@ -359,6 +359,22 @@ describe('open questions stop reasons', () => {
       '  Q1. FIRST_OPEN The report assumes option A.'
     ].join('\n'));
   });
+  test('exact_text_size says the exact text of a question is too long to show in full', () => {
+    assert.equal(lib.renderOpenQuestions(open, 'exact_text_size'), [
+      'I stopped asking because the exact text of a question is too long to show you in full. These are still open:',
+      '  Q1. FIRST_OPEN The report assumes option A.'
+    ].join('\n'));
+  });
+  test('before_pr says the run stopped before the pull request and asks to run the request again with the answer', () => {
+    assert.equal(lib.renderOpenQuestions(open, 'before_pr'), [
+      'I stopped before the pull request because these questions need your answer. Run the request again with your answer. These are still open:',
+      '  Q1. FIRST_OPEN The report assumes option A.'
+    ].join('\n'));
+  });
+  test('every stop reason has its own intro', () => {
+    const intros = ['pause_limit', 'reply_size', 'exact_text_size', 'before_pr'].map((stopReason) => lib.renderOpenQuestions(open, stopReason).split('\n')[0]);
+    assert.equal(new Set(intros).size, intros.length);
+  });
   for (const stopReason of ['nonsense', null, '']) {
     test(`stop reason ${JSON.stringify(stopReason)} throws`, () => {
       assert.throws(() => lib.renderOpenQuestions(open, stopReason), /renderOpenQuestions: no intro for stop reason/);
@@ -395,5 +411,47 @@ describe('questionLabel', () => {
     entries.forEach((entry, index) => {
       assert.ok(text.includes(`  ${lib.questionLabel(index)}. PROBLEM_${index}`), `label ${index}`);
     });
+  });
+});
+
+describe('exact entries', () => {
+  const plain = { brief: makeBrief({ problem: 'PLAIN_PROBLEM', verbatim: 'PLAIN_VERBATIM' }), reason: 'gate_irreversible' };
+  const exact = { brief: makeBrief({ problem: 'EXACT_PROBLEM', verbatim: 'EXACT_VERBATIM' }), reason: 'hard_stop', exact: true };
+  test('the compact form keeps the Exact text lines of an exact entry', () => {
+    assert.equal(lib.renderQuestionsCompact([exact], []), [
+      'I need your answer on 1 question before I go on.',
+      '',
+      'Q1. EXACT_PROBLEM',
+      'Recommendation: option A (weak). Why: WHY_TEXT',
+      'Exact text:',
+      'EXACT_VERBATIM',
+      '',
+      REPLY_LINE
+    ].join('\n'));
+  });
+  test('only exact entries keep their Exact text lines', () => {
+    const text = lib.renderQuestionsCompact([plain, exact, plain], []);
+    assert.equal(text.split('\n').filter((line) => line === 'Exact text:').length, 1);
+    assert.ok(!text.includes('PLAIN_VERBATIM'));
+    assertInOrder(text, ['Q1. PLAIN_PROBLEM', 'Q2. EXACT_PROBLEM', 'Exact text:', 'EXACT_VERBATIM', 'Q3. PLAIN_PROBLEM']);
+  });
+  test('an exact verbatim is shown exactly as given, em dash included', () => {
+    const verbatim = `drop the table ${EM_DASH} for good | now`;
+    const text = lib.renderQuestionsCompact([{ ...exact, brief: makeBrief({ verbatim }) }], []);
+    assert.ok(text.split('\n').includes(verbatim));
+  });
+  test('an exact entry without verbatim has no Exact text line', () => {
+    const brief = makeBrief();
+    delete brief.verbatim;
+    assert.doesNotMatch(lib.renderQuestionsCompact([{ ...exact, brief }], []), /Exact text:/);
+  });
+  for (const flag of [false, 'true', 1, null]) {
+    test(`exact ${JSON.stringify(flag)} renders as a plain entry`, () => {
+      const entry = { ...exact, exact: flag };
+      assert.equal(lib.renderQuestionsCompact([entry], []), lib.renderQuestionsCompact([{ brief: entry.brief, reason: entry.reason }], []));
+    });
+  }
+  test('the full form is the same with or without exact', () => {
+    assert.equal(lib.renderQuestions([plain, exact], []), lib.renderQuestions([plain, { brief: exact.brief, reason: exact.reason }], []));
   });
 });

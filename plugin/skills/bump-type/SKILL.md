@@ -36,7 +36,8 @@ The caller keeps ONLY two judgments, both defined in
 The caller resolves and passes these; the skill does not invent them.
 
 - `base`: the resolved base branch per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md`
-  (Framework Defaults). Passed as a plain ref name; revision-suffix syntax is rejected.
+  (Framework Defaults). Passed as a plain ref name or a full commit id; revision-suffix syntax
+  is rejected.
 - `bump_trigger`: `yes` or `no` — the Bump Trigger judgment above.
 - `no_bump_match`: `yes` or `no` — the "No bump is required by default" judgment above.
 

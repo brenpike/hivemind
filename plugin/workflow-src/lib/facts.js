@@ -26,8 +26,8 @@
  *       plugin/skills/gather-facts/scripts/gather-facts.sh. Its keys are
  *       the keys of that script's OUTPUT header in its order: facts_file,
  *       facts_lines, head_state, branch, head, trunk, trunk_freshness,
- *       trunk_ahead, trunk_behind, cut, external_texts, delivery,
- *       delivery_stops. Every key is required but branch. Every pattern is
+ *       trunk_ahead, trunk_behind, trunk_commit, cut, external_texts,
+ *       delivery, delivery_stops. Every key is required but branch. Every pattern is
  *       anchored at both ends and has no flags:
  *         facts_file  .hivemind/facts/facts-<UTC>-<random>.json as the
  *                     script names it: 8 digits, T, 6 digits, Z, a dash
@@ -35,6 +35,7 @@
  *         facts_lines a positive count with no leading zero.
  *         branch, trunk  gitIdentifierPattern() (identifier.js).
  *         head        40 or 64 lowercase hex digits.
+ *         trunk_commit  40 or 64 lowercase hex digits, or none.
  *         trunk_ahead, trunk_behind, external_texts  a count, 0 or one
  *                     with no leading zero.
  *         head_state, trunk_freshness, delivery  one value of its enum.
@@ -64,6 +65,7 @@
  *         head_state is unsafe_name exactly when delivery_stops lists
  *         branch_name_unsafe;
  *         trunk_freshness no_trunk comes with history_unavailable;
+ *         trunk_commit none comes with history_unavailable;
  *         trunk_ahead and trunk_behind fit trunk_freshness: both 0 but for
  *         ahead (ahead only), behind (behind only) and diverged (both);
  *         no cut or delivery_stops entry repeats;
@@ -200,6 +202,7 @@ function gatherFactsRoutingSpec() {
     trunk_freshness: { pattern: wholeFactsPattern(factsEnumSource(factsTrunkFreshnessValues())), required: true },
     trunk_ahead: { pattern: count, required: true },
     trunk_behind: { pattern: count, required: true },
+    trunk_commit: { pattern: wholeFactsPattern('none|[0-9a-f]{40}|[0-9a-f]{64}'), required: true },
     cut: { pattern: wholeFactsPattern(factsListSource(factsCutFields())), required: true },
     external_texts: { pattern: count, required: true },
     delivery: { pattern: wholeFactsPattern(factsEnumSource(factsDeliveryValues())), required: true },
@@ -275,6 +278,7 @@ function isConsistentFactsRelay(values, trunk) {
     && (values.cut !== 'none') === hasFactsStop(stops, 'cut_fields')
     && (values.head_state === 'unsafe_name') === hasFactsStop(stops, 'branch_name_unsafe')
     && (values.trunk_freshness !== 'no_trunk' || hasFactsStop(stops, 'history_unavailable'))
+    && (values.trunk_commit !== 'none' || hasFactsStop(stops, 'history_unavailable'))
     && matchesFreshnessCounts(values.trunk_freshness, values.trunk_ahead, values.trunk_behind);
 }
 

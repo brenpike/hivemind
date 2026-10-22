@@ -7,6 +7,7 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
 
 const HARNESS_CUT = 8000;
+const PULL_REQUEST = { url: 'https://github.com/brenpike/hivemind/pull/409', head_ref_oid: 'a'.repeat(40), created: true };
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 const ALPHABETS = {
   plain: 'abcdefghijklmnopqrstuvwxyz ABCDEFG 0123456789.,;:-',
@@ -122,9 +123,10 @@ describe('result contract', () => {
   test('resultFields covers exactly the fields both shapes use', () => {
     const paused = lib.pauseForUser({ resumeArgs: {}, blocks: [{ text: 'm' }] });
     const finished = lib.finish({ outcome: 'complete', blocks: [{ text: 'm' }] });
-    const used = new Set([...Object.keys(paused), ...Object.keys(finished)]);
+    const finishedWithPr = lib.finish({ outcome: 'complete', blocks: [{ text: 'm' }], pr: PULL_REQUEST });
+    const used = new Set([...Object.keys(paused), ...Object.keys(finished), ...Object.keys(finishedWithPr)]);
     assert.deepEqual([...lib.resultFields()].sort(), [...used].sort());
-    assert.deepEqual([...lib.resultFields()], ['needs_user', 'outcome', 'resume_args', 'message']);
+    assert.deepEqual([...lib.resultFields()], ['needs_user', 'outcome', 'resume_args', 'pr', 'message']);
   });
   test('the reply goes under the args key reply, which is not a result field', () => {
     assert.equal(lib.replyField(), 'reply');
@@ -307,5 +309,177 @@ describe('canCarry', () => {
     assert.equal(lib.canCarry({ request: '<'.repeat(Math.floor((half - baseLength) / 4) + 1) }), false);
     assertFitted(lib.pauseForUser({ resumeArgs: atBoundary, blocks: [{ text: 'z'.repeat(9000), shorten: true }] }));
     assert.throws(() => lib.pauseForUser({ resumeArgs: overBoundary, blocks: [{ text: 'Q?' }] }), /too long to carry/);
+  });
+});
+
+describe('pull request', () => {
+  test('finish carries pr between outcome and message', () => {
+    for (const pr of [PULL_REQUEST, { url: 'https://ghe.example.com/team/repo/pull/7', head_ref_oid: '0123456789abcdef'.repeat(4), created: false }]) {
+      const finished = structuredClone(lib.finish({ outcome: 'complete', blocks: [{ text: 'Done.' }], pr }));
+      assert.deepEqual(finished, { needs_user: false, outcome: 'complete', pr, message: 'Done.' });
+      assert.deepEqual(Object.keys(finished), ['needs_user', 'outcome', 'pr', 'message']);
+      assert.deepEqual(Object.keys(finished.pr), ['url', 'head_ref_oid', 'created']);
+    }
+  });
+  test('finish without pr has no pr key', () => {
+    const finished = lib.finish({ outcome: 'blocked', blocks: [{ text: 'Stopped.' }], pr: undefined });
+    assert.deepEqual(Object.keys(finished), ['needs_user', 'outcome', 'message']);
+  });
+  test('pr takes room from the message, so the result still fits', () => {
+    const blocks = [{ text: 'x<'.repeat(20000), shorten: true }];
+    const withPr = lib.finish({ outcome: 'complete', blocks, pr: PULL_REQUEST });
+    const withoutPr = lib.finish({ outcome: 'complete', blocks });
+    assertFitted(withPr);
+    assert.ok(withPr.message.length < withoutPr.message.length);
+  });
+  test('invalid pr throws', () => {
+    const invalidCases = [
+      [null, /pr must be a plain object/],
+      [[], /pr must be a plain object/],
+      ['https://github.com/o/r/pull/1', /pr must be a plain object/],
+      [{ ...PULL_REQUEST, number: 409 }, /pr has an unknown key "number"/],
+      [{ head_ref_oid: PULL_REQUEST.head_ref_oid, created: true }, /pr url must be a pull request URL/],
+      [{ ...PULL_REQUEST, url: 'http://github.com/o/r/pull/1' }, /pr url must be a pull request URL/],
+      [{ ...PULL_REQUEST, url: 'https://github.com/o/r/pull/1?x=1' }, /pr url must be a pull request URL/],
+      [{ ...PULL_REQUEST, url: 'https://github.com/o/r/pull/1/files' }, /pr url must be a pull request URL/],
+      [{ ...PULL_REQUEST, url: 'https://github.com/o/r/issues/1' }, /pr url must be a pull request URL/],
+      [{ ...PULL_REQUEST, url: 'https://github.com/o r/pull/1' }, /pr url must be a pull request URL/],
+      [{ ...PULL_REQUEST, head_ref_oid: 'A'.repeat(40) }, /head_ref_oid must be 40 or 64 lowercase hex chars/],
+      [{ ...PULL_REQUEST, head_ref_oid: 'a'.repeat(39) }, /head_ref_oid must be 40 or 64 lowercase hex chars/],
+      [{ ...PULL_REQUEST, head_ref_oid: 'a'.repeat(41) }, /head_ref_oid must be 40 or 64 lowercase hex chars/],
+      [{ ...PULL_REQUEST, head_ref_oid: 'g'.repeat(40) }, /head_ref_oid must be 40 or 64 lowercase hex chars/],
+      [{ url: PULL_REQUEST.url, created: true }, /head_ref_oid must be 40 or 64 lowercase hex chars/],
+      [{ ...PULL_REQUEST, created: 'true' }, /pr created must be a boolean/],
+      [{ url: PULL_REQUEST.url, head_ref_oid: PULL_REQUEST.head_ref_oid }, /pr created must be a boolean/]
+    ];
+    for (const [pr, expected] of invalidCases) {
+      assert.throws(() => lib.finish({ outcome: 'complete', blocks: [{ text: 'm' }], pr }), expected, JSON.stringify(pr));
+    }
+  });
+});
+
+function markWholeBlocks(nextRandom, blocks) {
+  return blocks.map((block) => {
+    if (nextRandom() >= 0.4) {
+      return block;
+    }
+    const { shorten, ...rest } = block;
+    return { ...rest, whole: true };
+  });
+}
+
+function showsWholeBlocks(message, blocks) {
+  return blocks.every((block) => block.whole !== true || message.includes(block.text) || (block.compact !== undefined && message.includes(block.compact)));
+}
+
+describe('whole blocks', () => {
+  test('invalid whole throws', () => {
+    const invalidCases = [
+      [[{ text: 'a', whole: false }], /block whole must be true when present/],
+      [[{ text: 'a', whole: 'yes' }], /block whole must be true when present/],
+      [[{ text: 'a', whole: true, shorten: true }], /a whole block cannot have shorten/]
+    ];
+    for (const [blocks, expected] of invalidCases) {
+      assert.throws(() => lib.finish({ outcome: 'complete', blocks }), expected);
+      assert.throws(() => lib.pauseForUser({ resumeArgs: {}, blocks }), expected);
+      assert.throws(() => lib.canShowWhole({ resumeArgs: {}, blocks }), expected);
+    }
+  });
+  test('T0 shows a whole block as its text', () => {
+    assert.equal(finishMessage([{ text: 'Whole <&>', compact: 'W', whole: true }, { text: 'Tail.' }]), 'Whole <&>\n\nTail.');
+  });
+  test('T1 keeps a whole block as its text and cuts only the shorten block', () => {
+    const message = finishMessage([{ text: 'Whole <&>', compact: 'W', whole: true }, { text: 'r'.repeat(20000), shorten: true }]);
+    assert.ok(message.startsWith('Whole <&>\n\nrrr'));
+    assert.ok(message.endsWith('\n\n' + lib.noticeMarker('shortened')));
+  });
+  test('T2 shows a whole block in its compact form, uncut', () => {
+    const shortenedMarker = lib.noticeMarker('shortened');
+    const lead = 'L'.repeat(messageRoom() - 4 - costOf(shortenedMarker) + 1);
+    const compact = 'C'.repeat(3000);
+    const message = finishMessage([{ text: lead, compact, whole: true }, { text: 'r'.repeat(20000), shorten: true }]);
+    assert.ok(message.startsWith(lib.noticeMarker('compact') + '\n\n' + compact + '\n\nrrr'));
+    const plain = finishMessage([{ text: 'Q'.repeat(9000), compact: 'Q short', whole: true }, { text: 'Tail.' }]);
+    assert.equal(plain, lib.noticeMarker('compact') + '\n\nQ short\n\nTail.');
+  });
+  test('T3 keeps every block up to the last whole block intact and cuts only after it', () => {
+    const cutMarker = lib.noticeMarker('cut');
+    const first = 'a'.repeat(2000);
+    const whole = 'W<'.repeat(1000);
+    const blocks = [{ text: 'A'.repeat(9000), compact: first }, { text: 'B'.repeat(9000), compact: whole, whole: true }, { text: 'k'.repeat(30000) }];
+    const message = finishMessage(blocks);
+    assert.ok(message.startsWith(first + '\n\n' + whole + '\n\nkkk'), message.slice(0, 80));
+    assert.ok(message.endsWith('k\n\n' + cutMarker));
+    assert.ok(costOf(message) <= messageRoom());
+    const withoutWhole = finishMessage([{ text: 'k'.repeat(30000) }, { text: 'B'.repeat(9000), compact: whole }]);
+    assert.ok(!withoutWhole.includes(whole), 'without whole the cut falls inside the block');
+  });
+  test('T3 with a shorten block keeps the whole block and the cut marker when nothing else fits', () => {
+    const cutMarker = lib.noticeMarker('cut');
+    const whole = 'W'.repeat(messageRoom() - 4 - costOf(cutMarker));
+    const message = finishMessage([{ text: 'L'.repeat(9000), compact: whole, whole: true }, { text: 'r'.repeat(5000), shorten: true }]);
+    assert.equal(message, whole + '\n\n' + cutMarker);
+  });
+  test('a whole part that cannot fit throws from pauseForUser and finish', () => {
+    const cutMarker = lib.noticeMarker('cut');
+    const pauseRoom = lib.noticeBudget() - lib.noticeLength({ needs_user: true, resume_args: {}, message: '' });
+    assert.ok(pauseRoom > messageRoom());
+    const tooLong = 'W'.repeat(pauseRoom - 4 - costOf(cutMarker) + 1);
+    const blocks = [{ text: 'L'.repeat(9000), compact: tooLong, whole: true }, { text: 'r'.repeat(5000), shorten: true }];
+    assert.throws(() => lib.finish({ outcome: 'complete', blocks }), /finish: the whole blocks do not fit the completion notice/);
+    assert.throws(() => lib.pauseForUser({ resumeArgs: {}, blocks }), /pauseForUser: the whole blocks do not fit the completion notice/);
+    assert.throws(() => lib.finish({ outcome: 'complete', blocks: [{ text: 'x'.repeat(9000) }, { text: 'W'.repeat(9000), whole: true }] }), /whole blocks do not fit/);
+  });
+});
+
+describe('canShowWhole', () => {
+  test('is true when pauseForUser fits and false when it throws', () => {
+    const fits = { resumeArgs: { answers: {} }, blocks: [{ text: 'Q'.repeat(9000), compact: 'Q short', whole: true }, { text: 'Commits.' }] };
+    assert.equal(lib.canShowWhole(fits), true);
+    assert.ok(lib.pauseForUser(fits).message.includes('Q short'));
+    const tooLong = { resumeArgs: { answers: {} }, blocks: [{ text: 'Q'.repeat(9000), compact: 'q'.repeat(9000), whole: true }] };
+    assert.equal(lib.canShowWhole(tooLong), false);
+    assert.throws(() => lib.pauseForUser(tooLong), /whole blocks do not fit/);
+    assert.equal(lib.canShowWhole({ resumeArgs: {}, blocks: [{ text: 'x'.repeat(30000) }] }), true);
+  });
+  test('the resume args take room from the whole part', () => {
+    const half = Math.floor(lib.noticeBudget() / 2);
+    const blocks = [{ text: 'Q'.repeat(9000), compact: 'q'.repeat(half), whole: true }];
+    assert.equal(lib.canShowWhole({ resumeArgs: {}, blocks }), true);
+    assert.equal(lib.canShowWhole({ resumeArgs: { request: 'a'.repeat(half - 200) }, blocks }), true);
+    assert.equal(lib.canShowWhole({ resumeArgs: { request: 'a'.repeat(half - 150) }, blocks }), false);
+  });
+  test('invalid input throws as pauseForUser does', () => {
+    const blocks = [{ text: 'Q?' }];
+    assert.throws(() => lib.canShowWhole({ resumeArgs: [], blocks }), /canShowWhole: resumeArgs must be a plain object/);
+    assert.throws(() => lib.canShowWhole({ resumeArgs: { reply: 'x' }, blocks }), /canShowWhole: resumeArgs must not have a reply key/);
+    assert.throws(() => lib.canShowWhole({ resumeArgs: { request: 'a'.repeat(9000) }, blocks }), /canShowWhole: resumeArgs is too long to carry/);
+    assert.throws(() => lib.canShowWhole({ resumeArgs: {}, blocks: [] }), /blocks must be a non-empty array/);
+  });
+  test('every seeded pause agrees with canShowWhole, and every fitted result keeps its whole blocks', () => {
+    const nextRandom = createRandom(409);
+    const counts = { shown: 0, refused: 0 };
+    for (let caseIndex = 0; caseIndex < 240; caseIndex++) {
+      const blocks = markWholeBlocks(nextRandom, buildBlocks(nextRandom));
+      const resumeArgs = buildCarriedResumeArgs(nextRandom);
+      const canShow = lib.canShowWhole({ resumeArgs, blocks });
+      if (canShow) {
+        const paused = lib.pauseForUser({ resumeArgs, blocks });
+        assertFitted(paused);
+        assert.ok(showsWholeBlocks(paused.message, blocks), 'a whole block was cut');
+        counts.shown++;
+      } else {
+        assert.throws(() => lib.pauseForUser({ resumeArgs, blocks }), /whole blocks do not fit/);
+        counts.refused++;
+      }
+      try {
+        const finished = lib.finish({ outcome: 'complete', blocks });
+        assertFitted(finished);
+        assert.ok(showsWholeBlocks(finished.message, blocks), 'a whole block was cut');
+      } catch (error) {
+        assert.match(error.message, /finish: the whole blocks do not fit/);
+      }
+    }
+    assert.ok(counts.shown > 20 && counts.refused > 20, JSON.stringify(counts));
   });
 });

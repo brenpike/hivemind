@@ -465,6 +465,11 @@ def facts_build($named):
 def facts_routing_list:
   if length == 0 then "none" else join(",") end;
 
+def facts_trunk_commit:
+  if .history.base == "remote_trunk" then .repository.remote_trunk
+  elif .history.base == "local_trunk" then .repository.local_trunk
+  else "none" end;
+
 def facts_routing_lines:
   ["head_state: \(.repository.head_state)"]
   + (if .repository.head_state == "branch" then ["branch: \(.repository.branch)"] else [] end)
@@ -473,6 +478,7 @@ def facts_routing_lines:
      "trunk_freshness: \(.repository.trunk_freshness)",
      "trunk_ahead: \(.repository.trunk_ahead)",
      "trunk_behind: \(.repository.trunk_behind)",
+     "trunk_commit: \(facts_trunk_commit)",
      "cut: \(.summary.cut | facts_routing_list)",
      "external_texts: \(.summary.external_texts)",
      "delivery: \(.summary.delivery)",

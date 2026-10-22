@@ -11,7 +11,8 @@
 # through push-branch.sh, reuses the open PR on the pushed commit (re-reading to absorb head SHA
 # lag) or creates one, and verifies the created PR. On success it prints
 #     url: <url> / head_ref_oid: <sha> / created: true|false [/ warning: <text>]
-# on stdout, exit 0. On any blocker it prints nothing on stdout, exit 1, and the LAST stderr line
+# on stdout, exit 0, with `commented: true|false` after `created:` only when the inputs carry
+# comment (posted with `gh pr comment` on a reused PR only). On any blocker it prints nothing on stdout, exit 1, and the LAST stderr line
 # is `blocker: <fixed reason>`.
 #
 # ISOLATION: the REAL committed engine and the REAL push-branch.sh run unmodified by absolute path.
@@ -168,10 +169,12 @@ INPUTS_MISSING_REASON='inputs file not found'
 INPUTS_OUTSIDE_REASON='inputs file resolves outside the checkout'
 INPUTS_JSON_REASON='inputs file is not valid JSON'
 NOT_OBJECT_REASON='inputs must be a JSON object'
-UNKNOWN_FIELD_REASON='inputs have a field other than title, body and draft'
+UNKNOWN_FIELD_REASON='inputs have a field other than title, body, draft and comment'
 TITLE_REASON='title must be one line of text'
 BODY_REASON='body must be text with no control characters other than newline and tab'
 DRAFT_REASON='draft must be true or false'
+COMMENT_REASON='comment must be non-blank text with no control characters other than newline and tab'
+COMMENT_POST_REASON='the PR comment could not be posted'
 MERGE_REASON='a merge is in progress'
 UNMERGED_REASON='the index has unmerged paths'
 STAGED_REASON='the index has staged changes'
@@ -342,6 +345,15 @@ expected_block() {
     printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\n' "$PR_URL" "$HEAD_SHA" "$1"
     if [[ -n "${2:-}" ]]; then
         printf 'warning: %s\n' "$2"
+    fi
+}
+
+# expected_comment_block <created> <commented> [warning] -> the exact success stdout for PR_URL at
+# HEAD_SHA when the inputs carry comment.
+expected_comment_block() {
+    printf 'url: %s\nhead_ref_oid: %s\ncreated: %s\ncommented: %s\n' "$PR_URL" "$HEAD_SHA" "$1" "$2"
+    if [[ -n "${3:-}" ]]; then
+        printf 'warning: %s\n' "$3"
     fi
 }
 
@@ -694,6 +706,87 @@ test_draft() {
     stub_create_ok
     assert_success draft-false "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
     assert_equal draft-false-flag 6 "$(wc -l <"$GH_STUB_DIR/pr-create.1.args" | tr -d ' ')" "no --draft"
+}
+
+# ── Comment ─────────────────────────────────────────────────────────────────
+
+test_comment_field_refusals() {
+    create_world comment-fields
+    assert_input_refused comment-number '{"title":"t","body":"b","comment":1}' "$COMMENT_REASON"
+    assert_input_refused comment-null '{"title":"t","body":"b","comment":null}' "$COMMENT_REASON"
+    assert_input_refused comment-array '{"title":"t","body":"b","comment":["c"]}' "$COMMENT_REASON"
+    assert_input_refused comment-empty '{"title":"t","body":"b","comment":""}' "$COMMENT_REASON"
+    assert_input_refused comment-blank '{"title":"t","body":"b","comment":" \t\n "}' "$COMMENT_REASON"
+    assert_input_refused comment-cr '{"title":"t","body":"b","comment":"a\r\nb"}' "$COMMENT_REASON"
+    assert_input_refused comment-nul '{"title":"t","body":"b","comment":"a\u0000b"}' "$COMMENT_REASON"
+    assert_input_refused comment-del '{"title":"t","body":"b","comment":"a\u007fb"}' "$COMMENT_REASON"
+    assert_input_refused comment-esc '{"title":"t","body":"b","comment":"a\u001bb"}' "$COMMENT_REASON"
+    assert_input_refused comment-after-unknown '{"title":"t","body":"b","comment":"","head":"x"}' "$UNKNOWN_FIELD_REASON"
+    assert_input_refused comment-after-title '{"title":"","body":"b","comment":""}' "$TITLE_REASON"
+    assert_input_refused comment-after-body '{"title":"t","body":1,"comment":""}' "$BODY_REASON"
+    assert_input_refused comment-after-draft '{"title":"t","body":"b","draft":"yes","comment":""}' "$DRAFT_REASON"
+    assert_equal comment-fields-no-gh 0 "$(call_count pr-list)" "no gh call"
+}
+
+test_comment() {
+    local comment_text comment_args
+    comment_text="Run again"$'\n\n'"- \$(touch pwned5) \`touch pwned6\`"$'\t'"tab"$'\n'
+    create_world comment-reuse
+    run_git "$WORK_TREE" push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    write_inputs "$(jq -cn --arg comment "$comment_text" '{title: "t", body: "b", comment: $comment}')"
+    assert_success comment-reuse "$WORK_TREE" "$(expected_comment_block false true)" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal comment-reuse-calls 1 "$(call_count pr-comment)" "one gh pr comment"
+    comment_args="$(cat "$GH_STUB_DIR/pr-comment.1.args")"
+    assert_equal comment-reuse-args "$(printf 'pr\ncomment\n7')" \
+        "$(printf '%s' "$comment_args" | sed -n '1,3p')" "gh pr comment argv"
+    assert_equal comment-reuse-args-count 4 "$(printf '%s\n' "$comment_args" | wc -l | tr -d ' ')" "four arguments"
+    assert_equal comment-reuse-body-file-arg "--body-file=$TMPDIR/" \
+        "$(printf '%s\n' "$comment_args" | sed -n '4p' | sed 's#hivemind-open-plan-pr\.[^/]*/comment\.md$##')" \
+        "comment file in the private work folder"
+    assert_equal comment-reuse-body "${comment_text}x" "$(cat "$GH_STUB_DIR/pr-comment.1.body"; printf 'x')" "comment passed verbatim"
+    assert_equal comment-reuse-no-expansion '' "$(find "$WORKDIR" -name 'pwned*')" "no command ran"
+    assert_equal comment-reuse-no-create 0 "$(call_count pr-create)" "no gh pr create"
+    assert_equal comment-reuse-work-dir-removed '' "$(ls "$TMPDIR")" "private work folder removed"
+
+    create_world comment-reuse-rerun
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    write_inputs '{"title":"t","body":"b","comment":"again"}'
+    assert_success comment-rerun-1 "$WORK_TREE" "$(expected_comment_block false true)" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success comment-rerun-2 "$WORK_TREE" "$(expected_comment_block false true)" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal comment-rerun-calls 2 "$(call_count pr-comment)" "each run that reuses the PR posts its own comment"
+
+    create_world comment-create
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    write_inputs '{"title":"t","body":"b","comment":"c"}'
+    assert_success comment-create "$WORK_TREE" "$(expected_comment_block true false)" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal comment-create-no-comment 0 "$(call_count pr-comment)" "no gh pr comment on a created PR"
+    assert_equal comment-create-body 'bx' "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'x')" "body unchanged by the comment"
+
+    create_world comment-create-warning
+    stub_respond pr-list '' '[]'
+    stub_respond repo-view '' '' 1
+    stub_create_ok
+    write_inputs '{"title":"t","body":"b","comment":"c"}'
+    assert_success comment-create-warning "$WORK_TREE" "$(expected_comment_block true false "$REPO_UNKNOWN_WARNING")" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal comment-create-warning-no-comment 0 "$(call_count pr-comment)" "no gh pr comment on a created PR"
+
+    create_world comment-post-fails
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    stub_respond pr-comment '' '' 1 'HTTP 403: Resource not accessible'
+    write_inputs '{"title":"t","body":"b","comment":"c"}'
+    assert_blocker comment-post-fails "$WORK_TREE" "$COMMENT_POST_REASON" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal comment-post-fails-gh-stderr 1 "$(grep -c 'HTTP 403: Resource not accessible' "$WORKDIR/comment-post-fails.err")" "gh stderr relayed"
+    assert_equal comment-post-fails-calls 1 "$(call_count pr-comment)" "one gh pr comment, no retry"
+    assert_equal comment-post-fails-no-create 0 "$(call_count pr-create)" "no gh pr create"
+    assert_branch_pushed comment-post-fails-pushed
 }
 
 # ── Reuse path ──────────────────────────────────────────────────────────────
@@ -1169,6 +1262,8 @@ test_lookup_refusals
 test_create
 test_title_not_expanded
 test_draft
+test_comment_field_refusals
+test_comment
 test_reuse
 test_head_repository
 test_create_failures
