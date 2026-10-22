@@ -154,10 +154,25 @@ describe('taken decisions', () => {
       '  D1. TAKEN_ONE',
       '    Chose option B: SUMMARY_B',
       '    Why: TAKEN_WHY',
+      '    Exact text:',
+      'VERBATIM_TEXT',
       '  D2. TAKEN_TWO',
       '    Chose option A: SUMMARY_A',
-      '    Why: WHY_TEXT'
+      '    Why: WHY_TEXT',
+      '    Exact text:',
+      'VERBATIM_TEXT'
     ].join('\n'));
+  });
+  test('renderDecisions omits the Exact text lines when verbatim is absent or empty', () => {
+    const absent = makeBrief({ problem: 'NO_VERBATIM' });
+    delete absent.verbatim;
+    const text = lib.renderDecisions([{ brief: absent }, { brief: makeBrief({ problem: 'EMPTY_VERBATIM', verbatim: '' }) }]);
+    assert.doesNotMatch(text, /Exact text:/);
+  });
+  test('renderDecisions shows verbatim exactly as given, unindented', () => {
+    const verbatim = `keep ${EM_DASH} this | as is`;
+    const lines = lib.renderDecisions([{ brief: makeBrief({ verbatim }) }]).split('\n');
+    assert.deepEqual(lines.slice(-2), ['    Exact text:', verbatim]);
   });
   test('renderDecisions of nothing is empty', () => {
     assert.equal(lib.renderDecisions([]), '');

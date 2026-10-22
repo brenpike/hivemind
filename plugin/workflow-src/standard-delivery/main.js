@@ -1006,7 +1006,7 @@ function buildPlanAcceptanceBrief(plan) {
   return {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the plan, shown as exact text below: create or confirm its working branch and run its steps.',
+    problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: 'Nothing is delivered.' },
     options: [
       { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: 'The plan passed every check, and its changes stay on the working branch until you merge them.', straw_man: 'A step can still change something you did not expect before you see the pull request.', effort: 'medium', value: 'high', reversible: true },
@@ -1022,7 +1022,7 @@ function buildPlanAcceptanceBrief(plan) {
 function buildRemediationPlanBrief(plan) {
   return Object.assign(buildPlanAcceptanceBrief(plan), {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the remediation plan for the local review findings, shown as exact text below: run its steps on the working branch, then every gate again.'
+    problem: 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again.'
   });
 }
 
@@ -1046,7 +1046,7 @@ function buildExternalEffectBrief(stepId, summary) {
   return {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
-    problem: 'Plan step ' + JSON.stringify(stepId) + ' has an effect outside the repo that cannot be undone, shown as exact text below. May the run go on to it?',
+    problem: 'Plan step ' + JSON.stringify(stepId) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: 'The step runs before any pull request exists.' },
     options: [
       { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: 'The step is part of the delivery you asked for.', straw_man: 'The effect happens before you see the pull request and cannot be undone.', effort: 'small', value: 'high', reversible: false },

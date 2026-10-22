@@ -1939,6 +1939,8 @@ const ROW_TESTS = {
       const bumpBrief = main.buildBumpTypeBrief(parsedBump());
       assert.ok(bumpBrief.problem.includes('need no version bump'), bumpBrief.problem);
       assert.ok(run.result.message.includes(lib.renderDecisions([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: bumpBrief }])), run.result.message);
+      assert.ok(run.result.message.includes('  D1. Start delivering the plan: create or confirm its working branch and run its steps.\n'), run.result.message);
+      assert.ok(run.result.message.includes('\n    Exact text:\n' + makePlan().summary + '\n'), run.result.message);
     });
     for (const [label, changes] of [
       ['ask_user', { dominant_row: 'MULTI', verdict: 'ask_user', rule_applied: '5' }],
@@ -3256,6 +3258,23 @@ describe('standard-delivery live', () => {
       assert.ok(!/#[0-9]/.test(source));
       assert.ok(!/\bDate\s*\(|\bDate\.now|Math\.random/.test(source));
     }
+  });
+  test('no taken or asked brief built in main.js has a problem promising exact text', () => {
+    const builderNames = [...mainSource.matchAll(/^function (build\w*Brief)\(/gm)].map((match) => match[1]);
+    assert.ok(builderNames.length >= 4, builderNames.join(','));
+    for (const name of builderNames) {
+      const start = mainSource.indexOf('\nfunction ' + name + '(');
+      const body = mainSource.slice(start, mainSource.indexOf('\n}\n', start));
+      assert.doesNotMatch(body, /exact text/i, name);
+    }
+    const briefs = [
+      main.buildPlanAcceptanceBrief(makePlan()),
+      main.buildRemediationPlanBrief(makePlan()),
+      main.buildTrunkStaleBrief(parsedFacts({ trunk_freshness: 'behind', trunk_behind: '1' })),
+      main.buildExternalEffectBrief('S1', 'Publish to a staging registry.'),
+      main.buildBumpTypeBrief(parsedBump())
+    ];
+    briefs.forEach((brief) => assert.doesNotMatch(brief.problem, /exact text/i, brief.problem));
   });
   test('every phase the script enters is a meta phase', async () => {
     const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'clean' }] } }));

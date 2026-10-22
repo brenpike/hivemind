@@ -441,7 +441,7 @@ function renderQuestion(entry, index) {
   lines.push(renderRecommendation(readField(brief, 'recommendation')));
   lines.push('Why I am asking: ' + askReasonLine(readField(entry, 'reason')));
   lines.push(...renderAssumptions(readField(brief, 'assumptions')));
-  lines.push(...renderVerbatim(readField(brief, 'verbatim')));
+  lines.push(...renderVerbatim(readField(brief, 'verbatim'), ''));
   return lines.join('\n');
 }
 
@@ -452,7 +452,7 @@ function renderCompactQuestion(entry, index) {
     renderRecommendation(readField(brief, 'recommendation'))
   ];
   if (readField(entry, 'exact') === true) {
-    lines.push(...renderVerbatim(readField(brief, 'verbatim')));
+    lines.push(...renderVerbatim(readField(brief, 'verbatim'), ''));
   }
   return lines.join('\n');
 }
@@ -520,11 +520,11 @@ function renderAssumption(assumption) {
   return statement + ' (source not given: ' + evidence + ')';
 }
 
-function renderVerbatim(verbatim) {
+function renderVerbatim(verbatim, labelIndent) {
   if (typeof verbatim !== 'string' || verbatim === '') {
     return [];
   }
-  return ['Exact text:', verbatim];
+  return [labelIndent + 'Exact text:', verbatim];
 }
 
 function renderOpenQuestion(entry, index) {
@@ -541,11 +541,13 @@ function renderTakenDecision(entry, index) {
   const recommendation = readField(brief, 'recommendation');
   const optionId = readField(recommendation, 'option_id');
   const chosen = findOptionById(readField(brief, 'options'), optionId);
-  return [
+  const lines = [
     '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')),
     '    Chose option ' + renderText(optionId) + ': ' + renderText(readField(chosen, 'summary')),
     '    Why: ' + renderText(readField(recommendation, 'why'))
-  ].join('\n');
+  ];
+  lines.push(...renderVerbatim(readField(brief, 'verbatim'), '    '));
+  return lines.join('\n');
 }
 
 function renderCompactDecision(entry, index) {
