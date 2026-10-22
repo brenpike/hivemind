@@ -1056,6 +1056,9 @@ function isRecommendationAnOption(brief) {
  *     taken  as above.
  *   askReasonLine(reason)
  *     reason an ask reason from decisionReasons(), other than 'auto'.
+ *   questionLabel(index)
+ *     index  non-negative integer, the position of a question in asks or
+ *            open.
  *   renderOpenQuestions(open, stopReason)
  *     open        non-empty array of {brief} for questions still unanswered
  *                 when the run stops asking. Entries of asks fit.
@@ -1084,6 +1087,8 @@ function isRecommendationAnOption(brief) {
  *     decision, labelled D1..Dn by position: problem, chosen option id and
  *     why, without the option summary. The empty string when taken is empty.
  *   askReasonLine    one plain sentence for the reason.
+ *   questionLabel    the label renderQuestions, renderQuestionsCompact and
+ *     renderOpenQuestions show by position: 'Q' + (index + 1).
  *   renderOpenQuestions  one block: a line saying why the run stopped
  *     asking, either after pauseLimit() rounds ('pause_limit') or because
  *     the replies so far are too long to carry into another round
@@ -1098,7 +1103,8 @@ function isRecommendationAnOption(brief) {
  *   malformed brief still renders.
  *   No em dash and no markdown tables. An em dash inside a brief field is
  *   replaced by a comma. verbatim is shown exactly as given.
- *   Invalid arguments, unknown reasons and unknown stop reasons throw.
+ *   Invalid arguments, unknown reasons and unknown stop reasons throw. So
+ *   does questionLabel for anything but a non-negative integer.
  *   renderOpenQuestions with 'pause_limit' calls pauseLimit() from
  *   result.js, so it runs only where result.js is loaded too, as in every
  *   built script.
@@ -1107,7 +1113,8 @@ function isRecommendationAnOption(brief) {
  * Why
  *   The user answers from this text alone, so every question carries what
  *   the user needs to decide it, and labels come from code so the reply can
- *   point at a question without trusting a model-written id.
+ *   point at a question without trusting a model-written id. Question labels
+ *   have one home, questionLabel, so the three renderers cannot drift apart.
  */
 
 function renderQuestions(asks, taken) {
@@ -1213,6 +1220,13 @@ function renderStopIntro(stopReason) {
   }
 }
 
+function questionLabel(index) {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error('questionLabel: index must be a non-negative integer');
+  }
+  return 'Q' + (index + 1);
+}
+
 function renderIntroLine(count) {
   if (count === 1) {
     return 'I need your answer on 1 question before I go on.';
@@ -1222,7 +1236,7 @@ function renderIntroLine(count) {
 
 function renderQuestion(entry, index) {
   const brief = readField(entry, 'brief');
-  const lines = ['Q' + (index + 1) + '. ' + renderText(readField(brief, 'problem'))];
+  const lines = [questionLabel(index) + '. ' + renderText(readField(brief, 'problem'))];
   lines.push(...renderSeriousness(readField(brief, 'criticality')));
   lines.push(...renderOptions(readField(brief, 'options')));
   lines.push(renderRecommendation(readField(brief, 'recommendation')));
@@ -1235,7 +1249,7 @@ function renderQuestion(entry, index) {
 function renderCompactQuestion(entry, index) {
   const brief = readField(entry, 'brief');
   return [
-    'Q' + (index + 1) + '. ' + renderText(readField(brief, 'problem')),
+    questionLabel(index) + '. ' + renderText(readField(brief, 'problem')),
     renderRecommendation(readField(brief, 'recommendation'))
   ].join('\n');
 }
@@ -1316,7 +1330,7 @@ function renderOpenQuestion(entry, index) {
   const optionId = readField(recommendation, 'option_id');
   const hasChoice = readField(recommendation, 'strength') !== 'none' && typeof optionId === 'string' && optionId.trim() !== '';
   const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'There is no recommendation.';
-  return '  Q' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' ' + choice;
+  return '  ' + questionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' ' + choice;
 }
 
 function renderTakenDecision(entry, index) {
