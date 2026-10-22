@@ -78,14 +78,18 @@
 #                             `git commit --cleanup=whitespace -F -` with the message piped from
 #                             jq, then the checks below.
 #   A failed commit           before `git add` the script records the index entries of the paths
-#                             it stages (`git ls-files -s -z`, literal pathspecs). When the commit
-#                             fails and HEAD is still the old HEAD, one `git update-index -z
-#                             --index-info` writes each recorded entry back and removes each entry
-#                             those pathspecs now match that was not recorded (a zero object id as
-#                             long as the old HEAD's). It then reads the entries again and they
-#                             must equal the record (`the commit failed and the index could not be
-#                             restored` otherwise). Nothing else in the index, HEAD, the refs or
-#                             the work tree changes.
+#                             it stages (`git ls-files -s -z`, literal pathspecs), and after it the
+#                             entries `git add` left. When the commit fails, HEAD is still the old
+#                             HEAD and the entries those pathspecs match still equal what `git add`
+#                             left, one `git update-index -z --index-info` writes each recorded
+#                             entry back and removes each entry those pathspecs now match that was
+#                             not recorded (a zero object id as long as the old HEAD's). It then
+#                             reads the entries again and they must equal the record. When HEAD
+#                             moved, when a hook or another process changed an entry under those
+#                             pathspecs after `git add`, or when the write-back fails, the blocker
+#                             is `the commit failed and the index could not be restored`, and only
+#                             a failed write-back can have written anything. Nothing else in the
+#                             index, HEAD, the refs or the work tree changes.
 #   After a commit: HEAD must still be refs/heads/<branch>, HEAD must be a new commit whose one
 #   parent is the old HEAD, every path the new commit changes, read from the commit itself with
 #   `git diff-tree`, must be in files (`the commit has a path outside files`, as when a
@@ -135,6 +139,27 @@
 #                  have already run by then. Deferred, not needed while the actors are trusted.
 #   Linkage:     local review findings 84d5a88e and b19d1dde.
 #
+# RECORDED RESIDUAL R2 (interrupted run): only a failed `git commit` puts the index back. A run
+# that a signal ends after `git add` leaves the listed paths staged, and one that ends after the
+# commit but before the result checks leaves a commit those checks never read.
+#   Root cause:  staging and committing are separate steps on the shared live index (the root of
+#                R1), and the script cannot act after it is killed.
+#   Inherited:   before the failed-commit write-back existed, every failure after `git add`,
+#                interruptions included, left the listed paths staged. The write-back narrowed
+#                that and did not add the exposure.
+#   Bounded impact: only paths the step listed stay staged, and their work tree side is
+#                untouched, so no edit is lost. The next facts step reports them as dirty and the
+#                run stops before planning (ADR-0037 invariant 1), and a rerun stages them again
+#                and changes nothing else. A commit made just before the signal holds only paths
+#                the status check allowed, apart from R1's race, and a rerun reports it as the
+#                commit the step ended on.
+#   Rejected remediations:
+#                - an INT/TERM/HUP trap: SIGKILL, which ends a run whose tool call timed out,
+#                  cannot be trapped, so a trap lists the signals it handles and does not close
+#                  the class.
+#                - a commit on a private index: the transactional options R1 already rejected.
+#   Linkage:     local review finding cb584af5.
+#
 # NOT CHECKED: repo hooks, local refs, git config, and the operator are trusted under
 # ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline). A commit-msg
 # hook can rewrite the message, and a post-commit hook can change files or refs; the result
@@ -144,8 +169,9 @@
 # stops the run with that commit in place (see RECORDED RESIDUAL R1); one that edits a listed
 # path has the edit staged. An entry written back after a failed commit has no cached file stat,
 # so git reads the file again on its next refresh, and it loses the intent-to-add, skip-worktree
-# and assume-unchanged marks; a hook that changed the index under those pathspecs before failing
-# has that change undone too.
+# and assume-unchanged marks. A process that changes an entry under those pathspecs between the
+# check against what `git add` left and the write-back has that change undone: a race on the
+# shared live index of the same kind as RECORDED RESIDUAL R1, with the same trusted actors.
 # jq decodes status paths as UTF-8, so a path with bytes that are not UTF-8 shows with
 # replacement characters on its outside line and can never be listed. A listed path that is an
 # untracked ignored file is not dirty, so it is not committed. A submodule path is a directory,
@@ -154,7 +180,7 @@
 # trunk lookup order is mirrored from git, not asked of git, and git 2.25 shows only the end of
 # a symbolic-ref chain, with the same residuals as create-working-branch.sh. The private work
 # folder (mktemp -d under TMPDIR) holds the inputs copy, the status listing, the index entry
-# records, the commit's error text and the commit's path listing, and is removed by the EXIT trap.
+# records from before and after `git add`, the commit's error text and the commit's path listing, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
@@ -238,6 +264,7 @@ inputs_copy="$work_dir/inputs.json"
 status_file="$work_dir/status.z"
 commit_paths_file="$work_dir/commit-paths.z"
 index_before_file="$work_dir/index-before.z"
+index_added_file="$work_dir/index-added.z"
 index_after_file="$work_dir/index-after.z"
 restore_info_file="$work_dir/restore-info.z"
 commit_error_file="$work_dir/commit-error.txt"
@@ -425,6 +452,8 @@ if [ "${#add_paths[@]}" -gt 0 ]; then
   GIT_LITERAL_PATHSPECS=1 git ls-files -s -z -- "${add_paths[@]}" >"$index_before_file" 2>/dev/null \
     || blocker "cannot read the index"
   GIT_LITERAL_PATHSPECS=1 git add -A -- "${add_paths[@]}" >/dev/null 2>&1 || blocker "could not stage the listed paths"
+  GIT_LITERAL_PATHSPECS=1 git ls-files -s -z -- "${add_paths[@]}" >"$index_added_file" 2>/dev/null \
+    || blocker "cannot read the index"
 fi
 
 staged_rc=0
@@ -459,14 +488,17 @@ def entry_paths($text): $text | split("\u0000")[] | select(length > 0) | .[(inde
 # restore_staged_entries
 #   Puts back the index entries of the paths `git add` staged, from the record taken before it:
 #   removal lines for new entries, then the recorded entries byte for byte, in one
-#   `git update-index -z --index-info`. Fails when HEAD is no longer the old HEAD, when a git or
-#   jq step fails, or when the entries read again differ from the record.
+#   `git update-index -z --index-info`. Fails, writing nothing, when HEAD is no longer the old
+#   HEAD or when the entries those pathspecs match differ from what `git add` left, so a change a
+#   hook or another process made there is never undone. Fails too when a git or jq step fails, or
+#   when the entries read again differ from the record.
 restore_staged_entries() {
   local current_head
   [ "${#add_paths[@]}" -gt 0 ] || return 0
   current_head="$(git rev-parse --verify --quiet 'HEAD^{commit}' 2>/dev/null)" || return 1
   [ "$current_head" = "$old_head" ] || return 1
   GIT_LITERAL_PATHSPECS=1 git ls-files -s -z -- "${add_paths[@]}" >"$index_after_file" 2>/dev/null || return 1
+  cmp -s "$index_added_file" "$index_after_file" || return 1
   jq -n -j --rawfile before_text "$index_before_file" --rawfile after_text "$index_after_file" \
     --arg zero_oid "${old_head//?/0}" "$removal_program" >"$restore_info_file" 2>/dev/null || return 1
   cat -- "$index_before_file" >>"$restore_info_file" 2>/dev/null || return 1

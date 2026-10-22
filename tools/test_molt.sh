@@ -806,6 +806,30 @@ test_failed_commit_restore_fails() {
     assert_equal restore-fails-head "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD)" "HEAD unchanged"
 }
 
+# A hook that changes an entry under the staged paths before failing keeps that change: nothing is
+# written back and the blocker says the index could not be restored. A hook that stages only an
+# unlisted path does not stop the write-back, and its own entry stays.
+test_failed_commit_keeps_hook_entries() {
+    local hook_blob
+    create_world restore-hook-listed
+    write_failing_hook 'printf "hooked\n" >>f.txt; git add f.txt'
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_blocker restore-hook-listed "$WORK_TREE" \
+        'the commit failed and the index could not be restored' '' --trunk main --inputs "$INPUTS_REL"
+    hook_blob="$(run_git "$WORK_TREE" hash-object f.txt)"
+    assert_equal restore-hook-listed-entry "$hook_blob" "$(run_git "$WORK_TREE" rev-parse :f.txt)" "the hook's staged blob kept"
+    assert_equal restore-hook-listed-head "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD)" "HEAD unchanged"
+
+    create_world restore-hook-unlisted
+    write_failing_hook 'printf "hooked\n" >>g.txt; git add g.txt'
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_blocker restore-hook-unlisted "$WORK_TREE" "$COMMIT_FAILED_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_equal restore-hook-unlisted-listed ' M f.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- f.txt)" "listed path put back"
+    assert_equal restore-hook-unlisted-hook 'M  g.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- g.txt)" "the hook's unlisted entry kept"
+}
+
 # ── Run ──────────────────────────────────────────────────────────────────────
 
 test_usage_errors
@@ -826,6 +850,7 @@ test_failed_commit_restores_index
 test_failed_commit_messages
 test_failed_commit_identity
 test_failed_commit_restore_fails
+test_failed_commit_keeps_hook_entries
 
 echo
 echo "molt engine tests: $PASS_COUNT passed, $FAIL_COUNT failed"
