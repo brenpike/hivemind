@@ -26,6 +26,9 @@ const gatherFactsPath = join(repoRoot, 'plugin/skills/gather-facts/scripts/gathe
 const createBranchPath = join(repoRoot, 'plugin/skills/create-working-branch/scripts/create-working-branch.sh');
 const moltPath = join(repoRoot, 'plugin/skills/molt/scripts/molt.sh');
 const bumpTypePath = join(repoRoot, 'plugin/skills/bump-type/scripts/bump-type.sh');
+const openPlanPrPath = join(repoRoot, 'plugin/skills/open-plan-pr/scripts/open-plan-pr.sh');
+const openPlanPrText = readText(openPlanPrPath);
+const safetyRailsText = readText(join(repoRoot, 'plugin/governance/safety-rails.md'));
 const definitionsText = readText(join(repoRoot, 'plugin/governance/definitions.md'));
 const reviewerText = readText(join(repoRoot, 'plugin/agents/local-reviewer.md'));
 const autonomyTable = readJson('plugin/references/decision-autonomy-table.json');
@@ -47,6 +50,7 @@ const BUMP_KEYS = ['dominant_row', 'verdict', 'bump_type', 'rule_applied', 'coun
 const MINOR_BUMP = { dominant_row: 'MINOR', verdict: 'bump_required', bump_type: 'minor', rule_applied: '3', counts: { major: '0', minor: '1', patch: '0', no_bump: '0' } };
 const MALFORMED_FACTS = 'The facts step returned malformed facts, so the delivery stopped before planning.';
 const NOT_READY = 'The branch is not ready for delivery, so the delivery stopped before planning:';
+const PR_URL = 'https://github.com/o/r/pull/7';
 const scratchRoots = [];
 
 after(() => {
@@ -169,6 +173,22 @@ function parsedBump(changes) {
   return lib.parseRoutingLines(bumpStdout(changes), main.bumpTypeRoutingSpec()).values;
 }
 
+function prRelay(changes = {}) {
+  return { outcome: 'ran', stdout: routingStdout({ url: PR_URL, head_ref_oid: HEAD, created: 'true', commented: 'false', ...changes }) };
+}
+
+/**
+ * A pull request runner stand-in for the create path: it reports the
+ * expect_commit of its inputs block as the PR head.
+ */
+function cannedPrRunner(changes = {}) {
+  return (prompt) => prRelay({ head_ref_oid: readDataBlock(prompt, 'inputs').expect_commit, ...changes });
+}
+
+function openedLine(head) {
+  return 'Opened pull request ' + PR_URL + ' on commit ' + head + '.';
+}
+
 /**
  * The default gate results of pass `pass`: no bump, validation passed, a
  * clean local review, and validation and review commits that leave the head
@@ -181,12 +201,13 @@ function tailResults(pass, head, changes = {}) {
     ['validate-commit-' + pass + '-1']: commitRelay({ commit: head, committed: 'false' }),
     ['review-' + pass + '-1']: REVIEW_CLEAN,
     ['review-commit-' + pass + '-1']: commitRelay({ commit: head, committed: 'false' }),
+    ['pr-' + pass]: cannedPrRunner(),
     ...changes
   };
 }
 
 function tailLabels(pass) {
-  return ['bump-type-' + pass + '-1', 'validate-' + pass + '-1', 'validate-commit-' + pass + '-1', 'review-' + pass + '-1', 'review-commit-' + pass + '-1'];
+  return ['bump-type-' + pass + '-1', 'validate-' + pass + '-1', 'validate-commit-' + pass + '-1', 'review-' + pass + '-1', 'review-commit-' + pass + '-1', 'pr-' + pass];
 }
 
 function happyResults(changes = {}) {
@@ -366,7 +387,8 @@ function realTailResults(scratch, pass) {
     ['validate-' + pass + '-1']: VALIDATE_PASSED,
     ['validate-commit-' + pass + '-1']: realCommitRunner(scratch),
     ['review-' + pass + '-1']: REVIEW_CLEAN,
-    ['review-commit-' + pass + '-1']: realCommitRunner(scratch)
+    ['review-commit-' + pass + '-1']: realCommitRunner(scratch),
+    ['pr-' + pass]: cannedPrRunner()
   };
 }
 
@@ -439,6 +461,75 @@ function realFixWorker(scratch, file) {
   };
 }
 
+/**
+ * Gives the scratch repo a local bare origin that carries main, so the
+ * facts see a fresh trunk and the push lands with no network.
+ */
+function addBareOrigin(scratch) {
+  const origin = join(dirname(scratch.repo), 'origin.git');
+  runGitIn(scratch, ['init', '-q', '--bare', origin]);
+  runGitIn(scratch, ['remote', 'add', 'origin', origin]);
+  runGitIn(scratch, ['push', '-q', 'origin', 'main']);
+  return origin;
+}
+
+/**
+ * Replaces the scratch stub gh with one that serves the create path of
+ * open-plan-pr.sh: no open PR, a created PR at PR_URL whose head is the
+ * branch commit on the bare origin. It records the create argv and body.
+ */
+function writeCreatePathGh(scratch, origin) {
+  const logDir = join(dirname(scratch.repo), 'gh-log');
+  mkdirSync(logDir, { recursive: true });
+  const stub = [
+    '#!/bin/sh',
+    'case "$1 $2" in',
+    '  "pr list") printf \'[]\\n\' ;;',
+    '  "pr create")',
+    '    printf \'%s\\n\' "$@" >\'' + logDir + '/create.args\'',
+    '    for arg in "$@"; do case "$arg" in --body-file=*) cp "${arg#--body-file=}" \'' + logDir + '/body.md\' ;; esac; done',
+    '    printf \'%s\\n\' \'' + PR_URL + '\' ;;',
+    '  "pr view") printf \'{"headRefName":"feature/cache","headRefOid":"%s","headRepository":null}\\n\' "$(git --git-dir=\'' + origin + '\' rev-parse refs/heads/feature/cache)" ;;',
+    '  *) exit 1 ;;',
+    'esac',
+    ''
+  ].join('\n');
+  writeFileSync(join(dirname(scratch.repo), 'stub-bin', 'gh'), stub);
+  return logDir;
+}
+
+/**
+ * A PR runner stand-in that does what the PR prompt asks: it writes the
+ * inputs file from the inputs block and runs the real open-plan-pr.sh.
+ */
+function realPrRunner(scratch) {
+  return (prompt) => {
+    const inputs = readDataBlock(prompt, 'inputs');
+    const inputsPath = '.hivemind/pr-inputs-test.json';
+    mkdirSync(join(scratch.repo, '.hivemind'), { recursive: true });
+    writeFileSync(join(scratch.repo, inputsPath), JSON.stringify({ title: inputs.title, body: inputs.body, comment: inputs.comment }));
+    return runScriptIn(scratch, openPlanPrPath, ['--head', inputs.head, '--base', inputs.base, '--expect-commit', inputs.expect_commit, '--inputs', inputsPath]);
+  };
+}
+
+function readOutputKeys(scriptText) {
+  const start = scriptText.indexOf('# OUTPUT on success');
+  const end = scriptText.indexOf('# EXIT CONTRACT', start);
+  assert.ok(start !== -1 && end !== -1, 'the script header has OUTPUT and EXIT CONTRACT');
+  return [...scriptText.slice(start, end).matchAll(/^# {3}([a-z_]+): /gm)].map((match) => match[1]);
+}
+
+function isPullRequestText(text, keepsLines) {
+  return Array.from(text).every((character) => {
+    const codePoint = character.codePointAt(0);
+    return (keepsLines && (codePoint === 9 || codePoint === 10)) || (codePoint >= 32 && (codePoint < 127 || codePoint > 159));
+  });
+}
+
+function gatesBlock(lines) {
+  return ['Gates:', ...lines.map((line) => '- ' + line)].join('\n');
+}
+
 function recordRelays(runner, relays) {
   return (prompt) => {
     const relay = runner(prompt);
@@ -448,7 +539,7 @@ function recordRelays(runner, relays) {
 }
 
 const FAILURE_TEXT = 'FAILURE_TEXT_ZQ: test cache.test.js failed';
-const FIX_FLOW_LABELS = ['facts-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'validate-commit-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1'];
+const FIX_FLOW_LABELS = ['facts-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'validate-commit-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1'];
 
 /**
  * One failed validation, one fix round committed as THIRD, the bump step
@@ -518,7 +609,8 @@ function remediationResults(review, changes = {}) {
   });
 }
 
-const PASS_ONE_LABELS = ['facts-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)];
+const REMEDIATION_LAUNCH = { ...LAUNCH, answers: { 'round-1': 'Yes, run it.' } };
+const PASS_ONE_LABELS = ['facts-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1).slice(0, -1)];
 
 function readContractIds(source) {
   return [...source.matchAll(/\{ id: '(SD-[0-9]+)'/g)].map((match) => match[1]);
@@ -1289,7 +1381,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, waveResults);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'branch-1', 'work-1-S1', 'work-1-S2', 'commit-1-1', 'work-1-S3', 'commit-1-2', ...tailLabels(1)]);
-      assert.deepEqual(run.phases.slice(-9), ['Waves', 'Commit', 'Waves', 'Commit', 'Bump', 'Validate', 'Commit', 'Review', 'Commit']);
+      assert.deepEqual(run.phases.slice(-10), ['Waves', 'Commit', 'Waves', 'Commit', 'Bump', 'Validate', 'Commit', 'Review', 'Commit', 'PR']);
     });
     test('each worker gets its step, wave_scopes, branch, base and trunk as data under the boundary sentence', async () => {
       const run = await runWorkflow(LAUNCH, waveResults);
@@ -1460,7 +1552,7 @@ const ROW_TESTS = {
     const results = happyResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'clean' }] } });
     test('runner prompts carry no request text', async () => {
       const run = await runWorkflow(LAUNCH, results);
-      for (const label of ['facts-1', 'scan', 'branch-1', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1']) {
+      for (const label of ['facts-1', 'scan', 'branch-1', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']) {
         assert.ok(!callOf(run, label).prompt.includes('REQUEST_MARKER_ZQ'), label);
       }
       assert.ok(callOf(run, 'plan-1').prompt.includes('REQUEST_MARKER_ZQ'));
@@ -1471,7 +1563,7 @@ const ROW_TESTS = {
       assert.ok(callOf(run, 'scan').prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(callOf(run, 'bump-type-1-1').prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(callOf(run, 'validate-1-1').prompt.includes(lib.runnerReadOnlySentence()));
-      for (const [label, skill] of [['branch-1', 'hivemind:create-working-branch'], ['commit-1-1', 'hivemind:molt'], ['validate-commit-1-1', 'hivemind:molt'], ['review-commit-1-1', 'hivemind:molt']]) {
+      for (const [label, skill] of [['branch-1', 'hivemind:create-working-branch'], ['commit-1-1', 'hivemind:molt'], ['validate-commit-1-1', 'hivemind:molt'], ['review-commit-1-1', 'hivemind:molt'], ['pr-1', 'hivemind:open-plan-pr']]) {
         const prompt = callOf(run, label).prompt;
         assert.ok(prompt.includes(main.gitScriptSentence(skill)), label);
         assert.ok(!prompt.includes(lib.runnerReadOnlySentence()), label);
@@ -1482,7 +1574,7 @@ const ROW_TESTS = {
       const clause = readDroneClause('A git-script task is also exempt: when the delegation says ', 'take the place of this check.');
       const condition = clause.match(/when the delegation says (.+?), the task runs on (.+?), and that script's refusals take the place of this check\.$/);
       assert.ok(condition, clause);
-      for (const skill of ['hivemind:create-working-branch', 'hivemind:molt']) {
+      for (const skill of ['hivemind:create-working-branch', 'hivemind:molt', 'hivemind:open-plan-pr']) {
         const sentence = main.gitScriptSentence(skill);
         assert.ok(sentence.includes(condition[1].replace('a named hivemind git skill whose script', skill + ', a hivemind git skill whose script')), sentence);
         assert.ok(sentence.includes('the task runs on ' + condition[2]), sentence);
@@ -1514,8 +1606,10 @@ const ROW_TESTS = {
       assert.deepEqual(run.result, {
         needs_user: false,
         outcome: 'complete',
+        pr: { url: PR_URL, head_ref_oid: OTHER, created: true },
         message: [
           HELD_ALL + OTHER + '.',
+          openedLine(OTHER),
           'Commits this run made:\n- ' + OTHER,
           'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."',
           lib.renderDecisions(taken)
@@ -1690,7 +1784,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run).slice(4), ['commit-1-1', 'bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1']);
+      assert.deepEqual(labelsOf(run).slice(4), ['commit-1-1', 'bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       const bumpBrief = main.buildBumpTypeBrief(parsedBump(MINOR_BUMP));
       assert.ok(bumpBrief.problem.includes('call for a minor version bump'), bumpBrief.problem);
       assert.ok(run.result.message.endsWith(lib.renderDecisions([{ brief: main.buildPlanAcceptanceBrief(plan) }, { brief: bumpBrief }])), run.result.message);
@@ -1767,7 +1861,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1']);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       assert.equal(readDataBlock(callOf(run, 'bump-type-1-1').prompt, 'inputs').base, trunkCommit);
       const bumpValues = lib.parseRoutingLines(bumpRelays[0].stdout, main.bumpTypeRoutingSpec()).values;
       assert.equal(bumpValues.verdict, 'bump_required');
@@ -1797,7 +1891,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run).slice(5), ['bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'bump-1-2', 'bump-commit-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1']);
+      assert.deepEqual(labelsOf(run).slice(5), ['bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'bump-1-2', 'bump-commit-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       const moltSpec = main.moltRoutingSpec();
       const firstBump = lib.parseRoutingLines(bumpCommitRelays[0].stdout, moltSpec).values;
@@ -1996,7 +2090,7 @@ const ROW_TESTS = {
     });
     test('a fix commit sends the run back through the gates that held on an earlier commit, resolved once through gate_rerun', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults());
-      assert.deepEqual(labelsOf(run).slice(-5), ['bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1']);
+      assert.deepEqual(labelsOf(run).slice(-6), ['bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       const rerunBrief = main.buildGateRerunBrief(['bump'], { held: { bump: OTHER } }, THIRD, false);
       assert.equal(run.result.message.split(rerunBrief.problem).length - 1, 1, run.result.message);
       assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'));
@@ -2005,7 +2099,7 @@ const ROW_TESTS = {
       const results = fixFlowResults({ 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }), 'validate-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }), 'review-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run).slice(-6), ['fix-1-1', 'fix-commit-1-1', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1']);
+      assert.deepEqual(labelsOf(run).slice(-7), ['fix-1-1', 'fix-commit-1-1', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       assert.ok(!run.result.message.includes('landed after'));
     });
     test('a surfaced gate_rerun asks at the first going back', async () => {
@@ -2054,7 +2148,8 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, fixFlowResults());
       const tailLabelPattern = /^(?:bump-type|bump|bump-commit|validate|validate-commit|fix|fix-commit|review|review-commit)-1-[1-9][0-9]*$/;
       const labels = labelsOf(run);
-      assert.ok(labels.slice(5).every((label) => tailLabelPattern.test(label)), JSON.stringify(labels));
+      assert.ok(labels.slice(5, -1).every((label) => tailLabelPattern.test(label)), JSON.stringify(labels));
+      assert.equal(labels.at(-1), 'pr-1');
       assert.equal(new Set(labels).size, labels.length);
       const names = [...mainSource.matchAll(/gateLabel\('([a-z-]+)', run, /g)].map((match) => match[1]);
       assert.deepEqual([...new Set(names)].sort(), ['bump', 'bump-commit', 'bump-type', 'fix', 'fix-commit', 'review', 'review-commit', 'validate', 'validate-commit']);
@@ -2095,7 +2190,7 @@ const ROW_TESTS = {
       test(`${label} configures the local review gate`, async () => {
         const run = await runWorkflow(args, happyResults());
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        assert.deepEqual(labelsOf(run), PASS_ONE_LABELS);
+        assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'pr-1']);
         assert.ok(run.result.message.startsWith(HELD_ALL + OTHER + '.'), run.result.message);
       });
     }
@@ -2110,7 +2205,7 @@ const ROW_TESTS = {
     test('with local_review false no review runs, the gate does not count as held, and it is listed', async () => {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), PASS_ONE_LABELS.slice(0, -2));
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS.slice(0, -2), 'pr-1']);
       assert.ok(run.result.message.startsWith('Every plan step is done on branch "feature/cache", each wave is committed, and the version bump and validation held on commit ' + OTHER + '.\n\n'), run.result.message);
       assert.ok(run.result.message.includes('\n\n' + notConfigured + '\n\n'), run.result.message);
       assert.ok(!run.phases.includes('Review'));
@@ -2276,7 +2371,7 @@ const ROW_TESTS = {
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       assert.equal(runGitIn(scratch, ['log', '-1', '--format=%s']), 'fix: review finding');
       assert.deepEqual({ ...lib.parseRoutingLines(commitRelays[0].stdout, main.moltRoutingSpec()).values }, { branch: 'feature/cache', commit: head, committed: 'false' });
-      assert.deepEqual(labelsOf(run).slice(-5), ['review-1-1', 'review-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2']);
+      assert.deepEqual(labelsOf(run).slice(-6), ['review-1-1', 'review-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + head + '.'), run.result.message);
     });
   },
@@ -2496,7 +2591,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2']);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'), run.result.message);
       const rerun = main.buildGateRerunBrief(['bump', 'validate'], { held: { bump: OTHER, validate: OTHER } }, THIRD, false);
       assert.equal(run.result.message.split(rerun.problem).length - 1, 1, run.result.message);
@@ -2518,7 +2613,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-3', 'validate-1-3', 'validate-commit-1-3', 'review-1-2', 'review-commit-1-2']);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-3', 'validate-1-3', 'validate-commit-1-3', 'review-1-2', 'review-commit-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + FOURTH + '.'), run.result.message);
       const rerun = main.buildGateRerunBrief(['bump', 'validate', 'review'], { held: { bump: THIRD, validate: OTHER, review: THIRD } }, FOURTH, false);
       assert.ok(rerun.problem.startsWith('Commit ' + FOURTH + ' landed after the version bump, validation and local review held on an earlier commit.'), rerun.problem);
@@ -2529,7 +2624,302 @@ const ROW_TESTS = {
       const results = fixFlowResults();
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), FIX_FLOW_LABELS.slice(0, -2));
+      assert.deepEqual(labelsOf(run), [...FIX_FLOW_LABELS.slice(0, -3), 'pr-1']);
+    });
+  },
+  'SD-42': () => {
+    test('once every gate held on H, the PR runner invokes open-plan-pr with only head, base, expect_commit H, title, body and comment', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(labelsOf(run).at(-1), 'pr-1');
+      assert.equal(run.phases.at(-1), 'PR');
+      const call = callOf(run, 'pr-1');
+      assert.ok(call.prompt.startsWith('Invoke the hivemind:open-plan-pr skill once, with the inputs in the inputs block below, to push the working branch and open its pull request or reuse the open one.\n'));
+      assert.ok(call.prompt.includes(main.pushGrantSentence()));
+      assert.ok(call.prompt.includes(main.gitScriptSentence('hivemind:open-plan-pr')));
+      assert.ok(call.prompt.includes('set stdout to its stdout, word for word, every line.'));
+      assert.ok(!call.prompt.includes(lib.runnerReadOnlySentence()));
+      assert.ok(!call.prompt.includes(main.commitGrantSentence()));
+      assert.equal(call.opts.agentType, 'hivemind:drone');
+      assert.equal(call.opts.model, 'haiku');
+      assert.equal(call.opts.phase, 'PR');
+      assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'stdout', 'stderr']);
+      const inputs = readDataBlock(call.prompt, 'inputs');
+      assert.deepEqual(Object.keys(inputs), ['head', 'base', 'expect_commit', 'title', 'body', 'comment']);
+      assert.deepEqual({ head: inputs.head, base: inputs.base, expect_commit: inputs.expect_commit }, { head: 'feature/cache', base: 'main', expect_commit: OTHER });
+      const outside = withoutDataBlock(call.prompt, 'inputs');
+      assert.ok(!outside.includes('feature/cache') && !outside.includes(OTHER), outside);
+    });
+    for (const [label, results, head, args = LAUNCH] of [
+      ['a run with no fix', happyResults(), OTHER],
+      ['a run with a fix round', fixFlowResults(), THIRD],
+      ['a run with a reviewer fix commit', happyResults({ 'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }), 'bump-type-1-2': bumpRelay(), 'validate-1-2': VALIDATE_PASSED, 'validate-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' }) }), THIRD],
+      ['a run with a remediation pass', remediationResults(ESCALATION), THIRD, REMEDIATION_LAUNCH]
+    ]) {
+      test(`${label}: the PR prompt is the only push prompt, once, and its expect_commit is the commit every gate held on`, async () => {
+        const run = await runWorkflow(args, results);
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        const pushCalls = run.calls.filter((call) => /hivemind:(open-plan-pr|push-branch)/.test(call.prompt));
+        assert.deepEqual(pushCalls.map((call) => call.opts.label), [labelsOf(run).at(-1)]);
+        assert.ok(/^pr-[1-9]$/.test(labelsOf(run).at(-1)));
+        assert.equal(readDataBlock(pushCalls[0].prompt, 'inputs').expect_commit, head);
+        assert.equal(run.result.pr.head_ref_oid, head);
+        assert.ok(run.result.message.startsWith(HELD_ALL + head + '.'), run.result.message);
+      });
+    }
+    test('a run that stops before every gate held makes no PR call', async () => {
+      const stopped = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is missing.' } }));
+      assert.equal(stopped.result.outcome, 'blocked');
+      const asked = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': DIMINISHING }), buildWithSurfaceKinds(['diminishing_returns_exit']));
+      assert.equal(asked.result.outcome, 'complete');
+      for (const run of [stopped, asked]) {
+        assert.ok(labelsOf(run).every((label) => !label.startsWith('pr-')), JSON.stringify(labelsOf(run)));
+        assert.ok(run.calls.every((call) => !call.prompt.includes('hivemind:open-plan-pr')));
+        assert.equal(run.result.pr, undefined);
+      }
+    });
+  },
+  'SD-43': () => {
+    test('the push grant sentence matches the delegated-implementer grant of safety-rails.md and the push sentence of drone.md', () => {
+      const grantLine = safetyRailsText.split('\n').find((line) => line.startsWith('- `COMMIT-GRANT delegated-implementer:`'));
+      assert.ok(grantLine !== undefined, 'safety-rails.md has the delegated-implementer grant line');
+      assert.ok(grantLine.includes('commit or push ONLY when their delegation explicitly authorizes it for that specific delegation'), grantLine);
+      assert.ok(grantLine.includes('A push runs only through `hivemind:open-plan-pr` or `hivemind:push-branch`, never against the resolved trunk branch.'), grantLine);
+      assert.ok(droneText.includes('A push needs the same explicit grant.'));
+      const sentence = main.pushGrantSentence();
+      assert.ok(sentence.startsWith('This delegation explicitly grants push authority for this one task: '), sentence);
+      assert.ok(sentence.includes('one push of the working branch and one pull request opened or reused, made only by the hivemind:open-plan-pr script.'), sentence);
+      assert.ok(sentence.endsWith(' It grants no commit, and no push of the trunk.'), sentence);
+    });
+    test('only the PR prompt carries the push grant: wave workers and the commit runner never do', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      const granted = run.calls.filter((call) => call.prompt.includes(main.pushGrantSentence())).map((call) => call.opts.label);
+      assert.deepEqual(granted, ['pr-1']);
+      assert.ok(main.commitGrantSentence().endsWith('It grants no push.'));
+      assert.ok(callOf(run, 'work-1-STEP-001').prompt.includes('Never commit, push'));
+    });
+  },
+  'SD-44': () => {
+    for (const [label, plan, title] of [
+      ['a feature', makePlan(), 'feat: Add the cache layer.'],
+      ['a breaking bugfix', makePlan({ classification: 'bugfix', breaking: true }), 'fix!: Add the cache layer.'],
+      ['a summary whose first line is blank', makePlan({ summary: '\n  \n  Cache the reads.  \nThen the writes.' }), 'feat: Cache the reads.'],
+      ['a summary with a tab and control characters', makePlan({ summary: 'Cache\tthe\u0007reads\u0085now.\r\nMore.' }), 'feat: Cache the reads now.'],
+      ['a blank summary', makePlan({ summary: '  ' }), 'feat:']
+    ]) {
+      test(`${label} gives the title ${JSON.stringify(title)}`, () => {
+        assert.equal(main.buildPullRequestTitle(plan), title);
+      });
+    }
+    test('a long summary is cut to maxTitleLength() characters, never inside a character', () => {
+      assert.equal(main.maxTitleLength(), 256);
+      const ascii = main.buildPullRequestTitle(makePlan({ summary: 'x'.repeat(400) }));
+      assert.equal(ascii.length, 256);
+      const astral = main.buildPullRequestTitle(makePlan({ summary: '\u{1F600}'.repeat(400) }));
+      assert.equal(Array.from(astral).length, 256);
+      assert.ok(astral.endsWith('\u{1F600}'));
+      for (const title of [ascii, astral]) {
+        assert.ok(isPullRequestText(title, false) && !title.includes('\n'), title);
+      }
+    });
+    test('the PR inputs carry the title built from the plan', async () => {
+      const plan = makePlan({ classification: 'refactor', breaking: true, summary: 'Split the cache.\nKeep the API.' });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
+      assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').title, 'refactor!: Split the cache.');
+    });
+  },
+  'SD-45': () => {
+    test('the body holds the summary, the gates with their commits, the commits, the reversible effects and every decision, and the comment the gates and the decisions', async () => {
+      const plan = effectPlan('Post a preview link.', true);
+      const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
+      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const gates = gatesBlock(['the version bump: no bump, held on commit ' + OTHER, 'validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
+      const decisions = lib.renderDecisions([{ brief: strong }, { brief: main.buildPlanAcceptanceBrief(plan) }, { brief: main.buildBumpTypeBrief(parsedBump()) }]);
+      assert.equal(inputs.body, [plan.summary, gates, 'Commits this run made:\n- ' + OTHER, 'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."', decisions].join('\n\n'));
+      assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', gates, decisions].join('\n\n'));
+    });
+    test('a bump type, a validation not run and a local review not configured are each named', async () => {
+      const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
+      const results = happyResults({ 'plan-1': planResult(plan), 'bump-type-1-1': bumpRelay(MINOR_BUMP), 'bump-1-1': { outcome: 'complete' }, 'bump-commit-1-1': commitRelay({ commit: THIRD }), 'validate-1-1': { outcome: 'not_run' }, 'validate-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }) });
+      const run = await runWorkflow({ ...LAUNCH, local_review: false }, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const gates = gatesBlock(['the version bump: minor bump, held on commit ' + THIRD, 'validation: not run, the project documents no validation commands, held on commit ' + THIRD, 'local review: not configured for this run']);
+      assert.ok(inputs.body.includes('\n\n' + gates + '\n\n'), inputs.body);
+      assert.ok(inputs.comment.includes('\n\n' + gates), inputs.comment);
+    });
+    test('a taken diminishing returns exit shows a fixed problem, the open finding count and no reviewer text', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': DIMINISHING }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const fixed = main.reviewDecisionProblems().diminishing_returns_exit;
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(text.includes('- local review: diminishing returns, 2 findings still open, held on commit ' + OTHER), text);
+        assert.ok(text.includes(fixed), text);
+        for (const reviewerText of ['Stop here; the rest is style.', 'the highest severity', '"low"']) {
+          assert.ok(!text.includes(reviewerText), reviewerText);
+        }
+      }
+      assert.ok(run.result.message.includes('the highest severity "low"'), 'the final message keeps the JSON-encoded reviewer value');
+    });
+    for (const [review, kind, reviewerTexts] of [[ESCALATION, 'planner_escalation_routing', ['F5', 'skips the', 'src/cache.js']], [CLUSTER, 'root_cluster_routing', ['The cache key is built from raw input.', 'input-keying']]]) {
+      test(`a taken ${kind} shows a fixed problem and no reviewer text`, async () => {
+        const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(review));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        const inputs = readDataBlock(callOf(run, 'pr-2').prompt, 'inputs');
+        for (const text of [inputs.body, inputs.comment]) {
+          assert.ok(text.includes(main.reviewDecisionProblems()[kind]), text);
+          reviewerTexts.forEach((reviewerText) => assert.ok(!text.includes(reviewerText), reviewerText));
+        }
+      });
+    }
+    test('no control character other than newline and tab reaches the body or the comment', async () => {
+      const plan = makePlan({ summary: 'Cache\u0007 the\treads.\r\nThen\u0000 the\u009b writes.\u007f' });
+      const question = makeBrief({ problem: 'Pick\u0001 a key.\u001b[31m' });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [question]) }));
+      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(isPullRequestText(text, true), JSON.stringify(text));
+      }
+      assert.ok(inputs.body.startsWith('Cache  the\treads. \nThen  the  writes. \n\n'), JSON.stringify(inputs.body));
+      assert.ok(inputs.comment.includes('Pick  a key. [31m'), inputs.comment);
+    });
+    test('decisions go compact when the full form would pass maxPullRequestTextLength()', async () => {
+      assert.equal(main.maxPullRequestTextLength(), 60000);
+      const longOptions = makeBrief().options.map((option) => ({ ...option, summary: 'S'.repeat(61000) }));
+      const question = makeBrief({ problem: 'LONG_OPTION_PROBLEM', options: longOptions });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [question]) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const compact = lib.renderDecisionsCompact([{ brief: question }, { brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }]);
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(text.endsWith('\n\n' + compact), text.slice(-400));
+        assert.ok(text.length <= 60000 && !text.includes('S'.repeat(100)));
+      }
+    });
+    test('a body still too long in compact form stops the run blocked naming its size, with no PR call', async () => {
+      const question = makeBrief({ problem: 'P'.repeat(61000) });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [question]) }));
+      assert.equal(run.result.outcome, 'blocked');
+      const match = run.result.message.match(/^The pull request body would be ([0-9]+) characters even with the decisions in short form, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing\./);
+      assert.ok(match, run.result.message.slice(0, 300));
+      assert.ok(Number(match[1]) > 60000);
+      assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
+      assert.equal(run.result.pr, undefined);
+    });
+    test('a comment still too long in compact form stops the run naming the comment and its size', () => {
+      const gates = { held: { bump: OTHER, validate: OTHER, review: OTHER }, notes: { bump: 'no bump', validate: 'passed', review: 'clean' } };
+      const plan = makePlan({ summary: '' });
+      const longOptions = makeBrief().options.map((option) => ({ ...option, summary: 'S'.repeat(61000) }));
+      const runWith = (problem) => ({ localReview: true, head: OTHER, commits: [OTHER], reversibleEffects: [], taken: [{ brief: makeBrief({ problem: problem, options: longOptions }), kind: 'planner_question' }] });
+      const shortTexts = main.buildPullRequestTexts(runWith('P'), plan, gates);
+      const bodyOverhead = shortTexts.body.length - 1;
+      const commentOverhead = shortTexts.comment.length - 1;
+      assert.ok(commentOverhead > bodyOverhead, 'with no summary the comment lead is longer than the body commits');
+      const problem = 'P'.repeat(60000 - commentOverhead + 1);
+      const texts = main.buildPullRequestTexts(runWith(problem), plan, gates);
+      assert.equal(texts.problem, 'The pull request comment would be 60001 characters even with the decisions in short form, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing.');
+    });
+  },
+  'SD-46': () => {
+    test('the spec keys are the open-plan-pr.sh OUTPUT keys in order, and its warnings are the script fixed texts', () => {
+      assert.deepEqual(Object.keys(main.openPlanPrRoutingSpec()), readOutputKeys(openPlanPrText));
+      assert.deepEqual(readOutputKeys(openPlanPrText), ['url', 'head_ref_oid', 'created', 'commented', 'warning']);
+      const scriptWarnings = [...openPlanPrText.matchAll(/^ *[a-z_]*warning='([^']+)'$/gm)].map((match) => match[1]);
+      assert.deepEqual([...scriptWarnings].sort(), [...main.pullRequestWarningTexts()].sort());
+      const spec = main.openPlanPrRoutingSpec();
+      assert.deepEqual(Object.entries(spec).filter(([, entry]) => entry.required).map(([key]) => key), ['url', 'head_ref_oid', 'created', 'commented']);
+      main.pullRequestWarningTexts().forEach((text) => assert.ok(spec.warning.pattern.test(text), text));
+    });
+    test('canned reuse-and-comment stdout parses with the spec, and the run finishes with the reused PR', async () => {
+      const stdout = 'url: ' + PR_URL + '\nhead_ref_oid: ' + OTHER + '\ncreated: false\ncommented: true\n';
+      assert.deepEqual({ ...lib.parseRoutingLines(stdout, main.openPlanPrRoutingSpec()).values }, { url: PR_URL, head_ref_oid: OTHER, created: 'false', commented: 'true' });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': { outcome: 'ran', stdout: stdout } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
+      assert.ok(run.result.message.includes('\n\nPushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ', and commented on it with the gates and the decisions taken.\n\n'), run.result.message);
+    });
+    for (const warning of ['push was rejected; the branch is not on its remote', 'no upstream and no origin remote; push deferred', 'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked']) {
+      test(`the warning ${JSON.stringify(warning)} is named in the final message`, async () => {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': cannedPrRunner({ warning: warning }) }));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.ok(run.result.message.includes(openedLine(OTHER) + '\nThe pull request step warned: ' + warning + '.\n\n'), run.result.message);
+      });
+    }
+    const malformed = 'The pull request step returned malformed routing lines, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it.';
+    const unusable = 'The pull request step returned a result it could not use, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it.';
+    const good = prRelay({ head_ref_oid: OTHER }).stdout;
+    for (const [label, relay, message] of [
+      ['no result', null, unusable],
+      ['an empty object', {}, unusable],
+      ['an extra field', { outcome: 'ran', stdout: good, note: 'x' }, unusable],
+      ['ran with no stdout', { outcome: 'ran' }, malformed],
+      ['a head other than H', prRelay({ head_ref_oid: THIRD }), 'The pull request step reported a head commit other than the commit every gate held on, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it.'],
+      ['created false with commented false', prRelay({ head_ref_oid: OTHER, created: 'false', commented: 'false' }), malformed],
+      ['created true with commented true', prRelay({ head_ref_oid: OTHER, commented: 'true' }), malformed],
+      ['no commented line', prRelay({ head_ref_oid: OTHER, commented: undefined }), malformed],
+      ['an unknown warning', prRelay({ head_ref_oid: OTHER, warning: 'all good' }), malformed],
+      ['an http url', prRelay({ head_ref_oid: OTHER, url: 'http://github.com/o/r/pull/7' }), malformed],
+      ['a url that is not a pull request', prRelay({ head_ref_oid: OTHER, url: 'https://github.com/o/r/issues/7' }), malformed],
+      ['an unknown line', { outcome: 'ran', stdout: good + 'remote: origin\n' }, malformed],
+      ['a duplicate line', { outcome: 'ran', stdout: good + 'created: true\n' }, malformed],
+      ['CR line ends', { outcome: 'ran', stdout: good.replace(/\n/g, '\r\n') }, malformed],
+      ['a blocked relay', { outcome: 'blocked', stderr: 'blocker: working tree has uncommitted changes\n' }, 'The pull request step was blocked, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it. blocker: working tree has uncommitted changes']
+    ]) {
+      test(`a relay with ${label} stops the run blocked naming the pull request step`, async () => {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': relay }));
+        assert.equal(run.result.outcome, 'blocked');
+        assert.equal(run.result.pr, undefined);
+        assert.ok(run.result.message.startsWith(message + '\n\nCommits this run made:\n- ' + OTHER), run.result.message);
+        assert.equal(labelsOf(run).at(-1), 'pr-1');
+      });
+    }
+  },
+  'SD-47': () => {
+    test('real open-plan-pr.sh, with its real push-branch.sh child, pushes H to a bare origin and opens the PR through a stub gh', async () => {
+      const scratch = makeScratchRepo();
+      const origin = addBareOrigin(scratch);
+      const logDir = writeCreatePathGh(scratch, origin);
+      const prRelays = [];
+      const run = await runWorkflow(LAUNCH, realResults(scratch, { 'plan-1': planResult(makePlan()), 'pr-1': recordRelays(realPrRunner(scratch), prRelays) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
+      assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: head, created: true });
+      assert.equal(runGitIn(scratch, ['ls-remote', origin, 'refs/heads/feature/cache']).split('\t')[0], head);
+      assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').expect_commit, head);
+      const createArgs = readFileSync(join(logDir, 'create.args'), 'utf8').split('\n');
+      assert.ok(createArgs.includes('--base') && createArgs.includes('main') && createArgs.includes('--title=feat: Add the cache layer.'), JSON.stringify(createArgs));
+      assert.ok(!createArgs.includes('--head'));
+      assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').body);
+      assert.ok(!prRelays[0].stdout.includes('commented: true'));
+      assert.ok(run.result.message.startsWith(HELD_ALL + head + '.\n\n' + openedLine(head) + '\nThe pull request step warned: gh cannot read the push remote as a GitHub repository; the PR head repository was not checked.\n\n'), run.result.message);
+    });
+    test('real open-plan-pr.sh refuses a head other than expect_commit, and the run stops blocked naming the PR step', async () => {
+      const scratch = makeScratchRepo();
+      const origin = addBareOrigin(scratch);
+      writeCreatePathGh(scratch, origin);
+      const moveHead = (prompt) => {
+        writeRepoFile(scratch, 'late.txt', 'late\n');
+        runGitIn(scratch, ['add', 'late.txt']);
+        runGitIn(scratch, ['commit', '-q', '-m', 'chore: a late commit']);
+        return realPrRunner(scratch)(prompt);
+      };
+      const run = await runWorkflow(LAUNCH, realResults(scratch, { 'plan-1': planResult(makePlan()), 'pr-1': moveHead }));
+      assert.equal(run.result.outcome, 'blocked');
+      assert.ok(run.result.message.startsWith('The pull request step was blocked, so the delivery stopped.'), run.result.message);
+      assert.equal(spawnSync('git', ['ls-remote', '--exit-code', origin, 'refs/heads/feature/cache'], { cwd: scratch.repo, env: scratch.env }).status, 2, 'nothing was pushed');
+    });
+    test('the result carries pr and its keys come before the message', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.deepEqual(Object.keys(run.result), ['needs_user', 'outcome', 'pr', 'message']);
+      assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: true });
+    });
+    test('with local_review false the final message names the PR and lists the gate that did not run', async () => {
+      const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(run.result.message.startsWith('Every plan step is done on branch "feature/cache", each wave is committed, and the version bump and validation held on commit ' + OTHER + '.\n\n' + openedLine(OTHER) + '\n\n'), run.result.message);
+      assert.ok(run.result.message.includes('Gates that did not run:\n- ' + main.notConfiguredReviewLine()), run.result.message);
     });
   }
 };
@@ -2562,7 +2952,7 @@ describe('standard-delivery draft', () => {
   test('meta names the workflow and its phases', async () => {
     const run = await workflow.run({ args: undefined, results: {} });
     assert.equal(run.meta.name, WORKFLOW_ID);
-    assert.deepEqual(structuredClone(run.meta.phases).map((phase) => phase.title), ['Facts', 'Scan', 'Plan', 'Revise', 'Branch', 'Waves', 'Commit', 'Bump', 'Validate', 'Fix', 'Review']);
+    assert.deepEqual(structuredClone(run.meta.phases).map((phase) => phase.title), ['Facts', 'Scan', 'Plan', 'Revise', 'Branch', 'Waves', 'Commit', 'Bump', 'Validate', 'Fix', 'Review', 'PR']);
   });
   test('main.js and meta.js are ASCII with no em dash, no hash before a digit and no clock or randomness', () => {
     for (const source of [mainSource, metaSource]) {
@@ -2573,7 +2963,7 @@ describe('standard-delivery draft', () => {
   });
   test('every phase the script enters is a meta phase', async () => {
     const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'clean' }] } }));
-    const titles = ['Facts', 'Scan', 'Plan', 'Revise', 'Branch', 'Waves', 'Commit', 'Bump', 'Validate', 'Fix', 'Review'];
+    const titles = ['Facts', 'Scan', 'Plan', 'Revise', 'Branch', 'Waves', 'Commit', 'Bump', 'Validate', 'Fix', 'Review', 'PR'];
     assert.ok(run.phases.every((title) => titles.includes(title)), JSON.stringify(run.phases));
   });
 });

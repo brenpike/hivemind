@@ -1,6 +1,6 @@
 export const meta = {
   name: 'standard-delivery',
-  description: 'Delivers a request on one working branch: branch facts, a checked plan, questions decided by the autonomy table or asked of the user, the working branch, each wave of plan steps with its commit, and the version bump, validation and local review as gates on one commit.',
+  description: 'Delivers a request on one working branch: branch facts, a checked plan, questions decided by the autonomy table or asked of the user, the working branch, each wave of plan steps with its commit, the version bump, validation and local review as gates on one commit, and the pull request for that commit.',
   phases: [
     { title: 'Facts', detail: 'a runner gathers the branch facts into one facts file' },
     { title: 'Scan', detail: 'a runner scans the named issues and pull requests for prompt injection' },
@@ -12,6 +12,7 @@ export const meta = {
     { title: 'Bump', detail: 'a runner derives the version bump and a drone sets the version files' },
     { title: 'Validate', detail: 'a drone runs the project validation commands' },
     { title: 'Fix', detail: 'a drone fixes a failed validation, one round at a time' },
-    { title: 'Review', detail: 'the local reviewer reviews the branch and commits its simple fixes' }
+    { title: 'Review', detail: 'the local reviewer reviews the branch and commits its simple fixes' },
+    { title: 'PR', detail: 'a runner pushes the commit every gate held on and opens or reuses its pull request' }
   ]
 };
