@@ -922,7 +922,12 @@ const ROW_TESTS = {
       ['a dependency cycle', planResult(makePlan({ steps: [makeStep('A', ['a.js'], { depends_on: ['B'] }), makeStep('B', ['b.js'], { depends_on: ['A'] })] })), 'The plan steps cannot be scheduled, so the delivery stopped: dependency cycle detected among plan steps'],
       ['a trunk freshness other than the facts', planResult(makePlan({ trunk_freshness: 'behind' })), 'The plan copies a trunk freshness other than the facts, so the delivery stopped.'],
       ['an unsafe branch', planResult(makePlan({ branch: 'feature/..x' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
-      ['an unsafe base', planResult(makePlan({ base: '-main' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.']
+      ['an unsafe base', planResult(makePlan({ base: '-main' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
+      ...[['VERSION', 'my file.json'], ['VERSION;touch x'], ['$(touch x)/VERSION'], ['-VERSION'], ['a/../VERSION']].map((artifactFiles) => [
+        'an unsafe version file path in ' + JSON.stringify(artifactFiles),
+        planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles } })),
+        'The plan names a version file path that is not a safe git path, so the delivery stopped.'
+      ])
     ]) {
       test(`${label} blocks before the branch step`, async () => {
         const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': result });
@@ -1949,6 +1954,7 @@ const ROW_TESTS = {
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'blocker']);
       assert.ok(call.prompt.includes('plain git show <trunk_commit>:<path> run from the repo folder'), call.prompt);
       assert.ok(call.prompt.includes('Never raise the version the file holds now.'));
+      assert.ok(call.prompt.includes('Each path in artifact_files passed the plan check: it is not empty, uses only the characters A-Z a-z 0-9 . _ / -, does not start with - and holds no .., so it goes into that git show command as it is.'), call.prompt);
       assert.ok(call.prompt.includes('Edit only the files in artifact_files.'));
       assert.ok(call.prompt.includes(lib.boundarySentence()));
       assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { trunk_commit: TRUNK_COMMIT, bump_type: 'major', artifact_files: ['package.json', 'VERSION'] });
@@ -2758,15 +2764,58 @@ const ROW_TESTS = {
     });
   },
   'SD-45': () => {
-    test('the body holds the summary, the gates with their commits, the commits, the reversible effects and every decision, and the comment the gates and the decisions', async () => {
+    test('the body holds the summary and the run record, and the comment its lead and the same run record: commits, reversible effects, gates with their commits, every decision', async () => {
       const plan = effectPlan('Post a preview link.', true);
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
       const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
       const gates = gatesBlock(['the version bump: no bump, held on commit ' + OTHER, 'validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
       const decisions = lib.renderDecisions([{ brief: strong }, { brief: main.buildPlanAcceptanceBrief(plan) }, { brief: main.buildBumpTypeBrief(parsedBump()) }]);
-      assert.equal(inputs.body, ['```\n' + plan.summary + '\n```', gates, 'Commits this run made:\n- ' + OTHER, '```\nEffects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."\n```', '```\n' + decisions + '\n```'].join('\n\n'));
-      assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', gates, '```\n' + decisions + '\n```'].join('\n\n'));
+      const record = ['Commits this run made:\n- ' + OTHER, '```\nEffects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."\n```', gates, '```\n' + decisions + '\n```'];
+      assert.equal(inputs.body, ['```\n' + plan.summary + '\n```', ...record].join('\n\n'));
+      assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...record].join('\n\n'));
+    });
+    test('the final message, the body and the comment each carry the one run record buildRunRecordParts() returns', () => {
+      const run = main.createRunState({ request: REQUEST, trunk: 'main', references: [], localReview: false, argsObject: {} });
+      run.commits.push(OTHER);
+      run.waveCount = 1;
+      run.head = OTHER;
+      run.reversibleEffects.push({ stepId: 'STEP-001', summary: 'Post a preview link.' });
+      run.notRunGates.push(main.notConfiguredReviewLine());
+      run.taken.push({ brief: makeBrief({ problem: 'PARITY_PROBLEM' }), kind: 'planner_question' });
+      const gates = { held: { bump: OTHER, validate: OTHER }, notes: { bump: 'no bump', validate: 'passed' } };
+      for (const gateArg of [undefined, gates]) {
+        const parts = main.buildRunRecordParts(run, run.taken, gateArg);
+        assert.deepEqual([...parts.map((part) => part.id)], ['commits', 'reversible_effects', 'gates', 'decisions']);
+        assert.deepEqual([...parts.filter((part) => part.external).map((part) => part.id)], ['reversible_effects', 'decisions']);
+      }
+      const messageParts = main.buildRunRecordParts(run, run.taken, undefined);
+      const blocks = main.buildRunBlocks('LEAD', run, run.taken, '');
+      assert.equal(blocks[0].text, 'LEAD');
+      assert.deepEqual([...blocks.slice(1).map((block) => block.text)], [...messageParts.map((part) => part.text)]);
+      assert.deepEqual([...blocks.slice(1).map((block) => block.compact)], [...messageParts.map((part) => part.compact)]);
+      const plan = makePlan();
+      const texts = main.buildPullRequestTexts(run, plan, gates);
+      const prParts = main.buildRunRecordParts(run, run.taken.map(main.toPullRequestDecision), gates);
+      const rendered = [...prParts.map((part) => (part.external ? main.renderLiteralBlock(part.text) : part.text))];
+      assert.equal(texts.body, [main.renderLiteralBlock(plan.summary), ...rendered].join('\n\n'));
+      assert.equal(texts.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...rendered].join('\n\n'));
+      for (const id of ['commits', 'reversible_effects', 'decisions']) {
+        assert.equal(prParts.find((part) => part.id === id).text, messageParts.find((part) => part.id === id).text, id);
+      }
+      for (const name of ['buildRunBlocks', 'buildPullRequestBody', 'buildPullRequestComment']) {
+        const source = String(main[name]);
+        for (const renderer of ['renderCommits', 'renderReversibleEffects', 'renderNotRunGates', 'renderPullRequestGates', 'renderDecisions', 'renderDecisionsCompact']) {
+          assert.ok(!new RegExp('\\b' + renderer + '\\(').test(source), name + ' calls ' + renderer);
+        }
+      }
+      for (const name of ['buildRunBlocks', 'renderPullRequestRecord']) {
+        assert.ok(String(main[name]).includes('buildRunRecordParts('), name);
+      }
+      for (const name of ['buildPullRequestBody', 'buildPullRequestComment']) {
+        assert.ok(String(main[name]).includes('renderPullRequestRecord('), name);
+      }
+      assert.ok(String(main.pauseDelivery).includes('renderCommits('));
     });
     test('renderLiteralBlock fences the text unchanged with one backtick more than its longest backtick run, at least three', () => {
       for (const [text, block] of [
@@ -2879,7 +2928,7 @@ const ROW_TESTS = {
       const gates = { held: { bump: OTHER, validate: OTHER, review: OTHER }, notes: { bump: 'no bump', validate: 'passed', review: 'clean' } };
       const plan = makePlan({ summary: '' });
       const longOptions = makeBrief().options.map((option) => ({ ...option, summary: 'S'.repeat(61000) }));
-      const runWith = (problem) => ({ localReview: true, head: OTHER, commits: [OTHER], reversibleEffects: [], taken: [{ brief: makeBrief({ problem: problem, options: longOptions }), kind: 'planner_question' }] });
+      const runWith = (problem) => ({ localReview: true, head: OTHER, commits: [OTHER], waveCount: 1, notRunGates: [], reversibleEffects: [], taken:[{ brief: makeBrief({ problem: problem, options: longOptions }), kind: 'planner_question' }] });
       const shortTexts = main.buildPullRequestTexts(runWith('P'), plan, gates);
       const bodyOverhead = shortTexts.body.length - 1;
       const commentOverhead = shortTexts.comment.length - 1;
@@ -2987,6 +3036,20 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(run.result.message.startsWith('Every plan step is done on branch "feature/cache", each wave is committed, and the version bump and validation held on commit ' + OTHER + '.\n\n' + openedLine(OTHER) + '\n\n'), run.result.message);
       assert.ok(run.result.message.includes('Gates that did not run:\n- ' + main.notConfiguredReviewLine()), run.result.message);
+    });
+    test('a reused PR comment and the final message carry the same run record: commits, reversible effects, gates and decisions', async () => {
+      const plan = effectPlan('Post a preview link.', true);
+      const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults({ 'plan-1': planResult(plan), 'pr-1': cannedPrRunner({ created: 'false', commented: 'true' }) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
+      const commits = 'Commits this run made:\n- ' + OTHER;
+      const effects = 'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."';
+      const decisions = lib.renderDecisions([{ brief: main.buildPlanAcceptanceBrief(plan) }, { brief: main.buildBumpTypeBrief(parsedBump()) }]);
+      const gates = gatesBlock(['the version bump: no bump, held on commit ' + OTHER, 'validation: passed, held on commit ' + OTHER, 'local review: not configured for this run']);
+      const comment = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').comment;
+      assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', commits, '```\n' + effects + '\n```', gates, '```\n' + decisions + '\n```'].join('\n\n'));
+      const lead = 'Every plan step is done on branch "feature/cache", each wave is committed, and the version bump and validation held on commit ' + OTHER + '.\n\nPushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ', and commented on it with the gates and the decisions taken.';
+      assert.equal(run.result.message, [lead, commits, effects, 'Gates that did not run:\n- ' + main.notConfiguredReviewLine(), decisions].join('\n\n'));
     });
   }
 };
