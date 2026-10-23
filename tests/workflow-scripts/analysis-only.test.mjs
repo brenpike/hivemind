@@ -104,21 +104,9 @@ function makeLongTakenBrief(index) {
   });
 }
 
-function makeLongOption(id, caseLength) {
-  return {
-    id: id,
-    summary: 'Option ' + id + ' summary.',
-    steel_man: 'S'.repeat(caseLength),
-    straw_man: 'T'.repeat(caseLength),
-    effort: 'small',
-    value: 'high',
-    reversible: true
-  };
-}
-
-function makeLongGatedBrief(index, problemLength, caseLength) {
+function makeLongGatedBrief(index, problemLength, detailLength) {
   const gated = makeGatedBrief('GATED_' + index + ' ' + 'q'.repeat(problemLength));
-  return { ...gated, options: [makeLongOption('A', caseLength), makeLongOption('B', caseLength)] };
+  return { ...gated, criticality: { ...gated.criticality, blast_radius: 'S'.repeat(detailLength) } };
 }
 
 describe('analysis-only: no pause', () => {
@@ -461,26 +449,26 @@ describe('analysis-only: notice budget', () => {
     assert.ok(message.endsWith(lib.noticeMarker('shortened')));
   });
   test('many long gated questions pause in compact form with every label', async () => {
-    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 600));
+    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 2400));
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: gated }) });
     assertWithinNotice(run.result);
     assert.equal(run.result.needs_user, true);
     assert.deepEqual(run.result.resume_args, { answers: {} });
     const message = run.result.message;
     assert.ok(message.startsWith(COMPACT_MARKER));
-    assert.ok(!message.includes('Case for:'));
+    assert.ok(!message.includes('Why it matters:'));
     for (let label = 1; label <= gated.length; label++) {
       assert.ok(message.includes('Q' + label + '. GATED_' + (label - 1)), 'Q' + label);
     }
   });
   test('gated questions too long even in compact form pause with a hard cut', async () => {
-    const gated = Array.from({ length: 60 }, (_, index) => makeLongGatedBrief(index, 200, 600));
+    const gated = Array.from({ length: 60 }, (_, index) => makeLongGatedBrief(index, 200, 2400));
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: gated }) });
     assertWithinNotice(run.result);
     assert.equal(run.result.needs_user, true);
     assert.deepEqual(run.result.resume_args, { answers: {} });
     const message = run.result.message;
-    assert.ok(message.startsWith('I need your answers on 60 questions before I go on.'));
+    assert.ok(message.startsWith('**Answer Q1 to Q60 so I can go on: pick one option for each.**'));
     assert.ok(message.endsWith(lib.noticeMarker('cut')));
     assert.ok(message.includes(CUT_MARKER));
     assert.ok(!message.includes(COMPACT_MARKER));
@@ -509,7 +497,7 @@ describe('analysis-only: notice budget', () => {
     }
   });
   test('a resume rebuilds the request from the launch args and gives revise the full questions', async () => {
-    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 600));
+    const gated = Array.from({ length: 10 }, (_, index) => makeLongGatedBrief(index, 20, 2400));
     const results = {
       analyze: makeAnalysis({ questions: gated }),
       'revise-1': makeAnalysis({ report: 'REPORT_ONE', questions: [makeGatedBrief('SECOND_PROBLEM')] }),
@@ -518,12 +506,12 @@ describe('analysis-only: notice budget', () => {
     const launchArgs = { request: REQUEST };
     const first = await runWorkflow(launchArgs, results);
     assert.ok(first.result.message.startsWith(COMPACT_MARKER));
-    assert.ok(!first.result.message.includes('Case for:'));
+    assert.ok(!first.result.message.includes('Why it matters:'));
     const second = await runWorkflow(resumeWith(launchArgs, first.result, 'REPLY_ONE'), results);
     assert.equal(second.calls[1].prompt, first.calls[1].prompt);
     assert.deepEqual(labelsOf(second.calls), ['facts', 'analyze', 'revise-1']);
     const revisePrompt = second.calls[2].prompt;
-    assert.ok(revisePrompt.includes('Case for: ' + 'S'.repeat(600)));
+    assert.ok(revisePrompt.includes('If it goes wrong: ' + 'S'.repeat(2400)));
     assert.ok(revisePrompt.includes('Q10. GATED_9'));
     assert.equal(second.result.needs_user, true);
     assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'REPLY_ONE' } });

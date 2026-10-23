@@ -7,7 +7,8 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const libDir = repoRoot + 'plugin/workflow-src/lib/';
 const lib = loadLibs(['decide.js', 'brief.js', 'result.js'].map((name) => libDir + name));
 const EM_DASH = '\u2014';
-const REPLY_LINE = 'Reply in your own words. You can point at a question by its label, like Q1.';
+const REPLY_LINE = 'Reply with a label and an option, like Q1 A, or in your own words.';
+const ONE_HEADING = '**Answer Q1 so I can go on: pick one of its options.**';
 
 function makeBrief(overrides = {}) {
   return {
@@ -46,31 +47,45 @@ function assertInOrder(text, needles) {
   }
 }
 
-describe('renderQuestions field order', () => {
+describe('renderQuestions layout', () => {
   const text = lib.renderQuestions([{ brief: makeBrief(), reason: 'gate_irreversible' }], []);
-  test('shows every field in the contract order', () => {
-    assertInOrder(text, [
-      'Q1. PROBLEM_TEXT',
-      'How serious: high criticality, likelihood edge case.',
-      'If it goes wrong: BLAST_TEXT',
-      'If ignored: IGNORED_TEXT',
-      'Option A: SUMMARY_A', 'Case for: FOR_A', 'Case against: AGAINST_A', 'Effort small, value high, reversible: yes.',
-      'Option B: SUMMARY_B', 'Case for: FOR_B', 'Case against: AGAINST_B', 'Effort large, value low, reversible: no.',
+  test('puts the ask first, then options, recommendation, why it matters and the exact text', () => {
+    assert.equal(text, [
+      ONE_HEADING,
+      '',
+      '**Q1. PROBLEM_TEXT**',
+      '- A: SUMMARY_A (recommended)',
+      '- B: SUMMARY_B',
       'Recommendation: option A (weak). Why: WHY_TEXT',
-      'Why I am asking: ',
-      'USER_STATEMENT', 'REPO_STATEMENT', 'ASSUMED_STATEMENT',
-      'Exact text:', 'VERBATIM_TEXT'
-    ]);
+      'Why it matters: high criticality, likelihood edge case. If it goes wrong: BLAST_TEXT',
+      'Why I am asking: ' + lib.askReasonLine('gate_irreversible'),
+      '',
+      'Exact text:',
+      'VERBATIM_TEXT',
+      '',
+      REPLY_LINE
+    ].join('\n'));
+  });
+  test('one question with two options and no verbatim fits in 12 lines', () => {
+    const brief = makeBrief();
+    delete brief.verbatim;
+    const lines = lib.renderQuestions([{ brief, reason: 'hard_stop' }], []).split('\n');
+    assert.ok(lines.length <= 12, `${lines.length} lines`);
+  });
+  test('leaves out the cases, effort, value, reversible and assumptions', () => {
+    for (const needle of ['FOR_A', 'AGAINST_A', 'Case for', 'Effort', 'reversible', 'Assumptions', 'USER_STATEMENT', 'IGNORED_TEXT']) {
+      assert.equal(text.includes(needle), false, `shows ${needle}`);
+    }
   });
   test('never shows brief.id or brief.kind', () => {
     assert.doesNotMatch(text, /Q9|planner_question/);
   });
-  test('ends with one line telling the user to reply in their own words', () => {
+  test('ends with one line showing how to reply', () => {
     const lines = text.split('\n');
     assert.equal(lines[lines.length - 1], REPLY_LINE);
     assert.equal(lines.filter((line) => line === REPLY_LINE).length, 1);
   });
-  test('omits the verbatim block when verbatim is absent', () => {
+  test('omits the verbatim section when verbatim is absent', () => {
     const brief = makeBrief();
     delete brief.verbatim;
     assert.doesNotMatch(lib.renderQuestions([{ brief, reason: 'hard_stop' }], []), /Exact text:/);
@@ -80,10 +95,21 @@ describe('renderQuestions field order', () => {
     const rendered = lib.renderQuestions([{ brief: makeBrief({ verbatim }), reason: 'hard_stop' }], []);
     assert.ok(rendered.split('\n').includes(verbatim));
   });
-  test('shows a recommendation of none', () => {
-    const recommendation = { option_id: '', strength: 'none', why: 'NONE_WHY' };
+  test('shows a multi-line verbatim whole', () => {
+    const verbatim = 'line one\n\nline three';
+    const rendered = lib.renderQuestions([{ brief: makeBrief({ verbatim }), reason: 'hard_stop' }], []);
+    assert.ok(rendered.includes('Exact text:\n' + verbatim + '\n\n'));
+  });
+  test('shows a recommendation of none and marks no option', () => {
+    const recommendation = { option_id: 'A', strength: 'none', why: 'NONE_WHY' };
     const rendered = lib.renderQuestions([{ brief: makeBrief({ recommendation }), reason: 'no_recommendation' }], []);
     assert.equal(lineContaining(rendered, 'Recommendation:'), 'Recommendation: none. Why: NONE_WHY');
+    assert.doesNotMatch(rendered, /recommended\)/);
+  });
+  test('marks only the recommended option', () => {
+    const recommendation = { option_id: 'B', strength: 'strong', why: 'W' };
+    const rendered = lib.renderQuestions([{ brief: makeBrief({ recommendation }), reason: 'hard_stop' }], []);
+    assert.ok(rendered.includes('- A: SUMMARY_A\n- B: SUMMARY_B (recommended)\n'));
   });
 });
 
@@ -94,13 +120,18 @@ describe('labels', () => {
       reason: 'table_surface'
     }));
     const text = lib.renderQuestions(asks, []);
-    assertInOrder(text, ['Q1. FIRST', 'Q2. SECOND', 'Q3. THIRD']);
+    assertInOrder(text, ['**Q1. FIRST**', '**Q2. SECOND**', '**Q3. THIRD**']);
     assert.doesNotMatch(text, /Q[4-7]/);
-    assert.match(text, /^I need your answers on 3 questions before I go on\./);
+    assert.equal(text.split('\n')[0], '**Answer Q1 to Q3 so I can go on: pick one option for each.**');
   });
-  test('one question uses the singular intro', () => {
+  test('one question uses the singular heading', () => {
     const text = lib.renderQuestions([{ brief: makeBrief(), reason: 'hard_stop' }], []);
-    assert.match(text, /^I need your answer on 1 question before I go on\./);
+    assert.equal(text.split('\n')[0], ONE_HEADING);
+  });
+  test('two questions name both labels in the heading', () => {
+    const entry = { brief: makeBrief(), reason: 'hard_stop' };
+    const text = lib.renderQuestions([entry, entry], []);
+    assert.equal(text.split('\n')[0], '**Answer Q1 and Q2 so I can go on: pick one option for each.**');
   });
 });
 
@@ -125,22 +156,6 @@ describe('reason lines', () => {
       assert.throws(() => lib.renderQuestions([{ brief: makeBrief(), reason }], []), /askReasonLine/);
     });
   }
-});
-
-describe('assumptions', () => {
-  const text = lib.renderQuestions([{ brief: makeBrief(), reason: 'hard_stop' }], []);
-  test('assumed origin is marked as something the user can overrule', () => {
-    assert.equal(lineContaining(text, 'ASSUMED_STATEMENT'), '  - ASSUMED_STATEMENT (my assumption, you can overrule it: ASSUMED_EVIDENCE)');
-  });
-  test('user and repo origins are not marked as overrulable', () => {
-    assert.equal(lineContaining(text, 'USER_STATEMENT'), '  - USER_STATEMENT (you said so: USER_EVIDENCE)');
-    assert.equal(lineContaining(text, 'REPO_STATEMENT'), '  - REPO_STATEMENT (from the repo: REPO_EVIDENCE)');
-    assert.equal(text.split('overrule').length - 1, 1);
-  });
-  test('no assumptions renders a none line', () => {
-    const rendered = lib.renderQuestions([{ brief: makeBrief({ assumptions: [] }), reason: 'hard_stop' }], []);
-    assert.ok(rendered.split('\n').includes('Assumptions: none.'));
-  });
 });
 
 describe('taken decisions', () => {
@@ -177,11 +192,24 @@ describe('taken decisions', () => {
   test('renderDecisions of nothing is empty', () => {
     assert.equal(lib.renderDecisions([]), '');
   });
-  test('renderQuestions lists them after the questions and says they can be changed in the same reply', () => {
+  test('renderQuestions lists them one line each after the questions and says they can be changed in the same reply', () => {
     const text = lib.renderQuestions([{ brief: makeBrief(), reason: 'hard_stop' }], taken);
-    assertInOrder(text, ['Q1. PROBLEM_TEXT', 'Decided for you:', 'D1. TAKEN_ONE', 'D2. TAKEN_TWO',
-      'You can change any of these in the same reply.', REPLY_LINE]);
-    assert.ok(text.endsWith(REPLY_LINE));
+    assert.ok(text.endsWith([
+      '',
+      'Decided for you:',
+      '- D1. TAKEN_ONE Chose option B.',
+      '- D2. TAKEN_TWO Chose option A.',
+      'You can change any of these in the same reply.',
+      '',
+      REPLY_LINE
+    ].join('\n')));
+  });
+  test('renderQuestions leaves out the summary, why and verbatim of a taken decision', () => {
+    const decided = [{ brief: makeBrief({ problem: 'TAKEN_ONE', options: [{ id: 'A', summary: 'TAKEN_SUMMARY' }], recommendation: { option_id: 'A', strength: 'strong', why: 'TAKEN_WHY' }, verbatim: 'TAKEN_VERBATIM' }) }];
+    const text = lib.renderQuestions([{ brief: makeBrief({ verbatim: '' }), reason: 'hard_stop' }], decided);
+    for (const needle of ['TAKEN_SUMMARY', 'TAKEN_WHY', 'TAKEN_VERBATIM', 'Exact text:']) {
+      assert.equal(text.includes(needle), false, `shows ${needle}`);
+    }
   });
   test('renderQuestions without taken decisions has no decided block', () => {
     assert.doesNotMatch(lib.renderQuestions([{ brief: makeBrief(), reason: 'hard_stop' }], []), /Decided for you|change any of these/);
@@ -207,8 +235,9 @@ describe('malformed briefs still render', () => {
   for (const brief of [null, undefined, {}, { problem: 7, options: 'x', criticality: [], recommendation: null, assumptions: {} }]) {
     test(`brief ${JSON.stringify(brief)} renders with not given placeholders`, () => {
       const text = lib.renderQuestions([{ brief, reason: 'malformed_brief' }], []);
-      assert.ok(text.includes('Q1. not given'));
+      assert.ok(text.includes('**Q1. not given**'));
       assert.ok(text.includes('Options: not given.'));
+      assert.ok(text.includes('Why it matters: not given criticality, likelihood not given. If it goes wrong: not given'));
       assert.ok(text.endsWith(REPLY_LINE));
     });
   }
@@ -263,7 +292,7 @@ describe('argument checks', () => {
 
 function labelsOf(text) {
   return text.split('\n')
-    .map((line) => line.match(/^\s*([QD]\d+)\./))
+    .map((line) => line.match(/^\s*(?:- |\*\*)?([QD]\d+)\./))
     .filter((match) => match !== null)
     .map((match) => match[1]);
 }
@@ -283,24 +312,26 @@ describe('compact questions', () => {
     assert.deepEqual(labelsOf(compact), labelsOf(full));
     assert.deepEqual(labelsOf(compact), ['Q1', 'Q2', 'Q3', 'D1', 'D2']);
   });
-  test('keeps the intro line and the reply line of the full form', () => {
+  test('keeps the heading and the reply line of the full form', () => {
     assert.equal(compact.split('\n')[0], full.split('\n')[0]);
     assert.ok(compact.endsWith(REPLY_LINE));
     assert.equal(compact.split('\n').filter((line) => line === REPLY_LINE).length, 1);
   });
-  test('shows only the problem and the recommendation with its why', () => {
+  test('shows the problem, the options and the recommendation with its why', () => {
     const text = lib.renderQuestionsCompact([{ brief: makeBrief(), reason: 'hard_stop' }], []);
     assert.equal(text, [
-      'I need your answer on 1 question before I go on.',
+      ONE_HEADING,
       '',
-      'Q1. PROBLEM_TEXT',
+      '**Q1. PROBLEM_TEXT**',
+      '- A: SUMMARY_A (recommended)',
+      '- B: SUMMARY_B',
       'Recommendation: option A (weak). Why: WHY_TEXT',
       '',
       REPLY_LINE
     ].join('\n'));
   });
   test('omits the detail the full form carries', () => {
-    for (const needle of ['Case for:', 'How serious:', 'Assumptions', 'Exact text:']) {
+    for (const needle of ['Why it matters:', 'Why I am asking:', 'Exact text:']) {
       assert.ok(full.includes(needle), `full form lacks ${needle}`);
       assert.equal(compact.includes(needle), false, `compact form shows ${needle}`);
     }
@@ -328,8 +359,8 @@ describe('compact questions', () => {
   for (const brief of [null, undefined, {}, { problem: 7, options: 'x', criticality: [], recommendation: null, assumptions: {} }]) {
     test(`malformed brief ${JSON.stringify(brief)} renders with not given placeholders`, () => {
       const text = lib.renderQuestionsCompact([{ brief, reason: 'malformed_brief' }], [{ brief }]);
-      assert.ok(text.includes('Q1. not given'));
-      assert.ok(text.includes('  D1. not given Chose option not given. Why: not given'));
+      assert.ok(text.includes('**Q1. not given**'));
+      assert.ok(text.includes('- D1. not given Chose option not given.'));
       assert.ok(text.endsWith(REPLY_LINE));
     });
   }
@@ -380,9 +411,9 @@ describe('open questions stop reasons', () => {
       '  Q1. FIRST_OPEN The report assumes option A.'
     ].join('\n'));
   });
-  test('before_pr says the run stopped before the pull request and asks to run the request again with the answer', () => {
+  test('before_pr says the run stopped before the pull request and names no next action', () => {
     assert.equal(lib.renderOpenQuestions(open, 'before_pr'), [
-      'I stopped before the pull request because these questions need your answer. Run the request again with your answer. These are still open:',
+      'I stopped before the pull request because these questions need your answer. These are still open:',
       '  Q1. FIRST_OPEN The report assumes option A.'
     ].join('\n'));
   });
@@ -434,10 +465,13 @@ describe('exact entries', () => {
   const exact = { brief: makeBrief({ problem: 'EXACT_PROBLEM', verbatim: 'EXACT_VERBATIM' }), reason: 'hard_stop', exact: true };
   test('the compact form keeps the Exact text lines of an exact entry', () => {
     assert.equal(lib.renderQuestionsCompact([exact], []), [
-      'I need your answer on 1 question before I go on.',
+      ONE_HEADING,
       '',
-      'Q1. EXACT_PROBLEM',
+      '**Q1. EXACT_PROBLEM**',
+      '- A: SUMMARY_A (recommended)',
+      '- B: SUMMARY_B',
       'Recommendation: option A (weak). Why: WHY_TEXT',
+      '',
       'Exact text:',
       'EXACT_VERBATIM',
       '',

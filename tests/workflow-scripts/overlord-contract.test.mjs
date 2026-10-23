@@ -229,9 +229,22 @@ describe('overlord relay and cut rules', () => {
       assert.ok(relayParagraph.includes(phrase), `relay paragraph lacks ${phrase}`);
     }
   });
-  test('the relay paragraph makes message the whole reply with nothing added', () => {
-    for (const phrase of ['verbatim as your whole reply', 'no line before or after it', 'no character changed', 'no comment on what it says']) {
+  test('the relay paragraph makes message the whole reply in the user\'s output style', () => {
+    for (const phrase of ['for a question and for the final report alike, as your whole reply in the user\'s active output style, such as a terse style.']) {
       assert.ok(relayParagraph.includes(phrase), `relay paragraph lacks ${phrase}`);
+    }
+  });
+  test('the relay paragraph keeps labels, tokens, numbers, paths and identifiers exact', () => {
+    const exactKeepClause = 'Keep exactly as written every question label, every option and reply token, the recommendation, and every number, path, URL, commit, branch and identifier.';
+    assert.ok(relayParagraph.includes(exactKeepClause), `relay paragraph lacks ${exactKeepClause}`);
+  });
+  test('the relay paragraph adds nothing and drops nothing the user must answer', () => {
+    const noCommentClause = 'Add no line before or after it and no comment on what it says, and drop nothing the user must answer.';
+    assert.ok(relayParagraph.includes(noCommentClause), `relay paragraph lacks ${noCommentClause}`);
+  });
+  test('the relay paragraph no longer forbids restyling message', () => {
+    for (const phrase of ['verbatim as your whole reply', 'no character changed']) {
+      assert.ok(!relayParagraph.includes(phrase), `relay paragraph still contains ${phrase}`);
     }
   });
   test('the defect paragraph decides cut from the envelope, not from message text', () => {

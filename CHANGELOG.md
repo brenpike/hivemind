@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.0.2] - 2026-10-23
+
+### Changed
+
+- The overlord presents a workflow run's `message`, a question or the final report, in the user's active output style, such as a terse style. It keeps every question label, option and reply token, the recommendation, and every number, path, URL, commit, branch and identifier exactly as written, adds no line before or after it and no comment, and drops nothing the user must answer. The reply and the resume args stay verbatim. Docs: ADR-0036 amendment 2026-10-23 changes decision 16.
+
+### Fixed
+
+- A delivery run no longer asks a settled question again until the 3-pause limit. Every question is now recognized by its kind, its scope and the exact text the user was shown, so an answer cannot carry over to a question shown with other text, and a rewrite the user cannot see cannot ask it again. Plan acceptance is asked only when no other question of the pass is open, and a reply that settles it runs the plan result it was shown with. The acceptance question still shows the plan summary, not every step; ADR-0037 records that residual. A question raised again with any visible change is asked again, within the pause limit, and an irreversible effect is still asked again when its text changes, since the user approves it word for word (issue 433).
+- A delivery run that stops with questions still open, at the pause limit, before the pull request, or when a question or reply is too long to carry, ends blocked, not complete, and names the next action in one line. A completed delivery run always has a pull request. A settled plan acceptance or trunk freshness question that comes back in its pass ends the run blocked as a workflow defect, with no pause. analysis-only still completes with the questions listed (issue 434).
+- Question messages put the ask first: a bold heading, a short options list with reply tokens, a one-line recommendation and at most two lines on why it matters. Each decision already taken shows as one line (issue 431).
+- Docs: ADR-0037 amendment 2026-10-23 and ADR-0036 amendment 2026-10-23. README and the website say that a delivery run that stops with questions open ends blocked.
+
 ## [7.0.1] - 2026-10-23
 
 ### Fixed

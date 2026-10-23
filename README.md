@@ -221,7 +221,7 @@ Launching a script:
 How a script run behaves:
 
 - **No run ledger.** The working branch, its commits and the PR are the record. A paused run resumes in the same session. A new session plans what is left: the planner reads the branch's history from the facts file and the files as they are now.
-- **Questions.** Routine planner questions are decided by the autonomy table (`plugin/references/decision-autonomy-table.json`) and listed as decided for you. Only irreversible, architectural or safety-relevant questions, and hard stops, pause the run with a decision brief. A run pauses at most 3 times; after that it completes and lists the questions still open. A question never ends the run blocked.
+- **Questions.** Routine planner questions are decided by the autonomy table (`plugin/references/decision-autonomy-table.json`) and listed as decided for you. Only irreversible, architectural or safety-relevant questions, and hard stops, pause the run with a decision brief. A run pauses at most 3 times. A delivery run that stops with questions still open, at that limit or before the PR, ends blocked, lists them and names the next action, so a completed delivery run always has a PR. An analysis-only run completes and lists the questions still open.
 - **Effects outside the repo.** A plan step that declares an irreversible effect outside the repo, such as a deploy, a publish, a migration or a write to an outside service, asks you before the first wave.
 - **Request options.** A delivery request can ask for a draft PR, or to skip local review. Local review is also skipped when the Codex plugin is not available in the session.
 
