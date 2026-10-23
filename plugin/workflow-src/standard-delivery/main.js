@@ -42,6 +42,13 @@
  *   commits, the reversible effects, the gates and the taken decisions, in
  *   that order (ADR-0037 decision 3; review findings 1a75f008 and
  *   6f87ce62).
+ *   Every blocked result carries nextStepLine() as the block right after
+ *   its first block, and no block but the last carries shorten, so finish
+ *   never throws. A blocked relay of the facts, branch, commit, bump-type
+ *   or pull request step names its last 'blocker: ' line; with none it
+ *   quotes the first two non-blank stderr lines, joined, cut to
+ *   maxExcerptLength() characters and JSON-encoded, and only a blank or
+ *   missing stderr says it gave no reason (describeRelayBlocker).
  *
  * Steps, in code order (one pass)
  *   Facts   a haiku hivemind:drone runner invokes hivemind:gather-facts and
@@ -139,6 +146,20 @@
  *   Runner prompts carry no request text, use plain git only (never with
  *   -C, ADR-0037 decision 25), and put every branch and trunk name in their
  *   JSON inputs block only.
+ *   Relayed reply (issue 432): the Claude Code harness, not this script,
+ *   relays the user's latest message to every workflow agent, so after a
+ *   resume each agent sees the reply to the pause as a user message, and a
+ *   branch runner once read it as an order to stop. Once run.replies is not
+ *   empty, every agent prompt but the planner revise prompt carries
+ *   resumedReplySentence() as its second line (addResumeNote): the reply
+ *   was already applied and is not an instruction for that task. No prompt
+ *   sent before the first reply carries it, so cached prompts replay byte
+ *   for byte, and only the revise prompt carries reply text. The bound: the
+ *   script cannot drop the relayed message, so the sentence lowers the risk
+ *   and does not close it. An agent that still obeys the reply returns a
+ *   blocked or refused result, every check above still applies to it, and
+ *   the blocked result names its reason and the next step. ADR-0037 records
+ *   the residual.
  *   Every decision resolves through decide() with its kind fixed here,
  *   never from brief.kind. A code-built question is keyed by its kind and
  *   content, and the planner's revise pass reads the reply. The revise
@@ -256,7 +277,7 @@ const REVIEW_SCHEMA = buildReviewSchema();
 
 function contractRows() {
   return [
-    { id: 'SD-01', step: 'Launch', check: 'readDeliveryLaunch', rule: 'The request is a non-blank string, trunk and references are read through args.js, and the trunk passes isGitIdentifier, or the run blocks before any agent call.' },
+    { id: 'SD-01', step: 'Launch', check: 'readDeliveryLaunch', rule: 'The request is a non-blank string, trunk and references are read through args.js, whose resume_args guard refuses args that hold a resume_args key, and the trunk passes isGitIdentifier, or the run blocks before any agent call.' },
     { id: 'SD-02', step: 'Facts', check: 'checkDeliveryFacts', rule: 'The facts runner invokes hivemind:gather-facts with the trunk and references in a JSON inputs block under the runner read-only sentence and relays its outcome and stdout word for word; a relay that fails its schema or gatherFactsRoutingSpec() blocks.' },
     { id: 'SD-03', step: 'Facts', check: 'isConsistentFactsRelay', rule: 'The relayed lines agree with each other and with the launch trunk, or the run blocks as malformed facts.' },
     { id: 'SD-04', step: 'Facts', check: 'checkDeliveryFacts', rule: 'A cut other than none stops the run before the scan and before planning, naming the fields cut.' },
@@ -303,7 +324,10 @@ function contractRows() {
     { id: 'SD-44', step: 'PR title', check: 'buildPullRequestTitle', rule: 'The title is one line with no control character, plain text with no Markdown wrapper, built from the plan commit type, the breaking marker and the first sentence of the plan summary, at most maxTitleLength() code points including that prefix, cut at a word boundary when too long, and never ending in an ellipsis.' },
     { id: 'SD-45', step: 'PR body and comment', check: 'buildPullRequestTexts', rule: 'The body holds the plan summary and the run record, and the comment its lead and the run record, where the run record is every part buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate with its result and the commit it held on or not configured for this run, and every taken decision; neither carries a control character other than newline and tab or any reviewer text, each of the summary, the reversible effects and the decisions sits in its own fenced block whose fence is one backtick longer than its longest backtick run, at least three, the gates, the commits and the comment lead stay plain, the decisions go compact when a text would pass maxPullRequestTextLength() characters, and a text still too long stops the run blocked naming its size before any push.' },
     { id: 'SD-46', step: 'PR relay', check: 'checkPullRequestRelay', rule: 'The relayed stdout parses with openPlanPrRoutingSpec(), whose keys are the open-plan-pr.sh OUTPUT keys in order and whose warning holds only the script fixed texts, head_ref_oid equals H, and commented is true exactly when created is false; a blocked or malformed relay stops the run blocked naming the pull request step.' },
-    { id: 'SD-47', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run finishes complete with pr {url, head_ref_oid, created}, and the final message names the pull request, opened or pushed to with a comment, the gates that held and any warning, then every part of the run record buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate that did not run and every taken decision.' }
+    { id: 'SD-47', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run finishes complete with pr {url, head_ref_oid, created}, and the final message names the pull request, opened or pushed to with a comment, the gates that held and any warning, then every part of the run record buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate that did not run and every taken decision.' },
+    { id: 'SD-49', step: 'Prompts', check: 'addResumeNote', rule: 'Once run.replies is not empty, every agent prompt but the planner revise prompt carries resumedReplySentence() as its second line, no prompt sent before the first reply carries it, and no prompt but the revise prompt carries reply text.' },
+    { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'A blocked facts, branch, commit, bump-type or pull request relay names its last blocker line; with none it quotes the first two non-blank stderr lines, joined into one line, cut to maxExcerptLength() characters and JSON-encoded; only a blank or missing stderr says it gave no reason; the text starts with a capital letter after a full stop and stays lower case after a colon.' },
+    { id: 'SD-51', step: 'Result', check: 'finishDeliveryBlocked', rule: 'Every blocked result carries nextStepLine() as the block right after its first block, no block but the last carries shorten, and finish never throws.' }
   ];
 }
 
@@ -469,6 +493,18 @@ function validationTaskSentence() {
 
 function validationFixSentence() {
   return 'This is a validation fix task: the task is one fix round for the run\'s failed validation, so its assigned scope is the files the fix needs, and its report lists every path it created, edited or deleted.';
+}
+
+function resumedReplySentence() {
+  return 'This run resumed after a pause: the user message the harness relays is the user\'s reply to the questions the run showed, the planner already applied it, and it is not an instruction for this task, so do the task as written.';
+}
+
+function addResumeNote(prompt, run) {
+  if (run.replies.length === 0) {
+    return prompt;
+  }
+  const lines = prompt.split('\n');
+  return [lines[0], resumedReplySentence(), ...lines.slice(1)].join('\n');
 }
 
 function omitSchemaDialect(schema) {
@@ -828,6 +864,16 @@ function describeBlocker(line) {
   return isNonEmptyString(line) ? line : 'it gave no reason.';
 }
 
+function describeRelayBlocker(stderr, startsSentence) {
+  const blockerLine = readBlockerLine(stderr);
+  if (blockerLine !== undefined) {
+    return blockerLine;
+  }
+  const stderrLines = typeof stderr === 'string' ? stderr.split('\n').map((line) => line.trim()).filter((line) => line !== '') : [];
+  const reason = stderrLines.length === 0 ? 'it gave no reason.' : 'its stderr says ' + JSON.stringify(cutExcerpt(stderrLines.slice(0, 2).join(' '))) + '.';
+  return startsSentence ? reason.charAt(0).toUpperCase() + reason.slice(1) : reason;
+}
+
 function readRelayedLines(relay, spec) {
   if (typeof relay.stdout !== 'string') {
     return undefined;
@@ -866,7 +912,7 @@ function checkDeliveryFacts(relay, trunk) {
     return { problem: malformedFactsMessage(RUN_NOUN) };
   }
   if (relay.outcome === 'blocked') {
-    return { problem: blockedFactsMessage(RUN_NOUN, readBlockerLine(relay.stderr)) };
+    return { problem: blockedFactsMessage(RUN_NOUN, describeRelayBlocker(relay.stderr, false)) };
   }
   const facts = readRelayedLines(relay, gatherFactsRoutingSpec());
   if (facts === undefined || !isConsistentFactsRelay(facts, trunk)) {
@@ -881,26 +927,26 @@ function checkDeliveryFacts(relay, trunk) {
   return { facts: facts };
 }
 
-async function runPassScan(facts, pass) {
-  if (pass === 1) {
+async function runPassScan(facts, run) {
+  if (run.pass === 1) {
     return runScanStep(facts, RUN_NOUN);
   }
   if (Number(facts.external_texts) === 0) {
     return undefined;
   }
   phase('Scan');
-  const scan = await agent(buildScanPrompt(facts), Object.assign(scanOptions(), { label: 'scan-' + pass }));
+  const scan = await agent(addResumeNote(buildScanPrompt(facts), run), Object.assign(scanOptions(), { label: 'scan-' + run.pass }));
   return describeScanProblem(scan, facts, RUN_NOUN);
 }
 
 async function runFactsStep(run) {
   phase('Facts');
-  const relay = await agent(buildDeliveryFactsPrompt(run.trunk, run.references), runnerOptions('facts-' + run.pass, 'Facts'));
+  const relay = await agent(addResumeNote(buildDeliveryFactsPrompt(run.trunk, run.references), run), runnerOptions('facts-' + run.pass, 'Facts'));
   const checked = checkDeliveryFacts(relay, run.trunk);
   if (checked.problem !== undefined) {
     return checked;
   }
-  const scanProblem = await runPassScan(checked.facts, run.pass);
+  const scanProblem = await runPassScan(checked.facts, run);
   return scanProblem === undefined ? checked : { problem: scanProblem };
 }
 
@@ -1171,10 +1217,10 @@ function toRunBlock(part) {
   return part.compact === undefined ? { text: part.text } : { text: part.text, compact: part.compact };
 }
 
-function buildRunBlocks(lead, run, taken, openQuestions) {
+function buildRunBlocks(lead, run, taken, secondText) {
   const blocks = [{ text: lead }];
-  if (openQuestions !== '') {
-    blocks.push({ text: openQuestions });
+  if (secondText !== '') {
+    blocks.push({ text: secondText });
   }
   blocks.push(...buildRunRecordParts(run, taken, undefined).map(toRunBlock));
   if (blocks.length === 1) {
@@ -1183,11 +1229,15 @@ function buildRunBlocks(lead, run, taken, openQuestions) {
   return blocks;
 }
 
+function nextStepLine() {
+  return 'Fix the cause named above, then run the request again.';
+}
+
 function finishDeliveryBlocked(message, run) {
   if (run === undefined) {
-    return finish({ outcome: 'blocked', blocks: [{ text: message, shorten: true }] });
+    return finish({ outcome: 'blocked', blocks: [{ text: message }, { text: nextStepLine() }] });
   }
-  return finish({ outcome: 'blocked', blocks: buildRunBlocks(message, run, run.taken, '') });
+  return finish({ outcome: 'blocked', blocks: buildRunBlocks(message, run, run.taken, nextStepLine()) });
 }
 
 function describePullRequest(values) {
@@ -1259,7 +1309,7 @@ async function runPlanningPass(run, facts, replan) {
   phase('Plan');
   let resultSchema = PLAN_RESULT_SCHEMA;
   let shownAsks = [];
-  let planResult = await agent(buildPlanPrompt(run.request, facts, replan), plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
+  let planResult = await agent(addResumeNote(buildPlanPrompt(run.request, facts, replan), run), plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
   for (;;) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk);
     if (problem !== undefined) {
@@ -1309,7 +1359,7 @@ function checkBranchRelay(relay, plan, freshness) {
     return { problem: 'The branch step returned a result it could not use, ' + stopped };
   }
   if (relay.outcome === 'blocked') {
-    return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeBlocker(readBlockerLine(relay.stderr)) };
+    return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
   }
   const values = readRelayedLines(relay, createWorkingBranchRoutingSpec());
   if (values === undefined || values.warning !== branchWarningTexts()[freshness]) {
@@ -1323,7 +1373,7 @@ function checkBranchRelay(relay, plan, freshness) {
 
 async function runBranchStep(run, plan, freshness) {
   phase('Branch');
-  const relay = await agent(buildBranchPrompt(plan, freshness, run.trunk), runnerOptions('branch-' + run.pass, 'Branch'));
+  const relay = await agent(addResumeNote(buildBranchPrompt(plan, freshness, run.trunk), run), runnerOptions('branch-' + run.pass, 'Branch'));
   return checkBranchRelay(relay, plan, freshness);
 }
 
@@ -1374,7 +1424,7 @@ function findPlanStep(plan, stepId) {
 
 function createWorkerTask(step, waveSteps, plan, run) {
   const waveScopes = listStepFiles(waveSteps.filter((other) => other.id !== step.id));
-  const prompt = buildWorkerPrompt(step, waveScopes, plan, run.trunk);
+  const prompt = addResumeNote(buildWorkerPrompt(step, waveScopes, plan, run.trunk), run);
   const options = { agentType: step.owner, schema: WORKER_SCHEMA, label: 'work-' + run.pass + '-' + step.id, phase: 'Waves' };
   return () => agent(prompt, options);
 }
@@ -1420,7 +1470,7 @@ function buildCommitPrompt(files, plan, trunk, stepName) {
 }
 
 function describeCommitBlocker(stderr, stepNoun) {
-  const lines = ['The commit step was blocked, so ' + describeRunNoun(RUN_NOUN) + ' stopped: ' + describeBlocker(readBlockerLine(stderr))];
+  const lines = ['The commit step was blocked, so ' + describeRunNoun(RUN_NOUN) + ' stopped: ' + describeRelayBlocker(stderr, false)];
   const outsideLines = typeof stderr === 'string' ? stderr.split('\n').filter((line) => line.startsWith('outside: ')) : [];
   if (outsideLines.length > 0) {
     lines.push('Dirty paths outside the files of ' + stepNoun + ':');
@@ -1450,7 +1500,7 @@ function checkCommitRelay(relay, plan, stepName) {
 
 async function runCommitStep(run, plan, files, label, stepName) {
   phase('Commit');
-  const relay = await agent(buildCommitPrompt(files, plan, run.trunk, stepName), runnerOptions(label, 'Commit'));
+  const relay = await agent(addResumeNote(buildCommitPrompt(files, plan, run.trunk, stepName), run), runnerOptions(label, 'Commit'));
   const checked = checkCommitRelay(relay, plan, stepName);
   if (checked.problem !== undefined) {
     return checked;
@@ -1637,7 +1687,7 @@ function checkBumpTypeRelay(relay) {
     return { problem: 'The bump step returned a result it could not use, ' + stopped };
   }
   if (relay.outcome === 'blocked') {
-    return { problem: 'The bump step was blocked, ' + stopped + ' ' + describeBlocker(readBlockerLine(relay.stderr)) };
+    return { problem: 'The bump step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
   }
   const values = readRelayedLines(relay, bumpTypeRoutingSpec());
   if (values === undefined || !isConsistentBumpRelay(values)) {
@@ -1692,7 +1742,7 @@ function describeBlockedGateStep(stepTitle, reason, commitValues) {
 
 async function runBumpEdit(run, plan, facts, bumpType, count) {
   phase('Bump');
-  const prompt = buildBumpPrompt(facts.trunk_commit, bumpType, plan, run.trunk);
+  const prompt = addResumeNote(buildBumpPrompt(facts.trunk_commit, bumpType, plan, run.trunk), run);
   const result = await agent(prompt, droneOptions(gateLabel('bump', run, count), 'Bump', BUMP_EDIT_SCHEMA));
   const committed = await runCommitStep(run, plan, plan.versioning.artifact_files, gateLabel('bump-commit', run, count), 'bump');
   if (committed.problem !== undefined) {
@@ -1708,7 +1758,7 @@ async function runBumpEdit(run, plan, facts, bumpType, count) {
 async function runBumpGate(run, plan, facts, gates) {
   const count = gates.runs.bump;
   phase('Bump');
-  const relay = await agent(buildBumpTypePrompt(facts.trunk_commit, plan.versioning), runnerOptions(gateLabel('bump-type', run, count), 'Bump'));
+  const relay = await agent(addResumeNote(buildBumpTypePrompt(facts.trunk_commit, plan.versioning), run), runnerOptions(gateLabel('bump-type', run, count), 'Bump'));
   const checked = checkBumpTypeRelay(relay);
   if (checked.problem !== undefined) {
     return { result: finishDeliveryBlocked(checked.problem, run) };
@@ -1766,7 +1816,7 @@ function buildFixPrompt(failures, plan, trunk) {
 
 async function runFixRound(run, plan, failures, round) {
   phase('Fix');
-  const result = await agent(buildFixPrompt(failures, plan, run.trunk), droneOptions(gateLabel('fix', run, round), 'Fix', FIX_SCHEMA));
+  const result = await agent(addResumeNote(buildFixPrompt(failures, plan, run.trunk), run), droneOptions(gateLabel('fix', run, round), 'Fix', FIX_SCHEMA));
   const fix = readGateEditOutcome(result, FIX_SCHEMA);
   const committed = await runCommitStep(run, plan, fix.files, gateLabel('fix-commit', run, round), 'fix');
   if (committed.problem !== undefined) {
@@ -1787,7 +1837,7 @@ function listNotRunGate(run, line) {
 async function runValidateGate(run, plan, gates) {
   const count = gates.runs.validate;
   phase('Validate');
-  const result = await agent(buildValidatePrompt(), droneOptions(gateLabel('validate', run, count), 'Validate', VALIDATE_SCHEMA));
+  const result = await agent(addResumeNote(buildValidatePrompt(), run), droneOptions(gateLabel('validate', run, count), 'Validate', VALIDATE_SCHEMA));
   const committed = await runCommitStep(run, plan, [], gateLabel('validate-commit', run, count), 'validate');
   if (committed.problem !== undefined) {
     return { result: finishDeliveryBlocked(committed.problem, run) };
@@ -1985,7 +2035,7 @@ function routeLocalReview(review, run) {
 async function runReviewGate(run, plan, gates) {
   const count = gates.runs.review;
   phase('Review');
-  const review = await agent(buildReviewPrompt(plan, run.trunk), reviewerOptions(gateLabel('review', run, count)));
+  const review = await agent(addResumeNote(buildReviewPrompt(plan, run.trunk), run), reviewerOptions(gateLabel('review', run, count)));
   const committed = await runCommitStep(run, plan, [], gateLabel('review-commit', run, count), 'review');
   if (committed.problem !== undefined) {
     return { result: finishDeliveryBlocked(committed.problem, run) };
@@ -2141,7 +2191,7 @@ function checkPullRequestRelay(relay, head) {
     return { problem: 'The pull request step returned a result it could not use, ' + stopped };
   }
   if (relay.outcome === 'blocked') {
-    return { problem: 'The pull request step was blocked, ' + stopped + ' ' + describeBlocker(readBlockerLine(relay.stderr)) };
+    return { problem: 'The pull request step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
   }
   const values = readRelayedLines(relay, openPlanPrRoutingSpec());
   if (values === undefined || values.commented === values.created) {
@@ -2159,7 +2209,7 @@ async function runPullRequestStep(run, plan, gates) {
     return { result: finishDeliveryBlocked(texts.problem, run) };
   }
   phase('PR');
-  const relay = await agent(buildPullRequestPrompt(plan, run.head, texts, run.draft), runnerOptions('pr-' + run.pass, 'PR'));
+  const relay = await agent(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), runnerOptions('pr-' + run.pass, 'PR'));
   const checked = checkPullRequestRelay(relay, run.head);
   if (checked.problem !== undefined) {
     return { result: finishDeliveryBlocked(checked.problem, run) };

@@ -51,11 +51,16 @@ const MINOR_BUMP = { dominant_row: 'MINOR', verdict: 'bump_required', bump_type:
 const MALFORMED_FACTS = 'The facts step returned malformed facts, so the delivery stopped before planning.';
 const NOT_READY = 'The branch is not ready for delivery, so the delivery stopped before planning:';
 const PR_URL = 'https://github.com/o/r/pull/7';
+const NEXT_STEP_LINE = 'Fix the cause named above, then run the request again.';
 const scratchRoots = [];
 
 after(() => {
   scratchRoots.forEach((root) => rmSync(root, { recursive: true, force: true }));
 });
+
+function withNextStep(message) {
+  return message + '\n\n' + NEXT_STEP_LINE;
+}
 
 function readText(path) {
   return readFileSync(path, 'utf8').replace(/\r/g, '');
@@ -705,27 +710,33 @@ const ROW_TESTS = {
   'SD-01': () => {
     test('args undefined finishes blocked with no agent call', async () => {
       const run = await runWorkflow(undefined, {});
-      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'No request was given, so there is nothing to deliver.' });
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('No request was given, so there is nothing to deliver.') });
       assert.deepEqual(run.calls, []);
     });
     test('a blank request blocks with no agent call', async () => {
       const run = await runWorkflow({ request: '  ' }, {});
-      assert.equal(run.result.message, 'No request was given, so there is nothing to deliver.');
+      assert.equal(run.result.message, withNextStep('No request was given, so there is nothing to deliver.'));
       assert.deepEqual(run.calls, []);
     });
     for (const trunk of ['-main', 'ma..in', 'main branch', 'ma$in', 'main\n']) {
       test(`trunk ${JSON.stringify(trunk)} fails isGitIdentifier and blocks with no agent call`, async () => {
         const run = await runWorkflow({ request: REQUEST, trunk: trunk }, {});
-        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The trunk launch arg is not a safe git branch name, so the delivery did not start.' });
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The trunk launch arg is not a safe git branch name, so the delivery did not start.') });
         assert.deepEqual(run.calls, []);
       });
     }
     test('a blank trunk and bad references block through args.js', async () => {
       const blankTrunk = await runWorkflow({ request: REQUEST, trunk: ' ' }, {});
-      assert.equal(blankTrunk.result.message, 'The trunk launch arg must be a non-blank string, so the delivery did not start.');
+      assert.equal(blankTrunk.result.message, withNextStep('The trunk launch arg must be a non-blank string, so the delivery did not start.'));
       const badReferences = await runWorkflow({ request: REQUEST, references: ['x'] }, {});
-      assert.equal(badReferences.result.message, 'The references launch arg must be a list of issue or pull request numbers, so the delivery did not start.');
+      assert.equal(badReferences.result.message, withNextStep('The references launch arg must be a list of issue or pull request numbers, so the delivery did not start.'));
       assert.deepEqual(blankTrunk.calls.concat(badReferences.calls), []);
+    });
+    test('args that nest resume_args block through the args.js guard with no agent call', async () => {
+      const run = await runWorkflow({ ...LAUNCH, resume_args: { answers: { 'round-1': 'SECRET_REPLY_ZQ' } } }, happyResults());
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so the delivery did not start.') });
+      assert.deepEqual(run.calls, []);
+      assert.ok(main.contractRows().find((row) => row.id === 'SD-01').rule.includes('resume_args guard'));
     });
     test('a string launch takes the default trunk and no references', async () => {
       const run = await runWorkflow(REQUEST, happyResults());
@@ -839,7 +850,7 @@ const ROW_TESTS = {
     }
     test('each stop of a list gets its own line, in order', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ delivery: 'stop', delivery_stops: 'operation_in_progress,dirty_paths' }) });
-      assert.equal(run.result.message, [NOT_READY, '- ' + main.deliveryStopLine('operation_in_progress'), '- ' + main.deliveryStopLine('dirty_paths')].join('\n'));
+      assert.equal(run.result.message, withNextStep([NOT_READY, '- ' + main.deliveryStopLine('operation_in_progress'), '- ' + main.deliveryStopLine('dirty_paths')].join('\n')));
     });
     test('the dirty paths line says the run never commits, stashes or discards an edit it did not make', () => {
       assert.ok(main.deliveryStopLine('dirty_paths').includes('The run never commits, stashes or discards an edit it did not make'));
@@ -2329,7 +2340,7 @@ const ROW_TESTS = {
     for (const value of ['yes', 'true', 1, 0, null, {}]) {
       test(`local_review ${JSON.stringify(value)} blocks with no agent call`, async () => {
         const run = await runWorkflow({ ...LAUNCH, local_review: value }, happyResults());
-        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The local_review launch arg must be true or false, so the delivery did not start.' });
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The local_review launch arg must be true or false, so the delivery did not start.') });
         assert.deepEqual(run.calls, []);
       });
     }
@@ -2351,7 +2362,7 @@ const ROW_TESTS = {
     for (const value of ['yes', 'true', 1, 0, null, {}]) {
       test(`draft ${JSON.stringify(value)} blocks with no agent call`, async () => {
         const run = await runWorkflow({ ...LAUNCH, draft: value }, happyResults());
-        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The draft launch arg must be true or false, so the delivery did not start.' });
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The draft launch arg must be true or false, so the delivery did not start.') });
         assert.deepEqual(run.calls, []);
       });
     }
@@ -3179,7 +3190,7 @@ const ROW_TESTS = {
         const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': relay }));
         assert.equal(run.result.outcome, 'blocked');
         assert.equal(run.result.pr, undefined);
-        assert.ok(run.result.message.startsWith(message + '\n\nCommits this run made:\n- ' + OTHER), run.result.message);
+        assert.ok(run.result.message.startsWith(withNextStep(message) + '\n\nCommits this run made:\n- ' + OTHER), run.result.message);
         assert.equal(labelsOf(run).at(-1), 'pr-1');
       });
     }
@@ -3242,6 +3253,139 @@ const ROW_TESTS = {
       assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', commits, '```\n' + effects + '\n```', gates, '```\n' + decisions + '\n```'].join('\n\n'));
       const lead = 'Every plan step is done on branch "feature/cache", each wave is committed, and the version bump and validation held on commit ' + OTHER + '.\n\nPushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ', and commented on it with the gates and the decisions taken.';
       assert.equal(run.result.message, [lead, commits, effects, 'Gates that did not run:\n- ' + main.notConfiguredReviewLine(), decisions].join('\n\n'));
+    });
+  },
+  'SD-49': () => {
+    const reply = "I don't have time for that";
+    const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
+    const resumedLabels = ['facts-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)];
+    async function runResumed(results) {
+      const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': gated });
+      assert.equal(paused.result.needs_user, true);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+      return { paused: paused, run: run };
+    }
+    function assertNoteAfterRevise(run) {
+      const reviseIndex = labelsOf(run).indexOf('revise-1');
+      run.calls.forEach((call, index) => {
+        const hasNote = call.prompt.includes(main.resumedReplySentence());
+        assert.equal(hasNote, index > reviseIndex, call.opts.label + ' carries the resume sentence only after revise-1');
+        if (hasNote) {
+          assert.equal(call.prompt.split('\n')[1], main.resumedReplySentence(), call.opts.label);
+        }
+        assert.equal(call.prompt.includes(reply), call.opts.label === 'revise-1', call.opts.label + ' carries the reply only in revise-1');
+      });
+    }
+    test('a resume whose reply revise-1 settles runs branch-1 through pr-1, each later prompt with the sentence and only revise-1 with the reply', async () => {
+      const { paused, run } = await runResumed(happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), resumedLabels);
+      assertNoteAfterRevise(run);
+      assert.equal(callOf(run, 'facts-1').prompt, callOf(paused, 'facts-1').prompt);
+      assert.equal(callOf(run, 'plan-1').prompt, callOf(paused, 'plan-1').prompt);
+      assert.equal(readDataBlock(callOf(run, 'revise-1').prompt, 'reply'), reply);
+    });
+    test('the sentence reaches the bump drone and the fix round after a resume', async () => {
+      const versioned = makePlan({ versioning: { bump_trigger: 'no', no_bump_match: 'no', artifact_files: ['VERSION'] } });
+      const results = fixFlowResults({
+        'plan-1': planResult(versioned, [makeGatedBrief('GATED_PROBLEM')]),
+        'revise-1': reviseResult(planResult(versioned), ['Q1']),
+        'bump-1-1': { outcome: 'complete' },
+        'bump-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }),
+        'bump-1-2': { outcome: 'complete' },
+        'bump-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' })
+      });
+      const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(versioned, [makeGatedBrief('GATED_PROBLEM')]) });
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(['bump-1-1', 'fix-1-1', 'bump-1-2'].every((label) => labelsOf(run).includes(label)), JSON.stringify(labelsOf(run)));
+      assertNoteAfterRevise(run);
+    });
+    test('the facts, scan and plan steps of a later pass carry the sentence', async () => {
+      const results = happyResults({
+        'plan-1': gated,
+        'revise-1': reviseResult(planResult(), ['Q1']),
+        'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
+        'facts-2': onPlanBranchFacts(OTHER, { external_texts: '1' }),
+        'scan-2': { results: [{ item_ref: 't1', verdict: 'clean' }] },
+        'plan-2': planResult(),
+        'branch-2': branchRelay({ created: 'false', commit: OTHER }),
+        'work-2-STEP-001': WORKER_DONE,
+        'commit-2-1': commitRelay({ commit: THIRD }),
+        ...tailResults(2, THIRD)
+      });
+      const { run } = await runResumed(results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(6, 9), ['facts-2', 'scan-2', 'plan-2']);
+      assertNoteAfterRevise(run);
+    });
+    test('a run that never paused sends no prompt with the sentence', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.ok(run.calls.every((call) => !call.prompt.includes(main.resumedReplySentence())));
+      assert.equal(main.addResumeNote('a\nb', { replies: [] }), 'a\nb');
+      assert.equal(main.addResumeNote('a\nb', { replies: ['r'] }), 'a\n' + main.resumedReplySentence() + '\nb');
+    });
+  },
+  'SD-50': () => {
+    const stderr = '\nfatal: not a git repository "x"\n  hint: run git init  \nthird line\n';
+    const quoted = 'its stderr says ' + JSON.stringify('fatal: not a git repository "x" hint: run git init') + '.';
+    const capital = 'I' + quoted.slice(1);
+    for (const [label, results, lead] of [
+      ['facts', { 'facts-1': { outcome: 'blocked', stderr: stderr } }, 'The facts step was blocked, so the delivery stopped before planning: ' + quoted],
+      ['branch', happyResults({ 'branch-1': { outcome: 'blocked', stderr: stderr } }), 'The branch step was blocked, so the delivery stopped before any wave. ' + capital],
+      ['commit', happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: stderr } }), 'The commit step was blocked, so the delivery stopped: ' + quoted],
+      ['bump-type', happyResults({ 'bump-type-1-1': { outcome: 'blocked', stderr: stderr } }), 'The bump step was blocked, so the delivery stopped before validation. ' + capital],
+      ['pull request', happyResults({ 'pr-1': { outcome: 'blocked', stderr: stderr } }), 'The pull request step was blocked, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it. ' + capital]
+    ]) {
+      test(`a blocked ${label} relay with no blocker line quotes its first two non-blank stderr lines`, async () => {
+        const run = await runWorkflow(LAUNCH, results);
+        assert.equal(run.result.outcome, 'blocked');
+        assert.equal(run.result.message.split('\n\n')[0], lead);
+      });
+    }
+    test('a blocked branch relay with a blank or missing stderr says it gave no reason', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'branch-1': { outcome: 'blocked' } }));
+      assert.equal(run.result.message.split('\n\n')[0], 'The branch step was blocked, so the delivery stopped before any wave. It gave no reason.');
+      for (const stderr of [' \n\n', '', undefined]) {
+        assert.equal(main.describeRelayBlocker(stderr, true), 'It gave no reason.', JSON.stringify(stderr));
+        assert.equal(main.describeRelayBlocker(stderr, false), 'it gave no reason.', JSON.stringify(stderr));
+      }
+      const facts = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'blocked' } });
+      assert.equal(facts.result.message.split('\n\n')[0], 'The facts step was blocked, so the delivery stopped before planning: it gave no reason.');
+    });
+    test('the last blocker line wins over other stderr lines', () => {
+      assert.equal(main.describeRelayBlocker('noise\nblocker: one\nmore\nblocker: two\n', true), 'blocker: two');
+    });
+    test('the quote is cut to maxExcerptLength() characters before it is JSON-encoded', () => {
+      assert.equal(main.describeRelayBlocker('\u{1F600}'.repeat(150) + '\n' + 'x'.repeat(150), false), 'its stderr says ' + JSON.stringify('\u{1F600}'.repeat(150) + ' ' + 'x'.repeat(49)) + '.');
+      assert.equal(main.describeRelayBlocker('a\u0007b', true), 'Its stderr says "a\\u0007b".');
+    });
+  },
+  'SD-51': () => {
+    test('the next-step line is the block right after the first block of a blocked result', async () => {
+      assert.equal(main.nextStepLine(), NEXT_STEP_LINE);
+      const results = happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: 'Tests fail.' } });
+      const run = await runWorkflow(LAUNCH, results);
+      assert.equal(run.result.outcome, 'blocked');
+      const paragraphs = run.result.message.split('\n\n');
+      assert.ok(paragraphs[0].startsWith('A worker did not finish its step'), paragraphs[0]);
+      assert.equal(paragraphs[1], NEXT_STEP_LINE);
+      assert.equal(paragraphs[2], 'Commits this run made:\n- ' + OTHER);
+    });
+    test('a launch problem gets the next-step line as its second block', async () => {
+      const run = await runWorkflow({ request: REQUEST, trunk: 5 }, {});
+      assert.deepEqual(run.result.message.split('\n\n'), ['The trunk launch arg must be a non-blank string, so the delivery did not start.', NEXT_STEP_LINE]);
+    });
+    test('a blocked result too long for the notice finishes cut, without a throw', async () => {
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: 'B'.repeat(20000), questions: [] } });
+      assert.equal(run.failures, 0);
+      assert.equal(run.result.outcome, 'blocked');
+      assert.ok(run.result.message.endsWith(lib.noticeMarker('cut')), run.result.message.slice(-300));
+      assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
+    });
+    test('the complete result keeps its lead alone first, with no next-step line', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.ok(!run.result.message.includes(NEXT_STEP_LINE));
     });
   }
 };

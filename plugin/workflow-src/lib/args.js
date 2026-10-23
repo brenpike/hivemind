@@ -34,8 +34,8 @@
  *     entry normalizes, deduplicated in order, at most maxReferences().
  *     Otherwise {problem}.
  *   readLaunchInputs(argsObject, runNoun)
- *     {trunk, references}, or the {problem} of the first bad arg, trunk
- *     before references.
+ *     {trunk, references}, or the {problem} of the first bad arg: a
+ *     resume_args key first, then trunk, then references.
  *   roundKey(round)            'round-N', the answers key of round N.
  *   readStoredAnswers(argsObject)
  *     argsObject.answers when it is a plain object, else {}.
@@ -53,6 +53,10 @@
  *   string launch takes the defaults. A top-level 'round-N' key is never
  *   read. resume_args is {answers} alone: never the request, which the
  *   launch args already hold, and never a reply or an autonomy key.
+ *   Args that hold a resume_args key are a problem before any other check:
+ *   the resume rule puts the keys of resume_args at the top level of args,
+ *   so a nested resume_args would drop the stored answers and ask the same
+ *   question again.
  *   A digit string reference passes as it is, leading zeros included. The
  *   facts skill's input gate is the charset check on trunk and references,
  *   so no second allowlist is kept here.
@@ -139,6 +143,9 @@ function readReferences(argsObject, runNoun) {
 }
 
 function readLaunchInputs(argsObject, runNoun) {
+  if (Object.prototype.hasOwnProperty.call(argsObject, 'resume_args')) {
+    return { problem: 'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so ' + describeRunNoun(runNoun) + ' did not start.' };
+  }
   const trunkInput = readTrunk(argsObject, runNoun);
   if (trunkInput.problem !== undefined) {
     return trunkInput;

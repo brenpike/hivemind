@@ -1954,6 +1954,9 @@ function readReferences(argsObject, runNoun) {
 }
 
 function readLaunchInputs(argsObject, runNoun) {
+  if (Object.prototype.hasOwnProperty.call(argsObject, 'resume_args')) {
+    return { problem: 'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so ' + describeRunNoun(runNoun) + ' did not start.' };
+  }
   const trunkInput = readTrunk(argsObject, runNoun);
   if (trunkInput.problem !== undefined) {
     return trunkInput;

@@ -93,6 +93,19 @@ describe('readLaunchInputs', () => {
       assert.throws(() => lib.readLaunchInputs({}, runNoun), /runNoun must be a non-blank string/);
     });
   }
+  for (const runNoun of ['delivery', 'analysis']) {
+    test(`a resume_args key is a problem before any other check, naming the ${runNoun}`, () => {
+      const problem = 'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so the ' + runNoun + ' did not start.';
+      for (const nested of [{ answers: { 'round-1': 'SECRET_REPLY_ZQ' } }, null, 'SECRET_REPLY_ZQ']) {
+        const result = read(lib.readLaunchInputs({ trunk: 5, references: 'bad', resume_args: nested }, runNoun));
+        assert.deepEqual(result, { problem: problem }, JSON.stringify(nested));
+        assert.ok(!result.problem.includes('SECRET_REPLY_ZQ'));
+      }
+    });
+  }
+  test('args with no resume_args key pass the guard', () => {
+    assert.deepEqual(read(lib.readLaunchInputs({ answers: { 'round-1': 'R1' }, reply: 'R2' }, RUN_NOUN)), { trunk: 'main', references: [] });
+  });
   test('describeRunNoun names the run after "the"', () => {
     assert.equal(lib.describeRunNoun(RUN_NOUN), 'the delivery');
   });
