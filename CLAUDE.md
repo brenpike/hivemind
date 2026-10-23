@@ -108,6 +108,7 @@ CI runs via `.github/workflows/policy-check.yml` (job: `policy-check`), enforced
 - Putting plugin content at repo root instead of under `plugin/` — `${CLAUDE_PLUGIN_ROOT}` will not resolve where authors expect.
 - Adding/renaming a load-bearing governance section with named consumers (or editing a `tests/policy/safety-*.json`) without adding the consumer-assertion fixture → unprotected coupling (P3).
 - Authoring a `tests/policy/safety-*.json` fixture without reading the pin-authoring contract in `tests/policy/README.md` → overclaimed or wrong-clause pins that leave the suite green through a real regression.
+- Adding a bare or never-matching file-tool entry (`Read`, `Write`, `Edit`, `Glob`, `Grep`) to a non-executor skill's `allowed-tools` → fails CHECK 16. Use `Read(~/.claude/plugins/cache/brenpike/hivemind/**)` or the navigator's own `Edit(.hivemind/...)` inputs-file entry (`plugin/governance/security-policy.md` "Skill File-Tool Grants").
 
 ## Companion plugins referenced
 

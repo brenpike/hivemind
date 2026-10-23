@@ -3,7 +3,7 @@ name: bump-type
 description: Derives the dominant Bump Type Determination row and bump verdict for the working-branch commits since the base, emitting a routing decision the caller acts on. Use when deciding whether a version bump is required and which bump type applies.
 allowed-tools:
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh *)
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash
 ---
 

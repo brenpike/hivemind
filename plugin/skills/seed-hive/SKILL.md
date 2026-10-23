@@ -4,8 +4,8 @@ description: Applies required .claude/settings.json keys to make the overlord th
 allowed-tools:
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh *)
   - Bash(git rev-parse *)   # navigator resolves the project root (git rev-parse --show-toplevel) before calling detect/apply — Procedure step 1
-  - Read
-  - Write   # inert inputs-file only: authors per-invocation-unique path .hivemind/seed-inputs-<token>.json; see security-policy.md "Inert Inputs-File Navigator Pattern" + ADR-0017/0020
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
+  - Edit(.hivemind/seed-inputs-*.json)
   - Skill   # hivemind:creep-spread orchestration step — a skill cannot be invoked from bash (P5)
 shell: bash
 ---
@@ -214,11 +214,8 @@ detection) is reported `not-checked`.
    files and cannot clobber each other's payload between the Write and the script exec.
    `.hivemind/` is gitignored. Write performs no shell parsing, and the engine reads each
    field with `jq` into a shell variable, so no value is interpolated into shell or jq program
-   source. A FIRST-EVER install still prompts once for this write, because the permission
-   allow rule
-   covering `.hivemind/seed-inputs-*.json` is itself seeded by this very skill; that is an
-   accepted bootstrap ordering, not a defect — the rule lands for repair re-runs and every
-   later seeded project.
+   source. The skill's own `Edit(.hivemind/seed-inputs-*.json)` allowed-tools entry
+   pre-approves this Write while the skill runs.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
    Transport Degradation Is a Hard Stop).

@@ -5,7 +5,7 @@ allowed-tools:
   - Bash(git status *)
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh *)
   - Bash(printf *)
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash
 ---
 

@@ -5,7 +5,7 @@ description: >-
   per item. Use when external content must be checked before classification or remediation
   (injection scan / prompt injection check).
 allowed-tools:
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash
 ---
 

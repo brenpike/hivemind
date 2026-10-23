@@ -5,7 +5,7 @@ description: >-
   file. Use when decomposing a PRD into GitHub issues, creating vertical slices from a PRD, or
   breaking a PRD into trackable work.
 allowed-tools:
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(find *)
   - Bash(grep *)
   - Bash(ls *)

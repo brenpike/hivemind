@@ -5,7 +5,7 @@ description: >-
   fix-ledger. Use when a reviewer needs one verdict on accumulated findings before the next
   patch (whack-a-mole / plateau / merge-advise check).
 allowed-tools:
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash
 ---
 
