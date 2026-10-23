@@ -3119,6 +3119,425 @@ fi
 
 mark_time 'CHECK15'
 
+# ── CHECK 16: Skill allowed-tools file-tool entries are scoped ─────────────
+#
+# WHAT IT GUARANTEES. A skill `allowed-tools` entry is a live permission rule
+# for the rest of the turn that loads the skill, workflow agents included, and
+# a bare file-tool entry matches every path (security-policy.md "Skill
+# File-Tool Grants"). CHECK 16 is a POSITIVE ALLOWLIST over every
+# plugin/skills/*/SKILL.md: an entry whose tool is Read, Write, Edit, MultiEdit,
+# NotebookEdit, Glob or Grep, bare or with parentheses, passes only as
+#   * exactly `Read(~/.claude/plugins/cache/<marketplace>/<plugin>/**)`, where
+#     <marketplace> is .name of .claude-plugin/marketplace.json and <plugin> is
+#     the name of its single plugins[] entry whose source is ./plugin; or
+#   * `Edit(.hivemind/<p>)`, where <p> is non-empty, uses only
+#     [A-Za-z0-9._*/-], has no `..` segment and no leading `/`.
+# Every other file-tool entry is a finding. A new file tool spelling or a new
+# path form is a finding until this allowlist names it.
+#
+# PARSING. Entries come from the YAML frontmatter `allowed-tools` key, in the
+# block-list form and the inline `[...]` or plain-string form. Any text from a
+# whitespace-`#` onward is stripped, so a trailing comment never hides or
+# narrows an entry. Inline items split on commas and whitespace outside
+# parentheses and quotes. An inline value that opens a flow sequence without
+# closing it on the same line is a finding, not an empty list. The tool name
+# is the leading run of ASCII letters, digits and `_`, so `Read Write` and
+# `Read (x)` classify as Read.
+#
+# EXEMPTIONS are by path: the executor skills listed in
+# CHECK16_EXEMPT_SKILLS keep their bare entries until their own decision. An
+# exempt path that is missing, or that carries no bare file-tool entry, is a
+# stale-exemption finding, so the list cannot outlive the grants it excuses.
+#
+# FAIL-CLOSED. An unreadable or malformed marketplace manifest, a missing or
+# non-identifier marketplace name, no single ./plugin entry with an identifier
+# name, or zero discovered skills is a finding, never a pass.
+#
+# RESIDUALS. A file tool reached through an MCP server or a future built-in
+# with another name is not a file tool here. A frontmatter key spelled other
+# than `allowed-tools` at column 0 is not read. A multi-line YAML scalar entry
+# is read as its first line only.
+echo ''
+echo '=== CHECK 16: Skill allowed-tools file-tool entries are scoped ==='
+
+CHECK16_MARKETPLACE_MANIFEST="$REPO_ROOT/.claude-plugin/marketplace.json"
+CHECK16_POLICY_CITATION='security-policy.md "Skill File-Tool Grants"'
+CHECK16_ASCII_ALNUM='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+CHECK16_IDENTIFIER_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*\$"
+CHECK16_SCOPED_PATH_REGEX="^[${CHECK16_ASCII_ALNUM}._*/-]+\$"
+CHECK16_FILE_TOOLS=(Read Write Edit MultiEdit NotebookEdit Glob Grep)
+CHECK16_EXEMPT_SKILLS=(tdd refactor-to-depth plan-to-prd plan-interrogation create-handoff creep-spread)
+CHECK16_CACHE_READ_RULE=''
+CHECK16_NORMALIZED=''
+declare -a CHECK16_ENTRY_TEXTS=()
+declare -a CHECK16_ENTRY_LINES=()
+
+check16_found=false
+
+# check16_trim TEXT
+# Sets CHECK16_TRIMMED to TEXT without leading or trailing whitespace.
+CHECK16_TRIMMED=''
+check16_trim() {
+    local text="$1"
+    text="${text#"${text%%[![:space:]]*}"}"
+    CHECK16_TRIMMED="${text%"${text##*[![:space:]]}"}"
+}
+
+# check16_normalize_entry RAW
+# Sets CHECK16_NORMALIZED to RAW with any text from a whitespace-`#` onward
+# stripped, then trimmed, then with one pair of matching surrounding quotes
+# removed and trimmed again.
+check16_normalize_entry() {
+    local entry="$1"
+    entry="${entry%%[[:space:]]#*}"
+    check16_trim "$entry"
+    entry="$CHECK16_TRIMMED"
+    if [[ ${#entry} -ge 2 && ( "$entry" == \"*\" || "$entry" == \'*\' ) ]]; then
+        check16_trim "${entry:1:${#entry}-2}"
+        entry="$CHECK16_TRIMMED"
+    fi
+    CHECK16_NORMALIZED="$entry"
+}
+
+# check16_is_file_tool_name NAME
+# Returns 0 when NAME is exactly one of CHECK16_FILE_TOOLS, else 1.
+check16_is_file_tool_name() {
+    local known_tool
+    for known_tool in "${CHECK16_FILE_TOOLS[@]}"; do
+        if [[ "$1" == "$known_tool" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# check16_is_scoped_edit_entry ENTRY
+# Returns 0 when the normalized ENTRY is `Edit(.hivemind/<p>)` with <p>
+# non-empty, drawn only from [A-Za-z0-9._*/-], free of any `..` segment and not
+# starting with `/`, else 1.
+check16_is_scoped_edit_entry() {
+    local entry="$1"
+    if [[ "$entry" != 'Edit(.hivemind/'*')' ]]; then
+        return 1
+    fi
+    local scoped_path="${entry#'Edit(.hivemind/'}"
+    scoped_path="${scoped_path%')'}"
+    if [[ -z "$scoped_path" || ! "$scoped_path" =~ $CHECK16_SCOPED_PATH_REGEX ]]; then
+        return 1
+    fi
+    if [[ "$scoped_path" == /* || "/${scoped_path}/" == *'/../'* ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# check16_entry_is_violation RAW
+# The single entry classifier: returns 0 when RAW, once normalized, names a
+# file tool (bare or with parentheses) in any form other than the two allowed
+# forms, else 1. With no resolved cache Read rule, no Read form is allowed.
+check16_entry_is_violation() {
+    check16_normalize_entry "$1"
+    local entry="$CHECK16_NORMALIZED"
+    local tool_name="${entry%%[!${CHECK16_ASCII_ALNUM}_]*}"
+    if ! check16_is_file_tool_name "$tool_name"; then
+        return 1
+    fi
+    if [[ -n "$CHECK16_CACHE_READ_RULE" && "$entry" == "$CHECK16_CACHE_READ_RULE" ]]; then
+        return 1
+    fi
+    if check16_is_scoped_edit_entry "$entry"; then
+        return 1
+    fi
+    return 0
+}
+
+# check16_append_entry TEXT LINE
+# Appends one non-empty raw entry and its file line number to the entry arrays.
+check16_append_entry() {
+    check16_trim "$1"
+    if [[ -n "$CHECK16_TRIMMED" ]]; then
+        CHECK16_ENTRY_TEXTS+=("$CHECK16_TRIMMED")
+        CHECK16_ENTRY_LINES+=("$2")
+    fi
+    return 0
+}
+
+# check16_split_inline_value VALUE LINE
+# Appends each item of an inline allowed-tools VALUE -- the `[...]` flow form or
+# a plain string, optionally quoted whole -- to the entry arrays at LINE. Items
+# split on commas and whitespace outside parentheses and quotes. Returns 1 when
+# VALUE opens a flow sequence it does not close, else 0.
+check16_split_inline_value() {
+    local value="$1" line_number="$2"
+    local current_item='' open_quote='' paren_depth=0 char_index value_char
+    if [[ "$value" == '['* ]]; then
+        if [[ "$value" != *']' ]]; then
+            return 1
+        fi
+        value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && ( "$value" == \"*\" || "$value" == \'*\' ) ]]; then
+        value="${value:1:${#value}-2}"
+    fi
+    for ((char_index = 0; char_index < ${#value}; char_index++)); do
+        value_char="${value:char_index:1}"
+        if [[ -n "$open_quote" ]]; then
+            if [[ "$value_char" == "$open_quote" ]]; then
+                open_quote=''
+            fi
+            current_item+="$value_char"
+            continue
+        fi
+        case "$value_char" in
+            \"|\')
+                open_quote="$value_char"
+                current_item+="$value_char"
+                ;;
+            '(')
+                paren_depth=$((paren_depth + 1))
+                current_item+="$value_char"
+                ;;
+            ')')
+                if [[ "$paren_depth" -gt 0 ]]; then
+                    paren_depth=$((paren_depth - 1))
+                fi
+                current_item+="$value_char"
+                ;;
+            ','|' '|$'\t')
+                if [[ "$paren_depth" -gt 0 ]]; then
+                    current_item+="$value_char"
+                else
+                    check16_append_entry "$current_item" "$line_number"
+                    current_item=''
+                fi
+                ;;
+            *)
+                current_item+="$value_char"
+                ;;
+        esac
+    done
+    check16_append_entry "$current_item" "$line_number"
+    return 0
+}
+
+# check16_collect_entries SKILL_FILE
+# Replaces CHECK16_ENTRY_TEXTS and CHECK16_ENTRY_LINES with every raw
+# allowed-tools entry in SKILL_FILE's YAML frontmatter and its line number.
+# Frontmatter bounds follow find_navigator_entry_line: it opens at the first
+# trimmed `---` line and closes at the next one. A trailing CR is stripped. An
+# unclosed inline flow sequence is a CHECK16 finding and sets check16_found.
+check16_collect_entries() {
+    local skill_file="$1"
+    local textline value line_number=0 in_frontmatter=false in_list=false
+    CHECK16_ENTRY_TEXTS=()
+    CHECK16_ENTRY_LINES=()
+    while IFS= read -r textline || [[ -n "$textline" ]]; do
+        line_number=$((line_number + 1))
+        textline="${textline%$'\r'}"
+        check16_trim "$textline"
+        if [[ "$CHECK16_TRIMMED" == '---' ]]; then
+            if [[ "$in_frontmatter" == true ]]; then
+                break
+            fi
+            in_frontmatter=true
+            continue
+        fi
+        if [[ "$in_frontmatter" != true ]]; then
+            continue
+        fi
+        if [[ "$in_list" == true ]]; then
+            if [[ -z "$CHECK16_TRIMMED" || "$CHECK16_TRIMMED" == '#'* ]]; then
+                continue
+            fi
+            if [[ "$CHECK16_TRIMMED" == '-' || "$CHECK16_TRIMMED" == '-'[[:space:]]* ]]; then
+                check16_append_entry "${CHECK16_TRIMMED#-}" "$line_number"
+                continue
+            fi
+            in_list=false
+        fi
+        if [[ "$textline" =~ ^allowed-tools[[:space:]]*:(.*)$ ]]; then
+            value="${BASH_REMATCH[1]}"
+            value="${value%%[[:space:]]#*}"
+            check16_trim "$value"
+            value="$CHECK16_TRIMMED"
+            if [[ -z "$value" ]]; then
+                in_list=true
+            elif ! check16_split_inline_value "$value" "$line_number"; then
+                check16_found=true
+                add_finding 'CHECK16' "$skill_file" "$line_number" \
+                    "allowed-tools opens an inline flow sequence it does not close on the same line (\"${value}\"); its entries cannot be read, so write them as a block list or close the sequence -- see ${CHECK16_POLICY_CITATION}"
+            fi
+        fi
+    done < "$skill_file"
+    return 0
+}
+
+# check16_resolve_cache_read_rule
+# Sets CHECK16_CACHE_READ_RULE from the marketplace manifest. Returns 1 after a
+# CHECK16 finding when the manifest is unreadable or malformed, its .name is not
+# an identifier, or it has no single ./plugin entry with an identifier name.
+check16_resolve_cache_read_rule() {
+    local manifest="$CHECK16_MARKETPLACE_MANIFEST"
+    local marketplace_name plugin_name
+    if [[ ! -f "$manifest" || ! -r "$manifest" ]] || ! jq empty "$manifest" > /dev/null 2>&1; then
+        add_finding 'CHECK16' "$manifest" 0 \
+            "the marketplace manifest is missing, unreadable or not valid JSON, so the plugin cache Read rule cannot be derived and no skill entry is checked -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    if ! marketplace_name="$(jq -er '.name | select(type == "string")' "$manifest" 2>/dev/null)" \
+       || [[ ! "$marketplace_name" =~ $CHECK16_IDENTIFIER_REGEX ]]; then
+        add_finding 'CHECK16' "$manifest" 0 \
+            "the marketplace manifest .name is missing or not an identifier matching ${CHECK16_IDENTIFIER_REGEX}, so the plugin cache Read rule cannot be derived and no skill entry is checked -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    if ! plugin_name="$(jq -er '[.plugins[]? | select(type == "object" and .source == "./plugin") | .name] | if length == 1 and (.[0] | type) == "string" then .[0] else empty end' "$manifest" 2>/dev/null)" \
+       || [[ ! "$plugin_name" =~ $CHECK16_IDENTIFIER_REGEX ]]; then
+        add_finding 'CHECK16' "$manifest" 0 \
+            "the marketplace manifest has no single plugins[] entry with source ./plugin and an identifier name, so the plugin cache Read rule cannot be derived and no skill entry is checked -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    CHECK16_CACHE_READ_RULE="Read(~/.claude/plugins/cache/${marketplace_name}/${plugin_name}/**)"
+    return 0
+}
+
+# check16_is_exempt_skill NAME
+# Returns 0 when NAME is one of CHECK16_EXEMPT_SKILLS, else 1.
+check16_is_exempt_skill() {
+    local exempt_skill
+    for exempt_skill in "${CHECK16_EXEMPT_SKILLS[@]}"; do
+        if [[ "$1" == "$exempt_skill" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# check16_has_bare_file_tool_entry
+# Returns 0 when any collected entry, normalized, is exactly a file tool name.
+check16_has_bare_file_tool_entry() {
+    local raw_entry
+    for raw_entry in "${CHECK16_ENTRY_TEXTS[@]}"; do
+        check16_normalize_entry "$raw_entry"
+        if check16_is_file_tool_name "$CHECK16_NORMALIZED"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# check16_scan_skill_file SKILL_FILE
+# Records a CHECK16 finding for every collected entry the classifier rejects.
+check16_scan_skill_file() {
+    local skill_file="$1" entry_index
+    for ((entry_index = 0; entry_index < ${#CHECK16_ENTRY_TEXTS[@]}; entry_index++)); do
+        if check16_entry_is_violation "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
+            check16_found=true
+            add_finding 'CHECK16' "$skill_file" "${CHECK16_ENTRY_LINES[$entry_index]}" \
+                "allowed-tools entry '${CHECK16_NORMALIZED}' is a file-tool grant outside the two allowed forms ('${CHECK16_CACHE_READ_RULE}' or 'Edit(.hivemind/<path>)'); a skill entry is a live rule for the whole turn that loads it -- see ${CHECK16_POLICY_CITATION}"
+        fi
+    done
+    return 0
+}
+
+declare -a check16_skill_files=()
+discover_checked_paths 'CHECK16' check16_skill_files files 'skill SKILL.md files' "$PLUGIN_ROOT/skills" -- -maxdepth 2 -name 'SKILL.md' || check16_found=true
+
+if [[ "${#check16_skill_files[@]}" -eq 0 ]]; then
+    check16_found=true
+    add_finding 'CHECK16' "$PLUGIN_ROOT/skills" 0 \
+        "skill discovery found ZERO plugin/skills/*/SKILL.md files, which disarms this check rather than passing it -- see ${CHECK16_POLICY_CITATION}"
+fi
+
+if ! check16_resolve_cache_read_rule; then
+    check16_found=true
+else
+    for skill_file in "${check16_skill_files[@]}"; do
+        skill_name="$(basename "$(dirname "$skill_file")")"
+        check16_collect_entries "$skill_file"
+        if check16_is_exempt_skill "$skill_name"; then
+            continue
+        fi
+        check16_scan_skill_file "$skill_file"
+    done
+
+    for exempt_skill in "${CHECK16_EXEMPT_SKILLS[@]}"; do
+        exempt_skill_file="$PLUGIN_ROOT/skills/${exempt_skill}/SKILL.md"
+        exempt_skill_discovered=false
+        for skill_file in "${check16_skill_files[@]}"; do
+            if [[ "$skill_file" == "$exempt_skill_file" ]]; then
+                exempt_skill_discovered=true
+            fi
+        done
+        if [[ "$exempt_skill_discovered" != true ]]; then
+            check16_found=true
+            add_finding 'CHECK16' "$exempt_skill_file" 0 \
+                "stale exemption: hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but its SKILL.md was not discovered -- remove it from the exemption list -- see ${CHECK16_POLICY_CITATION}"
+            continue
+        fi
+        check16_collect_entries "$exempt_skill_file"
+        if ! check16_has_bare_file_tool_entry; then
+            check16_found=true
+            add_finding 'CHECK16' "$exempt_skill_file" 0 \
+                "stale exemption: hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but carries no bare file-tool entry -- remove it from the exemption list so its entries are checked -- see ${CHECK16_POLICY_CITATION}"
+        fi
+    done
+fi
+
+# ── CHECK 16 DETECTION CANARY ──────────────────────────────────────────────
+# The entry classifier over fixed strings, in BOTH directions. A narrowed
+# file-tool list, a widened or narrowed allowed form, or a dropped
+# trailing-comment strip turns this run red while every skill still passes.
+
+check16_expect_hit() {
+    if ! check16_entry_is_violation "$1"; then
+        check16_found=true
+        add_finding 'CHECK16' 'tools/policy_check.sh' 0 \
+            "detection canary: entry \"$1\" was not classified as a file-tool violation -- the file-tool list was narrowed or an allowed form widened"
+    fi
+    return 0
+}
+
+check16_expect_miss() {
+    if check16_entry_is_violation "$1"; then
+        check16_found=true
+        add_finding 'CHECK16' 'tools/policy_check.sh' 0 \
+            "detection canary: entry \"$1\" was classified as a file-tool violation -- an allowed form was narrowed, the trailing-comment strip dropped, or a non-file tool is now treated as one"
+    fi
+    return 0
+}
+
+if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
+    check16_expect_hit 'Read'
+    check16_expect_hit 'Write   # x'
+    check16_expect_hit 'Write(.hivemind/a.json)'
+    check16_expect_hit 'Glob(src/**)'
+    check16_expect_hit 'Grep'
+    check16_expect_hit 'Read(//etc/**)'
+    check16_expect_hit 'Read(${CLAUDE_PLUGIN_ROOT}/**)'
+    check16_expect_hit 'Edit(../x)'
+    check16_expect_hit 'Edit(/abs/x)'
+    check16_expect_hit 'NotebookEdit(.hivemind/a)'
+    check16_expect_hit 'Edit(.hivemind/)'
+    check16_expect_hit 'Edit(.hivemind/../x)'
+
+    check16_expect_miss "$CHECK16_CACHE_READ_RULE"
+    check16_expect_miss "${CHECK16_CACHE_READ_RULE}   # x"
+    check16_expect_miss 'Edit(.hivemind/runs/.record-inputs-*.json)'
+    check16_expect_miss 'Bash(git status *)'
+    check16_expect_miss 'Skill'
+    check16_expect_miss 'Agent(hivemind:x)'
+    check16_expect_miss 'Monitor'
+    check16_expect_miss 'LSP'
+fi
+
+if [[ "$check16_found" == false ]]; then
+    echo "[PASS] Check 16: All ${#check16_skill_files[@]} skills carry file-tool entries only in the two allowed forms (${#CHECK16_EXEMPT_SKILLS[@]} executor skills exempt by path)"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'CHECK16'
+
 # ── SAFETY REGRESSION TESTS ────────────────────────────────────────────────
 
 echo ''
