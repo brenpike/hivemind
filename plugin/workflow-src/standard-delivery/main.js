@@ -47,9 +47,9 @@
  *   longer than maxBlockedLeadLength() code points has those first code
  *   points as its compact form, so the fit keeps the next-step line in
  *   every tier and finish never throws.
- *   Every step- or script-written value a message shows goes through
- *   encodeUntrustedText (lib/result.js), so it shows as quoted JSON of
- *   printable ASCII. A blocked relay of the facts, branch, commit,
+ *   Every step- or script-written diagnostic or name a message shows goes
+ *   through encodeUntrustedText (lib/result.js), so it shows as quoted JSON
+ *   of printable ASCII. A blocked relay of the facts, branch, commit,
  *   bump-type or pull request step quotes the payload of its last
  *   'blocker: ' line that has one; with none it quotes the first two
  *   non-blank stderr lines, and only a blank or missing stderr says it
@@ -61,7 +61,11 @@
  *   reversible effect summaries and the other review values go through
  *   encodeUntrustedText, and a scheduling problem through
  *   toPrintableAscii. JSON.stringify is left only in throw messages, in
- *   questionKey and in the acceptResolution comparison.
+ *   questionKey and in the acceptResolution comparison. Planner prose
+ *   written for the user is not encoded: the brief fields and verbatim
+ *   text lib/brief.js renders, which include the plan summary and an
+ *   irreversible effect's text, show as written. That is the residual
+ *   ADR-0037 records (Risks, step text in a blocked message, (b)).
  *
  * Steps, in code order (one pass)
  *   Facts   a haiku hivemind:drone runner invokes hivemind:gather-facts and
@@ -339,7 +343,7 @@ function contractRows() {
     { id: 'SD-46', step: 'PR relay', check: 'checkPullRequestRelay', rule: 'The relayed stdout parses with openPlanPrRoutingSpec(), whose keys are the open-plan-pr.sh OUTPUT keys in order and whose warning holds only the script fixed texts, head_ref_oid equals H, and commented is true exactly when created is false; a blocked or malformed relay stops the run blocked naming the pull request step.' },
     { id: 'SD-47', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run finishes complete with pr {url, head_ref_oid, created}, and the final message names the pull request, opened or pushed to with a comment, the gates that held and any warning, then every part of the run record buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate that did not run and every taken decision.' },
     { id: 'SD-49', step: 'Prompts', check: 'addResumeNote', rule: 'Once run.replies is not empty, every agent prompt but the planner revise prompt carries resumedReplySentence() as its second line, no prompt sent before the first reply carries it, and no prompt but the revise prompt carries reply text.' },
-    { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'Every step- or script-written value a message shows goes through encodeUntrustedText; a blocked relay quotes its last non-blank blocker line, else its first two non-blank stderr lines, else gives no reason, a step blocker goes through describeReason, each one line cut to maxExcerptLength() characters, and the text starts with a capital letter after a full stop and stays lower case after a colon.' },
+    { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'Every step- or script-written diagnostic or name a message shows goes through encodeUntrustedText, while planner prose rendered by lib/brief.js shows as written; a blocked relay quotes its last non-blank blocker line, else its first two non-blank stderr lines, else gives no reason, a step blocker goes through describeReason, each one line cut to maxExcerptLength() characters, and the text starts with a capital letter after a full stop and stays lower case after a colon.' },
     { id: 'SD-51', step: 'Result', check: 'finishDeliveryBlocked', rule: 'Every blocked result carries nextStepLine() as a whole block right after its first block, no block carries shorten, a first block longer than maxBlockedLeadLength() code points has those first code points as its compact form, so the message keeps the next-step line however long the first block is, and finish never throws.' }
   ];
 }

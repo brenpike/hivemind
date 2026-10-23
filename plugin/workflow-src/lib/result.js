@@ -114,14 +114,20 @@
  *   (ADR-0036 decision 13).
  *   Invalid input throws instead of returning a partial result.
  *   message is the last key, after needs_user, outcome, resume_args and pr.
- *   Encode at output: every step- or script-written value a workflow puts
- *   in a message goes through encodeUntrustedText, most through
- *   quoteDiagnostic or describeReason, so it shows as one quoted JSON
- *   string of printable ASCII. A control character, an escape sequence, a
- *   bidi or zero-width mark, a line separator or a line feed in it cannot
- *   reach the user's terminal raw, start a line of its own or forge the
- *   next-step line. Markdown inside the quote stays as text and is the
- *   residual ADR-0037 records.
+ *   Encode at output: every step- or script-written diagnostic or name a
+ *   workflow puts in a message goes through encodeUntrustedText, most
+ *   through quoteDiagnostic or describeReason, so it shows as one quoted
+ *   JSON string of printable ASCII. That covers reasons, blocker and stderr
+ *   lines, paths, branch names, step ids, reversible effect summaries and
+ *   review values. A control character, an escape sequence, a bidi or
+ *   zero-width mark, a line separator or a line feed in one cannot reach
+ *   the user's terminal raw, start a line of its own or forge the
+ *   next-step line. Markdown inside the quote stays as text. Planner prose
+ *   written for the user is not encoded: the brief fields and verbatim
+ *   text lib/brief.js renders, which include the plan summary and an
+ *   irreversible effect's text, and the analysis-only report show as
+ *   written. Both are residuals ADR-0037 records (Risks, step text in a
+ *   blocked message, (a) and (b)).
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
