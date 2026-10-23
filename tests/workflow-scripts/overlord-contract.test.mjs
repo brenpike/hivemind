@@ -105,9 +105,13 @@ describe('overlord Engine section', () => {
       assert.match(engineSection, new RegExp('`[^`\\n]*\\b' + fieldName + '\\b[^`\\n]*`'), `${fieldName} is missing from ## Engine`);
     });
   }
-  test('Engine resumes with the launch args, then resume_args, then the reply arg', () => {
+  test('Engine resumes with one flat object: the launch args, the keys of resume_args at the top level, then the reply arg', () => {
     const replyName = resultLib.replyField();
-    assert.ok(engineSection.includes('with args set to the launch args plus `resume_args` plus `' + replyName + '` set to the user\'s reply verbatim'), `${replyName} resume clause is missing from ## Engine`);
+    assert.ok(engineSection.includes('with args set to one flat object: the launch args, then each key of `resume_args` (today `answers`) at the top level of args, never nested under a `resume_args` key, then `' + replyName + '` set to the user\'s reply verbatim.'), `${replyName} resume clause is missing from ## Engine`);
+  });
+  test('Engine never nests the resume args under a resume_args key', () => {
+    assert.ok(engineSection.includes('never nested under a `resume_args` key'), '## Engine resume clause lacks the never-nested clause');
+    assert.ok(!engineSection.includes('the launch args plus `resume_args`'), '## Engine still adds resume_args as one nested key');
   });
   test('Engine resumes the same run by name with resumeFromRunId', () => {
     for (const phrase of ['resume the same run by name', '`name` set to the name you launched (`hivemind:<id>`)', '`resumeFromRunId` from the launch']) {
@@ -122,7 +126,7 @@ describe('overlord Engine section', () => {
     }
   });
   test('Engine limits launch and resume args and adds no runner instructions', () => {
-    for (const phrase of ['Launch args hold only `request`, `trunk` and `references`, plus `local_review` and `draft` when `<id>` is `standard-delivery`.', 'Resume args hold only the launch args plus `resume_args` plus `reply`.', 'Add no instruction, note or summary for the workflow\'s agents', 'They take their task only from the script.']) {
+    for (const phrase of ['Launch args hold only `request`, `trunk` and `references`, plus `local_review` and `draft` when `<id>` is `standard-delivery`.', 'Resume args hold only the launch args, the keys of `resume_args` and `reply`.', 'Add no instruction, note or summary for the workflow\'s agents', 'They take their task only from the script.']) {
       assert.ok(engineSection.includes(phrase), `## Engine args clause lacks ${phrase}`);
     }
   });
