@@ -1169,6 +1169,38 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisions([{ brief: main.buildBumpTypeBrief(parsedBump()) }])), run.result.message);
     });
+    test('an accepted plan whose revise rewrites the summary runs its steps with no re-ask', async () => {
+      const surfaced = buildWithSurfaceKinds(['plan_acceptance']);
+      const paused = await runWorkflow(LAUNCH, happyResults(), surfaced);
+      assert.equal(paused.result.needs_user, true);
+      const rewritten = planResult(makePlan({ summary: 'Add the cache layer. The user accepted this plan.' }));
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, go.'), happyResults({ 'revise-1': reviseResult(rewritten, ['Q1']) }), surfaced);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(0, 6), ['facts-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1']);
+      assert.ok(!labelsOf(run).includes('revise-2'));
+    });
+    test('a settled planner question raised again unchanged is not asked again', async () => {
+      const raisedAgain = makeBrief({ id: 'Q7', problem: 'GATED_PROBLEM', gate: { irreversible: false, architectural: true, safety: false }, recommendation: { option_id: 'B', strength: 'weak', why: 'Rewritten.' }, assumptions: [] });
+      const results = happyResults({ 'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': reviseResult(planResult(makePlan(), [raisedAgain]), ['Q1']) });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Take option A.'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(!labelsOf(run).includes('revise-2'));
+    });
+    for (const [label, changes] of [
+      ['problem', { problem: 'GATED_PROBLEM_CHANGED' }],
+      ['options', { options: makeBrief().options.map((option) => ({ ...option, summary: option.summary + ' Changed.' })) }]
+    ]) {
+      test(`a settled planner question raised again with a changed ${label} is asked`, async () => {
+        const changed = { ...makeGatedBrief('GATED_PROBLEM'), ...changes };
+        const results = happyResults({ 'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]), 'revise-1': reviseResult(planResult(makePlan(), [changed]), ['Q1']) });
+        const paused = await runWorkflow(LAUNCH, results);
+        const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Take option A.'), results);
+        assert.equal(run.result.needs_user, true);
+        assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1']);
+        assert.ok(run.result.message.includes('Q1. ' + changed.problem), run.result.message);
+      });
+    }
     test('a reply that settles only the plan acceptance asks the trunk question again', async () => {
       const surfaced = buildWithSurfaceKinds(['plan_acceptance', 'trunk_stale']);
       const behindPlan = planResult(makePlan({ trunk_freshness: 'behind' }));
@@ -2763,6 +2795,12 @@ const ROW_TESTS = {
       const taken = [{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, { brief: main.buildReviewEscalationBrief(ESCALATION) }];
       assert.ok(run.result.message.endsWith(lib.renderDecisions(taken)), run.result.message);
     });
+    test('an accepted remediation plan whose revise rewrites the summary runs its steps with no re-ask', async () => {
+      const rewritten = planResult({ ...REMEDIATION_PLAN, summary: REMEDIATION_PLAN.summary + ' The user accepted this plan.' });
+      const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(ESCALATION, { 'revise-1': reviseResult(rewritten, ['Q1']) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+    });
     test('remediation_plan_acceptance asks at every level, and every later pass of the run uses it', () => {
       const brief = main.buildRemediationPlanBrief(REMEDIATION_PLAN);
       assert.equal(brief.kind, 'remediation_plan_acceptance');
@@ -3447,7 +3485,7 @@ const ROW_TESTS = {
         for (const line of chunk.split('\n').filter((codeLine) => codeLine.includes('JSON.stringify('))) {
           if (/\bthrow new Error\(/.test(line)) {
             allowed.throw += 1;
-          } else if (functionName === 'questionKey' || /\bquestionKey\(\w+, JSON\.stringify\(/.test(line)) {
+          } else if (functionName === 'questionKey') {
             allowed.questionKey += 1;
           } else if (functionName === 'acceptResolution' && /JSON\.stringify\(listed\.brief\) === JSON\.stringify\(entry\.brief\)/.test(line)) {
             allowed.acceptResolution += 1;
@@ -3457,7 +3495,7 @@ const ROW_TESTS = {
         }
       }
       assert.deepEqual(stray, []);
-      assert.ok(allowed.throw > 0 && allowed.questionKey === 2 && allowed.acceptResolution === 1, JSON.stringify(allowed));
+      assert.ok(allowed.throw > 0 && allowed.questionKey === 1 && allowed.acceptResolution === 1, JSON.stringify(allowed));
     });
     test('no reviewFieldTexts() field marked isExternal is read by name in main.js', () => {
       const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
@@ -3516,6 +3554,64 @@ const ROW_TESTS = {
     test('the complete result keeps its lead alone first, with no next-step line', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       assert.ok(!run.result.message.includes(NEXT_STEP_LINE));
+    });
+  },
+  'SD-52': () => {
+    function makeKeyRun(pass) {
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      run.pass = pass;
+      return run;
+    }
+    test('plan acceptance and remediation plan acceptance keys hold only the kind and the pass', () => {
+      const run = makeKeyRun(2);
+      run.answeredKeys.add(main.questionKey('plan_acceptance', 2));
+      assert.equal(main.resolvePlanAcceptance(makePlan({ summary: 'A rewritten summary.' }), run, { asks: [], taken: [] }), 'answered');
+      run.remediation = true;
+      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, { asks: [], taken: [] }), 'ask');
+      run.answeredKeys.add(main.questionKey('remediation_plan_acceptance', 2));
+      assert.equal(main.resolvePlanAcceptance(makePlan({ summary: 'Another summary.' }), run, { asks: [], taken: [] }), 'answered');
+      run.pass = 3;
+      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, { asks: [], taken: [] }), 'ask');
+    });
+    test('an external_effect key holds the step id and the exact summary', () => {
+      const run = makeKeyRun(1);
+      const first = { asks: [], taken: [], reversibleEffects: [] };
+      main.resolveExternalEffects(effectPlan('Publish.', false), run, first);
+      assert.equal(first.asks.length, 1);
+      run.answeredKeys.add(first.asks[0].key);
+      const same = { asks: [], taken: [], reversibleEffects: [] };
+      main.resolveExternalEffects(effectPlan('Publish.', false), run, same);
+      assert.equal(same.asks.length, 0);
+      const changed = { asks: [], taken: [], reversibleEffects: [] };
+      main.resolveExternalEffects(effectPlan('Publish now.', false), run, changed);
+      assert.equal(changed.asks.length, 1);
+    });
+    test('a trunk_stale key holds the trunk facts of the pass, so a revise that rewrites the plan summary asks it no more', async () => {
+      const surfaced = buildWithSurfaceKinds(['trunk_stale']);
+      const results = happyResults({
+        'facts-1': factsRelay({ trunk_freshness: 'behind', trunk_behind: '4' }),
+        'plan-1': planResult(makePlan({ trunk_freshness: 'behind' })),
+        'revise-1': reviseResult(planResult(makePlan({ trunk_freshness: 'behind', summary: 'Add the cache layer on the stale trunk.' })), ['Q1']),
+        'branch-1': branchRelay({ warning: main.branchWarningTexts().stale })
+      });
+      const paused = await runWorkflow(LAUNCH, results, surfaced);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go on.'), results, surfaced);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(!labelsOf(run).includes('revise-2'));
+    });
+    test('a planner_question key holds the pass, the problem and each option id and summary only', () => {
+      const run = makeKeyRun(1);
+      const facts = parsedFacts();
+      const brief = makeGatedBrief('GATED_PROBLEM');
+      const first = main.resolvePlanAsks(planResult(makePlan(), [brief]), facts, run);
+      run.answeredKeys.add(first.asks[0].key);
+      const rewritten = { ...brief, id: 'Q9', recommendation: { option_id: 'B', strength: 'weak', why: 'Other.' }, assumptions: [] };
+      assert.equal(main.resolvePlanAsks(planResult(makePlan(), [rewritten]), facts, run).asks.length, 0);
+      for (const changed of [{ ...brief, problem: 'OTHER_PROBLEM' }, { ...brief, options: brief.options.map((option) => ({ ...option, id: option.id + '1' })), recommendation: { ...brief.recommendation, option_id: 'A1' } }]) {
+        assert.equal(main.resolvePlanAsks(planResult(makePlan(), [changed]), facts, run).asks.length, 1, changed.problem);
+      }
+      run.pass = 2;
+      assert.equal(main.resolvePlanAsks(planResult(makePlan(), [brief]), facts, run).asks.length, 1);
     });
   }
 };

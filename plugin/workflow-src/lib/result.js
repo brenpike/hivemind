@@ -70,12 +70,19 @@
  * Contract the overlord relays
  *   Only the harness completion notice carries the result. A model's own
  *   summary of the run never counts.
- *   needs_user true: show message to the user as is. Then relaunch the same
+ *   The overlord presents message, for a question and for the final report
+ *   alike, as its whole reply in the user's active output style, such as a
+ *   terse style. It keeps exactly as written every question label, every
+ *   option and reply token, the recommendation, and every number, path,
+ *   URL, commit, branch and identifier. It adds no line before or after
+ *   message and no comment on what it says, and drops nothing the user must
+ *   answer.
+ *   needs_user true: show message to the user. Then relaunch the same
  *   run with args built in this order: the launch args, then the keys of
  *   resume_args over them, then reply set to the user's reply word for word.
  *   That is the only resume rule: nothing else in args is read as a reply.
  *   Never answer for the user.
- *   needs_user false: show message to the user as is. The run is over.
+ *   needs_user false: show message to the user. The run is over.
  *
  * Size
  *   The harness cuts the completion notice at a fixed length of the escaped
