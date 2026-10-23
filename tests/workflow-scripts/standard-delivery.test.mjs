@@ -3376,12 +3376,36 @@ const ROW_TESTS = {
       const run = await runWorkflow({ request: REQUEST, trunk: 5 }, {});
       assert.deepEqual(run.result.message.split('\n\n'), ['The trunk launch arg must be a non-blank string, so the delivery did not start.', NEXT_STEP_LINE]);
     });
-    test('a blocked result too long for the notice finishes cut, without a throw', async () => {
-      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: 'B'.repeat(20000), questions: [] } });
-      assert.equal(run.failures, 0);
-      assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.endsWith(lib.noticeMarker('cut')), run.result.message.slice(-300));
-      assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
+    const longBlocker = 'B'.repeat(20000);
+    for (const [label, results, leadStart] of [
+      ['planner', { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: longBlocker, questions: [] } }, 'The planner could not plan the delivery: '],
+      ['worker', happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: longBlocker } }), 'A worker did not finish its step'],
+      ['branch relay', happyResults({ 'branch-1': { outcome: 'blocked', stderr: 'blocker: ' + longBlocker + '\n' } }), 'The branch step was blocked'],
+      ['validation', happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }), 'The validation step was blocked'],
+      ['fix round', fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: longBlocker }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }), 'The validation fix round was blocked'],
+      ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'Local review was blocked']
+    ]) {
+      test(`a ${label} blocker too long for the notice keeps the next-step line, without a throw`, async () => {
+        const run = await runWorkflow(LAUNCH, results);
+        assert.equal(run.failures, 0);
+        assert.equal(run.result.outcome, 'blocked');
+        const paragraphs = run.result.message.split('\n\n');
+        const leadIndex = paragraphs.findIndex((paragraph) => paragraph.startsWith(leadStart));
+        assert.ok(leadIndex >= 0, run.result.message.slice(0, 300));
+        assert.equal(paragraphs[leadIndex + 1], NEXT_STEP_LINE, run.result.message.slice(-600));
+        assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
+      });
+    }
+    test('a first block of the costliest characters still keeps the next-step line, without a throw', () => {
+      const message = 'The planner could not plan the delivery: ' + '\u0001'.repeat(20000);
+      const run = { taken: [], waveCount: 1, commits: Array.from({ length: 400 }, () => OTHER), reversibleEffects: [], notRunGates: [] };
+      for (const blockedRun of [undefined, run]) {
+        const result = main.finishDeliveryBlocked(message, blockedRun);
+        const paragraphs = result.message.split('\n\n');
+        assert.equal(paragraphs[paragraphs.findIndex((paragraph) => paragraph.startsWith('The planner could not plan')) + 1], NEXT_STEP_LINE);
+        assert.equal(Array.from(paragraphs.find((paragraph) => paragraph.startsWith('The planner could not plan'))).length, main.maxBlockedLeadLength());
+        assert.ok(lib.noticeLength(result) <= lib.noticeBudget());
+      }
     });
     test('the complete result keeps its lead alone first, with no next-step line', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());

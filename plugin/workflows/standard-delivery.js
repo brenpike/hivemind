@@ -2352,7 +2352,7 @@ function contractRows() {
     { id: 'SD-47', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run finishes complete with pr {url, head_ref_oid, created}, and the final message names the pull request, opened or pushed to with a comment, the gates that held and any warning, then every part of the run record buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate that did not run and every taken decision.' },
     { id: 'SD-49', step: 'Prompts', check: 'addResumeNote', rule: 'Once run.replies is not empty, every agent prompt but the planner revise prompt carries resumedReplySentence() as its second line, no prompt sent before the first reply carries it, and no prompt but the revise prompt carries reply text.' },
     { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'A blocked facts, branch, commit, bump-type or pull request relay names its last blocker line; with none it quotes the first two non-blank stderr lines, joined into one line, cut to maxExcerptLength() characters and JSON-encoded; only a blank or missing stderr says it gave no reason; the text starts with a capital letter after a full stop and stays lower case after a colon.' },
-    { id: 'SD-51', step: 'Result', check: 'finishDeliveryBlocked', rule: 'Every blocked result carries nextStepLine() as the block right after its first block, no block but the last carries shorten, and finish never throws.' }
+    { id: 'SD-51', step: 'Result', check: 'finishDeliveryBlocked', rule: 'Every blocked result carries nextStepLine() as a whole block right after its first block, no block carries shorten, a first block longer than maxBlockedLeadLength() code points has those first code points as its compact form, so the message keeps the next-step line however long the first block is, and finish never throws.' }
   ];
 }
 
@@ -2374,6 +2374,10 @@ function maxReviewIterations() {
 
 function maxExcerptLength() {
   return 200;
+}
+
+function maxBlockedLeadLength() {
+  return 1000;
 }
 
 function maxTitleLength() {
@@ -3258,11 +3262,17 @@ function nextStepLine() {
   return 'Fix the cause named above, then run the request again.';
 }
 
-function finishDeliveryBlocked(message, run) {
-  if (run === undefined) {
-    return finish({ outcome: 'blocked', blocks: [{ text: message }, { text: nextStepLine() }] });
+function buildBlockedLead(message) {
+  const characters = Array.from(message);
+  if (characters.length <= maxBlockedLeadLength()) {
+    return { text: message };
   }
-  return finish({ outcome: 'blocked', blocks: buildRunBlocks(message, run, run.taken, nextStepLine()) });
+  return { text: message, compact: characters.slice(0, maxBlockedLeadLength()).join('') };
+}
+
+function finishDeliveryBlocked(message, run) {
+  const recordBlocks = run === undefined ? [] : buildRunRecordParts(run, run.taken, undefined).map(toRunBlock);
+  return finish({ outcome: 'blocked', blocks: [buildBlockedLead(message), { text: nextStepLine(), whole: true }, ...recordBlocks] });
 }
 
 function describePullRequest(values) {
