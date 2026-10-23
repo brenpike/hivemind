@@ -19,8 +19,8 @@ Then run `/hivemind:seed-hive` once in each project (see [Per-project setup](#pe
 
 - **bash** (macOS, Linux, or WSL on Windows)
 - **git** and **gh** (GitHub CLI)
-- **jq**: required by the run-ledger engines (`hivemind:init-run-ledger`, `hivemind:record-state-result`) and by `hivemind:seed-hive`
-- Claude Code CLI
+- **jq**: required by the run-ledger engines (`hivemind:init-run-ledger`, `hivemind:record-state-result`), by the facts and git scripts (`hivemind:gather-facts`, `hivemind:molt`, `hivemind:open-plan-pr`), and by `hivemind:seed-hive`
+- Claude Code CLI. When Claude Code's Workflow tool is available, analysis and delivery requests run as workflow scripts; otherwise they run on the workflow state machine (see [Two engines](#two-engines)).
 - **tmux**: only for brood execution (`hivemind:spawn-brood`, `hivemind:brood-status`)
 - **node**: only for the optional local Codex review (`codex` companion)
 
@@ -57,11 +57,12 @@ Or run the setup skill once to apply the required keys automatically:
 
 `.hivemind/` is runtime state created by the overlord and its skills. It should not be committed. It holds:
 
-- `.hivemind/runs/<run-id>/state.json`: the run ledger, one per overlord run
+- `.hivemind/runs/<run-id>/state.json`: the run ledger, one per state-machine run. Workflow-script runs keep no run ledger.
+- `.hivemind/facts/`: the branch facts files `hivemind:gather-facts` writes, one per facts run
 - `.hivemind/broods/<brood-id>/manifest.json`: one manifest per brood
 - `.hivemind/review-loop/fix-ledger.yaml`: the local reviewer's finding ledger
 - `.hivemind/handoffs/` (and `.hivemind/plans/`): session-resumption handoffs and the plans they point at
-- short-lived inputs files (e.g. `.hivemind/seed-inputs-<token>.json`, `.hivemind/runs/.init-inputs-<token>.json`) that skills pass to their engine scripts
+- short-lived inputs files that skills pass to their engine scripts, e.g. `.hivemind/seed-inputs-<token>.json`, `.hivemind/runs/.init-inputs-<token>.json`, and the molt and PR inputs files `.hivemind/molt-inputs-<token>.json` (the commit message and its file list) and `.hivemind/pr-inputs-<token>.json` (the PR title and body)
 
 If you prefer manual setup, add `.hivemind/` and `.claude/worktrees/` to your project's `.gitignore` directly.
 
@@ -71,7 +72,7 @@ If you prefer manual setup, add `.hivemind/` and `.claude/worktrees/` to your pr
 /hivemind:seed-hive seed_allowlist=no
 ```
 
-The seeded entries cover read/output helper Bash commands (`echo`, `printf`, `cat`, `grep`, `jq`, `head`, `tail`, `ls`, `wc`, `sort`, `uniq`) and scoped git read subcommands (`git ls-files`, `git ls-tree`, and `git grep` are read-only listers/searchers; `git stash list` and `git stash show *` are read-only stash inspection; `git tag` is list-only). The `Skill(hivemind:route-workflow)` entry stops the permission prompt on the read-only routing call the overlord makes for each request. They are appended-if-absent: existing entries are never overwritten or removed. `echo`/`printf`/`cat`/`sort` **are** included: Claude Code re-prompts (ask/deny) on any command that writes or redirects to a path outside the session working directory (only `> /dev/null` is exempt) and splits compound commands (`&&`/`||`/`;`/`|`/newline), requiring each subcommand to match a rule independently, so granting them does not create an arbitrary-file-write vector (`echo evil > /etc/passwd`, `printf x > ~/.bashrc`, `cmd && rm -rf y` all re-prompt). The only silent write any of these helpers permits is bounded to the working directory, identical to `grep`/`jq`/`head`/`tail`/`ls`/`wc`/`uniq`. `node`, `Edit`, and `Write` are not auto-approved; those require explicit per-project decisions.
+The seeded entries cover read/output helper Bash commands (`echo`, `printf`, `cat`, `grep`, `jq`, `head`, `tail`, `ls`, `wc`, `sort`, `uniq`) and scoped git read subcommands (`git ls-files`, `git ls-tree`, and `git grep` are read-only listers/searchers; `git stash list` and `git stash show *` are read-only stash inspection; `git tag` is list-only). The `Skill(hivemind:route-workflow)` entry stops the permission prompt on the read-only routing call the overlord makes for each request. Next to it sit the inputs-file rules, each an `Edit(.hivemind/...)` entry for one fixed path a skill writes with the Write tool for its engine script: `Edit(.hivemind/review-loop/*)`, `Edit(.hivemind/runs/.init-inputs-*.json)`, `Edit(.hivemind/runs/.record-inputs-*.json)`, `Edit(.hivemind/runs/.markfb-inputs-*.json)`, `Edit(.hivemind/spawn-inputs.*.json)`, `Edit(.hivemind/seed-inputs-*.json)`, `Edit(.hivemind/molt-inputs-*.json)` and `Edit(.hivemind/pr-inputs-*.json)`. Each one only stops the Write prompt for its path. No `Workflow(...)` rule is seeded: the workflow approval prompt's don't-ask-again choice is the per-project opt-in. The entries are appended-if-absent: existing entries are never overwritten or removed. `echo`/`printf`/`cat`/`sort` **are** included: Claude Code re-prompts (ask/deny) on any command that writes or redirects to a path outside the session working directory (only `> /dev/null` is exempt) and splits compound commands (`&&`/`||`/`;`/`|`/newline), requiring each subcommand to match a rule independently, so granting them does not create an arbitrary-file-write vector (`echo evil > /etc/passwd`, `printf x > ~/.bashrc`, `cmd && rm -rf y` all re-prompt). The only silent write any of these helpers permits is bounded to the working directory, identical to `grep`/`jq`/`head`/`tail`/`ls`/`wc`/`uniq`. `node`, and `Edit` or `Write` on any path outside those inputs files, are not auto-approved; those require explicit per-project decisions.
 
 **After upgrading the plugin, re-run `/hivemind:seed-hive`.** A newer version may recommend `permissions.allow` entries your project does not have yet, and those entries are merged only when `seed-hive` runs, never automatically on upgrade. Skipping the re-run does not take away any capability (tool grants ship inside the plugin itself and load at session start); it only leaves those newer allow rules unmerged in your `.claude/settings.json`. Re-running is always safe: the merge is idempotent and your existing entries are preserved.
 
@@ -116,7 +117,9 @@ Three optional operator overrides are read from the `env` block of `.claude/sett
 |---|---|---|
 | `HIVEMIND_LOCAL_REVIEW_MODEL` | Model for the local pre-PR Codex review. Empty or unset means Codex uses its own default. The value must match `^[a-zA-Z0-9/_.\-]+$` (e.g. `gpt-5.3-codex`, `gpt-5.5`); anything else blocks the review before Codex is invoked. Whether a given model is available depends on your Codex account. | `docs/adr/0022-local-review-parity-with-post-pr-review.md` |
 | `HIVEMIND_SKIP_PR_WATCH` | Checked by presence (any non-empty value): the overlord never watches a PR after opening it, and does not read your request for a watch opt-out. Unset or empty means the default watch applies. | `docs/adr/0029-default-pr-watch-and-idle-window-lifecycle.md` |
-| `HIVEMIND_ENABLE_DECISION_REPORT` | Opt-in, checked by presence (any non-empty value). When set, after a run's PR merges or closes the overlord shows you a report of the decisions it made on your behalf (`hivemind:decision-report`, chat only). The decision journal in the run ledger is written either way. When unset or empty, no report is rendered and no GitHub call is made, but runs that would have reported still get a zero-byte `.decision-report-done` marker, so enabling the key later only reports runs that finish after you enable it. | `docs/adr/0030-config-gated-post-merge-decision-report.md` |
+| `HIVEMIND_ENABLE_DECISION_REPORT` | Covers state-machine runs only: workflow-script runs keep no run ledger, so the report does not see them, and they show their decisions in the final message and the PR body instead. Opt-in, checked by presence (any non-empty value). When set, after a run's PR merges or closes the overlord shows you a report of the decisions it made on your behalf (`hivemind:decision-report`, chat only). The decision journal in the run ledger is written either way. When unset or empty, no report is rendered and no GitHub call is made, but runs that would have reported still get a zero-byte `.decision-report-done` marker, so enabling the key later only reports runs that finish after you enable it. | `docs/adr/0030-config-gated-post-merge-decision-report.md` |
+
+To keep a workflow on the state machine, add a `Workflow(hivemind:analysis-only)` or `Workflow(hivemind:standard-delivery)` entry to `permissions.deny` in `.claude/settings.json` or `.claude/settings.local.json`. The launch is then refused with no prompt, and the overlord says so in one line and runs the request on the state machine (see [Two engines](#two-engines)).
 
 ## Recommended companion plugins
 
@@ -191,9 +194,9 @@ Hivemind coordinates specialized bioforms to plan, build, review, and ship code,
 
 | Bioform | Role | What it does |
 |---|---|---|
-| :eye: **Overlord** | Orchestrator | The control plane and your main interface. Routes each request to a workflow, runs the workflow state machine and its run ledger, owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation; never writes code. |
-| :brain: **Cerebrate** | Strategist | Researches the codebase and returns the **directive**: `STEP-NNN` steps with exact file scopes, dependencies, risks, and a delivery shape (single, multi, or brood). Read-only; never writes files. |
-| :hammer: **Drone** | Builder | Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step. |
+| :eye: **Overlord** | Orchestrator | The control plane and your main interface. Routes each request to a workflow, then launches its workflow script or runs the workflow state machine and its run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation; never writes code. |
+| :brain: **Cerebrate** | Strategist | Researches the codebase and returns the **directive**: `STEP-NNN` steps with exact file scopes, dependencies, risks, and a delivery shape (single, multi, or brood). Has no shell: its tools are Read, Glob, Grep, LSP, the web tools, and the claude-mem search tools. Takes branch state only from the facts file. Never writes files. |
+| :hammer: **Drone** | Builder | Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step. Inside workflow scripts, it also runs the facts and git steps. |
 | :performing_arts: **Changeling** | Shaper | Presentational UI/UX: markup, styling, layout, design tokens, visual states, presentational accessibility, within its assigned file scope. |
 
 Two more agents handle review. They are composites rather than bioforms: each one classifies findings, fixes the simple ones itself, and hands everything else back to the overlord.
@@ -201,11 +204,48 @@ Two more agents handle review. They are composites rather than bioforms: each on
 - **Local-Reviewer** (pre-PR): runs an adversarial Codex review loop before the PR exists (needs the `codex` companion).
 - **GitHub-Reviewer** (post-PR): a stateless, one-shot worker that fetches and classifies GitHub review feedback, fixes, pushes, replies, and resolves threads. `hivemind:github-review-loop` dispatches it.
 
+### Two engines
+
+`hivemind:route-workflow` selects the workflow first, for every request that is not a Reflex. One of two engines then runs it:
+
+- **Workflow scripts.** `analysis-only` and `standard-delivery` launch as the `hivemind:analysis-only` and `hivemind:standard-delivery` Workflow scripts when Claude Code's Workflow tool is available.
+- **The workflow state machine.** Every other workflow (`pr-feedback-remediation`, `hatchery-dispatch`, `exploratory-intent-session`) runs on its JSON state machine, and so does a request whose launch is refused.
+
+Launching a script:
+
+- In manual mode, the Workflow tool's approval prompt is the opt-in. A No at the prompt interrupts the turn: nothing runs and nothing falls back.
+- A `Workflow(hivemind:<id>)` entry in `permissions.deny` falls back to the state machine: the launch is refused with no prompt, and the overlord says so in one line and runs the request on the state machine. A launch refused because the workflow is not found, or because workflows are turned off, falls back the same way. A run that started and then failed or ended blocked is reported as it ended and does not fall back.
+- In auto mode, the classifier decides the launch and no approval prompt is shown.
+- Brood children start without the Workflow tool, so every strain runs on the state machine.
+
+How a script run behaves:
+
+- **No run ledger.** The working branch, its commits and the PR are the record. A paused run resumes in the same session. A new session plans what is left: the planner reads the branch's history from the facts file and the files as they are now.
+- **Questions.** Routine planner questions are decided by the autonomy table (`plugin/references/decision-autonomy-table.json`) and listed as decided for you. Only irreversible, architectural or safety-relevant questions, and hard stops, pause the run with a decision brief. A run pauses at most 3 times; after that it completes and lists the questions still open. A question never ends the run blocked.
+- **Effects outside the repo.** A plan step that declares an irreversible effect outside the repo, such as a deploy, a publish, a migration or a write to an outside service, asks you before the first wave.
+- **Request options.** A delivery request can ask for a draft PR, or to skip local review. Local review is also skipped when the Codex plugin is not available in the session.
+
 ### The Lifecycle
 
-When the Workflow tool is available, `standard-delivery` runs as the `hivemind:standard-delivery` workflow script: facts, plan, branch, waves with a commit each, version bump, validation, local review, and the PR. It keeps no run ledger, and the decisions it takes go on the PR body. The overlord then watches the PR as described below. The state machine shown here is the fallback, used when the launch is denied (a `Workflow(hivemind:standard-delivery)` entry in `permissions.deny`) or the Workflow tool is absent, as in brood children.
+A `standard-delivery` script run, from request to PR:
 
-A `standard-delivery` run, from request to watched PR:
+1. **Facts.** A runner gathers the branch facts into one facts file (`hivemind:gather-facts`).
+2. **Scan.** A runner scans the text of the issues and PRs the request names for prompt injection (`hivemind:injection-scan`).
+3. **Plan.** The cerebrate plans what is left of the request on this branch, and the plan is checked against `plugin/references/plan-schema.json`. After a pause, the planner revises the plan with your reply.
+4. **Branch.** A runner creates or confirms the working branch (`hivemind:create-working-branch`).
+5. **Waves.** Workers run each ready wave of plan steps in parallel, and a runner commits the wave's files after each wave (`hivemind:molt`).
+6. **Bump.** A runner derives the version bump (`hivemind:bump-type`), a drone sets the version files, and a runner commits them.
+7. **Validate.** A drone runs the project's validation commands. A failure gets a bounded number of fix rounds, one at a time, each one committed; after the last round the run asks you.
+8. **Review.** The local reviewer reviews the branch and commits its simple fixes, when local review is on.
+9. **PR.** A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (`hivemind:open-plan-pr`).
+
+**Gates hold on one commit.** The bump, validation and local review are gates. Each gate holds only for the commit it ended on, and the PR step pushes only a commit every configured gate held on. So a later commit, such as a validation fix round or a local-review fix, reruns the gates it invalidates: every gate that ended on an earlier commit. The reruns are bounded, and the run asks you at the bound. A gate not configured for the run, such as local review without the Codex plugin, is listed on the PR.
+
+**Decisions on the PR.** Every decision the run took for you is listed in the final message and in the PR body, or in a PR comment when the run reuses an open PR. A question that comes up after the last wave does not pause the run: it ends complete with the question open, its commits and decisions listed, and nothing pushed.
+
+**Post-PR watch.** When the run opened or reused a PR, the overlord applies the default watch rule (see **Post-PR watch** below) and runs `pr-feedback-remediation` with intake `watch` on the state machine for that PR. That watch is a new run with its own run ledger.
+
+**State-machine fallback.** When the launch is refused, or the Workflow tool is absent as in brood children, `standard-delivery` runs on its state machine, from request to watched PR:
 
 ```
 You --> Overlord --> route-workflow --> standard-delivery
@@ -222,31 +262,33 @@ You --> Overlord --> route-workflow --> standard-delivery
 
 1. **Route.** `hivemind:route-workflow` picks the workflow: `standard-delivery`, `analysis-only`, `pr-feedback-remediation`, `hatchery-dispatch`, or `exploratory-intent-session`. A **Reflex** (one owner, one known file, trivial change) takes the fast path and skips the router, the run ledger, and the cerebrate.
 2. **Record.** The overlord writes a run ledger to `.hivemind/runs/<run-id>/state.json`. Each state result is normally validated against the workflow definition before the run advances (a resumed run on a changed workflow version can fall back to judgment instead).
-3. **Plan.** At `plan`, the cerebrate returns the directive.
+3. **Plan.** At `plan`, the cerebrate returns the directive. Before every cerebrate delegation, in every planning state and on every replan, the state machine runs `hivemind:gather-facts` and passes the facts file to the cerebrate. It stops before planning on a failed facts run, a cut field, or injection-suspect text.
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
 5. **Build in waves.** `implement_next_step` asks `hivemind:next-wave` for the ready wave; `implement_step` dispatches it as parallel drones and changelings; `checkpoint` molts once for the whole wave.
 6. **Gate.** `version_bump_decision` (via `hivemind:bump-type`; a required bump goes through `version_bump` and `version_checkpoint`), then `validate` runs the project's validation commands.
 7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped.
 8. **Ship and watch.** `open_pr` opens the PR, then `github_review_decision` and `github_review_loop` watch it by default, fixing, pushing, replying to, and resolving feedback from the Codex, Copilot, or Claude reviewer bots until approval, merge, close, or an idle hour. Opt out in your request or with `HIVEMIND_SKIP_PR_WATCH`. Agents never merge.
 
-**Waves.** Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; the overlord makes one checkpoint commit (one molt) per wave.
+**Waves.** Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine.
 
 **Post-PR watch.** Watching is the default. It is off only when your original request explicitly says not to watch the PR, or when `HIVEMIND_SKIP_PR_WATCH` is set. Which reviewers count is set by `reviewer_filter`: `automated` (default; the Codex, Copilot, and Claude bot accounts), `codex-only`, `all`, or a single login. Approval is a 👍 reaction from Codex on the PR or an `APPROVED` review from Copilot. `max_watch_duration` (default `3600` seconds) is an idle window, re-armed after each remediation cycle rather than a total budget. `max_remediation_cycles` defaults to a floor published by `loop-state.sh floor` (in `plugin/skills/github-review-loop/scripts/`); a caller may raise it but never go below it. The loop ends at a terminal: `clean`, `pr-merged`, `pr-closed`, `max-cycles-reached`, `watch-window-elapsed`, `planner-escalation`, `root-cluster-suspected`, `merge-advised`, `injection-suspect`, `high-severity-rejection`, `user-input-required`, or `blocked`. Agents never merge. `merge-advised` is advice to you.
 
-**Decision autonomy.** Routine judgment calls are decided for you and journaled; irreversible, architectural, or safety-relevant calls and every merge come back to you. **Tier A** decisions are always surfaced: safety rails, ambiguous routing, resume and version-skew choices, brood strain approval, tool failures after retries, facts only you hold, and every merge recommendation. **Tier B** decisions are auto-decided and journaled in the run ledger with one disposition: `did-now`, `deferred`, `recorded`, or `surfaced` (when the promotion gate trips). Policy: `plugin/governance/decision-autonomy.md`.
+**Decision autonomy.** Routine judgment calls are decided for you; irreversible, architectural, or safety-relevant calls and every merge come back to you. On the state machine, **Tier A** decisions are always surfaced: safety rails, ambiguous routing, resume and version-skew choices, brood strain approval, tool failures after retries, facts only you hold, and every merge recommendation. **Tier B** decisions are auto-decided and journaled in the run ledger with one disposition: `did-now`, `deferred`, `recorded`, or `surfaced` (when the promotion gate trips). Policy: `plugin/governance/decision-autonomy.md`. Script runs show their decisions differently: every decision taken for you is listed in the final message and the PR body, and there is no decision journal and no post-merge decision report.
 
 ### Workflows
 
-Workflow definitions live in `plugin/workflows/`:
+Workflow definitions (JSON state machines) and the generated workflow scripts live in `plugin/workflows/`:
 
-| Workflow | Purpose |
-|---|---|
-| `workflow-router.json` | Classifies a non-Reflex request (`selected`, `ambiguous`, `exploratory`, `blocked`) and initializes the run ledger |
-| `standard-delivery.json` | Plan, branch, build in waves, gate, review, open the PR, and watch it |
-| `analysis-only.json` | Analyze and report; no code changes |
-| `pr-feedback-remediation.json` | Remediate feedback on an existing PR. Intake picks `watch` (run the review loop) or `fix` (one-shot fix pass by `github-reviewer`), after checking out the PR branch |
-| `hatchery-dispatch.json` | Brood plan, strain approval, spawn the brood, then monitor it |
-| `exploratory-intent-session.json` | Open-ended exploration with user checkpoints, ending in a report |
+| Workflow | Purpose | Workflow script |
+|---|---|---|
+| `workflow-router.json` | Classifies a non-Reflex request (`selected`, `ambiguous`, `exploratory`, `blocked`) and initializes the run ledger | none |
+| `standard-delivery.json` | Plan, branch, build in waves, gate, review, open the PR, and watch it | `standard-delivery.js` |
+| `analysis-only.json` | Analyze and report; no code changes | `analysis-only.js` |
+| `pr-feedback-remediation.json` | Remediate feedback on an existing PR. Intake picks `watch` (run the review loop) or `fix` (one-shot fix pass by `github-reviewer`), after checking out the PR branch | none |
+| `hatchery-dispatch.json` | Brood plan, strain approval, spawn the brood, then monitor it | none |
+| `exploratory-intent-session.json` | Open-ended exploration with user checkpoints, ending in a report | none |
+
+A workflow with a script runs it when the launch goes ahead, and its JSON state machine otherwise (see [Two engines](#two-engines)). The scripts are built from `plugin/workflow-src/` by `tools/build_workflows.mjs`.
 
 ### Brood Mode: Parallel Execution
 
@@ -306,8 +348,9 @@ plugin/                     # plugin root; everything Claude Code loads lives he
   agents/                   # agent definitions (overlord, cerebrate, drone, changeling, local-reviewer, github-reviewer)
   skills/                   # skill definitions (incl. _shared/ helpers)
   governance/               # runtime governance docs loaded via ${CLAUDE_PLUGIN_ROOT}/governance/
-  workflows/                # declarative workflow definitions (JSON state machines)
-  references/               # runtime reference docs (ledger schemas, GraphQL operations, state machine)
+  workflows/                # JSON workflow definitions (state machines) and the generated .js workflow scripts
+  workflow-src/             # workflow script sources (<id>/meta.js, <id>/main.js, lib/), built into workflows/
+  references/               # runtime reference docs (ledger, facts, plan and brief schemas, autonomy table, GraphQL operations, state machine)
 web/                        # GitHub Pages website (HTML, styles, TypeScript in src/, vitest tests)
 docs/
   adr/                      # architecture decision records
@@ -316,7 +359,9 @@ docs/
   design/design-system.html # style system reference (not deployed)
   engineering-principles.md
 tools/                      # dev-only validation scripts (validate.sh dispatcher, policy linter, report validator)
+  build_workflows.mjs       # builds plugin/workflow-src/ into plugin/workflows/*.js; --check is the drift check
 tests/                      # dev-only test fixtures and checks (policy, reports, plugin compatibility)
+  workflow-scripts/         # node tests for the workflow scripts (run by tools/test_workflow_scripts.sh)
 package.json                # website tooling (npm scripts: build, test)
 package-lock.json
 tsconfig.json               # website TypeScript build (web/src -> web/scripts)
@@ -338,9 +383,9 @@ README.md
 
 | Agent | Model | Role |
 |---|---|---|
-| `hivemind:overlord` | opus | Session default agent. Routes each request to a workflow, runs the workflow state machine and run ledger, owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation and never writes code. |
-| `hivemind:cerebrate` | opus | Research and implementation planning: returns `STEP-NNN` steps with exact file scopes, dependencies, risks, and a delivery shape. Read-only, no file writes. |
-| `hivemind:drone` | opus | Implementation within explicitly assigned file scope; the default owner of every step. |
+| `hivemind:overlord` | opus | Session default agent. Routes each request to a workflow, then launches its workflow script or runs the workflow state machine and run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation and never writes code. |
+| `hivemind:cerebrate` | opus | Research and implementation planning: returns `STEP-NNN` steps with exact file scopes, dependencies, risks, and a delivery shape. No shell (Read, Glob, Grep, LSP, web tools, claude-mem search) and no file writes; branch state comes from the facts file. |
+| `hivemind:drone` | opus | Implementation within explicitly assigned file scope; the default owner of every step. Inside workflow scripts it also runs the facts and git steps. |
 | `hivemind:changeling` | sonnet | Presentational UI/UX work within explicitly assigned file scope. |
 | `hivemind:local-reviewer` | opus | Pre-PR adversarial Codex review loop (`max_iterations` 10). Fixes simple findings itself (2 files or fewer, no architecture or contract impact), escalates complex ones to the overlord, and stops on break-fix cycles. Needs the `codex` companion. |
 | `hivemind:github-reviewer` | opus | Stateless, one-shot post-PR worker: fetches and classifies review feedback, applies fixes, pushes, replies, and resolves threads. Dispatched by `hivemind:github-review-loop`, which does the monitoring. |
@@ -352,15 +397,15 @@ All skills are invoked using the namespaced form:
 | Skill | Purpose |
 |---|---|
 | `hivemind:creep-spread` | Analyze project artifacts and generate a populated CONTEXT.md (or CONTEXT-MAP.md for multi-context repos) with domain terms extracted from code, docs, and config |
-| `hivemind:molt` | Commit a completed phase, milestone, version bump, or review-remediation item |
-| `hivemind:create-working-branch` | Create or confirm a compliant working branch before implementation |
-| `hivemind:gather-facts` | Report the branch as it is: branch state, its history against a freshly fetched trunk, the branch's PRs, and the text of any issue or PR the request names, in one complete facts file |
+| `hivemind:molt` | Commit a completed phase, milestone, version bump, or review-remediation item through the committed `molt.sh` script, which commits exactly the listed files, refuses any other dirty path before it changes anything, and reports `committed: false` when there is nothing to commit. Used by both engines; in a workflow script it closes each wave and each gate step |
+| `hivemind:create-working-branch` | Create or confirm a compliant working branch before implementation, through a committed script that refuses a dirty tree, an in-progress merge, rebase, cherry-pick, revert or bisect, and a working branch that is trunk, before any change. Used by both engines |
+| `hivemind:gather-facts` | Report the branch as it is: branch state, its history against a freshly fetched trunk, the branch's PRs, and the text of any issue or PR the request names, in one complete facts file under `.hivemind/facts/`. The facts step of both workflow scripts, and run by the overlord before every cerebrate delegation on the state machine |
 | `hivemind:adaptation-cycle` | Run a pre-PR local Codex review on the current branch diff and return normalized findings. Review-only (it fixes nothing); invoked by the `local-reviewer` agent only |
 | `hivemind:github-review-loop` | Watch a PR in the main session and dispatch the fix-mode `github-reviewer` per actionable event; owns the post-PR review loop |
 | `hivemind:detect-remediation-signals` | Shared root-cluster / break-fix / diminishing-returns / stop-and-merge detector over a fix-ledger; emits one verdict both reviewers map to their own exit_reason |
-| `hivemind:injection-scan` | Scan external-content items for prompt-injection / instruction-override attempts against the security-policy taxonomy; shared judgment skill used by both reviewer agents. Also scans issue and PR text in the branch facts before the planner reads it |
-| `hivemind:open-plan-pr` | Open a pull request after completion, validation, and versioning gates pass |
-| `hivemind:push-branch` | Push the current working branch to its remote (no PR creation); used to land remediation commits before resuming a review loop |
+| `hivemind:injection-scan` | Scan external-content items for prompt-injection / instruction-override attempts against the security-policy taxonomy; shared judgment skill used by both reviewer agents. Also scans issue and PR text in the branch facts before the planner reads it: the scan step of both workflow scripts, and on the state machine before each cerebrate delegation |
+| `hivemind:open-plan-pr` | Open a pull request after completion, validation, and versioning gates pass, through a committed script that pushes through `push-branch.sh`, then reuses an open PR on the same head, base and commit (posting an optional comment there) or creates the PR, optionally as a draft, and verifies it. Used by both engines |
+| `hivemind:push-branch` | Push the current working branch to its remote (no PR creation) through the committed `push-branch.sh`, which every push runs through and which refuses trunk; `--expect-commit` refuses when HEAD is another commit. Used to land remediation commits before resuming a review loop |
 | `hivemind:plan-interrogation` | Interactive plan interview: challenges a plan against the project's domain model, sharpens terminology, and updates documentation (CONTEXT.md, ADRs) as decisions crystallise |
 | `hivemind:create-handoff` | Generate an optional session-resumption handoff doc from a plan |
 | `hivemind:plan-to-prd` | Turn an interrogated plan into a committed WHAT-only PRD |
@@ -372,12 +417,12 @@ All skills are invoked using the namespaced form:
 | `hivemind:brood-status` | Check status of broods under the current checkout, with per-strain status; reports per-strain tmux session state, branch existence, and PR status |
 | `hivemind:enable-brood-remote` | User-invoked: fan the Claude `/rc` remote-control command out to every strain in a brood (tmux keystroke injection) |
 | `hivemind:route-workflow` | Sole workflow classifier: selects which workflow handles a non-Reflex request by judgment (never a keyword table); emits selected / ambiguous / exploratory / blocked |
-| `hivemind:init-run-ledger` | Initialize the run ledger for the current overlord instance: creates `.hivemind/runs/<run-id>/` and writes the initial `state.json` via the committed engine script |
-| `hivemind:record-state-result` | Record the outcome of the current workflow state into the run ledger and advance `state.current` to the legal next state, validated against the workflow definition |
-| `hivemind:next-wave` | Read-only engine for the overlord's intra-run parallel implement loop: reads the run ledger and computes the ready WAVE (the maximal, file-disjoint set of dependency-satisfied plan steps) to dispatch as concurrent agent delegations this iteration |
+| `hivemind:init-run-ledger` | State machine only. Initialize the run ledger for the current overlord instance: creates `.hivemind/runs/<run-id>/` and writes the initial `state.json` via the committed engine script |
+| `hivemind:record-state-result` | State machine only. Record the outcome of the current workflow state into the run ledger and advance `state.current` to the legal next state, validated against the workflow definition |
+| `hivemind:next-wave` | State machine only (the `standard-delivery` script computes its waves in code, with parity tests against this engine). Read-only engine for the overlord's intra-run parallel implement loop: reads the run ledger and computes the ready WAVE (the maximal, file-disjoint set of dependency-satisfied plan steps) to dispatch as concurrent agent delegations this iteration |
 | `hivemind:bump-type` | Read-only engine for the overlord's `version_bump_decision` workflow state: derives the dominant Bump Type Determination row and bump verdict from the working-branch commits since the base; the Bump Trigger / No-bump judgments stay with the caller |
 | `hivemind:mark-intent-fallback` | Sanctioned engine write-path for the version-skew intent-fallback resume door and start-fresh stale-run closeout: sets `run.mode:intent_fallback`, appends a fallback event, and optionally closes a stale run via `run.status` |
-| `hivemind:decision-report` | Render a chronological narrative of the auto-decisions a run made on your behalf, in the consumer project's domain language, and return it as chat text (writes nothing to disk). The automatic post-merge invocation is opt-in via `HIVEMIND_ENABLE_DECISION_REPORT` (see [Configuration](#configuration)); invoking the skill explicitly works regardless of the key |
+| `hivemind:decision-report` | State-machine runs only, because it reads the run ledger's decision journal. Render a chronological narrative of the auto-decisions a run made on your behalf, in the consumer project's domain language, and return it as chat text (writes nothing to disk). The automatic post-merge invocation is opt-in via `HIVEMIND_ENABLE_DECISION_REPORT` (see [Configuration](#configuration)); invoking the skill explicitly works regardless of the key |
 | `hivemind:zoom-out` | User-invoked only (model invocation disabled): zoom out for broader context; maps relevant modules and callers using the project's domain glossary vocabulary |
 | `hivemind:improving-architecture` | Read-only architecture analysis: emits a ranked refactoring blueprint of deepening opportunities (shallow → deep modules) for testability and AI-navigability |
 | `hivemind:refactor-to-depth` | Execution skill that performs a behavior-preserving deepening refactor via a refactor-under-green loop; the in-implementation counterpart to the read-only `improving-architecture` blueprint |
@@ -413,19 +458,23 @@ Runtime reference docs in `plugin/references/`:
 | `fix-ledger-schema.md` | Local reviewer fix-ledger schema |
 | `github-pr-review-graphql.md` | GitHub operations for PR review remediation, reviewer filters, and approval detection |
 | `github-subissue-graphql.md` | GitHub operations for native sub-issues |
+| `facts-schema.json` | Shape of the branch facts file `hivemind:gather-facts` writes: branch state, history against trunk, the branch's PRs, and the external texts, each list saying whether it is complete |
+| `plan-schema.json` | The plan payload the cerebrate returns to the `standard-delivery` script: branch, classification, bump judgments, delivery, and steps with file scopes, dependencies and declared effects outside the repo |
+| `decision-autonomy-table.json` | The autonomy table workflow scripts decide by: hard stops, and per decision kind whether each autonomy level decides it or asks you |
+| `decision-brief-schema.json` | Shape of a decision brief, the question a script run shows you when it pauses |
 
 ### Workflow definitions
 
-State machines in `plugin/workflows/`, loaded by the overlord at runtime. What each one is for: [The Swarm → Workflows](#workflows).
+State machines in `plugin/workflows/`, read at runtime by the engine skills (`hivemind:init-run-ledger`, `hivemind:record-state-result`), next to the generated workflow scripts. What each one is for: [The Swarm → Workflows](#workflows).
 
-| File | Start state |
-|---|---|
-| `workflow-router.json` | `classify` |
-| `standard-delivery.json` | `plan` |
-| `analysis-only.json` | `analyze` |
-| `pr-feedback-remediation.json` | `intake` |
-| `hatchery-dispatch.json` | `brood_plan` |
-| `exploratory-intent-session.json` | `intake` |
+| File | Start state | Generated script |
+|---|---|---|
+| `workflow-router.json` | `classify` | none |
+| `standard-delivery.json` | `plan` | `standard-delivery.js` |
+| `analysis-only.json` | `analyze` | `analysis-only.js` |
+| `pr-feedback-remediation.json` | `intake` | none |
+| `hatchery-dispatch.json` | `brood_plan` | none |
+| `exploratory-intent-session.json` | `intake` | none |
 
 ## Website
 
