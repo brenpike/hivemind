@@ -73,17 +73,17 @@
             <li class="agent-card panel c0" data-cluster="0">
               <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Overlord</h3><span class="tag">Orchestrator</span></div>
               <p class="kind xs">Bioform · <code>hivemind:overlord</code> · session default</p>
-              <p class="desc xs">Routes each request to a workflow, runs the workflow state machine and its run ledger, and owns branches, checkpoint commits, version bumps, PRs and review routing. It delegates all implementation and never writes code.</p>
+              <p class="desc xs">Routes each request to a workflow, then launches its workflow script or runs the workflow state machine and its run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs and review routing. It delegates all implementation and never writes code.</p>
             </li>
             <li class="agent-card panel c1" data-cluster="1">
               <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Cerebrate</h3><span class="tag">Strategist · read-only</span></div>
               <p class="kind xs">Bioform</p>
-              <p class="desc xs">Researches the codebase and returns the directive: STEP-NNN steps with exact file scopes, dependencies, risks and a delivery shape (single, multi or brood). Never writes files.</p>
+              <p class="desc xs">Researches the codebase and returns the directive: STEP-NNN steps with exact file scopes, dependencies, risks and a delivery shape (single, multi or brood). Has no shell: its tools are Read, Glob, Grep, LSP, the web tools and the claude-mem search tools. Takes branch state only from the facts file. Never writes files.</p>
             </li>
             <li class="agent-card panel c2" data-cluster="2">
               <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Drone</h3><span class="tag">Builder</span></div>
               <p class="kind xs">Bioform</p>
-              <p class="desc xs">Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step.</p>
+              <p class="desc xs">Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step. Inside workflow scripts, it also runs the facts and git steps.</p>
             </li>
             <li class="agent-card panel c3" data-cluster="3">
               <div class="card-top"><span class="node" aria-hidden="true"></span><h3 class="xg">Changeling</h3><span class="tag">Shaper</span></div>
@@ -111,42 +111,44 @@
           <header class="panel plate">
             <p class="kicker xs">standard-delivery</p>
             <h2 id="workflow-title" class="xg">How a run works</h2>
-            <p class="xs">Eight beats from your intent to a reviewed pull request. Each state result is normally validated against the workflow definition before the run advances.</p>
+            <p class="xs">Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. A script run keeps no run ledger: the working branch, its commits and the PR are the record. When the launch is refused, or the Workflow tool is absent as in brood children, standard-delivery runs on its state machine instead.</p>
           </header>
           <ol class="beats">
             <li class="beat panel">
               <h3 class="xg">Route</h3>
-              <p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session.</p>
-              <p class="xs">A trivial one-file change takes the Reflex fast path, which skips the router, the ledger and the cerebrate.</p>
+              <p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session. Analysis-only and standard-delivery launch as workflow scripts when Claude Code's Workflow tool is available; every other workflow runs on its state machine.</p>
+              <p class="xs">A trivial one-file change takes the Reflex fast path, which skips the router, the run ledger and the cerebrate.</p>
             </li>
             <li class="beat panel">
-              <h3 class="xg">Record</h3>
-              <p class="xs">The ledger lives at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, and each state result is normally validated against the workflow definition before the run advances.</p>
+              <h3 class="xg">Facts</h3>
+              <p class="xs">A runner gathers the branch facts into one facts file (<code>hivemind:gather-facts</code>), then scans the text of the issues and PRs the request names for prompt injection (<code>hivemind:injection-scan</code>).</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Plan</h3>
-              <p class="xs">The cerebrate returns the directive.</p>
+              <p class="xs">The cerebrate plans what is left of the request on this branch, and the plan is checked against <code>plugin/references/plan-schema.json</code>. After a pause, the planner revises the plan with your reply.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Branch</h3>
-              <p class="xs">Git preflight, then a compliant working branch: <code>feature/</code>, <code>bugfix/</code>, <code>hotfix/</code>, <code>refactor/</code>, <code>chore/</code>, <code>docs/</code>, <code>test/</code>, <code>ci/</code>.</p>
+              <p class="xs">A runner creates or confirms a compliant working branch (<code>hivemind:create-working-branch</code>): <code>feature/</code>, <code>bugfix/</code>, <code>hotfix/</code>, <code>refactor/</code>, <code>chore/</code>, <code>docs/</code>, <code>test/</code>, <code>ci/</code>.</p>
               <p class="xs">The swarm never commits to trunk.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Build in waves</h3>
-              <p class="xs"><code>hivemind:next-wave</code> selects every ready step whose dependencies are met and whose files do not overlap. Drones and changelings build those steps in parallel, with one checkpoint commit (molt) per wave.</p>
+              <p class="xs">Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap. Drones and changelings build it in parallel, and a runner commits the wave's files with one checkpoint commit (molt) per wave (<code>hivemind:molt</code>).</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Gate</h3>
-              <p class="xs">Version-bump decision (<code>hivemind:bump-type</code>), then validation.</p>
+              <p class="xs">A runner derives the version bump (<code>hivemind:bump-type</code>), then a drone runs the project's validation commands. A failure gets a bounded number of fix rounds, each one committed; after the last round the run asks you.</p>
+              <p class="xs">The bump, validation and local review each hold only for the commit they ended on, and the PR step pushes only a commit every configured gate held on. A later commit reruns the gates it invalidates.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Review</h3>
-              <p class="xs">The local-reviewer runs its adversarial review loop. Needs the codex companion.</p>
+              <p class="xs">The local-reviewer reviews the branch and commits its simple fixes. Needs the codex companion.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Ship and watch</h3>
-              <p class="xs">The overlord opens the PR and watches it by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour.</p>
+              <p class="xs">A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). Every decision the run took for you is listed in the final message and in the PR body.</p>
+              <p class="xs">The overlord then watches the PR by default. It fixes, pushes, replies to and resolves actionable feedback from Codex, Copilot or Claude reviewer bots until reviewer approval, merge, close, or an idle hour.</p>
               <p class="xs">Opt out by saying so in the request or by setting <code>HIVEMIND_SKIP_PR_WATCH</code>. Agents never merge. You do.</p>
             </li>
           </ol>
@@ -160,7 +162,7 @@
             <article class="panel subpanel" aria-labelledby="autonomy-title">
               <p class="kicker xs">Who decides</p>
               <h3 id="autonomy-title" class="xg">Autonomy</h3>
-              <p class="xs">Routine judgment calls are decided and journaled. Irreversible, architectural or safety-relevant calls, and every merge, always come back to you.</p>
+              <p class="xs">Routine calls are decided for you by the autonomy table and listed on the PR. Irreversible, architectural or safety-relevant calls pause the run and ask you, and every merge comes back to you. A question never ends the run blocked.</p>
             </article>
             <article class="panel subpanel signals-panel" aria-labelledby="signals-title">
               <p class="kicker xs">What the swarm tells you</p>
