@@ -1,5 +1,5 @@
 /*
- * standard-delivery main.js: the body of the draft standard-delivery
+ * standard-delivery main.js: the body of the standard-delivery
  * workflow script. It delivers a request on one working branch: branch
  * facts, a checked plan, questions decided or asked, the working branch,
  * each wave of plan steps with its commit, then the version bump,
@@ -7,8 +7,7 @@
  * pull request. The run ends at the pull request: once every configured
  * gate held on one commit, it pushes that commit and opens or reuses the
  * pull request, and ends complete naming it. Watching the pull request is
- * the overlord's, not this script's (ADR-0037 PR8). The DRAFT marker keeps
- * the script out of plugin/workflows/.
+ * the overlord's, not this script's (ADR-0037 decision 4).
  *
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only
@@ -301,7 +300,7 @@ function contractRows() {
     { id: 'SD-41', step: 'Gates', check: 'resolveGateRerun', rule: 'A commit the reviewer makes sends the run back through the version bump and validation, and a commit made after local review held sends it back through local review as well.' },
     { id: 'SD-42', step: 'Gates to the PR', check: 'buildPullRequestPrompt', rule: 'Once every configured gate held on one commit H, a haiku runner invokes hivemind:open-plan-pr once, with label pr-P and phase PR, under the push grant sentence and the git-script sentence, with a JSON inputs block of only head (the plan branch), base (the plan base), expect_commit H, title, body, comment and draft (the draft launch arg); it is the only push the workflow makes, so every push carries expect_commit.' },
     { id: 'SD-43', step: 'Push grant', check: 'pushGrantSentence', rule: 'The push grant sentence grants one push of the working branch and one pull request opened or reused, made only by the hivemind:open-plan-pr script, and no commit, matching the delegated-implementer grant of safety-rails.md and the push sentence of drone.md.' },
-    { id: 'SD-44', step: 'PR title', check: 'buildPullRequestTitle', rule: 'The title is one line with no control character and at most maxTitleLength() characters, plain text with no Markdown wrapper, built from the plan commit type, the breaking marker and the first line of the plan summary.' },
+    { id: 'SD-44', step: 'PR title', check: 'buildPullRequestTitle', rule: 'The title is one line with no control character, plain text with no Markdown wrapper, built from the plan commit type, the breaking marker and the first sentence of the plan summary, at most maxTitleLength() code points including that prefix, cut at a word boundary when too long, and never ending in an ellipsis.' },
     { id: 'SD-45', step: 'PR body and comment', check: 'buildPullRequestTexts', rule: 'The body holds the plan summary and the run record, and the comment its lead and the run record, where the run record is every part buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate with its result and the commit it held on or not configured for this run, and every taken decision; neither carries a control character other than newline and tab or any reviewer text, each of the summary, the reversible effects and the decisions sits in its own fenced block whose fence is one backtick longer than its longest backtick run, at least three, the gates, the commits and the comment lead stay plain, the decisions go compact when a text would pass maxPullRequestTextLength() characters, and a text still too long stops the run blocked naming its size before any push.' },
     { id: 'SD-46', step: 'PR relay', check: 'checkPullRequestRelay', rule: 'The relayed stdout parses with openPlanPrRoutingSpec(), whose keys are the open-plan-pr.sh OUTPUT keys in order and whose warning holds only the script fixed texts, head_ref_oid equals H, and commented is true exactly when created is false; a blocked or malformed relay stops the run blocked naming the pull request step.' },
     { id: 'SD-47', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run finishes complete with pr {url, head_ref_oid, created}, and the final message names the pull request, opened or pushed to with a comment, the gates that held and any warning, then every part of the run record buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate that did not run and every taken decision.' }
@@ -329,7 +328,7 @@ function maxExcerptLength() {
 }
 
 function maxTitleLength() {
-  return 256;
+  return 72;
 }
 
 function maxPullRequestTextLength() {
@@ -1007,7 +1006,7 @@ function buildPlanAcceptanceBrief(plan) {
   return {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the plan, shown as exact text below: create or confirm its working branch and run its steps.',
+    problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: 'Nothing is delivered.' },
     options: [
       { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: 'The plan passed every check, and its changes stay on the working branch until you merge them.', straw_man: 'A step can still change something you did not expect before you see the pull request.', effort: 'medium', value: 'high', reversible: true },
@@ -1023,7 +1022,7 @@ function buildPlanAcceptanceBrief(plan) {
 function buildRemediationPlanBrief(plan) {
   return Object.assign(buildPlanAcceptanceBrief(plan), {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the remediation plan for the local review findings, shown as exact text below: run its steps on the working branch, then every gate again.'
+    problem: 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again.'
   });
 }
 
@@ -1047,7 +1046,7 @@ function buildExternalEffectBrief(stepId, summary) {
   return {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
-    problem: 'Plan step ' + JSON.stringify(stepId) + ' has an effect outside the repo that cannot be undone, shown as exact text below. May the run go on to it?',
+    problem: 'Plan step ' + JSON.stringify(stepId) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: 'The step runs before any pull request exists.' },
     options: [
       { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: 'The step is part of the delivery you asked for.', straw_man: 'The effect happens before you see the pull request and cannot be undone.', effort: 'small', value: 'high', reversible: false },
@@ -2042,11 +2041,27 @@ function renderLiteralBlock(text) {
   return fence + '\n' + text + '\n' + fence;
 }
 
+function readFirstSentence(text) {
+  const end = /[.!?](?= |$)/.exec(text);
+  const sentence = end === null ? text : text.slice(0, end.index + 1);
+  return (sentence.endsWith('.') ? sentence.slice(0, -1) : sentence).trimEnd();
+}
+
+function cutTitleText(text, room) {
+  const characters = Array.from(text);
+  if (characters.length <= room) {
+    return text;
+  }
+  const lastSpace = characters.slice(0, room + 1).lastIndexOf(' ');
+  const kept = characters.slice(0, lastSpace > 0 ? lastSpace : room).join('');
+  return kept.replace(/[\s,;:-]+$/u, '');
+}
+
 function buildPullRequestTitle(plan) {
-  const firstLine = plan.summary.split('\n').map((line) => line.trim()).find((line) => line !== '');
   const prefix = commitTypeMap()[plan.classification] + (plan.breaking ? '!' : '') + ':';
-  const title = cleanPullRequestText(firstLine === undefined ? prefix : prefix + ' ' + firstLine, false);
-  return Array.from(title).slice(0, maxTitleLength()).join('').trim();
+  const text = cleanPullRequestText(plan.summary, false).replace(/\s+/gu, ' ').trim();
+  const sentence = cutTitleText(readFirstSentence(text), maxTitleLength() - prefix.length - 1);
+  return sentence === '' ? prefix : prefix + ' ' + sentence;
 }
 
 function renderPullRequestGates(run, gates) {

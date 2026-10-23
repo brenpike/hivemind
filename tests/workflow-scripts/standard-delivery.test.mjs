@@ -1,7 +1,7 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -1939,6 +1939,8 @@ const ROW_TESTS = {
       const bumpBrief = main.buildBumpTypeBrief(parsedBump());
       assert.ok(bumpBrief.problem.includes('need no version bump'), bumpBrief.problem);
       assert.ok(run.result.message.includes(lib.renderDecisions([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: bumpBrief }])), run.result.message);
+      assert.ok(run.result.message.includes('  D1. Start delivering the plan: create or confirm its working branch and run its steps.\n'), run.result.message);
+      assert.ok(run.result.message.includes('\n    Exact text:\n' + makePlan().summary + '\n'), run.result.message);
     });
     for (const [label, changes] of [
       ['ask_user', { dominant_row: 'MULTI', verdict: 'ask_user', rule_applied: '5' }],
@@ -2899,32 +2901,58 @@ const ROW_TESTS = {
   },
   'SD-44': () => {
     for (const [label, plan, title] of [
-      ['a feature', makePlan(), 'feat: Add the cache layer.'],
-      ['a breaking bugfix', makePlan({ classification: 'bugfix', breaking: true }), 'fix!: Add the cache layer.'],
-      ['a summary whose first line is blank', makePlan({ summary: '\n  \n  Cache the reads.  \nThen the writes.' }), 'feat: Cache the reads.'],
-      ['a summary with a tab and control characters', makePlan({ summary: 'Cache\tthe\u0007reads\u0085now.\r\nMore.' }), 'feat: Cache the reads now.'],
+      ['a feature', makePlan(), 'feat: Add the cache layer'],
+      ['a breaking bugfix', makePlan({ classification: 'bugfix', breaking: true }), 'fix!: Add the cache layer'],
+      ['a summary whose first line is blank', makePlan({ summary: '\n  \n  Cache the reads.  \nThen the writes.' }), 'feat: Cache the reads'],
+      ['a summary with a tab and control characters', makePlan({ summary: 'Cache\tthe\u0007reads\u0085now.\r\nMore.' }), 'feat: Cache the reads now'],
       ['a blank summary', makePlan({ summary: '  ' }), 'feat:'],
-      ['a summary with an at-mention and a code span', makePlan({ summary: 'Ping @octocat about `x`.' }), 'feat: Ping @octocat about `x`.']
+      ['a summary with an at-mention and a code span', makePlan({ summary: 'Ping @octocat about `x`.' }), 'feat: Ping @octocat about `x`'],
+      ['a summary of several sentences', makePlan({ summary: 'Cache the reads! Then the writes. Then more.' }), 'feat: Cache the reads!'],
+      ['a summary asking a question', makePlan({ summary: 'Why cache? Speed.' }), 'feat: Why cache?'],
+      ['a summary whose dotted tokens are not sentence ends', makePlan({ summary: 'Fix README.md for v1.2 and the \'...\' marker. Then more.' }), 'feat: Fix README.md for v1.2 and the \'...\' marker'],
+      ['a summary with no sentence end', makePlan({ summary: 'Cache the reads' }), 'feat: Cache the reads'],
+      ['a hard-wrapped first sentence', makePlan({ summary: 'Cache the reads\n  across every\nrequest. Then more.' }), 'feat: Cache the reads across every request']
     ]) {
       test(`${label} gives the title ${JSON.stringify(title)}`, () => {
         assert.equal(main.buildPullRequestTitle(plan), title);
       });
     }
-    test('a long summary is cut to maxTitleLength() characters, never inside a character', () => {
-      assert.equal(main.maxTitleLength(), 256);
+    test('maxTitleLength() is 72 code points', () => {
+      assert.equal(main.maxTitleLength(), 72);
+    });
+    test('a long first sentence is cut at the last word boundary, with no trailing punctuation and no ellipsis (F3)', () => {
+      const summary = 'Fix the spelling typo in README.md: line 3 reads \'...\'; the word recieve becomes receive, and the heading, the table and the footer keep their text. Nothing else changes.';
+      const title = main.buildPullRequestTitle(makePlan({ classification: 'docs', summary: summary }));
+      assert.ok(title.startsWith('docs: Fix the spelling typo in README.md'), title);
+      assert.ok(Array.from(title).length <= main.maxTitleLength(), title);
+      const words = title.slice('docs: '.length).split(' ');
+      assert.deepEqual(words, summary.split(' ').slice(0, words.length).map((word, position) => (position === words.length - 1 ? word.replace(/[,;:-]+$/, '') : word)));
+      assert.ok(!/[\s,;:-]$/.test(title) && !title.includes('…'), title);
+    });
+    test('a cut never leaves trailing whitespace or a trailing , ; : or -', () => {
+      const title = main.buildPullRequestTitle(makePlan({ summary: 'a'.repeat(60) + ' bb, -; cc ' + 'd'.repeat(20) }));
+      assert.equal(title, 'feat: ' + 'a'.repeat(60) + ' bb');
+    });
+    test('an unbroken token is cut to maxTitleLength() code points, never inside a character', () => {
       const ascii = main.buildPullRequestTitle(makePlan({ summary: 'x'.repeat(400) }));
-      assert.equal(ascii.length, 256);
+      assert.equal(ascii, 'feat: ' + 'x'.repeat(66));
       const astral = main.buildPullRequestTitle(makePlan({ summary: '\u{1F600}'.repeat(400) }));
-      assert.equal(Array.from(astral).length, 256);
-      assert.ok(astral.endsWith('\u{1F600}'));
-      for (const title of [ascii, astral]) {
-        assert.ok(isPullRequestText(title, false) && !title.includes('\n'), title);
+      assert.equal(Array.from(astral).length, 72);
+      assert.ok(astral.endsWith('\u{1F600}') && !astral.endsWith('\u{1F600}'.slice(0, 1)), astral);
+      assert.equal(astral, 'feat: ' + '\u{1F600}'.repeat(66));
+    });
+    test('every title is one line of PR text within maxTitleLength() code points', () => {
+      const summaries = ['', 'Cache.', 'x'.repeat(400), '\u{1F600}'.repeat(400), 'a\nb\r\nc d. e', 'Ping @octocat about `x`.', 'word '.repeat(40)];
+      for (const summary of summaries) {
+        const title = main.buildPullRequestTitle(makePlan({ classification: 'bugfix', breaking: true, summary: summary }));
+        assert.ok(isPullRequestText(title, false) && !title.includes('\n'), JSON.stringify(title));
+        assert.ok(Array.from(title).length <= main.maxTitleLength() && !title.includes('…'), JSON.stringify(title));
       }
     });
     test('the PR inputs carry the title built from the plan', async () => {
       const plan = makePlan({ classification: 'refactor', breaking: true, summary: 'Split the cache.\nKeep the API.' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
-      assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').title, 'refactor!: Split the cache.');
+      assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').title, 'refactor!: Split the cache');
     });
   },
   'SD-45': () => {
@@ -3169,7 +3197,7 @@ const ROW_TESTS = {
       assert.equal(runGitIn(scratch, ['ls-remote', origin, 'refs/heads/feature/cache']).split('\t')[0], head);
       assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').expect_commit, head);
       const createArgs = readFileSync(join(logDir, 'create.args'), 'utf8').split('\n');
-      assert.ok(createArgs.includes('--base') && createArgs.includes('main') && createArgs.includes('--title=feat: Add the cache layer.'), JSON.stringify(createArgs));
+      assert.ok(createArgs.includes('--base') && createArgs.includes('main') && createArgs.includes('--title=feat: Add the cache layer'), JSON.stringify(createArgs));
       assert.ok(!createArgs.includes('--head'));
       assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').body);
       assert.ok(!prRelays[0].stdout.includes('commented: true'));
@@ -3237,11 +3265,13 @@ for (const [rowId, defineTests] of Object.entries(ROW_TESTS)) {
   describe(rowId, defineTests);
 }
 
-describe('standard-delivery draft', () => {
-  test('DRAFT is a regular file, so no built script is written', () => {
-    assert.ok(lstatSync(join(sourceDir, 'DRAFT')).isFile());
-    assert.equal(isDraftWorkflow(repoRoot, WORKFLOW_ID), true);
-    assert.equal(existsSync(join(repoRoot, builtPathFor(WORKFLOW_ID))), false);
+describe('standard-delivery live', () => {
+  test('no DRAFT marker, so the committed built script equals a fresh build', () => {
+    assert.equal(existsSync(join(sourceDir, 'DRAFT')), false);
+    assert.equal(isDraftWorkflow(repoRoot, WORKFLOW_ID), false);
+    const builtPath = join(repoRoot, builtPathFor(WORKFLOW_ID));
+    assert.ok(existsSync(builtPath));
+    assert.equal(readText(builtPath), builtSource);
   });
   test('meta names the workflow and its phases', async () => {
     const run = await workflow.run({ args: undefined, results: {} });
@@ -3254,6 +3284,23 @@ describe('standard-delivery draft', () => {
       assert.ok(!/#[0-9]/.test(source));
       assert.ok(!/\bDate\s*\(|\bDate\.now|Math\.random/.test(source));
     }
+  });
+  test('no taken or asked brief built in main.js has a problem promising exact text', () => {
+    const builderNames = [...mainSource.matchAll(/^function (build\w*Brief)\(/gm)].map((match) => match[1]);
+    assert.ok(builderNames.length >= 4, builderNames.join(','));
+    for (const name of builderNames) {
+      const start = mainSource.indexOf('\nfunction ' + name + '(');
+      const body = mainSource.slice(start, mainSource.indexOf('\n}\n', start));
+      assert.doesNotMatch(body, /exact text/i, name);
+    }
+    const briefs = [
+      main.buildPlanAcceptanceBrief(makePlan()),
+      main.buildRemediationPlanBrief(makePlan()),
+      main.buildTrunkStaleBrief(parsedFacts({ trunk_freshness: 'behind', trunk_behind: '1' })),
+      main.buildExternalEffectBrief('S1', 'Publish to a staging registry.'),
+      main.buildBumpTypeBrief(parsedBump())
+    ];
+    briefs.forEach((brief) => assert.doesNotMatch(brief.problem, /exact text/i, brief.problem));
   });
   test('every phase the script enters is a meta phase', async () => {
     const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'clean' }] } }));

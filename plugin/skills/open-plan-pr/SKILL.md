@@ -9,6 +9,7 @@ allowed-tools:
   - Bash(git diff *)
   - Bash(printf *)
   - Write   # inert inputs-file only: authors per-invocation-unique path .hivemind/pr-inputs-<token>.json; see security-policy.md "Inert Inputs-File Navigator Pattern" + ADR-0017/0018/0019
+  - Edit(.hivemind/pr-inputs-*.json)
 shell: bash
 ---
 

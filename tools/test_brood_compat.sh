@@ -1054,10 +1054,20 @@ assert_spawn_brood_child_leaf_regular_ok() {
     # ANTI-FALSE-REJECT: the leaf guard emits a specific rejection message before any tmux/launch.
     # Its ABSENCE confirms no leaf-guard rejection fired; PRESENCE of a correct stub launch confirms
     # the run reached the launch path through the guard (not false-rejected).
-    if [[ "$leaf_guard_rejected" == "no" && "$stub_launched_ok" == "yes" ]]; then
+    # ADR-0037 decision 10: the child launches with the Workflow tool disallowed, and the
+    # bypass-permissions flag is still present.
+    local launched_argv argv_ok=no
+    launched_argv="$(sed -n 's/^argv=//p' "$marker" 2>/dev/null | head -1)"
+    case "$launched_argv" in
+        *"--disallowedTools Workflow"*)
+            case "$launched_argv" in
+                *"--dangerously-skip-permissions"*) argv_ok=yes ;;
+            esac ;;
+    esac
+    if [[ "$leaf_guard_rejected" == "no" && "$stub_launched_ok" == "yes" && "$argv_ok" == "yes" ]]; then
         pass "$name" "regular-file task.md leaf NOT rejected (stub launched into strain worktree $launched_cwd)"
     else
-        failed "$name" "expected no leaf-guard rejection + stub launched into strain worktree; rc=$rc leaf_guard_rejected=$leaf_guard_rejected stub_launched_ok=$stub_launched_ok launched_cwd=[${launched_cwd:-}] stderr: $(cat "$stderr_out")"
+        failed "$name" "expected no leaf-guard rejection + stub launched into strain worktree; rc=$rc leaf_guard_rejected=$leaf_guard_rejected stub_launched_ok=$stub_launched_ok argv_ok=$argv_ok launched_argv=[${launched_argv:-}] launched_cwd=[${launched_cwd:-}] stderr: $(cat "$stderr_out")"
     fi
 }
 

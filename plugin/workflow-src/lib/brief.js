@@ -37,7 +37,10 @@
  *     saying the user can change them in the same reply. The last line tells
  *     the user to reply in their own words.
  *   renderDecisions  the "Decided for you" block, labelled D1..Dn by
- *     position, or the empty string when taken is empty.
+ *     position, or the empty string when taken is empty. Each decision
+ *     shows its problem, the chosen option with its summary and the why,
+ *     then, when verbatim is a non-empty string, a line "    Exact text:"
+ *     and the verbatim exactly as given, unindented.
  *   renderQuestionsCompact  the shorter form of renderQuestions, with the
  *     same intro line, Q1..Qn labels and last line. Each question shows only
  *     its problem and the recommendation with its why, and for an exact
@@ -210,7 +213,7 @@ function renderQuestion(entry, index) {
   lines.push(renderRecommendation(readField(brief, 'recommendation')));
   lines.push('Why I am asking: ' + askReasonLine(readField(entry, 'reason')));
   lines.push(...renderAssumptions(readField(brief, 'assumptions')));
-  lines.push(...renderVerbatim(readField(brief, 'verbatim')));
+  lines.push(...renderVerbatim(readField(brief, 'verbatim'), ''));
   return lines.join('\n');
 }
 
@@ -221,7 +224,7 @@ function renderCompactQuestion(entry, index) {
     renderRecommendation(readField(brief, 'recommendation'))
   ];
   if (readField(entry, 'exact') === true) {
-    lines.push(...renderVerbatim(readField(brief, 'verbatim')));
+    lines.push(...renderVerbatim(readField(brief, 'verbatim'), ''));
   }
   return lines.join('\n');
 }
@@ -289,11 +292,11 @@ function renderAssumption(assumption) {
   return statement + ' (source not given: ' + evidence + ')';
 }
 
-function renderVerbatim(verbatim) {
+function renderVerbatim(verbatim, labelIndent) {
   if (typeof verbatim !== 'string' || verbatim === '') {
     return [];
   }
-  return ['Exact text:', verbatim];
+  return [labelIndent + 'Exact text:', verbatim];
 }
 
 function renderOpenQuestion(entry, index) {
@@ -310,11 +313,13 @@ function renderTakenDecision(entry, index) {
   const recommendation = readField(brief, 'recommendation');
   const optionId = readField(recommendation, 'option_id');
   const chosen = findOptionById(readField(brief, 'options'), optionId);
-  return [
+  const lines = [
     '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')),
     '    Chose option ' + renderText(optionId) + ': ' + renderText(readField(chosen, 'summary')),
     '    Why: ' + renderText(readField(recommendation, 'why'))
-  ].join('\n');
+  ];
+  lines.push(...renderVerbatim(readField(brief, 'verbatim'), '    '));
+  return lines.join('\n');
 }
 
 function renderCompactDecision(entry, index) {

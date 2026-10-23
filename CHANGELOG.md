@@ -4,6 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
 ## [Unreleased]
 
 ### Added
@@ -11,6 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 ### Fixed
+
+## [7.0.0] - 2026-10-22
+
+### Added
+
+- Docs: ADR-0010 amendment 2026-10-22, and the ADR-0037 PR8 live smoke records.
+
+### Changed
+
+- BREAKING: delivery requests run as the `hivemind:standard-delivery` workflow script when the Workflow tool is available. Delivery runs keep no run ledger, so resume-on-start and the decision report do not see them. Taken decisions go on the PR body. The overlord passes `local_review` and `draft`, and hands the result `pr` to the post-PR watch. Brood children start without the Workflow tool. To opt out, add a `Workflow(hivemind:standard-delivery)` entry to `permissions.deny`: delivery then falls back to the state machine. Answering No at the approval prompt interrupts the turn with no fallback.
+- Built workflow scripts strip comments and write data as indented JSON. The build fails over 190,000 characters, and on any Claude Code approval-preview rule: a line over 2,048 characters, squared line lengths over 50,000,000, the cut marker text, or a run of more than 8 combining or zero-width characters. This keeps scripts approvable in manual mode.
+- PR titles are the commit type plus the first sentence of the plan summary, at most 72 characters, cut at a word.
+- The molt and open-plan-pr skills carry Edit allowed-tools entries for their inputs files.
+
+### Removed
+
+- `memory: project` from the drone and changeling agents, so consumer repos get no `.claude/agent-memory/` folder.
+
+### Fixed
+
+- molt shows git's error when a commit fails, and puts back the index entries it staged.
+- A taken decision shows the exact text it accepted.
 
 ## [6.7.0] - 2026-10-22
 

@@ -849,8 +849,11 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # rather than omitting it (a live --dangerously-skip-permissions child must never go
   # unreported).
   cur_session="$tmux_session"
+  # ADR-0037 decision 10: children stay on the state machine until slice 4, so the hatchery's
+  # started-evidence keeps working. --disallowedTools takes a list, so it precedes --settings and
+  # is never the last argument.
   if ! tmux new-session -d -s "$tmux_session" -c "$wt" \
-        "claude --dangerously-skip-permissions --settings '{\"skipDangerousModePermissionPrompt\":true}'" 2>/dev/null; then
+        "claude --dangerously-skip-permissions --disallowedTools Workflow --settings '{\"skipDangerousModePermissionPrompt\":true}'" 2>/dev/null; then
     printf 'warning: tmux new-session failed for strain %s\n' "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
     # HARD cleanup: remove ONLY what this invocation created (the worktree+branch

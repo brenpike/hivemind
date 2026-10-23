@@ -16,7 +16,8 @@
 # message built from the inputs, verifies the commit, and prints
 #     branch: <b> / commit: <full sha> / committed: true|false
 # on stdout, exit 0. On any blocker it prints nothing on stdout, exit 1, and the LAST stderr line
-# is `blocker: <fixed reason>`.
+# is `blocker: <fixed reason>`. A failed commit puts back the index entries of the paths the
+# engine staged, and its blocker carries git's commit error text as `: git said <JSON string>`.
 #
 # ISOLATION: the REAL committed engine is run unmodified by absolute path (it self-locates its own
 # _shared/ libraries). Each case builds a THROWAWAY repository under a mktemp WORKDIR, so no real
@@ -671,15 +672,6 @@ test_subfolder_invocation() {
 }
 
 test_hooks() {
-    create_world hook-fails
-    printf '#!/bin/sh\nexit 1\n' >"$WORK_TREE/.git/hooks/pre-commit"
-    chmod +x "$WORK_TREE/.git/hooks/pre-commit"
-    printf 'changed\n' >"$WORK_TREE/f.txt"
-    write_basic_inputs '["f.txt"]'
-    assert_blocker hook-fails "$WORK_TREE" "$COMMIT_FAILED_REASON" '' --trunk main --inputs "$INPUTS_REL"
-    assert_equal hook-fails-head "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD)" "HEAD unchanged"
-    assert_equal hook-fails-refs "refs/heads/$BRANCH" "$(run_git "$WORK_TREE" symbolic-ref HEAD)" "still on the branch"
-
     create_world hook-rewrites
     printf '#!/bin/sh\nprintf "hooked\\n" >>f.txt\n' >"$WORK_TREE/.git/hooks/pre-commit"
     chmod +x "$WORK_TREE/.git/hooks/pre-commit"
@@ -707,6 +699,137 @@ test_hooks() {
     assert_committed hook-stages-listed "$(printf 'M\tf.txt')" 'feat(core): add thing'
 }
 
+# ── Failed commits ──────────────────────────────────────────────────────────
+
+# write_failing_hook <hook body> -> a pre-commit hook in the current world that runs <hook body>
+# (sh) and exits 1.
+write_failing_hook() {
+    printf '#!/bin/sh\n%s\nexit 1\n' "$1" >"$WORK_TREE/.git/hooks/pre-commit"
+    chmod +x "$WORK_TREE/.git/hooks/pre-commit"
+}
+
+# assert_hook_message <name> <message bytes> <expected blocker reason> [stream]
+# A failing hook that writes <message bytes> to stderr (or stdout when [stream] is `stdout`) in a
+# world with one dirty listed file: the blocker is exactly <expected blocker reason> and HEAD,
+# refs, index and tree are unchanged.
+assert_hook_message() {
+    local redirect='>&2'
+    [[ "${4:-stderr}" == stdout ]] && redirect=''
+    create_world "$1"
+    printf '%s' "$2" >"$WORLD_ROOT/hook-message"
+    write_failing_hook "cat '$WORLD_ROOT/hook-message' $redirect"
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_refused_unchanged "$1" "$WORK_TREE" "$3" '' --trunk main --inputs "$INPUTS_REL"
+}
+
+# A failing commit puts back the index entries of exactly the paths the engine staged: a
+# partly staged path gets its earlier staged blob back, a listed untracked path is untracked
+# again, a listed deleted path is back in the index, and a fully staged listed path the engine
+# did not stage keeps its entry.
+test_failed_commit_restores_index() {
+    local staged_blob
+    create_world restore-index
+    write_failing_hook ':'
+    printf 'staged side\n' >"$WORK_TREE/f.txt"
+    run_git "$WORK_TREE" add f.txt
+    staged_blob="$(run_git "$WORK_TREE" rev-parse :f.txt)"
+    printf 'work tree side\n' >"$WORK_TREE/f.txt"
+    printf 'new\n' >"$WORK_TREE/new.txt"
+    rm "$WORK_TREE/g.txt"
+    printf 'fully staged\n' >"$WORK_TREE/sub/keep.txt"
+    run_git "$WORK_TREE" add sub/keep.txt
+    write_basic_inputs '["f.txt","new.txt","g.txt","sub/keep.txt"]'
+    assert_refused_unchanged restore-index "$WORK_TREE" "$COMMIT_FAILED_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_equal restore-index-partly-staged "$staged_blob" "$(run_git "$WORK_TREE" rev-parse :f.txt)" "earlier staged blob back"
+    assert_equal restore-index-untracked '?? new.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- new.txt)" "listed untracked path untracked again"
+    assert_equal restore-index-deleted ' D g.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- g.txt)" "listed deleted path back in the index"
+    assert_equal restore-index-fully-staged 'M  sub/keep.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- sub/keep.txt)" "fully staged path kept"
+    assert_equal restore-index-work-tree 'work tree side' "$(cat "$WORK_TREE/f.txt")" "work tree untouched"
+}
+
+# The commit's stderr reaches the blocker as one JSON string: silent failure keeps the bare
+# reason, text is trimmed and encoded, control characters are escaped, and text over 500 code
+# points keeps its last 500 behind `...`.
+test_failed_commit_messages() {
+    local long_tail exact_text
+    assert_hook_message hook-silent '' "$COMMIT_FAILED_REASON"
+    assert_hook_message hook-white-space $'  \n\t \n' "$COMMIT_FAILED_REASON"
+    assert_hook_message hook-stderr $'\n  lint: f.txt has "tabs" \\ here  \n\n' \
+        'the commit failed: git said "lint: f.txt has \"tabs\" \\ here"'
+    assert_hook_message hook-stdout $'from stdout\n' 'the commit failed: git said "from stdout"' stdout
+    assert_hook_message hook-control $'bad\001char \033[31mred\nnext\177line\n' \
+        'the commit failed: git said "bad\u0001char \u001b[31mred\nnext\u007fline"'
+    long_tail="$(printf 'é%.0s' $(seq 1 499))Z"
+    assert_hook_message hook-long "HEAD$long_tail"$'\n' "the commit failed: git said \"...$long_tail\""
+    exact_text="$(printf 'é%.0s' $(seq 1 500))"
+    assert_hook_message hook-exact-500 "$exact_text"$'\n' "the commit failed: git said \"$exact_text\""
+}
+
+# A commit that fails because git has no author identity carries git's own reason. Global and
+# system config are out of reach: HOME and XDG_CONFIG_HOME point at an empty folder and
+# GIT_CONFIG_NOSYSTEM=1 holds; the repository sets user.useConfigOnly and an email, no name.
+test_failed_commit_identity() {
+    local saved_home="$HOME" saved_xdg="$XDG_CONFIG_HOME" errfile="$WORKDIR/identity-missing.err" out rc=0 before after
+    create_world identity-missing
+    run_git "$WORK_TREE" config user.useConfigOnly true
+    run_git "$WORK_TREE" config user.email t@example.invalid
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    before="$(repo_snapshot)"
+    mkdir -p "$WORKDIR/empty-home"
+    export HOME="$WORKDIR/empty-home" XDG_CONFIG_HOME="$WORKDIR/empty-home/.config"
+    unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL EMAIL
+    run_engine "$WORK_TREE" out "$errfile" --trunk main --inputs "$INPUTS_REL" || rc=$?
+    export HOME="$saved_home" XDG_CONFIG_HOME="$saved_xdg"
+    after="$(repo_snapshot)"
+    assert_equal identity-missing-exit "1|" "$rc|$out" "exit 1, empty stdout"
+    assert_equal identity-missing-lines 1 "$(wc -l <"$errfile" | tr -d ' ')" "one stderr line"
+    case "$(cat "$errfile")" in
+        "blocker: $COMMIT_FAILED_REASON: git said \""*'no name was given and auto-detection is disabled"')
+            pass identity-missing "blocker carries git's identity error" ;;
+        *)
+            failed identity-missing "unexpected stderr: $(tr '\n' '|' <"$errfile")" ;;
+    esac
+    assert_equal identity-missing-unchanged "$before" "$after" "HEAD, refs, index and tree"
+}
+
+# When the index cannot be written back (a hook leaves index.lock behind), the blocker says so
+# and still carries git's text.
+test_failed_commit_restore_fails() {
+    create_world restore-fails
+    write_failing_hook ': >.git/index.lock; echo "lock left" >&2'
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_blocker restore-fails "$WORK_TREE" \
+        'the commit failed and the index could not be restored: git said "lock left"' '' --trunk main --inputs "$INPUTS_REL"
+    assert_equal restore-fails-head "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD)" "HEAD unchanged"
+}
+
+# A hook that changes an entry under the staged paths before failing keeps that change: nothing is
+# written back and the blocker says the index could not be restored. A hook that stages only an
+# unlisted path does not stop the write-back, and its own entry stays.
+test_failed_commit_keeps_hook_entries() {
+    local hook_blob
+    create_world restore-hook-listed
+    write_failing_hook 'printf "hooked\n" >>f.txt; git add f.txt'
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_blocker restore-hook-listed "$WORK_TREE" \
+        'the commit failed and the index could not be restored' '' --trunk main --inputs "$INPUTS_REL"
+    hook_blob="$(run_git "$WORK_TREE" hash-object f.txt)"
+    assert_equal restore-hook-listed-entry "$hook_blob" "$(run_git "$WORK_TREE" rev-parse :f.txt)" "the hook's staged blob kept"
+    assert_equal restore-hook-listed-head "$HEAD_SHA" "$(run_git "$WORK_TREE" rev-parse HEAD)" "HEAD unchanged"
+
+    create_world restore-hook-unlisted
+    write_failing_hook 'printf "hooked\n" >>g.txt; git add g.txt'
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_blocker restore-hook-unlisted "$WORK_TREE" "$COMMIT_FAILED_REASON" '' --trunk main --inputs "$INPUTS_REL"
+    assert_equal restore-hook-unlisted-listed ' M f.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- f.txt)" "listed path put back"
+    assert_equal restore-hook-unlisted-hook 'M  g.txt' "$(run_git "$WORK_TREE" status --porcelain=v1 -- g.txt)" "the hook's unlisted entry kept"
+}
+
 # ── Run ──────────────────────────────────────────────────────────────────────
 
 test_usage_errors
@@ -723,6 +846,11 @@ test_commits
 test_messages
 test_subfolder_invocation
 test_hooks
+test_failed_commit_restores_index
+test_failed_commit_messages
+test_failed_commit_identity
+test_failed_commit_restore_fails
+test_failed_commit_keeps_hook_entries
 
 echo
 echo "molt engine tests: $PASS_COUNT passed, $FAIL_COUNT failed"
