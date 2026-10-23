@@ -1129,7 +1129,7 @@ const ROW_TESTS = {
       const plan = effectPlan('Publish to the registry.', false);
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(plan, [makeGatedBrief('GATED_PROBLEM')]) });
       assert.equal(run.result.needs_user, true);
-      assert.ok(run.result.message.startsWith('I need your answers on 2 questions before I go on.'), run.result.message);
+      assert.ok(run.result.message.startsWith('**Answer Q1 and Q2 so I can go on: pick one option for each.**'), run.result.message);
       assert.ok(run.result.message.includes('Q1. GATED_PROBLEM'));
       assert.ok(run.result.message.includes('Q2. Plan step "STEP-001" has an effect outside the repo'));
     });
@@ -1220,14 +1220,14 @@ const ROW_TESTS = {
         'branch-1': branchRelay({ warning: main.branchWarningTexts().stale })
       });
       const paused = await runWorkflow(LAUNCH, results, surfaced);
-      assert.ok(paused.result.message.startsWith('I need your answers on 2 questions before I go on.'), paused.result.message);
+      assert.ok(paused.result.message.startsWith('**Answer Q1 and Q2 so I can go on: pick one option for each.**'), paused.result.message);
       assert.ok(paused.result.message.includes('Q1. Start delivering the plan'), paused.result.message);
       assert.ok(paused.result.message.includes('Q2. The trunk may not be up to date'), paused.result.message);
       const second = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Accept the plan.'), results, surfaced);
       assert.equal(second.result.needs_user, true);
       assert.deepEqual(labelsOf(second), ['facts-1', 'plan-1', 'revise-1']);
       assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'Accept the plan.' } });
-      assert.ok(second.result.message.startsWith('I need your answer on 1 question before I go on.'), second.result.message);
+      assert.ok(second.result.message.startsWith('**Answer Q1 so I can go on: pick one of its options.**'), second.result.message);
       assert.ok(second.result.message.includes('Q1. The trunk may not be up to date'), second.result.message);
       assert.ok(!second.result.message.includes('Start delivering the plan'), second.result.message);
       const run = await runWorkflow(resumeWith(LAUNCH, second.result, 'Go on from the trunk.'), results, surfaced);
@@ -1891,8 +1891,8 @@ const ROW_TESTS = {
     });
   },
   'SD-20': () => {
-    const longOptions = makeBrief().options.map((option) => ({ ...option, steel_man: 'S'.repeat(4000) }));
-    const longQuestion = makeBrief({ problem: 'LONG_PROBLEM', options: longOptions, gate: { irreversible: false, architectural: true, safety: false } });
+    const longCriticality = { ...makeBrief().criticality, blast_radius: 'S'.repeat(8000) };
+    const longQuestion = makeBrief({ problem: 'LONG_PROBLEM', criticality: longCriticality, gate: { irreversible: false, architectural: true, safety: false } });
     test('only external_effect asks are exact', () => {
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       const plan = effectPlan('Publish to the registry.', false);

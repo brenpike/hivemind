@@ -26,27 +26,31 @@
  *                 'reply_size', 'exact_text_size' or 'before_pr'.
  *
  * Outputs
- *   renderQuestions  one message. Each ask becomes a question labelled Q1..Qn
- *     by its position in asks. Each question shows, in this order: problem;
- *     how serious (criticality level, likelihood, blast_radius, if_ignored);
- *     each option with summary, case for (steel_man), case against
- *     (straw_man), effort, value and reversible; the recommendation with its
- *     why; one "Why I am asking" line from askReasonLine; the assumptions,
- *     where origin 'assumed' is marked as something the user can overrule;
- *     the verbatim text when present. Taken decisions follow, with a line
- *     saying the user can change them in the same reply. The last line tells
- *     the user to reply in their own words.
+ *   renderQuestions  one message, the ask first, its sections apart by
+ *     blank lines. The first line is a bold heading naming the labels the
+ *     user must answer. Each ask then becomes a question labelled Q1..Qn by
+ *     its position in asks: a bold "Qn. problem" line; one list line per
+ *     option with its id, which is the reply token, and its summary, the
+ *     recommended option marked; the recommendation with its why on one
+ *     line; then the "Why it matters" part, two lines: the criticality
+ *     level, likelihood and blast_radius, and the "Why I am asking" line
+ *     from askReasonLine.
+ *     When the brief carries verbatim, an "Exact text:" section follows
+ *     with the verbatim whole. Then one line per taken decision, its D
+ *     label, problem and chosen option id, with a line saying the user can
+ *     change them in the same reply. The last line shows how to reply, like
+ *     Q1 A, or in their own words. Cases for and against, effort, value,
+ *     reversible and assumptions are not shown.
  *   renderDecisions  the "Decided for you" block, labelled D1..Dn by
  *     position, or the empty string when taken is empty. Each decision
  *     shows its problem, the chosen option with its summary and the why,
  *     then, when verbatim is a non-empty string, a line "    Exact text:"
  *     and the verbatim exactly as given, unindented.
  *   renderQuestionsCompact  the shorter form of renderQuestions, with the
- *     same intro line, Q1..Qn labels and last line. Each question shows only
- *     its problem and the recommendation with its why, and for an exact
- *     entry also the "Exact text:" lines of the full form. Taken decisions
- *     follow as renderDecisionsCompact, with the same line saying the user
- *     can change them in the same reply.
+ *     same layout, heading, Q1..Qn labels, taken decision lines and last
+ *     line. Each question shows its problem line, option lines and
+ *     recommendation line, without the "Why it matters" part, and only an
+ *     exact entry keeps its "Exact text:" section.
  *   renderDecisionsCompact  the "Decided for you" block with one line per
  *     decision, labelled D1..Dn by position: problem, chosen option id and
  *     why, without the option summary. The empty string when taken is empty.
@@ -58,8 +62,9 @@
  *     replies so far are too long to carry into another round
  *     ('reply_size'), because the exact text of a question is too long to
  *     show in full ('exact_text_size'), or because the run stopped before
- *     the pull request for questions that need the user's answer, so the
- *     user runs the request again with it ('before_pr'). Then one line per
+ *     the pull request for questions that need the user's answer
+ *     ('before_pr'). The line names no next action: the workflow adds its
+ *     own next-step line. Then one line per
  *     question labelled Q1..Qn by position, with its problem and the option
  *     the report assumes, or a line saying there is no recommendation.
  *
@@ -68,8 +73,13 @@
  *   brief.kind are never shown: labels are assigned here, and kind names
  *   are internal. A missing or mistyped field renders as 'not given', so a
  *   malformed brief still renders.
- *   No em dash and no markdown tables. An em dash inside a brief field is
- *   replaced by a comma. verbatim is shown exactly as given.
+ *   No em dash and no markdown tables: options are a list. An em dash
+ *   inside a brief field is replaced by a comma. verbatim is shown exactly
+ *   as given and whole, and only renderDecisions shows the verbatim of a
+ *   taken decision. The question messages give a taken decision one line,
+ *   so its full text lives in the final message and the pull request body.
+ *   One question with two options and no verbatim renders in about 10
+ *   lines.
  *   Invalid arguments, unknown reasons and unknown stop reasons throw. So
  *   does questionLabel for anything but a non-negative integer.
  *   renderOpenQuestions with 'pause_limit' calls pauseLimit() from
@@ -78,10 +88,11 @@
  *   No size budget lives here: the caller picks the full or compact form.
  *
  * Why
- *   The user answers from this text alone, so every question carries what
- *   the user needs to decide it, and labels come from code so the reply can
- *   point at a question without trusting a model-written id. Question labels
- *   have one home, questionLabel, so the three renderers cannot drift apart.
+ *   The user answers from this text alone, so the ask comes first and each
+ *   question carries only what the user needs to decide it (issue 431).
+ *   Labels and reply tokens come from code so the reply can point at a
+ *   question without trusting a model-written id. Question labels have one
+ *   home, questionLabel, so the three renderers cannot drift apart.
  */
 
 function renderQuestions(asks, taken) {
@@ -91,12 +102,12 @@ function renderQuestions(asks, taken) {
   if (!Array.isArray(taken)) {
     throw new Error('renderQuestions: taken must be an array');
   }
-  const blocks = [renderIntroLine(asks.length)];
+  const blocks = [renderHeading(asks.length)];
   asks.forEach((entry, index) => blocks.push(renderQuestion(entry, index)));
   if (taken.length > 0) {
-    blocks.push(renderDecisions(taken) + '\nYou can change any of these in the same reply.');
+    blocks.push(renderTakenLines(taken));
   }
-  blocks.push('Reply in your own words. You can point at a question by its label, like Q1.');
+  blocks.push(renderReplyLine());
   return blocks.join('\n\n');
 }
 
@@ -119,12 +130,12 @@ function renderQuestionsCompact(asks, taken) {
   if (!Array.isArray(taken)) {
     throw new Error('renderQuestionsCompact: taken must be an array');
   }
-  const blocks = [renderIntroLine(asks.length)];
+  const blocks = [renderHeading(asks.length)];
   asks.forEach((entry, index) => blocks.push(renderCompactQuestion(entry, index)));
   if (taken.length > 0) {
-    blocks.push(renderDecisionsCompact(taken) + '\nYou can change any of these in the same reply.');
+    blocks.push(renderTakenLines(taken));
   }
-  blocks.push('Reply in your own words. You can point at a question by its label, like Q1.');
+  blocks.push(renderReplyLine());
   return blocks.join('\n\n');
 }
 
@@ -185,7 +196,7 @@ function renderStopIntro(stopReason) {
     case 'exact_text_size':
       return 'I stopped asking because the exact text of a question is too long to show you in full. These are still open:';
     case 'before_pr':
-      return 'I stopped before the pull request because these questions need your answer. Run the request again with your answer. These are still open:';
+      return 'I stopped before the pull request because these questions need your answer. These are still open:';
     default:
       throw new Error('renderOpenQuestions: no intro for stop reason ' + JSON.stringify(stopReason));
   }
@@ -198,63 +209,77 @@ function questionLabel(index) {
   return 'Q' + (index + 1);
 }
 
-function renderIntroLine(count) {
+function renderHeading(count) {
   if (count === 1) {
-    return 'I need your answer on 1 question before I go on.';
+    return '**Answer ' + questionLabel(0) + ' so I can go on: pick one of its options.**';
   }
-  return 'I need your answers on ' + count + ' questions before I go on.';
+  const joiner = count === 2 ? ' and ' : ' to ';
+  return '**Answer ' + questionLabel(0) + joiner + questionLabel(count - 1) + ' so I can go on: pick one option for each.**';
+}
+
+function renderReplyLine() {
+  return 'Reply with a label and an option, like Q1 A, or in your own words.';
+}
+
+function renderTakenLines(taken) {
+  const lines = ['Decided for you:'];
+  taken.forEach((entry, index) => lines.push(renderTakenLine(entry, index)));
+  lines.push('You can change any of these in the same reply.');
+  return lines.join('\n');
+}
+
+function renderTakenLine(entry, index) {
+  const brief = readField(entry, 'brief');
+  return '- D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
+    + renderText(readField(readField(brief, 'recommendation'), 'option_id')) + '.';
 }
 
 function renderQuestion(entry, index) {
   const brief = readField(entry, 'brief');
-  const lines = [questionLabel(index) + '. ' + renderText(readField(brief, 'problem'))];
-  lines.push(...renderSeriousness(readField(brief, 'criticality')));
-  lines.push(...renderOptions(readField(brief, 'options')));
-  lines.push(renderRecommendation(readField(brief, 'recommendation')));
+  const lines = renderAsk(brief, index);
+  lines.push(renderWhyItMatters(readField(brief, 'criticality')));
   lines.push('Why I am asking: ' + askReasonLine(readField(entry, 'reason')));
-  lines.push(...renderAssumptions(readField(brief, 'assumptions')));
-  lines.push(...renderVerbatim(readField(brief, 'verbatim'), ''));
-  return lines.join('\n');
+  const sections = [lines.join('\n')];
+  sections.push(...renderVerbatimSection(readField(brief, 'verbatim')));
+  return sections.join('\n\n');
 }
 
 function renderCompactQuestion(entry, index) {
   const brief = readField(entry, 'brief');
-  const lines = [
-    questionLabel(index) + '. ' + renderText(readField(brief, 'problem')),
-    renderRecommendation(readField(brief, 'recommendation'))
-  ];
+  const sections = [renderAsk(brief, index).join('\n')];
   if (readField(entry, 'exact') === true) {
-    lines.push(...renderVerbatim(readField(brief, 'verbatim'), ''));
+    sections.push(...renderVerbatimSection(readField(brief, 'verbatim')));
   }
-  return lines.join('\n');
+  return sections.join('\n\n');
 }
 
-function renderSeriousness(criticality) {
+function renderAsk(brief, index) {
+  const recommendation = readField(brief, 'recommendation');
   return [
-    'How serious: ' + renderToken(readField(criticality, 'level')) + ' criticality, likelihood '
-      + renderToken(readField(criticality, 'likelihood')) + '.',
-    '  If it goes wrong: ' + renderText(readField(criticality, 'blast_radius')),
-    '  If ignored: ' + renderText(readField(criticality, 'if_ignored'))
+    '**' + questionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + '**',
+    ...renderOptions(readField(brief, 'options'), recommendation),
+    renderRecommendation(recommendation)
   ];
 }
 
-function renderOptions(options) {
+function renderWhyItMatters(criticality) {
+  return 'Why it matters: ' + renderToken(readField(criticality, 'level')) + ' criticality, likelihood '
+    + renderToken(readField(criticality, 'likelihood')) + '. If it goes wrong: '
+    + renderText(readField(criticality, 'blast_radius'));
+}
+
+function renderOptions(options, recommendation) {
   if (!Array.isArray(options) || options.length === 0) {
     return ['Options: not given.'];
   }
-  const lines = ['Options:'];
-  options.forEach((option) => lines.push(...renderOption(option)));
-  return lines;
+  const recommendedId = readField(recommendation, 'strength') === 'none' ? undefined : readField(recommendation, 'option_id');
+  return options.map((option) => renderOption(option, recommendedId));
 }
 
-function renderOption(option) {
-  return [
-    '  Option ' + renderText(readField(option, 'id')) + ': ' + renderText(readField(option, 'summary')),
-    '    Case for: ' + renderText(readField(option, 'steel_man')),
-    '    Case against: ' + renderText(readField(option, 'straw_man')),
-    '    Effort ' + renderToken(readField(option, 'effort')) + ', value ' + renderToken(readField(option, 'value'))
-      + ', reversible: ' + renderYesNo(readField(option, 'reversible')) + '.'
-  ];
+function renderOption(option, recommendedId) {
+  const optionId = readField(option, 'id');
+  const mark = typeof optionId === 'string' && optionId === recommendedId ? ' (recommended)' : '';
+  return '- ' + renderText(optionId) + ': ' + renderText(readField(option, 'summary')) + mark;
 }
 
 function renderRecommendation(recommendation) {
@@ -267,29 +292,9 @@ function renderRecommendation(recommendation) {
     + renderToken(strength) + '). ' + why;
 }
 
-function renderAssumptions(assumptions) {
-  if (!Array.isArray(assumptions) || assumptions.length === 0) {
-    return ['Assumptions: none.'];
-  }
-  const lines = ['Assumptions:'];
-  assumptions.forEach((assumption) => lines.push(renderAssumption(assumption)));
-  return lines;
-}
-
-function renderAssumption(assumption) {
-  const statement = '  - ' + renderText(readField(assumption, 'statement'));
-  const evidence = renderText(readField(assumption, 'evidence'));
-  const origin = readField(assumption, 'origin');
-  if (origin === 'user') {
-    return statement + ' (you said so: ' + evidence + ')';
-  }
-  if (origin === 'repo') {
-    return statement + ' (from the repo: ' + evidence + ')';
-  }
-  if (origin === 'assumed') {
-    return statement + ' (my assumption, you can overrule it: ' + evidence + ')';
-  }
-  return statement + ' (source not given: ' + evidence + ')';
+function renderVerbatimSection(verbatim) {
+  const lines = renderVerbatim(verbatim, '');
+  return lines.length === 0 ? [] : [lines.join('\n')];
 }
 
 function renderVerbatim(verbatim, labelIndent) {
@@ -352,14 +357,4 @@ function renderText(value) {
 
 function renderToken(value) {
   return renderText(value).replace(/_/g, ' ');
-}
-
-function renderYesNo(value) {
-  if (value === true) {
-    return 'yes';
-  }
-  if (value === false) {
-    return 'no';
-  }
-  return 'not given';
 }
