@@ -189,16 +189,24 @@
  *   the blocked result names its reason and the next step. ADR-0037 records
  *   the residual.
  *   Every decision resolves through decide() with its kind fixed here,
- *   never from brief.kind. Every question is keyed through questionKey by
- *   its kind and values the revise step cannot rewrite (issue 433): plan
- *   acceptance and remediation plan acceptance by the pass, trunk_stale by
- *   the trunk facts of the pass, an irreversible effect by its step id and
- *   exact summary, since a changed irreversible text is a new question the
- *   user must approve word for word, and a planner question by the pass,
- *   its problem and each option id and summary, never its brief id,
- *   recommendation or assumptions. The residual: a planner question raised
- *   again with a changed problem or options is a new question, asked again
- *   within the pause limit. The planner's revise pass reads the reply. The
+ *   never from brief.kind. Every question of a plan pass is keyed through
+ *   questionKey by its kind, a scope its call site passes and the question
+ *   rendered alone by renderQuestions, so the key holds every value the user
+ *   saw and no hand-picked subset of brief or plan fields (issue 433,
+ *   review findings 7578f16f and 0c804e49). The scope is the pass for a
+ *   planner question, the pass and the whole plan for both plan
+ *   acceptances, and 'run' for trunk_stale and an irreversible effect,
+ *   whose rendered text holds the trunk facts, or the step id and exact
+ *   summary, so a changed irreversible text is a new question the user must
+ *   approve word for word. A tail decision has no scope and no key. A plan
+ *   acceptance ask waits while any other ask of its round is open, so the
+ *   user accepts the plan that holds no open question. When a reply settles
+ *   the shown acceptance, the plan result that was shown is the one that
+ *   runs, and a revise that only rewrites the summary to record the answer
+ *   does not ask again (issue 433). The residual: a planner question raised
+ *   again with other rendered text, a changed recommendation too, is a new
+ *   question, asked again within the pause limit. The planner's revise pass
+ *   reads the reply. The
  *   revise result names in settled, by label like Q1, the shown questions the
  *   reply settled: only the keys of those count as answered and are not
  *   asked again, and every other question resolves again and goes in the
@@ -252,14 +260,15 @@
  *   finishOpenQuestions, lists the questions still open, names the next
  *   action with nextActionLine() and runs nothing further. The pause limit
  *   belongs to lib/result.js; what happens at it is this workflow's call.
- *   Settled question guard: within one pass, a plan_acceptance,
- *   remediation_plan_acceptance or trunk_stale question a reply settled is
- *   keyed on values the revise step cannot rewrite, so it is never asked
- *   again. When a pause round would still show one, that is a workflow
- *   defect: the run neither pauses nor counts the round toward
- *   pauseLimit(), and finishes blocked naming the question kind. An
- *   irreversible effect whose text changed, and a planner question whose
- *   problem or options changed, are new questions and still count.
+ *   Settled question guard: within one pass, a trunk_stale question a
+ *   reply settled renders the same text for the whole run, and a settled
+ *   plan_acceptance or remediation_plan_acceptance restores the plan result
+ *   that was shown, so its key holds and it is never asked again. When a
+ *   pause round would still show one, that is a workflow defect: the run
+ *   neither pauses nor counts the round toward pauseLimit(), and finishes
+ *   blocked naming the question kind. An irreversible effect whose text
+ *   changed, and a planner question that renders other text, are new
+ *   questions and still count.
  *   An irreversible effect is asked as an exact entry, so the pause keeps
  *   its exact text whole in every fit tier (lib/result.js whole blocks): the
  *   user never answers an effect question without its verbatim text.
@@ -333,7 +342,7 @@ function contractRows() {
     { id: 'SD-06', step: 'Scan', check: 'runPassScan', rule: 'When external_texts is above 0 the shared scan step runs, and an injection suspect or a coverage failure stops the run before planning.' },
     { id: 'SD-07', step: 'Plan', check: 'runDeliveryPass', rule: 'Every planner call follows the facts step of its own pass, and a pass starts only at launch, after needs_replan, after a branch switch or after a taken local review escalation or root cluster.' },
     { id: 'SD-08', step: 'Plan', check: 'describePlanProblem', rule: 'The plan result fits the schema of its call, the plan result schema or on a revise pass that schema with settled, before any of its fields is read, every value at a field PLAN_SCHEMA marks as a repository path passes isRepositoryPath, the molt.sh files rule, before computeWave, its steps pass computeWave, its trunk_freshness equals the facts, its branch, its base and each versioning.artifact_files path also pass isGitIdentifier, and when the facts were taken on a branch other than trunk its branch equals that branch.' },
-    { id: 'SD-09', step: 'Plan', check: 'runPlanningPass', rule: 'Planner questions resolve through decide() kind planner_question and the plan through kind plan_acceptance; a pass puts its asks in one pause and the reply goes to a revise pass, where only the keys of the shown questions named in settled count as answered; a settled plan_acceptance, remediation_plan_acceptance or trunk_stale question back in its pass ends the run blocked as a workflow defect with no pause, and at the pause limit the run ends blocked, listing the open questions.' },
+    { id: 'SD-09', step: 'Plan', check: 'runPlanningPass', rule: 'Planner questions resolve through decide() kind planner_question and the plan through kind plan_acceptance; a pass puts its asks in one pause and the reply goes to a revise pass, where only the keys of the shown questions named in settled count as answered; a plan acceptance is shown only when no other ask is open, and once settled the shown plan result runs; a settled plan_acceptance, remediation_plan_acceptance or trunk_stale question back in its pass ends the run blocked as a workflow defect with no pause, and at the pause limit the run ends blocked, listing the open questions.' },
     { id: 'SD-10', step: 'Plan to branch', check: 'resolveTrunkFreshness', rule: 'Trunk freshness fresh gives fresh and no_remote gives skipped; every other value resolves through decide() kind trunk_stale, where a take gives stale and is listed and an ask pauses.' },
     { id: 'SD-11', step: 'Plan to waves', check: 'resolveExternalEffects', rule: 'Before the first wave each irreversible effect a step declares asks through decide() kind external_effect with its summary as verbatim data; an effect question the reply settled is not asked again, one it did not settle or whose summary changed is asked again before any wave, and reversible effects are listed in the final message.' },
     { id: 'SD-12', step: 'Branch', check: 'checkBranchRelay', rule: 'The branch runner invokes hivemind:create-working-branch with base, working_branch, classification, trunk-freshness and trunk in its JSON inputs block only, under the git-script sentence, and its stdout parses with the create-working-branch spec, with a branch line equal to the plan branch.' },
@@ -376,7 +385,7 @@ function contractRows() {
     { id: 'SD-49', step: 'Prompts', check: 'addResumeNote', rule: 'Once run.replies is not empty, every agent prompt but the planner revise prompt carries resumedReplySentence() as its second line, no prompt sent before the first reply carries it, and no prompt but the revise prompt carries reply text.' },
     { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'Every step- or script-written diagnostic or name a message shows goes through encodeUntrustedText, while planner prose rendered by lib/brief.js shows as written; a blocked relay quotes its last non-blank blocker line, else its first two non-blank stderr lines, else gives no reason, a step blocker goes through describeReason, each one line cut to maxExcerptLength() characters, and the text starts with a capital letter after a full stop and stays lower case after a colon.' },
     { id: 'SD-51', step: 'Result', check: 'finishDeliveryBlocked', rule: 'Every blocked result carries nextStepLine(), or nextActionLine() at an open question stop, as a whole block right after its first block; no block carries shorten, a first block over maxBlockedLeadLength() code points has those code points as its compact form, and finish never throws.' },
-    { id: 'SD-52', step: 'Question keys', check: 'questionKey', rule: 'A question key holds its kind and only values the revise step cannot rewrite: the pass for both plan acceptances, the trunk facts for trunk_stale, the step id and exact summary for external_effect, and the pass, problem and option ids and summaries for planner_question.' }
+    { id: 'SD-52', step: 'Question keys', check: 'questionKey', rule: 'A question key holds its kind, its scope and its rendered text: the scope is the pass for planner_question, the pass and the whole plan for both plan acceptances, and run for trunk_stale and external_effect.' }
   ];
 }
 
@@ -1100,10 +1109,11 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
 }
 
 /**
- * Returns the key a question counts as answered under. Each key holds only
- * values the planner revise step cannot rewrite, or text the user must
- * approve word for word, so a settled question is not asked again after a
- * revise (issue 433).
+ * Returns the key a question counts as answered under: its kind and its
+ * content, which resolveDecision builds from the call site scope and the
+ * question as renderQuestions shows it alone. A question the user saw
+ * settled is not asked again after a revise that shows it the same way
+ * (issue 433).
  */
 function questionKey(kind, content) {
   return JSON.stringify([kind, content]);
@@ -1166,18 +1176,21 @@ function buildExternalEffectBrief(stepId, summary) {
   };
 }
 
-function resolveDecision(kind, brief, key, run, resolution) {
-  if (key !== undefined && run.answeredKeys.has(key)) {
-    return 'answered';
-  }
+function resolveDecision(kind, brief, scope, run, resolution) {
   const decision = decide({ kind: kind, level: run.level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA);
   if (decision.action === 'take') {
     resolution.taken.push({ brief: brief, kind: kind });
     return 'take';
   }
-  const ask = { brief: brief, reason: decision.reason, key: key, kind: kind };
+  const ask = { brief: brief, reason: decision.reason, kind: kind };
   if (kind === EXTERNAL_EFFECT_KIND) {
     ask.exact = true;
+  }
+  if (scope !== undefined) {
+    ask.key = questionKey(kind, [scope, renderQuestions([ask], [])]);
+    if (run.answeredKeys.has(ask.key)) {
+      return 'answered';
+    }
   }
   resolution.asks.push(ask);
   return 'ask';
@@ -1188,8 +1201,7 @@ function resolveTrunkFreshness(facts, run, resolution) {
   if (mapped !== 'decide') {
     return mapped;
   }
-  const key = questionKey(TRUNK_STALE_KIND, [facts.trunk_freshness, facts.trunk_ahead, facts.trunk_behind].join(' '));
-  const status = resolveDecision(TRUNK_STALE_KIND, buildTrunkStaleBrief(facts), key, run, resolution);
+  const status = resolveDecision(TRUNK_STALE_KIND, buildTrunkStaleBrief(facts), 'run', run, resolution);
   return status === 'ask' ? undefined : 'stale';
 }
 
@@ -1201,40 +1213,42 @@ function resolveExternalEffects(plan, run, resolution) {
         continue;
       }
       /*
-       * INVARIANT: the key holds the exact effect summary, so a changed
-       * irreversible text is a new question the user must approve word for
-       * word.
+       * INVARIANT: the key holds the rendered question, which shows the step
+       * id and the exact effect summary, so a changed irreversible text is a
+       * new question the user must approve word for word.
        */
-      const key = questionKey(EXTERNAL_EFFECT_KIND, [step.id, effect.summary]);
-      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), key, run, resolution);
+      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), 'run', run, resolution);
     }
   }
 }
 
 function resolvePlanAcceptance(plan, run, resolution) {
   if (run.remediation) {
-    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, buildRemediationPlanBrief(plan), questionKey(REMEDIATION_PLAN_ACCEPTANCE_KIND, run.pass), run, resolution);
+    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, buildRemediationPlanBrief(plan), [run.pass, plan], run, resolution);
   }
-  return resolveDecision(PLAN_ACCEPTANCE_KIND, buildPlanAcceptanceBrief(plan), questionKey(PLAN_ACCEPTANCE_KIND, run.pass), run, resolution);
+  return resolveDecision(PLAN_ACCEPTANCE_KIND, buildPlanAcceptanceBrief(plan), [run.pass, plan], run, resolution);
 }
 
 function resolvePlanAsks(planResult, facts, run) {
   const resolution = { asks: [], taken: [], freshness: undefined, reversibleEffects: [] };
   const plan = planResult.plan;
   /*
-   * INVARIANT: a planner question key holds the pass, the problem and each
-   * option id and summary, never the model-written brief id, recommendation
-   * or assumptions. A settled question raised again unchanged is answered;
-   * one with a changed problem or options is a new question, which the
-   * pause limit still bounds.
+   * INVARIANT: a planner question key holds the pass and the question as
+   * the user sees it, never the unrendered brief id, assumptions or option
+   * steel_man. A settled question raised again with the same rendered text
+   * is answered; one that renders other text is a new question, which the
+   * pause limit still bounds. The plan acceptance key holds the pass and
+   * the whole plan, so the acceptance waits until no other ask of the
+   * round is open: the plan the user accepts is the plan that runs.
    */
-  planResult.questions.forEach((brief) => {
-    const key = questionKey(PLANNER_QUESTION_KIND, [run.pass, brief.problem, brief.options.map((option) => [option.id, option.summary])]);
-    resolveDecision(PLANNER_QUESTION_KIND, brief, key, run, resolution);
-  });
-  resolvePlanAcceptance(plan, run, resolution);
+  planResult.questions.forEach((brief) => resolveDecision(PLANNER_QUESTION_KIND, brief, run.pass, run, resolution));
+  const acceptance = resolvePlanAcceptance(plan, run, resolution);
+  const acceptanceAsk = resolution.asks[resolution.asks.length - 1];
   resolution.freshness = resolveTrunkFreshness(facts, run, resolution);
   resolveExternalEffects(plan, run, resolution);
+  if (acceptance === 'ask' && resolution.asks.length > 1) {
+    resolution.asks = resolution.asks.filter((ask) => ask !== acceptanceAsk);
+  }
   return resolution;
 }
 
@@ -1402,6 +1416,7 @@ async function runPlanningPass(run, facts, replan) {
   phase('Plan');
   let resultSchema = PLAN_RESULT_SCHEMA;
   let shownAsks = [];
+  let shownResult;
   const settledKinds = new Set();
   let planResult = await agent(addResumeNote(buildPlanPrompt(run.request, facts, replan), run), plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
   for (;;) {
@@ -1411,6 +1426,9 @@ async function runPlanningPass(run, facts, replan) {
     }
     if (shownAsks.length > 0) {
       markSettledAsks(planResult.settled, shownAsks, run, settledKinds);
+      if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
+        planResult = shownResult;
+      }
     }
     const resolution = resolvePlanAsks(planResult, facts, run);
     if (resolution.asks.length === 0) {
@@ -1418,10 +1436,12 @@ async function runPlanningPass(run, facts, replan) {
       return { plan: planResult.plan, freshness: resolution.freshness };
     }
     /*
-     * INVARIANT: these three kinds are keyed on values the revise step
-     * cannot rewrite, so one a reply settled coming back in its pass is a
-     * workflow defect. The check runs before canPause, so it never pauses
-     * and never counts a round toward pauseLimit() (issue 434).
+     * INVARIANT: a settled trunk question keeps its rendered text for the
+     * whole run, and a settled plan acceptance restores the shown plan
+     * result above, so its key holds again. One of these three kinds a
+     * reply settled coming back in its pass is a workflow defect. The check
+     * runs before canPause, so it never pauses and never counts a round
+     * toward pauseLimit() (issue 434).
      */
     const resettled = resolution.asks.find((ask) => settledKinds.has(ask.kind) && [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, TRUNK_STALE_KIND].includes(ask.kind));
     if (resettled !== undefined) {
@@ -1439,6 +1459,7 @@ async function runPlanningPass(run, facts, replan) {
     run.replies.push(reply);
     phase('Revise');
     shownAsks = resolution.asks;
+    shownResult = planResult;
     resultSchema = buildReviseResultSchema(shownAsks);
     const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));

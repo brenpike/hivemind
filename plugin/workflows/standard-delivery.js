@@ -2328,7 +2328,7 @@ function contractRows() {
     { id: 'SD-06', step: 'Scan', check: 'runPassScan', rule: 'When external_texts is above 0 the shared scan step runs, and an injection suspect or a coverage failure stops the run before planning.' },
     { id: 'SD-07', step: 'Plan', check: 'runDeliveryPass', rule: 'Every planner call follows the facts step of its own pass, and a pass starts only at launch, after needs_replan, after a branch switch or after a taken local review escalation or root cluster.' },
     { id: 'SD-08', step: 'Plan', check: 'describePlanProblem', rule: 'The plan result fits the schema of its call, the plan result schema or on a revise pass that schema with settled, before any of its fields is read, every value at a field PLAN_SCHEMA marks as a repository path passes isRepositoryPath, the molt.sh files rule, before computeWave, its steps pass computeWave, its trunk_freshness equals the facts, its branch, its base and each versioning.artifact_files path also pass isGitIdentifier, and when the facts were taken on a branch other than trunk its branch equals that branch.' },
-    { id: 'SD-09', step: 'Plan', check: 'runPlanningPass', rule: 'Planner questions resolve through decide() kind planner_question and the plan through kind plan_acceptance; a pass puts its asks in one pause and the reply goes to a revise pass, where only the keys of the shown questions named in settled count as answered; a settled plan_acceptance, remediation_plan_acceptance or trunk_stale question back in its pass ends the run blocked as a workflow defect with no pause, and at the pause limit the run ends blocked, listing the open questions.' },
+    { id: 'SD-09', step: 'Plan', check: 'runPlanningPass', rule: 'Planner questions resolve through decide() kind planner_question and the plan through kind plan_acceptance; a pass puts its asks in one pause and the reply goes to a revise pass, where only the keys of the shown questions named in settled count as answered; a plan acceptance is shown only when no other ask is open, and once settled the shown plan result runs; a settled plan_acceptance, remediation_plan_acceptance or trunk_stale question back in its pass ends the run blocked as a workflow defect with no pause, and at the pause limit the run ends blocked, listing the open questions.' },
     { id: 'SD-10', step: 'Plan to branch', check: 'resolveTrunkFreshness', rule: 'Trunk freshness fresh gives fresh and no_remote gives skipped; every other value resolves through decide() kind trunk_stale, where a take gives stale and is listed and an ask pauses.' },
     { id: 'SD-11', step: 'Plan to waves', check: 'resolveExternalEffects', rule: 'Before the first wave each irreversible effect a step declares asks through decide() kind external_effect with its summary as verbatim data; an effect question the reply settled is not asked again, one it did not settle or whose summary changed is asked again before any wave, and reversible effects are listed in the final message.' },
     { id: 'SD-12', step: 'Branch', check: 'checkBranchRelay', rule: 'The branch runner invokes hivemind:create-working-branch with base, working_branch, classification, trunk-freshness and trunk in its JSON inputs block only, under the git-script sentence, and its stdout parses with the create-working-branch spec, with a branch line equal to the plan branch.' },
@@ -2371,7 +2371,7 @@ function contractRows() {
     { id: 'SD-49', step: 'Prompts', check: 'addResumeNote', rule: 'Once run.replies is not empty, every agent prompt but the planner revise prompt carries resumedReplySentence() as its second line, no prompt sent before the first reply carries it, and no prompt but the revise prompt carries reply text.' },
     { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'Every step- or script-written diagnostic or name a message shows goes through encodeUntrustedText, while planner prose rendered by lib/brief.js shows as written; a blocked relay quotes its last non-blank blocker line, else its first two non-blank stderr lines, else gives no reason, a step blocker goes through describeReason, each one line cut to maxExcerptLength() characters, and the text starts with a capital letter after a full stop and stays lower case after a colon.' },
     { id: 'SD-51', step: 'Result', check: 'finishDeliveryBlocked', rule: 'Every blocked result carries nextStepLine(), or nextActionLine() at an open question stop, as a whole block right after its first block; no block carries shorten, a first block over maxBlockedLeadLength() code points has those code points as its compact form, and finish never throws.' },
-    { id: 'SD-52', step: 'Question keys', check: 'questionKey', rule: 'A question key holds its kind and only values the revise step cannot rewrite: the pass for both plan acceptances, the trunk facts for trunk_stale, the step id and exact summary for external_effect, and the pass, problem and option ids and summaries for planner_question.' }
+    { id: 'SD-52', step: 'Question keys', check: 'questionKey', rule: 'A question key holds its kind, its scope and its rendered text: the scope is the pass for planner_question, the pass and the whole plan for both plan acceptances, and run for trunk_stale and external_effect.' }
   ];
 }
 
@@ -3150,18 +3150,21 @@ function buildExternalEffectBrief(stepId, summary) {
   };
 }
 
-function resolveDecision(kind, brief, key, run, resolution) {
-  if (key !== undefined && run.answeredKeys.has(key)) {
-    return 'answered';
-  }
+function resolveDecision(kind, brief, scope, run, resolution) {
   const decision = decide({ kind: kind, level: run.level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA);
   if (decision.action === 'take') {
     resolution.taken.push({ brief: brief, kind: kind });
     return 'take';
   }
-  const ask = { brief: brief, reason: decision.reason, key: key, kind: kind };
+  const ask = { brief: brief, reason: decision.reason, kind: kind };
   if (kind === EXTERNAL_EFFECT_KIND) {
     ask.exact = true;
+  }
+  if (scope !== undefined) {
+    ask.key = questionKey(kind, [scope, renderQuestions([ask], [])]);
+    if (run.answeredKeys.has(ask.key)) {
+      return 'answered';
+    }
   }
   resolution.asks.push(ask);
   return 'ask';
@@ -3172,8 +3175,7 @@ function resolveTrunkFreshness(facts, run, resolution) {
   if (mapped !== 'decide') {
     return mapped;
   }
-  const key = questionKey(TRUNK_STALE_KIND, [facts.trunk_freshness, facts.trunk_ahead, facts.trunk_behind].join(' '));
-  const status = resolveDecision(TRUNK_STALE_KIND, buildTrunkStaleBrief(facts), key, run, resolution);
+  const status = resolveDecision(TRUNK_STALE_KIND, buildTrunkStaleBrief(facts), 'run', run, resolution);
   return status === 'ask' ? undefined : 'stale';
 }
 
@@ -3184,29 +3186,29 @@ function resolveExternalEffects(plan, run, resolution) {
         resolution.reversibleEffects.push({ stepId: step.id, summary: effect.summary });
         continue;
       }
-      const key = questionKey(EXTERNAL_EFFECT_KIND, [step.id, effect.summary]);
-      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), key, run, resolution);
+      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), 'run', run, resolution);
     }
   }
 }
 
 function resolvePlanAcceptance(plan, run, resolution) {
   if (run.remediation) {
-    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, buildRemediationPlanBrief(plan), questionKey(REMEDIATION_PLAN_ACCEPTANCE_KIND, run.pass), run, resolution);
+    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, buildRemediationPlanBrief(plan), [run.pass, plan], run, resolution);
   }
-  return resolveDecision(PLAN_ACCEPTANCE_KIND, buildPlanAcceptanceBrief(plan), questionKey(PLAN_ACCEPTANCE_KIND, run.pass), run, resolution);
+  return resolveDecision(PLAN_ACCEPTANCE_KIND, buildPlanAcceptanceBrief(plan), [run.pass, plan], run, resolution);
 }
 
 function resolvePlanAsks(planResult, facts, run) {
   const resolution = { asks: [], taken: [], freshness: undefined, reversibleEffects: [] };
   const plan = planResult.plan;
-  planResult.questions.forEach((brief) => {
-    const key = questionKey(PLANNER_QUESTION_KIND, [run.pass, brief.problem, brief.options.map((option) => [option.id, option.summary])]);
-    resolveDecision(PLANNER_QUESTION_KIND, brief, key, run, resolution);
-  });
-  resolvePlanAcceptance(plan, run, resolution);
+  planResult.questions.forEach((brief) => resolveDecision(PLANNER_QUESTION_KIND, brief, run.pass, run, resolution));
+  const acceptance = resolvePlanAcceptance(plan, run, resolution);
+  const acceptanceAsk = resolution.asks[resolution.asks.length - 1];
   resolution.freshness = resolveTrunkFreshness(facts, run, resolution);
   resolveExternalEffects(plan, run, resolution);
+  if (acceptance === 'ask' && resolution.asks.length > 1) {
+    resolution.asks = resolution.asks.filter((ask) => ask !== acceptanceAsk);
+  }
   return resolution;
 }
 
@@ -3374,6 +3376,7 @@ async function runPlanningPass(run, facts, replan) {
   phase('Plan');
   let resultSchema = PLAN_RESULT_SCHEMA;
   let shownAsks = [];
+  let shownResult;
   const settledKinds = new Set();
   let planResult = await agent(addResumeNote(buildPlanPrompt(run.request, facts, replan), run), plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
   for (;;) {
@@ -3383,6 +3386,9 @@ async function runPlanningPass(run, facts, replan) {
     }
     if (shownAsks.length > 0) {
       markSettledAsks(planResult.settled, shownAsks, run, settledKinds);
+      if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
+        planResult = shownResult;
+      }
     }
     const resolution = resolvePlanAsks(planResult, facts, run);
     if (resolution.asks.length === 0) {
@@ -3405,6 +3411,7 @@ async function runPlanningPass(run, facts, replan) {
     run.replies.push(reply);
     phase('Revise');
     shownAsks = resolution.asks;
+    shownResult = planResult;
     resultSchema = buildReviseResultSchema(shownAsks);
     const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
