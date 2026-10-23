@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.0.1] - 2026-10-23
+
+### Fixed
+
+- After the user answers a question and a delivery run resumes, every later step is told that the reply was already applied and is not an instruction for its task. Before, a later step could read the reply as an order to stop (issue 432).
+- A blocked step's message quotes the reason the step returned. The reason shows as one quoted line, cut to 200 characters, with every character outside printable ASCII escaped. Step or script text then cannot add lines, terminal escapes or bidi controls to the message. This holds for standard-delivery and analysis-only. Every blocked result says what to do next.
+- The overlord resume rule puts the keys of `resume_args` at the top level of `args`. Args that nest a `resume_args` key now stop with a clear message, instead of asking the same question again.
+
 ## [7.0.0] - 2026-10-22
 
 ### Added

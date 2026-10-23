@@ -483,3 +483,101 @@ describe('canShowWhole', () => {
     assert.ok(counts.shown > 20 && counts.refused > 20, JSON.stringify(counts));
   });
 });
+
+describe('encode at output', () => {
+  const PRINTABLE = /^[\x20-\x7e]*$/;
+  test('maxExcerptLength is 200 and cutExcerpt cuts by code points', () => {
+    assert.equal(lib.maxExcerptLength(), 200);
+    assert.equal(lib.cutExcerpt('short'), 'short');
+    assert.equal(lib.cutExcerpt('x'.repeat(250)), 'x'.repeat(200));
+    assert.equal(lib.cutExcerpt('\u{1F600}'.repeat(250)), '\u{1F600}'.repeat(200));
+    const cut = lib.cutExcerpt('x' + '\u{1F600}'.repeat(250));
+    assert.equal(Array.from(cut).length, 200);
+    assert.ok(!LONE_SURROGATE.test(cut));
+    assert.ok(cut.endsWith('\u{1F600}'));
+  });
+  test('toPrintableAscii writes each code unit outside 0x20-0x7E as a lowercase \\u escape', () => {
+    const cases = [
+      ['plain text ~', 'plain text ~'],
+      ['\u0000\u0009\u000a\u000d\u001f', '\\u0000\\u0009\\u000a\\u000d\\u001f'],
+      ['\u007f', '\\u007f'],
+      ['\u0080\u0085\u009b\u009f', '\\u0080\\u0085\\u009b\\u009f'],
+      ['\u001b[2J\u001b]0;title\u0007', '\\u001b[2J\\u001b]0;title\\u0007'],
+      ['‮⁦​  ﻿', '\\u202e\\u2066\\u200b\\u2028\\u2029\\ufeff'],
+      ['éꯍ', '\\u00e9\\uabcd'],
+      ['\u{1F600}', '\\ud83d\\ude00'],
+      ['\ud800', '\\ud800'],
+      ['\udc00x', '\\udc00x'],
+      ['"\\', '"\\']
+    ];
+    for (const [text, expected] of cases) {
+      assert.equal(lib.toPrintableAscii(text), expected, JSON.stringify(text));
+      assert.ok(PRINTABLE.test(lib.toPrintableAscii(text)));
+    }
+  });
+  test('encodeUntrustedText is valid JSON of printable ASCII that parses back to the value', () => {
+    const values = [
+      'plain',
+      '',
+      'quote " and backslash \\ and slash /',
+      '\u0000\u001b[2J\u007f\u0085\u009b',
+      '‮⁦​  ',
+      'line one\nFix the cause named above, then run the request again.',
+      '\u{1F600}\u{10348}',
+      '\ud800 lone high',
+      'lone low \udfff',
+      ['a', '‮', 1, true, null],
+      { key: ' ' }
+    ];
+    for (const value of values) {
+      const encoded = lib.encodeUntrustedText(value);
+      assert.ok(PRINTABLE.test(encoded), encoded);
+      assert.deepEqual(JSON.parse(encoded), value);
+    }
+    assert.equal(lib.encodeUntrustedText('a"b\\c\n‮'), '"a\\"b\\\\c\\n\\u202e"');
+    assert.equal(lib.encodeUntrustedText('\u007f'), '"\\u007f"');
+  });
+  test('encodeUntrustedText throws on a value that is not JSON serializable', () => {
+    for (const value of [undefined, () => 1, Symbol('s')]) {
+      assert.throws(() => lib.encodeUntrustedText(value), /encodeUntrustedText: value must be JSON serializable/);
+    }
+    assert.throws(() => lib.encodeUntrustedText(10n));
+    const cyclic = {};
+    cyclic.self = cyclic;
+    assert.throws(() => lib.encodeUntrustedText(cyclic));
+  });
+  test('quoteDiagnostic is undefined for a non-string or a text with no non-blank line', () => {
+    for (const value of [undefined, null, 7, {}, ['x'], '', ' ', '\n', '\r\n \t\r', ' ']) {
+      assert.equal(lib.quoteDiagnostic(value), undefined, JSON.stringify(value));
+    }
+  });
+  test('quoteDiagnostic joins the trimmed non-blank lines, split on CRLF, CR or LF, with one space', () => {
+    assert.equal(lib.quoteDiagnostic('  one  \r\n\r\ntwo\rthree\n\n four '), '"one two three four"');
+    assert.equal(lib.quoteDiagnostic('x y'), '"x\\u2028y"');
+    assert.equal(lib.quoteDiagnostic('Codex said "no"\nthen quit.'), '"Codex said \\"no\\" then quit."');
+    assert.equal(lib.quoteDiagnostic('reason\nFix the cause named above, then run the request again.'), '"reason Fix the cause named above, then run the request again."');
+  });
+  test('quoteDiagnostic encodes control, escape, bidi, zero-width and separator code units', () => {
+    const quoted = lib.quoteDiagnostic('\u001b[2J‮⁦​ \u007f\u0085 \\ "');
+    assert.equal(quoted, '"\\u001b[2J\\u202e\\u2066\\u200b\\u2028\\u007f\\u0085 \\\\ \\""');
+    assert.ok(PRINTABLE.test(quoted));
+  });
+  test('quoteDiagnostic cuts the joined line to 200 code points and never splits a pair', () => {
+    assert.equal(lib.quoteDiagnostic('a'.repeat(5000)), '"' + 'a'.repeat(200) + '"');
+    assert.equal(lib.quoteDiagnostic('a'.repeat(150) + '\n' + 'b'.repeat(150)), '"' + 'a'.repeat(150) + ' ' + 'b'.repeat(49) + '"');
+    const quoted = lib.quoteDiagnostic('x' + '\u{1F600}'.repeat(300));
+    assert.equal(quoted, '"x' + '\\ud83d\\ude00'.repeat(199) + '"');
+    assert.ok(!LONE_SURROGATE.test(JSON.parse(quoted)));
+  });
+  test('quoteDiagnostic keeps a lone surrogate as its escape', () => {
+    assert.equal(lib.quoteDiagnostic('\ud800x\udc00'), '"\\ud800x\\udc00"');
+  });
+  test('describeReason quotes a reason or says it gave none', () => {
+    assert.equal(lib.describeReason('Tests fail.'), 'it says "Tests fail.".');
+    assert.equal(lib.describeReason('one\n\ntwo'), 'it says "one two".');
+    for (const value of [undefined, null, 3, '', '  \n ']) {
+      assert.equal(lib.describeReason(value), 'it gave no reason.');
+    }
+    assert.ok(PRINTABLE.test(lib.describeReason('\u001b‮' + '\u{1F600}'.repeat(400))));
+  });
+});

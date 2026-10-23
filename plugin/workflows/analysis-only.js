@@ -1278,6 +1278,39 @@ function noticeLength(value) {
     + 4 * countCharacter(jsonText, '&');
 }
 
+function maxExcerptLength() {
+  return 200;
+}
+
+function cutExcerpt(text) {
+  return Array.from(text).slice(0, maxExcerptLength()).join('');
+}
+
+function toPrintableAscii(text) {
+  return text.replace(/[^\x20-\x7e]/g, (unit) => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0'));
+}
+
+function encodeUntrustedText(value) {
+  const jsonText = JSON.stringify(value);
+  if (typeof jsonText !== 'string') {
+    throw new Error('encodeUntrustedText: value must be JSON serializable');
+  }
+  return toPrintableAscii(jsonText);
+}
+
+function quoteDiagnostic(text) {
+  if (typeof text !== 'string') {
+    return undefined;
+  }
+  const textLines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter((line) => line !== '');
+  return textLines.length === 0 ? undefined : encodeUntrustedText(cutExcerpt(textLines.join(' ')));
+}
+
+function describeReason(text) {
+  const quoted = quoteDiagnostic(text);
+  return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
+}
+
 function canCarry(resumeArgs) {
   const emptyPause = { needs_user: true, resume_args: resumeArgs, message: '' };
   return noticeLength(emptyPause) <= Math.floor(noticeBudget() / 2);
@@ -1954,6 +1987,9 @@ function readReferences(argsObject, runNoun) {
 }
 
 function readLaunchInputs(argsObject, runNoun) {
+  if (Object.prototype.hasOwnProperty.call(argsObject, 'resume_args')) {
+    return { problem: 'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so ' + describeRunNoun(runNoun) + ' did not start.' };
+  }
   const trunkInput = readTrunk(argsObject, runNoun);
   if (trunkInput.problem !== undefined) {
     return trunkInput;
@@ -2223,7 +2259,7 @@ async function runScanStep(facts, runNoun) {
 function renderSuspectLine(result) {
   const category = isNonEmptyString(result.pattern_category) ? result.pattern_category : 'no category given';
   const excerpt = typeof result.field_excerpt === 'string' ? Array.from(result.field_excerpt).slice(0, scanExcerptLimit()).join('') : '';
-  return '- ' + JSON.stringify(result.item_ref) + ' (' + category + '): ' + JSON.stringify(excerpt);
+  return '- ' + encodeUntrustedText(result.item_ref) + ' (' + category + '): ' + encodeUntrustedText(excerpt);
 }
 
 function readTextIndex(itemRef) {
@@ -2370,7 +2406,7 @@ function describeFactsProblem(facts) {
     return malformedFactsMessage(RUN_NOUN);
   }
   if (facts.outcome === 'blocked') {
-    return blockedFactsMessage(RUN_NOUN, facts.blocker);
+    return blockedFactsMessage(RUN_NOUN, describeReason(facts.blocker));
   }
   const isWellFormed = matchesFactsLine('facts_file', facts.facts_file)
     && matchesFactsLine('facts_lines', facts.facts_lines)
@@ -2404,8 +2440,7 @@ function describeReplyProblem(analysis) {
     return 'The planner returned no result, so the analysis stopped.';
   }
   if (analysis.outcome === 'blocked') {
-    const blocker = isNonEmptyString(analysis.blocker) ? analysis.blocker : 'it gave no reason.';
-    return 'The planner could not do the analysis: ' + blocker;
+    return 'The planner could not do the analysis: ' + describeReason(analysis.blocker);
   }
   if (analysis.outcome !== 'complete') {
     return 'The planner returned an unknown outcome, so the analysis stopped.';

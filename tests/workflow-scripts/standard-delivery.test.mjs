@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs, loadWorkflowSource } from './harness.mjs';
-import { LIB_FILES, buildWorkflow, builtPathFor, isDraftWorkflow } from '../../tools/build_workflows.mjs';
+import { LIB_FILES, buildWorkflow, builtPathFor, isDraftWorkflow, stripCommentsAndStrings } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
@@ -51,11 +51,16 @@ const MINOR_BUMP = { dominant_row: 'MINOR', verdict: 'bump_required', bump_type:
 const MALFORMED_FACTS = 'The facts step returned malformed facts, so the delivery stopped before planning.';
 const NOT_READY = 'The branch is not ready for delivery, so the delivery stopped before planning:';
 const PR_URL = 'https://github.com/o/r/pull/7';
+const NEXT_STEP_LINE = 'Fix the cause named above, then run the request again.';
 const scratchRoots = [];
 
 after(() => {
   scratchRoots.forEach((root) => rmSync(root, { recursive: true, force: true }));
 });
+
+function withNextStep(message) {
+  return message + '\n\n' + NEXT_STEP_LINE;
+}
 
 function readText(path) {
   return readFileSync(path, 'utf8').replace(/\r/g, '');
@@ -664,7 +669,7 @@ function readReviewerContract(heading) {
 }
 
 function reviewMessage(lead, fieldLines) {
-  return [lead + ', so the delivery stopped before the pull request. Each value below is JSON-encoded as the review returned it.', ...fieldLines].join('\n');
+  return [lead + ', so the delivery stopped before the pull request. Each value below is quoted as the review returned it, encoded as JSON in printable ASCII.', ...fieldLines].join('\n');
 }
 
 /**
@@ -705,27 +710,33 @@ const ROW_TESTS = {
   'SD-01': () => {
     test('args undefined finishes blocked with no agent call', async () => {
       const run = await runWorkflow(undefined, {});
-      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'No request was given, so there is nothing to deliver.' });
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('No request was given, so there is nothing to deliver.') });
       assert.deepEqual(run.calls, []);
     });
     test('a blank request blocks with no agent call', async () => {
       const run = await runWorkflow({ request: '  ' }, {});
-      assert.equal(run.result.message, 'No request was given, so there is nothing to deliver.');
+      assert.equal(run.result.message, withNextStep('No request was given, so there is nothing to deliver.'));
       assert.deepEqual(run.calls, []);
     });
     for (const trunk of ['-main', 'ma..in', 'main branch', 'ma$in', 'main\n']) {
       test(`trunk ${JSON.stringify(trunk)} fails isGitIdentifier and blocks with no agent call`, async () => {
         const run = await runWorkflow({ request: REQUEST, trunk: trunk }, {});
-        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The trunk launch arg is not a safe git branch name, so the delivery did not start.' });
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The trunk launch arg is not a safe git branch name, so the delivery did not start.') });
         assert.deepEqual(run.calls, []);
       });
     }
     test('a blank trunk and bad references block through args.js', async () => {
       const blankTrunk = await runWorkflow({ request: REQUEST, trunk: ' ' }, {});
-      assert.equal(blankTrunk.result.message, 'The trunk launch arg must be a non-blank string, so the delivery did not start.');
+      assert.equal(blankTrunk.result.message, withNextStep('The trunk launch arg must be a non-blank string, so the delivery did not start.'));
       const badReferences = await runWorkflow({ request: REQUEST, references: ['x'] }, {});
-      assert.equal(badReferences.result.message, 'The references launch arg must be a list of issue or pull request numbers, so the delivery did not start.');
+      assert.equal(badReferences.result.message, withNextStep('The references launch arg must be a list of issue or pull request numbers, so the delivery did not start.'));
       assert.deepEqual(blankTrunk.calls.concat(badReferences.calls), []);
+    });
+    test('args that nest resume_args block through the args.js guard with no agent call', async () => {
+      const run = await runWorkflow({ ...LAUNCH, resume_args: { answers: { 'round-1': 'SECRET_REPLY_ZQ' } } }, happyResults());
+      assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so the delivery did not start.') });
+      assert.deepEqual(run.calls, []);
+      assert.ok(main.contractRows().find((row) => row.id === 'SD-01').rule.includes('resume_args guard'));
     });
     test('a string launch takes the default trunk and no references', async () => {
       const run = await runWorkflow(REQUEST, happyResults());
@@ -784,7 +795,7 @@ const ROW_TESTS = {
     }
     test('a blocked relay names its blocker line', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'blocked', stderr: 'blocker: not a work tree\n' } });
-      assertBlockedBeforeWaves(run, 'The facts step was blocked, so the delivery stopped before planning: blocker: not a work tree');
+      assertBlockedBeforeWaves(run, 'The facts step was blocked, so the delivery stopped before planning: its blocker line says "not a work tree".');
     });
   },
   'SD-03': () => {
@@ -839,7 +850,7 @@ const ROW_TESTS = {
     }
     test('each stop of a list gets its own line, in order', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ delivery: 'stop', delivery_stops: 'operation_in_progress,dirty_paths' }) });
-      assert.equal(run.result.message, [NOT_READY, '- ' + main.deliveryStopLine('operation_in_progress'), '- ' + main.deliveryStopLine('dirty_paths')].join('\n'));
+      assert.equal(run.result.message, withNextStep([NOT_READY, '- ' + main.deliveryStopLine('operation_in_progress'), '- ' + main.deliveryStopLine('dirty_paths')].join('\n')));
     });
     test('the dirty paths line says the run never commits, stashes or discards an edit it did not make', () => {
       assert.ok(main.deliveryStopLine('dirty_paths').includes('The run never commits, stashes or discards an edit it did not make'));
@@ -945,7 +956,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.ok(!callOf(run, 'plan-1').prompt.includes('<replan>'));
       assert.ok(readDataBlock(callOf(run, 'plan-2').prompt, 'replan').startsWith('The branch step switched'));
-      assert.equal(readDataBlock(callOf(run, 'plan-3').prompt, 'replan'), 'Step "STEP-001" needs a new plan: The API moved.');
+      assert.equal(readDataBlock(callOf(run, 'plan-3').prompt, 'replan'), 'Step "STEP-001" needs a new plan: it says "The API moved.".');
     });
     test('a taken local review escalation starts a pass with the facts step of its own', async () => {
       const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION));
@@ -958,7 +969,7 @@ const ROW_TESTS = {
   'SD-08': () => {
     const schemaProblem = 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.';
     for (const [label, result, message] of [
-      ['a blocked planner', { outcome: 'blocked', blocker: 'No such module.', questions: [] }, 'The planner could not plan the delivery: No such module.'],
+      ['a blocked planner', { outcome: 'blocked', blocker: 'No such module.', questions: [] }, 'The planner could not plan the delivery: it says "No such module.".'],
       ['a blocked planner with no reason', { outcome: 'blocked', questions: [] }, 'The planner could not plan the delivery: it gave no reason.'],
       ['a blocked result that fails the schema', { outcome: 'blocked', blocker: 'No such module.' }, schemaProblem],
       ['no result', null, 'The planner returned no result, so the delivery stopped.'],
@@ -1400,7 +1411,7 @@ const ROW_TESTS = {
     test('a blocked branch step names its blocker line', async () => {
       const results = { 'facts-1': factsRelay(), 'plan-1': planResult(), 'branch-1': { outcome: 'blocked', stderr: 'blocker: the working tree is dirty\n' } };
       const run = await runWorkflow(LAUNCH, results);
-      assert.equal(run.result.message.split('\n\n')[0], 'The branch step was blocked, so the delivery stopped before any wave. blocker: the working tree is dirty');
+      assert.equal(run.result.message.split('\n\n')[0], 'The branch step was blocked, so the delivery stopped before any wave. Its blocker line says "the working tree is dirty".');
     });
     test('the warning texts are the fixed texts of create-working-branch.sh', () => {
       const scriptText = readText(createBranchPath);
@@ -1425,7 +1436,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow({ request: REQUEST, trunk: 'refs/heads/main' }, results);
       assertBlockedBeforeWaves(run);
-      assert.ok(run.result.message.startsWith('The branch step was blocked, so the delivery stopped before any wave. blocker: working_branch equals trunk'), run.result.message);
+      assert.ok(run.result.message.startsWith('The branch step was blocked, so the delivery stopped before any wave. Its blocker line says "working_branch equals trunk".'), run.result.message);
     });
   },
   'SD-13': () => {
@@ -1609,7 +1620,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: stderr } }));
       assert.equal(run.result.outcome, 'blocked');
       assert.ok(run.result.message.startsWith([
-        'The commit step was blocked, so the delivery stopped: blocker: the working tree has dirty paths outside files',
+        'The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files".',
         'Dirty paths outside the files of the wave:',
         '- "notes.txt"',
         '- "tmp/x"'
@@ -1619,7 +1630,7 @@ const ROW_TESTS = {
       const scratch = makeScratchRepo();
       const run = await runWorkflow(LAUNCH, realResults(scratch, { 'work-1-STEP-001': realWorker(scratch, 'stray.txt') }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: blocker: the working tree has dirty paths outside files\nDirty paths outside the files of the wave:\n- "stray.txt"'), run.result.message);
+      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files".\nDirty paths outside the files of the wave:\n- "stray.txt"'), run.result.message);
     });
     test('real molt.sh: a wave with nothing to commit reports committed false', async () => {
       const scratch = makeScratchRepo();
@@ -1636,7 +1647,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run).slice(-2), ['work-1-STEP-001', 'commit-1-1']);
       assert.ok(run.result.message.startsWith([
         'A worker did not finish its step, so the delivery stopped after the commit of its wave.',
-        'Step "STEP-001" was blocked: Tests fail.',
+        'Step "STEP-001" was blocked: it says "Tests fail.".',
         'The wave was committed as ' + OTHER + ', so that commit can hold partial edits of the steps above.'
       ].join('\n')), run.result.message);
     });
@@ -1681,7 +1692,7 @@ const ROW_TESTS = {
       assert.equal(main.maxReplans(), 3);
       const run = await runWorkflow(LAUNCH, replanResults(4));
       assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith('A worker asked for a new plan after 3 replans, so the delivery stopped.\nStep "STEP-001" needs a new plan: The API moved again.'), run.result.message);
+      assert.ok(run.result.message.startsWith('A worker asked for a new plan after 3 replans, so the delivery stopped.\nStep "STEP-001" needs a new plan: it says "The API moved again.".'), run.result.message);
       assert.deepEqual(labelsOf(run).slice(-3), ['work-4-STEP-001', 'work-4-STEP-002', 'commit-4-1']);
     });
     test('a blocked worker wins over needs_replan in the same wave', async () => {
@@ -1892,7 +1903,7 @@ const ROW_TESTS = {
     test('a blocked bump-type relay names its blocker line', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'bump-type-1-1': { outcome: 'blocked', stderr: 'blocker: base ref does not resolve to a commit\n' } }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.equal(run.result.message.split('\n\n')[0], 'The bump step was blocked, so the delivery stopped before validation. blocker: base ref does not resolve to a commit');
+      assert.equal(run.result.message.split('\n\n')[0], 'The bump step was blocked, so the delivery stopped before validation. Its blocker line says "base ref does not resolve to a commit".');
     });
     const goodStdout = bumpStdout();
     for (const [label, relay] of [
@@ -2080,7 +2091,7 @@ const ROW_TESTS = {
       assert.ok(run.result.message.includes('Commits this run made:\n- ' + OTHER + '\n- ' + THIRD), run.result.message);
     });
     for (const [label, result, reason] of [
-      ['a blocked bump drone', { outcome: 'blocked', blocker: 'VERSION holds no version.' }, 'VERSION holds no version.'],
+      ['a blocked bump drone', { outcome: 'blocked', blocker: 'VERSION holds no version.' }, 'it says "VERSION holds no version.".'],
       ['a null bump drone result', null, 'it returned no usable result.']
     ]) {
       test(`${label} stops the run after the bump commit`, async () => {
@@ -2136,7 +2147,7 @@ const ROW_TESTS = {
     test('blocked stops the run after the validation commit', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' } }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.equal(run.result.message.split('\n\n')[0], 'The validation step was blocked, so the delivery stopped before the pull request: npm is not installed.');
+      assert.equal(run.result.message.split('\n\n')[0], 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is not installed.".');
       assert.equal(labelsOf(run).at(-1), 'validate-commit-1-1');
     });
     for (const [label, result] of [['no result', null], ['failed with no failures', { outcome: 'failed' }], ['an extra field', { outcome: 'passed', note: 'x' }]]) {
@@ -2154,7 +2165,7 @@ const ROW_TESTS = {
       };
       const run = await runWorkflow(LAUNCH, realResults(scratch, { 'validate-1-1': dirtyValidation }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: blocker: the working tree has dirty paths outside files\nDirty paths outside the files of the validation run:\n- "coverage.txt"'), run.result.message);
+      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files".\nDirty paths outside the files of the validation run:\n- "coverage.txt"'), run.result.message);
     });
   },
   'SD-26': () => {
@@ -2216,7 +2227,7 @@ const ROW_TESTS = {
     test('a blocked fix round stops the run after its commit', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'The test needs a database.' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith('The validation fix round was blocked, so the delivery stopped after its commit: The test needs a database.\nIt left nothing to commit, so the branch head stays ' + OTHER + '.'), run.result.message);
+      assert.ok(run.result.message.startsWith('The validation fix round was blocked, so the delivery stopped after its commit: it says "The test needs a database.".\nIt left nothing to commit, so the branch head stays ' + OTHER + '.'), run.result.message);
       assert.equal(labelsOf(run).at(-1), 'fix-commit-1-1');
     });
     test('a null fix result commits an empty file list and stops', async () => {
@@ -2329,7 +2340,7 @@ const ROW_TESTS = {
     for (const value of ['yes', 'true', 1, 0, null, {}]) {
       test(`local_review ${JSON.stringify(value)} blocks with no agent call`, async () => {
         const run = await runWorkflow({ ...LAUNCH, local_review: value }, happyResults());
-        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The local_review launch arg must be true or false, so the delivery did not start.' });
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The local_review launch arg must be true or false, so the delivery did not start.') });
         assert.deepEqual(run.calls, []);
       });
     }
@@ -2351,7 +2362,7 @@ const ROW_TESTS = {
     for (const value of ['yes', 'true', 1, 0, null, {}]) {
       test(`draft ${JSON.stringify(value)} blocks with no agent call`, async () => {
         const run = await runWorkflow({ ...LAUNCH, draft: value }, happyResults());
-        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: 'The draft launch arg must be true or false, so the delivery did not start.' });
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The draft launch arg must be true or false, so the delivery did not start.') });
         assert.deepEqual(run.calls, []);
       });
     }
@@ -2516,7 +2527,7 @@ const ROW_TESTS = {
       const stderr = 'outside: "notes.txt"\nblocker: the working tree has dirty paths outside files\n';
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-commit-1-1': { outcome: 'blocked', stderr: stderr } }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: blocker: the working tree has dirty paths outside files\nDirty paths outside the files of the local review:\n- "notes.txt"'), run.result.message);
+      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files".\nDirty paths outside the files of the local review:\n- "notes.txt"'), run.result.message);
     });
     test('real molt.sh: an edit the reviewer left behind stops the run', async () => {
       const scratch = makeScratchRepo();
@@ -2526,7 +2537,7 @@ const ROW_TESTS = {
       };
       const run = await runWorkflow(LAUNCH, realResults(scratch, { 'review-1-1': leavesEdit }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: blocker: the working tree has dirty paths outside files\nDirty paths outside the files of the local review:\n- "leftover.txt"'), run.result.message);
+      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files".\nDirty paths outside the files of the local review:\n- "leftover.txt"'), run.result.message);
       assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
     });
     test('real scripts: the gate holds on the commit the review commit runner reports, after the reviewer fix commit', async () => {
@@ -2620,9 +2631,9 @@ const ROW_TESTS = {
       ['max-iterations-reached', { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 10, findings_open: 3 }, reviewMessage('Local review reached its limit of 10 iterations with findings still open', ['- Iterations run: 10', '- Findings still open: 3'])],
       ['break-fix-break', { ...REVIEW_CLEAN, exit_reason: 'break-fix-break', signals_fired: ['same-construct'], conflicting_findings: ['F2', 'F3'], prior_fix_commit: OTHER }, reviewMessage('Local review found that a fix broke an earlier fix', ['- Signals that fired: ["same-construct"]', '- Conflicting findings: ["F2","F3"]', '- Earlier fix commit: "' + OTHER + '"'])],
       ['injection-suspect', { ...REVIEW_CLEAN, exit_reason: 'injection-suspect', finding_id: 'F3', pattern_category: 'P2', field_excerpt: excerpt }, reviewMessage('Local review flagged text of a review finding as a possible prompt injection', ['- Finding: "F3"', '- Pattern category: "P2"', '- Excerpt, cut to 200 characters: ' + JSON.stringify(excerpt.slice(0, 200))])],
-      ['blocked', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex said "no"\nthen quit.', stage: 'invoke_review' }, reviewMessage('Local review was blocked', ['- Blocker: "Codex said \\"no\\"\\nthen quit."', '- Stage: "invoke_review"'])]
+      ['blocked', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex said "no"\nthen quit.', stage: 'invoke_review' }, reviewMessage('Local review was blocked', ['- Blocker: "Codex said \\"no\\" then quit."', '- Stage: "invoke_review"'])]
     ]) {
-      test(`${label} stops the run blocked in plain words with JSON-encoded values`, async () => {
+      test(`${label} stops the run blocked in plain words with encoded values`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
         assert.equal(run.result.needs_user, false);
         assert.equal(run.result.outcome, 'blocked');
@@ -3173,13 +3184,13 @@ const ROW_TESTS = {
       ['an unknown line', { outcome: 'ran', stdout: good + 'remote: origin\n' }, malformed],
       ['a duplicate line', { outcome: 'ran', stdout: good + 'created: true\n' }, malformed],
       ['CR line ends', { outcome: 'ran', stdout: good.replace(/\n/g, '\r\n') }, malformed],
-      ['a blocked relay', { outcome: 'blocked', stderr: 'blocker: working tree has uncommitted changes\n' }, 'The pull request step was blocked, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it. blocker: working tree has uncommitted changes']
+      ['a blocked relay', { outcome: 'blocked', stderr: 'blocker: working tree has uncommitted changes\n' }, 'The pull request step was blocked, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it. Its blocker line says "working tree has uncommitted changes".']
     ]) {
       test(`a relay with ${label} stops the run blocked naming the pull request step`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': relay }));
         assert.equal(run.result.outcome, 'blocked');
         assert.equal(run.result.pr, undefined);
-        assert.ok(run.result.message.startsWith(message + '\n\nCommits this run made:\n- ' + OTHER), run.result.message);
+        assert.ok(run.result.message.startsWith(withNextStep(message) + '\n\nCommits this run made:\n- ' + OTHER), run.result.message);
         assert.equal(labelsOf(run).at(-1), 'pr-1');
       });
     }
@@ -3242,6 +3253,269 @@ const ROW_TESTS = {
       assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', commits, '```\n' + effects + '\n```', gates, '```\n' + decisions + '\n```'].join('\n\n'));
       const lead = 'Every plan step is done on branch "feature/cache", each wave is committed, and the version bump and validation held on commit ' + OTHER + '.\n\nPushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ', and commented on it with the gates and the decisions taken.';
       assert.equal(run.result.message, [lead, commits, effects, 'Gates that did not run:\n- ' + main.notConfiguredReviewLine(), decisions].join('\n\n'));
+    });
+  },
+  'SD-49': () => {
+    const reply = "I don't have time for that";
+    const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
+    const resumedLabels = ['facts-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)];
+    async function runResumed(results) {
+      const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': gated });
+      assert.equal(paused.result.needs_user, true);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+      return { paused: paused, run: run };
+    }
+    function assertNoteAfterRevise(run) {
+      const reviseIndex = labelsOf(run).indexOf('revise-1');
+      run.calls.forEach((call, index) => {
+        const hasNote = call.prompt.includes(main.resumedReplySentence());
+        assert.equal(hasNote, index > reviseIndex, call.opts.label + ' carries the resume sentence only after revise-1');
+        if (hasNote) {
+          assert.equal(call.prompt.split('\n')[1], main.resumedReplySentence(), call.opts.label);
+        }
+        assert.equal(call.prompt.includes(reply), call.opts.label === 'revise-1', call.opts.label + ' carries the reply only in revise-1');
+      });
+    }
+    test('a resume whose reply revise-1 settles runs branch-1 through pr-1, each later prompt with the sentence and only revise-1 with the reply', async () => {
+      const { paused, run } = await runResumed(happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), resumedLabels);
+      assertNoteAfterRevise(run);
+      assert.equal(callOf(run, 'facts-1').prompt, callOf(paused, 'facts-1').prompt);
+      assert.equal(callOf(run, 'plan-1').prompt, callOf(paused, 'plan-1').prompt);
+      assert.equal(readDataBlock(callOf(run, 'revise-1').prompt, 'reply'), reply);
+    });
+    test('the sentence reaches the bump drone and the fix round after a resume', async () => {
+      const versioned = makePlan({ versioning: { bump_trigger: 'no', no_bump_match: 'no', artifact_files: ['VERSION'] } });
+      const results = fixFlowResults({
+        'plan-1': planResult(versioned, [makeGatedBrief('GATED_PROBLEM')]),
+        'revise-1': reviseResult(planResult(versioned), ['Q1']),
+        'bump-1-1': { outcome: 'complete' },
+        'bump-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }),
+        'bump-1-2': { outcome: 'complete' },
+        'bump-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' })
+      });
+      const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(versioned, [makeGatedBrief('GATED_PROBLEM')]) });
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(['bump-1-1', 'fix-1-1', 'bump-1-2'].every((label) => labelsOf(run).includes(label)), JSON.stringify(labelsOf(run)));
+      assertNoteAfterRevise(run);
+    });
+    test('the facts, scan and plan steps of a later pass carry the sentence', async () => {
+      const results = happyResults({
+        'plan-1': gated,
+        'revise-1': reviseResult(planResult(), ['Q1']),
+        'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
+        'facts-2': onPlanBranchFacts(OTHER, { external_texts: '1' }),
+        'scan-2': { results: [{ item_ref: 't1', verdict: 'clean' }] },
+        'plan-2': planResult(),
+        'branch-2': branchRelay({ created: 'false', commit: OTHER }),
+        'work-2-STEP-001': WORKER_DONE,
+        'commit-2-1': commitRelay({ commit: THIRD }),
+        ...tailResults(2, THIRD)
+      });
+      const { run } = await runResumed(results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(6, 9), ['facts-2', 'scan-2', 'plan-2']);
+      assertNoteAfterRevise(run);
+    });
+    test('a run that never paused sends no prompt with the sentence', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.ok(run.calls.every((call) => !call.prompt.includes(main.resumedReplySentence())));
+      assert.equal(main.addResumeNote('a\nb', { replies: [] }), 'a\nb');
+      assert.equal(main.addResumeNote('a\nb', { replies: ['r'] }), 'a\n' + main.resumedReplySentence() + '\nb');
+    });
+  },
+  'SD-50': () => {
+    const stderr = '\nfatal: not a git repository "x"\n  hint: run git init  \nthird line\n';
+    const quoted = 'its stderr says ' + JSON.stringify('fatal: not a git repository "x" hint: run git init') + '.';
+    const capital = 'I' + quoted.slice(1);
+    for (const [label, results, lead] of [
+      ['facts', { 'facts-1': { outcome: 'blocked', stderr: stderr } }, 'The facts step was blocked, so the delivery stopped before planning: ' + quoted],
+      ['branch', happyResults({ 'branch-1': { outcome: 'blocked', stderr: stderr } }), 'The branch step was blocked, so the delivery stopped before any wave. ' + capital],
+      ['commit', happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: stderr } }), 'The commit step was blocked, so the delivery stopped: ' + quoted],
+      ['bump-type', happyResults({ 'bump-type-1-1': { outcome: 'blocked', stderr: stderr } }), 'The bump step was blocked, so the delivery stopped before validation. ' + capital],
+      ['pull request', happyResults({ 'pr-1': { outcome: 'blocked', stderr: stderr } }), 'The pull request step was blocked, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it. ' + capital]
+    ]) {
+      test(`a blocked ${label} relay with no blocker line quotes its first two non-blank stderr lines`, async () => {
+        const run = await runWorkflow(LAUNCH, results);
+        assert.equal(run.result.outcome, 'blocked');
+        assert.equal(run.result.message.split('\n\n')[0], lead);
+      });
+    }
+    test('a blocked branch relay with a blank or missing stderr says it gave no reason', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'branch-1': { outcome: 'blocked' } }));
+      assert.equal(run.result.message.split('\n\n')[0], 'The branch step was blocked, so the delivery stopped before any wave. It gave no reason.');
+      for (const stderr of [' \n\n', '', undefined]) {
+        assert.equal(main.describeRelayBlocker(stderr, true), 'It gave no reason.', JSON.stringify(stderr));
+        assert.equal(main.describeRelayBlocker(stderr, false), 'it gave no reason.', JSON.stringify(stderr));
+      }
+      const facts = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'blocked' } });
+      assert.equal(facts.result.message.split('\n\n')[0], 'The facts step was blocked, so the delivery stopped before planning: it gave no reason.');
+    });
+    test('the last blocker line wins over other stderr lines', () => {
+      assert.equal(main.describeRelayBlocker('noise\nblocker: one\nmore\nblocker: two\n', true), 'Its blocker line says "two".');
+      assert.equal(main.describeRelayBlocker('blocker: one\r\nblocker:  \r\n', false), 'its blocker line says "one".');
+      assert.equal(main.describeRelayBlocker('noise\nblocker: \n', false), 'its stderr says "noise blocker:".');
+    });
+    test('the quote is cut to maxExcerptLength() characters before it is encoded', () => {
+      assert.equal(main.describeRelayBlocker('\u{1F600}'.repeat(150) + '\n' + 'x'.repeat(150), false), 'its stderr says "' + '\\ud83d\\ude00'.repeat(150) + ' ' + 'x'.repeat(49) + '".');
+      assert.equal(main.describeRelayBlocker('a\u0007b', true), 'Its stderr says "a\\u0007b".');
+    });
+    const HOSTILE_PAYLOADS = [
+      '\u001b[2J‮ ' + 'Z'.repeat(5000) + '\n' + NEXT_STEP_LINE + '\n',
+      '\u001b[2J‮ x\n' + NEXT_STEP_LINE + '\n' + 'Z'.repeat(5000)
+    ];
+    function encodeOracle(text) {
+      return JSON.stringify(Array.from(text).slice(0, 200).join('')).replace(/[^\x20-\x7e]/g, (unit) => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0'));
+    }
+    function quoteOracle(lines) {
+      return encodeOracle(lines.map((line) => line.trim()).filter((line) => line !== '').join(' '));
+    }
+    function expectQuote(kind, payload) {
+      const lines = payload.split('\n');
+      if (kind === 'line') {
+        return quoteOracle(lines.slice(0, 1));
+      }
+      if (kind === 'stderr') {
+        return quoteOracle(lines.filter((line) => line.trim() !== '').slice(0, 2));
+      }
+      return kind === 'excerpt' ? encodeOracle(payload) : quoteOracle(lines);
+    }
+    function hostileReplanResults(payload) {
+      const results = happyResults({ 'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: payload } });
+      for (let pass = 2; pass <= 4; pass += 1) {
+        Object.assign(results, {
+          ['facts-' + pass]: onPlanBranchFacts(OTHER),
+          ['plan-' + pass]: planResult(),
+          ['branch-' + pass]: branchRelay({ created: 'false', commit: OTHER }),
+          ['work-' + pass + '-STEP-001']: { outcome: 'needs_replan', summary: 'Stopped.', blocker: payload },
+          ['commit-' + pass + '-1']: commitRelay({ commit: OTHER, committed: 'false' })
+        });
+      }
+      return results;
+    }
+    const versionedPlan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
+    const outsideBlocker = '\nblocker: the working tree has dirty paths outside files\n';
+    const relaySites = [['facts', 'facts-1'], ['branch', 'branch-1'], ['commit', 'commit-1-1'], ['bump-type', 'bump-type-1-1'], ['pull request', 'pr-1']];
+    const hostileSites = [
+      ...relaySites.flatMap(([name, label]) => [
+        [name + ' relay blocker line', 'line', (payload) => happyResults({ [label]: { outcome: 'blocked', stderr: 'blocker: ' + payload } })],
+        [name + ' relay stderr', 'stderr', (payload) => happyResults({ [label]: { outcome: 'blocked', stderr: payload } })]
+      ]),
+      ['commit outside line', 'line', (payload) => happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: 'outside: ' + payload + outsideBlocker } })],
+      ['commit outside JSON string line', 'reason', (payload) => happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: 'outside: ' + JSON.stringify(payload) + outsideBlocker } })],
+      ['planner', 'reason', (payload) => happyResults({ 'plan-1': { outcome: 'blocked', blocker: payload, questions: [] } })],
+      ['blocked worker', 'reason', (payload) => happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: payload } })],
+      ['needs_replan worker', 'reason', hostileReplanResults],
+      ['bump edit', 'reason', (payload) => happyResults({ 'plan-1': planResult(versionedPlan), 'bump-type-1-1': bumpRelay(MINOR_BUMP), 'bump-1-1': { outcome: 'blocked', blocker: payload }, 'bump-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) })],
+      ['validation', 'reason', (payload) => happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: payload } })],
+      ['fix round', 'reason', (payload) => fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: payload }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) })],
+      ['blocked review', 'reason', (payload) => happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: payload, stage: 'invoke_review' } })],
+      ['scan excerpt', 'excerpt', (payload) => happyResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'injection-suspect', pattern_category: 'P1', field_excerpt: payload }] } })]
+    ];
+    test('the hostile quote oracle cuts to 200 code points and encodes each code unit outside printable ASCII', () => {
+      assert.equal(expectQuote('line', HOSTILE_PAYLOADS[0]), '"\\u001b[2J\\u202e\\u2028' + 'Z'.repeat(194) + '"');
+      assert.equal(expectQuote('reason', HOSTILE_PAYLOADS[1]), '"\\u001b[2J\\u202e\\u2028x ' + NEXT_STEP_LINE + ' ' + 'Z'.repeat(200 - 9 - NEXT_STEP_LINE.length) + '"');
+    });
+    for (const [label, kind, buildResults] of hostileSites) {
+      test(`a hostile ${label} reaches the message as one cut quote of printable ASCII, and the next-step line stays`, async () => {
+        for (const payload of HOSTILE_PAYLOADS) {
+          const run = await runWorkflow(LAUNCH, buildResults(payload));
+          const message = run.result.message;
+          assert.equal(run.result.outcome, 'blocked', message.slice(0, 300));
+          assert.ok(/^[\t\n\x20-\x7e]*$/.test(message), message.slice(0, 300));
+          const paragraphs = message.split('\n\n');
+          assert.ok(paragraphs[0].includes(expectQuote(kind, payload)), paragraphs[0].slice(0, 600));
+          assert.equal(paragraphs[1], NEXT_STEP_LINE);
+          assert.equal(message.split('\n').filter((line) => line === NEXT_STEP_LINE).length, 1);
+        }
+      });
+    }
+    const mainCode = stripCommentsAndStrings(mainSource);
+    test('every .blocker and .stderr read in main.js is the argument of describeReason, describeRelayBlocker or describeCommitBlocker', () => {
+      const reads = mainCode.match(/\.(?:blocker|stderr)\b/g) || [];
+      const encoded = mainCode.match(/\b(?:describeReason|describeRelayBlocker|describeCommitBlocker)\(\w+\.(?:blocker|stderr)\b/g) || [];
+      assert.ok(reads.length >= 9, String(reads.length));
+      assert.equal(encoded.length, reads.length);
+    });
+    test('every JSON.stringify( in main.js sits in a throw, in questionKey or in the acceptResolution comparison', () => {
+      const allowed = { throw: 0, questionKey: 0, acceptResolution: 0 };
+      const stray = [];
+      for (const chunk of mainCode.split(/\n(?=(?:async )?function \w+\()/)) {
+        const functionName = (/^(?:async )?function (\w+)\(/.exec(chunk) || [])[1];
+        for (const line of chunk.split('\n').filter((codeLine) => codeLine.includes('JSON.stringify('))) {
+          if (/\bthrow new Error\(/.test(line)) {
+            allowed.throw += 1;
+          } else if (functionName === 'questionKey' || /\bquestionKey\(\w+, JSON\.stringify\(/.test(line)) {
+            allowed.questionKey += 1;
+          } else if (functionName === 'acceptResolution' && /JSON\.stringify\(listed\.brief\) === JSON\.stringify\(entry\.brief\)/.test(line)) {
+            allowed.acceptResolution += 1;
+          } else {
+            stray.push(line.trim());
+          }
+        }
+      }
+      assert.deepEqual(stray, []);
+      assert.ok(allowed.throw > 0 && allowed.questionKey === 2 && allowed.acceptResolution === 1, JSON.stringify(allowed));
+    });
+    test('no reviewFieldTexts() field marked isExternal is read by name in main.js', () => {
+      const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
+      const reads = [...mainCode.matchAll(/\breview\.(\w+)/g)].map((match) => match[1]);
+      assert.ok(external.includes('blocker') && external.includes('field_excerpt') && reads.includes('exit_reason'));
+      assert.deepEqual(reads.filter((name) => external.includes(name)), []);
+      assert.ok(!/\breview\[""\]/.test(mainCode));
+    });
+  },
+  'SD-51': () => {
+    test('the next-step line is the block right after the first block of a blocked result', async () => {
+      assert.equal(main.nextStepLine(), NEXT_STEP_LINE);
+      const results = happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: 'Tests fail.' } });
+      const run = await runWorkflow(LAUNCH, results);
+      assert.equal(run.result.outcome, 'blocked');
+      const paragraphs = run.result.message.split('\n\n');
+      assert.ok(paragraphs[0].startsWith('A worker did not finish its step'), paragraphs[0]);
+      assert.equal(paragraphs[1], NEXT_STEP_LINE);
+      assert.equal(paragraphs[2], 'Commits this run made:\n- ' + OTHER);
+    });
+    test('a launch problem gets the next-step line as its second block', async () => {
+      const run = await runWorkflow({ request: REQUEST, trunk: 5 }, {});
+      assert.deepEqual(run.result.message.split('\n\n'), ['The trunk launch arg must be a non-blank string, so the delivery did not start.', NEXT_STEP_LINE]);
+    });
+    const longBlocker = 'B'.repeat(20000);
+    for (const [label, results, leadStart] of [
+      ['planner', { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: longBlocker, questions: [] } }, 'The planner could not plan the delivery: '],
+      ['worker', happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: longBlocker } }), 'A worker did not finish its step'],
+      ['branch relay', happyResults({ 'branch-1': { outcome: 'blocked', stderr: 'blocker: ' + longBlocker + '\n' } }), 'The branch step was blocked'],
+      ['validation', happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }), 'The validation step was blocked'],
+      ['fix round', fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: longBlocker }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }), 'The validation fix round was blocked'],
+      ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'Local review was blocked']
+    ]) {
+      test(`a ${label} blocker too long for the notice keeps the next-step line, without a throw`, async () => {
+        const run = await runWorkflow(LAUNCH, results);
+        assert.equal(run.failures, 0);
+        assert.equal(run.result.outcome, 'blocked');
+        const paragraphs = run.result.message.split('\n\n');
+        const leadIndex = paragraphs.findIndex((paragraph) => paragraph.startsWith(leadStart));
+        assert.ok(leadIndex >= 0, run.result.message.slice(0, 300));
+        assert.equal(paragraphs[leadIndex + 1], NEXT_STEP_LINE, run.result.message.slice(-600));
+        assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
+      });
+    }
+    test('a first block of the costliest characters still keeps the next-step line, without a throw', () => {
+      const message = 'The planner could not plan the delivery: ' + '\u0001'.repeat(20000);
+      const run = { taken: [], waveCount: 1, commits: Array.from({ length: 400 }, () => OTHER), reversibleEffects: [], notRunGates: [] };
+      for (const blockedRun of [undefined, run]) {
+        const result = main.finishDeliveryBlocked(message, blockedRun);
+        const paragraphs = result.message.split('\n\n');
+        assert.equal(paragraphs[paragraphs.findIndex((paragraph) => paragraph.startsWith('The planner could not plan')) + 1], NEXT_STEP_LINE);
+        assert.equal(Array.from(paragraphs.find((paragraph) => paragraph.startsWith('The planner could not plan'))).length, main.maxBlockedLeadLength());
+        assert.ok(lib.noticeLength(result) <= lib.noticeBudget());
+      }
+    });
+    test('the complete result keeps its lead alone first, with no next-step line', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.ok(!run.result.message.includes(NEXT_STEP_LINE));
     });
   }
 };
