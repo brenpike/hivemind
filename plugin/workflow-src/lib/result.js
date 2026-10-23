@@ -109,9 +109,11 @@
  *   has room for at least a marker.
  *
  * Invariants
- *   A run pauses at most pauseLimit() times. After that it finishes with
- *   outcome 'complete' and its message lists the questions still open.
- *   Open questions never make a run end as 'blocked'.
+ *   A run pauses at most pauseLimit() times. The limit belongs to this
+ *   lib; each workflow decides what happens at it, and its message lists
+ *   the questions still open: analysis-only finishes with outcome
+ *   'complete', and standard-delivery ends 'blocked' with the next action
+ *   named, so its 'complete' always means a pull request exists.
  *   resume_args is the only state that crosses a pause, so the workflow keeps
  *   its pause count and earlier answers there, in fields it alone reads.
  *   resume_args never has a reply key, so a stale reply cannot be replayed.
