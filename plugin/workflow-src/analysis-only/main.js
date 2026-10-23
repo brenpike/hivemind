@@ -85,6 +85,12 @@
  *   when canCarry fails for the resume_args a pause would return, it
  *   completes instead and lists the questions still open, with stop reason
  *   'reply_size'.
+ *   A blocked facts or planner result shows its blocker only through
+ *   describeReason (result.js): its non-blank lines joined into one line,
+ *   cut to maxExcerptLength() code points and encoded by
+ *   encodeUntrustedText, or 'it gave no reason.' when it has none. So a
+ *   control character, an escape sequence, a bidi mark or a line feed in
+ *   it never reaches the user raw.
  *   Open questions never end it blocked: only a missing request, a bad
  *   trunk or references arg, a facts or scan stop, or a planner result it
  *   cannot use does.
@@ -221,7 +227,7 @@ function describeFactsProblem(facts) {
     return malformedFactsMessage(RUN_NOUN);
   }
   if (facts.outcome === 'blocked') {
-    return blockedFactsMessage(RUN_NOUN, facts.blocker);
+    return blockedFactsMessage(RUN_NOUN, describeReason(facts.blocker));
   }
   const isWellFormed = matchesFactsLine('facts_file', facts.facts_file)
     && matchesFactsLine('facts_lines', facts.facts_lines)
@@ -255,8 +261,7 @@ function describeReplyProblem(analysis) {
     return 'The planner returned no result, so the analysis stopped.';
   }
   if (analysis.outcome === 'blocked') {
-    const blocker = isNonEmptyString(analysis.blocker) ? analysis.blocker : 'it gave no reason.';
-    return 'The planner could not do the analysis: ' + blocker;
+    return 'The planner could not do the analysis: ' + describeReason(analysis.blocker);
   }
   if (analysis.outcome !== 'complete') {
     return 'The planner returned an unknown outcome, so the analysis stopped.';

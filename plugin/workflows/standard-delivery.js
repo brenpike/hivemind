@@ -1286,6 +1286,39 @@ function noticeLength(value) {
     + 4 * countCharacter(jsonText, '&');
 }
 
+function maxExcerptLength() {
+  return 200;
+}
+
+function cutExcerpt(text) {
+  return Array.from(text).slice(0, maxExcerptLength()).join('');
+}
+
+function toPrintableAscii(text) {
+  return text.replace(/[^\x20-\x7e]/g, (unit) => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0'));
+}
+
+function encodeUntrustedText(value) {
+  const jsonText = JSON.stringify(value);
+  if (typeof jsonText !== 'string') {
+    throw new Error('encodeUntrustedText: value must be JSON serializable');
+  }
+  return toPrintableAscii(jsonText);
+}
+
+function quoteDiagnostic(text) {
+  if (typeof text !== 'string') {
+    return undefined;
+  }
+  const textLines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter((line) => line !== '');
+  return textLines.length === 0 ? undefined : encodeUntrustedText(cutExcerpt(textLines.join(' ')));
+}
+
+function describeReason(text) {
+  const quoted = quoteDiagnostic(text);
+  return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
+}
+
 function canCarry(resumeArgs) {
   const emptyPause = { needs_user: true, resume_args: resumeArgs, message: '' };
   return noticeLength(emptyPause) <= Math.floor(noticeBudget() / 2);
@@ -2234,7 +2267,7 @@ async function runScanStep(facts, runNoun) {
 function renderSuspectLine(result) {
   const category = isNonEmptyString(result.pattern_category) ? result.pattern_category : 'no category given';
   const excerpt = typeof result.field_excerpt === 'string' ? Array.from(result.field_excerpt).slice(0, scanExcerptLimit()).join('') : '';
-  return '- ' + JSON.stringify(result.item_ref) + ' (' + category + '): ' + JSON.stringify(excerpt);
+  return '- ' + encodeUntrustedText(result.item_ref) + ' (' + category + '): ' + encodeUntrustedText(excerpt);
 }
 
 function readTextIndex(itemRef) {
@@ -2338,8 +2371,8 @@ function contractRows() {
     { id: 'SD-33', step: 'Review result', check: 'describeReviewProblem', rule: 'The review result fits REVIEW_SCHEMA, whose fields are the local-reviewer Output Contract fields with each Codex-derived text field labelled as able to carry external content, and it carries every field its exit_reason names; any other result stops the run blocked.' },
     { id: 'SD-34', step: 'Local review to its commit', check: 'runReviewGate', rule: 'Whatever the reviewer returned, the commit runner then runs with an empty file list and stops the run on any edit left behind, and the review gate holds on the commit it reports; when a commit step commits nothing but reports a commit other than the previous head, the range <previous head>..<new head> enters the run commits, so the final message, the pull request body and the pull request comment list commits the reviewer made, and a commit step that reports the same head with nothing committed adds nothing.' },
     { id: 'SD-35', step: 'Review routes', check: 'localReviewRoutes', rule: 'localReviewRoutes() maps every exit_reason of the local-reviewer Output Contract and nothing else, and clean holds the gate.' },
-    { id: 'SD-36', step: 'Review stops', check: 'describeReviewStop', rule: 'max-iterations-reached, break-fix-break, injection-suspect and blocked stop the run blocked in plain words, each reviewer value JSON-encoded and the excerpt cut to maxExcerptLength() characters.' },
-    { id: 'SD-37', step: 'Review questions', check: 'finishReviewQuestion', rule: 'user-input-required and high-severity-rejection end the run complete with the reviewer question open in plain words under stop reason before_pr, its values JSON-encoded (ADR-0037 decision 17, until slice 3).' },
+    { id: 'SD-36', step: 'Review stops', check: 'describeReviewStop', rule: 'max-iterations-reached, break-fix-break, injection-suspect and blocked stop the run blocked in plain words, each reviewer value encoded and the blocker and excerpt cut to maxExcerptLength() characters.' },
+    { id: 'SD-37', step: 'Review questions', check: 'finishReviewQuestion', rule: 'user-input-required and high-severity-rejection end the run complete with the reviewer question open in plain words under stop reason before_pr, its values encoded (ADR-0037 decision 17, until slice 3).' },
     { id: 'SD-38', step: 'Diminishing returns', check: 'resolveDiminishingReturns', rule: 'diminishing-returns resolves through decide() kind diminishing_returns_exit: a take holds the gate and is listed, and an ask ends the run under stop reason before_pr.' },
     { id: 'SD-39', step: 'Local review to planning', check: 'requestReviewReplan', rule: 'planner-escalation and root-cluster-suspected resolve through decide() kinds planner_escalation_routing and root_cluster_routing; an ask ends the run under stop reason before_pr, and a take starts a new pass through the facts step with the review result as replan data, counted against maxReplans().' },
     { id: 'SD-40', step: 'Remediation plan', check: 'resolvePlanAcceptance', rule: 'Once local review sent the run back to planning, every later plan acceptance resolves through decide() kind remediation_plan_acceptance, which always asks, through the pause and revise path.' },
@@ -2351,7 +2384,7 @@ function contractRows() {
     { id: 'SD-46', step: 'PR relay', check: 'checkPullRequestRelay', rule: 'The relayed stdout parses with openPlanPrRoutingSpec(), whose keys are the open-plan-pr.sh OUTPUT keys in order and whose warning holds only the script fixed texts, head_ref_oid equals H, and commented is true exactly when created is false; a blocked or malformed relay stops the run blocked naming the pull request step.' },
     { id: 'SD-47', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run finishes complete with pr {url, head_ref_oid, created}, and the final message names the pull request, opened or pushed to with a comment, the gates that held and any warning, then every part of the run record buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate that did not run and every taken decision.' },
     { id: 'SD-49', step: 'Prompts', check: 'addResumeNote', rule: 'Once run.replies is not empty, every agent prompt but the planner revise prompt carries resumedReplySentence() as its second line, no prompt sent before the first reply carries it, and no prompt but the revise prompt carries reply text.' },
-    { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'A blocked facts, branch, commit, bump-type or pull request relay names its last blocker line; with none it quotes the first two non-blank stderr lines, joined into one line, cut to maxExcerptLength() characters and JSON-encoded; only a blank or missing stderr says it gave no reason; the text starts with a capital letter after a full stop and stays lower case after a colon.' },
+    { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'Every step- or script-written value a message shows goes through encodeUntrustedText; a blocked relay quotes its last non-blank blocker line, else its first two non-blank stderr lines, else gives no reason, a step blocker goes through describeReason, each one line cut to maxExcerptLength() characters, and the text starts with a capital letter after a full stop and stays lower case after a colon.' },
     { id: 'SD-51', step: 'Result', check: 'finishDeliveryBlocked', rule: 'Every blocked result carries nextStepLine() as a whole block right after its first block, no block carries shorten, a first block longer than maxBlockedLeadLength() code points has those first code points as its compact form, so the message keeps the next-step line however long the first block is, and finish never throws.' }
   ];
 }
@@ -2370,10 +2403,6 @@ function maxGateReruns() {
 
 function maxReviewIterations() {
   return 10;
-}
-
-function maxExcerptLength() {
-  return 200;
 }
 
 function maxBlockedLeadLength() {
@@ -2882,24 +2911,20 @@ function buildDeliveryFactsPrompt(trunk, references) {
   ].join('\n');
 }
 
-function readBlockerLine(stderr) {
-  if (typeof stderr !== 'string') {
-    return undefined;
-  }
-  return stderr.split('\n').reverse().find((line) => line.startsWith('blocker: '));
-}
-
-function describeBlocker(line) {
-  return isNonEmptyString(line) ? line : 'it gave no reason.';
+function splitStderrLines(stderr) {
+  return typeof stderr === 'string' ? stderr.split(/\r\n|\r|\n/) : [];
 }
 
 function describeRelayBlocker(stderr, startsSentence) {
-  const blockerLine = readBlockerLine(stderr);
-  if (blockerLine !== undefined) {
-    return blockerLine;
+  const stderrLines = splitStderrLines(stderr);
+  const blockerPayloads = stderrLines.filter((line) => line.startsWith('blocker: ')).map((line) => line.slice('blocker: '.length)).filter((payload) => payload.trim() !== '');
+  const stderrQuote = quoteDiagnostic(stderrLines.filter((line) => line.trim() !== '').slice(0, 2).join('\n'));
+  let reason = 'it gave no reason.';
+  if (blockerPayloads.length > 0) {
+    reason = 'its blocker line says ' + quoteDiagnostic(blockerPayloads.pop()) + '.';
+  } else if (stderrQuote !== undefined) {
+    reason = 'its stderr says ' + stderrQuote + '.';
   }
-  const stderrLines = typeof stderr === 'string' ? stderr.split('\n').map((line) => line.trim()).filter((line) => line !== '') : [];
-  const reason = stderrLines.length === 0 ? 'it gave no reason.' : 'its stderr says ' + JSON.stringify(cutExcerpt(stderrLines.slice(0, 2).join(' '))) + '.';
   return startsSentence ? reason.charAt(0).toUpperCase() + reason.slice(1) : reason;
 }
 
@@ -3043,7 +3068,7 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
     return schemaProblem;
   }
   if (planResult.outcome === 'blocked') {
-    return 'The planner could not plan the delivery: ' + describeBlocker(planResult.blocker);
+    return 'The planner could not plan the delivery: ' + describeReason(planResult.blocker);
   }
   if (planResult.plan === undefined) {
     return schemaProblem;
@@ -3055,7 +3080,7 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
   }
   const wave = computeWave(plan.steps, []);
   if (!wave.ok) {
-    return 'The plan steps cannot be scheduled, so ' + describeRunNoun(RUN_NOUN) + ' stopped: ' + wave.problem;
+    return 'The plan steps cannot be scheduled, so ' + describeRunNoun(RUN_NOUN) + ' stopped: ' + toPrintableAscii(wave.problem);
   }
   if (plan.trunk_freshness !== facts.trunk_freshness) {
     return 'The plan copies a trunk freshness other than the facts, so ' + describeRunNoun(RUN_NOUN) + ' stopped.';
@@ -3068,7 +3093,7 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
   }
   const isOnOtherBranch = facts.head_state === 'branch' && facts.branch !== trunk;
   if (isOnOtherBranch && plan.branch !== facts.branch) {
-    return 'The run started on branch ' + JSON.stringify(facts.branch) + ' and delivers on it, but the plan names branch ' + JSON.stringify(plan.branch) + ', so ' + describeRunNoun(RUN_NOUN) + ' stopped.';
+    return 'The run started on branch ' + encodeUntrustedText(facts.branch) + ' and delivers on it, but the plan names branch ' + encodeUntrustedText(plan.branch) + ', so ' + describeRunNoun(RUN_NOUN) + ' stopped.';
   }
   return undefined;
 }
@@ -3121,7 +3146,7 @@ function buildExternalEffectBrief(stepId, summary) {
   return {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
-    problem: 'Plan step ' + JSON.stringify(stepId) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
+    problem: 'Plan step ' + encodeUntrustedText(stepId) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: 'The step runs before any pull request exists.' },
     options: [
       { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: 'The step is part of the delivery you asked for.', straw_man: 'The effect happens before you see the pull request and cannot be undone.', effort: 'small', value: 'high', reversible: false },
@@ -3215,7 +3240,7 @@ function renderCommits(commits) {
 
 function renderReversibleEffects(effects) {
   const lines = ['Effects outside the repo that the plan declares as reversible:'];
-  effects.forEach((effect) => lines.push('- step ' + JSON.stringify(effect.stepId) + ': ' + JSON.stringify(effect.summary)));
+  effects.forEach((effect) => lines.push('- step ' + encodeUntrustedText(effect.stepId) + ': ' + encodeUntrustedText(effect.summary)));
   return lines.join('\n');
 }
 
@@ -3287,7 +3312,7 @@ function describePullRequest(values) {
 
 function finishDeliveryComplete(run, plan, prValues) {
   const held = joinNames(configuredGateIds(run).map((gateId) => gateNames()[gateId]), 'and');
-  const heldLine = 'Every plan step is done on branch ' + JSON.stringify(plan.branch) + ', each wave is committed, and ' + held + ' held on commit ' + run.head + '.';
+  const heldLine = 'Every plan step is done on branch ' + encodeUntrustedText(plan.branch) + ', each wave is committed, and ' + held + ' held on commit ' + run.head + '.';
   const lead = heldLine + '\n\n' + describePullRequest(prValues);
   const pr = { url: prValues.url, head_ref_oid: prValues.head_ref_oid, created: prValues.created === 'true' };
   return finish({ outcome: 'complete', blocks: buildRunBlocks(lead, run, run.taken, ''), pr: pr });
@@ -3471,7 +3496,7 @@ function readWorkerOutcome(step, result) {
   if (result.outcome === 'complete') {
     return { stepId: step.id, status: 'complete' };
   }
-  return { stepId: step.id, status: result.outcome, reason: describeBlocker(result.blocker) };
+  return { stepId: step.id, status: result.outcome, reason: describeReason(result.blocker) };
 }
 
 function commitStepTexts(stepName) {
@@ -3504,12 +3529,21 @@ function buildCommitPrompt(files, plan, trunk, stepName) {
   ].join('\n');
 }
 
+function readOutsidePath(payload) {
+  try {
+    const parsed = JSON.parse(payload);
+    return typeof parsed === 'string' ? parsed : payload;
+  } catch (parseError) {
+    return payload;
+  }
+}
+
 function describeCommitBlocker(stderr, stepNoun) {
   const lines = ['The commit step was blocked, so ' + describeRunNoun(RUN_NOUN) + ' stopped: ' + describeRelayBlocker(stderr, false)];
-  const outsideLines = typeof stderr === 'string' ? stderr.split('\n').filter((line) => line.startsWith('outside: ')) : [];
+  const outsideLines = splitStderrLines(stderr).filter((line) => line.startsWith('outside: '));
   if (outsideLines.length > 0) {
     lines.push('Dirty paths outside the files of ' + stepNoun + ':');
-    outsideLines.forEach((line) => lines.push('- ' + line.slice('outside: '.length)));
+    outsideLines.forEach((line) => lines.push('- ' + quoteOrEmpty(readOutsidePath(line.slice('outside: '.length)))));
   }
   return lines.join('\n');
 }
@@ -3551,7 +3585,7 @@ async function runCommitStep(run, plan, files, label, stepName) {
 
 function describeBlockedWave(blockedOutcomes, commitValues) {
   const lines = ['A worker did not finish its step, so ' + describeRunNoun(RUN_NOUN) + ' stopped after the commit of its wave.'];
-  blockedOutcomes.forEach((outcome) => lines.push('Step ' + JSON.stringify(outcome.stepId) + ' was blocked: ' + outcome.reason));
+  blockedOutcomes.forEach((outcome) => lines.push('Step ' + encodeUntrustedText(outcome.stepId) + ' was blocked: ' + outcome.reason));
   if (commitValues.committed === 'true') {
     lines.push('The wave was committed as ' + commitValues.commit + ', so that commit can hold partial edits of the steps above.');
   } else {
@@ -3561,7 +3595,7 @@ function describeBlockedWave(blockedOutcomes, commitValues) {
 }
 
 function describeReplanReasons(replanOutcomes) {
-  return replanOutcomes.map((outcome) => 'Step ' + JSON.stringify(outcome.stepId) + ' needs a new plan: ' + outcome.reason).join('\n');
+  return replanOutcomes.map((outcome) => 'Step ' + encodeUntrustedText(outcome.stepId) + ' needs a new plan: ' + outcome.reason).join('\n');
 }
 
 function requestStepReplan(run, replanOutcomes) {
@@ -3578,7 +3612,7 @@ async function runPlanWaves(run, plan, facts) {
   for (let waveNumber = 1; ; waveNumber += 1) {
     const wave = computeWave(plan.steps, doneIds);
     if (!wave.ok) {
-      return { result: finishDeliveryBlocked('The plan steps cannot be scheduled, so ' + describeRunNoun(RUN_NOUN) + ' stopped: ' + wave.problem, run) };
+      return { result: finishDeliveryBlocked('The plan steps cannot be scheduled, so ' + describeRunNoun(RUN_NOUN) + ' stopped: ' + toPrintableAscii(wave.problem), run) };
     }
     if (wave.all_done) {
       return runGates(run, plan, facts);
@@ -3760,7 +3794,7 @@ function readGateEditOutcome(result, schema) {
   }
   const files = result.files === undefined ? [] : result.files;
   if (result.outcome === 'blocked') {
-    return { status: 'blocked', reason: describeBlocker(result.blocker), files: files };
+    return { status: 'blocked', reason: describeReason(result.blocker), files: files };
   }
   return { status: 'complete', files: files };
 }
@@ -3826,7 +3860,7 @@ function readValidateOutcome(result) {
     return { problem: malformed };
   }
   if (result.outcome === 'blocked') {
-    return { problem: 'The validation step was blocked, so ' + describeRunNoun(RUN_NOUN) + ' stopped before the pull request: ' + describeBlocker(result.blocker) };
+    return { problem: 'The validation step was blocked, so ' + describeRunNoun(RUN_NOUN) + ' stopped before the pull request: ' + describeReason(result.blocker) };
   }
   if (result.outcome === 'failed' && !isNonEmptyString(result.failures)) {
     return { problem: malformed };
@@ -3935,10 +3969,6 @@ function describeReviewProblem(review) {
   return missing.length === 0 ? undefined : malformed;
 }
 
-function cutExcerpt(text) {
-  return Array.from(text).slice(0, maxExcerptLength()).join('');
-}
-
 function reviewStopTexts(exitReason) {
   switch (exitReason) {
     case 'max-iterations-reached':
@@ -3969,14 +3999,17 @@ function reviewFieldNames() {
   };
 }
 
+function quoteOrEmpty(text) {
+  return quoteDiagnostic(text) || encodeUntrustedText('');
+}
+
 function quoteReviewValue(review, field) {
-  const value = field === 'field_excerpt' ? cutExcerpt(review[field]) : review[field];
-  return JSON.stringify(value);
+  return field === 'blocker' || field === 'field_excerpt' ? quoteOrEmpty(review[field]) : encodeUntrustedText(review[field]);
 }
 
 function describeReviewStop(review, head) {
   const texts = reviewStopTexts(review.exit_reason);
-  const lines = [texts.lead + ', so ' + describeRunNoun(RUN_NOUN) + ' stopped before the pull request. Each value below is JSON-encoded as the review returned it.'];
+  const lines = [texts.lead + ', so ' + describeRunNoun(RUN_NOUN) + ' stopped before the pull request. Each value below is quoted as the review returned it, encoded as JSON in printable ASCII.'];
   texts.fields.forEach((field) => lines.push('- ' + reviewFieldNames()[field] + ': ' + quoteReviewValue(review, field)));
   if (review.fix_commits_exist) {
     lines.push('Local review committed fixes before it stopped, so the branch head is ' + head + '.');

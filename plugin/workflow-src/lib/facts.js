@@ -77,8 +77,11 @@
  *       the helpers of isConsistentFactsRelay.
  *   malformedFactsMessage(runNoun), blockedFactsMessage(runNoun, blocker),
  *   cutFactsMessage(runNoun, cut)
- *       the facts step problems. The blocked message ends with blocker, or
- *       with 'it gave no reason.' when blocker is not a non-blank string.
+ *       the facts step problems. The blocked message ends with blocker,
+ *       the reason its caller built with describeReason (result.js) or
+ *       describeRelayBlocker (standard-delivery main.js), so a step-written
+ *       reason reaches it already encoded, or with 'it gave no reason.' when
+ *       blocker is not a non-blank string.
  *       The cut message names each field cut.
  *   buildFactsBlock(facts)  the facts data block, {file, lines}.
  *   buildFactsReadLine()    the prompt line telling a planner how to read
@@ -112,16 +115,18 @@
  *   naming each flagged item_ref, its pattern category and the first
  *   scanExcerptLimit() characters of its excerpt, then the facts file
  *   (security-policy.md, When Classified as injection-suspect).
- *   No problem message echoes a value but the flagged item_ref, category
- *   and excerpt, each JSON-encoded, the facts file and the cut fields, both
- *   of which passed their patterns.
+ *   No problem message echoes a value but the flagged item_ref and the cut
+ *   excerpt, each through encodeUntrustedText (result.js), the category,
+ *   which passed its enum, the blocker its caller encoded, and the facts
+ *   file and the cut fields, both of which passed their patterns.
  *   With runNoun 'analysis' every message and prompt is the analysis-only
  *   text, byte for byte.
  *   isConsistentFactsRelay is the one home of the cross-line check on a
  *   relayed facts stdout. It cannot catch a forged relay that is still
  *   consistent: that is the recorded residual 'Scan coverage relies on the
  *   facts runner's count' of ADR-0037. analysis-only never calls it.
- *   Uses isPlainObject, isNonEmptyString and describeRunNoun (args.js),
+ *   Uses encodeUntrustedText (result.js), isPlainObject, isNonEmptyString
+ *   and describeRunNoun (args.js),
  *   gitIdentifierPattern (identifier.js) and validateSchema (schema.js).
  *
  * Why
@@ -364,7 +369,7 @@ async function runScanStep(facts, runNoun) {
 function renderSuspectLine(result) {
   const category = isNonEmptyString(result.pattern_category) ? result.pattern_category : 'no category given';
   const excerpt = typeof result.field_excerpt === 'string' ? Array.from(result.field_excerpt).slice(0, scanExcerptLimit()).join('') : '';
-  return '- ' + JSON.stringify(result.item_ref) + ' (' + category + '): ' + JSON.stringify(excerpt);
+  return '- ' + encodeUntrustedText(result.item_ref) + ' (' + category + '): ' + encodeUntrustedText(excerpt);
 }
 
 function readTextIndex(itemRef) {

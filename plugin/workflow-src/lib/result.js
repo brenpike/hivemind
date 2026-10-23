@@ -29,6 +29,13 @@
  *     resumeArgs  plain JSON object.
  *   noticeLength(value)
  *     value       any JSON value.
+ *   cutExcerpt(text), toPrintableAscii(text)
+ *     text        a string.
+ *   encodeUntrustedText(value)
+ *     value       any value. A step- or script-written value to show.
+ *   quoteDiagnostic(text), describeReason(text)
+ *     text        any value. A step- or script-written reason, blocker line,
+ *                 stderr line or path, as a step returned it.
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
@@ -45,6 +52,20 @@
  *   noticeLength  the chars value takes in the completion notice.
  *   canCarry      true when a pause result with resumeArgs and an empty
  *                 message takes at most half of noticeBudget().
+ *   maxExcerptLength  200, the code points of a quoted excerpt.
+ *   cutExcerpt    the first maxExcerptLength() code points of text, so a
+ *                 cut never splits a surrogate pair.
+ *   toPrintableAscii  text with each UTF-16 code unit outside 0x20-0x7E
+ *                 written as \u and 4 lowercase hex digits.
+ *   encodeUntrustedText  toPrintableAscii(JSON.stringify(value)): valid
+ *                 JSON of printable ASCII only. It throws when value is not
+ *                 JSON serializable.
+ *   quoteDiagnostic  undefined unless text is a string with a non-blank
+ *                 line. Otherwise its non-blank lines, split on CRLF, CR or
+ *                 LF and each trimmed, joined with one space, cut by
+ *                 cutExcerpt and passed through encodeUntrustedText.
+ *   describeReason  'it says ' + quoteDiagnostic(text) + '.', or 'it gave
+ *                 no reason.' when quoteDiagnostic(text) is undefined.
  *
  * Contract the overlord relays
  *   Only the harness completion notice carries the result. A model's own
@@ -93,6 +114,14 @@
  *   (ADR-0036 decision 13).
  *   Invalid input throws instead of returning a partial result.
  *   message is the last key, after needs_user, outcome, resume_args and pr.
+ *   Encode at output: every step- or script-written value a workflow puts
+ *   in a message goes through encodeUntrustedText, most through
+ *   quoteDiagnostic or describeReason, so it shows as one quoted JSON
+ *   string of printable ASCII. A control character, an escape sequence, a
+ *   bidi or zero-width mark, a line separator or a line feed in it cannot
+ *   reach the user's terminal raw, start a line of its own or forge the
+ *   next-step line. Markdown inside the quote stays as text and is the
+ *   residual ADR-0037 records.
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
@@ -149,6 +178,39 @@ function noticeLength(value) {
     + 3 * countCharacter(jsonText, '<')
     + 3 * countCharacter(jsonText, '>')
     + 4 * countCharacter(jsonText, '&');
+}
+
+function maxExcerptLength() {
+  return 200;
+}
+
+function cutExcerpt(text) {
+  return Array.from(text).slice(0, maxExcerptLength()).join('');
+}
+
+function toPrintableAscii(text) {
+  return text.replace(/[^\x20-\x7e]/g, (unit) => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0'));
+}
+
+function encodeUntrustedText(value) {
+  const jsonText = JSON.stringify(value);
+  if (typeof jsonText !== 'string') {
+    throw new Error('encodeUntrustedText: value must be JSON serializable');
+  }
+  return toPrintableAscii(jsonText);
+}
+
+function quoteDiagnostic(text) {
+  if (typeof text !== 'string') {
+    return undefined;
+  }
+  const textLines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter((line) => line !== '');
+  return textLines.length === 0 ? undefined : encodeUntrustedText(cutExcerpt(textLines.join(' ')));
+}
+
+function describeReason(text) {
+  const quoted = quoteDiagnostic(text);
+  return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
 }
 
 function canCarry(resumeArgs) {
