@@ -18,12 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The policy check finds inputs-file skills by their scoped Edit entry for their own inputs file, not by a YAML comment the runtime drops. A new check rejects any other file-tool entry in a skill's allowed-tools, outside the six executor skills, and takes the plugin cache path from the marketplace manifest.
-- Docs: a new Skill File-Tool Grants section in security-policy.md, the ADR-0010 amendment 2026-10-23 and the ADR-0037 amendment 2026-10-23. README and the website describe the new permission posture.
+- Docs: a new Skill File-Tool Grants section in security-policy.md, the ADR-0010 amendment 2026-10-23, with the headless permission test result, and the ADR-0037 amendment 2026-10-23. README and the website describe the new permission posture.
 
 ### Fixed
 
-- Skills no longer pre-approve Write or Read of any path. Before, a bare Write, Read, Glob or Grep entry in a skill's allowed-tools approved that tool for every path for the rest of the turn, workflow agents included. The inputs-file skills now pre-approve only the Write of their own inputs file, through an Edit entry. The other non-executor skills pre-approve only Reads of this plugin's files in the marketplace cache, and, per the Claude Code permissions docs, searches of them. Reads elsewhere outside the repo prompt again (issue 428).
-- For marketplace installs, the planner's searches of plugin files no longer prompt in the turn that routed the request (the PR8 live smoke F2 in ADR-0037). A plugin loaded from a local path still gets Read prompts for plugin files outside the project. To stop them, add a Read allow rule for that plugin folder to `.claude/settings.local.json` (issue 428).
+- Skills no longer pre-approve Write or Read of any path. Before, a bare Write, Read, Glob or Grep entry in a skill's allowed-tools approved that tool for every path for the rest of the turn, workflow agents included. The inputs-file skills now pre-approve only the Write of their own inputs file, through an Edit entry. The other non-executor skills pre-approve only Reads of this plugin's files in the marketplace cache, and Grep searches of them, per the Claude Code permissions docs and a headless test on Claude Code 2.1.310. Reads elsewhere outside the repo prompt again (issue 428).
+- For a plugin installed in the plugin cache, the planner's searches of plugin files no longer prompt in the turn that routed the request (the PR8 live smoke F2 in ADR-0037). A headless test on Claude Code 2.1.310 confirmed it, and ADR-0010 records the result. A plugin loaded from a local path, such as a marketplace added from a local folder, still gets Read prompts for plugin files outside the project. To stop them, add a Read allow rule for that plugin folder to `.claude/settings.local.json` (issue 428).
 
 ## [7.0.2] - 2026-10-23
 
