@@ -2,7 +2,7 @@
 name: triage-backlog
 description: Rates every open issue across 7 mutex label families, infers depends-on links, renders a delta table, and applies labels behind a confirm gate. Use when triaging or re-triaging the issue backlog.
 allowed-tools:
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash
 shell: bash
 ---

@@ -5,7 +5,7 @@ description: >-
   behalf, in the consumer project's domain language, and RETURNS it as chat text. Use after a
   run's PR merges or closes when the run journaled at least one auto-decision.
 allowed-tools:
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(git rev-parse *)
 shell: bash
 ---

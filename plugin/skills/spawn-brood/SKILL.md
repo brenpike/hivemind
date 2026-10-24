@@ -3,8 +3,8 @@ name: spawn-brood
 description: Dispatches parallel overlord sessions as a brood, spawning N Claude Code instances in separate git worktrees via tmux and writing the brood manifest. Use when spawning a brood or running parallel strains.
 allowed-tools:
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/spawn-brood/scripts/spawn-brood.sh *)
-  - Read
-  - Write   # inert inputs-file only: authors per-invocation mktemp-unique staging path under .hivemind/; see security-policy.md "Inert Inputs-File Navigator Pattern" + ADR-0017/0018
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
+  - Edit(.hivemind/spawn-inputs.*.json)
 shell: bash
 ---
 

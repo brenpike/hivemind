@@ -166,6 +166,7 @@
             <pre><code><span class="t-str">"Bash(node /path/to/.claude/plugins/cache/openai-codex/codex/*)"</span></code></pre>
           </div>
           <p class="note">Replace <code>/path/to/</code> with your actual home directory path. The <code>codex/*</code> wildcard covers all Codex CLI entry points so the entry does not need updating when Codex is upgraded.</p>
+          <p>Skill grants are scoped too. While a skill runs, for the rest of that turn and for workflow agents started in it, its <code>allowed-tools</code> pre-approve only the Write of its own inputs file (for example <code>Edit(.hivemind/molt-inputs-*.json)</code> in <code>hivemind:molt</code>) and Reads of plugin files under <code>~/.claude/plugins/cache/brenpike/hivemind/</code>, a rule that also covers Grep searches of them, per the Claude Code permissions docs and a headless test on Claude Code 2.1.310. Apart from the six user-invoked executor skills (<code>tdd</code>, <code>refactor-to-depth</code>, <code>plan-to-prd</code>, <code>plan-interrogation</code>, <code>create-handoff</code> and <code>creep-spread</code>), which still carry broad Read, Write and Edit, no skill pre-approves a Read or Write of any other path. If the plugin loads from a local path (<code>--plugin-dir</code>, or a marketplace added from a local folder), Reads of its files outside the project prompt; to pre-approve them, add <code>Read(//&lt;absolute plugin folder&gt;/**)</code> to the project's gitignored <code>.claude/settings.local.json</code>. The seeded rules are unchanged.</p>
           <p class="note">See the <a href="https://github.com/brenpike/hivemind#per-project-setup" target="_blank" rel="noopener noreferrer">README setup section</a> for the full rationale and the upgrade path for already-seeded projects.</p>
         </div>
 
@@ -276,7 +277,7 @@
               </tr>
               <tr>
                 <td><code>hivemind:next-wave</code></td>
-                <td>State machine only (the <code>standard-delivery</code> script computes its waves in code, with parity tests against this engine). Reads the run ledger and computes the ready wave: the maximal, file-disjoint set of dependency-satisfied plan steps to dispatch in parallel this iteration.</td>
+                <td>State machine only (the <code>standard-delivery</code> script computes its waves in code, in <code>plugin/workflow-src/lib/waves.js</code>, with parity tests against this engine). Reads the run ledger and computes the ready wave: the maximal, file-disjoint set of dependency-satisfied plan steps to dispatch in parallel this iteration.</td>
               </tr>
               <tr>
                 <td><code>hivemind:mark-intent-fallback</code></td>
@@ -394,7 +395,7 @@
           <header class="panel plate">
             <p class="kicker xs">06 The Pipeline</p>
             <h2 id="lifecycle-heading" class="xg">The Lifecycle</h2>
-            <p class="xs"><code>hivemind:route-workflow</code> selects the workflow first, for every request that is not a Reflex. One of two engines then runs it: when Claude Code's Workflow tool is available, <code>analysis-only</code> and <code>standard-delivery</code> launch as workflow scripts; every other workflow, and a request whose launch is refused, runs on its JSON state machine. A script run keeps no run ledger: the working branch, its commits and the PR are the record. A <code>standard-delivery</code> script run, from request to PR:</p>
+            <p class="xs"><code>hivemind:route-workflow</code> selects the workflow first, for every request that is not a Reflex. One of two engines then runs it: when Claude Code's Workflow tool is available, <code>analysis-only</code> and <code>standard-delivery</code> launch as workflow scripts; every other workflow, and a request whose launch is refused, runs on its JSON state machine. <code>analysis-only</code> (<code>hivemind:analysis-only</code>) has been a script since 6.0.0, and <code>standard-delivery</code> (<code>hivemind:standard-delivery</code>) since 7.0.0. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, with no fallback. To keep delivery on the state machine, add <code>Workflow(hivemind:standard-delivery)</code> to <code>permissions.deny</code>: the launch is refused with no prompt and the request falls back to the state machine. A script run keeps no run ledger: the working branch, its commits and the PR are the record, and its decisions go on the PR body. Only the state machine keeps a run ledger. A <code>standard-delivery</code> script run, from request to PR:</p>
           </header>
           <ol class="beats" aria-label="Lifecycle steps">
             <li class="beat panel">
@@ -456,7 +457,7 @@
 
           <div class="panel subpanel">
             <h3 class="xg">Workflows</h3>
-            <p>Every non-Reflex request is routed to one workflow. <code>standard-delivery</code> and <code>analysis-only</code> have workflow scripts: each runs its script when the launch goes ahead, and its JSON state machine otherwise. The other workflows run only on their state machines, where the run ledger records where a run is and which transition comes next.</p>
+            <p>Every non-Reflex request is routed to one workflow. <code>standard-delivery</code> and <code>analysis-only</code> have workflow scripts: each runs its script when the launch goes ahead, and its JSON state machine otherwise. The other workflows run only on their state machines, where the run ledger records where a run is and which transition comes next. The definitions live in <code>plugin/workflows/</code>: the <code>.json</code> state machines plus the generated <code>.js</code> scripts.</p>
             <div class="table-wrap" role="region" aria-label="Hivemind workflows" tabindex="0">
               <table class="ref" aria-label="Hivemind workflows">
                 <thead>
@@ -494,7 +495,7 @@
           <div class="card-grid card-grid--2">
             <article class="panel card" role="region" aria-labelledby="lifecycle-waves-heading">
               <h3 class="xg" id="lifecycle-waves-heading">Waves</h3>
-              <p>Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine. On the state machine, <code>hivemind:next-wave</code> computes the wave from the run ledger; the <code>standard-delivery</code> script computes its waves in code.</p>
+              <p>Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine. On the state machine, <code>hivemind:next-wave</code> computes the wave from the run ledger; the <code>standard-delivery</code> script computes its waves in <code>plugin/workflow-src/lib/waves.js</code>.</p>
             </article>
             <article class="panel card" role="region" aria-labelledby="lifecycle-watch-heading">
               <h3 class="xg" id="lifecycle-watch-heading">Default PR watch</h3>
@@ -518,7 +519,7 @@
             <ul class="dots" aria-label="Brood mode details">
               <li>The cerebrate decomposes work into independent strains with no shared state between them.</li>
               <li>Approval gate: nothing spawns until you approve the strain list.</li>
-              <li>Each strain runs its own full overlord session in a detached tmux session. Brood children start without the Workflow tool, so every strain runs on the state machine.</li>
+              <li>Each strain runs its own full overlord session in a detached tmux session. Brood children start with <code>--disallowedTools Workflow</code>, so they have no Workflow tool and every strain runs on the state machine.</li>
               <li>Each strain lives in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and produces its own branch and PR.</li>
               <li>The overlord stays in hatchery mode, monitoring the brood from home base and available as an on-demand helper.</li>
             </ul>

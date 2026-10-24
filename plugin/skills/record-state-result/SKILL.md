@@ -3,8 +3,8 @@ name: record-state-result
 description: Records a workflow state outcome into the run ledger, validates the transition against the workflow definition, and advances state.current to the legal next state. Use when advancing a run after a state completes.
 allowed-tools:
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/record-state-result/scripts/record-state-result.sh *)
-  - Read
-  - Write   # inert inputs-file only: authors per-invocation-unique path .hivemind/runs/.record-inputs-<token>.json; see security-policy.md "Inert Inputs-File Navigator Pattern" + ADR-0017/0018/0019
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
+  - Edit(.hivemind/runs/.record-inputs-*.json)
 shell: bash
 ---
 

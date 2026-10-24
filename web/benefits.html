@@ -77,6 +77,7 @@
             <p>Manually managing the plan → build → review → ship pipeline (deciding when to plan, when to build, when to stop and review) is cognitive overhead on top of the actual work.</p>
             <p class="kicker kicker--solution xs">Solution</p>
             <p>The overlord is the control plane that coordinates specialized bioforms to plan, build, review, and ship code, <strong>so you don't have to manage the pipeline yourself.</strong> Routine judgment calls, such as routine planner questions, are decided for you; irreversible, architectural or safety-relevant calls and every merge come back to you. A workflow-script run lists every decision it took for you in its final message and on the PR.</p>
+            <p>Delivery runs as the <code>hivemind:standard-delivery</code> workflow script, and analysis as <code>hivemind:analysis-only</code>, a script since 6.0.0. In manual mode Claude Code shows a Workflow approval prompt first; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, with no fallback. To keep delivery on the workflow state machine, add <code>Workflow(hivemind:standard-delivery)</code> to <code>permissions.deny</code>. Only the state machine keeps a run ledger: a script run keeps none and puts its decisions on the PR body. Both engines read <code>plugin/workflows/</code>, which holds the <code>.json</code> definitions plus the generated <code>.js</code> scripts.</p>
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>Less context-switching and fewer stops. A single interface. You give the overlord a task; the swarm handles the rest.</p>
           </div>
@@ -166,7 +167,7 @@ PR opened  (watched by default)
             <p class="kicker kicker--problem xs">Problem</p>
             <p>When independent work must be serialised through a single session, the pipeline becomes a bottleneck. Large features that could proceed in parallel wait on each other.</p>
             <p class="kicker kicker--solution xs">Solution</p>
-            <p>Parallelism at two scales. <strong>Within a run</strong>, plan steps build in parallel waves on both engines, the workflow scripts and the state machine: every ready, dependency-met, file-disjoint step is dispatched at once, workers in a wave do not commit, and one checkpoint commit closes each wave. <strong>Across runs</strong>, brood mode splits work into independent <strong>strains</strong> and, once you approve them, dispatches a <strong>brood</strong>: parallel overlord sessions, each running its own full lifecycle in a separate git worktree.</p>
+            <p>Parallelism at two scales. <strong>Within a run</strong>, plan steps build in parallel waves on both engines, the workflow scripts and the state machine: every ready, dependency-met, file-disjoint step is dispatched at once, workers in a wave do not commit, and one checkpoint commit closes each wave. <strong>Across runs</strong>, brood mode splits work into independent <strong>strains</strong> and, once you approve them, dispatches a <strong>brood</strong>: parallel overlord sessions, each running its own full lifecycle in a separate git worktree. A script run computes its waves in <code>plugin/workflow-src/lib/waves.js</code>; <code>hivemind:next-wave</code> reads the run ledger only on the state-machine fallback. Brood children start with <code>--disallowedTools Workflow</code>, so each strain runs on the state machine.</p>
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>Parallel throughput on independent work, inside a single run and across many. Each strain gets its own branch and PR.</p>
             <p><span class="tag tag--violet">hivemind:next-wave</span> <span class="tag tag--hot">hivemind:spawn-brood</span> <span class="tag tag--cyan">hivemind:brood-status</span></p>
@@ -276,7 +277,7 @@ PR opened  (watched by default)
             <p class="cmd-label"><span>02</span> Install the plugin</p>
             <pre><code>/plugin install hivemind@brenpike</code></pre>
           </div>
-          <p class="cmd-note">No external install step. Add the marketplace, install the plugin, then run <code>/hivemind:seed-hive</code> once in each project.</p>
+          <p class="cmd-note">No external install step. Add the marketplace, install the plugin, then run <code>/hivemind:seed-hive</code> once in each project. Seeding merges a least-privilege allowlist, with <code>Edit(.hivemind/...)</code> rules such as <code>Edit(.hivemind/molt-inputs-*.json)</code> and <code>Edit(.hivemind/pr-inputs-*.json)</code> that pre-approve only the inputs files skills write.</p>
           <div class="cta">
             <a class="btn btn-primary" href="https://github.com/brenpike/hivemind" target="_blank" rel="noopener noreferrer" aria-label="View Hivemind on GitHub (opens in new tab)">View on GitHub</a>
             <a class="btn btn-ghost" href="./functionality.html">How It Works</a>

@@ -2243,31 +2243,31 @@ mark_time 'CHECK13'
 # scripts that ALREADY source containment.sh, so NOT sourcing it is a silent
 # opt-out: a skill promoted to an inputs-file navigator without a
 # containment-sourcing engine is invisible to CHECK 9 forever. CHECK 14 makes
-# that source MANDATORY for every navigator that CARRIES the discovery marker
+# that source MANDATORY for every navigator that CARRIES the discovery key
 # below — enrolling the navigator into CHECK 9 is the obligation, so across the
-# MARKED set CHECK 9 stops being optional. The check also fails CLOSED on the
-# discovery key itself: zero discovered navigators is an ERROR, not a pass, so
-# the marker disappearing repo-wide cannot silently disarm the check.
+# discovered set CHECK 9 stops being optional. The check also fails CLOSED on
+# the discovery key itself: zero discovered navigators is an ERROR, not a pass,
+# so the key disappearing repo-wide cannot silently disarm the check.
 #
-# WHAT IT DOES NOT. A Write-carrying skill that never adopts the marker stays
-# INVISIBLE to this check. The CHECK 9 opt-out is NARROWED to that one case and
-# made LOUD everywhere else — it is not eliminated. Marker adoption on a NEWLY
-# authored navigator is an AUTHORING CONVENTION, not a machine-verified
-# property; that residual gap is tracked at #319.
+# DISCOVERY KEY (no hand-kept list): every navigator's `allowed-tools` carries
+# a scoped Edit entry for its own inputs file, an entry that begins with the
+# fixed string `- Edit(.hivemind/` whatever comment trails it (see
+# security-policy.md "Inert Inputs-File Navigator Pattern"). The key is the
+# runtime pre-approval itself: that entry is what lets the navigator's
+# inputs-file Write run without a prompt while the skill runs, so a navigator
+# cannot drop the key without its own Write starting to prompt. Executor skills
+# carry no such entry and carry NEITHER obligation.
 #
-# DISCOVERY KEY (no hand-kept list): every navigator's `allowed-tools` Write
-# entry carries the literal marker `# inert inputs-file only:` (see
-# security-policy.md "Inert Inputs-File Navigator Pattern", which declares this
-# marker the validator's load-bearing discovery key BY CONVENTION). Executor
-# skills carry a BARE `- Write` with no marker and carry NEITHER obligation.
-# Because discovery is driven off that marker, adding a navigator without its
-# obligations turns this suite red automatically ONLY IF the new navigator
-# adopts the marker.
+# WHAT IT DOES NOT. A navigator authored without the scoped Edit entry is NOT
+# discovered, and carries neither obligation here; its inputs-file Write then
+# prompts at runtime, which surfaces the gap but does not fail this suite. The
+# CHECK 9 opt-out is NARROWED to that one case and made LOUD everywhere else —
+# it is not eliminated.
 #
-# Matching is FIXED-STRING on both the marker and the `- Write` entry token,
-# scoped to the file's YAML frontmatter. A frontmatter parser is deliberately
-# NOT written: the frontmatter form is stable and a parser is a new failure
-# surface.
+# Matching is FIXED-STRING on the entry prefix, after leading whitespace is
+# trimmed, scoped to the file's YAML frontmatter. A frontmatter parser is
+# deliberately NOT written: the frontmatter form is stable and a parser is a
+# new failure surface.
 #
 # Each discovered navigator must satisfy BOTH obligations:
 #   (a) at least one plugin/skills/<name>/scripts/*.sh sources containment.sh in
@@ -2284,8 +2284,7 @@ mark_time 'CHECK13'
 echo ''
 echo '=== CHECK 14: Inert inputs-file navigator obligations ==='
 
-CHECK14_MARKER='# inert inputs-file only:'
-CHECK14_WRITE_ENTRY='- Write'
+CHECK14_EDIT_ENTRY_PREFIX='- Edit(.hivemind/'
 CHECK14_POLICY_DOC="$PLUGIN_ROOT/governance/security-policy.md"
 CHECK14_SECTION_HEADING='### Inert Inputs-File Navigator Pattern'
 
@@ -2302,19 +2301,31 @@ check14_section="$(awk -v heading="$CHECK14_SECTION_HEADING" '
     in_section { print }
 ' "$CHECK14_POLICY_DOC")"
 
-# skill_declares_navigator_marker FILE
-# Echoes "true" when the skill's frontmatter carries a `- Write` entry bearing
-# the inert-inputs-file marker, "false" otherwise.
-skill_declares_navigator_marker() {
+# find_navigator_entry_line FILE
+# Echoes the file line number of the first YAML frontmatter entry that begins,
+# after leading whitespace, with the navigator discovery key, or 0 when the
+# frontmatter carries none. Frontmatter bounds follow get_frontmatter: it opens
+# at the first trimmed `---` line and closes at the next one.
+find_navigator_entry_line() {
     local skill_file="$1"
-    local fm_line
-    while IFS= read -r fm_line; do
-        [[ "$fm_line" != *"$CHECK14_WRITE_ENTRY"* ]] && continue
-        [[ "$fm_line" != *"$CHECK14_MARKER"* ]] && continue
-        echo "true"
-        return
-    done <<< "$(get_frontmatter "$skill_file")"
-    echo "false"
+    local textline trimmed
+    local line_number=0
+    local in_frontmatter=false
+    while IFS= read -r textline || [[ -n "$textline" ]]; do
+        line_number=$((line_number + 1))
+        trimmed="${textline#"${textline%%[![:space:]]*}"}"
+        if [[ "${trimmed%"${trimmed##*[![:space:]]}"}" == "---" ]]; then
+            [[ "$in_frontmatter" == true ]] && break
+            in_frontmatter=true
+            continue
+        fi
+        [[ "$in_frontmatter" != true ]] && continue
+        if [[ "$trimmed" == "$CHECK14_EDIT_ENTRY_PREFIX"* ]]; then
+            echo "$line_number"
+            return
+        fi
+    done < "$skill_file"
+    echo "0"
 }
 
 # skill_sources_containment SKILL_DIR
@@ -2357,36 +2368,36 @@ check14_navigator_count=0
 declare -a check14_skill_files=()
 discover_checked_paths 'CHECK14' check14_skill_files files 'skill SKILL.md files' "$PLUGIN_ROOT/skills" -- -maxdepth 2 -name 'SKILL.md' || check14_found=true
 for skill_file in "${check14_skill_files[@]}"; do
-    if [[ "$(skill_declares_navigator_marker "$skill_file")" != "true" ]]; then
+    entry_line="$(find_navigator_entry_line "$skill_file")"
+    if [[ "$entry_line" -eq 0 ]]; then
         continue
     fi
     check14_navigator_count=$((check14_navigator_count + 1))
 
     skill_dir="$(dirname "$skill_file")"
     skill_name="$(basename "$skill_dir")"
-    marker_line="$(grep -nF "$CHECK14_MARKER" "$skill_file" 2>/dev/null | head -n1 | cut -d: -f1 || true)"
-    [[ -z "$marker_line" ]] && marker_line=0
 
     skill_sources_containment "$skill_dir"
     if [[ "$SKILL_SOURCES_CONTAINMENT_RESULT" != "true" ]]; then
         check14_found=true
-        add_finding 'CHECK14' "$skill_file" "$marker_line" \
+        add_finding 'CHECK14' "$skill_file" "$entry_line" \
             "Inert inputs-file navigator hivemind:${skill_name} fails obligation (a): no plugin/skills/${skill_name}/scripts/*.sh sources containment.sh in the direct '. <path>/containment.sh' form CHECK 9 enrolls on (an indirect loop-variable source does not enroll) -- until it does, CHECK 9's guard-before-read enforcement never applies to this navigator"
     fi
 
     if [[ "$check14_section" != *"hivemind:${skill_name}"* ]]; then
         check14_found=true
-        add_finding 'CHECK14' "$skill_file" "$marker_line" \
+        add_finding 'CHECK14' "$skill_file" "$entry_line" \
             "Inert inputs-file navigator hivemind:${skill_name} fails obligation (b): literal 'hivemind:${skill_name}' is absent from the '${CHECK14_SECTION_HEADING}' section of plugin/governance/security-policy.md -- add it to the covered-set enumeration"
     fi
 done
 
-# FAIL-CLOSED on the discovery key itself: zero navigators means the marker was
-# renamed or dropped, which would silently disarm this check rather than fail it.
+# FAIL-CLOSED on the discovery key itself: zero navigators means the scoped Edit
+# entry was renamed or dropped everywhere, which would silently disarm this
+# check rather than fail it.
 if [[ "$check14_navigator_count" -eq 0 ]]; then
     check14_found=true
     add_finding 'CHECK14' "$CHECK14_POLICY_DOC" 0 \
-        "Inert inputs-file navigator discovery found ZERO navigators -- the '${CHECK14_MARKER}' discovery key is missing from every skill frontmatter, which disarms this check; restore the marker or retire the pattern deliberately"
+        "Inert inputs-file navigator discovery found ZERO navigators -- no skill frontmatter carries an entry beginning with the '${CHECK14_EDIT_ENTRY_PREFIX}' discovery key, which disarms this check; restore the scoped Edit entry or retire the pattern deliberately"
 fi
 
 if [[ "$check14_found" == false ]]; then
@@ -3107,6 +3118,940 @@ else
 fi
 
 mark_time 'CHECK15'
+
+# ── CHECK 16: Skill allowed-tools file-tool entries are scoped ─────────────
+#
+# WHAT IT GUARANTEES. A skill `allowed-tools` entry is a live permission rule
+# for the rest of the turn that loads the skill, workflow agents included, and
+# a bare file-tool entry matches every path (security-policy.md "Skill
+# File-Tool Grants"). CHECK 16 is a POSITIVE ALLOWLIST over every
+# plugin/skills/*/SKILL.md: an entry whose tool is Read, Write, Edit, MultiEdit,
+# NotebookEdit, Glob or Grep, bare or with parentheses, passes only as
+#   * exactly `Read(~/.claude/plugins/cache/<marketplace>/<plugin>/**)`, where
+#     <marketplace> is .name of .claude-plugin/marketplace.json and <plugin> is
+#     the name of its single plugins[] entry whose source is ./plugin; or
+#   * exactly `Edit(<glob>)`, where <glob> is the `Edit` glob that the
+#     "Inert Inputs-File Navigator Pattern" section of security-policy.md lists
+#     on THIS skill's own `hivemind:<name>` covered-set line. The doc is the
+#     ground truth: a skill not listed there may carry no Edit entry, and a
+#     listed skill only its own glob, never another navigator's. Each listed
+#     glob must itself be `.hivemind/<dirs>/<prefix>*<suffix>`: no wildcard in
+#     a directory segment, exactly one `*`, a prefix and a suffix that each hold
+#     a letter or digit, no `.` or `..` segment. A listed glob that fails this
+#     shape is a finding and admits nothing, so widening the doc to
+#     `.hivemind/**` or `.hivemind/*` turns this check red.
+# Every other file-tool entry is a finding. A new file tool spelling or a new
+# path form is a finding until this allowlist names it.
+#
+# PARSING. CHECK 16 does not model the Claude Code loader. It accepts only a
+# canonical frontmatter form that every documented reader reads the same way,
+# and everything else is a finding. BOUNDS: once a trailing CR is stripped,
+# line 1 must be exactly `---`; otherwise that is one finding and nothing more
+# is read. The frontmatter closes at the first later line that is exactly
+# `---`, and a frontmatter with no such line is a finding. Every other
+# frontmatter line that holds the text `---` at any indent (a comment, a list
+# item, a block-scalar body, a value, a closer with trailing text, a four-dash
+# line) is a finding, and the line is still read as usual. So a frontmatter has
+# exactly one closing candidate, and every reader that opens on line 1 closes
+# on the same line. A reader that stops earlier reads only a prefix of what
+# this check read, so it sees no entry this check did not see.
+#
+# WHY A CANONICAL FORM AND NOT A YAML PARSER. No YAML parser ships with bash,
+# jq, the python3 standard library or the Node standard library, and the perl
+# core module CPAN::Meta::YAML reads only a subset of YAML. The Claude Code
+# loader is documented only as an opener on line 1, YAML between the markers,
+# exact field names, and allowed-tools as a space- or comma-separated string
+# or a YAML list. Any parser is one more reader, and readers split the
+# frontmatter from the body before any parser runs, so a parser cannot make
+# them agree on the bounds. The canonical form does.
+#
+# Entries come from the YAML frontmatter `allowed-tools` key, in the
+# block-list form and the inline `[...]` or plain-string form. Any text from a
+# whitespace-`#` onward is stripped, so a trailing comment never hides or
+# narrows an entry. Inline items split on commas and whitespace outside
+# parentheses and quotes. The parser is FAIL-CLOSED: a form it does not read is
+# a finding, never a silent skip. Top-level KEYS are a positive grammar too:
+# every column-0 frontmatter line that is not blank or a comment must be a
+# plain, unquoted `<key>:` whose key is an ASCII letter or digit followed by
+# letters, digits, `_` or `-`, and the first content line must be at column 0.
+# A plain YAML key decodes no escapes, so the key text read here is the key the
+# runtime reads, and no other key spelling can pass unseen. So each of these is
+# a finding: a column-0 line that is not a plain key (a quoted or escape-spelled
+# key, an explicit `?` key, an alias, anchor, tag or merge key, a flow mapping,
+# a compact list item or a bare scalar); indented content before the first
+# column-0 key (an indented root mapping); an inline value that opens a flow
+# sequence without closing it on the same line; an indented line under the key
+# that is not a `- <entry>` list item (a continuation of a multi-line scalar, a
+# nested value, a block scalar body); any other frontmatter line that holds the
+# text `allowed-tools` (an indented key, or prose in another value); and, for
+# every skill, exempt or not, an entry that is not `<name>` or `<name>(<rule>)` with
+# <name> drawn from ASCII letters, digits, `_` and `-` and no `(`, `)` or `,`
+# inside <rule> (an anchor, alias, tag, block-scalar indicator, nested list,
+# `Read Write` item, or an item such as `Bash(x) Edit(**)`, `Bash(a, Write)` or
+# `Bash(a(b))` that another reader could split into more than one rule). So
+# each item holds exactly one rule, however a reader splits it.
+#
+# EXEMPTIONS. Exempt means "pinned to its current entries", not "unchecked".
+# The executor skills listed in CHECK16_EXEMPT_SKILLS keep their bare entries
+# until the executor-skill grant decision (issue 428 tail), and
+# security-policy.md "Skill File-Tool Grants" states the threat model those bare
+# entries carry. An exempt skill goes through the same collector, parse-error
+# findings and entry grammar as every other skill. Instead of the allowlist
+# classifier, its file-tool entries (Read, Write, Edit, MultiEdit, NotebookEdit,
+# Glob and Grep, bare or scoped) must equal its CHECK16_EXEMPT_PINS entry
+# exactly, counted as a multiset and in any order. Every added, removed or
+# changed file-tool entry is a finding that names the skill and the entry.
+# Entries for other tools stay out of the pin. An exempt path that is missing,
+# an exempt skill with no pin, a pin for a skill that is not exempt, and a pin
+# that holds no bare file-tool entry are each a stale-exemption finding, so the
+# list cannot outlive the grants it excuses. The run also counts the pins it
+# compared, and a count that differs from the number of discovered exempt
+# skills is a finding, so a loop that skips an exempt skill turns this check red.
+#
+# FAIL-CLOSED. An unreadable or malformed marketplace manifest, a missing or
+# non-identifier marketplace name, no single ./plugin entry with an identifier
+# name, zero discovered skills, or zero navigator globs read from
+# security-policy.md is a finding, never a pass.
+#
+# RESIDUALS. A file tool reached through an MCP server or a future built-in
+# with another name is not a file tool here. A navigator whose covered-set line
+# is reworded so the `(`Edit` glob `...`)` form no longer appears loses its
+# allowed Edit entry, which fails loudly on that skill rather than passing.
+# CHECK 16 accepts one canonical form and relies on the Claude Code loader being
+# in the documented family: a line-1 `---` opener; YAML between the markers;
+# exact field names; `allowed-tools` as a space- or comma-separated string or a
+# YAML list, split outside parentheses as the documented
+# `Bash(git add *) Bash(git commit *)` form requires; and YAML comments dropped,
+# as ADR-0010's 2026-10-22 amendment observed. Not modeled: a loader that
+# splits inside parentheses, decodes escapes in plain scalars, or reads past the
+# closing `---` line. Bounded: such a loader contradicts the Claude Code skills
+# docs; every SKILL.md change is a reviewed diff; a misspelled key grants
+# nothing, because Claude Code ignores unknown fields and matches field names
+# exactly; and the live grant check is the manual headless test ADR-0010
+# records. Rejected remediations: a YAML parser (none in the toolchain, it is
+# one more reader, and the frontmatter split happens before any parser), and a
+# runtime ground-truth check in CI (it needs the claude binary, auth and model
+# calls, and is not deterministic). Linked: PR 443 review thread
+# discussion_r4365394796 and local review findings 605118a8 and 960e5059.
+echo ''
+echo '=== CHECK 16: Skill allowed-tools file-tool entries are scoped ==='
+
+CHECK16_MARKETPLACE_MANIFEST="$REPO_ROOT/.claude-plugin/marketplace.json"
+CHECK16_POLICY_CITATION='security-policy.md "Skill File-Tool Grants"'
+CHECK16_ASCII_ALNUM='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
+CHECK16_IDENTIFIER_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*\$"
+CHECK16_ENTRY_GRAMMAR_REGEX="^[${CHECK16_ASCII_ALNUM}_-]+([(][^(),]*[)])?\$"
+CHECK16_PLAIN_KEY_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}_-]*[[:space:]]*:([[:space:]]|\$)"
+CHECK16_GLOB_LITERAL="[${CHECK16_ASCII_ALNUM}._-]*[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*"
+CHECK16_INPUTS_GLOB_REGEX="^[.]hivemind/([${CHECK16_ASCII_ALNUM}._-]+/)*${CHECK16_GLOB_LITERAL}[*]${CHECK16_GLOB_LITERAL}\$"
+CHECK16_NAVIGATOR_LINE_REGEX='^- `hivemind:([abcdefghijklmnopqrstuvwxyz0123456789-]+)` .*[(]`Edit` glob `([^`]+)`[)]'
+CHECK16_FILE_TOOLS=(Read Write Edit MultiEdit NotebookEdit Glob Grep)
+CHECK16_EXEMPT_SKILLS=(tdd refactor-to-depth plan-to-prd plan-interrogation create-handoff creep-spread)
+declare -A CHECK16_EXEMPT_PINS=(
+    [tdd]='Read, Write, Edit'
+    [refactor-to-depth]='Read, Write, Edit, Glob, Grep'
+    [plan-to-prd]='Read, Write, Edit'
+    [plan-interrogation]='Read, Write, Edit'
+    [create-handoff]='Read, Write, Edit'
+    [creep-spread]='Read, Write'
+)
+CHECK16_PINS_COMPARED=0
+CHECK16_CACHE_READ_RULE=''
+CHECK16_NORMALIZED=''
+declare -a CHECK16_ENTRY_TEXTS=()
+declare -a CHECK16_ENTRY_LINES=()
+declare -a CHECK16_PARSE_ERROR_LINES=()
+declare -a CHECK16_PARSE_ERROR_TEXTS=()
+declare -a CHECK16_PROBLEM_LINES=()
+declare -a CHECK16_PROBLEM_TEXTS=()
+declare -A CHECK16_NAVIGATOR_GLOBS=()
+
+check16_found=false
+
+# check16_trim TEXT
+# Sets CHECK16_TRIMMED to TEXT without leading or trailing whitespace.
+CHECK16_TRIMMED=''
+check16_trim() {
+    local text="$1"
+    text="${text#"${text%%[![:space:]]*}"}"
+    CHECK16_TRIMMED="${text%"${text##*[![:space:]]}"}"
+}
+
+# check16_normalize_entry RAW
+# Sets CHECK16_NORMALIZED to RAW with any text from a whitespace-`#` onward
+# stripped, then trimmed, then with one pair of matching surrounding quotes
+# removed and trimmed again.
+check16_normalize_entry() {
+    local entry="$1"
+    entry="${entry%%[[:space:]]#*}"
+    check16_trim "$entry"
+    entry="$CHECK16_TRIMMED"
+    if [[ ${#entry} -ge 2 && ( "$entry" == \"*\" || "$entry" == \'*\' ) ]]; then
+        check16_trim "${entry:1:${#entry}-2}"
+        entry="$CHECK16_TRIMMED"
+    fi
+    CHECK16_NORMALIZED="$entry"
+}
+
+# check16_is_file_tool_name NAME
+# Returns 0 when NAME is exactly one of CHECK16_FILE_TOOLS, else 1.
+check16_is_file_tool_name() {
+    local known_tool
+    for known_tool in "${CHECK16_FILE_TOOLS[@]}"; do
+        if [[ "$1" == "$known_tool" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# check16_is_safe_inputs_glob GLOB
+# Returns 0 when GLOB is `.hivemind/<dirs>/<prefix>*<suffix>`: directory
+# segments without wildcards, exactly one `*` in the last segment, a prefix and
+# a suffix that each hold an ASCII letter or digit, and no `.` or `..` segment.
+# Returns 1 otherwise, so `.hivemind/**`, `.hivemind/*` and `.hivemind/*/x-*.json`
+# never pass.
+check16_is_safe_inputs_glob() {
+    local glob="$1"
+    if [[ ! "$glob" =~ $CHECK16_INPUTS_GLOB_REGEX ]]; then
+        return 1
+    fi
+    if [[ "/${glob}/" == *'/../'* || "/${glob}/" == *'/./'* ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# check16_entry_is_unrecognized RAW
+# Returns 0 when RAW, once normalized, is not `<name>` or `<name>(<rule>)` with
+# <name> drawn from ASCII letters, digits, `_` and `-` and no `(`, `)` or `,`
+# inside <rule>, else 1. An anchor, alias, tag, block-scalar indicator, nested
+# list item, `Read Write` item, or an item holding more than one rule such as
+# `Bash(x) Edit(**)` is unrecognized, so it cannot pass as a non-file tool.
+check16_entry_is_unrecognized() {
+    check16_normalize_entry "$1"
+    if [[ "$CHECK16_NORMALIZED" =~ $CHECK16_ENTRY_GRAMMAR_REGEX ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# check16_entry_is_violation RAW ALLOWED_GLOB
+# The single entry classifier: returns 0 when RAW, once normalized, names a
+# file tool (bare or with parentheses) in any form other than the cache Read
+# rule or `Edit(ALLOWED_GLOB)`, else 1. ALLOWED_GLOB is the skill's own
+# navigator glob from security-policy.md, or empty when the skill has none, in
+# which case no Edit form is allowed. With no resolved cache Read rule, no Read
+# form is allowed.
+check16_entry_is_violation() {
+    local allowed_glob="${2:-}"
+    check16_normalize_entry "$1"
+    local entry="$CHECK16_NORMALIZED"
+    local tool_name="${entry%%[!${CHECK16_ASCII_ALNUM}_]*}"
+    if ! check16_is_file_tool_name "$tool_name"; then
+        return 1
+    fi
+    if [[ -n "$CHECK16_CACHE_READ_RULE" && "$entry" == "$CHECK16_CACHE_READ_RULE" ]]; then
+        return 1
+    fi
+    if [[ -n "$allowed_glob" && "$entry" == "Edit(${allowed_glob})" ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# check16_resolve_navigator_globs
+# Fills CHECK16_NAVIGATOR_GLOBS (skill name -> glob) from the `(`Edit` glob
+# `...`)` text on each `hivemind:<name>` line of the covered-set section of
+# security-policy.md. A listed glob that fails check16_is_safe_inputs_glob, or
+# a navigator listed twice, is a finding and admits nothing. Returns 1 after a
+# finding when the section is missing or lists no glob at all.
+check16_resolve_navigator_globs() {
+    local section_text section_line nav_name nav_glob
+    local -A seen_names=()
+    if [[ ! -f "$CHECK14_POLICY_DOC" || ! -r "$CHECK14_POLICY_DOC" ]]; then
+        add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
+            "security-policy.md is missing or unreadable, so no navigator inputs-file glob can be read and no Edit entry is allowed -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    section_text="$(awk -v heading="$CHECK14_SECTION_HEADING" '
+        { sub(/\r$/, "") }
+        $0 == heading { in_section = 1; next }
+        in_section && /^### / { exit }
+        in_section { print }
+    ' "$CHECK14_POLICY_DOC")"
+    while IFS= read -r section_line; do
+        if [[ ! "$section_line" =~ $CHECK16_NAVIGATOR_LINE_REGEX ]]; then
+            continue
+        fi
+        nav_name="${BASH_REMATCH[1]}"
+        nav_glob="${BASH_REMATCH[2]}"
+        if [[ -n "${seen_names[$nav_name]:-}" ]]; then
+            unset 'CHECK16_NAVIGATOR_GLOBS[$nav_name]'
+            add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
+                "the '${CHECK14_SECTION_HEADING}' section lists hivemind:${nav_name} with an Edit glob more than once, so none of its globs is allowed -- list each navigator once -- see ${CHECK16_POLICY_CITATION}"
+            check16_found=true
+            continue
+        fi
+        seen_names[$nav_name]=true
+        if ! check16_is_safe_inputs_glob "$nav_glob"; then
+            add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
+                "the '${CHECK14_SECTION_HEADING}' section lists Edit glob '${nav_glob}' for hivemind:${nav_name}, which is not one inputs-file glob of the form .hivemind/<dirs>/<prefix>*<suffix>, so it is not allowed -- see ${CHECK16_POLICY_CITATION}"
+            check16_found=true
+            continue
+        fi
+        CHECK16_NAVIGATOR_GLOBS[$nav_name]="$nav_glob"
+    done <<< "$section_text"
+    if [[ "${#seen_names[@]}" -eq 0 ]]; then
+        add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
+            "the '${CHECK14_SECTION_HEADING}' section lists no navigator line with an Edit glob, so no Edit entry is allowed and this check cannot tell a navigator's own inputs file from any other path -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    return 0
+}
+
+# check16_append_entry TEXT LINE
+# Appends one non-empty raw entry and its file line number to the entry arrays.
+check16_append_entry() {
+    check16_trim "$1"
+    if [[ -n "$CHECK16_TRIMMED" ]]; then
+        CHECK16_ENTRY_TEXTS+=("$CHECK16_TRIMMED")
+        CHECK16_ENTRY_LINES+=("$2")
+    fi
+    return 0
+}
+
+# check16_split_inline_value VALUE LINE
+# Appends each item of an inline allowed-tools VALUE -- the `[...]` flow form or
+# a plain string, optionally quoted whole -- to the entry arrays at LINE. Items
+# split on commas and whitespace outside parentheses and quotes. Returns 1 when
+# VALUE opens a flow sequence it does not close, else 0.
+check16_split_inline_value() {
+    local value="$1" line_number="$2"
+    local current_item='' open_quote='' paren_depth=0 char_index value_char
+    if [[ "$value" == '['* ]]; then
+        if [[ "$value" != *']' ]]; then
+            return 1
+        fi
+        value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && ( "$value" == \"*\" || "$value" == \'*\' ) ]]; then
+        value="${value:1:${#value}-2}"
+    fi
+    for ((char_index = 0; char_index < ${#value}; char_index++)); do
+        value_char="${value:char_index:1}"
+        if [[ -n "$open_quote" ]]; then
+            if [[ "$value_char" == "$open_quote" ]]; then
+                open_quote=''
+            fi
+            current_item+="$value_char"
+            continue
+        fi
+        case "$value_char" in
+            \"|\')
+                open_quote="$value_char"
+                current_item+="$value_char"
+                ;;
+            '(')
+                paren_depth=$((paren_depth + 1))
+                current_item+="$value_char"
+                ;;
+            ')')
+                if [[ "$paren_depth" -gt 0 ]]; then
+                    paren_depth=$((paren_depth - 1))
+                fi
+                current_item+="$value_char"
+                ;;
+            ','|' '|$'\t')
+                if [[ "$paren_depth" -gt 0 ]]; then
+                    current_item+="$value_char"
+                else
+                    check16_append_entry "$current_item" "$line_number"
+                    current_item=''
+                fi
+                ;;
+            *)
+                current_item+="$value_char"
+                ;;
+        esac
+    done
+    check16_append_entry "$current_item" "$line_number"
+    return 0
+}
+
+# check16_add_parse_error LINE TEXT
+# Appends one parse error and its file line number to the parse-error arrays.
+check16_add_parse_error() {
+    CHECK16_PARSE_ERROR_LINES+=("$1")
+    CHECK16_PARSE_ERROR_TEXTS+=("$2")
+    return 0
+}
+
+# check16_collect_entries SKILL_FILE
+# Replaces CHECK16_ENTRY_TEXTS and CHECK16_ENTRY_LINES with every raw
+# allowed-tools entry in SKILL_FILE's YAML frontmatter and its line number, and
+# CHECK16_PARSE_ERROR_LINES and CHECK16_PARSE_ERROR_TEXTS with every form the
+# collector does not read. It reports nothing itself, so the canary can run it.
+# A trailing CR is stripped from each line. Line 1 must be exactly `---`, and
+# the frontmatter closes at the first later line that is exactly `---`; any
+# other frontmatter line holding the text `---` is a parse error.
+check16_collect_entries() {
+    local skill_file="$1"
+    local textline value line_number=0 frontmatter_open=false frontmatter_closed=false key_mode='' seen_top_key=false
+    CHECK16_ENTRY_TEXTS=()
+    CHECK16_ENTRY_LINES=()
+    CHECK16_PARSE_ERROR_LINES=()
+    CHECK16_PARSE_ERROR_TEXTS=()
+    while IFS= read -r textline || [[ -n "$textline" ]]; do
+        line_number=$((line_number + 1))
+        textline="${textline%$'\r'}"
+        if [[ "$line_number" -eq 1 ]]; then
+            if [[ "$textline" != '---' ]]; then
+                break
+            fi
+            frontmatter_open=true
+            continue
+        fi
+        if [[ "$textline" == '---' ]]; then
+            frontmatter_closed=true
+            break
+        fi
+        if [[ "$textline" == *'---'* ]]; then
+            check16_add_parse_error "$line_number" \
+                "a frontmatter line holds the text '---' but is not the closing line, which must be exactly '---' (an indented, commented or trailing-text delimiter, a four-dash line, or '---' inside a value, list item or block-scalar body), so readers can disagree on where the frontmatter ends -- keep '---' only on line 1 and on the closing line, each exactly '---'"
+        fi
+        check16_trim "$textline"
+        if [[ -n "$key_mode" ]]; then
+            if [[ -z "$CHECK16_TRIMMED" || "$CHECK16_TRIMMED" == '#'* ]]; then
+                continue
+            fi
+            if [[ "$key_mode" == block && ( "$CHECK16_TRIMMED" == '-' || "$CHECK16_TRIMMED" == '-'[[:space:]]* ) ]]; then
+                check16_append_entry "${CHECK16_TRIMMED#-}" "$line_number"
+                continue
+            fi
+            if [[ "$textline" == [[:space:]]* ]]; then
+                check16_add_parse_error "$line_number" \
+                    "an indented line under allowed-tools is not a '- <entry>' list item (a continuation of a multi-line value, a nested value or a block scalar body), so its text cannot be classified -- write each entry as its own '- <entry>' item"
+                continue
+            fi
+            key_mode=''
+        fi
+        if [[ -n "$CHECK16_TRIMMED" && "$CHECK16_TRIMMED" != '#'* ]]; then
+            if [[ "$textline" == [[:space:]]* ]]; then
+                if [[ "$seen_top_key" != true ]]; then
+                    check16_add_parse_error "$line_number" \
+                        "frontmatter content before the first column-0 key is indented (an indented root mapping), so its top-level keys cannot be read -- start the frontmatter with plain column-0 '<key>:' lines"
+                    continue
+                fi
+            elif [[ "$textline" =~ $CHECK16_PLAIN_KEY_REGEX ]]; then
+                seen_top_key=true
+            else
+                check16_add_parse_error "$line_number" \
+                    "a column-0 frontmatter line is not a plain '<key>:' with an ASCII key (a quoted or escape-spelled key, an explicit '?' key, an alias, anchor, tag or merge key, a flow mapping, a compact list item or a bare scalar), so the key it names cannot be read -- write every top-level key plain and unquoted, and indent list items under their key"
+                continue
+            fi
+        fi
+        if [[ "$textline" =~ ^allowed-tools[[:space:]]*:(.*)$ ]]; then
+            value="${BASH_REMATCH[1]}"
+            value="${value%%[[:space:]]#*}"
+            check16_trim "$value"
+            value="$CHECK16_TRIMMED"
+            if [[ -z "$value" ]]; then
+                key_mode=block
+            else
+                key_mode=inline
+                if ! check16_split_inline_value "$value" "$line_number"; then
+                    check16_add_parse_error "$line_number" \
+                        "allowed-tools opens an inline flow sequence it does not close on the same line (\"${value}\"); its entries cannot be read, so write them as a block list or close the sequence"
+                fi
+            fi
+            continue
+        fi
+        if [[ "$textline" == *allowed-tools* ]]; then
+            check16_add_parse_error "$line_number" \
+                "the text allowed-tools appears in a frontmatter line that is not a column-0 'allowed-tools:' key (an indented, quoted or flow-mapping key, or prose in another value), so it cannot be classified -- use a column-0 'allowed-tools:' key and keep the words out of other frontmatter values"
+        fi
+    done < "$skill_file"
+    if [[ "$frontmatter_open" != true ]]; then
+        check16_add_parse_error 1 \
+            "line 1 is not exactly '---' (the file is empty, or line 1 is blank, indented or holds other text), so no frontmatter is read -- start the file with a line that is exactly '---'"
+    elif [[ "$frontmatter_closed" != true ]]; then
+        check16_add_parse_error 1 \
+            "the frontmatter opened on line 1 has no later line that is exactly '---', so its end cannot be read -- close it with a line that is exactly '---'"
+    fi
+    return 0
+}
+
+# check16_resolve_cache_read_rule
+# Sets CHECK16_CACHE_READ_RULE from the marketplace manifest. Returns 1 after a
+# CHECK16 finding when the manifest is unreadable or malformed, its .name is not
+# an identifier, or it has no single ./plugin entry with an identifier name.
+check16_resolve_cache_read_rule() {
+    local manifest="$CHECK16_MARKETPLACE_MANIFEST"
+    local marketplace_name plugin_name
+    if [[ ! -f "$manifest" || ! -r "$manifest" ]] || ! jq empty "$manifest" > /dev/null 2>&1; then
+        add_finding 'CHECK16' "$manifest" 0 \
+            "the marketplace manifest is missing, unreadable or not valid JSON, so the plugin cache Read rule cannot be derived and no skill entry is checked -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    if ! marketplace_name="$(jq -er '.name | select(type == "string")' "$manifest" 2>/dev/null)" \
+       || [[ ! "$marketplace_name" =~ $CHECK16_IDENTIFIER_REGEX ]]; then
+        add_finding 'CHECK16' "$manifest" 0 \
+            "the marketplace manifest .name is missing or not an identifier matching ${CHECK16_IDENTIFIER_REGEX}, so the plugin cache Read rule cannot be derived and no skill entry is checked -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    if ! plugin_name="$(jq -er '[.plugins[]? | select(type == "object" and .source == "./plugin") | .name] | if length == 1 and (.[0] | type) == "string" then .[0] else empty end' "$manifest" 2>/dev/null)" \
+       || [[ ! "$plugin_name" =~ $CHECK16_IDENTIFIER_REGEX ]]; then
+        add_finding 'CHECK16' "$manifest" 0 \
+            "the marketplace manifest has no single plugins[] entry with source ./plugin and an identifier name, so the plugin cache Read rule cannot be derived and no skill entry is checked -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    CHECK16_CACHE_READ_RULE="Read(~/.claude/plugins/cache/${marketplace_name}/${plugin_name}/**)"
+    return 0
+}
+
+# check16_is_exempt_skill NAME
+# Returns 0 when NAME is one of CHECK16_EXEMPT_SKILLS, else 1.
+check16_is_exempt_skill() {
+    local exempt_skill
+    for exempt_skill in "${CHECK16_EXEMPT_SKILLS[@]}"; do
+        if [[ "$1" == "$exempt_skill" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# check16_pin_has_bare_file_tool_entry PIN_TEXT
+# Returns 0 when any comma-separated entry of PIN_TEXT, trimmed, is exactly a
+# file tool name, else 1.
+check16_pin_has_bare_file_tool_entry() {
+    local pin_entry
+    local -a pin_entries=()
+    IFS=',' read -r -a pin_entries <<< "$1"
+    for pin_entry in "${pin_entries[@]}"; do
+        check16_trim "$pin_entry"
+        if check16_is_file_tool_name "$CHECK16_TRIMMED"; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+# check16_add_problem LINE TEXT
+# Appends one problem and its file line number to the problem arrays.
+check16_add_problem() {
+    CHECK16_PROBLEM_LINES+=("$1")
+    CHECK16_PROBLEM_TEXTS+=("$2")
+    return 0
+}
+
+# check16_diff_exempt_pin SKILL_NAME
+# Compares every recognized file-tool entry the last collect recorded with the
+# CHECK16_EXEMPT_PINS entry of SKILL_NAME, as a multiset, and appends one problem
+# for each entry that is not pinned and each pinned entry that is absent.
+# Entries for other tools are not compared. Counts the comparison in
+# CHECK16_PINS_COMPARED.
+check16_diff_exempt_pin() {
+    local skill_name="$1" pin_text pin_entry pin_display entry_index entry tool_name
+    local -a pin_entries=()
+    local -A remaining_counts=()
+    CHECK16_PINS_COMPARED=$((CHECK16_PINS_COMPARED + 1))
+    pin_text="${CHECK16_EXEMPT_PINS[$skill_name]-}"
+    pin_display="${pin_text:-none}"
+    IFS=',' read -r -a pin_entries <<< "$pin_text"
+    for pin_entry in "${pin_entries[@]}"; do
+        check16_trim "$pin_entry"
+        remaining_counts["$CHECK16_TRIMMED"]=$(( ${remaining_counts["$CHECK16_TRIMMED"]:-0} + 1 ))
+    done
+    for ((entry_index = 0; entry_index < ${#CHECK16_ENTRY_TEXTS[@]}; entry_index++)); do
+        if check16_entry_is_unrecognized "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
+            continue
+        fi
+        entry="$CHECK16_NORMALIZED"
+        tool_name="${entry%%[!${CHECK16_ASCII_ALNUM}_]*}"
+        if ! check16_is_file_tool_name "$tool_name"; then
+            continue
+        fi
+        if [[ "${remaining_counts["$entry"]:-0}" -gt 0 ]]; then
+            remaining_counts["$entry"]=$(( ${remaining_counts["$entry"]} - 1 ))
+            continue
+        fi
+        check16_add_problem "${CHECK16_ENTRY_LINES[$entry_index]}" \
+            "allowed-tools entry '${entry}' on exempt executor skill hivemind:${skill_name} is not one of its pinned file-tool entries (${pin_display}); exempt means pinned to its current entries, not unchecked, so make the executor-skill grant decision (issue 428 tail) before adding, removing or changing a file-tool entry on this skill"
+    done
+    for pin_entry in "${pin_entries[@]}"; do
+        check16_trim "$pin_entry"
+        if [[ "${remaining_counts["$CHECK16_TRIMMED"]:-0}" -gt 0 ]]; then
+            remaining_counts["$CHECK16_TRIMMED"]=$(( ${remaining_counts["$CHECK16_TRIMMED"]} - 1 ))
+            check16_add_problem 0 \
+                "pinned file-tool entry '${CHECK16_TRIMMED}' of exempt executor skill hivemind:${skill_name} is missing from its allowed-tools (pinned: ${pin_display}); exempt means pinned to its current entries, not unchecked, so make the executor-skill grant decision (issue 428 tail) before adding, removing or changing a file-tool entry on this skill"
+        fi
+    done
+    return 0
+}
+
+# check16_evaluate_skill SKILL_FILE SKILL_NAME
+# Collects SKILL_FILE's entries and replaces CHECK16_PROBLEM_LINES and
+# CHECK16_PROBLEM_TEXTS with every parse error, every unrecognized entry, and
+# either every entry the classifier rejects (with SKILL_NAME's own navigator
+# glob) or, for an exempt SKILL_NAME, every difference from its pin. It reports
+# nothing itself, so the canary can run it.
+check16_evaluate_skill() {
+    local skill_file="$1" skill_name="$2" allowed_glob entry_index allowed_edit_text
+    allowed_glob="${CHECK16_NAVIGATOR_GLOBS[$skill_name]:-}"
+    CHECK16_PROBLEM_LINES=()
+    CHECK16_PROBLEM_TEXTS=()
+    check16_collect_entries "$skill_file"
+    for ((entry_index = 0; entry_index < ${#CHECK16_PARSE_ERROR_TEXTS[@]}; entry_index++)); do
+        check16_add_problem "${CHECK16_PARSE_ERROR_LINES[$entry_index]}" "${CHECK16_PARSE_ERROR_TEXTS[$entry_index]}"
+    done
+    if [[ -n "$allowed_glob" ]]; then
+        allowed_edit_text="'Edit(${allowed_glob})', this skill's own inputs-file glob in security-policy.md"
+    else
+        allowed_edit_text="no Edit entry, because security-policy.md lists no inputs-file glob for this skill"
+    fi
+    for ((entry_index = 0; entry_index < ${#CHECK16_ENTRY_TEXTS[@]}; entry_index++)); do
+        if check16_entry_is_unrecognized "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
+            check16_add_problem "${CHECK16_ENTRY_LINES[$entry_index]}" \
+                "allowed-tools entry '${CHECK16_NORMALIZED}' is not one recognized tool entry ('<name>' or '<name>(<rule>)' with no '(', ')' or ',' inside the rule), so it cannot be classified -- write one plain rule per list item, each as its own '- <entry>' line, with no '(', ')' or ',' inside the parentheses"
+            continue
+        fi
+        if check16_is_exempt_skill "$skill_name"; then
+            continue
+        fi
+        if check16_entry_is_violation "${CHECK16_ENTRY_TEXTS[$entry_index]}" "$allowed_glob"; then
+            check16_add_problem "${CHECK16_ENTRY_LINES[$entry_index]}" \
+                "allowed-tools entry '${CHECK16_NORMALIZED}' is a file-tool grant outside the allowed forms ('${CHECK16_CACHE_READ_RULE}', and ${allowed_edit_text}); a skill entry is a live rule for the whole turn that loads it"
+        fi
+    done
+    if check16_is_exempt_skill "$skill_name"; then
+        check16_diff_exempt_pin "$skill_name"
+    fi
+    return 0
+}
+
+# check16_report_problems SKILL_FILE
+# Records a CHECK16 finding for every problem the last evaluate recorded.
+check16_report_problems() {
+    local skill_file="$1" problem_index
+    for ((problem_index = 0; problem_index < ${#CHECK16_PROBLEM_TEXTS[@]}; problem_index++)); do
+        check16_found=true
+        add_finding 'CHECK16' "$skill_file" "${CHECK16_PROBLEM_LINES[$problem_index]}" \
+            "${CHECK16_PROBLEM_TEXTS[$problem_index]} -- see ${CHECK16_POLICY_CITATION}"
+    done
+    return 0
+}
+
+declare -a check16_skill_files=()
+discover_checked_paths 'CHECK16' check16_skill_files files 'skill SKILL.md files' "$PLUGIN_ROOT/skills" -- -maxdepth 2 -name 'SKILL.md' || check16_found=true
+
+if [[ "${#check16_skill_files[@]}" -eq 0 ]]; then
+    check16_found=true
+    add_finding 'CHECK16' "$PLUGIN_ROOT/skills" 0 \
+        "skill discovery found ZERO plugin/skills/*/SKILL.md files, which disarms this check rather than passing it -- see ${CHECK16_POLICY_CITATION}"
+fi
+
+check16_resolve_navigator_globs || check16_found=true
+
+if ! check16_resolve_cache_read_rule; then
+    check16_found=true
+else
+    for skill_file in "${check16_skill_files[@]}"; do
+        skill_name="$(basename "$(dirname "$skill_file")")"
+        check16_evaluate_skill "$skill_file" "$skill_name"
+        check16_report_problems "$skill_file"
+    done
+
+    check16_exempt_discovered_count=0
+    for exempt_skill in "${CHECK16_EXEMPT_SKILLS[@]}"; do
+        exempt_skill_file="$PLUGIN_ROOT/skills/${exempt_skill}/SKILL.md"
+        exempt_skill_discovered=false
+        for skill_file in "${check16_skill_files[@]}"; do
+            if [[ "$skill_file" == "$exempt_skill_file" ]]; then
+                exempt_skill_discovered=true
+            fi
+        done
+        if [[ "$exempt_skill_discovered" != true ]]; then
+            check16_found=true
+            add_finding 'CHECK16' "$exempt_skill_file" 0 \
+                "stale exemption: hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but its SKILL.md was not discovered -- remove it from the exemption list and its pin -- see ${CHECK16_POLICY_CITATION}"
+            continue
+        fi
+        check16_exempt_discovered_count=$((check16_exempt_discovered_count + 1))
+        if [[ -z "${CHECK16_EXEMPT_PINS[$exempt_skill]+set}" ]]; then
+            check16_found=true
+            add_finding 'CHECK16' "$exempt_skill_file" 0 \
+                "hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but has no CHECK16_EXEMPT_PINS entry, so every file-tool entry it carries is reported as unpinned -- pin its current file-tool entries -- see ${CHECK16_POLICY_CITATION}"
+        elif ! check16_pin_has_bare_file_tool_entry "${CHECK16_EXEMPT_PINS[$exempt_skill]}"; then
+            check16_found=true
+            add_finding 'CHECK16' "$exempt_skill_file" 0 \
+                "stale exemption: hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but its pin holds no bare file-tool entry -- remove it from the exemption list and its pin so its entries are checked -- see ${CHECK16_POLICY_CITATION}"
+        fi
+    done
+
+    for pinned_skill in "${!CHECK16_EXEMPT_PINS[@]}"; do
+        if ! check16_is_exempt_skill "$pinned_skill"; then
+            check16_found=true
+            add_finding 'CHECK16' 'tools/policy_check.sh' 0 \
+                "stale exemption: CHECK16_EXEMPT_PINS holds a pin for hivemind:${pinned_skill}, which is not in CHECK16_EXEMPT_SKILLS -- remove the pin -- see ${CHECK16_POLICY_CITATION}"
+        fi
+    done
+
+    if [[ "$CHECK16_PINS_COMPARED" -ne "$check16_exempt_discovered_count" ]]; then
+        check16_found=true
+        add_finding 'CHECK16' 'tools/policy_check.sh' 0 \
+            "the skill scan compared ${CHECK16_PINS_COMPARED} exempt pin(s) but ${check16_exempt_discovered_count} exempt skill(s) were discovered, so an exempt skill skipped its pin comparison -- run every discovered skill through check16_evaluate_skill -- see ${CHECK16_POLICY_CITATION}"
+    fi
+fi
+
+# ── CHECK 16 DETECTION CANARY ──────────────────────────────────────────────
+# The entry classifier, the entry grammar, the inputs-glob shape, the
+# frontmatter collector and the exempt pin comparison over fixed inputs, in
+# BOTH directions. An exempt skill that skips its pin comparison, a narrowed
+# file-tool list, a widened or narrowed allowed form, a dropped trailing-comment
+# strip, or a collector that skips a form it does not read turns this run red
+# while every skill still passes.
+
+check16_canary_finding() {
+    check16_found=true
+    add_finding 'CHECK16' 'tools/policy_check.sh' 0 "detection canary: $1"
+    return 0
+}
+
+# check16_expect_hit ENTRY [ALLOWED_GLOB]
+check16_expect_hit() {
+    if ! check16_entry_is_violation "$1" "${2:-}"; then
+        check16_canary_finding "entry \"$1\" with allowed glob \"${2:-}\" was not classified as a file-tool violation -- the file-tool list was narrowed or an allowed form widened"
+    fi
+    return 0
+}
+
+# check16_expect_miss ENTRY [ALLOWED_GLOB]
+check16_expect_miss() {
+    if check16_entry_is_violation "$1" "${2:-}"; then
+        check16_canary_finding "entry \"$1\" with allowed glob \"${2:-}\" was classified as a file-tool violation -- an allowed form was narrowed, the trailing-comment strip dropped, or a non-file tool is now treated as one"
+    fi
+    return 0
+}
+
+check16_expect_unrecognized() {
+    if ! check16_entry_is_unrecognized "$1"; then
+        check16_canary_finding "entry \"$1\" passed the tool-entry grammar -- the grammar was widened"
+    fi
+    return 0
+}
+
+check16_expect_recognized() {
+    if check16_entry_is_unrecognized "$1"; then
+        check16_canary_finding "entry \"$1\" failed the tool-entry grammar -- the grammar was narrowed"
+    fi
+    return 0
+}
+
+check16_expect_unsafe_glob() {
+    if check16_is_safe_inputs_glob "$1"; then
+        check16_canary_finding "glob \"$1\" passed the inputs-file glob shape -- the shape was widened"
+    fi
+    return 0
+}
+
+check16_expect_safe_glob() {
+    if ! check16_is_safe_inputs_glob "$1"; then
+        check16_canary_finding "glob \"$1\" failed the inputs-file glob shape -- the shape was narrowed"
+    fi
+    return 0
+}
+
+# check16_count_doc_problems LABEL LINE...
+# Runs the collector over a frontmatter built from the LINE arguments and sets
+# CHECK16_DOC_PROBLEMS to its parse errors plus every entry that is
+# unrecognized or a violation with no allowed Edit glob.
+CHECK16_DOC_PROBLEMS=0
+check16_count_doc_problems() {
+    shift
+    local raw_entry
+    check16_collect_entries <(printf '%s\n' "$@")
+    CHECK16_DOC_PROBLEMS="${#CHECK16_PARSE_ERROR_TEXTS[@]}"
+    for raw_entry in "${CHECK16_ENTRY_TEXTS[@]}"; do
+        if check16_entry_is_unrecognized "$raw_entry" || check16_entry_is_violation "$raw_entry" ''; then
+            CHECK16_DOC_PROBLEMS=$((CHECK16_DOC_PROBLEMS + 1))
+        fi
+    done
+    return 0
+}
+
+check16_expect_doc_problem() {
+    check16_count_doc_problems "$@"
+    if [[ "$CHECK16_DOC_PROBLEMS" -eq 0 ]]; then
+        check16_canary_finding "frontmatter case '$1' produced no finding -- the collector skips a form it does not read"
+    fi
+    return 0
+}
+
+# check16_count_skill_problems SKILL_NAME LINE...
+# Runs check16_evaluate_skill over a SKILL.md built from the LINE arguments as
+# skill SKILL_NAME and sets CHECK16_SKILL_PROBLEMS to its problem count.
+CHECK16_SKILL_PROBLEMS=0
+check16_count_skill_problems() {
+    local skill_name="$1"
+    shift
+    check16_evaluate_skill <(printf '%s\n' "$@") "$skill_name"
+    CHECK16_SKILL_PROBLEMS="${#CHECK16_PROBLEM_TEXTS[@]}"
+    return 0
+}
+
+# check16_expect_skill_problem LABEL SKILL_NAME LINE...
+check16_expect_skill_problem() {
+    local case_label="$1"
+    shift
+    check16_count_skill_problems "$@"
+    if [[ "$CHECK16_SKILL_PROBLEMS" -eq 0 ]]; then
+        check16_canary_finding "skill case '${case_label}' for hivemind:$1 produced no finding -- an exempt skill is no longer held to its pinned file-tool entries"
+    fi
+    return 0
+}
+
+# check16_expect_skill_clean LABEL SKILL_NAME LINE...
+check16_expect_skill_clean() {
+    local case_label="$1"
+    shift
+    check16_count_skill_problems "$@"
+    if [[ "$CHECK16_SKILL_PROBLEMS" -ne 0 ]]; then
+        check16_canary_finding "skill case '${case_label}' for hivemind:$1 produced ${CHECK16_SKILL_PROBLEMS} finding(s) -- the exempt pin comparison misreads a matching skill"
+    fi
+    return 0
+}
+
+check16_expect_doc_clean() {
+    check16_count_doc_problems "$@"
+    if [[ "$CHECK16_DOC_PROBLEMS" -ne 0 ]]; then
+        check16_canary_finding "frontmatter case '$1' produced ${CHECK16_DOC_PROBLEMS} finding(s) -- the collector misreads a supported form"
+    fi
+    return 0
+}
+
+if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
+    check16_canary_glob='.hivemind/runs/.record-inputs-*.json'
+
+    check16_expect_hit 'Read'
+    check16_expect_hit 'Write   # x'
+    check16_expect_hit 'Write(.hivemind/a.json)'
+    check16_expect_hit 'Glob(src/**)'
+    check16_expect_hit 'Grep'
+    check16_expect_hit 'Read(//etc/**)'
+    check16_expect_hit 'Read(${CLAUDE_PLUGIN_ROOT}/**)'
+    check16_expect_hit 'Edit(../x)'
+    check16_expect_hit 'Edit(/abs/x)'
+    check16_expect_hit 'NotebookEdit(.hivemind/a)'
+    check16_expect_hit 'Edit(.hivemind/)'
+    check16_expect_hit 'Edit(.hivemind/../x)'
+    check16_expect_hit 'Edit(.hivemind/**)' "$check16_canary_glob"
+    check16_expect_hit 'Edit(.hivemind/*)' "$check16_canary_glob"
+    check16_expect_hit 'Edit(.hivemind/molt-inputs-*.json)' "$check16_canary_glob"
+    check16_expect_hit "Edit(${check16_canary_glob})"
+    check16_expect_hit "Write(${check16_canary_glob})" "$check16_canary_glob"
+
+    check16_expect_miss "$CHECK16_CACHE_READ_RULE"
+    check16_expect_miss "${CHECK16_CACHE_READ_RULE}   # x"
+    check16_expect_miss "Edit(${check16_canary_glob})" "$check16_canary_glob"
+    check16_expect_miss "Edit(${check16_canary_glob})   # x" "$check16_canary_glob"
+    check16_expect_miss 'Bash(git status *)'
+    check16_expect_miss 'Skill'
+    check16_expect_miss 'Agent(hivemind:x)'
+    check16_expect_miss 'Monitor'
+    check16_expect_miss 'LSP'
+
+    check16_expect_unrecognized '&tools'
+    check16_expect_unrecognized '*tools'
+    check16_expect_unrecognized '[Write]'
+    check16_expect_unrecognized '!!str Write'
+    check16_expect_unrecognized '|'
+    check16_expect_unrecognized '>-'
+    check16_expect_unrecognized '- Write'
+    check16_expect_unrecognized 'Read Write'
+    check16_expect_unrecognized 'Read (x)'
+    check16_expect_unrecognized 'Bash(x) Edit(**)'
+    check16_expect_unrecognized 'Bash(a, Write)'
+    check16_expect_unrecognized 'Bash(a(b))'
+    check16_expect_recognized 'Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh *)'
+    check16_expect_recognized 'Agent(hivemind:github-reviewer)'
+    check16_expect_recognized 'mcp__plugin_claude-mem_mcp-search__search'
+    check16_expect_recognized "$CHECK16_CACHE_READ_RULE"
+
+    check16_expect_safe_glob '.hivemind/runs/.record-inputs-*.json'
+    check16_expect_safe_glob '.hivemind/spawn-inputs.*.json'
+    check16_expect_unsafe_glob '.hivemind/**'
+    check16_expect_unsafe_glob '.hivemind/*'
+    check16_expect_unsafe_glob '.hivemind/*.json'
+    check16_expect_unsafe_glob '.hivemind/*/x-*.json'
+    check16_expect_unsafe_glob '.hivemind/a-**.json'
+    check16_expect_unsafe_glob '.hivemind/a-*-*.json'
+    check16_expect_unsafe_glob '.hivemind/../x-*.json'
+    check16_expect_unsafe_glob '.hivemind/./x-*.json'
+    check16_expect_unsafe_glob '/.hivemind/x-*.json'
+    check16_expect_unsafe_glob 'runs/.hivemind/x-*.json'
+    check16_expect_unsafe_glob '.hivemind/x-inputs.json'
+
+    check16_expect_doc_problem 'indented key' '---' 'name: x' '  allowed-tools: [Write]' '---'
+    check16_expect_doc_problem 'quoted key' '---' '"allowed-tools": [Write]' '---'
+    check16_expect_doc_problem 'flow-mapping frontmatter' '---' '{name: x, allowed-tools: [Write]}' '---'
+    check16_expect_doc_problem 'anchored inline value' '---' 'allowed-tools: &t [Write]' '---'
+    check16_expect_doc_problem 'block scalar' '---' 'allowed-tools: |' '  Write' '---'
+    check16_expect_doc_problem 'multi-line list item' '---' 'allowed-tools:' '  - Bash(x)' '    Write' '---'
+    check16_expect_doc_problem 'multi-line inline value' '---' 'allowed-tools: Bash(x)' '  Write' '---'
+    check16_expect_doc_problem 'unclosed flow sequence' '---' 'allowed-tools: [Bash(x),' '  Write]' '---'
+    check16_expect_doc_problem 'tagged list item' '---' 'allowed-tools:' '  - !!str Write' '---'
+    check16_expect_doc_problem 'CRLF bare entry' $'---\r' $'allowed-tools:\r' $'  - Write\r' $'---\r'
+    check16_expect_doc_problem 'unicode-escaped key' '---' 'name: x' '"allowed\u002dtools": [Write]' '---'
+    check16_expect_doc_problem 'hex-escaped key' '---' 'name: x' '"allowed\x2dtools": [Write]' '---'
+    check16_expect_doc_problem 'escaped key after a block list' '---' 'allowed-tools:' '  - Skill' '"allowed\u002dtools": [Write]' '---'
+    check16_expect_doc_problem 'explicit key' '---' 'name: x' '? "allowed\u002dtools"' ': [Write]' '---'
+    check16_expect_doc_problem 'alias key' '---' 'name: &k x' '*k : [Write]' '---'
+    check16_expect_doc_problem 'merge key' '---' 'base: &b {x: 1}' '<<: *b' '---'
+    check16_expect_doc_problem 'indented root mapping' '---' '  name: x' '  "allowed\u002dtools": [Write]' '---'
+    check16_expect_doc_problem 'compact list under another key' '---' 'tags:' '- a' '---'
+    check16_expect_doc_problem 'indented delimiter in a block scalar' '---' 'name: x' 'description: |' '  ---' 'allowed-tools:' '  - Write' '---'
+    check16_expect_doc_problem 'delimiter text in a value' '---' 'name: x' 'description: a --- b' 'allowed-tools:' '  - Skill' '---'
+    check16_expect_doc_problem 'delimiter text in a list item' '---' 'allowed-tools:' '  - Bash(echo ---)' '---'
+    check16_expect_doc_problem 'closer with trailing text' '---' 'name: x' '--- # end' 'allowed-tools:' '  - Skill' '---'
+    check16_expect_doc_problem 'four-dash line' '---' 'name: x' '----' '---'
+    check16_expect_doc_problem 'unclosed frontmatter' '---' 'name: x' 'allowed-tools:' '  - Skill'
+    check16_expect_doc_problem 'opener not on line 1' '' '---' 'name: x' '---'
+    check16_expect_doc_problem 'indented opener' ' ---' 'name: x' '---'
+    check16_expect_doc_clean 'nested value under a plain key' '---' 'name: x' 'metadata:' '  owner: y' '  # note' 'description: "quoted value"' 'disable-model-invocation: true' '---'
+    check16_expect_doc_clean 'block list' '---' 'name: x' 'allowed-tools:' '  - Bash(git status *)' "  - ${CHECK16_CACHE_READ_RULE}   # c" '  # a comment' '' 'shell: bash' '---' 'Body text may say allowed-tools: Write.'
+    check16_expect_doc_clean 'compact block list' '---' 'allowed-tools:' '- Skill' '- Monitor' '---'
+    check16_expect_doc_clean 'empty flow sequence' '---' 'allowed-tools: []' '---'
+    check16_expect_doc_clean 'inline flow sequence' '---' 'allowed-tools: [Bash(git log *), Agent(hivemind:x)]' 'shell: bash' '---'
+    check16_expect_doc_clean 'folded description and body rules' '---' 'name: x' 'description: >-' '  Does a thing.' '  Use when y.' 'allowed-tools:' '  - Skill' 'shell: bash' '---' 'Body' '---' 'More body with --- in it'
+    check16_expect_doc_clean 'CRLF delimiters' $'---\r' $'name: x\r' $'---\r'
+
+    if [[ "${#CHECK16_EXEMPT_SKILLS[@]}" -gt 0 ]]; then
+        check16_canary_exempt="${CHECK16_EXEMPT_SKILLS[0]}"
+        declare -a check16_canary_pin_entries=()
+        declare -a check16_canary_pin_lines=()
+        IFS=',' read -r -a check16_canary_pin_entries <<< "${CHECK16_EXEMPT_PINS[$check16_canary_exempt]-}"
+        for check16_canary_pin_entry in "${check16_canary_pin_entries[@]}"; do
+            check16_trim "$check16_canary_pin_entry"
+            check16_canary_pin_lines+=("  - ${CHECK16_TRIMMED}")
+        done
+        check16_canary_first_entry="${check16_canary_pin_lines[0]:-  - Read}"
+        check16_expect_skill_clean 'exempt skill matching its pin' "$check16_canary_exempt" '---' 'allowed-tools:' '  - Bash(git status *)' "${check16_canary_pin_lines[@]}" '  - Skill' '---'
+        check16_expect_skill_problem 'exempt skill with one extra bare Write' "$check16_canary_exempt" '---' 'allowed-tools:' "${check16_canary_pin_lines[@]}" '  - Write' '---'
+        check16_expect_skill_problem 'exempt skill with one entry removed' "$check16_canary_exempt" '---' 'allowed-tools:' "${check16_canary_pin_lines[@]:1}" '---'
+        check16_expect_skill_problem 'exempt skill with one entry rescoped' "$check16_canary_exempt" '---' 'allowed-tools:' "${check16_canary_first_entry}(src/**)" "${check16_canary_pin_lines[@]:1}" '---'
+        check16_expect_skill_problem 'exempt skill with a multi-rule item' "$check16_canary_exempt" '---' 'allowed-tools:' "${check16_canary_pin_lines[@]}" '  - Bash(x) Edit(**)' '---'
+    fi
+fi
+
+if [[ "$check16_found" == false ]]; then
+    echo "[PASS] Check 16: All ${#check16_skill_files[@]} skills carry file-tool entries only in the two allowed forms (${#CHECK16_EXEMPT_SKILLS[@]} executor skills pinned to their current file-tool entries)"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'CHECK16'
 
 # ── SAFETY REGRESSION TESTS ────────────────────────────────────────────────
 

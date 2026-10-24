@@ -111,12 +111,13 @@
           <header class="panel plate">
             <p class="kicker xs">standard-delivery</p>
             <h2 id="workflow-title" class="xg">How a run works</h2>
-            <p class="xs">Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. A script run keeps no run ledger: the working branch, its commits and the PR are the record. When the launch is refused, or the Workflow tool is absent as in brood children, standard-delivery runs on its state machine instead.</p>
+            <p class="xs">Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. A script run keeps no run ledger: the working branch, its commits and the PR are the record. When the launch is refused, or the Workflow tool is absent as in brood children, standard-delivery runs on its state machine instead, and only that path keeps a run ledger.</p>
           </header>
           <ol class="beats">
             <li class="beat panel">
               <h3 class="xg">Route</h3>
-              <p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session. Analysis-only and standard-delivery launch as workflow scripts when Claude Code's Workflow tool is available; every other workflow runs on its state machine.</p>
+              <p class="xs"><code>hivemind:route-workflow</code> picks standard-delivery, analysis-only, pr-feedback-remediation, hatchery-dispatch or exploratory-intent-session. Analysis-only and standard-delivery launch as the <code>hivemind:analysis-only</code> and <code>hivemind:standard-delivery</code> workflow scripts when Claude Code's Workflow tool is available; every other workflow runs on its state machine.</p>
+              <p class="xs">Analysis-only has been a script since 6.0.0, standard-delivery since 7.0.0. In manual mode the Workflow tool shows an approval prompt; in auto mode the launch goes ahead with no prompt. A No at the prompt interrupts the turn, with no fallback. To keep delivery on the state machine, add <code>Workflow(hivemind:standard-delivery)</code> to <code>permissions.deny</code>: the launch is refused with no prompt and the request falls back to the state machine. The definitions live in <code>plugin/workflows/</code>: <code>.json</code> state machines plus the generated <code>.js</code> scripts.</p>
               <p class="xs">A trivial one-file change takes the Reflex fast path, which skips the router, the run ledger and the cerebrate.</p>
             </li>
             <li class="beat panel">
@@ -134,7 +135,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Build in waves</h3>
-              <p class="xs">Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap. Drones and changelings build it in parallel, and a runner commits the wave's files with one checkpoint commit (molt) per wave (<code>hivemind:molt</code>).</p>
+              <p class="xs">Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap. Drones and changelings build it in parallel, and a runner commits the wave's files with one checkpoint commit (molt) per wave (<code>hivemind:molt</code>). The script computes each wave in <code>plugin/workflow-src/lib/waves.js</code>; on the state-machine fallback, <code>hivemind:next-wave</code> reads it from the run ledger.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Gate</h3>
@@ -157,7 +158,7 @@
             <article class="panel subpanel" aria-labelledby="brood-title">
               <p class="kicker xs">Parallel strains</p>
               <h3 id="brood-title" class="xg">Brood</h3>
-              <p class="xs">The cerebrate splits big work into independent strains. After you approve, each strain runs as its own overlord in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and its own detached tmux session, with its own branch and PR. The hatchery watches via <code>hivemind:brood-status</code>.</p>
+              <p class="xs">The cerebrate splits big work into independent strains. After you approve, each strain runs as its own overlord in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and its own detached tmux session, with its own branch and PR. Each strain starts with <code>--disallowedTools Workflow</code>, so it runs on the state machine. The hatchery watches via <code>hivemind:brood-status</code>.</p>
             </article>
             <article class="panel subpanel" aria-labelledby="autonomy-title">
               <p class="kicker xs">Who decides</p>
@@ -202,7 +203,7 @@
               <p class="cmd-label"><span>03</span> Seed each project</p>
               <pre><code>/hivemind:seed-hive</code></pre>
             </div>
-            <p class="cmd-note xs">Run the first two once in Claude Code, then seed the hive in each project.</p>
+            <p class="cmd-note xs">Run the first two once in Claude Code, then seed the hive in each project. Seeding merges a least-privilege allowlist, with <code>Edit(.hivemind/...)</code> rules such as <code>Edit(.hivemind/molt-inputs-*.json)</code> and <code>Edit(.hivemind/pr-inputs-*.json)</code> that pre-approve only the inputs files skills write.</p>
           </div>
           <div class="panel reqs">
             <div class="group">

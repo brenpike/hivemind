@@ -2,7 +2,7 @@
 name: route-workflow
 description: Classifies a non-Reflex request and selects the handling workflow as the sole workflow classifier, emitting selected, ambiguous, exploratory, or blocked. Use when routing or classifying a request to a workflow.
 allowed-tools:
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)   # pre-approves this plugin's file Reads and searches for the agents launched in the same turn; see security-policy.md "Skill File-Tool Grants"
 shell: bash
 ---
 

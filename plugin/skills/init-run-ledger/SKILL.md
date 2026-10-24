@@ -3,8 +3,8 @@ name: init-run-ledger
 description: Creates the run ledger for the current overlord instance, writing .hivemind/runs/<run-id>/state.json. Use when starting or initializing a new run.
 allowed-tools:
   - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/init-run-ledger/scripts/init-run-ledger.sh *)
-  - Read
-  - Write   # inert inputs-file only: authors per-invocation-unique path .hivemind/runs/.init-inputs-<token>.json; see security-policy.md "Inert Inputs-File Navigator Pattern" + ADR-0017/0018/0019
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
+  - Edit(.hivemind/runs/.init-inputs-*.json)
 shell: bash
 ---
 

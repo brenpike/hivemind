@@ -5,9 +5,7 @@ description: >-
   testability and AI-navigability, editing nothing. Use when improving architecture, finding
   refactor opportunities, or making code more testable or AI-navigable.
 allowed-tools:
-  - Read
-  - Glob
-  - Grep
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(git log *)
   - Bash(git ls-files *)
 shell: bash

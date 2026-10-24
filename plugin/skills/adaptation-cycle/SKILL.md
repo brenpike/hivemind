@@ -2,7 +2,7 @@
 name: adaptation-cycle
 description: Runs a local pre-PR Codex review via codex-plugin-cc, normalizes findings, and returns them to the caller. Review-only — does not fix findings. Invoked by local-reviewer agent only. Use when running a local pre-PR review.
 allowed-tools:
-  - Read
+  - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(git status *)
   - Bash(git branch *)
   - Bash(git remote *)
