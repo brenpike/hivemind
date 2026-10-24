@@ -3148,15 +3148,23 @@ mark_time 'CHECK15'
 # whitespace-`#` onward is stripped, so a trailing comment never hides or
 # narrows an entry. Inline items split on commas and whitespace outside
 # parentheses and quotes. The parser is FAIL-CLOSED: a form it does not read is
-# a finding, never a silent skip. So each of these is a finding: an inline
-# value that opens a flow sequence without closing it on the same line; an
-# indented line under the key that is not a `- <entry>` list item (a
-# continuation of a multi-line scalar, a nested value, a block scalar body);
-# any other frontmatter line that holds the text `allowed-tools` (an indented,
-# quoted or flow-mapping key); and, for a non-exempt skill, an entry that is
-# not `<name>` or `<name>(<anything>)` with <name> drawn from ASCII letters,
-# digits, `_` and `-` (an anchor, alias, tag, block-scalar indicator, nested
-# list or `Read Write` item).
+# a finding, never a silent skip. Top-level KEYS are a positive grammar too:
+# every column-0 frontmatter line that is not blank or a comment must be a
+# plain, unquoted `<key>:` whose key is an ASCII letter or digit followed by
+# letters, digits, `_` or `-`, and the first content line must be at column 0.
+# A plain YAML key decodes no escapes, so the key text read here is the key the
+# runtime reads, and no other key spelling can pass unseen. So each of these is
+# a finding: a column-0 line that is not a plain key (a quoted or escape-spelled
+# key, an explicit `?` key, an alias, anchor, tag or merge key, a flow mapping,
+# a compact list item or a bare scalar); indented content before the first
+# column-0 key (an indented root mapping); an inline value that opens a flow
+# sequence without closing it on the same line; an indented line under the key
+# that is not a `- <entry>` list item (a continuation of a multi-line scalar, a
+# nested value, a block scalar body); any other frontmatter line that holds the
+# text `allowed-tools` (an indented key, or prose in another value); and, for a
+# non-exempt skill, an entry that is not `<name>` or `<name>(<anything>)` with
+# <name> drawn from ASCII letters, digits, `_` and `-` (an anchor, alias, tag,
+# block-scalar indicator, nested list or `Read Write` item).
 #
 # EXEMPTIONS are by path: the executor skills listed in
 # CHECK16_EXEMPT_SKILLS keep their bare entries until their own decision. An
@@ -3169,11 +3177,9 @@ mark_time 'CHECK15'
 # security-policy.md is a finding, never a pass.
 #
 # RESIDUALS. A file tool reached through an MCP server or a future built-in
-# with another name is not a file tool here. This is not a YAML parser: a key
-# spelled through YAML escape sequences, so that the text `allowed-tools` never
-# appears, is not seen. A navigator whose covered-set line is reworded so the
-# `(`Edit` glob `...`)` form no longer appears loses its allowed Edit entry,
-# which fails loudly on that skill rather than passing.
+# with another name is not a file tool here. A navigator whose covered-set line
+# is reworded so the `(`Edit` glob `...`)` form no longer appears loses its
+# allowed Edit entry, which fails loudly on that skill rather than passing.
 echo ''
 echo '=== CHECK 16: Skill allowed-tools file-tool entries are scoped ==='
 
@@ -3182,6 +3188,7 @@ CHECK16_POLICY_CITATION='security-policy.md "Skill File-Tool Grants"'
 CHECK16_ASCII_ALNUM='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 CHECK16_IDENTIFIER_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*\$"
 CHECK16_ENTRY_GRAMMAR_REGEX="^[${CHECK16_ASCII_ALNUM}_-]+([(].*[)])?\$"
+CHECK16_PLAIN_KEY_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}_-]*[[:space:]]*:([[:space:]]|\$)"
 CHECK16_GLOB_LITERAL="[${CHECK16_ASCII_ALNUM}._-]*[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*"
 CHECK16_INPUTS_GLOB_REGEX="^[.]hivemind/([${CHECK16_ASCII_ALNUM}._-]+/)*${CHECK16_GLOB_LITERAL}[*]${CHECK16_GLOB_LITERAL}\$"
 CHECK16_NAVIGATOR_LINE_REGEX='^- `hivemind:([abcdefghijklmnopqrstuvwxyz0123456789-]+)` .*[(]`Edit` glob `([^`]+)`[)]'
@@ -3423,7 +3430,7 @@ check16_add_parse_error() {
 # trimmed `---` line and closes at the next one. A trailing CR is stripped.
 check16_collect_entries() {
     local skill_file="$1"
-    local textline value line_number=0 in_frontmatter=false key_mode=''
+    local textline value line_number=0 in_frontmatter=false key_mode='' seen_top_key=false
     CHECK16_ENTRY_TEXTS=()
     CHECK16_ENTRY_LINES=()
     CHECK16_PARSE_ERROR_LINES=()
@@ -3456,6 +3463,21 @@ check16_collect_entries() {
                 continue
             fi
             key_mode=''
+        fi
+        if [[ -n "$CHECK16_TRIMMED" && "$CHECK16_TRIMMED" != '#'* ]]; then
+            if [[ "$textline" == [[:space:]]* ]]; then
+                if [[ "$seen_top_key" != true ]]; then
+                    check16_add_parse_error "$line_number" \
+                        "frontmatter content before the first column-0 key is indented (an indented root mapping), so its top-level keys cannot be read -- start the frontmatter with plain column-0 '<key>:' lines"
+                    continue
+                fi
+            elif [[ "$textline" =~ $CHECK16_PLAIN_KEY_REGEX ]]; then
+                seen_top_key=true
+            else
+                check16_add_parse_error "$line_number" \
+                    "a column-0 frontmatter line is not a plain '<key>:' with an ASCII key (a quoted or escape-spelled key, an explicit '?' key, an alias, anchor, tag or merge key, a flow mapping, a compact list item or a bare scalar), so the key it names cannot be read -- write every top-level key plain and unquoted, and indent list items under their key"
+                continue
+            fi
         fi
         if [[ "$textline" =~ ^allowed-tools[[:space:]]*:(.*)$ ]]; then
             value="${BASH_REMATCH[1]}"
@@ -3781,6 +3803,15 @@ if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
     check16_expect_doc_problem 'unclosed flow sequence' '---' 'allowed-tools: [Bash(x),' '  Write]' '---'
     check16_expect_doc_problem 'tagged list item' '---' 'allowed-tools:' '  - !!str Write' '---'
     check16_expect_doc_problem 'CRLF bare entry' $'---\r' $'allowed-tools:\r' $'  - Write\r' $'---\r'
+    check16_expect_doc_problem 'unicode-escaped key' '---' 'name: x' '"allowed\u002dtools": [Write]' '---'
+    check16_expect_doc_problem 'hex-escaped key' '---' 'name: x' '"allowed\x2dtools": [Write]' '---'
+    check16_expect_doc_problem 'escaped key after a block list' '---' 'allowed-tools:' '  - Skill' '"allowed\u002dtools": [Write]' '---'
+    check16_expect_doc_problem 'explicit key' '---' 'name: x' '? "allowed\u002dtools"' ': [Write]' '---'
+    check16_expect_doc_problem 'alias key' '---' 'name: &k x' '*k : [Write]' '---'
+    check16_expect_doc_problem 'merge key' '---' 'base: &b {x: 1}' '<<: *b' '---'
+    check16_expect_doc_problem 'indented root mapping' '---' '  name: x' '  "allowed\u002dtools": [Write]' '---'
+    check16_expect_doc_problem 'compact list under another key' '---' 'tags:' '- a' '---'
+    check16_expect_doc_clean 'nested value under a plain key' '---' 'name: x' 'metadata:' '  owner: y' '  # note' 'description: "quoted value"' 'disable-model-invocation: true' '---'
     check16_expect_doc_clean 'block list' '---' 'name: x' 'allowed-tools:' '  - Bash(git status *)' "  - ${CHECK16_CACHE_READ_RULE}   # c" '  # a comment' '' 'shell: bash' '---' 'Body text may say allowed-tools: Write.'
     check16_expect_doc_clean 'compact block list' '---' 'allowed-tools:' '- Skill' '- Monitor' '---'
     check16_expect_doc_clean 'empty flow sequence' '---' 'allowed-tools: []' '---'
