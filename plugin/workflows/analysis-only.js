@@ -1109,7 +1109,9 @@ function renderQuestion(entry, index) {
   lines.push(renderWhyItMatters(readField(brief, 'criticality')));
   lines.push('Why I am asking: ' + askReasonLine(readField(entry, 'reason')));
   const sections = [lines.join('\n')];
-  sections.push(...renderVerbatimSection(readField(brief, 'verbatim')));
+  if (readField(entry, 'exact') === true) {
+    sections.push(...renderVerbatimSection(readField(brief, 'verbatim')));
+  }
   return sections.join('\n\n');
 }
 
@@ -1170,7 +1172,7 @@ function renderVerbatim(verbatim, labelIndent) {
   if (typeof verbatim !== 'string' || verbatim === '') {
     return [];
   }
-  return [labelIndent + 'Exact text:', verbatim];
+  return [labelIndent + 'Word for word:', verbatim];
 }
 
 function renderOpenQuestion(entry, index) {
@@ -1178,7 +1180,7 @@ function renderOpenQuestion(entry, index) {
   const recommendation = readField(brief, 'recommendation');
   const optionId = readField(recommendation, 'option_id');
   const hasChoice = readField(recommendation, 'strength') !== 'none' && typeof optionId === 'string' && optionId.trim() !== '';
-  const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'There is no recommendation.';
+  const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'I have no recommendation of my own.';
   return '  ' + questionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' ' + choice;
 }
 
@@ -1199,8 +1201,9 @@ function renderTakenDecision(entry, index) {
 function renderCompactDecision(entry, index) {
   const brief = readField(entry, 'brief');
   const recommendation = readField(brief, 'recommendation');
+  const whyLine = renderText(readField(recommendation, 'why')).split(/\s*[\r\n]+\s*/).join(' ');
   return '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
-    + renderText(readField(recommendation, 'option_id')) + '. Why: ' + renderText(readField(recommendation, 'why'));
+    + renderText(readField(recommendation, 'option_id')) + '. Why: ' + cutAtBoundary(whyLine, maxExcerptLength());
 }
 
 function findOptionById(options, optionId) {
@@ -1270,6 +1273,47 @@ function cutExcerpt(text) {
   return Array.from(text).slice(0, maxExcerptLength()).join('');
 }
 
+function maxReasonLength() {
+  return 600;
+}
+
+function cutAtBoundary(text, limit) {
+  if (typeof text !== 'string') {
+    throw new Error('cutAtBoundary: text must be a string');
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('cutAtBoundary: limit must be a positive integer');
+  }
+  const codePoints = Array.from(text);
+  if (codePoints.length <= limit) {
+    return text;
+  }
+  const keptLength = findSentenceEnd(codePoints, limit) || findWordEnd(codePoints, limit) || limit;
+  return codePoints.slice(0, keptLength).join('');
+}
+
+function findSentenceEnd(codePoints, limit) {
+  for (let index = limit; index >= 1; index -= 1) {
+    if ('.!?'.includes(codePoints[index - 1]) && isWhitespace(codePoints[index])) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function findWordEnd(codePoints, limit) {
+  for (let index = limit; index >= 1; index -= 1) {
+    if (isWhitespace(codePoints[index]) && !isWhitespace(codePoints[index - 1])) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function isWhitespace(codePoint) {
+  return /^\s$/u.test(codePoint);
+}
+
 function toPrintableAscii(text) {
   return text.replace(/[^\x20-\x7e]/g, (unit) => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0'));
 }
@@ -1282,16 +1326,21 @@ function encodeUntrustedText(value) {
   return toPrintableAscii(jsonText);
 }
 
-function quoteDiagnostic(text) {
+function quoteDiagnostic(text, limit = maxExcerptLength()) {
   if (typeof text !== 'string') {
     return undefined;
   }
   const textLines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter((line) => line !== '');
-  return textLines.length === 0 ? undefined : encodeUntrustedText(cutExcerpt(textLines.join(' ')));
+  if (textLines.length === 0) {
+    return undefined;
+  }
+  const joinedLine = textLines.join(' ');
+  const keptLine = cutAtBoundary(joinedLine, limit);
+  return encodeUntrustedText(keptLine) + (keptLine === joinedLine ? '' : ' (cut)');
 }
 
 function describeReason(text) {
-  const quoted = quoteDiagnostic(text);
+  const quoted = quoteDiagnostic(text, maxReasonLength());
   return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
 }
 
@@ -2459,7 +2508,7 @@ function finishBlocked(message) {
 function finishComplete(report, openQuestions, taken) {
   const blocks = [];
   if (taken.length > 0) {
-    blocks.push({ text: renderDecisions(taken), compact: renderDecisionsCompact(taken) });
+    blocks.push({ text: renderDecisionsCompact(taken) });
   }
   if (openQuestions !== '') {
     blocks.push({ text: openQuestions });

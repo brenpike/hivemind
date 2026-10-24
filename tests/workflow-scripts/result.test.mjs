@@ -562,15 +562,40 @@ describe('encode at output', () => {
     assert.equal(quoted, '"\\u001b[2J\\u202e\\u2066\\u200b\\u2028\\u007f\\u0085 \\\\ \\""');
     assert.ok(PRINTABLE.test(quoted));
   });
-  test('quoteDiagnostic cuts the joined line to 200 code points and never splits a pair', () => {
-    assert.equal(lib.quoteDiagnostic('a'.repeat(5000)), '"' + 'a'.repeat(200) + '"');
-    assert.equal(lib.quoteDiagnostic('a'.repeat(150) + '\n' + 'b'.repeat(150)), '"' + 'a'.repeat(150) + ' ' + 'b'.repeat(49) + '"');
+  test('quoteDiagnostic cuts the joined line to 200 code points at a boundary, marks the cut and never splits a pair', () => {
+    assert.equal(lib.quoteDiagnostic('a'.repeat(5000)), '"' + 'a'.repeat(200) + '" (cut)');
+    assert.equal(lib.quoteDiagnostic('a'.repeat(150) + '\n' + 'b'.repeat(150)), '"' + 'a'.repeat(150) + '" (cut)');
+    assert.equal(lib.quoteDiagnostic('One. ' + 'b'.repeat(250)), '"One." (cut)');
     const quoted = lib.quoteDiagnostic('x' + '\u{1F600}'.repeat(300));
-    assert.equal(quoted, '"x' + '\\ud83d\\ude00'.repeat(199) + '"');
-    assert.ok(!LONE_SURROGATE.test(JSON.parse(quoted)));
+    assert.equal(quoted, '"x' + '\\ud83d\\ude00'.repeat(199) + '" (cut)');
+    assert.ok(!LONE_SURROGATE.test(JSON.parse(quoted.slice(0, -' (cut)'.length))));
+  });
+  test('quoteDiagnostic adds no cut mark when nothing was cut', () => {
+    assert.equal(lib.quoteDiagnostic('a'.repeat(200)), '"' + 'a'.repeat(200) + '"');
+    assert.equal(lib.quoteDiagnostic('a'.repeat(100) + '\n' + 'b'.repeat(99)), '"' + 'a'.repeat(100) + ' ' + 'b'.repeat(99) + '"');
+    assert.equal(lib.quoteDiagnostic('\u{1F600}'.repeat(200)), '"' + '\\ud83d\\ude00'.repeat(200) + '"');
+  });
+  test('quoteDiagnostic takes an optional limit', () => {
+    assert.equal(lib.quoteDiagnostic('one two three', 7), '"one two" (cut)');
+    assert.equal(lib.quoteDiagnostic('one two three', 13), '"one two three"');
+    assert.equal(lib.quoteDiagnostic('a'.repeat(300), 250), '"' + 'a'.repeat(250) + '" (cut)');
+    assert.equal(lib.quoteDiagnostic('a'.repeat(300)), lib.quoteDiagnostic('a'.repeat(300), lib.maxExcerptLength()));
+    assert.throws(() => lib.quoteDiagnostic('text', 0), /cutAtBoundary: limit must be a positive integer/);
   });
   test('quoteDiagnostic keeps a lone surrogate as its escape', () => {
     assert.equal(lib.quoteDiagnostic('\ud800x\udc00'), '"\\ud800x\\udc00"');
+  });
+  test('maxReasonLength is 600', () => {
+    assert.equal(lib.maxReasonLength(), 600);
+  });
+  test('describeReason quotes a reason whole up to 600 code points', () => {
+    const sentence = 'The step stopped here.';
+    const reason = sentence + ' ' + 'x'.repeat(600 - sentence.length - 1);
+    assert.equal(Array.from(reason).length, 600);
+    assert.equal(lib.describeReason(reason), 'it says "' + reason + '".');
+    assert.equal(lib.describeReason(reason + 'y'), 'it says "' + sentence + '" (cut).');
+    assert.equal(lib.describeReason('w'.repeat(700)), 'it says "' + 'w'.repeat(600) + '" (cut).');
+    assert.equal(lib.describeReason('\u{1F600}'.repeat(600)), 'it says "' + '\\ud83d\\ude00'.repeat(600) + '".');
   });
   test('describeReason quotes a reason or says it gave none', () => {
     assert.equal(lib.describeReason('Tests fail.'), 'it says "Tests fail.".');
@@ -579,5 +604,48 @@ describe('encode at output', () => {
       assert.equal(lib.describeReason(value), 'it gave no reason.');
     }
     assert.ok(PRINTABLE.test(lib.describeReason('\u001b‮' + '\u{1F600}'.repeat(400))));
+  });
+});
+
+describe('cutAtBoundary', () => {
+  test('returns text unchanged when it has at most limit code points', () => {
+    assert.equal(lib.cutAtBoundary('short', 5), 'short');
+    assert.equal(lib.cutAtBoundary('', 3), '');
+    assert.equal(lib.cutAtBoundary('\u{1F600}'.repeat(4), 4), '\u{1F600}'.repeat(4));
+  });
+  test('cuts right after the last sentence end within the limit', () => {
+    assert.equal(lib.cutAtBoundary('One. Two! Three? Four five six', 20), 'One. Two! Three?');
+    assert.equal(lib.cutAtBoundary('First part. Second part goes on', 12), 'First part.');
+    assert.equal(lib.cutAtBoundary('Ends here.\nnext line', 11), 'Ends here.');
+  });
+  test('a sentence mark needs whitespace after it', () => {
+    assert.equal(lib.cutAtBoundary('see v1.2 and more words', 12), 'see v1.2 and');
+  });
+  test('cuts before the last whitespace when there is no sentence end', () => {
+    assert.equal(lib.cutAtBoundary('alpha beta gamma delta', 13), 'alpha beta');
+    assert.equal(lib.cutAtBoundary('alpha beta gamma', 10), 'alpha beta');
+    assert.equal(lib.cutAtBoundary('alpha   beta gamma', 9), 'alpha');
+  });
+  test('cuts hard at the limit when there is no boundary', () => {
+    assert.equal(lib.cutAtBoundary('abcdefghij', 4), 'abcd');
+    assert.equal(lib.cutAtBoundary(' abcdefghij', 4), ' abc');
+  });
+  test('counts code points and never splits a surrogate pair', () => {
+    const smile = '\u{1F600}';
+    assert.equal(lib.cutAtBoundary(smile.repeat(10), 3), smile.repeat(3));
+    assert.equal(lib.cutAtBoundary('x' + smile.repeat(10), 4), 'x' + smile.repeat(3));
+    assert.equal(lib.cutAtBoundary(smile + smile + ' ' + smile.repeat(5), 5), smile + smile);
+    assert.equal(lib.cutAtBoundary(smile + '. ' + smile.repeat(5), 6), smile + '.');
+    for (let limit = 1; limit < 12; limit += 1) {
+      const cut = lib.cutAtBoundary('a' + smile + ' b' + smile + '. ' + smile.repeat(6), limit);
+      assert.ok(!LONE_SURROGATE.test(cut), String(limit));
+      assert.ok(Array.from(cut).length <= limit, String(limit));
+    }
+  });
+  test('throws on a non-string text or a bad limit', () => {
+    assert.throws(() => lib.cutAtBoundary(7, 3), /cutAtBoundary: text must be a string/);
+    for (const limit of [0, -1, 1.5, '3', undefined]) {
+      assert.throws(() => lib.cutAtBoundary('text', limit), /cutAtBoundary: limit must be a positive integer/);
+    }
   });
 });

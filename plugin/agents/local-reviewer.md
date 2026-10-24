@@ -38,10 +38,11 @@ ledger_path: <path>
 # diminishing-returns: signals_observed, latest_severity_max, findings_open, recommendation_text
 # injection-suspect: finding_id, pattern_category, field_excerpt
 # planner-escalation: finding_id, classification, file, title
-# user-input-required: finding_id, title
-# high-severity-rejection: finding_id, title, rationale_text
+# user-input-required: finding_id, title, open_findings
+# high-severity-rejection: finding_id, title, rationale_text, open_findings
 # blocked: blocker, stage
 ```
+`open_findings` lists every finding still open in the fix ledger, each with its `finding_id`, `severity`, `title`, `body` and `recommendation` copied as data, and an empty `recommendation` when the ledger has none.
 **Exit precedence.** When more than one exit_reason fires in one iteration, the winner is the highest-precedence token per `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh` (Bash-invocable: pass the fired tokens, it emits the winner). This file states WHICH reasons fire and WHEN; the ORDER among simultaneous reasons defers to that ladder.
 
 ## The Loop

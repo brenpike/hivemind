@@ -31,11 +31,16 @@
  *     value       any JSON value.
  *   cutExcerpt(text), toPrintableAscii(text)
  *     text        a string.
+ *   cutAtBoundary(text, limit)
+ *     text        a string.
+ *     limit       positive integer, the most code points to keep.
  *   encodeUntrustedText(value)
  *     value       any value. A step- or script-written value to show.
- *   quoteDiagnostic(text), describeReason(text)
+ *   quoteDiagnostic(text, limit), describeReason(text)
  *     text        any value. A step- or script-written reason, blocker line,
  *                 stderr line or path, as a step returned it.
+ *     limit       optional positive integer, the most code points to quote.
+ *                 maxExcerptLength() when absent.
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
@@ -55,6 +60,13 @@
  *   maxExcerptLength  200, the code points of a quoted excerpt.
  *   cutExcerpt    the first maxExcerptLength() code points of text, so a
  *                 cut never splits a surrogate pair.
+ *   maxReasonLength  600, the code points of a quoted reason.
+ *   cutAtBoundary text unchanged when it has at most limit code points.
+ *                 Otherwise the longest prefix of at most limit code points
+ *                 that ends right after a sentence end, a '.', '!' or '?'
+ *                 followed by whitespace; else the prefix that ends before
+ *                 the last whitespace; else the first limit code points. It
+ *                 never splits a surrogate pair.
  *   toPrintableAscii  text with each UTF-16 code unit outside 0x20-0x7E
  *                 written as \u and 4 lowercase hex digits.
  *   encodeUntrustedText  toPrintableAscii(JSON.stringify(value)): valid
@@ -63,9 +75,12 @@
  *   quoteDiagnostic  undefined unless text is a string with a non-blank
  *                 line. Otherwise its non-blank lines, split on CRLF, CR or
  *                 LF and each trimmed, joined with one space, cut by
- *                 cutExcerpt and passed through encodeUntrustedText.
- *   describeReason  'it says ' + quoteDiagnostic(text) + '.', or 'it gave
- *                 no reason.' when quoteDiagnostic(text) is undefined.
+ *                 cutAtBoundary to limit and passed through
+ *                 encodeUntrustedText. When the cut dropped text, the mark
+ *                 ' (cut)' follows the closing quote.
+ *   describeReason  'it says ' + quoteDiagnostic(text, maxReasonLength())
+ *                 + '.', or 'it gave no reason.' when that quote is
+ *                 undefined. A reason is quoted whole up to 600 code points.
  *
  * Contract the overlord relays
  *   Only the harness completion notice carries the result. A model's own
@@ -203,6 +218,47 @@ function cutExcerpt(text) {
   return Array.from(text).slice(0, maxExcerptLength()).join('');
 }
 
+function maxReasonLength() {
+  return 600;
+}
+
+function cutAtBoundary(text, limit) {
+  if (typeof text !== 'string') {
+    throw new Error('cutAtBoundary: text must be a string');
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('cutAtBoundary: limit must be a positive integer');
+  }
+  const codePoints = Array.from(text);
+  if (codePoints.length <= limit) {
+    return text;
+  }
+  const keptLength = findSentenceEnd(codePoints, limit) || findWordEnd(codePoints, limit) || limit;
+  return codePoints.slice(0, keptLength).join('');
+}
+
+function findSentenceEnd(codePoints, limit) {
+  for (let index = limit; index >= 1; index -= 1) {
+    if ('.!?'.includes(codePoints[index - 1]) && isWhitespace(codePoints[index])) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function findWordEnd(codePoints, limit) {
+  for (let index = limit; index >= 1; index -= 1) {
+    if (isWhitespace(codePoints[index]) && !isWhitespace(codePoints[index - 1])) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function isWhitespace(codePoint) {
+  return /^\s$/u.test(codePoint);
+}
+
 function toPrintableAscii(text) {
   return text.replace(/[^\x20-\x7e]/g, (unit) => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0'));
 }
@@ -215,16 +271,21 @@ function encodeUntrustedText(value) {
   return toPrintableAscii(jsonText);
 }
 
-function quoteDiagnostic(text) {
+function quoteDiagnostic(text, limit = maxExcerptLength()) {
   if (typeof text !== 'string') {
     return undefined;
   }
   const textLines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter((line) => line !== '');
-  return textLines.length === 0 ? undefined : encodeUntrustedText(cutExcerpt(textLines.join(' ')));
+  if (textLines.length === 0) {
+    return undefined;
+  }
+  const joinedLine = textLines.join(' ');
+  const keptLine = cutAtBoundary(joinedLine, limit);
+  return encodeUntrustedText(keptLine) + (keptLine === joinedLine ? '' : ' (cut)');
 }
 
 function describeReason(text) {
-  const quoted = quoteDiagnostic(text);
+  const quoted = quoteDiagnostic(text, maxReasonLength());
   return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
 }
 

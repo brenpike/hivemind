@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.0.4] - 2026-10-24
+
+### Changed
+
+- The local reviewer's user-input-required and high-severity-rejection exits return `open_findings`: every finding still open in the fix ledger, with its id, severity, title, body and recommendation, copied as data.
+- Docs: the ADR-0037 amendment 2026-10-24 on short run messages, with dated notes on the contract table home, the plan acceptance residual, Risks residual (b), the PR8 live smoke D1 row and the deferred item on delivery-tail questions.
+
+### Fixed
+
+- Workflow run messages are short. A question shows text word for word, under "Word for word:", only for an ask the workflow marks exact, today an irreversible effect. The plan acceptance question no longer pastes the plan summary: it shows one line with the PR title, step count and branch, and says the full plan is in the run's per-agent results. Chat messages show each taken decision on one line, and the PR body and comment keep the full form with the text it accepted. A blocked reason is quoted whole up to 600 code points, and every cut quote or blocked lead ends at a sentence or word boundary, with a cut mark. A blocked step can say its cause is outside the repo, such as machine load or a timeout, and the run then says nothing in the repo needs a fix and to run the request again once the cause has passed. The test-only contract rows move out of the built script, so the build stays within its 190,000-character budget (issue 445).
+- A local review question in a delivery run names each finding by a short id and lists every finding still open, with its severity, title, body and the reviewer's recommendation, so the user can answer it from the message (issue 441).
+
 ## [7.0.3] - 2026-10-23
 
 ### Changed
