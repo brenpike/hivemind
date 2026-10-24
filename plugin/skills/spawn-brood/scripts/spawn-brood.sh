@@ -111,7 +111,9 @@ POLL_INTERVAL=2
 # return. spawn-brood does NOT verify turn-start by screen-scraping the TUI. A child that
 # fails to actually start a turn surfaces later through hivemind:brood-status, which judges
 # liveness from on-disk ground truth (a child run-ledger state.current or a gather-facts output
-# file present => running, neither => starting) — not from capture-pane frames.
+# file present => running, neither => starting) — not from capture-pane frames. PROVENANCE: both
+# sources post-date launch by construction. The run-ledger leaf is keyed by the spawn-generated
+# brood GUID run id, and the facts folder was proven absent before launch (3a-facts-guard).
 INJECT_SETTLE=0.2
 
 # SPAWN-TIME RESEND TUNABLES (inject_strain turn-start verification): under load (many
@@ -653,6 +655,25 @@ for idx in $(seq 0 $((strain_count - 1))); do
     continue
   fi
 
+  # 3a-facts-guard: PRE-LAUNCH FACTS ABSENCE. Started-evidence for a script-engine child is a
+  # gather-facts output file in "$wt/.hivemind/facts" (hivemind_detect_facts_evidence). A base
+  # ref that tracks .hivemind/facts (force-added past the .hivemind/ gitignore) materializes it
+  # here via `git worktree add`, before the child runs, so a base-tree file could pass as
+  # started-evidence: resend suppression, a false `running`, and /rc keystrokes. Refuse the
+  # strain when the folder exists in ANY form (regular file, directory, live or dangling
+  # symlink), whatever names it holds: every facts file spawn-brood or brood-status later reads
+  # then sits in a folder proven absent at launch, so it post-dates launch by construction. Same
+  # hard per-strain pre-launch cleanup as the containment guard above; BEFORE any
+  # mkdir/cp/task-write and before tmux new-session.
+  if [ -e "$wt/.hivemind/facts" ] || [ -L "$wt/.hivemind/facts" ]; then
+    printf 'warning: child worktree %s already holds .hivemind/facts (base ref tracks .hivemind/facts); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
+    mark_failed "$idx"
+    git worktree remove --force "$wt" >/dev/null 2>&1 || true
+    rm -rf "$wt" >/dev/null 2>&1 || true
+    cur_wt=""
+    continue
+  fi
+
   # 3b: propagate config into the new worktree, if present.
   if [ -f "$settings_local" ]; then
     # LEAF GUARD: the 525 dir-guard proves the .claude ANCESTOR is unsymlinked, but the cp
@@ -919,6 +940,9 @@ verify_started_evidence() {
 #      which keeps no run ledger).
 # Both are the SAME shared functions brood-status uses, so spawn-time and dashboard evidence
 # cannot diverge. Fail closed: neither source => not started.
+# PROVENANCE: both sources post-date launch by construction. The ledger leaf is keyed by the
+# spawn-generated brood GUID run id (S_RUN_ID), and "$wt/.hivemind/facts" was proven absent
+# before launch (3a-facts-guard), so no base-tree file can count.
 strain_has_started_evidence() {
   local idx="$1"
   local state_current facts_evidence
@@ -942,7 +966,9 @@ verify_strain() {
   # (.../.hivemind/runs/<run_id>/state.json) and the gather-facts output file
   # (.../.hivemind/facts/facts-*.json) are GROUND TRUTH: the child writes one of them when its
   # workflow actually starts. We poll THOSE files (strain_has_started_evidence) — never the
-  # pane — for started-evidence, and resend a bare Enter only if none appears.
+  # pane — for started-evidence, and resend a bare Enter only if none appears. Neither file can
+  # come from the base tree: the ledger leaf is keyed by the spawn-generated brood GUID run id,
+  # and the facts folder was proven absent before launch (3a-facts-guard).
   #
   # CONFINED READ (security-policy discipline for hostile child-ledger reads): the per-poll
   # projection is delegated to verify_started_evidence above, which confines the ledger leaf

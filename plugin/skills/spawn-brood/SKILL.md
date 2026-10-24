@@ -50,7 +50,11 @@ After:
       override, because the harness relays it to every workflow agent the child runs.
       A pre-launch identity guard runs before each strain's session is started:
       if the strain's `task.md` `strain.id` would not match its `run.suggested_id`,
-      the strain is refused (failed-pre-launch) and never spawned. The engine
+      the strain is refused (failed-pre-launch) and never spawned. A pre-launch
+      facts guard runs too: a strain whose new worktree already holds
+      `.hivemind/facts` (a base that tracks it) is refused (failed-pre-launch)
+      and its worktree removed, so every facts file spawn or brood-status reads
+      was written after launch. The engine
       submits each task during a shared Pass-2 readiness round-robin:
       load-buffer, paste-buffer, settle, then a single Enter, so the submit
       keystroke lands as a submit instead of racing the paste. After all strains
@@ -95,8 +99,8 @@ After:
 - [ ] Final action is the Bash script call. Exit 0 = brood spawned successfully
       (all strains `running`, OR all non-running strains are `starting` — a slow
       cold boot is not a failure); exit 1 = pre-flight blocker OR at least one
-      strain is genuinely `failed` (dead tmux session or pre-launch identity
-      guard refusal). `starting` strains do NOT contribute to `failed_count`
+      strain is genuinely `failed` (dead tmux session, or a pre-launch refusal
+      by the identity guard or the facts guard). `starting` strains do NOT contribute to `failed_count`
       and do NOT cause exit 1.
 
 The manifest is a registry/coordination artifact, NOT the source of truth for

@@ -1161,6 +1161,107 @@ assert_spawn_brood_child_leaf_regular_ok() {
     fi
 }
 
+# ── Assertion 9b: FACTS-BASE-REFUSED (pre-launch facts absence guard) ─────────────
+# Started-evidence for a script-engine child is a gather-facts output file in the strain worktree's
+# .hivemind/facts. A base ref that force-adds a file under .hivemind/facts (past the .hivemind/
+# gitignore) materializes it with `git worktree add`, before the child runs. spawn-brood's
+# 3a-facts-guard refuses such a strain before provisioning or launch: one `warning:` line naming
+# the cause, mark_failed, worktree removed, exit 1, no stub launch, no `remote: applied` line. The
+# brood-status collector, run from the coordinator checkout, then derives the strain `failed` and
+# counts no running strain.
+#
+# Case a (matching name): the base tracks a REGULAR facts-<UTC>-<hex>.json. NON-VACUITY: without
+# the guard, the stub launches (marker present) and the base file counts as started-evidence, so
+# the manifest says `running`; both flip this case to FAIL.
+# Case b (non-matching name): the base tracks only .hivemind/facts/.keep. It is refused the same
+# way, which proves the guard checks that the folder is absent, not which names it holds.
+#
+# The REMOTE:started-child-promoted-running-receives-rc case (facts file written by the child
+# after launch) proves the guard does not over-refuse.
+#
+# DEPENDENCY GATING: same dep gate as the escape cases (claude via the stub).
+
+# run_facts_base_refusal_case <name> <facts-leaf>: build a base ref `evil` that force-adds
+# .hivemind/facts/<facts-leaf> as a regular file, spawn one strain on it, and pass or fail <name>.
+run_facts_base_refusal_case() {
+    local name="$1" facts_leaf="$2"
+    local missing=""
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes the facts guard; skipping (missing: $missing)"
+        return
+    }
+
+    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    local gitroot="$WORKDIR/brood-git"
+    init_spawn_repo "$gitroot"
+
+    git -C "$gitroot" checkout -q -b evil
+    mkdir -p "$gitroot/.hivemind/facts"
+    printf '{}\n' > "$gitroot/.hivemind/facts/$facts_leaf"
+    git -C "$gitroot" add -f "$gitroot/.hivemind/facts/$facts_leaf"
+    git -C "$gitroot" commit -q -m "evil: tracks .hivemind/facts/$facts_leaf"
+    if ! git -C "$gitroot" ls-files -s -- ".hivemind/facts/$facts_leaf" | grep -q '^100644 '; then
+        failed "$name" "fixture error: .hivemind/facts/$facts_leaf was not committed as a regular file on evil ref"
+        return
+    fi
+    git -C "$gitroot" checkout -q main
+    rm -rf "$gitroot/.hivemind"
+    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
+
+    local inputs="$gitroot/brood-inputs.json"
+    write_one_strain_inputs "$inputs" "evil" "base tracks .hivemind/facts"
+
+    local rc=0
+    local stdout_out="$WORKDIR/spawn-stdout.txt"
+    local stderr_out="$WORKDIR/spawn-stderr.txt"
+    local marker="$WORKDIR/launch-marker.txt"
+    reap_brood_sessions
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" bash "$SPAWN_SCRIPT" "$inputs" ) \
+        >"$stdout_out" 2>"$stderr_out" || rc=$?
+    local launched_session
+    launched_session="$(sed -n 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$stdout_out" 2>/dev/null | head -1)"
+    [ -n "$launched_session" ] && tmux kill-session -t "$launched_session" 2>/dev/null || true
+
+    local guard_warned=no stub_launched=no worktree_leaked=no applied_line=no
+    grep -qE '^warning: child worktree .* already holds \.hivemind/facts \(base ref tracks \.hivemind/facts\); refusing to provision or launch strain api$' "$stderr_out" 2>/dev/null && guard_warned=yes
+    [ -s "$marker" ] && stub_launched=yes
+    if git -C "$gitroot" worktree list --porcelain 2>/dev/null \
+         | grep -E '^worktree .*/\.claude/worktrees/' | grep -q .; then
+        worktree_leaked=yes
+    fi
+    [ -n "$(find_strain_worktree "$gitroot")" ] && worktree_leaked=yes
+    grep -q '^remote: applied' "$stdout_out" 2>/dev/null && applied_line=yes
+
+    local manifest manifest_status=""
+    manifest="$(find_brood_manifest "$gitroot")"
+    [ -n "$manifest" ] && manifest_status="$(jq -r '.strains[0].status // ""' "$manifest" 2>/dev/null)"
+
+    local collect_out collect_rc=0 collect_ok=no
+    collect_out="$( cd "$gitroot" && bash "$COLLECT_SCRIPT" 2>/dev/null )" || collect_rc=$?
+    if printf '%s' "$collect_out" | jq -e \
+        '(.broods[0].strains[0].derived_status|startswith("failed"))
+         and .broods[0].summary.running==0' >/dev/null 2>&1; then
+        collect_ok=yes
+    fi
+
+    if [[ "$rc" -ne 0 && "$guard_warned" == "yes" && "$stub_launched" == "no" && "$worktree_leaked" == "no" \
+          && "$manifest_status" == "failed" && "$applied_line" == "no" && "$collect_rc" -eq 0 && "$collect_ok" == "yes" ]]; then
+        pass "$name" "base-tracked .hivemind/facts/$facts_leaf refused before launch (exit $rc); worktree removed; manifest failed; no remote: applied; collector derived failed, running=0"
+    else
+        failed "$name" "expected non-zero exit + guard warning + no stub launch + worktree removed + status=failed + no remote: applied + collector failed/running=0; rc=$rc guard_warned=$guard_warned stub_launched=$stub_launched worktree_leaked=$worktree_leaked status=$manifest_status applied_line=$applied_line collect_rc=$collect_rc collect_ok=$collect_ok stderr: $(cat "$stderr_out" 2>/dev/null) collect: $collect_out"
+    fi
+}
+
+assert_spawn_brood_facts_base_matching_refused() {
+    run_facts_base_refusal_case "FACTS-BASE-REFUSED:matching-facts-file-in-base-refused-before-launch" \
+        "facts-20261024T120000Z-0123456789ab.json"
+}
+
+assert_spawn_brood_facts_base_nonmatching_refused() {
+    run_facts_base_refusal_case "FACTS-BASE-REFUSED:nonmatching-facts-folder-in-base-refused-before-launch" \
+        ".keep"
+}
+
 # ── Assertion 10: DEFECT-A:task.md-identity-not-cross-wired (#290 regression) ─────
 # Defect A (#290): spawn-brood.sh's task.md emitter sourced strain.id from a LEAKED loop var
 # (`$short`/`$name` left dangling by the derive loop) instead of the index-pinned S_SHORT[$idx].
@@ -3532,6 +3633,8 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked
 assert_spawn_brood_child_leaf_task_escape_blocked
 assert_spawn_brood_child_leaf_settings_escape_blocked
 assert_spawn_brood_child_leaf_regular_ok
+assert_spawn_brood_facts_base_matching_refused
+assert_spawn_brood_facts_base_nonmatching_refused
 assert_spawn_brood_task_identity_not_cross_wired
 assert_spawn_brood_alive_no_evidence_starting
 assert_spawn_brood_tail_death_reconciled

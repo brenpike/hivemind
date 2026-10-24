@@ -21,13 +21,14 @@
 # second started-evidence source, hivemind_detect_facts_evidence (end of file): a gather-facts
 # output file in the child worktree, for script-engine children that write no run ledger.
 #
-# BOUNDED RESIDUAL (facts evidence): hivemind_detect_facts_evidence counts ANY regular,
-# non-symlink file whose NAME matches the gather-facts output shape. A facts file committed in a
-# hostile base ref (force-added past the .hivemind/ gitignore) and materialized by
-# `git worktree add` therefore counts as started-evidence before the child runs. Accepted: the
-# signal is display only — it can only lift an alive strain out of the `starting` demotion gate to
-# `running`; it never marks a strain complete, never hides a dead session, and no file content is
-# ever read or emitted.
+# PROVENANCE (facts evidence): hivemind_detect_facts_evidence counts a regular, non-symlink file
+# whose NAME matches the gather-facts output shape. Every match post-dates launch by construction:
+# spawn-brood's pre-launch facts guard refuses a strain (marked failed, worktree removed, never
+# launched) when its fresh worktree already holds `.hivemind/facts` in any form, so a facts file
+# committed in a hostile base ref (force-added past the .hivemind/ gitignore) and materialized by
+# `git worktree add` never reaches a launched strain. The run-ledger source carries the same
+# guarantee: its leaf is keyed by the spawn-generated brood GUID run id. No file content is ever
+# read or emitted.
 #
 # DATA-BOUNDARY (MANDATORY): a child run-ledger (`<worktree>/.hivemind/runs/<id>/state.json`)
 # is UNTRUSTED, attacker-controllable bytes — a brood child runs detached, and child content
@@ -408,7 +409,9 @@ hivemind_read_confined_state_current() {
 # CALLER CONTRACT: the caller MUST source containment.sh BEFORE calling — the folder chain is
 # checked by hivemind_assert_contained (defined there). <worktree_root> MUST be a script-derived,
 # trusted, git-reported worktree root (brood-status's ground-truth worktree, spawn-brood's
-# S_WT[idx]) — NEVER a manifest/child-supplied path.
+# S_WT[idx]) — NEVER a manifest/child-supplied path. <worktree_root> MUST be a strain worktree
+# spawn-brood created and launched behind its pre-launch facts guard (`.hivemind/facts` proven
+# absent before launch), so any match post-dates launch.
 #
 # FOLDER CHAIN: hivemind_assert_contained walks `.hivemind` and `.hivemind/facts`, rejecting a
 # symlinked component and any existing component that canonicalizes outside the worktree. A
