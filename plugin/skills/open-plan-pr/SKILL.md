@@ -20,6 +20,7 @@ Before:
 - [ ] Current branch matches `head` and is not `base`
 - [ ] Validation passed or "Not run (no validation commands defined)"
 - [ ] Required version/release metadata included or not required
+- [ ] Local review gate held, or local review did not run, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
 - [ ] No unexpected unstaged changes
 
 After:
@@ -49,7 +50,7 @@ The caller may pass these. When one is absent, the script works as it does witho
 - `comment`: text for the open PR the script reuses. When it is given, step 5 writes it verbatim as the `comment` field. The script posts it only on a reused PR; a created PR gets no comment.
 - `draft`: `true` or `false`, the caller's choice of a draft PR. When it is given, step 5 writes it as the `draft` field, in place of judging whether the user asked for a draft PR.
 
-When `expect_commit` is given, the caller has already checked validation and version metadata on that commit, so steps 3 and 4 take the caller's check.
+When `expect_commit` is given, the caller has already checked validation, version metadata and local review on that commit, so steps 3 and 4 and the local review gate take the caller's check.
 
 ## Requirements
 
@@ -105,6 +106,7 @@ as a workflow state or as one step inside a longer procedure:
 - open PR for a partial plan unless one of: the user explicitly requested a draft PR, OR the planner's `Delivery: Shape` field equals `multi-plan`
 - open PR if the Validation procedure returned the Worker Report — Blocked (`stage: validation`) or any declared validation command failed. `Validated: Not run (no validation commands defined)` is a valid terminal state per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) and does not block PR opening.
 - open PR if required version/release metadata is missing per `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md`
+- open PR when local review ran on the branch and did not hold the local review gate per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
 - continue past step 6 with an unverified push state
 - invent missing validation
 - include any of the following strings (any case) in commit messages or PR content: `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship

@@ -55,6 +55,8 @@ SemVer:
 
 Open PR only when: plan complete, validation passed, version bump included if required, branch pushed.
 
+Local review gate: when local review ran on the branch, the PR opens only when the last exit reason it returned holds the gate. The exit reasons that hold the gate are `clean`, and `diminishing-returns` once its advisory exit is taken. Every other exit reason holds nothing, max-iterations-reached included, and stops the PR on every path: the workflow script, the state machine, and any step taken outside both. Local review that did not run, because it is not configured or was skipped, neither holds nor blocks the PR.
+
 PR content must include:
 - Summary covering what changed and why, at the length the change needs
 - File paths modified, grouped by plan step

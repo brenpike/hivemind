@@ -1,0 +1,26 @@
+{
+  "rule": "PR requires the local review gate to hold when local review ran",
+  "description": "P3 coupling. `plugin/governance/workflow.md` (PR Requirements) is the single home of the local review gate: which local review exit reasons hold the gate before a PR opens, and that every other exit reason holds nothing. The source pin is ONE span carrying both halves of that claim: the holding set (`clean`, and `diminishing-returns` once its advisory exit is taken) and the obligation on the rest (every other exit reason holds nothing, max-iterations-reached included, and stops the PR on every path). Adding a third holding exit reason inside the sentence, dropping the advisory-exit condition on `diminishing-returns`, rewriting `holds nothing`, dropping the max-iterations-reached example, or narrowing `on every path` turns the suite red. A consumer in the same file pins the discriminating condition and its obligation as ONE span: when local review ran on the branch, the PR opens only when the last exit reason it returned holds the gate. Dropping the ran-on-the-branch condition, or keying the gate on an exit reason other than the last one, turns the suite red. A second consumer in the same file pins the not-run clause: local review that did not run, because it is not configured or was skipped, neither holds nor blocks the PR, so rewriting a skipped review into a blocker or into a hold turns the suite red. Two consumers in `plugin/skills/open-plan-pr/SKILL.md` pin the pointers to the canonical section, a Before checklist item and a Do Not bullet, each naming `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements); they pin the reference, not the rule, so the skill restates no exit reason. Deleting a pointer or retargeting its file or section turns the suite red. What these pins honestly guarantee is exactly that these five word sequences exist in these two named files; they claim nothing about meaning and nothing about what the workflow script, the state machine, or an agent actually does. Residuals, stated plainly: (1) a meaning inversion around the pinned bytes, such as a later sentence in the section that names a further holding exit reason or exempts a path, is invisible; (2) agreement between this statement and the engines' own routing tables is not checked here, because a presence pin cannot compare two tables; (3) the Do Not bullet's negation comes from the `## Do Not` heading, not from the pinned sentence, and the heading is unpinned; (4) the `expect_commit` sentence in the skill, by which a caller's local review check stands in for the skill's own, is unpinned; (5) a NEW PR-opening path that never carries a pointer to the canonical section is an absence defect no fixture in this directory can see, per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/workflow.md",
+    "pattern": "The exit reasons that hold the gate are `clean`, and `diminishing-returns` once its advisory exit is taken. Every other exit reason holds nothing, max-iterations-reached included, and stops the PR on every path: the workflow script, the state machine, and any step taken outside both."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/workflow.md",
+      "pattern": "Local review gate: when local review ran on the branch, the PR opens only when the last exit reason it returned holds the gate."
+    },
+    {
+      "file": "plugin/governance/workflow.md",
+      "pattern": "Local review that did not run, because it is not configured or was skipped, neither holds nor blocks the PR."
+    },
+    {
+      "file": "plugin/skills/open-plan-pr/SKILL.md",
+      "pattern": "- [ ] Local review gate held, or local review did not run, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)"
+    },
+    {
+      "file": "plugin/skills/open-plan-pr/SKILL.md",
+      "pattern": "- open PR when local review ran on the branch and did not hold the local review gate per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)"
+    }
+  ]
+}
