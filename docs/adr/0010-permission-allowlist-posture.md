@@ -205,3 +205,11 @@ Results and raw runs: `~/code/hivemind-workflow-spikes/428/results.md`. Other su
 Closed:
 
 - **The S11-d plan for a seeded Read rule in the committed `.claude/settings.json` is closed as superseded.** The seed template gets no Read rule. Reason: a skill entry can be withdrawn in a later release, and a seeded rule cannot, because the settings merge never removes an entry (ADR-0037, decision 9). This closes the deferral to issue 428 in the 2026-10-22 S11-d bullet.
+
+Decided 2026-10-23 (user call): what CHECK 16 guards.
+
+- **CHECK 16 is a regression gate against accidental drift in a reviewed diff.** It reads its admission inputs from this repository: the navigator inputs-file globs in `plugin/governance/security-policy.md`, the exempt executor-skill list in `tools/policy_check.sh`, and the cache Read rule it builds from `.claude-plugin/marketplace.json`. A change in the same pull request that widens one of those inputs together with a grant is outside its model. Reason: any in-repo linter can be disarmed by editing what it reads, so no further check closes that class. Code review owns edits to these inputs. Such an edit is visible in the diff, because it touches `security-policy.md`, the linter or the manifest. This closes local findings 9696352e and 7f281dc6 as a class.
+- **Bounds that still hold.** The glob shape check keeps a widened navigator glob to one `.hivemind/` inputs-file pattern. Each exempt skill has its exact current file-tool entries pinned, added in the same pull request, so it cannot gain a grant silently. The executor skills already hold bare `Read` and `Write` by their own pending decision, tracked on issue 428.
+- **Considered and rejected: a second machine-readable copy of the navigator mapping.** It is one more same-repo input, and it does not change the trust root.
+- **Considered and rejected: matching the inputs-file path in the skill body.** The skill body is also a same-repo input, so it does not change the trust root either.
+- **The cache Read rule covers every installed version by design.** `Read(~/.claude/plugins/cache/brenpike/hivemind/**)` matches every installed version of the `brenpike`/`hivemind` plugin. Reason: a version-scoped rule would go stale each release (ADR-0037, decision 9). Local finding 47760930 is rejected on that basis.

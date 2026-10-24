@@ -3183,18 +3183,30 @@ mark_time 'CHECK15'
 # sequence without closing it on the same line; an indented line under the key
 # that is not a `- <entry>` list item (a continuation of a multi-line scalar, a
 # nested value, a block scalar body); any other frontmatter line that holds the
-# text `allowed-tools` (an indented key, or prose in another value); and, for a
-# non-exempt skill, an entry that is not `<name>` or `<name>(<rule>)` with
+# text `allowed-tools` (an indented key, or prose in another value); and, for
+# every skill, exempt or not, an entry that is not `<name>` or `<name>(<rule>)` with
 # <name> drawn from ASCII letters, digits, `_` and `-` and no `(`, `)` or `,`
 # inside <rule> (an anchor, alias, tag, block-scalar indicator, nested list,
 # `Read Write` item, or an item such as `Bash(x) Edit(**)`, `Bash(a, Write)` or
 # `Bash(a(b))` that another reader could split into more than one rule). So
 # each item holds exactly one rule, however a reader splits it.
 #
-# EXEMPTIONS are by path: the executor skills listed in
-# CHECK16_EXEMPT_SKILLS keep their bare entries until their own decision. An
-# exempt path that is missing, or that carries no bare file-tool entry, is a
-# stale-exemption finding, so the list cannot outlive the grants it excuses.
+# EXEMPTIONS. Exempt means "pinned to its current entries", not "unchecked".
+# The executor skills listed in CHECK16_EXEMPT_SKILLS keep their bare entries
+# until the executor-skill grant decision (issue 428 tail), and
+# security-policy.md "Skill File-Tool Grants" states the threat model those bare
+# entries carry. An exempt skill goes through the same collector, parse-error
+# findings and entry grammar as every other skill. Instead of the allowlist
+# classifier, its file-tool entries (Read, Write, Edit, MultiEdit, NotebookEdit,
+# Glob and Grep, bare or scoped) must equal its CHECK16_EXEMPT_PINS entry
+# exactly, counted as a multiset and in any order. Every added, removed or
+# changed file-tool entry is a finding that names the skill and the entry.
+# Entries for other tools stay out of the pin. An exempt path that is missing,
+# an exempt skill with no pin, a pin for a skill that is not exempt, and a pin
+# that holds no bare file-tool entry are each a stale-exemption finding, so the
+# list cannot outlive the grants it excuses. The run also counts the pins it
+# compared, and a count that differs from the number of discovered exempt
+# skills is a finding, so a loop that skips an exempt skill turns this check red.
 #
 # FAIL-CLOSED. An unreadable or malformed marketplace manifest, a missing or
 # non-identifier marketplace name, no single ./plugin entry with an identifier
@@ -3235,12 +3247,23 @@ CHECK16_INPUTS_GLOB_REGEX="^[.]hivemind/([${CHECK16_ASCII_ALNUM}._-]+/)*${CHECK1
 CHECK16_NAVIGATOR_LINE_REGEX='^- `hivemind:([abcdefghijklmnopqrstuvwxyz0123456789-]+)` .*[(]`Edit` glob `([^`]+)`[)]'
 CHECK16_FILE_TOOLS=(Read Write Edit MultiEdit NotebookEdit Glob Grep)
 CHECK16_EXEMPT_SKILLS=(tdd refactor-to-depth plan-to-prd plan-interrogation create-handoff creep-spread)
+declare -A CHECK16_EXEMPT_PINS=(
+    [tdd]='Read, Write, Edit'
+    [refactor-to-depth]='Read, Write, Edit, Glob, Grep'
+    [plan-to-prd]='Read, Write, Edit'
+    [plan-interrogation]='Read, Write, Edit'
+    [create-handoff]='Read, Write, Edit'
+    [creep-spread]='Read, Write'
+)
+CHECK16_PINS_COMPARED=0
 CHECK16_CACHE_READ_RULE=''
 CHECK16_NORMALIZED=''
 declare -a CHECK16_ENTRY_TEXTS=()
 declare -a CHECK16_ENTRY_LINES=()
 declare -a CHECK16_PARSE_ERROR_LINES=()
 declare -a CHECK16_PARSE_ERROR_TEXTS=()
+declare -a CHECK16_PROBLEM_LINES=()
+declare -a CHECK16_PROBLEM_TEXTS=()
 declare -A CHECK16_NAVIGATOR_GLOBS=()
 
 check16_found=false
@@ -3558,18 +3581,6 @@ check16_collect_entries() {
     return 0
 }
 
-# check16_report_parse_errors SKILL_FILE
-# Records a CHECK16 finding for every parse error the last collect recorded.
-check16_report_parse_errors() {
-    local skill_file="$1" error_index
-    for ((error_index = 0; error_index < ${#CHECK16_PARSE_ERROR_TEXTS[@]}; error_index++)); do
-        check16_found=true
-        add_finding 'CHECK16' "$skill_file" "${CHECK16_PARSE_ERROR_LINES[$error_index]}" \
-            "${CHECK16_PARSE_ERROR_TEXTS[$error_index]} -- see ${CHECK16_POLICY_CITATION}"
-    done
-    return 0
-}
-
 # check16_resolve_cache_read_rule
 # Sets CHECK16_CACHE_READ_RULE from the marketplace manifest. Returns 1 after a
 # CHECK16 finding when the manifest is unreadable or malformed, its .name is not
@@ -3610,25 +3621,90 @@ check16_is_exempt_skill() {
     return 1
 }
 
-# check16_has_bare_file_tool_entry
-# Returns 0 when any collected entry, normalized, is exactly a file tool name.
-check16_has_bare_file_tool_entry() {
-    local raw_entry
-    for raw_entry in "${CHECK16_ENTRY_TEXTS[@]}"; do
-        check16_normalize_entry "$raw_entry"
-        if check16_is_file_tool_name "$CHECK16_NORMALIZED"; then
+# check16_pin_has_bare_file_tool_entry PIN_TEXT
+# Returns 0 when any comma-separated entry of PIN_TEXT, trimmed, is exactly a
+# file tool name, else 1.
+check16_pin_has_bare_file_tool_entry() {
+    local pin_entry
+    local -a pin_entries=()
+    IFS=',' read -r -a pin_entries <<< "$1"
+    for pin_entry in "${pin_entries[@]}"; do
+        check16_trim "$pin_entry"
+        if check16_is_file_tool_name "$CHECK16_TRIMMED"; then
             return 0
         fi
     done
     return 1
 }
 
-# check16_scan_skill_file SKILL_FILE ALLOWED_GLOB
-# Records a CHECK16 finding for every collected entry that is unrecognized or
-# that the classifier rejects. ALLOWED_GLOB is the skill's own navigator glob,
-# or empty.
-check16_scan_skill_file() {
-    local skill_file="$1" allowed_glob="${2:-}" entry_index allowed_edit_text
+# check16_add_problem LINE TEXT
+# Appends one problem and its file line number to the problem arrays.
+check16_add_problem() {
+    CHECK16_PROBLEM_LINES+=("$1")
+    CHECK16_PROBLEM_TEXTS+=("$2")
+    return 0
+}
+
+# check16_diff_exempt_pin SKILL_NAME
+# Compares every recognized file-tool entry the last collect recorded with the
+# CHECK16_EXEMPT_PINS entry of SKILL_NAME, as a multiset, and appends one problem
+# for each entry that is not pinned and each pinned entry that is absent.
+# Entries for other tools are not compared. Counts the comparison in
+# CHECK16_PINS_COMPARED.
+check16_diff_exempt_pin() {
+    local skill_name="$1" pin_text pin_entry pin_display entry_index entry tool_name
+    local -a pin_entries=()
+    local -A remaining_counts=()
+    CHECK16_PINS_COMPARED=$((CHECK16_PINS_COMPARED + 1))
+    pin_text="${CHECK16_EXEMPT_PINS[$skill_name]-}"
+    pin_display="${pin_text:-none}"
+    IFS=',' read -r -a pin_entries <<< "$pin_text"
+    for pin_entry in "${pin_entries[@]}"; do
+        check16_trim "$pin_entry"
+        remaining_counts["$CHECK16_TRIMMED"]=$(( ${remaining_counts["$CHECK16_TRIMMED"]:-0} + 1 ))
+    done
+    for ((entry_index = 0; entry_index < ${#CHECK16_ENTRY_TEXTS[@]}; entry_index++)); do
+        if check16_entry_is_unrecognized "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
+            continue
+        fi
+        entry="$CHECK16_NORMALIZED"
+        tool_name="${entry%%[!${CHECK16_ASCII_ALNUM}_]*}"
+        if ! check16_is_file_tool_name "$tool_name"; then
+            continue
+        fi
+        if [[ "${remaining_counts["$entry"]:-0}" -gt 0 ]]; then
+            remaining_counts["$entry"]=$(( ${remaining_counts["$entry"]} - 1 ))
+            continue
+        fi
+        check16_add_problem "${CHECK16_ENTRY_LINES[$entry_index]}" \
+            "allowed-tools entry '${entry}' on exempt executor skill hivemind:${skill_name} is not one of its pinned file-tool entries (${pin_display}); exempt means pinned to its current entries, not unchecked, so make the executor-skill grant decision (issue 428 tail) before adding, removing or changing a file-tool entry on this skill"
+    done
+    for pin_entry in "${pin_entries[@]}"; do
+        check16_trim "$pin_entry"
+        if [[ "${remaining_counts["$CHECK16_TRIMMED"]:-0}" -gt 0 ]]; then
+            remaining_counts["$CHECK16_TRIMMED"]=$(( ${remaining_counts["$CHECK16_TRIMMED"]} - 1 ))
+            check16_add_problem 0 \
+                "pinned file-tool entry '${CHECK16_TRIMMED}' of exempt executor skill hivemind:${skill_name} is missing from its allowed-tools (pinned: ${pin_display}); exempt means pinned to its current entries, not unchecked, so make the executor-skill grant decision (issue 428 tail) before adding, removing or changing a file-tool entry on this skill"
+        fi
+    done
+    return 0
+}
+
+# check16_evaluate_skill SKILL_FILE SKILL_NAME
+# Collects SKILL_FILE's entries and replaces CHECK16_PROBLEM_LINES and
+# CHECK16_PROBLEM_TEXTS with every parse error, every unrecognized entry, and
+# either every entry the classifier rejects (with SKILL_NAME's own navigator
+# glob) or, for an exempt SKILL_NAME, every difference from its pin. It reports
+# nothing itself, so the canary can run it.
+check16_evaluate_skill() {
+    local skill_file="$1" skill_name="$2" allowed_glob entry_index allowed_edit_text
+    allowed_glob="${CHECK16_NAVIGATOR_GLOBS[$skill_name]:-}"
+    CHECK16_PROBLEM_LINES=()
+    CHECK16_PROBLEM_TEXTS=()
+    check16_collect_entries "$skill_file"
+    for ((entry_index = 0; entry_index < ${#CHECK16_PARSE_ERROR_TEXTS[@]}; entry_index++)); do
+        check16_add_problem "${CHECK16_PARSE_ERROR_LINES[$entry_index]}" "${CHECK16_PARSE_ERROR_TEXTS[$entry_index]}"
+    done
     if [[ -n "$allowed_glob" ]]; then
         allowed_edit_text="'Edit(${allowed_glob})', this skill's own inputs-file glob in security-policy.md"
     else
@@ -3636,16 +3712,32 @@ check16_scan_skill_file() {
     fi
     for ((entry_index = 0; entry_index < ${#CHECK16_ENTRY_TEXTS[@]}; entry_index++)); do
         if check16_entry_is_unrecognized "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
-            check16_found=true
-            add_finding 'CHECK16' "$skill_file" "${CHECK16_ENTRY_LINES[$entry_index]}" \
-                "allowed-tools entry '${CHECK16_NORMALIZED}' is not one recognized tool entry ('<name>' or '<name>(<rule>)' with no '(', ')' or ',' inside the rule), so it cannot be classified -- write one plain rule per list item, each as its own '- <entry>' line, with no '(', ')' or ',' inside the parentheses -- see ${CHECK16_POLICY_CITATION}"
+            check16_add_problem "${CHECK16_ENTRY_LINES[$entry_index]}" \
+                "allowed-tools entry '${CHECK16_NORMALIZED}' is not one recognized tool entry ('<name>' or '<name>(<rule>)' with no '(', ')' or ',' inside the rule), so it cannot be classified -- write one plain rule per list item, each as its own '- <entry>' line, with no '(', ')' or ',' inside the parentheses"
+            continue
+        fi
+        if check16_is_exempt_skill "$skill_name"; then
             continue
         fi
         if check16_entry_is_violation "${CHECK16_ENTRY_TEXTS[$entry_index]}" "$allowed_glob"; then
-            check16_found=true
-            add_finding 'CHECK16' "$skill_file" "${CHECK16_ENTRY_LINES[$entry_index]}" \
-                "allowed-tools entry '${CHECK16_NORMALIZED}' is a file-tool grant outside the allowed forms ('${CHECK16_CACHE_READ_RULE}', and ${allowed_edit_text}); a skill entry is a live rule for the whole turn that loads it -- see ${CHECK16_POLICY_CITATION}"
+            check16_add_problem "${CHECK16_ENTRY_LINES[$entry_index]}" \
+                "allowed-tools entry '${CHECK16_NORMALIZED}' is a file-tool grant outside the allowed forms ('${CHECK16_CACHE_READ_RULE}', and ${allowed_edit_text}); a skill entry is a live rule for the whole turn that loads it"
         fi
+    done
+    if check16_is_exempt_skill "$skill_name"; then
+        check16_diff_exempt_pin "$skill_name"
+    fi
+    return 0
+}
+
+# check16_report_problems SKILL_FILE
+# Records a CHECK16 finding for every problem the last evaluate recorded.
+check16_report_problems() {
+    local skill_file="$1" problem_index
+    for ((problem_index = 0; problem_index < ${#CHECK16_PROBLEM_TEXTS[@]}; problem_index++)); do
+        check16_found=true
+        add_finding 'CHECK16' "$skill_file" "${CHECK16_PROBLEM_LINES[$problem_index]}" \
+            "${CHECK16_PROBLEM_TEXTS[$problem_index]} -- see ${CHECK16_POLICY_CITATION}"
     done
     return 0
 }
@@ -3666,14 +3758,11 @@ if ! check16_resolve_cache_read_rule; then
 else
     for skill_file in "${check16_skill_files[@]}"; do
         skill_name="$(basename "$(dirname "$skill_file")")"
-        if check16_is_exempt_skill "$skill_name"; then
-            continue
-        fi
-        check16_collect_entries "$skill_file"
-        check16_report_parse_errors "$skill_file"
-        check16_scan_skill_file "$skill_file" "${CHECK16_NAVIGATOR_GLOBS[$skill_name]:-}"
+        check16_evaluate_skill "$skill_file" "$skill_name"
+        check16_report_problems "$skill_file"
     done
 
+    check16_exempt_discovered_count=0
     for exempt_skill in "${CHECK16_EXEMPT_SKILLS[@]}"; do
         exempt_skill_file="$PLUGIN_ROOT/skills/${exempt_skill}/SKILL.md"
         exempt_skill_discovered=false
@@ -3685,22 +3774,40 @@ else
         if [[ "$exempt_skill_discovered" != true ]]; then
             check16_found=true
             add_finding 'CHECK16' "$exempt_skill_file" 0 \
-                "stale exemption: hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but its SKILL.md was not discovered -- remove it from the exemption list -- see ${CHECK16_POLICY_CITATION}"
+                "stale exemption: hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but its SKILL.md was not discovered -- remove it from the exemption list and its pin -- see ${CHECK16_POLICY_CITATION}"
             continue
         fi
-        check16_collect_entries "$exempt_skill_file"
-        check16_report_parse_errors "$exempt_skill_file"
-        if ! check16_has_bare_file_tool_entry; then
+        check16_exempt_discovered_count=$((check16_exempt_discovered_count + 1))
+        if [[ -z "${CHECK16_EXEMPT_PINS[$exempt_skill]+set}" ]]; then
             check16_found=true
             add_finding 'CHECK16' "$exempt_skill_file" 0 \
-                "stale exemption: hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but carries no bare file-tool entry -- remove it from the exemption list so its entries are checked -- see ${CHECK16_POLICY_CITATION}"
+                "hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but has no CHECK16_EXEMPT_PINS entry, so every file-tool entry it carries is reported as unpinned -- pin its current file-tool entries -- see ${CHECK16_POLICY_CITATION}"
+        elif ! check16_pin_has_bare_file_tool_entry "${CHECK16_EXEMPT_PINS[$exempt_skill]}"; then
+            check16_found=true
+            add_finding 'CHECK16' "$exempt_skill_file" 0 \
+                "stale exemption: hivemind:${exempt_skill} is in CHECK16_EXEMPT_SKILLS but its pin holds no bare file-tool entry -- remove it from the exemption list and its pin so its entries are checked -- see ${CHECK16_POLICY_CITATION}"
         fi
     done
+
+    for pinned_skill in "${!CHECK16_EXEMPT_PINS[@]}"; do
+        if ! check16_is_exempt_skill "$pinned_skill"; then
+            check16_found=true
+            add_finding 'CHECK16' 'tools/policy_check.sh' 0 \
+                "stale exemption: CHECK16_EXEMPT_PINS holds a pin for hivemind:${pinned_skill}, which is not in CHECK16_EXEMPT_SKILLS -- remove the pin -- see ${CHECK16_POLICY_CITATION}"
+        fi
+    done
+
+    if [[ "$CHECK16_PINS_COMPARED" -ne "$check16_exempt_discovered_count" ]]; then
+        check16_found=true
+        add_finding 'CHECK16' 'tools/policy_check.sh' 0 \
+            "the skill scan compared ${CHECK16_PINS_COMPARED} exempt pin(s) but ${check16_exempt_discovered_count} exempt skill(s) were discovered, so an exempt skill skipped its pin comparison -- run every discovered skill through check16_evaluate_skill -- see ${CHECK16_POLICY_CITATION}"
+    fi
 fi
 
 # ── CHECK 16 DETECTION CANARY ──────────────────────────────────────────────
-# The entry classifier, the entry grammar, the inputs-glob shape and the
-# frontmatter collector over fixed inputs, in BOTH directions. A narrowed
+# The entry classifier, the entry grammar, the inputs-glob shape, the
+# frontmatter collector and the exempt pin comparison over fixed inputs, in
+# BOTH directions. An exempt skill that skips its pin comparison, a narrowed
 # file-tool list, a widened or narrowed allowed form, a dropped trailing-comment
 # strip, or a collector that skips a form it does not read turns this run red
 # while every skill still passes.
@@ -3777,6 +3884,40 @@ check16_expect_doc_problem() {
     check16_count_doc_problems "$@"
     if [[ "$CHECK16_DOC_PROBLEMS" -eq 0 ]]; then
         check16_canary_finding "frontmatter case '$1' produced no finding -- the collector skips a form it does not read"
+    fi
+    return 0
+}
+
+# check16_count_skill_problems SKILL_NAME LINE...
+# Runs check16_evaluate_skill over a SKILL.md built from the LINE arguments as
+# skill SKILL_NAME and sets CHECK16_SKILL_PROBLEMS to its problem count.
+CHECK16_SKILL_PROBLEMS=0
+check16_count_skill_problems() {
+    local skill_name="$1"
+    shift
+    check16_evaluate_skill <(printf '%s\n' "$@") "$skill_name"
+    CHECK16_SKILL_PROBLEMS="${#CHECK16_PROBLEM_TEXTS[@]}"
+    return 0
+}
+
+# check16_expect_skill_problem LABEL SKILL_NAME LINE...
+check16_expect_skill_problem() {
+    local case_label="$1"
+    shift
+    check16_count_skill_problems "$@"
+    if [[ "$CHECK16_SKILL_PROBLEMS" -eq 0 ]]; then
+        check16_canary_finding "skill case '${case_label}' for hivemind:$1 produced no finding -- an exempt skill is no longer held to its pinned file-tool entries"
+    fi
+    return 0
+}
+
+# check16_expect_skill_clean LABEL SKILL_NAME LINE...
+check16_expect_skill_clean() {
+    local case_label="$1"
+    shift
+    check16_count_skill_problems "$@"
+    if [[ "$CHECK16_SKILL_PROBLEMS" -ne 0 ]]; then
+        check16_canary_finding "skill case '${case_label}' for hivemind:$1 produced ${CHECK16_SKILL_PROBLEMS} finding(s) -- the exempt pin comparison misreads a matching skill"
     fi
     return 0
 }
@@ -3884,10 +4025,27 @@ if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
     check16_expect_doc_clean 'inline flow sequence' '---' 'allowed-tools: [Bash(git log *), Agent(hivemind:x)]' 'shell: bash' '---'
     check16_expect_doc_clean 'folded description and body rules' '---' 'name: x' 'description: >-' '  Does a thing.' '  Use when y.' 'allowed-tools:' '  - Skill' 'shell: bash' '---' 'Body' '---' 'More body with --- in it'
     check16_expect_doc_clean 'CRLF delimiters' $'---\r' $'name: x\r' $'---\r'
+
+    if [[ "${#CHECK16_EXEMPT_SKILLS[@]}" -gt 0 ]]; then
+        check16_canary_exempt="${CHECK16_EXEMPT_SKILLS[0]}"
+        declare -a check16_canary_pin_entries=()
+        declare -a check16_canary_pin_lines=()
+        IFS=',' read -r -a check16_canary_pin_entries <<< "${CHECK16_EXEMPT_PINS[$check16_canary_exempt]-}"
+        for check16_canary_pin_entry in "${check16_canary_pin_entries[@]}"; do
+            check16_trim "$check16_canary_pin_entry"
+            check16_canary_pin_lines+=("  - ${CHECK16_TRIMMED}")
+        done
+        check16_canary_first_entry="${check16_canary_pin_lines[0]:-  - Read}"
+        check16_expect_skill_clean 'exempt skill matching its pin' "$check16_canary_exempt" '---' 'allowed-tools:' '  - Bash(git status *)' "${check16_canary_pin_lines[@]}" '  - Skill' '---'
+        check16_expect_skill_problem 'exempt skill with one extra bare Write' "$check16_canary_exempt" '---' 'allowed-tools:' "${check16_canary_pin_lines[@]}" '  - Write' '---'
+        check16_expect_skill_problem 'exempt skill with one entry removed' "$check16_canary_exempt" '---' 'allowed-tools:' "${check16_canary_pin_lines[@]:1}" '---'
+        check16_expect_skill_problem 'exempt skill with one entry rescoped' "$check16_canary_exempt" '---' 'allowed-tools:' "${check16_canary_first_entry}(src/**)" "${check16_canary_pin_lines[@]:1}" '---'
+        check16_expect_skill_problem 'exempt skill with a multi-rule item' "$check16_canary_exempt" '---' 'allowed-tools:' "${check16_canary_pin_lines[@]}" '  - Bash(x) Edit(**)' '---'
+    fi
 fi
 
 if [[ "$check16_found" == false ]]; then
-    echo "[PASS] Check 16: All ${#check16_skill_files[@]} skills carry file-tool entries only in the two allowed forms (${#CHECK16_EXEMPT_SKILLS[@]} executor skills exempt by path)"
+    echo "[PASS] Check 16: All ${#check16_skill_files[@]} skills carry file-tool entries only in the two allowed forms (${#CHECK16_EXEMPT_SKILLS[@]} executor skills pinned to their current file-tool entries)"
     CHECKS_PASSED=$((CHECKS_PASSED + 1))
 else
     CHECKS_FAILED=$((CHECKS_FAILED + 1))
