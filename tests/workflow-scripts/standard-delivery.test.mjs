@@ -34,6 +34,8 @@ const openPlanPrText = readText(openPlanPrPath);
 const safetyRailsText = readText(join(repoRoot, 'plugin/governance/safety-rails.md'));
 const definitionsText = readText(join(repoRoot, 'plugin/governance/definitions.md'));
 const reviewerText = readText(join(repoRoot, 'plugin/agents/local-reviewer.md'));
+const workflowRulesText = readText(join(repoRoot, 'plugin/governance/workflow.md'));
+const deliveryMachine = readJson('plugin/workflows/standard-delivery.json');
 const autonomyTable = readJson('plugin/references/decision-autonomy-table.json');
 
 const REQUEST = 'Add the cache layer. REQUEST_MARKER_ZQ';
@@ -58,7 +60,7 @@ const NEXT_STEP_LINE = 'Fix the cause named above, then run the request again.';
 const OPEN_LEAD = 'The delivery ran no further step, because questions are still open.';
 const RUN_AGAIN = 'Run the request again with the answers in it.';
 const ON_BRANCH_LINE = RUN_AGAIN + ' The new run plans what is left from the commits already on branch "feature/cache".';
-const BEFORE_PR_LINE = ON_BRANCH_LINE + ' The pull request can be opened from those commits.';
+const BEFORE_PR_LINE = ON_BRANCH_LINE + ' No pull request until every gate holds on them.';
 const scratchRoots = [];
 
 after(() => {
@@ -684,6 +686,26 @@ function readReviewerContract(heading) {
     exitReasons: exitLine === undefined ? [] : exitLine.slice('exit_reason: '.length).split(' | '),
     conditional: Object.fromEntries(conditional.map(([name, fields]) => [name, fields.split(', ')]))
   };
+}
+
+/**
+ * The exit reasons the sentence of workflow.md (PR Requirements) names, in
+ * backticks, as holding the local review gate, sorted.
+ */
+function workflowHoldingExits() {
+  const sectionStart = workflowRulesText.indexOf('\n## PR Requirements\n');
+  const section = workflowRulesText.slice(sectionStart, workflowRulesText.indexOf('\n## ', sectionStart + 1));
+  const sentenceStart = section.indexOf('The exit reasons that hold the gate are ');
+  assert.ok(sentenceStart >= 0, 'workflow.md (PR Requirements) names the exit reasons that hold the gate');
+  const sentence = section.slice(sentenceStart, section.indexOf('.', sentenceStart));
+  return Array.from(sentence.matchAll(/`([a-z-]+)`/g), (match) => match[1]).sort();
+}
+
+/**
+ * The exit reasons localReviewRoutes() routes to hold or diminishing, sorted.
+ */
+function gateHoldingExitsOfRoutes() {
+  return Object.entries(main.localReviewRoutes()).filter(([, route]) => route === 'hold' || route === 'diminishing').map(([exitReason]) => exitReason).sort();
 }
 
 function reviewMessage(lead, fieldLines) {
@@ -2157,6 +2179,18 @@ const ROW_TESTS = {
       assert.ok(/function finishTailAsk\(asks, run, detail\) \{\n {2}return finishOpenQuestions\(\{ asks: asks, taken: \[\] \}, 'before_pr', run, detail\);/.test(mainSource));
       assert.ok((mainSource.match(/finishTailAsk\(/g) || []).length >= 4);
     });
+    test('the next-action line never offers a pull request from commits a gate did not hold on', () => {
+      const run = { commits: [OTHER], branch: 'feature/cache' };
+      const oldBeforePrLine = ON_BRANCH_LINE + ' The pull request can be opened from those commits.';
+      assert.equal(main.nextActionLine('before_pr', run), BEFORE_PR_LINE);
+      assert.ok(BEFORE_PR_LINE.length <= oldBeforePrLine.length);
+      for (const stopReason of ['pause_limit', 'reply_size', 'exact_text_size', 'before_pr']) {
+        for (const stopRun of [run, { commits: [], branch: undefined }]) {
+          assert.ok(!/pull request (can|may|will) be opened|open the pull request/i.test(main.nextActionLine(stopReason, stopRun)), stopReason);
+        }
+      }
+      assert.ok(!mainSource.includes('can be opened from those commits'));
+    });
   },
   'SD-24': () => {
     test('real bump-type.sh and molt.sh: the bump sets VERSION from trunk_commit and the gates hold on the bump commit', async () => {
@@ -2769,6 +2803,22 @@ const ROW_TESTS = {
         'high-severity-rejection': 'question',
         blocked: 'stop'
       });
+    });
+    test('the exits routed to hold or diminishing are the exits workflow.md (PR Requirements) names as holding local review', () => {
+      assert.deepEqual(gateHoldingExitsOfRoutes(), workflowHoldingExits());
+      assert.deepEqual(workflowHoldingExits(), ['clean', 'diminishing-returns']);
+    });
+    test('the local_review transitions route the same exits, send only the holding exits to open_pr, and send every stop exit to a terminal state', () => {
+      const transitions = deliveryMachine.states.local_review.transitions;
+      assert.deepEqual(Object.keys(transitions).sort(), Object.keys(main.localReviewRoutes()).sort());
+      const openPrExits = Object.keys(transitions).filter((exitReason) => transitions[exitReason] === 'open_pr').sort();
+      assert.deepEqual(openPrExits, gateHoldingExitsOfRoutes());
+      const stopExits = Object.entries(main.localReviewRoutes()).filter(([, route]) => route === 'stop').map(([exitReason]) => exitReason);
+      assert.ok(stopExits.includes('max-iterations-reached'));
+      for (const exitReason of stopExits) {
+        assert.notEqual(transitions[exitReason], 'open_pr', exitReason);
+        assert.equal(deliveryMachine.states[transitions[exitReason]].type, 'terminal', exitReason);
+      }
     });
     test('reviewExitFields equals the conditional fields of the Output Contract', () => {
       const contract = readReviewerContract('## Output Contract');

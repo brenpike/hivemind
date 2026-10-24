@@ -3323,7 +3323,7 @@ function nextActionLine(stopReason, run) {
     return again;
   }
   const line = again + ' The new run plans what is left from the commits already on branch ' + encodeUntrustedText(cutExcerpt(run.branch)) + '.';
-  return stopReason === 'before_pr' ? line + ' The pull request can be opened from those commits.' : line;
+  return stopReason === 'before_pr' ? line + ' No pull request until every gate holds on them.' : line;
 }
 
 function buildBlockedLead(message) {
