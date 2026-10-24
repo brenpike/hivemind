@@ -3205,6 +3205,22 @@ mark_time 'CHECK15'
 # with another name is not a file tool here. A navigator whose covered-set line
 # is reworded so the `(`Edit` glob `...`)` form no longer appears loses its
 # allowed Edit entry, which fails loudly on that skill rather than passing.
+# CHECK 16 accepts one canonical form and relies on the Claude Code loader being
+# in the documented family: a line-1 `---` opener; YAML between the markers;
+# exact field names; `allowed-tools` as a space- or comma-separated string or a
+# YAML list, split outside parentheses as the documented
+# `Bash(git add *) Bash(git commit *)` form requires; and YAML comments dropped,
+# as ADR-0010's 2026-10-22 amendment observed. Not modeled: a loader that
+# splits inside parentheses, decodes escapes in plain scalars, or reads past the
+# closing `---` line. Bounded: such a loader contradicts the Claude Code skills
+# docs; every SKILL.md change is a reviewed diff; a misspelled key grants
+# nothing, because Claude Code ignores unknown fields and matches field names
+# exactly; and the live grant check is the manual headless test ADR-0010
+# records. Rejected remediations: a YAML parser (none in the toolchain, it is
+# one more reader, and the frontmatter split happens before any parser), and a
+# runtime ground-truth check in CI (it needs the claude binary, auth and model
+# calls, and is not deterministic). Linked: PR 443 review thread
+# discussion_r4365394796 and local review findings 605118a8 and 960e5059.
 echo ''
 echo '=== CHECK 16: Skill allowed-tools file-tool entries are scoped ==='
 
