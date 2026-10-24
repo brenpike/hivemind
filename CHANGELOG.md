@@ -34,6 +34,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The 7.0.5 known gap is closed. On the state machine, a commit made after a gate, such as a local review fix or a validation fix, no longer reaches a pull request unseen: the run asks before the pull request. Brood children, the main users of the state machine, now run on the script engine, where a later commit reruns the gates it invalidates. See the ADR-0037 amendment, "Recorded residual: state-machine gates" (#409).
 - spawn-brood addresses each strain's tmux session exactly. Liveness probes use `=<session>`, and the readiness capture, the task paste and every Enter go to the pane id resolved from the exact session, as `rc-brood.sh` does. A strain whose session ended can no longer pass another strain's task or keystrokes on through tmux's name-prefix match. `hivemind:brood-status` probes liveness the same way (#409).
+- `rc-brood.sh` reads the brood manifest the way the brood-status projector does. A symlinked manifest, or a brood directory that resolves outside the checkout, is a blocker with no keystroke sent, and the file is read once into memory. The brood-status collector's brood-id check refuses a manifest that became a symlink after the projector read it (#409).
+- spawn-brood writes the manifest through a temp file it creates itself, under a random name, and refuses to write when anything already sits at that path. A symlink planted at the temp path can no longer redirect the manifest write, and a manifest left as a symlink after the rename is a blocker (#409).
 
 ## [7.0.5] - 2026-10-24
 

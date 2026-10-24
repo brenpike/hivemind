@@ -38,7 +38,9 @@
 # MANIFEST:
 #   <checkout-root>/.hivemind/broods/<broodId>/manifest.json  (manifest_version 4, JSON). The
 #   checkout root is `git rev-parse --show-toplevel` — the SAME anchor spawn-brood writes against,
-#   so read side and write side agree by construction.
+#   so read side and write side agree by construction. The read is confined as in
+#   brood-status-project.sh: a symlinked leaf or ancestor is a pre-flight blocker, and the file is
+#   opened once into an in-memory snapshot that every field read uses.
 #
 # OUTPUT (stdout):
 #   Per-strain disposition lines (`applied|skipped|failed: <strain> ...`) and a final summary line
@@ -47,7 +49,8 @@
 # EXIT CONTRACT:
 #   0  the fan-out COMPLETED — even with some strains skipped (dead/missing session, unsanitizable
 #      name) or failed (a per-strain tmux error). Zero strains / zero alive sessions also exit 0.
-#   1  ONLY a pre-flight blocker: bad brood-id, a bad `--only` short, missing/unreadable/invalid manifest, a manifest
+#   1  ONLY a pre-flight blocker: bad brood-id, a bad `--only` short, missing/unreadable/invalid manifest,
+#      a manifest whose leaf or an ancestor is a symlink, a manifest
 #      that FAILS THE SHAPE PREFLIGHT (`.strains` missing/null/object/non-array, or a strain
 #      element that is not an object / carries a non-string name or tmux_session), or a missing
 #      dependency. No keystroke is delivered on a pre-flight blocker. A wrong-shaped/corrupt
@@ -104,6 +107,14 @@ trap ':' EXIT
 # blocker: emit a pre-flight blocker to stderr in the canonical form and exit 1 (no keystroke
 # delivered). Mirrors the spawn-brood.sh / brood-status-collect.sh blocker pattern.
 blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
+
+# ── Self-location + shared containment helper ─────────────────────────────────────
+# layout plugin/skills/enable-brood-remote/scripts/ => 3 dirs up is the plugin root. The helper
+# supplies hivemind_assert_inputs_contained for the confined manifest read below.
+script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
+plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
+[ -f "$plugin_root/skills/_shared/containment.sh" ] || blocker "required shared library missing: skills/_shared/containment.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/containment.sh" || blocker "failed to source skills/_shared/containment.sh (unparseable); refusing to proceed"
 
 # ── Dependency check ──────────────────────────────────────────────────────────────
 # tmux delivers the keystrokes; jq reads the manifest as DATA; git resolves the checkout root.
@@ -168,10 +179,31 @@ root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
   || blocker "not inside a git checkout (git rev-parse --show-toplevel failed)"
 
 manifest="$root/.hivemind/broods/$brood_id/manifest.json"
+
+# ── Confined single-snapshot manifest read (mirrors brood-status-project.sh) ─────────
+# The manifest sits in the coordinator checkout, but a brood child or any local process can
+# replace it or an ancestor dir with a symlink, and [ -f ]/[ -r ]/jq all FOLLOW symlinks. So:
+#   1. reject a symlinked LEAF first ([ -L ] fires even for a dangling target);
+#   2. require a readable regular file;
+#   3. hivemind_assert_inputs_contained rejects a symlinked ANCESTOR (dirname canonicalized
+#      with cd && pwd -P, prefix-matched under the canonical checkout root);
+#   4. open the file EXACTLY ONCE: jq parses the intact bytes (a literal NUL or a second JSON
+#      document fails here) and emits one compact object, held in a shell var;
+#   5. re-assert 1 and 3 after the read, so a swap during the read fails closed.
+# Every later field read runs against $manifest_content on jq stdin and never reopens the
+# file. A failure at any step is a pre-flight blocker: zero keystrokes.
+[ -L "$manifest" ] \
+  && blocker "refusing to read the brood manifest: $manifest is a symlink leaf"
 [ -f "$manifest" ] && [ -r "$manifest" ] \
   || blocker "brood manifest not found or unreadable: $manifest"
-# Validate it parses as JSON before any field read — a corrupt manifest is a pre-flight blocker.
-jq -e 'type == "object"' "$manifest" >/dev/null 2>&1 \
+hivemind_assert_inputs_contained "$root" "$manifest" >/dev/null 2>&1 \
+  || blocker "refusing to read the brood manifest: $manifest resolves outside the checkout (symlinked ancestor)"
+manifest_content="$(jq -c -s 'if length == 1 then .[0] else error("not exactly one JSON document") end' "$manifest" 2>/dev/null)" \
+  || blocker "brood manifest is not valid JSON: $manifest"
+{ [ ! -L "$manifest" ] && hivemind_assert_inputs_contained "$root" "$manifest" >/dev/null 2>&1; } \
+  || blocker "refusing to use the brood manifest: $manifest changed into a symlink during the read"
+# Validate it is a JSON object before any field read — a corrupt manifest is a pre-flight blocker.
+jq -e 'type == "object"' <<< "$manifest_content" >/dev/null 2>&1 \
   || blocker "brood manifest is not valid JSON: $manifest"
 
 # ── Manifest brood-id coherence gate (target-trust) ───────────────────────────────
@@ -179,7 +211,7 @@ jq -e 'type == "object"' "$manifest" >/dev/null 2>&1 \
 # recorded brood_id disagrees with the directory it was located under is stale or tampered — its
 # strain sessions cannot be trusted as THIS brood's targets. Reject as a pre-flight blocker BEFORE
 # any session is probed or addressed. A non-string / missing brood_id also fails this gate.
-manifest_brood_id="$(jq -r 'if (.brood_id | type) == "string" then .brood_id else "" end' "$manifest" 2>/dev/null || true)"
+manifest_brood_id="$(jq -r 'if (.brood_id | type) == "string" then .brood_id else "" end' <<< "$manifest_content" 2>/dev/null || true)"
 [ "$manifest_brood_id" = "$brood_id" ] \
   || blocker "manifest brood_id does not match requested brood-id (stale/tampered manifest): $manifest"
 
@@ -215,7 +247,7 @@ jq -e '
         and ((.tmux_session | type) | (. == "string" or . == "null"))
       )
   )
-' "$manifest" >/dev/null 2>&1 \
+' <<< "$manifest_content" >/dev/null 2>&1 \
   || blocker "brood manifest failed shape preflight (\`.strains\` must be a non-null array of objects, each with string-or-null name + tmux_session): $manifest"
 
 # ── Enumerate strains (DATA reads — never command source) ─────────────────────────
@@ -243,7 +275,7 @@ projection="$(
     | [ (.name         | reqstr("name")         | gsub("[[:cntrl:]]"; "")),
         (.tmux_session | reqstr("tmux_session") | gsub("[[:cntrl:]]"; "")) ]
     | @tsv
-  ' "$manifest"
+  ' <<< "$manifest_content"
 )" || blocker "failed to project strains from manifest (corrupt/non-string name or tmux_session): $manifest"
 
 strain_names=()

@@ -1952,6 +1952,65 @@ KEYEDSTUB_EOF
     fi
 }
 
+# ── Assertion 13e: MANIFEST-TEMP:pre-planted-temp-symlink-never-followed (0c6b006b) ──
+# The manifest temp leaf must be a file spawn-brood CREATES, never one it finds. A `uuidgen` stub
+# fixes the uuid, so both the brood-id and the temp-name token are known in advance, and the case
+# pre-plants a symlink at the exact temp path pointing at a victim file outside the checkout.
+# Assert: the victim keeps its bytes, no manifest.json is published, spawn exits 1 with the
+# recovery line. Pre-fix code wrote `$STATE/.manifest.json.tmp.$$` with a plain `>`, which follows
+# a symlink planted at that guessable name and overwrites its target; this case pins the fixed
+# contract (fresh exclusive create, refused when anything already sits at the temp path) at a path
+# the test can predict.
+#
+# DEPENDENCY GATING: gated on tmux+jq (claude via the stub). SKIP cleanly when any is absent.
+assert_spawn_brood_manifest_temp_symlink_not_followed() {
+    local name="MANIFEST-TEMP:pre-planted-temp-symlink-never-followed"
+    local missing=""
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes the manifest write; skipping (missing: $missing)"
+        return
+    }
+
+    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    local gitroot="$WORKDIR/brood-git"
+    init_spawn_repo "$gitroot"
+    local fixed_uuid="0c6b006b-0000-4000-8000-00000000e13e"
+    local uuid_stub="$WORKDIR/uuid-stub"
+    mkdir -p "$uuid_stub"
+    cat > "$uuid_stub/uuidgen" <<UUIDSTUB_EOF
+#!/usr/bin/env bash
+echo $fixed_uuid
+UUIDSTUB_EOF
+    chmod +x "$uuid_stub/uuidgen"
+    local state="$gitroot/.hivemind/broods/brood-$fixed_uuid"
+    local victim="$WORKDIR/victim.txt"
+    printf 'victim-bytes\n' > "$victim"
+    mkdir -p "$state"
+    ln -s "$victim" "$state/.manifest.json.tmp.$fixed_uuid"
+    local inputs="$gitroot/brood-inputs.json"
+    write_one_strain_inputs "$inputs" "main" "child whose manifest temp path was pre-planted"
+
+    local rc=0
+    local stdout_out="$WORKDIR/spawn-stdout.txt"
+    local stderr_out="$WORKDIR/spawn-stderr.txt"
+    local marker="$WORKDIR/launch-marker.txt"
+    reap_brood_sessions
+    ( cd "$gitroot" && PATH="$uuid_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        STARTED_EVIDENCE_TIMEOUT=3 bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>"$stderr_out" || rc=$?
+    tmux kill-server 2>/dev/null || true
+
+    local victim_bytes manifest_published=no recovery_line=no
+    victim_bytes="$(cat "$victim" 2>/dev/null)"
+    [ -e "$state/manifest.json" ] && manifest_published=yes
+    grep -q '^recovery: manifest write failed' "$stderr_out" 2>/dev/null && recovery_line=yes
+
+    if [[ "$rc" -eq 1 && "$victim_bytes" == "victim-bytes" && "$manifest_published" == "no" && "$recovery_line" == "yes" ]]; then
+        pass "$name" "pre-planted temp symlink refused; victim untouched; no manifest published; exit 1 with recovery line"
+    else
+        failed "$name" "expected exit 1 + victim untouched + no manifest + recovery line; rc=$rc victim=[$victim_bytes] manifest_published=$manifest_published recovery_line=$recovery_line stderr: $(cat "$stderr_out" 2>/dev/null)"
+    fi
+}
+
 # ════════════════════════════════════════════════════════════════════════════════
 # brood-status-project.sh (read-side projection, #161)
 # ════════════════════════════════════════════════════════════════════════════════
@@ -3718,6 +3777,7 @@ assert_spawn_brood_tail_started_promoted
 assert_spawn_brood_started_child_gets_remote_control
 assert_spawn_brood_rc_failure_keeps_exit_code
 assert_spawn_brood_exact_session_not_prefix_sibling
+assert_spawn_brood_manifest_temp_symlink_not_followed
 assert_reconcile_settle_clamp_bounds_huge_override
 
 echo ''
@@ -3920,6 +3980,58 @@ assert_collect_broodid_mismatch_empty_blocker() {
     rm -rf "$tmp"
     if [[ "$rc" -eq 0 && "$ok" == "yes" ]]; then
         pass "$name" "exit 0; zero-strain wrong/absent top-level brood_id -> blocker (not empty); both counted unreadable"
+    else
+        failed "$name" "rc=$rc ok=$ok out=[$out]"
+    fi
+}
+
+# ── COLLECT-REREAD-CONFINED: the brood_id re-read refuses a manifest swapped after the projector ──
+# The collector reopens the manifest for its brood-id integrity read after the projector's guarded
+# snapshot. This case runs a COPY of the brood-status scripts and the _shared libraries in a
+# throwaway plugin tree whose projector is a stub: it swaps the manifest for a symlink to a
+# well-formed, brood_id-matching manifest OUTSIDE the checkout, then exits 0 with no STRAIN lines
+# (the window a real swap would race into). The re-read must refuse the symlink, so the brood
+# renders as a blocker with an absent/malformed brood_id. Pre-fix code follows the symlink, reads
+# the matching brood_id, and renders an ordinary empty brood.
+assert_collect_reread_refuses_swapped_symlink() {
+    local name="COLLECT-REREAD-CONFINED:swapped-symlink-manifest-renders-blocker"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        skip "$name" "collect needs jq+git; skipping (missing dep)"
+        return
+    fi
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local root="$tmp/repo"; mkdir -p "$root"
+    collect_seed_repo "$root"
+    local fake_plugin="$tmp/fake-plugin"
+    mkdir -p "$fake_plugin/skills"
+    cp -R "$REPO_ROOT/plugin/skills/brood-status" "$fake_plugin/skills/"
+    cp -R "$REPO_ROOT/plugin/skills/_shared" "$fake_plugin/skills/"
+    cat > "$fake_plugin/skills/brood-status/scripts/brood-status-project.sh" <<'SWAPPROJ_EOF'
+#!/usr/bin/env bash
+# Stub projector: swap the manifest for a symlink to the outside manifest, then succeed silently.
+rm -f "$1" && ln -s "$HIVEMIND_TEST_OUTSIDE_MANIFEST" "$1"
+exit 0
+SWAPPROJ_EOF
+    local id="brood-8888bbbb-8888-4bbb-8bbb-888888888888"
+    mkdir -p "$root/.hivemind/broods/$id" "$tmp/outside"
+    jq -n --arg bid "$id" \
+        '{ manifest_version:4, brood_id:$bid, created_at:"2026-06-01T00:00:00Z",
+           base:"main", overlap_risk:"low", strains:[], merge_order:[] }' \
+        > "$root/.hivemind/broods/$id/manifest.json"
+    cp "$root/.hivemind/broods/$id/manifest.json" "$tmp/outside/manifest.json"
+
+    local out rc=0
+    out="$( cd "$root" && HIVEMIND_TEST_OUTSIDE_MANIFEST="$tmp/outside/manifest.json" \
+        bash "$fake_plugin/skills/brood-status/scripts/brood-status-collect.sh" 2>/dev/null )" || rc=$?
+    local ok=no
+    if printf '%s' "$out" | jq -e --arg id "$id" \
+        '(.broods|length)==1 and .broods[0].brood_id==$id and .broods[0].status=="blocker"
+         and (.broods[0].detail|contains("absent/malformed"))' >/dev/null 2>&1; then
+        ok=yes
+    fi
+    rm -rf "$tmp"
+    if [[ "$rc" -eq 0 && "$ok" == "yes" ]]; then
+        pass "$name" "exit 0; manifest swapped for an outside symlink after the projector -> blocker, never read"
     else
         failed "$name" "rc=$rc ok=$ok out=[$out]"
     fi
@@ -4434,6 +4546,7 @@ assert_collect_unreadable_isolated
 assert_collect_missing_sentinel_not_probed
 assert_collect_broodid_mismatch_blocker
 assert_collect_broodid_mismatch_empty_blocker
+assert_collect_reread_refuses_swapped_symlink
 assert_collect_started_running
 assert_collect_alive_unstarted_starting
 assert_collect_legacy_no_pointer_running

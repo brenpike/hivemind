@@ -1311,7 +1311,23 @@ manifest_json="$(printf '%s' "$strains_objects" | jq -s '.' \
 # truncation), and this temp+mv additionally closes any same-brood re-write read-skew. The temp
 # file is created under $STATE (already mkdir'd + containment-verified above), not $TMPDIR, so it
 # shares the target filesystem (mv stays a rename, never a cross-device copy).
-manifest_tmp="$STATE/.manifest.json.tmp.$$"
+#
+# EXCLUSIVE TEMP LEAF: by now launched children know the brood id, and any local process can
+# write under $STATE, so the temp leaf must be one this script CREATES, never one it finds. The
+# name carries a fresh random uuid (not the guessable $$), and the write runs under `set -C`
+# (noclobber), where bash opens a missing file with O_CREAT|O_EXCL and refuses an existing
+# regular file. A pre-planted symlink (dangling or not) or file at the temp path therefore fails
+# the write closed instead of redirecting it, and the bytes go through the descriptor that
+# created the file. After the rename, a symlinked manifest leaf (a temp file swapped for a link
+# before the mv) also fails closed.
+manifest_tmp_token="$(generate_brood_uuid | tr '[:upper:]' '[:lower:]')"
+case "$manifest_tmp_token" in
+  ''|*[!a-z0-9-]*)
+    printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
+    blocker "failed to generate a random manifest temp name; refusing to report success with no current manifest"
+    ;;
+esac
+manifest_tmp="$STATE/.manifest.json.tmp.$manifest_tmp_token"
 # DIRECTORY-LEAF REJECTION: `mv SOURCE DEST` treats DEST as a target DIRECTORY when DEST is a
 # directory, silently moving the temp file *inside* it (`mv` succeeds) so the documented manifest
 # path is left as a directory, not a readable manifest file, while spawn reports success. `mv -T`
@@ -1323,12 +1339,13 @@ if [ -d "$manifest_path" ]; then
   printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
   blocker "manifest path $manifest_path is a directory, not a file (stale/interrupted leaf); refusing to report success with no current manifest"
 fi
-if ! printf '%s\n' "$manifest_json" > "$manifest_tmp" 2>/dev/null \
+if ! ( set -C; printf '%s\n' "$manifest_json" > "$manifest_tmp" ) 2>/dev/null \
    || ! mv "$manifest_tmp" "$manifest_path" 2>/dev/null \
+   || [ -L "$manifest_path" ] \
    || [ ! -f "$manifest_path" ]; then
   rm -f "$manifest_tmp" >/dev/null 2>&1 || true
   printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
-  blocker "failed to write brood manifest to $manifest_path (target unwritable or not a regular file after rename, e.g. a stale directory at that path); refusing to report success with no current manifest"
+  blocker "failed to write brood manifest to $manifest_path (temp file not created fresh, target unwritable, or not a regular file after rename, e.g. a stale directory or a symlink at that path); refusing to report success with no current manifest"
 fi
 
 # ── Final contract ──────────────────────────────────────────────────────────────

@@ -57,6 +57,8 @@ DISCOVER_SCRIPT="$script_dir/brood-discover.sh"
 PROJECT_SCRIPT="$script_dir/brood-status-project.sh"
 [ -f "$plugin_root/skills/_shared/brood-status-derive.sh" ] || blocker "required shared library missing: skills/_shared/brood-status-derive.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/brood-status-derive.sh" || blocker "failed to source skills/_shared/brood-status-derive.sh (unparseable); refusing to proceed"
+[ -f "$plugin_root/skills/_shared/containment.sh" ] || blocker "required shared library missing: skills/_shared/containment.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/containment.sh" || blocker "failed to source skills/_shared/containment.sh (unparseable); refusing to proceed"
 
 # ── Dependency check ──────────────────────────────────────────────────────────────
 # jq is the hard floor (consume projector TAB output + build the JSON document). git resolves the
@@ -214,7 +216,14 @@ for manifest in "${manifests[@]}"; do
   # read mirrors the projector's own validation: a control-bearing value is rejected (-> empty ->
   # mismatch), and the value must match the directory id exactly (which is already ^brood-[0-9a-f-]+$
   # shaped by discovery), so absent/tampered/malformed all resolve to "!= brood_id" -> mismatch.
-  manifest_brood_id="$(jq -r '(.brood_id // "") | select((tostring | test("[[:cntrl:]]")) | not) // ""' "$manifest" 2>/dev/null || true)"
+  # This read REOPENS the manifest after the projector's guarded snapshot, so it re-applies the
+  # projector's confinement first: a symlinked leaf, or an ancestor that resolves outside the
+  # checkout, leaves manifest_brood_id empty, which renders the brood as a blocker below. jq never
+  # follows a symlink swapped in after the projector ran.
+  manifest_brood_id=""
+  if [ ! -L "$manifest" ] && hivemind_assert_inputs_contained "$root" "$manifest" >/dev/null 2>&1; then
+    manifest_brood_id="$(jq -r '(.brood_id // "") | select((tostring | test("[[:cntrl:]]")) | not) // ""' "$manifest" 2>/dev/null || true)"
+  fi
   if [ "$manifest_brood_id" != "$brood_id" ]; then
     brood_objects+=( "$(jq -n --arg id "$brood_id" --arg got "$manifest_brood_id" \
       '{brood_id:$id, status:"blocker",

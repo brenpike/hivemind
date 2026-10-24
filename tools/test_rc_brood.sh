@@ -48,6 +48,9 @@
 #      an unselected strain gets one `skipped: <short> (not selected)` line and ZERO send-keys; a bad
 #      short (outside ^[a-z0-9-]+$) is a pre-flight blocker with ZERO send-keys; `--only` with no shorts
 #      sends nothing, exits 0 and reports 0 applied (Cases 18a-18d).
+#  12. Confined manifest read: a symlinked manifest leaf, a symlinked per-brood dir that resolves
+#      outside the checkout, and a manifest holding two JSON documents are each a pre-flight blocker
+#      with ZERO send-keys, even when the outside manifest is well-formed (Cases 19a-19c).
 #
 # Usage:
 #   ./tools/test_rc_brood.sh
@@ -1092,6 +1095,50 @@ assert_eq "only-empty:exit" "0" "$RUN_RC" "empty selection completes"
 assert_eq "only-empty:zero-sendkeys" "0" "$(count_records "$LOG18D")" "no keystroke delivered with an empty selection"
 assert_contains "only-empty:summary" "0 applied, 3 skipped, 0 failed (of 3 strains)" "$OUT18D" "summary reports 0 applied"
 assert_contains "only-empty:skip-db" "skipped: db-migrations (not selected)" "$OUT18D" "every strain skipped as not selected"
+
+# ── Case 19a: symlinked manifest LEAF → pre-flight blocker, zero send-keys ─────────
+# The manifest path is a symlink to a well-formed manifest OUTSIDE the checkout, carrying the right
+# brood_id and live strains. The confined read must refuse it before any jq read or tmux probe.
+echo '=== Case 19a: symlinked manifest leaf — blocker, exit 1, zero send-keys ==='
+ROOT19A="$WORKDIR/leaf-symlink"
+mkdir -p "$ROOT19A/.hivemind/broods/$BID1" "$WORKDIR/outside19a"
+git -C "$ROOT19A" init -q
+cp "$FIXTURES/rc-manifest-all-alive.json" "$WORKDIR/outside19a/manifest.json"
+ln -s "$WORKDIR/outside19a/manifest.json" "$ROOT19A/.hivemind/broods/$BID1/manifest.json"
+ALIVE19A="$WORKDIR/alive19a"; LOG19A="$WORKDIR/log19a"; : > "$LOG19A"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19A"
+run_engine "$ROOT19A" "$BID1" "$ALIVE19A" "$LOG19A"
+assert_eq "leaf-symlink:exit" "1" "$RUN_RC" "symlinked manifest leaf is a pre-flight blocker"
+assert_contains "leaf-symlink:blocker" "is a symlink leaf" "$(cat "${LOG19A}.stderr")" "leaf-symlink blocker on stderr"
+assert_eq "leaf-symlink:zero-sendkeys" "0" "$(count_records "$LOG19A")" "no keystroke from a symlinked manifest"
+
+# ── Case 19b: symlinked manifest ANCESTOR → pre-flight blocker, zero send-keys ─────
+# The per-brood dir is a symlink to a dir OUTSIDE the checkout that holds a regular, well-formed
+# manifest. The leaf is not a symlink, so only the ancestor containment check can refuse it.
+echo '=== Case 19b: symlinked manifest ancestor — blocker, exit 1, zero send-keys ==='
+ROOT19B="$WORKDIR/ancestor-symlink"
+mkdir -p "$ROOT19B/.hivemind/broods" "$WORKDIR/outside19b"
+git -C "$ROOT19B" init -q
+cp "$FIXTURES/rc-manifest-all-alive.json" "$WORKDIR/outside19b/manifest.json"
+ln -s "$WORKDIR/outside19b" "$ROOT19B/.hivemind/broods/$BID1"
+ALIVE19B="$WORKDIR/alive19b"; LOG19B="$WORKDIR/log19b"; : > "$LOG19B"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19B"
+run_engine "$ROOT19B" "$BID1" "$ALIVE19B" "$LOG19B"
+assert_eq "ancestor-symlink:exit" "1" "$RUN_RC" "symlinked manifest ancestor is a pre-flight blocker"
+assert_contains "ancestor-symlink:blocker" "resolves outside the checkout" "$(cat "${LOG19B}.stderr")" "ancestor blocker on stderr"
+assert_eq "ancestor-symlink:zero-sendkeys" "0" "$(count_records "$LOG19B")" "no keystroke from a manifest outside the checkout"
+
+# ── Case 19c: two JSON documents in the manifest → pre-flight blocker, zero send-keys ─
+# The single-snapshot read parses the intact file once and requires exactly one JSON document.
+echo '=== Case 19c: multi-document manifest — blocker, exit 1, zero send-keys ==='
+ROOT19C="$(new_brood_root multi-doc "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+cat "$FIXTURES/rc-manifest-all-alive.json" >> "$ROOT19C/.hivemind/broods/$BID1/manifest.json"
+ALIVE19C="$WORKDIR/alive19c"; LOG19C="$WORKDIR/log19c"; : > "$LOG19C"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19C"
+run_engine "$ROOT19C" "$BID1" "$ALIVE19C" "$LOG19C"
+assert_eq "multi-doc:exit" "1" "$RUN_RC" "multi-document manifest is a pre-flight blocker"
+assert_contains "multi-doc:blocker" "brood manifest is not valid JSON" "$(cat "${LOG19C}.stderr")" "multi-document blocker on stderr"
+assert_eq "multi-doc:zero-sendkeys" "0" "$(count_records "$LOG19C")" "no keystroke from a multi-document manifest"
 
 # ── Tally ─────────────────────────────────────────────────────────────────────────
 echo
