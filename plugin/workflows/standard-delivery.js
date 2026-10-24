@@ -1117,7 +1117,9 @@ function renderQuestion(entry, index) {
   lines.push(renderWhyItMatters(readField(brief, 'criticality')));
   lines.push('Why I am asking: ' + askReasonLine(readField(entry, 'reason')));
   const sections = [lines.join('\n')];
-  sections.push(...renderVerbatimSection(readField(brief, 'verbatim')));
+  if (readField(entry, 'exact') === true) {
+    sections.push(...renderVerbatimSection(readField(brief, 'verbatim')));
+  }
   return sections.join('\n\n');
 }
 
@@ -1178,7 +1180,7 @@ function renderVerbatim(verbatim, labelIndent) {
   if (typeof verbatim !== 'string' || verbatim === '') {
     return [];
   }
-  return [labelIndent + 'Exact text:', verbatim];
+  return [labelIndent + 'Word for word:', verbatim];
 }
 
 function renderOpenQuestion(entry, index) {
@@ -1186,7 +1188,7 @@ function renderOpenQuestion(entry, index) {
   const recommendation = readField(brief, 'recommendation');
   const optionId = readField(recommendation, 'option_id');
   const hasChoice = readField(recommendation, 'strength') !== 'none' && typeof optionId === 'string' && optionId.trim() !== '';
-  const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'There is no recommendation.';
+  const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'I have no recommendation of my own.';
   return '  ' + questionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' ' + choice;
 }
 
@@ -1207,8 +1209,9 @@ function renderTakenDecision(entry, index) {
 function renderCompactDecision(entry, index) {
   const brief = readField(entry, 'brief');
   const recommendation = readField(brief, 'recommendation');
+  const whyLine = renderText(readField(recommendation, 'why')).split(/\s*[\r\n]+\s*/).join(' ');
   return '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
-    + renderText(readField(recommendation, 'option_id')) + '. Why: ' + renderText(readField(recommendation, 'why'));
+    + renderText(readField(recommendation, 'option_id')) + '. Why: ' + cutAtBoundary(whyLine, maxExcerptLength());
 }
 
 function findOptionById(options, optionId) {
@@ -1278,6 +1281,47 @@ function cutExcerpt(text) {
   return Array.from(text).slice(0, maxExcerptLength()).join('');
 }
 
+function maxReasonLength() {
+  return 600;
+}
+
+function cutAtBoundary(text, limit) {
+  if (typeof text !== 'string') {
+    throw new Error('cutAtBoundary: text must be a string');
+  }
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new Error('cutAtBoundary: limit must be a positive integer');
+  }
+  const codePoints = Array.from(text);
+  if (codePoints.length <= limit) {
+    return text;
+  }
+  const keptLength = findSentenceEnd(codePoints, limit) || findWordEnd(codePoints, limit) || limit;
+  return codePoints.slice(0, keptLength).join('');
+}
+
+function findSentenceEnd(codePoints, limit) {
+  for (let index = limit; index >= 1; index -= 1) {
+    if ('.!?'.includes(codePoints[index - 1]) && isWhitespace(codePoints[index])) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function findWordEnd(codePoints, limit) {
+  for (let index = limit; index >= 1; index -= 1) {
+    if (isWhitespace(codePoints[index]) && !isWhitespace(codePoints[index - 1])) {
+      return index;
+    }
+  }
+  return 0;
+}
+
+function isWhitespace(codePoint) {
+  return /^\s$/u.test(codePoint);
+}
+
 function toPrintableAscii(text) {
   return text.replace(/[^\x20-\x7e]/g, (unit) => '\\u' + unit.charCodeAt(0).toString(16).padStart(4, '0'));
 }
@@ -1290,16 +1334,21 @@ function encodeUntrustedText(value) {
   return toPrintableAscii(jsonText);
 }
 
-function quoteDiagnostic(text) {
+function quoteDiagnostic(text, limit = maxExcerptLength()) {
   if (typeof text !== 'string') {
     return undefined;
   }
   const textLines = text.split(/\r\n|\r|\n/).map((line) => line.trim()).filter((line) => line !== '');
-  return textLines.length === 0 ? undefined : encodeUntrustedText(cutExcerpt(textLines.join(' ')));
+  if (textLines.length === 0) {
+    return undefined;
+  }
+  const joinedLine = textLines.join(' ');
+  const keptLine = cutAtBoundary(joinedLine, limit);
+  return encodeUntrustedText(keptLine) + (keptLine === joinedLine ? '' : ' (cut)');
 }
 
 function describeReason(text) {
-  const quoted = quoteDiagnostic(text);
+  const quoted = quoteDiagnostic(text, maxReasonLength());
   return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
 }
 
@@ -2318,63 +2367,6 @@ const FIX_SCHEMA = buildGateEditSchema(true);
 const VALIDATE_SCHEMA = buildValidateSchema();
 const REVIEW_SCHEMA = buildReviewSchema();
 
-function contractRows() {
-  return [
-    { id: 'SD-01', step: 'Launch', check: 'readDeliveryLaunch', rule: 'The request is a non-blank string, trunk and references are read through args.js, whose resume_args guard refuses args that hold a resume_args key, and the trunk passes isGitIdentifier, or the run blocks before any agent call.' },
-    { id: 'SD-02', step: 'Facts', check: 'checkDeliveryFacts', rule: 'The facts runner invokes hivemind:gather-facts with the trunk and references in a JSON inputs block under the runner read-only sentence and relays its outcome and stdout word for word; a relay that fails its schema or gatherFactsRoutingSpec() blocks.' },
-    { id: 'SD-03', step: 'Facts', check: 'isConsistentFactsRelay', rule: 'The relayed lines agree with each other and with the launch trunk, or the run blocks as malformed facts.' },
-    { id: 'SD-04', step: 'Facts', check: 'checkDeliveryFacts', rule: 'A cut other than none stops the run before the scan and before planning, naming the fields cut.' },
-    { id: 'SD-05', step: 'Facts to plan', check: 'describeDeliveryStops', rule: 'A delivery stop stops the run before planning, naming each stop in fixed plain wording; dirty paths say the run never commits, stashes or discards an edit it did not make.' },
-    { id: 'SD-06', step: 'Scan', check: 'runPassScan', rule: 'When external_texts is above 0 the shared scan step runs, and an injection suspect or a coverage failure stops the run before planning.' },
-    { id: 'SD-07', step: 'Plan', check: 'runDeliveryPass', rule: 'Every planner call follows the facts step of its own pass, and a pass starts only at launch, after needs_replan, after a branch switch or after a taken local review escalation or root cluster.' },
-    { id: 'SD-08', step: 'Plan', check: 'describePlanProblem', rule: 'The plan result fits the schema of its call, the plan result schema or on a revise pass that schema with settled, before any of its fields is read, every value at a field PLAN_SCHEMA marks as a repository path passes isRepositoryPath, the molt.sh files rule, before computeWave, its steps pass computeWave, its trunk_freshness equals the facts, its branch, its base and each versioning.artifact_files path also pass isGitIdentifier, and when the facts were taken on a branch other than trunk its branch equals that branch.' },
-    { id: 'SD-09', step: 'Plan', check: 'runPlanningPass', rule: 'Planner questions resolve through decide() kind planner_question and the plan through kind plan_acceptance; a pass puts its asks in one pause and the reply goes to a revise pass, where only the keys of the shown questions named in settled count as answered; a plan acceptance is shown only when no other ask is open, and once settled the shown plan result runs; a settled plan_acceptance, remediation_plan_acceptance or trunk_stale question back in its pass ends the run blocked as a workflow defect with no pause, and at the pause limit the run ends blocked, listing the open questions.' },
-    { id: 'SD-10', step: 'Plan to branch', check: 'resolveTrunkFreshness', rule: 'Trunk freshness fresh gives fresh and no_remote gives skipped; every other value resolves through decide() kind trunk_stale, where a take gives stale and is listed and an ask pauses.' },
-    { id: 'SD-11', step: 'Plan to waves', check: 'resolveExternalEffects', rule: 'Before the first wave each irreversible effect a step declares asks through decide() kind external_effect with its summary as verbatim data; an effect question the reply settled is not asked again, one it did not settle or whose summary changed is asked again before any wave, and reversible effects are listed in the final message.' },
-    { id: 'SD-12', step: 'Branch', check: 'checkBranchRelay', rule: 'The branch runner invokes hivemind:create-working-branch with base, working_branch, classification, trunk-freshness and trunk in its JSON inputs block only, under the git-script sentence, and its stdout parses with the create-working-branch spec, with a branch line equal to the plan branch.' },
-    { id: 'SD-13', step: 'Branch', check: 'needsBranchReplan', rule: 'A branch step that switched onto an existing branch the facts were not taken on, or whose commit differs from the facts head, sends the run back through facts and planning before any wave.' },
-    { id: 'SD-14', step: 'Waves', check: 'runPlanWaves', rule: 'Each wave comes from computeWave over the plan steps and the done ids; its workers run in parallel() with their step, wave_scopes, branch, base and trunk as data under the boundary sentence, never commit, push or switch, and a null result counts as blocked.' },
-    { id: 'SD-15', step: 'A wave to its commit', check: 'checkCommitRelay', rule: 'After every wave the commit runner invokes hivemind:molt with the wave files, the commit type mapped from the classification, breaking and trunk, under an explicit commit grant and the git-script sentence; its stdout parses with the molt spec with a branch line equal to the plan branch, and a blocked commit stops the run naming its blocker and outside lines.' },
-    { id: 'SD-16', step: 'Waves', check: 'describeBlockedWave', rule: 'A blocked or failed worker stops the run after the wave commit, naming the commit.' },
-    { id: 'SD-17', step: 'A wave to planning', check: 'requestStepReplan', rule: 'A needs_replan wave is committed, then the run gathers facts and plans what is left with the done ids reset, at most maxReplans() times, and then stops naming the reason.' },
-    { id: 'SD-18', step: 'Prompts', check: 'gitScriptSentence', rule: 'Runner prompts carry no request text; read-only runners carry the runner read-only sentence and git-script runners the git-script sentence, both matching the exemptions in ${CLAUDE_PLUGIN_ROOT}/agents/drone.md.' },
-    { id: 'SD-19', step: 'Result', check: 'buildRunBlocks', rule: 'The final message lists every part of the run record buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate that did not run and every taken decision; and a resume replays every earlier prompt byte for byte.' },
-    { id: 'SD-20', step: 'Pause', check: 'pauseDelivery', rule: 'Each external_effect ask is exact, so a pause holding one keeps its questions block whole and its compact form shows each irreversible effect text verbatim; when canShowWhole is false the run ends blocked through finishOpenQuestions, stop reason exact_text_size, and runs nothing further.' },
-    { id: 'SD-21', step: 'Commits to bump-type', check: 'checkBumpTypeRelay', rule: 'After every wave is committed, the bump-type runner invokes hivemind:bump-type once under the runner read-only sentence, with a JSON inputs block of base, the pass facts trunk_commit, and bump_trigger and no_bump_match from plan.versioning, and nothing else; its stdout parses with bumpTypeRoutingSpec(), whose keys are the bump-type.sh OUTPUT keys in order with counts as a block, and a blocked or malformed relay stops the run before validation.' },
-    { id: 'SD-22', step: 'Bump verdict', check: 'resolveBumpVerdict', rule: 'bump_required and no_bump resolve through decide() kind version_bump_type with a code-built brief, and a take is listed with the run decisions; ask_user, and bump_required with an empty artifact_files, resolve through decide() kind version_bump_indeterminable with no recommendation, so they ask.' },
-    { id: 'SD-23', step: 'Tail asks', check: 'finishTailAsk', rule: 'Every ask after the last wave ends the run blocked with the question open under stop reason before_pr, the commits and decisions listed, and nothing pushed.' },
-    { id: 'SD-24', step: 'Bump to validation', check: 'runBumpEdit', rule: 'When artifact_files is not empty and the verdict is taken, a hivemind:drone on its default model sets each listed file version to its value at trunk_commit, read with plain git show, raised by bump_type, none keeping it, and edits only those files, and its prompt states that each path passed isGitIdentifier at the plan check; the commit runner then commits exactly artifact_files with the plan commit type, the bump gate holds on the commit it reports, a bump step run again with trunk unmoved reports committed false, and a blocked drone stops the run after the commit.' },
-    { id: 'SD-25', step: 'Validate', check: 'readValidateOutcome', rule: 'A hivemind:drone on its default model runs the project documented validation commands as its whole task under the validation task sentence, which matches the Validation Procedure clause of definitions.md, and edits nothing; it returns passed, failed with the failures as text, not_run or blocked; then the commit runner runs with an empty file list and refuses any dirty path; passed or not_run holds the gate, not_run is listed, and blocked or a malformed result stops the run.' },
-    { id: 'SD-26', step: 'Fix rounds', check: 'runFixRound', rule: 'A failed validation resolves through decide() kind validation_remediation; each taken round is a hivemind:drone under the validation fix sentence, which matches the validation fix task clause of drone.md, with the failures as data under the boundary sentence, and it reports its files; the commit runner commits exactly those files with the plan commit type, and after maxFixRounds() rounds a failure ends the run asking.' },
-    { id: 'SD-27', step: 'Gates', check: 'runGates', rule: 'A gate holds only for the commit its step ended on; a step ending on a commit other than the head the gates last checked sends the run back to the first gate to rerun each gate that held on an earlier commit, each going back resolves once through decide() kind gate_rerun, after maxGateReruns() of them the run ends blocked asking, and the run finishes complete only when every configured gate held on one commit, naming it.' },
-    { id: 'SD-28', step: 'Gate labels', check: 'gateLabel', rule: 'Gate step labels come only from the pass, the gate step and its run count (bump-type-P-N, bump-P-N, bump-commit-P-N, validate-P-N, validate-commit-P-N, fix-P-N, fix-commit-P-N, review-P-N, review-commit-P-N), so every label is unique and a run again replays every prompt byte for byte.' },
-    { id: 'SD-29', step: 'Decisions', check: 'resolveDecision', rule: 'Every decide() kind main.js uses is a hard stop or a row of the autonomy table whose resolved_at names a standard-delivery site.' },
-    { id: 'SD-30', step: 'Launch', check: 'readLocalReview', rule: 'The local_review launch arg is absent, true or false; absent means configured, and any other value stops the run before any agent call.' },
-    { id: 'SD-48', step: 'Launch', check: 'readDraft', rule: 'The draft launch arg is absent, true or false; absent means false, any other value stops the run before any agent call, and the value is the draft field of the open-plan-pr inputs block.' },
-    { id: 'SD-31', step: 'Gates', check: 'configuredGateIds', rule: 'With local_review false the local review gate is not configured: it never runs, never stops the run, never counts as held, and every message after the last wave lists it as a gate that did not run.' },
-    { id: 'SD-32', step: 'Validation to local review', check: 'buildReviewPrompt', rule: 'Once validation holds, hivemind:local-reviewer gets base, working_branch, trunk and max_iterations 10 in a JSON inputs block under the boundary sentence, with no request text, label review-P-N and phase Review.' },
-    { id: 'SD-33', step: 'Review result', check: 'describeReviewProblem', rule: 'The review result fits REVIEW_SCHEMA, whose fields are the local-reviewer Output Contract fields with each Codex-derived text field labelled as able to carry external content, and it carries every field its exit_reason names; any other result stops the run blocked.' },
-    { id: 'SD-34', step: 'Local review to its commit', check: 'runReviewGate', rule: 'Whatever the reviewer returned, the commit runner then runs with an empty file list and stops the run on any edit left behind, and the review gate holds on the commit it reports; when a commit step commits nothing but reports a commit other than the previous head, the range <previous head>..<new head> enters the run commits, so the final message, the pull request body and the pull request comment list commits the reviewer made, and a commit step that reports the same head with nothing committed adds nothing.' },
-    { id: 'SD-35', step: 'Review routes', check: 'localReviewRoutes', rule: 'localReviewRoutes() maps every exit_reason of the local-reviewer Output Contract and nothing else, and clean holds the gate.' },
-    { id: 'SD-36', step: 'Review stops', check: 'describeReviewStop', rule: 'max-iterations-reached, break-fix-break, injection-suspect and blocked stop the run blocked in plain words, each reviewer value encoded and the blocker and excerpt cut to maxExcerptLength() characters.' },
-    { id: 'SD-37', step: 'Review questions', check: 'finishReviewQuestion', rule: 'user-input-required and high-severity-rejection end the run blocked with the reviewer question open in plain words under stop reason before_pr, its values encoded (ADR-0037 decision 17, until slice 3).' },
-    { id: 'SD-38', step: 'Diminishing returns', check: 'resolveDiminishingReturns', rule: 'diminishing-returns resolves through decide() kind diminishing_returns_exit: a take holds the gate and is listed, and an ask ends the run under stop reason before_pr.' },
-    { id: 'SD-39', step: 'Local review to planning', check: 'requestReviewReplan', rule: 'planner-escalation and root-cluster-suspected resolve through decide() kinds planner_escalation_routing and root_cluster_routing; an ask ends the run under stop reason before_pr, and a take starts a new pass through the facts step with the review result as replan data, counted against maxReplans().' },
-    { id: 'SD-40', step: 'Remediation plan', check: 'resolvePlanAcceptance', rule: 'Once local review sent the run back to planning, every later plan acceptance resolves through decide() kind remediation_plan_acceptance, which always asks, through the pause and revise path.' },
-    { id: 'SD-41', step: 'Gates', check: 'resolveGateRerun', rule: 'A commit the reviewer makes sends the run back through the version bump and validation, and a commit made after local review held sends it back through local review as well.' },
-    { id: 'SD-42', step: 'Gates to the PR', check: 'buildPullRequestPrompt', rule: 'Once every configured gate held on one commit H, a haiku runner invokes hivemind:open-plan-pr once, with label pr-P and phase PR, under the push grant sentence and the git-script sentence, with a JSON inputs block of only head (the plan branch), base (the plan base), expect_commit H, title, body, comment and draft (the draft launch arg); it is the only push the workflow makes, so every push carries expect_commit.' },
-    { id: 'SD-43', step: 'Push grant', check: 'pushGrantSentence', rule: 'The push grant sentence grants one push of the working branch and one pull request opened or reused, made only by the hivemind:open-plan-pr script, and no commit, matching the delegated-implementer grant of safety-rails.md and the push sentence of drone.md.' },
-    { id: 'SD-44', step: 'PR title', check: 'buildPullRequestTitle', rule: 'The title is one line with no control character, plain text with no Markdown wrapper, built from the plan commit type, the breaking marker and the first sentence of the plan summary, at most maxTitleLength() code points including that prefix, cut at a word boundary when too long, and never ending in an ellipsis.' },
-    { id: 'SD-45', step: 'PR body and comment', check: 'buildPullRequestTexts', rule: 'The body holds the plan summary and the run record, and the comment its lead and the run record, where the run record is every part buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate with its result and the commit it held on or not configured for this run, and every taken decision; neither carries a control character other than newline and tab or any reviewer text, each of the summary, the reversible effects and the decisions sits in its own fenced block whose fence is one backtick longer than its longest backtick run, at least three, the gates, the commits and the comment lead stay plain, the decisions go compact when a text would pass maxPullRequestTextLength() characters, and a text still too long stops the run blocked naming its size before any push.' },
-    { id: 'SD-46', step: 'PR relay', check: 'checkPullRequestRelay', rule: 'The relayed stdout parses with openPlanPrRoutingSpec(), whose keys are the open-plan-pr.sh OUTPUT keys in order and whose warning holds only the script fixed texts, head_ref_oid equals H, and commented is true exactly when created is false; a blocked or malformed relay stops the run blocked naming the pull request step.' },
-    { id: 'SD-47', step: 'Result', check: 'finishDeliveryComplete', rule: 'The run finishes complete with pr {url, head_ref_oid, created}, and the final message names the pull request, opened or pushed to with a comment, the gates that held and any warning, then every part of the run record buildRunRecordParts() returns, in its order: the commits, the reversible effects, each gate that did not run and every taken decision.' },
-    { id: 'SD-49', step: 'Prompts', check: 'addResumeNote', rule: 'Once run.replies is not empty, every agent prompt but the planner revise prompt carries resumedReplySentence() as its second line, no prompt sent before the first reply carries it, and no prompt but the revise prompt carries reply text.' },
-    { id: 'SD-50', step: 'Relays', check: 'describeRelayBlocker', rule: 'Every step- or script-written diagnostic or name a message shows goes through encodeUntrustedText, while planner prose rendered by lib/brief.js shows as written; a blocked relay quotes its last non-blank blocker line, else its first two non-blank stderr lines, else gives no reason, a step blocker goes through describeReason, each one line cut to maxExcerptLength() characters, and the text starts with a capital letter after a full stop and stays lower case after a colon.' },
-    { id: 'SD-51', step: 'Result', check: 'finishDeliveryBlocked', rule: 'Every blocked result carries nextStepLine(), or nextActionLine() at an open question stop, as a whole block right after its first block; no block carries shorten, a first block over maxBlockedLeadLength() code points has those code points as its compact form, and finish never throws.' },
-    { id: 'SD-52', step: 'Question keys', check: 'questionKey', rule: 'A question key holds its kind, its scope and its rendered text: the scope is the pass for planner_question, the pass and the whole plan for both plan acceptances, and run for trunk_stale and external_effect.' }
-  ];
-}
-
 function maxReplans() {
   return 3;
 }
@@ -2611,6 +2603,14 @@ function buildRelaySchema() {
   };
 }
 
+function buildNextActionProperty() {
+  return {
+    type: 'string',
+    enum: ['fix_cause', 'run_again'],
+    description: 'Only with outcome blocked. run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise.'
+  };
+}
+
 function buildWorkerSchema() {
   return {
     type: 'object',
@@ -2623,7 +2623,8 @@ function buildWorkerSchema() {
         description: 'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change before the step can be done.'
       },
       summary: { type: 'string', description: 'What you changed, in one or two sentences.' },
-      blocker: { type: 'string', description: 'Why the step is blocked or needs a new plan. Only with outcome blocked or needs_replan.' }
+      blocker: { type: 'string', description: 'Why the step is blocked or needs a new plan. Only with outcome blocked or needs_replan.' },
+      next_action: buildNextActionProperty()
     }
   };
 }
@@ -2635,7 +2636,8 @@ function buildGateEditSchema(hasFiles) {
     required: ['outcome'],
     properties: {
       outcome: { type: 'string', enum: ['complete', 'blocked'], description: 'complete when the task is done. blocked when it cannot be done.' },
-      blocker: { type: 'string', description: 'Why the task cannot be done. Only with outcome blocked.' }
+      blocker: { type: 'string', description: 'Why the task cannot be done. Only with outcome blocked.' },
+      next_action: buildNextActionProperty()
     }
   };
   if (hasFiles) {
@@ -2657,7 +2659,8 @@ function buildValidateSchema() {
         description: 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.'
       },
       failures: { type: 'string', description: 'What failed: each failing command with its failure output. Only with outcome failed.' },
-      blocker: { type: 'string', description: 'The command that cannot run and why. Only with outcome blocked.' }
+      blocker: { type: 'string', description: 'The command that cannot run and why. Only with outcome blocked.' },
+      next_action: buildNextActionProperty()
     }
   };
 }
@@ -2685,9 +2688,9 @@ function reviewExitFields() {
     'root-cluster-suspected': ['cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'member_count'],
     'diminishing-returns': ['signals_observed', 'latest_severity_max', 'findings_open', 'recommendation_text'],
     'injection-suspect': ['finding_id', 'pattern_category', 'field_excerpt'],
-    'user-input-required': ['finding_id', 'title'],
+    'user-input-required': ['finding_id', 'title', 'open_findings'],
     'planner-escalation': ['finding_id', 'classification', 'file', 'title'],
-    'high-severity-rejection': ['finding_id', 'title', 'rationale_text'],
+    'high-severity-rejection': ['finding_id', 'title', 'rationale_text', 'open_findings'],
     blocked: ['blocker', 'stage']
   };
 }
@@ -2717,6 +2720,7 @@ function reviewFieldTexts() {
     file: { type: 'string', text: 'The file of the finding.', isExternal: true },
     title: { type: 'string', text: 'The title of the finding.', isExternal: true },
     rationale_text: { type: 'string', text: 'Why the reviewer rejects the finding.', isExternal: true },
+    open_findings: { type: 'findings', text: 'Every finding still open in the fix ledger.', isExternal: true },
     blocker: { type: 'string', text: 'What blocked the review.', isExternal: true },
     stage: { type: 'string', text: 'The loop stage that was blocked.', isExternal: false }
   };
@@ -2773,8 +2777,30 @@ function describeReviewField(name, entry) {
   return prefix + entry.text + ' Only with exit_reason ' + joinNames(exits, 'or') + '.';
 }
 
+function openFindingTexts() {
+  return {
+    finding_id: 'The id of the finding.',
+    severity: 'The severity of the finding.',
+    title: 'The title of the finding.',
+    body: 'The body of the finding.',
+    recommendation: 'What the reviewer recommends for the finding, empty when the fix ledger holds no recommendation.'
+  };
+}
+
+function buildOpenFindingSchema() {
+  const properties = {};
+  for (const [name, text] of Object.entries(openFindingTexts())) {
+    properties[name] = { type: 'string', description: externalLabel() + ' ' + text };
+  }
+  properties.recommendation.minLength = 0;
+  return { type: 'object', additionalProperties: false, required: Object.keys(openFindingTexts()), properties: properties };
+}
+
 function buildReviewFieldSchema(name, entry) {
   const description = describeReviewField(name, entry);
+  if (entry.type === 'findings') {
+    return { type: 'array', description: description, items: buildOpenFindingSchema() };
+  }
   if (entry.type === 'list') {
     const itemDescription = (entry.isExternal ? externalLabel() + ' ' : '') + 'One entry.';
     return { type: 'array', description: description, items: { type: 'string', description: itemDescription } };
@@ -3093,11 +3119,16 @@ function questionKey(kind, content) {
   return JSON.stringify([kind, content]);
 }
 
+function describePlanLine(plan) {
+  const stepCount = plan.steps.length + (plan.steps.length === 1 ? ' step' : ' steps');
+  return 'The plan: ' + buildPullRequestTitle(plan) + ', ' + stepCount + ' on branch ' + encodeUntrustedText(plan.branch) + '. The full plan is in this run\'s per-agent results.';
+}
+
 function buildPlanAcceptanceBrief(plan) {
   return {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
+    problem: 'Start delivering the plan: create or confirm its working branch and run its steps. ' + describePlanLine(plan),
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: 'Nothing is delivered.' },
     options: [
       { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: 'The plan passed every check, and its changes stay on the working branch until you merge them.', straw_man: 'A step can still change something you did not expect before you see the pull request.', effort: 'medium', value: 'high', reversible: true },
@@ -3113,7 +3144,7 @@ function buildPlanAcceptanceBrief(plan) {
 function buildRemediationPlanBrief(plan) {
   return Object.assign(buildPlanAcceptanceBrief(plan), {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again.'
+    problem: 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again. ' + describePlanLine(plan)
   });
 }
 
@@ -3263,8 +3294,8 @@ function buildRunRecordParts(run, taken, gates) {
   return parts;
 }
 
-function toRunBlock(part) {
-  return part.compact === undefined ? { text: part.text } : { text: part.text, compact: part.compact };
+function toMessageBlock(part) {
+  return { text: part.compact === undefined ? part.text : part.compact };
 }
 
 function buildRunBlocks(lead, run, taken, secondText) {
@@ -3272,14 +3303,17 @@ function buildRunBlocks(lead, run, taken, secondText) {
   if (secondText !== '') {
     blocks.push({ text: secondText });
   }
-  blocks.push(...buildRunRecordParts(run, taken, undefined).map(toRunBlock));
+  blocks.push(...buildRunRecordParts(run, taken, undefined).map(toMessageBlock));
   if (blocks.length === 1) {
     blocks[0].shorten = true;
   }
   return blocks;
 }
 
-function nextStepLine() {
+function nextStepLine(nextAction) {
+  if (nextAction === 'run_again') {
+    return 'Nothing in the repo needs a fix: run the request again once the cause named above has passed, for example when the machine is idle.';
+  }
   return 'Fix the cause named above, then run the request again.';
 }
 
@@ -3293,16 +3327,13 @@ function nextActionLine(stopReason, run) {
 }
 
 function buildBlockedLead(message) {
-  const characters = Array.from(message);
-  if (characters.length <= maxBlockedLeadLength()) {
-    return { text: message };
-  }
-  return { text: message, compact: characters.slice(0, maxBlockedLeadLength()).join('') };
+  const compact = cutAtBoundary(message, maxBlockedLeadLength());
+  return compact === message ? { text: message } : { text: message, compact: compact };
 }
 
-function finishDeliveryBlocked(message, run) {
-  const recordBlocks = run === undefined ? [] : buildRunRecordParts(run, run.taken, undefined).map(toRunBlock);
-  return finish({ outcome: 'blocked', blocks: [buildBlockedLead(message), { text: nextStepLine(), whole: true }, ...recordBlocks] });
+function finishDeliveryBlocked(message, run, nextAction) {
+  const recordBlocks = run === undefined ? [] : buildRunRecordParts(run, run.taken, undefined).map(toMessageBlock);
+  return finish({ outcome: 'blocked', blocks: [buildBlockedLead(message), { text: nextStepLine(nextAction), whole: true }, ...recordBlocks] });
 }
 
 function describePullRequest(values) {
@@ -3323,15 +3354,18 @@ function finishDeliveryComplete(run, plan, prValues) {
   return finish({ outcome: 'complete', blocks: buildRunBlocks(lead, run, run.taken, ''), pr: pr });
 }
 
-function finishOpenQuestions(resolution, stopReason, run) {
+function finishOpenQuestions(resolution, stopReason, run, detail) {
   const lead = 'The delivery ran no further step, because questions are still open.';
   const blocks = buildRunBlocks(lead, run, run.taken.concat(resolution.taken), renderOpenQuestions(resolution.asks, stopReason));
   blocks.splice(1, 0, { text: nextActionLine(stopReason, run), whole: true });
+  if (detail !== undefined) {
+    blocks.splice(3, 0, detail);
+  }
   return finish({ outcome: 'blocked', blocks: blocks });
 }
 
-function finishTailAsk(asks, run) {
-  return finishOpenQuestions({ asks: asks, taken: [] }, 'before_pr', run);
+function finishTailAsk(asks, run, detail) {
+  return finishOpenQuestions({ asks: asks, taken: [] }, 'before_pr', run, detail);
 }
 
 function pauseDelivery(resolution, questions, run) {
@@ -3513,7 +3547,7 @@ function readWorkerOutcome(step, result) {
   if (result.outcome === 'complete') {
     return { stepId: step.id, status: 'complete' };
   }
-  return { stepId: step.id, status: result.outcome, reason: describeReason(result.blocker) };
+  return { stepId: step.id, status: result.outcome, reason: describeReason(result.blocker), nextAction: result.next_action };
 }
 
 function commitStepTexts(stepName) {
@@ -3646,7 +3680,8 @@ async function runPlanWaves(run, plan, facts) {
     const outcomes = waveSteps.map((step, index) => readWorkerOutcome(step, workerResults[index]));
     const blockedOutcomes = outcomes.filter((outcome) => outcome.status === 'blocked');
     if (blockedOutcomes.length > 0) {
-      return { result: finishDeliveryBlocked(describeBlockedWave(blockedOutcomes, committed.values), run) };
+      const nextAction = blockedOutcomes.every((outcome) => outcome.nextAction === 'run_again') ? 'run_again' : 'fix_cause';
+      return { result: finishDeliveryBlocked(describeBlockedWave(blockedOutcomes, committed.values), run, nextAction) };
     }
     const replanOutcomes = outcomes.filter((outcome) => outcome.status === 'needs_replan');
     if (replanOutcomes.length > 0) {
@@ -3812,7 +3847,7 @@ function readGateEditOutcome(result, schema) {
   }
   const files = result.files === undefined ? [] : result.files;
   if (result.outcome === 'blocked') {
-    return { status: 'blocked', reason: describeReason(result.blocker), files: files };
+    return { status: 'blocked', reason: describeReason(result.blocker), files: files, nextAction: result.next_action };
   }
   return { status: 'complete', files: files };
 }
@@ -3837,7 +3872,7 @@ async function runBumpEdit(run, plan, facts, bumpType, count) {
   }
   const edit = readGateEditOutcome(result, BUMP_EDIT_SCHEMA);
   if (edit.status === 'blocked') {
-    return { result: finishDeliveryBlocked(describeBlockedGateStep('The version bump step', edit.reason, committed.values), run) };
+    return { result: finishDeliveryBlocked(describeBlockedGateStep('The version bump step', edit.reason, committed.values), run, edit.nextAction) };
   }
   return { held: true };
 }
@@ -3878,7 +3913,7 @@ function readValidateOutcome(result) {
     return { problem: malformed };
   }
   if (result.outcome === 'blocked') {
-    return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker) };
+    return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: result.next_action };
   }
   if (result.outcome === 'failed' && !isNonEmptyString(result.failures)) {
     return { problem: malformed };
@@ -3910,7 +3945,7 @@ async function runFixRound(run, plan, failures, round) {
     return { result: finishDeliveryBlocked(committed.problem, run) };
   }
   if (fix.status === 'blocked') {
-    return { result: finishDeliveryBlocked(describeBlockedGateStep('The validation fix round', fix.reason, committed.values), run) };
+    return { result: finishDeliveryBlocked(describeBlockedGateStep('The validation fix round', fix.reason, committed.values), run, fix.nextAction) };
   }
   return { held: false };
 }
@@ -3931,7 +3966,7 @@ async function runValidateGate(run, plan, gates) {
   }
   const validation = readValidateOutcome(result);
   if (validation.problem !== undefined) {
-    return { result: finishDeliveryBlocked(validation.problem, run) };
+    return { result: finishDeliveryBlocked(validation.problem, run, validation.nextAction) };
   }
   if (validation.status === 'not_run') {
     listNotRunGate(run, 'validation: the project documents no validation commands.');
@@ -4022,6 +4057,9 @@ function quoteOrEmpty(text) {
 }
 
 function quoteReviewValue(review, field) {
+  if (field === 'finding_id') {
+    return quoteShortFindingId(review[field]);
+  }
   return field === 'blocker' || field === 'field_excerpt' ? quoteOrEmpty(review[field]) : encodeUntrustedText(review[field]);
 }
 
@@ -4035,14 +4073,43 @@ function describeReviewStop(review, head) {
   return lines.join('\n');
 }
 
-function buildReviewQuestionBrief(review, head) {
+function quoteShortFindingId(findingId) {
+  return encodeUntrustedText(Array.from(findingId).slice(0, 8).join(''));
+}
+
+function describeOpenFindingCount(openFindings) {
+  const count = openFindings.length;
+  return count === 1 ? '1 finding is still open.' : count + ' findings are still open.';
+}
+
+function renderOpenFindingLine(finding, isCompact) {
+  const head = '- ' + quoteShortFindingId(finding.finding_id) + ', severity ' + encodeUntrustedText(finding.severity) + ', ' + encodeUntrustedText(finding.title);
+  if (isCompact) {
+    return head;
+  }
+  const recommendation = finding.recommendation.trim() === '' ? 'no recommendation from the reviewer' : encodeUntrustedText(finding.recommendation);
+  return head + ': ' + quoteOrEmpty(finding.body) + ' Recommendation: ' + recommendation;
+}
+
+function buildOpenFindingsBlock(openFindings) {
+  if (openFindings.length === 0) {
+    return undefined;
+  }
+  const heading = 'Findings still open, each value quoted as the review returned it:';
+  return {
+    text: [heading, ...openFindings.map((finding) => renderOpenFindingLine(finding, false))].join('\n'),
+    compact: [heading, ...openFindings.map((finding) => renderOpenFindingLine(finding, true))].join('\n')
+  };
+}
+
+function buildReviewQuestionBrief(review, head, openFindings) {
   const finding = 'finding ' + quoteReviewValue(review, 'finding_id') + ', titled ' + quoteReviewValue(review, 'title');
   const isRejection = review.exit_reason === 'high-severity-rejection';
   return buildTailBrief({
     kind: reviewQuestionKinds()[review.exit_reason],
-    problem: isRejection
+    problem: (isRejection
       ? 'Local review rejected high severity ' + finding + ', and left it unfixed, because: ' + quoteReviewValue(review, 'rationale_text') + '. Should it be fixed before the pull request?'
-      : 'Local review needs your answer on ' + finding + ', before the pull request.',
+      : 'Local review needs your answer on ' + finding + ', before the pull request.') + ' ' + describeOpenFindingCount(openFindings),
     goOn: isRejection ? 'Go on with the finding unfixed.' : 'Answer the finding, then run the request again.',
     strength: 'none',
     why: 'Only you can settle a question the review raises.',
@@ -4051,7 +4118,8 @@ function buildReviewQuestionBrief(review, head) {
 }
 
 function finishReviewQuestion(review, run) {
-  return { result: finishTailAsk([{ brief: buildReviewQuestionBrief(review, run.head) }], run) };
+  const openFindings = review.open_findings;
+  return { result: finishTailAsk([{ brief: buildReviewQuestionBrief(review, run.head, openFindings) }], run, buildOpenFindingsBlock(openFindings)) };
 }
 
 function buildDiminishingReturnsBrief(review, head) {
