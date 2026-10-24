@@ -2548,6 +2548,35 @@ const ROW_TESTS = {
       assert.ok(lib.validateSchema(briefSchema, main.buildValidationRemediationBrief(OTHER, 1)).ok);
       assert.ok(lib.validateSchema(briefSchema, main.buildFixLimitBrief(OTHER)).ok);
     });
+    test('the state machine mirrors the gates through gate_check: every outcome that holds a gate goes to it', () => {
+      const gateCheck = deliveryMachine.states.gate_check;
+      assert.equal(gateCheck.type, 'decision');
+      assert.equal(gateCheck.owner, 'overlord');
+      assert.deepEqual(listTransitionsInto(deliveryMachine, 'gate_check'), [
+        'diminishing_returns_decision.taken',
+        'implement_next_step.all_steps_complete',
+        'local_review.clean',
+        'local_review_decision.skipped',
+        'validate.passed',
+        'version_bump_decision.not_required',
+        'version_checkpoint.complete'
+      ]);
+    });
+    test('gate_check routes each due outcome, in main.gateIds() order, back to its gate, and all_held to open_pr', () => {
+      const gateEntryStates = { bump: 'version_bump_decision', validate: 'validate', review: 'local_review_decision' };
+      const transitions = deliveryMachine.states.gate_check.transitions;
+      const dueEdges = Object.entries(transitions).filter(([outcome]) => outcome.endsWith('_due'));
+      assert.deepEqual(dueEdges.map(([outcome]) => outcome), ['version_due', 'validation_due', 'review_due']);
+      assert.deepEqual(dueEdges.map(([, next]) => next), [...main.gateIds()].map((gateId) => gateEntryStates[gateId]));
+      assert.equal(transitions.all_held, 'open_pr');
+      assert.deepEqual(Object.keys(transitions).sort(), ['all_held', 'blocked', 'review_due', 'validation_due', 'version_due']);
+      assert.equal(deliveryMachine.states[transitions.blocked].type, 'terminal');
+    });
+    test('local_review clean and diminishing_returns_decision taken lead to gate_check, which routes version_due back to the version gate', () => {
+      assert.equal(deliveryMachine.states.local_review.transitions.clean, 'gate_check');
+      assert.equal(deliveryMachine.states.diminishing_returns_decision.transitions.taken, 'gate_check');
+      assert.equal(deliveryMachine.states.gate_check.transitions.version_due, 'version_bump_decision');
+    });
   },
   'SD-28': () => {
     test('gate step labels come only from the pass, the gate step and its run count', async () => {
@@ -2875,11 +2904,11 @@ const ROW_TESTS = {
         assert.ok(!workflowTakenConditionExits().includes(exitReason), exitReason);
       }
     });
-    test('the local_review transitions route the same exits: hold to open_pr, diminishing to diminishing_returns_decision, and every stop exit to a terminal state other than open_pr', () => {
+    test('the local_review transitions route the same exits: hold to gate_check, diminishing to diminishing_returns_decision, and every stop exit to a terminal state other than open_pr', () => {
       const transitions = deliveryMachine.states.local_review.transitions;
       assert.deepEqual(Object.keys(transitions).sort(), Object.keys(main.localReviewRoutes()).sort());
       for (const exitReason of localReviewExitsRoutedTo('hold')) {
-        assert.equal(transitions[exitReason], 'open_pr', exitReason);
+        assert.equal(transitions[exitReason], 'gate_check', exitReason);
       }
       const decision = deliveryMachine.states.diminishing_returns_decision;
       assert.equal(decision.type, 'decision');
@@ -2894,15 +2923,12 @@ const ROW_TESTS = {
         assert.equal(deliveryMachine.states[transitions[exitReason]].type, 'terminal', exitReason);
       }
     });
-    test('the only transitions into open_pr are local_review clean, diminishing_returns_decision taken and local_review_decision skipped', () => {
-      const holdEdges = localReviewExitsRoutedTo('hold').map((exitReason) => 'local_review.' + exitReason);
-      const allowed = [...holdEdges, 'diminishing_returns_decision.taken', 'local_review_decision.skipped'].sort();
-      assert.deepEqual(listTransitionsInto(deliveryMachine, 'open_pr'), allowed);
-      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review_decision.skipped']);
+    test('the only transition into open_pr is gate_check all_held', () => {
+      assert.deepEqual(listTransitionsInto(deliveryMachine, 'open_pr'), ['gate_check.all_held']);
     });
-    test('diminishing_returns_decision reaches open_pr only through taken, and its other outcomes end at a terminal state that never reaches open_pr', () => {
+    test('diminishing_returns_decision reaches gate_check only through taken, and its other outcomes end at a terminal state that never reaches open_pr', () => {
       const transitions = deliveryMachine.states.diminishing_returns_decision.transitions;
-      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'open_pr'), ['taken']);
+      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'gate_check'), ['taken']);
       const otherOutcomes = Object.keys(transitions).filter((outcome) => outcome !== 'taken');
       assert.ok(otherOutcomes.includes('not_taken'));
       for (const outcome of otherOutcomes) {
