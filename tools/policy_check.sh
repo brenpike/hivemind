@@ -3143,7 +3143,29 @@ mark_time 'CHECK15'
 # Every other file-tool entry is a finding. A new file tool spelling or a new
 # path form is a finding until this allowlist names it.
 #
-# PARSING. Entries come from the YAML frontmatter `allowed-tools` key, in the
+# PARSING. CHECK 16 does not model the Claude Code loader. It accepts only a
+# canonical frontmatter form that every documented reader reads the same way,
+# and everything else is a finding. BOUNDS: once a trailing CR is stripped,
+# line 1 must be exactly `---`; otherwise that is one finding and nothing more
+# is read. The frontmatter closes at the first later line that is exactly
+# `---`, and a frontmatter with no such line is a finding. Every other
+# frontmatter line that holds the text `---` at any indent (a comment, a list
+# item, a block-scalar body, a value, a closer with trailing text, a four-dash
+# line) is a finding, and the line is still read as usual. So a frontmatter has
+# exactly one closing candidate, and every reader that opens on line 1 closes
+# on the same line. A reader that stops earlier reads only a prefix of what
+# this check read, so it sees no entry this check did not see.
+#
+# WHY A CANONICAL FORM AND NOT A YAML PARSER. No YAML parser ships with bash,
+# jq, the python3 standard library or the Node standard library, and the perl
+# core module CPAN::Meta::YAML reads only a subset of YAML. The Claude Code
+# loader is documented only as an opener on line 1, YAML between the markers,
+# exact field names, and allowed-tools as a space- or comma-separated string
+# or a YAML list. Any parser is one more reader, and readers split the
+# frontmatter from the body before any parser runs, so a parser cannot make
+# them agree on the bounds. The canonical form does.
+#
+# Entries come from the YAML frontmatter `allowed-tools` key, in the
 # block-list form and the inline `[...]` or plain-string form. Any text from a
 # whitespace-`#` onward is stripped, so a trailing comment never hides or
 # narrows an entry. Inline items split on commas and whitespace outside
@@ -3162,9 +3184,12 @@ mark_time 'CHECK15'
 # that is not a `- <entry>` list item (a continuation of a multi-line scalar, a
 # nested value, a block scalar body); any other frontmatter line that holds the
 # text `allowed-tools` (an indented key, or prose in another value); and, for a
-# non-exempt skill, an entry that is not `<name>` or `<name>(<anything>)` with
-# <name> drawn from ASCII letters, digits, `_` and `-` (an anchor, alias, tag,
-# block-scalar indicator, nested list or `Read Write` item).
+# non-exempt skill, an entry that is not `<name>` or `<name>(<rule>)` with
+# <name> drawn from ASCII letters, digits, `_` and `-` and no `(`, `)` or `,`
+# inside <rule> (an anchor, alias, tag, block-scalar indicator, nested list,
+# `Read Write` item, or an item such as `Bash(x) Edit(**)`, `Bash(a, Write)` or
+# `Bash(a(b))` that another reader could split into more than one rule). So
+# each item holds exactly one rule, however a reader splits it.
 #
 # EXEMPTIONS are by path: the executor skills listed in
 # CHECK16_EXEMPT_SKILLS keep their bare entries until their own decision. An
@@ -3187,7 +3212,7 @@ CHECK16_MARKETPLACE_MANIFEST="$REPO_ROOT/.claude-plugin/marketplace.json"
 CHECK16_POLICY_CITATION='security-policy.md "Skill File-Tool Grants"'
 CHECK16_ASCII_ALNUM='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 CHECK16_IDENTIFIER_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*\$"
-CHECK16_ENTRY_GRAMMAR_REGEX="^[${CHECK16_ASCII_ALNUM}_-]+([(].*[)])?\$"
+CHECK16_ENTRY_GRAMMAR_REGEX="^[${CHECK16_ASCII_ALNUM}_-]+([(][^(),]*[)])?\$"
 CHECK16_PLAIN_KEY_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}_-]*[[:space:]]*:([[:space:]]|\$)"
 CHECK16_GLOB_LITERAL="[${CHECK16_ASCII_ALNUM}._-]*[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*"
 CHECK16_INPUTS_GLOB_REGEX="^[.]hivemind/([${CHECK16_ASCII_ALNUM}._-]+/)*${CHECK16_GLOB_LITERAL}[*]${CHECK16_GLOB_LITERAL}\$"
@@ -3259,10 +3284,11 @@ check16_is_safe_inputs_glob() {
 }
 
 # check16_entry_is_unrecognized RAW
-# Returns 0 when RAW, once normalized, is not `<name>` or `<name>(<anything>)`
-# with <name> drawn from ASCII letters, digits, `_` and `-`, else 1. An anchor,
-# alias, tag, block-scalar indicator, nested list item or a `Read Write` item
-# is unrecognized, so it cannot pass as a non-file tool.
+# Returns 0 when RAW, once normalized, is not `<name>` or `<name>(<rule>)` with
+# <name> drawn from ASCII letters, digits, `_` and `-` and no `(`, `)` or `,`
+# inside <rule>, else 1. An anchor, alias, tag, block-scalar indicator, nested
+# list item, `Read Write` item, or an item holding more than one rule such as
+# `Bash(x) Edit(**)` is unrecognized, so it cannot pass as a non-file tool.
 check16_entry_is_unrecognized() {
     check16_normalize_entry "$1"
     if [[ "$CHECK16_NORMALIZED" =~ $CHECK16_ENTRY_GRAMMAR_REGEX ]]; then
@@ -3426,11 +3452,12 @@ check16_add_parse_error() {
 # allowed-tools entry in SKILL_FILE's YAML frontmatter and its line number, and
 # CHECK16_PARSE_ERROR_LINES and CHECK16_PARSE_ERROR_TEXTS with every form the
 # collector does not read. It reports nothing itself, so the canary can run it.
-# Frontmatter bounds follow find_navigator_entry_line: it opens at the first
-# trimmed `---` line and closes at the next one. A trailing CR is stripped.
+# A trailing CR is stripped from each line. Line 1 must be exactly `---`, and
+# the frontmatter closes at the first later line that is exactly `---`; any
+# other frontmatter line holding the text `---` is a parse error.
 check16_collect_entries() {
     local skill_file="$1"
-    local textline value line_number=0 in_frontmatter=false key_mode='' seen_top_key=false
+    local textline value line_number=0 frontmatter_open=false frontmatter_closed=false key_mode='' seen_top_key=false
     CHECK16_ENTRY_TEXTS=()
     CHECK16_ENTRY_LINES=()
     CHECK16_PARSE_ERROR_LINES=()
@@ -3438,17 +3465,22 @@ check16_collect_entries() {
     while IFS= read -r textline || [[ -n "$textline" ]]; do
         line_number=$((line_number + 1))
         textline="${textline%$'\r'}"
-        check16_trim "$textline"
-        if [[ "$CHECK16_TRIMMED" == '---' ]]; then
-            if [[ "$in_frontmatter" == true ]]; then
+        if [[ "$line_number" -eq 1 ]]; then
+            if [[ "$textline" != '---' ]]; then
                 break
             fi
-            in_frontmatter=true
+            frontmatter_open=true
             continue
         fi
-        if [[ "$in_frontmatter" != true ]]; then
-            continue
+        if [[ "$textline" == '---' ]]; then
+            frontmatter_closed=true
+            break
         fi
+        if [[ "$textline" == *'---'* ]]; then
+            check16_add_parse_error "$line_number" \
+                "a frontmatter line holds the text '---' but is not the closing line, which must be exactly '---' (an indented, commented or trailing-text delimiter, a four-dash line, or '---' inside a value, list item or block-scalar body), so readers can disagree on where the frontmatter ends -- keep '---' only on line 1 and on the closing line, each exactly '---'"
+        fi
+        check16_trim "$textline"
         if [[ -n "$key_mode" ]]; then
             if [[ -z "$CHECK16_TRIMMED" || "$CHECK16_TRIMMED" == '#'* ]]; then
                 continue
@@ -3500,6 +3532,13 @@ check16_collect_entries() {
                 "the text allowed-tools appears in a frontmatter line that is not a column-0 'allowed-tools:' key (an indented, quoted or flow-mapping key, or prose in another value), so it cannot be classified -- use a column-0 'allowed-tools:' key and keep the words out of other frontmatter values"
         fi
     done < "$skill_file"
+    if [[ "$frontmatter_open" != true ]]; then
+        check16_add_parse_error 1 \
+            "line 1 is not exactly '---' (the file is empty, or line 1 is blank, indented or holds other text), so no frontmatter is read -- start the file with a line that is exactly '---'"
+    elif [[ "$frontmatter_closed" != true ]]; then
+        check16_add_parse_error 1 \
+            "the frontmatter opened on line 1 has no later line that is exactly '---', so its end cannot be read -- close it with a line that is exactly '---'"
+    fi
     return 0
 }
 
@@ -3583,7 +3622,7 @@ check16_scan_skill_file() {
         if check16_entry_is_unrecognized "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
             check16_found=true
             add_finding 'CHECK16' "$skill_file" "${CHECK16_ENTRY_LINES[$entry_index]}" \
-                "allowed-tools entry '${CHECK16_NORMALIZED}' is not a recognized tool entry ('<name>' or '<name>(...)'), so it cannot be classified -- write it as a plain tool entry -- see ${CHECK16_POLICY_CITATION}"
+                "allowed-tools entry '${CHECK16_NORMALIZED}' is not one recognized tool entry ('<name>' or '<name>(<rule>)' with no '(', ')' or ',' inside the rule), so it cannot be classified -- write one plain rule per list item, each as its own '- <entry>' line, with no '(', ')' or ',' inside the parentheses -- see ${CHECK16_POLICY_CITATION}"
             continue
         fi
         if check16_entry_is_violation "${CHECK16_ENTRY_TEXTS[$entry_index]}" "$allowed_glob"; then
@@ -3774,6 +3813,9 @@ if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
     check16_expect_unrecognized '- Write'
     check16_expect_unrecognized 'Read Write'
     check16_expect_unrecognized 'Read (x)'
+    check16_expect_unrecognized 'Bash(x) Edit(**)'
+    check16_expect_unrecognized 'Bash(a, Write)'
+    check16_expect_unrecognized 'Bash(a(b))'
     check16_expect_recognized 'Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh *)'
     check16_expect_recognized 'Agent(hivemind:github-reviewer)'
     check16_expect_recognized 'mcp__plugin_claude-mem_mcp-search__search'
@@ -3811,11 +3853,21 @@ if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
     check16_expect_doc_problem 'merge key' '---' 'base: &b {x: 1}' '<<: *b' '---'
     check16_expect_doc_problem 'indented root mapping' '---' '  name: x' '  "allowed\u002dtools": [Write]' '---'
     check16_expect_doc_problem 'compact list under another key' '---' 'tags:' '- a' '---'
+    check16_expect_doc_problem 'indented delimiter in a block scalar' '---' 'name: x' 'description: |' '  ---' 'allowed-tools:' '  - Write' '---'
+    check16_expect_doc_problem 'delimiter text in a value' '---' 'name: x' 'description: a --- b' 'allowed-tools:' '  - Skill' '---'
+    check16_expect_doc_problem 'delimiter text in a list item' '---' 'allowed-tools:' '  - Bash(echo ---)' '---'
+    check16_expect_doc_problem 'closer with trailing text' '---' 'name: x' '--- # end' 'allowed-tools:' '  - Skill' '---'
+    check16_expect_doc_problem 'four-dash line' '---' 'name: x' '----' '---'
+    check16_expect_doc_problem 'unclosed frontmatter' '---' 'name: x' 'allowed-tools:' '  - Skill'
+    check16_expect_doc_problem 'opener not on line 1' '' '---' 'name: x' '---'
+    check16_expect_doc_problem 'indented opener' ' ---' 'name: x' '---'
     check16_expect_doc_clean 'nested value under a plain key' '---' 'name: x' 'metadata:' '  owner: y' '  # note' 'description: "quoted value"' 'disable-model-invocation: true' '---'
     check16_expect_doc_clean 'block list' '---' 'name: x' 'allowed-tools:' '  - Bash(git status *)' "  - ${CHECK16_CACHE_READ_RULE}   # c" '  # a comment' '' 'shell: bash' '---' 'Body text may say allowed-tools: Write.'
     check16_expect_doc_clean 'compact block list' '---' 'allowed-tools:' '- Skill' '- Monitor' '---'
     check16_expect_doc_clean 'empty flow sequence' '---' 'allowed-tools: []' '---'
     check16_expect_doc_clean 'inline flow sequence' '---' 'allowed-tools: [Bash(git log *), Agent(hivemind:x)]' 'shell: bash' '---'
+    check16_expect_doc_clean 'folded description and body rules' '---' 'name: x' 'description: >-' '  Does a thing.' '  Use when y.' 'allowed-tools:' '  - Skill' 'shell: bash' '---' 'Body' '---' 'More body with --- in it'
+    check16_expect_doc_clean 'CRLF delimiters' $'---\r' $'name: x\r' $'---\r'
 fi
 
 if [[ "$check16_found" == false ]]; then
