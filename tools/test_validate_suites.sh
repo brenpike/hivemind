@@ -166,9 +166,9 @@ else
 fi
 
 # (a1) Every passing suite must report PASS (no lost suites, full signal).
-if printf '%s\n' "$out_a1" | grep -q -- '--- \[STUB:alpha:0:0\] PASS ---' \
-   && printf '%s\n' "$out_a1" | grep -q -- '--- \[STUB:bravo:0:0\] PASS ---' \
-   && printf '%s\n' "$out_a1" | grep -q -- '--- \[STUB:charlie:0:0\] PASS ---'; then
+if grep -q -- '--- \[STUB:alpha:0:0\] PASS ---' <<<"$out_a1" \
+   && grep -q -- '--- \[STUB:bravo:0:0\] PASS ---' <<<"$out_a1" \
+   && grep -q -- '--- \[STUB:charlie:0:0\] PASS ---' <<<"$out_a1"; then
   pass "aggregate:all-pass-replayed" "all three PASS lines present"
 else
   failed "aggregate:all-pass-replayed" "missing a PASS line: $out_a1"
@@ -184,9 +184,9 @@ if [ -n "$rc_a2" ] && [ "$rc_a2" != "0" ]; then
 else
   failed "aggregate:one-fail-rc-nonzero" "expected nonzero rc, got '$rc_a2'"
 fi
-if printf '%s\n' "$out_a2" | grep -q -- '--- \[STUB:bravo:2:0\] FAIL ---' \
-   && printf '%s\n' "$out_a2" | grep -q -- '--- \[STUB:alpha:0:0\] PASS ---' \
-   && printf '%s\n' "$out_a2" | grep -q -- '--- \[STUB:charlie:0:0\] PASS ---'; then
+if grep -q -- '--- \[STUB:bravo:2:0\] FAIL ---' <<<"$out_a2" \
+   && grep -q -- '--- \[STUB:alpha:0:0\] PASS ---' <<<"$out_a2" \
+   && grep -q -- '--- \[STUB:charlie:0:0\] PASS ---' <<<"$out_a2"; then
   pass "aggregate:one-fail-full-signal" "failing suite FAILs, others still PASS"
 else
   failed "aggregate:one-fail-full-signal" "expected bravo FAIL + alpha/charlie PASS: $out_a2"
@@ -203,7 +203,7 @@ if [ -n "$rc_a3" ] && [ "$rc_a3" != "0" ]; then
 else
   failed "missing-rc:fail-safe-rc-nonzero" "expected nonzero rc from missing rc file, got '$rc_a3'"
 fi
-if printf '%s\n' "$out_a3" | grep -q -- '--- \[STUB:gone:vanish:0\] FAIL ---'; then
+if grep -q -- '--- \[STUB:gone:vanish:0\] FAIL ---' <<<"$out_a3"; then
   pass "missing-rc:fail-safe-suite-fail" "vanished suite reported FAIL"
 else
   failed "missing-rc:fail-safe-suite-fail" "vanished suite did NOT report FAIL: $out_a3"
@@ -234,7 +234,7 @@ fi
 # completion-first did not drop the late suite's rc.
 rc_b="$(rc_of "$out_b")"
 if [ -n "$rc_b" ] && [ "$rc_b" != "0" ] \
-   && printf '%s\n' "$out_b" | grep -q -- '--- \[STUB:late:3:0\] FAIL ---'; then
+   && grep -q -- '--- \[STUB:late:3:0\] FAIL ---' <<<"$out_b"; then
   pass "replay:late-failer-not-lost" "rc=$rc_b, late FAIL present"
 else
   failed "replay:late-failer-not-lost" "late fast-failer's FAIL/rc lost: rc='$rc_b' out=$out_b"
