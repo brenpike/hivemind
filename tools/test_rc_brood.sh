@@ -44,6 +44,10 @@
 #      A session reporting >1 active pane (or zero) fails CLOSED — `failed:` disposition, strain counted
 #      failed, ZERO `/rc` sent (it never selects one of multiple active panes), fan-out still exits 0
 #      (Case 17). A revert to break-on-first would silently pick one pane and deliver, tripping Case 17.
+#  11. Strain selection (`--only <short>...`, spawn-time remote control): a selected short is delivered;
+#      an unselected strain gets one `skipped: <short> (not selected)` line and ZERO send-keys; a bad
+#      short (outside ^[a-z0-9-]+$) is a pre-flight blocker with ZERO send-keys; `--only` with no shorts
+#      sends nothing, exits 0 and reports 0 applied (Cases 18a-18d).
 #
 # Usage:
 #   ./tools/test_rc_brood.sh
@@ -312,14 +316,16 @@ new_brood_root() {
   printf '%s' "$root"
 }
 
-# run_engine <root> <brood_id> <alive_file> <sendkeys_log> — run the engine inside <root> with the
-# fake tmux first on PATH, a tmp HOME, the configured alive-set + send-keys log. Stdout is written to
+# run_engine <root> <brood_id> <alive_file> <sendkeys_log> [engine_arg…] — run the engine inside <root>
+# with the fake tmux first on PATH, a tmp HOME, the configured alive-set + send-keys log. Any argument
+# after <sendkeys_log> is passed to the engine after the brood-id (e.g. `--only api`). Stdout is written to
 # <sendkeys_log>.stdout, stderr to <sendkeys_log>.stderr, and the exit code is stored in the global
 # RUN_RC. run_engine is NOT invoked through command substitution (a `$()` subshell could not write
 # RUN_RC back to the parent shell); callers read RUN_RC and the .stdout file after the call.
 RUN_RC=0
 run_engine() {
   local root="$1" brood_id="$2" alive_file="$3" sendkeys_log="$4"
+  shift 4
   set +e
   (
     cd "$root" \
@@ -330,7 +336,7 @@ run_engine() {
          TMUX_SENDKEYS_FAIL_TARGET="${TMUX_SENDKEYS_FAIL_TARGET:-}" \
          TMUX_PANE_GONE_AT_SEND="${TMUX_PANE_GONE_AT_SEND:-}" \
          TMUX_MULTI_ACTIVE="${TMUX_MULTI_ACTIVE:-}" \
-         bash "$ENGINE" "$brood_id"
+         bash "$ENGINE" "$brood_id" "$@"
   ) >"${sendkeys_log}.stdout" 2>"${sendkeys_log}.stderr"
   RUN_RC=$?
   set -e
@@ -1019,6 +1025,73 @@ assert_contains "multi-active:failed-line" "failed: api" "$OUT17" "strain record
 assert_contains "multi-active:expected-one" "expected exactly one active pane" "$OUT17" "multi-active fails closed with the exactly-one-active-pane error"
 assert_contains "multi-active:summary" "0 applied, 0 skipped, 1 failed (of 1 strains)" "$OUT17" "strain counted failed, none applied"
 assert_eq "multi-active:zero-sendkeys" "0" "$(count_records "$LOG17")" "no keystroke delivered when >1 active pane (never selects one)"
+
+# ── Case 18a: --only selects one strain — the selected short is delivered ─────────
+# The 3-strain all-alive manifest with `--only db-migrations`: only that strain gets `/rc`; api and
+# web-ui are skipped as not selected with zero send-keys, even though their sessions are alive.
+echo '=== Case 18a: --only selected short delivered, unselected strains skipped ==='
+ROOT18A="$(new_brood_root only-selected "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+ALIVE18A="$WORKDIR/alive18a"
+LOG18A="$WORKDIR/log18a"
+: > "$LOG18A"
+printf '%s\n' \
+  "$BID1-api" \
+  "$BID1-web-ui" \
+  "$BID1-db-migrations" > "$ALIVE18A"
+run_engine "$ROOT18A" "$BID1" "$ALIVE18A" "$LOG18A" --only db-migrations
+OUT18A="$(cat "${LOG18A}.stdout")"
+LOGTEXT18A="$(cat "$LOG18A")"
+PAYLOADS18A="$(literal_payloads "$LOG18A")"
+assert_eq "only-selected:exit" "0" "$RUN_RC" "selected fan-out completed"
+assert_eq "only-selected:record-count" "2" "$(count_records "$LOG18A")" "one literal + one Enter for the selected strain"
+assert_eq "only-selected:payload" "/rc db-migrations" "$PAYLOADS18A" "only the selected short is delivered"
+assert_contains "only-selected:target" "ARG:$(pane_id_for "$BID1-db-migrations")" "$LOGTEXT18A" "selected strain addressed at its resolved pane id"
+assert_contains "only-selected:applied" "applied: db-migrations" "$OUT18A"
+assert_contains "only-selected:summary" "1 applied, 2 skipped, 0 failed (of 3 strains)" "$OUT18A" "summary counts"
+
+# ── Case 18b: --only — an unselected strain is skipped with zero send-keys ───────
+# Same run as 18a, asserted from the unselected side: one `skipped: <short> (not selected)` line per
+# unselected strain and no keystroke addressed to either of their panes.
+echo '=== Case 18b: --only unselected strain skipped, zero send-keys to it ==='
+assert_contains "only-unselected:skip-api"   "skipped: api (not selected)"    "$OUT18A" "api skipped as not selected"
+assert_contains "only-unselected:skip-webui" "skipped: web-ui (not selected)" "$OUT18A" "web-ui skipped as not selected"
+assert_eq "only-unselected:skip-api-once" "1" "$(grep -c '^skipped: api ' <<<"$OUT18A")" "exactly one skip line for api"
+assert_not_contains "only-unselected:no-payload-api"   "/rc api"    "$PAYLOADS18A" "unselected api never receives /rc"
+assert_not_contains "only-unselected:no-payload-webui" "/rc web-ui" "$PAYLOADS18A" "unselected web-ui never receives /rc"
+assert_not_contains "only-unselected:no-pane-api"   "ARG:$(pane_id_for "$BID1-api")"    "$LOGTEXT18A" "unselected api pane never targeted"
+assert_not_contains "only-unselected:no-pane-webui" "ARG:$(pane_id_for "$BID1-web-ui")" "$LOGTEXT18A" "unselected web-ui pane never targeted"
+
+# ── Case 18c: --only with a bad short → pre-flight blocker, zero send-keys ────────
+# A short outside ^[a-z0-9-]+$ (uppercase, then a shell metacharacter, then empty) is rejected before
+# the manifest is read: blocker on stderr, exit 1, send-keys log EMPTY. The good short listed first
+# proves the whole selection is validated before any delivery.
+echo '=== Case 18c: --only bad short — blocker, exit 1, zero send-keys ==='
+for bad_short in 'API' 'api;touch' ''; do
+  ROOT18C="$(new_brood_root "only-bad-$RANDOM" "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+  ALIVE18C="$WORKDIR/alive18c"
+  LOG18C="$WORKDIR/log18c"
+  : > "$LOG18C"
+  printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE18C"
+  run_engine "$ROOT18C" "$BID1" "$ALIVE18C" "$LOG18C" --only api "$bad_short"
+  assert_eq "only-bad[$bad_short]:exit" "1" "$RUN_RC" "bad short is a pre-flight blocker"
+  assert_contains "only-bad[$bad_short]:blocker" "blocker: --only short must match" "$(cat "${LOG18C}.stderr")" "blocker line on stderr"
+  assert_eq "only-bad[$bad_short]:zero-sendkeys" "0" "$(count_records "$LOG18C")" "no keystroke delivered on a bad short"
+  assert_eq "only-bad[$bad_short]:no-stdout" "" "$(cat "${LOG18C}.stdout")" "no disposition lines before the blocker"
+done
+
+# ── Case 18d: --only with no shorts → nothing sent, exit 0, 0 applied ─────────────
+echo '=== Case 18d: --only with no shorts — zero send-keys, exit 0, 0 applied ==='
+ROOT18D="$(new_brood_root only-empty "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+ALIVE18D="$WORKDIR/alive18d"
+LOG18D="$WORKDIR/log18d"
+: > "$LOG18D"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE18D"
+run_engine "$ROOT18D" "$BID1" "$ALIVE18D" "$LOG18D" --only
+OUT18D="$(cat "${LOG18D}.stdout")"
+assert_eq "only-empty:exit" "0" "$RUN_RC" "empty selection completes"
+assert_eq "only-empty:zero-sendkeys" "0" "$(count_records "$LOG18D")" "no keystroke delivered with an empty selection"
+assert_contains "only-empty:summary" "0 applied, 3 skipped, 0 failed (of 3 strains)" "$OUT18D" "summary reports 0 applied"
+assert_contains "only-empty:skip-db" "skipped: db-migrations (not selected)" "$OUT18D" "every strain skipped as not selected"
 
 # ── Tally ─────────────────────────────────────────────────────────────────────────
 echo

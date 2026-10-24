@@ -17,12 +17,23 @@
 #     normal agent-invocable skill scoped by its description; Claude Code has no in-band peer-drive
 #     API (upstream anthropics/claude-code#34243), so external `tmux send-keys` is the only
 #     delivery path — the same keystroke-injection mechanism spawn-brood already uses.
+#     AMENDMENT (spawn-time remote control): spawn-brood calls this engine itself at spawn time with
+#     `--only <short>...` naming every strain that showed started-evidence and was alive when spawn
+#     ended, so remote control is on by default. The user-requested path through the skill (brood-id
+#     only, every strain) is unchanged; it stays the way to reach strains that started later or lost
+#     the connection.
 #
-# INPUT (single positional argument):
+# INPUT (positional arguments):
 #   $1  <broodId> — a brood-id of the EXACT shape spawn-brood generates (`brood-<uuidv4>`,
 #       asserted ^brood-[0-9a-f-]+$). Validated as a strict safe single path component BEFORE any
 #       use (reject empty / leading-dash / path-traversal / separators / command-substitution /
 #       framing bytes). Used to locate the per-brood manifest under the checkout root.
+#   $2  optional `--only`, followed by ZERO OR MORE strain shorts. Every argument after `--only` is a
+#       short, with no further option parsing. Each short MUST match ^[a-z0-9-]+$ and is checked
+#       BEFORE the manifest is read; a bad one is a pre-flight blocker (zero keystrokes). With
+#       `--only`, a strain whose derived short is not listed gets one `skipped: <short> (not
+#       selected)` line and no keystroke; `--only` with no shorts selects nothing and sends nothing
+#       (summary reports 0 applied). Without `--only` every strain is a candidate, exactly as before.
 #
 # MANIFEST:
 #   <checkout-root>/.hivemind/broods/<broodId>/manifest.json  (manifest_version 4, JSON). The
@@ -36,7 +47,7 @@
 # EXIT CONTRACT:
 #   0  the fan-out COMPLETED — even with some strains skipped (dead/missing session, unsanitizable
 #      name) or failed (a per-strain tmux error). Zero strains / zero alive sessions also exit 0.
-#   1  ONLY a pre-flight blocker: bad brood-id, missing/unreadable/invalid manifest, a manifest
+#   1  ONLY a pre-flight blocker: bad brood-id, a bad `--only` short, missing/unreadable/invalid manifest, a manifest
 #      that FAILS THE SHAPE PREFLIGHT (`.strains` missing/null/object/non-array, or a strain
 #      element that is not an object / carries a non-string name or tmux_session), or a missing
 #      dependency. No keystroke is delivered on a pre-flight blocker. A wrong-shaped/corrupt
@@ -121,6 +132,33 @@ esac
 case "$brood_id" in
   *[!a-z0-9-]*) blocker "brood-id contains a byte outside [a-z0-9-]: $brood_id" ;;
 esac
+
+# ── Optional strain selection: `--only <short>...` (validate FAIL-CLOSED before the manifest read) ─
+# Every argument after `--only` is a short, with no further option parsing. Each one MUST match
+# ^[a-z0-9-]+$ — the same charset the derived `short` is built from — so a bad one is a pre-flight
+# blocker before any manifest read or keystroke. `--only` with zero shorts is valid: it selects
+# nothing. Without `--only`, `only_mode` stays 0 and every strain is a candidate as before.
+only_mode=0
+selected_shorts=()
+if [ "${2:-}" = "--only" ]; then
+  only_mode=1
+  for selected_short in "${@:3}"; do
+    case "$selected_short" in
+      ''|*[!a-z0-9-]*) blocker "--only short must match ^[a-z0-9-]+\$: $selected_short" ;;
+    esac
+    selected_shorts+=("$selected_short")
+  done
+fi
+
+# is_short_selected: succeed when $1 is one of the `--only` shorts (exact byte equality).
+is_short_selected() {
+  local candidate="$1" selected_idx=0
+  while [ "$selected_idx" -lt "${#selected_shorts[@]}" ]; do
+    [ "${selected_shorts[$selected_idx]}" = "$candidate" ] && return 0
+    selected_idx=$((selected_idx + 1))
+  done
+  return 1
+}
 
 # ── Checkout root + manifest path ─────────────────────────────────────────────────
 # The SAME anchor spawn-brood.sh writes against (git rev-parse --show-toplevel), so the manifest
@@ -252,6 +290,14 @@ while [ "$idx" -lt "$strain_count" ]; do
     continue
   fi
   expected_session="$brood_id-$short"
+
+  # Selection gate: with `--only`, a strain whose derived short is not listed is skipped before any
+  # session probe, so it never receives a keystroke.
+  if [ "$only_mode" -eq 1 ] && ! is_short_selected "$short"; then
+    printf 'skipped: %s (not selected)\n' "$short"
+    skipped=$((skipped + 1))
+    continue
+  fi
 
   # A strain whose recorded session is empty or sentinel-shaped has no recorded value to cross-check.
   if [ -z "$session" ]; then

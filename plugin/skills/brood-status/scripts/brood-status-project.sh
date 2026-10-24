@@ -25,8 +25,9 @@
 #
 # DATA-BOUNDARY (MANDATORY): the brood manifest AND every child run-ledger
 # (`<worktree>/.hivemind/runs/<id>/state.json`) are UNTRUSTED, attacker-controllable bytes —
-# brood children run detached --dangerously-skip-permissions, so both the manifest the hatchery
-# wrote from their inputs and the ledgers they write are adversary-influenced. EVERY value read
+# brood children run detached, and child content stays adversary-influenced whatever its
+# permission mode, so both the manifest the hatchery wrote from their inputs and the ledgers they
+# write are adversary-influenced. EVERY value read
 # from them is treated as DATA, never as instructions or shell source:
 #   - manifest values are extracted out-of-band with jq into inert vars (manifest-json.sh),
 #     then RE-GATED through the matching allowlist value-class (allowlist.sh) BEFORE any path
@@ -42,7 +43,16 @@
 #   emitted token can contain a literal tab and break the framing. Fields, in order:
 #
 #     STRAIN <TAB> brood_id <TAB> name <TAB> worktree_path <TAB> branch <TAB> tmux_session \
-#            <TAB> manifest_status <TAB> state_current <TAB> run_status <TAB> live_branch
+#            <TAB> manifest_status <TAB> state_current <TAB> run_status <TAB> live_branch \
+#            <TAB> facts_evidence
+#
+#   `facts_evidence` (the LAST field, index 11) is `yes` or `no`: `yes` when a gather-facts output
+#   file (facts-<8 digits>T<6 digits>Z-<12 lowercase hex>.json, a regular non-symlink file) sits
+#   directly in the selected ground-truth worktree's `.hivemind/facts` folder, per
+#   hivemind_detect_facts_evidence (_shared/ledger-project.sh). It is the started-evidence of a
+#   script-engine child, which writes no run ledger. It is `no` whenever no ground-truth worktree
+#   was selected, the worktree is not contained under the checkout root, or the folder chain fails
+#   containment. It is APPENDED so indices 1-10 are unchanged. No file content is read.
 #
 #   `live_branch` (the LAST field, index 10) is the selected worktree's git-reported LIVE branch
 #   (`branch refs/heads/<name>` from the porcelain parse), gated through the identifier value-class.
@@ -68,10 +78,10 @@
 #   This is DISTINCT from MISSING (a ledger pointer exists but the child has not yet written
 #   started-evidence) and from MALFORMED (a present-but-rejected ledger). Example (tabs shown as
 #   <TAB>):
-#     STRAIN<TAB>brood-1a2b<TAB>auth<TAB>/abs/wt/auth<TAB>strain/brood-1a2b/auth<TAB>brood-1a2b-auth<TAB>spawned<TAB>implement_step<TAB>running<TAB>bugfix/auth-fix-9f3a
+#     STRAIN<TAB>brood-1a2b<TAB>auth<TAB>/abs/wt/auth<TAB>strain/brood-1a2b/auth<TAB>brood-1a2b-auth<TAB>spawned<TAB>implement_step<TAB>running<TAB>bugfix/auth-fix-9f3a<TAB>no
 #
 #   The full field ORDER is: brood_id, name, worktree_path, branch, tmux_session,
-#   manifest_status, state_current, run_status, live_branch.
+#   manifest_status, state_current, run_status, live_branch, facts_evidence.
 #
 #   INTEGRITY SENTINEL (distinct from any STRAIN line): when the manifest is PRESENT but
 #   UNREADABLE — either UNPARSEABLE (torn / truncated / invalid JSON) OR VALID-JSON-BUT-WRONG-SHAPE
@@ -137,7 +147,7 @@ blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 #   2. Escape `|` (0x7C) -> `\|` (the Markdown cell escape), so an inert quoted `|` cannot forge a
 #      table column.
 # The TAB field SEPARATOR is NOT touched here: this operates WITHIN a single field value only; the
-# caller still joins fields with literal TABs, preserving the 10-field TAB-delimited STRAIN grammar.
+# caller still joins fields with literal TABs, preserving the 11-field TAB-delimited STRAIN grammar.
 encode_cell() {
   # `tr -d` drops C0 + DEL; `sed` escapes any remaining `|`. Order: strip controls first, then
   # escape `|`, so a stripped control byte can never split the `|` escape. Operates on stdin via a
@@ -521,6 +531,33 @@ EOF
     fi
   fi
 
+  # ── RESIDENCY of the selected worktree under CHECKOUT_ROOT ────────────────────────
+  # Assert the git-derived worktree is canonicalized + CONTAINED under CHECKOUT_ROOT. git may
+  # report linked/sibling worktrees deliberately OUTSIDE the checkout; such an out-of-checkout
+  # worktree fails closed (no ledger read, no facts check). This is the CHECKOUT_ROOT ⊇
+  # git-worktree link of the full containment chain, shared by the ledger read and the facts check.
+  canon_gt_wt=""
+  gt_resident=0
+  if [ -n "$gt_worktree" ]; then
+    canon_gt_wt="$(cd "$gt_worktree" 2>/dev/null && pwd -P)"
+    if [ -n "$canon_gt_wt" ]; then
+      case "$canon_gt_wt/" in
+        "$canon_checkout/"*) gt_resident=1 ;;
+      esac
+    fi
+  fi
+
+  # ── FACTS EVIDENCE for the selected worktree (script-engine started-evidence) ─────
+  # `no` unless a ground-truth worktree was selected AND it is resident under CHECKOUT_ROOT; then
+  # hivemind_detect_facts_evidence checks the `.hivemind/facts` folder chain with the containment
+  # helpers and reports yes/no from file names and types only. Independent of the ledger pointer:
+  # a script-engine child may carry no run.suggested_id and still prove it started.
+  facts_out="no"
+  if [ "$gt_resident" -eq 1 ]; then
+    facts_out="$(hivemind_detect_facts_evidence "$gt_worktree")"
+    [ "$facts_out" = "yes" ] || facts_out="no"
+  fi
+
   # 3. Derive the ledger path under the GROUND-TRUTH worktree:
   #    "<git-worktree>/.hivemind/runs/<suggested_id>/state.json". Only <suggested_id> is
   #    manifest-sourced; gate it as a STRICT single-component identifier (no slash, no space) so it
@@ -561,17 +598,8 @@ EOF
     state_out="MALFORMED"
     run_out="MALFORMED"
   else
-    # Assert the git-derived worktree is canonicalized + CONTAINED under CHECKOUT_ROOT. git may
-    # report linked/sibling worktrees deliberately OUTSIDE the checkout; such an out-of-checkout
-    # worktree fails closed here (no read). This is the CHECKOUT_ROOT ⊇ git-worktree link of the
-    # full containment chain.
-    canon_gt_wt="$(cd "$gt_worktree" 2>/dev/null && pwd -P)"
-    gt_resident=0
-    if [ -n "$canon_gt_wt" ]; then
-      case "$canon_gt_wt/" in
-        "$canon_checkout/"*) gt_resident=1 ;;
-      esac
-    fi
+    # The CHECKOUT_ROOT ⊇ git-worktree residency (gt_resident) was computed once above for the
+    # selected worktree; an out-of-checkout worktree fails closed here (no read).
     if [ "$gt_resident" -ne 1 ]; then
       # git-worktree escapes (or fails to canonicalize beneath) CHECKOUT_ROOT: fail closed.
       state_out="MALFORMED"
@@ -586,7 +614,7 @@ EOF
       # inline block it replaced. The relative chain is .hivemind/runs/<suggested_id>/state.json.
       # gt_worktree is the git-derived worktree ALREADY proven resident under CHECKOUT_ROOT by
       # the canon_gt_wt / gt_resident link above (the shared function has no CHECKOUT_ROOT notion,
-      # so that link MUST stay inline here and run FIRST).
+      # so that link MUST stay inline in this script and run FIRST).
       #
       # OUTPUT GRAMMAR (exactly two lines): line 1 = state.current result, line 2 = run.status
       # result, each ∈ { MISSING | MALFORMED | <validated value> }. On any guard/read failure both
@@ -606,7 +634,8 @@ EOF
   #    loop and emitted verbatim on every strain line. live_branch (field 10) is APPENDED LAST so
   #    existing 1-based field indices 2-9 are unchanged (#270 PR-probe re-anchor): it carries the
   #    selected worktree's git-reported LIVE branch (or MISSING/MALFORMED), distinct from the
-  #    display-only manifest `branch` column (field 5).
+  #    display-only manifest `branch` column (field 5). facts_evidence (field 11, yes|no) is
+  #    APPENDED after it so indices 1-10 stay unchanged.
   #
   #    ENCODE-AT-OUTPUT (see encode_cell above): every display column is run through encode_cell
   #    UNIFORMLY before emission — not per-class carve-outs. The strict columns (brood_id,
@@ -615,8 +644,8 @@ EOF
   #    and self-documenting; encode_cell is a no-op on values that already lack `|` and controls.
   #    Only the value-classes that can carry a `|` as inert quoted data (worktree_path / branch —
   #    the FLOOR-ONLY path/identifier inputs) are materially affected. The literal TABs joining the
-  #    fields are added by printf AFTER per-field encoding, so the 10-field framing is preserved.
-  printf 'STRAIN\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+  #    fields are added by printf AFTER per-field encoding, so the 11-field framing is preserved.
+  printf 'STRAIN\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
     "$(encode_cell "$brood_id_out")" \
     "$(encode_cell "$name_out")" \
     "$(encode_cell "$wt_out")" \
@@ -625,7 +654,8 @@ EOF
     "$(encode_cell "$status_out")" \
     "$(encode_cell "$state_out")" \
     "$(encode_cell "$run_out")" \
-    "$(encode_cell "$live_branch_out")"
+    "$(encode_cell "$live_branch_out")" \
+    "$(encode_cell "$facts_out")"
 
   idx=$((idx + 1))
 done

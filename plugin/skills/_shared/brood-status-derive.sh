@@ -27,8 +27,14 @@ set -u
 
 # ── hivemind_derive_strain_status ─────────────────────────────────────────────────
 # hivemind_derive_strain_status <manifest_status> <session_alive:0|1> <pr_state> <pr_number> \
-#                               <state_current> <run_status>
+#                               <state_current> <run_status> [<facts_evidence:yes|no>]
 #   -> prints the derived Status string to stdout.
+#
+# <facts_evidence> (OPTIONAL 7th argument) is the projector's field 11: `yes` when a gather-facts
+# output file sits in the strain's ground-truth worktree (hivemind_detect_facts_evidence in
+# ledger-project.sh), the started-evidence of a script-engine child, which writes no run ledger.
+# Only the exact value `yes` counts; an ABSENT argument (every 6-argument call), an empty value or
+# any other value means `no`, so every 6-argument call keeps its result.
 #
 # Ports the SKILL.md rule table EXACTLY. Priority (highest first):
 #   1. manifest_status == failed (failed-precedence): a strain recorded failed in the manifest is
@@ -67,8 +73,10 @@ set -u
 #
 # STARTED-EVIDENCE GATE: an alive session is NOT proof the child
 # started its workflow — a pasted-but-never-submitted child has an alive tmux session and no run
-# ledger. The ground-truth started signal is RUN-LEDGER EVIDENCE: a present, non-MISSING/
-# non-MALFORMED state.current. An alive session WITHOUT that evidence derives the DISTINCT,
+# ledger. The ground-truth started signal is EITHER of two sources: RUN-LEDGER EVIDENCE (a
+# present, non-MISSING/non-MALFORMED state.current, written by a state-machine child) OR FACTS
+# EVIDENCE (<facts_evidence> == yes, a gather-facts output file written by a script-engine child).
+# An alive session WITHOUT either source derives the DISTINCT,
 # TRANSIENT (non-terminal), non-running, non-complete status below instead of a bare `running`.
 # MALFORMED state.current is fail-closed (NOT started-evidence -> demote to starting, not running).
 # The gate applies ONLY when a ledger pointer EXISTS but supplies no started-evidence (state.current
@@ -80,7 +88,7 @@ set -u
 # alive branch picks running vs running (PR #N open) from pr_for_derive, never from state_current).
 hivemind_derive_strain_status() {
   local manifest_status="$1" session_alive="$2" pr_state="$3" pr_number="$4"
-  local state_current="$5" run_status="$6"
+  local state_current="$5" run_status="$6" facts_evidence="${7:-no}"
 
   # 1. failed-precedence (manifest static field beats the alive-session inference).
   if [ "$manifest_status" = "failed" ]; then
@@ -98,15 +106,19 @@ hivemind_derive_strain_status() {
 
   if [ "$session_alive" -eq 1 ]; then
     # Started-evidence gate: a present, non-MISSING/non-MALFORMED state.current is ground-truth
-    # proof the child wrote its run ledger and started its workflow. Absent that, an alive session
-    # is demoted from `running` to the transient `starting` status. The gate fires ONLY for a ledger
-    # pointer that EXISTS but supplies no started-evidence (empty/MISSING/MALFORMED). NO_LEDGER_POINTER
-    # (legacy no-pointer manifest) is INTENTIONALLY absent from this set: started-evidence is
-    # structurally unavailable there, so the strain falls through to the observable table below and
-    # derives running / running (PR #N open) — the legacy no-pointer fall-through.
+    # proof the child wrote its run ledger and started its workflow; facts_evidence == yes is the
+    # same proof for a script-engine child. Absent both, an alive session is demoted from `running`
+    # to the transient `starting` status. The gate fires ONLY for a ledger pointer that EXISTS but
+    # supplies no started-evidence (empty/MISSING/MALFORMED) and no facts evidence.
+    # NO_LEDGER_POINTER (legacy no-pointer manifest) is INTENTIONALLY absent from this set:
+    # started-evidence is structurally unavailable there, so the strain falls through to the
+    # observable table below and derives running / running (PR #N open) — the legacy no-pointer
+    # fall-through.
     if [ -z "$state_current" ] || [ "$state_current" = "MISSING" ] || [ "$state_current" = "MALFORMED" ]; then
-      printf '%s' "starting (session alive, workflow not yet started)"
-      return 0
+      if [ "$facts_evidence" != "yes" ]; then
+        printf '%s' "starting (session alive, workflow not yet started)"
+        return 0
+      fi
     fi
     case "$pr_for_derive" in
       open) printf 'running (PR #%s open)' "$pr_number" ;;

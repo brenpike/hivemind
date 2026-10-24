@@ -630,6 +630,84 @@ mkdir -p "$rcc6_wt/$rcc6_rel"
 assert_eq "rcc:dir-leaf-state"  "MALFORMED" "$rcc_s" "dir-typed leaf (present-but-unreadable): line1 = MALFORMED"
 assert_eq "rcc:dir-leaf-status" "MALFORMED" "$rcc_r" "dir-typed leaf (present-but-unreadable): line2 = MALFORMED"
 
+# ── Section 3c: hivemind_detect_facts_evidence — script-engine started-evidence ────
+echo ''
+echo '=== ledger-project.sh: hivemind_detect_facts_evidence (facts-file started-evidence) ==='
+#
+# A script-engine child writes no run ledger; its gather-facts output file in the worktree's
+# .hivemind/facts folder is its started-evidence. The function prints yes/no from file NAMES and
+# TYPES only. Each case builds a real temp worktree under WORKDIR.
+FACTS_NAME="facts-20261024T101500Z-0123456789ab.json"
+
+# 3c-1: matching regular file present → yes.
+fe1_wt="$WORKDIR/fe1/checkout"
+mkdir -p "$fe1_wt/.hivemind/facts"
+printf '{}\n' > "$fe1_wt/.hivemind/facts/$FACTS_NAME"
+assert_eq "facts:present" "yes" "$(hivemind_detect_facts_evidence "$fe1_wt")" "matching regular facts file -> yes"
+
+# 3c-2: facts folder absent → no; facts folder present but empty → no.
+fe2_wt="$WORKDIR/fe2/checkout"
+mkdir -p "$fe2_wt"
+assert_eq "facts:absent-folder" "no" "$(hivemind_detect_facts_evidence "$fe2_wt")" "no .hivemind/facts folder -> no"
+mkdir -p "$fe2_wt/.hivemind/facts"
+assert_eq "facts:empty-folder" "no" "$(hivemind_detect_facts_evidence "$fe2_wt")" "empty facts folder -> no"
+
+# 3c-3: symlinked leaf with a matching name → no (the target is a real external facts file).
+fe3_wt="$WORKDIR/fe3/checkout"
+fe3_ext="$WORKDIR/fe3/external"
+mkdir -p "$fe3_wt/.hivemind/facts" "$fe3_ext"
+printf '{}\n' > "$fe3_ext/$FACTS_NAME"
+ln -s "$fe3_ext/$FACTS_NAME" "$fe3_wt/.hivemind/facts/$FACTS_NAME"
+assert_eq "facts:symlink-leaf" "no" "$(hivemind_detect_facts_evidence "$fe3_wt")" "symlinked matching leaf -> no"
+
+# 3c-4: symlinked facts folder pointing at an external folder holding a matching file → no.
+fe4_wt="$WORKDIR/fe4/checkout"
+fe4_ext="$WORKDIR/fe4/external-facts"
+mkdir -p "$fe4_wt/.hivemind" "$fe4_ext"
+printf '{}\n' > "$fe4_ext/$FACTS_NAME"
+ln -s "$fe4_ext" "$fe4_wt/.hivemind/facts"
+assert_eq "facts:symlink-folder" "no" "$(hivemind_detect_facts_evidence "$fe4_wt")" "symlinked facts folder -> no"
+
+# 3c-4b: symlinked .hivemind ancestor → no.
+fe4b_wt="$WORKDIR/fe4b/checkout"
+fe4b_ext="$WORKDIR/fe4b/external-hivemind"
+mkdir -p "$fe4b_wt" "$fe4b_ext/facts"
+printf '{}\n' > "$fe4b_ext/facts/$FACTS_NAME"
+ln -s "$fe4b_ext" "$fe4b_wt/.hivemind"
+assert_eq "facts:symlink-ancestor" "no" "$(hivemind_detect_facts_evidence "$fe4b_wt")" "symlinked .hivemind ancestor -> no"
+
+# 3c-5: non-matching names → no (uppercase hex, short random, missing Z, wrong prefix, nested).
+fe5_wt="$WORKDIR/fe5/checkout"
+mkdir -p "$fe5_wt/.hivemind/facts/nested"
+printf '{}\n' > "$fe5_wt/.hivemind/facts/facts-20261024T101500Z-0123456789AB.json"
+printf '{}\n' > "$fe5_wt/.hivemind/facts/facts-20261024T101500Z-0123456789a.json"
+printf '{}\n' > "$fe5_wt/.hivemind/facts/facts-20261024T101500-0123456789ab.json"
+printf '{}\n' > "$fe5_wt/.hivemind/facts/notes-20261024T101500Z-0123456789ab.json"
+printf '{}\n' > "$fe5_wt/.hivemind/facts/$FACTS_NAME.bak"
+printf '{}\n' > "$fe5_wt/.hivemind/facts/nested/$FACTS_NAME"
+assert_eq "facts:non-matching-name" "no" "$(hivemind_detect_facts_evidence "$fe5_wt")" "only non-matching names -> no"
+
+# 3c-6: a DIRECTORY carrying a matching name → no.
+fe6_wt="$WORKDIR/fe6/checkout"
+mkdir -p "$fe6_wt/.hivemind/facts/$FACTS_NAME"
+assert_eq "facts:dir-matching-name" "no" "$(hivemind_detect_facts_evidence "$fe6_wt")" "directory with a matching name -> no"
+
+# 3c-7: a gather-facts temp file (.facts-XXXXXX, the pre-publish mktemp) → no.
+fe7_wt="$WORKDIR/fe7/checkout"
+mkdir -p "$fe7_wt/.hivemind/facts"
+printf '{}\n' > "$fe7_wt/.hivemind/facts/.facts-a1B2c3"
+assert_eq "facts:temp-file" "no" "$(hivemind_detect_facts_evidence "$fe7_wt")" ".facts-XXXXXX temp file -> no"
+
+# 3c-8: the facts folder path is a regular FILE → no.
+fe8_wt="$WORKDIR/fe8/checkout"
+mkdir -p "$fe8_wt/.hivemind"
+printf 'x\n' > "$fe8_wt/.hivemind/facts"
+assert_eq "facts:folder-is-file" "no" "$(hivemind_detect_facts_evidence "$fe8_wt")" "facts path is a regular file -> no"
+
+# 3c-9: a matching file beside non-matching ones still counts (one regular match is enough).
+printf '{}\n' > "$fe5_wt/.hivemind/facts/$FACTS_NAME"
+assert_eq "facts:match-among-noise" "yes" "$(hivemind_detect_facts_evidence "$fe5_wt")" "matching file among non-matching names -> yes"
+
 # ── Section 4: NUL / control-byte rejection + single-document discipline (Codex #172) ──
 echo ''
 echo '=== NUL + control-byte + single-document (Codex #172 root cluster) ==='
@@ -918,6 +996,32 @@ assert_eq "derive:alive-nopointer-open" "running (PR #7 open)" \
 # dead legacy strain (session never resurrected) -> failed terminal; NO_LEDGER_POINTER never touches the dead branch.
 assert_eq "derive:dead-nopointer-failed" "failed (session ended, no PR)" \
   "$(hivemind_derive_strain_status running 0 none "" NO_LEDGER_POINTER MISSING)" "dead + NO_LEDGER_POINTER + no PR -> failed (session ended, no PR)"
+
+# ── 6a-ter. optional 7th argument facts_evidence: script-engine started-evidence ──
+# An alive strain derives running when state.current is a valid token OR facts_evidence is yes;
+# absent the 7th argument it means no, so every 6-argument call above keeps its result.
+assert_eq "derive:alive-missing-facts-yes" "running" \
+  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING yes)" "alive + MISSING state.current + facts yes -> running"
+assert_eq "derive:alive-malformed-facts-yes" "running" \
+  "$(hivemind_derive_strain_status running 1 none "" MALFORMED MISSING yes)" "alive + MALFORMED state.current + facts yes -> running"
+assert_eq "derive:alive-empty-facts-yes-open" "running (PR #5 open)" \
+  "$(hivemind_derive_strain_status running 1 open 5 "" "" yes)" "alive + empty state.current + facts yes + open PR -> running (PR #N open)"
+assert_eq "derive:alive-missing-facts-no" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING no)" "alive + MISSING state.current + facts no -> starting"
+assert_eq "derive:alive-missing-facts-empty" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING "")" "alive + MISSING state.current + empty facts -> starting"
+assert_eq "derive:alive-missing-facts-other" "$STARTING" \
+  "$(hivemind_derive_strain_status running 1 none "" MISSING MISSING YES)" "alive + MISSING state.current + facts 'YES' (not exact yes) -> starting"
+assert_eq "derive:alive-started-facts-no" "running" \
+  "$(hivemind_derive_strain_status running 1 none "" "$STARTED" running no)" "alive + valid state.current + facts no -> running"
+assert_eq "derive:alive-nopointer-facts-no" "running" \
+  "$(hivemind_derive_strain_status running 1 none "" NO_LEDGER_POINTER MISSING no)" "alive + NO_LEDGER_POINTER + facts no -> running (exemption unchanged)"
+assert_eq "derive:dead-none-facts-yes" "failed (session ended, no PR)" \
+  "$(hivemind_derive_strain_status running 0 none "" MISSING MISSING yes)" "dead + no PR + facts yes -> failed (dead rows unchanged)"
+assert_eq "derive:dead-merged-facts-yes" "complete" \
+  "$(hivemind_derive_strain_status running 0 merged 13 MISSING MISSING yes)" "dead + merged + facts yes -> complete (dead rows unchanged)"
+assert_eq "derive:failed-alive-facts-yes" "failed (injection failed; session alive for debug)" \
+  "$(hivemind_derive_strain_status failed 1 none "" MISSING MISSING yes)" "failed + alive + facts yes -> failed precedence kept"
 
 # ── 6b. hivemind_classify_status_bucket — every derived status maps to a bucket ──
 assert_eq "bucket:complete" "complete" \

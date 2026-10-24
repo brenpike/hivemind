@@ -31,7 +31,10 @@
 #           "workflow_state","run_status","derived_status"} ],
 #           workflow_state is a real workflow-state token or one of the fixed tokens MISSING /
 #           MALFORMED / NO_LEDGER_POINTER (legacy manifest with no ledger pointer); run_status is a
-#           real run.status token or MISSING / MALFORMED.
+#           real run.status token or MISSING / MALFORMED. branch is the selected worktree's git LIVE
+#           branch (projector field 10) or MISSING / MALFORMED (no worktree, detached HEAD, or a
+#           rejected name) — new manifests carry no per-strain branch, so the manifest column is
+#           not shown.
 #         "summary":{"complete","running","blocked_failed","total"} } ],
 #       "global":{"total_broods","unreadable","complete","total_strains"} }
 #   Broods in sorted discovery order; strains in projector/manifest order. PER-BROOD FAILURE
@@ -222,7 +225,7 @@ for manifest in "${manifests[@]}"; do
   # Brood-id integrity holds. Parse STRAIN lines. Zero strains -> empty brood.
   strain_objects=()
   buckets=()
-  while IFS="$TAB" read -r sentinel f_brood f_name f_wt f_branch f_tmux f_status f_state f_run f_live_branch; do
+  while IFS="$TAB" read -r sentinel f_brood f_name f_wt f_branch f_tmux f_status f_state f_run f_live_branch f_facts; do
     [ "$sentinel" = "STRAIN" ] || continue
     # Probe observables using the projector-validated tokens (inert "$var").
     session_alive="$(probe_session_alive "$f_tmux")"
@@ -234,12 +237,13 @@ for manifest in "${manifests[@]}"; do
     pr_number="${pr_pair#*$TAB}"
 
     # f_state (state.current) and f_run (run.status) are the child-ledger started-evidence tokens
-    # already projected at the loop head. Threaded inert ("$var") into derivation: an
-    # alive session with no started-evidence (MISSING/MALFORMED state.current) demotes to `starting`
-    # rather than masking as `running`. A legacy manifest with no ledger pointer projects
-    # NO_LEDGER_POINTER, for which the started-evidence gate does not apply (observable status is
-    # kept). No new probe, no new I/O.
-    derived="$(hivemind_derive_strain_status "$f_status" "$session_alive" "$pr_state" "$pr_number" "$f_state" "$f_run")"
+    # already projected at the loop head; f_facts (projector field 11, yes|no) is the facts
+    # started-evidence of a script-engine child, which writes no run ledger. Threaded inert
+    # ("$var") into derivation: an alive session with neither source (MISSING/MALFORMED
+    # state.current and f_facts != yes) demotes to `starting` rather than masking as `running`. A
+    # legacy manifest with no ledger pointer projects NO_LEDGER_POINTER, for which the
+    # started-evidence gate does not apply (observable status is kept). No new probe, no new I/O.
+    derived="$(hivemind_derive_strain_status "$f_status" "$session_alive" "$pr_state" "$pr_number" "$f_state" "$f_run" "$f_facts")"
     buckets+=( "$(hivemind_classify_status_bucket "$derived")" )
 
     session_word="dead"; [ "$session_alive" -eq 1 ] && session_word="alive"
@@ -250,13 +254,13 @@ for manifest in "${manifests[@]}"; do
       pr_num_json="null"
     fi
 
-    # The display object's `branch` shows the manifest branch (f_branch — the spawn-time context
-    # ref), while the PR probe above keys on the git-ground-truth live branch (f_live_branch). This
-    # divergence is INTENTIONAL: the dashboard surfaces the manifest's recorded branch for context,
-    # but the probe must follow the worktree's actual HEAD to find the child's derived-branch PR.
+    # The display object's `branch` shows the git-ground-truth live branch (f_live_branch), the same
+    # value the PR probe above keys on. New manifests carry no per-strain branch (a child boots on a
+    # detached HEAD and its planner names its own branch), so the manifest column (f_branch) is not
+    # displayed; a detached or unselected worktree shows the sentinel MISSING.
     strain_objects+=( "$(jq -n \
       --arg name "$f_name" \
-      --arg branch "$f_branch" \
+      --arg branch "$f_live_branch" \
       --arg session "$session_word" \
       --arg tmux_session "$f_tmux" \
       --argjson number "$pr_num_json" \

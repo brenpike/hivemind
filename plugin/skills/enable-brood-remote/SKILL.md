@@ -13,6 +13,8 @@ Enable remote control for a brood: fan the Claude Code slash command `/rc <strai
 
 This skill is **agent-invocable on purpose**, but it fires ONLY on an EXPLICIT user request to enable remote control over a brood's strains — never as an autonomous coordination step. That description-scoping is exactly how the ADR-0007 boundary is preserved: the coordinator stays a read-only status dashboard with zero brood-awareness in children, and issuing these keystrokes on the user's explicit request is human-initiated addressing — equivalent to the user attaching to each pane and typing the command themselves (ADR-0027). The coordinator never autonomously remote-controls children.
 
+`spawn-brood` already turns remote control on at spawn time for every strain that started before spawn ended (ADR-0027 amendment). This skill stays the on-request path: use it for strains that started later than that, or that lost their remote-control connection. Called this way, the engine still targets every live strain of the brood.
+
 ## Procedure
 
 1. **Resolve the target broodId.** Discover the broods under the current checkout:

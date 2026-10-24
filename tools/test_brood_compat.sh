@@ -1704,7 +1704,8 @@ write_ledger() {
 # 1-based index $2. NEW v4/#168 grammar (brood_id inserted as field 2 — every index after shifts
 # +1 vs the pre-#168 grammar): 1=STRAIN 2=brood_id 3=name 4=worktree_path 5=branch 6=tmux_session
 # 7=manifest_status 8=state_current 9=run_status 10=live_branch (the worktree's git-reported LIVE
-# branch, appended for #270 — distinct from the display-only manifest `branch` at field 5).
+# branch, appended for #270 — distinct from the display-only manifest `branch` at field 5)
+# 11=facts_evidence (yes|no — a gather-facts output file in the ground-truth worktree).
 strain_field() {
     local output="$1" idx="$2"
     printf '%s\n' "$output" | awk -F'\t' -v i="$idx" '/^STRAIN\t/ { print $i; exit }'
@@ -2108,6 +2109,143 @@ assert_proj_live_branch_detached() {
         pass "$name" "exit 0; detached-HEAD live_branch (field 10)=MISSING (fail-closed); ledger still projects by path"
     else
         failed "$name" "rc=$rc live_branch=$(strain_field "$out" 10) state=$(strain_field "$out" 8) run=$(strain_field "$out" 9)"
+    fi
+}
+
+# ── Projection FACTS: field 11 facts_evidence (script-engine started-evidence) ──────
+# The projector appends field 11, facts_evidence (yes|no): yes when a gather-facts output file sits
+# directly in the selected ground-truth worktree's .hivemind/facts folder. It is no whenever no
+# ground-truth worktree was selected or containment fails. Fields 1-10 are unchanged.
+PROJ_FACTS_NAME="facts-20261024T101500Z-0123456789ab.json"
+
+# PROJ-FACTS-YES: GT worktree + suggested_id + NO ledger + a facts file → field 8 MISSING, field 11
+# yes, exactly 11 fields on the STRAIN line.
+assert_proj_facts_yes() {
+    local name="PROJ-FACTS-YES:facts-file-in-gt-worktree-field11-yes"
+    ensure_proj_workdir; local wd="$PROJ_WORKDIR/factsyes"
+    mkdir -p "$wd"
+    local branch="strain/$GT_BROOD_ID/factsyes" sid="$GT_BROOD_ID--factsyes"
+    local wt="$wd/wt"
+    gt_add_worktree "" "$branch" "$wt"
+    mkdir -p "$wt/.hivemind/facts"
+    printf '{}\n' > "$wt/.hivemind/facts/$PROJ_FACTS_NAME"
+    local manifest="$wd/manifest.json"
+    write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
+
+    local out rc=0
+    out="$(run_project "$manifest")" || rc=$?
+    local nf; nf="$(printf '%s\n' "$out" | awk -F'\t' '/^STRAIN\t/ { print NF; exit }')"
+    if [[ "$rc" -eq 0 \
+          && "$nf" == "11" \
+          && "$(strain_field "$out" 8)" == "MISSING" \
+          && "$(strain_field "$out" 9)" == "MISSING" \
+          && "$(strain_field "$out" 10)" == "$branch" \
+          && "$(strain_field "$out" 11)" == "yes" ]]; then
+        pass "$name" "exit 0; 11 fields; no ledger (MISSING) but facts file -> field 11 yes"
+    else
+        failed "$name" "rc=$rc nf=$nf state=$(strain_field "$out" 8) run=$(strain_field "$out" 9) live=$(strain_field "$out" 10) facts=$(strain_field "$out" 11)"
+    fi
+}
+
+# PROJ-FACTS-NO: GT worktree + valid ledger + NO facts file → field 11 no; fields 2-10 as the
+# happy path (unchanged by the new field).
+assert_proj_facts_no() {
+    local name="PROJ-FACTS-NO:no-facts-file-field11-no-fields-1-10-unchanged"
+    ensure_proj_workdir; local wd="$PROJ_WORKDIR/factsno"
+    mkdir -p "$wd"
+    local branch="strain/$GT_BROOD_ID/factsno" sid="$GT_BROOD_ID--factsno"
+    local wt="$wd/wt"
+    gt_add_worktree "" "$branch" "$wt"
+    mkdir -p "$wt/.hivemind/runs/$sid"
+    write_ledger "$wt/.hivemind/runs/$sid/state.json" running implement_step
+    local manifest="$wd/manifest.json"
+    write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
+
+    local out rc=0
+    out="$(run_project "$manifest")" || rc=$?
+    local first10; first10="$(printf '%s\n' "$out" | awk -F'\t' -v OFS='\t' '/^STRAIN\t/ { NF=10; print; exit }')"
+    local expected10
+    expected10="$(printf 'STRAIN\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
+        "$GT_BROOD_ID" "api" "$wt" "$branch" "brood-api" "running" "implement_step" "running" "$branch")"
+    if [[ "$rc" -eq 0 \
+          && "$first10" == "$expected10" \
+          && "$(strain_field "$out" 11)" == "no" ]]; then
+        pass "$name" "exit 0; fields 1-10 byte-identical to the 10-field grammar; no facts file -> field 11 no"
+    else
+        failed "$name" "rc=$rc first10=[$first10] expected10=[$expected10] facts=$(strain_field "$out" 11)"
+    fi
+}
+
+# PROJ-FACTS-NOWT: worktree_path matches NO git worktree, though a facts file sits under that plain
+# dir → field 11 no (no ground-truth worktree selected; the manifest path is never a path anchor).
+assert_proj_facts_no_worktree() {
+    local name="PROJ-FACTS-NOWT:unregistered-worktree-path-field11-no"
+    ensure_proj_workdir; local wd="$PROJ_WORKDIR/factsnowt"
+    local wt="$wd/wt"
+    mkdir -p "$wt/.hivemind/facts"
+    printf '{}\n' > "$wt/.hivemind/facts/$PROJ_FACTS_NAME"
+    local manifest="$wd/manifest.json"
+    write_manifest_v4 "$manifest" "api" "$wt" "strain/$GT_BROOD_ID/factsnowt" "brood-api" "running" \
+        "$GT_BROOD_ID--factsnowt"
+
+    local out rc=0
+    out="$(run_project "$manifest")" || rc=$?
+    if [[ "$rc" -eq 0 && "$(strain_field "$out" 11)" == "no" ]]; then
+        pass "$name" "exit 0; no ground-truth worktree selected -> field 11 no (facts under the plain dir ignored)"
+    else
+        failed "$name" "rc=$rc facts=$(strain_field "$out" 11)"
+    fi
+}
+
+# PROJ-FACTS-OUTSIDE: a real git worktree registered OUTSIDE the checkout root, carrying a facts
+# file → field 11 no (the CHECKOUT_ROOT residency link fails closed).
+assert_proj_facts_outside_checkout() {
+    local name="PROJ-FACTS-OUTSIDE:worktree-outside-checkout-field11-no"
+    ensure_proj_workdir; local wd="$PROJ_WORKDIR/factsoutside"
+    mkdir -p "$wd"
+    local outside; outside="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX")"
+    local branch="strain/$GT_BROOD_ID/factsoutside" sid="$GT_BROOD_ID--factsoutside"
+    local wt="$outside/wt"
+    gt_add_worktree "" "$branch" "$wt"
+    mkdir -p "$wt/.hivemind/facts"
+    printf '{}\n' > "$wt/.hivemind/facts/$PROJ_FACTS_NAME"
+    local manifest="$wd/manifest.json"
+    write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
+
+    local out rc=0
+    out="$(run_project "$manifest")" || rc=$?
+    git -C "$PROJ_WORKDIR" worktree remove --force "$wt" 2>/dev/null || true
+    rm -rf "$outside"
+    if [[ "$rc" -eq 0 \
+          && "$(strain_field "$out" 8)" == "MALFORMED" \
+          && "$(strain_field "$out" 11)" == "no" ]]; then
+        pass "$name" "exit 0; worktree outside the checkout -> ledger MALFORMED and field 11 no (fail closed)"
+    else
+        failed "$name" "rc=$rc state=$(strain_field "$out" 8) facts=$(strain_field "$out" 11)"
+    fi
+}
+
+# PROJ-FACTS-SYMLINK: GT worktree whose .hivemind/facts folder is a symlink to an external folder
+# holding a matching facts file → field 11 no (folder-chain containment fails).
+assert_proj_facts_symlink_folder() {
+    local name="PROJ-FACTS-SYMLINK:symlinked-facts-folder-field11-no"
+    ensure_proj_workdir; local wd="$PROJ_WORKDIR/factssymlink"
+    mkdir -p "$wd/external"
+    local branch="strain/$GT_BROOD_ID/factssymlink" sid="$GT_BROOD_ID--factssymlink"
+    local wt="$wd/wt"
+    gt_add_worktree "" "$branch" "$wt"
+    printf '{}\n' > "$wd/external/$PROJ_FACTS_NAME"
+    mkdir -p "$wt/.hivemind"
+    ln -s "$wd/external" "$wt/.hivemind/facts"
+    local manifest="$wd/manifest.json"
+    write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
+
+    local out rc=0
+    out="$(run_project "$manifest")" || rc=$?
+    if [[ "$rc" -eq 0 && "$(strain_field "$out" 11)" == "no" ]]; then
+        pass "$name" "exit 0; symlinked facts folder -> field 11 no"
+    else
+        failed "$name" "rc=$rc facts=$(strain_field "$out" 11)"
     fi
 }
 
@@ -3205,6 +3343,11 @@ assert_proj_rekey_branch_switched
 assert_proj_detached_head_located
 assert_proj_live_branch_emitted
 assert_proj_live_branch_detached
+assert_proj_facts_yes
+assert_proj_facts_no
+assert_proj_facts_no_worktree
+assert_proj_facts_outside_checkout
+assert_proj_facts_symlink_folder
 assert_proj_malformed_run_status
 assert_proj_injection_state_current
 assert_proj_metachar_worktree
@@ -3655,7 +3798,9 @@ GH_EOF
     local ok=no
     if printf '%s' "$out" | jq -e \
         --arg id "$COLLECT_BROOD_ID" \
+        --arg live "$derived_branch" \
         '.broods[0].strains[0].session=="dead"
+         and .broods[0].strains[0].branch==$live
          and .broods[0].strains[0].pr.state=="merged"
          and .broods[0].strains[0].pr.number==4242
          and .broods[0].strains[0].derived_status=="complete"' >/dev/null 2>&1; then
@@ -3664,7 +3809,7 @@ GH_EOF
     git -C "$root" worktree remove --force "$wt" 2>/dev/null || true
     rm -rf "$gh_stub" "$tmp"
     if [[ "$rc" -eq 0 && "$ok" == "yes" && "$recorded_head" == "$derived_branch" ]]; then
-        pass "$name" "exit 0; PR probe --head=$recorded_head (derived live branch, NOT scratch '$scratch_branch'); dead+merged -> complete"
+        pass "$name" "exit 0; PR probe --head=$recorded_head and display branch = derived live branch (NOT scratch '$scratch_branch'); dead+merged -> complete"
     else
         failed "$name" "rc=$rc ok=$ok recorded_head=[$recorded_head] expected=[$derived_branch] out=[$out]"
     fi
@@ -3748,6 +3893,102 @@ GH_EOF
     fi
 }
 
+# ── COLLECT-FACTS: script-engine child — detached worktree, no ledger, started-evidence by facts file ──
+# A script-engine child boots on a detached HEAD (no live branch), writes no run ledger, and its
+# gather-facts output file is its started-evidence. New manifests carry no per-strain branch.
+# collect_facts_case <facts:yes|no> builds that strain with a real alive tmux session and echoes
+# three lines: made_session (yes|no), the collector exit code, and the compact collector JSON.
+collect_facts_case() {
+    local with_facts="$1"
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local root="$tmp/repo"; mkdir -p "$root"
+    collect_seed_repo "$root"
+    local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
+    mkdir -p "$brood_dir"
+    local sid="$COLLECT_BROOD_ID--api" sess="$COLLECT_BROOD_ID-api-facts-$with_facts"
+    local wt="$root/wt-api"
+    git -C "$root" worktree add -q --detach "$wt" HEAD 2>/dev/null
+    if [[ "$with_facts" == "yes" ]]; then
+        mkdir -p "$wt/.hivemind/facts"
+        printf '{}\n' > "$wt/.hivemind/facts/facts-20261024T101500Z-0123456789ab.json"
+    fi
+    jq -n \
+        --arg brood_id "$COLLECT_BROOD_ID" --arg wt "$wt" --arg sid "$sid" --arg sess "$sess" \
+        '{ manifest_version:4, brood_id:$brood_id, created_at:"2026-06-01T00:00:00Z",
+           base:"main", overlap_risk:"low",
+           strains:[{name:"api", description:"d", worktree_path:$wt,
+                     tmux_session:$sess, status:"running",
+                     run:{suggested_id:$sid, workflow_hint:"standard-delivery"}}],
+           merge_order:[] }' > "$brood_dir/manifest.json"
+    local made_session=no
+    if tmux new-session -d -s "$sess" 2>/dev/null; then made_session=yes; fi
+    local out rc=0
+    out="$( cd "$root" && bash "$COLLECT_SCRIPT" 2>/dev/null )" || rc=$?
+    [[ "$made_session" == "yes" ]] && tmux kill-session -t "$sess" 2>/dev/null || true
+    git -C "$root" worktree remove --force "$wt" 2>/dev/null || true
+    rm -rf "$tmp"
+    printf '%s\n%s\n%s\n' "$made_session" "$rc" "$(printf '%s' "$out" | jq -c . 2>/dev/null)"
+}
+
+# COLLECT-FACTS-RUNNING: alive + no ledger + facts file → derived running; claimed column MISSING;
+# branch shows the live-branch sentinel MISSING (detached HEAD, no manifest branch).
+assert_collect_facts_running() {
+    local name="COLLECT-FACTS-RUNNING:alive-no-ledger-facts-file-derives-running"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        skip "$name" "collect needs jq+git; skipping (missing dep)"
+        return
+    fi
+    if ! command -v tmux >/dev/null 2>&1; then
+        skip "$name" "collect facts case needs a real tmux session to observe alive; skipping (no tmux)"
+        return
+    fi
+    local made_session rc out
+    { IFS= read -r made_session; IFS= read -r rc; IFS= read -r out; } < <(collect_facts_case yes)
+    if [[ "$made_session" != "yes" ]]; then
+        skip "$name" "could not create a tmux session (no tmux server); skipping"
+        return
+    fi
+    if [[ "$rc" -eq 0 ]] && printf '%s' "$out" | jq -e \
+        '.broods[0].strains[0].session=="alive"
+         and .broods[0].strains[0].workflow_state=="MISSING"
+         and .broods[0].strains[0].branch=="MISSING"
+         and .broods[0].strains[0].derived_status=="running"
+         and .broods[0].summary.running==1' >/dev/null 2>&1; then
+        pass "$name" "exit 0; alive + no ledger + facts file -> running; branch MISSING (detached, live branch)"
+    else
+        failed "$name" "rc=$rc out=[$out]"
+    fi
+}
+
+# COLLECT-FACTS-NEITHER: alive + no ledger + no facts file → still derives starting.
+assert_collect_facts_neither_starting() {
+    local name="COLLECT-FACTS-NEITHER:alive-no-ledger-no-facts-derives-starting"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        skip "$name" "collect needs jq+git; skipping (missing dep)"
+        return
+    fi
+    if ! command -v tmux >/dev/null 2>&1; then
+        skip "$name" "collect facts case needs a real tmux session to observe alive; skipping (no tmux)"
+        return
+    fi
+    local made_session rc out
+    { IFS= read -r made_session; IFS= read -r rc; IFS= read -r out; } < <(collect_facts_case no)
+    if [[ "$made_session" != "yes" ]]; then
+        skip "$name" "could not create a tmux session (no tmux server); skipping"
+        return
+    fi
+    if [[ "$rc" -eq 0 ]] && printf '%s' "$out" | jq -e \
+        '.broods[0].strains[0].session=="alive"
+         and .broods[0].strains[0].workflow_state=="MISSING"
+         and .broods[0].strains[0].branch=="MISSING"
+         and (.broods[0].strains[0].derived_status|startswith("starting"))
+         and .broods[0].summary.running==0' >/dev/null 2>&1; then
+        pass "$name" "exit 0; alive + neither ledger nor facts file -> starting"
+    else
+        failed "$name" "rc=$rc out=[$out]"
+    fi
+}
+
 echo ''
 echo '=== brood-status-collect.sh collection-loop entrypoint tests (#186, ADR-0020) ==='
 assert_collect_empty
@@ -3761,6 +4002,8 @@ assert_collect_alive_unstarted_starting
 assert_collect_legacy_no_pointer_running
 assert_collect_pr_probe_uses_live_branch
 assert_collect_detached_no_false_failed
+assert_collect_facts_running
+assert_collect_facts_neither_starting
 
 echo ''
 echo '=== Summary ==='

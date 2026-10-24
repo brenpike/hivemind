@@ -17,11 +17,21 @@
 #
 # SINGLE RESPONSIBILITY: project + validate the two workflow-state scalars (run.status and
 # state.current) from a CONFINED child run-ledger path. The ledger is JSON, parsed READ-ONLY
-# with jq. This file sources nothing and writes nothing — pure projection.
+# with jq. This file sources nothing and writes nothing — pure projection. It also holds the
+# second started-evidence source, hivemind_detect_facts_evidence (end of file): a gather-facts
+# output file in the child worktree, for script-engine children that write no run ledger.
+#
+# BOUNDED RESIDUAL (facts evidence): hivemind_detect_facts_evidence counts ANY regular,
+# non-symlink file whose NAME matches the gather-facts output shape. A facts file committed in a
+# hostile base ref (force-added past the .hivemind/ gitignore) and materialized by
+# `git worktree add` therefore counts as started-evidence before the child runs. Accepted: the
+# signal is display only — it can only lift an alive strain out of the `starting` demotion gate to
+# `running`; it never marks a strain complete, never hides a dead session, and no file content is
+# ever read or emitted.
 #
 # DATA-BOUNDARY (MANDATORY): a child run-ledger (`<worktree>/.hivemind/runs/<id>/state.json`)
-# is UNTRUSTED, attacker-controllable bytes — a brood child runs detached
-# --dangerously-skip-permissions, so its ledger contents are adversary-influenced. These
+# is UNTRUSTED, attacker-controllable bytes — a brood child runs detached, and child content
+# stays adversary-influenced whatever its permission mode, so its ledger contents are too. These
 # functions NEVER echo raw ledger bytes: they emit ONLY a value that passed strict validation,
 # or one of the fixed tokens MISSING / MALFORMED. The caller is expected to have already
 # CONFINED the ledger path (containment + allowlist) before calling; these functions add the
@@ -259,7 +269,8 @@ hivemind_project_state_current() {
 # containment.sh. (Both current callers already source in that order.)
 #
 # DATA-BOUNDARY (MANDATORY): the child run-ledger is UNTRUSTED, attacker-controllable bytes (a
-# brood child runs detached --dangerously-skip-permissions). This function NEVER echoes raw
+# brood child runs detached; child content stays adversary-influenced whatever its permission
+# mode). This function NEVER echoes raw
 # ledger bytes: each emitted scalar is ONLY a value that passed the _content projectors' strict
 # in-jq validation, or one of the fixed tokens MISSING / MALFORMED. Confinement is enforced here
 # (containment + leaf/NUL/ITEM-4 guards) so neither caller has to reimplement it.
@@ -381,4 +392,58 @@ hivemind_read_confined_state_current() {
     printf 'MISSING\nMISSING\n'
     return 0
   fi
+}
+
+# hivemind_detect_facts_evidence <worktree_root>
+#
+# STARTED-EVIDENCE for script-engine children. A script-engine run writes no run ledger, but its
+# first step (hivemind:gather-facts) publishes `.hivemind/facts/facts-<UTC>-<random>.json` inside
+# the child worktree. This function prints `yes` when a REGULAR, NON-SYMLINK file whose name has
+# the exact gather-facts output shape
+#   facts-<8 digits>T<6 digits>Z-<12 lowercase hex>.json
+# sits DIRECTLY in `<worktree_root>/.hivemind/facts`, and `no` otherwise. It reads NO file
+# content: only names and file types. A gather-facts temp file (`.facts-XXXXXX`), a directory or
+# symlink carrying a matching name, a non-matching name, or a nested file never counts.
+#
+# CALLER CONTRACT: the caller MUST source containment.sh BEFORE calling — the folder chain is
+# checked by hivemind_assert_contained (defined there). <worktree_root> MUST be a script-derived,
+# trusted, git-reported worktree root (brood-status's ground-truth worktree, spawn-brood's
+# S_WT[idx]) — NEVER a manifest/child-supplied path.
+#
+# FOLDER CHAIN: hivemind_assert_contained walks `.hivemind` and `.hivemind/facts`, rejecting a
+# symlinked component and any existing component that canonicalizes outside the worktree. A
+# reject, an absent folder, or a non-directory folder => `no`.
+#
+# OUTPUT GRAMMAR: exactly one line, `yes` or `no`. Never a path, never file content.
+hivemind_detect_facts_evidence() {
+  local worktree_root="$1"
+  local digit='[0123456789]'
+  local hex='[0123456789abcdef]'
+
+  local canon_wt
+  if ! canon_wt="$(hivemind_assert_contained "$worktree_root" ".hivemind/facts" 2>/dev/null)"; then
+    printf 'no\n'
+    return 0
+  fi
+  local facts_dir="$canon_wt/.hivemind/facts"
+  if [ -L "$facts_dir" ] || [ ! -d "$facts_dir" ]; then
+    printf 'no\n'
+    return 0
+  fi
+
+  local facts_entry facts_name
+  for facts_entry in "$facts_dir"/facts-*.json; do
+    facts_name="${facts_entry##*/}"
+    # shellcheck disable=SC2254
+    case "$facts_name" in
+      facts-$digit$digit$digit$digit$digit$digit$digit$digit"T"$digit$digit$digit$digit$digit$digit"Z-"$hex$hex$hex$hex$hex$hex$hex$hex$hex$hex$hex$hex".json") : ;;
+      *) continue ;;
+    esac
+    [ -L "$facts_entry" ] && continue
+    [ -f "$facts_entry" ] || continue
+    printf 'yes\n'
+    return 0
+  done
+  printf 'no\n'
+  return 0
 }
