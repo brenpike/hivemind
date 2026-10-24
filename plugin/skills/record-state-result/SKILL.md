@@ -68,6 +68,11 @@ epoch (`.plan.epoch`), and every appended event — for this and every other sta
 stamped with the current `plan_epoch`. The caller supplies NOTHING for this: it is entirely
 engine-maintained, with no inputs-file field to set it.
 
+Every appended event is also stamped with a top-level, engine-written `head`: the full object
+id printed by plain `git rev-parse --verify -q HEAD^{commit}`, run in the checkout at append
+time, or JSON null when HEAD has no commit. It is never read from the inputs file, so a `head`
+key under `outputs` stays inside `outputs` and cannot set or override the top-level `head`.
+
 ## Inputs JSON
 
 The script owns deterministic read -> validate -> mutate -> atomic-write; the navigator

@@ -3,8 +3,8 @@
 # containment.sh — shared symlink-write-escape containment idiom for the three
 # committed hivemind run-ledger / brood writers (init-run-ledger, record-state-result,
 # spawn-brood); it also provides the ledger-read leaf guard (hivemind_assert_ledger_contained)
-# for the ledger-reading engines (mark-intent-fallback, record-state-result, next-wave),
-# completing leaf-symmetry across inputs-file / write-target / ledger-read leaves.
+# for the ledger-reading engines (mark-intent-fallback, record-state-result, next-wave,
+# gate-check), completing leaf-symmetry across inputs-file / write-target / ledger-read leaves.
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: each caller sources it by absolute
 # path derived from its OWN script_dir (`. "$plugin_root/skills/_shared/containment.sh"`).
@@ -231,7 +231,7 @@ hivemind_assert_file_contained() {
 # hivemind_assert_ledger_contained <raw_repo_root> <ledger_file_path>
 #
 # LEDGER-READ leaf guard for the ledger-reading engines (mark-intent-fallback,
-# record-state-result, next-wave). Those engines read the run-ledger state.json via
+# record-state-result, next-wave, gate-check). Those engines read the run-ledger state.json via
 # [ -f "$ledger" ], jq -e . "$ledger", and jq -r '.run.id' "$ledger" — all of which FOLLOW
 # SYMLINKS. Their existing hivemind_assert_contained "$repo_root" ".hivemind/runs/$run_id"
 # guard validates the chain only DOWN TO the <run_id> run-dir, NOT the state.json leaf below
