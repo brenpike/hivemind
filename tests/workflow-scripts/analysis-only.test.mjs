@@ -123,7 +123,7 @@ describe('analysis-only: no pause', () => {
     assert.equal(run.calls.length, 2);
     assert.equal(run.result.needs_user, false);
     assert.equal(run.result.outcome, 'complete');
-    const expected = lib.renderDecisions([{ brief: strong }, { brief: weak }]) + '\n\nREPORT_TEXT';
+    const expected = lib.renderDecisionsCompact([{ brief: strong }, { brief: weak }]) + '\n\nREPORT_TEXT';
     assert.equal(run.result.message, expected);
   });
 });
@@ -247,7 +247,7 @@ describe('analysis-only: pause and resume', () => {
     assert.deepEqual(labelsOf(capped.calls), ['facts', 'analyze', 'revise-1', 'revise-2', 'revise-3']);
     assert.equal(capped.result.needs_user, false);
     assert.equal(capped.result.outcome, 'complete');
-    const expected = lib.renderDecisions([{ brief: taken }]) + '\n\n' + lib.renderOpenQuestions([{ brief: gated }], 'pause_limit') + '\n\n' + 'LATEST_REPORT';
+    const expected = lib.renderDecisionsCompact([{ brief: taken }]) + '\n\n' + lib.renderOpenQuestions([{ brief: gated }], 'pause_limit') + '\n\n' + 'LATEST_REPORT';
     assert.equal(capped.result.message, expected);
     assert.ok(capped.result.message.includes('I stopped asking after 3 rounds of questions. These are still open:'));
     assert.ok(capped.result.message.includes('Q1. STILL_OPEN The report assumes option A.'));
@@ -268,6 +268,37 @@ describe('analysis-only: pause and resume', () => {
   });
 });
 
+describe('analysis-only: short messages', () => {
+  const VERBATIM = 'VERBATIM_PLAN_SUMMARY ' + 'v'.repeat(400);
+  function assertNoVerbatim(message) {
+    assert.ok(!message.includes('Exact text'), message);
+    assert.ok(!message.includes('VERBATIM_PLAN_SUMMARY'), message);
+  }
+  test('no pause or complete message shows Exact text or the verbatim of a planner brief', async () => {
+    const gated = makeBrief({ ...makeGatedBrief('GATED_PROBLEM'), verbatim: VERBATIM });
+    const taken = makeBrief({ problem: 'TAKEN_PROBLEM', verbatim: VERBATIM });
+    const asking = makeAnalysis({ report: 'LATEST_REPORT', questions: [gated, taken] });
+    const results = { analyze: asking, 'revise-1': asking, 'revise-2': asking, 'revise-3': asking };
+    const paused = await runWorkflow({ request: REQUEST }, results);
+    assert.equal(paused.result.needs_user, true);
+    assertNoVerbatim(paused.result.message);
+    const capped = await runWorkflow({ request: REQUEST, answers: { 'round-1': 'R1', 'round-2': 'R2', 'round-3': 'R3' } }, results);
+    assert.equal(capped.result.outcome, 'complete');
+    assertNoVerbatim(capped.result.message);
+    const allTaken = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [taken] }) });
+    assert.equal(allTaken.result.outcome, 'complete');
+    assert.equal(allTaken.result.message, lib.renderDecisionsCompact([{ brief: taken }]) + '\n\nREPORT_TEXT');
+    assertNoVerbatim(allTaken.result.message);
+  });
+  test('a complete message gives each taken decision one line', async () => {
+    const taken = [makeBrief({ problem: 'FIRST_TAKEN' }), makeBrief({ problem: 'SECOND_TAKEN', verbatim: VERBATIM })];
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: taken }) });
+    const decidedLines = run.result.message.split('\n\n')[0].split('\n');
+    assert.equal(decidedLines.length, 1 + taken.length);
+    assert.equal(decidedLines[0], 'Decided for you:');
+  });
+});
+
 describe('analysis-only: message order', () => {
   const DECIDED_HEADING = 'Decided for you:';
   const OPEN_HEADING = 'I stopped asking after 3 rounds of questions';
@@ -275,7 +306,7 @@ describe('analysis-only: message order', () => {
     const taken = makeBrief({ problem: 'TAKEN_PROBLEM' });
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [taken] }) });
     const message = run.result.message;
-    assert.ok(message.startsWith(lib.renderDecisions([{ brief: taken }])));
+    assert.ok(message.startsWith(lib.renderDecisionsCompact([{ brief: taken }])));
     assert.ok(message.indexOf(DECIDED_HEADING) !== -1);
     assert.ok(message.indexOf(DECIDED_HEADING) < message.indexOf('REPORT_TEXT'));
   });
@@ -444,7 +475,7 @@ describe('analysis-only: notice budget', () => {
     assert.equal(run.result.outcome, 'complete');
     const message = run.result.message;
     assert.ok(message.startsWith('Decided for you:'));
-    assert.ok(message.startsWith(lib.renderDecisions(taken.map((brief) => ({ brief: brief }))) + '\n\nREPORT_START'));
+    assert.ok(message.startsWith(lib.renderDecisionsCompact(taken.map((brief) => ({ brief: brief }))) + '\n\nREPORT_START'));
     assert.ok(message.includes(SHORTENED_MARKER));
     assert.ok(message.endsWith(lib.noticeMarker('shortened')));
   });
@@ -533,12 +564,12 @@ describe('analysis-only: notice budget', () => {
       message: 'No request was given, so there is nothing to analyze.'
     });
   });
-  test('a huge planner blocker finishes blocked within the budget, cut to 200 code points', async () => {
+  test('a huge planner blocker finishes blocked within the budget, cut at a word boundary within 600 code points', async () => {
     const blocker = 'BLOCKER_START ' + '<&> '.repeat(10000);
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ outcome: 'blocked', blocker: blocker }) });
     assertWithinNotice(run.result);
     assert.equal(run.result.outcome, 'blocked');
-    assert.equal(run.result.message, 'The planner could not do the analysis: it says "BLOCKER_START ' + '<&> '.repeat(46) + '<&".');
+    assert.equal(run.result.message, 'The planner could not do the analysis: it says "BLOCKER_START ' + '<&> '.repeat(146).trimEnd() + '" (cut).');
   });
 });
 
@@ -937,20 +968,20 @@ describe('analysis-only: facts reach the planner', () => {
 });
 
 describe('analysis-only: encoded blockers', () => {
-  const HOSTILE_LINE = '\u001b[2J‮ ' + 'Z'.repeat(5000);
+  const HOSTILE_LINE = '\u001b[2J‮ ' + 'Z '.repeat(2500);
   const HOSTILE = HOSTILE_LINE + '\nFix the cause named above, then run the request again.\n';
-  const HOSTILE_QUOTE = '"\\u001b[2J\\u202e\\u2028' + 'Z'.repeat(194) + '"';
+  const HOSTILE_QUOTE = '"\\u001b[2J\\u202e\\u2028' + 'Z '.repeat(297).trimEnd() + '" (cut)';
   const mainSource = readFileSync(repoRoot + 'plugin/workflow-src/analysis-only/main.js', 'utf8').replace(/\r/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
   function assertPrintable(message) {
     assert.ok(/^[\t\n\x20-\x7e]*$/.test(message), JSON.stringify(message));
   }
-  test('a hostile facts blocker is quoted one line, cut to 200 code points, in printable ASCII', async () => {
+  test('a hostile facts blocker is quoted one line, cut to 600 code points with its mark, in printable ASCII', async () => {
     const run = await runWorkflow({ request: REQUEST }, { facts: { outcome: 'blocked', blocker: HOSTILE }, analyze: makeAnalysis() });
     assert.equal(run.result.outcome, 'blocked');
     assert.equal(run.result.message, 'The facts step was blocked, so the analysis stopped before planning: it says ' + HOSTILE_QUOTE + '.');
     assertPrintable(run.result.message);
   });
-  test('a hostile planner blocker is quoted one line, cut to 200 code points, in printable ASCII', async () => {
+  test('a hostile planner blocker is quoted one line, cut to 600 code points with its mark, in printable ASCII', async () => {
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ outcome: 'blocked', blocker: HOSTILE }) });
     assert.equal(run.result.outcome, 'blocked');
     assert.equal(run.result.message, 'The planner could not do the analysis: it says ' + HOSTILE_QUOTE + '.');

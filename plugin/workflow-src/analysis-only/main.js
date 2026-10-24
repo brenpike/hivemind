@@ -87,10 +87,11 @@
  *   'reply_size'.
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
- *   cut to maxExcerptLength() code points and encoded by
- *   encodeUntrustedText, or 'it gave no reason.' when it has none. So a
- *   control character, an escape sequence, a bidi mark or a line feed in
- *   it never reaches the user raw.
+ *   quoted whole up to maxReasonLength() code points, 600, else cut by
+ *   cutAtBoundary at a sentence or word boundary with the mark ' (cut)'
+ *   after the quote, and encoded by encodeUntrustedText, or 'it gave no
+ *   reason.' when it has none. So a control character, an escape sequence,
+ *   a bidi mark or a line feed in it never reaches the user raw.
  *   Open questions never end it blocked: only a missing request, a bad
  *   trunk or references arg, a facts or scan stop, or a planner result it
  *   cannot use does.
@@ -109,12 +110,13 @@
  *   is by design, not a defect (ADR-0036 decision 13).
  *   Every message is a list of blocks, highest priority first, which
  *   result.js fits to the completion notice (ADR-0036 decision 15). A pause
- *   message is one block: the questions with any decided-for-you block,
- *   with renderQuestionsCompact as its compact form. A complete message is
- *   the decided-for-you block, with renderDecisionsCompact as its compact
- *   form, then any open-questions block, then the report last, the only
- *   block that may be shortened. A blocked message is one block that may be
- *   shortened.
+ *   message is one block: the questions with one line per taken decision,
+ *   with renderQuestionsCompact as its compact form. No ask is marked
+ *   exact, so a question never shows the verbatim of its brief. A complete
+ *   message is the decided-for-you block as renderDecisionsCompact alone,
+ *   one line per decision with no verbatim, then any open-questions block,
+ *   then the report last, the only block that may be shortened. A blocked
+ *   message is one block that may be shortened.
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -296,7 +298,7 @@ function finishBlocked(message) {
 function finishComplete(report, openQuestions, taken) {
   const blocks = [];
   if (taken.length > 0) {
-    blocks.push({ text: renderDecisions(taken), compact: renderDecisionsCompact(taken) });
+    blocks.push({ text: renderDecisionsCompact(taken) });
   }
   if (openQuestions !== '') {
     blocks.push({ text: openQuestions });
