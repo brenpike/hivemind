@@ -298,6 +298,9 @@ case "$brood_id" in
   *[!a-z0-9-]*) blocker "generated brood-id contains a byte outside [a-z0-9-]: $brood_id" ;;
 esac
 
+# By decision, neither the inputs file nor any field in it has a byte limit. Rationale: the
+# ADR-0037 slice 4 residual "Spawn inputs carry no byte limits" in
+# docs/adr/0037-standard-delivery-on-script-engine.md.
 # Parse top-level scalars into inert variables. Any inputs `brood_id` is intentionally NOT
 # read — the brood-id is generated above, not caller-supplied.
 base="$(jq -r '.base // ""' "$INPUTS_FILE")"
@@ -1211,6 +1214,8 @@ done
 # Numbers/booleans/null/arrays are emitted as their JSON TYPES (manifest_version a number,
 # merged:false a boolean, pr:null, rebased_after:[]), never stringified. Field names MUST
 # NOT be renamed (brood-status consumes them).
+# Each free-text --arg here is subject to the per-argument limit (MAX_ARG_STRLEN); the ADR-0037
+# slice 4 residual "Spawn inputs carry no byte limits" covers it.
 # The launched sessions are about to be recorded in the manifest; the interruption
 # guard is no longer needed (and must not fire over the manifest write itself, which
 # has its own recovery: path).
