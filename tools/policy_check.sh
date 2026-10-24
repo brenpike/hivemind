@@ -3130,8 +3130,16 @@ mark_time 'CHECK15'
 #   * exactly `Read(~/.claude/plugins/cache/<marketplace>/<plugin>/**)`, where
 #     <marketplace> is .name of .claude-plugin/marketplace.json and <plugin> is
 #     the name of its single plugins[] entry whose source is ./plugin; or
-#   * `Edit(.hivemind/<p>)`, where <p> is non-empty, uses only
-#     [A-Za-z0-9._*/-], has no `..` segment and no leading `/`.
+#   * exactly `Edit(<glob>)`, where <glob> is the `Edit` glob that the
+#     "Inert Inputs-File Navigator Pattern" section of security-policy.md lists
+#     on THIS skill's own `hivemind:<name>` covered-set line. The doc is the
+#     ground truth: a skill not listed there may carry no Edit entry, and a
+#     listed skill only its own glob, never another navigator's. Each listed
+#     glob must itself be `.hivemind/<dirs>/<prefix>*<suffix>`: no wildcard in
+#     a directory segment, exactly one `*`, a prefix and a suffix that each hold
+#     a letter or digit, no `.` or `..` segment. A listed glob that fails this
+#     shape is a finding and admits nothing, so widening the doc to
+#     `.hivemind/**` or `.hivemind/*` turns this check red.
 # Every other file-tool entry is a finding. A new file tool spelling or a new
 # path form is a finding until this allowlist names it.
 #
@@ -3139,10 +3147,16 @@ mark_time 'CHECK15'
 # block-list form and the inline `[...]` or plain-string form. Any text from a
 # whitespace-`#` onward is stripped, so a trailing comment never hides or
 # narrows an entry. Inline items split on commas and whitespace outside
-# parentheses and quotes. An inline value that opens a flow sequence without
-# closing it on the same line is a finding, not an empty list. The tool name
-# is the leading run of ASCII letters, digits and `_`, so `Read Write` and
-# `Read (x)` classify as Read.
+# parentheses and quotes. The parser is FAIL-CLOSED: a form it does not read is
+# a finding, never a silent skip. So each of these is a finding: an inline
+# value that opens a flow sequence without closing it on the same line; an
+# indented line under the key that is not a `- <entry>` list item (a
+# continuation of a multi-line scalar, a nested value, a block scalar body);
+# any other frontmatter line that holds the text `allowed-tools` (an indented,
+# quoted or flow-mapping key); and, for a non-exempt skill, an entry that is
+# not `<name>` or `<name>(<anything>)` with <name> drawn from ASCII letters,
+# digits, `_` and `-` (an anchor, alias, tag, block-scalar indicator, nested
+# list or `Read Write` item).
 #
 # EXEMPTIONS are by path: the executor skills listed in
 # CHECK16_EXEMPT_SKILLS keep their bare entries until their own decision. An
@@ -3151,12 +3165,15 @@ mark_time 'CHECK15'
 #
 # FAIL-CLOSED. An unreadable or malformed marketplace manifest, a missing or
 # non-identifier marketplace name, no single ./plugin entry with an identifier
-# name, or zero discovered skills is a finding, never a pass.
+# name, zero discovered skills, or zero navigator globs read from
+# security-policy.md is a finding, never a pass.
 #
 # RESIDUALS. A file tool reached through an MCP server or a future built-in
-# with another name is not a file tool here. A frontmatter key spelled other
-# than `allowed-tools` at column 0 is not read. A multi-line YAML scalar entry
-# is read as its first line only.
+# with another name is not a file tool here. This is not a YAML parser: a key
+# spelled through YAML escape sequences, so that the text `allowed-tools` never
+# appears, is not seen. A navigator whose covered-set line is reworded so the
+# `(`Edit` glob `...`)` form no longer appears loses its allowed Edit entry,
+# which fails loudly on that skill rather than passing.
 echo ''
 echo '=== CHECK 16: Skill allowed-tools file-tool entries are scoped ==='
 
@@ -3164,13 +3181,19 @@ CHECK16_MARKETPLACE_MANIFEST="$REPO_ROOT/.claude-plugin/marketplace.json"
 CHECK16_POLICY_CITATION='security-policy.md "Skill File-Tool Grants"'
 CHECK16_ASCII_ALNUM='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 CHECK16_IDENTIFIER_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*\$"
-CHECK16_SCOPED_PATH_REGEX="^[${CHECK16_ASCII_ALNUM}._*/-]+\$"
+CHECK16_ENTRY_GRAMMAR_REGEX="^[${CHECK16_ASCII_ALNUM}_-]+([(].*[)])?\$"
+CHECK16_GLOB_LITERAL="[${CHECK16_ASCII_ALNUM}._-]*[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*"
+CHECK16_INPUTS_GLOB_REGEX="^[.]hivemind/([${CHECK16_ASCII_ALNUM}._-]+/)*${CHECK16_GLOB_LITERAL}[*]${CHECK16_GLOB_LITERAL}\$"
+CHECK16_NAVIGATOR_LINE_REGEX='^- `hivemind:([abcdefghijklmnopqrstuvwxyz0123456789-]+)` .*[(]`Edit` glob `([^`]+)`[)]'
 CHECK16_FILE_TOOLS=(Read Write Edit MultiEdit NotebookEdit Glob Grep)
 CHECK16_EXEMPT_SKILLS=(tdd refactor-to-depth plan-to-prd plan-interrogation create-handoff creep-spread)
 CHECK16_CACHE_READ_RULE=''
 CHECK16_NORMALIZED=''
 declare -a CHECK16_ENTRY_TEXTS=()
 declare -a CHECK16_ENTRY_LINES=()
+declare -a CHECK16_PARSE_ERROR_LINES=()
+declare -a CHECK16_PARSE_ERROR_TEXTS=()
+declare -A CHECK16_NAVIGATOR_GLOBS=()
 
 check16_found=false
 
@@ -3211,31 +3234,45 @@ check16_is_file_tool_name() {
     return 1
 }
 
-# check16_is_scoped_edit_entry ENTRY
-# Returns 0 when the normalized ENTRY is `Edit(.hivemind/<p>)` with <p>
-# non-empty, drawn only from [A-Za-z0-9._*/-], free of any `..` segment and not
-# starting with `/`, else 1.
-check16_is_scoped_edit_entry() {
-    local entry="$1"
-    if [[ "$entry" != 'Edit(.hivemind/'*')' ]]; then
+# check16_is_safe_inputs_glob GLOB
+# Returns 0 when GLOB is `.hivemind/<dirs>/<prefix>*<suffix>`: directory
+# segments without wildcards, exactly one `*` in the last segment, a prefix and
+# a suffix that each hold an ASCII letter or digit, and no `.` or `..` segment.
+# Returns 1 otherwise, so `.hivemind/**`, `.hivemind/*` and `.hivemind/*/x-*.json`
+# never pass.
+check16_is_safe_inputs_glob() {
+    local glob="$1"
+    if [[ ! "$glob" =~ $CHECK16_INPUTS_GLOB_REGEX ]]; then
         return 1
     fi
-    local scoped_path="${entry#'Edit(.hivemind/'}"
-    scoped_path="${scoped_path%')'}"
-    if [[ -z "$scoped_path" || ! "$scoped_path" =~ $CHECK16_SCOPED_PATH_REGEX ]]; then
-        return 1
-    fi
-    if [[ "$scoped_path" == /* || "/${scoped_path}/" == *'/../'* ]]; then
+    if [[ "/${glob}/" == *'/../'* || "/${glob}/" == *'/./'* ]]; then
         return 1
     fi
     return 0
 }
 
-# check16_entry_is_violation RAW
+# check16_entry_is_unrecognized RAW
+# Returns 0 when RAW, once normalized, is not `<name>` or `<name>(<anything>)`
+# with <name> drawn from ASCII letters, digits, `_` and `-`, else 1. An anchor,
+# alias, tag, block-scalar indicator, nested list item or a `Read Write` item
+# is unrecognized, so it cannot pass as a non-file tool.
+check16_entry_is_unrecognized() {
+    check16_normalize_entry "$1"
+    if [[ "$CHECK16_NORMALIZED" =~ $CHECK16_ENTRY_GRAMMAR_REGEX ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# check16_entry_is_violation RAW ALLOWED_GLOB
 # The single entry classifier: returns 0 when RAW, once normalized, names a
-# file tool (bare or with parentheses) in any form other than the two allowed
-# forms, else 1. With no resolved cache Read rule, no Read form is allowed.
+# file tool (bare or with parentheses) in any form other than the cache Read
+# rule or `Edit(ALLOWED_GLOB)`, else 1. ALLOWED_GLOB is the skill's own
+# navigator glob from security-policy.md, or empty when the skill has none, in
+# which case no Edit form is allowed. With no resolved cache Read rule, no Read
+# form is allowed.
 check16_entry_is_violation() {
+    local allowed_glob="${2:-}"
     check16_normalize_entry "$1"
     local entry="$CHECK16_NORMALIZED"
     local tool_name="${entry%%[!${CHECK16_ASCII_ALNUM}_]*}"
@@ -3245,7 +3282,57 @@ check16_entry_is_violation() {
     if [[ -n "$CHECK16_CACHE_READ_RULE" && "$entry" == "$CHECK16_CACHE_READ_RULE" ]]; then
         return 1
     fi
-    if check16_is_scoped_edit_entry "$entry"; then
+    if [[ -n "$allowed_glob" && "$entry" == "Edit(${allowed_glob})" ]]; then
+        return 1
+    fi
+    return 0
+}
+
+# check16_resolve_navigator_globs
+# Fills CHECK16_NAVIGATOR_GLOBS (skill name -> glob) from the `(`Edit` glob
+# `...`)` text on each `hivemind:<name>` line of the covered-set section of
+# security-policy.md. A listed glob that fails check16_is_safe_inputs_glob, or
+# a navigator listed twice, is a finding and admits nothing. Returns 1 after a
+# finding when the section is missing or lists no glob at all.
+check16_resolve_navigator_globs() {
+    local section_text section_line nav_name nav_glob
+    local -A seen_names=()
+    if [[ ! -f "$CHECK14_POLICY_DOC" || ! -r "$CHECK14_POLICY_DOC" ]]; then
+        add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
+            "security-policy.md is missing or unreadable, so no navigator inputs-file glob can be read and no Edit entry is allowed -- see ${CHECK16_POLICY_CITATION}"
+        return 1
+    fi
+    section_text="$(awk -v heading="$CHECK14_SECTION_HEADING" '
+        { sub(/\r$/, "") }
+        $0 == heading { in_section = 1; next }
+        in_section && /^### / { exit }
+        in_section { print }
+    ' "$CHECK14_POLICY_DOC")"
+    while IFS= read -r section_line; do
+        if [[ ! "$section_line" =~ $CHECK16_NAVIGATOR_LINE_REGEX ]]; then
+            continue
+        fi
+        nav_name="${BASH_REMATCH[1]}"
+        nav_glob="${BASH_REMATCH[2]}"
+        if [[ -n "${seen_names[$nav_name]:-}" ]]; then
+            unset 'CHECK16_NAVIGATOR_GLOBS[$nav_name]'
+            add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
+                "the '${CHECK14_SECTION_HEADING}' section lists hivemind:${nav_name} with an Edit glob more than once, so none of its globs is allowed -- list each navigator once -- see ${CHECK16_POLICY_CITATION}"
+            check16_found=true
+            continue
+        fi
+        seen_names[$nav_name]=true
+        if ! check16_is_safe_inputs_glob "$nav_glob"; then
+            add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
+                "the '${CHECK14_SECTION_HEADING}' section lists Edit glob '${nav_glob}' for hivemind:${nav_name}, which is not one inputs-file glob of the form .hivemind/<dirs>/<prefix>*<suffix>, so it is not allowed -- see ${CHECK16_POLICY_CITATION}"
+            check16_found=true
+            continue
+        fi
+        CHECK16_NAVIGATOR_GLOBS[$nav_name]="$nav_glob"
+    done <<< "$section_text"
+    if [[ "${#seen_names[@]}" -eq 0 ]]; then
+        add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
+            "the '${CHECK14_SECTION_HEADING}' section lists no navigator line with an Edit glob, so no Edit entry is allowed and this check cannot tell a navigator's own inputs file from any other path -- see ${CHECK16_POLICY_CITATION}"
         return 1
     fi
     return 0
@@ -3319,17 +3406,28 @@ check16_split_inline_value() {
     return 0
 }
 
+# check16_add_parse_error LINE TEXT
+# Appends one parse error and its file line number to the parse-error arrays.
+check16_add_parse_error() {
+    CHECK16_PARSE_ERROR_LINES+=("$1")
+    CHECK16_PARSE_ERROR_TEXTS+=("$2")
+    return 0
+}
+
 # check16_collect_entries SKILL_FILE
 # Replaces CHECK16_ENTRY_TEXTS and CHECK16_ENTRY_LINES with every raw
-# allowed-tools entry in SKILL_FILE's YAML frontmatter and its line number.
+# allowed-tools entry in SKILL_FILE's YAML frontmatter and its line number, and
+# CHECK16_PARSE_ERROR_LINES and CHECK16_PARSE_ERROR_TEXTS with every form the
+# collector does not read. It reports nothing itself, so the canary can run it.
 # Frontmatter bounds follow find_navigator_entry_line: it opens at the first
-# trimmed `---` line and closes at the next one. A trailing CR is stripped. An
-# unclosed inline flow sequence is a CHECK16 finding and sets check16_found.
+# trimmed `---` line and closes at the next one. A trailing CR is stripped.
 check16_collect_entries() {
     local skill_file="$1"
-    local textline value line_number=0 in_frontmatter=false in_list=false
+    local textline value line_number=0 in_frontmatter=false key_mode=''
     CHECK16_ENTRY_TEXTS=()
     CHECK16_ENTRY_LINES=()
+    CHECK16_PARSE_ERROR_LINES=()
+    CHECK16_PARSE_ERROR_TEXTS=()
     while IFS= read -r textline || [[ -n "$textline" ]]; do
         line_number=$((line_number + 1))
         textline="${textline%$'\r'}"
@@ -3344,15 +3442,20 @@ check16_collect_entries() {
         if [[ "$in_frontmatter" != true ]]; then
             continue
         fi
-        if [[ "$in_list" == true ]]; then
+        if [[ -n "$key_mode" ]]; then
             if [[ -z "$CHECK16_TRIMMED" || "$CHECK16_TRIMMED" == '#'* ]]; then
                 continue
             fi
-            if [[ "$CHECK16_TRIMMED" == '-' || "$CHECK16_TRIMMED" == '-'[[:space:]]* ]]; then
+            if [[ "$key_mode" == block && ( "$CHECK16_TRIMMED" == '-' || "$CHECK16_TRIMMED" == '-'[[:space:]]* ) ]]; then
                 check16_append_entry "${CHECK16_TRIMMED#-}" "$line_number"
                 continue
             fi
-            in_list=false
+            if [[ "$textline" == [[:space:]]* ]]; then
+                check16_add_parse_error "$line_number" \
+                    "an indented line under allowed-tools is not a '- <entry>' list item (a continuation of a multi-line value, a nested value or a block scalar body), so its text cannot be classified -- write each entry as its own '- <entry>' item"
+                continue
+            fi
+            key_mode=''
         fi
         if [[ "$textline" =~ ^allowed-tools[[:space:]]*:(.*)$ ]]; then
             value="${BASH_REMATCH[1]}"
@@ -3360,14 +3463,33 @@ check16_collect_entries() {
             check16_trim "$value"
             value="$CHECK16_TRIMMED"
             if [[ -z "$value" ]]; then
-                in_list=true
-            elif ! check16_split_inline_value "$value" "$line_number"; then
-                check16_found=true
-                add_finding 'CHECK16' "$skill_file" "$line_number" \
-                    "allowed-tools opens an inline flow sequence it does not close on the same line (\"${value}\"); its entries cannot be read, so write them as a block list or close the sequence -- see ${CHECK16_POLICY_CITATION}"
+                key_mode=block
+            else
+                key_mode=inline
+                if ! check16_split_inline_value "$value" "$line_number"; then
+                    check16_add_parse_error "$line_number" \
+                        "allowed-tools opens an inline flow sequence it does not close on the same line (\"${value}\"); its entries cannot be read, so write them as a block list or close the sequence"
+                fi
             fi
+            continue
+        fi
+        if [[ "$textline" == *allowed-tools* ]]; then
+            check16_add_parse_error "$line_number" \
+                "the text allowed-tools appears in a frontmatter line that is not a column-0 'allowed-tools:' key (an indented, quoted or flow-mapping key, or prose in another value), so it cannot be classified -- use a column-0 'allowed-tools:' key and keep the words out of other frontmatter values"
         fi
     done < "$skill_file"
+    return 0
+}
+
+# check16_report_parse_errors SKILL_FILE
+# Records a CHECK16 finding for every parse error the last collect recorded.
+check16_report_parse_errors() {
+    local skill_file="$1" error_index
+    for ((error_index = 0; error_index < ${#CHECK16_PARSE_ERROR_TEXTS[@]}; error_index++)); do
+        check16_found=true
+        add_finding 'CHECK16' "$skill_file" "${CHECK16_PARSE_ERROR_LINES[$error_index]}" \
+            "${CHECK16_PARSE_ERROR_TEXTS[$error_index]} -- see ${CHECK16_POLICY_CITATION}"
+    done
     return 0
 }
 
@@ -3424,15 +3546,28 @@ check16_has_bare_file_tool_entry() {
     return 1
 }
 
-# check16_scan_skill_file SKILL_FILE
-# Records a CHECK16 finding for every collected entry the classifier rejects.
+# check16_scan_skill_file SKILL_FILE ALLOWED_GLOB
+# Records a CHECK16 finding for every collected entry that is unrecognized or
+# that the classifier rejects. ALLOWED_GLOB is the skill's own navigator glob,
+# or empty.
 check16_scan_skill_file() {
-    local skill_file="$1" entry_index
+    local skill_file="$1" allowed_glob="${2:-}" entry_index allowed_edit_text
+    if [[ -n "$allowed_glob" ]]; then
+        allowed_edit_text="'Edit(${allowed_glob})', this skill's own inputs-file glob in security-policy.md"
+    else
+        allowed_edit_text="no Edit entry, because security-policy.md lists no inputs-file glob for this skill"
+    fi
     for ((entry_index = 0; entry_index < ${#CHECK16_ENTRY_TEXTS[@]}; entry_index++)); do
-        if check16_entry_is_violation "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
+        if check16_entry_is_unrecognized "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then
             check16_found=true
             add_finding 'CHECK16' "$skill_file" "${CHECK16_ENTRY_LINES[$entry_index]}" \
-                "allowed-tools entry '${CHECK16_NORMALIZED}' is a file-tool grant outside the two allowed forms ('${CHECK16_CACHE_READ_RULE}' or 'Edit(.hivemind/<path>)'); a skill entry is a live rule for the whole turn that loads it -- see ${CHECK16_POLICY_CITATION}"
+                "allowed-tools entry '${CHECK16_NORMALIZED}' is not a recognized tool entry ('<name>' or '<name>(...)'), so it cannot be classified -- write it as a plain tool entry -- see ${CHECK16_POLICY_CITATION}"
+            continue
+        fi
+        if check16_entry_is_violation "${CHECK16_ENTRY_TEXTS[$entry_index]}" "$allowed_glob"; then
+            check16_found=true
+            add_finding 'CHECK16' "$skill_file" "${CHECK16_ENTRY_LINES[$entry_index]}" \
+                "allowed-tools entry '${CHECK16_NORMALIZED}' is a file-tool grant outside the allowed forms ('${CHECK16_CACHE_READ_RULE}', and ${allowed_edit_text}); a skill entry is a live rule for the whole turn that loads it -- see ${CHECK16_POLICY_CITATION}"
         fi
     done
     return 0
@@ -3447,16 +3582,19 @@ if [[ "${#check16_skill_files[@]}" -eq 0 ]]; then
         "skill discovery found ZERO plugin/skills/*/SKILL.md files, which disarms this check rather than passing it -- see ${CHECK16_POLICY_CITATION}"
 fi
 
+check16_resolve_navigator_globs || check16_found=true
+
 if ! check16_resolve_cache_read_rule; then
     check16_found=true
 else
     for skill_file in "${check16_skill_files[@]}"; do
         skill_name="$(basename "$(dirname "$skill_file")")"
-        check16_collect_entries "$skill_file"
         if check16_is_exempt_skill "$skill_name"; then
             continue
         fi
-        check16_scan_skill_file "$skill_file"
+        check16_collect_entries "$skill_file"
+        check16_report_parse_errors "$skill_file"
+        check16_scan_skill_file "$skill_file" "${CHECK16_NAVIGATOR_GLOBS[$skill_name]:-}"
     done
 
     for exempt_skill in "${CHECK16_EXEMPT_SKILLS[@]}"; do
@@ -3474,6 +3612,7 @@ else
             continue
         fi
         check16_collect_entries "$exempt_skill_file"
+        check16_report_parse_errors "$exempt_skill_file"
         if ! check16_has_bare_file_tool_entry; then
             check16_found=true
             add_finding 'CHECK16' "$exempt_skill_file" 0 \
@@ -3483,29 +3622,99 @@ else
 fi
 
 # ── CHECK 16 DETECTION CANARY ──────────────────────────────────────────────
-# The entry classifier over fixed strings, in BOTH directions. A narrowed
-# file-tool list, a widened or narrowed allowed form, or a dropped
-# trailing-comment strip turns this run red while every skill still passes.
+# The entry classifier, the entry grammar, the inputs-glob shape and the
+# frontmatter collector over fixed inputs, in BOTH directions. A narrowed
+# file-tool list, a widened or narrowed allowed form, a dropped trailing-comment
+# strip, or a collector that skips a form it does not read turns this run red
+# while every skill still passes.
 
+check16_canary_finding() {
+    check16_found=true
+    add_finding 'CHECK16' 'tools/policy_check.sh' 0 "detection canary: $1"
+    return 0
+}
+
+# check16_expect_hit ENTRY [ALLOWED_GLOB]
 check16_expect_hit() {
-    if ! check16_entry_is_violation "$1"; then
-        check16_found=true
-        add_finding 'CHECK16' 'tools/policy_check.sh' 0 \
-            "detection canary: entry \"$1\" was not classified as a file-tool violation -- the file-tool list was narrowed or an allowed form widened"
+    if ! check16_entry_is_violation "$1" "${2:-}"; then
+        check16_canary_finding "entry \"$1\" with allowed glob \"${2:-}\" was not classified as a file-tool violation -- the file-tool list was narrowed or an allowed form widened"
     fi
     return 0
 }
 
+# check16_expect_miss ENTRY [ALLOWED_GLOB]
 check16_expect_miss() {
-    if check16_entry_is_violation "$1"; then
-        check16_found=true
-        add_finding 'CHECK16' 'tools/policy_check.sh' 0 \
-            "detection canary: entry \"$1\" was classified as a file-tool violation -- an allowed form was narrowed, the trailing-comment strip dropped, or a non-file tool is now treated as one"
+    if check16_entry_is_violation "$1" "${2:-}"; then
+        check16_canary_finding "entry \"$1\" with allowed glob \"${2:-}\" was classified as a file-tool violation -- an allowed form was narrowed, the trailing-comment strip dropped, or a non-file tool is now treated as one"
+    fi
+    return 0
+}
+
+check16_expect_unrecognized() {
+    if ! check16_entry_is_unrecognized "$1"; then
+        check16_canary_finding "entry \"$1\" passed the tool-entry grammar -- the grammar was widened"
+    fi
+    return 0
+}
+
+check16_expect_recognized() {
+    if check16_entry_is_unrecognized "$1"; then
+        check16_canary_finding "entry \"$1\" failed the tool-entry grammar -- the grammar was narrowed"
+    fi
+    return 0
+}
+
+check16_expect_unsafe_glob() {
+    if check16_is_safe_inputs_glob "$1"; then
+        check16_canary_finding "glob \"$1\" passed the inputs-file glob shape -- the shape was widened"
+    fi
+    return 0
+}
+
+check16_expect_safe_glob() {
+    if ! check16_is_safe_inputs_glob "$1"; then
+        check16_canary_finding "glob \"$1\" failed the inputs-file glob shape -- the shape was narrowed"
+    fi
+    return 0
+}
+
+# check16_count_doc_problems LABEL LINE...
+# Runs the collector over a frontmatter built from the LINE arguments and sets
+# CHECK16_DOC_PROBLEMS to its parse errors plus every entry that is
+# unrecognized or a violation with no allowed Edit glob.
+CHECK16_DOC_PROBLEMS=0
+check16_count_doc_problems() {
+    shift
+    local raw_entry
+    check16_collect_entries <(printf '%s\n' "$@")
+    CHECK16_DOC_PROBLEMS="${#CHECK16_PARSE_ERROR_TEXTS[@]}"
+    for raw_entry in "${CHECK16_ENTRY_TEXTS[@]}"; do
+        if check16_entry_is_unrecognized "$raw_entry" || check16_entry_is_violation "$raw_entry" ''; then
+            CHECK16_DOC_PROBLEMS=$((CHECK16_DOC_PROBLEMS + 1))
+        fi
+    done
+    return 0
+}
+
+check16_expect_doc_problem() {
+    check16_count_doc_problems "$@"
+    if [[ "$CHECK16_DOC_PROBLEMS" -eq 0 ]]; then
+        check16_canary_finding "frontmatter case '$1' produced no finding -- the collector skips a form it does not read"
+    fi
+    return 0
+}
+
+check16_expect_doc_clean() {
+    check16_count_doc_problems "$@"
+    if [[ "$CHECK16_DOC_PROBLEMS" -ne 0 ]]; then
+        check16_canary_finding "frontmatter case '$1' produced ${CHECK16_DOC_PROBLEMS} finding(s) -- the collector misreads a supported form"
     fi
     return 0
 }
 
 if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
+    check16_canary_glob='.hivemind/runs/.record-inputs-*.json'
+
     check16_expect_hit 'Read'
     check16_expect_hit 'Write   # x'
     check16_expect_hit 'Write(.hivemind/a.json)'
@@ -3518,15 +3727,64 @@ if [[ -n "$CHECK16_CACHE_READ_RULE" ]]; then
     check16_expect_hit 'NotebookEdit(.hivemind/a)'
     check16_expect_hit 'Edit(.hivemind/)'
     check16_expect_hit 'Edit(.hivemind/../x)'
+    check16_expect_hit 'Edit(.hivemind/**)' "$check16_canary_glob"
+    check16_expect_hit 'Edit(.hivemind/*)' "$check16_canary_glob"
+    check16_expect_hit 'Edit(.hivemind/molt-inputs-*.json)' "$check16_canary_glob"
+    check16_expect_hit "Edit(${check16_canary_glob})"
+    check16_expect_hit "Write(${check16_canary_glob})" "$check16_canary_glob"
 
     check16_expect_miss "$CHECK16_CACHE_READ_RULE"
     check16_expect_miss "${CHECK16_CACHE_READ_RULE}   # x"
-    check16_expect_miss 'Edit(.hivemind/runs/.record-inputs-*.json)'
+    check16_expect_miss "Edit(${check16_canary_glob})" "$check16_canary_glob"
+    check16_expect_miss "Edit(${check16_canary_glob})   # x" "$check16_canary_glob"
     check16_expect_miss 'Bash(git status *)'
     check16_expect_miss 'Skill'
     check16_expect_miss 'Agent(hivemind:x)'
     check16_expect_miss 'Monitor'
     check16_expect_miss 'LSP'
+
+    check16_expect_unrecognized '&tools'
+    check16_expect_unrecognized '*tools'
+    check16_expect_unrecognized '[Write]'
+    check16_expect_unrecognized '!!str Write'
+    check16_expect_unrecognized '|'
+    check16_expect_unrecognized '>-'
+    check16_expect_unrecognized '- Write'
+    check16_expect_unrecognized 'Read Write'
+    check16_expect_unrecognized 'Read (x)'
+    check16_expect_recognized 'Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh *)'
+    check16_expect_recognized 'Agent(hivemind:github-reviewer)'
+    check16_expect_recognized 'mcp__plugin_claude-mem_mcp-search__search'
+    check16_expect_recognized "$CHECK16_CACHE_READ_RULE"
+
+    check16_expect_safe_glob '.hivemind/runs/.record-inputs-*.json'
+    check16_expect_safe_glob '.hivemind/spawn-inputs.*.json'
+    check16_expect_unsafe_glob '.hivemind/**'
+    check16_expect_unsafe_glob '.hivemind/*'
+    check16_expect_unsafe_glob '.hivemind/*.json'
+    check16_expect_unsafe_glob '.hivemind/*/x-*.json'
+    check16_expect_unsafe_glob '.hivemind/a-**.json'
+    check16_expect_unsafe_glob '.hivemind/a-*-*.json'
+    check16_expect_unsafe_glob '.hivemind/../x-*.json'
+    check16_expect_unsafe_glob '.hivemind/./x-*.json'
+    check16_expect_unsafe_glob '/.hivemind/x-*.json'
+    check16_expect_unsafe_glob 'runs/.hivemind/x-*.json'
+    check16_expect_unsafe_glob '.hivemind/x-inputs.json'
+
+    check16_expect_doc_problem 'indented key' '---' 'name: x' '  allowed-tools: [Write]' '---'
+    check16_expect_doc_problem 'quoted key' '---' '"allowed-tools": [Write]' '---'
+    check16_expect_doc_problem 'flow-mapping frontmatter' '---' '{name: x, allowed-tools: [Write]}' '---'
+    check16_expect_doc_problem 'anchored inline value' '---' 'allowed-tools: &t [Write]' '---'
+    check16_expect_doc_problem 'block scalar' '---' 'allowed-tools: |' '  Write' '---'
+    check16_expect_doc_problem 'multi-line list item' '---' 'allowed-tools:' '  - Bash(x)' '    Write' '---'
+    check16_expect_doc_problem 'multi-line inline value' '---' 'allowed-tools: Bash(x)' '  Write' '---'
+    check16_expect_doc_problem 'unclosed flow sequence' '---' 'allowed-tools: [Bash(x),' '  Write]' '---'
+    check16_expect_doc_problem 'tagged list item' '---' 'allowed-tools:' '  - !!str Write' '---'
+    check16_expect_doc_problem 'CRLF bare entry' $'---\r' $'allowed-tools:\r' $'  - Write\r' $'---\r'
+    check16_expect_doc_clean 'block list' '---' 'name: x' 'allowed-tools:' '  - Bash(git status *)' "  - ${CHECK16_CACHE_READ_RULE}   # c" '  # a comment' '' 'shell: bash' '---' 'Body text may say allowed-tools: Write.'
+    check16_expect_doc_clean 'compact block list' '---' 'allowed-tools:' '- Skill' '- Monitor' '---'
+    check16_expect_doc_clean 'empty flow sequence' '---' 'allowed-tools: []' '---'
+    check16_expect_doc_clean 'inline flow sequence' '---' 'allowed-tools: [Bash(git log *), Agent(hivemind:x)]' 'shell: bash' '---'
 fi
 
 if [[ "$check16_found" == false ]]; then
