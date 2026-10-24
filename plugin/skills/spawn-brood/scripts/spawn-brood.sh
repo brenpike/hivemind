@@ -24,6 +24,15 @@
 # No branch is created: each worktree boots on a detached HEAD at the resolved base commit, and
 # the child's own planner names and creates its working branch.
 #
+# TARGET DISCIPLINE (twin of TARGET-TRUST in skills/enable-brood-remote/scripts/rc-brood.sh):
+#   tmux resolves a bare session name exact-first-then-PREFIX, so brood-<id>-api can resolve to a
+#   live sibling brood-<id>-api-x once api is gone. Every tmux operation on a strain session is
+#   therefore exact. Liveness probes use `has-session -t "=<session>"`. Readiness capture, the
+#   task paste, the submit Enter and every nudge address the `%N` pane id that
+#   resolve_strain_pane reads from `list-panes -s -t "=<session>"` right before use (exactly one
+#   active row whose session name is byte-equal, else fail closed). `=` is used only in
+#   target-SESSION contexts: on tmux 3.0a it fails as a target-PANE spec.
+#
 # INPUT (single positional argument — OQ4 staging-inputs transport):
 #   $1  Path to a JSON inputs file the navigator (SKILL.md) authored via the Write tool to a
 #       PER-INVOCATION mktemp-unique STAGING path UNDER .hivemind/ (e.g.
@@ -480,7 +489,7 @@ validate_ref "base" "$base" || exit 1
 
 for idx in $(seq 0 $((strain_count - 1))); do
   # 1d tmux session collision
-  if tmux has-session -t "${S_TMUX[$idx]}" 2>/dev/null; then
+  if tmux has-session -t "=${S_TMUX[$idx]}" 2>/dev/null; then
     printf 'blocker: tmux session %s already exists\n' "${S_TMUX[$idx]}" >&2; exit 1
   fi
   # 1d worktree path collision
@@ -848,12 +857,39 @@ done
 # Pass 3's verify_strain). Best-effort delete the buffer on EVERY failure path so an untrusted
 # task never persists in the shared tmux buffer. Returns 0 once the submit keystroke is sent; 1
 # only on a tmux command failure (dead pane / load / paste / send error), marking failed first.
+# resolve_strain_pane <session>: echo the `%N` pane id of the EXACT session's active pane (see
+# TARGET DISCIPLINE in the header). Lists panes in target-SESSION context with the `=` exact-match
+# prefix and reads EVERY row, never the first match. Succeeds only when exactly one row carries
+# the active flags `11`, its session name is byte-equal to <session>, and its pane id is `%N`.
+# Returns 1 with nothing on stdout otherwise: list-panes failed (session gone), zero or several
+# active rows, a foreign session name, or a malformed pane id.
+resolve_strain_pane() {
+  local expected_session="$1"
+  local TAB=$'\t'
+  local pane_rows="" r_session="" r_flags="" r_pane=""
+  local active_count=0 resolved_session="" resolved_pane=""
+  pane_rows="$(tmux list-panes -s -t "=$expected_session" -F '#{session_name}'"$TAB"'#{window_active}#{pane_active}'"$TAB"'#{pane_id}' 2>/dev/null)" \
+    || return 1
+  while IFS="$TAB" read -r r_session r_flags r_pane; do
+    if [ "$r_flags" = "11" ]; then
+      active_count=$((active_count + 1))
+      resolved_session="$r_session"
+      resolved_pane="$r_pane"
+    fi
+  done <<< "$pane_rows"
+  [ "$active_count" -eq 1 ] || return 1
+  [ "$resolved_session" = "$expected_session" ] || return 1
+  [[ "$resolved_pane" =~ ^%[0-9]+$ ]] || return 1
+  printf '%s\n' "$resolved_pane"
+}
+
 submit_strain() {
   local idx="$1"
   local tmux_session="${S_TMUX[$idx]}"
   local wt="${S_WT[$idx]}"
   local buffer_name="$tmux_session"   # session-unique named buffer (brood-<short>)
   local task_file="$wt/.hivemind/brood/task.md"
+  local pane_id=""
 
   if ! tmux load-buffer -b "$buffer_name" "$task_file" 2>/dev/null; then
     printf 'warning: tmux load-buffer failed for strain %s\n' "${S_NAME[$idx]}" >&2
@@ -861,7 +897,10 @@ submit_strain() {
     mark_failed "$idx"
     return 1
   fi
-  if ! tmux paste-buffer -d -p -b "$buffer_name" -t "$tmux_session" 2>/dev/null; then
+  # One resolution per submit: the paste and the submit Enter both go to this pane id. A failed
+  # resolution is a dead pane, reported on the paste-buffer warning line.
+  if ! pane_id="$(resolve_strain_pane "$tmux_session")" \
+    || ! tmux paste-buffer -d -p -b "$buffer_name" -t "$pane_id" 2>/dev/null; then
     printf 'warning: tmux paste-buffer failed for strain %s\n' "${S_NAME[$idx]}" >&2
     tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
     mark_failed "$idx"
@@ -879,7 +918,7 @@ submit_strain() {
   # Submit ONCE, after the settle. The settle is what makes this single Enter land as a submit
   # (not an in-composer newline). On a send-keys command failure (e.g. dead pane) clean up the
   # buffer, mark the strain failed, and return 1.
-  if ! tmux send-keys -t "$tmux_session" Enter 2>/dev/null; then
+  if ! tmux send-keys -t "$pane_id" Enter 2>/dev/null; then
     printf 'warning: tmux send-keys Enter failed for strain %s\n' "${S_NAME[$idx]}" >&2
     tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
     mark_failed "$idx"
@@ -958,6 +997,7 @@ verify_strain() {
   local idx="$1"
   local tmux_session="${S_TMUX[$idx]}"
   local buffer_name="$tmux_session"   # session-unique named buffer (brood-<short>)
+  local pane_id=""
 
   # WHY read on-disk evidence and
   # NOT capture-pane: capture-pane turn-start verification was deliberately REMOVED in issue
@@ -1006,7 +1046,8 @@ verify_strain() {
     # task. A bare Enter on an already-submitted (empty) composer is a harmless no-op. A send-keys
     # failure here means a dead pane => mark failed and return 1.
     if [ "$(date +%s)" -ge "$next_nudge" ]; then
-      if ! tmux send-keys -t "$tmux_session" Enter 2>/dev/null; then
+      if ! pane_id="$(resolve_strain_pane "$tmux_session")" \
+        || ! tmux send-keys -t "$pane_id" Enter 2>/dev/null; then
         printf 'warning: tmux send-keys Enter (nudge) failed for strain %s\n' "${S_NAME[$idx]}" >&2
         tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
         mark_failed "$idx"
@@ -1024,7 +1065,7 @@ verify_strain() {
   #            `starting`, and the FINAL exit contract excludes it from failed_count. No teardown.
   #   DEAD  => the session is gone; this is a genuine launch failure => fail-closed mark_failed.
   tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
-  if tmux has-session -t "$tmux_session" 2>/dev/null; then
+  if tmux has-session -t "=$tmux_session" 2>/dev/null; then
     S_STATUS[$idx]="starting"
     printf 'starting: strain %s launched but workflow not yet started within %ds (session alive)\n' \
       "${S_NAME[$idx]}" "$STARTED_EVIDENCE_TIMEOUT" >&2
@@ -1066,7 +1107,9 @@ while [ "${#pending[@]}" -gt 0 ] && [ "$(date +%s)" -lt "$deadline" ]; do
   declare -a still_pending=()
   for idx in "${pending[@]}"; do
     tmux_session="${S_TMUX[$idx]}"
-    if tmux capture-pane -t "$tmux_session" -p 2>/dev/null | grep -qF "$READY_SUBSTRING"; then
+    # A failed pane resolution counts as not ready: the strain stays pending until READY_TIMEOUT.
+    if pane_id="$(resolve_strain_pane "$tmux_session")" \
+      && tmux capture-pane -t "$pane_id" -p 2>/dev/null | grep -qF "$READY_SUBSTRING"; then
       # Fast submit only (no blocking poll). On success enqueue for Pass-3 verification; on a
       # tmux failure submit_strain has already mark_failed'd it — do not enqueue. Either way the
       # strain leaves pending.
@@ -1135,7 +1178,7 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # since DIED in the Pass-3 tail must NOT be promoted to `running` on that stale evidence — the
   # exit-code ⇄ end-of-spawn liveness contract (#291) requires a dead session at end-of-spawn to
   # count toward exit 1 regardless of started-evidence. So re-probe liveness before promoting.
-  if tmux has-session -t "$tmux_session" 2>/dev/null; then
+  if tmux has-session -t "=$tmux_session" 2>/dev/null; then
     is_alive=1
   else
     is_alive=0

@@ -28,7 +28,10 @@
 # committed in a hostile base ref (force-added past the .hivemind/ gitignore) and materialized by
 # `git worktree add` never reaches a launched strain. The run-ledger source carries the same
 # guarantee: its leaf is keyed by the spawn-generated brood GUID run id. No file content is ever
-# read or emitted.
+# read or emitted. A match proves the file was written after launch, NOT that gather-facts wrote
+# it: any process that runs after launch can write a facts-shaped file (or, knowing the run id
+# from task.md, a run-ledger state.current). Recorded residual, ADR-0037 amendment 2026-10-24
+# (slice 4), "A process that runs after launch can write a facts-shaped file".
 #
 # DATA-BOUNDARY (MANDATORY): a child run-ledger (`<worktree>/.hivemind/runs/<id>/state.json`)
 # is UNTRUSTED, attacker-controllable bytes — a brood child runs detached, and child content
@@ -411,7 +414,10 @@ hivemind_read_confined_state_current() {
 # trusted, git-reported worktree root (brood-status's ground-truth worktree, spawn-brood's
 # S_WT[idx]) — NEVER a manifest/child-supplied path. <worktree_root> MUST be a strain worktree
 # spawn-brood created and launched behind its pre-launch facts guard (`.hivemind/facts` proven
-# absent before launch), so any match post-dates launch.
+# absent before launch), so any match post-dates launch. A match does NOT prove gather-facts
+# wrote it: any process that runs after launch can write a facts-shaped file. Recorded residual,
+# ADR-0037 amendment 2026-10-24 (slice 4), "A process that runs after launch can write a
+# facts-shaped file".
 #
 # FOLDER CHAIN: hivemind_assert_contained walks `.hivemind` and `.hivemind/facts`, rejecting a
 # symlinked component and any existing component that canonicalizes outside the worktree. A

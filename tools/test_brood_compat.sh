@@ -1876,6 +1876,82 @@ FAILRC_EOF
     fi
 }
 
+# ── Assertion 13d: EXACT-SESSION:dead-strain-never-alive-through-prefix-sibling (eadbd5d2) ──
+# tmux resolves a bare session name exact-first-then-PREFIX, so once <brood-id>-api is gone a bare
+# `has-session -t <brood-id>-api` resolves to the live sibling <brood-id>-api-x. One brood with
+# strains api and api-x and a claude stub keyed on the worktree name:
+#   api   prints the ready line, lives ~4s (past the Pass-2 readiness poll), then exits.
+#   api-x prints the ready line and stays alive past both strains' grace windows.
+# TIMING: STARTED_EVIDENCE_TIMEOUT=7 is below RESEND_POLL_TIMEOUT (8), so no nudge fires. api's
+# grace runs out ~7s after its Pass-3 entry (t ~2-3s), well after api died (t ~4-5s); api-x is
+# still alive when its own grace runs out (t ~16-17s) and at the reconciliation sweep.
+# Assert: api is `failed` (never `starting` or `running`), api-x is `starting`, exit 1. Pre-fix
+# code probes liveness by bare name and records api `starting` with exit 0.
+#
+# DEPENDENCY GATING: gated on tmux+jq (claude via the stub). SKIP cleanly when any is absent.
+assert_spawn_brood_exact_session_not_prefix_sibling() {
+    local name="EXACT-SESSION:dead-strain-not-alive-through-prefix-sibling-session"
+    local missing=""
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes the liveness probes; skipping (missing: $missing)"
+        return
+    }
+
+    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    local gitroot="$WORKDIR/brood-git"
+    init_spawn_repo "$gitroot"
+    local keyed_stub="$WORKDIR/keyed-stub"
+    mkdir -p "$keyed_stub"
+    cat > "$keyed_stub/claude" <<'KEYEDSTUB_EOF'
+#!/usr/bin/env bash
+# Keyed stub: the api child exits soon after it is ready; the api-x child stays alive.
+printf 'hivemind:overlord\n'
+case "$(basename "$(pwd -P)")" in
+    api) sleep 4 ;;
+    *) sleep 40 ;;
+esac
+exit 0
+KEYEDSTUB_EOF
+    chmod +x "$keyed_stub/claude"
+
+    local inputs="$gitroot/brood-inputs.json"
+    jq -n \
+        --arg base "main" \
+        --arg overlap_risk "low" \
+        --arg overlap_details "exact session addressing with a prefix sibling" \
+        '{
+            base: $base,
+            overlap_risk: $overlap_risk,
+            overlap_details: $overlap_details,
+            strains: [
+                { name: "api", description: "child that exits soon after ready" },
+                { name: "api-x", description: "child that stays alive" }
+            ]
+        }' \
+        > "$inputs"
+
+    local rc=0
+    local stdout_out="$WORKDIR/spawn-stdout.txt"
+    local marker="$WORKDIR/launch-marker.txt"
+    reap_brood_sessions
+    ( cd "$gitroot" && PATH="$keyed_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        STARTED_EVIDENCE_TIMEOUT=7 bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>/dev/null || rc=$?
+    tmux kill-server 2>/dev/null || true
+
+    local manifest api_status="" api_x_status=""
+    manifest="$(find_brood_manifest "$gitroot")"
+    if [ -n "$manifest" ]; then
+        api_status="$(jq -r '.strains[] | select(.name == "api") | .status' "$manifest" 2>/dev/null)"
+        api_x_status="$(jq -r '.strains[] | select(.name == "api-x") | .status' "$manifest" 2>/dev/null)"
+    fi
+
+    if [[ "$rc" -eq 1 && "$api_status" == "failed" && "$api_x_status" == "starting" ]]; then
+        pass "$name" "api session gone while api-x alive -> api failed, api-x starting; exit 1"
+    else
+        failed "$name" "expected exit 1 + api=failed + api-x=starting; rc=$rc api=$api_status api-x=$api_x_status manifest=${manifest:-<none>} stdout: $(cat "$stdout_out" 2>/dev/null)"
+    fi
+}
+
 # ════════════════════════════════════════════════════════════════════════════════
 # brood-status-project.sh (read-side projection, #161)
 # ════════════════════════════════════════════════════════════════════════════════
@@ -3641,6 +3717,7 @@ assert_spawn_brood_tail_death_reconciled
 assert_spawn_brood_tail_started_promoted
 assert_spawn_brood_started_child_gets_remote_control
 assert_spawn_brood_rc_failure_keeps_exit_code
+assert_spawn_brood_exact_session_not_prefix_sibling
 assert_reconcile_settle_clamp_bounds_huge_override
 
 echo ''
@@ -4299,6 +4376,56 @@ assert_collect_facts_neither_starting() {
     fi
 }
 
+# COLLECT-EXACT-SESSION (eadbd5d2): the strain's tmux_session is <COLLECT_BROOD_ID>-api and only a
+# session <COLLECT_BROOD_ID>-api-x is alive. A bare `has-session -t <id>-api` prefix-matches the
+# sibling and reads alive; the exact `=` probe must report the strain's session dead.
+assert_collect_exact_session_not_prefix_sibling() {
+    local name="COLLECT-EXACT-SESSION:dead-session-not-alive-through-prefix-sibling"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        skip "$name" "collect needs jq+git; skipping (missing dep)"
+        return
+    fi
+    if ! command -v tmux >/dev/null 2>&1; then
+        skip "$name" "collect exact-session case needs a real tmux sibling session; skipping (no tmux)"
+        return
+    fi
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local root="$tmp/repo"; mkdir -p "$root"
+    collect_seed_repo "$root"
+    local brood_dir="$root/.hivemind/broods/$COLLECT_BROOD_ID"
+    mkdir -p "$brood_dir"
+    local sid="$COLLECT_BROOD_ID--api" sess="$COLLECT_BROOD_ID-api" sibling="$COLLECT_BROOD_ID-api-x"
+    local wt="$root/wt-api"
+    git -C "$root" worktree add -q --detach "$wt" HEAD 2>/dev/null
+    jq -n \
+        --arg brood_id "$COLLECT_BROOD_ID" --arg wt "$wt" --arg sid "$sid" --arg sess "$sess" \
+        '{ manifest_version:4, brood_id:$brood_id, created_at:"2026-06-01T00:00:00Z",
+           base:"main", overlap_risk:"low",
+           strains:[{name:"api", description:"d", worktree_path:$wt,
+                     tmux_session:$sess, status:"running",
+                     run:{suggested_id:$sid, workflow_hint:"standard-delivery"}}],
+           merge_order:[] }' > "$brood_dir/manifest.json"
+    local made_session=no
+    if tmux new-session -d -s "$sibling" 2>/dev/null; then made_session=yes; fi
+    local out rc=0
+    out="$( cd "$root" && bash "$COLLECT_SCRIPT" 2>/dev/null )" || rc=$?
+    [[ "$made_session" == "yes" ]] && tmux kill-session -t "=$sibling" 2>/dev/null || true
+    git -C "$root" worktree remove --force "$wt" 2>/dev/null || true
+    rm -rf "$tmp"
+    if [[ "$made_session" != "yes" ]]; then
+        skip "$name" "could not create a tmux session (no tmux server); skipping"
+        return
+    fi
+    if [[ "$rc" -eq 0 ]] && printf '%s' "$out" | jq -e \
+        --arg sess "$sess" \
+        '.broods[0].strains[0].tmux_session==$sess
+         and .broods[0].strains[0].session=="dead"' >/dev/null 2>&1; then
+        pass "$name" "exit 0; only the prefix sibling is alive -> strain session dead"
+    else
+        failed "$name" "rc=$rc out=[$out]"
+    fi
+}
+
 echo ''
 echo '=== brood-status-collect.sh collection-loop entrypoint tests (#186, ADR-0020) ==='
 assert_collect_empty
@@ -4314,6 +4441,7 @@ assert_collect_pr_probe_uses_live_branch
 assert_collect_detached_no_false_failed
 assert_collect_facts_running
 assert_collect_facts_neither_starting
+assert_collect_exact_session_not_prefix_sibling
 
 echo ''
 echo '=== Summary ==='

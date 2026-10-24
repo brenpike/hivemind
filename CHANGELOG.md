@@ -19,7 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Spawn turns on remote control for each brood child once it has started. After the manifest is written, spawn-brood runs the enable-brood-remote engine with `--only <short>...` for exactly the strains that showed started-evidence and were alive when spawn ended, so each gets `/rc <short>` and the user can watch and answer it from claude.ai or the Claude app. Monitoring the brood is the user's job. A strain still starting when spawn ended gets a `remote: skipped:` line and no remote control until the user asks for `hivemind:enable-brood-remote`. A remote-control failure prints a `remote:` warning and never changes the manifest or the exit code. Remote control needs a claude.ai subscription login (#409).
 - `rc-brood.sh` takes `--only <short>...` and sends `/rc` only to the strains it names, so spawn-brood reuses its pane-id delivery. Without `--only`, every live strain is a candidate as before (#409).
-- A gather-facts output file (`.hivemind/facts/facts-*.json`) in a child worktree counts as started-evidence, for spawn-brood and for `hivemind:brood-status`, through one shared function, because a script run writes no run ledger. Spawn refuses a strain whose new worktree already holds `.hivemind/facts`, so a file the base tree carries never counts as started-evidence. The dashboard's claimed-state columns stay blank for script children, a recorded residual (#409).
+- A gather-facts output file (`.hivemind/facts/facts-*.json`) in a child worktree counts as started-evidence, for spawn-brood and for `hivemind:brood-status`, through one shared function, because a script run writes no run ledger. Spawn refuses a strain whose new worktree already holds `.hivemind/facts`, so a file the base tree carries never counts as started-evidence. A process that writes a facts-shaped file after launch can still pass as started-evidence, a bounded recorded residual. The dashboard's claimed-state columns stay blank for script children, a recorded residual (#409).
 
 ### Changed
 
@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The 7.0.5 known gap is closed. On the state machine, a commit made after a gate, such as a local review fix or a validation fix, no longer reaches a pull request unseen: the run asks before the pull request. Brood children, the main users of the state machine, now run on the script engine, where a later commit reruns the gates it invalidates. See the ADR-0037 amendment, "Recorded residual: state-machine gates" (#409).
+- spawn-brood addresses each strain's tmux session exactly. Liveness probes use `=<session>`, and the readiness capture, the task paste and every Enter go to the pane id resolved from the exact session, as `rc-brood.sh` does. A strain whose session ended can no longer pass another strain's task or keystrokes on through tmux's name-prefix match. `hivemind:brood-status` probes liveness the same way (#409).
 
 ## [7.0.5] - 2026-10-24
 

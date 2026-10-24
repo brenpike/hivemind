@@ -103,10 +103,12 @@ fi
 SENTINEL_RE='^(MISSING|MALFORMED)$'
 
 # probe_session_alive <tmux_session> -> echoes 1 (alive) or 0 (dead/skip).
+# The `=` prefix makes tmux match the session name exactly, so a dead strain session never reads
+# alive through a live sibling whose name it prefixes (brood-<id>-api vs brood-<id>-api-x).
 probe_session_alive() {
   local sess="$1"
   [[ "$sess" =~ $SENTINEL_RE ]] && { printf '0'; return 0; }
-  if command -v tmux >/dev/null 2>&1 && tmux has-session -t "$sess" 2>/dev/null; then
+  if command -v tmux >/dev/null 2>&1 && tmux has-session -t "=$sess" 2>/dev/null; then
     printf '1'
   else
     printf '0'
