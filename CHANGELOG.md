@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.0.5] - 2026-10-24
+
+### Fixed
+
+- A pull request no longer opens on any path when local review ran and did not hold the gate, `max-iterations-reached` included. workflow.md (PR Requirements) is now the one statement of which local review exits hold the gate. The open-plan-pr checklist checks it, a new policy fixture pins it, and a test fails when the workflow script, the state machine or that statement disagree. Before, a run finished by hand could read `max-iterations-reached` as a pass and open the pull request (issue 444).
+- A delivery run that stops before the pull request no longer says the pull request can be opened from its commits. Its next-action line now says no pull request opens until every gate holds on them (issue 444).
+- The local reviewer's iteration limit is fixed at 10. A delegation that asks for any other limit ends blocked at initialize. Before, a caller could lower it to 1 (issue 444).
+- The local reviewer's diminishing-returns exit follows the two-round rule. It fires only when this round and the one before it found only unusual-setup edge cases or wording findings, so it never fires right after a real fix (issue 444).
+- Docs: the ADR-0037 amendment 2026-10-23 on local review holding the pull request on every path. README says a question after the last wave ends the run blocked (issue 444).
+
 ## [7.0.4] - 2026-10-24
 
 ### Changed

@@ -243,7 +243,7 @@ A `standard-delivery` script run, from request to PR:
 
 **Gates hold on one commit.** The bump, validation and local review are gates. Each gate holds only for the commit it ended on, and the PR step pushes only a commit every configured gate held on. So a later commit, such as a validation fix round or a local-review fix, reruns the gates it invalidates: every gate that ended on an earlier commit. The reruns are bounded, and the run asks you at the bound. A gate not configured for the run, such as local review without the Codex plugin, is listed on the PR.
 
-**Decisions on the PR.** Every decision the run took for you is listed in the final message and in the PR body, or in a PR comment when the run reuses an open PR. A question that comes up after the last wave does not pause the run: it ends complete with the question open, its commits and decisions listed, and nothing pushed.
+**Decisions on the PR.** Every decision the run took for you is listed in the final message and in the PR body, or in a PR comment when the run reuses an open PR. A question that comes up after the last wave does not pause the run: it ends blocked with the question open, its commits and decisions listed, and nothing pushed. No pull request opens from those commits until a run holds every configured gate on them.
 
 **Post-PR watch.** When the run opened or reused a PR, the overlord applies the default watch rule (see **Post-PR watch** below) and runs `pr-feedback-remediation` with intake `watch` on the state machine for that PR. That watch is a new run with its own run ledger.
 
