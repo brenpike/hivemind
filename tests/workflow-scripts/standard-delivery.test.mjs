@@ -1,6 +1,6 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -767,6 +767,297 @@ function reachesStateWithout(machine, start, target, unexpanded) {
     }
   }
   return false;
+}
+
+const gateCheckPath = join(repoRoot, 'plugin/skills/gate-check/scripts/gate-check.sh');
+const gateContract = readJson('plugin/skills/gate-check/scripts/gate-contract.json');
+const GATE_ENTRY_STATES = { bump: 'version_bump_decision', validate: 'validate', review: 'local_review_decision' };
+const GATE_RUN_LABEL_IDS = { 'bump-type': 'bump', validate: 'validate', review: 'review' };
+const GATE_PARITY_DEFAULT_SEED = 444;
+const GATE_WALK_RUN_LIMIT = 12;
+const GATE_CHECK_RUN_ID = 'run-gate-parity';
+const GATE_CHECK_ROUTING_RE = /^outcome: ([a-z_]+)\nhead: ([0-9a-f]{40})\nreruns: ([0-9]+)\nmax_reruns: ([0-9]+)\n$/;
+const GATE_PARITY_DEEP_COUNT = 16;
+
+/**
+ * The commit object id the script walk gives its commit number `index`.
+ */
+function gateShaOf(index) {
+  return 'c' + index.toString(16).padStart(39, '0');
+}
+
+/**
+ * A commit relay for a gate step of the script walk: a new commit pushed onto
+ * `commits` when `commits` is asked to grow, else the current head.
+ */
+function scriptGateCommit(commits, isCommit) {
+  if (!isCommit) {
+    return commitRelay({ commit: commits.at(-1), committed: 'false' });
+  }
+  commits.push(gateShaOf(commits.length));
+  return commitRelay({ commit: commits.at(-1) });
+}
+
+/**
+ * The exit reason run `index` (from 0) of local review returns in gate
+ * history `history`: history.reviewExits[index], clean when absent.
+ */
+function readReviewExit(history, index) {
+  return (history.reviewExits || [])[index] === 'diminishing-returns' ? 'diminishing-returns' : 'clean';
+}
+
+/**
+ * The scripted results of the script walk over `history`: run N of the bump
+ * gate commits when history.bumps[N - 1] is true, run N of local review when
+ * history.reviews[N - 1] is true and returns readReviewExit(history, N - 1),
+ * validation passes and never commits, and a run past its list commits nothing.
+ */
+function buildGateWalkResults(history, commits) {
+  const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
+  const results = happyResults({ 'plan-1': planResult(plan), 'commit-1-1': commitRelay({ commit: commits[0] }) });
+  for (let count = 1; count <= GATE_WALK_RUN_LIMIT; count += 1) {
+    Object.assign(results, {
+      ['bump-type-1-' + count]: bumpRelay(MINOR_BUMP),
+      ['bump-1-' + count]: { outcome: 'complete' },
+      ['bump-commit-1-' + count]: () => scriptGateCommit(commits, history.bumps[count - 1] === true),
+      ['validate-1-' + count]: VALIDATE_PASSED,
+      ['validate-commit-1-' + count]: () => scriptGateCommit(commits, false),
+      ['review-1-' + count]: readReviewExit(history, count - 1) === 'clean' ? REVIEW_CLEAN : DIMINISHING,
+      ['review-commit-1-' + count]: () => scriptGateCommit(commits, history.reviews[count - 1] === true)
+    });
+  }
+  return results;
+}
+
+/**
+ * The gate ids a script run ran, in order, read from its gate step labels.
+ */
+function readScriptGatesRun(run) {
+  return labelsOf(run).map((label) => /^(bump-type|validate|review)-1-[0-9]+$/.exec(label)).filter((match) => match !== null).map((match) => GATE_RUN_LABEL_IDS[match[1]]);
+}
+
+/**
+ * The end of a script walk: the pull request with the number of the commit it
+ * was opened on, the rerun limit, or the message of any other end.
+ */
+function readScriptGateEnd(run, commits) {
+  if (run.result.outcome === 'complete') {
+    return { end: 'pr', commit: commits.indexOf(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').expect_commit) };
+  }
+  if (run.result.outcome === 'blocked' && run.result.message.includes('The checks already ran again ' + main.maxGateReruns() + ' times after later commits.')) {
+    return { end: 'rerun_limit' };
+  }
+  return { end: 'other', message: run.result.message };
+}
+
+/**
+ * Walks gate history `history` through the workflow script: the gates run in
+ * order, the end of the walk, the number of going-backs the run took and the
+ * history cut to the gate runs it used.
+ */
+async function walkScriptGates(history) {
+  const commits = [gateShaOf(0)];
+  const run = await runWorkflow({ ...LAUNCH, local_review: history.localReview }, buildGateWalkResults(history, commits));
+  const gatesRun = readScriptGatesRun(run);
+  const reviewRuns = gatesRun.filter((gateId) => gateId === 'review');
+  const used = {
+    localReview: history.localReview,
+    bumps: gatesRun.filter((gateId) => gateId === 'bump').map((gateId, index) => history.bumps[index] === true),
+    reviews: reviewRuns.map((gateId, index) => history.reviews[index] === true),
+    reviewExits: reviewRuns.map((gateId, index) => readReviewExit(history, index))
+  };
+  const goingBacks = run.result.message.split(' on an earlier commit. Run ').length - 1;
+  return { gatesRun: gatesRun, end: readScriptGateEnd(run, commits), goingBacks: goingBacks, used: used };
+}
+
+/**
+ * Appends the event `state`.`result` with the current HEAD of `walk.scratch`
+ * to the walk ledger, after checking it is a transition of the state machine.
+ */
+function appendGateEvent(walk, state, result) {
+  assert.ok(Object.hasOwn(deliveryMachine.states[state].transitions, result), state + '.' + result);
+  walk.events.push({ at: '2026-10-24T00:00:00Z', state: state, result: result, plan_epoch: 0, head: walk.commits.at(-1), outputs: {} });
+  const runDir = join(walk.scratch.repo, '.hivemind', 'runs', GATE_CHECK_RUN_ID);
+  mkdirSync(runDir, { recursive: true });
+  writeFileSync(join(runDir, 'state.json'), JSON.stringify({ run: { id: GATE_CHECK_RUN_ID, workflow: 'standard-delivery' }, plan: { epoch: 0, steps: [] }, events: walk.events }));
+}
+
+/**
+ * Makes a real commit in the walk scratch repo and records its object id.
+ */
+function commitGateStep(walk) {
+  runGitIn(walk.scratch, ['commit', '-q', '--allow-empty', '-m', 'gate step ' + walk.commits.length]);
+  walk.commits.push(runGitIn(walk.scratch, ['rev-parse', 'HEAD']));
+}
+
+/**
+ * Runs gate-check.sh once in the walk scratch repo, without blocking other
+ * walks, and resolves to its exit status, stdout and stderr.
+ */
+function spawnGateCheck(walk) {
+  return new Promise((resolve) => {
+    execFile('bash', [gateCheckPath, GATE_CHECK_RUN_ID], { cwd: walk.scratch.repo, env: walk.scratch.env, encoding: 'utf8' }, (error, stdout, stderr) => resolve({ status: error === null ? 0 : error.code, stdout: stdout, stderr: stderr }));
+  });
+}
+
+/**
+ * Runs gate-check.sh once in the walk scratch repo and parses its routing.
+ */
+async function readGateCheck(walk) {
+  const run = await spawnGateCheck(walk);
+  assert.equal(run.status, 0, run.stderr);
+  const match = GATE_CHECK_ROUTING_RE.exec(run.stdout);
+  assert.notEqual(match, null, run.stdout);
+  return { outcome: match[1], head: match[2] };
+}
+
+/**
+ * Runs the state-machine steps of the gate entry state `entry` for the walk:
+ * the events its step records, and a real commit when the history says so.
+ */
+function runMachineGate(walk, entry) {
+  if (entry === 'version_bump_decision') {
+    walk.gatesRun.push('bump');
+    if (walk.history.bumps[walk.bumpRuns++] !== true) {
+      appendGateEvent(walk, 'version_bump_decision', 'not_required');
+      return;
+    }
+    appendGateEvent(walk, 'version_bump_decision', 'required');
+    appendGateEvent(walk, 'version_bump', 'complete');
+    commitGateStep(walk);
+    appendGateEvent(walk, 'version_checkpoint', 'complete');
+  } else if (entry === 'validate') {
+    walk.gatesRun.push('validate');
+    appendGateEvent(walk, 'validate', 'passed');
+  } else if (!walk.history.localReview) {
+    appendGateEvent(walk, 'local_review_decision', 'skipped');
+  } else {
+    walk.gatesRun.push('review');
+    appendGateEvent(walk, 'local_review_decision', 'required');
+    const reviewIndex = walk.reviewRuns++;
+    if (walk.history.reviews[reviewIndex] === true) {
+      commitGateStep(walk);
+    }
+    if (readReviewExit(walk.history, reviewIndex) === 'clean') {
+      appendGateEvent(walk, 'local_review', 'clean');
+      return;
+    }
+    appendGateEvent(walk, 'local_review', 'diminishing-returns');
+    appendGateEvent(walk, 'diminishing_returns_decision', 'taken');
+  }
+}
+
+/**
+ * Walks gate history `history` through the state machine: gate-check.sh in a
+ * scratch repo picks each gate_check outcome, the graph routes it, and the
+ * walk records each gate step's events with the HEAD of real commits. Returns
+ * the gates run in order and the end of the walk.
+ */
+async function walkMachineGates(history) {
+  const scratch = makeScratchRepo();
+  const walk = { scratch: scratch, history: history, events: [], commits: [runGitIn(scratch, ['rev-parse', 'HEAD'])], gatesRun: [], bumpRuns: 0, reviewRuns: 0 };
+  appendGateEvent(walk, 'implement_next_step', 'all_steps_complete');
+  for (let step = 0; step < 4 * GATE_WALK_RUN_LIMIT; step += 1) {
+    const routing = await readGateCheck(walk);
+    const entry = deliveryMachine.states.gate_check.transitions[routing.outcome];
+    if (entry === 'open_pr') {
+      return { gatesRun: walk.gatesRun, end: { end: 'pr', commit: walk.commits.indexOf(routing.head) } };
+    }
+    if (routing.outcome === gateContract.outcomes.rerun_limit) {
+      assert.equal(deliveryMachine.states[entry].type, 'terminal');
+      return { gatesRun: walk.gatesRun, end: { end: 'rerun_limit' } };
+    }
+    runMachineGate(walk, entry);
+  }
+  assert.fail('the state machine walk did not end: ' + JSON.stringify(history));
+}
+
+/**
+ * Walks each of `histories` through both engines, the state machine walks
+ * side by side, and asserts they agree on the gates run, the end and the pull
+ * request commit. Returns the script walks.
+ */
+async function assertGateParity(histories, note) {
+  const scriptedWalks = [];
+  for (const history of histories) {
+    scriptedWalks.push(await walkScriptGates(history));
+  }
+  const machineWalks = await Promise.all(histories.map(walkMachineGates));
+  scriptedWalks.forEach((scripted, index) => {
+    const label = note + ' ' + JSON.stringify(scripted.used);
+    assert.notEqual(scripted.end.end, 'other', label + ' ' + scripted.end.message);
+    assert.deepEqual(machineWalks[index].gatesRun, scripted.gatesRun, label);
+    assert.deepEqual(machineWalks[index].end, scripted.end, label);
+  });
+  return scriptedWalks;
+}
+
+/**
+ * Every gate history whose bump and review choices fit in three runs each,
+ * with local review configured, and both bump choices without it, cut to the
+ * runs the script used and with no duplicate. A going-back past the first
+ * round needs a review commit, so every history with at most two going-backs
+ * is among them.
+ */
+async function listShortGateHistories() {
+  const seen = new Map();
+  const candidates = [false, true].map((bump) => ({ localReview: false, bumps: [bump], reviews: [] }));
+  for (let bits = 0; bits < 64; bits += 1) {
+    const choices = Array.from({ length: 6 }, (unused, index) => (bits & (1 << index)) !== 0);
+    candidates.push({ localReview: true, bumps: choices.slice(0, 3), reviews: choices.slice(3) });
+  }
+  for (const candidate of candidates) {
+    const scripted = await walkScriptGates(candidate);
+    seen.set(JSON.stringify(scripted.used), scripted);
+  }
+  return [...seen.values()];
+}
+
+/**
+ * A seeded pseudo-random number generator (mulberry32) giving floats in [0, 1).
+ */
+function makeSeededRandom(seed) {
+  let state = seed >>> 0;
+  return () => {
+    state = (state + 0x6d2b79f5) >>> 0;
+    const mixed = Math.imul(state ^ (state >>> 15), 1 | state);
+    const spread = (mixed + Math.imul(mixed ^ (mixed >>> 7), 61 | mixed)) ^ mixed;
+    return ((spread ^ (spread >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * The gate parity seed: GATE_PARITY_SEED when set, else the fixed default.
+ */
+function readGateParitySeed() {
+  const seedText = process.env.GATE_PARITY_SEED;
+  const seed = seedText === undefined || seedText === '' ? GATE_PARITY_DEFAULT_SEED : Number(seedText);
+  assert.ok(Number.isSafeInteger(seed), 'GATE_PARITY_SEED is not an integer: ' + seedText);
+  return seed;
+}
+
+/**
+ * GATE_PARITY_DEEP_COUNT distinct gate histories drawn from `seed`, each with
+ * local review configured, each review run clean or a taken diminishing-returns,
+ * and at least three going-backs in the script walk.
+ */
+async function drawDeepGateHistories(seed) {
+  const random = makeSeededRandom(seed);
+  const seen = new Map();
+  for (let attempt = 0; attempt < 400 && seen.size < GATE_PARITY_DEEP_COUNT; attempt += 1) {
+    const history = {
+      localReview: true,
+      bumps: Array.from({ length: GATE_WALK_RUN_LIMIT }, () => random() < 0.5),
+      reviews: Array.from({ length: GATE_WALK_RUN_LIMIT }, () => random() < 0.75),
+      reviewExits: Array.from({ length: GATE_WALK_RUN_LIMIT }, () => (random() < 0.5 ? 'clean' : 'diminishing-returns'))
+    };
+    const scripted = await walkScriptGates(history);
+    if (scripted.goingBacks >= 3) {
+      seen.set(JSON.stringify(scripted.used), scripted.used);
+    }
+  }
+  assert.equal(seen.size, GATE_PARITY_DEEP_COUNT, 'seed ' + seed);
+  return [...seen.values()];
 }
 
 function reviewMessage(lead, fieldLines) {
@@ -2548,34 +2839,55 @@ const ROW_TESTS = {
       assert.ok(lib.validateSchema(briefSchema, main.buildValidationRemediationBrief(OTHER, 1)).ok);
       assert.ok(lib.validateSchema(briefSchema, main.buildFixLimitBrief(OTHER)).ok);
     });
-    test('the state machine mirrors the gates through gate_check: every outcome that holds a gate goes to it', () => {
+    test('the gate-check contract equals the script: its gate ids in order are main.gateIds() and its max_reruns is main.maxGateReruns()', () => {
+      assert.deepEqual(gateContract.gates.map((gate) => gate.id), [...main.gateIds()]);
+      assert.equal(gateContract.max_reruns, main.maxGateReruns());
+      assert.equal(gateContract.workflow, deliveryMachine.id);
+    });
+    test('gate_check runs hivemind:gate-check, and the transitions into it are the holding and skip transitions of its contract and implement_next_step all_steps_complete', () => {
       const gateCheck = deliveryMachine.states.gate_check;
-      assert.equal(gateCheck.type, 'decision');
-      assert.equal(gateCheck.owner, 'overlord');
-      assert.deepEqual(listTransitionsInto(deliveryMachine, 'gate_check'), [
-        'diminishing_returns_decision.taken',
-        'implement_next_step.all_steps_complete',
-        'local_review.clean',
-        'local_review_decision.skipped',
-        'validate.passed',
-        'version_bump_decision.not_required',
-        'version_checkpoint.complete'
-      ]);
+      assert.equal(gateCheck.type, 'skill');
+      assert.equal(gateCheck.skill, 'hivemind:gate-check');
+      assert.equal(Object.hasOwn(gateCheck, 'owner'), false);
+      const contractEdges = gateContract.gates.flatMap((gate) => [...gate.holds, ...(gate.skip || [])]);
+      assert.deepEqual(listTransitionsInto(deliveryMachine, 'gate_check'), [...contractEdges, 'implement_next_step.all_steps_complete'].sort());
     });
-    test('gate_check routes each due outcome, in main.gateIds() order, back to its gate, and all_held to open_pr', () => {
-      const gateEntryStates = { bump: 'version_bump_decision', validate: 'validate', review: 'local_review_decision' };
+    test('gate_check outcomes are the contract due outcomes, all_held, rerun_limit and blocked; each due outcome routes to its gate entry state, all_held to open_pr, and rerun_limit and blocked to terminals', () => {
       const transitions = deliveryMachine.states.gate_check.transitions;
-      const dueEdges = Object.entries(transitions).filter(([outcome]) => outcome.endsWith('_due'));
-      assert.deepEqual(dueEdges.map(([outcome]) => outcome), ['version_due', 'validation_due', 'review_due']);
-      assert.deepEqual(dueEdges.map(([, next]) => next), [...main.gateIds()].map((gateId) => gateEntryStates[gateId]));
-      assert.equal(transitions.all_held, 'open_pr');
-      assert.deepEqual(Object.keys(transitions).sort(), ['all_held', 'blocked', 'review_due', 'validation_due', 'version_due']);
-      assert.equal(deliveryMachine.states[transitions.blocked].type, 'terminal');
+      const dueOutcomes = gateContract.gates.map((gate) => gate.due);
+      assert.deepEqual(Object.keys(transitions).sort(), [...dueOutcomes, gateContract.outcomes.all_held, gateContract.outcomes.rerun_limit, 'blocked'].sort());
+      assert.deepEqual(dueOutcomes.map((outcome) => transitions[outcome]), [...main.gateIds()].map((gateId) => GATE_ENTRY_STATES[gateId]));
+      assert.equal(transitions[gateContract.outcomes.all_held], 'open_pr');
+      for (const outcome of [gateContract.outcomes.rerun_limit, 'blocked']) {
+        assert.equal(deliveryMachine.states[transitions[outcome]].type, 'terminal', outcome);
+        assert.notEqual(transitions[outcome], 'open_pr', outcome);
+      }
     });
-    test('local_review clean and diminishing_returns_decision taken lead to gate_check, which routes version_due back to the version gate', () => {
-      assert.equal(deliveryMachine.states.local_review.transitions.clean, 'gate_check');
-      assert.equal(deliveryMachine.states.diminishing_returns_decision.transitions.taken, 'gate_check');
-      assert.equal(deliveryMachine.states.gate_check.transitions.version_due, 'version_bump_decision');
+    test('the review gate holds on the hold exits of localReviewRoutes() at local_review and on diminishing_returns_decision taken', () => {
+      const reviewGate = gateContract.gates.find((gate) => gate.id === 'review');
+      const holdEdges = localReviewExitsRoutedTo('hold').map((exitReason) => 'local_review.' + exitReason);
+      assert.deepEqual([...reviewGate.holds].sort(), [...holdEdges, 'diminishing_returns_decision.taken'].sort());
+      assert.deepEqual(reviewGate.skip, ['local_review_decision.skipped']);
+    });
+    test('the script and the state machine agree on every gate history with at most two going-backs', async () => {
+      const shallow = (await listShortGateHistories()).filter((scripted) => scripted.goingBacks <= 2);
+      assert.equal(shallow.length, 8);
+      assert.deepEqual(shallow.filter((scripted) => !scripted.used.localReview).map((scripted) => scripted.used.bumps), [[false], [true]]);
+      shallow.forEach((scripted) => assert.equal(scripted.end.end, 'pr', JSON.stringify(scripted.used)));
+      await assertGateParity(shallow.map((scripted) => scripted.used), 'shallow');
+    });
+    test('the script and the state machine agree on histories that reach the rerun limit: review commits every time, and bump and review alternate', async () => {
+      const limitHistories = [
+        { localReview: true, bumps: [false, ...Array(GATE_WALK_RUN_LIMIT - 1).fill(true)], reviews: Array(GATE_WALK_RUN_LIMIT).fill(true) },
+        { localReview: true, bumps: Array(GATE_WALK_RUN_LIMIT).fill(true), reviews: Array(GATE_WALK_RUN_LIMIT).fill(true) }
+      ];
+      for (const scripted of await assertGateParity(limitHistories, 'limit')) {
+        assert.equal(scripted.end.end, 'rerun_limit', JSON.stringify(scripted.used));
+      }
+    });
+    test('the script and the state machine agree on a seeded sample of deeper gate histories (GATE_PARITY_SEED)', async () => {
+      const seed = readGateParitySeed();
+      await assertGateParity(await drawDeepGateHistories(seed), 'seed ' + seed);
     });
   },
   'SD-28': () => {

@@ -84,14 +84,15 @@
       }
     },
     "gate_check": {
-      "type": "decision",
-      "description": "Overlord finds the next gate the PR still needs. A gate holds only for the commit its step ended on, per ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (PR Requirements). The gates, in order, are version (version_bump_decision), validation (validate) and local review (local_review_decision). Each holding result records event.outputs.gate_commit, per ${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md (Convention (gate end commit)). The outcome is the first gate in that order whose latest gate_commit is not HEAD: version_due, validation_due or review_due. A gate with no gate_commit has not held. Review that local_review_decision skipped in this run is not configured: it neither holds nor blocks. A gate already held on HEAD is not run again. all_held, when every configured gate holds on HEAD, is the only route to open_pr.",
-      "owner": "overlord",
+      "type": "skill",
+      "description": "The hivemind:gate-check engine finds the next gate the PR still needs from the run ledger and HEAD. A gate holds only for the commit its step ended on, per ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (PR Requirements). all_held is the only route to open_pr, and rerun_limit ends the run at blocked.",
+      "skill": "hivemind:gate-check",
       "transitions": {
         "version_due": "version_bump_decision",
         "validation_due": "validate",
         "review_due": "local_review_decision",
         "all_held": "open_pr",
+        "rerun_limit": "blocked",
         "blocked": "blocked"
       }
     },
@@ -185,7 +186,7 @@
     },
     "open_pr": {
       "type": "skill",
-      "description": "Open the pull request for the completed plan, on the commit gate_check found every configured gate held on. That commit is passed as expect_commit to hivemind:open-plan-pr.",
+      "description": "Open the pull request for the completed plan. The expect_commit passed to hivemind:open-plan-pr is the head hivemind:gate-check printed with all_held.",
       "skill": "hivemind:open-plan-pr",
       "transitions": {
         "complete": "github_review_decision",
