@@ -304,7 +304,7 @@ _Alias_: coordinator mode
 _Avoid_: manager mode, supervisor mode
 
 **Brood-Id**:
-The machine-generated `brood-<uuidv4>` identifier (charset `^brood-[0-9a-f-]+$`) that names one brood — the per-brood isolation key. Generated internally by spawn-brood, injective by construction, and propagated into the per-brood state dir (`.hivemind/broods/<brood-id>/`), each strain's branch (`strain/<brood-id>/<short>`), worktree (`.claude/worktrees/<brood-id>/<short>`), and tmux session (`<brood-id>-<short>`), so concurrent same-checkout broods never collide.
+The machine-generated `brood-<uuidv4>` identifier (charset `^brood-[0-9a-f-]+$`) that names one brood — the per-brood isolation key. Generated internally by spawn-brood, injective by construction, and propagated into the per-brood state dir (`.hivemind/broods/<brood-id>/`), each strain's worktree (`.claude/worktrees/<brood-id>/<short>`), and tmux session (`<brood-id>-<short>`), so concurrent same-checkout broods never collide. Each child's working branch is named by its own run, not by the brood-id.
 _Avoid_: brood slug, brood key, brood name
 
 **Brood-Plan**:
@@ -316,7 +316,7 @@ One independent unit of work within a brood-plan, assigned to a single child ove
 _Avoid_: stream, task (too generic), work item, lane
 
 **Brood Manifest**:
-The per-brood JSON file at `.hivemind/broods/<brood-id>/manifest.json` (schema `manifest_version: 4`) in the spawning checkout (the current worktree; the main checkout for the top-level hatchery), tracking one brood's strains — their display worktree paths, derived branches, tmux sessions, and status. Each brood owns a disjoint manifest under its brood-id directory; the hatchery enumerates them by globbing `.hivemind/broods/brood-*/manifest.json`.
+The per-brood JSON file at `.hivemind/broods/<brood-id>/manifest.json` (schema `manifest_version: 4`) in the spawning checkout (the current worktree; the main checkout for the top-level hatchery), tracking one brood's strains — their display worktree paths, tmux sessions, and status. New manifests carry no per-strain branch. Each brood owns a disjoint manifest under its brood-id directory; the hatchery enumerates them by globbing `.hivemind/broods/brood-*/manifest.json`.
 _Avoid_: brood config, brood state, registry
 
 ### Pipeline & Artifacts

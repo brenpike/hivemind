@@ -369,7 +369,7 @@
               </tr>
               <tr>
                 <td><code>hivemind:enable-brood-remote</code></td>
-                <td>User-invoked: fan the Claude <code>/rc</code> remote-control command out to every strain in a brood (tmux keystroke injection).</td>
+                <td>User-invoked. Spawn already turns remote control on for the strains that started; on request, this skill sends the Claude <code>/rc</code> remote-control command again to every live strain in a brood (tmux keystroke injection).</td>
               </tr>
               <tr>
                 <td><code>hivemind:tdd</code></td>
@@ -436,7 +436,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">State-machine fallback</h3>
-              <p>When the launch is refused, or the Workflow tool is absent as in brood children, <code>standard-delivery</code> runs on its state machine instead: route, record a run ledger at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, plan, git preflight and branch, build in waves with <code>hivemind:next-wave</code>, gate, review, open the PR, and watch it. A <em>Reflex</em> (one owner, one known file, trivial change) skips the router, the run ledger, and the cerebrate.</p>
+              <p>When the launch is refused, or the Workflow tool is absent, <code>standard-delivery</code> runs on its state machine instead: route, record a run ledger at <code>.hivemind/runs/&lt;run-id&gt;/state.json</code>, plan, git preflight and branch, build in waves with <code>hivemind:next-wave</code>, gate, review, ask you before the PR (<code>pr_confirm</code>), open the PR, and watch it. A <em>Reflex</em> (one owner, one known file, trivial change) skips the router, the run ledger, and the cerebrate.</p>
             </li>
           </ol>
 
@@ -519,8 +519,9 @@
             <ul class="dots" aria-label="Brood mode details">
               <li>The cerebrate decomposes work into independent strains with no shared state between them.</li>
               <li>Approval gate: nothing spawns until you approve the strain list.</li>
-              <li>Each strain runs its own full overlord session in a detached tmux session. Brood children start with <code>--disallowedTools Workflow</code>, so they have no Workflow tool and every strain runs on the state machine.</li>
-              <li>Each strain lives in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and produces its own branch and PR.</li>
+              <li>Each strain runs its own full overlord session in a detached tmux session. Brood children start in auto mode, so they launch the workflow scripts with no approval prompt, and fall back to the state machine as any session does.</li>
+              <li>Once a strain has started, spawn turns on remote control for it, so you can watch and answer it from claude.ai or the Claude app. Monitoring the brood is your job. Remote control needs a claude.ai subscription login. A strain that had not started when spawn ended needs <code>hivemind:enable-brood-remote</code>.</li>
+              <li>Each strain lives in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>), starts on a detached HEAD at the base, names its own branch, and produces its own PR.</li>
               <li>The overlord stays in hatchery mode, monitoring the brood from home base and available as an on-demand helper.</li>
             </ul>
             <p><span class="tag tag--hot">hivemind:spawn-brood</span> <span class="tag tag--cyan">hivemind:brood-status</span></p>

@@ -13,6 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.1.0] - 2026-10-24
+
+### Added
+
+- Spawn turns on remote control for each brood child once it has started. After the manifest is written, spawn-brood runs the enable-brood-remote engine with `--only <short>...` for exactly the strains that showed started-evidence and were alive when spawn ended, so each gets `/rc <short>` and the user can watch and answer it from claude.ai or the Claude app. Monitoring the brood is the user's job. A strain still starting when spawn ended gets a `remote: skipped:` line and no remote control until the user asks for `hivemind:enable-brood-remote`. A remote-control failure prints a `remote:` warning and never changes the manifest or the exit code. Remote control needs a claude.ai subscription login (#409).
+- `rc-brood.sh` takes `--only <short>...` and sends `/rc` only to the strains it names, so spawn-brood reuses its pane-id delivery. Without `--only`, every live strain is a candidate as before (#409).
+- A gather-facts output file (`.hivemind/facts/facts-*.json`) in a child worktree counts as started-evidence, for spawn-brood and for `hivemind:brood-status`, through one shared function, because a script run writes no run ledger. The dashboard's claimed-state columns stay blank for script children, a recorded residual (#409).
+
+### Changed
+
+- Brood children run on the script engine. They no longer start with `--disallowedTools Workflow`, so they launch the `standard-delivery` and `analysis-only` workflow scripts like any session and fall back to the state machine as any session does (#409).
+- Brood children start in auto mode (`--permission-mode auto`) instead of bypass mode, so the workflow launches with no approval prompt. On a host where auto mode is unavailable, the child starts in manual mode and waits at its first prompt, where the attach line reaches it (#409).
+- Each strain worktree boots on a detached HEAD at the base commit. Spawn creates no `strain/<brood-id>/<short>` branch, and new manifests carry no per-strain branch. Each child's own planner names and creates its working branch (#409).
+- A child's `task.md` carries data only: the data-boundary preamble, then `parent.kind`, `parent.brood_id`, `strain.id`, `strain.name`, `run.suggested_id`, `run.workflow_hint`, `working_branch.base` and `task.description`. It carries no instructions list and no scratch branch, ledger path or trunk-freshness override, because the harness relays it to every workflow agent the child runs (ADR-0037 decision 24) (#409).
+- On the state machine, `standard-delivery` stops before the pull request at the new user gate `pr_confirm`. The overlord shows the commits made after each gate ended and opens the pull request only when the user approves. A rejection ends the run blocked before the pull request. A clean local review, a taken diminishing-returns advisory and a skipped local review now go to `pr_confirm`. The standard-delivery definition moves to version 5, so a run resumed from version 4 meets the version-skew doors (#409).
+- Docs: amendments to ADR-0037, ADR-0035, ADR-0036, ADR-0017 and ADR-0027. README, the CONTEXT.md glossary and the website describe brood children on the script engine, auto mode, remote control after start and the stop before the pull request (#409).
+
+### Fixed
+
+- The 7.0.5 known gap is closed. On the state machine, a commit made after a gate, such as a local review fix or a validation fix, no longer reaches a pull request unseen: the run asks before the pull request. Brood children, the main users of the state machine, now run on the script engine, where a later commit reruns the gates it invalidates. See the ADR-0037 amendment, "Recorded residual: state-machine gates" (#409).
+
 ## [7.0.5] - 2026-10-24
 
 ### Fixed

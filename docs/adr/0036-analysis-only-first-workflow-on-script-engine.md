@@ -83,8 +83,8 @@ This ADR governs the new engine as far as this slice builds it: the `analysis-on
 | Check the cerebrate tool-list finding | 2, before the slice starts |
 | Autonomy level as plugin `userConfig` | 3 |
 | Reviewer briefs | 3 |
-| Brood on the new engine, spike S8 (worktree base) | 4 |
-| `--permission-mode auto` for brood children (ADR-0035 decision 12) | 4 |
+| Brood on the new engine, spike S8 (worktree base). Amended 2026-10-24: done in slice 4, where brood children launch the script engine, and S8 is not needed because children stay separate sessions (ADR-0007) (ADR-0037, Amendment 2026-10-24: brood children on the script engine (slice 4)) | 4 (done) |
+| `--permission-mode auto` for brood children (ADR-0035 decision 12). Amended 2026-10-24: done in slice 4, with remote control turned on for each strain started when spawn ends (ADR-0037, Amendment 2026-10-24: brood children on the script engine (slice 4)) | 4 (done) |
 | Retire the JSON engine, slim the overlord | 5 |
 | Spike S6 (a long wait inside an agent) | Only if the PR watch leaves the main session |
 | Resume On Start still reads the on-disk workflow definition: the version-skew gate (`plugin/agents/overlord.md`, `## Resume On Start`) compares the ledger `version` with the on-disk definition, and a resumed run needs its current state's definition. Root cause: that prose sends the model to the definition file, the same class as decision 17. Evidence: smoke-602 (`~/code/hivemind-workflow-spikes/smoke-602/results.md`, N1 to N3; https://github.com/brenpike/hivemind/issues/409#issuecomment-6279153393). Bounded impact: inherited, not observed. It fires only when a running ledger of the current engine exists at session start, and the cost is a permission prompt, not data loss. The path retires with the current engine. Tracked in https://github.com/brenpike/hivemind/issues/409 | 5 |

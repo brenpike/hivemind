@@ -32,3 +32,13 @@ Delivery is external `tmux send-keys` of `/rc <strain-name>` into each target st
 - Delivery reuses the existing spawn-brood `tmux send-keys` mechanism, adding no new control-plane primitive.
 
 References: ADR-0007; `plugin/skills/enable-brood-remote/`; upstream anthropics/claude-code#34243.
+
+## Amendment 2026-10-24
+
+Slice 4 of https://github.com/brenpike/hivemind/issues/409 launches brood children in auto mode, and the user owns monitoring the brood (ADR-0037, Amendment 2026-10-24: brood children on the script engine (slice 4); ADR-0017, Amendment 2026-10-24).
+
+- **spawn-brood turns remote control on by default.** After the manifest is written, spawn-brood sends `/rc <short>` to each strain that showed started-evidence and was alive when spawn ended, through `rc-brood.sh --only`, so it reuses the same pane-id delivery and adds no new control-plane primitive. A strain still starting when spawn ends gets none until the user asks for enable-brood-remote.
+- **It stays human-initiated addressing.** The spawn itself is user-approved, and remote control on by default is the user's standing choice, made on 2026-10-24. Sending it at spawn is the same keystroke the user would type on attaching, so the coordinator does not become an autonomous controller, and ADR-0007 holds.
+- **The skill stays explicit-request-only for later use.** `hivemind:enable-brood-remote` still fires only on the user's explicit request, for example to reach strains that started after spawn ended. Its description scope is unchanged.
+
+Text: `plugin/skills/spawn-brood/scripts/spawn-brood.sh`, `plugin/skills/enable-brood-remote/scripts/rc-brood.sh` (`--only`).
