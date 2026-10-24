@@ -60,7 +60,7 @@
       "owner": "overlord",
       "transitions": {
         "has_next_step": "implement_step",
-        "all_steps_complete": "gate_check",
+        "all_steps_complete": "version_bump_decision",
         "blocked": "blocked"
       }
     },
@@ -83,26 +83,13 @@
         "blocked": "blocked"
       }
     },
-    "gate_check": {
-      "type": "skill",
-      "description": "The hivemind:gate-check engine finds the next gate the PR still needs from the run ledger and HEAD. A gate holds only for the commit its step ended on, per ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (PR Requirements). all_held is the only route to open_pr, and rerun_limit ends the run at blocked.",
-      "skill": "hivemind:gate-check",
-      "transitions": {
-        "version_due": "version_bump_decision",
-        "validation_due": "validate",
-        "review_due": "local_review_decision",
-        "all_held": "open_pr",
-        "rerun_limit": "blocked",
-        "blocked": "blocked"
-      }
-    },
     "version_bump_decision": {
       "type": "decision",
-      "description": "Overlord judges whether a version bump is required. On re-entry the outcome is required only when the branch does not already carry the bump the verdict calls for; a bump the branch already includes is not_required, so the run never bumps twice.",
+      "description": "Overlord judges whether a version bump is required.",
       "owner": "overlord",
       "transitions": {
         "required": "version_bump",
-        "not_required": "gate_check",
+        "not_required": "validate",
         "ambiguous": "blocked",
         "blocked": "blocked"
       }
@@ -121,7 +108,7 @@
       "description": "Molt a checkpoint commit for the version bump.",
       "skill": "hivemind:molt",
       "transitions": {
-        "complete": "gate_check",
+        "complete": "validate",
         "blocked": "blocked"
       }
     },
@@ -130,7 +117,7 @@
       "description": "Overlord runs validation and judges pass/fail.",
       "owner": "overlord",
       "transitions": {
-        "passed": "gate_check",
+        "passed": "local_review_decision",
         "failed": "blocked",
         "blocked": "blocked"
       }
@@ -141,16 +128,16 @@
       "owner": "overlord",
       "transitions": {
         "required": "local_review",
-        "skipped": "gate_check",
+        "skipped": "open_pr",
         "blocked": "blocked"
       }
     },
     "local_review": {
       "type": "agent",
-      "description": "Local reviewer runs the pre-PR adaptation cycle; reviewer-return outcomes are named transitions matching the local-reviewer exit_reason vocabulary. The reviewer's fix_commits_exist flag is surfaced for operator awareness only — it is a scalar field, not an exit_reason, so it is NOT a transition key and does NOT alter the deterministic route: 'clean' always targets gate_check, and 'diminishing-returns' always targets diminishing_returns_decision. The deterministic executor can only advance to the returned state. Reviewer fix commits move HEAD past the commits earlier gates held on, so those gates no longer hold and gate_check sends the run back through them.",
+      "description": "Local reviewer runs the pre-PR adaptation cycle; reviewer-return outcomes are named transitions matching the local-reviewer exit_reason vocabulary. The reviewer's fix_commits_exist flag is surfaced for operator awareness only — it is a scalar field, not an exit_reason, so it is NOT a transition key and does NOT alter the deterministic route: 'clean' always targets open_pr, and 'diminishing-returns' always targets diminishing_returns_decision. The deterministic executor can only advance to the returned state. A post-review version re-evaluation, if the operator wants one when fix commits exist, is a separate user-initiated action outside this workflow's automatic routing.",
       "agent": "hivemind:local-reviewer",
       "transitions": {
-        "clean": "gate_check",
+        "clean": "open_pr",
         "planner-escalation": "review_remediation_plan",
         "root-cluster-suspected": "review_remediation_plan",
         "max-iterations-reached": "review_exhausted",
@@ -164,10 +151,10 @@
     },
     "diminishing_returns_decision": {
       "type": "decision",
-      "description": "Overlord decides whether the local reviewer's diminishing-returns advisory exit is taken, as decision kind diminishing_returns_exit of ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json. Only taken reaches gate_check, per ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (PR Requirements). An advisory that is not taken, including one the user declines when the decision is surfaced, ends the run at blocked before the pull request.",
+      "description": "Overlord decides whether the local reviewer's diminishing-returns advisory exit is taken, as decision kind diminishing_returns_exit of ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json. Only taken reaches open_pr, per ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (PR Requirements). An advisory that is not taken, including one the user declines when the decision is surfaced, ends the run at blocked before the pull request.",
       "owner": "overlord",
       "transitions": {
-        "taken": "gate_check",
+        "taken": "open_pr",
         "not_taken": "blocked",
         "blocked": "blocked"
       }
@@ -186,7 +173,7 @@
     },
     "open_pr": {
       "type": "skill",
-      "description": "Open the pull request for the completed plan. The expect_commit passed to hivemind:open-plan-pr is the head hivemind:gate-check printed with all_held.",
+      "description": "Open the pull request for the completed plan.",
       "skill": "hivemind:open-plan-pr",
       "transitions": {
         "complete": "github_review_decision",

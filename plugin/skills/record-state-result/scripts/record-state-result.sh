@@ -24,13 +24,9 @@
 #      (keys). --result MUST be one of those keys, else blocker + exit 1, UNCHANGED.
 #   6. next_state = transitions[result]. next_state must be declared in definition.states
 #      (its compact definition is printed on success), else blocker + exit 1, UNCHANGED.
-#   7. Append an event {at,state,result,next_state,summary,outputs,plan_epoch,head}.
-#      plan_epoch is an ENGINE-WRITTEN top-level int (NOT a free-form outputs rider): every
-#      appended event carries it, so a caller can neither forge nor omit it. See item 12.
-#      head is an ENGINE-WRITTEN top-level field: the full object id printed by plain
-#      `git rev-parse --verify -q HEAD^{commit}`, run in the checkout at append time, or JSON
-#      null when HEAD has no commit (unborn branch). It is NEVER read from the inputs file,
-#      so an outputs.head value stays inside outputs and cannot set or override it.
+#   7. Append an event {at,state,result,next_state,summary,outputs,plan_epoch}. plan_epoch
+#      is an ENGINE-WRITTEN top-level int (NOT a free-form outputs rider): every appended
+#      event carries it, so a caller can neither forge nor omit it. See item 12.
 #   8. Update state.previous=state, state.current=next_state, state.status.
 #   9. Update run.updated_at.
 #  10. If next_state is a declared terminal, set run.status + state.status to the
@@ -518,10 +514,6 @@ fi
 
 now_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-# (7 head) engine-derived commit HEAD is on at append time; empty (no commit) becomes JSON
-# null in the jq program below. Never sourced from the inputs file.
-head_commit="$(git rev-parse --verify -q 'HEAD^{commit}')"
-
 # ── Atomic write: temp file beside the ledger, then mv into place ──────────────
 # Use the CANONICAL (verified-contained) dir for the temp-write + atomic rename so both
 # operate on the path that passed containment, not the raw textual one.
@@ -564,7 +556,6 @@ jq \
   --argjson plan_steps "${plan_steps:-[]}" \
   --arg plan_path "$plan_path" \
   --argjson have_plan_steps "$have_plan_steps" \
-  --arg head "$head_commit" \
   '
   (.plan.epoch // 0) as $cur_epoch
   | (if $have_plan_steps then $cur_epoch + 1 else $cur_epoch end) as $epoch
@@ -575,8 +566,7 @@ jq \
     next_state: $next_state,
     summary: $summary,
     outputs: $outputs,
-    plan_epoch: $epoch,
-    head: (if $head == "" then null else $head end)
+    plan_epoch: $epoch
   }]
   | .state.previous = $state
   | .state.current = $next_state

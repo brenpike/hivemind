@@ -3311,99 +3311,6 @@ assert_record_undeclared_target_unchanged() {
     fi
 }
 
-# ── HA/HB/HC. engine-written top-level head on every appended event ─────────
-
-# commit_gitroot <gitroot> -> makes one empty commit in the throwaway checkout so HEAD has a commit.
-commit_gitroot() {
-    git -C "$1" -c user.name=engine-test -c user.email=engine-test@example.invalid \
-        -c commit.gpgsign=false commit -q --allow-empty -m "engine test commit"
-}
-
-# record_head_case <gitroot> <run_id> <inputs> <outputs-json> -> runs a build/done record carrying
-# <outputs-json> as outputs; returns the engine exit code.
-record_head_case() {
-    local gitroot="$1" run_id="$2" inputs="$3" outputs_json="$4"
-    jq -n \
-        --arg run_id "$run_id" \
-        --arg state build \
-        --arg result done \
-        --arg summary "engine test event head stamp" \
-        --argjson outputs "$outputs_json" \
-        '{run_id: $run_id, state: $state, result: $result, summary: $summary, outputs: $outputs}' \
-        > "$inputs"
-    local rc=0
-    ( cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" ) >/dev/null 2>&1 || rc=$?
-    return "$rc"
-}
-
-assert_event_head_after_commit() {
-    local name="HA:event-head-after-commit"
-    # After a commit, the appended event's top-level head equals the checkout's full HEAD id.
-    local gitroot run_id ledger rc=0
-    gitroot="$(new_gitroot ha-git)"
-    run_id="engine-case-ha"
-    commit_gitroot "$gitroot" || { failed "$name" "could not create the scratch commit"; return; }
-    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_BUILD")"
-    record_head_case "$gitroot" "$run_id" "$gitroot/ha-inputs.json" '{}' || rc=$?
-    if [[ "$rc" -ne 0 ]]; then
-        failed "$name" "engine exited $rc recording build/done (expected 0)"
-        return
-    fi
-    local expected event_head
-    expected="$(git -C "$gitroot" rev-parse --verify -q 'HEAD^{commit}')"
-    event_head="$(jq -r '.events[-1].head' "$ledger")"
-    if [[ -n "$expected" && "$event_head" == "$expected" ]]; then
-        pass "$name" "appended event head equals checkout HEAD ($expected)"
-    else
-        failed "$name" "expected event head=$expected, got $event_head"
-    fi
-}
-
-assert_event_head_null_unborn() {
-    local name="HB:event-head-null-unborn"
-    # On an unborn branch (no commit), the appended event's top-level head is JSON null.
-    local gitroot run_id ledger rc=0
-    gitroot="$(new_gitroot hb-git)"
-    run_id="engine-case-hb"
-    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_BUILD")"
-    record_head_case "$gitroot" "$run_id" "$gitroot/hb-inputs.json" '{}' || rc=$?
-    if [[ "$rc" -ne 0 ]]; then
-        failed "$name" "engine exited $rc recording build/done on an unborn branch (expected 0)"
-        return
-    fi
-    local head_type
-    head_type="$(jq -r '.events[-1] | if has("head") then (.head | type) else "absent" end' "$ledger")"
-    if [[ "$head_type" == "null" ]]; then
-        pass "$name" "appended event head is JSON null on an unborn branch"
-    else
-        failed "$name" "expected event head null, got type $head_type"
-    fi
-}
-
-assert_outputs_head_not_top_level() {
-    local name="HC:outputs-head-stays-in-outputs"
-    # An outputs.head value is recorded verbatim under outputs and never sets the top-level head.
-    local gitroot run_id ledger rc=0 forged="ffffffffffffffffffffffffffffffffffffffff"
-    gitroot="$(new_gitroot hc-git)"
-    run_id="engine-case-hc"
-    commit_gitroot "$gitroot" || { failed "$name" "could not create the scratch commit"; return; }
-    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_BUILD")"
-    record_head_case "$gitroot" "$run_id" "$gitroot/hc-inputs.json" "{\"head\":\"$forged\"}" || rc=$?
-    if [[ "$rc" -ne 0 ]]; then
-        failed "$name" "engine exited $rc recording build/done with outputs.head (expected 0)"
-        return
-    fi
-    local expected event_head outputs_head
-    expected="$(git -C "$gitroot" rev-parse --verify -q 'HEAD^{commit}')"
-    event_head="$(jq -r '.events[-1].head' "$ledger")"
-    outputs_head="$(jq -r '.events[-1].outputs.head' "$ledger")"
-    if [[ "$event_head" == "$expected" && "$outputs_head" == "$forged" ]]; then
-        pass "$name" "outputs.head kept under outputs; top-level head stays checkout HEAD"
-    else
-        failed "$name" "expected head=$expected outputs.head=$forged, got head=$event_head outputs.head=$outputs_head"
-    fi
-}
-
 # ── Drive all assertions ────────────────────────────────────────────────────
 
 echo '=== Engine behavior tests: derive-only engines against tests/engine/ fixtures (dual-root) ==='
@@ -3468,9 +3375,6 @@ assert_init_start_mismatch_blocks_with_derived_version
 assert_init_undeclared_start_state_blocks
 assert_record_prints_state_definition
 assert_record_undeclared_target_unchanged
-assert_event_head_after_commit
-assert_event_head_null_unborn
-assert_outputs_head_not_top_level
 
 echo ''
 echo '=== Summary ==='

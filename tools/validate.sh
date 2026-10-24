@@ -358,7 +358,6 @@ run_suites() {
 #     plugin/references/facts-schema.json, plugin/references/plan-schema.json,
 #     plugin/skills/gather-facts/scripts/{gather-facts.sh,gather-facts.jq},
 #     plugin/skills/next-wave/scripts/next-wave.sh, tests/next-wave/**,
-#     plugin/skills/gate-check/** (gate-check.test.mjs runs gate-check.sh on gate-contract.json),
 #     plugin/skills/_shared/{containment,ledger-engine-io}.sh,
 #     plugin/skills/create-working-branch/scripts/create-working-branch.sh,
 #     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**,
@@ -662,8 +661,7 @@ map_path() {
   # gather-facts files route only to test_gather_facts), the create-working-branch.sh and
   # bump-type.sh enums plan-schema.test.mjs pins, the next-wave.sh engine waves.test.mjs runs as
   # its parity oracle together with the two _shared libs that engine sources (containment.sh,
-  # ledger-engine-io.sh) and the tests/next-wave/* fixtures it replays, the gate-check skill whose
-  # gate-check.sh engine and gate-contract.json gate-check.test.mjs runs, the route-workflow skill
+  # ledger-engine-io.sh) and the tests/next-wave/* fixtures it replays, the route-workflow skill
   # and the plugin/workflows/*.json definitions whose catalog parity route-catalog.test.mjs pins,
   # the drone agent whose git-script task clause standard-delivery.test.mjs matches against the
   # runner sentence, the cerebrate agent whose plan block cerebrate-plan.test.mjs checks names the
@@ -700,7 +698,6 @@ map_path() {
      || "$p" == plugin/skills/gather-facts/scripts/gather-facts.jq \
      || "$p" == plugin/skills/next-wave/scripts/next-wave.sh \
      || "$p" == tests/next-wave/* \
-     || "$p" == plugin/skills/gate-check/* \
      || "$p" == plugin/skills/_shared/containment.sh \
      || "$p" == plugin/skills/_shared/ledger-engine-io.sh \
      || "$p" == plugin/skills/create-working-branch/scripts/create-working-branch.sh \
@@ -1395,8 +1392,7 @@ self_test() {
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
   #    the generated-script, data-file, agent (overlord, drone, cerebrate, local-reviewer),
   #    governance doc (safety-rails, definitions), route-workflow skill, workflow-definition,
-  #    node-test-read or node-test-run script/fixture (open-plan-pr.sh, push-branch.sh,
-#    gate-check.sh, gate-contract.json), or
+  #    node-test-read or node-test-run script/fixture (open-plan-pr.sh, push-branch.sh), or
   #    sourced _shared lib (bump-type-derive.sh) selector were dropped. Probe each directly so
   #    removing any one selector FAILS here.
   local workflow_input
@@ -1409,8 +1405,6 @@ self_test() {
     "plugin/skills/gather-facts/scripts/gather-facts.jq" \
     "plugin/skills/next-wave/scripts/next-wave.sh" \
     "tests/next-wave/ledger-x.json" \
-    "plugin/skills/gate-check/scripts/gate-check.sh" \
-    "plugin/skills/gate-check/scripts/gate-contract.json" \
     "plugin/skills/_shared/containment.sh" \
     "plugin/skills/_shared/ledger-engine-io.sh" \
     "plugin/skills/create-working-branch/scripts/create-working-branch.sh" \

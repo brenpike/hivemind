@@ -123,7 +123,6 @@ Append-only blocker log.
   "next_state": "git_preflight",
   "summary": "Cerebrate returned a single-delivery plan.",
   "plan_epoch": 0,
-  "head": "0123456789abcdef0123456789abcdef01234567",
   "outputs": {
     "plan_path": ".hivemind/runs/2026-05-30T22-10-00Z-standard-delivery/plan.json"
   }
@@ -132,15 +131,11 @@ Append-only blocker log.
 
 `plan_epoch` is a TOP-LEVEL, ENGINE-WRITTEN event field — distinct from the free-form, caller-supplied `outputs` object below. `record-state-result` stamps it on EVERY event it appends, recording the `.plan.epoch` value the ledger held at append time. Because it is engine-written rather than caller-supplied, it cannot be forged or omitted by a caller the way anything under `outputs` can.
 
-`head` is likewise a TOP-LEVEL, ENGINE-WRITTEN event field, not an `outputs` key. `record-state-result` stamps it on EVERY event it appends: the full object id printed by plain `git rev-parse --verify -q HEAD^{commit}`, run in the checkout at append time, or JSON null when HEAD has no commit. The engine never reads it from the inputs file, so a `head` key under `outputs` stays inside `outputs` and cannot set or override the top-level `head`.
-
 `event.outputs` is free-form and recorded verbatim. This holds for every convention below: each is additive and free-form — NO schema change and NO new REQUIRED field — and `event.outputs` stays free-form/optional.
 
 **Convention (proactive-recurrence-origin marker):** on a `root-cluster-suspected` transition, `event.outputs` MAY carry the named origin-marker key (`recurrence_origin`). Its presence distinguishes a proactively-derived zoom-out from a reviewer-returned one. The key's name, values, and absence semantics are defined SOLELY in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (### Proactive Zoom-Out Ledger Marker)` — that subsection is the single source; this note does not restate them.
 
 **Convention (open_pr PR identity):** on an `open_pr` transition, `event.outputs` MAY carry the opened PR's identity — `pr` (the PR URL) and `head_ref_oid` (the PR head SHA). The overlord forwards these from the routing YAML `hivemind:open-plan-pr` returns (`url` → `pr`, `head_ref_oid`). The deferred post-merge decision report derives the run's PR from `event.outputs.pr` — that report is CONFIG-GATED (opt-in via `HIVEMIND_ENABLE_DECISION_REPORT`, OFF by default), so recording these keys does NOT imply a report will fire; the trigger and policy single source is `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (## Post-Merge Decision Report Trigger)`.
-
-**Convention (gate end commit):** a standard-delivery gate's end commit is the top-level `head` of its holding event. The `hivemind:gate-check` contract names the holding transitions. No caller output carries the end commit. The gate rule it records is single-sourced to `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements); this note does not restate it.
 
 **Convention (pr-feedback-remediation PR identity):** a `pr-feedback-remediation` run has no `open_pr` state, so on a `pr_branch_preflight` (and/or `intake`) transition `event.outputs` MAY carry the resolved PR's `pr` (URL) and `head_ref_oid` (head SHA). The overlord records these from the PR it resolves and checks out at `pr_branch_preflight`. The deferred post-merge decision report derives the run's PR from `event.outputs.pr` of EITHER event and is CONFIG-GATED the same way (opt-in via `HIVEMIND_ENABLE_DECISION_REPORT`, OFF by default), single-sourced to `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (## Post-Merge Decision Report Trigger)`. These keys/paths are DISTINCT from `decisions[]`, `recurrence_origin`, and `plan.steps`.
 

@@ -18,10 +18,6 @@
       "pattern": "returns control to whatever invoked it"
     },
     {
-      "file": "plugin/skills/gate-check/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
       "file": "plugin/skills/gather-facts/SKILL.md",
       "pattern": "returns control to whatever invoked it"
     },
@@ -83,10 +79,6 @@
     },
     {
       "file": "plugin/skills/create-working-branch/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/gate-check/SKILL.md",
       "pattern": "the caller then continues from the point at which it invoked this skill"
     },
     {
