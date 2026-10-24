@@ -21,6 +21,7 @@ Before:
 - [ ] Validation passed or "Not run (no validation commands defined)"
 - [ ] Required version/release metadata included or not required
 - [ ] Local review gate held, or local review did not run, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
+- [ ] Every configured gate held on the commit HEAD is on, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
 - [ ] No unexpected unstaged changes
 
 After:
@@ -107,6 +108,7 @@ as a workflow state or as one step inside a longer procedure:
 - open PR if the Validation procedure returned the Worker Report — Blocked (`stage: validation`) or any declared validation command failed. `Validated: Not run (no validation commands defined)` is a valid terminal state per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) and does not block PR opening.
 - open PR if required version/release metadata is missing per `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md`
 - open PR when local review ran on the branch and did not hold the local review gate per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
+- open PR on a commit a configured gate did not hold on per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
 - continue past step 6 with an unverified push state
 - invent missing validation
 - include any of the following strings (any case) in commit messages or PR content: `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship

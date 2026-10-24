@@ -57,6 +57,8 @@ Open PR only when: plan complete, validation passed, version bump included if re
 
 Local review gate: when local review ran on the branch, the PR opens only when the last exit reason it returned holds the gate. The exit reasons that hold the gate are `clean`, and `diminishing-returns` once its advisory exit is taken. Every other exit reason holds nothing, max-iterations-reached included, and stops the PR on every path: the workflow script, the state machine, and any step taken outside both. Local review that did not run, because it is not configured or was skipped, neither holds nor blocks the PR.
 
+Gate end commit: a gate holds only for the commit its step ended on. The gates are validation, the version bump, and local review when it ran. The PR opens only on a commit every configured gate held on, on every path: the workflow script, the state machine, and any step taken outside both. A commit made after a gate, such as a validation fix, a bump commit, or a local review fix, sends the run back through every gate that ended on an earlier commit before the PR opens.
+
 PR content must include:
 - Summary covering what changed and why, at the length the change needs
 - File paths modified, grouped by plan step

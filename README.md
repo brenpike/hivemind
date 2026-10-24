@@ -257,9 +257,13 @@ You --> Overlord --> route-workflow --> standard-delivery
     implement_next_step -> implement_step (wave: parallel Drones/Changelings)
             ^                   |
             +---- checkpoint <--+   (one molt per wave)
-    version_bump_decision -> [version_bump -> version_checkpoint] -> validate
-    local_review_decision -> local_review (Local-Reviewer + Codex, or skipped)
-    local_review (diminishing-returns) -> diminishing_returns_decision (only taken -> open_pr)
+    implement_next_step (all steps done) -> gate_check <-- each gate that holds
+    gate_check (HEAD vs each gate's end commit)
+        |-- version_due ----> version_bump_decision -> [version_bump -> version_checkpoint]
+        |-- validation_due -> validate
+        |-- review_due -----> local_review_decision -> local_review (Local-Reviewer + Codex, or skipped)
+        |                     local_review (diminishing-returns) -> diminishing_returns_decision (taken)
+        +-- all_held -------> open_pr (only route in)
     open_pr --> github_review_decision --> github_review_loop (GitHub-Reviewer)
 ```
 
@@ -268,9 +272,9 @@ You --> Overlord --> route-workflow --> standard-delivery
 3. **Plan.** At `plan`, the cerebrate returns the directive. Before every cerebrate delegation, in every planning state and on every replan, the state machine runs `hivemind:gather-facts` and passes the facts file to the cerebrate. It stops before planning on a failed facts run, a cut field, or injection-suspect text.
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
 5. **Build in waves.** `implement_next_step` asks `hivemind:next-wave` for the ready wave; `implement_step` dispatches it as parallel drones and changelings; `checkpoint` molts once for the whole wave.
-6. **Gate.** `version_bump_decision` (via `hivemind:bump-type`; a required bump goes through `version_bump` and `version_checkpoint`), then `validate` runs the project's validation commands.
-7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped. A `diminishing-returns` exit goes through `diminishing_returns_decision` first: only a taken advisory reaches `open_pr`, and one not taken ends the run blocked before the PR.
-8. **Ship and watch.** `open_pr` opens the PR, then `github_review_decision` and `github_review_loop` watch it by default, fixing, pushing, replying to, and resolving feedback from the Codex, Copilot, or Claude reviewer bots until approval, merge, close, or an idle hour. Opt out in your request or with `HIVEMIND_SKIP_PR_WATCH`. Agents never merge.
+6. **Gate.** `gate_check` is the loop head of the gates. Each gate records the commit it ended on, and `gate_check` compares HEAD with those commits in the order version, validation, local review, sending the run back to the first gate that did not end on HEAD. A gate that already held on HEAD does not run again, so a later commit, a local review fix included, sends the run back only through the gates that ended on an earlier commit. The version gate is `version_bump_decision` (via `hivemind:bump-type`; a required bump goes through `version_bump` and `version_checkpoint`), and the validation gate is `validate`, which runs the project's validation commands.
+7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped and the review gate is not configured for the run. A `diminishing-returns` exit goes through `diminishing_returns_decision` first: only a taken advisory goes back to `gate_check`, and one not taken ends the run blocked before the PR.
+8. **Ship and watch.** `gate_check` reaches `open_pr` only with `all_held`, when every configured gate held on HEAD. `open_pr` pushes that commit, and the push refuses when HEAD is another commit. It opens the PR, then `github_review_decision` and `github_review_loop` watch it by default, fixing, pushing, replying to, and resolving feedback from the Codex, Copilot, or Claude reviewer bots until approval, merge, close, or an idle hour. Opt out in your request or with `HIVEMIND_SKIP_PR_WATCH`. Agents never merge.
 
 **Waves.** Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine. On the state machine, `hivemind:next-wave` computes each wave from the run ledger; the script computes its waves in `plugin/workflow-src/lib/waves.js`.
 
