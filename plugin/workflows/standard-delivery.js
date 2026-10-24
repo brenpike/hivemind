@@ -156,7 +156,7 @@ const AUTONOMY_TABLE = {
    "balanced": "auto",
    "low": "surface",
    "resolved_at": [
-    "local_review.diminishing-returns",
+    "diminishing_returns_decision",
     "standard-delivery.local_review"
    ],
    "when": "The review loop detects diminishing returns and the overlord decides whether to stop remediating and exit the loop."
@@ -3323,7 +3323,7 @@ function nextActionLine(stopReason, run) {
     return again;
   }
   const line = again + ' The new run plans what is left from the commits already on branch ' + encodeUntrustedText(cutExcerpt(run.branch)) + '.';
-  return stopReason === 'before_pr' ? line + ' The pull request can be opened from those commits.' : line;
+  return stopReason === 'before_pr' ? line + ' No pull request until every gate holds on them.' : line;
 }
 
 function buildBlockedLead(message) {

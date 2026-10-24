@@ -65,8 +65,9 @@
  *   nextActionLine() names the next action in one line: run the request
  *   again with the answers in it. When the run made commits, it names the
  *   branch, cut by cutExcerpt, and says the new run plans what is left
- *   from the commits already on it; at a before_pr stop it also says the
- *   pull request can be opened from those commits (issue 434).
+ *   from the commits already on it; at a before_pr stop it also says no
+ *   pull request opens from those commits until a run holds every
+ *   configured gate on them (issues 434 and 444).
  *   Only finishDeliveryComplete, with pr, ends complete, so complete
  *   always means a pull request exists.
  *   Every step- or script-written diagnostic or name a message shows goes
@@ -167,7 +168,9 @@
  *   blocked with the question open (stop reason before_pr), the commits
  *   and decisions listed, the next action named, and nothing pushed. That
  *   covers the tail asks, the bump, validation and gate rerun limits, and
- *   the local review questions.
+ *   the local review questions. The next action never offers a pull
+ *   request from commits a gate did not hold on: no pull request opens
+ *   until a run holds every configured gate on them.
  *
  * Invariants
  *   contractRows() in contract.js is the executable home of the step
@@ -1335,7 +1338,7 @@ function nextActionLine(stopReason, run) {
     return again;
   }
   const line = again + ' The new run plans what is left from the commits already on branch ' + encodeUntrustedText(cutExcerpt(run.branch)) + '.';
-  return stopReason === 'before_pr' ? line + ' The pull request can be opened from those commits.' : line;
+  return stopReason === 'before_pr' ? line + ' No pull request until every gate holds on them.' : line;
 }
 
 function buildBlockedLead(message) {

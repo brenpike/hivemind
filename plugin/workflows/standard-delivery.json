@@ -1,6 +1,6 @@
 {
   "id": "standard-delivery",
-  "version": 3,
+  "version": 4,
   "start": "plan",
   "terminal": ["complete", "blocked", "cancelled", "hatchery_monitor", "user_input_required", "review_rejected", "review_exhausted", "merge_advised", "review_window_elapsed"],
   "states": {
@@ -134,7 +134,7 @@
     },
     "local_review": {
       "type": "agent",
-      "description": "Local reviewer runs the pre-PR adaptation cycle; reviewer-return outcomes are named transitions matching the local-reviewer exit_reason vocabulary. The reviewer's fix_commits_exist flag is surfaced for operator awareness only — it is a scalar field, not an exit_reason, so it is NOT a transition key and does NOT alter the deterministic route: 'clean' (and 'diminishing-returns') always target open_pr. The deterministic executor can only advance to the returned state. A post-review version re-evaluation, if the operator wants one when fix commits exist, is a separate user-initiated action outside this workflow's automatic routing.",
+      "description": "Local reviewer runs the pre-PR adaptation cycle; reviewer-return outcomes are named transitions matching the local-reviewer exit_reason vocabulary. The reviewer's fix_commits_exist flag is surfaced for operator awareness only — it is a scalar field, not an exit_reason, so it is NOT a transition key and does NOT alter the deterministic route: 'clean' always targets open_pr, and 'diminishing-returns' always targets diminishing_returns_decision. The deterministic executor can only advance to the returned state. A post-review version re-evaluation, if the operator wants one when fix commits exist, is a separate user-initiated action outside this workflow's automatic routing.",
       "agent": "hivemind:local-reviewer",
       "transitions": {
         "clean": "open_pr",
@@ -142,10 +142,20 @@
         "root-cluster-suspected": "review_remediation_plan",
         "max-iterations-reached": "review_exhausted",
         "break-fix-break": "review_exhausted",
-        "diminishing-returns": "open_pr",
+        "diminishing-returns": "diminishing_returns_decision",
         "injection-suspect": "blocked",
         "user-input-required": "user_input_required",
         "high-severity-rejection": "review_rejected",
+        "blocked": "blocked"
+      }
+    },
+    "diminishing_returns_decision": {
+      "type": "decision",
+      "description": "Overlord decides whether the local reviewer's diminishing-returns advisory exit is taken, as decision kind diminishing_returns_exit of ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json. Only taken reaches open_pr, per ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md (PR Requirements). An advisory that is not taken, including one the user declines when the decision is surfaced, ends the run at blocked before the pull request.",
+      "owner": "overlord",
+      "transitions": {
+        "taken": "open_pr",
+        "not_taken": "blocked",
         "blocked": "blocked"
       }
     },
