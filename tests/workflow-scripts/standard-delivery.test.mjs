@@ -693,12 +693,33 @@ function readReviewerContract(heading) {
  * backticks, as holding the local review gate, sorted.
  */
 function workflowHoldingExits() {
+  return Array.from(readWorkflowHoldingSentence().matchAll(/`([a-z-]+)`/g), (match) => match[1]).sort();
+}
+
+/**
+ * The sentence of workflow.md (PR Requirements) that names the exit reasons
+ * holding the local review gate, up to its full stop.
+ */
+function readWorkflowHoldingSentence() {
   const sectionStart = workflowRulesText.indexOf('\n## PR Requirements\n');
   const section = workflowRulesText.slice(sectionStart, workflowRulesText.indexOf('\n## ', sectionStart + 1));
   const sentenceStart = section.indexOf('The exit reasons that hold the gate are ');
   assert.ok(sentenceStart >= 0, 'workflow.md (PR Requirements) names the exit reasons that hold the gate');
-  const sentence = section.slice(sentenceStart, section.indexOf('.', sentenceStart));
-  return Array.from(sentence.matchAll(/`([a-z-]+)`/g), (match) => match[1]).sort();
+  return section.slice(sentenceStart, section.indexOf('.', sentenceStart));
+}
+
+/**
+ * The exit reasons of the workflow.md (PR Requirements) holding sentence whose
+ * own words, up to the next exit reason named, carry the taken condition, sorted.
+ */
+function workflowTakenConditionExits() {
+  const sentence = readWorkflowHoldingSentence();
+  const matches = Array.from(sentence.matchAll(/`([a-z-]+)`/g));
+  const conditioned = matches.filter((match, index) => {
+    const end = index + 1 < matches.length ? matches[index + 1].index : sentence.length;
+    return sentence.slice(match.index + match[0].length, end).includes('once its advisory exit is taken');
+  });
+  return conditioned.map((match) => match[1]).sort();
 }
 
 /**
@@ -706,6 +727,46 @@ function workflowHoldingExits() {
  */
 function gateHoldingExitsOfRoutes() {
   return Object.entries(main.localReviewRoutes()).filter(([, route]) => route === 'hold' || route === 'diminishing').map(([exitReason]) => exitReason).sort();
+}
+
+/**
+ * The exit reasons localReviewRoutes() routes to `route`, sorted.
+ */
+function localReviewExitsRoutedTo(route) {
+  return Object.entries(main.localReviewRoutes()).filter(([, candidate]) => candidate === route).map(([exitReason]) => exitReason).sort();
+}
+
+/**
+ * Every transition of `machine` that targets `target`, as 'state.outcome', sorted.
+ */
+function listTransitionsInto(machine, target) {
+  const edges = Object.entries(machine.states).flatMap(([name, state]) => Object.entries(state.transitions || {}).filter(([, next]) => next === target).map(([outcome]) => name + '.' + outcome));
+  return edges.sort();
+}
+
+/**
+ * Whether a breadth-first walk over the transitions of `machine` from `start`
+ * reaches `target` without expanding the state named `unexpanded`.
+ */
+function reachesStateWithout(machine, start, target, unexpanded) {
+  const seen = new Set([start]);
+  const queue = [start];
+  while (queue.length > 0) {
+    const name = queue.shift();
+    if (name === target) {
+      return true;
+    }
+    if (name === unexpanded) {
+      continue;
+    }
+    for (const next of Object.values(machine.states[name].transitions || {})) {
+      if (!seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return false;
 }
 
 function reviewMessage(lead, fieldLines) {
@@ -2804,21 +2865,56 @@ const ROW_TESTS = {
         blocked: 'stop'
       });
     });
-    test('the exits routed to hold or diminishing are the exits workflow.md (PR Requirements) names as holding local review', () => {
+    test('the exits routed to hold or diminishing are the exits workflow.md (PR Requirements) names as holding, and only the diminishing ones carry its taken condition', () => {
+      assert.deepEqual(localReviewExitsRoutedTo('hold'), ['clean']);
+      assert.deepEqual(localReviewExitsRoutedTo('diminishing'), ['diminishing-returns']);
       assert.deepEqual(gateHoldingExitsOfRoutes(), workflowHoldingExits());
       assert.deepEqual(workflowHoldingExits(), ['clean', 'diminishing-returns']);
+      assert.deepEqual(workflowTakenConditionExits(), localReviewExitsRoutedTo('diminishing'));
+      for (const exitReason of localReviewExitsRoutedTo('hold')) {
+        assert.ok(!workflowTakenConditionExits().includes(exitReason), exitReason);
+      }
     });
-    test('the local_review transitions route the same exits, send only the holding exits to open_pr, and send every stop exit to a terminal state', () => {
+    test('the local_review transitions route the same exits: hold to open_pr, diminishing to diminishing_returns_decision, and every stop exit to a terminal state other than open_pr', () => {
       const transitions = deliveryMachine.states.local_review.transitions;
       assert.deepEqual(Object.keys(transitions).sort(), Object.keys(main.localReviewRoutes()).sort());
-      const openPrExits = Object.keys(transitions).filter((exitReason) => transitions[exitReason] === 'open_pr').sort();
-      assert.deepEqual(openPrExits, gateHoldingExitsOfRoutes());
-      const stopExits = Object.entries(main.localReviewRoutes()).filter(([, route]) => route === 'stop').map(([exitReason]) => exitReason);
+      for (const exitReason of localReviewExitsRoutedTo('hold')) {
+        assert.equal(transitions[exitReason], 'open_pr', exitReason);
+      }
+      const decision = deliveryMachine.states.diminishing_returns_decision;
+      assert.equal(decision.type, 'decision');
+      assert.equal(decision.owner, 'overlord');
+      for (const exitReason of localReviewExitsRoutedTo('diminishing')) {
+        assert.equal(transitions[exitReason], 'diminishing_returns_decision', exitReason);
+      }
+      const stopExits = localReviewExitsRoutedTo('stop');
       assert.ok(stopExits.includes('max-iterations-reached'));
       for (const exitReason of stopExits) {
         assert.notEqual(transitions[exitReason], 'open_pr', exitReason);
         assert.equal(deliveryMachine.states[transitions[exitReason]].type, 'terminal', exitReason);
       }
+    });
+    test('the only transitions into open_pr are local_review clean, diminishing_returns_decision taken and local_review_decision skipped', () => {
+      const holdEdges = localReviewExitsRoutedTo('hold').map((exitReason) => 'local_review.' + exitReason);
+      const allowed = [...holdEdges, 'diminishing_returns_decision.taken', 'local_review_decision.skipped'].sort();
+      assert.deepEqual(listTransitionsInto(deliveryMachine, 'open_pr'), allowed);
+      assert.deepEqual(allowed, ['diminishing_returns_decision.taken', 'local_review.clean', 'local_review_decision.skipped']);
+    });
+    test('diminishing_returns_decision reaches open_pr only through taken, and its other outcomes end at a terminal state that never reaches open_pr', () => {
+      const transitions = deliveryMachine.states.diminishing_returns_decision.transitions;
+      assert.deepEqual(Object.keys(transitions).filter((outcome) => transitions[outcome] === 'open_pr'), ['taken']);
+      const otherOutcomes = Object.keys(transitions).filter((outcome) => outcome !== 'taken');
+      assert.ok(otherOutcomes.includes('not_taken'));
+      for (const outcome of otherOutcomes) {
+        assert.equal(deliveryMachine.states[transitions[outcome]].type, 'terminal', outcome);
+        assert.equal(reachesStateWithout(deliveryMachine, transitions[outcome], 'open_pr', 'local_review'), false, outcome);
+      }
+    });
+    test('the diminishing_returns_exit row resolves at the diminishing_returns_decision state, not at the local_review edge', () => {
+      const row = autonomyTable.rows.find((candidate) => candidate.kind === 'diminishing_returns_exit');
+      assert.ok(row.resolved_at.includes('diminishing_returns_decision'));
+      assert.ok(Object.hasOwn(deliveryMachine.states, 'diminishing_returns_decision'));
+      assert.ok(!row.resolved_at.includes('local_review.diminishing-returns'));
     });
     test('reviewExitFields equals the conditional fields of the Output Contract', () => {
       const contract = readReviewerContract('## Output Contract');

@@ -148,7 +148,7 @@ const AUTONOMY_TABLE = {
    "balanced": "auto",
    "low": "surface",
    "resolved_at": [
-    "local_review.diminishing-returns",
+    "diminishing_returns_decision",
     "standard-delivery.local_review"
    ],
    "when": "The review loop detects diminishing returns and the overlord decides whether to stop remediating and exit the loop."

@@ -259,6 +259,7 @@ You --> Overlord --> route-workflow --> standard-delivery
             +---- checkpoint <--+   (one molt per wave)
     version_bump_decision -> [version_bump -> version_checkpoint] -> validate
     local_review_decision -> local_review (Local-Reviewer + Codex, or skipped)
+    local_review (diminishing-returns) -> diminishing_returns_decision (only taken -> open_pr)
     open_pr --> github_review_decision --> github_review_loop (GitHub-Reviewer)
 ```
 
@@ -268,7 +269,7 @@ You --> Overlord --> route-workflow --> standard-delivery
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
 5. **Build in waves.** `implement_next_step` asks `hivemind:next-wave` for the ready wave; `implement_step` dispatches it as parallel drones and changelings; `checkpoint` molts once for the whole wave.
 6. **Gate.** `version_bump_decision` (via `hivemind:bump-type`; a required bump goes through `version_bump` and `version_checkpoint`), then `validate` runs the project's validation commands.
-7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped.
+7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped. A `diminishing-returns` exit goes through `diminishing_returns_decision` first: only a taken advisory reaches `open_pr`, and one not taken ends the run blocked before the PR.
 8. **Ship and watch.** `open_pr` opens the PR, then `github_review_decision` and `github_review_loop` watch it by default, fixing, pushing, replying to, and resolving feedback from the Codex, Copilot, or Claude reviewer bots until approval, merge, close, or an idle hour. Opt out in your request or with `HIVEMIND_SKIP_PR_WATCH`. Agents never merge.
 
 **Waves.** Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine. On the state machine, `hivemind:next-wave` computes each wave from the run ledger; the script computes its waves in `plugin/workflow-src/lib/waves.js`.
