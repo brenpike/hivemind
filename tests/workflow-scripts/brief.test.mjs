@@ -49,7 +49,7 @@ function assertInOrder(text, needles) {
 
 describe('renderQuestions layout', () => {
   const text = lib.renderQuestions([{ brief: makeBrief(), reason: 'gate_irreversible' }], []);
-  test('puts the ask first, then options, recommendation, why it matters and the exact text', () => {
+  test('puts the ask first, then options, recommendation and why it matters, with no verbatim for a non-exact ask', () => {
     assert.equal(text, [
       ONE_HEADING,
       '',
@@ -60,11 +60,12 @@ describe('renderQuestions layout', () => {
       'Why it matters: high criticality, likelihood edge case. If it goes wrong: BLAST_TEXT',
       'Why I am asking: ' + lib.askReasonLine('gate_irreversible'),
       '',
-      'Exact text:',
-      'VERBATIM_TEXT',
-      '',
       REPLY_LINE
     ].join('\n'));
+  });
+  test('an exact ask shows its verbatim under Word for word', () => {
+    const exactText = lib.renderQuestions([{ brief: makeBrief(), reason: 'gate_irreversible', exact: true }], []);
+    assert.equal(exactText, text.replace('\n\n' + REPLY_LINE, '\n\nWord for word:\nVERBATIM_TEXT\n\n' + REPLY_LINE));
   });
   test('one question with two options and no verbatim fits in 12 lines', () => {
     const brief = makeBrief();
@@ -88,17 +89,17 @@ describe('renderQuestions layout', () => {
   test('omits the verbatim section when verbatim is absent', () => {
     const brief = makeBrief();
     delete brief.verbatim;
-    assert.doesNotMatch(lib.renderQuestions([{ brief, reason: 'hard_stop' }], []), /Exact text:/);
+    assert.doesNotMatch(lib.renderQuestions([{ brief, reason: 'hard_stop', exact: true }], []), /Word for word:/);
   });
-  test('shows verbatim exactly as given', () => {
+  test('shows the verbatim of an exact ask exactly as given', () => {
     const verbatim = `keep ${EM_DASH} this | as is`;
-    const rendered = lib.renderQuestions([{ brief: makeBrief({ verbatim }), reason: 'hard_stop' }], []);
+    const rendered = lib.renderQuestions([{ brief: makeBrief({ verbatim }), reason: 'hard_stop', exact: true }], []);
     assert.ok(rendered.split('\n').includes(verbatim));
   });
-  test('shows a multi-line verbatim whole', () => {
+  test('shows a multi-line verbatim of an exact ask whole', () => {
     const verbatim = 'line one\n\nline three';
-    const rendered = lib.renderQuestions([{ brief: makeBrief({ verbatim }), reason: 'hard_stop' }], []);
-    assert.ok(rendered.includes('Exact text:\n' + verbatim + '\n\n'));
+    const rendered = lib.renderQuestions([{ brief: makeBrief({ verbatim }), reason: 'hard_stop', exact: true }], []);
+    assert.ok(rendered.includes('Word for word:\n' + verbatim + '\n\n'));
   });
   test('shows a recommendation of none and marks no option', () => {
     const recommendation = { option_id: 'A', strength: 'none', why: 'NONE_WHY' };
@@ -169,25 +170,25 @@ describe('taken decisions', () => {
       '  D1. TAKEN_ONE',
       '    Chose option B: SUMMARY_B',
       '    Why: TAKEN_WHY',
-      '    Exact text:',
+      '    Word for word:',
       'VERBATIM_TEXT',
       '  D2. TAKEN_TWO',
       '    Chose option A: SUMMARY_A',
       '    Why: WHY_TEXT',
-      '    Exact text:',
+      '    Word for word:',
       'VERBATIM_TEXT'
     ].join('\n'));
   });
-  test('renderDecisions omits the Exact text lines when verbatim is absent or empty', () => {
+  test('renderDecisions omits the Word for word lines when verbatim is absent or empty', () => {
     const absent = makeBrief({ problem: 'NO_VERBATIM' });
     delete absent.verbatim;
     const text = lib.renderDecisions([{ brief: absent }, { brief: makeBrief({ problem: 'EMPTY_VERBATIM', verbatim: '' }) }]);
-    assert.doesNotMatch(text, /Exact text:/);
+    assert.doesNotMatch(text, /Word for word:/);
   });
   test('renderDecisions shows verbatim exactly as given, unindented', () => {
     const verbatim = `keep ${EM_DASH} this | as is`;
     const lines = lib.renderDecisions([{ brief: makeBrief({ verbatim }) }]).split('\n');
-    assert.deepEqual(lines.slice(-2), ['    Exact text:', verbatim]);
+    assert.deepEqual(lines.slice(-2), ['    Word for word:', verbatim]);
   });
   test('renderDecisions of nothing is empty', () => {
     assert.equal(lib.renderDecisions([]), '');
@@ -207,7 +208,7 @@ describe('taken decisions', () => {
   test('renderQuestions leaves out the summary, why and verbatim of a taken decision', () => {
     const decided = [{ brief: makeBrief({ problem: 'TAKEN_ONE', options: [{ id: 'A', summary: 'TAKEN_SUMMARY' }], recommendation: { option_id: 'A', strength: 'strong', why: 'TAKEN_WHY' }, verbatim: 'TAKEN_VERBATIM' }) }];
     const text = lib.renderQuestions([{ brief: makeBrief({ verbatim: '' }), reason: 'hard_stop' }], decided);
-    for (const needle of ['TAKEN_SUMMARY', 'TAKEN_WHY', 'TAKEN_VERBATIM', 'Exact text:']) {
+    for (const needle of ['TAKEN_SUMMARY', 'TAKEN_WHY', 'TAKEN_VERBATIM', 'Word for word:']) {
       assert.equal(text.includes(needle), false, `shows ${needle}`);
     }
   });
@@ -252,12 +253,12 @@ describe('open questions', () => {
     assert.equal(lib.renderOpenQuestions(open), [
       'I stopped asking after ' + lib.pauseLimit() + ' rounds of questions. These are still open:',
       '  Q1. FIRST_OPEN The report assumes option A.',
-      '  Q2. SECOND_OPEN There is no recommendation.'
+      '  Q2. SECOND_OPEN I have no recommendation of my own.'
     ].join('\n'));
   });
   test('strength none has no recommendation even with an option id', () => {
     const brief = makeBrief({ recommendation: { option_id: 'B', strength: 'none', why: 'W' } });
-    assert.ok(lib.renderOpenQuestions([{ brief }]).endsWith('Q1. PROBLEM_TEXT There is no recommendation.'));
+    assert.ok(lib.renderOpenQuestions([{ brief }]).endsWith('Q1. PROBLEM_TEXT I have no recommendation of my own.'));
   });
   test('never shows brief.id or brief.kind', () => {
     assert.doesNotMatch(lib.renderOpenQuestions(open), /Q9|planner_question/);
@@ -270,7 +271,7 @@ describe('open questions', () => {
   });
   for (const brief of [null, undefined, {}, { problem: 7, recommendation: [] }]) {
     test(`malformed brief ${JSON.stringify(brief)} renders with not given placeholders`, () => {
-      assert.ok(lib.renderOpenQuestions([{ brief }]).endsWith('Q1. not given There is no recommendation.'));
+      assert.ok(lib.renderOpenQuestions([{ brief }]).endsWith('Q1. not given I have no recommendation of my own.'));
     });
   }
 });
@@ -331,7 +332,7 @@ describe('compact questions', () => {
     ].join('\n'));
   });
   test('omits the detail the full form carries', () => {
-    for (const needle of ['Why it matters:', 'Why I am asking:', 'Exact text:']) {
+    for (const needle of ['Why it matters:', 'Why I am asking:']) {
       assert.ok(full.includes(needle), `full form lacks ${needle}`);
       assert.equal(compact.includes(needle), false, `compact form shows ${needle}`);
     }
@@ -383,6 +384,19 @@ describe('compact decisions', () => {
   });
   test('labels equal the full form labels', () => {
     assert.deepEqual(labelsOf(lib.renderDecisionsCompact(taken)), labelsOf(lib.renderDecisions(taken)));
+  });
+  test('renderDecisionsCompact gives a long multi-sentence why one line, cut at a sentence end', () => {
+    const sentence = 'This sentence explains one part of the choice in some detail.';
+    const why = Array.from({ length: 8 }, () => sentence).join(' ') + '\nA second line of reasons.';
+    const brief = makeBrief({ problem: 'LONG_WHY', recommendation: { option_id: 'B', strength: 'strong', why } });
+    const lines = lib.renderDecisionsCompact([{ brief }]).split('\n');
+    assert.equal(lines.length, 2);
+    const kept = lib.cutAtBoundary(why.replace('\n', ' '), lib.maxExcerptLength());
+    assert.equal(lines[1], '  D1. LONG_WHY Chose option B. Why: ' + kept);
+    assert.ok(kept.endsWith('detail.'));
+    assert.ok(Array.from(kept).length <= lib.maxExcerptLength());
+    assert.ok(kept.length < why.length);
+    assert.doesNotMatch(lines[1], /SUMMARY_B|VERBATIM_TEXT/);
   });
   test('argument checks', () => {
     assert.throws(() => lib.renderDecisionsCompact(undefined), /renderDecisionsCompact: taken must be an array/);
@@ -463,7 +477,7 @@ describe('questionLabel', () => {
 describe('exact entries', () => {
   const plain = { brief: makeBrief({ problem: 'PLAIN_PROBLEM', verbatim: 'PLAIN_VERBATIM' }), reason: 'gate_irreversible' };
   const exact = { brief: makeBrief({ problem: 'EXACT_PROBLEM', verbatim: 'EXACT_VERBATIM' }), reason: 'hard_stop', exact: true };
-  test('the compact form keeps the Exact text lines of an exact entry', () => {
+  test('the compact form keeps the Word for word lines of an exact entry', () => {
     assert.equal(lib.renderQuestionsCompact([exact], []), [
       ONE_HEADING,
       '',
@@ -472,18 +486,20 @@ describe('exact entries', () => {
       '- B: SUMMARY_B',
       'Recommendation: option A (weak). Why: WHY_TEXT',
       '',
-      'Exact text:',
+      'Word for word:',
       'EXACT_VERBATIM',
       '',
       REPLY_LINE
     ].join('\n'));
   });
-  test('only exact entries keep their Exact text lines', () => {
-    const text = lib.renderQuestionsCompact([plain, exact, plain], []);
-    assert.equal(text.split('\n').filter((line) => line === 'Exact text:').length, 1);
-    assert.ok(!text.includes('PLAIN_VERBATIM'));
-    assertInOrder(text, ['Q1. PLAIN_PROBLEM', 'Q2. EXACT_PROBLEM', 'Exact text:', 'EXACT_VERBATIM', 'Q3. PLAIN_PROBLEM']);
-  });
+  for (const [formName, render] of [['full', lib.renderQuestions], ['compact', lib.renderQuestionsCompact]]) {
+    test(`only exact entries keep their Word for word lines in the ${formName} form`, () => {
+      const text = render([plain, exact, plain], []);
+      assert.equal(text.split('\n').filter((line) => line === 'Word for word:').length, 1);
+      assert.ok(!text.includes('PLAIN_VERBATIM'));
+      assertInOrder(text, ['Q1. PLAIN_PROBLEM', 'Q2. EXACT_PROBLEM', 'Word for word:', 'EXACT_VERBATIM', 'Q3. PLAIN_PROBLEM']);
+    });
+  }
   test('an exact verbatim is shown exactly as given, em dash included', () => {
     const verbatim = `drop the table ${EM_DASH} for good | now`;
     const text = lib.renderQuestionsCompact([{ ...exact, brief: makeBrief({ verbatim }) }], []);
@@ -492,15 +508,28 @@ describe('exact entries', () => {
   test('an exact entry without verbatim has no Exact text line', () => {
     const brief = makeBrief();
     delete brief.verbatim;
-    assert.doesNotMatch(lib.renderQuestionsCompact([{ ...exact, brief }], []), /Exact text:/);
+    assert.doesNotMatch(lib.renderQuestionsCompact([{ ...exact, brief }], []), /Word for word:/);
   });
   for (const flag of [false, 'true', 1, null]) {
     test(`exact ${JSON.stringify(flag)} renders as a plain entry`, () => {
       const entry = { ...exact, exact: flag };
-      assert.equal(lib.renderQuestionsCompact([entry], []), lib.renderQuestionsCompact([{ brief: entry.brief, reason: entry.reason }], []));
+      const plainEntry = { brief: entry.brief, reason: entry.reason };
+      assert.equal(lib.renderQuestionsCompact([entry], []), lib.renderQuestionsCompact([plainEntry], []));
+      assert.equal(lib.renderQuestions([entry], []), lib.renderQuestions([plainEntry], []));
+      assert.doesNotMatch(lib.renderQuestions([entry], []), /EXACT_VERBATIM/);
     });
   }
-  test('the full form is the same with or without exact', () => {
-    assert.equal(lib.renderQuestions([plain, exact], []), lib.renderQuestions([plain, { brief: exact.brief, reason: exact.reason }], []));
+  test('no output says Exact text', () => {
+    const taken = [{ brief: makeBrief() }];
+    const outputs = [
+      lib.renderQuestions([plain, exact], taken),
+      lib.renderQuestionsCompact([plain, exact], taken),
+      lib.renderDecisions(taken),
+      lib.renderDecisionsCompact(taken),
+      ...['pause_limit', 'reply_size', 'exact_text_size', 'before_pr'].map((stopReason) => lib.renderOpenQuestions([exact], stopReason))
+    ];
+    for (const output of outputs) {
+      assert.equal(output.includes('Exact text'), false, output);
+    }
   });
 });

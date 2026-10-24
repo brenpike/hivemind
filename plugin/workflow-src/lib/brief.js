@@ -35,25 +35,29 @@
  *     line; then the "Why it matters" part, two lines: the criticality
  *     level, likelihood and blast_radius, and the "Why I am asking" line
  *     from askReasonLine.
- *     When the brief carries verbatim, an "Exact text:" section follows
- *     with the verbatim whole. Then one line per taken decision, its D
- *     label, problem and chosen option id, with a line saying the user can
+ *     Only for an exact entry whose brief carries verbatim, a "Word for
+ *     word:" section follows with the verbatim whole, so a plan summary is
+ *     not pasted into every question. Then one line per taken decision, its
+ *     D label, problem and chosen option id, with a line saying the user can
  *     change them in the same reply. The last line shows how to reply, like
  *     Q1 A, or in their own words. Cases for and against, effort, value,
  *     reversible and assumptions are not shown.
  *   renderDecisions  the "Decided for you" block, labelled D1..Dn by
  *     position, or the empty string when taken is empty. Each decision
  *     shows its problem, the chosen option with its summary and the why,
- *     then, when verbatim is a non-empty string, a line "    Exact text:"
- *     and the verbatim exactly as given, unindented.
+ *     then, when verbatim is a non-empty string, a line "    Word for
+ *     word:" and the verbatim exactly as given, unindented. This full form
+ *     is the record the pull request body carries.
  *   renderQuestionsCompact  the shorter form of renderQuestions, with the
  *     same layout, heading, Q1..Qn labels, taken decision lines and last
  *     line. Each question shows its problem line, option lines and
- *     recommendation line, without the "Why it matters" part, and only an
- *     exact entry keeps its "Exact text:" section.
+ *     recommendation line, without the "Why it matters" part, and, as in
+ *     the full form, only an exact entry has its "Word for word:" section.
  *   renderDecisionsCompact  the "Decided for you" block with one line per
  *     decision, labelled D1..Dn by position: problem, chosen option id and
- *     why, without the option summary. The empty string when taken is empty.
+ *     why, without the option summary or verbatim. The why is made one line
+ *     and cut by cutAtBoundary (result.js) to maxExcerptLength(). The empty
+ *     string when taken is empty.
  *   askReasonLine    one plain sentence for the reason.
  *   questionLabel    the label renderQuestions, renderQuestionsCompact and
  *     renderOpenQuestions show by position: 'Q' + (index + 1).
@@ -66,7 +70,7 @@
  *     ('before_pr'). The line names no next action: the workflow adds its
  *     own next-step line. Then one line per
  *     question labelled Q1..Qn by position, with its problem and the option
- *     the report assumes, or a line saying there is no recommendation.
+ *     the report assumes, or the line 'I have no recommendation of my own.'
  *
  * Invariants
  *   Text comes from brief fields and fixed wording only. brief.id and
@@ -83,13 +87,17 @@
  *   Invalid arguments, unknown reasons and unknown stop reasons throw. So
  *   does questionLabel for anything but a non-negative integer.
  *   renderOpenQuestions with 'pause_limit' calls pauseLimit() from
- *   result.js, so it runs only where result.js is loaded too, as in every
- *   built script.
+ *   result.js, and renderDecisionsCompact calls cutAtBoundary and
+ *   maxExcerptLength() from it, so they run only where result.js is loaded
+ *   too, as in every built script.
  *   No size budget lives here: the caller picks the full or compact form.
  *
  * Why
  *   The user answers from this text alone, so the ask comes first and each
  *   question carries only what the user needs to decide it (issue 431).
+ *   A question shows verbatim text only when the user must read it word
+ *   for word, and a taken decision gets one short line, so a question
+ *   message does not paste the plan again (issue 445).
  *   Labels and reply tokens come from code so the reply can point at a
  *   question without trusting a model-written id. Question labels have one
  *   home, questionLabel, so the three renderers cannot drift apart.
@@ -240,7 +248,9 @@ function renderQuestion(entry, index) {
   lines.push(renderWhyItMatters(readField(brief, 'criticality')));
   lines.push('Why I am asking: ' + askReasonLine(readField(entry, 'reason')));
   const sections = [lines.join('\n')];
-  sections.push(...renderVerbatimSection(readField(brief, 'verbatim')));
+  if (readField(entry, 'exact') === true) {
+    sections.push(...renderVerbatimSection(readField(brief, 'verbatim')));
+  }
   return sections.join('\n\n');
 }
 
@@ -301,7 +311,7 @@ function renderVerbatim(verbatim, labelIndent) {
   if (typeof verbatim !== 'string' || verbatim === '') {
     return [];
   }
-  return [labelIndent + 'Exact text:', verbatim];
+  return [labelIndent + 'Word for word:', verbatim];
 }
 
 function renderOpenQuestion(entry, index) {
@@ -309,7 +319,7 @@ function renderOpenQuestion(entry, index) {
   const recommendation = readField(brief, 'recommendation');
   const optionId = readField(recommendation, 'option_id');
   const hasChoice = readField(recommendation, 'strength') !== 'none' && typeof optionId === 'string' && optionId.trim() !== '';
-  const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'There is no recommendation.';
+  const choice = hasChoice ? 'The report assumes option ' + renderText(optionId) + '.' : 'I have no recommendation of my own.';
   return '  ' + questionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' ' + choice;
 }
 
@@ -330,8 +340,9 @@ function renderTakenDecision(entry, index) {
 function renderCompactDecision(entry, index) {
   const brief = readField(entry, 'brief');
   const recommendation = readField(brief, 'recommendation');
+  const whyLine = renderText(readField(recommendation, 'why')).split(/\s*[\r\n]+\s*/).join(' ');
   return '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
-    + renderText(readField(recommendation, 'option_id')) + '. Why: ' + renderText(readField(recommendation, 'why'));
+    + renderText(readField(recommendation, 'option_id')) + '. Why: ' + cutAtBoundary(whyLine, maxExcerptLength());
 }
 
 function findOptionById(options, optionId) {
