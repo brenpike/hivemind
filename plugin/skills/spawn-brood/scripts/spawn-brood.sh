@@ -37,10 +37,16 @@
 #   $1  Path to a JSON inputs file the navigator (SKILL.md) authored via the Write tool to a
 #       PER-INVOCATION mktemp-unique STAGING path UNDER .hivemind/ (e.g.
 #       .hivemind/spawn-inputs.<rand>.json). The navigator passes that staging path here. This
-#       script VALIDATES it (must exist, be valid JSON, and resolve INSIDE the checkout via the
-#       shared read-guard), jq-reads it into inert shell VARIABLES, generates the brood-id,
-#       creates .hivemind/broods/<brood-id>/, then atomically `mv`s the staging file into
-#       "<state>/inputs.json" for the record. Per-invocation mktemp staging preserves
+#       script checks it (must exist and resolve INSIDE the checkout via the shared read-guard),
+#       proves the physical location of its parent directory once, and then reads it EXACTLY ONCE
+#       through hivemind_read_verified_leaf into an in-memory JSON snapshot (one descriptor, proven
+#       to be the checked regular file). Every validation and field read runs jq over that snapshot
+#       on stdin; the staging path is never opened again, so a file swapped in after the check is
+#       never read. After pre-flight it writes the snapshot (compact JSON) to
+#       "<state>/inputs.json" for the record through a verified directory handle
+#       (hivemind_write_verified_leaf, which creates .hivemind/broods/<brood-id>/), then removes
+#       the staging file from its checked parent directory (hivemind_remove_verified_entry).
+#       Per-invocation mktemp staging preserves
 #       disjointness (no singleton inputs file to clobber). Untrusted bytes in the JSON are read
 #       into variables and referenced only as "$var" — bash does not re-evaluate command
 #       substitution from variable contents, so the command-substitution injection class is
@@ -63,7 +69,12 @@
 #   is ignored.
 #
 # OUTPUT:
-#   - Writes per-strain task.md files under each worktree's gitignored .hivemind/.
+#   - Writes per-strain task.md files under each worktree's gitignored .hivemind/, and copies the
+#     coordinator .claude/settings.local.json (read once, before any worktree exists) into each
+#     worktree. Every file this script writes goes through hivemind_write_verified_leaf, so no
+#     write resolves a checked path string again. Launching in a directory still takes path
+#     strings (`git worktree add`, `tmux new-session -c`): see the ADR-0037 slice 4 recorded
+#     residual "Launching in a directory" in docs/adr/0037-standard-delivery-on-script-engine.md.
 #   - Writes the brood manifest to .hivemind/broods/<brood-id>/manifest.json (JSON,
 #     manifest_version: 4) in the coordinator checkout (anchored to the checkout root).
 #   - On full success: prints `brood_id: <brood-id>` and `manifest: <abs path>` to stdout,
@@ -251,13 +262,57 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 hivemind_assert_inputs_contained "$(git rev-parse --show-toplevel 2>/dev/null)" "$INPUTS_FILE" >/dev/null \
   || { printf 'blocker: refusing to read the inputs file: %s resolves outside the checkout (symlinked ancestor)\n' "$INPUTS_FILE" >&2; exit 1; }
 
-# ── JSON-validity probe (AFTER the inputs READ-guard) ───────────────────────────
-# `jq -e .` opening an attacker-supplied external path is itself an external-file JSON-validity
-# read oracle, so the containment guard above MUST gate it. This probe therefore runs AFTER
-# hivemind_assert_inputs_contained — never before. A contained-but-invalid-JSON inputs file
-# still hits this blocker (the guard passes, the probe rejects).
-jq -e . "$INPUTS_FILE" >/dev/null 2>&1 \
-  || { printf 'blocker: brood inputs file %s is not valid JSON\n' "$INPUTS_FILE" >&2; exit 1; }
+# ── Inputs snapshot (ONE read, AFTER the inputs READ-guard) ─────────────────────
+# The read-guard above checked the staging path STRING. Reading that string again (as every
+# per-field jq read of the staging path once did) would follow a symlink or rename planted after the
+# check. So: prove the physical location of the staging file's parent directory ONCE, from the
+# directory handle (getcwd via the external `pwd -P`), and require it under the checkout root,
+# proven the same way. Then read the leaf ONCE through hivemind_read_verified_leaf: one
+# descriptor, proven to be that directory's regular, non-symlink leaf, fed to jq, which must
+# find exactly one JSON document. The compact result is the in-memory snapshot every later
+# validation and field read runs over (read_inputs_field); INPUTS_FILE is never opened again.
+# Opening an attacker-supplied external path is itself a JSON-validity read oracle, so this read
+# stays AFTER hivemind_assert_inputs_contained, never before.
+inputs_checkout_root="$(git rev-parse --show-toplevel 2>/dev/null)"
+[ -n "$inputs_checkout_root" ] || { printf 'blocker: not inside a git repository\n' >&2; exit 1; }
+inputs_root_physical="$(CDPATH= cd -P -- "$inputs_checkout_root" 2>/dev/null && env pwd -P 2>/dev/null)"
+inputs_dir_physical="$(CDPATH= cd -P -- "$(dirname -- "$INPUTS_FILE")" 2>/dev/null && env pwd -P 2>/dev/null)"
+inputs_leaf="$(basename -- "$INPUTS_FILE")"
+if [ -z "$inputs_root_physical" ] || [ -z "$inputs_dir_physical" ]; then
+  printf 'blocker: refusing to read the inputs file: %s has no provable physical location inside the checkout\n' "$INPUTS_FILE" >&2
+  exit 1
+fi
+case "$inputs_dir_physical/" in
+  "$inputs_root_physical/"*) : ;;
+  *)
+    printf 'blocker: refusing to read the inputs file: %s resolves outside the checkout (symlinked ancestor)\n' "$INPUTS_FILE" >&2
+    exit 1
+    ;;
+esac
+inputs_read_status=0
+inputs_snapshot="$(hivemind_read_verified_leaf "$inputs_dir_physical" "$inputs_leaf" \
+  jq -c -s 'if length == 1 then .[0] else error("expected exactly one JSON document") end' 2>/dev/null)" \
+  || inputs_read_status=$?
+case "$inputs_read_status" in
+  0) : ;;
+  5) printf 'blocker: brood inputs file %s is not valid JSON\n' "$INPUTS_FILE" >&2; exit 1 ;;
+  *)
+    printf 'blocker: refusing to read the inputs file: %s is not the checked regular file inside the checkout\n' "$INPUTS_FILE" >&2
+    exit 1
+    ;;
+esac
+
+# read_inputs_field <jq-filter>: run `jq -r <jq-filter>` over the in-memory inputs snapshot on
+# stdin. Never opens INPUTS_FILE.
+read_inputs_field() {
+  printf '%s' "$inputs_snapshot" | jq -r "$1"
+}
+
+# Up-front shape gate over the snapshot, before any field read or side effect: the inputs must
+# be a JSON object whose strains member is an array.
+inputs_shape_ok="$(read_inputs_field 'type == "object" and ((.strains | type) == "array")' 2>/dev/null)"
+[ "$inputs_shape_ok" = "true" ] \
+  || { printf 'blocker: inputs file has no valid strains array\n' >&2; exit 1; }
 
 # ── Brood-id generation (internal, OQ locked) ────────────────────────────────────
 # Generate the brood-id INTERNALLY as brood-<uuidv4>. Any caller-supplied brood_id in the
@@ -287,6 +342,19 @@ generate_brood_uuid() {
   return 0
 }
 
+# generate_temp_token: echo a fresh lowercase random uuid for a verified-write temp name
+# (hivemind_write_verified_leaf <temp_token>), or echo nothing and return 1 when none can be
+# generated or it holds a byte outside [a-z0-9-].
+generate_temp_token() {
+  local temp_token
+  temp_token="$(generate_brood_uuid | tr '[:upper:]' '[:lower:]')"
+  case "$temp_token" in
+    ''|*[!a-z0-9-]*) return 1 ;;
+  esac
+  printf '%s' "$temp_token"
+  return 0
+}
+
 brood_uuid="$(generate_brood_uuid | tr '[:upper:]' '[:lower:]')"
 [ -n "$brood_uuid" ] || blocker "failed to generate a brood-id (no uuidgen, kernel uuid, or /dev/urandom available)"
 brood_id="brood-$brood_uuid"
@@ -303,9 +371,9 @@ esac
 # docs/adr/0037-standard-delivery-on-script-engine.md.
 # Parse top-level scalars into inert variables. Any inputs `brood_id` is intentionally NOT
 # read — the brood-id is generated above, not caller-supplied.
-base="$(jq -r '.base // ""' "$INPUTS_FILE")"
-overlap_risk="$(jq -r '.overlap_risk // ""' "$INPUTS_FILE")"
-overlap_details="$(jq -r '.overlap_details // ""' "$INPUTS_FILE")"
+base="$(read_inputs_field '.base // ""')"
+overlap_risk="$(read_inputs_field '.overlap_risk // ""')"
+overlap_details="$(read_inputs_field '.overlap_details // ""')"
 
 # ── manifest hatchery bridge fields (ADDITIVE; ledger-bridge) ────────────────────
 # manifest_version: 4 marks the per-brood-namespaced JSON manifest format: top-level
@@ -319,9 +387,9 @@ overlap_details="$(jq -r '.overlap_details // ""' "$INPUTS_FILE")"
 # generated brood_id, so no new untrusted bytes enter here. They enter the manifest jq
 # construction below as --arg bindings.
 manifest_version='4'
-hatchery_run_id="$(jq -r '.hatchery.run_id // ""' "$INPUTS_FILE")"
+hatchery_run_id="$(read_inputs_field '.hatchery.run_id // ""')"
 [ -n "$hatchery_run_id" ] || hatchery_run_id="$brood_id-hatchery"
-hatchery_workflow="$(jq -r '.hatchery.workflow // ""' "$INPUTS_FILE")"
+hatchery_workflow="$(read_inputs_field '.hatchery.workflow // ""')"
 [ -n "$hatchery_workflow" ] || hatchery_workflow="hatchery-dispatch"
 # The hatchery ledger is JSON (state.json), as is the manifest carrying the pointer —
 # format-follows-consumer (ADR-0018 §A): both are machine-consumed by jq (the ledger by the
@@ -356,7 +424,7 @@ esac
 
 # Strain count. An empty/zero-strain array is a blocker — never write an empty
 # manifest (a downstream brood-status would treat it as a broodless session).
-strain_count="$(jq -r '.strains | length' "$INPUTS_FILE" 2>/dev/null || echo 0)"
+strain_count="$(read_inputs_field '.strains | length' 2>/dev/null || echo 0)"
 case "$strain_count" in
   ''|*[!0-9]*) printf 'blocker: inputs file has no valid strains array\n' >&2; exit 1 ;;
 esac
@@ -368,6 +436,9 @@ esac
 # tmux_session / worktree path follow the same index. Untrusted values live only in
 # these variables — never interpolated into command source.
 declare -a S_NAME S_DESC S_SHORT S_TMUX S_WT S_STATUS
+# S_TASK: each strain's exact task.md content, kept in memory so the task paste never reads
+# task.md back from disk (set in Pass 1 when the task file is written).
+declare -a S_TASK
 # ledger-bridge (STEP-007): per-strain suggested run metadata, index-aligned with the
 # arrays above. The suggested run id is the lineage key the manifest records and the run-ledger
 # leaf the started-evidence read confines; this script never creates a child ledger.
@@ -406,8 +477,8 @@ hivemind_assert_contained "$repo_root" ".claude/worktrees/$brood_id" >/dev/null 
 repo_root="$canon_repo_root"
 
 for idx in $(seq 0 $((strain_count - 1))); do
-  name="$(jq -r ".strains[$idx].name // \"\"" "$INPUTS_FILE")"
-  desc="$(jq -r ".strains[$idx].description // \"\"" "$INPUTS_FILE")"
+  name="$(read_inputs_field ".strains[$idx].name // \"\"")"
+  desc="$(read_inputs_field ".strains[$idx].description // \"\"")"
 
   # PRODUCER NAME CONTRACT: the strain name must satisfy the reader's presentation value-class
   # (hivemind_assert_presentation in _shared/allowlist.sh). This is the SINGLE SOURCE OF TRUTH
@@ -441,7 +512,7 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # child's own router decides), defaulting to standard-delivery. Values derive only from the
   # generated brood_id / short, so no new untrusted bytes.
   run_id="$brood_id_safe--$short"
-  run_hint="$(jq -r ".strains[$idx].workflow_hint // \"\"" "$INPUTS_FILE")"
+  run_hint="$(read_inputs_field ".strains[$idx].workflow_hint // \"\"")"
   [ -n "$run_hint" ] || run_hint="standard-delivery"
 
   S_NAME[$idx]="$name"
@@ -546,16 +617,44 @@ base_commit="$(git rev-parse --verify --quiet "$base^{commit}" 2>/dev/null)" \
 # but hivemind:brood-status resolves the checkout root — a pwd-anchored manifest would make the
 # brood invisible to monitoring.
 STATE="$repo_root/.hivemind/broods/$brood_id"
-mkdir -p "$STATE"
 
-# OQ4 staging-inputs transport: atomically RELOCATE the navigator-authored staging inputs file
-# into the per-brood state dir as inputs.json, for the record. The staging file was already
-# validated (exists, valid JSON, contained under the checkout) at the top of the script. `mv`
-# within the same checkout filesystem is atomic; a copy-then-leave would risk a stale staging
-# file lingering under .hivemind/. After this point INPUTS_FILE is no longer read (all values
-# were parsed into inert variables above).
-mv "$INPUTS_FILE" "$STATE/inputs.json" \
-  || blocker "failed to relocate staging inputs file $INPUTS_FILE into $STATE/inputs.json"
+# ── Coordinator settings snapshot (pre-flight, before any worktree) ─────────────
+# The coordinator's .claude/settings.local.json is copied into every strain worktree. A `[ -f ]`
+# test plus `cp` would follow a symlink leaf, and each would resolve the path again. So the leaf
+# is checked ONCE here: a symlink (live or dangling) or any other non-regular leaf stops the
+# spawn before any worktree, session or manifest exists. An absent file means no copy. A regular
+# file is read ONCE through hivemind_read_verified_leaf into an in-memory snapshot that keeps its
+# exact bytes: the trailing "." sentinel stops the command substitution from stripping trailing
+# newlines, and is removed after.
+has_settings_snapshot=false
+settings_snapshot=""
+hivemind_assert_file_contained "$repo_root" ".claude/settings.local.json" >/dev/null \
+  || blocker "refusing to copy the coordinator settings: $repo_root/.claude/settings.local.json is a symlink or not a regular file; no worktree or session created"
+if [ -e "$repo_root/.claude/settings.local.json" ]; then
+  settings_read_status=0
+  settings_sentinel_snapshot="$(hivemind_read_verified_leaf "$repo_root/.claude" settings.local.json cat \
+    && printf '.')" || settings_read_status=$?
+  [ "$settings_read_status" -eq 0 ] \
+    || blocker "refusing to copy the coordinator settings: $repo_root/.claude/settings.local.json could not be read as the checked regular file; no worktree or session created"
+  settings_snapshot="${settings_sentinel_snapshot%.}"
+  has_settings_snapshot=true
+fi
+
+# ── Inputs record + staging removal (OQ4 staging-inputs transport) ──────────────
+# Write the in-memory inputs snapshot (compact JSON) into the per-brood state dir as
+# inputs.json, for the record. hivemind_write_verified_leaf creates .hivemind/broods/<brood-id>
+# one proven directory at a time from the canonical checkout root, so no mkdir or write lands
+# outside a directory whose location was proven from its handle. Then remove the staging file
+# from its checked parent directory, so no stale staging file lingers under .hivemind/. The
+# staging path is never opened again: every value came from the snapshot above. Either failure
+# is a pre-launch blocker; nothing has been launched yet.
+inputs_record_token="$(generate_temp_token)" \
+  || blocker "failed to generate a random temp name for $STATE/inputs.json; no worktree or session created"
+hivemind_write_verified_leaf "$repo_root" ".hivemind/broods/$brood_id" create inputs.json \
+  "$inputs_record_token" "$inputs_snapshot" \
+  || blocker "failed to record the inputs snapshot into $STATE/inputs.json; no worktree or session created"
+hivemind_remove_verified_entry "$inputs_dir_physical" "$inputs_leaf" \
+  || blocker "failed to remove staging inputs file $INPUTS_FILE after recording it into $STATE/inputs.json; no worktree or session created"
 
 # ── Per-strain failure helpers ──────────────────────────────────────────────────
 # HARD failure: worktree add / new-session failed BEFORE launch. Clean up ONLY
@@ -569,7 +668,6 @@ launched_sessions=""
 # reference them under `set -u` even if a signal arrives before the loop's first reset.
 cur_wt=""
 cur_session=""
-settings_local="$repo_root/.claude/settings.local.json"
 
 # Interruption guard over BOTH the Pass-1 launch loop and the Pass-2 readiness wait:
 # once a detached session launches, no manifest exists yet, so a cancelled Bash call /
@@ -661,7 +759,7 @@ for idx in $(seq 0 $((strain_count - 1))); do
     # DESTRUCTIVE cleanup: this invocation created the worktree via worktree-add above
     # (created_worktree=true), so removing it is removing only OUR own provisional resource.
     git worktree remove --force "$wt" >/dev/null 2>&1 || true
-    rm -rf "$wt" >/dev/null 2>&1 || true
+    hivemind_remove_verified_entry "$repo_root/.claude/worktrees/$brood_id" "$short" >/dev/null 2>&1 || true
     # Worktree removed; clear so the interrupt trap does not report it as a leak.
     cur_wt=""
     continue
@@ -681,13 +779,14 @@ for idx in $(seq 0 $((strain_count - 1))); do
     printf 'warning: child worktree %s already holds .hivemind/facts (base ref tracks .hivemind/facts); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
     git worktree remove --force "$wt" >/dev/null 2>&1 || true
-    rm -rf "$wt" >/dev/null 2>&1 || true
+    hivemind_remove_verified_entry "$repo_root/.claude/worktrees/$brood_id" "$short" >/dev/null 2>&1 || true
     cur_wt=""
     continue
   fi
 
-  # 3b: propagate config into the new worktree, if present.
-  if [ -f "$settings_local" ]; then
+  # 3b: propagate config into the new worktree, if present. The bytes come from the coordinator
+  # settings snapshot read ONCE in pre-flight, never from the coordinator path again.
+  if [ "$has_settings_snapshot" = true ]; then
     # LEAF GUARD: the 525 dir-guard proves the .claude ANCESTOR is unsymlinked, but the cp
     # write target is the .claude/settings.local.json LEAF — a hostile base ref can track a
     # real .claude/ dir yet a SYMLINKED settings.local.json leaf, materialized into $wt by
@@ -698,12 +797,27 @@ for idx in $(seq 0 $((strain_count - 1))); do
       printf 'warning: child worktree %s has a symlinked .claude/settings.local.json leaf that escapes the checkout (base ref tracks it); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
       mark_failed "$idx"
       git worktree remove --force "$wt" >/dev/null 2>&1 || true
-      rm -rf "$wt" >/dev/null 2>&1 || true
+      hivemind_remove_verified_entry "$repo_root/.claude/worktrees/$brood_id" "$short" >/dev/null 2>&1 || true
       cur_wt=""
       continue
     fi
-    mkdir -p "$wt/.claude"
-    cp "$settings_local" "$wt/.claude/settings.local.json"
+    # Write through a verified directory handle: each component of .claude is proven from its
+    # handle before the next is touched, and the leaf is created exclusively then renamed, so a
+    # symlink or rename planted after the guard above cannot redirect the write. A failure is a
+    # HARD pre-launch failure, with the task-provisioning cleanup below.
+    settings_temp_token="$(generate_temp_token)" || settings_temp_token=""
+    if [ -z "$settings_temp_token" ] \
+       || ! hivemind_write_verified_leaf "$wt" ".claude" create settings.local.json \
+              "$settings_temp_token" "$settings_snapshot"; then
+      printf 'warning: settings provisioning failed for strain %s\n' "${S_NAME[$idx]}" >&2
+      mark_failed "$idx"
+      if [ "$created_worktree" = true ]; then
+        git worktree remove --force "$wt" >/dev/null 2>&1 || true
+      fi
+      # Worktree removed; clear so the trap does not report it as a leak.
+      cur_wt=""
+      continue
+    fi
   fi
 
   # 3c: write the strain task to the worktree's gitignored .hivemind path. Preamble
@@ -721,7 +835,6 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # except TAB (0x09) and LF (0x0a), plus DEL (0x7f), before writing. No control byte
   # is load-bearing in a task description; removing them cannot break a paste boundary.
   desc="$(printf '%s' "$desc" | tr -d '\000-\010\013-\037\177')"
-  task_file="$wt/.hivemind/brood/task.md"
   # ── child-task data block (ADR-0037 decision 24: data only) ──────────────────
   # Emit the brood metadata BELOW the data-boundary preamble (the preamble stays FIRST); the
   # description is carried inside this block as `task.description`. The harness relays task.md
@@ -764,7 +877,7 @@ for idx in $(seq 0 $((strain_count - 1))); do
     printf 'warning: child worktree %s has a symlinked .hivemind/brood/task.md leaf that escapes the checkout (base ref tracks it); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
     git worktree remove --force "$wt" >/dev/null 2>&1 || true
-    rm -rf "$wt" >/dev/null 2>&1 || true
+    hivemind_remove_verified_entry "$repo_root/.claude/worktrees/$brood_id" "$short" >/dev/null 2>&1 || true
     cur_wt=""
     continue
   fi
@@ -772,8 +885,18 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # or write (full FS, permissions, conflicting path) is a HARD pre-launch failure —
   # same class as `git worktree add` failure. Clean up what this invocation created
   # and skip the session launch rather than leave an idle privileged child.
-  if ! mkdir -p "$wt/.hivemind/brood" 2>/dev/null \
-     || ! printf '%s\n\n%s\n' "$PREAMBLE" "$brood_meta" > "$task_file" 2>/dev/null; then
+  # The task content is kept in memory (S_TASK) with the exact bytes of
+  # printf '%s\n\n%s\n' "$PREAMBLE" "$brood_meta"; submit_strain pastes it from memory and never
+  # reads task.md back. The write goes through a verified directory handle: .hivemind and
+  # .hivemind/brood are created and proven one at a time from the worktree root, and the leaf is
+  # created exclusively then renamed, so a symlink or rename planted after the guard above cannot
+  # redirect it.
+  printf -v task_content '%s\n\n%s\n' "$PREAMBLE" "$brood_meta"
+  S_TASK[$idx]="$task_content"
+  task_temp_token="$(generate_temp_token)" || task_temp_token=""
+  if [ -z "$task_temp_token" ] \
+     || ! hivemind_write_verified_leaf "$wt" ".hivemind/brood" create task.md \
+            "$task_temp_token" "${S_TASK[$idx]}" 2>/dev/null; then
     printf 'warning: task-file provisioning failed for strain %s\n' "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
     if [ "$created_worktree" = true ]; then
@@ -889,12 +1012,13 @@ resolve_strain_pane() {
 submit_strain() {
   local idx="$1"
   local tmux_session="${S_TMUX[$idx]}"
-  local wt="${S_WT[$idx]}"
   local buffer_name="$tmux_session"   # session-unique named buffer (brood-<short>)
-  local task_file="$wt/.hivemind/brood/task.md"
   local pane_id=""
 
-  if ! tmux load-buffer -b "$buffer_name" "$task_file" 2>/dev/null; then
+  # The buffer loads from the in-memory task content on stdin (`load-buffer -`, tmux 3.0a or
+  # later), never from task.md on disk: a child (or any racer) that replaces task.md after it
+  # was written cannot change what is pasted.
+  if ! printf '%s' "${S_TASK[$idx]}" | tmux load-buffer -b "$buffer_name" - 2>/dev/null; then
     printf 'warning: tmux load-buffer failed for strain %s\n' "${S_NAME[$idx]}" >&2
     tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
     mark_failed "$idx"
@@ -1309,48 +1433,35 @@ manifest_json="$(printf '%s' "$strains_objects" | jq -s '.' \
   blocker "failed to construct brood manifest JSON; refusing to report success with no current manifest"
 }
 
-# ATOMIC WRITE: write the manifest to a temp file IN $STATE then `mv` it into place. The
-# `mv` within the same filesystem (both under $STATE) is atomic, so a concurrent reader
-# (brood-status) observes either the OLD or the COMPLETE NEW manifest — never a truncated/partial
-# file. Per-brood namespacing already gives each brood its own disjoint manifest (no cross-brood
-# truncation), and this temp+mv additionally closes any same-brood re-write read-skew. The temp
-# file is created under $STATE (already mkdir'd + containment-verified above), not $TMPDIR, so it
-# shares the target filesystem (mv stays a rename, never a cross-device copy).
+# ATOMIC WRITE: hivemind_write_verified_leaf writes the manifest to a temp file IN the state
+# directory and renames it into place there, so a concurrent reader (brood-status) observes either
+# the OLD or the COMPLETE NEW manifest — never a truncated/partial file. Per-brood namespacing
+# already gives each brood its own disjoint manifest (no cross-brood truncation), and this
+# temp+rename additionally closes any same-brood re-write read-skew. The temp file shares the
+# target directory, not $TMPDIR, so the rename never becomes a cross-device copy.
 #
-# EXCLUSIVE TEMP LEAF: by now launched children know the brood id, and any local process can
-# write under $STATE, so the temp leaf must be one this script CREATES, never one it finds. The
-# name carries a fresh random uuid (not the guessable $$), and the write runs under `set -C`
-# (noclobber), where bash opens a missing file with O_CREAT|O_EXCL and refuses an existing
-# regular file. A pre-planted symlink (dangling or not) or file at the temp path therefore fails
-# the write closed instead of redirecting it, and the bytes go through the descriptor that
-# created the file. After the rename, a symlinked manifest leaf (a temp file swapped for a link
-# before the mv) also fails closed.
-manifest_tmp_token="$(generate_brood_uuid | tr '[:upper:]' '[:lower:]')"
-case "$manifest_tmp_token" in
-  ''|*[!a-z0-9-]*)
-    printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
-    blocker "failed to generate a random manifest temp name; refusing to report success with no current manifest"
-    ;;
-esac
-manifest_tmp="$STATE/.manifest.json.tmp.$manifest_tmp_token"
-# DIRECTORY-LEAF REJECTION: `mv SOURCE DEST` treats DEST as a target DIRECTORY when DEST is a
-# directory, silently moving the temp file *inside* it (`mv` succeeds) so the documented manifest
-# path is left as a directory, not a readable manifest file, while spawn reports success. `mv -T`
-# (no-target-directory) is not portable (GNU-only), so reject a directory leaf explicitly before
-# the rename and re-assert a regular-file postcondition after it. A concurrent/interrupted process
-# leaving a directory at the leaf now fails closed instead of producing a false success.
-if [ -d "$manifest_path" ]; then
-  rm -f "$manifest_tmp" >/dev/null 2>&1 || true
+# VERIFIED DIRECTORY HANDLE: by now launched children know the brood id, and any local process can
+# write under the state directory, so the write never resolves the "$STATE" path string again. The
+# helper walks .hivemind/broods/<brood-id> from the canonical checkout root in nocreate mode,
+# refusing a symlinked or missing component and proving each directory's location from its handle
+# (getcwd) before touching the next. A state directory swapped for a symlink after it was created
+# therefore fails the write closed instead of redirecting it.
+#
+# EXCLUSIVE TEMP LEAF: the temp leaf .manifest.json.tmp.<token> must be one this script CREATES,
+# never one it finds. The token is a fresh random uuid (not the guessable $$), any existing entry
+# at the temp name (a pre-planted symlink, dangling or not, or a file) is refused, and the file is
+# created under `set -C` (noclobber); the bytes go through the descriptor that created it. The
+# rename uses no-target-directory semantics, so a directory or symlink at manifest.json is never
+# followed: a directory leaf is refused before the rename, and a non-regular or symlinked leaf
+# after it fails closed.
+manifest_tmp_token="$(generate_temp_token)" || {
   printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
-  blocker "manifest path $manifest_path is a directory, not a file (stale/interrupted leaf); refusing to report success with no current manifest"
-fi
-if ! ( set -C; printf '%s\n' "$manifest_json" > "$manifest_tmp" ) 2>/dev/null \
-   || ! mv "$manifest_tmp" "$manifest_path" 2>/dev/null \
-   || [ -L "$manifest_path" ] \
-   || [ ! -f "$manifest_path" ]; then
-  rm -f "$manifest_tmp" >/dev/null 2>&1 || true
+  blocker "failed to generate a random manifest temp name; refusing to report success with no current manifest"
+}
+if ! hivemind_write_verified_leaf "$repo_root" ".hivemind/broods/$brood_id" nocreate manifest.json \
+       "$manifest_tmp_token" "$manifest_json"$'\n' 2>/dev/null; then
   printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
-  blocker "failed to write brood manifest to $manifest_path (temp file not created fresh, target unwritable, or not a regular file after rename, e.g. a stale directory or a symlink at that path); refusing to report success with no current manifest"
+  blocker "failed to write brood manifest to $manifest_path (state directory not the one spawn created, temp file not created fresh, target unwritable, or not a regular file after rename, e.g. a stale directory or a symlink at that path); refusing to report success with no current manifest"
 fi
 
 # ── Final contract ──────────────────────────────────────────────────────────────
