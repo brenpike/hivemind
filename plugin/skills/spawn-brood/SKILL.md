@@ -172,9 +172,10 @@ The caller resolves and passes these; the skill does not resolve them.
 2. **Write the inputs file** via the Write tool to a per-invocation mktemp-unique
    staging path under `.hivemind/` (e.g. `.hivemind/spawn-inputs.<rand>.json`).
    Use the Write tool's `file_path` parameter for that unique path; set `content`
-   to the JSON object from step 1. Write performs no shell parsing of the values,
-   and `spawn-brood.sh` reads each field with `jq` into a shell variable, so no
-   field is interpolated into shell or jq program source. That is a transport
+   to the JSON object from step 1. Write performs no shell parsing of the values.
+   `spawn-brood.sh` reads the inputs file once into memory and reads each field
+   from that copy with `jq` into a shell variable, so no field is interpolated
+   into shell or jq program source. That is a transport
    property only: the description is carried on into the child's prompt as
    `task.description`, and the controls that bound that text are the compensating
    controls in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Brood Spawn
@@ -190,7 +191,8 @@ The caller resolves and passes these; the skill does not resolve them.
    ```
    EXECUTE (do not Read) the script — it owns every deterministic step: dependency
    checks, input validation, pre-flight collision/exclude/base checks, brood-id
-   generation, per-brood state-dir creation, staging-file relocation, three-pass
+   generation, per-brood state-dir creation, the inputs snapshot, the record
+   write and the staging-file removal, three-pass
    spawn (create+launch, ready-poll+inject, then started-evidence verify),
    manifest emission, the remote-control step, and cleanup.
 
