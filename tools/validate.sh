@@ -316,7 +316,8 @@ run_suites() {
 #                                      -> test_engine  (also validate_workflows reads tests/engine;
 #                                         containment.sh is copied into test_engine's fake plugin)
 #   plugin/skills/spawn-brood/**, brood-status/**, init-run-ledger/scripts/**,
-#     plugin/skills/_shared/containment.sh, tests/brood/**
+#     plugin/skills/_shared/containment.sh, plugin/skills/enable-brood-remote/scripts/rc-brood.sh,
+#     tests/brood/**
 #                                      -> test_brood_compat
 #   plugin/skills/_shared/*.sh, tests/brood/**          -> test_shared_libs
 #   plugin/skills/github-review-loop/scripts/*.jq      -> test_fix_history_classify, test_fetch_normalize,
@@ -516,10 +517,13 @@ map_path() {
   # Also containment.sh: the shared containment guard's regressions are exercised ONLY by
   # test_brood_compat (via spawn-brood.sh / brood-status guards), not test_shared_libs — so a
   # containment.sh change must trigger this suite or its only relevant coverage is skipped.
+  # Also rc-brood.sh: spawn-brood runs it at spawn time to turn on remote control, and only
+  # test_brood_compat drives that spawn-time call (test_rc_brood covers the engine on its own).
   if [[ "$p" == plugin/skills/spawn-brood/* \
      || "$p" == plugin/skills/brood-status/* \
      || "$p" == plugin/skills/init-run-ledger/scripts/* \
      || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == plugin/skills/enable-brood-remote/scripts/rc-brood.sh \
      || "$p" == tests/brood/* ]]; then
     add_selected "$SUITE_TEST_BROOD" "$p (brood script/fixture)"
     matched=1
@@ -1481,6 +1485,23 @@ self_test() {
       fails=$((fails + 1))
     fi
   done
+
+  # 11. rc-brood.sh must ALSO route to test_brood_compat.sh, because spawn-brood runs it at spawn
+  #     time and only that suite drives the spawn-time call. The KNOWN_SUITES probe (#1) reaches
+  #     test_brood_compat.sh via a tests/brood/* fixture and test_rc_brood.sh via the skill body, so
+  #     it would stay green if this leg were dropped. Probe it directly so dropping it FAILS here.
+  SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
+  map_path "plugin/skills/enable-brood-remote/scripts/rc-brood.sh" >/dev/null
+  hit=0
+  for entry in "${SELECTED[@]:-}"; do
+    if [[ "${entry%%$'\t'*}" == "$SUITE_TEST_BROOD" ]]; then hit=1; break; fi
+  done
+  if [[ "$hit" -eq 1 ]]; then
+    echo "PASS: rc-brood.sh -> test_brood_compat.sh (spawn-time remote control)"
+  else
+    echo "FAIL: rc-brood.sh did NOT route to test_brood_compat.sh"
+    fails=$((fails + 1))
+  fi
 
   echo
   if [[ "$fails" -eq 0 ]]; then
