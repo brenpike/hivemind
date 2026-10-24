@@ -1417,6 +1417,244 @@ else
   failed "c7d:symlinked-ancestor-reject" "ledger: symlinked ancestor must reject; got return 0"
 fi
 
+# ── 7e. verified-handle helpers — reads/writes through a proven directory handle ──
+# Each refusal case plants a REAL symlink, directory or temp name on disk and asserts the
+# documented return code plus the untouched outside bytes, so removing the guard it covers
+# turns the case red.
+
+# 7e-1: hivemind_cwd_is accepts the real directory it is run in.
+c7e1="$WORKDIR/c7e1/real"
+mkdir -p "$c7e1"
+c7e1_canon="$(canon_dir "$c7e1")"
+( cd "$c7e1_canon" && hivemind_cwd_is "$c7e1_canon" )
+assert_eq "c7e:cwd-is-real-accept" "0" "$?" "cwd_is: real directory → return 0"
+
+# 7e-2: hivemind_cwd_is refuses a directory reached through a symlinked component: the logical
+# path string names the link, the handle is the target.
+ln -s "$c7e1_canon" "$WORKDIR/c7e1/link"
+c7e2_link="$(canon_dir "$WORKDIR/c7e1")/link"
+( cd "$c7e2_link" && hivemind_cwd_is "$c7e2_link" )
+c7e2_rc=$?
+if [ "$c7e2_rc" -ne 0 ]; then
+  pass "c7e:cwd-is-symlinked-refuse" "cwd_is: directory reached through a symlink → non-zero"
+else
+  failed "c7e:cwd-is-symlinked-refuse" "cwd_is: symlinked directory must refuse; got return 0"
+fi
+
+# 7e-3: hivemind_fd_is_leaf accepts a descriptor opened on the leaf itself.
+c7e3="$WORKDIR/c7e3"
+mkdir -p "$c7e3"
+printf 'leaf\n' > "$c7e3/leaf.txt"
+printf 'other\n' > "$c7e3/other.txt"
+( exec 3< "$c7e3/leaf.txt"; hivemind_fd_is_leaf 3 "$c7e3/leaf.txt" )
+assert_eq "c7e:fd-is-leaf-accept" "0" "$?" "fd_is_leaf: descriptor on the leaf → return 0"
+
+# 7e-4: hivemind_fd_is_leaf refuses a descriptor opened on a different file than the leaf.
+( exec 3< "$c7e3/other.txt"; hivemind_fd_is_leaf 3 "$c7e3/leaf.txt" )
+c7e4_rc=$?
+if [ "$c7e4_rc" -ne 0 ]; then
+  pass "c7e:fd-is-leaf-other-file-refuse" "fd_is_leaf: descriptor on another file → non-zero"
+else
+  failed "c7e:fd-is-leaf-other-file-refuse" "fd_is_leaf: identity mismatch must refuse; got return 0"
+fi
+
+# 7e-5: hivemind_fd_is_leaf refuses a symlink leaf even when it points at the very file the
+# descriptor is open on (-ef alone would pass; only the symlink test refuses).
+ln -s "$c7e3/leaf.txt" "$c7e3/leaf-link.txt"
+( exec 3< "$c7e3/leaf.txt"; hivemind_fd_is_leaf 3 "$c7e3/leaf-link.txt" )
+c7e5_rc=$?
+if [ "$c7e5_rc" -ne 0 ]; then
+  pass "c7e:fd-is-leaf-symlink-refuse" "fd_is_leaf: symlink leaf to the open file → non-zero"
+else
+  failed "c7e:fd-is-leaf-symlink-refuse" "fd_is_leaf: symlink leaf must refuse; got return 0"
+fi
+
+# 7e-6: hivemind_fd_is_leaf refuses a descriptor that is not a regular file (a directory leaf
+# opened for reading: -ef alone would pass; only the regular-file test refuses).
+mkdir -p "$c7e3/dir-leaf"
+( exec 3< "$c7e3/dir-leaf"; hivemind_fd_is_leaf 3 "$c7e3/dir-leaf" ) 2>/dev/null
+c7e6_rc=$?
+if [ "$c7e6_rc" -ne 0 ]; then
+  pass "c7e:fd-is-leaf-non-regular-refuse" "fd_is_leaf: directory descriptor → non-zero"
+else
+  failed "c7e:fd-is-leaf-non-regular-refuse" "fd_is_leaf: non-regular descriptor must refuse; got return 0"
+fi
+
+# 7e-7: hivemind_read_verified_leaf passes the exact bytes (embedded NUL and trailing newline
+# intact) and leaves the caller's working directory unchanged.
+c7e7="$WORKDIR/c7e7/state"
+c7e7_ext="$WORKDIR/c7e7/external"
+mkdir -p "$c7e7" "$c7e7_ext"
+c7e7_dir="$(canon_dir "$c7e7")"
+printf 'a b\000c\n\tlast\n' > "$c7e7_dir/inputs.json"
+printf 'SECRET\n' > "$c7e7_ext/secret.json"
+c7e7_cwd_before="$(pwd -P)"
+hivemind_read_verified_leaf "$c7e7_dir" "inputs.json" cat > "$WORKDIR/c7e7/out.bin"
+assert_eq "c7e:read-exact-rc" "0" "$?" "read: regular leaf → return 0"
+if cmp -s "$c7e7_dir/inputs.json" "$WORKDIR/c7e7/out.bin"; then
+  pass "c7e:read-exact-bytes" "read: command received the exact bytes (NUL and trailing newline intact)"
+else
+  failed "c7e:read-exact-bytes" "read: command bytes differ from the leaf bytes"
+fi
+assert_eq "c7e:read-caller-cwd-unchanged" "$c7e7_cwd_before" "$(pwd -P)" "read: caller working directory unchanged"
+
+# 7e-8: read refuses a live symlink leaf with code 3 and the command never sees the target.
+ln -s "$c7e7_ext/secret.json" "$c7e7_dir/live-link.json"
+c7e8_out="$(hivemind_read_verified_leaf "$c7e7_dir" "live-link.json" cat 2>/dev/null)"
+assert_eq "c7e:read-live-symlink-rc" "3" "$?" "read: live symlink leaf → code 3"
+assert_eq "c7e:read-live-symlink-no-bytes" "" "$c7e8_out" "read: live symlink leaf → command never ran"
+
+# 7e-9: read refuses a dangling symlink leaf with code 3.
+ln -s "$c7e7_ext/missing.json" "$c7e7_dir/dangling-link.json"
+hivemind_read_verified_leaf "$c7e7_dir" "dangling-link.json" cat >/dev/null 2>&1
+assert_eq "c7e:read-dangling-symlink-rc" "3" "$?" "read: dangling symlink leaf → code 3"
+
+# 7e-10: read refuses a directory leaf with code 3.
+mkdir -p "$c7e7_dir/dir-leaf.json"
+hivemind_read_verified_leaf "$c7e7_dir" "dir-leaf.json" cat >/dev/null 2>&1
+assert_eq "c7e:read-directory-leaf-rc" "3" "$?" "read: directory leaf → code 3"
+
+# 7e-11: read refuses a directory reached through a symlink with code 2: the link holds a leaf
+# of the same name, which must never be read.
+printf 'OUTSIDE\n' > "$c7e7_ext/inputs.json"
+ln -s "$c7e7_ext" "$WORKDIR/c7e7/state-link"
+c7e11_link="$(canon_dir "$WORKDIR/c7e7")/state-link"
+c7e11_out="$(hivemind_read_verified_leaf "$c7e11_link" "inputs.json" cat 2>/dev/null)"
+assert_eq "c7e:read-symlinked-dir-rc" "2" "$?" "read: directory reached through a symlink → code 2"
+assert_eq "c7e:read-symlinked-dir-no-bytes" "" "$c7e11_out" "read: symlinked directory → command never ran"
+
+# 7e-12: read reports an absent leaf with code 4.
+hivemind_read_verified_leaf "$c7e7_dir" "absent.json" cat >/dev/null 2>&1
+assert_eq "c7e:read-absent-leaf-rc" "4" "$?" "read: absent leaf → code 4"
+
+# 7e-13: read reports a failing command with code 5.
+hivemind_read_verified_leaf "$c7e7_dir" "inputs.json" false >/dev/null 2>&1
+assert_eq "c7e:read-command-failed-rc" "5" "$?" "read: failing command → code 5"
+
+# 7e-14: hivemind_write_verified_leaf creates missing chain components and the leaf with the
+# exact bytes, and leaves no temp file behind.
+c7e14="$WORKDIR/c7e14/checkout"
+mkdir -p "$c7e14"
+c7e14_root="$(canon_dir "$c7e14")"
+c7e14_content="$(printf 'line one\n\tline two')"$'\n'
+hivemind_write_verified_leaf "$c7e14_root" ".hivemind/broods/brood-1" create "manifest.json" "tok14" "$c7e14_content"
+assert_eq "c7e:write-create-rc" "0" "$?" "write: missing chain created → return 0"
+printf '%s' "$c7e14_content" > "$WORKDIR/c7e14/expected.bin"
+if cmp -s "$WORKDIR/c7e14/expected.bin" "$c7e14_root/.hivemind/broods/brood-1/manifest.json"; then
+  pass "c7e:write-create-bytes" "write: leaf holds the exact bytes (trailing newline intact)"
+else
+  failed "c7e:write-create-bytes" "write: leaf bytes differ from the content"
+fi
+if [ -e "$c7e14_root/.hivemind/broods/brood-1/.manifest.json.tmp.tok14" ]; then
+  failed "c7e:write-create-no-temp" "write: temp file left behind after success"
+else
+  pass "c7e:write-create-no-temp" "write: no temp file left behind"
+fi
+
+# 7e-15: write refuses a chain component that is a symlink to an outside directory with code 2,
+# and nothing is created outside.
+c7e15="$WORKDIR/c7e15/checkout"
+c7e15_ext="$WORKDIR/c7e15/external"
+mkdir -p "$c7e15" "$c7e15_ext"
+c7e15_root="$(canon_dir "$c7e15")"
+ln -s "$c7e15_ext" "$c7e15_root/.hivemind"
+hivemind_write_verified_leaf "$c7e15_root" ".hivemind/broods" create "manifest.json" "tok15" "x" 2>/dev/null
+assert_eq "c7e:write-symlinked-chain-rc" "2" "$?" "write: symlinked chain component → code 2"
+assert_eq "c7e:write-symlinked-chain-nothing-outside" "" "$(ls -A "$c7e15_ext")" "write: nothing created in the outside directory"
+
+# 7e-16: write refuses a pre-planted temp name with code 4 and leaves that name's target and
+# the leaf untouched.
+c7e16="$WORKDIR/c7e16/checkout"
+c7e16_ext="$WORKDIR/c7e16/external"
+mkdir -p "$c7e16" "$c7e16_ext"
+c7e16_root="$(canon_dir "$c7e16")"
+printf 'ORIGINAL\n' > "$c7e16_ext/target.txt"
+ln -s "$c7e16_ext/target.txt" "$c7e16_root/.manifest.json.tmp.tok16"
+hivemind_write_verified_leaf "$c7e16_root" "" create "manifest.json" "tok16" "HOSTILE" 2>/dev/null
+assert_eq "c7e:write-planted-temp-rc" "4" "$?" "write: pre-planted temp name → code 4"
+assert_eq "c7e:write-planted-temp-target-untouched" "ORIGINAL" "$(cat "$c7e16_ext/target.txt")" "write: planted temp target bytes unchanged"
+if [ -e "$c7e16_root/manifest.json" ] || [ -L "$c7e16_root/manifest.json" ]; then
+  failed "c7e:write-planted-temp-no-leaf" "write: leaf created despite the refused temp name"
+else
+  pass "c7e:write-planted-temp-no-leaf" "write: no leaf created"
+fi
+
+# 7e-17: write replaces a symlinked leaf (pointing at an outside file) with a regular file and
+# leaves the link target's bytes unchanged.
+c7e17="$WORKDIR/c7e17/checkout"
+c7e17_ext="$WORKDIR/c7e17/external"
+mkdir -p "$c7e17" "$c7e17_ext"
+c7e17_root="$(canon_dir "$c7e17")"
+printf 'ORIGINAL\n' > "$c7e17_ext/target.txt"
+ln -s "$c7e17_ext/target.txt" "$c7e17_root/settings.local.json"
+hivemind_write_verified_leaf "$c7e17_root" "" nocreate "settings.local.json" "tok17" "NEW"
+assert_eq "c7e:write-symlink-leaf-rc" "0" "$?" "write: symlinked leaf → replaced, return 0"
+if [ ! -L "$c7e17_root/settings.local.json" ] && [ -f "$c7e17_root/settings.local.json" ]; then
+  pass "c7e:write-symlink-leaf-regular" "write: leaf is now a regular file"
+else
+  failed "c7e:write-symlink-leaf-regular" "write: leaf is still a symlink or not a regular file"
+fi
+assert_eq "c7e:write-symlink-leaf-bytes" "NEW" "$(cat "$c7e17_root/settings.local.json")" "write: leaf holds the new bytes"
+assert_eq "c7e:write-symlink-leaf-target-untouched" "ORIGINAL" "$(cat "$c7e17_ext/target.txt")" "write: link target bytes unchanged"
+
+# 7e-18: write replaces a symlinked leaf that points at an outside DIRECTORY instead of moving
+# the temp file into that directory (no-target-directory rename).
+c7e18="$WORKDIR/c7e18/checkout"
+c7e18_ext="$WORKDIR/c7e18/external"
+mkdir -p "$c7e18" "$c7e18_ext"
+c7e18_root="$(canon_dir "$c7e18")"
+ln -s "$c7e18_ext" "$c7e18_root/task.md"
+hivemind_write_verified_leaf "$c7e18_root" "" nocreate "task.md" "tok18" "TASK"
+assert_eq "c7e:write-symlink-dir-leaf-rc" "0" "$?" "write: leaf symlinked to a directory → replaced, return 0"
+assert_eq "c7e:write-symlink-dir-leaf-nothing-outside" "" "$(ls -A "$c7e18_ext")" "write: nothing moved into the outside directory"
+assert_eq "c7e:write-symlink-dir-leaf-bytes" "TASK" "$(cat "$c7e18_root/task.md" 2>/dev/null)" "write: leaf holds the new bytes"
+
+# 7e-19: write refuses a directory leaf with code 3 and leaves it a directory.
+c7e19="$WORKDIR/c7e19/checkout"
+mkdir -p "$c7e19/settings.local.json"
+c7e19_root="$(canon_dir "$c7e19")"
+hivemind_write_verified_leaf "$c7e19_root" "" nocreate "settings.local.json" "tok19" "x" 2>/dev/null
+assert_eq "c7e:write-directory-leaf-rc" "3" "$?" "write: directory leaf → code 3"
+assert_eq "c7e:write-directory-leaf-no-temp" "" "$(ls -A "$c7e19_root/settings.local.json")" "write: nothing written into the directory leaf"
+
+# 7e-20: write in nocreate mode refuses a missing chain component with code 2.
+hivemind_write_verified_leaf "$c7e19_root" "missing" nocreate "leaf.txt" "tok20" "x" 2>/dev/null
+assert_eq "c7e:write-nocreate-missing-rc" "2" "$?" "write: nocreate with a missing component → code 2"
+
+# 7e-21: hivemind_remove_verified_entry removes a regular file.
+c7e21="$WORKDIR/c7e21/state"
+c7e21_ext="$WORKDIR/c7e21/external"
+mkdir -p "$c7e21" "$c7e21_ext/keep"
+c7e21_dir="$(canon_dir "$c7e21")"
+printf 'x\n' > "$c7e21_dir/stale.json"
+hivemind_remove_verified_entry "$c7e21_dir" "stale.json"
+assert_eq "c7e:remove-file-rc" "0" "$?" "remove: regular file → return 0"
+if [ -e "$c7e21_dir/stale.json" ]; then
+  failed "c7e:remove-file-gone" "remove: file still present"
+else
+  pass "c7e:remove-file-gone" "remove: file removed"
+fi
+
+# 7e-22: remove deletes a symlink itself and leaves its target directory and contents intact.
+printf 'KEEP\n' > "$c7e21_ext/keep/data.txt"
+ln -s "$c7e21_ext/keep" "$c7e21_dir/worktree"
+hivemind_remove_verified_entry "$c7e21_dir" "worktree"
+assert_eq "c7e:remove-symlink-rc" "0" "$?" "remove: symlink → return 0"
+if [ -L "$c7e21_dir/worktree" ] || [ -e "$c7e21_dir/worktree" ]; then
+  failed "c7e:remove-symlink-gone" "remove: symlink still present"
+else
+  pass "c7e:remove-symlink-gone" "remove: symlink removed"
+fi
+assert_eq "c7e:remove-symlink-target-untouched" "KEEP" "$(cat "$c7e21_ext/keep/data.txt" 2>/dev/null)" "remove: symlink target contents intact"
+
+# 7e-23: remove refuses a directory reached through a symlink with code 2 and removes nothing
+# from the link target.
+ln -s "$c7e21_ext" "$WORKDIR/c7e21/state-link"
+c7e23_link="$(canon_dir "$WORKDIR/c7e21")/state-link"
+hivemind_remove_verified_entry "$c7e23_link" "keep" 2>/dev/null
+assert_eq "c7e:remove-symlinked-dir-rc" "2" "$?" "remove: directory reached through a symlink → code 2"
+assert_eq "c7e:remove-symlinked-dir-untouched" "KEEP" "$(cat "$c7e21_ext/keep/data.txt" 2>/dev/null)" "remove: link target entry intact"
+
 # ── Section 8: ledger-reconstruct-parse.sh — git_log_to_findings (PURE parse) ────
 echo ''
 echo '=== ledger-reconstruct-parse.sh: git_log_to_findings (git-log fix-surface parse) ==='
