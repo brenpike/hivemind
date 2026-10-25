@@ -599,7 +599,16 @@ Links: https://github.com/brenpike/hivemind/issues/453, `docs/adr/0038-root-caus
 - a second writer of the fix ledger between a question and its answer, for example a concurrent review loop in the same checkout;
 - a review pass that runs before the answer is applied.
 
+A finding that asks to pass the fix ledger identity or path back to the reviewer on resume, such as `resume_from_ledger` or the asking review's `ledger_path`, is also a REPEAT of this decision.
+
 **The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+**Scope extended 2026-10-25, user call: local review finding 2379110a.** Finding 2379110a, "P1: Local-review resume omits the ledger identity" (`plugin/workflow-src/standard-delivery/main.js`, the review rerun with `user_answer`), asked that the rerun pass the asking review's `ledger_path` back as `resume_from_ledger`. It is a repeat of this record, and the user kept the decision. Reasons:
+
+- The fix ledger with an answer is fixed at `.hivemind/review-loop/fix-ledger.yaml`. The caller does not choose it.
+- Step 1 continues from that ledger and never starts a new one. A missing ledger, a wrong last exit, or a named finding that is not open returns blocked.
+- A different ledger at that path needs a second writer. That is the reopen condition of this record, and it is unchanged.
+- Accepting a caller-supplied path would cut against Trust-Boundary Discipline in `plugin/governance/security-policy.md`.
 
 The rest of ADR-0037 is unchanged.
 
