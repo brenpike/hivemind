@@ -130,8 +130,8 @@ const AUTONOMY_TABLE = {
   },
   {
    "kind": "remediation_plan_acceptance",
-   "high": "surface",
-   "balanced": "surface",
+   "high": "auto",
+   "balanced": "auto",
    "low": "surface",
    "resolved_at": [
     "review_remediation_plan.single",
@@ -140,7 +140,7 @@ const AUTONOMY_TABLE = {
     "review_remediation_plan_postpr.multi",
     "standard-delivery.plan"
    ],
-   "when": "A planner returns a remediation plan for a root cluster and the overlord decides whether to accept it and implement."
+   "when": "A planner returns a remediation plan for review findings and the overlord decides whether to accept it and implement. The decision is asked when any flag of plan.remediation_gate is true, since the gate then trips as architectural, and taken otherwise."
   },
   {
    "kind": "diminishing_returns_exit",
@@ -285,7 +285,8 @@ const BRIEF_SCHEMA = {
   },
   "problem": {
    "type": "string",
-   "description": "The decision in plain language, one or two sentences, no internal mechanism names."
+   "maxLength": 300,
+   "description": "Written for the user: the decision in plain language, one or two sentences, no internal mechanism names."
   },
   "criticality": {
    "type": "object",
@@ -320,11 +321,13 @@ const BRIEF_SCHEMA = {
     },
     "blast_radius": {
      "type": "string",
-     "description": "What and how much is affected if it goes wrong. One short sentence."
+     "maxLength": 160,
+     "description": "Written for the user: what and how much is affected if it goes wrong. One short sentence."
     },
     "if_ignored": {
      "type": "string",
-     "description": "What happens if the decision is not made or is ignored. One short sentence."
+     "maxLength": 160,
+     "description": "Written for the user: what happens if the decision is not made or is ignored. One short sentence."
     }
    }
   },
@@ -351,7 +354,8 @@ const BRIEF_SCHEMA = {
      },
      "summary": {
       "type": "string",
-      "description": "What this option does, in plain language."
+      "maxLength": 160,
+      "description": "Written for the user: what this option does, in plain language."
      },
      "steel_man": {
       "type": "string",
@@ -434,7 +438,8 @@ const BRIEF_SCHEMA = {
     },
     "why": {
      "type": "string",
-     "description": "Reasoning tied to criticality and to effort versus value."
+     "maxLength": 200,
+     "description": "Written for the user: reasoning tied to criticality and to effort versus value, in one or two short sentences."
     }
    }
   },
@@ -509,6 +514,8 @@ const PLAN_SCHEMA = {
  "additionalProperties": false,
  "required": [
   "summary",
+  "digest",
+  "remediation_gate",
   "branch",
   "base",
   "trunk_freshness",
@@ -522,6 +529,51 @@ const PLAN_SCHEMA = {
   "summary": {
    "type": "string",
    "description": "Can carry external content. What the plan delivers."
+  },
+  "digest": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "problem",
+    "change"
+   ],
+   "description": "The plan in two short sentences written for the user. A question about accepting the plan shows them as written, in place of the summary.",
+   "properties": {
+    "problem": {
+     "type": "string",
+     "maxLength": 200,
+     "description": "Can carry external content. Written for the user: one plain sentence saying what the plan addresses, the ask of the request or the root cause a review found."
+    },
+    "change": {
+     "type": "string",
+     "maxLength": 200,
+     "description": "Can carry external content. Written for the user: one plain sentence saying what the plan changes."
+    }
+   }
+  },
+  "remediation_gate": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "architectural",
+    "grows_surface",
+    "repeats_surface"
+   ],
+   "description": "Whether accepting a plan that remediates review findings goes to the user, per the remediation plan rule of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate). Each flag is true only for a plan that remediates review findings, and only while no reply in this run has accepted that condition. Every flag is false for any other plan.",
+   "properties": {
+    "architectural": {
+     "type": "boolean",
+     "description": "True when the remediation is architectural, clause 2 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+    },
+    "grows_surface": {
+     "type": "boolean",
+     "description": "True when the remediation adds more surface than it removes, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Surface-Growth Escalation)."
+    },
+    "repeats_surface": {
+     "type": "boolean",
+     "description": "True when the remediation follows a fix on the same surface that did not close its class, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Forced zoom-out after the first non-closing structural fix)."
+    }
+   }
   },
   "branch": {
    "type": "string",
@@ -626,6 +678,7 @@ const PLAN_SCHEMA = {
     "properties": {
      "id": {
       "type": "string",
+      "maxLength": 64,
       "description": "Can carry external content. The step id, unique in the plan. depends_on names steps by it."
      },
      "owner": {
@@ -671,6 +724,7 @@ const PLAN_SCHEMA = {
        "properties": {
         "summary": {
          "type": "string",
+         "maxLength": 300,
          "description": "Can carry external content. What the effect does and where."
         },
         "reversible": {
@@ -2512,7 +2566,8 @@ function buildAnalysisSpec(questionSchema) {
       },
       blocker: {
         type: 'string',
-        description: 'Why the analysis cannot be done.'
+        maxLength: 400,
+        description: 'Why the analysis cannot be done, in one or two short sentences written for the user.'
       },
       questions: {
         type: 'array',

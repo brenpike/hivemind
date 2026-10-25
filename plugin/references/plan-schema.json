@@ -6,6 +6,8 @@
   "additionalProperties": false,
   "required": [
     "summary",
+    "digest",
+    "remediation_gate",
     "branch",
     "base",
     "trunk_freshness",
@@ -19,6 +21,51 @@
     "summary": {
       "type": "string",
       "description": "Can carry external content. What the plan delivers."
+    },
+    "digest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "problem",
+        "change"
+      ],
+      "description": "The plan in two short sentences written for the user. A question about accepting the plan shows them as written, in place of the summary.",
+      "properties": {
+        "problem": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Can carry external content. Written for the user: one plain sentence saying what the plan addresses, the ask of the request or the root cause a review found."
+        },
+        "change": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Can carry external content. Written for the user: one plain sentence saying what the plan changes."
+        }
+      }
+    },
+    "remediation_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "architectural",
+        "grows_surface",
+        "repeats_surface"
+      ],
+      "description": "Whether accepting a plan that remediates review findings goes to the user, per the remediation plan rule of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate). Each flag is true only for a plan that remediates review findings, and only while no reply in this run has accepted that condition. Every flag is false for any other plan.",
+      "properties": {
+        "architectural": {
+          "type": "boolean",
+          "description": "True when the remediation is architectural, clause 2 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+        },
+        "grows_surface": {
+          "type": "boolean",
+          "description": "True when the remediation adds more surface than it removes, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Surface-Growth Escalation)."
+        },
+        "repeats_surface": {
+          "type": "boolean",
+          "description": "True when the remediation follows a fix on the same surface that did not close its class, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Forced zoom-out after the first non-closing structural fix)."
+        }
+      }
     },
     "branch": {
       "type": "string",
@@ -123,6 +170,7 @@
         "properties": {
           "id": {
             "type": "string",
+            "maxLength": 64,
             "description": "Can carry external content. The step id, unique in the plan. depends_on names steps by it."
           },
           "owner": {
@@ -168,6 +216,7 @@
               "properties": {
                 "summary": {
                   "type": "string",
+                  "maxLength": 300,
                   "description": "Can carry external content. What the effect does and where."
                 },
                 "reversible": {

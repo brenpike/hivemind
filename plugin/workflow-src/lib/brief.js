@@ -73,6 +73,12 @@
  *     the report assumes, or the line 'I have no recommendation of my own.'
  *
  * Invariants
+ *   Bounded fields: the brief text fields shown are written for the user
+ *   and bounded by maxLength in decision-brief-schema.json, problem 300,
+ *   an option summary 160, the recommendation why 200, blast_radius 160
+ *   (issue 445), so a question stays short whatever its producer writes.
+ *   A brief over a bound fails the schema: decide() asks it as
+ *   malformed_brief, and it still renders here as given.
  *   Text comes from brief fields and fixed wording only. brief.id and
  *   brief.kind are never shown: labels are assigned here, and kind names
  *   are internal. A missing or mistyped field renders as 'not given', so a

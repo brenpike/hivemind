@@ -16,7 +16,8 @@
     },
     "problem": {
       "type": "string",
-      "description": "The decision in plain language, one or two sentences, no internal mechanism names."
+      "maxLength": 300,
+      "description": "Written for the user: the decision in plain language, one or two sentences, no internal mechanism names."
     },
     "criticality": {
       "type": "object",
@@ -36,11 +37,13 @@
         },
         "blast_radius": {
           "type": "string",
-          "description": "What and how much is affected if it goes wrong. One short sentence."
+          "maxLength": 160,
+          "description": "Written for the user: what and how much is affected if it goes wrong. One short sentence."
         },
         "if_ignored": {
           "type": "string",
-          "description": "What happens if the decision is not made or is ignored. One short sentence."
+          "maxLength": 160,
+          "description": "Written for the user: what happens if the decision is not made or is ignored. One short sentence."
         }
       }
     },
@@ -59,7 +62,8 @@
           },
           "summary": {
             "type": "string",
-            "description": "What this option does, in plain language."
+            "maxLength": 160,
+            "description": "Written for the user: what this option does, in plain language."
           },
           "steel_man": {
             "type": "string",
@@ -122,7 +126,8 @@
         },
         "why": {
           "type": "string",
-          "description": "Reasoning tied to criticality and to effort versus value."
+          "maxLength": 200,
+          "description": "Written for the user: reasoning tied to criticality and to effort versus value, in one or two short sentences."
         }
       }
     },

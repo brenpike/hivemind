@@ -138,8 +138,8 @@ const AUTONOMY_TABLE = {
   },
   {
    "kind": "remediation_plan_acceptance",
-   "high": "surface",
-   "balanced": "surface",
+   "high": "auto",
+   "balanced": "auto",
    "low": "surface",
    "resolved_at": [
     "review_remediation_plan.single",
@@ -148,7 +148,7 @@ const AUTONOMY_TABLE = {
     "review_remediation_plan_postpr.multi",
     "standard-delivery.plan"
    ],
-   "when": "A planner returns a remediation plan for a root cluster and the overlord decides whether to accept it and implement."
+   "when": "A planner returns a remediation plan for review findings and the overlord decides whether to accept it and implement. The decision is asked when any flag of plan.remediation_gate is true, since the gate then trips as architectural, and taken otherwise."
   },
   {
    "kind": "diminishing_returns_exit",
@@ -293,7 +293,8 @@ const BRIEF_SCHEMA = {
   },
   "problem": {
    "type": "string",
-   "description": "The decision in plain language, one or two sentences, no internal mechanism names."
+   "maxLength": 300,
+   "description": "Written for the user: the decision in plain language, one or two sentences, no internal mechanism names."
   },
   "criticality": {
    "type": "object",
@@ -328,11 +329,13 @@ const BRIEF_SCHEMA = {
     },
     "blast_radius": {
      "type": "string",
-     "description": "What and how much is affected if it goes wrong. One short sentence."
+     "maxLength": 160,
+     "description": "Written for the user: what and how much is affected if it goes wrong. One short sentence."
     },
     "if_ignored": {
      "type": "string",
-     "description": "What happens if the decision is not made or is ignored. One short sentence."
+     "maxLength": 160,
+     "description": "Written for the user: what happens if the decision is not made or is ignored. One short sentence."
     }
    }
   },
@@ -359,7 +362,8 @@ const BRIEF_SCHEMA = {
      },
      "summary": {
       "type": "string",
-      "description": "What this option does, in plain language."
+      "maxLength": 160,
+      "description": "Written for the user: what this option does, in plain language."
      },
      "steel_man": {
       "type": "string",
@@ -442,7 +446,8 @@ const BRIEF_SCHEMA = {
     },
     "why": {
      "type": "string",
-     "description": "Reasoning tied to criticality and to effort versus value."
+     "maxLength": 200,
+     "description": "Written for the user: reasoning tied to criticality and to effort versus value, in one or two short sentences."
     }
    }
   },
@@ -517,6 +522,8 @@ const PLAN_SCHEMA = {
  "additionalProperties": false,
  "required": [
   "summary",
+  "digest",
+  "remediation_gate",
   "branch",
   "base",
   "trunk_freshness",
@@ -530,6 +537,51 @@ const PLAN_SCHEMA = {
   "summary": {
    "type": "string",
    "description": "Can carry external content. What the plan delivers."
+  },
+  "digest": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "problem",
+    "change"
+   ],
+   "description": "The plan in two short sentences written for the user. A question about accepting the plan shows them as written, in place of the summary.",
+   "properties": {
+    "problem": {
+     "type": "string",
+     "maxLength": 200,
+     "description": "Can carry external content. Written for the user: one plain sentence saying what the plan addresses, the ask of the request or the root cause a review found."
+    },
+    "change": {
+     "type": "string",
+     "maxLength": 200,
+     "description": "Can carry external content. Written for the user: one plain sentence saying what the plan changes."
+    }
+   }
+  },
+  "remediation_gate": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "architectural",
+    "grows_surface",
+    "repeats_surface"
+   ],
+   "description": "Whether accepting a plan that remediates review findings goes to the user, per the remediation plan rule of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate). Each flag is true only for a plan that remediates review findings, and only while no reply in this run has accepted that condition. Every flag is false for any other plan.",
+   "properties": {
+    "architectural": {
+     "type": "boolean",
+     "description": "True when the remediation is architectural, clause 2 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+    },
+    "grows_surface": {
+     "type": "boolean",
+     "description": "True when the remediation adds more surface than it removes, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Surface-Growth Escalation)."
+    },
+    "repeats_surface": {
+     "type": "boolean",
+     "description": "True when the remediation follows a fix on the same surface that did not close its class, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Forced zoom-out after the first non-closing structural fix)."
+    }
+   }
   },
   "branch": {
    "type": "string",
@@ -634,6 +686,7 @@ const PLAN_SCHEMA = {
     "properties": {
      "id": {
       "type": "string",
+      "maxLength": 64,
       "description": "Can carry external content. The step id, unique in the plan. depends_on names steps by it."
      },
      "owner": {
@@ -679,6 +732,7 @@ const PLAN_SCHEMA = {
        "properties": {
         "summary": {
          "type": "string",
+         "maxLength": 300,
          "description": "Can carry external content. What the effect does and where."
         },
         "reversible": {
@@ -2703,7 +2757,7 @@ function buildPlanResultSpec(planSchema, briefSchema) {
         description: 'One decision brief for each decision the repository and the request do not settle.',
         items: omitSchemaDialect(briefSchema)
       },
-      blocker: { type: 'string', description: 'Why the delivery cannot be planned.' }
+      blocker: { type: 'string', maxLength: 400, description: 'Why the delivery cannot be planned, in one or two short sentences written for the user.' }
     },
     required: ['outcome', 'questions'],
     variants: { complete: { required: ['plan'], optional: [] }, blocked: { required: [], optional: ['blocker'] } }
@@ -2756,7 +2810,7 @@ function buildWorkerSchema() {
         description: 'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change before the step can be done.'
       },
       summary: { type: 'string', description: 'What you changed, in one or two sentences.' },
-      blocker: { type: 'string', description: 'Why the step is blocked or needs a new plan.' },
+      blocker: { type: 'string', maxLength: 400, description: 'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty()
     },
     required: ['outcome', 'summary'],
@@ -2773,7 +2827,7 @@ function buildGateEditSchema(hasFiles) {
     tag: 'outcome',
     properties: {
       outcome: { type: 'string', enum: ['complete', 'blocked'], description: 'complete when the task is done. blocked when it cannot be done.' },
-      blocker: { type: 'string', description: 'Why the task cannot be done.' },
+      blocker: { type: 'string', maxLength: 400, description: 'Why the task cannot be done, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty()
     },
     required: ['outcome'],
@@ -2796,7 +2850,7 @@ function buildValidateSchema() {
         description: 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.'
       },
       failures: { type: 'string', description: 'What failed: each failing command with its failure output.' },
-      blocker: { type: 'string', description: 'The command that cannot run and why.' },
+      blocker: { type: 'string', maxLength: 400, description: 'The command that cannot run and why, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty()
     },
     required: ['outcome'],
@@ -3287,16 +3341,41 @@ function questionKey(kind, content) {
   return JSON.stringify([kind, content]);
 }
 
-function describePlanLine(plan) {
-  const stepCount = plan.steps.length + (plan.steps.length === 1 ? ' step' : ' steps');
-  return 'The plan: ' + buildPullRequestTitle(plan) + ', ' + stepCount + ' on branch ' + encodeUntrustedText(plan.branch) + '. The full plan is in this run\'s per-agent results.';
+function describeCount(count, noun) {
+  return count + ' ' + noun + (count === 1 ? '' : 's');
+}
+
+function toOneLine(text) {
+  return text.trim().split(/\s*[\r\n]+\s*/).join(' ');
+}
+
+function buildPlanDetailBlock(plan) {
+  const files = listStepFiles(plan.steps);
+  const shownPaths = files.slice(0, 5).map((file) => encodeUntrustedText(cutExcerpt(file)));
+  const restCount = files.length - shownPaths.length;
+  const paths = joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and');
+  return {
+    text: [
+      'What the plan addresses: ' + toOneLine(plan.digest.problem),
+      'What it changes: ' + toOneLine(plan.digest.change),
+      'It has ' + describeCount(plan.steps.length, 'step') + ' and touches ' + describeCount(files.length, 'file') + ' on branch ' + encodeUntrustedText(cutExcerpt(plan.branch)) + ': ' + paths + '.'
+    ].join('\n')
+  };
+}
+
+function remediationGateTexts() {
+  return {
+    architectural: 'changes how the system is built',
+    grows_surface: 'adds more surface than it removes',
+    repeats_surface: 'follows a fix on the same surface that did not close its class'
+  };
 }
 
 function buildPlanAcceptanceBrief(plan) {
   return {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the plan: create or confirm its working branch and run its steps. ' + describePlanLine(plan),
+    problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: 'Nothing is delivered.' },
     options: [
       { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: 'The plan passed every check, and its changes stay on the working branch until you merge them.', straw_man: 'A step can still change something you did not expect before you see the pull request.', effort: 'medium', value: 'high', reversible: true },
@@ -3310,9 +3389,13 @@ function buildPlanAcceptanceBrief(plan) {
 }
 
 function buildRemediationPlanBrief(plan) {
+  const texts = remediationGateTexts();
+  const flagTexts = Object.keys(texts).filter((flag) => plan.remediation_gate[flag]).map((flag) => texts[flag]);
+  const lead = 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again.';
   return Object.assign(buildPlanAcceptanceBrief(plan), {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again. ' + describePlanLine(plan)
+    problem: flagTexts.length === 0 ? lead : lead + ' I am asking because the plan ' + joinNames(flagTexts, 'and') + '.',
+    gate: { irreversible: false, architectural: flagTexts.length > 0, safety: false }
   });
 }
 
@@ -3320,7 +3403,7 @@ function buildTrunkStaleBrief(facts) {
   return {
     id: 'trunk',
     kind: TRUNK_STALE_KIND,
-    problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + facts.trunk_ahead + ' commits ahead of its remote and ' + facts.trunk_behind + ' behind. Create or confirm the working branch from it anyway?',
+    problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
     criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: 'The branch may need a rebase before it merges.' },
     options: [
       { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: 'The branch can be rebased later, and the pull request shows its base.', straw_man: 'The branch may start from an old trunk and conflict later.', effort: 'trivial', value: 'medium', reversible: true },
@@ -3336,7 +3419,7 @@ function buildExternalEffectBrief(stepId, summary) {
   return {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
-    problem: 'Plan step ' + encodeUntrustedText(stepId) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
+    problem: 'Plan step ' + encodeUntrustedText(Array.from(stepId).slice(0, 16).join('')) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: 'The step runs before any pull request exists.' },
     options: [
       { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: 'The step is part of the delivery you asked for.', straw_man: 'The effect happens before you see the pull request and cannot be undone.', effort: 'small', value: 'high', reversible: false },
@@ -3612,7 +3695,8 @@ async function runPlanningPass(run, facts, replan) {
     const round = run.replies.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {
-      return { result: pauseDelivery(resolution, questions, run) };
+      const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
+      return { result: pauseDelivery(resolution, questions, run, isAcceptance ? buildPlanDetailBlock(planResult.plan) : undefined) };
     }
     run.replies.push(reply);
     phase('Revise');
@@ -4339,7 +4423,7 @@ function askReviewQuestion(review, run) {
 function buildDiminishingReturnsBrief(review, head) {
   return buildTailBrief({
     kind: DIMINISHING_RETURNS_EXIT_KIND,
-    problem: 'Local review on commit ' + head + ' sees diminishing returns, with ' + review.findings_open + ' findings still open, the highest severity ' + quoteReviewValue(review, 'latest_severity_max') + '. Stop fixing and hold the local review gate on this commit with those findings open?',
+    problem: 'Local review on commit ' + head + ' sees diminishing returns, with ' + describeCount(review.findings_open, 'finding') + ' still open. Stop fixing and hold the local review gate on this commit with those findings open?',
     goOn: 'Stop fixing and go on with the open findings.',
     strength: 'strong',
     why: 'More review rounds fix little now, and the open findings stay on the record for you before the merge.',
@@ -4365,8 +4449,8 @@ function buildReviewEscalationBrief(review) {
   return buildTailBrief({
     kind: isCluster ? ROOT_CLUSTER_ROUTING_KIND : PLANNER_ESCALATION_ROUTING_KIND,
     problem: isCluster
-      ? 'Local review found findings that share one suspected root, ' + quoteReviewValue(review, 'hypothesized_root') + '. Go back to planning, from fresh facts, for a remediation that closes the class?'
-      : 'Local review escalated finding ' + quoteReviewValue(review, 'finding_id') + ', titled ' + quoteReviewValue(review, 'title') + ', in file ' + quoteReviewValue(review, 'file') + ', to the planner. Go back to planning, from fresh facts, for its remediation?',
+      ? 'Local review found ' + describeCount(review.cluster_ids.length, 'finding') + ' in ' + describeCount(review.cluster_files.length, 'file') + ' that share one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?'
+      : 'Local review escalated finding ' + quoteReviewValue(review, 'finding_id') + ' to the planner. Go back to planning, from fresh facts, for its remediation?',
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
     why: 'The finding needs more than a simple fix, and the remediation plan comes to you before any step of it runs.',

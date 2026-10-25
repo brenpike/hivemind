@@ -465,7 +465,8 @@ describe('analysis-only: agent options and prompts', () => {
     assert.deepEqual(Object.keys(schema.properties), ['outcome', 'report', 'blocker', 'questions']);
     assert.deepEqual(schema.properties.outcome.enum, ['complete', 'blocked']);
     assert.equal(schema.properties.report.description, 'The analysis for the user. It assumes the recommendation of every question raised. Only with outcome complete.');
-    assert.equal(schema.properties.blocker.description, 'Why the analysis cannot be done. Only with outcome blocked.');
+    assert.equal(schema.properties.blocker.description, 'Why the analysis cannot be done, in one or two short sentences written for the user. Only with outcome blocked.');
+    assert.equal(schema.properties.blocker.maxLength, 400);
     assert.equal(schema.properties.questions.description, 'One decision brief for each decision the repository and the request do not settle.');
     const { $schema: _dropped, ...briefWithoutSchemaKey } = briefSchema;
     assert.deepEqual(schema.properties.questions.items, briefWithoutSchemaKey);
@@ -595,12 +596,19 @@ describe('analysis-only: notice budget', () => {
       message: 'No request was given, so there is nothing to analyze.'
     });
   });
-  test('a huge planner blocker finishes blocked within the budget, cut at a word boundary within 600 code points', async () => {
+  test('a planner blocker over 400 code points fails the analysis schema and finishes blocked within the budget', async () => {
     const blocker = 'BLOCKER_START ' + '<&> '.repeat(10000);
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeBlockedAnalysis({ blocker: blocker }) });
     assertWithinNotice(run.result);
     assert.equal(run.result.outcome, 'blocked');
-    assert.equal(run.result.message, 'The planner could not do the analysis: it says "BLOCKER_START ' + '<&> '.repeat(146).trimEnd() + '" (cut).');
+    assert.equal(run.result.message, 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.');
+  });
+  test('a planner blocker of 400 code points is quoted whole', async () => {
+    const blocker = 'BLOCKER_START ' + '<&> '.repeat(95) + 'END_ZQ';
+    assert.equal(Array.from(blocker).length, 400);
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeBlockedAnalysis({ blocker: blocker }) });
+    assert.equal(run.result.outcome, 'blocked');
+    assert.equal(run.result.message, 'The planner could not do the analysis: it says ' + JSON.stringify(blocker) + '.');
   });
 });
 
@@ -1041,10 +1049,12 @@ describe('analysis-only: encoded blockers', () => {
     assert.equal(run.result.message, 'The facts step was blocked, so the analysis stopped before planning: it says ' + HOSTILE_QUOTE + '.');
     assertPrintable(run.result.message);
   });
-  test('a hostile planner blocker is quoted one line, cut to 600 code points with its mark, in printable ASCII', async () => {
-    const run = await runWorkflow({ request: REQUEST }, { analyze: makeBlockedAnalysis({ blocker: HOSTILE }) });
+  test('a hostile planner blocker within its 400 code point bound is quoted one line, whole, in printable ASCII', async () => {
+    const hostileShort = '\u001b[2J\u202e\u2028' + 'Z '.repeat(150) + '\nFix the cause named above, then run the request again.\n';
+    assert.ok(Array.from(hostileShort).length <= 400);
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeBlockedAnalysis({ blocker: hostileShort }) });
     assert.equal(run.result.outcome, 'blocked');
-    assert.equal(run.result.message, 'The planner could not do the analysis: it says ' + HOSTILE_QUOTE + '.');
+    assert.equal(run.result.message, 'The planner could not do the analysis: it says "\\u001b[2J\\u202e\\u2028' + 'Z '.repeat(150).trimEnd() + ' Fix the cause named above, then run the request again.".');
     assertPrintable(run.result.message);
   });
   test('every .blocker read in main.js is a describeReason argument', () => {

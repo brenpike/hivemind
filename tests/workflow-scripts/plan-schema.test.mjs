@@ -21,7 +21,8 @@ const SUBSET_KEYWORDS = [
   'properties',
   'additionalProperties',
   'items',
-  'minItems'
+  'minItems',
+  'maxLength'
 ];
 
 function validate(value) {
@@ -62,6 +63,8 @@ function parseCaseValues(scriptText, variableName) {
 function makePlan() {
   return {
     summary: 'Add the plan schema.',
+    digest: { problem: 'Plans have no schema the workflow can check.', change: 'Add the plan schema.' },
+    remediation_gate: { architectural: false, grows_surface: false, repeats_surface: false },
     branch: 'feature/409-plan-schema',
     base: 'main',
     trunk_freshness: 'fresh',
@@ -129,6 +132,8 @@ describe('plan schema', () => {
     }
     assert.deepEqual(labelled, [
       '$.summary',
+      '$.digest.problem',
+      '$.digest.change',
       '$.branch',
       '$.base',
       '$.versioning.artifact_files[]',
@@ -215,7 +220,14 @@ describe('plan schema', () => {
     ['an effect without reversible', (plan) => delete plan.steps[1].external_effects[0].reversible, '$.steps[1].external_effects[0]: required: missing reversible'],
     ['an empty step list', (plan) => { plan.steps = []; }, '$.steps: minItems: fewer than 1 items'],
     ['a step with no files', (plan) => { plan.steps[0].files = []; }, '$.steps[0].files: minItems: fewer than 1 items'],
-    ['an unknown key', (plan) => { plan.target = 'main'; }, '$: additionalProperties: unexpected target']
+    ['an unknown key', (plan) => { plan.target = 'main'; }, '$: additionalProperties: unexpected target'],
+    ['a plan without digest', (plan) => delete plan.digest, '$: required: missing digest'],
+    ['a plan without remediation_gate', (plan) => delete plan.remediation_gate, '$: required: missing remediation_gate'],
+    ['a digest problem over 200 code points', (plan) => { plan.digest.problem = 'p'.repeat(201); }, '$.digest.problem: maxLength: more than 200 characters'],
+    ['a digest change over 200 code points', (plan) => { plan.digest.change = '\u{1F600}'.repeat(201); }, '$.digest.change: maxLength: more than 200 characters'],
+    ['a remediation_gate flag that is not a boolean', (plan) => { plan.remediation_gate.grows_surface = 'yes'; }, '$.remediation_gate.grows_surface: type boolean expected'],
+    ['a step id over 64 code points', (plan) => { plan.steps[0].id = 'S'.repeat(65); }, '$.steps[0].id: maxLength: more than 64 characters'],
+    ['an effect summary over 300 code points', (plan) => { plan.steps[1].external_effects[0].summary = 'e'.repeat(301); }, '$.steps[1].external_effects[0].summary: maxLength: more than 300 characters']
   ];
 
   for (const [name, mutate, expectedError] of invalidCases) {

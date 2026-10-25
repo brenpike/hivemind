@@ -29,7 +29,7 @@ These were previously surfaced for confirmation; they are now taken autonomously
 - the Creep-Stagnation / diminishing-returns advisory early-exit decision
 - a validation failure — attempt remediation autonomously, surface ONLY if it cannot be resolved
 - a version-bump TYPE when it is inferable from the compatibility impact (when it cannot be inferred, that is Tier A — surface it)
-- root-cluster zoom-out routing to cerebrate — ONLY the ROUTING of the reviewer's read-only root-cluster signal to cerebrate for a remediation plan is auto-decided and journaled here. ACCEPTING/EXECUTING the resulting architectural remediation plan is architectural blast radius: it TRIPS the **Promotion Gate**, so the overlord — BY JUDGMENT — pauses its continuous-execution loop and SURFACES the plan to the user BEFORE recording the transition that advances into implementation. This is an overlord judgment obligation (judgment + journal), NOT a workflow-enforced approval state; the workflow definition routes the plan-review outcome straight into the implement step with no `user_gate`, and the surface is the overlord honoring the gate by judgment, not the state machine blocking it. Auto-take covers the route, not the architectural fix.
+- root-cluster zoom-out routing to cerebrate — ONLY the ROUTING of the reviewer's read-only root-cluster signal to cerebrate for a remediation plan is auto-decided and journaled here. ACCEPTING/EXECUTING the remediation plan cerebrate returns is a separate decision, governed by the remediation-plan rule in **Promotion Gate**. Auto-take of the route never accepts the plan.
 - remediation-approach choices where the overlord holds a confident recommendation
 
 A Tier-B decision is auto-taken only while the promotion gate is CLEAN. When the gate trips on the recommended action, the decision promotes to a surface (Tier A behavior) regardless of its tier listing here.
@@ -59,7 +59,15 @@ The promotion gate TRIPS — forcing a surface to the user — when the RECOMMEN
 
 Otherwise the gate is CLEAN and the Tier-B decision is auto-taken per the 2x2. The gate is evaluated against the recommended action only, per the key rule in **The Autonomy 2x2**.
 
-This split is why the root-cluster zoom-out in **Tier B** auto-takes only the ROUTING to cerebrate: routing the reviewer's read-only signal is a contained action with a clean gate, but the architectural remediation plan cerebrate returns is gate clause 2 (architectural blast radius), so ACCEPTING/EXECUTING that plan is a Tier-A surface — the overlord, by judgment, pauses its continuous-execution loop and surfaces the plan to the user before recording the transition that advances into implementation. This surface is the overlord's judgment-based obligation, the same trust model as every other surface in this doc (judgment + journal, ADR-0006 intent-based governance) — NOT a claim that the workflow definition enforces an approval gate. The same distinction governs the forced proactive zoom-out in **Recurrence Interplay**.
+**Remediation plan acceptance (stated once; every other doc refers here).** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is a contained action with a clean gate, auto-taken per **Tier B**. Accepting the remediation plan cerebrate returns is a separate decision. It surfaces to the user ONLY when the plan's `remediation_gate` (per `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks ANY of:
+
+- the plan is architectural — gate clause 2 above;
+- the plan adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Surface-Growth Escalation`);
+- the plan follows a fix on the same surface that did not close its class, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry`).
+
+Any other remediation plan is auto-taken. On the workflow state machine the overlord journals it `did-now` and records the transition into the implement step. On the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it, and the run lists the decision in its final message and the PR body. The **Tier A** safety rails still hold for every step of an auto-taken plan.
+
+When a flag is set on the state machine, the overlord, by judgment, pauses its continuous-execution loop and surfaces the plan to the user before recording the transition that advances into implementation. This surface is the overlord's judgment-based obligation, the same trust model as every other surface in this doc (judgment + journal, ADR-0006 intent-based governance) — NOT a claim that the workflow definition enforces an approval gate: the workflow definition routes the plan-review outcome straight into the implement step with no `user_gate`.
 
 ## Disposition Vocabulary
 
@@ -94,7 +102,7 @@ The single source for the `event.outputs` shape — its free-form, recorded-verb
 
 ## Recurrence Interplay
 
-Auto-take NEVER disables the proactive same-surface recurrence tracking. Contained remediation fixes auto-flow under the 2x2 as ordinary `did-now` work, but the forced zoom-out that recurrence tracking triggers is architectural by construction, so it TRIPS the promotion gate (architectural blast radius) — the overlord, by judgment, pauses its continuous-execution loop and surfaces the returned plan to the user before recording the transition that advances into implementation; it is never auto-executed. As above, this surface is an overlord judgment obligation, not a workflow-enforced approval state. This is the same routing-vs-execution split as the root-cluster bullet in **Tier B**.
+Auto-take NEVER disables the proactive same-surface recurrence tracking. Contained remediation fixes auto-flow under the 2x2 as ordinary `did-now` work. The plan a forced zoom-out returns is accepted or surfaced per the remediation-plan rule in **Promotion Gate**, the same routing-vs-execution split as the root-cluster bullet in **Tier B**.
 
 The recurrence mechanics — the counting unit, the trip threshold, the Gate-A recurrence / Gate-B youth call, and the forced-zoom-out trigger — are defined SOLELY in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry`, `## Cross-Iteration Same-Surface Recurrence`); the `recurrence_origin` marker is defined in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`### Proactive Zoom-Out Ledger Marker`) and referenced for the ledger in `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md`. This section references those by name and does NOT restate them.
 

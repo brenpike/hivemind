@@ -157,12 +157,19 @@ Open questions:
 
 Append a machine-readable YAML `plan:` block after the prose for ANY plan that routes to an implementation loop — regardless of compact vs full output. Each `steps[]` entry must carry a `STEP-NNN` id, `owner`, `files`, `outcome`, `depends_on`, and `external_effects`. This is mandatory the moment a plan routes to implementation: the overlord feeds `plan.steps` to `hivemind:record-state-result --plan-steps` to drive the implement loop, so a compact plan that omits the machine block leaves that loop with no steps. The compact prose template stays available for trivial single-owner plans, but a compact plan that routes to implementation still emits this block. This is the communication contract the overlord reformats into the JSON run ledger at the §A seam (cerebrate stays read-only and writes nothing; it only emits this block as part of its report).
 
-`${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json` holds what `branch`, `base`, `trunk_freshness`, `classification`, `breaking`, `versioning.bump_trigger`, `versioning.no_bump_match`, `versioning.artifact_files` and `external_effects` mean, and this block does not restate it; on the script engine the plan comes back in that schema's shape, with `delivery` then `single` or `multi`, and every step declares each effect it has outside the repo in `external_effects`.
+`${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json` holds what `digest`, `remediation_gate`, `branch`, `base`, `trunk_freshness`, `classification`, `breaking`, `versioning.bump_trigger`, `versioning.no_bump_match`, `versioning.artifact_files` and `external_effects` mean, and this block does not restate it; on the script engine the plan comes back in that schema's shape, with `delivery` then `single` or `multi`, and every step declares each effect it has outside the repo in `external_effects`.
 
 ```yaml
 plan:
   id: "plan-<utc-timestamp>"
   summary: ""
+  digest:
+    problem: ""
+    change: ""
+  remediation_gate:
+    architectural: false
+    grows_surface: false
+    repeats_surface: false
   branch: ""
   base: ""
   trunk_freshness: fresh
@@ -267,6 +274,12 @@ CONTENT must establish:
 - the SURFACE the fix adds and the surface it removes. When the fix grows the surface, do
   not plan it as settled: raise it as a question brief (on the state machine, an open
   question) per the doctrine's `## Surface-Growth Escalation`.
+- the `remediation_gate` flags of the `plan:` block, set as
+  `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json` describes them: `architectural`,
+  `grows_surface` and `repeats_surface` each true only while its condition holds and no
+  reply in this run has accepted it. A flag that is set makes the run ask the user before
+  the plan runs; with every flag false the plan is decided and listed at the default
+  autonomy level.
 - a RECORDED DECISION — when the request or the user's reply answers a review question by
   rejecting a finding, the plan records that decision at its source, per the doctrine's
   `## Recorded Decisions and Repeat Findings`.
