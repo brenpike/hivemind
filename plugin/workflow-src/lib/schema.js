@@ -43,6 +43,9 @@
  *   minLength must hold a non-whitespace character. An enum or a minLength
  *   governs when present, so an enum may list the empty string and a
  *   minLength may accept a whitespace-only string. maxLength does not govern.
+ *   Every value whose schema has type integer must be zero or more, inside
+ *   anyOf branches too. Every integer the plugin's schemas hold is a count,
+ *   a size or an id, so a negative one is never valid.
  *
  * Why
  *   A brief is written by a model and read by decide(). A hand-kept check
@@ -51,6 +54,11 @@
  *   anyOf is the one combinator here because the structured outputs docs list
  *   anyOf as supported and do not list if, then, else, oneOf or not. A schema
  *   that uses anyOf can still be an agent output schema.
+ *   Integers are zero or more by default, with no keyword, because every
+ *   integer the plugin's schemas hold is a count, a size or an id, and the
+ *   structured outputs docs list no numeric bound keyword such as minimum.
+ *   A model-written count can then never be negative, as a model-written
+ *   string can never be blank.
  */
 
 function supportedSchemaKeywords() {
@@ -176,6 +184,10 @@ function isBlankSchemaString(schema, value) {
   return schema.type === 'string' && !isGoverned && value.trim() === '';
 }
 
+function isNegativeSchemaInteger(schema, value) {
+  return schema.type === 'integer' && value < 0;
+}
+
 function countSchemaCodePoints(text) {
   return [...text].length;
 }
@@ -201,6 +213,9 @@ function collectSchemaErrors(schema, value, path, errors) {
   }
   if (isBlankSchemaString(schema, value)) {
     errors.push(path + ': type string: blank');
+  }
+  if (isNegativeSchemaInteger(schema, value)) {
+    errors.push(path + ': type integer: negative');
   }
   if (isShortSchemaString(schema, value)) {
     errors.push(path + ': minLength: fewer than ' + schema.minLength + ' characters');

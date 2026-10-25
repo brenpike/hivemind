@@ -184,6 +184,31 @@ describe('validateSchema blank strings', () => {
   });
 });
 
+describe('validateSchema negative integers', () => {
+  test('type integer rejects -1 at the root', () => {
+    assert.deepEqual(validate({ type: 'integer' }, -1), { ok: false, errors: ['$: type integer: negative'] });
+  });
+  test('type integer accepts 0', () => {
+    assert.deepEqual(validate({ type: 'integer' }, 0), { ok: true, errors: [] });
+  });
+  test('a negative nested property is reported at its path', () => {
+    const schema = { type: 'object', properties: { a: { type: 'integer' } } };
+    assert.deepEqual(validate(schema, { a: -1 }).errors, ['$.a: type integer: negative']);
+  });
+  test('a negative array item is reported at its index', () => {
+    const schema = { type: 'array', items: { type: 'integer' } };
+    assert.deepEqual(validate(schema, [0, -1, 2]).errors, ['$[1]: type integer: negative']);
+  });
+  test('the negative-integer rule applies inside a branch', () => {
+    const schema = { anyOf: [{ type: 'null' }, { type: 'integer' }] };
+    assert.deepEqual(validate(schema, -1), { ok: false, errors: ['$: anyOf: matches no branch'] });
+    assert.deepEqual(validate(schema, 0), { ok: true, errors: [] });
+  });
+  test('type number is unaffected', () => {
+    assert.deepEqual(validate({ type: 'number' }, -1), { ok: true, errors: [] });
+  });
+});
+
 describe('validateSchema minLength', () => {
   test('accepts a string at the boundary and rejects one below it', () => {
     assert.deepEqual(validate({ type: 'string', minLength: 2 }, 'ab'), { ok: true, errors: [] });

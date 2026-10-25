@@ -667,7 +667,7 @@ function tailAskMessage(asks) {
 
 const FOURTH = '5'.repeat(40);
 const ESCALATION = { ...REVIEW_CLEAN, exit_reason: 'planner-escalation', findings_open: 1, finding_id: 'F5', classification: 'architecture', file: 'src/cache.js', title: 'The cache layer skips the "auth" check.' };
-const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.', member_count: 2 };
+const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.' };
 const DIMINISHING = { ...REVIEW_CLEAN, exit_reason: 'diminishing-returns', findings_open: 2, signals_observed: ['severity-decay'], latest_severity_max: 'low', recommendation_text: 'Stop here; the rest is style.' };
 const REMEDIATION_PLAN = makePlan({ summary: 'Route the cache through the auth check.', steps: [makeStep('STEP-002', ['src/auth.js'])] });
 
@@ -2757,10 +2757,21 @@ const ROW_TESTS = {
       }
       assert.ok(lib.validateSchema(schema, REVIEW_CLEAN).ok);
     });
+    test('every conditional list field holds at least one entry, rejected_findings may be empty, and a conditional count throws', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      const schema = callOf(run, 'review-1-1').opts.schema;
+      const conditionalArrays = Object.keys(main.reviewFieldTexts()).filter((name) => schema.properties[name].type === 'array');
+      assert.deepEqual(conditionalArrays.sort(), ['cluster_files', 'cluster_ids', 'conflicting_findings', 'open_findings', 'signals_fired', 'signals_observed']);
+      conditionalArrays.forEach((name) => assert.equal(schema.properties[name].minItems, 1, name));
+      assert.equal(schema.properties.rejected_findings.minItems, undefined);
+      assert.ok(Object.values(main.reviewFieldTexts()).every((entry) => ['string', 'list', 'findings'].includes(entry.type)));
+      assert.throws(() => main.buildReviewFieldSchema('member_count', { type: 'integer', text: 'How many.', isExternal: false }), /buildReviewFieldSchema: field member_count/);
+    });
     const malformed = 'The local review step returned no usable result, so the delivery stopped before the pull request.';
     const withoutLedger = Object.fromEntries(Object.entries(REVIEW_CLEAN).filter(([key]) => key !== 'ledger_path'));
     const withoutRejected = Object.fromEntries(Object.entries(REVIEW_CLEAN).filter(([key]) => key !== 'rejected_findings'));
     const escalationWithoutFile = Object.fromEntries(Object.entries(ESCALATION).filter(([key]) => key !== 'file'));
+    const breakFix = { ...REVIEW_CLEAN, exit_reason: 'break-fix-break', signals_fired: ['same-construct'], conflicting_findings: ['F2'], prior_fix_commit: OTHER };
     for (const [label, review] of [
       ['no result', null],
       ['an empty object', {}],
@@ -2772,7 +2783,15 @@ const ROW_TESTS = {
       ['a count as a string', { ...REVIEW_CLEAN, iterations_completed: '1' }],
       ['a planner-escalation with no file', escalationWithoutFile],
       ['a user-input-required with no open_findings', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.' }],
-      ['a blocked result with no stage', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex is unavailable.' }]
+      ['a blocked result with no stage', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex is unavailable.' }],
+      ['empty cluster_ids', { ...CLUSTER, cluster_ids: [] }],
+      ['empty cluster_files', { ...CLUSTER, cluster_files: [] }],
+      ['empty signals_fired', { ...breakFix, signals_fired: [] }],
+      ['empty conflicting_findings', { ...breakFix, conflicting_findings: [] }],
+      ['empty signals_observed', { ...DIMINISHING, signals_observed: [] }],
+      ['empty open_findings', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.', open_findings: [] }],
+      ['a root-cluster-suspected result carrying member_count', { ...CLUSTER, member_count: 2 }],
+      ['a negative findings_open', { ...REVIEW_CLEAN, findings_open: -1 }]
     ]) {
       test(`a review result with ${label} stops the run after the review commit`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
@@ -3119,6 +3138,7 @@ const ROW_TESTS = {
         assert.deepEqual({ ...lib.decide({ kind: kind, level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
       }
       assert.ok(main.buildReviewEscalationBrief(ESCALATION).problem.includes('finding "F5", titled "The cache layer skips the \\"auth\\" check.", in file "src/cache.js"'));
+      assert.equal(main.buildReviewEscalationBrief(CLUSTER).problem, 'Local review found findings that share one suspected root, "The cache key is built from raw input.". Go back to planning, from fresh facts, for a remediation that closes the class?');
     });
     for (const [review, kind] of [[ESCALATION, 'planner_escalation_routing'], [CLUSTER, 'root_cluster_routing']]) {
       test(`a surfaced ${kind} ends the run asking before the pull request, with no new pass`, async () => {

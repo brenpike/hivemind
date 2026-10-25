@@ -809,6 +809,10 @@ function isBlankSchemaString(schema, value) {
   return schema.type === 'string' && !isGoverned && value.trim() === '';
 }
 
+function isNegativeSchemaInteger(schema, value) {
+  return schema.type === 'integer' && value < 0;
+}
+
 function countSchemaCodePoints(text) {
   return [...text].length;
 }
@@ -834,6 +838,9 @@ function collectSchemaErrors(schema, value, path, errors) {
   }
   if (isBlankSchemaString(schema, value)) {
     errors.push(path + ': type string: blank');
+  }
+  if (isNegativeSchemaInteger(schema, value)) {
+    errors.push(path + ': type integer: negative');
   }
   if (isShortSchemaString(schema, value)) {
     errors.push(path + ': minLength: fewer than ' + schema.minLength + ' characters');

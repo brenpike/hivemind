@@ -817,6 +817,10 @@ function isBlankSchemaString(schema, value) {
   return schema.type === 'string' && !isGoverned && value.trim() === '';
 }
 
+function isNegativeSchemaInteger(schema, value) {
+  return schema.type === 'integer' && value < 0;
+}
+
 function countSchemaCodePoints(text) {
   return [...text].length;
 }
@@ -842,6 +846,9 @@ function collectSchemaErrors(schema, value, path, errors) {
   }
   if (isBlankSchemaString(schema, value)) {
     errors.push(path + ': type string: blank');
+  }
+  if (isNegativeSchemaInteger(schema, value)) {
+    errors.push(path + ': type integer: negative');
   }
   if (isShortSchemaString(schema, value)) {
     errors.push(path + ': minLength: fewer than ' + schema.minLength + ' characters');
@@ -2685,7 +2692,7 @@ function reviewExitFields() {
     clean: [],
     'max-iterations-reached': [],
     'break-fix-break': ['signals_fired', 'conflicting_findings', 'prior_fix_commit'],
-    'root-cluster-suspected': ['cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'member_count'],
+    'root-cluster-suspected': ['cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale'],
     'diminishing-returns': ['signals_observed', 'latest_severity_max', 'findings_open', 'recommendation_text'],
     'injection-suspect': ['finding_id', 'pattern_category', 'field_excerpt'],
     'user-input-required': ['finding_id', 'title', 'open_findings'],
@@ -2709,7 +2716,6 @@ function reviewFieldTexts() {
     hypothesized_root: { type: 'string', text: 'The root the cluster findings share.', isExternal: true },
     root_class: { type: 'string', text: 'The class of that root.', isExternal: true },
     same_framing_rationale: { type: 'string', text: 'Why the findings share one framing.', isExternal: true },
-    member_count: { type: 'integer', text: 'How many findings the cluster holds.', isExternal: false },
     signals_observed: { type: 'list', text: 'Each diminishing returns signal observed.', isExternal: false },
     latest_severity_max: { type: 'string', text: 'The highest severity of the latest findings.', isExternal: true },
     recommendation_text: { type: 'string', text: 'What the reviewer recommends.', isExternal: true },
@@ -2812,13 +2818,16 @@ function buildOpenFindingSchema() {
 function buildReviewFieldSchema(name, entry) {
   const description = describeReviewField(name, entry);
   if (entry.type === 'findings') {
-    return { type: 'array', description: description, items: buildOpenFindingSchema() };
+    return { type: 'array', description: description, minItems: 1, items: buildOpenFindingSchema() };
   }
   if (entry.type === 'list') {
     const itemDescription = (entry.isExternal ? externalLabel() + ' ' : '') + 'One entry.';
-    return { type: 'array', description: description, items: { type: 'string', description: itemDescription } };
+    return { type: 'array', description: description, minItems: 1, items: { type: 'string', description: itemDescription } };
   }
-  return { type: entry.type, description: description };
+  if (entry.type === 'string') {
+    return { type: 'string', description: description };
+  }
+  throw new Error('buildReviewFieldSchema: field ' + name + ' has type ' + JSON.stringify(entry.type) + ', which states no domain');
 }
 
 function buildReviewSchema() {
@@ -4182,7 +4191,7 @@ function buildReviewEscalationBrief(review) {
   return buildTailBrief({
     kind: isCluster ? ROOT_CLUSTER_ROUTING_KIND : PLANNER_ESCALATION_ROUTING_KIND,
     problem: isCluster
-      ? 'Local review found ' + review.member_count + ' findings with one suspected root, ' + quoteReviewValue(review, 'hypothesized_root') + '. Go back to planning, from fresh facts, for a remediation that closes the class?'
+      ? 'Local review found findings that share one suspected root, ' + quoteReviewValue(review, 'hypothesized_root') + '. Go back to planning, from fresh facts, for a remediation that closes the class?'
       : 'Local review escalated finding ' + quoteReviewValue(review, 'finding_id') + ', titled ' + quoteReviewValue(review, 'title') + ', in file ' + quoteReviewValue(review, 'file') + ', to the planner. Go back to planning, from fresh facts, for its remediation?',
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
