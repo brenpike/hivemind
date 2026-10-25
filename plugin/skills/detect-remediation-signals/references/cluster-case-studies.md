@@ -15,7 +15,7 @@ These ground the doctrine's vocabulary in lived experience. For the binding defi
 2. Validator charset treadmill — positive allowlist (cluster)
 3. NUL-via-bash-command-substitution — reject NUL where bytes are intact (cluster)
 4. Read-failure-looks-like-empty — shape-validated read + sentinel (cluster)
-5. Trusting manifest-declared paths — ground-truth derivation, deferred-with-scope (cluster)
+5. Trusting manifest-declared paths — ground-truth derivation in the same PR (cluster)
 6. Break-fix instance — per-construct edit recurrence (break-fix)
 7. Cross-iteration young-surface recurrence — shared query primitive (cluster)
 
@@ -101,7 +101,7 @@ hiding live children.
 `MANIFEST_UNREADABLE` sentinel + a single-document requirement (`jq` slurp, `length==1`), so a
 failed read is loud and distinct from empty.
 
-## 5. Trusting manifest-declared paths — containment family (cluster, deferred-with-scope)
+## 5. Trusting manifest-declared paths — containment family (cluster)
 
 **Symptoms (4 findings):** symlinked-manifest-leaf; worktree-residency-under-checkout;
 symlink-swap TOCTOU; worktree-must-be-a-real-worktree.
@@ -112,12 +112,17 @@ adds one more containment check.
 - `fix_framing`: `trust-untrusted-path`
 - `root_class`: `manifest-declared-path-trust`
 
-**Signal fired:** root-cluster (N≥3). This exemplar also teaches **Defer-with-Scope**: the
-structural fix (derive the worktree from `git worktree list` ground truth, stop trusting the
-manifest path — prefer **ground-truth derivation over validating untrusted input**) was
-deferred WITH full root-cause scope, linked threads, and a
-bounded-impact note. The cluster verdict still fires; the reviewer routes it to a structural
-fix that may be deferred, never to N more per-finding containment patches.
+**Signal fired:** root-cluster (N≥3). The same-framing test is "yes" — the next comment would
+be one more containment check on the same untrusted path.
+
+**Closed-by-construction fix:** derive the worktree from `git worktree list` ground truth and
+stop trusting the manifest path — prefer **ground-truth derivation over validating untrusted
+input**. With the manifest path no longer the anchor, containment findings on it cannot exist.
+
+**Lesson:** a found root cause is fixed at its source in the PR that found it, per the
+doctrine's `## First-Finding Triage`, and is never deferred. The reviewer routes the cluster to
+this structural fix in the same PR — never to N more per-finding containment patches, and never
+to a deferral.
 
 ## 6. Break-fix instance — per-construct edit recurrence (break-fix, NOT cluster)
 
@@ -162,8 +167,8 @@ shared primitive is what binds the distinct findings.
 `## Cross-Iteration Same-Surface Recurrence`). Gate A holds — three distinct iterations re-emit on
 the same surface, framing- and line-independent. Gate B holds — the surface is young
 (introduced this initiative), so it escalates to zoom-out rather than to a bounded-tail
-merge-advisory. Because the recurring findings share a query PRIMITIVE, the threshold is **N=2**;
-three members clear it. The within-pass severity modifier never fired — each pass was individually
+merge-advisory. The threshold on this axis is **N=2**;
+three members clear it, and the shared query PRIMITIVE is part of the same-framing rationale. The within-pass severity modifier never fired — each pass was individually
 quiet — which is exactly why this orthogonal axis exists.
 
 **Closed-by-construction fix:** zoom out and CHANGE THE PRIMITIVE — replace the fuzzy/approximate

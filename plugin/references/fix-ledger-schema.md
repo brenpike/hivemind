@@ -20,12 +20,13 @@ Read this file when initializing or updating the fix ledger in Procedure step 3.
           "file": "string",
           "line_start": 0,
           "line_end": 0,
-          "status": "open|fixing|fixed|regressed|cycling",
+          "status": "open|fixing|fixed|regressed|cycling|rejected",
           "introduced_iteration": 1,
           "fixed_iteration": null,
           "fix_commit": null,
           "fix_framing": null,
-          "root_class": null
+          "root_class": null,
+          "rejection_record": null
         }
       ],
       "verdict": "approve|needs-attention",
@@ -47,6 +48,10 @@ The normalized shape/intent of the fix applied to this finding. Serves as the PR
 ### `iterations[].findings[].root_class` (string|null, optional, default null)
 
 The hypothesized shared-root category that a cluster of findings maps to. Assigned by `hivemind:detect-remediation-signals` when a group of findings with matching `fix_framing` values points to a common underlying cause. Null if no root-class has been inferred. Absent and null are treated identically.
+
+### `iterations[].findings[].rejection_record` (string|null, optional, default null)
+
+The path and section of the recorded decision a finding with `status: rejected` contests, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Recorded Decisions and Repeat Findings`). Set only with `status: rejected`, and null for every other status. A `rejected` finding is disposed, never open. Absent and null are treated identically.
 
 ### `iterations[].review_base_ref` (string|null, optional, default null)
 

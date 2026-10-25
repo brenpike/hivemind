@@ -1,0 +1,46 @@
+{
+  "rule": "First-Finding Triage doctrine section coupling",
+  "description": "`plugin/governance/remediation-doctrine.md` `## First-Finding Triage` is the single source for the triage every remediation actor runs at the first non-trivial finding, before any fix. The source pin is the section heading. Five further pins in the same file carry the load-bearing claims. (1) The trigger and its obligation in one span: at the FIRST non-trivial finding, before any fix is planned or applied, answer the four questions, keyed on the first finding and never on a finding count; rewriting the trigger back to a count, moving it after a fix, or dropping the obligation turns the suite red. (2) Question 1's obligation: a found root cause, introduced or inherited, is fixed at its source in the PR that found it, even outside the reviewed diff, and origin never licenses a deferral or a residual. (3) Question 2's obligation: the fix lands in the owning layer, not at the symptom. (4) Question 3's preference: removing or retiring the surface is preferred over hardening it. (5) Question 4's condition and obligation: when a recorded threat model puts the assumed attacker or failure outside, the finding is rejected at the source by citing the record and not hardened, and when no threat model is recorded, recording one is an architectural call for the user. The consumers pin the POINTER only, never remedy prose, so honest rewording of the doctrine body does not break them: `plugin/agents/local-reviewer.md`, `plugin/agents/github-reviewer.md` and `plugin/agents/overlord.md` must still name `## First-Finding Triage` in the doctrine file, and `plugin/agents/cerebrate.md` must still name it as the doctrine's section. What this pin honestly guarantees is exactly that these word sequences exist in these five named files; it claims nothing about meaning. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible: surrounding prose that re-keys triage on a count, or that admits origin as a deferral ground elsewhere, stays green; (2) a consumer can keep its pointer while moving the triage after its first fix, because the consumer pins carry the pointer and not the trigger wording around it; (3) the pin sees only the five files it names, and no fixture in this directory can detect a NEW remediation actor that never points at the section at all, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/remediation-doctrine.md",
+    "pattern": "## First-Finding Triage"
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "At the FIRST non-trivial finding, before any fix is planned or applied, answer the four questions below. Triage is keyed on the first finding, never on a finding count: a root cause found once is found."
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "Either way, a found root cause is fixed at its source in the PR that found it, even when that source lies outside the reviewed diff. Origin never licenses a deferral or a residual."
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "What is the root class, and which layer owns it? The fix lands in that layer, not at the symptom."
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "Can the surface be removed or retired instead of hardened? Removal is preferred"
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "When a recorded threat model puts it outside, reject the finding at the source by citing the record, and do not harden. When no threat model is recorded, recording one is an architectural call for the user."
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "remediation-doctrine.md` (`## First-Finding Triage`)"
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "remediation-doctrine.md` (`## First-Finding Triage`)"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "remediation-doctrine.md` (`## First-Finding Triage`)"
+    },
+    {
+      "file": "plugin/agents/cerebrate.md",
+      "pattern": "doctrine's `## First-Finding Triage`"
+    }
+  ]
+}

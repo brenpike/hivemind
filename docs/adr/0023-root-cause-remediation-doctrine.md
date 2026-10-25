@@ -60,3 +60,13 @@ The NORMATIVE home for this routing — the conjunctive conditions, the destinat
 No new ADR is created for this decision: these existing ADRs are its correct homes, and ADR ordinals collide across parallel worktrees.
 
 This amendment is APPEND-ONLY in the EDITING sense: the original Context, Decision, Considered Options, and Consequences above are left byte-unchanged rather than rewritten in place. It is NOT append-only in NORMATIVE FORCE. Where this amendment supersedes a clause above — Decision 4 and the Consequences naming "a tracked issue" as the structural home for a finding left unfixed — THIS AMENDMENT GOVERNS and the superseded clause is historical record, not an enforceable rule. Every clause this amendment does not name stands in force as written. Status remains accepted.
+
+## Amendment — 2026-10-24 (residual grounds and the first finding, ADR-0038)
+
+`docs/adr/0038-root-cause-at-the-first-finding.md` changes three things recorded above. `plugin/governance/remediation-doctrine.md` governs each one.
+
+- **The residual ground changes.** The 2026-09-18 amendment's three conjunctive conditions for a recorded residual (inherited, bounded, remediation rejected on the merits) are superseded. A residual is now admissible only on one of two grounds: the finding falls outside the recorded threat model, or no fix on this engine can close the class and the user decided so. Origin is never a ground. A found root cause, introduced or inherited, is fixed at its source in the PR that found it. A recorded residual is promoted to a filed issue when its ground is later invalidated.
+- **Defer-with-Scope is narrowed.** It applies only to findings that are not a found root cause, such as the edge-case and wording tail after the diminishing-returns exit. Its two destinations and its scope obligation are unchanged.
+- **Triage comes before severity.** Every non-trivial finding, whatever its severity, gets the doctrine's First-Finding Triage before any fix. Decision 3 stands: severity still tunes the cluster threshold and never triggers a zoom-out by itself.
+
+Status remains accepted. Every clause this amendment does not name stands as written.

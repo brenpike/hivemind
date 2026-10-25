@@ -413,3 +413,97 @@ It updates these places in place, each with a dated note:
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/409, `docs/adr/0007-fleet-children-unaware-coordinator-dashboard.md`, `docs/adr/0017-brood-spawn-mechanism.md`, `docs/adr/0027-agent-invocable-remote-control-via-description-scoping.md`, `docs/adr/0035-one-script-per-workflow-engine.md`.
+
+## Amendment 2026-10-24: first-finding triage on the script engine (issue 448)
+
+This amendment covers the script changes of https://github.com/brenpike/hivemind/issues/448. `docs/adr/0038-root-cause-at-the-first-finding.md` records the decisions, and `plugin/governance/remediation-doctrine.md` states the rules. The script follows the doctrine and copies none of it. The state-machine definitions are unchanged.
+
+- **`rejected_findings` is a required review field.** The local reviewer returns every finding it rejected under a recorded decision, each with its `finding_id`, `title` and `record`, the path and section of the decision it cites. The list is empty when there are none. Each value is labelled as able to carry external content. A result without the field stops the run blocked, as any result that fails `REVIEW_SCHEMA` does. Text: `rejectedFindingTexts`, `buildFindingItemSchema`, `buildOpenFindingSchema`, `buildReviewSchema` and `buildReviewPrompt` in `plugin/workflow-src/standard-delivery/main.js`, row SD-33.
+- **The review gate note gives the count.** When the review that held the gate lists rejected findings, its note adds a code-built count: "N findings rejected under recorded decisions". The pull request body and comment carry that count and no rejected-finding text, so no Codex text reaches the pull request. Text: `describeRejectedCount`, `routeLocalReview`, `resolveDiminishingReturns`, `runReviewGate` and `runGates`.
+- **The details go in chat only.** The final complete message carries a detail block right after its first block, headed by that note. It names each rejected finding by the first 8 code points of its `finding_id`, with its title and record, each value encoded as external content. Its compact form keeps only the id and the title. An empty list adds nothing. Text: `renderRejectedFindingLine`, `buildRejectedFindingsBlock`, `finishDeliveryComplete` and `runPullRequestStep`, row SD-55.
+- **No zoom-out trigger.** The script sets no zoom-out trigger, and every review replan gets the same remediation reason. The planner makes the zoom-out call by judgment from the branch commits in its fresh facts (ADR-0038 decision 3). This branch's first draft keyed the reason on a run-wide flag, which made any second review replan look like a non-closing structural fix (local review finding 65415fd0), so the flag and its branch are removed. Remediation plan acceptance reads the run's taken review-routing decision instead of the flag, with unchanged behavior. Text: `requestReviewReplan`, `resolvePlanAcceptance` and `createRunState`, rows SD-39 and SD-40.
+- **Only the escalation reaches the planner.** A local review that sends the run back to planning passes the planner only its `exit_reason` and the fields that `exit_reason` names. So a finding rejected under a recorded decision, the fix ledger path, the open findings and the counts never reach remediation planning. The projection is a positive allowlist drawn from the same per-exit field table the review schema uses. Text: `projectReplanReview` and `requestReviewReplan` in `plugin/workflow-src/standard-delivery/main.js`, row SD-39.
+- **The rejection option text.** Option A of a `high_severity_rejection` question now says that rejecting the finding has the next run record the decision at its source, so review stops raising it. Decision 17 stands: the question still ends the run before the pull request until slice 3. Text: `buildReviewQuestionBrief`, row SD-37.
+- **Review values carry their domain.** Each conditional array field of the review result holds at least one entry, so a field the workflow forwards to the planner or shows the user is never present but empty. `member_count` is gone from the review result, so the root-cluster escalation brief names no count and the planner gets `cluster_ids`, which no count can disagree with. `buildReviewFieldSchema` refuses a conditional field type without a domain: it throws on any type other than string, list or findings. Counts are floored at zero by the validator (ADR-0036, Amendment 2026-10-24: integers are counts). A result outside these domains stops the run blocked, as any result that fails `REVIEW_SCHEMA` does. Text: `reviewFieldTexts`, `reviewExitFields`, `buildReviewFieldSchema` and `buildReviewEscalationBrief` in `plugin/workflow-src/standard-delivery/main.js`, rows SD-33 and SD-39.
+
+The built `plugin/workflows/standard-delivery.js` is 178,341 characters, within the 190,000 character budget of decision 18. The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-25: fix round files are checked by molt.sh alone (local review finding c2e0ada3)
+
+**The finding.** Local review finding c2e0ada3 said the `files` list of a fix round result accepts empty and non-path members: blank, absolute, traversal or `.git` parts. It asked the workflow to check them.
+
+**Decided 2026-10-25, user call: rejected.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings" (ADR-0038 decision 4). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- A blank member already fails `validateSchema` in `plugin/workflow-src/lib/schema.js`, which refuses a blank string for a `type: string` with no `enum` and no `minLength`.
+- A traversal or absolute path reaches only `molt.sh`, whose `is_exact_path` rule in `plugin/skills/molt/scripts/molt.sh` refuses it before any change. That is the recorded design in the `plugin/workflow-src/standard-delivery/main.js` header ("Fix round files are not plan fields"). The parity test "isRepositoryPath gives the verdict of the molt.sh files rule on one corpus" in `tests/workflow-scripts/standard-delivery.test.mjs` keeps the two rules the same.
+- An empty list is the designed no-change fix round, after which validation runs again (test "a fix round that commits nothing reruns only validation").
+- A check in the workflow would copy the `molt.sh` rule and change no behavior. It adds surface and removes none (doctrine "## Surface-Growth Escalation"). It also names no class it eliminates, so it fails "### Closed-by-Construction Acceptance Test".
+
+**Scope.** A finding is a REPEAT of this decision when it asks standard-delivery to check fix round `files` members for blank, empty, absolute, traversal or `.git` shape before `molt.sh`. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a fix round path that reaches a change before the `molt.sh` rule runs;
+- `molt.sh` accepting a path its rule should refuse;
+- the parity between `isRepositoryPath` and `molt.sh` breaking.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-25: a suspect scan result needs no diagnostic field (local review finding 87c0420e)
+
+**The finding.** Local review finding 87c0420e said the injection-suspect variant of `scanStepSchema` in `plugin/workflow-src/lib/facts.js` leaves `pattern_category`, `field_excerpt` and `reason` optional. It asked the schema to require them.
+
+**Decided 2026-10-25, user call: rejected.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings" (ADR-0038 decision 4). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- The design is inherited from `main` and tested. On `main` the scan result schema already left the three fields optional. Commit b0f59aa added the test "a suspect with no category or excerpt still blocks" in `tests/workflow-scripts/analysis-only.test.mjs`, and `renderSuspectLine` shows "no category given" and an empty excerpt for a suspect that carries neither.
+- `describeScanProblem` stops the run before planning for any suspect, whatever fields it carries. A result that fails `scanStepSchema` stops the run at the same point. So requiring the fields changes no routing, and no flagged text reaches the planner either way.
+- The change names no class it eliminates, so it fails "### Closed-by-Construction Acceptance Test". It adds a check and removes none (doctrine "## Surface-Growth Escalation").
+
+**Scope.** A finding is a REPEAT of this decision when it asks the scan result schema to require any of `pattern_category`, `field_excerpt` or `reason` on an injection-suspect result, or flags that a suspect may omit them. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a suspect that does not stop the run before planning;
+- flagged text that reaches the planner;
+- a suspect line that shows a value without `encodeUntrustedText`;
+- scan routing that depends on those fields.
+
+The local reviewer's own injection-suspect exit in `reviewExitFields` is out of this record's scope.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-25: local review counts are display only (local review finding de83f9cf)
+
+**The finding.** Local review finding de83f9cf said `iterations_completed`, `findings_resolved` and `findings_open` in `buildReviewSchema` (`plugin/workflow-src/standard-delivery/main.js`) are not bounded or checked against each other. It asked the workflow to check them.
+
+**Decided 2026-10-25, user call: rejected.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings" (ADR-0038 decision 4). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- The design is inherited from `main`, where `REVIEW_SCHEMA` held the same three integer counts with no bound and no cross-check.
+- The counts are display only. `localReviewRoutes` keys only on `exit_reason`. `projectReplanReview` keeps them from the planner, since no exit reason that replans names a count in `reviewExitFields`. They show only in the review stop message of `max-iterations-reached`, in the diminishing-returns question, and in the diminishing-returns gate note, which the pull request body and comment carry as a number.
+- A negative count already fails `validateSchema` in `plugin/workflow-src/lib/schema.js` (ADR-0036, Amendment 2026-10-24: integers are counts).
+- Doctrine "## Bounded-Impact Gating" assesses them as informational only. A count validator adds a check path and removes none (doctrine "## Surface-Growth Escalation").
+
+**Scope.** A finding is a REPEAT of this decision when it asks standard-delivery to bound these counts, for example against `maxReviewIterations()`, or to check them against each other, `exit_reason`, `open_findings` or `rejected_findings`. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a count that routes the run or holds or releases a gate;
+- a count that reaches the planner;
+- a count that reaches the pull request text other than as the `findings_open` number in the diminishing-returns gate note;
+- a negative or non-integer count that passes the validator.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
