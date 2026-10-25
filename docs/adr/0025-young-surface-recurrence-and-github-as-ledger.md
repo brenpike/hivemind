@@ -44,7 +44,7 @@ Reference: issue #273.
 
 `docs/adr/0038-root-cause-at-the-first-finding.md` moves both trip points earlier. `plugin/governance/remediation-doctrine.md` governs the mechanics.
 
-- **The forced zoom-out moves to the first fix.** The overlord forces the approach-level zoom-out after one non-closing structural fix on a surface, not after two. The counter still persists across structural fixes, and the first non-closing fix after any accepted structural fix is the trip point. On the script engine the trigger is a local review that sends the run back to planning after a remediation pass already ran.
+- **The forced zoom-out moves to the first fix.** The overlord forces the approach-level zoom-out after one non-closing structural fix on a surface, not after two. The counter still persists across structural fixes, and the first non-closing fix after any accepted structural fix is the trip point. On the script engine no code trigger exists, and the planner makes this call by judgment from the branch commits its fresh facts list (ADR-0038 decision 3).
 - **The cross-iteration axis trips at N=2.** Gate A now holds at two distinct iterations with a fix between them, and the axis has no N=3 default. Sharing a data-access, query, parse or serialization primitive is now part of the cluster's same-framing rationale, not a separate threshold.
 
 Decisions 1 and 2 stand: youth is still a hard gate, and GitHub is still the recurrence ledger. Status remains accepted.

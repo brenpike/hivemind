@@ -3120,15 +3120,20 @@ const ROW_TESTS = {
         assert.notEqual(projected, input);
       }
     });
-    test('a take while run.remediation is already true gets the zoom-out reason, and the first review replan keeps its reason', async () => {
+    test('a second review replan gets the same remediation reason as the first, with no zoom-out and no remediation flag in the run state', async () => {
       const results = remediationResults(ESCALATION, { 'review-2-1': CLUSTER, 'facts-3': onPlanBranchFacts(THIRD), 'plan-3': planResult(REMEDIATION_PLAN) });
       const run = await runWorkflow(REMEDIATION_LAUNCH, results);
       assert.equal(run.result.needs_user, true, run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2).slice(0, -1), 'facts-3', 'plan-3']);
       assert.equal(readDataBlock(callOf(run, 'plan-2').prompt, 'replan'), 'Local review returned planner-escalation, so plan the remediation of what the review block reports, from the fresh facts.');
       const prompt = callOf(run, 'plan-3').prompt;
-      assert.equal(readDataBlock(prompt, 'replan'), 'Local review returned root-cluster-suspected after a remediation pass already ran, so that structural fix did not close the class. Zoom out: plan from the root cause and the layer that owns it, from the fresh facts.');
+      assert.equal(readDataBlock(prompt, 'replan'), 'Local review returned root-cluster-suspected, so plan the remediation of what the review block reports, from the fresh facts.');
       assert.deepEqual(readDataBlock(prompt, 'review'), projectExpected(CLUSTER));
+      for (const label of ['plan-2', 'plan-3']) {
+        assert.ok(!readDataBlock(callOf(run, label).prompt, 'replan').includes('Zoom out'), label);
+      }
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      assert.equal(Object.hasOwn(state, 'remediation'), false);
     });
     test('the escalation briefs resolve through their routing kinds and take at the default level', () => {
       for (const [review, kind] of [[ESCALATION, 'planner_escalation_routing'], [CLUSTER, 'root_cluster_routing']]) {
@@ -3209,7 +3214,7 @@ const ROW_TESTS = {
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
       const first = { asks: [], taken: [] };
       assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, first), 'take');
-      run.remediation = true;
+      run.taken.push({ brief: main.buildReviewEscalationBrief(ESCALATION), kind: 'planner_escalation_routing' });
       const later = { asks: [], taken: [] };
       assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, later), 'ask');
       assert.equal(later.asks[0].brief.kind, 'remediation_plan_acceptance');
@@ -4003,7 +4008,7 @@ const ROW_TESTS = {
     }
     test('a plan acceptance key holds the kind, the pass and the whole plan', () => {
       const run = makeKeyRun(2);
-      run.remediation = true;
+      run.taken.push({ brief: main.buildReviewEscalationBrief(ESCALATION), kind: 'planner_escalation_routing' });
       const first = { asks: [], taken: [] };
       assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, first), 'ask');
       run.answeredKeys.add(first.asks[0].key);

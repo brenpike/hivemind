@@ -2920,7 +2920,6 @@ function createRunState(launch) {
     references: launch.references,
     localReview: launch.localReview,
     draft: launch.draft,
-    remediation: false,
     level: resolveLevel(undefined, AUTONOMY_TABLE),
     storedAnswers: readStoredAnswers(launch.argsObject),
     pendingReply: readPendingReply(launch.argsObject),
@@ -3246,7 +3245,8 @@ function resolveExternalEffects(plan, run, resolution) {
 }
 
 function resolvePlanAcceptance(plan, run, resolution) {
-  if (run.remediation) {
+  const isRemediation = run.taken.some((entry) => entry.kind === PLANNER_ESCALATION_ROUTING_KIND || entry.kind === ROOT_CLUSTER_ROUTING_KIND);
+  if (isRemediation) {
     return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, buildRemediationPlanBrief(plan), [run.pass, plan], run, resolution);
   }
   return resolveDecision(PLAN_ACCEPTANCE_KIND, buildPlanAcceptanceBrief(plan), [run.pass, plan], run, resolution);
@@ -4222,10 +4222,7 @@ function requestReviewReplan(review, run) {
     return { result: finishDeliveryBlocked('Local review returned ' + review.exit_reason + ' after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.', run) };
   }
   run.replans += 1;
-  const reason = run.remediation
-    ? 'Local review returned ' + review.exit_reason + ' after a remediation pass already ran, so that structural fix did not close the class. Zoom out: plan from the root cause and the layer that owns it, from the fresh facts.'
-    : 'Local review returned ' + review.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
-  run.remediation = true;
+  const reason = 'Local review returned ' + review.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
   return { replan: { reason: reason, review: projectReplanReview(review) } };
 }
 
