@@ -447,7 +447,7 @@ Reference documentation in `plugin/governance/`:
 | `report-format.md` | Phase-closing report schemas, handoff formats, and step-delta structure |
 | `versioning.md` | SemVer rules, bump triggers, changelog and tag policy |
 | `security-policy.md` | External content boundaries, destructive-fix confirmation gate, injection classification |
-| `remediation-doctrine.md` | Shared root-cause remediation vocabulary and policy: root-cluster, same-framing test, closed-by-construction, bounded-impact gating, stop-and-merge |
+| `remediation-doctrine.md` | Shared root-cause remediation vocabulary and policy, the one home for both engines: first-finding triage, root-cluster, same-framing test, closed-by-construction, surface-growth escalation, bounded-impact gating, recorded decisions and repeat findings, stop-and-merge |
 | `decision-autonomy.md` | Tier A / Tier B decision tiers, the autonomy 2x2, the promotion gate, dispositions, the decision journal, and the post-merge decision-report trigger |
 
 Governance docs are plugin runtime data: agents load them via `${CLAUDE_PLUGIN_ROOT}/governance/` paths at runtime. They are load-bearing: renaming section headers or files can break agent rules that reference them. See `CLAUDE.md` for editing constraints.

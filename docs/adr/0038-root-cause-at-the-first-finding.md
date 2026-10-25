@@ -1,0 +1,79 @@
+# Root cause at the first finding
+
+**Status:** accepted, 2026-10-24
+
+## Context
+
+Review remediation played whack-a-mole on every 7.x session that ran a local review: it patched one finding at a time and zoomed out only after several fixes had failed.
+
+- **#444.** Four review rounds and three structural fixes went into the state machine's PR gates, and each fix surfaced the next gap. The gap was inherited from main and was not #444's scope, and the user had to cut the work back (commit 35c2ee4). https://github.com/brenpike/hivemind/issues/448 records the incident and five causes: the zoom-out trigger is a count, the zoom-out stays inside the reviewed surface, inherited findings have no rule, surface growth is not measured, and the overlord routes each escalation with no step back.
+- **Slice 4 of #409.** The same pattern ran again. The review found a root cluster in inherited `spawn-brood.sh` code, and the run proposed deferring it because it was inherited. The user rejected that: introduced or inherited, a found root cause is fixed at its source in the PR that found it (https://github.com/brenpike/hivemind/issues/448#issuecomment-6390355323).
+- **Rejected findings came back.** One finding, that spawn turns on remote control by default, was raised in four runs as d570f77e, ca0bf1bb, e8b38871 and 7dc90a91. The user rejected it each time. Each Codex review starts fresh, and a finding id is new every run, so the user was asked the same question again. The fourth time, the run request already said that any repeat is rejected and is not a question. The local review ladder still turned the high-severity rejection into a user question, so the carry-over has to live in the review engine, not in the request text (https://github.com/brenpike/hivemind/issues/448#issuecomment-6390967948, https://github.com/brenpike/hivemind/issues/448#issuecomment-6391852770).
+- **A boundary that does not exist.** Finding 3918bfb0 came back after two structural fixes, each covering only the sites already named. Three structural fixes, about 3,600 lines, hardened a boundary that does not exist: same-user brood children are not a security boundary against the coordinator. The question that would have stopped the spin at the first finding is whether the attacker the review assumes is inside the threat model (https://github.com/brenpike/hivemind/issues/448#issuecomment-6391852770).
+
+This ADR records the decisions. It does not restate the rules. Each rule is stated once in `plugin/governance/remediation-doctrine.md`, the one home for them on both engines, and the sections named below are its text. This decision spans ADR-0023, ADR-0025 and ADR-0037, so it gets its own record, and each of those ADRs carries a dated note that points here.
+
+## Decision
+
+Each of the four root causes had the wrong key. Each decision below changes that key.
+
+1. **Triage is keyed on the first finding, not on a count.** At the first non-trivial finding, before any fix is planned or applied, the reviewer or planner answers four questions:
+   - Introduced or inherited? Either way, a found root cause is fixed at its source in this PR, by the user's correction in comment 6390355323.
+   - What is the root class, and which layer owns it?
+   - Can the surface be removed instead of hardened?
+   - Is the attacker or failure the finding assumes inside the recorded threat model? If not, the finding is rejected by citing the record.
+
+   Severity no longer decides whether a finding gets this triage: every non-trivial finding does. Text: `## First-Finding Triage`, `## Severity as Sensitivity Modifier`.
+2. **A recorded residual is keyed on a ground, not on origin.** Before, "inherited" was one of three conditions for leaving a finding unfixed as a recorded residual. Now a residual is admissible only on one of two grounds: the finding falls outside the recorded threat model, or no fix on this engine can close the class and the user decided so. Origin is never a ground. Defer-with-Scope is narrowed to findings that are not a found root cause, such as the edge-case and wording tail after the diminishing-returns exit. Impact never defers a found root cause. Text: `### Recorded Residual`, `## Defer-with-Scope`, `## Bounded-Impact Gating`.
+3. **The zoom-out is keyed on the first non-closing fix, not on two or three.** The forced zoom-out trips after one non-closing structural fix. It reruns the triage at the approach level and questions the key or the primitive. The cross-iteration axis trips at the first re-emission on a young surface after a fix on it (N=2), and the N=3 default is gone. ADR-0025's two decisions stand: youth is still a hard gate, and GitHub is still the recurrence ledger. On the script engine the trigger comes from code: a local review that sends the run back to planning after a remediation pass already ran. Text: `## Cross-Iteration Same-Surface Recurrence`, `## Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry` (**Forced zoom-out after the first non-closing structural fix**), `### Proactive Zoom-Out Ledger Marker`.
+4. **A user rejection is keyed on a decision recorded in the repo on the branch, not on a finding id or a question (the user's choice, Q1 option A).** A user's rejection of a finding and a threat model are both decisions. Each is recorded at its source in the project's durable design record, on the branch or on trunk. When the user rejects a finding, the next plan records the decision as a plan step with an owner and a file scope. A later finding that contests a recorded decision is a repeat. Both reviewers reject a repeat by citing the record, list it for the user before the PR, do not fix it, and never ask about it again. A finding that shows a failure the record does not cover is new and gets the triage. The script engine lists these rejections: the count goes on the PR, the details go in chat only. Text: `## Recorded Decisions and Repeat Findings`.
+
+Two decisions go with them:
+
+5. **A fix that grows the surface is escalated.** A fix that adds more surface than it removes is not applied. The fixer counts, by judgment, the new files, code paths, checks, state and lines the fix adds against those it removes. When the surface grows, the user gets one architectural call: a one-line ask, options that include removing the surface and recording the threat model, and a recommendation. On the script engine the call rides the existing planner question, so no new stop kind is added. On the state machine it is an open question, and the overlord treats it as the architectural-blast-radius trip of its Routing-vs-Execution Invariant. Text: `## Surface-Growth Escalation`.
+6. **One home for both engines.** These rules are stated once, in the remediation doctrine. Each consumer cites the doctrine's sections by name and copies none of them: the local reviewer, the GitHub reviewer, cerebrate, the overlord on the state machine, and the standard-delivery script's review handling. The state-machine definitions are unchanged, so no run meets the version-skew doors. ADR-0023 decision 1 still holds: the detection algorithm stays in `hivemind:detect-remediation-signals`. Text: `## Engine Consumers`, and the doctrine's opening paragraph.
+
+## Text homes
+
+Each file this decision changed, and what changed in it:
+
+- `plugin/governance/remediation-doctrine.md`: the opening paragraph and the sections named in each decision above.
+- `plugin/governance/decision-autonomy.md`: the `recorded` disposition is admissible only on a ground named in `### Recorded Residual`.
+- `plugin/agents/local-reviewer.md`: the `rejected_findings` Output Contract field; step 5 (the triage, recorded-decision repeats as `status: rejected`, and surface-growth escalation); the `open` to `rejected` ledger transition.
+- `plugin/agents/github-reviewer.md`: step 4 (the triage, a cited-record rationale reply that counts as addressed, and surface-growth escalation); step 8 (a found root cause is never deferred).
+- `plugin/agents/cerebrate.md`: Remediation Zoom-Out Mode covers both engines, runs the triage first, and plans the scope boundary, the surface account and the recorded-decision step.
+- `plugin/agents/overlord.md`: First-finding triage before any fix; the proactive trigger and counter persistence, which now point to the doctrine's trip point; Surface-growth escalation; Repeat rejections at `pr_confirm`; Defer-with-scope.
+- `plugin/references/fix-ledger-schema.md`: the `rejected` status and the `rejection_record` field.
+- `plugin/skills/detect-remediation-signals/SKILL.md`: rejected findings are disposed in every guard and detector, and the cross-iteration step cites the doctrine's threshold rather than restating it.
+- `plugin/skills/detect-remediation-signals/references/cluster-case-studies.md`: case study 5 is a same-PR fix, not a deferral; case study 7 uses the single N=2 threshold.
+- `plugin/workflow-src/standard-delivery/main.js`:
+  - `rejectedFindingTexts`, `buildFindingItemSchema`, `buildOpenFindingSchema` and `buildReviewSchema`: `rejected_findings` is a required review field.
+  - `buildReviewPrompt`: asks for `rejected_findings`.
+  - `describeRejectedCount`, `routeLocalReview`, `resolveDiminishingReturns`, `runReviewGate` and `runGates`: the count of rejected findings in the review gate note.
+  - `renderRejectedFindingLine`, `buildRejectedFindingsBlock`, `finishDeliveryComplete` and `runPullRequestStep`: the chat-only detail block.
+  - `requestReviewReplan`: the zoom-out replan reason.
+  - `buildReviewQuestionBrief`: the rejection option text.
+
+  The generated `plugin/workflows/standard-delivery.js` follows.
+- `plugin/workflow-src/standard-delivery/contract.js`: rows SD-33, SD-37, SD-39 and the new SD-55, each tested in `tests/workflow-scripts/standard-delivery.test.mjs`.
+- Policy fixtures: `tests/policy/safety-first-finding-triage.json`, `tests/policy/safety-recorded-decision-repeat.json`, `tests/policy/safety-surface-growth-escalation.json` (new) and `tests/policy/safety-recorded-residual.json` (updated), which pin the doctrine sections and their consumers.
+
+## Considered Options
+
+| Option | Rejected because |
+|---|---|
+| Q1 B: a gitignored ledger of rejected findings, passed to the reviewer by a launch arg | A second record beside git that can go stale. ADR-0037 decision 2 keeps git and GitHub as the record, and ADR-0025 decision 2 already turned down a local recurrence file. It does not reach a new checkout or a brood worktree, the user never sees it in the PR, and launch args carry no runner instructions (ADR-0037 decision 24) |
+| Q1 C: build the in-run reply path for review questions now | Slice 3 scope (ADR-0037 decision 17, #441), and too large for this bugfix. A reply lasts one run, so later runs would still need a recorded decision |
+| Tell Codex, through the review focus, not to raise rejected findings | The focus only widens the review, never narrows it (local-reviewer step 3a), and a prompt is not a control the engine enforces. A suppression would also hide a new failure that the record does not cover |
+| Key a rejection on the Codex finding id | The id comes from the finding's file, lines and title, so it is new every run. The same finding came back as four ids (d570f77e, ca0bf1bb, e8b38871, 7dc90a91) |
+| Keep "inherited" as a residual ground and leave old debt out of the PR | The user's correction in comment 6390355323: a found root cause is fixed at its source in the PR that found it |
+
+## Consequences and residuals
+
+- **Trust in a decision recorded on the branch is bounded.** Any plan step can write a decision record, so a record on the branch is only as trustworthy as the user's view of it. Three things give that view: the chat listing of each rejected finding, the count on the PR, and the PR diff, which shows the record itself before merge. A record the user did not make is visible in all three before it reaches trunk.
+- **Matching a repeat is judgment.** The reviewer decides whether a finding contests a recorded decision or shows a failure the record does not cover. A wrong match in one direction asks the user again. In the other it lists as rejected a finding that should have been triaged. The listing puts every such match in front of the user before the PR.
+- **The first rejection still costs one relaunch.** A high-severity rejection with no record still ends the run with the question open before the PR (ADR-0037 decision 17). The next run records the decision, and from then on the review rejects the finding without asking. This ends when slice 3 gives review questions a reply path on the script.
+- **More work lands in the PR that finds it.** A root cause inherited from trunk is no longer deferred or recorded, so a PR can grow past its request. Surface-growth escalation bounds this: a fix that grows the surface goes to the user as one call, and a threat-model record can reject the class.
+- **No new state, stop kind or definition version.** The surface-growth call rides the existing question paths, and the state-machine definitions are unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, https://github.com/brenpike/hivemind/issues/444, https://github.com/brenpike/hivemind/issues/409, `docs/adr/0023-root-cause-remediation-doctrine.md`, `docs/adr/0025-young-surface-recurrence-and-github-as-ledger.md`, `docs/adr/0037-standard-delivery-on-script-engine.md`.

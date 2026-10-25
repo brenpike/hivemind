@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.1.1] - 2026-10-24
+
+### Added
+
+- The local reviewer returns `rejected_findings`: every finding it rejected under a recorded decision, with its id, title and the record it cites, copied as data. The fix ledger gains the `rejected` status and the `rejection_record` field, and `hivemind:detect-remediation-signals` treats a rejected finding as disposed in every guard and detector (#448).
+- On the script engine, a run whose local review rejected findings under recorded decisions shows their count in the review gate note on the pull request, and names each one, with its short id, title and record, in the final chat message only. No Codex text reaches the pull request (#448).
+
+### Changed
+
+- Docs: new ADR-0038, "Root cause at the first finding", and dated amendments to ADR-0023, ADR-0025 and ADR-0037. The CONTEXT.md glossary updates the Remediation Doctrine entry and adds First-Finding Triage and Repeat Finding. The README governance row for `remediation-doctrine.md` names the triage (#448).
+
+### Fixed
+
+- Review remediation no longer patches one finding at a time. At the first non-trivial finding, before any fix, the reviewers and the planner run the remediation doctrine's First-Finding Triage: introduced or inherited, root class and owning layer, remove instead of harden, and whether the finding falls inside the recorded threat model. Introduced or inherited, a found root cause is fixed at its source in the PR that found it (#448).
+- A finding is no longer recorded as a residual or deferred because it is inherited. A recorded residual is admissible only when the finding falls outside the recorded threat model, or when no fix on this engine can close the class and the user decided so. Defer-with-Scope applies only to findings that are not a found root cause (#448).
+- The zoom-out comes after the first non-closing structural fix, not the second. The cross-iteration recurrence axis trips at the first re-emission on a young surface (N=2), with no N=3 default. On the script engine, a local review that sends the run back to planning after a remediation pass already ran gets a replan reason that asks for that zoom-out (#448).
+- A finding the user rejected is no longer asked about again in later runs. When the user rejects a finding, the next plan records the decision in the repo on the branch, and both reviewers reject a repeat by citing that record, list it for the user and never ask again. The rejection option of a high-severity rejection question says so (#448).
+- A fix that adds more surface than it removes is no longer applied. It goes to the user as one architectural call, with a one-line ask, options and a recommendation, through the existing question path (#448).
+- These rules have one home, `plugin/governance/remediation-doctrine.md`, on both engines. The local reviewer, the GitHub reviewer, cerebrate, the overlord and the standard-delivery script cite it and copy none of it. The state-machine definitions are unchanged (#448).
+
 ## [7.1.0] - 2026-10-24
 
 ### Added

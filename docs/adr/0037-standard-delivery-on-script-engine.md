@@ -413,3 +413,17 @@ It updates these places in place, each with a dated note:
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/409, `docs/adr/0007-fleet-children-unaware-coordinator-dashboard.md`, `docs/adr/0017-brood-spawn-mechanism.md`, `docs/adr/0027-agent-invocable-remote-control-via-description-scoping.md`, `docs/adr/0035-one-script-per-workflow-engine.md`.
+
+## Amendment 2026-10-24: first-finding triage on the script engine (issue 448)
+
+This amendment covers the script changes of https://github.com/brenpike/hivemind/issues/448. `docs/adr/0038-root-cause-at-the-first-finding.md` records the decisions, and `plugin/governance/remediation-doctrine.md` states the rules. The script follows the doctrine and copies none of it. The state-machine definitions are unchanged.
+
+- **`rejected_findings` is a required review field.** The local reviewer returns every finding it rejected under a recorded decision, each with its `finding_id`, `title` and `record`, the path and section of the decision it cites. The list is empty when there are none. Each value is labelled as able to carry external content. A result without the field stops the run blocked, as any result that fails `REVIEW_SCHEMA` does. Text: `rejectedFindingTexts`, `buildFindingItemSchema`, `buildOpenFindingSchema`, `buildReviewSchema` and `buildReviewPrompt` in `plugin/workflow-src/standard-delivery/main.js`, row SD-33.
+- **The review gate note gives the count.** When the review that held the gate lists rejected findings, its note adds a code-built count: "N findings rejected under recorded decisions". The pull request body and comment carry that count and no rejected-finding text, so no Codex text reaches the pull request. Text: `describeRejectedCount`, `routeLocalReview`, `resolveDiminishingReturns`, `runReviewGate` and `runGates`.
+- **The details go in chat only.** The final complete message carries a detail block right after its first block, headed by that note. It names each rejected finding by the first 8 code points of its `finding_id`, with its title and record, each value encoded as external content. Its compact form keeps only the id and the title. An empty list adds nothing. Text: `renderRejectedFindingLine`, `buildRejectedFindingsBlock`, `finishDeliveryComplete` and `runPullRequestStep`, row SD-55.
+- **The zoom-out replan reason.** A local review that sends the run back to planning after a remediation pass already ran shows that the structural fix did not close the class. Its replan reason names the zoom-out: plan from the root cause and the layer that owns it, from the fresh facts. The first such replan keeps the remediation reason. Text: `requestReviewReplan`, row SD-39.
+- **The rejection option text.** Option A of a `high_severity_rejection` question now says that rejecting the finding has the next run record the decision at its source, so review stops raising it. Decision 17 stands: the question still ends the run before the pull request until slice 3. Text: `buildReviewQuestionBrief`, row SD-37.
+
+The built `plugin/workflows/standard-delivery.js` is 177,923 characters, within the 190,000 character budget of decision 18. The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
