@@ -2326,7 +2326,7 @@ const ROW_TESTS = {
       assert.ok(mainSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };'));
       assert.ok(mainSource.includes('  return replanFromTailAsk(resolution.asks, run);\n}'));
       assert.equal((mainSource.match(/replanFromTailAsk\(\[buildUndecidedAsk\(/g) || []).length, 2);
-      assert.ok(mainSource.includes('return askTail([buildUndecidedAsk(buildReviewQuestionBrief('));
+      assert.ok(mainSource.includes('return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));'));
     });
     test('a tail round shares the round numbering with the planning rounds, and its resume replays every earlier agent', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
@@ -2808,7 +2808,7 @@ const ROW_TESTS = {
     });
   },
   'SD-33': () => {
-    const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'rationale_text', 'open_findings', 'blocker', 'rejected_findings'];
+    const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'question', 'rationale_text', 'open_findings', 'blocker', 'rejected_findings'];
     test('REVIEW_SCHEMA holds the Output Contract fields, requires the always-present ones, and labels each Codex-derived text field', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const agentSchema = callOf(run, 'review-1-1').opts.schema;
@@ -2831,8 +2831,11 @@ const ROW_TESTS = {
       const findingItem = schema.properties.open_findings.items;
       assert.equal(findingItem.type, 'object');
       assert.equal(findingItem.additionalProperties, false);
-      assert.deepEqual(findingItem.required, ['finding_id', 'severity', 'title', 'body', 'recommendation']);
+      assert.deepEqual(findingItem.required, ['finding_id', 'severity', 'summary', 'recommendation']);
       assert.deepEqual(Object.keys(findingItem.properties), findingItem.required);
+      assert.deepEqual([findingItem.properties.summary.maxLength, findingItem.properties.recommendation.maxLength, findingItem.properties.recommendation.minLength], [200, 200, 0]);
+      assert.equal(findingItem.properties.finding_id.maxLength, undefined);
+      assert.deepEqual([schema.properties.question.maxLength, schema.properties.rationale_text.maxLength, schema.properties.recommendation_text.maxLength, schema.properties.recommendation_text.minLength, schema.properties.blocker.maxLength], [300, 300, 200, 0, 300]);
       Object.values(findingItem.properties).forEach((property) => assert.ok(property.type === 'string' && property.description.startsWith('Can carry external content. '), property.description));
       assert.ok(schema.properties.open_findings.description.endsWith('Only with exit_reason user-input-required or high-severity-rejection.'), schema.properties.open_findings.description);
       const rejectedItem = schema.properties.rejected_findings.items;
@@ -2846,11 +2849,18 @@ const ROW_TESTS = {
       assert.ok(lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [rejected] }).ok);
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [{ ...rejected, note: 'x' }] }).ok);
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [{ ...rejected, record: undefined }] }).ok);
-      const finding = { finding_id: 'F1', severity: 'high', title: 'T.', body: 'B.', recommendation: '' };
-      const question = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.' };
+      const finding = { finding_id: 'F1', severity: 'high', summary: 'S.', recommendation: '' };
+      const question = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.', question: 'Q?', recommendation_text: '' };
       assert.ok(lib.validateSchema(schema, { ...question, open_findings: [finding] }).ok);
       assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, note: 'x' }] }).ok);
-      assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, body: undefined }] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, summary: undefined }] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, body: 'B.' }] }).ok, 'an open finding carries no body');
+      assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, summary: 's'.repeat(201) }] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, question: 'q'.repeat(301), open_findings: [finding] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, recommendation_text: 'r'.repeat(201), open_findings: [finding] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, question: undefined, open_findings: [finding] }).ok, 'a user-input-required result lacks question');
+      assert.ok(!lib.validateSchema(schema, { ...question, recommendation_text: undefined, open_findings: [finding] }).ok, 'a user-input-required result lacks recommendation_text');
+      assert.ok(!lib.validateSchema(schema, { ...question, rationale_text: 'R.', open_findings: [finding] }).ok, 'rationale_text belongs to high-severity-rejection');
       assert.ok(!lib.validateSchema(schema, question).ok, 'a user-input-required result lacks open_findings');
       assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [finding], cluster_ids: ['F2'] }).ok, 'cluster_ids belongs to root-cluster-suspected');
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, finding_id: 'F1' }).ok, 'a clean result carries no finding_id');
@@ -2897,7 +2907,8 @@ const ROW_TESTS = {
       ['empty signals_fired', { ...breakFix, signals_fired: [] }],
       ['empty conflicting_findings', { ...breakFix, conflicting_findings: [] }],
       ['empty signals_observed', { ...DIMINISHING, signals_observed: [] }],
-      ['empty open_findings', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.', open_findings: [] }],
+      ['empty open_findings', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.', question: 'Q?', recommendation_text: '', open_findings: [] }],
+      ['a blocker over 300 characters', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'b'.repeat(301), stage: 'invoke_review' }],
       ['a root-cluster-suspected result carrying member_count', { ...CLUSTER, member_count: 2 }],
       ['a clean result carrying finding_id', { ...REVIEW_CLEAN, finding_id: 'F1' }],
       ['a planner-escalation result carrying cluster_ids', { ...ESCALATION, cluster_ids: ['F1'] }],
@@ -3126,30 +3137,50 @@ const ROW_TESTS = {
     });
   },
   'SD-37': () => {
-    const tenantFinding = { finding_id: 'F4', severity: 'medium', title: 'Should the cache be shared across tenants?', body: 'Tenants share one process.', recommendation: 'Key the cache by tenant.' };
-    const lockFinding = { finding_id: 'F6', severity: 'high', title: 'Use a distributed lock.', body: 'Two writers can race.', recommendation: '' };
-    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Should the cache be shared across tenants?', open_findings: [tenantFinding] };
-    const rejection = { ...REVIEW_CLEAN, exit_reason: 'high-severity-rejection', findings_open: 2, finding_id: 'F6', title: 'Use a distributed lock.', rationale_text: 'A process lock is enough for one writer.', open_findings: [lockFinding, tenantFinding] };
-    const tenantLine = '- "F4", severity "medium", "Should the cache be shared across tenants?": "Tenants share one process." Recommendation: "Key the cache by tenant."';
-    const lockLine = '- "F6", severity "high", "Use a distributed lock.": "Two writers can race." Recommendation: no recommendation from the reviewer';
+    const tenantFinding = { finding_id: 'F4', severity: 'medium', summary: 'Tenants share one cache process.', recommendation: 'Key the cache by tenant.' };
+    const lockFinding = { finding_id: 'F6', severity: 'high', summary: 'Two writers can race on the cache.', recommendation: '' };
+    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Codex title of F4.', question: 'Should the cache be shared across tenants?', recommendation_text: 'Keep one cache per tenant.', open_findings: [tenantFinding] };
+    const rejection = { ...REVIEW_CLEAN, exit_reason: 'high-severity-rejection', findings_open: 2, finding_id: 'F6', title: 'Codex title of F6.', rationale_text: 'A process lock is enough for one writer.', recommendation_text: '', open_findings: [lockFinding, tenantFinding] };
+    const tenantLine = '- "F4", severity "medium": "Tenants share one cache process." Recommendation: "Key the cache by tenant."';
+    const lockLine = '- "F6", severity "high": "Two writers can race on the cache." Recommendation: none';
     const heading = 'Findings still open, each value quoted as the review returned it:';
-    for (const [label, review, text, detail] of [
-      ['user-input-required', userInput, 'Local review needs your answer on finding "F4", titled "Should the cache be shared across tenants?", before the pull request. 1 finding is still open.', [heading, tenantLine]],
-      ['high-severity-rejection', rejection, 'Local review rejected high severity finding "F6", titled "Use a distributed lock.", and left it unfixed, because: "A process lock is enough for one writer.". Should it be fixed before the pull request? 2 findings are still open.', [heading, lockLine, tenantLine]]
+    for (const [label, review, text, detail, recommendationLine] of [
+      ['user-input-required', userInput, 'Local review asks you about finding "F4" before the pull request, as below. 1 finding still open.', ['Local review asks: "Should the cache be shared across tenants?"', 'It recommends: "Keep one cache per tenant."', heading, tenantLine], 'Recommendation: option A (weak). Why: See its recommendation below. Only you can settle a question the review raises.'],
+      ['high-severity-rejection', rejection, 'Local review rejected high severity finding "F6" and left it unfixed, for the reason below. Should it be fixed before the pull request? 2 findings still open.', ['Rejected because: "A process lock is enough for one writer."', 'It makes no recommendation.', heading, lockLine, tenantLine], 'Recommendation: none.']
     ]) {
-      test(`${label} pauses the run with the reviewer question and the open findings detail block`, async () => {
+      test(`${label} pauses the run with a short code-built question and the detail block right after it`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
         const brief = main.buildReviewQuestionBrief(review, OTHER, review.open_findings);
         assert.equal(brief.problem, text);
         assert.equal(brief.kind, main.reviewQuestionKinds()[label]);
         assert.ok(lib.validateSchema(briefSchema, brief).ok);
-        assert.equal(lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema).action, 'ask');
-        assertTailPause(run, [limitAsk(brief)], 'review-commit-1-1');
-        assert.ok(run.result.message.startsWith(lib.renderQuestions([limitAsk(brief)], []) + '\n\n' + detail.join('\n') + '\n\nCommits this run made:'), run.result.message);
+        const decision = lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema);
+        assert.equal(decision.action, 'ask');
+        const ask = { brief: brief, reason: decision.reason };
+        assertTailPause(run, [ask], 'review-commit-1-1');
+        assert.ok(run.result.message.startsWith(lib.renderQuestions([ask], []) + '\n\n' + detail.join('\n') + '\n\nCommits this run made:'), run.result.message);
+        assert.equal(main.buildReviewDetailBlock(review, review.open_findings).text, detail.join('\n'));
         assert.ok(run.result.message.includes('**Q1. ' + text + '**'), run.result.message);
-        assert.ok(run.result.message.includes('Recommendation: none.'), run.result.message);
+        assert.ok(run.result.message.includes(recommendationLine), run.result.message);
+        assert.ok(!run.result.message.includes('Codex title'), run.result.message);
       });
     }
+    test('a question whose review gives a recommendation never says there is none', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': userInput }));
+      const message = run.result.message;
+      assert.ok(!message.includes('Recommendation: none.') && !message.includes(lib.askReasonLine('no_recommendation')), message);
+      assert.ok(message.includes('- A: Answer the finding: this run gives your answer to local review, which goes on with it. (recommended)'), message);
+      assert.ok(message.includes('Why I am asking: ' + lib.askReasonLine('table_surface')), message);
+      const brief = main.buildReviewQuestionBrief({ ...rejection, recommendation_text: 'Keep the process lock.' }, OTHER, rejection.open_findings);
+      assert.deepEqual({ ...brief.recommendation }, { option_id: 'A', strength: 'weak', why: 'See its recommendation below. Only you can settle a question the review raises.' });
+      assert.equal(main.buildReviewQuestionBrief({ ...userInput, recommendation_text: ' ' }, OTHER, userInput.open_findings).recommendation.strength, 'none');
+    });
+    test('both review question kinds ask at every autonomy level', () => {
+      for (const kind of Object.values(main.reviewQuestionKinds())) {
+        const row = autonomyTable.rows.find((candidate) => candidate.kind === kind);
+        assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface'], kind);
+      }
+    });
     test('each option says what a reply does on this run, and option A of high_severity_rejection says local review records the decision at its source and goes on', () => {
       const options = main.buildReviewQuestionBrief(rejection, OTHER, rejection.open_findings).options;
       assert.equal(options[0].id, 'A');
@@ -3160,22 +3191,35 @@ const ROW_TESTS = {
       assert.equal(answerOptions[1].summary, 'Stop: local review ends blocked on this run, before the pull request.');
       assert.equal(main.buildBumpTypeBrief(parsedBump()).options[1].summary, 'Plan again: this run gives your reply to the planner before anything goes further.');
     });
-    test('the detail block comes right after the questions block, and its compact form keeps the id, severity and title only', () => {
-      const block = main.buildOpenFindingsBlock([tenantFinding]);
-      assert.equal(block.text, heading + '\n' + tenantLine);
-      assert.equal(block.compact, heading + '\n- "F4", severity "medium", "Should the cache be shared across tenants?"');
-      assert.equal(main.buildOpenFindingsBlock([]), undefined);
+    test('the detail block shows up to 5 open findings, then one line counting the rest, and has no compact form', () => {
+      const many = Array.from({ length: 7 }, (unused, index) => ({ ...tenantFinding, finding_id: 'F' + index }));
+      const block = main.buildReviewDetailBlock({ ...userInput, open_findings: many }, many);
+      const lines = block.text.split('\n');
+      assert.equal(lines.length, 2 + 1 + 5 + 1);
+      assert.equal(lines.at(-1), '2 more open findings.');
+      assert.ok(!block.text.includes('"F5"') && block.text.includes('"F4"'), block.text);
+      assert.equal(main.buildReviewDetailBlock({ ...userInput, open_findings: many.slice(0, 6) }, many.slice(0, 6)).text.split('\n').at(-1), '1 more open finding.');
+      assert.deepEqual(Object.keys(main.buildReviewDetailBlock(userInput, [tenantFinding])), ['text']);
     });
     test('each finding is named by the first 8 code points of its finding_id, and each value is encoded', async () => {
       const longId = 'a1b2c3d4'.repeat(8);
-      const hostile = { finding_id: longId, severity: 'high\u001b[2J', title: 'Line\nbreak', body: 'B'.repeat(100) + ' ' + 'C'.repeat(300), recommendation: '@owner fix it' };
-      const review = { ...userInput, finding_id: longId, open_findings: [hostile] };
+      const hostile = { finding_id: longId, severity: 'high\u001b[2J', summary: 'Line\nbreak', recommendation: '@owner fix it' };
+      const review = { ...userInput, finding_id: longId, question: 'Ask\u0007 me?', open_findings: [hostile] };
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
       const message = run.result.message;
       assert.ok(!message.includes(longId), message);
-      assert.ok(message.includes('finding "a1b2c3d4", titled'), message);
-      assert.ok(message.includes('- "a1b2c3d4", severity "high\\u001b[2J", "Line\\nbreak": "' + 'B'.repeat(100) + '" (cut) Recommendation: "@owner fix it"'), message);
+      assert.ok(message.includes('finding "a1b2c3d4" before'), message);
+      assert.ok(message.includes('Local review asks: "Ask\\u0007 me?"'), message);
+      assert.ok(message.includes('- "a1b2c3d4", severity "high\\u001b[2J": "Line\\nbreak" Recommendation: "@owner fix it"'), message);
       assert.ok(main.buildReviewEscalationBrief({ ...ESCALATION, finding_id: longId }).problem.includes('finding "a1b2c3d4" to the planner'));
+    });
+    test('the rerun review gets the questions block and the detail block as user_answer.question', () => {
+      const state = main.createRunState({ argsObject: { answers: {}, reply: 'Yes.' }, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      state.head = OTHER;
+      const asked = main.askReviewQuestion(userInput, state);
+      const brief = main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings);
+      const reason = lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema).reason;
+      assert.deepEqual(structuredClone(asked.answer), { question: lib.renderQuestions([{ brief: brief, reason: reason }], []) + '\n\n' + main.buildReviewDetailBlock(userInput, userInput.open_findings).text, reply: 'Yes.' });
     });
   },
   'SD-38': () => {
@@ -4033,9 +4077,19 @@ const ROW_TESTS = {
       assert.equal(expectQuote('excerpt', HOSTILE_PAYLOADS[0]), '"\\u001b[2J\\u202e\\u2028' + 'Z'.repeat(194) + '"');
     });
     const BOUNDED_HOSTILE_PAYLOADS = HOSTILE_PAYLOADS.map((payload) => payload.replace('Z'.repeat(5000), 'Z'.repeat(300)));
+    const REVIEW_HOSTILE_PAYLOADS = HOSTILE_PAYLOADS.map((payload) => payload.replace('Z'.repeat(5000), 'Z'.repeat(200)));
+    function hostilePayloadsOf(label, kind) {
+      if (label === 'blocked review') {
+        return REVIEW_HOSTILE_PAYLOADS;
+      }
+      return kind === 'reason' ? BOUNDED_HOSTILE_PAYLOADS : HOSTILE_PAYLOADS;
+    }
+    test('the hostile review blockers fit the 300 code point blocker bound of REVIEW_SCHEMA', () => {
+      assert.ok(REVIEW_HOSTILE_PAYLOADS.every((payload) => Array.from(payload).length <= 300));
+    });
     for (const [label, kind, buildResults] of hostileSites) {
       test(`a hostile ${label} reaches the message as one quote of printable ASCII, cut past its bound, and the next-step line stays`, async () => {
-        for (const payload of kind === 'reason' ? BOUNDED_HOSTILE_PAYLOADS : HOSTILE_PAYLOADS) {
+        for (const payload of hostilePayloadsOf(label, kind)) {
           const run = await runWorkflow(LAUNCH, buildResults(payload));
           const message = run.result.message;
           assert.equal(run.result.outcome, 'blocked', message.slice(0, 300));
@@ -4114,7 +4168,7 @@ const ROW_TESTS = {
       ['branch relay', happyResults({ 'branch-1': { outcome: 'blocked', stderr: 'blocker: ' + longBlocker + '\n' } }), 'The branch step was blocked'],
       ['validation', happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }), 'The validation step returned no usable result'],
       ['fix round', fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: longBlocker }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }), 'The validation fix round was blocked'],
-      ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'Local review was blocked']
+      ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'The local review step returned no usable result']
     ]) {
       test(`a ${label} blocker too long for the notice keeps the next-step line, without a throw`, async () => {
         const run = await runWorkflow(LAUNCH, results);
@@ -4236,8 +4290,8 @@ const ROW_TESTS = {
     const longRemediation = { ...REMEDIATION_PLAN, summary: 'Route the cache through the auth check. ' + 'Each read checks the caller first. '.repeat(110).trim() };
     const causeBlocker = 'The fix round could not finish. ' + 'The suite ran one more slow test file. '.repeat(8) + 'The cause is machine load, so a later run passes.';
     const findingIds = ['a1b2c3d4'.repeat(8), 'e5f6a7b8'.repeat(8)];
-    const openFindings = findingIds.map((findingId, index) => ({ finding_id: findingId, severity: 'medium', title: 'Finding ' + index + ' title.', body: 'Body text of the finding. '.repeat(20).trim(), recommendation: index === 0 ? 'Key the cache by tenant.' : '' }));
-    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 2, finding_id: findingIds[0], title: 'Should the cache be shared across tenants?', open_findings: openFindings };
+    const openFindings = findingIds.map((findingId, index) => ({ finding_id: findingId, severity: 'medium', summary: 'Finding ' + index + ' summary.', recommendation: index === 0 ? 'Key the cache by tenant.' : '' }));
+    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 2, finding_id: findingIds[0], title: 'Codex title.', question: 'Should the cache be shared across tenants?', recommendation_text: '', open_findings: openFindings };
     const takenBriefs = Array.from({ length: 5 }, (_, index) => makeBrief({ problem: 'Taken question ' + index + '.' }));
     /**
      * Asserts the message shape every SD-53 run shares and returns the
@@ -4306,11 +4360,11 @@ const ROW_TESTS = {
     test('a user-input-required pause with 2 open findings names each by its short id', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan), 'review-1-1': userInput }));
       assert.equal(run.result.needs_user, true);
-      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], openFindings.map((finding) => finding.body));
-      assert.ok(message.includes('finding "a1b2c3d4", titled'), message);
-      assert.ok(message.includes('2 findings are still open.'), message);
-      assert.ok(message.includes('- "e5f6a7b8", severity "medium", "Finding 1 title.": '), message);
-      assert.ok(message.includes('Recommendation: no recommendation from the reviewer'), message);
+      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], []);
+      assert.ok(message.includes('finding "a1b2c3d4" before'), message);
+      assert.ok(message.includes('2 findings still open.'), message);
+      assert.ok(message.includes('- "e5f6a7b8", severity "medium": "Finding 1 summary." Recommendation: none'), message);
+      assert.ok(!message.includes('Codex title.'), message);
     });
     test('a complete PR run keeps the plan summary in the pull request body only', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan) }));
@@ -4509,11 +4563,14 @@ const ROW_TESTS = {
     }
   },
   'SD-57': () => {
-    const tenantFinding = { finding_id: 'F4', severity: 'medium', title: 'Should the cache be shared across tenants?', body: 'Tenants share one process.', recommendation: 'Key the cache by tenant.' };
-    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Should the cache be shared across tenants?', open_findings: [tenantFinding] };
+    const tenantFinding = { finding_id: 'F4', severity: 'medium', summary: 'Tenants share one cache process.', recommendation: 'Key the cache by tenant.' };
+    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Codex title of F4.', question: 'Should the cache be shared across tenants?', recommendation_text: 'Keep one cache per tenant.', open_findings: [tenantFinding] };
     const reviewReply = 'Key it by tenant.';
+    function reviewAsk() {
+      return surfacedAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings));
+    }
     function reviewQuestionText() {
-      return lib.renderQuestions([limitAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings))], []);
+      return lib.renderQuestions([reviewAsk()], []) + '\n\n' + main.buildReviewDetailBlock(userInput, userInput.open_findings).text;
     }
     function answeredReviewResults(changes = {}) {
       return happyResults({ 'review-1-1': userInput, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }), ...changes });
@@ -4521,7 +4578,8 @@ const ROW_TESTS = {
     test('a resumed review question reruns the reviewer with user_answer on the current head while every earlier agent replays from cache', async () => {
       const results = answeredReviewResults();
       const paused = await runWorkflow(LAUNCH, results);
-      assertTailPause(paused, [limitAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings))], 'review-commit-1-1');
+      assertTailPause(paused, [reviewAsk()], 'review-commit-1-1');
+      assert.ok(paused.result.message.startsWith(reviewQuestionText() + '\n\n'), paused.result.message);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reviewReply), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'pr-1']);
@@ -4628,6 +4686,41 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'blocked');
       assertBounded(run);
     });
+    test('every local review string a message shows has a maxLength in REVIEW_SCHEMA or is cut by code', () => {
+      const schema = main.buildReviewSchema();
+      const findingItem = schema.properties.open_findings.items.properties;
+      assert.deepEqual([schema.properties.question.maxLength, schema.properties.rationale_text.maxLength, schema.properties.recommendation_text.maxLength, schema.properties.blocker.maxLength], [300, 300, 200, 300]);
+      assert.deepEqual([findingItem.summary.maxLength, findingItem.recommendation.maxLength], [200, 200]);
+      const review = { ...REVIEW_CLEAN, exit_reason: 'break-fix-break', signals_fired: Array.from({ length: 7 }, () => UNBOUNDED), conflicting_findings: ['F2'], prior_fix_commit: UNBOUNDED };
+      assert.equal(main.quoteReviewValue(review, 'signals_fired'), JSON.stringify(Array.from({ length: 5 }, () => 'U'.repeat(200))) + ' and 2 more');
+      assert.equal(main.quoteReviewValue(review, 'prior_fix_commit'), JSON.stringify('U'.repeat(200)));
+      assert.equal(main.quoteReviewValue({ ...review, rationale_text: 'r'.repeat(300) }, 'rationale_text'), JSON.stringify('r'.repeat(300)));
+    });
+    const REVIEW_BOUND = 6000;
+    const longFindings = Array.from({ length: 60 }, (unused, index) => ({ finding_id: index + UNBOUNDED, severity: UNBOUNDED, summary: 's'.repeat(200), recommendation: 'r'.repeat(200) }));
+    const reviewCases = [
+      ['user-input-required', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 60, finding_id: UNBOUNDED, title: UNBOUNDED, question: 'q'.repeat(300), recommendation_text: 'r'.repeat(200), open_findings: longFindings }, true],
+      ['high-severity-rejection', { ...REVIEW_CLEAN, exit_reason: 'high-severity-rejection', findings_open: 60, finding_id: UNBOUNDED, title: UNBOUNDED, rationale_text: 'w'.repeat(300), recommendation_text: 'r'.repeat(200), open_findings: longFindings }, true],
+      ['break-fix-break', { ...REVIEW_CLEAN, exit_reason: 'break-fix-break', signals_fired: Array.from({ length: 60 }, () => UNBOUNDED), conflicting_findings: Array.from({ length: 60 }, () => UNBOUNDED), prior_fix_commit: UNBOUNDED }, false],
+      ['injection-suspect', { ...REVIEW_CLEAN, exit_reason: 'injection-suspect', finding_id: UNBOUNDED, pattern_category: UNBOUNDED, field_excerpt: UNBOUNDED }, false],
+      ['blocked', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'b'.repeat(300), stage: UNBOUNDED }, false]
+    ];
+    for (const [label, review, pauses] of reviewCases) {
+      test(`a ${label} review with every unbounded review string at 5000 characters stays within the bound`, async () => {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
+        assert.equal(run.result.needs_user, pauses, run.result.message.slice(0, 300));
+        const message = run.result.message;
+        assert.ok(message.length <= REVIEW_BOUND, String(message.length));
+        assert.ok(!message.includes('U'.repeat(201)), message);
+      });
+    }
+    test('a complete run with 60 rejected findings of 5000 character titles and records shows each cut by code', async () => {
+      const rejected = Array.from({ length: 60 }, (unused, index) => ({ finding_id: 'R' + index, title: UNBOUNDED, record: UNBOUNDED }));
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, rejected_findings: rejected } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message.slice(0, 300));
+      assert.ok(!run.result.message.includes('U'.repeat(201)), run.result.message);
+      assert.equal(main.renderRejectedFindingLine(rejected[0], false), '- "R0", ' + JSON.stringify('U'.repeat(200)) + ', record ' + JSON.stringify('U'.repeat(200)));
+    });
     test('every code-built brief fits the brief schema with worst-case inputs', () => {
       const astralId = '\u{1F600}'.repeat(64);
       const worstPlan = { ...maxPlan, remediation_gate: { architectural: true, grows_surface: true, repeats_surface: true } };
@@ -4650,13 +4743,15 @@ const ROW_TESTS = {
         main.buildGateRerunBrief(['bump', 'validate', 'review'], gates, 'f'.repeat(64), false),
         main.buildDiminishingReturnsBrief({ ...worstReview, exit_reason: 'diminishing-returns' }, 'f'.repeat(64)),
         main.buildReviewEscalationBrief({ ...worstReview, exit_reason: 'planner-escalation' }),
-        main.buildReviewEscalationBrief({ ...worstReview, exit_reason: 'root-cluster-suspected' })
+        main.buildReviewEscalationBrief({ ...worstReview, exit_reason: 'root-cluster-suspected' }),
+        main.buildReviewQuestionBrief({ ...worstReview, exit_reason: 'user-input-required', recommendation_text: 'r'.repeat(200) }, 'f'.repeat(64), Array.from({ length: 1000 }, () => ({}))),
+        main.buildReviewQuestionBrief({ ...worstReview, exit_reason: 'high-severity-rejection', recommendation_text: '' }, 'f'.repeat(64), Array.from({ length: 1000 }, () => ({})))
       ];
       for (const brief of briefs) {
         const verdict = lib.validateSchema(briefSchema, brief);
         assert.ok(verdict.ok, brief.kind + ': ' + JSON.stringify(verdict.errors));
       }
-      for (const brief of briefs.slice(-3)) {
+      for (const brief of briefs.slice(-5)) {
         assert.ok(brief.problem.split('\\ud83d').length - 1 <= 8, brief.problem);
       }
     });
