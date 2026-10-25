@@ -252,8 +252,9 @@ CONTENT must establish:
   validating untrusted input). Pick the ordered preference that fits the cluster's root.
 - an explicit SCOPE BOUNDARY — every found root cause, introduced or inherited, is fixed
   now, at its source, even when that source lies outside the reviewed diff. Only a bounded
-  tail that is not a found root cause, or a finding rejected as outside the recorded threat
-  model, may be deferred or recorded.
+  tail that is not a found root cause may be deferred, per the doctrine's
+  **Defer-with-Scope**, and a finding is recorded as a residual only on a ground the
+  doctrine's **Recorded Residual** names.
 - the DESTINATION of that tail — a tracked issue OR a recorded residual, per the
   doctrine's **Defer-with-Scope** and **Recorded Residual**: either destination carries full
   root-cause scope, the linked threads, and a bounded-impact note. A deferral OR a recording
