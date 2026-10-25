@@ -66,6 +66,7 @@ const stateExecutionSection = readSection(body, '## Workflow State Execution');
 const questionGateParagraph = stateExecutionSection.split('\n\n').find((paragraph) => paragraph.startsWith('**Question gate.**')) ?? '';
 const engineSentences = engineSection.split(/(?<=[.!?])\s+/);
 const handOffParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('After you show `message`, when the result carries `pr`,')) ?? '';
+const stopParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the user asks to stop a launched run')) ?? '';
 
 function readDeliveryLaunchArgNames() {
   const template = engineSection.match(/with args `(\{[^`]*\})`/);
@@ -81,6 +82,9 @@ describe('overlord frontmatter tools', () => {
   const toolNames = readToolNames(frontmatter);
   test('tools include Workflow', () => {
     assert.ok(toolNames.includes('Workflow'), `tools are ${JSON.stringify(toolNames)}`);
+  });
+  test('tools include TaskStop', () => {
+    assert.ok(toolNames.includes('TaskStop'), `tools are ${JSON.stringify(toolNames)}`);
   });
   test('tools exclude Edit', () => {
     assert.equal(toolNames.includes('Edit'), false, `tools are ${JSON.stringify(toolNames)}`);
@@ -219,6 +223,25 @@ describe('overlord pull request hand-off and opt-in', () => {
   test('Engine states the approval prompt opt-in, that a No interrupts the turn, and the permissions.deny opt-out', () => {
     for (const phrase of ['The `Workflow` tool\'s approval prompt is the opt-in to a workflow, and no other opt-in exists.', 'A No at the approval prompt interrupts the turn: nothing runs and nothing falls back.', 'A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next']) {
       assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
+    }
+  });
+});
+
+describe('overlord stop and resume of a stopped run', () => {
+  test('Engine has a stop paragraph', () => {
+    assert.notEqual(stopParagraph, '', '## Engine has no paragraph starting When the user asks to stop a launched run');
+  });
+  test('the stop paragraph calls TaskStop with the taskId from any surface', () => {
+    for (const phrase of ['from any surface including Remote Control', 'call `TaskStop` with the `taskId` the `Workflow` tool returned for the running invocation', 'say in one line that the run stopped']) {
+      assert.ok(stopParagraph.includes(phrase), `stop paragraph lacks ${phrase}`);
+    }
+  });
+  test('the stop paragraph stops a run only when the user asks', () => {
+    assert.ok(stopParagraph.includes('Stop a run only when the user asks.'), 'stop paragraph lacks the only-when-the-user-asks clause');
+  });
+  test('the stop paragraph resumes a stopped run by name from its completed results', () => {
+    for (const phrase of ['A stopped run keeps every completed agent result.', 'When the user asks to go on, resume it by name', '`resumeFromRunId`', 'the args of its last launch or resume']) {
+      assert.ok(stopParagraph.includes(phrase), `stop paragraph lacks ${phrase}`);
     }
   });
 });

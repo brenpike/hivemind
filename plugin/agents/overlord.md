@@ -10,6 +10,7 @@ tools:
   - Skill
   - Monitor
   - Workflow
+  - TaskStop
   - Agent(general-purpose, hivemind:cerebrate, hivemind:drone, hivemind:changeling, hivemind:local-reviewer, hivemind:github-reviewer)
 ---
 
@@ -30,6 +31,8 @@ The result is built to fit the completion notice. A notice is cut only when its 
 The `Workflow` tool's approval prompt is the opt-in to a workflow, and no other opt-in exists. A No at the approval prompt interrupts the turn: nothing runs and nothing falls back. A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next (ADR-0037 decision 19).
 
 If the launch is refused or blocked (denied, not found, or workflows turned off), say so in one line and run the request on the workflow state machine. A run that started, then failed or ended blocked, is reported as it ended and does not fall back.
+
+When the user asks to stop a launched run, from any surface including Remote Control, call `TaskStop` with the `taskId` the `Workflow` tool returned for the running invocation, and say in one line that the run stopped. Stop a run only when the user asks. A stopped run keeps every completed agent result. When the user asks to go on, resume it by name: call the `Workflow` tool with `name` set to the name you launched and `resumeFromRunId` from the launch, with the args of its last launch or resume.
 
 Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md`, `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md`, `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`, `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md`, `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md`.
 
