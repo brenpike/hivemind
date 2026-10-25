@@ -569,14 +569,15 @@ for (const id of liveIds) {
       assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
       assert.deepEqual([...positions].sort((left, right) => left - right), positions);
     });
-    test('each data constant is JSON indented one space, over more than one line, equal to its file', () => {
+    test('each data constant is unindented JSON, one key or element per line, over more than one line, equal to its file', () => {
       const constants = [['AUTONOMY_TABLE', 'decision-autonomy-table.json'], ['BRIEF_SCHEMA', 'decision-brief-schema.json'], ['PLAN_SCHEMA', 'plan-schema.json']];
       for (const [name, file] of constants) {
         const fileData = JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8'));
         const prefix = 'const ' + name + ' = ';
-        assert.ok(source.includes(prefix + JSON.stringify(fileData, null, 1) + ';'), name);
+        assert.ok(source.includes(prefix + JSON.stringify(fileData, null, 1).replace(/^ +/gm, '') + ';'), name);
         const start = source.indexOf(prefix) + prefix.length;
         const jsonText = source.slice(start, source.indexOf('\n};', start) + 2);
+        assert.ok(!jsonText.split('\n').some((line) => line.startsWith(' ')), name);
         assert.ok(jsonText.includes('\n'), name);
         assert.deepEqual(JSON.parse(jsonText), fileData, name);
       }

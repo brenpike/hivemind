@@ -23,8 +23,10 @@
  *   data constants from plugin/references/, the shared libraries from
  *   plugin/workflow-src/lib/ in LIB_FILES order, and <id>/main.js.
  *   Comments are stripped from meta.js, each library and main.js by
- *   stripComments, and each data constant is JSON.stringify(data, null, 1):
- *   one key or element per line, indented one space per level.
+ *   stripComments, and each data constant is JSON.stringify(data, null, 1)
+ *   with the leading spaces removed from every line: one key or element per
+ *   line, no indent. JSON.stringify escapes newlines inside strings, so every
+ *   leading space it writes is indentation.
  *
  * Invariants
  *   CR is stripped from every input and the output is written with LF only.
@@ -185,7 +187,7 @@ function renderBanner(id) {
 
 function renderDataConstant(root, constant) {
   const data = JSON.parse(readSource(root, constant.path));
-  return 'const ' + constant.name + ' = ' + JSON.stringify(data, null, 1) + ';';
+  return 'const ' + constant.name + ' = ' + JSON.stringify(data, null, 1).replace(/^ +/gm, '') + ';';
 }
 
 const REGEX_AFTER_KEYWORDS = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
