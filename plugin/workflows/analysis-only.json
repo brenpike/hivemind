@@ -1,6 +1,6 @@
 {
   "id": "analysis-only",
-  "version": 1,
+  "version": 2,
   "start": "analyze",
   "terminal": ["complete", "blocked", "cancelled"],
   "states": {
@@ -10,7 +10,7 @@
       "agent": "hivemind:cerebrate",
       "transitions": {
         "complete": "report",
-        "open_questions": "blocked",
+        "open_questions": "question",
         "blocked": "blocked"
       }
     },
@@ -21,6 +21,14 @@
       "transitions": {
         "complete": "complete",
         "blocked": "blocked"
+      }
+    },
+    "question": {
+      "type": "user_gate",
+      "description": "Question gate: the analysis returned open_questions. The overlord asks the user, and the answer goes back to the state that asked, in the same run: the outcome is the name of that state, which runs again with the answer. cancelled ends the run.",
+      "transitions": {
+        "analyze": "analyze",
+        "cancelled": "cancelled"
       }
     },
     "complete": { "type": "terminal" },

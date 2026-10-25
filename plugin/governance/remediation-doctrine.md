@@ -111,7 +111,7 @@ The key is the recorded decision, never a finding id or a question. A finding id
 
 A later finding that contests a recorded decision is a REPEAT. The reviewer rejects it by citing the record, lists it for the user before the PR, does not fix it, and never asks again. A finding that shows a failure the record does not cover is NEW, and gets **First-Finding Triage**.
 
-When the user rejects a finding, the next plan records that decision at its source, so the next review reads the record instead of asking again.
+When the user rejects a finding, the rejection is recorded at its source before the next review reads it, so that review reads the record instead of asking again. The reviewer that asked records it when the user's answer comes back to it in the same run: the local reviewer in a delivery run, the GitHub reviewer in a PR watch. Otherwise the next plan records it as a plan step.
 
 ## Stop-and-Merge
 
@@ -287,8 +287,8 @@ These rules have one home, this doc, on both engines. Each consumer below refere
 - **local-reviewer** — applies **First-Finding Triage**, **Recorded Decisions and Repeat Findings** and **Surface-Growth Escalation** to each local review pass.
 - **github-reviewer** — applies the same sections to each PR review pass.
 - **cerebrate** — applies them when planning a remediation, including script-engine replans that carry a review block, where it makes the call in **Forced zoom-out after the first non-closing structural fix** by judgment from the branch commits its fresh facts list.
-- **the overlord on the state machine** — applies them when routing review remediation, including the forced zoom-out in **Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry**.
-- **the standard-delivery script's review handling** — sends a review back to planning and lists repeat rejections per **Recorded Decisions and Repeat Findings**.
+- **the overlord on the state machine** — applies them when routing review remediation, including the forced zoom-out in **Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry**, and returns an answer to the state that asked, through the question gate.
+- **the standard-delivery script's review handling** — sends a review back to planning, lists repeat rejections per **Recorded Decisions and Repeat Findings**, and returns the answer to a review question to the local reviewer.
 
 ## Relationship to Existing Detectors
 

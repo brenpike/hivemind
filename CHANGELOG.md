@@ -13,6 +13,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.1.2] - 2026-10-25
+
+### Added
+
+- Every state-machine definition gains one `question` user gate. On the state machine, a planner's `open_questions`, and a reviewer's `user-input-required` or `high-severity-rejection`, go to that gate: the overlord asks the user, and the answer goes back to the state that asked, in the same run, as `user_answer`. A reply that cancels ends the run `cancelled`. This applies to the delivery fallback, the analysis fallback, brood planning and the PR watch (#453).
+- `hivemind:local-reviewer`, `hivemind:github-reviewer` and `hivemind:github-review-loop` take an optional `user_answer` input: the question as shown and the user's reply word for word, plus the finding's `candidate_url` for the GitHub reviewer. Both are data. A reply that keeps a high-severity rejection has the reviewer record the decision at its source, commit it and go on, so review stops raising the finding. A reply that wants the finding fixed routes it as a fix or an escalation. A reply that settles nothing asks again on the GitHub side and ends the local review blocked (#453).
+- The overlord gains the `TaskStop` tool. When the user asks, from any surface including Remote Control, it stops a launched workflow run by the `taskId` the `Workflow` tool returned, and it resumes a stopped run by name later in the same session, from the completed agent results the run kept (#453).
+
+### Changed
+
+- The state-machine definitions move up one version: `standard-delivery` to 6, `pr-feedback-remediation` to 4, `analysis-only` to 2 and `hatchery-dispatch` to 2. The `user_input_required` and `review_rejected` terminals are gone from `standard-delivery` and `pr-feedback-remediation`. A run resumed from an earlier version meets the version-skew doors (#453).
+- The remediation doctrine says who records a finding the user rejects: the reviewer that asked, when the answer comes back to it in the same run, the local reviewer in a delivery run and the GitHub reviewer in a PR watch. Otherwise the next plan records it (#453).
+- Docs: amendments to ADR-0037 and ADR-0038. README and the website describe questions that pause and resume a run, the question gate, the watch and stopping a run (#453).
+
+### Fixed
+
+- On the script engine, a delivery run no longer ends blocked on an open question at a round count. Every open question pauses the run, and the user's reply resumes the same run, with no pause limit, while the agents that already finished replay from cache. A delivery run still ends blocked only when the replies are too long to carry, or the exact text of a question is too long to show. An analysis-only run keeps its limit of 3 pauses (#453).
+- On the script engine, a question after the last wave no longer ends the run blocked before the pull request. It pauses the run with nothing pushed. An answer to a local review question reruns the review gate on the same commit with `user_answer` and the reviewer's fix ledger. Any other answer, such as one after the last validation fix round, at the gate rerun bound, or on a diminishing-returns, escalation or root-cluster routing ask, starts a new planning pass with an answer block. A review that ran with an answer and then escalates carries the answer into its replan (#453).
+- On the state machine, a planner or reviewer question no longer ends the run at a terminal state. The delivery fallback, the analysis fallback, brood planning and the PR watch ask the user and go on in the same run, so a high-severity rejection in the PR watch no longer costs a relaunch (#453).
+
 ## [7.1.1] - 2026-10-24
 
 ### Added

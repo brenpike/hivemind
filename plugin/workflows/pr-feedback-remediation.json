@@ -1,8 +1,8 @@
 {
   "id": "pr-feedback-remediation",
-  "version": 3,
+  "version": 4,
   "start": "intake",
-  "terminal": ["complete", "blocked", "cancelled", "user_input_required", "review_rejected", "review_exhausted", "merge_advised", "review_window_elapsed"],
+  "terminal": ["complete", "blocked", "cancelled", "review_exhausted", "merge_advised", "review_window_elapsed"],
   "states": {
     "intake": {
       "type": "decision",
@@ -38,8 +38,8 @@
         "root-cluster-suspected": "review_remediation_plan",
         "merge-advised": "merge_advised",
         "injection-suspect": "blocked",
-        "high-severity-rejection": "review_rejected",
-        "user-input-required": "user_input_required",
+        "high-severity-rejection": "question",
+        "user-input-required": "question",
         "blocked": "blocked"
       }
     },
@@ -53,20 +53,20 @@
         "root-cluster-suspected": "review_remediation_plan",
         "merge-advised": "merge_advised",
         "injection-suspect": "blocked",
-        "high-severity-rejection": "review_rejected",
-        "user-input-required": "user_input_required",
+        "high-severity-rejection": "question",
+        "user-input-required": "question",
         "blocked": "blocked"
       }
     },
     "review_remediation_plan": {
       "type": "agent",
-      "description": "Cerebrate re-plans remediation when review escalates to the planner. Declares every cerebrate outcome (single|multi|brood|open_questions|blocked); a re-plan that yields steps routes to implementation. There is no brood_confirm state in this workflow, so brood/open_questions/blocked surface to the user — a PR-feedback remediation cannot fan out to a brood.",
+      "description": "Cerebrate re-plans remediation when review escalates to the planner. Declares every cerebrate outcome (single|multi|brood|open_questions|blocked); a re-plan that yields steps routes to implementation. There is no brood_confirm state in this workflow, so brood/blocked surface to the user as blocked — a PR-feedback remediation cannot fan out to a brood. open_questions goes to the question gate.",
       "agent": "hivemind:cerebrate",
       "transitions": {
         "single": "implement_next_step",
         "multi": "implement_next_step",
         "brood": "blocked",
-        "open_questions": "blocked",
+        "open_questions": "question",
         "blocked": "blocked"
       }
     },
@@ -118,11 +118,19 @@
         "blocked": "blocked"
       }
     },
+    "question": {
+      "type": "user_gate",
+      "description": "Question gate: a state asked the user a question (a planner's open_questions, or a reviewer's user-input-required or high-severity-rejection). The overlord asks the user, and the answer goes back to the state that asked, in the same run: the outcome is the name of that state, which runs again with the answer as user_answer. cancelled ends the run.",
+      "transitions": {
+        "github_review_loop": "github_review_loop",
+        "github_reviewer_fix": "github_reviewer_fix",
+        "review_remediation_plan": "review_remediation_plan",
+        "cancelled": "cancelled"
+      }
+    },
     "complete": { "type": "terminal" },
     "blocked": { "type": "terminal" },
     "cancelled": { "type": "terminal" },
-    "user_input_required": { "type": "terminal" },
-    "review_rejected": { "type": "terminal" },
     "review_exhausted": { "type": "terminal" },
     "merge_advised": { "type": "terminal" },
     "review_window_elapsed": { "type": "terminal" }

@@ -60,7 +60,6 @@ const NEXT_STEP_LINE = 'Fix the cause named above, then run the request again.';
 const OPEN_LEAD = 'The delivery ran no further step, because questions are still open.';
 const RUN_AGAIN = 'Run the request again with the answers in it.';
 const ON_BRANCH_LINE = RUN_AGAIN + ' The new run plans what is left from the commits already on branch "feature/cache".';
-const BEFORE_PR_LINE = ON_BRANCH_LINE + ' No pull request until every gate holds on them.';
 const scratchRoots = [];
 
 after(() => {
@@ -677,8 +676,50 @@ function fixFlowResults(changes = {}) {
   });
 }
 
-function tailAskMessage(asks) {
-  return OPEN_LEAD + '\n\n' + BEFORE_PR_LINE + '\n\n' + lib.renderOpenQuestions(asks, 'before_pr');
+/**
+ * Asserts the run paused on the tail asks `asks`: needs_user true, the
+ * message starting with the asks rendered as renderQuestions shows them,
+ * and, when given, `lastLabel` as the label of the last agent call.
+ */
+function assertTailPause(run, asks, lastLabel) {
+  assert.equal(run.result.needs_user, true, run.result.message);
+  assert.ok(run.result.message.startsWith(lib.renderQuestions(asks, [])), run.result.message);
+  if (lastLabel !== undefined) {
+    assert.equal(labelsOf(run).at(-1), lastLabel);
+  }
+}
+
+function surfacedAsk(brief) {
+  return { brief: brief, reason: 'table_surface' };
+}
+
+function limitAsk(brief) {
+  return { brief: brief, reason: 'no_recommendation' };
+}
+
+const ASK_USER_BUMP = { dominant_row: 'MULTI', verdict: 'ask_user', rule_applied: '5' };
+const TAIL_REPLY = 'Set the version in VERSION.';
+const STOP_FACTS = { outcome: 'blocked', stderr: 'blocker: STOP_AFTER_REPLAN_ZQ\n' };
+
+/**
+ * A pass 1 whose bump step asks version_bump_indeterminable at the default
+ * level, and a pass 2 the reply to it starts, whose gates hold on OTHER.
+ */
+function tailReplanResults(changes = {}) {
+  return happyResults({
+    'bump-type-1-1': bumpRelay(ASK_USER_BUMP),
+    'facts-2': onPlanBranchFacts(OTHER),
+    'plan-2': planResult(),
+    'branch-2': branchRelay({ created: 'false', commit: OTHER }),
+    'work-2-STEP-001': WORKER_DONE,
+    'commit-2-1': commitRelay({ commit: OTHER, committed: 'false' }),
+    ...tailResults(2, OTHER),
+    ...changes
+  });
+}
+
+function bumpAskOf() {
+  return surfacedAsk(main.buildBumpIndeterminableBrief(parsedBump(ASK_USER_BUMP)));
 }
 
 const FOURTH = '5'.repeat(40);
@@ -1082,6 +1123,16 @@ const ROW_TESTS = {
       assert.equal(callOf(run, 'facts-2').opts.phase, 'Facts');
       assert.ok(contract.contractRows().find((row) => row.id === 'SD-07').rule.includes('after a taken local review escalation or root cluster'));
     });
+    test('a reply to a tail ask other than a local review question starts a pass with the facts step of its own', async () => {
+      const results = tailReplanResults();
+      const paused = await runWorkflow(LAUNCH, results);
+      assertTailPause(paused, [bumpAskOf()], 'bump-type-1-1');
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, TAIL_REPLY), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const labels = labelsOf(run);
+      assert.deepEqual(labels.slice(labels.indexOf('bump-type-1-1')), ['bump-type-1-1', 'facts-2', 'plan-2', 'branch-2', 'work-2-STEP-001', 'commit-2-1', ...tailLabels(2)]);
+      assert.equal(callOf(run, 'facts-2').opts.phase, 'Facts');
+    });
   },
   'SD-08': () => {
     const schemaProblem = 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.';
@@ -1255,15 +1306,16 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(revise.prompt, 'earlier_plan'), makePlan());
       assert.ok(readDataBlock(revise.prompt, 'questions').includes('Q1. GATED_PROBLEM'));
     });
-    test('at the pause limit the run finishes blocked, names the next action in one line, lists the open questions and runs nothing further', async () => {
+    test('there is no pause limit: a question still open after three replies pauses again for round 4 and runs nothing further', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
-      const args = { ...LAUNCH, answers: { 'round-1': 'one', 'round-2': 'two', 'round-3': 'three' } };
+      const answers = { 'round-1': 'one', 'round-2': 'two', 'round-3': 'three' };
       const revised = reviseResult(gated, []);
-      const run = await runWorkflow(args, { 'facts-1': factsRelay(), 'plan-1': gated, 'revise-1': revised, 'revise-2': revised, 'revise-3': revised });
-      assert.equal(run.result.needs_user, false);
-      assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith(OPEN_LEAD + '\n\n' + RUN_AGAIN + '\n\nI stopped asking after 3 rounds of questions.'), run.result.message);
+      const run = await runWorkflow({ ...LAUNCH, answers: answers }, { 'facts-1': factsRelay(), 'plan-1': gated, 'revise-1': revised, 'revise-2': revised, 'revise-3': revised });
+      assert.equal(run.result.needs_user, true);
+      assert.deepEqual(run.result.resume_args, { answers: answers });
+      assert.ok(run.result.message.includes('Q1. GATED_PROBLEM'), run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'revise-2', 'revise-3']);
+      assert.ok(!mainSource.includes('canPause(') && !mainSource.includes('pause_limit'));
     });
     test('replies too long to carry finish blocked with the next action and the open questions', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
@@ -1415,15 +1467,14 @@ const ROW_TESTS = {
       assert.deepEqual(settledProperty.items, { type: 'string', enum: ['Q1', 'Q2'] });
       assert.ok(reviseCall.prompt.includes('Set settled to the label, like Q1, of each shown question the reply settles.'), reviseCall.prompt);
     });
-    test('an effect never settled stays open at the pause limit and nothing runs', async () => {
+    test('an effect never settled pauses again after three replies and nothing runs', async () => {
       const summary = 'Publish to the registry.';
       const revised = reviseResult(planResult(effectPlan(summary, false)), []);
       const args = { ...LAUNCH, answers: { 'round-1': 'one', 'round-2': 'two', 'round-3': 'three' } };
       const run = await runWorkflow(args, happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': revised, 'revise-2': revised, 'revise-3': revised }));
-      assert.equal(run.result.needs_user, false);
-      assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith(OPEN_LEAD + '\n\n' + RUN_AGAIN + '\n\nI stopped asking after 3 rounds of questions.'), run.result.message);
-      assert.ok(run.result.message.includes('\n  Q1. Plan step "STEP-001" has an effect outside the repo that cannot be undone'), run.result.message);
+      assert.equal(run.result.needs_user, true);
+      assert.ok(run.result.message.includes('Q1. Plan step "STEP-001" has an effect outside the repo that cannot be undone'), run.result.message);
+      assert.ok(run.result.message.includes('Word for word:\n' + summary), run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'revise-2', 'revise-3']);
     });
     for (const [kind, call, driftingCall, freshness] of [
@@ -1456,24 +1507,24 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(!run.result.message.includes('Workflow defect'), run.result.message);
     });
-    test('an irreversible effect whose text changed after a reply is a new question and counts toward the cap', async () => {
+    test('an irreversible effect whose text changed after a reply is a new question and pauses again', async () => {
       const revisedOnce = reviseResult(planResult(effectPlan('Publish version 2.', false)), ['Q1']);
       const revisedAgain = reviseResult(planResult(effectPlan('Publish version 3.', false)), ['Q1']);
       const args = { ...LAUNCH, answers: { 'round-1': 'one', 'round-2': 'two', 'round-3': 'three' } };
       const results = happyResults({ 'plan-1': planResult(effectPlan('Publish version 1.', false)), 'revise-1': revisedOnce, 'revise-2': revisedAgain, 'revise-3': reviseResult(planResult(effectPlan('Publish version 4.', false)), ['Q1']) });
       const run = await runWorkflow(args, results);
-      assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith(OPEN_LEAD + '\n\n' + RUN_AGAIN + '\n\nI stopped asking after 3 rounds of questions.'), run.result.message);
+      assert.equal(run.result.needs_user, true);
+      assert.ok(run.result.message.includes('Word for word:\nPublish version 4.'), run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'revise-2', 'revise-3']);
     });
-    test('the pause limit of a later pass names the branch the earlier commits are on', async () => {
+    test('the reply_size stop of a later pass names the branch the earlier commits are on', async () => {
       const unsettled = reviseResult(planResult(REMEDIATION_PLAN), []);
-      const args = { ...LAUNCH, answers: { 'round-1': 'one', 'round-2': 'two', 'round-3': 'three' } };
-      const run = await runWorkflow(args, remediationResults(ESCALATION, { 'revise-1': unsettled, 'revise-2': unsettled, 'revise-3': unsettled }));
+      const args = { ...LAUNCH, answers: { 'round-1': 'x'.repeat(5000) } };
+      const run = await runWorkflow(args, remediationResults(ESCALATION, { 'revise-1': unsettled }));
       assert.equal(run.result.outcome, 'blocked');
       const paragraphs = run.result.message.split('\n\n');
       assert.deepEqual(paragraphs.slice(0, 2), [OPEN_LEAD, ON_BRANCH_LINE]);
-      assert.ok(paragraphs[2].startsWith('I stopped asking after 3 rounds of questions.'), run.result.message);
+      assert.ok(paragraphs[2].startsWith('I stopped asking because your replies so far are too long to carry'), run.result.message);
       assert.ok(!labelsOf(run).includes('branch-2'));
     });
   },
@@ -2091,6 +2142,11 @@ const ROW_TESTS = {
       assert.ok(run.result.message.startsWith(OPEN_LEAD + '\n\n' + RUN_AGAIN + '\n\n' + openQuestions + '\n\n'), run.result.message.slice(0, 600));
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1']);
     });
+    test('reply_size and exact_text_size are the only open question stops', () => {
+      const stops = [...mainSource.matchAll(/finishOpenQuestions\([^,]+, '([a-z_]+)'/g)].map((match) => match[1]);
+      assert.deepEqual(stops, ['reply_size', 'exact_text_size']);
+      assert.ok(!mainSource.includes('before_pr') && !mainSource.includes('pause_limit'));
+    });
     test('a pause with no effect ask is not whole: an over-long question is cut as before', async () => {
       const hugeQuestion = makeGatedBrief('HUGE_PROBLEM ' + 'h'.repeat(9000));
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [hugeQuestion]) });
@@ -2208,14 +2264,11 @@ const ROW_TESTS = {
       ['ask_user', { dominant_row: 'MULTI', verdict: 'ask_user', rule_applied: '5' }],
       ['bump_required with an empty artifact_files', MINOR_BUMP]
     ]) {
-      test(`${label} asks through version_bump_indeterminable and ends blocked before validation`, async () => {
+      test(`${label} asks through version_bump_indeterminable and pauses before validation`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'bump-type-1-1': bumpRelay(changes) }));
-        assert.equal(run.result.needs_user, false);
-        assert.equal(run.result.outcome, 'blocked');
         const brief = main.buildBumpIndeterminableBrief(parsedBump(changes));
         assert.equal(brief.kind, 'version_bump_indeterminable');
-        assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: brief }]) + '\n\n'), run.result.message);
-        assert.equal(labelsOf(run).at(-1), 'bump-type-1-1');
+        assertTailPause(run, [surfacedAsk(brief)], 'bump-type-1-1');
       });
     }
     test('the bump briefs fit the brief schema; version_bump_type takes and version_bump_indeterminable asks at every level', () => {
@@ -2230,41 +2283,47 @@ const ROW_TESTS = {
     });
     test('a surfaced version_bump_type asks with the verdict brief', async () => {
       const run = await runWorkflow(LAUNCH, happyResults(), buildWithSurfaceKinds(['version_bump_type']));
-      assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: main.buildBumpTypeBrief(parsedBump()) }]) + '\n\n'), run.result.message);
-      assert.equal(labelsOf(run).at(-1), 'bump-type-1-1');
+      assertTailPause(run, [surfacedAsk(main.buildBumpTypeBrief(parsedBump()))], 'bump-type-1-1');
     });
   },
   'SD-23': () => {
-    test('a tail ask ends blocked with the question open, the next action, the commits and decisions listed, and nothing pushed', async () => {
+    test('a tail ask pauses with its question and the commits, and pushes nothing', async () => {
       const run = await runWorkflow(LAUNCH, happyResults(), buildWithSurfaceKinds(['version_bump_type']));
       assert.deepEqual(run.result, {
-        needs_user: false,
-        outcome: 'blocked',
+        needs_user: true,
+        resume_args: { answers: {} },
         message: [
-          tailAskMessage([{ brief: main.buildBumpTypeBrief(parsedBump()) }]),
-          'Commits this run made:\n- ' + OTHER,
-          lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }])
+          lib.renderQuestions([surfacedAsk(main.buildBumpTypeBrief(parsedBump()))], []),
+          'Commits this run made:\n- ' + OTHER
         ].join('\n\n')
       });
-      assert.ok(run.result.message.includes('I stopped before the pull request because these questions need your answer.'));
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1']);
       assert.ok(run.calls.every((call) => !/push/i.test(call.prompt.replace(/never push|no push|grants no push|, push/gi, ''))), 'no call pushes');
     });
-    test('every tail ask goes through finishTailAsk, whose stop reason is before_pr', () => {
-      assert.equal(mainSource.split('\'before_pr\'').length - 1, 2);
-      assert.ok(mainSource.includes('return stopReason === \'before_pr\' ? line + '));
-      assert.ok(/function finishTailAsk\(asks, run, detail\) \{\n {2}return finishOpenQuestions\(\{ asks: asks, taken: \[\] \}, 'before_pr', run, detail\);/.test(mainSource));
-      assert.ok((mainSource.match(/finishTailAsk\(/g) || []).length >= 4);
+    test('every tail ask goes through askTail, and no tail ask ends the run', () => {
+      assert.ok(!mainSource.includes('finishTailAsk') && !mainSource.includes('before_pr'));
+      assert.ok(/function askTail\(asks, run, detail\) \{\n {2}const questions = renderQuestions\(asks, \[\]\);/.test(mainSource));
+      assert.ok(mainSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };'));
+      assert.ok(mainSource.includes('  return replanFromTailAsk(resolution.asks, run);\n}'));
+      assert.equal((mainSource.match(/replanFromTailAsk\(\[buildUndecidedAsk\(/g) || []).length, 2);
+      assert.ok(mainSource.includes('return askTail([buildUndecidedAsk(buildReviewQuestionBrief('));
+    });
+    test('a tail round shares the round numbering with the planning rounds, and its resume replays every earlier agent', async () => {
+      const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
+      const results = tailReplanResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']), 'facts-2': STOP_FACTS });
+      const first = await runWorkflow(LAUNCH, results);
+      assert.deepEqual(first.result.resume_args, { answers: {} });
+      const second = await runWorkflow(resumeWith(LAUNCH, first.result, 'Take option A.'), results);
+      assertTailPause(second, [bumpAskOf()], 'bump-type-1-1');
+      assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'Take option A.' } });
+      const run = await runWorkflow(resumeWith(LAUNCH, second.result, TAIL_REPLY), results);
+      assert.equal(run.result.outcome, 'blocked');
+      assert.deepEqual(labelsOf(run), [...labelsOf(second), 'facts-2']);
+      second.calls.forEach((call, index) => assert.equal(run.calls[index].prompt, call.prompt, call.opts.label));
     });
     test('the next-action line never offers a pull request from commits a gate did not hold on', () => {
-      const run = { commits: [OTHER], branch: 'feature/cache' };
-      const oldBeforePrLine = ON_BRANCH_LINE + ' The pull request can be opened from those commits.';
-      assert.equal(main.nextActionLine('before_pr', run), BEFORE_PR_LINE);
-      assert.ok(BEFORE_PR_LINE.length <= oldBeforePrLine.length);
-      for (const stopReason of ['pause_limit', 'reply_size', 'exact_text_size', 'before_pr']) {
-        for (const stopRun of [run, { commits: [], branch: undefined }]) {
-          assert.ok(!/pull request (can|may|will) be opened|open the pull request/i.test(main.nextActionLine(stopReason, stopRun)), stopReason);
-        }
+      for (const stopRun of [{ commits: [OTHER], branch: 'feature/cache' }, { commits: [], branch: undefined }]) {
+        assert.ok(!/pull request/i.test(main.nextActionLine(stopRun)), JSON.stringify(stopRun));
       }
       assert.ok(!mainSource.includes('can be opened from those commits'));
     });
@@ -2460,7 +2519,7 @@ const ROW_TESTS = {
       const sentence = main.validationFixSentence();
       assert.ok(sentence.includes(condition[1] + ', so its assigned scope is ' + condition[2] + ', and its report lists ' + condition[3] + '.'), sentence);
     });
-    test('after maxFixRounds() rounds a failure ends the run blocked asking', async () => {
+    test('after maxFixRounds() rounds a failure pauses asking, and the reply starts a new pass with the answer block', async () => {
       assert.equal(main.maxFixRounds(), 3);
       const failed = { outcome: 'failed', failures: FAILURE_TEXT };
       const fixCommits = ['a', 'b', 'c'].map((digit) => digit.repeat(40));
@@ -2478,15 +2537,16 @@ const ROW_TESTS = {
         labels.push('fix-1-' + round, 'fix-commit-1-' + round, 'bump-type-1-' + (round + 1), 'validate-1-' + (round + 1), 'validate-commit-1-' + (round + 1));
       });
       const run = await runWorkflow(LAUNCH, results);
-      assert.equal(run.result.needs_user, false);
-      assert.equal(run.result.outcome, 'blocked');
       assert.deepEqual(labelsOf(run), labels);
-      assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: main.buildFixLimitBrief(fixCommits[2]) }]) + '\n\n'), run.result.message);
+      const ask = limitAsk(main.buildFixLimitBrief(fixCommits[2]));
+      assertTailPause(run, [ask]);
+      assert.ok(run.result.message.includes('- A: Say how to fix the failures: this run plans the fix from your reply.'), run.result.message);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Mock the database.'), { ...results, 'facts-2': STOP_FACTS });
+      assert.deepEqual(labelsOf(resumed), [...labels, 'facts-2']);
     });
     test('a surfaced validation_remediation asks before any fix round', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults(), buildWithSurfaceKinds(['validation_remediation']));
-      assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: main.buildValidationRemediationBrief(OTHER, 1) }]) + '\n\n'), run.result.message);
-      assert.equal(labelsOf(run).at(-1), 'validate-commit-1-1');
+      assertTailPause(run, [surfacedAsk(main.buildValidationRemediationBrief(OTHER, 1))], 'validate-commit-1-1');
     });
     test('a blocked fix round stops the run after its commit', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'The test needs a database.' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }));
@@ -2527,10 +2587,9 @@ const ROW_TESTS = {
     test('a surfaced gate_rerun asks at the first going back', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults(), buildWithSurfaceKinds(['gate_rerun']));
       const brief = main.buildGateRerunBrief(['bump'], { held: { bump: OTHER } }, THIRD, false);
-      assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: brief }]) + '\n\n'), run.result.message);
-      assert.equal(labelsOf(run).at(-1), 'fix-commit-1-1');
+      assertTailPause(run, [surfacedAsk(brief)], 'fix-commit-1-1');
     });
-    test('after maxGateReruns() going-backs the run ends blocked asking', async () => {
+    test('after maxGateReruns() going-backs the run pauses asking, and the reply starts a new pass', async () => {
       assert.equal(main.maxGateReruns(), 4);
       const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
       const bumpCommits = ['a', 'b', 'c'].map((digit) => digit.repeat(40));
@@ -2548,12 +2607,11 @@ const ROW_TESTS = {
         labels.push('bump-type-1-' + count, 'bump-1-' + count, 'bump-commit-1-' + count, 'validate-1-' + count, 'validate-commit-1-' + count);
       }
       const run = await runWorkflow(LAUNCH, results);
-      assert.equal(run.result.needs_user, false);
-      assert.equal(run.result.outcome, 'blocked');
       assert.deepEqual(labelsOf(run), labels);
       const limitBrief = main.buildGateRerunBrief(['bump'], { held: { bump: bumpCommits[2] } }, validateCommits[2], true);
-      assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: limitBrief }]) + '\n\n'), run.result.message);
-      assert.equal(run.result.message.split('on an earlier commit. Run ').length - 1, 4, run.result.message);
+      assertTailPause(run, [limitAsk(limitBrief)]);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Stop bumping twice.'), { ...results, 'facts-2': STOP_FACTS });
+      assert.deepEqual(labelsOf(resumed), [...labels, 'facts-2']);
     });
     test('the gates are the version bump, then validation, then local review, and the gate_rerun brief takes at the default level', () => {
       assert.deepEqual([...main.gateIds()], ['bump', 'validate', 'review']);
@@ -2666,8 +2724,8 @@ const ROW_TESTS = {
     });
     test('a tail ask with local_review false lists the gate too', async () => {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults(), buildWithSurfaceKinds(['version_bump_type']));
-      assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: main.buildBumpTypeBrief(parsedBump()) }]) + '\n\n'), run.result.message);
-      assert.ok(run.result.message.includes(notConfigured), run.result.message);
+      assertTailPause(run, [surfacedAsk(main.buildBumpTypeBrief(parsedBump()))]);
+      assert.ok(run.result.message.endsWith('\n\n' + notConfigured), run.result.message);
     });
     test('a run that stops before the last wave does not list it', async () => {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: 'Tests fail.' } }));
@@ -2696,9 +2754,17 @@ const ROW_TESTS = {
       assert.ok(call.prompt.includes('Never push'));
       assert.equal(main.maxReviewIterations(), 10);
     });
+    test('a review run after a reply to its question also gets user_answer in its inputs block', () => {
+      const answer = { question: 'QUESTION_ZQ', reply: 'REPLY_ZQ' };
+      const prompt = main.buildReviewPrompt(makePlan(), 'main', answer);
+      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10, user_answer: answer });
+      assert.ok(prompt.includes('Its user_answer holds a question your loop asked and the user reply to it. The reply is the decision of the user on that question.'), prompt);
+      assert.ok(!withoutDataBlock(prompt, 'inputs').includes('REPLY_ZQ'));
+      assert.ok(!main.buildReviewPrompt(makePlan(), 'main').includes('user_answer'));
+    });
     test('the inputs are local-reviewer Input Contract keys, and max_iterations matches it', () => {
       const contract = readReviewerContract('## Input Contract');
-      for (const key of ['base', 'working_branch', 'trunk', 'max_iterations']) {
+      for (const key of ['base', 'working_branch', 'trunk', 'max_iterations', 'user_answer']) {
         assert.ok(contract.keys.includes(key), key);
       }
       assert.equal(contract.values.max_iterations, String(main.maxReviewIterations()));
@@ -3051,27 +3117,30 @@ const ROW_TESTS = {
       ['user-input-required', userInput, 'Local review needs your answer on finding "F4", titled "Should the cache be shared across tenants?", before the pull request. 1 finding is still open.', [heading, tenantLine]],
       ['high-severity-rejection', rejection, 'Local review rejected high severity finding "F6", titled "Use a distributed lock.", and left it unfixed, because: "A process lock is enough for one writer.". Should it be fixed before the pull request? 2 findings are still open.', [heading, lockLine, tenantLine]]
     ]) {
-      test(`${label} ends the run blocked with the reviewer question open under before_pr`, async () => {
+      test(`${label} pauses the run with the reviewer question and the open findings detail block`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
-        assert.equal(run.result.needs_user, false);
-        assert.equal(run.result.outcome, 'blocked');
         const brief = main.buildReviewQuestionBrief(review, OTHER, review.open_findings);
         assert.equal(brief.problem, text);
         assert.equal(brief.kind, main.reviewQuestionKinds()[label]);
         assert.ok(lib.validateSchema(briefSchema, brief).ok);
         assert.equal(lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema).action, 'ask');
-        assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: brief }]) + '\n\n' + detail.join('\n') + '\n\n'), run.result.message);
-        assert.ok(run.result.message.includes(text + ' I have no recommendation of my own.'), run.result.message);
-        assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
+        assertTailPause(run, [limitAsk(brief)], 'review-commit-1-1');
+        assert.ok(run.result.message.startsWith(lib.renderQuestions([limitAsk(brief)], []) + '\n\n' + detail.join('\n') + '\n\nCommits this run made:'), run.result.message);
+        assert.ok(run.result.message.includes('**Q1. ' + text + '**'), run.result.message);
+        assert.ok(run.result.message.includes('Recommendation: none.'), run.result.message);
       });
     }
-    test('option A of high_severity_rejection says the next run records the rejection at its source, so review stops raising it', () => {
+    test('each option says what a reply does on this run, and option A of high_severity_rejection says local review records the decision at its source and goes on', () => {
       const options = main.buildReviewQuestionBrief(rejection, OTHER, rejection.open_findings).options;
       assert.equal(options[0].id, 'A');
-      assert.equal(options[0].summary, 'Reject the finding and go on with it unfixed: the next run records the decision at its source, so review stops raising it.');
-      assert.equal(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings).options[0].summary, 'Answer the finding, then run the request again.');
+      assert.equal(options[0].summary, 'Reject the finding and go on with it unfixed: local review records the decision at its source and goes on.');
+      assert.equal(options[1].summary, 'Fix the finding: local review fixes it, or sends it to the planner, and goes on.');
+      const answerOptions = main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings).options;
+      assert.equal(answerOptions[0].summary, 'Answer the finding: this run gives your answer to local review, which goes on with it.');
+      assert.equal(answerOptions[1].summary, 'Stop: local review ends blocked on this run, before the pull request.');
+      assert.equal(main.buildBumpTypeBrief(parsedBump()).options[1].summary, 'Plan again: this run gives your reply to the planner before anything goes further.');
     });
-    test('the detail block comes right after the open questions block, and its compact form keeps the id, severity and title only', () => {
+    test('the detail block comes right after the questions block, and its compact form keeps the id, severity and title only', () => {
       const block = main.buildOpenFindingsBlock([tenantFinding]);
       assert.equal(block.text, heading + '\n' + tenantLine);
       assert.equal(block.compact, heading + '\n- "F4", severity "medium", "Should the cache be shared across tenants?"');
@@ -3100,11 +3169,13 @@ const ROW_TESTS = {
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, { brief: brief }])), run.result.message);
       assert.deepEqual({ ...lib.decide({ kind: 'diminishing_returns_exit', level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
     });
-    test('a surfaced diminishing_returns_exit ends the run asking before the pull request', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': DIMINISHING }), buildWithSurfaceKinds(['diminishing_returns_exit']));
-      assert.equal(run.result.needs_user, false);
-      assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: main.buildDiminishingReturnsBrief(DIMINISHING, OTHER) }]) + '\n\n'), run.result.message);
-      assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
+    test('a surfaced diminishing_returns_exit pauses asking, and the reply starts a new pass', async () => {
+      const surfaced = buildWithSurfaceKinds(['diminishing_returns_exit']);
+      const results = happyResults({ 'review-1-1': DIMINISHING, 'facts-2': STOP_FACTS });
+      const run = await runWorkflow(LAUNCH, results, surfaced);
+      assertTailPause(run, [surfacedAsk(main.buildDiminishingReturnsBrief(DIMINISHING, OTHER))], 'review-commit-1-1');
+      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Stop fixing.'), results, surfaced);
+      assert.deepEqual(labelsOf(resumed), [...PASS_ONE_LABELS, 'facts-2']);
     });
   },
   'SD-39': () => {
@@ -3170,10 +3241,9 @@ const ROW_TESTS = {
       assert.equal(main.buildReviewEscalationBrief(CLUSTER).problem, 'Local review found findings that share one suspected root, "The cache key is built from raw input.". Go back to planning, from fresh facts, for a remediation that closes the class?');
     });
     for (const [review, kind] of [[ESCALATION, 'planner_escalation_routing'], [CLUSTER, 'root_cluster_routing']]) {
-      test(`a surfaced ${kind} ends the run asking before the pull request, with no new pass`, async () => {
+      test(`a surfaced ${kind} pauses asking, with no new pass until the reply`, async () => {
         const run = await runWorkflow(LAUNCH, remediationResults(review), buildWithSurfaceKinds([kind]));
-        assert.equal(run.result.needs_user, false);
-        assert.ok(run.result.message.startsWith(tailAskMessage([{ brief: main.buildReviewEscalationBrief(review) }]) + '\n\n'), run.result.message);
+        assertTailPause(run, [surfacedAsk(main.buildReviewEscalationBrief(review))]);
         assert.deepEqual(labelsOf(run), PASS_ONE_LABELS);
       });
     }
@@ -3347,7 +3417,7 @@ const ROW_TESTS = {
       const stopped = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is missing.' } }));
       assert.equal(stopped.result.outcome, 'blocked');
       const asked = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': DIMINISHING }), buildWithSurfaceKinds(['diminishing_returns_exit']));
-      assert.equal(asked.result.outcome, 'blocked');
+      assert.equal(asked.result.needs_user, true);
       for (const run of [stopped, asked]) {
         assert.ok(labelsOf(run).every((label) => !label.startsWith('pr-')), JSON.stringify(labelsOf(run)));
         assert.ok(run.calls.every((call) => !call.prompt.includes('hivemind:open-plan-pr')));
@@ -3787,6 +3857,18 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run).slice(6, 9), ['facts-2', 'scan-2', 'plan-2']);
       assertNoteAfterRevise(run);
     });
+    test('after a tail reply, the plan prompt with the answer block carries the reply and no sentence, and every other later prompt carries the sentence', async () => {
+      const results = tailReplanResults();
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, TAIL_REPLY), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const askIndex = labelsOf(run).indexOf('bump-type-1-1');
+      run.calls.forEach((call, index) => {
+        const isAnswerPrompt = call.opts.label === 'plan-2';
+        assert.equal(call.prompt.includes(main.resumedReplySentence()), index > askIndex && !isAnswerPrompt, call.opts.label);
+        assert.equal(call.prompt.includes(TAIL_REPLY), isAnswerPrompt, call.opts.label);
+      });
+    });
     test('a run that never paused sends no prompt with the sentence', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       assert.ok(run.calls.every((call) => !call.prompt.includes(main.resumedReplySentence())));
@@ -3983,23 +4065,20 @@ const ROW_TESTS = {
     }
     test('nextActionLine() names the next action in one line, with the branch once the run made commits', () => {
       const run = { commits: [], branch: undefined };
-      assert.equal(main.nextActionLine('pause_limit', run), RUN_AGAIN);
-      assert.equal(main.nextActionLine('before_pr', run), RUN_AGAIN);
+      assert.equal(main.nextActionLine(run), RUN_AGAIN);
       Object.assign(run, { commits: [OTHER], branch: 'feature/cache' });
-      for (const stopReason of ['pause_limit', 'reply_size', 'exact_text_size']) {
-        assert.equal(main.nextActionLine(stopReason, run), ON_BRANCH_LINE, stopReason);
-      }
-      assert.equal(main.nextActionLine('before_pr', run), BEFORE_PR_LINE);
+      assert.equal(main.nextActionLine(run), ON_BRANCH_LINE);
+      assert.equal(main.nextActionLine.length, 1);
     });
     test('an open question stop keeps nextActionLine() right after its first block, without a throw', () => {
       const asks = Array.from({ length: 30 }, (_, index) => ({ brief: makeBrief({ problem: 'P' + index + ' ' + '\u0001'.repeat(2000) }) }));
       const run = { taken: [], waveCount: 1, commits: Array.from({ length: 400 }, () => OTHER), reversibleEffects: [], notRunGates: [], branch: 'b'.repeat(5000) };
-      for (const stopReason of ['pause_limit', 'reply_size', 'exact_text_size', 'before_pr']) {
+      for (const stopReason of ['reply_size', 'exact_text_size']) {
         const result = main.finishOpenQuestions({ asks: asks, taken: [] }, stopReason, run);
         assert.equal(result.outcome, 'blocked');
         const paragraphs = result.message.split('\n\n');
         assert.equal(paragraphs[0], OPEN_LEAD);
-        assert.equal(paragraphs[1], main.nextActionLine(stopReason, run));
+        assert.equal(paragraphs[1], main.nextActionLine(run));
         assert.ok(!paragraphs[1].includes('\n'));
         assert.ok(lib.noticeLength(result) <= lib.noticeBudget());
       }
@@ -4145,15 +4224,17 @@ const ROW_TESTS = {
       assert.equal(message.split('\n\n')[1], main.nextStepLine('run_again'));
     });
     test('an open-question stop with 6 taken decisions shows each on one line', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan, takenBriefs) }), buildWithSurfaceKinds(['version_bump_type']));
+      const asked = planResult(longPlan, [...takenBriefs, makeGatedBrief('GATED_PROBLEM')]);
+      const run = await runWorkflow({ ...LAUNCH, answers: { 'round-1': 'x'.repeat(5000) } }, happyResults({ 'plan-1': asked, 'revise-1': reviseResult(asked, []) }));
       assert.equal(run.result.outcome, 'blocked');
+      assert.ok(run.result.message.includes('I stopped asking because your replies so far are too long to carry'), run.result.message);
       const message = assertMessageShape(run.result.message, [LONG_SUMMARY], []);
       const decided = message.split('\n\n').find((paragraph) => paragraph.startsWith('Decided for you:'));
       assert.equal(decided.split('\n').length, 7, decided);
     });
-    test('a user-input-required stop with 2 open findings names each by its short id', async () => {
+    test('a user-input-required pause with 2 open findings names each by its short id', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan), 'review-1-1': userInput }));
-      assert.equal(run.result.outcome, 'blocked');
+      assert.equal(run.result.needs_user, true);
       const message = assertMessageShape(run.result.message, [LONG_SUMMARY], openFindings.map((finding) => finding.body));
       assert.ok(message.includes('finding "a1b2c3d4", titled'), message);
       assert.ok(message.includes('2 findings are still open.'), message);
@@ -4355,6 +4436,67 @@ const ROW_TESTS = {
         assert.equal(labelsOf(run).at(-1), lastLabel);
       });
     }
+  },
+  'SD-57': () => {
+    const tenantFinding = { finding_id: 'F4', severity: 'medium', title: 'Should the cache be shared across tenants?', body: 'Tenants share one process.', recommendation: 'Key the cache by tenant.' };
+    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Should the cache be shared across tenants?', open_findings: [tenantFinding] };
+    const reviewReply = 'Key it by tenant.';
+    function reviewQuestionText() {
+      return lib.renderQuestions([limitAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings))], []);
+    }
+    function answeredReviewResults(changes = {}) {
+      return happyResults({ 'review-1-1': userInput, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }), ...changes });
+    }
+    test('a resumed review question reruns the reviewer with user_answer on the current head while every earlier agent replays from cache', async () => {
+      const results = answeredReviewResults();
+      const paused = await runWorkflow(LAUNCH, results);
+      assertTailPause(paused, [limitAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings))], 'review-commit-1-1');
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reviewReply), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'pr-1']);
+      paused.calls.forEach((call, index) => assert.equal(run.calls[index].prompt, call.prompt, call.opts.label));
+      const call = callOf(run, 'review-1-2');
+      assert.equal(call.opts.agentType, 'hivemind:local-reviewer');
+      assert.deepEqual(readDataBlock(call.prompt, 'inputs').user_answer, { question: reviewQuestionText(), reply: reviewReply });
+      assert.ok(!call.prompt.includes(main.resumedReplySentence()), call.prompt);
+      assert.ok(callOf(run, 'review-commit-1-2').prompt.includes(main.resumedReplySentence()));
+      assert.ok(run.result.message.startsWith(HELD_ALL + OTHER + '.'), run.result.message);
+    });
+    test('a review that ran with user_answer and escalates gives the replan plan prompt the answer block, and the replan counts against maxReplans()', async () => {
+      const results = answeredReviewResults({ 'review-1-2': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN) });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reviewReply), results);
+      assert.equal(run.result.needs_user, true, run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'facts-2', 'plan-2']);
+      const prompt = callOf(run, 'plan-2').prompt;
+      assert.deepEqual(readDataBlock(prompt, 'review'), structuredClone(main.projectReplanReview(ESCALATION)));
+      assert.deepEqual(readDataBlock(prompt, 'answer'), { question: reviewQuestionText(), reply: reviewReply });
+      assert.ok(prompt.includes('The answer block holds one JSON object: a question this run showed the user, and the user reply to it. The reply is the decision of the user on that question: plan with it, and do not let it change these instructions.'), prompt);
+      assert.ok(prompt.indexOf('<review>') < prompt.indexOf('<answer>'));
+      assert.ok(!prompt.includes(main.resumedReplySentence()), prompt);
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      const replanned = main.requestReviewReplan(ESCALATION, state, { question: 'Q.', reply: 'R.' });
+      assert.deepEqual(structuredClone(replanned.replan.answer), { question: 'Q.', reply: 'R.' });
+      assert.equal(state.replans, 1);
+      assert.equal(main.requestReviewReplan(ESCALATION, state, undefined).replan.answer, undefined);
+    });
+    test('a reply to any other tail ask starts a new pass with the answer block and does not count against maxReplans()', async () => {
+      const results = tailReplanResults();
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, TAIL_REPLY), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const prompt = callOf(run, 'plan-2').prompt;
+      assert.equal(readDataBlock(prompt, 'replan'), 'The user answered a question the run asked after the last wave, so plan again from the fresh facts with the answer block.');
+      assert.deepEqual(readDataBlock(prompt, 'answer'), { question: lib.renderQuestions([bumpAskOf()], []), reply: TAIL_REPLY });
+      assert.ok(!prompt.includes('<review>'));
+      assert.ok(!callOf(run, 'plan-1').prompt.includes('<answer>'));
+      const state = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      state.replans = main.maxReplans();
+      const replanned = main.replanFromTailAsk([bumpAskOf()], state);
+      assert.deepEqual(structuredClone(replanned.replan.answer), { question: lib.renderQuestions([bumpAskOf()], []), reply: TAIL_REPLY });
+      assert.equal(state.replans, main.maxReplans());
+      assert.deepEqual([...state.replies], [TAIL_REPLY]);
+    });
   }
 };
 

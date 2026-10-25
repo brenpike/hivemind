@@ -1200,8 +1200,6 @@ function renderStopIntro(stopReason) {
       return 'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
     case 'exact_text_size':
       return 'I stopped asking because the exact text of a question is too long to show you in full. These are still open:';
-    case 'before_pr':
-      return 'I stopped before the pull request because these questions need your answer. These are still open:';
     default:
       throw new Error('renderOpenQuestions: no intro for stop reason ' + JSON.stringify(stopReason));
   }

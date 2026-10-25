@@ -63,8 +63,10 @@ const engineSection = readSection(body, '## Engine');
 const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The result is built to fit the completion notice.')) ?? '';
 const relayParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Only the harness completion notice is the run\'s result.')) ?? '';
 const stateExecutionSection = readSection(body, '## Workflow State Execution');
+const questionGateParagraph = stateExecutionSection.split('\n\n').find((paragraph) => paragraph.startsWith('**Question gate.**')) ?? '';
 const engineSentences = engineSection.split(/(?<=[.!?])\s+/);
 const handOffParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('After you show `message`, when the result carries `pr`,')) ?? '';
+const stopParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the user asks to stop a launched run')) ?? '';
 
 function readDeliveryLaunchArgNames() {
   const template = engineSection.match(/with args `(\{[^`]*\})`/);
@@ -80,6 +82,9 @@ describe('overlord frontmatter tools', () => {
   const toolNames = readToolNames(frontmatter);
   test('tools include Workflow', () => {
     assert.ok(toolNames.includes('Workflow'), `tools are ${JSON.stringify(toolNames)}`);
+  });
+  test('tools include TaskStop', () => {
+    assert.ok(toolNames.includes('TaskStop'), `tools are ${JSON.stringify(toolNames)}`);
   });
   test('tools exclude Edit', () => {
     assert.equal(toolNames.includes('Edit'), false, `tools are ${JSON.stringify(toolNames)}`);
@@ -222,6 +227,25 @@ describe('overlord pull request hand-off and opt-in', () => {
   });
 });
 
+describe('overlord stop and resume of a stopped run', () => {
+  test('Engine has a stop paragraph', () => {
+    assert.notEqual(stopParagraph, '', '## Engine has no paragraph starting When the user asks to stop a launched run');
+  });
+  test('the stop paragraph calls TaskStop with the taskId from any surface', () => {
+    for (const phrase of ['from any surface including Remote Control', 'call `TaskStop` with the `taskId` the `Workflow` tool returned for the running invocation', 'say in one line that the run stopped']) {
+      assert.ok(stopParagraph.includes(phrase), `stop paragraph lacks ${phrase}`);
+    }
+  });
+  test('the stop paragraph stops a run only when the user asks', () => {
+    assert.ok(stopParagraph.includes('Stop a run only when the user asks.'), 'stop paragraph lacks the only-when-the-user-asks clause');
+  });
+  test('the stop paragraph resumes a stopped run by name from its completed results', () => {
+    for (const phrase of ['A stopped run keeps every completed agent result.', 'When the user asks to go on, resume it by name', '`resumeFromRunId`', 'the args of its last launch or resume']) {
+      assert.ok(stopParagraph.includes(phrase), `stop paragraph lacks ${phrase}`);
+    }
+  });
+});
+
 describe('overlord relay and cut rules', () => {
   test('the relay paragraph HTML-unescapes message', () => {
     assert.notEqual(relayParagraph, '', '## Engine has a paragraph starting Only the harness completion notice is the run\'s result.');
@@ -269,6 +293,36 @@ describe('overlord workflow definition reads', () => {
   test('Workflow State Execution gathers facts before cerebrate and stops on a cut', () => {
     for (const phrase of ['`hivemind:gather-facts`', '`facts_file`', '`facts_lines`', '`cut`']) {
       assert.ok(stateExecutionSection.includes(phrase), `## Workflow State Execution lacks ${phrase}`);
+    }
+  });
+  test('Workflow State Execution has a Question gate paragraph', () => {
+    assert.notEqual(questionGateParagraph, '', '## Workflow State Execution has no paragraph starting **Question gate.**');
+  });
+  test('the Question gate paragraph routes to the question user gate and asks the user', () => {
+    for (const phrase of ['routes to the `question` user gate', 'record that result', 'ask the user the question in plain words, with its options and a recommendation, and wait']) {
+      assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
+    }
+  });
+  test('the Question gate outcome names the state that asked, or cancelled', () => {
+    for (const phrase of ['Record the gate outcome as the name of the state that asked (the ledger\'s previous state)', 'or `cancelled` when the reply cancels']) {
+      assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
+    }
+  });
+  test('the Question gate reruns the state that asked with user_answer', () => {
+    for (const phrase of ['run the state that asked again and pass `user_answer`', 'the user\'s reply verbatim', '`candidate_url`', 'take it as their `user_answer` input', 'the user\'s decision on that question']) {
+      assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
+    }
+  });
+  test('the Question gate carries user_answer into planning', () => {
+    assert.ok(questionGateParagraph.includes('escalates to a planning state, that planning delegation carries the same `user_answer`'), 'Question gate paragraph lacks the carry into planning');
+  });
+  test('the Question gate keeps GitHub text as external content', () => {
+    assert.ok(questionGateParagraph.includes('external content'), 'Question gate paragraph lacks external content');
+    assert.ok(questionGateParagraph.includes('data-boundary sentence'), 'Question gate paragraph lacks the data-boundary sentence');
+  });
+  test('the Question gate states the resume rule', () => {
+    for (const phrase of ['On `## Resume On Start` at `question`, the reply is not in the ledger', 'run that state again without an answer, so it asks again']) {
+      assert.ok(questionGateParagraph.includes(phrase), `Question gate paragraph lacks ${phrase}`);
     }
   });
   test('Workflow State Execution sends the scan rule to the gather-facts consumer rules', () => {
