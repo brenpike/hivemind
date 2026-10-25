@@ -200,6 +200,21 @@
  *   Every payload that crosses a step is checked against its schema or
  *   routing spec before it is read, and a failed check blocks the step that
  *   reads it (ADR-0037 invariant 4).
+ *   Every step result schema whose fields depend on its outcome, or on
+ *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
+ *   from one table, which gives both its anyOf branches and its 'Only with'
+ *   descriptions: the plan result and revise schemas, the relay, worker,
+ *   bump edit, fix, validate and review schemas. validateSchema checks the
+ *   full schema, so a result that carries a field of another outcome, or
+ *   lacks a field its outcome requires, blocks the step that reads it with
+ *   that step's malformed or schema message, and no consumer checks the tie
+ *   again by hand. A field is required under its outcome only where a
+ *   consumer rejected its absence before. The revise schema goes through
+ *   the same builder with settled as a shared field, never Object.assign
+ *   over a built schema: settled would then be missing from every branch,
+ *   so every value would fail. Each agent gets toAgentSchema of the full
+ *   schema, the same schema with every anyOf removed, because the Messages
+ *   API rejects a tool input schema that has anyOf at its top level.
  *   Labels come only from the pass, the round, the step id, the wave
  *   number, and the gate step with its run count (gateLabel), so each is
  *   unique and a resume replays every earlier prompt byte for byte and gets
@@ -556,71 +571,67 @@ function omitSchemaDialect(schema) {
   return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$schema'));
 }
 
-function buildPlanResultSchema(planSchema, briefSchema) {
-  const planProperty = omitSchemaDialect(planSchema);
-  planProperty.description = planSchema.description + ' Only with outcome complete.';
+function buildPlanResultSpec(planSchema, briefSchema) {
   return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['outcome', 'questions'],
+    tag: 'outcome',
     properties: {
       outcome: {
         type: 'string',
         enum: ['complete', 'blocked'],
         description: 'complete when the plan is done. blocked only when the delivery cannot be planned at all.'
       },
-      plan: planProperty,
+      plan: omitSchemaDialect(planSchema),
       questions: {
         type: 'array',
         description: 'One decision brief for each decision the repository and the request do not settle.',
         items: omitSchemaDialect(briefSchema)
       },
-      blocker: {
-        type: 'string',
-        description: 'Why the delivery cannot be planned. Only with outcome blocked.'
-      }
-    }
+      blocker: { type: 'string', description: 'Why the delivery cannot be planned.' }
+    },
+    required: ['outcome', 'questions'],
+    variants: { complete: { required: ['plan'], optional: [] }, blocked: { required: [], optional: ['blocker'] } }
   };
 }
 
+function buildPlanResultSchema(planSchema, briefSchema) {
+  return buildTaggedSchema(buildPlanResultSpec(planSchema, briefSchema));
+}
+
 function buildReviseResultSchema(shownAsks) {
-  const settledProperty = {
+  const spec = buildPlanResultSpec(PLAN_SCHEMA, BRIEF_SCHEMA);
+  spec.properties.settled = {
     type: 'array',
     description: 'The label, like Q1, of each shown question the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
     items: { type: 'string', enum: shownAsks.map((ask, index) => questionLabel(index)) }
   };
-  return Object.assign({}, PLAN_RESULT_SCHEMA, {
-    required: PLAN_RESULT_SCHEMA.required.concat('settled'),
-    properties: Object.assign({}, PLAN_RESULT_SCHEMA.properties, { settled: settledProperty })
-  });
+  spec.required.push('settled');
+  return buildTaggedSchema(spec);
 }
 
 function buildRelaySchema() {
-  return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['outcome'],
+  return buildTaggedSchema({
+    tag: 'outcome',
     properties: {
       outcome: { type: 'string', enum: ['ran', 'blocked'], description: 'ran when the script exited 0. blocked when it exited 1.' },
-      stdout: { type: 'string', description: 'The script stdout, word for word, every line. Only with outcome ran.' },
-      stderr: { type: 'string', description: 'The script stderr, word for word, every line. Only with outcome blocked.' }
-    }
-  };
+      stdout: { type: 'string', description: 'The script stdout, word for word, every line.' },
+      stderr: { type: 'string', description: 'The script stderr, word for word, every line.' }
+    },
+    required: ['outcome'],
+    variants: { ran: { required: ['stdout'], optional: [] }, blocked: { required: [], optional: ['stderr'] } }
+  });
 }
 
 function buildNextActionProperty() {
   return {
     type: 'string',
     enum: ['fix_cause', 'run_again'],
-    description: 'Only with outcome blocked. run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise.'
+    description: 'run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise.'
   };
 }
 
 function buildWorkerSchema() {
-  return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['outcome', 'summary'],
+  return buildTaggedSchema({
+    tag: 'outcome',
     properties: {
       outcome: {
         type: 'string',
@@ -628,46 +639,57 @@ function buildWorkerSchema() {
         description: 'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change before the step can be done.'
       },
       summary: { type: 'string', description: 'What you changed, in one or two sentences.' },
-      blocker: { type: 'string', description: 'Why the step is blocked or needs a new plan. Only with outcome blocked or needs_replan.' },
+      blocker: { type: 'string', description: 'Why the step is blocked or needs a new plan.' },
       next_action: buildNextActionProperty()
+    },
+    required: ['outcome', 'summary'],
+    variants: {
+      complete: { required: [], optional: [] },
+      blocked: { required: [], optional: ['blocker', 'next_action'] },
+      needs_replan: { required: [], optional: ['blocker'] }
     }
-  };
+  });
 }
 
 function buildGateEditSchema(hasFiles) {
-  const schema = {
-    type: 'object',
-    additionalProperties: false,
-    required: ['outcome'],
+  const spec = {
+    tag: 'outcome',
     properties: {
       outcome: { type: 'string', enum: ['complete', 'blocked'], description: 'complete when the task is done. blocked when it cannot be done.' },
-      blocker: { type: 'string', description: 'Why the task cannot be done. Only with outcome blocked.' },
+      blocker: { type: 'string', description: 'Why the task cannot be done.' },
       next_action: buildNextActionProperty()
-    }
+    },
+    required: ['outcome'],
+    variants: { complete: { required: [], optional: [] }, blocked: { required: [], optional: ['blocker', 'next_action'] } }
   };
   if (hasFiles) {
-    schema.required = ['outcome', 'files'];
-    schema.properties.files = { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } };
+    spec.required = ['outcome', 'files'];
+    spec.properties.files = { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } };
   }
-  return schema;
+  return buildTaggedSchema(spec);
 }
 
 function buildValidateSchema() {
-  return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['outcome'],
+  return buildTaggedSchema({
+    tag: 'outcome',
     properties: {
       outcome: {
         type: 'string',
         enum: ['passed', 'failed', 'not_run', 'blocked'],
         description: 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.'
       },
-      failures: { type: 'string', description: 'What failed: each failing command with its failure output. Only with outcome failed.' },
-      blocker: { type: 'string', description: 'The command that cannot run and why. Only with outcome blocked.' },
+      failures: { type: 'string', description: 'What failed: each failing command with its failure output.' },
+      blocker: { type: 'string', description: 'The command that cannot run and why.' },
       next_action: buildNextActionProperty()
+    },
+    required: ['outcome'],
+    variants: {
+      passed: { required: [], optional: [] },
+      failed: { required: ['failures'], optional: [] },
+      not_run: { required: [], optional: [] },
+      blocked: { required: [], optional: ['blocker', 'next_action'] }
     }
-  };
+  });
 }
 
 function localReviewRoutes() {
@@ -775,10 +797,8 @@ function findRepositoryPathProblem(schema, value, location) {
   return '';
 }
 
-function describeReviewField(name, entry) {
-  const exits = Object.keys(reviewExitFields()).filter((exitReason) => reviewExitFields()[exitReason].includes(name));
-  const prefix = entry.isExternal ? externalLabel() + ' ' : '';
-  return prefix + entry.text + ' Only with exit_reason ' + joinNames(exits, 'or') + '.';
+function describeReviewField(entry) {
+  return (entry.isExternal ? externalLabel() + ' ' : '') + entry.text;
 }
 
 function openFindingTexts() {
@@ -814,7 +834,7 @@ function buildOpenFindingSchema() {
 }
 
 function buildReviewFieldSchema(name, entry) {
-  const description = describeReviewField(name, entry);
+  const description = describeReviewField(entry);
   if (entry.type === 'findings') {
     return { type: 'array', description: description, minItems: 1, items: buildOpenFindingSchema() };
   }
@@ -841,24 +861,28 @@ function buildReviewSchema() {
   for (const [name, entry] of Object.entries(reviewFieldTexts())) {
     properties[name] = buildReviewFieldSchema(name, entry);
   }
-  return {
-    type: 'object',
-    additionalProperties: false,
+  const variants = {};
+  for (const [exitReason, fields] of Object.entries(reviewExitFields())) {
+    variants[exitReason] = { required: fields, optional: [] };
+  }
+  return buildTaggedSchema({
+    tag: 'exit_reason',
+    properties: properties,
     required: ['exit_reason', 'iterations_completed', 'findings_resolved', 'findings_open', 'fix_commits_exist', 'ledger_path', 'rejected_findings'],
-    properties: properties
-  };
+    variants: variants
+  });
 }
 
 function runnerOptions(label, phaseTitle) {
-  return { agentType: runnerAgentType(), model: RUNNER_MODEL, schema: RELAY_SCHEMA, label: label, phase: phaseTitle };
+  return { agentType: runnerAgentType(), model: RUNNER_MODEL, schema: toAgentSchema(RELAY_SCHEMA), label: label, phase: phaseTitle };
 }
 
 function droneOptions(label, phaseTitle, schema) {
-  return { agentType: runnerAgentType(), schema: schema, label: label, phase: phaseTitle };
+  return { agentType: runnerAgentType(), schema: toAgentSchema(schema), label: label, phase: phaseTitle };
 }
 
 function plannerCallOptions(label, phaseTitle, resultSchema) {
-  return { agentType: PLANNER_AGENT, schema: resultSchema, label: label, phase: phaseTitle };
+  return { agentType: PLANNER_AGENT, schema: toAgentSchema(resultSchema), label: label, phase: phaseTitle };
 }
 
 function relayInstructionLines() {
@@ -1100,15 +1124,11 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
   if (!isPlainObject(planResult)) {
     return 'The planner returned no result, so ' + RUN_NAME + ' stopped.';
   }
-  const schemaProblem = 'The planner returned a plan that does not fit the plan schema, so ' + RUN_NAME + ' stopped.';
   if (!validateSchema(resultSchema, planResult).ok) {
-    return schemaProblem;
+    return 'The planner returned a plan that does not fit the plan schema, so ' + RUN_NAME + ' stopped.';
   }
   if (planResult.outcome === 'blocked') {
     return 'The planner could not plan the delivery: ' + describeReason(planResult.blocker);
-  }
-  if (planResult.plan === undefined) {
-    return schemaProblem;
   }
   const plan = planResult.plan;
   const pathLocation = findRepositoryPathProblem(PLAN_SCHEMA, plan, '');
@@ -1590,7 +1610,7 @@ function findPlanStep(plan, stepId) {
 function createWorkerTask(step, waveSteps, plan, run) {
   const waveScopes = listStepFiles(waveSteps.filter((other) => other.id !== step.id));
   const prompt = addResumeNote(buildWorkerPrompt(step, waveScopes, plan, run.trunk), run);
-  const options = { agentType: step.owner, schema: WORKER_SCHEMA, label: 'work-' + run.pass + '-' + step.id, phase: 'Waves' };
+  const options = { agentType: step.owner, schema: toAgentSchema(WORKER_SCHEMA), label: 'work-' + run.pass + '-' + step.id, phase: 'Waves' };
   return () => agent(prompt, options);
 }
 
@@ -1962,15 +1982,11 @@ function buildValidatePrompt() {
 }
 
 function readValidateOutcome(result) {
-  const malformed = 'The validation step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.';
   if (!validateSchema(VALIDATE_SCHEMA, result).ok) {
-    return { problem: malformed };
+    return { problem: 'The validation step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.' };
   }
   if (result.outcome === 'blocked') {
     return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: result.next_action };
-  }
-  if (result.outcome === 'failed' && !isNonEmptyString(result.failures)) {
-    return { problem: malformed };
   }
   return { status: result.outcome, failures: result.failures };
 }
@@ -2052,7 +2068,7 @@ function resolveGateRerun(run, gates) {
 }
 
 function reviewerOptions(label) {
-  return { agentType: REVIEWER_AGENT, schema: REVIEW_SCHEMA, label: label, phase: 'Review' };
+  return { agentType: REVIEWER_AGENT, schema: toAgentSchema(REVIEW_SCHEMA), label: label, phase: 'Review' };
 }
 
 function buildReviewPrompt(plan, trunk) {
@@ -2068,12 +2084,10 @@ function buildReviewPrompt(plan, trunk) {
 }
 
 function describeReviewProblem(review) {
-  const malformed = 'The local review step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.';
   if (!validateSchema(REVIEW_SCHEMA, review).ok) {
-    return malformed;
+    return 'The local review step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.';
   }
-  const missing = reviewExitFields()[review.exit_reason].filter((field) => review[field] === undefined);
-  return missing.length === 0 ? undefined : malformed;
+  return undefined;
 }
 
 function reviewStopTexts(exitReason) {
