@@ -429,3 +429,28 @@ This amendment covers the script changes of https://github.com/brenpike/hivemind
 The built `plugin/workflows/standard-delivery.js` is 178,341 characters, within the 190,000 character budget of decision 18. The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-25: fix round files are checked by molt.sh alone (local review finding c2e0ada3)
+
+**The finding.** Local review finding c2e0ada3 said the `files` list of a fix round result accepts empty and non-path members: blank, absolute, traversal or `.git` parts. It asked the workflow to check them.
+
+**Decided 2026-10-25, user call: rejected.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings" (ADR-0038 decision 4). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- A blank member already fails `validateSchema` in `plugin/workflow-src/lib/schema.js`, which refuses a blank string for a `type: string` with no `enum` and no `minLength`.
+- A traversal or absolute path reaches only `molt.sh`, whose `is_exact_path` rule in `plugin/skills/molt/scripts/molt.sh` refuses it before any change. That is the recorded design in the `plugin/workflow-src/standard-delivery/main.js` header ("Fix round files are not plan fields"). The parity test "isRepositoryPath gives the verdict of the molt.sh files rule on one corpus" in `tests/workflow-scripts/standard-delivery.test.mjs` keeps the two rules the same.
+- An empty list is the designed no-change fix round, after which validation runs again (test "a fix round that commits nothing reruns only validation").
+- A check in the workflow would copy the `molt.sh` rule and change no behavior. It adds surface and removes none (doctrine "## Surface-Growth Escalation"). It also names no class it eliminates, so it fails "### Closed-by-Construction Acceptance Test".
+
+**Scope.** A finding is a REPEAT of this decision when it asks standard-delivery to check fix round `files` members for blank, empty, absolute, traversal or `.git` shape before `molt.sh`. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a fix round path that reaches a change before the `molt.sh` rule runs;
+- `molt.sh` accepting a path its rule should refuse;
+- the parity between `isRepositoryPath` and `molt.sh` breaking.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.

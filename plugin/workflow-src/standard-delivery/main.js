@@ -298,7 +298,10 @@
  *   verdicts, so a change lands in both. The check is lexical, so a
  *   symlinked path or one that names a directory is left to molt.sh. Fix
  *   round files are not plan fields: they reach only molt.sh, which
- *   applies the same rule before any change. isGitIdentifier stays on
+ *   applies the same rule before any change. The user rejected local
+ *   review finding c2e0ada3, which asked for a check of fix round files
+ *   members in the workflow, on this basis (ADR-0037, Amendment
+ *   2026-10-25). isGitIdentifier stays on
  *   artifact_files for the git show splice in the bump prompt, since the
  *   path rule allows spaces, shell characters and a leading '-'.
  *   Open questions end the run blocked, never complete (issue 434): after
