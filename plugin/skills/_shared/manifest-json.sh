@@ -31,20 +31,17 @@
 # gone by construction. The remaining boundary is purely VALUE-shape (allowlist), applied by
 # the caller, not structural.
 #
-# DATA-BOUNDARY: every untrusted value (the strain name the caller searches by) enters jq as
-# a --arg binding, NEVER interpolated into the jq program string. An unparseable / torn
-# manifest yields no output (jq error swallowed) — the caller treats absent fields as empty.
+# DATA-BOUNDARY: the manifest content enters jq ONLY via stdin, and a strain index enters as a
+# --argjson binding, NEVER interpolated into the jq program string. This file opens no file.
 #
-# SINGLE-SNAPSHOT READ (read-side projection path): the projection engine
-# (brood-status-project.sh) reads the manifest file EXACTLY ONCE into an in-memory shell
-# variable (`content="$(cat -- "$path")"`) and then runs every projection against THAT snapshot
-# via jq stdin (`printf '%s' "$content" | jq ...`) — it never re-opens the file. This closes the read-side
+# SINGLE-SNAPSHOT READ (read-side projection path): the snapshot comes from
+# hivemind_brood_read_manifest (brood-state.sh), which reads the manifest EXACTLY ONCE, refuses
+# a NUL or raw control byte, and parses exactly one JSON document from that same read. Every projection below then runs against THAT snapshot via jq stdin
+# (`printf '%s' "$content" | jq ...`); nothing re-opens the file. This closes the read-side
 # SNAPSHOT-SKEW class: a concurrent write mid-read can no longer make the probe and the per-field
 # projections observe different instants. Bytes held in a shell variable and passed only to jq
-# stdin are inert — bash does not re-evaluate them as command source. The content-snapshot
-# helpers below (suffix `_snapshot` / `_at`) take the CONTENT, not the path; the legacy
-# path-based pair (hivemind_manifest_strain_names / hivemind_manifest_field) is retained for the
-# unit-test callers that pass a fixture path directly.
+# stdin are inert — bash does not re-evaluate them as command source. Every helper below (suffix
+# `_snapshot` / `_at`, plus the shape validator) takes the CONTENT, never a path.
 #
 # MANIFEST SHAPE (mirrors spawn-brood.sh's jq emitter): a top-level object with a `strains`
 # array; each strain is an object with `name`, `worktree_path`, `branch`, `tmux_session`,
@@ -53,65 +50,9 @@
 #
 # DEPENDENCY: jq only (POSIX + jq). No yq, no sed/awk YAML parsing.
 
-# hivemind_manifest_strain_names <manifest_path>
-# Emit one strain name per line, in manifest order. Emits nothing (exit 0) when the file is
-# absent, unparseable, or has no strains. jq `// empty` drops a null/absent name.
-hivemind_manifest_strain_names() {
-  local manifest_path="$1"
-  [ -f "$manifest_path" ] || return 0
-  jq -r '.strains[]?.name // empty' "$manifest_path" 2>/dev/null
-  return 0
-}
-
-# hivemind_manifest_field <manifest_path> <strain_name> <field>
-# Emit the scalar value of <field> for the strain whose name equals <strain_name>. Supported
-# fields: worktree_path, branch, tmux_session, status, run.suggested_ledger,
-# run.suggested_id, workflow_hint. The run.* fields may be passed with or WITHOUT the `run.`
-# prefix (workflow_hint/suggested_id/suggested_ledger normalize under `run`). Emits empty
-# (exit 0) when the strain or field is absent (a v1 manifest with no `run` block yields empty
-# for run.* fields), when the file is absent, or when the manifest is unparseable.
-#
-# The strain name enters jq as `--arg want`, NEVER interpolated into the program. The field
-# is resolved as a dot-path: direct fields read `.<field>`; run.* fields read `.run.<field>`.
-# The field name itself is a fixed, caller-supplied selector (not attacker content); it is
-# still mapped through a closed case so an unexpected field selects nothing rather than
-# building an arbitrary jq path.
-hivemind_manifest_field() {
-  local manifest_path="$1"
-  local strain_name="$2"
-  local field="$3"
-  [ -f "$manifest_path" ] || return 0
-
-  # Normalize the field selector to a fixed jq path under the matched strain. run.* fields
-  # (with or without the `run.` prefix) resolve under `.run`; direct fields at the top of the
-  # strain object. An unrecognized field maps to nothing (empty output).
-  local jq_path
-  case "$field" in
-    worktree_path|branch|tmux_session|status)
-      jq_path=".${field}" ;;
-    run.suggested_id|suggested_id)
-      jq_path=".run.suggested_id" ;;
-    run.suggested_ledger|suggested_ledger)
-      jq_path=".run.suggested_ledger" ;;
-    run.workflow_hint|workflow_hint)
-      jq_path=".run.workflow_hint" ;;
-    *)
-      return 0 ;;
-  esac
-
-  # Select the strain by name (--arg want), then resolve the fixed field path. `// empty`
-  # drops a null/absent field so the caller sees empty output (exit 0). The jq_path is one of
-  # the fixed literals above — never attacker content — composed into the program after the
-  # `select`. `first(...)` guards against a (malformed) manifest with duplicate names.
-  jq -r --arg want "$strain_name" \
-    "first(.strains[]? | select(.name == \$want)) | $jq_path // empty" \
-    "$manifest_path" 2>/dev/null
-  return 0
-}
-
 # ── Single-snapshot content helpers (read-side projection path) ──────────────────
-# These operate on an in-memory CONTENT snapshot the caller read ONCE from the manifest file,
-# never re-opening it. The content enters jq ONLY via pipe (`printf '%s' "$content" | jq ...`), never spliced into
+# These operate on an in-memory CONTENT snapshot hivemind_brood_read_manifest read ONCE from the
+# manifest file, never re-opening it. The content enters jq ONLY via pipe (`printf '%s' "$content" | jq ...`), never spliced into
 # the program; an index enters as --argjson. This is what lets the projection engine open the
 # manifest exactly once and run all projections + shape validation against one consistent view.
 
@@ -165,11 +106,12 @@ hivemind_manifest_strain_count_snapshot() {
 
 # hivemind_manifest_field_at <content> <index> <field>
 # Emit the validated scalar value of <field> for the strain at array position <index> (0-based)
-# in the in-memory snapshot, and signal presence-vs-rejection OUT-OF-BAND via EXIT CODE. Same
-# supported fields and the same fixed-jq-path closed-case mapping as hivemind_manifest_field; the
-# strain is selected by INDEX (--argjson i), never by a name that could collide or carry a
-# delimiter. The field selector is a fixed literal from the closed case below — never attacker
-# content.
+# in the in-memory snapshot, and signal presence-vs-rejection OUT-OF-BAND via EXIT CODE.
+# Supported fields: worktree_path, branch, tmux_session, status, run.suggested_ledger,
+# run.suggested_id, workflow_hint; the run.* fields may be passed with or WITHOUT the `run.`
+# prefix, and a v1 manifest with no `run` block yields absent for them. The strain is selected by
+# INDEX (--argjson i), never by a name that could collide or carry a delimiter. The field
+# selector is a fixed literal from the closed case below — never attacker content.
 #
 # EXIT-CODE CONTRACT (F2, locked OQ1 resolution — consumed by brood-status-project.sh, STEP-004):
 # This helper distinguishes ABSENT from REJECTED via the EXIT CODE, NOT via an in-band sentinel

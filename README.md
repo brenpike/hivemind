@@ -218,7 +218,7 @@ Launching a script:
 - In manual mode, the Workflow tool's approval prompt is the opt-in. A No at the prompt interrupts the turn: nothing runs and nothing falls back.
 - A `Workflow(hivemind:<id>)` entry in `permissions.deny` falls back to the state machine: the launch is refused with no prompt, and the overlord says so in one line and runs the request on the state machine. A launch refused because the workflow is not found, or because workflows are turned off, falls back the same way. A run that started and then failed or ended blocked is reported as it ended and does not fall back.
 - In auto mode, the classifier decides the launch and no approval prompt is shown.
-- Brood children start with `--disallowedTools Workflow`, so they have no Workflow tool and every strain runs on the state machine.
+- Brood children launch the scripts like any session. They start in auto mode, so no approval prompt is shown, and a refused launch falls back to the state machine as it does in any session.
 
 How a script run behaves:
 
@@ -247,7 +247,7 @@ A `standard-delivery` script run, from request to PR:
 
 **Post-PR watch.** When the run opened or reused a PR, the overlord applies the default watch rule (see **Post-PR watch** below) and runs `pr-feedback-remediation` with intake `watch` on the state machine for that PR. That watch is a new run with its own run ledger.
 
-**State-machine fallback.** When the launch is refused, or the Workflow tool is absent as in brood children, `standard-delivery` runs on its state machine, from request to watched PR:
+**State-machine fallback.** When the launch is refused, or the Workflow tool is absent, `standard-delivery` runs on its state machine, from request to watched PR. The state machine does not rerun earlier gates after a later commit, so the run stops and asks you before it opens the PR:
 
 ```
 You --> Overlord --> route-workflow --> standard-delivery
@@ -259,7 +259,8 @@ You --> Overlord --> route-workflow --> standard-delivery
             +---- checkpoint <--+   (one molt per wave)
     version_bump_decision -> [version_bump -> version_checkpoint] -> validate
     local_review_decision -> local_review (Local-Reviewer + Codex, or skipped)
-    local_review (diminishing-returns) -> diminishing_returns_decision (only taken -> open_pr)
+    local_review (diminishing-returns) -> diminishing_returns_decision (only taken -> pr_confirm)
+    pr_confirm (asks you; only approved -> open_pr)
     open_pr --> github_review_decision --> github_review_loop (GitHub-Reviewer)
 ```
 
@@ -269,8 +270,9 @@ You --> Overlord --> route-workflow --> standard-delivery
 4. **Branch.** `git_preflight` checks git state, then `branch` creates or confirms a compliant working branch (`feature/`, `bugfix/`, `hotfix/`, `refactor/`, `chore/`, `docs/`, `test/`, `ci/`). Nothing is ever committed to trunk.
 5. **Build in waves.** `implement_next_step` asks `hivemind:next-wave` for the ready wave; `implement_step` dispatches it as parallel drones and changelings; `checkpoint` molts once for the whole wave.
 6. **Gate.** `version_bump_decision` (via `hivemind:bump-type`; a required bump goes through `version_bump` and `version_checkpoint`), then `validate` runs the project's validation commands.
-7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped. A `diminishing-returns` exit goes through `diminishing_returns_decision` first: only a taken advisory reaches `open_pr`, and one not taken ends the run blocked before the PR.
-8. **Ship and watch.** `open_pr` opens the PR, then `github_review_decision` and `github_review_loop` watch it by default, fixing, pushing, replying to, and resolving feedback from the Codex, Copilot, or Claude reviewer bots until approval, merge, close, or an idle hour. Opt out in your request or with `HIVEMIND_SKIP_PR_WATCH`. Agents never merge.
+7. **Review.** `local_review_decision`, then `local_review`: the local-reviewer runs the Codex review. It needs the `codex` companion (see [Recommended companion plugins](#recommended-companion-plugins)); without it, the step is skipped. A `diminishing-returns` exit goes through `diminishing_returns_decision` first: only a taken advisory reaches `pr_confirm`, and one not taken ends the run blocked before the PR.
+8. **Confirm.** `pr_confirm` stops before the PR and asks you. The overlord shows the commits made after each gate ended, and only your approval reaches `open_pr`. A rejection ends the run blocked before the PR.
+9. **Ship and watch.** `open_pr` opens the PR, then `github_review_decision` and `github_review_loop` watch it by default, fixing, pushing, replying to, and resolving feedback from the Codex, Copilot, or Claude reviewer bots until approval, merge, close, or an idle hour. Opt out in your request or with `HIVEMIND_SKIP_PR_WATCH`. Agents never merge.
 
 **Waves.** Each wave is the largest set of plan steps whose dependencies are done and whose file scopes do not overlap, so parallel workers never write the same file. Workers in a wave do not commit; one checkpoint commit (one molt) closes each wave, made by a runner in a script run and by the overlord on the state machine. On the state machine, `hivemind:next-wave` computes each wave from the run ledger; the script computes its waves in `plugin/workflow-src/lib/waves.js`.
 
@@ -307,10 +309,11 @@ You --> Overlord --> Cerebrate (decompose)
 ```
 
 - **Approval gate.** The overlord shows you the normalized strain tasks and dispatches nothing until you approve.
-- **One worktree and one detached tmux session per strain.** Each strain runs its own overlord in `.claude/worktrees/<brood-id>/<short>`, started with `--disallowedTools Workflow`, so it runs on the state machine.
+- **One worktree and one detached tmux session per strain.** Each strain runs its own overlord in `.claude/worktrees/<brood-id>/<short>`, started in auto mode, so it launches the workflow scripts with no approval prompt.
 - **Manifest.** `hivemind:spawn-brood` writes `.hivemind/broods/<brood-id>/manifest.json`.
-- **Children are brood-unaware.** Each child derives its own compliant working branch, runs the full lifecycle, and opens its own PR.
-- **Hatchery.** The spawning overlord enters hatchery mode and watches the brood with `hivemind:brood-status` (tmux session state, branch existence, PR status per strain). On your explicit request, `hivemind:enable-brood-remote` turns on remote control for every strain.
+- **Children are brood-unaware.** Each child starts on a detached HEAD at the base, plans and names its own working branch, runs the full lifecycle, and opens its own PR.
+- **Remote control.** Once a strain has started, spawn turns on remote control for it (`/rc <short>`), so you can watch and answer it from claude.ai or the Claude app. Monitoring the brood is your job. Remote control needs a claude.ai subscription login. A strain that had not started when spawn ended gets no remote control until you ask for `hivemind:enable-brood-remote`.
+- **Hatchery.** The spawning overlord enters hatchery mode and watches the brood with `hivemind:brood-status` (tmux session state, branch existence, PR status per strain). Spawn turns on remote control for the strains that started; on your explicit request, `hivemind:enable-brood-remote` sends it again to every live strain.
 
 ### Signals
 
@@ -418,7 +421,7 @@ All skills are invoked using the namespaced form:
 | `hivemind:tdd` | Implement features using Test-Driven Development (TDD) with the red-green-refactor cycle; invoke only in a context that can modify source and test files |
 | `hivemind:spawn-brood` | Dispatch parallel overlord sessions: spawns N Claude Code instances in separate git worktrees via tmux and writes the brood manifest |
 | `hivemind:brood-status` | Check status of broods under the current checkout, with per-strain status; reports per-strain tmux session state, branch existence, and PR status |
-| `hivemind:enable-brood-remote` | User-invoked: fan the Claude `/rc` remote-control command out to every strain in a brood (tmux keystroke injection) |
+| `hivemind:enable-brood-remote` | User-invoked. Spawn already turns remote control on for the strains that started; on request, this skill sends the Claude `/rc` remote-control command again to every live strain in a brood (tmux keystroke injection) |
 | `hivemind:route-workflow` | Sole workflow classifier: selects which workflow handles a non-Reflex request by judgment (never a keyword table); emits selected / ambiguous / exploratory / blocked |
 | `hivemind:init-run-ledger` | State machine only. Initialize the run ledger for the current overlord instance: creates `.hivemind/runs/<run-id>/` and writes the initial `state.json` via the committed engine script |
 | `hivemind:record-state-result` | State machine only. Record the outcome of the current workflow state into the run ledger and advance `state.current` to the legal next state, validated against the workflow definition |

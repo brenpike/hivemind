@@ -1395,7 +1395,7 @@ mark_time 'CHECK8'
 #
 # Scope: every committed engine script matching plugin/skills/*/scripts/*.sh
 # that SOURCES _shared/containment.sh. Scripts that do not source it (e.g.
-# brood-discover.sh) are excluded — they have no guard to order against.
+# push-branch.sh) are excluded — they have no guard to order against.
 #
 # For each (script, guarded-token) pair we locate:
 #   * the GUARD line (the containment helper invocation for that token), and
@@ -1419,8 +1419,6 @@ mark_time 'CHECK8'
 #     presence probes that legitimately precede the inputs guard; only the first
 #     `jq` open of $INPUTS_FILE is the read the guard must gate (the jq validity
 #     probe is the canonical read-oracle, per the engine reference script).
-#   * `[ -L "$MANIFEST" ]` / `[ -f "$MANIFEST" ]` are leaf/existence probes that
-#     precede the manifest guard by design; only `cat`/`jq` opens are reads.
 #   * for $ledger the path is DERIVED after the runs-dir guard, so its first
 #     `[ -f "$ledger" ]` existence probe IS a real read of the derived path and
 #     the guard must precede it.
@@ -1492,24 +1490,21 @@ for engine_script in "${check9_engine_scripts[@]}"; do
     # EVERY GUARD_PATTERN is anchored to an EXECUTABLE line (^[[:space:]]*[^#]*)
     # so a COMMENT that merely NAMES the guard helper (e.g. a `# hivemind_read_inputs_file
     # "$INPUTS_FILE"` doc line above the first real read) is NOT miscounted as the
-    # guard — otherwise an engine reading $INPUTS_FILE/$MANIFEST with no real guard
+    # guard — otherwise an engine reading $INPUTS_FILE with no real guard
     # could pass on the strength of a comment mention.
-    declare -a token_labels=('$INPUTS_FILE' '$MANIFEST' '$ledger' '$ledger-leaf')
+    declare -a token_labels=('$INPUTS_FILE' '$ledger' '$ledger-leaf')
     declare -a token_guards=(
         '^[[:space:]]*[^#]*(hivemind_assert_inputs_contained|hivemind_read_inputs_file)[^#]*"\$INPUTS_FILE"'
-        '^[[:space:]]*[^#]*(hivemind_assert_inputs_contained|\[ -L )[^#]*"\$MANIFEST"'
         '^[[:space:]]*[^#]*hivemind_assert_contained[^#]*\.hivemind/runs/\$run_id'
         '^[[:space:]]*hivemind_assert_ledger_contained'
     )
     declare -a token_reads=(
         '(jq |cat )[^#]*"\$INPUTS_FILE"'
-        '(jq |cat )[^#]*"\$MANIFEST"'
         '^[[:space:]]*(jq |cat |\[ -f )[^#]*"\$ledger"'
         '^[[:space:]]*(jq |cat |\[ -f )[^#]*"\$ledger"'
     )
     declare -a token_read_excludes=(
         'hivemind_assert_inputs_contained|hivemind_read_inputs_file|\[ -[fnL] '
-        'hivemind_assert_inputs_contained|\[ -[fnL] '
         'hivemind_assert(_contained|_ledger_contained)'
         'hivemind_assert(_contained|_ledger_contained)'
     )

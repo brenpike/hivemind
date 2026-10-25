@@ -304,7 +304,7 @@ phase_apply() {
   # gate below — Class A: bash $(cat ...) silently strips NUL bytes (and trailing newlines), so a
   # NUL-bearing or torn on-disk settings.json would pass the in-variable single-object check and get
   # clobbered while apply reports complete. Validate the file ON ITS PATH before the lossy read — same
-  # root as the ledger-project.sh hivemind_path_has_nul-before-$(cat) NUL precedent.
+  # root as the brood-state.sh rule that refuses a NUL before any $(...) capture can erase it.
   if [ -f "$settings_file" ] && [ -s "$settings_file" ] && grep -q '[^[:space:]]' "$settings_file"; then
     if ! hivemind_jq_is_single_object_file "$settings_file"; then
       emit_blocked_output "$project_root" "malformed" "" "$companions_json"

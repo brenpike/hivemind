@@ -24,9 +24,8 @@ Before:
 - [ ] `strains`, `base`, `overlap_risk`, `overlap_details` provided (no `brood_id` — script generates it).
 - [ ] `tmux`, `claude`, and `jq` are installed (the script blocks on any missing).
 - [ ] `base` resolves to a real commit (the script verifies this once, up front).
-- [ ] No strain branch exists locally/remotely; no tmux session or worktree path
-      collides (the script pre-flights all of these; names are brood-id-namespaced,
-      so concurrent broods on the same checkout are supported).
+- [ ] No tmux session or worktree path collides (the script pre-flights both; names
+      are brood-id-namespaced, so concurrent broods on the same checkout are supported).
 
 After:
 - [ ] Script printed `brood_id: <id>` on stdout — the coordinator captures the generated
@@ -34,27 +33,28 @@ After:
 - [ ] Brood manifest written to `.hivemind/broods/<brood-id>/manifest.json` as
       `manifest_version: 4` (JSON integer) — carrying a top-level `hatchery`
       block (`run_id`, `ledger`, `workflow`) and a per-strain `run` block
-      (`suggested_id`, `workflow_hint`) alongside the v1 fields. Parsed
-      exclusively by jq (machine consumer); no YAML back-compat.
-- [ ] Each strain has a worktree + branch off `base`, a detached tmux session
-      `<brood-id>-<short>` running claude, and its injected `task.md` — which
-      emits the data-boundary preamble FIRST, THEN the YAML child-task metadata
-      block (`parent`, `strain`, `run`, `working_branch`, `instructions`), THEN
-      the description. The `strain/<brood-id>/<short>` branch is a throwaway
-      WORKTREE SCRATCH ref: the injected task hands the child a classification
-      hint (`run.workflow_hint`, passed through AS-IS — no prefix mapping in this
-      script), slug material (`strain.name`/`strain.description`), a uniqueness
-      token (`strain.id` / `parent.brood_id`), and `working_branch.base` +
-      `working_branch.trunk_freshness: skipped`. The child is instructed to derive
-      its OWN compliant `<type>/<slug>-<token>` working branch by judgment, run
-      `hivemind:create-working-branch` off `base` to switch the worktree HEAD onto
-      it, and open its PR from THAT branch — NOT from the scratch ref. The
-      branch-naming taxonomy/prefix decision lives in the child's prose judgment;
-      this script injects no taxonomy or prefix logic and keeps the child
-      brood-unaware (these are framed as ordinary task inputs).
+      (`suggested_id`, `workflow_hint`) alongside the v1 fields. No per-strain
+      `branch` field is written; readers treat an absent branch as `MISSING`.
+      Parsed exclusively by jq (machine consumer); no YAML back-compat.
+- [ ] Each strain has a worktree created DETACHED at the resolved `base` commit
+      (no `strain/<brood-id>/<short>` branch is created; the child's own planner
+      names and creates its working branch), a detached tmux session
+      `<brood-id>-<short>` running `claude --permission-mode auto`, and its
+      injected `task.md`. In auto mode the classifier launches the child's workflow
+      with no prompt, so the child runs on the script engine. `task.md` emits the
+      data-boundary preamble FIRST, THEN a data-only YAML block: `parent.kind`,
+      `parent.brood_id`, `strain.id`, `strain.name`, `run.suggested_id`,
+      `run.workflow_hint` (a non-binding hint, passed through AS-IS),
+      `working_branch.base` and `task.description`. It carries no instructions
+      list and no field naming a scratch branch, a ledger path or a trunk-freshness
+      override, because the harness relays it to every workflow agent the child runs.
       A pre-launch identity guard runs before each strain's session is started:
       if the strain's `task.md` `strain.id` would not match its `run.suggested_id`,
-      the strain is refused (failed-pre-launch) and never spawned. The engine
+      the strain is refused (failed-pre-launch) and never spawned. A pre-launch
+      facts guard runs too: a strain whose new worktree already holds
+      `.hivemind/facts` (a base that tracks it) is refused (failed-pre-launch)
+      and its worktree removed, so every facts file spawn or brood-status reads
+      was written after launch. The engine
       submits each task during a shared Pass-2 readiness round-robin:
       load-buffer, paste-buffer, settle, then a single Enter, so the submit
       keystroke lands as a submit instead of racing the paste. After all strains
@@ -62,8 +62,10 @@ After:
       verification — each strain's verify/resend poll runs on its OWN independent
       deadline (`STARTED_EVIDENCE_TIMEOUT`, default 180 s), decoupled from every
       other strain's readiness budget, so one slow child cannot block another.
-      The verifier polls the child's on-disk run-ledger `state.current` for
-      started-evidence; if no started-evidence is observed it resends Enter
+      The verifier polls the child worktree for started-evidence: a valid run-ledger
+      `state.current` (the confined ledger read) OR a gather-facts output file
+      (`.hivemind/facts/facts-*.json`, written by a script-engine child, which keeps
+      no run ledger). If no started-evidence is observed it resends Enter
       (idempotent — task text is already buffered, never re-pasted) as a
       periodic nudge within the grace window. On grace exhaustion the outcome
       depends on tmux session liveness: if the session is ALIVE the strain is
@@ -71,22 +73,34 @@ After:
       DEAD session yields `failed` (failed-to-launch). `starting` is a
       non-failed observable rendered by `hivemind:brood-status` as such;
       only `failed` is the error state in brood-status derivation. Verification
-      reads the child run-ledger `state.current` as ground truth — capture-pane
-      is not used. Whether a
-      child actually completed turn-start is also observed independently by
-      `hivemind:brood-status` from run-ledger ground truth (`state.current`
-      present => `running`, absent => `starting`), not only by spawn-brood.
+      reads on-disk ground truth — capture-pane is not used. Whether a child
+      actually started is also observed independently by `hivemind:brood-status`
+      from the same two sources (ledger or facts file present => `running`,
+      neither => `starting`), not only by spawn-brood.
       After Pass-3 completes and BEFORE manifest emission, a FINAL reconciliation
       sweep re-probes every `starting` strain once: a strain whose tmux session
       died in the Pass-3 tail is reclassified `failed` (contributing to exit 1),
-      and a strain that reached started-evidence in the tail is promoted to
-      `running` — tightening the spawn exit code to end-of-spawn liveness.
+      and a strain that reached started-evidence (ledger or facts file) in the
+      tail is promoted to `running` — tightening the spawn exit code to
+      end-of-spawn liveness.
+- [ ] Remote control: after the manifest is written, on both the exit-0 and
+      exit-1 paths, the script runs the `hivemind:enable-brood-remote` engine with
+      `--only <short>...` for exactly the strains whose status is `running`, so
+      each receives `/rc <short>`. It never triggers an unfiltered fan-out and
+      makes no call when no strain is running. Each engine output line is printed
+      to stdout prefixed `remote: `. Each `starting` strain gets one
+      `remote: skipped: <short> (not started when spawn ended; ask for enable-brood-remote later)`
+      line; a `failed` strain gets none. An engine blocker or failure prints a
+      `remote:` warning line and never changes the manifest or the exit code.
+      Remote control needs a claude.ai login and an accepted one-time
+      remote-control confirmation; otherwise the child shows that confirmation
+      until the user attaches.
 - [ ] `.claude/worktrees/` is excluded from git (the script self-guards).
 - [ ] Final action is the Bash script call. Exit 0 = brood spawned successfully
       (all strains `running`, OR all non-running strains are `starting` — a slow
       cold boot is not a failure); exit 1 = pre-flight blocker OR at least one
-      strain is genuinely `failed` (dead tmux session or pre-launch identity
-      guard refusal). `starting` strains do NOT contribute to `failed_count`
+      strain is genuinely `failed` (dead tmux session, or a pre-launch refusal
+      by the identity guard or the facts guard). `starting` strains do NOT contribute to `failed_count`
       and do NOT cause exit 1.
 
 The manifest is a registry/coordination artifact, NOT the source of truth for
@@ -103,8 +117,9 @@ The caller resolves and passes these; the skill does not resolve them.
   `Strains` plan-artifact entry. Each strain MAY also carry an optional
   `workflow_hint` (a non-binding suggestion for the child's router; defaults to
   `standard-delivery` when omitted). Per-strain `branch` is NOT supplied —
-  the script derives it as `strain/<brood-id>/<short>`.
-- `base`: resolved trunk/base branch; each strain worktree branches off it.
+  no strain branch is created.
+- `base`: resolved trunk/base branch; each strain worktree is created detached
+  at its commit.
 - `overlap_risk`: `low | medium | high`.
 - `overlap_details`: planner overlap-assessment text.
 - `hatchery` (OPTIONAL): `{run_id, workflow}` for the coordinator's own run
@@ -145,8 +160,8 @@ The caller resolves and passes these; the skill does not resolve them.
    - Do NOT include `brood_id` — the script generates it internally; any
      caller-supplied value is ignored.
    - Each strain requires `name` and `description`; `workflow_hint` is optional.
-     Do NOT include a per-strain `branch` — the script derives it as
-     `strain/<brood-id>/<short>`; any caller-supplied value is ignored.
+     Do NOT include a per-strain `branch` — no strain branch is created; any
+     caller-supplied value is ignored.
    - `hatchery` is optional; both its fields default when omitted.
    - `name` is sanitized to `short` (`[a-z0-9-]`) for the worktree path
      (`.claude/worktrees/<brood-id>/<short>`) and tmux session
@@ -157,9 +172,10 @@ The caller resolves and passes these; the skill does not resolve them.
 2. **Write the inputs file** via the Write tool to a per-invocation mktemp-unique
    staging path under `.hivemind/` (e.g. `.hivemind/spawn-inputs.<rand>.json`).
    Use the Write tool's `file_path` parameter for that unique path; set `content`
-   to the JSON object from step 1. Write performs no shell parsing of the values,
-   and `spawn-brood.sh` reads each field with `jq` into a shell variable, so no
-   field is interpolated into shell or jq program source. That is a transport
+   to the JSON object from step 1. Write performs no shell parsing of the values.
+   `spawn-brood.sh` reads the inputs file once into memory and reads each field
+   from that copy with `jq` into a shell variable, so no field is interpolated
+   into shell or jq program source. That is a transport
    property only: the description is carried on into the child's prompt as
    `task.description`, and the controls that bound that text are the compensating
    controls in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Brood Spawn
@@ -175,14 +191,17 @@ The caller resolves and passes these; the skill does not resolve them.
    ```
    EXECUTE (do not Read) the script — it owns every deterministic step: dependency
    checks, input validation, pre-flight collision/exclude/base checks, brood-id
-   generation, per-brood state-dir creation, staging-file relocation, two-pass
-   spawn (create+launch, then ready-poll+inject), manifest emission, and cleanup.
+   generation, per-brood state-dir creation, the inputs snapshot, the record
+   write and the staging-file removal, three-pass
+   spawn (create+launch, ready-poll+inject, then started-evidence verify),
+   manifest emission, the remote-control step, and cleanup.
 
 4. **Capture the generated brood-id** from stdout: on exit 0 the script prints
    `brood_id: <id>` then `manifest: <abs path>`. Capture `brood_id` — the
    coordinator needs it to monitor the brood (hatchery references its own brood-id).
    Exit 1: the script printed a `blocker: <reason>` (and, for partial failures,
    a `manifest: <abs path>` and `brood_id: <id>`) on stderr — surface it and stop.
+   On both exits, any `remote:` lines on stdout report the remote-control step.
 
 ## Pointers
 
@@ -197,7 +216,7 @@ rejected and the script exits with a blocker.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `STARTED_EVIDENCE_TIMEOUT` | `180` (seconds) | Cold-boot grace period for a child to write its run-ledger `state.current` (started-evidence). Governs the Pass-3 per-strain verification deadline. Bare-Enter resends are periodic nudges within this window, not a fixed retry cap. |
+| `STARTED_EVIDENCE_TIMEOUT` | `180` (seconds) | Cold-boot grace period for an auto-mode child to write started-evidence: a run-ledger `state.current` or a gather-facts output file. Governs the Pass-3 per-strain verification deadline. Bare-Enter resends are periodic nudges within this window, not a fixed retry cap. A strain still without started-evidence when spawn ends stays `starting` and gets no remote control until the user asks for `hivemind:enable-brood-remote`. |
 
 ## Silence Discipline
 
@@ -216,14 +235,14 @@ as a workflow state or as one step inside a longer procedure:
 
 ## Do Not
 
-- do not rely on `claude --worktree` for branch/worktree creation — the script
-  creates worktrees explicitly via `git worktree add -b <exact strain branch>`.
+- do not rely on `claude --worktree` for worktree creation — the script
+  creates worktrees explicitly via `git worktree add --detach` at the base commit.
 - commit, push, or open a PR.
 - modify any product files.
 - invent values for `strains`, `base`, `overlap_risk`, or `overlap_details` —
   the script exits 1 with a blocker if any are missing.
 - supply `brood_id` or per-strain `branch` in the inputs — the script generates
-  and derives both internally; caller-supplied values are ignored.
+  the brood-id and creates no strain branch; caller-supplied values are ignored.
 - author the inputs file via any transport other than the Write tool — no heredoc, no shell
   redirection, no inline python/node script. A missing Write tool is a hard stop, not a
   workaround; see `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`

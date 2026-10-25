@@ -3,32 +3,46 @@
 # spawn-brood — deterministic brood-spawn engine for the hivemind:spawn-brood skill.
 #
 # Spawns N overlord sessions ("strains") as a brood: one git worktree per strain,
-# one detached tmux session per strain running claude, a per-strain task.md, and a
-# per-brood manifest. This script OWNS every deterministic shell step; the skill
-# body is a navigator that authors the inputs file and calls this script once.
+# one detached tmux session per strain running claude in auto mode
+# (`claude --permission-mode auto`), a per-strain task.md, and a per-brood manifest. After
+# the manifest is written it turns on remote control (`/rc <short>`) for every strain that
+# started. This script OWNS every deterministic shell step; the skill body is a navigator
+# that authors the inputs file and calls this script once.
 #
 # STATE LAYOUT (per-brood namespacing): each spawn generates its OWN brood-id
 # INTERNALLY (brood-<uuidv4>) and writes its state to a DISJOINT, per-brood directory —
 # .hivemind/broods/<brood-id>/{inputs.json,manifest.json} — anchored to the checkout root.
-# Worktrees and branches are likewise namespaced by brood-id (see below), so two concurrent
-# same-checkout spawns get DISJOINT worktrees+branches+manifests and cannot collide. This
+# Worktrees and tmux sessions are likewise namespaced by brood-id (see below), so two concurrent
+# same-checkout spawns get DISJOINT worktrees+sessions+manifests and cannot collide. This
 # isolation REPLACES the old singleton manifest + tmux-liveness guard: there is no shared
 # manifest to overwrite, hence no overlap protection is needed (and none exists).
 #
 # NAMESPACE GRAMMAR (brood-id carries through every derived name):
 #   - state dir:    .hivemind/broods/<brood-id>/
-#   - branch:       strain/<brood-id>/<strain-slug>
-#   - worktree:     .claude/worktrees/<brood-id>/<strain-slug>
+#   - worktree:     .claude/worktrees/<brood-id>/<strain-slug>   (detached HEAD at the base commit)
 #   - tmux session: <brood-id>-<strain-slug>   (brood-prefixed → satisfies brood-status F3)
+# No branch is created: each worktree boots on a detached HEAD at the resolved base commit, and
+# the child's own planner names and creates its working branch.
+#
+# TARGET DISCIPLINE (twin of TARGET-TRUST in skills/enable-brood-remote/scripts/rc-brood.sh):
+#   tmux resolves a bare session name exact-first-then-PREFIX, so brood-<id>-api can resolve to a
+#   live sibling brood-<id>-api-x once api is gone. Every tmux operation on a strain session is
+#   therefore exact. Liveness probes use `has-session -t "=<session>"`. Readiness capture, the
+#   task paste, the submit Enter and every nudge address the `%N` pane id that
+#   resolve_strain_pane reads from `list-panes -s -t "=<session>"` right before use (exactly one
+#   active row whose session name is byte-equal, else fail closed). `=` is used only in
+#   target-SESSION contexts: on tmux 3.0a it fails as a target-PANE spec.
 #
 # INPUT (single positional argument — OQ4 staging-inputs transport):
 #   $1  Path to a JSON inputs file the navigator (SKILL.md) authored via the Write tool to a
 #       PER-INVOCATION mktemp-unique STAGING path UNDER .hivemind/ (e.g.
 #       .hivemind/spawn-inputs.<rand>.json). The navigator passes that staging path here. This
-#       script VALIDATES it (must exist, be valid JSON, and resolve INSIDE the checkout via the
-#       shared read-guard), jq-reads it into inert shell VARIABLES, generates the brood-id,
-#       creates .hivemind/broods/<brood-id>/, then atomically `mv`s the staging file into
-#       "<state>/inputs.json" for the record. Per-invocation mktemp staging preserves
+#       script checks it (must resolve INSIDE the checkout via the shared read-guard), then reads
+#       it ONCE with `jq -c -s` (exactly one JSON document) into an in-memory snapshot. Every
+#       validation and field read runs jq over that snapshot on stdin. After pre-flight it writes
+#       the snapshot (compact JSON) to "<state>/inputs.json" for the record (creating
+#       .hivemind/broods/<brood-id>/), then removes the staging file.
+#       Per-invocation mktemp staging preserves
 #       disjointness (no singleton inputs file to clobber). Untrusted bytes in the JSON are read
 #       into variables and referenced only as "$var" — bash does not re-evaluate command
 #       substitution from variable contents, so the command-substitution injection class is
@@ -46,36 +60,48 @@
 #         ...
 #       ]
 #     }
-#   The per-strain branch is NO LONGER caller-supplied — it is DERIVED as
-#   strain/<brood-id>/<strain-slug>, so two concurrent same-checkout broods reusing a strain
-#   name get disjoint branches (closes the F2-deep same-name brood-collision class). Any caller-supplied `branch` is ignored.
+#   There is NO per-strain branch: each worktree is created detached at the resolved base
+#   commit and the manifest records no per-strain branch field. Any caller-supplied `branch`
+#   is ignored.
 #
 # OUTPUT:
-#   - Writes per-strain task.md files under each worktree's gitignored .hivemind/.
+#   - Writes per-strain task.md files under each worktree's gitignored .hivemind/, and copies the
+#     coordinator .claude/settings.local.json (refused up front when it is a symlink or not a
+#     regular file) into each worktree.
 #   - Writes the brood manifest to .hivemind/broods/<brood-id>/manifest.json (JSON,
 #     manifest_version: 4) in the coordinator checkout (anchored to the checkout root).
+#   - Reads no brood state itself. Every brood-state read (a child run ledger, a child's
+#     gather-facts started-evidence, the pre-launch facts guard) goes through
+#     skills/_shared/brood-state.sh, the only home of brood-state reads, which takes identifiers
+#     (a worktree root and a run id) and derives every location from them.
 #   - On full success: prints `brood_id: <brood-id>` and `manifest: <abs path>` to stdout,
 #     exits 0. The brood_id line lets the overlord capture the generated id for monitoring.
 #   - On any per-strain failure: writes the manifest with failed strains marked
 #     "status": "failed", prints `blocker: <n> of <m> strains failed to spawn` and
 #     `manifest: <abs path>` to stderr, exits 1.
+#   - On BOTH of those paths, after the manifest is written: runs the enable-brood-remote engine
+#     (rc-brood.sh --only <short>...) for exactly the strains whose status is `running`, and prints
+#     each of its output lines to stdout prefixed `remote: `. Each `starting` strain gets one
+#     `remote: skipped: <short> (not started when spawn ended; ask for enable-brood-remote later)`
+#     line. No call is made when no strain is running. An rc-brood blocker or failure prints a
+#     `remote:` warning line and never changes the manifest or the exit code.
 #   - On any pre-flight blocker (missing dep, bad inputs, collision, unresolved
 #     base): prints `blocker: <reason>` to stderr, exits 1, writes no manifest.
 #
 # EXIT CONTRACT:
 #   0  all strains spawned + injected
 #   1  pre-flight blocker OR one-or-more strains failed
+#   The remote-control step never changes the exit code.
 #
 # set -u: an unset variable is a programming error here (every value is parsed
 # explicitly from the inputs file); fail loudly rather than silently spawn with an
-# empty branch/path. We do NOT use `set -e`: per-strain failures are caught and
+# empty base/path. We do NOT use `set -e`: per-strain failures are caught and
 # routed to the failed-strain path so the manifest still records the partial brood.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
 # are DELIBERATELY omitted. The full floor would change behavior: per-strain failures are
-# caught (`if ! git worktree add`) and routed to the failed-strain path, `git ls-remote
-# --exit-code` rc=2 is a normal no-collision result, and the INT/TERM trap reports leaked
-# resources — `set -e` would abort the whole brood on the first per-strain hiccup.
+# caught (`if ! git worktree add`) and routed to the failed-strain path, and the INT/TERM trap
+# reports leaked resources — `set -e` would abort the whole brood on the first per-strain hiccup.
 
 set -u
 
@@ -90,8 +116,8 @@ blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 # ready-for-input state before treating the strain as a POST-LAUNCH failure. 90s
 # covers cold claude-CLI start on a loaded host without hanging the brood.
 # POLL_INTERVAL: seconds between `tmux capture-pane` ready polls during that wait.
-# There is no gate timeout: the one-time bypass-permissions trust gate is
-# pre-accepted at launch via --settings, so no gate is ever screen-scraped.
+# There is no gate timeout: children launch in auto mode (--permission-mode auto),
+# which has no launch-time permissions gate, so no gate is ever screen-scraped.
 READY_TIMEOUT=90
 POLL_INTERVAL=2
 # INJECT_SETTLE: seconds to wait after tmux paste-buffer -p before sending the submit
@@ -101,26 +127,29 @@ POLL_INTERVAL=2
 # submit model (inject_strain) is now a SINGLE send: paste, settle, send Enter ONCE,
 # return. spawn-brood does NOT verify turn-start by screen-scraping the TUI. A child that
 # fails to actually start a turn surfaces later through hivemind:brood-status, which judges
-# liveness from run-ledger ground truth (child run state.current present => running, absent
-# => starting) — not from capture-pane frames.
+# liveness from on-disk ground truth (a child run-ledger state.current or a gather-facts output
+# file present => running, neither => starting) — not from capture-pane frames. PROVENANCE: both
+# sources post-date launch by construction. The run-ledger leaf is keyed by the spawn-generated
+# brood GUID run id, and the facts folder was proven absent before launch (3a-facts-guard).
 INJECT_SETTLE=0.2
 
 # SPAWN-TIME RESEND TUNABLES (inject_strain turn-start verification): under load (many
 # concurrent claude bootstraps) a single submit Enter can race/drop at the pty and leave a
 # child sitting idle at the prompt forever. After the initial submit, inject_strain polls the
-# child run-ledger for started-evidence and resends a bare Enter if none appears within the
-# per-attempt budget. Cadence reuses POLL_INTERVAL above.
+# child worktree for started-evidence (strain_has_started_evidence) and resends a bare Enter if
+# none appears within the per-attempt budget. Cadence reuses POLL_INTERVAL above.
 #   RESEND_RETRIES:      max bare-Enter resends AFTER the initial submit before marking failed.
-#   RESEND_POLL_TIMEOUT: seconds to poll the run-ledger per attempt before resending. The total
-#                        verification budget is roughly (RESEND_RETRIES+1)*RESEND_POLL_TIMEOUT,
-#                        sized so a slow-but-healthy child that writes its ledger late is caught
+#   RESEND_POLL_TIMEOUT: seconds to poll for started-evidence per attempt before resending. The
+#                        total verification budget is roughly (RESEND_RETRIES+1)*RESEND_POLL_TIMEOUT,
+#                        sized so a slow-but-healthy child that writes its evidence late is caught
 #                        by a poll rather than failed.
 RESEND_RETRIES=3
 RESEND_POLL_TIMEOUT=8
 
 # STARTED_EVIDENCE_TIMEOUT: cold-boot first-evidence grace window (seconds) for Pass-3
-# per-strain turn-start verification. A cold `claude` boot → route-workflow → init-run-ledger
-# chain can take >2min on a loaded host before the child writes run-ledger state.current, so the
+# per-strain turn-start verification. A cold `claude` boot → workflow start chain can take >2min
+# on a loaded host before the child writes started-evidence (a run-ledger state.current or a
+# gather-facts output file), so the
 # legacy (RESEND_RETRIES+1)*RESEND_POLL_TIMEOUT (~32s) budget falsely failed LIVE, progressing
 # strains. verify_strain now polls started-evidence against THIS deadline (computed per-strain at
 # its own Pass-3 entry — never a shared scheduler), nudging with bare-Enter resends every
@@ -212,12 +241,21 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 [ -f "$plugin_root/skills/_shared/allowlist.sh" ] || blocker "required shared library missing: skills/_shared/allowlist.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/allowlist.sh" || blocker "failed to source skills/_shared/allowlist.sh (unparseable); refusing to proceed"
 # Source the shared run-ledger scalar projector so spawn-time started-evidence is single-sourced
-# from the SAME validator the brood-status dashboard uses (hivemind_project_state_current). This
-# closes the prior divergence where an inline non-empty-string check accepted ledger values the
-# canonical projector rejects as MALFORMED (overlength, wrong charset, multi-document JSON),
+# from the SAME validator the brood-status dashboard uses (hivemind_project_state_current_content).
+# This closes the prior divergence where an inline non-empty-string check accepted ledger values
+# the canonical projector rejects as MALFORMED (overlength, wrong charset, multi-document JSON),
 # producing split-brain launch evidence between spawn-brood and brood-status.
 [ -f "$plugin_root/skills/_shared/ledger-project.sh" ] || blocker "required shared library missing: skills/_shared/ledger-project.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/ledger-project.sh" || blocker "failed to source skills/_shared/ledger-project.sh (unparseable); refusing to proceed"
+# Source the brood-state reader, the ONLY home of brood-state reads. It derives every location
+# from identifiers (a worktree root and a run id) and refuses a symlinked or non-directory
+# component and a symlinked or non-regular leaf: the child run ledger
+# (hivemind_brood_read_child_ledger), the gather-facts started-evidence
+# (hivemind_detect_facts_evidence, the second started-evidence source, written by a
+# script-engine child that keeps no run ledger) and the pre-launch facts guard
+# (hivemind_brood_facts_absent). It needs containment.sh and ledger-project.sh, sourced above.
+[ -f "$plugin_root/skills/_shared/brood-state.sh" ] || blocker "required shared library missing: skills/_shared/brood-state.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/brood-state.sh" || blocker "failed to source skills/_shared/brood-state.sh (unparseable); refusing to proceed"
 
 # ── Defense-in-depth inputs READ-guard (shared helper) ─────────────────────────
 # Refuse to READ the inputs file when its canonical path escapes the checkout (e.g. via a
@@ -228,13 +266,27 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 hivemind_assert_inputs_contained "$(git rev-parse --show-toplevel 2>/dev/null)" "$INPUTS_FILE" >/dev/null \
   || { printf 'blocker: refusing to read the inputs file: %s resolves outside the checkout (symlinked ancestor)\n' "$INPUTS_FILE" >&2; exit 1; }
 
-# ── JSON-validity probe (AFTER the inputs READ-guard) ───────────────────────────
-# `jq -e .` opening an attacker-supplied external path is itself an external-file JSON-validity
-# read oracle, so the containment guard above MUST gate it. This probe therefore runs AFTER
-# hivemind_assert_inputs_contained — never before. A contained-but-invalid-JSON inputs file
-# still hits this blocker (the guard passes, the probe rejects).
-jq -e . "$INPUTS_FILE" >/dev/null 2>&1 \
+# ── Inputs snapshot (ONE read, AFTER the inputs READ-guard) ─────────────────────
+# Read the staging file ONCE with `jq -c -s`, which must find exactly one JSON document. The
+# compact result is the in-memory snapshot every later validation and field read runs over
+# (read_inputs_field), so every field comes from the same parse. Opening an attacker-supplied
+# external path is itself a JSON-validity read oracle, so this read stays AFTER
+# hivemind_assert_inputs_contained, never before.
+inputs_one_document_filter='if length == 1 then .[0] else error("expected exactly one JSON document") end'
+inputs_snapshot="$(jq -c -s "$inputs_one_document_filter" "$INPUTS_FILE" 2>/dev/null)" \
   || { printf 'blocker: brood inputs file %s is not valid JSON\n' "$INPUTS_FILE" >&2; exit 1; }
+
+# read_inputs_field <jq-filter>: run `jq -r <jq-filter>` over the in-memory inputs snapshot on
+# stdin.
+read_inputs_field() {
+  printf '%s' "$inputs_snapshot" | jq -r "$1"
+}
+
+# Up-front shape gate over the snapshot, before any field read or side effect: the inputs must
+# be a JSON object whose strains member is an array.
+inputs_shape_ok="$(read_inputs_field 'type == "object" and ((.strains | type) == "array")' 2>/dev/null)"
+[ "$inputs_shape_ok" = "true" ] \
+  || { printf 'blocker: inputs file has no valid strains array\n' >&2; exit 1; }
 
 # ── Brood-id generation (internal, OQ locked) ────────────────────────────────────
 # Generate the brood-id INTERNALLY as brood-<uuidv4>. Any caller-supplied brood_id in the
@@ -242,7 +294,7 @@ jq -e . "$INPUTS_FILE" >/dev/null 2>&1 \
 # kernel uuid file, else /dev/urandom hex formatted as a uuid. LOWERCASE the result (some
 # uuidgen builds emit uppercase). The id is then ASSERTED to match ^brood-[0-9a-f-]+$ — a
 # single safe path component (no '/', no '..', no separator/framing bytes) — and FAILS CLOSED
-# otherwise, so it can be interpolated into the state dir / branch / worktree / session names
+# otherwise, so it can be interpolated into the state dir / worktree / session names
 # below without further sanitization.
 generate_brood_uuid() {
   local raw=""
@@ -264,6 +316,18 @@ generate_brood_uuid() {
   return 0
 }
 
+# generate_temp_token: echo a fresh lowercase random uuid for the manifest temp name, or echo
+# nothing and return 1 when none can be generated or it holds a byte outside [a-z0-9-].
+generate_temp_token() {
+  local temp_token
+  temp_token="$(generate_brood_uuid | tr '[:upper:]' '[:lower:]')"
+  case "$temp_token" in
+    ''|*[!a-z0-9-]*) return 1 ;;
+  esac
+  printf '%s' "$temp_token"
+  return 0
+}
+
 brood_uuid="$(generate_brood_uuid | tr '[:upper:]' '[:lower:]')"
 [ -n "$brood_uuid" ] || blocker "failed to generate a brood-id (no uuidgen, kernel uuid, or /dev/urandom available)"
 brood_id="brood-$brood_uuid"
@@ -275,16 +339,20 @@ case "$brood_id" in
   *[!a-z0-9-]*) blocker "generated brood-id contains a byte outside [a-z0-9-]: $brood_id" ;;
 esac
 
+# By decision, neither the inputs file nor any field in it has a byte limit. Rationale: the
+# ADR-0037 slice 4 residual "Spawn inputs carry no byte limits" in
+# docs/adr/0037-standard-delivery-on-script-engine.md.
 # Parse top-level scalars into inert variables. Any inputs `brood_id` is intentionally NOT
 # read — the brood-id is generated above, not caller-supplied.
-base="$(jq -r '.base // ""' "$INPUTS_FILE")"
-overlap_risk="$(jq -r '.overlap_risk // ""' "$INPUTS_FILE")"
-overlap_details="$(jq -r '.overlap_details // ""' "$INPUTS_FILE")"
+base="$(read_inputs_field '.base // ""')"
+overlap_risk="$(read_inputs_field '.overlap_risk // ""')"
+overlap_details="$(read_inputs_field '.overlap_details // ""')"
 
 # ── manifest hatchery bridge fields (ADDITIVE; ledger-bridge) ────────────────────
 # manifest_version: 4 marks the per-brood-namespaced JSON manifest format: top-level
-# brood_id (the generated GUID) and created_at, brood-id-carrying per-strain branch/worktree,
-# and per-strain run.suggested_ledger DROPPED (the read side derives it now). No backwards-
+# brood_id (the generated GUID) and created_at, brood-id-carrying per-strain worktree/session,
+# no per-strain branch field (each worktree boots detached; readers treat an absent branch as
+# MISSING), and per-strain run.suggested_ledger DROPPED (the read side derives it now). No backwards-
 # compat with prior versions (single-user, unreleased): drain any running brood before upgrade.
 # The hatchery run metadata POINTS at the coordinator's own run ledger (which the hatchery
 # overlord owns and writes in its OWN worktree — this script never creates it; it only records
@@ -292,9 +360,9 @@ overlap_details="$(jq -r '.overlap_details // ""' "$INPUTS_FILE")"
 # generated brood_id, so no new untrusted bytes enter here. They enter the manifest jq
 # construction below as --arg bindings.
 manifest_version='4'
-hatchery_run_id="$(jq -r '.hatchery.run_id // ""' "$INPUTS_FILE")"
+hatchery_run_id="$(read_inputs_field '.hatchery.run_id // ""')"
 [ -n "$hatchery_run_id" ] || hatchery_run_id="$brood_id-hatchery"
-hatchery_workflow="$(jq -r '.hatchery.workflow // ""' "$INPUTS_FILE")"
+hatchery_workflow="$(read_inputs_field '.hatchery.workflow // ""')"
 [ -n "$hatchery_workflow" ] || hatchery_workflow="hatchery-dispatch"
 # The hatchery ledger is JSON (state.json), as is the manifest carrying the pointer —
 # format-follows-consumer (ADR-0018 §A): both are machine-consumed by jq (the ledger by the
@@ -329,7 +397,7 @@ esac
 
 # Strain count. An empty/zero-strain array is a blocker — never write an empty
 # manifest (a downstream brood-status would treat it as a broodless session).
-strain_count="$(jq -r '.strains | length' "$INPUTS_FILE" 2>/dev/null || echo 0)"
+strain_count="$(read_inputs_field '.strains | length' 2>/dev/null || echo 0)"
 case "$strain_count" in
   ''|*[!0-9]*) printf 'blocker: inputs file has no valid strains array\n' >&2; exit 1 ;;
 esac
@@ -337,14 +405,14 @@ esac
   || { printf 'blocker: inputs file contains zero strains; nothing to spawn\n' >&2; exit 1; }
 
 # ── Per-strain parse + derive (parallel index-aligned arrays) ───────────────────
-# Each strain's name/description/branch are read into arrays; derived short /
+# Each strain's name/description are read into arrays; derived short /
 # tmux_session / worktree path follow the same index. Untrusted values live only in
 # these variables — never interpolated into command source.
-declare -a S_NAME S_DESC S_BRANCH S_SHORT S_TMUX S_WT S_STATUS
+declare -a S_NAME S_DESC S_SHORT S_TMUX S_WT S_STATUS
 # ledger-bridge (STEP-007): per-strain suggested run metadata, index-aligned with the
-# arrays above. ADDITIVE — these only POINT at where the child SHOULD initialize its own
-# JSON run ledger inside its own worktree; this script never creates a child ledger.
-declare -a S_RUN_ID S_RUN_LEDGER S_RUN_HINT
+# arrays above. The suggested run id is the lineage key the manifest records and the run-ledger
+# leaf the started-evidence read confines; this script never creates a child ledger.
+declare -a S_RUN_ID S_RUN_HINT
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)" \
   || { printf 'blocker: not inside a git repository\n' >&2; exit 1; }
@@ -379,8 +447,8 @@ hivemind_assert_contained "$repo_root" ".claude/worktrees/$brood_id" >/dev/null 
 repo_root="$canon_repo_root"
 
 for idx in $(seq 0 $((strain_count - 1))); do
-  name="$(jq -r ".strains[$idx].name // \"\"" "$INPUTS_FILE")"
-  desc="$(jq -r ".strains[$idx].description // \"\"" "$INPUTS_FILE")"
+  name="$(read_inputs_field ".strains[$idx].name // \"\"")"
+  desc="$(read_inputs_field ".strains[$idx].description // \"\"")"
 
   # PRODUCER NAME CONTRACT: the strain name must satisfy the reader's presentation value-class
   # (hivemind_assert_presentation in _shared/allowlist.sh). This is the SINGLE SOURCE OF TRUTH
@@ -398,47 +466,39 @@ for idx in $(seq 0 $((strain_count - 1))); do
   [ -n "$short" ] || { printf 'blocker: strain name %s sanitizes to an empty short id\n' "$name" >&2; exit 1; }
 
   # ── brood-id-namespaced names ───────────────────────────
-  # branch / worktree / tmux session ALL carry the brood-id so two concurrent same-checkout
-  # broods reusing a strain name get DISJOINT resources (closes the F2-deep same-name brood-collision class). The branch is
-  # DERIVED here (no longer caller-supplied). brood_id is asserted ^brood-[0-9a-f-]+$ and short
-  # is sanitized to [a-z0-9-], so the joins introduce no '..', '.lock', or doubled slash; each
-  # branch is additionally git check-ref-format-validated by validate_ref below.
-  #   branch:       strain/<brood-id>/<short>
+  # worktree / tmux session BOTH carry the brood-id so two concurrent same-checkout broods
+  # reusing a strain name get DISJOINT resources (closes the F2-deep same-name brood-collision
+  # class). brood_id is asserted ^brood-[0-9a-f-]+$ and short is sanitized to [a-z0-9-], so the
+  # joins introduce no '..' or doubled slash. No branch is derived: the worktree boots detached.
   #   worktree:     .claude/worktrees/<brood-id>/<short>
   #   tmux session: <brood-id>-<short>   (brood-prefixed → satisfies brood-status F3 grammar)
-  branch="strain/$brood_id/$short"
   wt="$repo_root/.claude/worktrees/$brood_id/$short"
   tmux_session="$brood_id-$short"
 
   # ledger-bridge (STEP-007): derive the per-strain suggested run metadata. suggested_id
-  # combines the brood_id with the sanitized short; suggested_ledger is the JSON ledger path
-  # INSIDE the child worktree (.../state.json — child ledgers are JSON, ADR-0018 §A). The
-  # suggested_ledger is NO LONGER recorded in the manifest (manifest v4 drops it — the read
-  # side derives it), but it is still emitted into the child task.md so the child knows where
-  # to initialize its own ledger. workflow_hint is an OPTIONAL overlord-supplied hint (a
-  # non-binding suggestion; the child's own router decides), defaulting to standard-delivery.
-  # Values derive only from the generated brood_id / short / wt, so no new untrusted bytes.
+  # combines the brood_id with the sanitized short. No ledger path is derived or handed to the
+  # child (ADR-0037 decision 24): the started-evidence read derives the leaf from the ground-truth
+  # worktree. workflow_hint is an OPTIONAL overlord-supplied hint (a non-binding suggestion; the
+  # child's own router decides), defaulting to standard-delivery. Values derive only from the
+  # generated brood_id / short, so no new untrusted bytes.
   run_id="$brood_id_safe--$short"
-  run_ledger="$wt/.hivemind/runs/$run_id/state.json"
-  run_hint="$(jq -r ".strains[$idx].workflow_hint // \"\"" "$INPUTS_FILE")"
+  run_hint="$(read_inputs_field ".strains[$idx].workflow_hint // \"\"")"
   [ -n "$run_hint" ] || run_hint="standard-delivery"
 
   S_NAME[$idx]="$name"
   S_DESC[$idx]="$desc"
-  S_BRANCH[$idx]="$branch"
   S_SHORT[$idx]="$short"
   S_TMUX[$idx]="$tmux_session"
   S_WT[$idx]="$wt"
   S_STATUS[$idx]="running"
   S_RUN_ID[$idx]="$run_id"
-  S_RUN_LEDGER[$idx]="$run_ledger"
   S_RUN_HINT[$idx]="$run_hint"
 done
 
 # ── Allowlist gate (defense-in-depth) ───────────────────────────────────────────
 # No longer load-bearing for shell safety — values are inert variables, never
-# command source. Retained as a ref-shape sanity gate: reject branch/base that
-# carry no legitimate use of forbidden bytes. Charset ^[A-Za-z0-9._/-]+$,
+# command source. Retained as a ref-shape sanity gate: reject a base that
+# carries no legitimate use of forbidden bytes. Charset ^[A-Za-z0-9._/-]+$,
 # non-empty, no leading '-', no '..'.
 validate_ref() {
   local label="$1" value="$2"
@@ -465,33 +525,15 @@ validate_ref() {
 }
 
 validate_ref "base" "$base" || exit 1
-for idx in $(seq 0 $((strain_count - 1))); do
-  validate_ref "branch" "${S_BRANCH[$idx]}" || exit 1
-done
 
 # ── Pre-flight (1a–1g, in order) ────────────────────────────────────────────────
-# 1a/1b dependency checks already ran above. 1c: branch existence (local+remote).
-# 1d: tmux session + worktree path collision. 1e: in-set short collision BEFORE any
-# spawn. 1f: repo-local exclude guard. 1g: base resolves once.
+# 1a/1b dependency checks already ran above. 1c is gone: no branch is created, so there is
+# no branch collision to check. 1d: tmux session + worktree path collision. 1e: in-set short
+# collision BEFORE any spawn. 1f: repo-local exclude guard. 1g: base resolves once.
 
 for idx in $(seq 0 $((strain_count - 1))); do
-  branch="${S_BRANCH[$idx]}"
-  # 1c local
-  if [ -n "$(git branch --list "$branch")" ]; then
-    printf 'blocker: branch %s already exists locally\n' "$branch" >&2; exit 1
-  fi
-  # 1c remote — FAIL CLOSED. --exit-code distinguishes ref-found (0) from
-  # no-matching-ref (2) from network/other error (anything else). An unreachable
-  # origin must NOT be treated as "no collision" (the old empty-output check failed
-  # open). rc captured without tripping set -e. "$branch" is allowlist-validated.
-  git ls-remote --exit-code --heads origin "$branch" >/dev/null 2>&1; rc=$?
-  case "$rc" in
-    0) blocker "branch $branch already exists on remote origin" ;;
-    2) : ;;
-    *) blocker "cannot reach origin to verify branch $branch; refusing to spawn (fail-closed)" ;;
-  esac
   # 1d tmux session collision
-  if tmux has-session -t "${S_TMUX[$idx]}" 2>/dev/null; then
+  if tmux has-session -t "=${S_TMUX[$idx]}" 2>/dev/null; then
     printf 'blocker: tmux session %s already exists\n' "${S_TMUX[$idx]}" >&2; exit 1
   fi
   # 1d worktree path collision
@@ -507,23 +549,6 @@ for i in $(seq 0 $((strain_count - 1))); do
     if [ "${S_SHORT[$i]}" = "${S_SHORT[$j]}" ]; then
       printf 'blocker: strain names %s and %s collide on sanitized short name %s\n' \
         "${S_NAME[$i]}" "${S_NAME[$j]}" "${S_SHORT[$i]}" >&2
-      exit 1
-    fi
-    # Branch collision across the set: distinct strain names may carry the SAME (or a
-    # path-prefix-conflicting) branch, which would pass short-name dedup yet make the
-    # second `git worktree add -b` fail → partial brood. Reject exact duplicates and
-    # git ref prefix conflicts (one branch being a path-prefix of another) up front.
-    bi="${S_BRANCH[$i]}"; bj="${S_BRANCH[$j]}"
-    branch_conflict=false
-    if [ "$bi" = "$bj" ]; then
-      branch_conflict=true
-    else
-      case "$bj" in "$bi"/*) branch_conflict=true ;; esac
-      case "$bi" in "$bj"/*) branch_conflict=true ;; esac
-    fi
-    if [ "$branch_conflict" = true ]; then
-      printf 'blocker: strains %s and %s collide on branch %s\n' \
-        "${S_NAME[$i]}" "${S_NAME[$j]}" "$bi" >&2
       exit 1
     fi
   done
@@ -544,8 +569,11 @@ if ! git check-ignore -q .claude/worktrees/; then
 fi
 
 # 1g base resolves ONCE, up front (one blocker instead of N cascading worktree-add
-# failures on a typo'd base).
-git rev-parse --verify --quiet "$base^{commit}" >/dev/null \
+# failures on a typo'd base). The resolved commit id is what every worktree is created
+# detached at, so every strain boots on the same commit even if the base ref moves mid-spawn.
+base_commit="$(git rev-parse --verify --quiet "$base^{commit}" 2>/dev/null)" \
+  || { printf 'blocker: base ref %s does not resolve to a commit\n' "$base" >&2; exit 1; }
+[ -n "$base_commit" ] \
   || { printf 'blocker: base ref %s does not resolve to a commit\n' "$base" >&2; exit 1; }
 
 # ── Per-brood state directory (NO liveness guard) ──────────────
@@ -559,21 +587,32 @@ git rev-parse --verify --quiet "$base^{commit}" >/dev/null \
 # but hivemind:brood-status resolves the checkout root — a pwd-anchored manifest would make the
 # brood invisible to monitoring.
 STATE="$repo_root/.hivemind/broods/$brood_id"
-mkdir -p "$STATE"
 
-# OQ4 staging-inputs transport: atomically RELOCATE the navigator-authored staging inputs file
-# into the per-brood state dir as inputs.json, for the record. The staging file was already
-# validated (exists, valid JSON, contained under the checkout) at the top of the script. `mv`
-# within the same checkout filesystem is atomic; a copy-then-leave would risk a stale staging
-# file lingering under .hivemind/. After this point INPUTS_FILE is no longer read (all values
-# were parsed into inert variables above).
-mv "$INPUTS_FILE" "$STATE/inputs.json" \
-  || blocker "failed to relocate staging inputs file $INPUTS_FILE into $STATE/inputs.json"
+# ── Coordinator settings leaf guard (pre-flight, before any worktree) ───────────
+# The coordinator's .claude/settings.local.json is copied into every strain worktree. A `[ -f ]`
+# test plus `cp` would follow a symlink leaf, so a symlink (live or dangling) or any other
+# non-regular leaf stops the spawn here, before any worktree, session or manifest exists. An
+# absent file means no copy.
+settings_local="$repo_root/.claude/settings.local.json"
+hivemind_assert_file_contained "$repo_root" ".claude/settings.local.json" >/dev/null \
+  || blocker "refusing to copy the coordinator settings: $settings_local is a symlink or not a regular file; no worktree or session created"
+
+# ── Inputs record + staging removal (OQ4 staging-inputs transport) ──────────────
+# Write the in-memory inputs snapshot (compact JSON) into the per-brood state dir as
+# inputs.json, for the record, then remove the staging file so no stale staging file lingers
+# under .hivemind/. Every value already came from the snapshot above. Either failure is a
+# pre-launch blocker; nothing has been launched yet.
+mkdir -p "$STATE" \
+  || blocker "failed to create brood state directory $STATE; no worktree or session created"
+printf '%s\n' "$inputs_snapshot" > "$STATE/inputs.json" \
+  || blocker "failed to record the inputs snapshot into $STATE/inputs.json; no worktree or session created"
+rm -f "$INPUTS_FILE" \
+  || blocker "failed to remove staging inputs file $INPUTS_FILE after recording it into $STATE/inputs.json; no worktree or session created"
 
 # ── Per-strain failure helpers ──────────────────────────────────────────────────
 # HARD failure: worktree add / new-session failed BEFORE launch. Clean up ONLY
 # resources THIS invocation confirmed it created (TOCTOU-guarded by per-resource
-# flags), never a racing spawn's branch/session.
+# flags), never a racing spawn's worktree/session.
 mark_failed() { S_STATUS[$1]="failed"; }
 
 # ── Pass 1: create worktree + launch detached session (non-blocking) ────────────
@@ -581,15 +620,13 @@ launched_sessions=""
 # In-progress-strain markers, initialised BEFORE the trap is armed so the handler can
 # reference them under `set -u` even if a signal arrives before the loop's first reset.
 cur_wt=""
-cur_branch=""
 cur_session=""
-settings_local="$repo_root/.claude/settings.local.json"
 
 # Interruption guard over BOTH the Pass-1 launch loop and the Pass-2 readiness wait:
 # once a detached session launches, no manifest exists yet, so a cancelled Bash call /
 # SIGTERM — even MID-loop, after one session launched but while a later strain is
 # creating its worktree / provisioning its task / starting tmux — would orphan live
-# sessions+worktrees+branches with nothing for brood-status or the liveness guard to
+# sessions+worktrees with nothing for brood-status or the liveness guard to
 # find. Arm BEFORE the first launch so the trap reports whatever launched_sessions has
 # accumulated so far (appended incrementally per confirmed launch). Emit the launched
 # session names in the SAME recovery: format used on the manifest-write-failure path,
@@ -598,18 +635,17 @@ settings_local="$repo_root/.claude/settings.local.json"
 brood_interrupt_trap() {
   printf 'recovery: spawn interrupted; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
   # The strain mid-provision when the signal arrived is NOT yet in launched_sessions:
-  # its worktree/branch (post worktree-add) and/or its live privileged session (post
+  # its worktree (post worktree-add) and/or its live privileged session (post
   # new-session, pre-append) would otherwise go unreported. Emit them too. Emit-only —
   # NO git/tmux/rm in the handler; the operator verifies and cleans manually.
   if [ -n "$cur_wt" ] || [ -n "$cur_session" ]; then
-    printf 'recovery: spawn interrupted mid-provision; in-progress strain may have leaked resources — worktree: %s branch: %s session: %s (verify with '\''git worktree list'\'' / '\''tmux ls'\'' and clean manually)\n' "$cur_wt" "$cur_branch" "$cur_session" >&2
+    printf 'recovery: spawn interrupted mid-provision; in-progress strain may have leaked resources — worktree: %s session: %s (verify with '\''git worktree list'\'' / '\''tmux ls'\'' and clean manually)\n' "$cur_wt" "$cur_session" >&2
   fi
   exit 1
 }
 trap brood_interrupt_trap INT TERM
 
 for idx in $(seq 0 $((strain_count - 1))); do
-  branch="${S_BRANCH[$idx]}"
   wt="${S_WT[$idx]}"
   tmux_session="${S_TMUX[$idx]}"
   desc="${S_DESC[$idx]}"
@@ -628,29 +664,27 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # THIS iteration. Set as each provisional resource comes into existence; cleared at
   # loop bottom once the strain is fully tracked in launched_sessions.
   cur_wt=""
-  cur_branch=""
   cur_session=""
 
-  # 3a: explicit worktree + exact strain branch off base. Do NOT use claude
-  # --worktree (mangles names / creates worktree-<name>).
+  # 3a: explicit worktree created DETACHED at the resolved base commit — no branch is created;
+  # the child's planner names its own working branch. Do NOT use claude --worktree (mangles
+  # names / creates worktree-<name>).
   # MARK-BEFORE-MUTATE: set the markers IMMEDIATELY BEFORE the mutating command, not
   # after its success check. Bash evaluates a pending INT/TERM at statement boundaries,
   # so a signal that becomes pending as `git worktree add` completes can fire the trap
   # BEFORE a post-success assignment runs — the worktree would exist but go unreported.
   # Marking first means an interrupt anywhere around the command conservatively
-  # OVER-reports a possibly-created worktree+branch for manual verification.
+  # OVER-reports a possibly-created worktree for manual verification.
   cur_wt="$wt"
-  cur_branch="$branch"
-  if ! git worktree add -b "$branch" "$wt" "$base" >/dev/null 2>&1; then
+  if ! git worktree add --detach "$wt" "$base_commit" >/dev/null 2>&1; then
     printf 'warning: git worktree add failed for strain %s\n' "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
-    # NON-DESTRUCTIVE: add did NOT succeed — the worktree/branch either was never
+    # NON-DESTRUCTIVE: add did NOT succeed — the worktree either was never
     # created by us or pre-exists (a concurrent spawn's, or a prior run's possibly-
     # uncommitted work). Never force-remove a resource this invocation did not create.
     # Only CLEAR the markers: this invocation did not create them, so they are not OUR
     # provisional leak and must not be reported as ours.
     cur_wt=""
-    cur_branch=""
     continue
   fi
   created_worktree=true
@@ -662,12 +696,12 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # worktree add` just MATERIALIZED that tree into $wt, so the symlink now lives INSIDE the
   # child worktree. Every provisioning write below derives textually from $wt
   # ("$wt/.hivemind/brood/task.md", "$wt/.claude/settings.local.json"), so a symlinked
-  # `.hivemind`/`.claude` here would make those writes — and then a
-  # --dangerously-skip-permissions child launched in $wt — escape the checkout. Re-run the
+  # `.hivemind`/`.claude` here would make those writes — and then an auto-mode child
+  # launched in $wt — escape the checkout. Re-run the
   # SAME depth-complete shared helper against the NEW WORKTREE ROOT $wt (not $repo_root) for
   # BOTH write chains, BEFORE any mkdir/cp/task-write AND before any tmux/child launch. On
   # EITHER failing this is a HARD per-strain pre-launch failure: remove the just-created
-  # worktree+branch, mark the strain failed, and skip its launch — never launch a privileged
+  # worktree, mark the strain failed, and skip its launch — never launch a privileged
   # child in a worktree whose `.hivemind`/`.claude` escapes the checkout. Per-strain, matching
   # the existing worktree-add / task-provisioning failure model (one bad base does not abort
   # the whole brood).
@@ -675,18 +709,38 @@ for idx in $(seq 0 $((strain_count - 1))); do
      || ! hivemind_assert_contained "$wt" ".claude" >/dev/null; then
     printf 'warning: child worktree %s has a symlinked .hivemind/.claude that escapes the checkout (base ref tracks it); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
-    # DESTRUCTIVE cleanup: this invocation created the worktree+branch via worktree-add above
-    # (created_worktree=true), so removing them is removing only OUR own provisional resource.
+    # DESTRUCTIVE cleanup: this invocation created the worktree via worktree-add above
+    # (created_worktree=true), so removing it is removing only OUR own provisional resource.
     git worktree remove --force "$wt" >/dev/null 2>&1 || true
-    git branch -D "$branch" >/dev/null 2>&1 || true
     rm -rf "$wt" >/dev/null 2>&1 || true
-    # Worktree+branch removed; clear so the interrupt trap does not report them as a leak.
+    # Worktree removed; clear so the interrupt trap does not report it as a leak.
     cur_wt=""
-    cur_branch=""
     continue
   fi
 
-  # 3b: propagate config into the new worktree, if present.
+  # 3a-facts-guard: PRE-LAUNCH FACTS ABSENCE. Started-evidence for a script-engine child is a
+  # gather-facts output file in the worktree's facts folder (hivemind_detect_facts_evidence). A base
+  # ref that tracks .hivemind/facts (force-added past the .hivemind/ gitignore) materializes it
+  # here via `git worktree add`, before the child runs, so a base-tree file could pass as
+  # started-evidence: resend suppression, a false `running`, and /rc keystrokes. Refuse the
+  # strain when the folder exists in ANY form (regular file, directory, live or dangling
+  # symlink), whatever names it holds: every facts file spawn-brood or brood-status later reads
+  # then sits in a folder proven absent at launch, so it post-dates launch by construction. Same
+  # hard per-strain pre-launch cleanup as the containment guard above; BEFORE any
+  # mkdir/cp/task-write and before tmux new-session. The check is hivemind_brood_facts_absent in
+  # brood-state.sh, which refuses a symlinked or non-directory .hivemind; it fails closed, so a
+  # refused worktree root or .hivemind refuses the strain too.
+  if ! hivemind_brood_facts_absent "$wt"; then
+    printf 'warning: child worktree %s already holds .hivemind/facts (base ref tracks .hivemind/facts); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
+    mark_failed "$idx"
+    git worktree remove --force "$wt" >/dev/null 2>&1 || true
+    rm -rf "$wt" >/dev/null 2>&1 || true
+    cur_wt=""
+    continue
+  fi
+
+  # 3b: propagate config into the new worktree, if present. The coordinator leaf was refused in
+  # pre-flight when it is a symlink or not a regular file.
   if [ -f "$settings_local" ]; then
     # LEAF GUARD: the 525 dir-guard proves the .claude ANCESTOR is unsymlinked, but the cp
     # write target is the .claude/settings.local.json LEAF — a hostile base ref can track a
@@ -698,10 +752,8 @@ for idx in $(seq 0 $((strain_count - 1))); do
       printf 'warning: child worktree %s has a symlinked .claude/settings.local.json leaf that escapes the checkout (base ref tracks it); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
       mark_failed "$idx"
       git worktree remove --force "$wt" >/dev/null 2>&1 || true
-      git branch -D "$branch" >/dev/null 2>&1 || true
       rm -rf "$wt" >/dev/null 2>&1 || true
       cur_wt=""
-      cur_branch=""
       continue
     fi
     mkdir -p "$wt/.claude"
@@ -718,75 +770,44 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # spec warns the terminating marker can be EMBEDDED in pasted text; an issue-sourced
   # description carrying a literal ESC[201~ (or ESC[200~) would close the bounded paste
   # early, so the remainder reaches the child as live keystrokes OUTSIDE the data-
-  # boundary preamble — acute because the child runs --dangerously-skip-permissions.
+  # boundary preamble — acute because the child runs in auto mode and acts on its prompt.
   # Strip every C0 control byte (incl. ESC 0x1b, which begins every paste marker)
   # except TAB (0x09) and LF (0x0a), plus DEL (0x7f), before writing. No control byte
   # is load-bearing in a task description; removing them cannot break a paste boundary.
   desc="$(printf '%s' "$desc" | tr -d '\000-\010\013-\037\177')"
   task_file="$wt/.hivemind/brood/task.md"
-  # ── ledger-bridge child-task metadata (STEP-007, ADDITIVE) ────────────────────
-  # Emit the inter-agent brood metadata BELOW the data-boundary preamble (the preamble stays
-  # FIRST); the description is carried inside this block as `task.description`. The metadata
-  # is YAML (an inter-agent contract — ADR-0018 §A keeps human/
-  # agent-read contracts as YAML); it tells the child it is a normal hivemind:overlord
-  # owning its OWN run ledger in this worktree, points at its suggested run id/ledger, and
-  # forbids it from touching the hatchery manifest/ledger (RUN-OWNERSHIP-01). Untrusted
-  # values (strain name, branch, worktree path, description copy) are emitted with the
-  # SAME block-scalar discipline used by the manifest emitter below: |- (strip) for
-  # exact-value fields, | (clip) for the free-text description, each reproduced at its
-  # block-scalar content indent via printf %s | sed. Control bytes are already stripped
-  # from desc above; name is stripped here for the same YAML-validity reason. The metadata
-  # is then emitted via the same single-write primitive BELOW the preamble — the preamble
-  # stays FIRST and the description rides inside this block as `task.description`, the child's
-  # actual prompt payload.
+  # ── child-task data block (ADR-0037 decision 24: data only) ──────────────────
+  # Emit the brood metadata BELOW the data-boundary preamble (the preamble stays FIRST); the
+  # description is carried inside this block as `task.description`. The harness relays task.md
+  # to every workflow agent the child runs, so the block is DATA ONLY: identity, the base the
+  # child's planner branches from, a non-binding workflow hint, and the task text. It carries no
+  # instructions list and no field naming a scratch branch, a ledger path or a trunk-freshness
+  # override. The metadata is YAML (an inter-agent contract — ADR-0018 §A keeps human/agent-read
+  # contracts as YAML). Untrusted values (strain name, description copy) are emitted with the
+  # SAME block-scalar discipline used by the manifest emitter below: |- (strip) for exact-value
+  # fields, | (clip) for the free-text description, each reproduced at its block-scalar content
+  # indent via printf %s | sed. Control bytes are already stripped from desc above; name is
+  # stripped here for the same YAML-validity reason.
   name_meta="$(printf '%s' "$name" | tr -d '\000-\010\013-\037\177')"
   brood_meta="$( {
     printf 'parent:\n'
     printf '  kind: brood\n'
     # parent.brood_id is the generated GUID (brood-<uuidv4>): emit the SAME $brood_id the
     # coordinator manifest emits at the manifest emitter below so lineage reconciliation
-    # matches child<->manifest. The GUID is already filesystem-safe (no colons), so it doubles
-    # as the run-id stem (brood_id_safe == brood_id); there is no separate sanitized form.
-    printf '  brood_id: |-\n';          printf '%s\n' "$brood_id"            | sed 's/^/    /'
-    printf '  hatchery_run_id: |-\n';   printf '%s\n' "$hatchery_run_id"     | sed 's/^/    /'
-    printf '  hatchery_manifest: |-\n'; printf '%s\n' "$STATE/manifest.json" | sed 's/^/    /'
+    # matches child<->manifest.
+    printf '  brood_id: |-\n';         printf '%s\n' "$brood_id"              | sed 's/^/    /'
     printf 'strain:\n'
-    printf '  id: |-\n';            printf '%s\n' "$short"          | sed 's/^/    /'
-    printf '  name: |-\n';          printf '%s\n' "$name_meta"      | sed 's/^/    /'
-    printf '  branch: |-\n';        printf '%s\n' "$branch"         | sed 's/^/    /'
-    printf '  worktree_path: |-\n'; printf '%s\n' "$wt"             | sed 's/^/    /'
+    printf '  id: |-\n';               printf '%s\n' "$short"                 | sed 's/^/    /'
+    printf '  name: |-\n';             printf '%s\n' "$name_meta"             | sed 's/^/    /'
     printf 'run:\n'
-    printf '  suggested_id: |-\n';      printf '%s\n' "${S_RUN_ID[$idx]}"     | sed 's/^/    /'
-    printf '  suggested_ledger: |-\n';  printf '%s\n' "${S_RUN_LEDGER[$idx]}" | sed 's/^/    /'
-    printf '  workflow_hint: |-\n';     printf '%s\n' "${S_RUN_HINT[$idx]}"   | sed 's/^/    /'
-    # working-branch derivation inputs (#270): the child boots on the throwaway SCRATCH ref
-    # strain/<brood-id>/<short> and must derive its OWN compliant <type>/<slug>-<token> working
-    # branch via create-working-branch BEFORE delivery/PR. We hand it the BASE it branches from
-    # (the brood base, already validated) and a `trunk_freshness: skipped` equivalent so its
-    # create-working-branch preflight is satisfiable while booted detached on the scratch ref.
-    # workflow_hint above doubles as the NON-BINDING classification hint (passed through AS-IS;
-    # no prefix mapping happens in this script). slug material = strain.name/description + the
-    # existing identity tokens (strain.id=<short>, parent.brood_id) as the uniqueness-token source.
+    printf '  suggested_id: |-\n';     printf '%s\n' "${S_RUN_ID[$idx]}"      | sed 's/^/    /'
+    # workflow_hint is the NON-BINDING classification hint, passed through AS-IS (no prefix
+    # mapping happens in this script).
+    printf '  workflow_hint: |-\n';    printf '%s\n' "${S_RUN_HINT[$idx]}"    | sed 's/^/    /'
     printf 'working_branch:\n'
-    printf '  base: |-\n';              printf '%s\n' "$base"               | sed 's/^/    /'
-    printf '  trunk_freshness: |-\n';   printf '%s\n' "skipped"             | sed 's/^/    /'
-    printf 'instructions:\n'
-    printf '  - You are a normal hivemind:overlord instance assigned to one strain of a brood.\n'
-    printf '  - Use the normal workflow router and workflow state machine.\n'
-    printf '  - You may BOOT on a throwaway/scratch working branch (strain/<brood-id>/<short>); it is NOT a compliant working branch.\n'
-    printf '  - Derive a compliant <type>/<slug>-<token> working branch BY JUDGMENT: use working_branch.base as base, run.workflow_hint as the NON-BINDING classification hint, strain.name/strain.description as slug material, and strain.id (or parent.brood_id) as the uniqueness token. Do NOT deliver or open a PR on the scratch ref.\n'
-    printf '  - Run hivemind:create-working-branch off working_branch.base with trunk-freshness set from working_branch.trunk_freshness (skipped) to switch this worktree HEAD onto your derived working branch BEFORE delivery/PR.\n'
-    printf '  - Initialize your OWN run ledger in this worktree (suggested path under run.suggested_ledger).\n'
-    printf '  - init-run-ledger takes a single positional JSON inputs file you author via Write; set its parent block, not CLI flags.\n'
-    printf '  - Set parent.kind = brood in the init inputs JSON.\n'
-    printf '  - Set parent.brood_id to parent.brood_id verbatim; init-run-ledger persists it verbatim into .parent.brood_id (so child ledger reconciles with the manifest). The brood_id is a GUID (brood-<uuidv4>), already filesystem-safe.\n'
-    printf '  - Set parent.strain_id to strain.id; your run id will be <brood-id>--<strain.id>, matching run.suggested_id.\n'
-    printf '  - Set parent.run_id to parent.hatchery_run_id.\n'
-    printf '  - Set parent.manifest to parent.hatchery_manifest.\n'
-    printf '  - Do NOT write the hatchery manifest.\n'
-    printf '  - Do NOT write the hatchery run ledger.\n'
+    printf '  base: |-\n';             printf '%s\n' "$base"                  | sed 's/^/    /'
     printf 'task:\n'
-    printf '  description: |\n';     printf '%s\n' "$desc"          | sed 's/^/    /'
+    printf '  description: |\n';       printf '%s\n' "$desc"                  | sed 's/^/    /'
   } )"
   # LEAF GUARD: the 525 dir-guard proves the .hivemind/brood ANCESTOR is unsymlinked, but the
   # write target is the task.md LEAF — a hostile base ref can track a real .hivemind/brood/ dir
@@ -797,10 +818,8 @@ for idx in $(seq 0 $((strain_count - 1))); do
     printf 'warning: child worktree %s has a symlinked .hivemind/brood/task.md leaf that escapes the checkout (base ref tracks it); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
     git worktree remove --force "$wt" >/dev/null 2>&1 || true
-    git branch -D "$branch" >/dev/null 2>&1 || true
     rm -rf "$wt" >/dev/null 2>&1 || true
     cur_wt=""
-    cur_branch=""
     continue
   fi
   # Guard task-file provisioning BEFORE launching a privileged child: a failed mkdir
@@ -813,11 +832,9 @@ for idx in $(seq 0 $((strain_count - 1))); do
     mark_failed "$idx"
     if [ "$created_worktree" = true ]; then
       git worktree remove --force "$wt" >/dev/null 2>&1 || true
-      git branch -D "$branch" >/dev/null 2>&1 || true
     fi
-    # Worktree+branch removed; clear so the trap does not report them as a leak.
+    # Worktree removed; clear so the trap does not report it as a leak.
     cur_wt=""
-    cur_branch=""
     continue
   fi
 
@@ -827,45 +844,38 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # brood-id-safe prefix + "--" + $short, the exact construction the derive loop used for
   # S_RUN_ID. With the per-iteration index-pinned re-bind above this can never fire, but it
   # GUARANTEES no crossed-identity child ever launches. On mismatch this is a HARD per-strain
-  # pre-launch failure: mirror the task-provisioning-failure cleanup (remove OUR worktree+branch,
+  # pre-launch failure: mirror the task-provisioning-failure cleanup (remove OUR worktree,
   # clear markers) and skip the launch.
   if [ "${S_RUN_ID[$idx]}" != "$brood_id_safe--$short" ]; then
     printf 'warning: strain %s: task.md identity guard failed (strain.id=%s vs run.suggested_id=%s); refusing to launch\n' "${S_NAME[$idx]}" "$short" "${S_RUN_ID[$idx]}" >&2
     mark_failed "$idx"
     if [ "$created_worktree" = true ]; then
       git worktree remove --force "$wt" >/dev/null 2>&1 || true
-      git branch -D "$branch" >/dev/null 2>&1 || true
     fi
-    # Worktree+branch removed; clear so the trap does not report them as a leak.
+    # Worktree removed; clear so the trap does not report it as a leak.
     cur_wt=""
-    cur_branch=""
     continue
   fi
 
-  # 3d: launch a DETACHED tmux session running claude (tmux supplies the pty the
-  # Bash context lacks). Pre-accept the bypass-permissions trust gate.
+  # 3d: launch a DETACHED tmux session running claude in auto mode (tmux supplies the pty the
+  # Bash context lacks). In auto mode the classifier launches the child's workflow with no
+  # prompt (ADR-0037 PR8 smoke record), so the child runs on the script engine.
   # MARK-BEFORE-MUTATE: set cur_session IMMEDIATELY BEFORE new-session so an interrupt
-  # that fires as the command completes reports the possibly-live privileged session
-  # rather than omitting it (a live --dangerously-skip-permissions child must never go
-  # unreported).
+  # that fires as the command completes reports the possibly-live session rather than
+  # omitting it (a live auto-mode child must never go unreported).
   cur_session="$tmux_session"
-  # ADR-0037 decision 10: children stay on the state machine until slice 4, so the hatchery's
-  # started-evidence keeps working. --disallowedTools takes a list, so it precedes --settings and
-  # is never the last argument.
   if ! tmux new-session -d -s "$tmux_session" -c "$wt" \
-        "claude --dangerously-skip-permissions --disallowedTools Workflow --settings '{\"skipDangerousModePermissionPrompt\":true}'" 2>/dev/null; then
+        "claude --permission-mode auto" 2>/dev/null; then
     printf 'warning: tmux new-session failed for strain %s\n' "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
-    # HARD cleanup: remove ONLY what this invocation created (the worktree+branch
+    # HARD cleanup: remove ONLY what this invocation created (the worktree
     # from 3a). new-session did not confirm launch, so no session to kill.
     if [ "$created_worktree" = true ]; then
       git worktree remove --force "$wt" >/dev/null 2>&1 || true
-      git branch -D "$branch" >/dev/null 2>&1 || true
     fi
-    # Worktree+branch removed; session did not confirm launch. Clear all markers so the
+    # Worktree removed; session did not confirm launch. Clear all markers so the
     # trap reports nothing.
     cur_wt=""
-    cur_branch=""
     cur_session=""
     continue
   fi
@@ -875,7 +885,6 @@ for idx in $(seq 0 $((strain_count - 1))); do
   # Strain now fully tracked in launched_sessions; clear the in-progress markers so the
   # trap does not double-report a strain already accounted for in launched_sessions.
   cur_wt=""
-  cur_branch=""
   cur_session=""
 done
 
@@ -892,9 +901,9 @@ done
 #   Pass 2 — shared-deadline readiness round-robin + FAST submit_strain (no blocking poll).
 #   Pass 3 — per-strain verify_strain, each computing its OWN deadline at its Pass-3 entry, so
 #            no strain's verifier shares wall-clock with another's.
-# The turn-start evidence stays on-disk run-ledger state.current ground truth (#213/#248
-# direction), NEVER capture-pane — the split only moved the poll out of the shared loop, it did
-# not change WHAT is polled.
+# The turn-start evidence stays on-disk ground truth (#213/#248 direction) — a run-ledger
+# state.current or a gather-facts output file (strain_has_started_evidence) — NEVER capture-pane;
+# the split only moved the poll out of the shared loop.
 
 # submit_strain: the FAST, non-blocking half of the former inject_strain. Inject a ready
 # strain's task via a per-strain NAMED buffer deleted on paste (-d). Bracketed paste (-p) keeps
@@ -905,12 +914,39 @@ done
 # Pass 3's verify_strain). Best-effort delete the buffer on EVERY failure path so an untrusted
 # task never persists in the shared tmux buffer. Returns 0 once the submit keystroke is sent; 1
 # only on a tmux command failure (dead pane / load / paste / send error), marking failed first.
+# resolve_strain_pane <session>: echo the `%N` pane id of the EXACT session's active pane (see
+# TARGET DISCIPLINE in the header). Lists panes in target-SESSION context with the `=` exact-match
+# prefix and reads EVERY row, never the first match. Succeeds only when exactly one row carries
+# the active flags `11`, its session name is byte-equal to <session>, and its pane id is `%N`.
+# Returns 1 with nothing on stdout otherwise: list-panes failed (session gone), zero or several
+# active rows, a foreign session name, or a malformed pane id.
+resolve_strain_pane() {
+  local expected_session="$1"
+  local TAB=$'\t'
+  local pane_rows="" r_session="" r_flags="" r_pane=""
+  local active_count=0 resolved_session="" resolved_pane=""
+  pane_rows="$(tmux list-panes -s -t "=$expected_session" -F '#{session_name}'"$TAB"'#{window_active}#{pane_active}'"$TAB"'#{pane_id}' 2>/dev/null)" \
+    || return 1
+  while IFS="$TAB" read -r r_session r_flags r_pane; do
+    if [ "$r_flags" = "11" ]; then
+      active_count=$((active_count + 1))
+      resolved_session="$r_session"
+      resolved_pane="$r_pane"
+    fi
+  done <<< "$pane_rows"
+  [ "$active_count" -eq 1 ] || return 1
+  [ "$resolved_session" = "$expected_session" ] || return 1
+  [[ "$resolved_pane" =~ ^%[0-9]+$ ]] || return 1
+  printf '%s\n' "$resolved_pane"
+}
+
 submit_strain() {
   local idx="$1"
   local tmux_session="${S_TMUX[$idx]}"
   local wt="${S_WT[$idx]}"
   local buffer_name="$tmux_session"   # session-unique named buffer (brood-<short>)
   local task_file="$wt/.hivemind/brood/task.md"
+  local pane_id=""
 
   if ! tmux load-buffer -b "$buffer_name" "$task_file" 2>/dev/null; then
     printf 'warning: tmux load-buffer failed for strain %s\n' "${S_NAME[$idx]}" >&2
@@ -918,7 +954,10 @@ submit_strain() {
     mark_failed "$idx"
     return 1
   fi
-  if ! tmux paste-buffer -d -p -b "$buffer_name" -t "$tmux_session" 2>/dev/null; then
+  # One resolution per submit: the paste and the submit Enter both go to this pane id. A failed
+  # resolution is a dead pane, reported on the paste-buffer warning line.
+  if ! pane_id="$(resolve_strain_pane "$tmux_session")" \
+    || ! tmux paste-buffer -d -p -b "$buffer_name" -t "$pane_id" 2>/dev/null; then
     printf 'warning: tmux paste-buffer failed for strain %s\n' "${S_NAME[$idx]}" >&2
     tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
     mark_failed "$idx"
@@ -936,7 +975,7 @@ submit_strain() {
   # Submit ONCE, after the settle. The settle is what makes this single Enter land as a submit
   # (not an in-composer newline). On a send-keys command failure (e.g. dead pane) clean up the
   # buffer, mark the strain failed, and return 1.
-  if ! tmux send-keys -t "$tmux_session" Enter 2>/dev/null; then
+  if ! tmux send-keys -t "$pane_id" Enter 2>/dev/null; then
     printf 'warning: tmux send-keys Enter failed for strain %s\n' "${S_NAME[$idx]}" >&2
     tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
     mark_failed "$idx"
@@ -952,61 +991,82 @@ submit_strain() {
 # three-pass design #213/#248 deliberately decoupled per-strain deadlines — do NOT reintroduce a
 # shared scheduler). Within that single grace window the loop polls started-evidence and, every
 # ~RESEND_POLL_TIMEOUT, NUDGES with a bare send-keys Enter (never a re-paste). The cap is the time
-# budget, NOT a hard resend count: a cold `claude` boot can take >2min to write its ledger, and
+# budget, NOT a hard resend count: a cold `claude` boot can take >2min to write its evidence, and
 # the legacy ~32s budget falsely failed those LIVE strains. On grace exhaustion the outcome
 # branches on tmux session liveness: session ALIVE => record `starting` (transient, NOT failed) +
 # informational line + return 0; session DEAD => fail-closed mark_failed + warning + return 1. A
 # dead-pane send-keys failure mid-nudge is likewise mark_failed + return 1. Returns 0 the moment
 # started-evidence appears.
-# verify_started_evidence <idx>: CONFINED single-snapshot projection of the strain's child
-# run-ledger state.current. Echoes the validated state.current, or one of the fixed tokens
-# MISSING / MALFORMED. This is the read-side discipline mandated by the security policy for
-# hostile child-ledger reads. The confined read is now SINGLE-SOURCED from the shared
-# _shared/ledger-project.sh primitive hivemind_read_confined_state_current (shared with
-# brood-status) — the duplicate inline guard/read/ITEM-4 block that mirrored
-# brood-status-project.sh and absorbed two P1 findings is GONE, closing the duplicate-drift
-# class. That primitive confines the leaf BENEATH the strain's GROUND-TRUTH worktree
-# (S_WT[$idx], script-derived from the canonical repo_root + generated brood-id/short — never a
-# manifest/child-supplied path), rejects a symlinked / non-regular / NUL-bearing leaf, reads
-# EXACTLY ONCE into an in-memory snapshot, RE-ASSERTS post-read containment, and projects from
-# CONTENT via hivemind_project_state_current_content — never the path-based projector. It emits
-# TWO lines (state.current, then run.status) from ONE snapshot; spawn-brood consumes ONLY line1
-# (state.current). We confine on-disk run-ledger ground truth, NOT capture-pane (#213/#248): the
+# verify_started_evidence <idx>: single-snapshot projection of the strain's child run-ledger
+# state.current. Echoes the validated state.current, or one of the fixed tokens MISSING /
+# MALFORMED. This is the read-side discipline mandated by the security policy for hostile
+# child-ledger reads. The read is SINGLE-SOURCED from hivemind_brood_read_child_ledger in
+# _shared/brood-state.sh (shared with brood-status), the only home of brood-state reads. It takes
+# IDENTIFIERS, never a path: the strain's GROUND-TRUTH worktree (S_WT[$idx], script-derived from
+# the canonical repo_root + generated brood-id/short — never a manifest/child-supplied path) and
+# the suggested run id (S_RUN_ID[$idx]). It refuses a symlinked or non-directory component, rejects
+# a symlinked / non-regular / NUL-bearing leaf, reads EXACTLY ONCE into an in-memory snapshot, and
+# projects from CONTENT via hivemind_project_state_current_content. It emits TWO lines
+# (state.current, then run.status) from ONE snapshot; spawn-brood consumes ONLY line1
+# (state.current). We read on-disk run-ledger ground truth, NOT capture-pane (#213/#248): the
 # child writes state.current when its workflow actually starts; we never screen-scrape the TUI.
 verify_started_evidence() {
   local idx="$1"
-  # Relative ledger chain under the strain worktree (mirrors S_RUN_LEDGER derivation):
-  #   .hivemind/runs/<run_id>/state.json
-  local rel_chain=".hivemind/runs/${S_RUN_ID[$idx]}/state.json"
 
-  # Single-snapshot confined read via the shared primitive. It outputs two lines from one
+  # Single-snapshot read via the shared brood-state reader. It outputs two lines from one
   # snapshot (line1 = state.current, line2 = run.status); spawn-brood needs only line1. Read
   # both set-u-safely so an absent second line cannot trip a bad read.
   local state_out="" _run_out=""
   { IFS= read -r state_out; IFS= read -r _run_out; } \
-    < <(hivemind_read_confined_state_current "${S_WT[$idx]}" "$rel_chain")
+    < <(hivemind_brood_read_child_ledger "${S_WT[$idx]}" "${S_RUN_ID[$idx]}")
   printf '%s\n' "$state_out"
+}
+
+# strain_has_started_evidence <idx>: succeed when the strain shows started-evidence. Two sources,
+# both read from the strain's GROUND-TRUTH worktree S_WT[$idx] (script-derived, never a
+# manifest/child-supplied path):
+#   1. the confined run-ledger read (verify_started_evidence) gives a valid state.current —
+#      neither MISSING nor MALFORMED (a state-machine child);
+#   2. hivemind_detect_facts_evidence (brood-state.sh) reports a gather-facts output file (a
+#      script-engine child, which keeps no run ledger).
+# Both are the SAME shared brood-state.sh functions brood-status uses, so spawn-time and
+# dashboard evidence cannot diverge. Fail closed: neither source => not started.
+# PROVENANCE: both sources post-date launch by construction. The ledger leaf is keyed by the
+# spawn-generated brood GUID run id (S_RUN_ID), and the worktree's facts folder was proven absent
+# before launch (3a-facts-guard), so no base-tree file can count.
+strain_has_started_evidence() {
+  local idx="$1"
+  local state_current facts_evidence
+  state_current="$(verify_started_evidence "$idx")"
+  if [ "$state_current" != "MISSING" ] && [ "$state_current" != "MALFORMED" ]; then
+    return 0
+  fi
+  facts_evidence="$(hivemind_detect_facts_evidence "${S_WT[$idx]}")"
+  [ "$facts_evidence" = "yes" ]
 }
 
 verify_strain() {
   local idx="$1"
   local tmux_session="${S_TMUX[$idx]}"
   local buffer_name="$tmux_session"   # session-unique named buffer (brood-<short>)
+  local pane_id=""
 
-  # WHY read the on-disk run-ledger and
+  # WHY read on-disk evidence and
   # NOT capture-pane: capture-pane turn-start verification was deliberately REMOVED in issue
   # #213 / PR #248 because screen-scraping the TUI for a turn-started frame caused a break-fix
   # review cluster (frame races, chrome coupling, false resends). The run-ledger
-  # (${S_RUN_LEDGER[$idx]}, .../.hivemind/runs/<run_id>/state.json) is GROUND TRUTH: the child
-  # writes .state.current when its workflow actually starts. We poll THAT file — never the
-  # pane — for started-evidence, and resend a bare Enter only if none appears.
+  # (.../.hivemind/runs/<run_id>/state.json) and the gather-facts output file
+  # (.../.hivemind/facts/facts-*.json) are GROUND TRUTH: the child writes one of them when its
+  # workflow actually starts. We poll THOSE files (strain_has_started_evidence) — never the
+  # pane — for started-evidence, and resend a bare Enter only if none appears. Neither file can
+  # come from the base tree: the ledger leaf is keyed by the spawn-generated brood GUID run id,
+  # and the facts folder was proven absent before launch (3a-facts-guard).
   #
   # CONFINED READ (security-policy discipline for hostile child-ledger reads): the per-poll
-  # projection is delegated to verify_started_evidence above, which confines the ledger leaf
-  # beneath the strain's GROUND-TRUTH worktree, rejects a symlinked/non-regular/NUL-bearing
-  # leaf, reads ONCE into a snapshot, and projects via the CONTENT projector — mirroring
-  # brood-status-project.sh. The legacy path-based hivemind_project_state_current (which
-  # [ -f ]/cat-follows the child-controlled leaf directly) is deliberately NOT called here.
+  # projection is delegated to verify_started_evidence above, which calls the brood-state.sh
+  # reader with the strain's GROUND-TRUTH worktree and run id. That reader rejects a
+  # symlinked/non-regular/NUL-bearing leaf, reads ONCE into a snapshot, and projects via the
+  # CONTENT projector — the same reader brood-status-project.sh uses.
   #
   # Started-evidence MUST match the brood-status derive gate. It is single-sourced from the SAME
   # canonical content projector the dashboard uses — hivemind_project_state_current_content in
@@ -1022,15 +1082,12 @@ verify_strain() {
   local grace_deadline=$(( $(date +%s) + STARTED_EVIDENCE_TIMEOUT ))
   local next_nudge=$(( $(date +%s) + RESEND_POLL_TIMEOUT ))
   while [ "$(date +%s)" -lt "$grace_deadline" ]; do
-    # Fail-closed projection: started ONLY when the CONFINED projector returns a validated
-    # state.current (neither MISSING nor MALFORMED). verify_started_evidence handles the
-    # confinement (leaf/ancestor symlink reject, NUL reject) AND the value-shape validation;
-    # absent file / unparseable / missing / null / non-string / empty / overlength /
-    # bad-charset / multi-doc / symlink-escape each yield a MISSING/MALFORMED sentinel =>
-    # keep polling. Fast path: a child already started on the first poll returns immediately.
-    local state_current
-    state_current="$(verify_started_evidence "$idx")"
-    if [ "$state_current" != "MISSING" ] && [ "$state_current" != "MALFORMED" ]; then
+    # Fail-closed: started ONLY when strain_has_started_evidence finds a validated
+    # state.current (neither MISSING nor MALFORMED) or a gather-facts output file. The confined
+    # readers handle containment (leaf/ancestor symlink reject, NUL reject) AND value-shape
+    # validation; anything else => keep polling. Fast path: a child already started on the first
+    # poll returns immediately.
+    if strain_has_started_evidence "$idx"; then
       return 0
     fi
 
@@ -1040,7 +1097,8 @@ verify_strain() {
     # task. A bare Enter on an already-submitted (empty) composer is a harmless no-op. A send-keys
     # failure here means a dead pane => mark failed and return 1.
     if [ "$(date +%s)" -ge "$next_nudge" ]; then
-      if ! tmux send-keys -t "$tmux_session" Enter 2>/dev/null; then
+      if ! pane_id="$(resolve_strain_pane "$tmux_session")" \
+        || ! tmux send-keys -t "$pane_id" Enter 2>/dev/null; then
         printf 'warning: tmux send-keys Enter (nudge) failed for strain %s\n' "${S_NAME[$idx]}" >&2
         tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
         mark_failed "$idx"
@@ -1052,13 +1110,13 @@ verify_strain() {
   done
 
   # Grace exhausted with still no started-evidence. Branch on tmux session liveness:
-  #   ALIVE => the child is a slow-but-healthy cold boot that has not yet written its ledger.
+  #   ALIVE => the child is a slow-but-healthy cold boot that has not yet written its evidence.
   #            Record the TRANSIENT `starting` status (NOT failed): it falls through the
   #            brood-status derive table as a non-failed observable, the manifest persists
   #            `starting`, and the FINAL exit contract excludes it from failed_count. No teardown.
   #   DEAD  => the session is gone; this is a genuine launch failure => fail-closed mark_failed.
   tmux delete-buffer -b "$buffer_name" 2>/dev/null || true
-  if tmux has-session -t "$tmux_session" 2>/dev/null; then
+  if tmux has-session -t "=$tmux_session" 2>/dev/null; then
     S_STATUS[$idx]="starting"
     printf 'starting: strain %s launched but workflow not yet started within %ds (session alive)\n' \
       "${S_NAME[$idx]}" "$STARTED_EVIDENCE_TIMEOUT" >&2
@@ -1080,7 +1138,7 @@ verify_strain() {
 # READY_TIMEOUT budget every still-pending strain depends on (reviewer starvation root:
 # synchronous-turn-start-verification-coupled-to-shared-scheduler). It now runs once
 # per strain in Pass 3 below, against each strain's OWN deadline. Turn-start evidence
-# stays on-disk run-ledger ground truth (#213/#248), unchanged — only its CALL SITE
+# stays on-disk ground truth (#213/#248), unchanged — only its CALL SITE
 # moved out of the shared loop.
 deadline=$(( $(date +%s) + READY_TIMEOUT ))
 
@@ -1100,7 +1158,9 @@ while [ "${#pending[@]}" -gt 0 ] && [ "$(date +%s)" -lt "$deadline" ]; do
   declare -a still_pending=()
   for idx in "${pending[@]}"; do
     tmux_session="${S_TMUX[$idx]}"
-    if tmux capture-pane -t "$tmux_session" -p 2>/dev/null | grep -qF "$READY_SUBSTRING"; then
+    # A failed pane resolution counts as not ready: the strain stays pending until READY_TIMEOUT.
+    if pane_id="$(resolve_strain_pane "$tmux_session")" \
+      && tmux capture-pane -t "$pane_id" -p 2>/dev/null | grep -qF "$READY_SUBSTRING"; then
       # Fast submit only (no blocking poll). On success enqueue for Pass-3 verification; on a
       # tmux failure submit_strain has already mark_failed'd it — do not enqueue. Either way the
       # strain leaves pending.
@@ -1116,7 +1176,7 @@ while [ "${#pending[@]}" -gt 0 ] && [ "$(date +%s)" -lt "$deadline" ]; do
 done
 
 # Any strain still pending after the shared deadline is a POST-LAUNCH ready-timeout
-# failure: leave session/worktree/branch alive for debugging; no buffer was created.
+# failure: leave session/worktree alive for debugging; no buffer was created.
 for idx in "${pending[@]+"${pending[@]}"}"; do
   printf 'warning: strain %s did not reach ready state within %ds\n' "${S_NAME[$idx]}" "$READY_TIMEOUT" >&2
   mark_failed "$idx"
@@ -1157,22 +1217,25 @@ sleep "$RECONCILE_SETTLE"
 for idx in $(seq 0 $((strain_count - 1))); do
   [ "${S_STATUS[$idx]}" = "starting" ] || continue
   tmux_session="${S_TMUX[$idx]}"
-  # (a) Reuse the EXACT confined started-evidence reader verify_strain uses: started ⇔ the
-  # projection is neither MISSING nor MALFORMED (single-document JSON, object shape, ^[a-z0-9_]+$,
-  # <=64 cap — all owned by the shared canonical projector). Never hand-parse the ledger here.
-  reconcile_state="$(verify_started_evidence "$idx")"
+  # (a) Reuse the EXACT started-evidence check verify_strain uses (strain_has_started_evidence:
+  # a valid run-ledger state.current or a gather-facts output file, both via the shared confined
+  # readers). Never hand-parse the ledger here.
+  has_evidence=0
+  if strain_has_started_evidence "$idx"; then
+    has_evidence=1
+  fi
   # END-OF-SPAWN liveness is probed ONCE here and gates BOTH branches below. started-evidence is a
-  # STALE on-disk artifact: a strain that wrote state.current earlier but whose tmux session has
+  # STALE on-disk artifact: a strain that wrote its evidence earlier but whose tmux session has
   # since DIED in the Pass-3 tail must NOT be promoted to `running` on that stale evidence — the
   # exit-code ⇄ end-of-spawn liveness contract (#291) requires a dead session at end-of-spawn to
   # count toward exit 1 regardless of started-evidence. So re-probe liveness before promoting.
-  if tmux has-session -t "$tmux_session" 2>/dev/null; then
+  if tmux has-session -t "=$tmux_session" 2>/dev/null; then
     is_alive=1
   else
     is_alive=0
   fi
   # (a) started-evidence present AND session still alive => running (slow boot crossed the line).
-  if [ "$is_alive" -eq 1 ] && [ "$reconcile_state" != "MISSING" ] && [ "$reconcile_state" != "MALFORMED" ]; then
+  if [ "$is_alive" -eq 1 ] && [ "$has_evidence" -eq 1 ]; then
     S_STATUS[$idx]="running"
     printf 'running: strain %s reached started-evidence during reconciliation\n' "${S_NAME[$idx]}" >&2
     continue
@@ -1199,6 +1262,8 @@ done
 # Numbers/booleans/null/arrays are emitted as their JSON TYPES (manifest_version a number,
 # merged:false a boolean, pr:null, rebased_after:[]), never stringified. Field names MUST
 # NOT be renamed (brood-status consumes them).
+# Each free-text --arg here is subject to the per-argument limit (MAX_ARG_STRLEN); the ADR-0037
+# slice 4 residual "Spawn inputs carry no byte limits" covers it.
 # The launched sessions are about to be recorded in the manifest; the interruption
 # guard is no longer needed (and must not fire over the manifest write itself, which
 # has its own recovery: path).
@@ -1216,7 +1281,7 @@ created_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 hatchery_ledger=".hivemind/runs/$hatchery_run_id/state.json"
 
 # Build the strains array as JSON. Each strain object is constructed by a per-strain jq -n
-# invocation binding every untrusted value (name, description, worktree_path, branch,
+# invocation binding every untrusted value (name, description, worktree_path,
 # tmux_session, status, run.*) as a --arg, plus the JSON-typed literals (pr:null,
 # merged:false, rebased_after:[]). The compact one-line objects are accumulated newline-
 # separated, then folded into a JSON array with `jq -s` below. No untrusted byte is ever
@@ -1224,15 +1289,14 @@ hatchery_ledger=".hivemind/runs/$hatchery_run_id/state.json"
 # MANIFEST v4: per-strain run.suggested_ledger is DROPPED — the read side (brood-status) derives
 # the child ledger path from ground-truth worktree discovery, so recording it here was redundant
 # manifest-path trust. run.suggested_id is KEPT (the lineage reconciliation key). worktree_path is
-# RETAINED as a display-only field. The child task.md still carries the suggested_ledger so the
-# child knows where to initialize its own ledger.
+# RETAINED as a display-only field. No per-strain branch field is written: each worktree boots
+# detached, and readers treat an absent branch as MISSING.
 strains_objects=""
 for idx in $(seq 0 $((strain_count - 1))); do
   strain_obj="$(jq -nc \
     --arg name "${S_NAME[$idx]}" \
     --arg description "${S_DESC[$idx]}" \
     --arg worktree_path "${S_WT[$idx]}" \
-    --arg branch "${S_BRANCH[$idx]}" \
     --arg tmux_session "${S_TMUX[$idx]}" \
     --arg status "${S_STATUS[$idx]}" \
     --arg suggested_id "${S_RUN_ID[$idx]}" \
@@ -1241,7 +1305,6 @@ for idx in $(seq 0 $((strain_count - 1))); do
       name: $name,
       description: $description,
       worktree_path: $worktree_path,
-      branch: $branch,
       tmux_session: $tmux_session,
       status: $status,
       pr: null,
@@ -1299,9 +1362,20 @@ manifest_json="$(printf '%s' "$strains_objects" | jq -s '.' \
 # (brood-status) observes either the OLD or the COMPLETE NEW manifest — never a truncated/partial
 # file. Per-brood namespacing already gives each brood its own disjoint manifest (no cross-brood
 # truncation), and this temp+mv additionally closes any same-brood re-write read-skew. The temp
-# file is created under $STATE (already mkdir'd + containment-verified above), not $TMPDIR, so it
+# file is created under $STATE (created with the inputs record above), not $TMPDIR, so it
 # shares the target filesystem (mv stays a rename, never a cross-device copy).
-manifest_tmp="$STATE/.manifest.json.tmp.$$"
+#
+# EXCLUSIVE TEMP LEAF: the temp leaf must be one this script CREATES, never one it finds. The
+# name carries a fresh random uuid (not the guessable $$), and the write runs under `set -C`
+# (noclobber), where bash opens a missing file with O_CREAT|O_EXCL and refuses an existing
+# regular file. A stray symlink (dangling or not) or file at the temp path therefore fails the
+# write closed instead of redirecting it. After the rename, a symlinked or non-regular manifest
+# leaf also fails closed.
+manifest_tmp_token="$(generate_temp_token)" || {
+  printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
+  blocker "failed to generate a random manifest temp name; refusing to report success with no current manifest"
+}
+manifest_tmp="$STATE/.manifest.json.tmp.$manifest_tmp_token"
 # DIRECTORY-LEAF REJECTION: `mv SOURCE DEST` treats DEST as a target DIRECTORY when DEST is a
 # directory, silently moving the temp file *inside* it (`mv` succeeds) so the documented manifest
 # path is left as a directory, not a readable manifest file, while spawn reports success. `mv -T`
@@ -1313,18 +1387,19 @@ if [ -d "$manifest_path" ]; then
   printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
   blocker "manifest path $manifest_path is a directory, not a file (stale/interrupted leaf); refusing to report success with no current manifest"
 fi
-if ! printf '%s\n' "$manifest_json" > "$manifest_tmp" 2>/dev/null \
+if ! ( set -C; printf '%s\n' "$manifest_json" > "$manifest_tmp" ) 2>/dev/null \
    || ! mv "$manifest_tmp" "$manifest_path" 2>/dev/null \
+   || [ -L "$manifest_path" ] \
    || [ ! -f "$manifest_path" ]; then
   rm -f "$manifest_tmp" >/dev/null 2>&1 || true
   printf 'recovery: manifest write failed; these live sessions are untracked and must be cleaned manually: %s\n' "$launched_sessions" >&2
-  blocker "failed to write brood manifest to $manifest_path (target unwritable or not a regular file after rename, e.g. a stale directory at that path); refusing to report success with no current manifest"
+  blocker "failed to write brood manifest to $manifest_path (temp file not created fresh, target unwritable, or not a regular file after rename, e.g. a stale directory or a symlink at that path); refusing to report success with no current manifest"
 fi
 
 # ── Final contract ──────────────────────────────────────────────────────────────
 # Emit a ready-to-paste tmux attach command (stdout) for every strain whose session is still
 # live, so the operator can watch a live brood child. That is BOTH `running` strains and
-# `starting` strains (slow-but-healthy cold boots with a live session whose ledger has not yet
+# `starting` strains (slow-but-healthy cold boots with a live session whose started-evidence has not yet
 # appeared) — both have an attachable session. Skips `failed` strains; emits nothing (no header,
 # no empty line) when no strain is running or starting.
 emit_attach_lines() {
@@ -1338,8 +1413,53 @@ emit_attach_lines() {
   done
 }
 
+# run_remote_control_engine <short>...: run the enable-brood-remote engine (rc-brood.sh) from the
+# coordinator checkout root for EXACTLY the listed strains (`--only`), so it reuses that engine's
+# pane-id-addressed `/rc <short>` delivery instead of a copy. The engine is located by
+# self-location from this script's plugin root (never ${CLAUDE_PLUGIN_ROOT}). Every line it prints
+# (stdout and stderr) goes to stdout prefixed `remote: `. A missing engine, a blocker or a failure
+# prints one `remote: warning:` line. It never touches the manifest and always returns 0, so the
+# remote-control step can never change the spawn exit code.
+run_remote_control_engine() {
+  local rc_engine="$plugin_root/skills/enable-brood-remote/scripts/rc-brood.sh"
+  local rc_output="" rc_status=0
+  if [ ! -f "$rc_engine" ]; then
+    printf 'remote: warning: remote control was not turned on (enable-brood-remote engine missing); ask for enable-brood-remote later\n'
+    return 0
+  fi
+  rc_output="$(cd "$repo_root" && bash "$rc_engine" "$brood_id" --only "$@" 2>&1)" || rc_status=$?
+  [ -n "$rc_output" ] && printf '%s\n' "$rc_output" | sed 's/^/remote: /'
+  if [ "$rc_status" -ne 0 ]; then
+    printf 'remote: warning: remote control was not turned on (rc-brood exited %d); ask for enable-brood-remote later\n' "$rc_status"
+  fi
+  return 0
+}
+
+# enable_remote_control: the remote-control step, run after the manifest is written on BOTH exit
+# paths. Strains whose in-memory status is `running` (started-evidence seen and session alive at
+# end of spawn) are passed to run_remote_control_engine; no call is made when none is running, and
+# an unfiltered fan-out is never triggered. Each `starting` strain gets one `remote: skipped:` line
+# so the operator knows to ask for enable-brood-remote once it starts. A `failed` strain gets no
+# line. Remote control needs a claude.ai login and an accepted one-time remote-control
+# confirmation in the child; otherwise the child shows that confirmation until the user attaches.
+enable_remote_control() {
+  local idx
+  local -a running_shorts=()
+  for idx in $(seq 0 $((strain_count - 1))); do
+    [ "${S_STATUS[$idx]}" = "running" ] && running_shorts+=("${S_SHORT[$idx]}")
+  done
+  if [ "${#running_shorts[@]}" -gt 0 ]; then
+    run_remote_control_engine "${running_shorts[@]}"
+  fi
+  for idx in $(seq 0 $((strain_count - 1))); do
+    [ "${S_STATUS[$idx]}" = "starting" ] \
+      && printf 'remote: skipped: %s (not started when spawn ended; ask for enable-brood-remote later)\n' "${S_SHORT[$idx]}"
+  done
+  return 0
+}
+
 # failed_count counts ONLY genuinely-`failed` strains (dead session / pre-launch guard). The
-# transient `starting` status (alive session, ledger not yet written within the cold-boot grace)
+# transient `starting` status (alive session, no started-evidence within the cold-boot grace)
 # is DELIBERATELY excluded: a brood whose only non-`running` strains are `starting` is SUCCESS and
 # must NOT trigger the `blocker: ... failed to spawn` teardown path below.
 failed_count=0
@@ -1353,6 +1473,7 @@ if [ "$failed_count" -eq 0 ]; then
   printf 'brood_id: %s\n' "$brood_id"
   printf 'manifest: %s\n' "$manifest_path"
   emit_attach_lines
+  enable_remote_control
   exit 0
 fi
 
@@ -1360,4 +1481,5 @@ printf 'brood_id: %s\n' "$brood_id"
 printf 'blocker: %d of %d strains failed to spawn\nmanifest: %s\n' \
   "$failed_count" "$strain_count" "$manifest_path" >&2
 emit_attach_lines
+enable_remote_control
 exit 1

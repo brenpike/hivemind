@@ -13,6 +13,8 @@ Enable remote control for a brood: fan the Claude Code slash command `/rc <strai
 
 This skill is **agent-invocable on purpose**, but it fires ONLY on an EXPLICIT user request to enable remote control over a brood's strains — never as an autonomous coordination step. That description-scoping is exactly how the ADR-0007 boundary is preserved: the coordinator stays a read-only status dashboard with zero brood-awareness in children, and issuing these keystrokes on the user's explicit request is human-initiated addressing — equivalent to the user attaching to each pane and typing the command themselves (ADR-0027). The coordinator never autonomously remote-controls children.
 
+`spawn-brood` already turns remote control on at spawn time for every strain that started before spawn ended (ADR-0027 amendment). This skill stays the on-request path: use it for strains that started later than that, or that lost their remote-control connection. Called this way, the engine still targets every live strain of the brood.
+
 ## Procedure
 
 1. **Resolve the target broodId.** Discover the broods under the current checkout:
@@ -20,6 +22,7 @@ This skill is **agent-invocable on purpose**, but it fires ONLY on an EXPLICIT u
    bash ${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-discover.sh
    ```
    It emits one absolute manifest path per line (`…/.hivemind/broods/<broodId>/manifest.json`), in sorted brood-id order. The `<broodId>` is the directory segment immediately above `manifest.json`.
+   - **Exit 1 with a `blocker: …` line on stderr** → discovery refused to list the broods (for example, the checkout's `.hivemind/broods` is a symlink or not a real directory, or the checkout root cannot be resolved). Relay the blocker line verbatim and stop. Do not report `No broods found.` and do not run the engine.
    - **Zero lines** → report `No broods found.` and stop.
    - **Exactly one line** → use that brood's `<broodId>`.
    - **Multiple lines** → surface the brood-ids and ask the user which one to enable remote control for. Do not pick on their behalf.

@@ -111,7 +111,7 @@
           <header class="panel plate">
             <p class="kicker xs">standard-delivery</p>
             <h2 id="workflow-title" class="xg">How a run works</h2>
-            <p class="xs">Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. A script run keeps no run ledger: the working branch, its commits and the PR are the record. When the launch is refused, or the Workflow tool is absent as in brood children, standard-delivery runs on its state machine instead, and only that path keeps a run ledger.</p>
+            <p class="xs">Eight beats from your intent to a reviewed pull request, as a standard-delivery workflow script run. A script run keeps no run ledger: the working branch, its commits and the PR are the record. When the launch is refused, or the Workflow tool is absent, standard-delivery runs on its state machine instead, and only that path keeps a run ledger.</p>
           </header>
           <ol class="beats">
             <li class="beat panel">
@@ -158,7 +158,7 @@
             <article class="panel subpanel" aria-labelledby="brood-title">
               <p class="kicker xs">Parallel strains</p>
               <h3 id="brood-title" class="xg">Brood</h3>
-              <p class="xs">The cerebrate splits big work into independent strains. After you approve, each strain runs as its own overlord in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and its own detached tmux session, with its own branch and PR. Each strain starts with <code>--disallowedTools Workflow</code>, so it runs on the state machine. The hatchery watches via <code>hivemind:brood-status</code>.</p>
+              <p class="xs">The cerebrate splits big work into independent strains. After you approve, each strain runs as its own overlord in its own git worktree (<code>.claude/worktrees/&lt;brood-id&gt;/&lt;short&gt;</code>) and its own detached tmux session, with its own branch and PR. Each strain starts in auto mode, so it launches the workflow scripts with no approval prompt. Once a strain has started, spawn turns on remote control for it, so you can watch and answer it from claude.ai or the Claude app; monitoring the brood is your job. The hatchery watches via <code>hivemind:brood-status</code>.</p>
             </article>
             <article class="panel subpanel" aria-labelledby="autonomy-title">
               <p class="kicker xs">Who decides</p>

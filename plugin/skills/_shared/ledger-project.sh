@@ -1,6 +1,6 @@
 # shellcheck shell=bash
 #
-# ledger-project.sh — shared child run-ledger scalar projector (read side).
+# ledger-project.sh — shared child run-ledger scalar projector: pure projection, no I/O.
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: each caller sources it by absolute
 # path derived from its OWN script_dir (`. "$plugin_root/skills/_shared/ledger-project.sh"`).
@@ -16,60 +16,28 @@
 # CHECK13 as a P18 documented exception.
 #
 # SINGLE RESPONSIBILITY: project + validate the two workflow-state scalars (run.status and
-# state.current) from a CONFINED child run-ledger path. The ledger is JSON, parsed READ-ONLY
-# with jq. This file sources nothing and writes nothing — pure projection.
+# state.current) from an in-memory child run-ledger CONTENT snapshot. Pure projection, no I/O:
+# this file sources nothing, opens no file and writes nothing. Its input comes from
+# brood-state.sh: hivemind_brood_read_child_ledger reads the ledger once, refuses a NUL or raw
+# control byte, parses exactly one JSON document from that same snapshot, and passes the result
+# to both projectors below.
 #
 # DATA-BOUNDARY (MANDATORY): a child run-ledger (`<worktree>/.hivemind/runs/<id>/state.json`)
-# is UNTRUSTED, attacker-controllable bytes — a brood child runs detached
-# --dangerously-skip-permissions, so its ledger contents are adversary-influenced. These
+# is UNTRUSTED, attacker-controllable bytes — a brood child runs detached, and child content
+# stays adversary-influenced whatever its permission mode, so its ledger contents are too. These
 # functions NEVER echo raw ledger bytes: they emit ONLY a value that passed strict validation,
-# or one of the fixed tokens MISSING / MALFORMED. The caller is expected to have already
-# CONFINED the ledger path (containment + allowlist) before calling; these functions add the
-# value-shape validation layer.
+# or one of the fixed tokens MISSING / MALFORMED.
 #
 # PER-SCALAR INDEPENDENCE: the two projectors are independent. A bad run.status never blanks
 # state.current and vice versa — the caller reads both and renders each on its own merit.
 #
 # TOKEN SEMANTICS:
-#   MISSING   — the ledger file/dir is absent, OR the field is absent/empty in a parseable file
-#               (`// empty` yielded nothing). "Nothing to report", not an attack.
-#   MALFORMED — the file exists but jq could not parse it (torn/partial/invalid JSON), OR the
-#               field is present but fails its value contract (out-of-enum status, or a
-#               state.current that violates the identifier shape / length cap). "Present but
-#               invalid" — never echoed raw.
-
-# SINGLE-SNAPSHOT READ (read-side projection path): the projection engine
-# (brood-status-project.sh) reads the ledger file EXACTLY ONCE into an in-memory shell variable
-# and projects BOTH scalars from THAT snapshot via jq stdin (`printf '%s' "$content" | jq ...`),
-# never re-opening the file. This mirrors the manifest single-snapshot pattern (manifest-json.sh)
-# and collapses the prior per-scalar reopen window: the OLD path-based projectors each independently
-# re-stat + re-open the leaf via jq (which FOLLOWS symlinks), so a hostile child could swap the
-# regular-file leaf to a symlink in the post-check window and the per-scalar reopens would follow it.
-# The content-snapshot projectors below (suffix `_content`) take the CONTENT, not the path; the
-# legacy path-based pair (hivemind_project_run_status / hivemind_project_state_current) is retained
-# as a thin read-once wrapper for the unit-test callers that pass a fixture path directly.
-
-# hivemind_path_has_nul <file>
-# Returns 0 (true) iff <file> contains at least one literal NUL byte. JSON never legitimately
-# contains a literal NUL, so its presence marks the file UNREADABLE/MALFORMED.
-#
-# WHY THIS EXISTS: bash command substitution `$(...)` SILENTLY STRIPS NUL bytes from its
-# captured output. A file read with `content="$(cat -- "$f")"` therefore yields a value that
-# DIFFERS from the on-disk bytes whenever a NUL is present — e.g. an on-disk
-# `{"strains":<NUL>[]}` becomes the valid-looking `{"strains":[]}` and passes shape validation.
-# We must therefore reject a NUL-bearing file at the FILE level, BEFORE any `$(...)` read can
-# erase the NUL. `grep`/bash-string approaches cannot carry a NUL in the pattern (the NUL is
-# itself stripped from the pattern), so detection is done byte-accurately via `tr`: strip every
-# NUL and compare the byte length to the original — any difference means a NUL was present.
-# LC_ALL=C keeps `tr`/`wc` byte-oriented (no locale multibyte interpretation).
-hivemind_path_has_nul() {
-  local file="$1"
-  [ -f "$file" ] || return 1
-  local orig stripped
-  orig="$(LC_ALL=C wc -c < "$file" 2>/dev/null)" || return 1
-  stripped="$(LC_ALL=C tr -d '\000' < "$file" 2>/dev/null | LC_ALL=C wc -c)"
-  [ "$orig" != "$stripped" ]
-}
+#   MISSING   — the content is empty, OR the field is absent/null/empty in a parseable document.
+#               "Nothing to report", not an attack.
+#   MALFORMED — jq could not parse the content (torn/partial/invalid JSON, zero or several
+#               documents), OR the field is present but fails its value contract (out-of-enum
+#               status, or a state.current that violates the identifier shape / length cap).
+#               "Present but invalid" — never echoed raw.
 
 # hivemind_project_run_status_content <content>
 # Emit the validated run.status from an in-memory ledger CONTENT snapshot, or MISSING
@@ -163,222 +131,4 @@ hivemind_project_state_current_content() {
   fi
   printf '%s\n' "$verdict"
   return 0
-}
-
-# hivemind_project_run_status <ledger_path>
-# Legacy path-based wrapper retained for unit-test callers that pass a fixture path. Reads the
-# ledger ONCE and delegates to hivemind_project_run_status_content. Emit the validated run.status,
-# or MISSING (absent file / absent-or-empty field) or MALFORMED (unparseable JSON / value outside
-# the fixed enum). An absent file is MISSING (the wrapper short-circuits before any read).
-hivemind_project_run_status() {
-  local ledger_path="$1"
-  if [ ! -f "$ledger_path" ]; then
-    printf 'MISSING\n'
-    return 0
-  fi
-  # FILE-LEVEL NUL REJECTION: the `cat` below captures via `$(...)`, which
-  # SILENTLY STRIPS NUL bytes, so a NUL-bearing ledger would parse as a different document than
-  # what is on disk. JSON never legitimately contains a literal NUL → "present but invalid" →
-  # MALFORMED, checked at the FILE level before the `$(...)` read can erase the NUL.
-  if hivemind_path_has_nul "$ledger_path"; then
-    printf 'MALFORMED\n'
-    return 0
-  fi
-  local content
-  # READ FAILURE on a PRESENT file (unreadable perms, I/O error) is "present but cannot be
-  # read" → MALFORMED, never MISSING. `cat` returns empty AND non-zero on failure; the
-  # `2>/dev/null` silences stderr only, not the exit status the `if !` tests. Mirrors the
-  # pre-single-snapshot jq-open-failure semantics and the content-snapshot read site. The
-  # re-test `[ -e ]` keeps a file that VANISHED after the `[ -f ]` guard above as MISSING
-  # (genuine absence), reporting MALFORMED only for a present-but-unreadable file.
-  if ! content="$(cat -- "$ledger_path" 2>/dev/null)"; then
-    if [ -e "$ledger_path" ]; then
-      printf 'MALFORMED\n'
-    else
-      printf 'MISSING\n'
-    fi
-    return 0
-  fi
-  hivemind_project_run_status_content "$content"
-  return 0
-}
-
-# hivemind_project_state_current <ledger_path>
-# Legacy path-based wrapper retained for unit-test callers that pass a fixture path. Reads the
-# ledger ONCE and delegates to hivemind_project_state_current_content. Emit the validated
-# state.current, or MISSING (absent file / absent-or-empty field) or MALFORMED (unparseable JSON /
-# value failing ^[a-z0-9_]+$ / value longer than 64 chars).
-hivemind_project_state_current() {
-  local ledger_path="$1"
-  if [ ! -f "$ledger_path" ]; then
-    printf 'MISSING\n'
-    return 0
-  fi
-  # FILE-LEVEL NUL REJECTION: see hivemind_project_run_status — a literal NUL in
-  # the ledger would be silently stripped by the `$(...)` read; a NUL-bearing ledger is MALFORMED.
-  if hivemind_path_has_nul "$ledger_path"; then
-    printf 'MALFORMED\n'
-    return 0
-  fi
-  local content
-  # READ FAILURE on a PRESENT file (unreadable perms, I/O error) is "present but cannot be
-  # read" → MALFORMED, never MISSING. `cat` returns empty AND non-zero on failure; the
-  # `2>/dev/null` silences stderr only, not the exit status the `if !` tests. Mirrors the
-  # pre-single-snapshot jq-open-failure semantics and the content-snapshot read site. The
-  # re-test `[ -e ]` keeps a file that VANISHED after the `[ -f ]` guard above as MISSING
-  # (genuine absence), reporting MALFORMED only for a present-but-unreadable file.
-  if ! content="$(cat -- "$ledger_path" 2>/dev/null)"; then
-    if [ -e "$ledger_path" ]; then
-      printf 'MALFORMED\n'
-    else
-      printf 'MISSING\n'
-    fi
-    return 0
-  fi
-  hivemind_project_state_current_content "$content"
-  return 0
-}
-
-# hivemind_read_confined_state_current <worktree_root> <relative_ledger_chain>
-#
-# SINGLE SOURCE OF THE 6-LAYER HARDENED CONFINED READ of a child run-ledger leaf. Both
-# spawn-brood's verify_started_evidence and brood-status-project.sh's inner ledger read call
-# THIS function instead of maintaining two byte-near-identical copies (the duplicate-drift root
-# class that absorbed two P1 findings on PR #278). It performs the confined, single-snapshot
-# read of `<worktree_root>/<relative_ledger_chain>` and projects BOTH workflow-state scalars
-# (state.current AND run.status) from that ONE snapshot.
-#
-# WHY BOTH SCALARS FROM ONE SNAPSHOT: brood-status renders both state.current and run.status.
-# Re-opening the ledger a second time to project the second scalar would reintroduce the
-# multi-open TOCTOU window the single-snapshot design closed (a hostile child could swap the
-# leaf between the two opens). So this function reads ONCE and projects both from the same
-# in-memory `cat` snapshot via the existing _content projectors.
-#
-# CALLER CONTRACT: the caller MUST source containment.sh BEFORE ledger-project.sh — this
-# function calls hivemind_assert_file_contained and hivemind_path_has_nul, both defined in
-# containment.sh. (Both current callers already source in that order.)
-#
-# DATA-BOUNDARY (MANDATORY): the child run-ledger is UNTRUSTED, attacker-controllable bytes (a
-# brood child runs detached --dangerously-skip-permissions). This function NEVER echoes raw
-# ledger bytes: each emitted scalar is ONLY a value that passed the _content projectors' strict
-# in-jq validation, or one of the fixed tokens MISSING / MALFORMED. Confinement is enforced here
-# (containment + leaf/NUL/ITEM-4 guards) so neither caller has to reimplement it.
-#
-# ARGUMENTS
-#   <worktree_root>          the GROUND-TRUTH worktree root the leaf is confined beneath. The
-#                            caller MUST pass a script-derived, trusted root (spawn-brood's
-#                            S_WT[idx]; brood-status's git-worktree-list-discovered, already
-#                            CHECKOUT_ROOT-confined path) — NEVER a manifest/child-supplied path.
-#   <relative_ledger_chain>  the checkout-relative chain to the leaf, e.g.
-#                            ".hivemind/runs/<run_id>/state.json".
-#
-# OUTPUT GRAMMAR (exactly two lines, stable for STEP-002/003/004 callers to parse):
-#   line 1 = state.current result  ∈ { MISSING | MALFORMED | <validated value> }
-#   line 2 = run.status result     ∈ { MISSING | MALFORMED | <validated value> }
-# A <validated value> on line 1 satisfies ^[a-z0-9_]+$ and length<=64; on line 2 it is one of
-# running|complete|blocked|cancelled. Neither line can carry a NUL or newline (the _content
-# projectors emit only fixed tokens or charset/enum-validated values). spawn-brood consumes only
-# line 1 (state.current); brood-status consumes both lines. Both lines take the SAME terminal
-# token on every guard-failure path below (a confinement/read failure is not scalar-specific).
-#
-# LAYER ORDERING (do NOT reorder — byte-equivalent to the two reference inner reads):
-#   1. hivemind_assert_file_contained — leaf [ -L ] + non-regular reject AND depth-complete
-#      ancestor symlink walk under <worktree_root>; echoes the CANONICAL worktree root. On
-#      reject => fail-closed MALFORMED (both), never read.
-#   2. derive canon_ledger = "$canon_wt/$rel_chain".
-#   3. [ -L "$canon_ledger" ] re-check as close to the read as possible — narrows (does not
-#      close; bash has no portable O_NOFOLLOW) the irreducible single-open micro-TOCTOU. =>
-#      MALFORMED.
-#   4. hivemind_path_has_nul — FILE-LEVEL NUL reject: bash $(...) silently strips NUL, so a
-#      NUL-bearing ledger would parse as a different document than what is on disk. JSON never
-#      legitimately carries a literal NUL => MALFORMED, rejected before the $(...) read.
-#   5. single `cat -- "$canon_ledger"` snapshot. On cat success: ITEM-4 post-read re-canonicalize
-#      the leaf PARENT (cd && pwd -P resolves every symlink component) + re-append basename +
-#      re-assert still under canon_wt — bounds the ancestor-swap micro-TOCTOU between the guard
-#      and the cat to an ACCEPTED residual (not a structural closure). On escape => MALFORMED.
-#   6. project state.current AND run.status from the ONE snapshot via the existing _content
-#      projectors. On cat FAILURE: [ -e "$canon_ledger" ] => MALFORMED (present-but-unreadable:
-#      perms / I/O), else MISSING (genuine absence — the child may not have written its ledger
-#      yet, or it vanished).
-hivemind_read_confined_state_current() {
-  local worktree_root="$1"
-  local rel_chain="$2"
-
-  # LAYER 1: confine the leaf beneath the ground-truth worktree. hivemind_assert_file_contained
-  # rejects a symlinked / non-regular state.json leaf ([ -L ] fires even on a dangling target)
-  # AND any symlinked ancestor of the chain, echoing the CANONICAL worktree root. A non-existent
-  # leaf PASSES (the child may not have written its ledger yet) => MISSING on the cat-failure
-  # path below. Reject (non-zero) => fail-closed MALFORMED (both), never read.
-  local canon_wt
-  if ! canon_wt="$(hivemind_assert_file_contained "$worktree_root" "$rel_chain" 2>/dev/null)"; then
-    printf 'MALFORMED\nMALFORMED\n'
-    return 0
-  fi
-  # LAYER 2: derive the canonical ledger path under the canonical worktree.
-  local canon_ledger="$canon_wt/$rel_chain"
-
-  # LAYER 3: re-assert the leaf is not a symlink as close to the read as possible (narrows, does
-  # not close, the irreducible single-open micro-TOCTOU — bash has no portable O_NOFOLLOW). An
-  # ACCEPTED bounded residual: only the validated state.current charset / run.status enum ever
-  # surfaces, never raw bytes.
-  if [ -L "$canon_ledger" ]; then
-    printf 'MALFORMED\nMALFORMED\n'
-    return 0
-  fi
-  # LAYER 4: FILE-LEVEL NUL REJECTION — bash $(...) silently strips NUL; a NUL-bearing ledger
-  # would parse as a different document than what is on disk. JSON never legitimately carries a
-  # literal NUL => MALFORMED, rejected at the FILE level before the $(...) read can erase it.
-  if hivemind_path_has_nul "$canon_ledger"; then
-    printf 'MALFORMED\nMALFORMED\n'
-    return 0
-  fi
-  # LAYER 5: single in-memory snapshot. cat returns empty AND non-zero on failure; the
-  # 2>/dev/null silences only stderr, not the exit status the `if` tests.
-  local ledger_content
-  if ledger_content="$(cat -- "$canon_ledger" 2>/dev/null)"; then
-    # READ SUCCEEDED.
-    # ITEM-4 DEFENSE-IN-DEPTH (locked): after the read, resolve the ACTUAL read target —
-    # canonicalize the leaf's PARENT (cd && pwd -P resolves every symlink component) and
-    # re-append the basename — and RE-ASSERT it is STILL contained under the canonical worktree
-    # (canon_wt). An ANCESTOR such as .hivemind/runs/<run_id> can be swapped to a symlink AFTER
-    # hivemind_assert_file_contained returned but BEFORE this cat; without a post-read check the
-    # projection would accept the escaped target's bytes. Project ONLY if still contained;
-    # otherwise MALFORMED. This bounds (does NOT structurally close — bash has no portable
-    # O_NOFOLLOW) the irreducible one-open micro-TOCTOU to an ACCEPTED residual.
-    local ledger_dir reread_target ledger_still_contained
-    ledger_dir="$(cd "$(dirname -- "$canon_ledger")" 2>/dev/null && pwd -P)"
-    reread_target=""
-    [ -n "$ledger_dir" ] && reread_target="$ledger_dir/$(basename -- "$canon_ledger")"
-    ledger_still_contained=0
-    if [ -n "$reread_target" ]; then
-      case "$reread_target/" in
-        "$canon_wt/"*) ledger_still_contained=1 ;;
-      esac
-    fi
-    if [ "$ledger_still_contained" -ne 1 ]; then
-      # The resolved read target escaped the worktree after the read => fail closed.
-      printf 'MALFORMED\nMALFORMED\n'
-      return 0
-    fi
-    # LAYER 6: confined post-read. Project BOTH scalars from the single in-memory snapshot via
-    # the CONTENT projectors — the same canonical validation both callers used independently
-    # (single-document JSON, object shape, charset / enum, length cap). Never the path-based
-    # projectors (they re-open the leaf and would reintroduce the multi-open window). The
-    # _content projectors each emit exactly one line, so the combined output is exactly two
-    # lines in the documented order: state.current, then run.status.
-    hivemind_project_state_current_content "$ledger_content"
-    hivemind_project_run_status_content "$ledger_content"
-    return 0
-  elif [ -e "$canon_ledger" ]; then
-    # Present but unreadable (perms / I/O) => present-but-invalid => MALFORMED, never MISSING.
-    # The existence re-test runs ONLY on the failure path, so it never enlarges the success-path
-    # read window above.
-    printf 'MALFORMED\nMALFORMED\n'
-    return 0
-  else
-    # Absent leaf (child has not initialized its ledger yet, or it vanished) => MISSING, per the
-    # documented TOKEN SEMANTICS — distinct from the present-but-unreadable case above.
-    printf 'MISSING\nMISSING\n'
-    return 0
-  fi
 }

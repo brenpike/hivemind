@@ -1,21 +1,27 @@
 #!/usr/bin/env bash
 #
 # brood-status-collect — THIN executable entrypoint for the brood-status collection loop
-# (ADR-0020). The read-side analog completion of the brood-status engine: discovery
-# (brood-discover.sh) + single-manifest projection (brood-status-project.sh) were
-# already committed; THIS script owns the LOOP, the IMPURE per-strain observable probing, the
-# pure status-derivation (via _shared/brood-status-derive.sh), and aggregation, emitting ONE JSON
+# (ADR-0020). THIS script owns the LOOP, the IMPURE per-strain observable probing, the pure
+# status-derivation (via _shared/brood-status-derive.sh), and aggregation, emitting ONE JSON
 # document the navigator renders. It replaces the prose loop/derivation that previously lived in
 # brood-status's SKILL.md steps 2..5 — exactly the "inline navigator-body logic" ADR-0020 rejects.
 #
+# BROOD STATE THROUGH ONE READER (Trust-Boundary Discipline, security-policy.md: accept
+# identifiers, never paths): this script never names or opens a brood-state path. It lists the
+# brood ids with hivemind_brood_list_ids (_shared/brood-state.sh, the only code that reads brood
+# state) and runs the single-brood projector (brood-status-project.sh) EXACTLY ONCE per brood with
+# two identifiers, the brood id and the checkout root. Everything it needs about a brood comes
+# from that one run: the BROOD line (the manifest's validated top-level brood_id, for the
+# brood-id integrity check), the STRAIN lines, the MANIFEST_UNREADABLE sentinel, or the
+# `blocker:` line. A refused listing is a `blocker:` line on stderr and exit 1, never a silent
+# empty list.
+#
 # STRUCTURAL SPLICE CLOSURE (the security point): the navigator previously spliced each
 # discovered manifest path AND the operator-controlled checkout root into an LLM-authored Bash
-# command (`bash brood-status-project.sh "<manifest_path>" "<checkout_root>"`). Per
-# security-policy.md / ADR-0019, double-quoting does NOT neutralize `$(...)`, backticks, or `${}`
-# in command SOURCE. This entrypoint runs the loop and invokes the projector with INERT shell
-# variables (`"$manifest"`, `"$root"`), so untrusted paths NEVER cross into LLM-authored command
-# source. Both residuals close BY CONSTRUCTION: the brood-id segment (already gated) AND
-# the operator-controlled checkout-root (deferred).
+# command. Per security-policy.md / ADR-0019, double-quoting does NOT neutralize `$(...)`,
+# backticks, or `${}` in command SOURCE. This entrypoint runs the loop and invokes the projector
+# with INERT shell variables (`"$brood_id"`, `"$root"`), so untrusted values NEVER cross into
+# LLM-authored command source.
 #
 # RUNTIME DEPS: jq is a hard dep (the projector output is consumed + a JSON document is built with
 # jq so all escaping is automatic). Unlike the PURE projector, tmux/gh/git ARE required here —
@@ -31,7 +37,10 @@
 #           "workflow_state","run_status","derived_status"} ],
 #           workflow_state is a real workflow-state token or one of the fixed tokens MISSING /
 #           MALFORMED / NO_LEDGER_POINTER (legacy manifest with no ledger pointer); run_status is a
-#           real run.status token or MISSING / MALFORMED.
+#           real run.status token or MISSING / MALFORMED. branch is the selected worktree's git LIVE
+#           branch (projector field 10) or MISSING / MALFORMED (no worktree, detached HEAD, or a
+#           rejected name) — new manifests carry no per-strain branch, so the manifest column is
+#           not shown.
 #         "summary":{"complete","running","blocked_failed","total"} } ],
 #       "global":{"total_broods","unreadable","complete","total_strains"} }
 #   Broods in sorted discovery order; strains in projector/manifest order. PER-BROOD FAILURE
@@ -50,10 +59,13 @@ blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 # portable (no realpath/readlink). NO ${CLAUDE_PLUGIN_ROOT} inside an engine script.
 script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
 plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
-DISCOVER_SCRIPT="$script_dir/brood-discover.sh"
 PROJECT_SCRIPT="$script_dir/brood-status-project.sh"
 [ -f "$plugin_root/skills/_shared/brood-status-derive.sh" ] || blocker "required shared library missing: skills/_shared/brood-status-derive.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/brood-status-derive.sh" || blocker "failed to source skills/_shared/brood-status-derive.sh (unparseable); refusing to proceed"
+[ -f "$plugin_root/skills/_shared/containment.sh" ] || blocker "required shared library missing: skills/_shared/containment.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/containment.sh" || blocker "failed to source skills/_shared/containment.sh (unparseable); refusing to proceed"
+[ -f "$plugin_root/skills/_shared/brood-state.sh" ] || blocker "required shared library missing: skills/_shared/brood-state.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/brood-state.sh" || blocker "failed to source skills/_shared/brood-state.sh (unparseable); refusing to proceed"
 
 # ── Dependency check ──────────────────────────────────────────────────────────────
 # jq is the hard floor (consume projector TAB output + build the JSON document). git resolves the
@@ -72,17 +84,21 @@ if [ -z "$root" ] || [ ! -d "$root" ]; then
   exit 1
 fi
 
-# ── Discover manifests (validated brood-id segments; treat as DATA) ────────────────
-# brood-discover.sh emits sorted absolute manifest paths, one per line. Capture into an array
-# with a Bash-3.2-portable read loop (mapfile/readarray are Bash-4-only and absent on macOS system
-# bash 3.2) so a path is never re-parsed as shell. Zero lines -> empty broods array.
-manifests=()
-if discover_out="$(bash "$DISCOVER_SCRIPT" "$root" 2>/dev/null)"; then
-  if [ -n "$discover_out" ]; then
-    while IFS= read -r manifest_line || [ -n "$manifest_line" ]; do
-      manifests+=("$manifest_line")
-    done <<< "$discover_out"
-  fi
+# ── List brood ids (pattern-validated identifiers; treat as DATA) ──────────────────
+# hivemind_brood_list_ids prints the sorted brood ids, one per line, or nothing when the checkout
+# has no broods. A refused listing (a symlinked or non-directory brood-state directory,
+# or an unresolvable root) returns non-zero with its reason on stderr: that is a blocker, never an
+# empty dashboard. Capture into an array with a Bash-3.2-portable read loop (mapfile/readarray are
+# Bash-4-only and absent on macOS system bash 3.2) so an id is never re-parsed as shell.
+brood_ids=()
+if ! ids_out="$(hivemind_brood_list_ids "$root")"; then
+  printf 'blocker: refusing to list the broods of checkout %s: brood state is a symlink or not a directory\n' "$root" >&2
+  exit 1
+fi
+if [ -n "$ids_out" ]; then
+  while IFS= read -r id_line || [ -n "$id_line" ]; do
+    brood_ids+=("$id_line")
+  done <<< "$ids_out"
 fi
 
 # ── Per-strain observable probes (IMPURE) ─────────────────────────────────────────
@@ -100,10 +116,12 @@ fi
 SENTINEL_RE='^(MISSING|MALFORMED)$'
 
 # probe_session_alive <tmux_session> -> echoes 1 (alive) or 0 (dead/skip).
+# The `=` prefix makes tmux match the session name exactly, so a dead strain session never reads
+# alive through a live sibling whose name it prefixes (brood-<id>-api vs brood-<id>-api-x).
 probe_session_alive() {
   local sess="$1"
   [[ "$sess" =~ $SENTINEL_RE ]] && { printf '0'; return 0; }
-  if command -v tmux >/dev/null 2>&1 && tmux has-session -t "$sess" 2>/dev/null; then
+  if command -v tmux >/dev/null 2>&1 && tmux has-session -t "=$sess" 2>/dev/null; then
     printf '1'
   else
     printf '0'
@@ -163,16 +181,15 @@ TAB="$(printf '\t')"
 brood_objects=()       # one jq-built JSON object per brood, in discovery order
 global_records=()      # "<is_unreadable>:<complete>:<total>" per brood for the global aggregate
 
-for manifest in "${manifests[@]}"; do
-  # Brood-id segment = basename of the manifest's parent dir (the discover-validated brood-* dir).
-  brood_id="$(basename "$(dirname "$manifest")")"
-
-  # Invoke the PURE projector with INERT "$var" args — the structural splice closure.
+for brood_id in "${brood_ids[@]+"${brood_ids[@]}"}"; do
+  # Invoke the PURE projector ONCE with INERT "$var" args — the structural splice closure. stderr
+  # is merged so a refusal's `blocker:` line comes from this same run; the parsers below select
+  # lines by their leading sentinel, so a stray diagnostic line never becomes a field.
   proj_rc=0
-  proj_out="$(bash "$PROJECT_SCRIPT" "$manifest" "$root" 2>/dev/null)" || proj_rc=$?
+  proj_out="$(bash "$PROJECT_SCRIPT" "$brood_id" "$root" 2>&1)" || proj_rc=$?
 
   if [ "$proj_rc" -eq 2 ]; then
-    # MANIFEST_UNREADABLE: detail is the manifest path from the sentinel line.
+    # MANIFEST_UNREADABLE: detail is the display path from the sentinel line.
     detail="$(printf '%s\n' "$proj_out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
     brood_objects+=( "$(jq -n --arg id "$brood_id" --arg detail "$detail" \
       '{brood_id:$id, status:"unreadable", detail:$detail, strains:[],
@@ -182,10 +199,11 @@ for manifest in "${manifests[@]}"; do
   fi
 
   if [ "$proj_rc" -ne 0 ]; then
-    # Other nonzero: pre-flight blocker. The projector wrote the blocker to stderr (discarded by
-    # the run above); capture a generic blocker detail rather than re-running the projector.
-    blocker_err=0
-    detail="$(bash "$PROJECT_SCRIPT" "$manifest" "$root" 2>&1 >/dev/null)" || blocker_err=$?
+    # Other nonzero: pre-flight blocker or refusal. The detail is the projector's own `blocker:`
+    # line from the run above (the last one, should a library reason precede it); a run that
+    # printed none still renders a blocker brood, with its exit status.
+    detail="$(printf '%s\n' "$proj_out" | awk '/^blocker: / { blocker_line = $0 } END { print blocker_line }')"
+    [ -n "$detail" ] || detail="blocker: brood-status-project.sh exited with status $proj_rc"
     brood_objects+=( "$(jq -n --arg id "$brood_id" --arg detail "$detail" \
       '{brood_id:$id, status:"blocker", detail:$detail, strains:[],
         summary:{complete:0, running:0, blocked_failed:0, total:0}}')" )
@@ -197,19 +215,19 @@ for manifest in "${manifests[@]}"; do
   # lines case). Before any per-strain work, assert BROOD-ID INTEGRITY independently of the strain
   # rows.
   #
-  # BROOD-ID INTEGRITY (manifest-level, strain-count-independent): the discovered directory name
-  # (brood_id, a discover-validated brood-* segment) and the manifest's TOP-LEVEL brood_id are two
-  # ground-truth identities that MUST agree. If they disagree — a manifest copied into the wrong
-  # brood dir, or a tampered/absent/malformed top-level brood_id — the brood is unattributable and
-  # must NOT be rendered as a normal brood under the directory id (which would mask the corruption).
-  # We read the top-level brood_id DIRECTLY here (inert jq DATA read, never command source) rather
-  # than inferring it from STRAIN rows, because the projector emits ZERO STRAIN lines for a valid
-  # empty manifest — a strain-row-only check would let an empty manifest copied into the wrong dir,
-  # or carrying a missing/malformed top-level brood_id, slip through as a normal `empty` brood. The
-  # read mirrors the projector's own validation: a control-bearing value is rejected (-> empty ->
-  # mismatch), and the value must match the directory id exactly (which is already ^brood-[0-9a-f-]+$
-  # shaped by discovery), so absent/tampered/malformed all resolve to "!= brood_id" -> mismatch.
-  manifest_brood_id="$(jq -r '(.brood_id // "") | select((tostring | test("[[:cntrl:]]")) | not) // ""' "$manifest" 2>/dev/null || true)"
+  # BROOD-ID INTEGRITY (manifest-level, strain-count-independent): the listed brood id (a
+  # pattern-validated directory name) and the manifest's TOP-LEVEL brood_id are two identities
+  # that MUST agree. If they disagree — a manifest copied into the wrong brood dir, or a
+  # tampered/absent/malformed top-level brood_id — the brood is unattributable and must NOT be
+  # rendered as a normal brood under the listed id (which would mask the corruption). The value
+  # comes from the projector's BROOD line, printed once even for a valid empty manifest (which has
+  # ZERO STRAIN lines), so an empty manifest copied into the wrong dir, or carrying a
+  # missing/malformed top-level brood_id, cannot slip through as a normal `empty` brood. This
+  # script never opens the manifest: the BROOD line is the projector's validated top-level value
+  # (^brood-[0-9a-f-]+$) or the fixed token MALFORMED, which renders as absent/malformed, as does a
+  # run that printed no BROOD line.
+  manifest_brood_id="$(printf '%s\n' "$proj_out" | awk -F'\t' '/^BROOD\t/ { print $2; exit }')"
+  [ "$manifest_brood_id" != "MALFORMED" ] || manifest_brood_id=""
   if [ "$manifest_brood_id" != "$brood_id" ]; then
     brood_objects+=( "$(jq -n --arg id "$brood_id" --arg got "$manifest_brood_id" \
       '{brood_id:$id, status:"blocker",
@@ -222,7 +240,7 @@ for manifest in "${manifests[@]}"; do
   # Brood-id integrity holds. Parse STRAIN lines. Zero strains -> empty brood.
   strain_objects=()
   buckets=()
-  while IFS="$TAB" read -r sentinel f_brood f_name f_wt f_branch f_tmux f_status f_state f_run f_live_branch; do
+  while IFS="$TAB" read -r sentinel f_brood f_name f_wt f_branch f_tmux f_status f_state f_run f_live_branch f_facts; do
     [ "$sentinel" = "STRAIN" ] || continue
     # Probe observables using the projector-validated tokens (inert "$var").
     session_alive="$(probe_session_alive "$f_tmux")"
@@ -234,12 +252,13 @@ for manifest in "${manifests[@]}"; do
     pr_number="${pr_pair#*$TAB}"
 
     # f_state (state.current) and f_run (run.status) are the child-ledger started-evidence tokens
-    # already projected at the loop head. Threaded inert ("$var") into derivation: an
-    # alive session with no started-evidence (MISSING/MALFORMED state.current) demotes to `starting`
-    # rather than masking as `running`. A legacy manifest with no ledger pointer projects
-    # NO_LEDGER_POINTER, for which the started-evidence gate does not apply (observable status is
-    # kept). No new probe, no new I/O.
-    derived="$(hivemind_derive_strain_status "$f_status" "$session_alive" "$pr_state" "$pr_number" "$f_state" "$f_run")"
+    # already projected at the loop head; f_facts (projector field 11, yes|no) is the facts
+    # started-evidence of a script-engine child, which writes no run ledger. Threaded inert
+    # ("$var") into derivation: an alive session with neither source (MISSING/MALFORMED
+    # state.current and f_facts != yes) demotes to `starting` rather than masking as `running`. A
+    # legacy manifest with no ledger pointer projects NO_LEDGER_POINTER, for which the
+    # started-evidence gate does not apply (observable status is kept). No new probe, no new I/O.
+    derived="$(hivemind_derive_strain_status "$f_status" "$session_alive" "$pr_state" "$pr_number" "$f_state" "$f_run" "$f_facts")"
     buckets+=( "$(hivemind_classify_status_bucket "$derived")" )
 
     session_word="dead"; [ "$session_alive" -eq 1 ] && session_word="alive"
@@ -250,13 +269,13 @@ for manifest in "${manifests[@]}"; do
       pr_num_json="null"
     fi
 
-    # The display object's `branch` shows the manifest branch (f_branch — the spawn-time context
-    # ref), while the PR probe above keys on the git-ground-truth live branch (f_live_branch). This
-    # divergence is INTENTIONAL: the dashboard surfaces the manifest's recorded branch for context,
-    # but the probe must follow the worktree's actual HEAD to find the child's derived-branch PR.
+    # The display object's `branch` shows the git-ground-truth live branch (f_live_branch), the same
+    # value the PR probe above keys on. New manifests carry no per-strain branch (a child boots on a
+    # detached HEAD and its planner names its own branch), so the manifest column (f_branch) is not
+    # displayed; a detached or unselected worktree shows the sentinel MISSING.
     strain_objects+=( "$(jq -n \
       --arg name "$f_name" \
-      --arg branch "$f_branch" \
+      --arg branch "$f_live_branch" \
       --arg session "$session_word" \
       --arg tmux_session "$f_tmux" \
       --argjson number "$pr_num_json" \

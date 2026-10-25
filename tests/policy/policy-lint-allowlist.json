@@ -72,7 +72,7 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/spawn-brood/scripts/spawn-brood.sh",
-    "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — per-strain failures are caught (`if ! git worktree add`) and routed to the failed-strain path so the manifest still records the partial brood; `git ls-remote --exit-code` rc=2 is a normal no-collision result; INT/TERM trap reports leaked resources."
+    "reason": "P18 documented exception (ADR-0020): set -u only. set -e/pipefail deliberately omitted — per-strain failures are caught (`if ! git worktree add`) and routed to the failed-strain path so the manifest still records the partial brood; INT/TERM trap reports leaked resources."
   },
   {
     "rule": "CHECK13",
@@ -93,6 +93,11 @@
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/manifest-json.sh",
     "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Pure extraction signalling presence/rejection via exit code; callers own set -u and error routing."
+  },
+  {
+    "rule": "CHECK13",
+    "path": "plugin/skills/_shared/brood-state.sh",
+    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. The shared reader of coordinator brood state: reads reported through return codes and MISSING/MALFORMED or yes/no tokens; callers own set -u and error routing (this lib never exits)."
   },
   {
     "rule": "CHECK13",

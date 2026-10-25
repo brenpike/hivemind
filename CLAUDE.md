@@ -127,7 +127,7 @@ The post-merge decision report is opt-in via `HIVEMIND_ENABLE_DECISION_REPORT`, 
 The plugin supports parallel multi-overlord execution via spawn-brood and brood-status skills. Each brood session runs in its own git worktree as an independent Claude Code instance.
 
 - **Architecture decision:** `docs/adr/0007-fleet-children-unaware-coordinator-dashboard.md` — children have zero brood awareness; coordinator is a status dashboard
-- **Brood manifest:** `.hivemind/broods/<brood-id>/manifest.json` — one per brood, written by `spawn-brood.sh` and discovered by `brood-discover.sh` via the `.hivemind/broods/brood-*/manifest.json` glob anchored to the spawning checkout root; already gitignored under `.hivemind/`. Layout reference: `plugin/references/brood-ledger-model.md`.
+- **Brood manifest:** `.hivemind/broods/<brood-id>/manifest.json` — one per brood, written by `spawn-brood.sh` and listed by `plugin/skills/_shared/brood-state.sh`, anchored to the spawning checkout root; already gitignored under `.hivemind/`. Layout reference: `plugin/references/brood-ledger-model.md`.
 - **Worktree sessions:** `.claude/worktrees/` (gitignored)
 
 Children are standard overlord sessions receiving a task description. No brood-specific code paths exist in child sessions.

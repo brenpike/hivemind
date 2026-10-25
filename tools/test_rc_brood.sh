@@ -44,6 +44,15 @@
 #      A session reporting >1 active pane (or zero) fails CLOSED — `failed:` disposition, strain counted
 #      failed, ZERO `/rc` sent (it never selects one of multiple active panes), fan-out still exits 0
 #      (Case 17). A revert to break-on-first would silently pick one pane and deliver, tripping Case 17.
+#  11. Strain selection (`--only <short>...`, spawn-time remote control): a selected short is delivered;
+#      an unselected strain gets one `skipped: <short> (not selected)` line and ZERO send-keys; a bad
+#      short (outside ^[a-z0-9-]+$) is a pre-flight blocker with ZERO send-keys; `--only` with no shorts
+#      sends nothing, exits 0 and reports 0 applied (Cases 18a-18d).
+#  12. Confined manifest read: a symlinked manifest leaf, a symlinked per-brood dir that resolves
+#      outside the checkout, and a manifest holding two JSON documents are each a pre-flight blocker
+#      with ZERO send-keys, even when the outside manifest is well-formed (Cases 19a-19c). A manifest
+#      holding a literal NUL (in the middle or trailing) and a symlinked .hivemind/broods directory
+#      are each a pre-flight blocker with ZERO send-keys too (Cases 19d-19f).
 #
 # Usage:
 #   ./tools/test_rc_brood.sh
@@ -312,14 +321,16 @@ new_brood_root() {
   printf '%s' "$root"
 }
 
-# run_engine <root> <brood_id> <alive_file> <sendkeys_log> — run the engine inside <root> with the
-# fake tmux first on PATH, a tmp HOME, the configured alive-set + send-keys log. Stdout is written to
+# run_engine <root> <brood_id> <alive_file> <sendkeys_log> [engine_arg…] — run the engine inside <root>
+# with the fake tmux first on PATH, a tmp HOME, the configured alive-set + send-keys log. Any argument
+# after <sendkeys_log> is passed to the engine after the brood-id (e.g. `--only api`). Stdout is written to
 # <sendkeys_log>.stdout, stderr to <sendkeys_log>.stderr, and the exit code is stored in the global
 # RUN_RC. run_engine is NOT invoked through command substitution (a `$()` subshell could not write
 # RUN_RC back to the parent shell); callers read RUN_RC and the .stdout file after the call.
 RUN_RC=0
 run_engine() {
   local root="$1" brood_id="$2" alive_file="$3" sendkeys_log="$4"
+  shift 4
   set +e
   (
     cd "$root" \
@@ -330,7 +341,7 @@ run_engine() {
          TMUX_SENDKEYS_FAIL_TARGET="${TMUX_SENDKEYS_FAIL_TARGET:-}" \
          TMUX_PANE_GONE_AT_SEND="${TMUX_PANE_GONE_AT_SEND:-}" \
          TMUX_MULTI_ACTIVE="${TMUX_MULTI_ACTIVE:-}" \
-         bash "$ENGINE" "$brood_id"
+         bash "$ENGINE" "$brood_id" "$@"
   ) >"${sendkeys_log}.stdout" 2>"${sendkeys_log}.stderr"
   RUN_RC=$?
   set -e
@@ -1019,6 +1030,155 @@ assert_contains "multi-active:failed-line" "failed: api" "$OUT17" "strain record
 assert_contains "multi-active:expected-one" "expected exactly one active pane" "$OUT17" "multi-active fails closed with the exactly-one-active-pane error"
 assert_contains "multi-active:summary" "0 applied, 0 skipped, 1 failed (of 1 strains)" "$OUT17" "strain counted failed, none applied"
 assert_eq "multi-active:zero-sendkeys" "0" "$(count_records "$LOG17")" "no keystroke delivered when >1 active pane (never selects one)"
+
+# ── Case 18a: --only selects one strain — the selected short is delivered ─────────
+# The 3-strain all-alive manifest with `--only db-migrations`: only that strain gets `/rc`; api and
+# web-ui are skipped as not selected with zero send-keys, even though their sessions are alive.
+echo '=== Case 18a: --only selected short delivered, unselected strains skipped ==='
+ROOT18A="$(new_brood_root only-selected "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+ALIVE18A="$WORKDIR/alive18a"
+LOG18A="$WORKDIR/log18a"
+: > "$LOG18A"
+printf '%s\n' \
+  "$BID1-api" \
+  "$BID1-web-ui" \
+  "$BID1-db-migrations" > "$ALIVE18A"
+run_engine "$ROOT18A" "$BID1" "$ALIVE18A" "$LOG18A" --only db-migrations
+OUT18A="$(cat "${LOG18A}.stdout")"
+LOGTEXT18A="$(cat "$LOG18A")"
+PAYLOADS18A="$(literal_payloads "$LOG18A")"
+assert_eq "only-selected:exit" "0" "$RUN_RC" "selected fan-out completed"
+assert_eq "only-selected:record-count" "2" "$(count_records "$LOG18A")" "one literal + one Enter for the selected strain"
+assert_eq "only-selected:payload" "/rc db-migrations" "$PAYLOADS18A" "only the selected short is delivered"
+assert_contains "only-selected:target" "ARG:$(pane_id_for "$BID1-db-migrations")" "$LOGTEXT18A" "selected strain addressed at its resolved pane id"
+assert_contains "only-selected:applied" "applied: db-migrations" "$OUT18A"
+assert_contains "only-selected:summary" "1 applied, 2 skipped, 0 failed (of 3 strains)" "$OUT18A" "summary counts"
+
+# ── Case 18b: --only — an unselected strain is skipped with zero send-keys ───────
+# Same run as 18a, asserted from the unselected side: one `skipped: <short> (not selected)` line per
+# unselected strain and no keystroke addressed to either of their panes.
+echo '=== Case 18b: --only unselected strain skipped, zero send-keys to it ==='
+assert_contains "only-unselected:skip-api"   "skipped: api (not selected)"    "$OUT18A" "api skipped as not selected"
+assert_contains "only-unselected:skip-webui" "skipped: web-ui (not selected)" "$OUT18A" "web-ui skipped as not selected"
+assert_eq "only-unselected:skip-api-once" "1" "$(grep -c '^skipped: api ' <<<"$OUT18A")" "exactly one skip line for api"
+assert_not_contains "only-unselected:no-payload-api"   "/rc api"    "$PAYLOADS18A" "unselected api never receives /rc"
+assert_not_contains "only-unselected:no-payload-webui" "/rc web-ui" "$PAYLOADS18A" "unselected web-ui never receives /rc"
+assert_not_contains "only-unselected:no-pane-api"   "ARG:$(pane_id_for "$BID1-api")"    "$LOGTEXT18A" "unselected api pane never targeted"
+assert_not_contains "only-unselected:no-pane-webui" "ARG:$(pane_id_for "$BID1-web-ui")" "$LOGTEXT18A" "unselected web-ui pane never targeted"
+
+# ── Case 18c: --only with a bad short → pre-flight blocker, zero send-keys ────────
+# A short outside ^[a-z0-9-]+$ (uppercase, then a shell metacharacter, then empty) is rejected before
+# the manifest is read: blocker on stderr, exit 1, send-keys log EMPTY. The good short listed first
+# proves the whole selection is validated before any delivery.
+echo '=== Case 18c: --only bad short — blocker, exit 1, zero send-keys ==='
+for bad_short in 'API' 'api;touch' ''; do
+  ROOT18C="$(new_brood_root "only-bad-$RANDOM" "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+  ALIVE18C="$WORKDIR/alive18c"
+  LOG18C="$WORKDIR/log18c"
+  : > "$LOG18C"
+  printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE18C"
+  run_engine "$ROOT18C" "$BID1" "$ALIVE18C" "$LOG18C" --only api "$bad_short"
+  assert_eq "only-bad[$bad_short]:exit" "1" "$RUN_RC" "bad short is a pre-flight blocker"
+  assert_contains "only-bad[$bad_short]:blocker" "blocker: --only short must match" "$(cat "${LOG18C}.stderr")" "blocker line on stderr"
+  assert_eq "only-bad[$bad_short]:zero-sendkeys" "0" "$(count_records "$LOG18C")" "no keystroke delivered on a bad short"
+  assert_eq "only-bad[$bad_short]:no-stdout" "" "$(cat "${LOG18C}.stdout")" "no disposition lines before the blocker"
+done
+
+# ── Case 18d: --only with no shorts → nothing sent, exit 0, 0 applied ─────────────
+echo '=== Case 18d: --only with no shorts — zero send-keys, exit 0, 0 applied ==='
+ROOT18D="$(new_brood_root only-empty "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+ALIVE18D="$WORKDIR/alive18d"
+LOG18D="$WORKDIR/log18d"
+: > "$LOG18D"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE18D"
+run_engine "$ROOT18D" "$BID1" "$ALIVE18D" "$LOG18D" --only
+OUT18D="$(cat "${LOG18D}.stdout")"
+assert_eq "only-empty:exit" "0" "$RUN_RC" "empty selection completes"
+assert_eq "only-empty:zero-sendkeys" "0" "$(count_records "$LOG18D")" "no keystroke delivered with an empty selection"
+assert_contains "only-empty:summary" "0 applied, 3 skipped, 0 failed (of 3 strains)" "$OUT18D" "summary reports 0 applied"
+assert_contains "only-empty:skip-db" "skipped: db-migrations (not selected)" "$OUT18D" "every strain skipped as not selected"
+
+# ── Case 19a: symlinked manifest LEAF → pre-flight blocker, zero send-keys ─────────
+# The manifest path is a symlink to a well-formed manifest OUTSIDE the checkout, carrying the right
+# brood_id and live strains. The confined read must refuse it before any jq read or tmux probe.
+echo '=== Case 19a: symlinked manifest leaf — blocker, exit 1, zero send-keys ==='
+ROOT19A="$WORKDIR/leaf-symlink"
+mkdir -p "$ROOT19A/.hivemind/broods/$BID1" "$WORKDIR/outside19a"
+git -C "$ROOT19A" init -q
+cp "$FIXTURES/rc-manifest-all-alive.json" "$WORKDIR/outside19a/manifest.json"
+ln -s "$WORKDIR/outside19a/manifest.json" "$ROOT19A/.hivemind/broods/$BID1/manifest.json"
+ALIVE19A="$WORKDIR/alive19a"; LOG19A="$WORKDIR/log19a"; : > "$LOG19A"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19A"
+run_engine "$ROOT19A" "$BID1" "$ALIVE19A" "$LOG19A"
+assert_eq "leaf-symlink:exit" "1" "$RUN_RC" "symlinked manifest leaf is a pre-flight blocker"
+assert_contains "leaf-symlink:blocker" "refusing to read the brood manifest" "$(cat "${LOG19A}.stderr")" "leaf-symlink blocker on stderr"
+assert_eq "leaf-symlink:zero-sendkeys" "0" "$(count_records "$LOG19A")" "no keystroke from a symlinked manifest"
+
+# ── Case 19b: symlinked manifest ANCESTOR → pre-flight blocker, zero send-keys ─────
+# The per-brood dir is a symlink to a dir OUTSIDE the checkout that holds a regular, well-formed
+# manifest. The leaf is not a symlink, so only the ancestor containment check can refuse it.
+echo '=== Case 19b: symlinked manifest ancestor — blocker, exit 1, zero send-keys ==='
+ROOT19B="$WORKDIR/ancestor-symlink"
+mkdir -p "$ROOT19B/.hivemind/broods" "$WORKDIR/outside19b"
+git -C "$ROOT19B" init -q
+cp "$FIXTURES/rc-manifest-all-alive.json" "$WORKDIR/outside19b/manifest.json"
+ln -s "$WORKDIR/outside19b" "$ROOT19B/.hivemind/broods/$BID1"
+ALIVE19B="$WORKDIR/alive19b"; LOG19B="$WORKDIR/log19b"; : > "$LOG19B"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19B"
+run_engine "$ROOT19B" "$BID1" "$ALIVE19B" "$LOG19B"
+assert_eq "ancestor-symlink:exit" "1" "$RUN_RC" "symlinked manifest ancestor is a pre-flight blocker"
+assert_contains "ancestor-symlink:blocker" "refusing to read the brood manifest" "$(cat "${LOG19B}.stderr")" "ancestor blocker on stderr"
+assert_eq "ancestor-symlink:zero-sendkeys" "0" "$(count_records "$LOG19B")" "no keystroke from a manifest outside the checkout"
+
+# ── Case 19c: two JSON documents in the manifest → pre-flight blocker, zero send-keys ─
+# The single-snapshot read parses the intact file once and requires exactly one JSON document.
+echo '=== Case 19c: multi-document manifest — blocker, exit 1, zero send-keys ==='
+ROOT19C="$(new_brood_root multi-doc "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+cat "$FIXTURES/rc-manifest-all-alive.json" >> "$ROOT19C/.hivemind/broods/$BID1/manifest.json"
+ALIVE19C="$WORKDIR/alive19c"; LOG19C="$WORKDIR/log19c"; : > "$LOG19C"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19C"
+run_engine "$ROOT19C" "$BID1" "$ALIVE19C" "$LOG19C"
+assert_eq "multi-doc:exit" "1" "$RUN_RC" "multi-document manifest is a pre-flight blocker"
+assert_contains "multi-doc:blocker" "brood manifest is not valid JSON" "$(cat "${LOG19C}.stderr")" "multi-document blocker on stderr"
+assert_eq "multi-doc:zero-sendkeys" "0" "$(count_records "$LOG19C")" "no keystroke from a multi-document manifest"
+
+# ── Case 19d/19e: literal NUL in the manifest → pre-flight blocker, zero send-keys ──
+# A NUL byte spliced into the middle of a well-formed manifest, then one appended after it. Bash
+# command substitution and some jq versions drop a NUL silently, so only the single read
+# that refuses it on the raw bytes can block it: blocker, exit 1, zero send-keys.
+for nul_place in middle trailing; do
+  echo "=== Case 19d/19e: manifest with a $nul_place NUL — blocker, exit 1, zero send-keys ==="
+  ROOT19N="$(new_brood_root "nul-$nul_place" "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+  MANIFEST19N="$ROOT19N/.hivemind/broods/$BID1/manifest.json"
+  if [ "$nul_place" = "middle" ]; then
+    { head -c 1 "$FIXTURES/rc-manifest-all-alive.json"; printf '\000'; tail -c +2 "$FIXTURES/rc-manifest-all-alive.json"; } > "$MANIFEST19N"
+  else
+    printf '\000' >> "$MANIFEST19N"
+  fi
+  ALIVE19N="$WORKDIR/alive19n-$nul_place"; LOG19N="$WORKDIR/log19n-$nul_place"; : > "$LOG19N"
+  printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19N"
+  run_engine "$ROOT19N" "$BID1" "$ALIVE19N" "$LOG19N"
+  assert_eq "nul-$nul_place:exit" "1" "$RUN_RC" "manifest with a $nul_place NUL is a pre-flight blocker"
+  assert_contains "nul-$nul_place:blocker" "blocker: brood manifest is not valid JSON" "$(cat "${LOG19N}.stderr")" "NUL blocker on stderr"
+  assert_eq "nul-$nul_place:zero-sendkeys" "0" "$(count_records "$LOG19N")" "no keystroke from a manifest holding a NUL"
+  assert_eq "nul-$nul_place:no-stdout" "" "$(cat "${LOG19N}.stdout")" "no disposition lines before the blocker"
+done
+
+# ── Case 19f: symlinked .hivemind/broods → pre-flight blocker, zero send-keys ──────
+# The broods directory itself is a symlink to a directory OUTSIDE the checkout that holds a
+# well-formed manifest under the right brood id. The walk refuses the symlinked component.
+echo '=== Case 19f: symlinked broods directory — blocker, exit 1, zero send-keys ==='
+ROOT19F="$WORKDIR/broods-symlink"
+mkdir -p "$ROOT19F/.hivemind" "$WORKDIR/outside19f/$BID1"
+git -C "$ROOT19F" init -q
+cp "$FIXTURES/rc-manifest-all-alive.json" "$WORKDIR/outside19f/$BID1/manifest.json"
+ln -s "$WORKDIR/outside19f" "$ROOT19F/.hivemind/broods"
+ALIVE19F="$WORKDIR/alive19f"; LOG19F="$WORKDIR/log19f"; : > "$LOG19F"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19F"
+run_engine "$ROOT19F" "$BID1" "$ALIVE19F" "$LOG19F"
+assert_eq "broods-symlink:exit" "1" "$RUN_RC" "symlinked broods directory is a pre-flight blocker"
+assert_contains "broods-symlink:blocker" "blocker: refusing to read the brood manifest" "$(cat "${LOG19F}.stderr")" "broods-symlink blocker on stderr"
+assert_eq "broods-symlink:zero-sendkeys" "0" "$(count_records "$LOG19F")" "no keystroke from a manifest behind a symlinked broods directory"
 
 # ── Tally ─────────────────────────────────────────────────────────────────────────
 echo
