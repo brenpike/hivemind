@@ -50,7 +50,9 @@
 #      sends nothing, exits 0 and reports 0 applied (Cases 18a-18d).
 #  12. Confined manifest read: a symlinked manifest leaf, a symlinked per-brood dir that resolves
 #      outside the checkout, and a manifest holding two JSON documents are each a pre-flight blocker
-#      with ZERO send-keys, even when the outside manifest is well-formed (Cases 19a-19c).
+#      with ZERO send-keys, even when the outside manifest is well-formed (Cases 19a-19c). A manifest
+#      holding a literal NUL (in the middle or trailing) and a symlinked .hivemind/broods directory
+#      are each a pre-flight blocker with ZERO send-keys too (Cases 19d-19f).
 #
 # Usage:
 #   ./tools/test_rc_brood.sh
@@ -1109,7 +1111,7 @@ ALIVE19A="$WORKDIR/alive19a"; LOG19A="$WORKDIR/log19a"; : > "$LOG19A"
 printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19A"
 run_engine "$ROOT19A" "$BID1" "$ALIVE19A" "$LOG19A"
 assert_eq "leaf-symlink:exit" "1" "$RUN_RC" "symlinked manifest leaf is a pre-flight blocker"
-assert_contains "leaf-symlink:blocker" "is a symlink leaf" "$(cat "${LOG19A}.stderr")" "leaf-symlink blocker on stderr"
+assert_contains "leaf-symlink:blocker" "refusing to read the brood manifest" "$(cat "${LOG19A}.stderr")" "leaf-symlink blocker on stderr"
 assert_eq "leaf-symlink:zero-sendkeys" "0" "$(count_records "$LOG19A")" "no keystroke from a symlinked manifest"
 
 # ── Case 19b: symlinked manifest ANCESTOR → pre-flight blocker, zero send-keys ─────
@@ -1125,7 +1127,7 @@ ALIVE19B="$WORKDIR/alive19b"; LOG19B="$WORKDIR/log19b"; : > "$LOG19B"
 printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19B"
 run_engine "$ROOT19B" "$BID1" "$ALIVE19B" "$LOG19B"
 assert_eq "ancestor-symlink:exit" "1" "$RUN_RC" "symlinked manifest ancestor is a pre-flight blocker"
-assert_contains "ancestor-symlink:blocker" "resolves outside the checkout" "$(cat "${LOG19B}.stderr")" "ancestor blocker on stderr"
+assert_contains "ancestor-symlink:blocker" "refusing to read the brood manifest" "$(cat "${LOG19B}.stderr")" "ancestor blocker on stderr"
 assert_eq "ancestor-symlink:zero-sendkeys" "0" "$(count_records "$LOG19B")" "no keystroke from a manifest outside the checkout"
 
 # ── Case 19c: two JSON documents in the manifest → pre-flight blocker, zero send-keys ─
@@ -1139,6 +1141,44 @@ run_engine "$ROOT19C" "$BID1" "$ALIVE19C" "$LOG19C"
 assert_eq "multi-doc:exit" "1" "$RUN_RC" "multi-document manifest is a pre-flight blocker"
 assert_contains "multi-doc:blocker" "brood manifest is not valid JSON" "$(cat "${LOG19C}.stderr")" "multi-document blocker on stderr"
 assert_eq "multi-doc:zero-sendkeys" "0" "$(count_records "$LOG19C")" "no keystroke from a multi-document manifest"
+
+# ── Case 19d/19e: literal NUL in the manifest → pre-flight blocker, zero send-keys ──
+# A NUL byte spliced into the middle of a well-formed manifest, then one appended after it. Bash
+# command substitution and some jq versions drop a NUL silently, so only the single verified read
+# that refuses it on the raw bytes can block it: blocker, exit 1, zero send-keys.
+for nul_place in middle trailing; do
+  echo "=== Case 19d/19e: manifest with a $nul_place NUL — blocker, exit 1, zero send-keys ==="
+  ROOT19N="$(new_brood_root "nul-$nul_place" "$BID1" "$FIXTURES/rc-manifest-all-alive.json")"
+  MANIFEST19N="$ROOT19N/.hivemind/broods/$BID1/manifest.json"
+  if [ "$nul_place" = "middle" ]; then
+    { head -c 1 "$FIXTURES/rc-manifest-all-alive.json"; printf '\000'; tail -c +2 "$FIXTURES/rc-manifest-all-alive.json"; } > "$MANIFEST19N"
+  else
+    printf '\000' >> "$MANIFEST19N"
+  fi
+  ALIVE19N="$WORKDIR/alive19n-$nul_place"; LOG19N="$WORKDIR/log19n-$nul_place"; : > "$LOG19N"
+  printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19N"
+  run_engine "$ROOT19N" "$BID1" "$ALIVE19N" "$LOG19N"
+  assert_eq "nul-$nul_place:exit" "1" "$RUN_RC" "manifest with a $nul_place NUL is a pre-flight blocker"
+  assert_contains "nul-$nul_place:blocker" "blocker: brood manifest is not valid JSON" "$(cat "${LOG19N}.stderr")" "NUL blocker on stderr"
+  assert_eq "nul-$nul_place:zero-sendkeys" "0" "$(count_records "$LOG19N")" "no keystroke from a manifest holding a NUL"
+  assert_eq "nul-$nul_place:no-stdout" "" "$(cat "${LOG19N}.stdout")" "no disposition lines before the blocker"
+done
+
+# ── Case 19f: symlinked .hivemind/broods → pre-flight blocker, zero send-keys ──────
+# The broods directory itself is a symlink to a directory OUTSIDE the checkout that holds a
+# well-formed manifest under the right brood id. The walk refuses the symlinked component.
+echo '=== Case 19f: symlinked broods directory — blocker, exit 1, zero send-keys ==='
+ROOT19F="$WORKDIR/broods-symlink"
+mkdir -p "$ROOT19F/.hivemind" "$WORKDIR/outside19f/$BID1"
+git -C "$ROOT19F" init -q
+cp "$FIXTURES/rc-manifest-all-alive.json" "$WORKDIR/outside19f/$BID1/manifest.json"
+ln -s "$WORKDIR/outside19f" "$ROOT19F/.hivemind/broods"
+ALIVE19F="$WORKDIR/alive19f"; LOG19F="$WORKDIR/log19f"; : > "$LOG19F"
+printf '%s\n' "$BID1-api" "$BID1-web-ui" "$BID1-db-migrations" > "$ALIVE19F"
+run_engine "$ROOT19F" "$BID1" "$ALIVE19F" "$LOG19F"
+assert_eq "broods-symlink:exit" "1" "$RUN_RC" "symlinked broods directory is a pre-flight blocker"
+assert_contains "broods-symlink:blocker" "blocker: refusing to read the brood manifest" "$(cat "${LOG19F}.stderr")" "broods-symlink blocker on stderr"
+assert_eq "broods-symlink:zero-sendkeys" "0" "$(count_records "$LOG19F")" "no keystroke from a manifest behind a symlinked broods directory"
 
 # ── Tally ─────────────────────────────────────────────────────────────────────────
 echo

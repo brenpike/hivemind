@@ -1,123 +1,115 @@
 #!/usr/bin/env bash
 #
-# brood-status-project — read-side child-ledger projection engine for hivemind:brood-status
-#The read-side analog of spawn-brood.sh's write-side injection closure
-# (ADR-0017): spawn-brood WRITES the manifest + provisions child worktrees out-of-band; this
-# script READS the manifest + each child run-ledger out-of-band and emits a machine-parseable
-# per-strain projection line. The skill body (navigator) calls this once; this script OWNS the
-# deterministic read + validation steps.
+# brood-status-project — read-side single-brood projection engine for hivemind:brood-status
+# (ADR-0020). The read-side analog of spawn-brood.sh's write-side injection closure (ADR-0017):
+# spawn-brood WRITES a brood's manifest and provisions its child worktrees; this script READS that
+# manifest and each child's started-evidence and emits machine-parseable lines. The collector
+# (brood-status-collect.sh) runs it once per brood; this script OWNS the deterministic read and
+# validation steps.
 #
-# INPUT (positional arguments):
-#   $1  Path (absolute or repo-relative) to a brood manifest JSON (current layout:
-#       `.hivemind/broods/<brood-id>/manifest.json`, per ADR-0021). LAYOUT-AGNOSTIC: the caller
-#       passes the manifest path explicitly; this script hardcodes NO manifest layout
-#       The manifest is UNTRUSTED data — see below.
-#   $2  OPTIONAL: the checkout root the manifest belongs to, used as the containment root for the
-#       manifest read-guard. DEFAULTS to `git rev-parse --show-toplevel` (the CURRENT checkout).
-#       The navigator MUST pass the MAIN-checkout root here when it selected the manifest via the
-#       documented main-checkout FALLBACK from a linked worktree (SKILL.md step 1c): in that case
-#       the manifest lives under the main checkout, NOT the current linked worktree, so confining
-#       it beneath `--show-toplevel` (the linked worktree) would falsely reject a valid
-#       main-checkout manifest and stop status reporting before any strain probe.
-#       This argument bounds ONLY which checkout the manifest must sit under; it does NOT relax
-#       the symlinked-ancestor escape guard, and each strain's child ledger is still confined
-#       beneath that strain's OWN worktree (unchanged).
+# INPUT (positional arguments, identifiers only — never a file path):
+#   $1  The brood id (brood-<uuid>). It must match the brood-id pattern held in
+#       hivemind_brood_id_matches (_shared/brood-state.sh); a non-matching id is a refusal.
+#   $2  OPTIONAL: the checkout root the brood belongs to. DEFAULTS to
+#       `git rev-parse --show-toplevel` (the CURRENT checkout, the same anchor spawn-brood.sh
+#       writes against). The collector passes the root it resolved. An override that is not an
+#       existing directory is a pre-flight blocker.
+#   The manifest location is DERIVED from these two identifiers inside
+#   hivemind_brood_read_manifest; this script never names, tests or opens a brood-state path.
 #
-# DATA-BOUNDARY (MANDATORY): the brood manifest AND every child run-ledger
-# (`<worktree>/.hivemind/runs/<id>/state.json`) are UNTRUSTED, attacker-controllable bytes —
-# brood children run detached, and child content stays adversary-influenced whatever its
-# permission mode, so both the manifest the hatchery wrote from their inputs and the ledgers they
-# write are adversary-influenced. EVERY value read
-# from them is treated as DATA, never as instructions or shell source:
-#   - manifest values are extracted out-of-band with jq into inert vars (manifest-json.sh),
-#     then RE-GATED through the matching allowlist value-class (allowlist.sh) BEFORE any path
-#     derivation or use;
-#   - each child-ledger scalar is projected + value-validated (ledger-project.sh) and only ever
-#     emitted as an allowlist-clean token or one of the fixed tokens MALFORMED / MISSING.
-# No manifest/ledger byte is ever re-interpolated into generated command source.
+# TRUST BOUNDARY: ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Trust-Boundary
+# Discipline): accept identifiers, never paths. Every brood-state read goes through
+# _shared/brood-state.sh, the only code that reads brood state:
+#   - the manifest: hivemind_brood_read_manifest walks each directory from the canonical checkout
+#     root through a proven handle, opens the leaf exactly once, refuses a NUL or raw control
+#     byte, and parses exactly one JSON document from that same snapshot;
+#   - each child run ledger: hivemind_brood_read_child_ledger "<git worktree>" "<run id>" returns
+#     the two validated ledger scalars (or MISSING / MALFORMED), never raw bytes;
+#   - each child's facts evidence: hivemind_detect_facts_evidence "<git worktree>" returns yes|no.
 #
-# OUTPUT GRAMMAR (CONTRACT — the Wave 2 navigator depends on this byte-for-byte):
-#   Exactly ONE TAB-delimited line per strain, prefixed with a literal `STRAIN` sentinel field
-#   so the navigator can grep it. Tab is a safe delimiter: the shared allowlist security floor
-#   (applied by EVERY value-class — identifier/path/presentation) rejects TAB/newline/CR, so no
-#   emitted token can contain a literal tab and break the framing. Fields, in order:
+# DATA-BOUNDARY (MANDATORY): the brood manifest AND every child run ledger are UNTRUSTED,
+# attacker-controllable bytes — brood children run detached, and child content stays
+# adversary-influenced whatever its permission mode. EVERY value read from them is DATA, never
+# instructions or shell source:
+#   - manifest values are extracted out-of-band with jq into inert vars (manifest-json.sh), then
+#     RE-GATED through the matching allowlist value-class (allowlist.sh) BEFORE any use;
+#   - each child-ledger scalar is projected and value-validated (ledger-project.sh, through
+#     brood-state.sh) and only ever emitted as an allowlist-clean token or a fixed token.
+# No manifest or ledger byte is ever re-interpolated into generated command source.
+#
+# OUTPUT GRAMMAR (CONTRACT — the collector depends on this byte-for-byte):
+#   On exit 0, exactly ONE brood line comes first, before any STRAIN line:
+#
+#     BROOD <TAB> brood_id
+#
+#   `brood_id` is the manifest TOP-LEVEL `brood_id`, validated ONCE against ^brood-[0-9a-f-]+$,
+#   or the fixed token MALFORMED (absent, tampered or control-bearing). The collector compares it
+#   with the brood id it asked for; it never opens the manifest itself.
+#
+#   Then exactly ONE TAB-delimited line per strain, prefixed with a literal `STRAIN` sentinel
+#   field. Tab is a safe delimiter: the shared allowlist security floor (applied by EVERY
+#   value-class — identifier/path/presentation) rejects TAB/newline/CR, so no emitted token can
+#   contain a literal tab and break the framing. Fields, in order (11 fields):
 #
 #     STRAIN <TAB> brood_id <TAB> name <TAB> worktree_path <TAB> branch <TAB> tmux_session \
 #            <TAB> manifest_status <TAB> state_current <TAB> run_status <TAB> live_branch \
 #            <TAB> facts_evidence
 #
-#   `facts_evidence` (the LAST field, index 11) is `yes` or `no`: `yes` when a gather-facts output
-#   file (facts-<8 digits>T<6 digits>Z-<12 lowercase hex>.json, a regular non-symlink file) sits
-#   directly in the selected ground-truth worktree's `.hivemind/facts` folder, per
-#   hivemind_detect_facts_evidence (_shared/ledger-project.sh). It is the started-evidence of a
-#   script-engine child, which writes no run ledger. It is `no` whenever no ground-truth worktree
-#   was selected, the worktree is not contained under the checkout root, or the folder chain fails
-#   containment. It is APPENDED so indices 1-10 are unchanged. No file content is read.
+#   `brood_id` (field 2) is the same validated top-level value as the BROOD line, repeated on
+#   every strain line.
 #
-#   `live_branch` (the LAST field, index 10) is the selected worktree's git-reported LIVE branch
-#   (`branch refs/heads/<name>` from the porcelain parse), gated through the identifier value-class.
-#   It is APPENDED so indices 2-9 are unchanged. It is DISTINCT from the display-only manifest
-#   `branch` column (field 5, the stale spawn-time scratch ref): the collector keys its `gh pr list
-#   --head` PR probe on THIS live branch (#270), because a brood child opens its PR from the
-#   DERIVED branch it switched onto, not the manifest scratch ref. A no-match/detached worktree
-#   yields MISSING; an identifier reject yields MALFORMED (so the collector's sentinel gate skips
-#   the probe rather than probing a literal token).
+#   `live_branch` (field 10) is the selected worktree's git-reported LIVE branch (`branch
+#   refs/heads/<name>` from the porcelain parse), gated through the identifier value-class. It is
+#   DISTINCT from the display-only manifest `branch` column (field 5, the stale spawn-time scratch
+#   ref): the collector keys its `gh pr list --head` PR probe on THIS live branch (#270). A
+#   no-match/detached worktree yields MISSING; an identifier reject yields MALFORMED.
 #
-#   `brood_id` is the FIRST field of every STRAIN line: a single value read
-#   from the manifest TOP-LEVEL `brood_id`, validated ONCE against ^brood-[0-9a-f-]+$ and emitted
-#   verbatim on every strain line so the STEP-005 navigator can attribute each strain to its brood
-#   when enumerating multiple manifests. (Enumeration across broods is the navigator's concern;
-#   this script remains a SINGLE-manifest projector and does NOT glob.)
+#   `facts_evidence` (field 11) is `yes` or `no`, from hivemind_detect_facts_evidence over the
+#   selected ground-truth worktree: the started-evidence of a script-engine child, which writes
+#   no run ledger. It is `no` whenever no ground-truth worktree was selected or the worktree is
+#   not resident under the checkout root. No file content is read.
 #
 #   Each remaining value is either an allowlist-clean token OR one of the fixed tokens
 #   MALFORMED / MISSING / NO_LEDGER_POINTER. A raw, un-validated scalar is NEVER emitted.
-#   `state_current` carries a THIRD fixed token NO_LEDGER_POINTER, emitted ONLY at the
-#   legacy/no-run-block branch below: it means the manifest carries no ledger pointer (no
-#   `run.suggested_id`), so started-evidence is STRUCTURALLY unavailable and the downstream
-#   started-evidence gate does NOT apply (the strain falls back to its observable status).
-#   This is DISTINCT from MISSING (a ledger pointer exists but the child has not yet written
-#   started-evidence) and from MALFORMED (a present-but-rejected ledger). Example (tabs shown as
-#   <TAB>):
+#   `state_current` carries the third fixed token NO_LEDGER_POINTER only when the manifest
+#   carries no ledger pointer (no `run.suggested_id`): started-evidence is then STRUCTURALLY
+#   unavailable and the downstream started-evidence gate does not apply. This is DISTINCT from
+#   MISSING (a pointer exists but the child has not yet written started-evidence) and from
+#   MALFORMED (a present-but-rejected ledger). Example (tabs shown as <TAB>):
+#     BROOD<TAB>brood-1a2b
 #     STRAIN<TAB>brood-1a2b<TAB>auth<TAB>/abs/wt/auth<TAB>strain/brood-1a2b/auth<TAB>brood-1a2b-auth<TAB>spawned<TAB>implement_step<TAB>running<TAB>bugfix/auth-fix-9f3a<TAB>no
 #
-#   The full field ORDER is: brood_id, name, worktree_path, branch, tmux_session,
-#   manifest_status, state_current, run_status, live_branch, facts_evidence.
-#
-#   INTEGRITY SENTINEL (distinct from any STRAIN line): when the manifest is PRESENT but
-#   UNREADABLE — either UNPARSEABLE (torn / truncated / invalid JSON) OR VALID-JSON-BUT-WRONG-SHAPE
-#   (`.strains` missing / null / non-array, or any non-object element) — the script emits exactly
-#   ONE line
-#     MANIFEST_UNREADABLE <TAB> <manifest_path>
-#   to stdout and exits nonzero (see EXIT CONTRACT). The wrong-shape class joins the
-#   syntactically-invalid class via a SINGLE shape-validating read (one open, one verdict). This
-#   is DISTINCT from "manifest absent" (a pre-flight blocker on stderr) and from "valid empty
-#   brood" (`{"strains":[]}` → exit 0, zero STRAIN lines, no sentinel). A present-but-unreadable
-#   manifest must NEVER be silently projected as zero strains: corruption (or a wrong-shape
-#   manifest) is otherwise indistinguishable from an empty brood and would hide live children from
-#   the monitoring dashboard. (A strain object that is well-formed but lacks `name` is NOT a
-#   structural failure — it projects with per-strain MALFORMED/MISSING tokens.)
+#   INTEGRITY SENTINEL (distinct from any BROOD or STRAIN line): when the manifest is PRESENT but
+#   UNREADABLE — a NUL or raw control byte, invalid JSON, zero or several JSON documents, an open
+#   or read error, OR valid JSON of the wrong shape (`.strains` missing / null / non-array, or any
+#   non-object element) — the script emits exactly ONE line
+#     MANIFEST_UNREADABLE <TAB> <display path>
+#   to stdout and exits 2. The display path comes from hivemind_brood_manifest_path and is never
+#   opened. A present-but-unreadable manifest must NEVER be silently projected as zero strains:
+#   corruption is otherwise indistinguishable from an empty brood and would hide live children.
+#   A VALID empty brood (`{"strains":[]}`) exits 0 with the BROOD line and zero STRAIN lines. A
+#   strain object that lacks `name` is NOT a structural failure — it projects with per-strain
+#   MALFORMED/MISSING tokens.
 #
 # EXIT CONTRACT:
-#   0  projected all strains (including zero strains for a VALID empty manifest). PER-STRAIN
-#      MALFORMED / MISSING is NOT a failure — a strain with a bad field or an unreadable ledger
-#      still emits its line (with token fields) and the script continues to the next strain.
-#   1  pre-flight blocker ONLY: missing arg, jq absent, manifest path escapes the checkout
-#      (symlinked ancestor). Reported via blocker() on stderr. No per-strain condition reaches
-#      exit 1.
-#   2  manifest PRESENT but UNREADABLE (unparseable OR valid-JSON-but-wrong-shape): emits the
-#      MANIFEST_UNREADABLE sentinel line to stdout (above) and exits 2. A distinct nonzero code so
-#      the navigator can tell a corruption/wrong-shape integrity-failure (live children may exist
-#      but cannot be enumerated) apart from the absent-manifest stderr blocker.
+#   0  projected the brood: one BROOD line, then one STRAIN line per strain (zero for a VALID
+#      empty manifest). PER-STRAIN MALFORMED / MISSING is NOT a failure.
+#   1  pre-flight blocker or refusal, reported via blocker() as one `blocker: <reason>` line on
+#      stderr: missing argument, jq absent, a bad checkout root, a brood id outside the pattern,
+#      a manifest that does not exist, or a refused read (a symlinked, non-directory or relocated
+#      directory on the derived path, or a symlinked or non-regular manifest leaf). No per-strain
+#      condition reaches exit 1.
+#   2  manifest PRESENT but UNREADABLE: the MANIFEST_UNREADABLE sentinel line on stdout (above).
 #
 # set -u: every value is read explicitly; an unset variable is a programming error here. We do
 # NOT use `set -e`: per-strain field/ledger problems are caught and rendered as tokens, never
 # allowed to abort the whole read. There is no EXIT trap.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
-# are DELIBERATELY omitted. The full floor would change behavior: per-item failures route
-# through blocker() with explicit exit codes, and unguarded jq/grep value-tests legitimately
-# return non-zero in normal flow (rendering MALFORMED/MISSING tokens) — `set -e` would abort
-# the read mid-projection.
+# are DELIBERATELY omitted. The full floor would change behavior: pre-flight failures route
+# through blocker() with explicit exit codes, and unguarded jq value-tests legitimately return
+# non-zero in normal flow (rendering MALFORMED/MISSING tokens) — `set -e` would abort the read
+# mid-projection.
 
 set -u
 
@@ -169,6 +161,8 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 . "$plugin_root/skills/_shared/manifest-json.sh" || blocker "failed to source skills/_shared/manifest-json.sh (unparseable); refusing to proceed"
 [ -f "$plugin_root/skills/_shared/ledger-project.sh" ] || blocker "required shared library missing: skills/_shared/ledger-project.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/ledger-project.sh" || blocker "failed to source skills/_shared/ledger-project.sh (unparseable); refusing to proceed"
+[ -f "$plugin_root/skills/_shared/brood-state.sh" ] || blocker "required shared library missing: skills/_shared/brood-state.sh; refusing to proceed"
+. "$plugin_root/skills/_shared/brood-state.sh" || blocker "failed to source skills/_shared/brood-state.sh (unparseable); refusing to proceed"
 
 # ── Dependency check ────────────────────────────────────────────────────────────
 # jq is required (the child ledgers are JSON). tmux/claude/gh are NOT required — this read
@@ -176,80 +170,57 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 command -v jq >/dev/null 2>&1 \
   || blocker "jq is required to project child run-ledgers but is not installed"
 
-# ── Manifest argument validation ────────────────────────────────────────────────
-MANIFEST="${1:-}"
-[ -n "$MANIFEST" ] \
-  || blocker "missing required argument: path to brood manifest JSON (\$1)"
-# Reject a SYMLINKED manifest leaf BEFORE the [ -f ] regular-file test (which FOLLOWS
-# symlinks and would pass a symlink-to-regular-file). hivemind_assert_inputs_contained below
-# canonicalizes only the manifest's dirname and re-appends the basename textually, so a
-# symlinked manifest LEAF pointing at an external file would otherwise resolve outside and be
-# read as an attacker-controlled JSON manifest. [ -L ] fires for a symlink leaf even when
-# its target is missing; checking it first closes the leaf-symlink escape the dirname-only
-# canonicalization leaves open. A symlinked ANCESTOR is still caught by the containment guard.
-[ -L "$MANIFEST" ] \
-  && blocker "refusing to read the manifest: $MANIFEST is a symlink leaf"
-[ -f "$MANIFEST" ] \
-  || blocker "brood manifest $MANIFEST does not exist or is not a regular file"
+# ── Argument validation ─────────────────────────────────────────────────────────
+BROOD_ID="${1:-}"
+[ -n "$BROOD_ID" ] \
+  || blocker "missing required argument: brood id (\$1)"
 
-# Determine the containment root the manifest must sit beneath. DEFAULT: the current checkout
-# (`git rev-parse --show-toplevel`). OVERRIDE: an explicit $2 supplied by the navigator when it
-# selected the manifest via the main-checkout fallback from a linked worktree (see header
-# The override must name an EXISTING DIRECTORY; an unreadable or non-directory override
-# is a pre-flight blocker (we never silently fall back, which could hide a wrong root).
+# The checkout root the brood belongs to. DEFAULT: the current checkout (`git rev-parse
+# --show-toplevel`). OVERRIDE: an explicit $2 from the collector. The override must name an
+# EXISTING DIRECTORY; a non-directory override is a pre-flight blocker (we never silently fall
+# back, which could hide a wrong root).
 CHECKOUT_ROOT="${2:-}"
 if [ -n "$CHECKOUT_ROOT" ]; then
   [ -d "$CHECKOUT_ROOT" ] \
     || blocker "supplied checkout root $CHECKOUT_ROOT does not exist or is not a directory"
 else
   CHECKOUT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null)"
+  [ -n "$CHECKOUT_ROOT" ] \
+    || blocker "cannot resolve the checkout root: git rev-parse --show-toplevel failed"
 fi
 
-# Defense-in-depth READ-guard: refuse to read a manifest whose canonical path escapes the
-# selected checkout root (e.g. via a symlinked ancestor). The helper never exits; map non-zero
-# to blocker. With a fallback-supplied root this confines the manifest beneath the MAIN checkout
-# (where the fallback manifest actually lives) instead of the current linked worktree.
-hivemind_assert_inputs_contained "$CHECKOUT_ROOT" "$MANIFEST" >/dev/null \
-  || blocker "refusing to read the manifest: $MANIFEST resolves outside the checkout root $CHECKOUT_ROOT (symlinked ancestor)"
-
-# ── Single-snapshot read + shape validation (one open, one verdict) ───────────────
-# The manifest passed every pre-flight (present, regular file, not a symlink leaf, contained).
-# Open it EXACTLY ONCE into an in-memory snapshot; every projection below runs against THIS
-# snapshot via jq stdin, never re-opening the file. This closes BOTH read-side issues at once:
-#   1. SNAPSHOT SKEW — probe and per-field projections previously re-opened the manifest at
-#      different instants, so a concurrent write mid-read could yield inconsistent reads. One
-#      open means one consistent view.
-#   2. SCHEMA GAP — the old `jq empty` probe was SYNTAX-only: a valid-JSON-but-wrong-shape
-#      manifest ({}, {"strains":null}, {"strains":"x"}, {"strains":[1]}) passed it, then the
-#      per-field projection yielded zero strains and was reported as a legitimate EMPTY brood,
-#      hiding live children. The shape validation here requires `.strains` to EXIST as an ARRAY
-#      with every element an OBJECT, folding the wrong-shape class into the UNREADABLE class.
-# On shape failure (invalid JSON OR wrong shape) emit one MANIFEST_UNREADABLE sentinel to stdout
-# and exit 2 (integrity failure). A VALID empty manifest (`{"strains":[]}`) PASSES shape (all()
-# over an empty array is true) and falls through to the loop, exiting 0 with no STRAIN lines
-# (legit empty brood). An element that IS an object but lacks `name` passes shape validation and
-# projects with per-strain MALFORMED/MISSING tokens — per-strain degradation is the existing
-# contract, distinct from a whole-manifest structural failure. This is the READ-side response
-# only; the WRITE-side liveness guard in spawn-brood.sh deliberately keeps its
-# fail-open-on-malformed behavior (a corrupt manifest must not wedge spawning).
-# The manifest is UNTRUSTED bytes; held only in a shell var passed to jq stdin, never eval'd.
+# ── Single-snapshot manifest read + shape validation (one open, one verdict) ────────
+# hivemind_brood_read_manifest derives the manifest location from the two identifiers, walks
+# every directory through a proven handle, opens the leaf EXACTLY ONCE, refuses a NUL or raw
+# control byte, and returns exactly one JSON document parsed from that same snapshot. Every
+# projection below runs against THIS snapshot via jq stdin; nothing re-opens the file. The
+# library's own refusal reason (if any) goes to stderr above the blocker line.
 #
-# FILE-LEVEL NUL REJECTION: bash `$(...)` SILENTLY STRIPS NUL bytes, so a
-# manifest whose on-disk bytes are e.g. `{"strains":<NUL>[]}` would, after the `$(...)` read below,
-# become the valid-looking `{"strains":[]}` — it would pass shape validation and project as an empty
-# brood, emitting no MANIFEST_UNREADABLE and exiting 0 (live children hidden). JSON never legitimately
-# contains a literal NUL, so we reject a NUL-bearing manifest at the FILE level (bytes still intact)
-# BEFORE the `$(...)` read can erase it: MANIFEST_UNREADABLE + exit 2, same integrity verdict as a
-# torn/wrong-shape manifest. (A control byte that arrives via a JSON ` ` ESCAPE — not a literal NUL
-# in the file — is a separate vector handled INSIDE jq during per-field projection; this file-level
-# check only catches a literal NUL the `$(...)` capture would silently drop.)
-if hivemind_path_has_nul "$MANIFEST"; then
-  printf 'MANIFEST_UNREADABLE\t%s\n' "$MANIFEST"
-  exit 2
-fi
-manifest_content="$(cat -- "$MANIFEST")"
-if ! hivemind_manifest_validate_shape "$manifest_content"; then
-  printf 'MANIFEST_UNREADABLE\t%s\n' "$MANIFEST"
+# Return codes map onto the exit contract:
+#   1  brood id outside the pattern            -> blocker (exit 1)
+#   2  a directory on the derived path refused -> blocker (exit 1)
+#   3  the manifest leaf refused               -> blocker (exit 1)
+#   4  the manifest does not exist             -> blocker (exit 1)
+#   5  present but unreadable                  -> MANIFEST_UNREADABLE sentinel (exit 2)
+# A snapshot that parses but has the wrong shape (`.strains` missing / null / non-array, or any
+# non-object element) joins the unreadable class: a corrupt manifest must never project as an
+# empty brood and hide live children. A VALID empty manifest (`{"strains":[]}`) passes shape and
+# exits 0 with zero STRAIN lines. An element that IS an object but lacks `name` passes shape and
+# projects with per-strain MALFORMED/MISSING tokens. The manifest is UNTRUSTED bytes, held only in
+# a shell var passed to jq stdin, never eval'd.
+manifest_content="$(hivemind_brood_read_manifest "$CHECKOUT_ROOT" "$BROOD_ID")"
+manifest_read_status=$?
+case "$manifest_read_status" in
+  0) ;;
+  1) blocker "refusing brood id: it does not match the brood-id pattern" ;;
+  2) blocker "refusing to read the manifest of brood $BROOD_ID: a directory on its derived path is a symlink, not a directory, or not the physical directory under the checkout root $CHECKOUT_ROOT" ;;
+  3) blocker "refusing to read the manifest of brood $BROOD_ID: the manifest is a symlink or not a regular file" ;;
+  4) blocker "brood manifest for $BROOD_ID does not exist under the checkout root $CHECKOUT_ROOT" ;;
+  5) ;;
+  *) blocker "reading the manifest of brood $BROOD_ID failed with unexpected status $manifest_read_status" ;;
+esac
+if [ "$manifest_read_status" -eq 5 ] || ! hivemind_manifest_validate_shape "$manifest_content"; then
+  printf 'MANIFEST_UNREADABLE\t%s\n' "$(hivemind_brood_manifest_path "$CHECKOUT_ROOT" "$BROOD_ID")"
   exit 2
 fi
 
@@ -270,11 +241,11 @@ canon_checkout="$(hivemind_canon_root "$CHECKOUT_ROOT")"
   || blocker "failed to canonicalize checkout root $CHECKOUT_ROOT for worktree containment"
 
 # ── Top-level brood_id (single read, validated once) ──────────────────────────────
-# The brood_id is the FIRST field of every STRAIN line. It is read ONCE from
+# The brood_id is the BROOD line's value and the FIRST field of every STRAIN line. It is read ONCE from
 # the manifest TOP-LEVEL `brood_id` and validated against ^brood-[0-9a-f-]+$ (the exact shape
 # spawn-brood.sh generates: brood-<uuidv4>). The manifest is UNTRUSTED, so a tampered/absent
 # brood_id renders the fixed token MALFORMED (never a raw byte) — it is still emitted on every
-# strain line so the navigator can tell an unattributable brood apart from a valid one. Read via
+# strain line so the collector can tell an unattributable brood apart from a valid one. Read via
 # jq stdin against the single snapshot, with the SAME in-jq C0-control rejection used elsewhere
 # (bash $(...) strips NUL; a \u00NN control escape must be rejected while bytes are intact).
 brood_id_raw="$(printf '%s' "$manifest_content" | jq -r '(.brood_id // empty) | select((tostring | test("[[:cntrl:]]")) | not)' 2>/dev/null)"
@@ -289,6 +260,12 @@ case "$brood_id_raw" in
     esac
     ;;
 esac
+
+# ── BROOD line (once, before any STRAIN line) ─────────────────────────────────────
+# The validated top-level brood_id, or MALFORMED. The collector checks it against the brood id it
+# asked for (brood-id integrity) from THIS line, so it never opens the manifest itself. It is
+# printed even for a VALID empty brood, which emits no STRAIN line.
+printf 'BROOD\t%s\n' "$(encode_cell "$brood_id_out")"
 
 # ── Ground-truth worktree discovery (locked OQ3 anchor, PATH-keyed) ───────────────
 # Parse `git worktree list --porcelain` ONCE into a SET of git-reported worktree ABSOLUTE PATHS.
@@ -549,8 +526,8 @@ EOF
 
   # ── FACTS EVIDENCE for the selected worktree (script-engine started-evidence) ─────
   # `no` unless a ground-truth worktree was selected AND it is resident under CHECKOUT_ROOT; then
-  # hivemind_detect_facts_evidence checks the `.hivemind/facts` folder chain with the containment
-  # helpers and reports yes/no from file names and types only. Independent of the ledger pointer:
+  # hivemind_detect_facts_evidence (_shared/brood-state.sh) walks the worktree's facts folder
+  # through proven handles and reports yes/no from file names and types only. Independent of the ledger pointer:
   # a script-engine child may carry no run.suggested_id and still prove it started.
   facts_out="no"
   if [ "$gt_resident" -eq 1 ]; then
@@ -558,12 +535,10 @@ EOF
     [ "$facts_out" = "yes" ] || facts_out="no"
   fi
 
-  # 3. Derive the ledger path under the GROUND-TRUTH worktree:
-  #    "<git-worktree>/.hivemind/runs/<suggested_id>/state.json". Only <suggested_id> is
-  #    manifest-sourced; gate it as a STRICT single-component identifier (no slash, no space) so it
-  #    cannot escape the worktree's runs/ dir. The `.hivemind/runs/.../state.json` segment is a
-  #    literal we own. Default both ledger scalars to tokens; only a fully-confined, readable,
-  #    CHECKOUT_ROOT-contained git-worktree path gets projected.
+  # 3. Read the child ledger under the GROUND-TRUTH worktree, keyed by the run id. Only
+  #    <suggested_id> is manifest-sourced; gate it as a STRICT single-component identifier (no
+  #    slash, no space) so it cannot name anything outside the worktree's run folder. Default both
+  #    ledger scalars to tokens; only a CHECKOUT_ROOT-resident git worktree gets projected.
   state_out="MISSING"
   run_out="MISSING"
 
@@ -605,26 +580,22 @@ EOF
       state_out="MALFORMED"
       run_out="MALFORMED"
     else
-      # Confined single-snapshot child-ledger read, delegated to the shared primitive
-      # hivemind_read_confined_state_current (_shared/ledger-project.sh). It performs the
-      # 6-layer hardened confined read — leaf [ -L ] + non-regular reject AND depth-complete
-      # ancestor symlink walk under the worktree root, a [ -L ] re-check at the read, FILE-LEVEL
-      # NUL rejection, a single `cat` snapshot, the ITEM-4 post-read re-canonicalize + re-assert,
-      # and BOTH _content projections from that ONE snapshot — and is byte-equivalent to the
-      # inline block it replaced. The relative chain is .hivemind/runs/<suggested_id>/state.json.
-      # gt_worktree is the git-derived worktree ALREADY proven resident under CHECKOUT_ROOT by
-      # the canon_gt_wt / gt_resident link above (the shared function has no CHECKOUT_ROOT notion,
-      # so that link MUST stay inline in this script and run FIRST).
+      # Child-ledger read, delegated to hivemind_brood_read_child_ledger (_shared/brood-state.sh),
+      # the only code that reads brood state. It takes IDENTIFIERS — the git-derived worktree and
+      # the run id — derives the ledger location itself, walks each directory through a proven
+      # handle, opens the leaf exactly once, refuses a NUL or raw control byte, and projects BOTH
+      # scalars from that ONE snapshot. gt_worktree is the git-derived worktree ALREADY proven
+      # resident under CHECKOUT_ROOT by the canon_gt_wt / gt_resident link above (the library has
+      # no CHECKOUT_ROOT notion, so that link stays inline in this script and runs FIRST).
       #
       # OUTPUT GRAMMAR (exactly two lines): line 1 = state.current result, line 2 = run.status
-      # result, each ∈ { MISSING | MALFORMED | <validated value> }. On any guard/read failure both
-      # lines carry the SAME terminal token. Parse with a set-u-safe `read` pair from a process
-      # substitution so a short/empty read leaves the vars defined rather than tripping `set -u`.
-      rel_chain=".hivemind/runs/$suggested_id/state.json"
+      # result, each one of MISSING, MALFORMED or a validated value. Parse with a set-u-safe `read`
+      # pair from a process substitution so a short/empty read leaves the vars defined rather than
+      # tripping `set -u`.
       state_out=""
       run_out=""
       { IFS= read -r state_out; IFS= read -r run_out; } \
-        < <(hivemind_read_confined_state_current "$gt_worktree" "$rel_chain")
+        < <(hivemind_brood_read_child_ledger "$gt_worktree" "$suggested_id")
     fi
   fi
 

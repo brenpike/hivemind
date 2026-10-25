@@ -2351,10 +2351,13 @@ assert_spawn_brood_task_paste_from_memory() {
 # brood-status-project.sh (read-side projection, #161)
 # ════════════════════════════════════════════════════════════════════════════════
 # END-TO-END integration cases that drive the read-side entrypoint
-#   bash "$PROJECT_SCRIPT" <manifest_path>
+#   bash "$PROJECT_SCRIPT" <brood_id> [checkout_root]
 # through the REAL manifest→allowlist→ledger-confine→projection path and assert the
-# CONTRACT output grammar (one TAB-delimited STRAIN line per strain) plus the exit
-# contract (0 = projected all strains; nonzero = pre-flight blocker only).
+# CONTRACT output grammar (one BROOD line, then one TAB-delimited STRAIN line per strain) plus
+# the exit contract (0 = projected all strains; 1 = blocker or refusal; 2 = MANIFEST_UNREADABLE).
+# The projector takes an IDENTIFIER, never a manifest path: every case stages its manifest at the
+# derived location <root>/.hivemind/broods/<brood_id>/manifest.json (proj_manifest_path) and calls
+# the projector by that id (run_project).
 #
 # These cases are PURE jq/manifest/ledger — they do NOT shell out to tmux/claude/gh,
 # so they run UNCONDITIONALLY (no dep gate, unlike the spawn-brood escape cases above
@@ -2370,21 +2373,23 @@ assert_spawn_brood_task_paste_from_memory() {
 
 # ensure_proj_workdir: lazily create (once) a disposable git checkout root for the projection
 # cases, setting the global PROJ_WORKDIR. The dir is `git init`'d so it is a real checkout
-# root: the entrypoint's defense-in-depth READ-guard canonicalizes `git rev-parse
-# --show-toplevel` and refuses any manifest resolving OUTSIDE the checkout, so every
-# projection case authors its manifest UNDER this root and runs the entrypoint with cwd
-# inside it (see run_project). All case fixtures namespace under a unique subdir of this
-# single root. Reaped by cleanup() via the tracked PROJ_WORKDIR/WORKDIR.
+# root: the entrypoint derives the manifest location from `git rev-parse --show-toplevel` and the
+# brood id, so every projection case stages its manifest UNDER this root and runs the entrypoint
+# with cwd inside it (see run_project). PROJ_WORKDIR is canonicalized (pwd -P) so the display
+# path in a MANIFEST_UNREADABLE sentinel equals the path a case staged. All case fixtures
+# namespace under a unique subdir (and a unique brood id) of this single root. Reaped by
+# cleanup() via the tracked PROJ_WORKDIR/WORKDIR.
 #
 # INVARIANT: this MUTATES the global PROJ_WORKDIR, so it MUST be called as a bare statement,
 # NEVER inside `$( ... )`. Command substitution runs in a subshell; an assignment made there
 # would not survive to the parent, and run_project's `cd "$PROJ_WORKDIR"` would silently
-# no-op (staying in the suite's cwd, where git toplevel is the hivemind repo — against which
-# the read-guard then rejects the tmpdir manifest as "outside the checkout").
+# no-op (staying in the suite's cwd, where git toplevel is the hivemind repo — under which the
+# staged brood id does not exist).
 PROJ_WORKDIR=""
 ensure_proj_workdir() {
     if [ -z "$PROJ_WORKDIR" ]; then
         PROJ_WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-proj.XXXXXX")"
+        PROJ_WORKDIR="$(cd "$PROJ_WORKDIR" && pwd -P)"
         git -C "$PROJ_WORKDIR" init -q
         # A seed commit is REQUIRED: the #168 ground-truth worktree discovery cases register real
         # git worktrees (`git worktree add -b <branch> <path> HEAD`) so the engine can resolve each
@@ -2401,12 +2406,47 @@ ensure_proj_workdir() {
     fi
 }
 
-# run_project: invoke the entrypoint with cwd INSIDE the git checkout root so its READ-guard
-# (git rev-parse --show-toplevel) resolves and the manifest path is contained. Echoes the
-# entrypoint stdout; stderr is discarded (callers asserting stderr capture it themselves).
-# $1 = manifest path.
+# run_project: invoke the entrypoint BY BROOD ID with cwd INSIDE the git checkout root, so its
+# default checkout root (git rev-parse --show-toplevel) is PROJ_WORKDIR and the manifest location
+# it derives is the one proj_manifest_path staged. Echoes the entrypoint stdout; stderr is
+# discarded (callers asserting stderr capture it themselves). $1 = brood id.
 run_project() {
     ( cd "$PROJ_WORKDIR" && bash "$PROJECT_SCRIPT" "$1" 2>/dev/null )
+}
+
+# proj_brood_id: print a deterministic, case-unique brood id for case key $1. cksum prints decimal
+# digits, which are valid hex, so the id matches ^brood-[0-9a-fA-F-]+$. A unique id per case keeps
+# one case's staged brood (a symlinked entry, a torn manifest) from reaching another case.
+proj_brood_id() {
+    printf 'brood-%s' "$(printf '%s' "$1" | cksum | awk '{ print $1 }')"
+}
+
+# proj_manifest_path: create the brood directory for brood id $1 under PROJ_WORKDIR and print the
+# derived manifest location, <PROJ_WORKDIR>/.hivemind/broods/<id>/manifest.json. The caller writes
+# the manifest there. Filesystem-only, so it is safe inside `$( ... )`.
+proj_manifest_path() {
+    local brood_dir="$PROJ_WORKDIR/.hivemind/broods/$1"
+    mkdir -p "$brood_dir"
+    printf '%s/manifest.json' "$brood_dir"
+}
+
+# brood_line_value: print the value of the BROOD line in $1 (entrypoint output), or nothing.
+brood_line_value() {
+    printf '%s\n' "$1" | awk -F'\t' '/^BROOD\t/ { print $2; exit }'
+}
+
+# count_brood_lines: number of BROOD lines in $1.
+count_brood_lines() {
+    printf '%s\n' "$1" | grep -c '^BROOD	' || true
+}
+
+# brood_line_first: print `yes` when the FIRST line of $1 is a BROOD line (so it precedes every
+# STRAIN line), `no` otherwise.
+brood_line_first() {
+    case "$(printf '%s\n' "$1" | head -n 1)" in
+        "BROOD	"*) printf 'yes' ;;
+        *) printf 'no' ;;
+    esac
 }
 
 # GT_BROOD_ID: the v4 top-level brood_id every projection manifest carries. It must match
@@ -2608,14 +2648,18 @@ assert_proj_happy_path() {
     gt_add_worktree "" "$branch" "$wt"
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" running implement_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local lines; lines="$(count_strain_lines "$out")"
     if [[ "$rc" -eq 0 \
           && "$lines" -eq 1 \
+          && "$(count_brood_lines "$out")" -eq 1 \
+          && "$(brood_line_first "$out")" == "yes" \
+          && "$(brood_line_value "$out")" == "$GT_BROOD_ID" \
           && "$(strain_field "$out" 2)" == "$GT_BROOD_ID" \
           && "$(strain_field "$out" 3)" == "api" \
           && "$(strain_field "$out" 4)" == "$wt" \
@@ -2624,9 +2668,9 @@ assert_proj_happy_path() {
           && "$(strain_field "$out" 7)" == "running" \
           && "$(strain_field "$out" 8)" == "implement_step" \
           && "$(strain_field "$out" 9)" == "running" ]]; then
-        pass "$name" "exit 0; one STRAIN line; brood_id first; state_current=implement_step run_status=running from GT worktree"
+        pass "$name" "exit 0; BROOD line first (validated brood_id), then one STRAIN line; state_current=implement_step run_status=running from GT worktree"
     else
-        failed "$name" "rc=$rc lines=$lines fields=[$(strain_field "$out" 2)|$(strain_field "$out" 3)|$(strain_field "$out" 4)|$(strain_field "$out" 5)|$(strain_field "$out" 6)|$(strain_field "$out" 7)|$(strain_field "$out" 8)|$(strain_field "$out" 9)]"
+        failed "$name" "rc=$rc lines=$lines brood_lines=$(count_brood_lines "$out") brood_first=$(brood_line_first "$out") brood=$(brood_line_value "$out") fields=[$(strain_field "$out" 2)|$(strain_field "$out" 3)|$(strain_field "$out" 4)|$(strain_field "$out" 5)|$(strain_field "$out" 6)|$(strain_field "$out" 7)|$(strain_field "$out" 8)|$(strain_field "$out" 9)]"
     fi
 }
 
@@ -2643,7 +2687,8 @@ assert_proj_v1_no_run_block() {
     local branch="strain/$GT_BROOD_ID/norun"
     local wt="$wd/wt"
     gt_add_worktree "" "$branch" "$wt"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     # No run block at all -> suggested_id absent -> state.current NO_LEDGER_POINTER (run.status
     # MISSING) despite the live worktree.
     jq -n --arg brood_id "$GT_BROOD_ID" --arg wt "$wt" --arg branch "$branch" \
@@ -2661,7 +2706,7 @@ assert_proj_v1_no_run_block() {
         }' > "$manifest"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 3)" == "api" \
           && "$(strain_field "$out" 4)" == "$wt" \
@@ -2684,11 +2729,12 @@ assert_proj_missing_ledger_file() {
     local wt="$wd/wt"
     gt_add_worktree "" "$branch" "$wt"
     mkdir -p "$wt/.hivemind/runs/$sid"   # dir exists, state.json does NOT
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MISSING" \
           && "$(strain_field "$out" 9)" == "MISSING" ]]; then
@@ -2714,14 +2760,15 @@ assert_proj_no_live_worktree() {
     # It must not: a path matching no git worktree-set entry selects NOTHING.
     mkdir -p "$wt/.hivemind/runs/$GT_BROOD_ID--ghost"
     write_ledger "$wt/.hivemind/runs/$GT_BROOD_ID--ghost/state.json" running ghostsentinel
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     # worktree_path ($wt) that no `git worktree add` ever registered; branch is irrelevant to the
     # lookup now (display-only) but kept well-formed so only the unregistered path drives the miss.
     write_manifest_v4 "$manifest" "api" "$wt" "strain/$GT_BROOD_ID/ghost" "brood-api" "running" \
         "$GT_BROOD_ID--ghost"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MISSING" \
           && "$(strain_field "$out" 9)" == "MISSING" ]] \
@@ -2759,12 +2806,13 @@ assert_proj_rekey_branch_switched() {
     gt_add_worktree "" "$derived_branch" "$wt"
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" running implement_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     # Manifest records the STALE scratch branch + the REAL worktree_path. Path-keying must locate.
     write_manifest_v4 "$manifest" "api" "$wt" "$scratch_branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 5)" == "$scratch_branch" \
           && "$(strain_field "$out" 8)" == "implement_step" \
@@ -2790,7 +2838,8 @@ assert_proj_detached_head_located() {
     git -C "$wt" checkout --detach -q 2>/dev/null
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" running implement_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     # Confirm the worktree really is detached (no branch line) so the case is non-vacuous.
@@ -2803,7 +2852,7 @@ assert_proj_detached_head_located() {
     fi
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "implement_step" \
           && "$(strain_field "$out" 9)" == "running" ]]; then
@@ -2834,12 +2883,13 @@ assert_proj_live_branch_emitted() {
     gt_add_worktree "" "$derived_branch" "$wt"
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" running implement_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     # Manifest records the STALE scratch ref as `branch` + the REAL worktree_path.
     write_manifest_v4 "$manifest" "api" "$wt" "$scratch_branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 5)" == "$scratch_branch" \
           && "$(strain_field "$out" 10)" == "$derived_branch" ]]; then
@@ -2866,7 +2916,8 @@ assert_proj_live_branch_detached() {
     git -C "$wt" checkout --detach -q 2>/dev/null
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" running implement_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     # Confirm the worktree really is detached (non-vacuous): no branch line in porcelain output.
@@ -2879,7 +2930,7 @@ assert_proj_live_branch_detached() {
     fi
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 10)" == "MISSING" \
           && "$(strain_field "$out" 8)" == "implement_step" \
@@ -2907,11 +2958,12 @@ assert_proj_facts_yes() {
     gt_add_worktree "" "$branch" "$wt"
     mkdir -p "$wt/.hivemind/facts"
     printf '{}\n' > "$wt/.hivemind/facts/$PROJ_FACTS_NAME"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local nf; nf="$(printf '%s\n' "$out" | awk -F'\t' '/^STRAIN\t/ { print NF; exit }')"
     if [[ "$rc" -eq 0 \
           && "$nf" == "11" \
@@ -2936,11 +2988,12 @@ assert_proj_facts_no() {
     gt_add_worktree "" "$branch" "$wt"
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" running implement_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local first10; first10="$(printf '%s\n' "$out" | awk -F'\t' -v OFS='\t' '/^STRAIN\t/ { NF=10; print; exit }')"
     local expected10
     expected10="$(printf 'STRAIN\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
@@ -2962,12 +3015,13 @@ assert_proj_facts_no_worktree() {
     local wt="$wd/wt"
     mkdir -p "$wt/.hivemind/facts"
     printf '{}\n' > "$wt/.hivemind/facts/$PROJ_FACTS_NAME"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "strain/$GT_BROOD_ID/factsnowt" "brood-api" "running" \
         "$GT_BROOD_ID--factsnowt"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 && "$(strain_field "$out" 11)" == "no" ]]; then
         pass "$name" "exit 0; no ground-truth worktree selected -> field 11 no (facts under the plain dir ignored)"
     else
@@ -2987,11 +3041,12 @@ assert_proj_facts_outside_checkout() {
     gt_add_worktree "" "$branch" "$wt"
     mkdir -p "$wt/.hivemind/facts"
     printf '{}\n' > "$wt/.hivemind/facts/$PROJ_FACTS_NAME"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     git -C "$PROJ_WORKDIR" worktree remove --force "$wt" 2>/dev/null || true
     rm -rf "$outside"
     if [[ "$rc" -eq 0 \
@@ -3015,11 +3070,12 @@ assert_proj_facts_symlink_folder() {
     printf '{}\n' > "$wd/external/$PROJ_FACTS_NAME"
     mkdir -p "$wt/.hivemind"
     ln -s "$wd/external" "$wt/.hivemind/facts"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 && "$(strain_field "$out" 11)" == "no" ]]; then
         pass "$name" "exit 0; symlinked facts folder -> field 11 no"
     else
@@ -3037,11 +3093,12 @@ assert_proj_malformed_run_status() {
     gt_add_worktree "" "$branch" "$wt"
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" frobnicate implement_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 9)" == "MALFORMED" \
           && "$(strain_field "$out" 8)" == "implement_step" ]]; then
@@ -3062,11 +3119,12 @@ assert_proj_injection_state_current() {
     mkdir -p "$wt/.hivemind/runs/$sid"
     local marker="$wd/pwn_state_marker"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" running "\$(touch $marker)"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
           && ! -e "$marker" ]]; then
@@ -3085,13 +3143,14 @@ assert_proj_metachar_worktree() {
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/metawt"
     mkdir -p "$wd"
     local marker="$wd/pwn_wt_marker"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     # worktree_path carries a command-sub payload; branch matches no live worktree (fail-closed).
     write_manifest_v4 "$manifest" "api" "/tmp/\$(touch $marker)/wt" "strain/$GT_BROOD_ID/metawt" \
         "brood-api" "running" "$GT_BROOD_ID--metawt"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 4)" == "MALFORMED" \
           && "$(strain_field "$out" 8)" == "MISSING" \
@@ -3127,11 +3186,12 @@ assert_proj_selector_dotdot_located() {
     gt_add_worktree "" "$branch" "$wt"
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" running implement_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 4)" == "$wt" \
           && "$(strain_field "$out" 8)" == "implement_step" \
@@ -3160,14 +3220,15 @@ assert_proj_traversal_selector_missing() {
     local resolved="$wd/realwt"
     mkdir -p "$resolved/.hivemind/runs/$GT_BROOD_ID--trav"
     write_ledger "$resolved/.hivemind/runs/$GT_BROOD_ID--trav/state.json" running travsentinel
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     # A traversal-style worktree_path: passes the selector floor (permits '..') but matches NO
     # git-reported worktree path → MISSING. branch is display-only and kept well-formed.
     write_manifest_v4 "$manifest" "api" "$wd/decoy/../realwt" "strain/$GT_BROOD_ID/trav" \
         "brood-api" "running" "$GT_BROOD_ID--trav"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MISSING" \
           && "$(strain_field "$out" 9)" == "MISSING" ]] \
@@ -3190,13 +3251,14 @@ assert_proj_selector_framing_rejected() {
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/selframe"
     mkdir -p "$wd"
     local marker="$wd/pwn_sel_marker"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     # worktree_path carries a command-sub payload; branch matches no live worktree (fail-closed).
     write_manifest_v4 "$manifest" "api" "/tmp/\$(touch $marker)/wt" "strain/$GT_BROOD_ID/selframe" \
         "brood-api" "running" "$GT_BROOD_ID--selframe"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 4)" == "MALFORMED" \
           && "$(strain_field "$out" 8)" == "MISSING" \
@@ -3220,11 +3282,12 @@ assert_proj_symlink_leaf() {
     local target="$wd/external_state.json"
     write_ledger "$target" running leakedsentinel
     ln -s "$target" "$wt/.hivemind/runs/$sid/state.json"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
           && "$(strain_field "$out" 9)" == "MALFORMED" ]] \
@@ -3251,11 +3314,12 @@ assert_proj_unreadable_ledger() {
     local leaf="$wt/.hivemind/runs/$sid/state.json"
     write_ledger "$leaf" running implement_step
     chmod 000 "$leaf"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     chmod 644 "$leaf" 2>/dev/null || true
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
@@ -3284,12 +3348,13 @@ assert_proj_suggested_id_escape() {
     # to prove the escape is blocked (sentinel must not surface).
     mkdir -p "$wt/.hivemind/escape"
     write_ledger "$wt/.hivemind/escape/state.json" running escapesentinel
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     # suggested_id contains '/' and '..' -> strict-identifier single-component gate rejects it.
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "../escape"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
           && "$(strain_field "$out" 9)" == "MALFORMED" ]] \
@@ -3321,12 +3386,13 @@ assert_proj_output_encoding() {
     local name="PROJ-OUTENC:display-cell-pipe-encoded"
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/outenc"
     mkdir -p "$wd"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "/tmp/a|b/wt" "strain/$GT_BROOD_ID/outenc" \
         "brood-api" "running" "$GT_BROOD_ID--outenc"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local wtcell; wtcell="$(strain_field "$out" 4)"
     local raw_pipe=no
     printf '%s' "$wtcell" | grep -qF '|' && raw_pipe=yes
@@ -3355,7 +3421,8 @@ assert_proj_no_tmpdir_needed() {
     mkdir -p "$wt_a/.hivemind/runs/$sid_a" "$wt_b/.hivemind/runs/$sid_b"
     write_ledger "$wt_a/.hivemind/runs/$sid_a/state.json" running implement_step
     write_ledger "$wt_b/.hivemind/runs/$sid_b/state.json" complete review_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     jq -n \
         --arg brood_id "$GT_BROOD_ID" \
         --arg wt_a "$wt_a" --arg wt_b "$wt_b" \
@@ -3381,7 +3448,7 @@ assert_proj_no_tmpdir_needed() {
     local bad_tmpdir="$wd/no_writable_tmpdir"
     mkdir -p "$bad_tmpdir"; chmod 000 "$bad_tmpdir"
     local out rc=0
-    out="$(TMPDIR="$bad_tmpdir" run_project "$manifest")" || rc=$?
+    out="$(TMPDIR="$bad_tmpdir" run_project "$brood_id")" || rc=$?
     chmod 0700 "$bad_tmpdir"
     local lines; lines="$(count_strain_lines "$out")"
     local api_name web_name
@@ -3404,11 +3471,12 @@ assert_proj_single_snapshot_consistency() {
     gt_add_worktree "" "$branch" "$wt"
     mkdir -p "$wt/.hivemind/runs/$sid"
     write_ledger "$wt/.hivemind/runs/$sid/state.json" blocked review_step
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local lines; lines="$(count_strain_lines "$out")"
     if [[ "$rc" -eq 0 \
           && "$lines" -eq 1 \
@@ -3433,7 +3501,8 @@ assert_proj_multi_strain() {
     mkdir -p "$wt_a/.hivemind/runs/$sid_a" "$wt_b/.hivemind/runs/$sid_b"
     write_ledger "$wt_a/.hivemind/runs/$sid_a/state.json" running implement_step
     write_ledger "$wt_b/.hivemind/runs/$sid_b/state.json" running "State With Spaces"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     jq -n \
         --arg brood_id "$GT_BROOD_ID" \
         --arg wt_a "$wt_a" --arg wt_b "$wt_b" \
@@ -3457,7 +3526,7 @@ assert_proj_multi_strain() {
         }' > "$manifest"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local lines; lines="$(count_strain_lines "$out")"
     local api_state web_state
     api_state="$(printf '%s\n' "$out" | awk -F'\t' '$3=="api"{print $8; exit}')"
@@ -3475,11 +3544,12 @@ assert_proj_unreadable_manifest() {
     local name="PROJ-UNREADABLE:present-but-invalid-json-sentinel"
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/unreadable"
     mkdir -p "$wd"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     printf '{"manifest_version":4,"strains":[{"name":"api",\n' > "$manifest"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_path
     sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
@@ -3495,18 +3565,20 @@ assert_proj_valid_empty_manifest() {
     local name="PROJ-EMPTY-OK:valid-empty-manifest-exit0-no-sentinel"
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/emptyok"
     mkdir -p "$wd"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     jq -n --arg brood_id "$GT_BROOD_ID" '{manifest_version:4, brood_id:$brood_id, created_at:"2026-05-30T22:10:00Z", base:"main", overlap_risk:"low", strains:[], merge_order:[]}' > "$manifest"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_seen=no
     printf '%s\n' "$out" | grep -q '^MANIFEST_UNREADABLE	' && sentinel_seen=yes
-    if [[ "$rc" -eq 0 && "$strain_lines" -eq 0 && "$sentinel_seen" == "no" ]]; then
-        pass "$name" "exit 0; valid empty manifest -> no STRAIN lines, no MANIFEST_UNREADABLE sentinel"
+    if [[ "$rc" -eq 0 && "$strain_lines" -eq 0 && "$sentinel_seen" == "no" \
+          && "$(count_brood_lines "$out")" -eq 1 && "$(brood_line_value "$out")" == "$GT_BROOD_ID" ]]; then
+        pass "$name" "exit 0; valid empty manifest -> one BROOD line, no STRAIN lines, no MANIFEST_UNREADABLE sentinel"
     else
-        failed "$name" "rc=$rc strain_lines=$strain_lines sentinel_seen=$sentinel_seen"
+        failed "$name" "rc=$rc strain_lines=$strain_lines sentinel_seen=$sentinel_seen brood_lines=$(count_brood_lines "$out") brood=$(brood_line_value "$out")"
     fi
 }
 
@@ -3519,10 +3591,11 @@ assert_proj_wrong_shape_unreadable() {
     local all_ok=yes detail=""
     local i=0
     for body in "${cases[@]}"; do
-        local manifest="$wd/manifest-$i.json"
+        local brood_id; brood_id="$(proj_brood_id "$name-$i")"
+        local manifest; manifest="$(proj_manifest_path "$brood_id")"
         printf '%s\n' "$body" > "$manifest"
         local out rc=0
-        out="$(run_project "$manifest")" || rc=$?
+        out="$(run_project "$brood_id")" || rc=$?
         local strain_lines; strain_lines="$(count_strain_lines "$out")"
         local sentinel_path
         sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
@@ -3544,17 +3617,19 @@ assert_proj_object_element_missing_name() {
     local name="PROJ-OBJNONAME:object-element-no-name-projects-malformed"
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/objnoname"
     mkdir -p "$wd"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     printf '%s\n' '{"strains":[{}]}' > "$manifest"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_seen=no
     printf '%s\n' "$out" | grep -q '^MANIFEST_UNREADABLE	' && sentinel_seen=yes
     # name is now field 3 (brood_id field 2). brood_id is absent in this minimal manifest -> field 2
     # renders MALFORMED; name (field 3) also MALFORMED (presentation rejects the empty name).
     if [[ "$rc" -eq 0 && "$strain_lines" -eq 1 && "$sentinel_seen" == "no" \
+          && "$(brood_line_value "$out")" == "MALFORMED" \
           && "$(strain_field "$out" 3)" == "MALFORMED" ]]; then
         pass "$name" "exit 0; one STRAIN line; name=MALFORMED; no sentinel (per-strain degradation)"
     else
@@ -3572,13 +3647,16 @@ assert_proj_brood_id_field() {
     local branch="strain/$GT_BROOD_ID/bid"
     local wt="$wd/wt"
     gt_add_worktree "" "$branch" "$wt"
-    local m_ok="$wd/manifest-ok.json"
+    local id_ok; id_ok="$(proj_brood_id "$name-ok")"
+    local m_ok; m_ok="$(proj_manifest_path "$id_ok")"
     write_manifest_v4 "$m_ok" "api" "$wt" "$branch" "brood-api" "running" "$GT_BROOD_ID--bid"
     local out rc=0
-    out="$(run_project "$m_ok")" || rc=$?
+    out="$(run_project "$id_ok")" || rc=$?
     local ok_field; ok_field="$(strain_field "$out" 2)"
+    local ok_brood; ok_brood="$(brood_line_value "$out")"
     # Tampered brood_id: not ^brood-[0-9a-f-]+$ (uppercase + colon in body) -> MALFORMED.
-    local m_bad="$wd/manifest-bad.json"
+    local id_bad; id_bad="$(proj_brood_id "$name-bad")"
+    local m_bad; m_bad="$(proj_manifest_path "$id_bad")"
     jq -n --arg wt "$wt" --arg branch "$branch" \
         '{ manifest_version:4, brood_id:"brood-NOT_HEX:body", created_at:"2026-05-30T22:10:00Z",
            base:"main", overlap_risk:"low",
@@ -3587,13 +3665,14 @@ assert_proj_brood_id_field() {
                      run:{suggested_id:"x",workflow_hint:"standard-delivery"}}],
            merge_order:[] }' > "$m_bad"
     local out2 rc2=0
-    out2="$(run_project "$m_bad")" || rc2=$?
+    out2="$(run_project "$id_bad")" || rc2=$?
     local bad_field; bad_field="$(strain_field "$out2" 2)"
-    if [[ "$rc" -eq 0 && "$ok_field" == "$GT_BROOD_ID" \
-          && "$rc2" -eq 0 && "$bad_field" == "MALFORMED" ]]; then
-        pass "$name" "valid brood_id surfaces verbatim ($ok_field); tampered brood_id -> MALFORMED"
+    local bad_brood; bad_brood="$(brood_line_value "$out2")"
+    if [[ "$rc" -eq 0 && "$ok_field" == "$GT_BROOD_ID" && "$ok_brood" == "$GT_BROOD_ID" \
+          && "$rc2" -eq 0 && "$bad_field" == "MALFORMED" && "$bad_brood" == "MALFORMED" ]]; then
+        pass "$name" "valid brood_id surfaces verbatim on the BROOD line and field 2 ($ok_field); tampered brood_id -> MALFORMED on both"
     else
-        failed "$name" "rc=$rc ok_field=$ok_field rc2=$rc2 bad_field=$bad_field"
+        failed "$name" "rc=$rc ok_field=$ok_field ok_brood=$ok_brood rc2=$rc2 bad_field=$bad_field bad_brood=$bad_brood"
     fi
 }
 
@@ -3602,11 +3681,12 @@ assert_proj_literal_nul_manifest() {
     local name="PROJ-NUL-MANIFEST:literal-nul-manifest-unreadable"
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/nulmanifest"
     mkdir -p "$wd"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     printf '{"strains":\000[]}' > "$manifest"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_path
     sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
@@ -3623,7 +3703,8 @@ assert_proj_nul_escape_branch() {
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/nulscalar"
     mkdir -p "$wd"
     local wt="$wd/wt"; mkdir -p "$wt"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     python3 - "$manifest" "$wt" "$GT_BROOD_ID" <<'PY'
 import sys
 manifest, wt, bid = sys.argv[1], sys.argv[2], sys.argv[3]
@@ -3635,7 +3716,7 @@ open(manifest, "w").write(obj)
 PY
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local lines; lines="$(count_strain_lines "$out")"
     # branch is now field 5. It MUST be MALFORMED, and the stripped `feature/apislice` must not appear.
     if [[ "$rc" -eq 0 && "$lines" -eq 1 && "$(strain_field "$out" 5)" == "MALFORMED" ]] \
@@ -3651,14 +3732,15 @@ assert_proj_multidoc_manifest() {
     local name="PROJ-MULTIDOC:two-documents-unreadable"
     ensure_proj_workdir; local wd="$PROJ_WORKDIR/multidoc"
     mkdir -p "$wd"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     printf '%s\n%s\n' \
         '{"manifest_version":4,"strains":[{"name":"api","worktree_path":"/repo/wt","branch":"b","tmux_session":"t","status":"running"}]}' \
         '{"manifest_version":4,"strains":[{"name":"web","worktree_path":"/repo/wt2","branch":"b2","tmux_session":"t2","status":"running"}]}' \
         > "$manifest"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_path
     sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
@@ -3667,6 +3749,153 @@ assert_proj_multidoc_manifest() {
     else
         failed "$name" "rc=$rc strain_lines=$strain_lines sentinel_path=[$sentinel_path]"
     fi
+}
+
+# ── Projection NUL-TRAILING: a NUL after an otherwise valid manifest → MANIFEST_UNREADABLE + exit 2 ─
+# bash command substitution drops a trailing NUL silently, so a reader that captured the bytes
+# first would see the valid `{"strains":[]}` and project an empty brood. The shared reader maps
+# every NUL to a visible byte before the capture and refuses it, so the verdict is the exit-2
+# sentinel with the derived display path.
+assert_proj_trailing_nul_manifest() {
+    local name="PROJ-NUL-TRAILING:trailing-nul-manifest-unreadable"
+    ensure_proj_workdir
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
+    printf '{"brood_id":"%s","strains":[]}\000' "$GT_BROOD_ID" > "$manifest"
+
+    local out rc=0
+    out="$(run_project "$brood_id")" || rc=$?
+    local sentinel_path
+    sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
+    if [[ "$rc" -eq 2 && "$(count_strain_lines "$out")" -eq 0 && "$(count_brood_lines "$out")" -eq 0 \
+          && "$sentinel_path" == "$manifest" ]]; then
+        pass "$name" "exit 2; trailing-NUL manifest -> MANIFEST_UNREADABLE (path=$sentinel_path); no BROOD or STRAIN line"
+    else
+        failed "$name" "rc=$rc out=[$out] sentinel_path=[$sentinel_path] expected=[$manifest]"
+    fi
+}
+
+# proj_run_refusal: run the projector by id $2 (checkout root $3, or the PROJ_WORKDIR default when
+# empty) and judge a refusal for case $1: exit 1, a `blocker:` line on stderr, and NO stdout line
+# at all (no BROOD, no STRAIN, no sentinel). $4 names a sentinel string whose appearance anywhere
+# in the output would prove the refused manifest was read. Records pass/failed itself.
+proj_run_refusal() {
+    local name="$1" brood_id="$2" checkout_root="$3" leak_sentinel="$4"
+    local err_file; err_file="$(mktemp "${TMPDIR:-/tmp}/hivemind-brood-proj-err.XXXXXX")"
+    local out rc=0
+    if [ -n "$checkout_root" ]; then
+        out="$(bash "$PROJECT_SCRIPT" "$brood_id" "$checkout_root" 2>"$err_file")" || rc=$?
+    else
+        out="$( cd "$PROJ_WORKDIR" && bash "$PROJECT_SCRIPT" "$brood_id" 2>"$err_file" )" || rc=$?
+    fi
+    local err; err="$(cat "$err_file")"
+    rm -f "$err_file"
+    local leaked=no
+    if [ -n "$leak_sentinel" ] && printf '%s\n%s' "$out" "$err" | grep -qF -- "$leak_sentinel"; then
+        leaked=yes
+    fi
+    if [[ "$rc" -eq 1 && -z "$out" && "$leaked" == "no" ]] && printf '%s\n' "$err" | grep -q '^blocker: '; then
+        pass "$name" "exit 1; blocker on stderr; no stdout line; refused manifest never read"
+    else
+        failed "$name" "rc=$rc leaked=$leaked out=[$out] stderr=[$err]"
+    fi
+}
+
+# proj_outside_manifest: write a well-formed one-strain manifest carrying brood id $2 and the
+# strain name $3 at path $1 (creating parents). The strain name is the leak sentinel the refusal
+# cases look for.
+proj_outside_manifest() {
+    mkdir -p "$(dirname "$1")"
+    jq -n --arg bid "$2" --arg sname "$3" \
+        '{ manifest_version:4, brood_id:$bid, created_at:"2026-06-01T00:00:00Z", base:"main",
+           overlap_risk:"low", strains:[{name:$sname, description:"d", status:"running"}],
+           merge_order:[] }' > "$1"
+}
+
+# ── Projection BAD-ID: a brood id outside the pattern → exit 1 refusal, nothing read ─
+# The projector accepts an identifier, never a path: an argument that is a path, or carries shell
+# metacharacters, fails the brood-id pattern and is refused before any read.
+assert_proj_bad_brood_id() {
+    local name="PROJ-BAD-ID:non-pattern-brood-id-refused"
+    ensure_proj_workdir
+    local wd="$PROJ_WORKDIR/badid"
+    mkdir -p "$wd"
+    local marker="$wd/pwn_badid_marker"
+    local bad_ids=( "../broods/x" "$GT_BROOD_ID/manifest.json" "brood-\$(touch $marker)" "brood-" "brood-xyz" "" )
+    local all_ok=yes detail="" bad_id rc out
+    for bad_id in "${bad_ids[@]}"; do
+        rc=0
+        out="$( cd "$PROJ_WORKDIR" && bash "$PROJECT_SCRIPT" "$bad_id" 2>/dev/null )" || rc=$?
+        if [[ "$rc" -ne 1 || -n "$out" ]]; then
+            all_ok=no
+            detail+=" [$bad_id -> rc=$rc out=$out]"
+        fi
+    done
+    if [[ "$all_ok" == "yes" && ! -e "$marker" ]]; then
+        pass "$name" "every non-pattern brood id (path, traversal, metachar, empty body) -> exit 1, no stdout, no side effect"
+    else
+        failed "$name" "expected exit 1 and no stdout for each;$detail marker_exists=$([ -e "$marker" ] && echo yes || echo no)"
+    fi
+}
+
+# ── Projection ABSENT: a pattern-valid brood id with no manifest → exit 1 (does not exist) ─
+assert_proj_absent_manifest() {
+    local name="PROJ-ABSENT:valid-id-no-manifest-blocker"
+    ensure_proj_workdir
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    mkdir -p "$PROJ_WORKDIR/.hivemind/broods/$brood_id"
+    proj_run_refusal "$name" "$brood_id" "" ""
+}
+
+# ── Projection MANIFEST-SYMLINK-LEAF: the derived manifest is a symlink → exit 1, target not read ─
+# The derived manifest leaf is a symlink to a well-formed manifest outside the checkout. The shared
+# reader refuses a symlinked leaf and never follows it, so the projector exits 1 and the outside
+# manifest's strain never surfaces.
+assert_proj_manifest_symlink_leaf() {
+    local name="PROJ-MANIFEST-SYMLINK-LEAF:symlinked-manifest-leaf-refused"
+    ensure_proj_workdir
+    local outside; outside="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX")"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
+    proj_outside_manifest "$outside/manifest.json" "$brood_id" "leafleaksentinel"
+    ln -s "$outside/manifest.json" "$manifest"
+    proj_run_refusal "$name" "$brood_id" "" "leafleaksentinel"
+    rm -rf "$outside"
+}
+
+# ── Projection MANIFEST-SYMLINK-ANCESTOR: the brood directory is a symlink → exit 1, not followed ─
+# The derived brood directory <root>/.hivemind/broods/<id> is a symlink to an outside directory
+# holding a well-formed manifest. The shared reader walks each directory through a proven handle
+# and refuses a symlinked component, so the projector exits 1 and the outside strain never surfaces.
+assert_proj_manifest_symlink_ancestor() {
+    local name="PROJ-MANIFEST-SYMLINK-ANCESTOR:symlinked-brood-dir-refused"
+    ensure_proj_workdir
+    local outside; outside="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-outside.XXXXXX")"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    proj_outside_manifest "$outside/brood/manifest.json" "$brood_id" "ancestorleaksentinel"
+    mkdir -p "$PROJ_WORKDIR/.hivemind/broods"
+    ln -s "$outside/brood" "$PROJ_WORKDIR/.hivemind/broods/$brood_id"
+    proj_run_refusal "$name" "$brood_id" "" "ancestorleaksentinel"
+    rm -rf "$outside"
+}
+
+# ── Projection MANIFEST-OUTSIDE-ROOT: brood state resolves outside the checkout → exit 1 ─
+# A separate checkout whose .hivemind is a symlink to a directory OUTSIDE it, holding
+# broods/<id>/manifest.json. The derived manifest location therefore resolves outside the checkout
+# root (passed explicitly as $2). The walk refuses the symlinked .hivemind, so the projector exits 1
+# and never reads the outside manifest.
+assert_proj_manifest_outside_root() {
+    local name="PROJ-MANIFEST-OUTSIDE-ROOT:brood-state-outside-checkout-refused"
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-proj-outside.XXXXXX")"
+    tmp="$(cd "$tmp" && pwd -P)"
+    local root="$tmp/repo"
+    mkdir -p "$root"
+    git -C "$root" init -q
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    proj_outside_manifest "$tmp/outside/broods/$brood_id/manifest.json" "$brood_id" "outsideleaksentinel"
+    ln -s "$tmp/outside" "$root/.hivemind"
+    proj_run_refusal "$name" "$brood_id" "$root" "outsideleaksentinel"
+    rm -rf "$tmp"
 }
 
 # ── Projection NUL-LEDGER: literal-NUL child ledger under GT worktree → MALFORMED ─
@@ -3680,11 +3909,12 @@ assert_proj_literal_nul_ledger() {
     mkdir -p "$wt/.hivemind/runs/$sid"
     local leaf="$wt/.hivemind/runs/$sid/state.json"
     printf '{"run":{"status":"running"},"state":{"current":"plan"}}\000' > "$leaf"
-    local manifest="$wd/manifest.json"
+    local brood_id; brood_id="$(proj_brood_id "$name")"
+    local manifest; manifest="$(proj_manifest_path "$brood_id")"
     write_manifest_v4 "$manifest" "api" "$wt" "$branch" "brood-api" "running" "$sid"
 
     local out rc=0
-    out="$(run_project "$manifest")" || rc=$?
+    out="$(run_project "$brood_id")" || rc=$?
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
           && "$(strain_field "$out" 9)" == "MALFORMED" ]] \
@@ -3731,13 +3961,12 @@ assert_proj_nested_worktree_anchor() {
     local manifest="$brood_dir/manifest.json"
     write_manifest_v4 "$manifest" "api" "$strain_wt" "$branch" "brood-api" "running" "$sid"
 
-    # Run the entrypoint with cwd INSIDE the linked worktree and NO $2 override — so the helper's
-    # default `git rev-parse --show-toplevel` resolves to $child_wt and the read-guard confines the
-    # manifest beneath the CHILD worktree (current-worktree anchoring). If the helper still anchored
-    # on the main checkout, the manifest under the linked worktree would resolve outside that root
-    # and be rejected.
+    # Run the entrypoint BY BROOD ID with cwd INSIDE the linked worktree and NO $2 override — so
+    # its default `git rev-parse --show-toplevel` resolves to $child_wt and the manifest location it
+    # derives sits beneath the CHILD worktree (current-worktree anchoring). If it still anchored on
+    # the main checkout, the brood id would not exist there and the projector would exit 1.
     local out rc=0
-    out="$( cd "$child_wt" && bash "$PROJECT_SCRIPT" "$manifest" 2>/dev/null )" || rc=$?
+    out="$( cd "$child_wt" && bash "$PROJECT_SCRIPT" "$GT_BROOD_ID" 2>/dev/null )" || rc=$?
     local lines; lines="$(count_strain_lines "$out")"
     if [[ "$rc" -eq 0 \
           && "$lines" -eq 1 \
@@ -3926,6 +4155,29 @@ assert_discover_hostile_name_skipped() {
     fi
 }
 
+
+# ── DISCOVER-SYMLINKED-BROODS: a symlinked .hivemind/broods → exit 1 blocker, no paths ──
+#    The listing refuses a symlinked brood-state directory instead of following it: discover exits
+#    1 with a `blocker:` line on stderr and emits no path, never an empty (success) listing.
+assert_discover_symlinked_broods_blocker() {
+    local name="DISCOVER-SYMLINKED-BROODS:symlinked-broods-dir-exit1-blocker"
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-discover.XXXXXX")"
+    local root="$tmp/repo"; mkdir -p "$root"
+    discover_seed_repo "$root"
+    discover_stub_manifest "$tmp/outside/brood-8888aaaa-8888-4aaa-8aaa-888888888888/manifest.json"
+    mkdir -p "$root/.hivemind"
+    ln -s "$tmp/outside" "$root/.hivemind/broods"
+    local err_file="$tmp/discover.err"
+    local out rc=0
+    out="$( cd "$root" && bash "$DISCOVER_SCRIPT" 2>"$err_file" )" || rc=$?
+    local err; err="$(cat "$err_file")"
+    rm -rf "$tmp"
+    if [[ "$rc" -eq 1 && -z "$out" ]] && printf '%s\n' "$err" | grep -q '^blocker: '; then
+        pass "$name" "exit 1; blocker on stderr; no path emitted (the symlinked broods dir is never followed)"
+    else
+        failed "$name" "rc=$rc out=[$out] stderr=[$err]"
+    fi
+}
 
 # ════════════════════════════════════════════════════════════════════════════════
 # brood-status-collect.sh (collection loop + status derivation entrypoint, #186, ADR-0020)
@@ -4158,6 +4410,12 @@ assert_proj_single_snapshot_consistency
 assert_proj_literal_nul_manifest
 assert_proj_nul_escape_branch
 assert_proj_multidoc_manifest
+assert_proj_trailing_nul_manifest
+assert_proj_bad_brood_id
+assert_proj_absent_manifest
+assert_proj_manifest_symlink_leaf
+assert_proj_manifest_symlink_ancestor
+assert_proj_manifest_outside_root
 assert_proj_literal_nul_ledger
 assert_proj_nested_worktree_anchor
 
@@ -4168,6 +4426,7 @@ assert_discover_sort_order
 assert_discover_nested_worktree
 assert_discover_dir_without_manifest_skipped
 assert_discover_hostile_name_skipped
+assert_discover_symlinked_broods_blocker
 
 # ── COLLECT-MISSING-SENTINEL: absent tmux_session/branch → probes SKIP MISSING token ─
 # A manifest strain with NO tmux_session and NO branch field. The projector emits the fixed token
@@ -4326,16 +4585,76 @@ assert_collect_broodid_mismatch_empty_blocker() {
     fi
 }
 
-# ── COLLECT-REREAD-CONFINED: the brood_id re-read refuses a manifest swapped after the projector ──
-# The collector reopens the manifest for its brood-id integrity read after the projector's guarded
-# snapshot. This case runs a COPY of the brood-status scripts and the _shared libraries in a
-# throwaway plugin tree whose projector is a stub: it swaps the manifest for a symlink to a
-# well-formed, brood_id-matching manifest OUTSIDE the checkout, then exits 0 with no STRAIN lines
-# (the window a real swap would race into). The re-read must refuse the symlink, so the brood
-# renders as a blocker with an absent/malformed brood_id. Pre-fix code follows the symlink, reads
-# the matching brood_id, and renders an ordinary empty brood.
-assert_collect_reread_refuses_swapped_symlink() {
-    local name="COLLECT-REREAD-CONFINED:swapped-symlink-manifest-renders-blocker"
+# collect_fake_plugin: copy the brood-status scripts and the _shared libraries into a throwaway
+# plugin tree under $1 and replace its projector with the stub body read from stdin. Prints the
+# fake collector's path. The copy keeps the collector's self-location and library sourcing real
+# while the stub decides what the "projector" reports.
+collect_fake_plugin() {
+    local fake_plugin="$1/fake-plugin"
+    mkdir -p "$fake_plugin/skills"
+    cp -R "$REPO_ROOT/plugin/skills/brood-status" "$fake_plugin/skills/"
+    cp -R "$REPO_ROOT/plugin/skills/_shared" "$fake_plugin/skills/"
+    cat > "$fake_plugin/skills/brood-status/scripts/brood-status-project.sh"
+    printf '%s' "$fake_plugin/skills/brood-status/scripts/brood-status-collect.sh"
+}
+
+# ── COLLECT-NEVER-OPENS-MANIFEST: the projector's BROOD line alone decides brood-id integrity ──
+# The collector takes the brood-id integrity value from the projector's BROOD line and never opens
+# a manifest itself. This case runs the collector against a stub projector that records each call
+# and prints `BROOD<TAB><requested id>`, while the on-disk manifest carries a DIFFERENT top-level
+# brood_id. If the collector read the manifest, it would render a mismatch blocker; because only
+# the BROOD line counts, the brood renders as an ordinary empty brood. The call log proves the
+# projector ran EXACTLY ONCE, with two identifiers (the brood id and the checkout root), never a
+# manifest path.
+assert_collect_never_opens_manifest() {
+    local name="COLLECT-NEVER-OPENS-MANIFEST:stub-brood-line-decides-integrity"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        skip "$name" "collect needs jq+git; skipping (missing dep)"
+        return
+    fi
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    tmp="$(cd "$tmp" && pwd -P)"
+    local root="$tmp/repo"; mkdir -p "$root"
+    collect_seed_repo "$root"
+    local fake_collect
+    fake_collect="$(collect_fake_plugin "$tmp" <<'NEVEROPEN_EOF'
+#!/usr/bin/env bash
+# Stub projector: record the call, then report the requested id as the manifest's brood_id.
+printf '%s|%s\n' "$1" "$2" >> "$HIVEMIND_TEST_CALL_LOG"
+printf 'BROOD\t%s\n' "$1"
+exit 0
+NEVEROPEN_EOF
+)"
+    local id="brood-8888bbbb-8888-4bbb-8bbb-888888888888"
+    mkdir -p "$root/.hivemind/broods/$id"
+    jq -n '{ manifest_version:4, brood_id:"brood-9999cccc-9999-4ccc-8ccc-999999999999",
+             created_at:"2026-06-01T00:00:00Z", base:"main", overlap_risk:"low",
+             strains:[], merge_order:[] }' > "$root/.hivemind/broods/$id/manifest.json"
+    local call_log="$tmp/calls.log"
+
+    local out rc=0
+    out="$( cd "$root" && HIVEMIND_TEST_CALL_LOG="$call_log" bash "$fake_collect" 2>/dev/null )" || rc=$?
+    local calls; calls="$(cat "$call_log" 2>/dev/null)"
+    local ok=no
+    if printf '%s' "$out" | jq -e --arg id "$id" \
+        '(.broods|length)==1 and .broods[0].brood_id==$id and .broods[0].status=="empty"
+         and .broods[0].detail==null and .global.unreadable==0' >/dev/null 2>&1; then
+        ok=yes
+    fi
+    rm -rf "$tmp"
+    if [[ "$rc" -eq 0 && "$ok" == "yes" && "$calls" == "$id|$root" ]]; then
+        pass "$name" "exit 0; stub BROOD line matched -> empty brood despite a mismatching manifest on disk; projector ran once with (id, root)"
+    else
+        failed "$name" "rc=$rc ok=$ok calls=[$calls] expected=[$id|$root] out=[$out]"
+    fi
+}
+
+# ── COLLECT-BROOD-MALFORMED: a BROOD MALFORMED line renders a blocker brood ──
+# A stub projector prints `BROOD<TAB>MALFORMED` (the manifest's top-level brood_id was absent,
+# tampered or control-bearing) and exits 0. The collector must render the brood as a blocker whose
+# detail says the manifest brood_id is absent/malformed, counted unreadable, never a normal brood.
+assert_collect_brood_malformed_blocker() {
+    local name="COLLECT-BROOD-MALFORMED:brood-line-malformed-renders-blocker"
     if ! command -v jq >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
         skip "$name" "collect needs jq+git; skipping (missing dep)"
         return
@@ -4343,38 +4662,111 @@ assert_collect_reread_refuses_swapped_symlink() {
     local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
     local root="$tmp/repo"; mkdir -p "$root"
     collect_seed_repo "$root"
-    local fake_plugin="$tmp/fake-plugin"
-    mkdir -p "$fake_plugin/skills"
-    cp -R "$REPO_ROOT/plugin/skills/brood-status" "$fake_plugin/skills/"
-    cp -R "$REPO_ROOT/plugin/skills/_shared" "$fake_plugin/skills/"
-    cat > "$fake_plugin/skills/brood-status/scripts/brood-status-project.sh" <<'SWAPPROJ_EOF'
+    local fake_collect
+    fake_collect="$(collect_fake_plugin "$tmp" <<'MALFORMEDPROJ_EOF'
 #!/usr/bin/env bash
-# Stub projector: swap the manifest for a symlink to the outside manifest, then succeed silently.
-rm -f "$1" && ln -s "$HIVEMIND_TEST_OUTSIDE_MANIFEST" "$1"
+# Stub projector: the manifest's top-level brood_id failed validation.
+printf 'BROOD\tMALFORMED\n'
 exit 0
-SWAPPROJ_EOF
-    local id="brood-8888bbbb-8888-4bbb-8bbb-888888888888"
-    mkdir -p "$root/.hivemind/broods/$id" "$tmp/outside"
-    jq -n --arg bid "$id" \
-        '{ manifest_version:4, brood_id:$bid, created_at:"2026-06-01T00:00:00Z",
-           base:"main", overlap_risk:"low", strains:[], merge_order:[] }' \
+MALFORMEDPROJ_EOF
+)"
+    local id="brood-aaaa1111-aaaa-4111-8111-aaaaaaaa1111"
+    mkdir -p "$root/.hivemind/broods/$id"
+    jq -n --arg bid "$id" '{ manifest_version:4, brood_id:$bid, strains:[] }' \
         > "$root/.hivemind/broods/$id/manifest.json"
-    cp "$root/.hivemind/broods/$id/manifest.json" "$tmp/outside/manifest.json"
 
     local out rc=0
-    out="$( cd "$root" && HIVEMIND_TEST_OUTSIDE_MANIFEST="$tmp/outside/manifest.json" \
-        bash "$fake_plugin/skills/brood-status/scripts/brood-status-collect.sh" 2>/dev/null )" || rc=$?
+    out="$( cd "$root" && bash "$fake_collect" 2>/dev/null )" || rc=$?
     local ok=no
     if printf '%s' "$out" | jq -e --arg id "$id" \
         '(.broods|length)==1 and .broods[0].brood_id==$id and .broods[0].status=="blocker"
-         and (.broods[0].detail|contains("absent/malformed"))' >/dev/null 2>&1; then
+         and (.broods[0].strains|length)==0
+         and (.broods[0].detail|contains("absent/malformed"))
+         and .global.unreadable==1' >/dev/null 2>&1; then
         ok=yes
     fi
     rm -rf "$tmp"
     if [[ "$rc" -eq 0 && "$ok" == "yes" ]]; then
-        pass "$name" "exit 0; manifest swapped for an outside symlink after the projector -> blocker, never read"
+        pass "$name" "exit 0; BROOD MALFORMED -> blocker brood (absent/malformed), counted unreadable"
     else
         failed "$name" "rc=$rc ok=$ok out=[$out]"
+    fi
+}
+
+# ── COLLECT-SYMLINKED-BROODS: a symlinked .hivemind/broods → exit 1 blocker, never an empty list ──
+# The brood-state directory is a symlink to an outside directory holding a valid brood. The listing
+# refuses the symlinked directory and the collector exits 1 with a `blocker:` line on stderr: a
+# refused listing is never rendered as "No broods found." and the outside brood is never read.
+assert_collect_symlinked_broods_blocker() {
+    local name="COLLECT-SYMLINKED-BROODS:symlinked-broods-dir-exit1-blocker"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        skip "$name" "collect needs jq+git; skipping (missing dep)"
+        return
+    fi
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local root="$tmp/repo"; mkdir -p "$root"
+    collect_seed_repo "$root"
+    local id="brood-bbbb2222-bbbb-4222-8222-bbbbbbbb2222"
+    mkdir -p "$tmp/outside/$id" "$root/.hivemind"
+    jq -n --arg bid "$id" '{ manifest_version:4, brood_id:$bid, strains:[] }' \
+        > "$tmp/outside/$id/manifest.json"
+    ln -s "$tmp/outside" "$root/.hivemind/broods"
+
+    local err_file="$tmp/collect.err"
+    local out rc=0
+    out="$( cd "$root" && bash "$COLLECT_SCRIPT" 2>"$err_file" )" || rc=$?
+    local err; err="$(cat "$err_file")"
+    rm -rf "$tmp"
+    if [[ "$rc" -eq 1 && -z "$out" ]] && printf '%s\n' "$err" | grep -q '^blocker: '; then
+        pass "$name" "exit 1; blocker on stderr; no JSON document (a refused listing is never an empty dashboard)"
+    else
+        failed "$name" "rc=$rc out=[$out] stderr=[$err]"
+    fi
+}
+
+# ── COLLECT-SYMLINKED-ENTRY: a symlinked brood entry → a blocker brood, run continues ──
+# One brood entry under .hivemind/broods is a symlink to an outside directory holding a valid
+# manifest; a sibling brood is a real, valid empty brood. The listing names the symlinked entry so
+# the projector refuses it loudly (exit 1); the collector renders it as a blocker brood whose detail
+# is the projector's own `blocker:` line, counts it unreadable, and still renders the sibling.
+assert_collect_symlinked_entry_blocker() {
+    local name="COLLECT-SYMLINKED-ENTRY:symlinked-brood-entry-renders-blocker"
+    if ! command -v jq >/dev/null 2>&1 || ! command -v git >/dev/null 2>&1; then
+        skip "$name" "collect needs jq+git; skipping (missing dep)"
+        return
+    fi
+    local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-collect.XXXXXX")"
+    local root="$tmp/repo"; mkdir -p "$root"
+    collect_seed_repo "$root"
+    local id_ok="brood-cccc3333-cccc-4333-8333-cccccccc3333"
+    local id_link="brood-dddd4444-dddd-4444-8444-dddddddd4444"
+    mkdir -p "$root/.hivemind/broods/$id_ok" "$tmp/outside"
+    jq -n --arg bid "$id_ok" '{ manifest_version:4, brood_id:$bid, strains:[] }' \
+        > "$root/.hivemind/broods/$id_ok/manifest.json"
+    jq -n --arg bid "$id_link" \
+        '{ manifest_version:4, brood_id:$bid, strains:[{name:"entryleaksentinel", status:"running"}] }' \
+        > "$tmp/outside/manifest.json"
+    ln -s "$tmp/outside" "$root/.hivemind/broods/$id_link"
+
+    local out rc=0
+    out="$( cd "$root" && bash "$COLLECT_SCRIPT" 2>/dev/null )" || rc=$?
+    local ok=no
+    if printf '%s' "$out" | jq -e --arg ida "$id_ok" --arg idb "$id_link" \
+        '(.broods|length)==2
+         and .broods[0].brood_id==$ida and .broods[0].status=="empty"
+         and .broods[1].brood_id==$idb and .broods[1].status=="blocker"
+         and (.broods[1].detail|startswith("blocker: "))
+         and (.broods[1].strains|length)==0
+         and .global.total_broods==2 and .global.unreadable==1' >/dev/null 2>&1; then
+        ok=yes
+    fi
+    local leaked=no
+    printf '%s' "$out" | grep -q 'entryleaksentinel' && leaked=yes
+    rm -rf "$tmp"
+    if [[ "$rc" -eq 0 && "$ok" == "yes" && "$leaked" == "no" ]]; then
+        pass "$name" "exit 0; symlinked brood entry -> blocker brood (detail is the projector's blocker line); sibling rendered; outside manifest never read"
+    else
+        failed "$name" "rc=$rc ok=$ok leaked=$leaked out=[$out]"
     fi
 }
 
@@ -4887,7 +5279,10 @@ assert_collect_unreadable_isolated
 assert_collect_missing_sentinel_not_probed
 assert_collect_broodid_mismatch_blocker
 assert_collect_broodid_mismatch_empty_blocker
-assert_collect_reread_refuses_swapped_symlink
+assert_collect_never_opens_manifest
+assert_collect_brood_malformed_blocker
+assert_collect_symlinked_broods_blocker
+assert_collect_symlinked_entry_blocker
 assert_collect_started_running
 assert_collect_alive_unstarted_starting
 assert_collect_legacy_no_pointer_running
