@@ -91,7 +91,11 @@
  *                           with tag verdict: clean carries no other field,
  *                           and injection-suspect may carry
  *                           pattern_category, field_excerpt and reason, all
- *                           optional.
+ *                           optional. The user rejected local review
+ *                           finding 87c0420e, which asked to require them,
+ *                           because a suspect stops the run before planning
+ *                           either way (ADR-0037, Amendment 2026-10-25: a
+ *                           suspect scan result needs no diagnostic field).
  *   scanExcerptLimit()      200, the characters of a flagged excerpt shown.
  *   buildScanPrompt(facts)  the scan runner's prompt.
  *   scanOptions()           the scan agent() options: label scan, phase Scan,

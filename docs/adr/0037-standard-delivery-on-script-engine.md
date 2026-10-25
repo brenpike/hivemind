@@ -454,3 +454,56 @@ Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-caus
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-25: a suspect scan result needs no diagnostic field (local review finding 87c0420e)
+
+**The finding.** Local review finding 87c0420e said the injection-suspect variant of `scanStepSchema` in `plugin/workflow-src/lib/facts.js` leaves `pattern_category`, `field_excerpt` and `reason` optional. It asked the schema to require them.
+
+**Decided 2026-10-25, user call: rejected.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings" (ADR-0038 decision 4). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- The design is inherited from `main` and tested. On `main` the scan result schema already left the three fields optional. Commit b0f59aa added the test "a suspect with no category or excerpt still blocks" in `tests/workflow-scripts/analysis-only.test.mjs`, and `renderSuspectLine` shows "no category given" and an empty excerpt for a suspect that carries neither.
+- `describeScanProblem` stops the run before planning for any suspect, whatever fields it carries. A result that fails `scanStepSchema` stops the run at the same point. So requiring the fields changes no routing, and no flagged text reaches the planner either way.
+- The change names no class it eliminates, so it fails "### Closed-by-Construction Acceptance Test". It adds a check and removes none (doctrine "## Surface-Growth Escalation").
+
+**Scope.** A finding is a REPEAT of this decision when it asks the scan result schema to require any of `pattern_category`, `field_excerpt` or `reason` on an injection-suspect result, or flags that a suspect may omit them. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a suspect that does not stop the run before planning;
+- flagged text that reaches the planner;
+- a suspect line that shows a value without `encodeUntrustedText`;
+- scan routing that depends on those fields.
+
+The local reviewer's own injection-suspect exit in `reviewExitFields` is out of this record's scope.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-25: local review counts are display only (local review finding de83f9cf)
+
+**The finding.** Local review finding de83f9cf said `iterations_completed`, `findings_resolved` and `findings_open` in `buildReviewSchema` (`plugin/workflow-src/standard-delivery/main.js`) are not bounded or checked against each other. It asked the workflow to check them.
+
+**Decided 2026-10-25, user call: rejected.** This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings" (ADR-0038 decision 4). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- The design is inherited from `main`, where `REVIEW_SCHEMA` held the same three integer counts with no bound and no cross-check.
+- The counts are display only. `localReviewRoutes` keys only on `exit_reason`. `projectReplanReview` keeps them from the planner, since no exit reason that replans names a count in `reviewExitFields`. They show only in the review stop message of `max-iterations-reached`, in the diminishing-returns question, and in the diminishing-returns gate note, which the pull request body and comment carry as a number.
+- A negative count already fails `validateSchema` in `plugin/workflow-src/lib/schema.js` (ADR-0036, Amendment 2026-10-24: integers are counts).
+- Doctrine "## Bounded-Impact Gating" assesses them as informational only. A count validator adds a check path and removes none (doctrine "## Surface-Growth Escalation").
+
+**Scope.** A finding is a REPEAT of this decision when it asks standard-delivery to bound these counts, for example against `maxReviewIterations()`, or to check them against each other, `exit_reason`, `open_findings` or `rejected_findings`. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a count that routes the run or holds or releases a gate;
+- a count that reaches the planner;
+- a count that reaches the pull request text other than as the `findings_open` number in the diminishing-returns gate note;
+- a negative or non-integer count that passes the validator.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.

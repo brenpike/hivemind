@@ -149,6 +149,11 @@
  *           Recorded Decisions and Repeat Findings): a held gate's note
  *           gives their code-built count, and the final complete message
  *           names each in a chat-only detail block.
+ *           iterations_completed, findings_resolved and findings_open are
+ *           display only: localReviewRoutes() keys only on exit_reason. The
+ *           user rejected local review finding de83f9cf, which asked for
+ *           bounds and consistency checks on them (ADR-0037, Amendment
+ *           2026-10-25: local review counts are display only).
  *   PR      once every configured gate held on one commit H, a haiku
  *           runner invokes hivemind:open-plan-pr once under the push grant
  *           and the git-script sentence. Its inputs block holds only head,
