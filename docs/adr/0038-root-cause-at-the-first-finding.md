@@ -52,6 +52,7 @@ Each file this decision changed, and what changed in it:
   - `describeRejectedCount`, `routeLocalReview`, `resolveDiminishingReturns`, `runReviewGate` and `runGates`: the count of rejected findings in the review gate note.
   - `renderRejectedFindingLine`, `buildRejectedFindingsBlock`, `finishDeliveryComplete` and `runPullRequestStep`: the chat-only detail block.
   - `requestReviewReplan`: the zoom-out replan reason.
+  - `projectReplanReview` and `requestReviewReplan`: the replan carries only the review's `exit_reason` and the fields that `exit_reason` names, so no rejected finding reaches the planner.
   - `buildReviewQuestionBrief`: the rejection option text.
 
   The generated `plugin/workflows/standard-delivery.js` follows.

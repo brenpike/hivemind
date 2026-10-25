@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A finding the user rejected is no longer asked about again in later runs. When the user rejects a finding, the next plan records the decision in the repo on the branch, and both reviewers reject a repeat by citing that record, list it for the user and never ask again. The rejection option of a high-severity rejection question says so (#448).
 - A fix that adds more surface than it removes is no longer applied. It goes to the user as one architectural call, with a one-line ask, options and a recommendation, through the existing question path (#448).
 - These rules have one home, `plugin/governance/remediation-doctrine.md`, on both engines. The local reviewer, the GitHub reviewer, cerebrate, the overlord and the standard-delivery script cite it and copy none of it. The state-machine definitions are unchanged (#448).
+- On the script engine, a local review that sends the run back to planning passes the planner only its escalation: the exit reason and that reason's fields. A finding rejected under a recorded decision no longer re-enters remediation planning (#448).
 
 ## [7.1.0] - 2026-10-24
 
