@@ -86,13 +86,13 @@ fi
 
 # ── List brood ids (pattern-validated identifiers; treat as DATA) ──────────────────
 # hivemind_brood_list_ids prints the sorted brood ids, one per line, or nothing when the checkout
-# has no broods. A refused listing (a symlinked, non-directory or relocated brood-state directory,
+# has no broods. A refused listing (a symlinked or non-directory brood-state directory,
 # or an unresolvable root) returns non-zero with its reason on stderr: that is a blocker, never an
 # empty dashboard. Capture into an array with a Bash-3.2-portable read loop (mapfile/readarray are
 # Bash-4-only and absent on macOS system bash 3.2) so an id is never re-parsed as shell.
 brood_ids=()
 if ! ids_out="$(hivemind_brood_list_ids "$root")"; then
-  printf 'blocker: refusing to list the broods of checkout %s: brood state is not a proven real directory\n' "$root" >&2
+  printf 'blocker: refusing to list the broods of checkout %s: brood state is a symlink or not a directory\n' "$root" >&2
   exit 1
 fi
 if [ -n "$ids_out" ]; then

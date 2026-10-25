@@ -123,8 +123,6 @@ reap_brood_sessions() { tmux kill-session -t brood-api 2>/dev/null || true; retu
 # succeeds without burning the 90s READY_TIMEOUT; keeps the pane alive briefly so at least one
 # capture-pane poll (POLL_INTERVAL=2) reads the line; then exits 0. It uses only POSIX builtins +
 # printf redirection (it runs under `tmux new-session` as a detached pty with no stdin).
-# A case may select an optional pre-readiness hook with HIVEMIND_STUB_HOOK (see the stub body);
-# unset, the stub behaves exactly as above.
 #
 # The marker path is UNIQUE PER CASE (each case sets HIVEMIND_STUB_MARKER to its own file), so a
 # launch recorded by one case can never bleed into another case's assertions.
@@ -147,32 +145,9 @@ if [ -n "$marker" ]; then
         if [ -f .claude/settings.local.json ]; then printf 'settings_local=present\n'; else printf 'settings_local=absent\n'; fi
     } >> "$marker" 2>/dev/null || true
 fi
-# Optional per-case hook (test-only), selected by HIVEMIND_STUB_HOOK and run before the readiness
-# line, so it finishes before spawn-brood sees the child as ready:
-#   state-swap  move HIVEMIND_STUB_STATE_DIR aside and put a symlink to HIVEMIND_STUB_OUTSIDE_DIR in
-#               its place.
-#   task-paste  replace this worktree's .hivemind/brood/task.md with a symlink to
-#               HIVEMIND_STUB_OUTSIDE_FILE; after the readiness line, append every line pasted into
-#               the pane to HIVEMIND_STUB_PASTE_LOG until 15s pass with no input.
-case "${HIVEMIND_STUB_HOOK:-}" in
-    state-swap)
-        mv "$HIVEMIND_STUB_STATE_DIR" "$HIVEMIND_STUB_STATE_DIR.aside"
-        ln -s "$HIVEMIND_STUB_OUTSIDE_DIR" "$HIVEMIND_STUB_STATE_DIR"
-        ;;
-    task-paste)
-        rm -f .hivemind/brood/task.md
-        ln -s "$HIVEMIND_STUB_OUTSIDE_FILE" .hivemind/brood/task.md
-        ;;
-esac
 # Emit the readiness chrome spawn-brood's capture-pane poll greps for (READY_SUBSTRING),
 # then keep the pane alive long enough for at least one POLL_INTERVAL=2 poll to read it.
 printf 'hivemind:overlord\n'
-if [ "${HIVEMIND_STUB_HOOK:-}" = "task-paste" ]; then
-    while IFS= read -r -t 15 pasted_line; do
-        printf '%s\n' "$pasted_line" >> "$HIVEMIND_STUB_PASTE_LOG"
-    done
-    exit 0
-fi
 sleep 4
 exit 0
 STUB_EOF
@@ -2178,175 +2153,6 @@ assert_spawn_brood_settings_symlink_source_refused() {
     fi
 }
 
-# ── Assertion 13h: SETTINGS-REGULAR-COPY:coordinator-settings-reach-child-byte-for-byte ──
-# A regular coordinator .claude/settings.local.json ending in two newlines must reach the child
-# byte for byte, from the ONE read spawn-brood makes before any worktree exists. A post-checkout
-# hook (which `git worktree add` runs) rewrites the coordinator file while the strain worktree is
-# being created. Assert: the child copy equals the ORIGINAL bytes, trailing newlines included, and
-# the hook did rewrite the coordinator file. Pre-fix code copied the coordinator path with `cp`
-# after `git worktree add`, so the child got the rewritten bytes.
-#
-# DEPENDENCY GATING: gated on tmux+jq (claude via the stub). SKIP cleanly when any is absent.
-assert_spawn_brood_settings_regular_copy_exact() {
-    local name="SETTINGS-REGULAR-COPY:coordinator-settings-reach-child-byte-for-byte"
-    local missing=""
-    missing="$(spawn_deps_satisfied)" || {
-        skip "$name" "spawn-brood dep check precedes the settings copy; skipping (missing: $missing)"
-        return
-    }
-
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
-    local gitroot="$WORKDIR/brood-git"
-    init_spawn_repo "$gitroot"
-    local coordinator_settings="$gitroot/.claude/settings.local.json"
-    local expected_settings="$WORKDIR/expected-settings.json"
-    printf '{"permissions":{"allow":["Bash(true)"]}}\n\n' > "$coordinator_settings"
-    cp "$coordinator_settings" "$expected_settings"
-    mkdir -p "$gitroot/.git/hooks"
-    cat > "$gitroot/.git/hooks/post-checkout" <<HOOK_EOF
-#!/usr/bin/env bash
-printf '{"rewritten":true}\n' > "$coordinator_settings"
-HOOK_EOF
-    chmod +x "$gitroot/.git/hooks/post-checkout"
-    git -C "$gitroot" config core.hooksPath "$gitroot/.git/hooks"
-    local inputs="$gitroot/brood-inputs.json"
-    write_one_strain_inputs "$inputs" "main" "child that receives the coordinator settings"
-
-    local rc=0
-    local stderr_out="$WORKDIR/spawn-stderr.txt"
-    local marker="$WORKDIR/launch-marker.txt"
-    reap_brood_sessions
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
-        STARTED_EVIDENCE_TIMEOUT=1 bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
-    tmux kill-server 2>/dev/null || true
-
-    local wt child_settings problems=""
-    wt="$(find_strain_worktree "$gitroot")"
-    child_settings="$wt/.claude/settings.local.json"
-    grep -qF '"rewritten":true' "$coordinator_settings" 2>/dev/null || problems+=" hook-never-ran"
-    if [ -z "$wt" ] || [ -L "$child_settings" ] || [ ! -f "$child_settings" ]; then
-        problems+=" no-regular-child-settings"
-    elif ! cmp -s "$expected_settings" "$child_settings"; then
-        problems+=" child-bytes-differ"
-    fi
-
-    if [[ -z "$problems" ]]; then
-        pass "$name" "child settings equal the coordinator bytes read before any worktree, trailing newlines included (exit $rc)"
-    else
-        failed "$name" "expected the original coordinator bytes in the child;$problems (rc=$rc) child=[$(od -c "$child_settings" 2>/dev/null | head -3)] stderr: $(cat "$stderr_out" 2>/dev/null)"
-    fi
-}
-
-# ── Assertion 13i: STATE-SWAP:swapped-state-dir-never-receives-the-manifest ──────
-# A `uuidgen` stub fixes the brood id. The stub claude's state-swap hook, run while the strain
-# launches, moves .hivemind/broods/<brood-id> aside and puts a symlink to an outside directory in
-# its place. The manifest write must not follow it. Assert: nothing is written in the outside
-# directory, spawn exits 1, and the recovery line is printed. Pre-fix code wrote the manifest temp
-# file and renamed it through the "$STATE" path string, so the manifest landed in the outside
-# directory and spawn exited 0.
-#
-# DEPENDENCY GATING: gated on tmux+jq (claude via the stub). SKIP cleanly when any is absent.
-assert_spawn_brood_state_swap_not_followed() {
-    local name="STATE-SWAP:swapped-state-dir-never-receives-the-manifest"
-    local missing=""
-    missing="$(spawn_deps_satisfied)" || {
-        skip "$name" "spawn-brood dep check precedes the manifest write; skipping (missing: $missing)"
-        return
-    }
-
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
-    local gitroot="$WORKDIR/brood-git"
-    init_spawn_repo "$gitroot"
-    local fixed_uuid="5a7e5a7e-0000-4000-8000-00000000d1a5"
-    local uuid_stub="$WORKDIR/uuid-stub"
-    mkdir -p "$uuid_stub"
-    cat > "$uuid_stub/uuidgen" <<UUIDSTUB_EOF
-#!/usr/bin/env bash
-echo $fixed_uuid
-UUIDSTUB_EOF
-    chmod +x "$uuid_stub/uuidgen"
-    local state="$gitroot/.hivemind/broods/brood-$fixed_uuid"
-    local outside="$WORKDIR/state-outside"
-    mkdir -p "$outside"
-    local inputs="$gitroot/brood-inputs.json"
-    write_one_strain_inputs "$inputs" "main" "child whose brood state dir is swapped"
-
-    local rc=0
-    local stderr_out="$WORKDIR/spawn-stderr.txt"
-    local marker="$WORKDIR/launch-marker.txt"
-    reap_brood_sessions
-    tmux kill-server 2>/dev/null || true
-    ( cd "$gitroot" && PATH="$uuid_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
-        HIVEMIND_STUB_HOOK=state-swap HIVEMIND_STUB_STATE_DIR="$state" HIVEMIND_STUB_OUTSIDE_DIR="$outside" \
-        STARTED_EVIDENCE_TIMEOUT=1 bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
-    tmux kill-server 2>/dev/null || true
-
-    local swapped=no outside_written=no recovery_line=no
-    [ -L "$state" ] && swapped=yes
-    find "$outside" -mindepth 1 -print 2>/dev/null | grep -q . && outside_written=yes
-    grep -q '^recovery: manifest write failed' "$stderr_out" 2>/dev/null && recovery_line=yes
-
-    if [[ "$rc" -eq 1 && "$swapped" == "yes" && "$outside_written" == "no" && "$recovery_line" == "yes" ]]; then
-        pass "$name" "state dir swapped for an outside symlink; manifest write refused, nothing outside; exit 1 with recovery line"
-    else
-        failed "$name" "expected swap + nothing outside + exit 1 + recovery line; rc=$rc swapped=$swapped outside_written=$outside_written recovery_line=$recovery_line stderr: $(cat "$stderr_out" 2>/dev/null)"
-    fi
-}
-
-# ── Assertion 13j: TASK-PASTE-FROM-MEMORY:paste-never-reads-task-md-back ─────────
-# The stub claude's task-paste hook replaces its own .hivemind/brood/task.md with a symlink to an
-# outside file holding a marker, then records every line pasted into its pane. Assert: the pasted
-# text carries the strain description and never the marker. Pre-fix code loaded the tmux buffer
-# from task.md on disk, so it followed the symlink and pasted the marker.
-#
-# DEPENDENCY GATING: gated on tmux+jq (claude via the stub). SKIP cleanly when any is absent.
-assert_spawn_brood_task_paste_from_memory() {
-    local name="TASK-PASTE-FROM-MEMORY:paste-never-reads-task-md-back"
-    local missing=""
-    missing="$(spawn_deps_satisfied)" || {
-        skip "$name" "spawn-brood dep check precedes the task paste; skipping (missing: $missing)"
-        return
-    }
-
-    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
-    local gitroot="$WORKDIR/brood-git"
-    init_spawn_repo "$gitroot"
-    local task_desc="task paste from memory strain description"
-    local task_marker="TASK-OUTSIDE-MARKER-2c9e"
-    local outside_task="$WORKDIR/outside-task.md"
-    printf '%s\n' "$task_marker" > "$outside_task"
-    local paste_log="$WORKDIR/pasted.txt"
-    local inputs="$gitroot/brood-inputs.json"
-    write_one_strain_inputs "$inputs" "main" "$task_desc"
-
-    local rc=0
-    local stderr_out="$WORKDIR/spawn-stderr.txt"
-    local marker="$WORKDIR/launch-marker.txt"
-    reap_brood_sessions
-    tmux kill-server 2>/dev/null || true
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
-        HIVEMIND_STUB_HOOK=task-paste HIVEMIND_STUB_OUTSIDE_FILE="$outside_task" HIVEMIND_STUB_PASTE_LOG="$paste_log" \
-        STARTED_EVIDENCE_TIMEOUT=3 bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
-    local waited=0
-    while [ "$waited" -lt 10 ] && ! grep -qF -- "$task_desc" "$paste_log" 2>/dev/null; do
-        sleep 1
-        waited=$((waited + 1))
-    done
-    tmux kill-server 2>/dev/null || true
-
-    local wt swapped=no pasted_desc=no pasted_marker=no
-    wt="$(find_strain_worktree "$gitroot")"
-    [ -n "$wt" ] && [ -L "$wt/.hivemind/brood/task.md" ] && swapped=yes
-    grep -qF -- "$task_desc" "$paste_log" 2>/dev/null && pasted_desc=yes
-    grep -qF -- "$task_marker" "$paste_log" 2>/dev/null && pasted_marker=yes
-
-    if [[ "$swapped" == "yes" && "$pasted_desc" == "yes" && "$pasted_marker" == "no" ]]; then
-        pass "$name" "task.md swapped for an outside symlink after it was written; pasted text carries the description, never the marker (exit $rc)"
-    else
-        failed "$name" "expected swap + description pasted + marker never pasted; rc=$rc swapped=$swapped pasted_desc=$pasted_desc pasted_marker=$pasted_marker pasted=[$(cat "$paste_log" 2>/dev/null)] stderr: $(cat "$stderr_out" 2>/dev/null)"
-    fi
-}
-
 # ════════════════════════════════════════════════════════════════════════════════
 # brood-status-project.sh (read-side projection, #161)
 # ════════════════════════════════════════════════════════════════════════════════
@@ -3865,8 +3671,8 @@ assert_proj_manifest_symlink_leaf() {
 
 # ── Projection MANIFEST-SYMLINK-ANCESTOR: the brood directory is a symlink → exit 1, not followed ─
 # The derived brood directory <root>/.hivemind/broods/<id> is a symlink to an outside directory
-# holding a well-formed manifest. The shared reader walks each directory through a proven handle
-# and refuses a symlinked component, so the projector exits 1 and the outside strain never surfaces.
+# holding a well-formed manifest. The shared reader tests each directory component and refuses a
+# symlinked component, so the projector exits 1 and the outside strain never surfaces.
 assert_proj_manifest_symlink_ancestor() {
     local name="PROJ-MANIFEST-SYMLINK-ANCESTOR:symlinked-brood-dir-refused"
     ensure_proj_workdir
@@ -4368,9 +4174,6 @@ assert_spawn_brood_exact_session_not_prefix_sibling
 assert_spawn_brood_manifest_temp_symlink_not_followed
 assert_spawn_brood_inputs_snapshot_read_once
 assert_spawn_brood_settings_symlink_source_refused
-assert_spawn_brood_settings_regular_copy_exact
-assert_spawn_brood_state_swap_not_followed
-assert_spawn_brood_task_paste_from_memory
 assert_reconcile_settle_clamp_bounds_huge_override
 
 echo ''

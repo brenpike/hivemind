@@ -1144,7 +1144,7 @@ assert_eq "multi-doc:zero-sendkeys" "0" "$(count_records "$LOG19C")" "no keystro
 
 # ── Case 19d/19e: literal NUL in the manifest → pre-flight blocker, zero send-keys ──
 # A NUL byte spliced into the middle of a well-formed manifest, then one appended after it. Bash
-# command substitution and some jq versions drop a NUL silently, so only the single verified read
+# command substitution and some jq versions drop a NUL silently, so only the single read
 # that refuses it on the raw bytes can block it: blocker, exit 1, zero send-keys.
 for nul_place in middle trailing; do
   echo "=== Case 19d/19e: manifest with a $nul_place NUL — blocker, exit 1, zero send-keys ==="

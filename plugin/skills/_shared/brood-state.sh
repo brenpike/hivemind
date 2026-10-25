@@ -15,25 +15,26 @@
 # carries no top-level `set` at all (pure function definitions); each caller owns its own
 # `set -u` and error routing. Allowlisted under CHECK13 as a P18 documented exception.
 #
-# CALLER CONTRACT: source containment.sh BEFORE this file (every reader here works through its
-# verified-handle helpers: hivemind_canon_root, hivemind_cwd_is, hivemind_read_verified_leaf).
-# Source ledger-project.sh before calling hivemind_brood_read_child_ledger (it projects the two
-# ledger scalars with hivemind_project_state_current_content / hivemind_project_run_status_content).
+# CALLER CONTRACT: source containment.sh BEFORE this file (every reader resolves its root with
+# hivemind_canon_root). Source ledger-project.sh before calling hivemind_brood_read_child_ledger
+# (it projects the two ledger scalars with hivemind_project_state_current_content /
+# hivemind_project_run_status_content).
 #
-# TRUST BOUNDARY: ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Trust-Boundary Discipline).
+# TRUST BOUNDARY: ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Trust-Boundary Discipline,
+# item 3) and the ADR-0037 slice 4 amendment. Brood children run as the same OS user as the
+# coordinator, so they are not a security boundary against it; these checks catch ACCIDENTS (a
+# stray symlink, a non-regular file, a NUL byte, several JSON documents), not a hostile child.
 # Every function takes IDENTIFIERS (a checkout or worktree root the caller derived from git, a
 # brood id, a run id) and derives every location from them; no function accepts a file path.
-# Each directory is walked from the canonical root one component at a time through a directory
-# HANDLE whose physical path is proven from the handle itself (hivemind_cwd_is), and each file is
-# opened exactly once through hivemind_read_verified_leaf. A symlinked, non-directory or
-# relocated component is refused, never followed.
+# Each directory component under the canonical root is tested in turn: a symlinked or
+# non-directory component is refused, never followed.
 #
 # SINGLE READ, BYTES INTACT: bash command substitution silently drops NUL bytes, and some jq
-# versions drop the bytes after a NUL, so neither may decide whether a file held one. The command
-# run on the one descriptor maps every NUL to \001 (LC_ALL=C tr), so the captured snapshot still
-# shows where each NUL was. The snapshot is refused when it holds any raw C0 control byte other
-# than TAB, LF or CR (JSON forbids them raw, and every NUL is now a \001). That same snapshot is
-# then parsed as exactly one JSON document. No second open, no second read.
+# versions drop the bytes after a NUL, so neither may decide whether a file held one. The one
+# read maps every NUL to \001 (LC_ALL=C tr), so the captured snapshot still shows where each NUL
+# was. The snapshot is refused when it holds any raw C0 control byte other than TAB, LF or CR
+# (JSON forbids them raw, and every NUL is now a \001). That same snapshot is then parsed as
+# exactly one JSON document.
 #
 # BROOD ID: one pattern, ^brood-[0-9a-fA-F-]+$, held only in hivemind_brood_id_matches and shared
 # by the listing and every read.
@@ -44,8 +45,8 @@
 #
 #   hivemind_brood_read_json <canonical_dir> <leaf>
 #     Reads <canonical_dir>/<leaf> once (see SINGLE READ above) and prints it as compact JSON on
-#     one line. Returns 0 ok; 2 directory refused; 3 leaf refused (symlink, non-regular, invalid
-#     name, identity mismatch); 4 leaf absent; 5 unreadable (NUL or raw control byte, invalid
+#     one line. Returns 0 ok; 2 directory refused (not a directory); 3 leaf refused (symlink,
+#     non-regular, invalid name); 4 leaf absent; 5 unreadable (NUL or raw control byte, invalid
 #     JSON, zero or several documents, open or read error on a present leaf).
 #
 #   hivemind_brood_manifest_path <checkout_root> <brood_id>
@@ -53,23 +54,23 @@
 #     outside the pattern prints nothing and returns 1.
 #
 #   hivemind_brood_read_manifest <checkout_root> <brood_id>
-#     A brood id outside the pattern returns 1. Walks .hivemind, broods and <brood_id> from the
-#     canonical checkout root: an absent component returns 4; a symlinked, non-directory or
-#     relocated component (or an unresolvable root) returns 2. Then runs hivemind_brood_read_json
-#     on manifest.json and returns its code.
+#     A brood id outside the pattern returns 1. Tests .hivemind, broods and <brood_id> under the
+#     canonical checkout root: an absent component returns 4; a symlinked or non-directory
+#     component (or an unresolvable root) returns 2. Then runs hivemind_brood_read_json on
+#     manifest.json and returns its code.
 #
 #   hivemind_brood_list_ids <checkout_root>
-#     An absent .hivemind or .hivemind/broods prints nothing and returns 0. A symlinked,
-#     non-directory or relocated one (or an unresolvable root) returns 2 with a reason on stderr.
-#     Otherwise prints, one per line and sorted with LC_ALL=C, each entry of the proven broods
-#     directory whose name matches the brood-id pattern and that is either a real directory
-#     holding a manifest.json entry of any type, or a symlink (listed so the read refuses it
-#     loudly; it is never followed). Non-matching names and real directories without a
-#     manifest.json entry are skipped.
+#     An absent .hivemind or .hivemind/broods prints nothing and returns 0. A symlinked or
+#     non-directory one (or an unresolvable root) returns 2 with a reason on stderr. Otherwise
+#     prints, one per line and sorted with LC_ALL=C, each entry of the broods directory whose
+#     name matches the brood-id pattern and that is either a real directory holding a
+#     manifest.json entry of any type, or a symlink (listed so the read refuses it loudly; it is
+#     never followed). Non-matching names and real directories without a manifest.json entry
+#     are skipped.
 #
 #   hivemind_brood_read_child_ledger <worktree_root> <run_id>
 #     <run_id> must be one safe path component (non-empty, no '/', not . or ..), else both lines
-#     are MALFORMED. Walks .hivemind, runs and <run_id> under the canonical worktree and reads
+#     are MALFORMED. Tests .hivemind, runs and <run_id> under the canonical worktree and reads
 #     state.json. Prints exactly two lines, state.current then run.status:
 #       MISSING / MISSING     the chain or the leaf is absent
 #       MALFORMED / MALFORMED the chain or the leaf is refused, or the leaf is unreadable
@@ -80,13 +81,13 @@
 #   hivemind_detect_facts_evidence <worktree_root>
 #     Prints `yes` when a REGULAR, NON-SYMLINK file whose name has the exact gather-facts output
 #     shape facts-<8 digits>T<6 digits>Z-<12 lowercase hex>.json sits directly in the worktree's
-#     .hivemind/facts, walked through a proven handle; names and types are tested relative to
-#     that handle. Prints `no` otherwise, including a refused or absent chain. Exactly one line;
-#     never a path, never file content. Always returns 0.
+#     .hivemind/facts, reached through non-symlinked directories. Prints `no` otherwise,
+#     including a refused or absent chain. Exactly one line; never a path, never file content.
+#     Always returns 0.
 #
 #   hivemind_brood_facts_absent <worktree_root>
-#     Returns 0 only when the worktree's .hivemind is absent, or is a proven real directory with
-#     no facts entry of any type (a dangling symlink counts as present). Returns 1 when a facts
+#     Returns 0 only when the worktree's .hivemind is absent, or is a real directory with no
+#     facts entry of any type (a dangling symlink counts as present). Returns 1 when a facts
 #     entry exists and 2 when the root or .hivemind is refused.
 #
 # PROVENANCE (facts evidence): hivemind_detect_facts_evidence counts a facts-shaped file that
@@ -101,12 +102,7 @@
 # Recorded residual, ADR-0037 amendment 2026-10-24 (slice 4), "A process that runs after launch
 # can write a facts-shaped file".
 #
-# BOUNDED RESIDUALS: the verified-handle residuals recorded in containment.sh (VERIFIED-HANDLE
-# HELPERS, BOUNDED RESIDUALS) apply to every read here: a hard link passes the identity check, a
-# directory moved after its check keeps serving reads, and a FIFO swapped in at a leaf between
-# its check and the open can block the read.
-#
-# DEPENDENCIES: containment.sh, ledger-project.sh (child ledger only), jq, tr, sort, env.
+# DEPENDENCIES: containment.sh, ledger-project.sh (child ledger only), jq, tr, sort.
 
 # hivemind_brood_id_matches <name>
 # Contract: see CONTRACT in the header.
@@ -118,97 +114,82 @@ hivemind_brood_id_matches() {
 }
 
 # hivemind__brood_walk_dir <canonical_dir> <component>...
-# Walks each single-component directory name from <canonical_dir> through a directory handle,
-# proving the physical path of every step with hivemind_cwd_is. Prints the proven physical path
-# of the last directory. Returns 0 ok; 2 refused (unproven start, invalid name, symlink,
-# non-directory, physical-path mismatch); 4 a component is absent. Prints a reason on stderr for
-# a refusal only. Runs in a subshell, so the caller's working directory is unchanged.
-hivemind__brood_walk_dir() (
-  local proven_dir="$1"
+# Tests each single-component directory name under <canonical_dir> in turn and prints the path of
+# the last directory. Returns 0 ok; 2 refused (invalid name, symlink, non-directory); 4 a
+# component is absent. Prints a reason on stderr for a refusal only.
+hivemind__brood_walk_dir() {
+  local walk_dir="$1"
   shift
-  if ! cd -P -- "$proven_dir" 2>/dev/null || ! hivemind_cwd_is "$proven_dir"; then
-    printf 'refusing directory %s: handle is not that physical directory\n' "$proven_dir" >&2
-    return 2
-  fi
   local walk_component
   for walk_component in "$@"; do
     case "$walk_component" in
       ''|.|..|*/*)
-        printf 'refusing component %s under %s: not a single path component\n' "$walk_component" "$proven_dir" >&2
+        printf 'refusing component %s under %s: not a single path component\n' "$walk_component" "$walk_dir" >&2
         return 2
         ;;
     esac
-    if [ -L "./$walk_component" ]; then
-      printf 'refusing symlinked component %s under %s\n' "$walk_component" "$proven_dir" >&2
+    walk_dir="${walk_dir%/}/$walk_component"
+    if [ -L "$walk_dir" ]; then
+      printf 'refusing symlinked directory %s\n' "$walk_dir" >&2
       return 2
     fi
-    if [ ! -e "./$walk_component" ]; then
+    if [ ! -e "$walk_dir" ]; then
       return 4
     fi
-    if [ ! -d "./$walk_component" ]; then
-      printf 'refusing non-directory component %s under %s\n' "$walk_component" "$proven_dir" >&2
-      return 2
-    fi
-    proven_dir="${proven_dir%/}/$walk_component"
-    if ! cd -P -- "./$walk_component" 2>/dev/null || ! hivemind_cwd_is "$proven_dir"; then
-      printf 'refusing directory %s: handle is not that physical directory\n' "$proven_dir" >&2
+    if [ ! -d "$walk_dir" ]; then
+      printf 'refusing non-directory %s\n' "$walk_dir" >&2
       return 2
     fi
   done
-  printf '%s' "$proven_dir"
+  printf '%s' "$walk_dir"
   return 0
-)
-
-# hivemind__brood_entry_present <canonical_dir> <name>
-# Returns 0 when an entry <name> of any type (a dangling symlink included) sits directly in the
-# proven <canonical_dir>, 1 when none does, 2 when the directory handle is refused.
-hivemind__brood_entry_present() (
-  local canonical_dir="$1"
-  local entry_name="$2"
-  if ! cd -P -- "$canonical_dir" 2>/dev/null || ! hivemind_cwd_is "$canonical_dir"; then
-    printf 'refusing directory %s: handle is not that physical directory\n' "$canonical_dir" >&2
-    return 2
-  fi
-  if [ -e "./$entry_name" ] || [ -L "./$entry_name" ]; then
-    return 0
-  fi
-  return 1
-)
+}
 
 # hivemind_brood_read_json <canonical_dir> <leaf>
 # Contract: see CONTRACT and SINGLE READ in the header.
 hivemind_brood_read_json() {
   local canonical_dir="$1"
   local leaf_name="$2"
-  local leaf_snapshot read_status
-  leaf_snapshot="$(hivemind_read_verified_leaf "$canonical_dir" "$leaf_name" env LC_ALL=C tr '\000' '\001')"
-  read_status=$?
-  case "$read_status" in
-    0) ;;
-    4)
-      hivemind__brood_entry_present "$canonical_dir" "$leaf_name" 2>/dev/null || return 4
-      printf 'leaf %s under %s is present but could not be opened\n' "$leaf_name" "$canonical_dir" >&2
-      return 5
-      ;;
-    2|3) return "$read_status" ;;
-    *)
-      printf 'failed to read leaf %s under %s\n' "$leaf_name" "$canonical_dir" >&2
-      return 5
+  if [ ! -d "$canonical_dir" ]; then
+    printf 'refusing directory %s: not a directory\n' "$canonical_dir" >&2
+    return 2
+  fi
+  case "$leaf_name" in
+    ''|.|..|*/*)
+      printf 'refusing leaf %s under %s: not a single path component\n' "$leaf_name" "$canonical_dir" >&2
+      return 3
       ;;
   esac
+  local leaf_path="${canonical_dir%/}/$leaf_name"
+  if [ -L "$leaf_path" ]; then
+    printf 'refusing symlinked leaf %s\n' "$leaf_path" >&2
+    return 3
+  fi
+  if [ ! -e "$leaf_path" ]; then
+    return 4
+  fi
+  if [ ! -f "$leaf_path" ]; then
+    printf 'refusing non-regular leaf %s\n' "$leaf_path" >&2
+    return 3
+  fi
+  local leaf_snapshot
+  if ! leaf_snapshot="$(LC_ALL=C tr '\000' '\001' < "$leaf_path" 2>/dev/null)"; then
+    printf 'failed to read leaf %s\n' "$leaf_path" >&2
+    return 5
+  fi
   local control_bytes
   if ! control_bytes="$(printf '%s' "$leaf_snapshot" | LC_ALL=C tr -cd '\001-\010\013\014\016-\037')"; then
-    printf 'failed to scan leaf %s under %s for control bytes\n' "$leaf_name" "$canonical_dir" >&2
+    printf 'failed to scan leaf %s for control bytes\n' "$leaf_path" >&2
     return 5
   fi
   if [ -n "$control_bytes" ]; then
-    printf 'refusing leaf %s under %s: it holds a NUL or raw control byte\n' "$leaf_name" "$canonical_dir" >&2
+    printf 'refusing leaf %s: it holds a NUL or raw control byte\n' "$leaf_path" >&2
     return 5
   fi
   local compact_json
   if ! compact_json="$(printf '%s' "$leaf_snapshot" \
       | jq -c -s 'if length == 1 then .[0] else error("not exactly one JSON document") end' 2>/dev/null)"; then
-    printf 'refusing leaf %s under %s: not exactly one valid JSON document\n' "$leaf_name" "$canonical_dir" >&2
+    printf 'refusing leaf %s: not exactly one valid JSON document\n' "$leaf_path" >&2
     return 5
   fi
   printf '%s\n' "$compact_json"
@@ -248,25 +229,22 @@ hivemind_brood_read_manifest() {
   hivemind_brood_read_json "$brood_dir" manifest.json
 }
 
-# hivemind__brood_list_entries <canonical_broods_dir>
+# hivemind__brood_list_entries <broods_dir>
 # The listing half of hivemind_brood_list_ids, run inside a subshell so the glob options it sets
-# and the directory it enters never reach the caller.
+# never reach the caller.
 hivemind__brood_list_entries() (
   local broods_dir="$1"
-  if ! cd -P -- "$broods_dir" 2>/dev/null || ! hivemind_cwd_is "$broods_dir"; then
-    printf 'refusing directory %s: handle is not that physical directory\n' "$broods_dir" >&2
-    return 2
-  fi
   set +f
   shopt -u nullglob failglob dotglob nocaseglob 2>/dev/null
   unset GLOBIGNORE
-  local entry_name listed_names=""
-  for entry_name in brood-*; do
+  local entry_path entry_name listed_names=""
+  for entry_path in "$broods_dir"/brood-*; do
+    entry_name="${entry_path##*/}"
     hivemind_brood_id_matches "$entry_name" || continue
-    if [ -L "./$entry_name" ]; then
+    if [ -L "$entry_path" ]; then
       listed_names="$listed_names$entry_name"$'\n'
-    elif [ -d "./$entry_name" ] \
-        && { [ -e "./$entry_name/manifest.json" ] || [ -L "./$entry_name/manifest.json" ]; }; then
+    elif [ -d "$entry_path" ] \
+        && { [ -e "$entry_path/manifest.json" ] || [ -L "$entry_path/manifest.json" ]; }; then
       listed_names="$listed_names$entry_name"$'\n'
     fi
   done
@@ -312,63 +290,47 @@ hivemind_brood_read_child_ledger() {
     printf 'MALFORMED\nMALFORMED\n'
     return 0
   fi
-  local run_dir walk_status
+  local run_dir ledger_json read_status
   run_dir="$(hivemind__brood_walk_dir "$canon_wt" .hivemind runs "$run_id" 2>/dev/null)"
-  walk_status=$?
-  case "$walk_status" in
-    0) ;;
-    4)
-      printf 'MISSING\nMISSING\n'
-      return 0
-      ;;
-    *)
-      printf 'MALFORMED\nMALFORMED\n'
-      return 0
-      ;;
-  esac
-  local ledger_json read_status
-  ledger_json="$(hivemind_brood_read_json "$run_dir" state.json 2>/dev/null)"
   read_status=$?
+  if [ "$read_status" -eq 0 ]; then
+    ledger_json="$(hivemind_brood_read_json "$run_dir" state.json 2>/dev/null)"
+    read_status=$?
+  fi
   case "$read_status" in
     0) ;;
-    4)
-      printf 'MISSING\nMISSING\n'
-      return 0
-      ;;
-    *)
-      printf 'MALFORMED\nMALFORMED\n'
-      return 0
-      ;;
+    4) printf 'MISSING\nMISSING\n' ;;
+    *) printf 'MALFORMED\nMALFORMED\n' ;;
   esac
+  if [ "$read_status" -ne 0 ]; then
+    return 0
+  fi
   hivemind_project_state_current_content "$ledger_json"
   hivemind_project_run_status_content "$ledger_json"
   return 0
 }
 
-# hivemind__brood_facts_match <canonical_facts_dir>
-# Prints `yes` when a regular, non-symlink, gather-facts-shaped file sits directly in the proven
-# facts directory, `no` otherwise (a refused handle included). Runs in a subshell so the glob
-# options it sets and the directory it enters never reach the caller.
+# hivemind__brood_facts_match <facts_dir>
+# Prints `yes` when a regular, non-symlink, gather-facts-shaped file sits directly in the facts
+# directory, `no` otherwise. Runs in a subshell so the glob options it sets never reach the
+# caller.
 hivemind__brood_facts_match() (
   local facts_dir="$1"
   local digit='[0123456789]'
   local hex='[0123456789abcdef]'
-  if ! cd -P -- "$facts_dir" 2>/dev/null || ! hivemind_cwd_is "$facts_dir"; then
-    printf 'no\n'
-    return 0
-  fi
   set +f
   shopt -u nullglob failglob dotglob nocaseglob 2>/dev/null
   unset GLOBIGNORE
-  local facts_name
-  for facts_name in facts-*.json; do
+  local facts_path facts_name
+  for facts_path in "$facts_dir"/facts-*.json; do
+    facts_name="${facts_path##*/}"
     # shellcheck disable=SC2254
     case "$facts_name" in
       facts-$digit$digit$digit$digit$digit$digit$digit$digit"T"$digit$digit$digit$digit$digit$digit"Z-"$hex$hex$hex$hex$hex$hex$hex$hex$hex$hex$hex$hex".json") : ;;
       *) continue ;;
     esac
-    [ -L "./$facts_name" ] && continue
-    [ -f "./$facts_name" ] || continue
+    [ -L "$facts_path" ] && continue
+    [ -f "$facts_path" ] || continue
     printf 'yes\n'
     return 0
   done
@@ -380,13 +342,9 @@ hivemind__brood_facts_match() (
 # Contract: see CONTRACT and PROVENANCE in the header.
 hivemind_detect_facts_evidence() {
   local worktree_root="$1"
-  local canon_wt
-  if ! canon_wt="$(hivemind_canon_root "$worktree_root")"; then
-    printf 'no\n'
-    return 0
-  fi
-  local facts_dir
-  if ! facts_dir="$(hivemind__brood_walk_dir "$canon_wt" .hivemind facts 2>/dev/null)"; then
+  local canon_wt facts_dir
+  if ! canon_wt="$(hivemind_canon_root "$worktree_root")" \
+      || ! facts_dir="$(hivemind__brood_walk_dir "$canon_wt" .hivemind facts 2>/dev/null)"; then
     printf 'no\n'
     return 0
   fi
@@ -410,12 +368,8 @@ hivemind_brood_facts_absent() {
     4) return 0 ;;
     *) return 2 ;;
   esac
-  local entry_status
-  hivemind__brood_entry_present "$hivemind_dir" facts
-  entry_status=$?
-  case "$entry_status" in
-    0) return 1 ;;
-    1) return 0 ;;
-    *) return 2 ;;
-  esac
+  if [ -e "$hivemind_dir/facts" ] || [ -L "$hivemind_dir/facts" ]; then
+    return 1
+  fi
+  return 0
 }

@@ -35,9 +35,8 @@
 # --argjson binding, NEVER interpolated into the jq program string. This file opens no file.
 #
 # SINGLE-SNAPSHOT READ (read-side projection path): the snapshot comes from
-# hivemind_brood_read_manifest (brood-state.sh), which opens the manifest EXACTLY ONCE through a
-# verified handle, refuses a NUL or raw control byte, and parses exactly one JSON document from
-# that same read. Every projection below then runs against THAT snapshot via jq stdin
+# hivemind_brood_read_manifest (brood-state.sh), which reads the manifest EXACTLY ONCE, refuses
+# a NUL or raw control byte, and parses exactly one JSON document from that same read. Every projection below then runs against THAT snapshot via jq stdin
 # (`printf '%s' "$content" | jq ...`); nothing re-opens the file. This closes the read-side
 # SNAPSHOT-SKEW class: a concurrent write mid-read can no longer make the probe and the per-field
 # projections observe different instants. Bytes held in a shell variable and passed only to jq

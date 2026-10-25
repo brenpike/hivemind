@@ -107,7 +107,6 @@ CI runs via `.github/workflows/policy-check.yml` (job: `policy-check`), enforced
 - Editing `marketplace.json` `source` away from `./plugin` — breaks consumer installs.
 - Putting plugin content at repo root instead of under `plugin/` — `${CLAUDE_PLUGIN_ROOT}` will not resolve where authors expect.
 - Adding/renaming a load-bearing governance section with named consumers (or editing a `tests/policy/safety-*.json`) without adding the consumer-assertion fixture → unprotected coupling (P3).
-- Reading brood state (the brood listing, a manifest, a child run ledger, facts evidence) anywhere outside `plugin/skills/_shared/brood-state.sh` → fails the policy check (CHECK 17 in `tools/policy_check.sh`). Call the reader with identifiers instead.
 - Authoring a `tests/policy/safety-*.json` fixture without reading the pin-authoring contract in `tests/policy/README.md` → overclaimed or wrong-clause pins that leave the suite green through a real regression.
 - Adding a bare or never-matching file-tool entry (`Read`, `Write`, `Edit`, `Glob`, `Grep`) to a non-executor skill's `allowed-tools` → fails CHECK 16. Use `Read(~/.claude/plugins/cache/brenpike/hivemind/**)` or the navigator's own `Edit(.hivemind/...)` inputs-file entry (`plugin/governance/security-policy.md` "Skill File-Tool Grants").
 
@@ -128,7 +127,7 @@ The post-merge decision report is opt-in via `HIVEMIND_ENABLE_DECISION_REPORT`, 
 The plugin supports parallel multi-overlord execution via spawn-brood and brood-status skills. Each brood session runs in its own git worktree as an independent Claude Code instance.
 
 - **Architecture decision:** `docs/adr/0007-fleet-children-unaware-coordinator-dashboard.md` — children have zero brood awareness; coordinator is a status dashboard
-- **Brood manifest:** `.hivemind/broods/<brood-id>/manifest.json` — one per brood, written by `spawn-brood.sh` and listed by the confined reader `plugin/skills/_shared/brood-state.sh` (not a glob), anchored to the spawning checkout root; already gitignored under `.hivemind/`. Layout reference: `plugin/references/brood-ledger-model.md`.
+- **Brood manifest:** `.hivemind/broods/<brood-id>/manifest.json` — one per brood, written by `spawn-brood.sh` and listed by `plugin/skills/_shared/brood-state.sh`, anchored to the spawning checkout root; already gitignored under `.hivemind/`. Layout reference: `plugin/references/brood-ledger-model.md`.
 - **Worktree sessions:** `.claude/worktrees/` (gitignored)
 
 Children are standard overlord sessions receiving a task description. No brood-specific code paths exist in child sessions.

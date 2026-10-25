@@ -18,9 +18,9 @@
 # SINGLE RESPONSIBILITY: project + validate the two workflow-state scalars (run.status and
 # state.current) from an in-memory child run-ledger CONTENT snapshot. Pure projection, no I/O:
 # this file sources nothing, opens no file and writes nothing. Its input comes from
-# brood-state.sh: hivemind_brood_read_child_ledger reads the ledger once through a verified
-# handle, refuses a NUL or raw control byte, parses exactly one JSON document from that same
-# snapshot, and passes the result to both projectors below.
+# brood-state.sh: hivemind_brood_read_child_ledger reads the ledger once, refuses a NUL or raw
+# control byte, parses exactly one JSON document from that same snapshot, and passes the result
+# to both projectors below.
 #
 # DATA-BOUNDARY (MANDATORY): a child run-ledger (`<worktree>/.hivemind/runs/<id>/state.json`)
 # is UNTRUSTED, attacker-controllable bytes — a brood child runs detached, and child content

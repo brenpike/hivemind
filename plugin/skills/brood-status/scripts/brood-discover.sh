@@ -9,9 +9,8 @@
 # identifiers, never paths): this script never names, globs or opens a brood-state path. It
 # lists the brood ids with hivemind_brood_list_ids and renders each one's manifest location with
 # hivemind_brood_manifest_path (both in _shared/brood-state.sh, the only code that reads brood
-# state). The listing walks each directory from the canonical checkout root through a proven
-# handle and refuses a symlinked, non-directory or relocated one, never following it. Each listed
-# id matches the brood-id pattern held in hivemind_brood_id_matches (^brood-[0-9a-fA-F-]+$): the
+# state). The listing tests each directory under the canonical checkout root and refuses a
+# symlinked or non-directory one, never following it. Each listed id matches the brood-id pattern held in hivemind_brood_id_matches (^brood-[0-9a-fA-F-]+$): the
 # literal `brood-` prefix followed by hex digits and dashes only, which structurally excludes ALL
 # shell metacharacters, so an emitted path carries no injection payload in its variable segment.
 # Non-conforming names are skipped silently.
@@ -34,7 +33,7 @@
 # EXIT CONTRACT:
 #   0  listed (zero or more paths).
 #   1  `blocker: <reason>` on stderr: a bad checkout root, a refused listing (a symlinked,
-#      non-directory or relocated brood-state directory), or a missing/unparseable shared library.
+#      non-directory brood-state directory), or a missing/unparseable shared library.
 #
 # NOT THIS SCRIPT'S JOB:
 #   - manifest CONTENTS validation (torn/garbage JSON) — that stays the projector's job
@@ -72,7 +71,7 @@ fi
 # List the brood ids. A refused listing carries its reason on stderr and becomes a blocker,
 # never a silent empty list.
 ids_out="$(hivemind_brood_list_ids "$root")" \
-  || blocker "refusing to list the broods of checkout $root: brood state is not a proven real directory"
+  || blocker "refusing to list the broods of checkout $root: brood state is a symlink or not a directory"
 
 # Zero ids → zero lines, exit 0 (empty is success — "No broods found." is the navigator's call).
 [ -n "$ids_out" ] || exit 0

@@ -20,8 +20,8 @@
 # TRUST BOUNDARY: ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Trust-Boundary
 # Discipline): accept identifiers, never paths. Every brood-state read goes through
 # _shared/brood-state.sh, the only code that reads brood state:
-#   - the manifest: hivemind_brood_read_manifest walks each directory from the canonical checkout
-#     root through a proven handle, opens the leaf exactly once, refuses a NUL or raw control
+#   - the manifest: hivemind_brood_read_manifest refuses a symlinked or non-directory component
+#     under the canonical checkout root, reads the leaf exactly once, refuses a NUL or raw control
 #     byte, and parses exactly one JSON document from that same snapshot;
 #   - each child run ledger: hivemind_brood_read_child_ledger "<git worktree>" "<run id>" returns
 #     the two validated ledger scalars (or MISSING / MALFORMED), never raw bytes;
@@ -96,7 +96,7 @@
 #      empty manifest). PER-STRAIN MALFORMED / MISSING is NOT a failure.
 #   1  pre-flight blocker or refusal, reported via blocker() as one `blocker: <reason>` line on
 #      stderr: missing argument, jq absent, a bad checkout root, a brood id outside the pattern,
-#      a manifest that does not exist, or a refused read (a symlinked, non-directory or relocated
+#      a manifest that does not exist, or a refused read (a symlinked or non-directory
 #      directory on the derived path, or a symlinked or non-regular manifest leaf). No per-strain
 #      condition reaches exit 1.
 #   2  manifest PRESENT but UNREADABLE: the MANIFEST_UNREADABLE sentinel line on stdout (above).
@@ -190,8 +190,8 @@ else
 fi
 
 # ── Single-snapshot manifest read + shape validation (one open, one verdict) ────────
-# hivemind_brood_read_manifest derives the manifest location from the two identifiers, walks
-# every directory through a proven handle, opens the leaf EXACTLY ONCE, refuses a NUL or raw
+# hivemind_brood_read_manifest derives the manifest location from the two identifiers, refuses
+# a symlinked or non-directory component, reads the leaf EXACTLY ONCE, refuses a NUL or raw
 # control byte, and returns exactly one JSON document parsed from that same snapshot. Every
 # projection below runs against THIS snapshot via jq stdin; nothing re-opens the file. The
 # library's own refusal reason (if any) goes to stderr above the blocker line.
@@ -213,7 +213,7 @@ manifest_read_status=$?
 case "$manifest_read_status" in
   0) ;;
   1) blocker "refusing brood id: it does not match the brood-id pattern" ;;
-  2) blocker "refusing to read the manifest of brood $BROOD_ID: a directory on its derived path is a symlink, not a directory, or not the physical directory under the checkout root $CHECKOUT_ROOT" ;;
+  2) blocker "refusing to read the manifest of brood $BROOD_ID: a directory on its derived path under the checkout root $CHECKOUT_ROOT is a symlink or not a directory" ;;
   3) blocker "refusing to read the manifest of brood $BROOD_ID: the manifest is a symlink or not a regular file" ;;
   4) blocker "brood manifest for $BROOD_ID does not exist under the checkout root $CHECKOUT_ROOT" ;;
   5) ;;
@@ -526,8 +526,8 @@ EOF
 
   # ── FACTS EVIDENCE for the selected worktree (script-engine started-evidence) ─────
   # `no` unless a ground-truth worktree was selected AND it is resident under CHECKOUT_ROOT; then
-  # hivemind_detect_facts_evidence (_shared/brood-state.sh) walks the worktree's facts folder
-  # through proven handles and reports yes/no from file names and types only. Independent of the ledger pointer:
+  # hivemind_detect_facts_evidence (_shared/brood-state.sh) refuses a symlinked or non-directory
+  # facts folder and reports yes/no from file names and types only. Independent of the ledger pointer:
   # a script-engine child may carry no run.suggested_id and still prove it started.
   facts_out="no"
   if [ "$gt_resident" -eq 1 ]; then
@@ -582,8 +582,8 @@ EOF
     else
       # Child-ledger read, delegated to hivemind_brood_read_child_ledger (_shared/brood-state.sh),
       # the only code that reads brood state. It takes IDENTIFIERS — the git-derived worktree and
-      # the run id — derives the ledger location itself, walks each directory through a proven
-      # handle, opens the leaf exactly once, refuses a NUL or raw control byte, and projects BOTH
+      # the run id — derives the ledger location itself, refuses a symlinked or non-directory
+      # component, reads the leaf exactly once, refuses a NUL or raw control byte, and projects BOTH
       # scalars from that ONE snapshot. gt_worktree is the git-derived worktree ALREADY proven
       # resident under CHECKOUT_ROOT by the canon_gt_wt / gt_resident link above (the library has
       # no CHECKOUT_ROOT notion, so that link stays inline in this script and runs FIRST).

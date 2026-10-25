@@ -41,12 +41,12 @@
 #   so read side and write side agree by construction. This script never builds or opens the
 #   manifest location itself: it passes the identifiers (checkout root, brood id) to
 #   hivemind_brood_read_manifest in skills/_shared/brood-state.sh, the only code that reads brood
-#   state. That reader walks each directory through a proven handle, opens the leaf exactly once,
+#   state. That reader refuses a symlinked or non-directory component, reads the leaf exactly once,
 #   refuses a NUL or raw control byte, and returns one compact JSON snapshot that every field read
 #   below uses. Reader return codes map to pre-flight blockers: 4 (absent) gives `brood manifest
-#   not found or unreadable`, 2 or 3 (a symlinked, non-directory or relocated component or leaf)
-#   gives `refusing to read the brood manifest`, and 5 (NUL, control byte, invalid JSON, not
-#   exactly one document) gives `brood manifest is not valid JSON`. The location shown in a blocker
+#   not found or unreadable`, 2 or 3 (a symlinked or non-directory component, or a symlinked or
+#   non-regular leaf) gives `refusing to read the brood manifest`, and 5 (NUL, control byte,
+#   invalid JSON, not exactly one document) gives `brood manifest is not valid JSON`. The location shown in a blocker
 #   comes from hivemind_brood_manifest_path, a display string only.
 #
 # OUTPUT (stdout):
@@ -58,7 +58,7 @@
 #      name) or failed (a per-strain tmux error). Zero strains / zero alive sessions also exit 0.
 #   1  ONLY a pre-flight blocker: bad brood-id, a bad `--only` short, missing/unreadable/invalid manifest,
 #      a manifest holding a NUL or raw control byte, a manifest whose leaf or an ancestor is a
-#      symlink, non-directory or relocated component, a manifest
+#      symlink or non-directory component, a manifest
 #      that FAILS THE SHAPE PREFLIGHT (`.strains` missing/null/object/non-array, or a strain
 #      element that is not an object / carries a non-string name or tmux_session), or a missing
 #      dependency. No keystroke is delivered on a pre-flight blocker. A wrong-shaped/corrupt
@@ -118,7 +118,7 @@ blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 
 # ── Self-location + shared brood-state reader ─────────────────────────────────────
 # layout plugin/skills/enable-brood-remote/scripts/ => 3 dirs up is the plugin root. containment.sh
-# supplies the verified-handle helpers brood-state.sh reads through; brood-state.sh supplies
+# supplies hivemind_canon_root, which brood-state.sh resolves roots with; brood-state.sh supplies
 # hivemind_brood_read_manifest and hivemind_brood_manifest_path for the manifest read below.
 script_dir="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -- "$__d" 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot self-locate the script directory; refusing to proceed"
 plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev/null)" || blocker "cannot resolve the plugin root from the script directory; refusing to proceed"
@@ -192,7 +192,7 @@ root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
 manifest="$(hivemind_brood_manifest_path "$root" "$brood_id")" \
   || blocker "brood-id does not match the brood-id pattern: $brood_id"
 
-# Single verified read through the shared brood-state reader (see MANIFEST in the header). Every
+# Single read through the shared brood-state reader (see MANIFEST in the header). Every
 # later field read runs against $manifest_content on jq stdin; nothing reopens the manifest. Any
 # reader failure is a pre-flight blocker: zero keystrokes.
 manifest_read_status=0
@@ -200,7 +200,7 @@ manifest_content="$(hivemind_brood_read_manifest "$root" "$brood_id")" || manife
 case "$manifest_read_status" in
   0) ;;
   4)   blocker "brood manifest not found or unreadable: $manifest" ;;
-  2|3) blocker "refusing to read the brood manifest: $manifest (a symlinked, non-directory or relocated component or leaf)" ;;
+  2|3) blocker "refusing to read the brood manifest: $manifest (a symlinked or non-directory component, or a symlinked or non-regular leaf)" ;;
   5)   blocker "brood manifest is not valid JSON: $manifest" ;;
   *)   blocker "refusing to read the brood manifest: $manifest (reader returned $manifest_read_status)" ;;
 esac
