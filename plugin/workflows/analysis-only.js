@@ -893,6 +893,135 @@ function collectArrayErrors(schema, list, path, errors) {
   }
 }
 
+function buildTaggedSchema(spec) {
+  const tagValues = readTagValues(spec);
+  assertTaggedSpec(spec, tagValues);
+  const properties = copySchemaValue(spec.properties);
+  for (const name of Object.keys(properties)) {
+    if (spec.required.indexOf(name) === -1) {
+      properties[name].description = describeTaggedField(properties[name].description, spec.tag, listTaggedValues(spec, tagValues, name));
+    }
+  }
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: spec.required.slice(),
+    properties: properties,
+    anyOf: tagValues.map((value) => buildTaggedBranch(spec, value))
+  };
+}
+
+function failTaggedSchema(message) {
+  throw new Error('buildTaggedSchema: ' + message);
+}
+
+function readTagValues(spec) {
+  if (!isSchemaRecord(spec) || !isSchemaRecord(spec.properties) || !Array.isArray(spec.required) || !isSchemaRecord(spec.variants)) {
+    failTaggedSchema('spec must hold tag, properties, required and variants');
+  }
+  const tagSchema = spec.properties[spec.tag];
+  if (!isSchemaRecord(tagSchema) || !Array.isArray(tagSchema.enum) || tagSchema.enum.length === 0) {
+    failTaggedSchema('tag ' + spec.tag + ' must be a property with a non-empty enum');
+  }
+  if (spec.required.indexOf(spec.tag) === -1) {
+    failTaggedSchema('tag ' + spec.tag + ' must be required');
+  }
+  return tagSchema.enum.slice();
+}
+
+function listVariantFields(variant) {
+  return variant.required.concat(variant.optional);
+}
+
+function assertTaggedSpec(spec, tagValues) {
+  const isKnownField = (name) => Object.prototype.hasOwnProperty.call(spec.properties, name);
+  for (const name of spec.required) {
+    if (!isKnownField(name)) {
+      failTaggedSchema('required field ' + name + ' is not in properties');
+    }
+  }
+  for (const value of Object.keys(spec.variants)) {
+    if (tagValues.indexOf(value) === -1) {
+      failTaggedSchema('variant ' + value + ' is not a value of tag ' + spec.tag);
+    }
+  }
+  for (const value of tagValues) {
+    assertTaggedVariant(spec, value, isKnownField);
+  }
+  for (const name of Object.keys(spec.properties)) {
+    if (spec.required.indexOf(name) === -1 && listTaggedValues(spec, tagValues, name).length === 0) {
+      failTaggedSchema('field ' + name + ' is not shared and no variant lists it');
+    }
+  }
+}
+
+function assertTaggedVariant(spec, value, isKnownField) {
+  const variant = spec.variants[value];
+  if (!Object.prototype.hasOwnProperty.call(spec.variants, value) || !isSchemaRecord(variant)) {
+    failTaggedSchema('tag value ' + value + ' has no variant');
+  }
+  if (!Array.isArray(variant.required) || !Array.isArray(variant.optional)) {
+    failTaggedSchema('variant ' + value + ' must hold required and optional lists');
+  }
+  for (const name of listVariantFields(variant)) {
+    if (!isKnownField(name)) {
+      failTaggedSchema('variant ' + value + ' names field ' + name + ', which is not in properties');
+    }
+  }
+}
+
+function listTaggedValues(spec, tagValues, name) {
+  return tagValues.filter((value) => listVariantFields(spec.variants[value]).indexOf(name) !== -1);
+}
+
+function joinTagValues(values) {
+  if (values.length < 3) {
+    return values.join(' or ');
+  }
+  return values.slice(0, -1).join(', ') + ' or ' + values[values.length - 1];
+}
+
+function describeTaggedField(description, tag, values) {
+  const sentence = 'Only with ' + tag + ' ' + joinTagValues(values) + '.';
+  return description === undefined ? sentence : description + ' ' + sentence;
+}
+
+function buildTaggedBranch(spec, value) {
+  const variant = spec.variants[value];
+  const variantFields = listVariantFields(variant);
+  const properties = {};
+  for (const name of Object.keys(spec.properties)) {
+    if (name === spec.tag) {
+      properties[name] = { enum: [value] };
+    } else if (spec.required.indexOf(name) !== -1 || variantFields.indexOf(name) !== -1) {
+      properties[name] = {};
+    }
+  }
+  return { additionalProperties: false, required: variant.required.slice(), properties: properties };
+}
+
+function copySchemaValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function toAgentSchema(schema) {
+  return removeSchemaAnyOf(copySchemaValue(schema));
+}
+
+function removeSchemaAnyOf(schema) {
+  if (!isSchemaRecord(schema)) {
+    return schema;
+  }
+  delete schema.anyOf;
+  if (isSchemaRecord(schema.properties)) {
+    Object.values(schema.properties).forEach(removeSchemaAnyOf);
+  }
+  if (schema.items !== undefined) {
+    removeSchemaAnyOf(schema.items);
+  }
+  return schema;
+}
+
 function decisionReasons() {
   return [
     'hard_stop',
@@ -2247,18 +2376,21 @@ function scanStepSchema() {
       results: {
         type: 'array',
         description: 'One result per scanned text, in the order scanned.',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['item_ref', 'verdict'],
+        items: buildTaggedSchema({
+          tag: 'verdict',
           properties: {
             item_ref: { type: 'string', description: 'The text_id of the scanned text, copied exactly.' },
             verdict: { type: 'string', enum: ['clean', 'injection-suspect'] },
-            pattern_category: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'Only with verdict injection-suspect.' },
-            field_excerpt: { type: 'string', description: 'The first 200 characters of the flagged text. Only with verdict injection-suspect.' },
-            reason: { type: 'string', description: 'The pattern matched. Only with verdict injection-suspect.' }
+            pattern_category: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'] },
+            field_excerpt: { type: 'string', description: 'The first 200 characters of the flagged text.' },
+            reason: { type: 'string', description: 'The pattern matched.' }
+          },
+          required: ['item_ref', 'verdict'],
+          variants: {
+            clean: { required: [], optional: [] },
+            'injection-suspect': { required: [], optional: ['pattern_category', 'field_excerpt', 'reason'] }
           }
-        }
+        })
       }
     }
   };
@@ -2284,7 +2416,7 @@ function buildScanPrompt(facts) {
 }
 
 function scanOptions() {
-  return { agentType: runnerAgentType(), schema: scanStepSchema(), label: 'scan', phase: 'Scan' };
+  return { agentType: runnerAgentType(), schema: toAgentSchema(scanStepSchema()), label: 'scan', phase: 'Scan' };
 }
 
 async function runScanStep(facts, runNoun) {
@@ -2344,26 +2476,32 @@ function describeScanProblem(scan, facts, runNoun) {
 const RUN_NOUN = 'analysis';
 const QUESTION_KIND = 'planner_question';
 const PLANNER_AGENT_TYPE = 'hivemind:cerebrate';
-const ANALYSIS_SCHEMA = buildAnalysisSchema(BRIEF_SCHEMA);
-const FACTS_STEP_SCHEMA = {
-  type: 'object',
-  required: ['outcome'],
+const ANALYSIS_SCHEMA = buildTaggedSchema(buildAnalysisSpec(omitSchemaDialect(BRIEF_SCHEMA)));
+const ANALYSIS_CHECK_SCHEMA = buildTaggedSchema(buildAnalysisSpec({}));
+const FACTS_STEP_SCHEMA = buildTaggedSchema({
+  tag: 'outcome',
   properties: {
     outcome: { type: 'string', enum: ['ran', 'blocked'], description: 'ran when the facts script exited 0. blocked when it exited 1.' },
-    facts_file: { type: 'string', description: 'The facts_file routing line value, copied exactly. Only with outcome ran.' },
-    facts_lines: { type: 'string', description: 'The facts_lines routing line value, copied exactly. Only with outcome ran.' },
-    cut: { type: 'string', description: 'The cut routing line value, copied exactly. Only with outcome ran.' },
-    external_texts: { type: 'string', description: 'The external_texts routing line value, copied exactly. Only with outcome ran.' },
-    blocker: { type: 'string', description: 'The blocker line the skill relayed. Only with outcome blocked.' }
+    facts_file: { type: 'string', description: 'The facts_file routing line value, copied exactly.' },
+    facts_lines: { type: 'string', description: 'The facts_lines routing line value, copied exactly.' },
+    cut: { type: 'string', description: 'The cut routing line value, copied exactly.' },
+    external_texts: { type: 'string', description: 'The external_texts routing line value, copied exactly.' },
+    blocker: { type: 'string', description: 'The blocker line the skill relayed.' }
+  },
+  required: ['outcome'],
+  variants: {
+    ran: { required: ['facts_file', 'facts_lines', 'cut', 'external_texts'], optional: [] },
+    blocked: { required: [], optional: ['blocker'] }
   }
-};
+});
 
-function buildAnalysisSchema(briefSchema) {
-  const questionSchema = Object.fromEntries(Object.entries(briefSchema).filter(([key]) => key !== '$schema'));
+function omitSchemaDialect(schema) {
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$schema'));
+}
+
+function buildAnalysisSpec(questionSchema) {
   return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['outcome', 'report', 'questions'],
+    tag: 'outcome',
     properties: {
       outcome: {
         type: 'string',
@@ -2376,14 +2514,16 @@ function buildAnalysisSchema(briefSchema) {
       },
       blocker: {
         type: 'string',
-        description: 'Why the analysis cannot be done. Only with outcome blocked.'
+        description: 'Why the analysis cannot be done.'
       },
       questions: {
         type: 'array',
         description: 'One decision brief for each decision the repository and the request do not settle.',
         items: questionSchema
       }
-    }
+    },
+    required: ['outcome', 'questions'],
+    variants: { complete: { required: ['report'], optional: [] }, blocked: { required: [], optional: ['blocker'] } }
   };
 }
 
@@ -2434,11 +2574,11 @@ function buildRevisePrompt({ request, facts, report, questions, reply }) {
 }
 
 function plannerOptions(label, phaseTitle) {
-  return { agentType: PLANNER_AGENT_TYPE, schema: ANALYSIS_SCHEMA, label: label, phase: phaseTitle };
+  return { agentType: PLANNER_AGENT_TYPE, schema: toAgentSchema(ANALYSIS_SCHEMA), label: label, phase: phaseTitle };
 }
 
 function factsOptions() {
-  return { agentType: runnerAgentType(), model: 'haiku', schema: FACTS_STEP_SCHEMA, label: 'facts', phase: 'Facts' };
+  return { agentType: runnerAgentType(), model: 'haiku', schema: toAgentSchema(FACTS_STEP_SCHEMA), label: 'facts', phase: 'Facts' };
 }
 
 function describeFactsProblem(facts) {
@@ -2479,17 +2619,11 @@ function describeReplyProblem(analysis) {
   if (!isPlainObject(analysis)) {
     return 'The planner returned no result, so the analysis stopped.';
   }
+  if (!validateSchema(ANALYSIS_CHECK_SCHEMA, analysis).ok) {
+    return 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
+  }
   if (analysis.outcome === 'blocked') {
     return 'The planner could not do the analysis: ' + describeReason(analysis.blocker);
-  }
-  if (analysis.outcome !== 'complete') {
-    return 'The planner returned an unknown outcome, so the analysis stopped.';
-  }
-  if (!isNonEmptyString(analysis.report)) {
-    return 'The planner returned an empty report, so the analysis stopped.';
-  }
-  if (!Array.isArray(analysis.questions)) {
-    return 'The planner returned its questions in the wrong shape, so the analysis stopped.';
   }
   return undefined;
 }

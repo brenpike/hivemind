@@ -46,10 +46,17 @@
  *   their patterns, and cut against the known cut fields, before anything
  *   reads it. external_texts must also be a safe integer. A failed check
  *   blocks as malformed facts, and no planner starts.
+ *   The facts schema is built by buildTaggedSchema (lib/schema.js) from one
+ *   table, which gives both its anyOf branches and its 'Only with'
+ *   descriptions: ran requires facts_file, facts_lines, cut and
+ *   external_texts, blocked may carry blocker, and no other field passes.
+ *   So a ran result with a blocker, or a blocked result with a facts field,
+ *   blocks as malformed facts.
  *   Only cut stops: a cut other than none blocks before the scan and the
  *   planner, naming the fields cut (ADR-0037 invariant 4). delivery and
  *   delivery_stops are never asked for or read: their checks belong to
- *   delivery, not to analysis.
+ *   delivery, not to analysis. A facts result that carries either blocks as
+ *   malformed facts, as any field outside the facts schema does.
  *   Scan before planning: when external_texts, the count N of texts from
  *   GitHub in the facts file, is above 0, a drone scans each of those texts,
  *   named by its text_id t1 to tN, with hivemind:injection-scan before any
@@ -85,6 +92,16 @@
  *   when canCarry fails for the resume_args a pause would return, it
  *   completes instead and lists the questions still open, with stop reason
  *   'reply_size'.
+ *   The analysis schema is built by buildTaggedSchema from one table too:
+ *   outcome and questions are shared, complete requires report, and blocked
+ *   may carry blocker. A planner result is checked against the full
+ *   analysis schema with the questions items check left out, so decide()
+ *   still checks each brief and a malformed brief is asked, never a reason
+ *   to stop. A result that fails the check, a field of the other outcome
+ *   included, finishes blocked with one plain malformed-result message.
+ *   Each agent gets toAgentSchema of its full schema, the same schema with
+ *   every anyOf removed, because the Messages API rejects a tool input
+ *   schema that has anyOf at its top level.
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
  *   quoted whole up to maxReasonLength() code points, 600, else cut by
@@ -127,26 +144,32 @@
 const RUN_NOUN = 'analysis';
 const QUESTION_KIND = 'planner_question';
 const PLANNER_AGENT_TYPE = 'hivemind:cerebrate';
-const ANALYSIS_SCHEMA = buildAnalysisSchema(BRIEF_SCHEMA);
-const FACTS_STEP_SCHEMA = {
-  type: 'object',
-  required: ['outcome'],
+const ANALYSIS_SCHEMA = buildTaggedSchema(buildAnalysisSpec(omitSchemaDialect(BRIEF_SCHEMA)));
+const ANALYSIS_CHECK_SCHEMA = buildTaggedSchema(buildAnalysisSpec({}));
+const FACTS_STEP_SCHEMA = buildTaggedSchema({
+  tag: 'outcome',
   properties: {
     outcome: { type: 'string', enum: ['ran', 'blocked'], description: 'ran when the facts script exited 0. blocked when it exited 1.' },
-    facts_file: { type: 'string', description: 'The facts_file routing line value, copied exactly. Only with outcome ran.' },
-    facts_lines: { type: 'string', description: 'The facts_lines routing line value, copied exactly. Only with outcome ran.' },
-    cut: { type: 'string', description: 'The cut routing line value, copied exactly. Only with outcome ran.' },
-    external_texts: { type: 'string', description: 'The external_texts routing line value, copied exactly. Only with outcome ran.' },
-    blocker: { type: 'string', description: 'The blocker line the skill relayed. Only with outcome blocked.' }
+    facts_file: { type: 'string', description: 'The facts_file routing line value, copied exactly.' },
+    facts_lines: { type: 'string', description: 'The facts_lines routing line value, copied exactly.' },
+    cut: { type: 'string', description: 'The cut routing line value, copied exactly.' },
+    external_texts: { type: 'string', description: 'The external_texts routing line value, copied exactly.' },
+    blocker: { type: 'string', description: 'The blocker line the skill relayed.' }
+  },
+  required: ['outcome'],
+  variants: {
+    ran: { required: ['facts_file', 'facts_lines', 'cut', 'external_texts'], optional: [] },
+    blocked: { required: [], optional: ['blocker'] }
   }
-};
+});
 
-function buildAnalysisSchema(briefSchema) {
-  const questionSchema = Object.fromEntries(Object.entries(briefSchema).filter(([key]) => key !== '$schema'));
+function omitSchemaDialect(schema) {
+  return Object.fromEntries(Object.entries(schema).filter(([key]) => key !== '$schema'));
+}
+
+function buildAnalysisSpec(questionSchema) {
   return {
-    type: 'object',
-    additionalProperties: false,
-    required: ['outcome', 'report', 'questions'],
+    tag: 'outcome',
     properties: {
       outcome: {
         type: 'string',
@@ -159,14 +182,16 @@ function buildAnalysisSchema(briefSchema) {
       },
       blocker: {
         type: 'string',
-        description: 'Why the analysis cannot be done. Only with outcome blocked.'
+        description: 'Why the analysis cannot be done.'
       },
       questions: {
         type: 'array',
         description: 'One decision brief for each decision the repository and the request do not settle.',
         items: questionSchema
       }
-    }
+    },
+    required: ['outcome', 'questions'],
+    variants: { complete: { required: ['report'], optional: [] }, blocked: { required: [], optional: ['blocker'] } }
   };
 }
 
@@ -217,11 +242,11 @@ function buildRevisePrompt({ request, facts, report, questions, reply }) {
 }
 
 function plannerOptions(label, phaseTitle) {
-  return { agentType: PLANNER_AGENT_TYPE, schema: ANALYSIS_SCHEMA, label: label, phase: phaseTitle };
+  return { agentType: PLANNER_AGENT_TYPE, schema: toAgentSchema(ANALYSIS_SCHEMA), label: label, phase: phaseTitle };
 }
 
 function factsOptions() {
-  return { agentType: runnerAgentType(), model: 'haiku', schema: FACTS_STEP_SCHEMA, label: 'facts', phase: 'Facts' };
+  return { agentType: runnerAgentType(), model: 'haiku', schema: toAgentSchema(FACTS_STEP_SCHEMA), label: 'facts', phase: 'Facts' };
 }
 
 function describeFactsProblem(facts) {
@@ -262,17 +287,11 @@ function describeReplyProblem(analysis) {
   if (!isPlainObject(analysis)) {
     return 'The planner returned no result, so the analysis stopped.';
   }
+  if (!validateSchema(ANALYSIS_CHECK_SCHEMA, analysis).ok) {
+    return 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
+  }
   if (analysis.outcome === 'blocked') {
     return 'The planner could not do the analysis: ' + describeReason(analysis.blocker);
-  }
-  if (analysis.outcome !== 'complete') {
-    return 'The planner returned an unknown outcome, so the analysis stopped.';
-  }
-  if (!isNonEmptyString(analysis.report)) {
-    return 'The planner returned an empty report, so the analysis stopped.';
-  }
-  if (!Array.isArray(analysis.questions)) {
-    return 'The planner returned its questions in the wrong shape, so the analysis stopped.';
   }
   return undefined;
 }
