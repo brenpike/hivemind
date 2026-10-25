@@ -312,13 +312,17 @@ run_suites() {
 # Globs verified against each tool:
 #   plugin/workflows/*.json            -> validate_workflows --strict + --self-test
 #   plugin/skills/record-state-result/scripts/**, init-run-ledger/scripts/**, tests/engine/**,
-#     plugin/skills/_shared/containment.sh
+#     plugin/skills/_shared/{containment,brood-state}.sh
 #                                      -> test_engine  (also validate_workflows reads tests/engine;
-#                                         containment.sh is copied into test_engine's fake plugin)
+#                                         containment.sh and brood-state.sh are copied into
+#                                         test_engine's fake plugin)
 #   plugin/skills/spawn-brood/**, brood-status/**, init-run-ledger/scripts/**,
-#     plugin/skills/_shared/containment.sh, plugin/skills/enable-brood-remote/scripts/rc-brood.sh,
-#     tests/brood/**
+#     plugin/skills/_shared/{containment,brood-state}.sh,
+#     plugin/skills/enable-brood-remote/scripts/rc-brood.sh, tests/brood/**
 #                                      -> test_brood_compat
+#   plugin/skills/enable-brood-remote/**, plugin/skills/_shared/brood-state.sh,
+#     tests/brood/rc-manifest-*.json (the four RC fixtures)
+#                                      -> test_rc_brood (brood-state.sh ALSO -> test_shared_libs)
 #   plugin/skills/_shared/*.sh, tests/brood/**          -> test_shared_libs
 #   plugin/skills/github-review-loop/scripts/*.jq      -> test_fix_history_classify, test_fetch_normalize,
 #                                                         test_shared_libs, test_change_detect_poll,
@@ -499,11 +503,14 @@ map_path() {
   # Also ledger-engine-io.sh: sourced by the three ledger engine entrypoints; test_engine.sh is the
   # behavior oracle for those engines, so a lib-only edit must trigger test_engine or engine
   # regressions go untested under --changed (test_shared_libs alone is not sufficient).
+  # Also brood-state.sh: test_engine.sh copies the brood-state reader into its fake plugin for the
+  # spawn-brood.sh it drives, so a reader edit must trigger test_engine.
   if [[ "$p" == plugin/skills/record-state-result/scripts/* \
      || "$p" == plugin/skills/init-run-ledger/scripts/* \
      || "$p" == plugin/skills/mark-intent-fallback/scripts/* \
      || "$p" == plugin/skills/_shared/containment.sh \
      || "$p" == plugin/skills/_shared/ledger-engine-io.sh \
+     || "$p" == plugin/skills/_shared/brood-state.sh \
      || "$p" == tests/engine/* ]]; then
     add_selected "$SUITE_TEST_ENGINE" "$p (engine script/fixture)"
     matched=1
@@ -519,10 +526,13 @@ map_path() {
   # containment.sh change must trigger this suite or its only relevant coverage is skipped.
   # Also rc-brood.sh: spawn-brood runs it at spawn time to turn on remote control, and only
   # test_brood_compat drives that spawn-time call (test_rc_brood covers the engine on its own).
+  # Also brood-state.sh: the brood-state reader sourced by spawn-brood.sh and every brood-status
+  # script; test_brood_compat is the behavior oracle for those consumers.
   if [[ "$p" == plugin/skills/spawn-brood/* \
      || "$p" == plugin/skills/brood-status/* \
      || "$p" == plugin/skills/init-run-ledger/scripts/* \
      || "$p" == plugin/skills/_shared/containment.sh \
+     || "$p" == plugin/skills/_shared/brood-state.sh \
      || "$p" == plugin/skills/enable-brood-remote/scripts/rc-brood.sh \
      || "$p" == tests/brood/* ]]; then
     add_selected "$SUITE_TEST_BROOD" "$p (brood script/fixture)"
@@ -541,7 +551,10 @@ map_path() {
   # prose-linted, never behaviorally exercised. Route the skill dir and ONLY the two new RC fixtures
   # to the behavioral suite; the other tests/brood/* fixtures stay owned by test_brood_compat /
   # test_shared_libs above. (tools/test_rc_brood.sh itself self-routes via the leg near the top.)
+  # Also brood-state.sh: rc-brood.sh reads the brood manifest through the brood-state reader, so a
+  # reader edit must trigger the RC oracle.
   if [[ "$p" == plugin/skills/enable-brood-remote/* \
+     || "$p" == plugin/skills/_shared/brood-state.sh \
      || "$p" == tests/brood/rc-manifest-all-alive.json \
      || "$p" == tests/brood/rc-manifest-hostile-name.json \
      || "$p" == tests/brood/rc-manifest-foreign-session.json \
@@ -1444,7 +1457,8 @@ self_test() {
   done
 
   # 10. Each consumer leg of the gather-facts, create-working-branch, push-branch, molt and
-  #     open-plan-pr suites that the KNOWN_SUITES probe (#1) does not reach must route to its
+  #     open-plan-pr suites, and each brood-state.sh leg (test_engine, test_brood_compat,
+  #     test_rc_brood), that the KNOWN_SUITES probe (#1) does not reach must route to its
   #     suite. #1 probes each entrypoint script, so it would stay green if the schema-chain,
   #     shared-lib, harness or push-branch child selector were dropped. Probe each <path>|<suite>
   #     pair directly so removing any one selector FAILS here.
@@ -1469,7 +1483,10 @@ self_test() {
     "plugin/skills/_shared/containment.sh|$SUITE_TEST_OPEN_PLAN_PR" \
     "plugin/skills/_shared/git-refusals.sh|$SUITE_TEST_OPEN_PLAN_PR" \
     "plugin/skills/push-branch/scripts/push-branch.sh|$SUITE_TEST_OPEN_PLAN_PR" \
-    "plugin/skills/open-plan-pr/SKILL.md|$SUITE_TEST_OPEN_PLAN_PR"; do
+    "plugin/skills/open-plan-pr/SKILL.md|$SUITE_TEST_OPEN_PLAN_PR" \
+    "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
+    "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD" \
+    "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_ENGINE"; do
     consumer_path="${consumer_pair%%|*}"
     consumer_suite="${consumer_pair#*|}"
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''

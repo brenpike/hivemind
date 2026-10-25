@@ -12,7 +12,7 @@ Check the status of all broods, with per-strain status. Reports per-strain tmux 
 
 This is an **interactive skill** — it produces user-visible text output.
 
-The entire deterministic collection loop — multi-brood discovery, per-strain external-observable probing (tmux/branch/PR), child-ledger workflow-state projection, status derivation, and aggregation — lives in the committed thin entrypoint `${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-status-collect.sh` (ADR-0020). That entrypoint internally calls the committed discovery script (`brood-discover.sh`) and the pure single-manifest projector (`brood-status-project.sh`) under read-side trust discipline (ADR-0018, ADR-0019 Boundary 3), runs the impure observable probes itself, and emits ONE JSON document. The navigator does ONLY three things: run the entrypoint, render markdown from its JSON, and write the human summary.
+The entire deterministic collection loop — multi-brood discovery, per-strain external-observable probing (tmux/branch/PR), child-ledger workflow-state projection, status derivation, and aggregation — lives in the committed thin entrypoint `${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-status-collect.sh` (ADR-0020). That entrypoint lists the broods through the confined brood-state reader (`${CLAUDE_PLUGIN_ROOT}/skills/_shared/brood-state.sh`) and runs the pure single-brood projector (`brood-status-project.sh`) once per brood id, under read-side trust discipline (ADR-0018, ADR-0019 Boundary 3), runs the impure observable probes itself, and emits ONE JSON document. The navigator does ONLY three things: run the entrypoint, render markdown from its JSON, and write the human summary.
 
 **Structural splice closure.** The navigator MUST NOT construct any shell command containing a manifest path, worktree path, or checkout root, and MUST NOT call the projector or the tmux/branch/PR probes directly. The entrypoint invokes the projector with inert shell variables, so untrusted discovered paths and the operator-controlled checkout root NEVER cross into LLM-authored command source (per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`, ADR-0019: double-quoting does not neutralize `$(...)`/backtick/`${}` in command SOURCE). Both the brood-id residual and the checkout-root residual close by construction.
 
@@ -35,6 +35,7 @@ The entire deterministic collection loop — multi-brood discovery, per-strain e
    ```
    Broods appear in sorted discovery order; strains in manifest/projector order. Per-brood failure isolation is enforced inside the entrypoint — one bad manifest becomes an `unreadable`/`blocker` brood entry, never an aborted run.
 
+   - **Exit 1 with a `blocker: …` line on stderr** → the entrypoint refused to run (for example, the checkout's `.hivemind/broods` is a symlink or not a real directory, or the checkout root cannot be resolved). Relay the blocker line verbatim and stop. Render no dashboard and do not report `No broods found.`
    - **`broods` empty** → report:
      ```
      No broods found.

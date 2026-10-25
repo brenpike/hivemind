@@ -1395,7 +1395,10 @@ mark_time 'CHECK8'
 #
 # Scope: every committed engine script matching plugin/skills/*/scripts/*.sh
 # that SOURCES _shared/containment.sh. Scripts that do not source it (e.g.
-# brood-discover.sh) are excluded — they have no guard to order against.
+# push-branch.sh) are excluded — they have no guard to order against.
+# Brood-state reads (the brood listing, a brood manifest, a child run ledger,
+# facts evidence) are not ordered here: CHECK 17 confines them to
+# _shared/brood-state.sh.
 #
 # For each (script, guarded-token) pair we locate:
 #   * the GUARD line (the containment helper invocation for that token), and
@@ -1419,8 +1422,6 @@ mark_time 'CHECK8'
 #     presence probes that legitimately precede the inputs guard; only the first
 #     `jq` open of $INPUTS_FILE is the read the guard must gate (the jq validity
 #     probe is the canonical read-oracle, per the engine reference script).
-#   * `[ -L "$MANIFEST" ]` / `[ -f "$MANIFEST" ]` are leaf/existence probes that
-#     precede the manifest guard by design; only `cat`/`jq` opens are reads.
 #   * for $ledger the path is DERIVED after the runs-dir guard, so its first
 #     `[ -f "$ledger" ]` existence probe IS a real read of the derived path and
 #     the guard must precede it.
@@ -1492,24 +1493,21 @@ for engine_script in "${check9_engine_scripts[@]}"; do
     # EVERY GUARD_PATTERN is anchored to an EXECUTABLE line (^[[:space:]]*[^#]*)
     # so a COMMENT that merely NAMES the guard helper (e.g. a `# hivemind_read_inputs_file
     # "$INPUTS_FILE"` doc line above the first real read) is NOT miscounted as the
-    # guard — otherwise an engine reading $INPUTS_FILE/$MANIFEST with no real guard
+    # guard — otherwise an engine reading $INPUTS_FILE with no real guard
     # could pass on the strength of a comment mention.
-    declare -a token_labels=('$INPUTS_FILE' '$MANIFEST' '$ledger' '$ledger-leaf')
+    declare -a token_labels=('$INPUTS_FILE' '$ledger' '$ledger-leaf')
     declare -a token_guards=(
         '^[[:space:]]*[^#]*(hivemind_assert_inputs_contained|hivemind_read_inputs_file)[^#]*"\$INPUTS_FILE"'
-        '^[[:space:]]*[^#]*(hivemind_assert_inputs_contained|\[ -L )[^#]*"\$MANIFEST"'
         '^[[:space:]]*[^#]*hivemind_assert_contained[^#]*\.hivemind/runs/\$run_id'
         '^[[:space:]]*hivemind_assert_ledger_contained'
     )
     declare -a token_reads=(
         '(jq |cat )[^#]*"\$INPUTS_FILE"'
-        '(jq |cat )[^#]*"\$MANIFEST"'
         '^[[:space:]]*(jq |cat |\[ -f )[^#]*"\$ledger"'
         '^[[:space:]]*(jq |cat |\[ -f )[^#]*"\$ledger"'
     )
     declare -a token_read_excludes=(
         'hivemind_assert_inputs_contained|hivemind_read_inputs_file|\[ -[fnL] '
-        'hivemind_assert_inputs_contained|\[ -[fnL] '
         'hivemind_assert(_contained|_ledger_contained)'
         'hivemind_assert(_contained|_ledger_contained)'
     )
@@ -4052,6 +4050,348 @@ else
 fi
 
 mark_time 'CHECK16'
+
+# ── CHECK 17: Coordinator brood-state reads go through the confined reader ──
+#
+# WHAT IT GUARANTEES. plugin/skills/_shared/brood-state.sh is the only code
+# that reads coordinator brood state: the brood listing, a brood manifest, a
+# child run ledger, a child's facts evidence and the pre-launch facts guard.
+# Its readers take identifiers (a checkout or worktree root, a brood id, a run
+# id), derive every location themselves and open each file once through a
+# verified handle (security-policy.md "Trust-Boundary Discipline": accept
+# identifiers, never paths). CHECK 17 fails on any other skill script line that
+# names a brood-state location, so a new path-string read of brood state cannot
+# land beside the reader.
+#
+# SCOPE. Every plugin/skills/**/*.sh the checked discovery finds, except the
+# reader itself. A line fires when a token sits before any `#` on it (the
+# CHECK 9 convention for an executable line):
+#   * in any script: .hivemind/broods, manifest.json and .hivemind/facts;
+#   * in a brood-scope script, also: .hivemind/runs and state.json.
+# A brood-scope script sits under skills/spawn-brood, skills/brood-status or
+# skills/enable-brood-remote, or sources brood-state.sh, ledger-project.sh or
+# manifest-json.sh. Outside brood scope, .hivemind/runs and state.json belong
+# to the run's own ledger engines, which are not brood state.
+#
+# EXEMPTIONS, A CLOSED LIST. Every CHECK 17 finding is recorded deny-only, so
+# no allowlist entry can widen this list.
+#   * gather-facts.sh may name .hivemind/facts, and only that token: it is the
+#     facts producer, writing into its own checkout.
+#   * CHECK17_PIN_LINES: spawn-brood.sh's writer and record lines (the brood
+#     write-chain guard and its blocker line, STATE=, the inputs.json write,
+#     the facts-guard warning, manifest_path=, hatchery_ledger= and the
+#     manifest.json write). Each pin is one exact line of spawn-brood.sh and
+#     must match exactly one line. A pin that matches no line is a stale-pin
+#     finding; a pin that matches several lines is a finding and exempts none.
+#
+# FAIL-CLOSED. A discovery failure, an undiscovered reader file, a reader
+# function the findings name that the reader no longer defines, an unreadable
+# script or pin file, and a scan count that differs from the discovered count
+# are each a finding, never a pass.
+#
+# RESIDUALS. A token assembled from parts (".hivemind/""broods", a variable
+# holding "broods"), or a token after a `#` that does not start a comment
+# (inside a string, or after ${#array[@]}), is not seen. Each physical line is
+# tested alone, so a backslash-continued command is judged by the line that
+# holds the token. Scripts outside plugin/skills are out of scope. The check
+# proves where the tokens appear, not that brood-state.sh reads safely:
+# tools/test_shared_libs.sh carries that.
+echo ''
+echo '=== CHECK 17: Coordinator brood-state reads go through the confined reader ==='
+
+CHECK17_POLICY_CITATION='security-policy.md "Trust-Boundary Discipline"'
+CHECK17_READER_FILE='plugin/skills/_shared/brood-state.sh'
+declare -a CHECK17_READER_FUNCTIONS=(
+    hivemind_brood_list_ids
+    hivemind_brood_read_manifest
+    hivemind_brood_read_child_ledger
+    hivemind_detect_facts_evidence
+    hivemind_brood_facts_absent
+)
+CHECK17_SHARED_TOKENS='\.hivemind/broods|manifest\.json'
+CHECK17_FACTS_TOKEN='\.hivemind/facts'
+CHECK17_BROOD_SCOPE_TOKENS='\.hivemind/runs|state\.json'
+CHECK17_FACTS_PRODUCER_FILE='plugin/skills/gather-facts/scripts/gather-facts.sh'
+CHECK17_BROOD_SCOPE_PATH_REGEX='^plugin/skills/(spawn-brood|brood-status|enable-brood-remote)/'
+CHECK17_BROOD_SOURCE_REGEX='^[^#]*(^|[[:space:]])(\.|source)[[:space:]][^#]*(brood-state|ledger-project|manifest-json)\.sh'
+CHECK17_PIN_FILE='plugin/skills/spawn-brood/scripts/spawn-brood.sh'
+declare -a CHECK17_PIN_LINES=()
+mapfile -t CHECK17_PIN_LINES <<'CHECK17_PINS'
+canon_repo_root="$(hivemind_assert_contained "$repo_root" ".hivemind/broods/$brood_id")" \
+  || blocker "refusing to spawn: ${canon_repo_root:-$repo_root}/.hivemind/broods/$brood_id resolves outside the checkout (symlinked ancestor); no worktree or session created"
+STATE="$repo_root/.hivemind/broods/$brood_id"
+hivemind_write_verified_leaf "$repo_root" ".hivemind/broods/$brood_id" create inputs.json \
+    printf 'warning: child worktree %s already holds .hivemind/facts (base ref tracks .hivemind/facts); refusing to provision or launch strain %s\n' "$wt" "${S_NAME[$idx]}" >&2
+manifest_path="$STATE/manifest.json"
+hatchery_ledger=".hivemind/runs/$hatchery_run_id/state.json"
+if ! hivemind_write_verified_leaf "$repo_root" ".hivemind/broods/$brood_id" nocreate manifest.json \
+CHECK17_PINS
+
+CHECK17_READER_FUNCTION_LIST="$(printf '%s, ' "${CHECK17_READER_FUNCTIONS[@]}")"
+CHECK17_READER_FUNCTION_LIST="${CHECK17_READER_FUNCTION_LIST%, }"
+CHECK17_FINDING_SUFFIX="-- read brood state only through ${CHECK17_READER_FILE} (${CHECK17_READER_FUNCTION_LIST}), which takes identifiers and derives every location itself -- see ${CHECK17_POLICY_CITATION}"
+
+# check17_finding FILEPATH LINE TEXT
+# Records one deny-only CHECK17 finding carrying the reader and policy suffix.
+check17_finding() {
+    check17_found=true
+    add_finding 'CHECK17' "$1" "$2" "$3 ${CHECK17_FINDING_SUFFIX}" deny
+    return 0
+}
+
+# check17_line_token LINE IN_BROOD_SCOPE IS_FACTS_PRODUCER IS_PIN_FILE
+# Sets CHECK17_HIT_TOKEN to the brood-state token LINE names before any `#`,
+# or to empty when LINE names none, is a pinned line of the pin file, or names
+# only .hivemind/facts in the facts producer.
+CHECK17_HIT_TOKEN=''
+declare -A CHECK17_PINNED_TEXTS=()
+check17_line_token() {
+    local line_body="$1" in_brood_scope="$2" is_facts_producer="$3" is_pin_file="$4"
+    local token_regex="$CHECK17_SHARED_TOKENS"
+    CHECK17_HIT_TOKEN=''
+    if [[ "$is_pin_file" == true && -n "$line_body" && -n "${CHECK17_PINNED_TEXTS["$line_body"]+set}" ]]; then
+        return 0
+    fi
+    if [[ "$is_facts_producer" != true ]]; then
+        token_regex+="|$CHECK17_FACTS_TOKEN"
+    fi
+    if [[ "$in_brood_scope" == true ]]; then
+        token_regex+="|$CHECK17_BROOD_SCOPE_TOKENS"
+    fi
+    if [[ "$line_body" =~ ^[^#]*($token_regex) ]]; then
+        CHECK17_HIT_TOKEN="${BASH_REMATCH[1]}"
+    fi
+    return 0
+}
+
+# check17_in_brood_scope REL_PATH FILE
+# Returns 0 when REL_PATH sits under a brood skill or FILE sources a brood-state
+# library on an executable line, 1 when neither, 2 when FILE cannot be read.
+check17_in_brood_scope() {
+    if [[ "$1" =~ $CHECK17_BROOD_SCOPE_PATH_REGEX ]]; then
+        return 0
+    fi
+    grep -qE -- "$CHECK17_BROOD_SOURCE_REGEX" "$2"
+}
+
+# check17_evaluate_pins FILE
+# Counts each CHECK17_PIN_LINES entry among the lines of FILE. Fills
+# CHECK17_PINNED_TEXTS with the pins that match exactly one line and
+# CHECK17_PIN_PROBLEM_TEXTS with one text per pin that matches none or
+# several. Returns 1 when FILE cannot be read.
+declare -a CHECK17_PIN_PROBLEM_TEXTS=()
+check17_evaluate_pins() {
+    local pin_source="$1"
+    local -a pin_source_lines=()
+    local -A pin_line_counts=()
+    local source_line pin_text pin_count
+    CHECK17_PINNED_TEXTS=()
+    CHECK17_PIN_PROBLEM_TEXTS=()
+    mapfile -t pin_source_lines 2>/dev/null < "$pin_source" || return 1
+    for source_line in "${pin_source_lines[@]}"; do
+        if [[ -n "$source_line" ]]; then
+            pin_line_counts["$source_line"]=$(( ${pin_line_counts["$source_line"]:-0} + 1 ))
+        fi
+    done
+    for pin_text in "${CHECK17_PIN_LINES[@]}"; do
+        if [[ -z "$pin_text" ]]; then
+            CHECK17_PIN_PROBLEM_TEXTS+=("empty pin: CHECK17_PIN_LINES holds a blank line, which pins nothing -- remove it")
+            continue
+        fi
+        pin_count="${pin_line_counts["$pin_text"]:-0}"
+        if [[ "$pin_count" -eq 1 ]]; then
+            CHECK17_PINNED_TEXTS["$pin_text"]=1
+        elif [[ "$pin_count" -eq 0 ]]; then
+            CHECK17_PIN_PROBLEM_TEXTS+=("stale pin: no line of ${CHECK17_PIN_FILE} is exactly \"${pin_text}\" -- update the pin to the current line or remove it")
+        else
+            CHECK17_PIN_PROBLEM_TEXTS+=("ambiguous pin: ${pin_count} lines of ${CHECK17_PIN_FILE} are exactly \"${pin_text}\", so the pin exempts none of them -- make each pinned line unique")
+        fi
+    done
+    return 0
+}
+
+# check17_scan_script FILE
+# Scans one discovered script and records a finding per line that names a
+# brood-state token outside the exemptions. Increments CHECK17_SCRIPTS_SCANNED
+# once the script is classified.
+CHECK17_SCRIPTS_SCANNED=0
+check17_scan_script() {
+    local script_path="$1"
+    local rel_script="${script_path#"$REPO_ROOT"/}"
+    local in_brood_scope=false is_facts_producer=false is_pin_file=false
+    local scope_rc=0 candidates_rc=0 candidates candidate
+    check17_in_brood_scope "$rel_script" "$script_path" || scope_rc=$?
+    if [[ "$scope_rc" -eq 0 ]]; then
+        in_brood_scope=true
+    elif [[ "$scope_rc" -ne 1 ]]; then
+        check17_finding "$script_path" 0 "cannot read this script to decide its brood scope (grep rc=${scope_rc})"
+        return 0
+    fi
+    if [[ "$rel_script" == "$CHECK17_FACTS_PRODUCER_FILE" ]]; then
+        is_facts_producer=true
+    fi
+    if [[ "$rel_script" == "$CHECK17_PIN_FILE" ]]; then
+        is_pin_file=true
+    fi
+    candidates="$(file_candidates E "^[^#]*(${CHECK17_SHARED_TOKENS}|${CHECK17_FACTS_TOKEN}|${CHECK17_BROOD_SCOPE_TOKENS})" "$script_path")" || candidates_rc=$?
+    if [[ "$candidates_rc" -ne 0 ]]; then
+        check17_finding "$script_path" 0 "cannot read this script to scan it for brood-state locations (grep rc=${candidates_rc})"
+        return 0
+    fi
+    while IFS= read -r candidate; do
+        if [[ -z "$candidate" ]]; then
+            continue
+        fi
+        check17_line_token "${candidate#*:}" "$in_brood_scope" "$is_facts_producer" "$is_pin_file"
+        if [[ -n "$CHECK17_HIT_TOKEN" ]]; then
+            check17_finding "$script_path" "${candidate%%:*}" "names the brood-state location '${CHECK17_HIT_TOKEN}' outside the confined reader"
+        fi
+    done <<< "$candidates"
+    CHECK17_SCRIPTS_SCANNED=$((CHECK17_SCRIPTS_SCANNED + 1))
+    return 0
+}
+
+check17_found=false
+check17_reader_seen=false
+
+declare -a check17_shell_scripts=()
+discover_checked_paths 'CHECK17' check17_shell_scripts files 'plugin skill shell scripts' "$PLUGIN_ROOT/skills" -- -name '*.sh' || check17_found=true
+
+check17_pins_rc=0
+check17_evaluate_pins "$REPO_ROOT/$CHECK17_PIN_FILE" || check17_pins_rc=$?
+if [[ "$check17_pins_rc" -ne 0 ]]; then
+    check17_finding "$CHECK17_PIN_FILE" 0 "cannot read the pin file, so none of its ${#CHECK17_PIN_LINES[@]} CHECK17_PIN_LINES entries can exempt a line"
+fi
+for check17_pin_problem in "${CHECK17_PIN_PROBLEM_TEXTS[@]}"; do
+    check17_finding "$CHECK17_PIN_FILE" 0 "$check17_pin_problem"
+done
+
+for check17_script in "${check17_shell_scripts[@]}"; do
+    check17_rel="${check17_script#"$REPO_ROOT"/}"
+    if [[ "$check17_rel" == "$CHECK17_READER_FILE" ]]; then
+        check17_reader_seen=true
+        continue
+    fi
+    check17_scan_script "$check17_script"
+done
+
+if [[ "$check17_reader_seen" == true ]]; then
+    for check17_reader_function in "${CHECK17_READER_FUNCTIONS[@]}"; do
+        if ! grep -qE -- "^${check17_reader_function}\(\) [{(]" "$REPO_ROOT/$CHECK17_READER_FILE"; then
+            check17_finding "$CHECK17_READER_FILE" 0 "the reader no longer defines ${check17_reader_function}, which CHECK 17 findings name -- update CHECK17_READER_FUNCTIONS"
+        fi
+    done
+else
+    check17_finding "$CHECK17_READER_FILE" 0 "the confined reader was not discovered under plugin/skills"
+fi
+
+check17_expected_scans=${#check17_shell_scripts[@]}
+if [[ "$check17_reader_seen" == true ]]; then
+    check17_expected_scans=$((check17_expected_scans - 1))
+fi
+if [[ "$check17_expected_scans" -le 0 ]]; then
+    check17_finding 'tools/policy_check.sh' 0 "zero skill scripts besides the reader were discovered, so nothing was scanned"
+elif [[ "$CHECK17_SCRIPTS_SCANNED" -ne "$check17_expected_scans" ]]; then
+    check17_finding 'tools/policy_check.sh' 0 "the scan classified ${CHECK17_SCRIPTS_SCANNED} script(s) but ${check17_expected_scans} were discovered, so a script skipped its scan -- run every discovered script through check17_scan_script"
+fi
+
+# ── CHECK 17 DETECTION CANARY ──────────────────────────────────────────────
+# The line classifier, the brood-scope test and the pin evaluation over fixed
+# inputs, in BOTH directions. A narrowed token list, a dropped comment cut, a
+# widened exemption, a lost brood scope or a pin check that no longer reports
+# a stale pin turns this run red while every script still passes.
+
+check17_canary_finding() {
+    check17_found=true
+    add_finding 'CHECK17' 'tools/policy_check.sh' 0 "detection canary: $1" deny
+    return 0
+}
+
+# check17_expect_hit LABEL LINE IN_BROOD_SCOPE IS_FACTS_PRODUCER IS_PIN_FILE
+check17_expect_hit() {
+    check17_line_token "$2" "$3" "$4" "$5"
+    if [[ -z "$CHECK17_HIT_TOKEN" ]]; then
+        check17_canary_finding "case '$1' was not flagged -- the token list was narrowed, or a scope or exemption widened"
+    fi
+    return 0
+}
+
+# check17_expect_miss LABEL LINE IN_BROOD_SCOPE IS_FACTS_PRODUCER IS_PIN_FILE
+check17_expect_miss() {
+    check17_line_token "$2" "$3" "$4" "$5"
+    if [[ -n "$CHECK17_HIT_TOKEN" ]]; then
+        check17_canary_finding "case '$1' was flagged as '${CHECK17_HIT_TOKEN}' -- the comment cut was dropped, or a scope or exemption narrowed"
+    fi
+    return 0
+}
+
+# check17_expect_scope LABEL EXPECTED_RC REL_PATH FILE
+check17_expect_scope() {
+    local scope_rc=0
+    check17_in_brood_scope "$3" "$4" || scope_rc=$?
+    if [[ "$scope_rc" -ne "$2" ]]; then
+        check17_canary_finding "scope case '$1' returned ${scope_rc}, expected $2 -- the brood-scope test drifted"
+    fi
+    return 0
+}
+
+# check17_expect_pin_problems LABEL EXPECTED_COUNT FILE
+check17_expect_pin_problems() {
+    local pins_rc=0
+    check17_evaluate_pins "$3" || pins_rc=$?
+    if [[ "$pins_rc" -ne 0 || "${#CHECK17_PIN_PROBLEM_TEXTS[@]}" -ne "$2" ]]; then
+        check17_canary_finding "pin case '$1' gave rc=${pins_rc} and ${#CHECK17_PIN_PROBLEM_TEXTS[@]} problem(s), expected rc=0 and $2 -- the pin check no longer counts exact lines"
+    fi
+    return 0
+}
+
+check17_run_detection_canary() {
+    local first_pin="${CHECK17_PIN_LINES[0]:-}"
+    local unread_rc=0
+
+    check17_expect_hit 'token assignment' 'manifest_path="$checkout_root/.hivemind/broods/$brood_id/manifest.json"' false false false
+    check17_expect_hit '.hivemind/broods alone' 'broods_dir="$checkout_root/.hivemind/broods"' false false false
+    check17_expect_hit '.hivemind/runs alone in brood scope' 'run_dir="$wt/.hivemind/runs/$run_id"' true false false
+    check17_expect_hit 'jq on a token path' 'jq -r ".strains[].name" "$STATE/manifest.json"' false false false
+    check17_expect_hit 'cat on a token path' 'cat "$wt/.hivemind/runs/$run_id/state.json"' true false false
+    check17_expect_hit 'glob over .hivemind/facts' 'for facts_file in "$wt"/.hivemind/facts/facts-*.json; do' false false false
+    check17_expect_hit 'state.json in brood scope' 'ledger="$run_dir/state.json"' true false false
+    check17_expect_hit 'facts producer naming manifest.json' 'cat "$canon_root/manifest.json"' false true false
+    check17_expect_hit 'pin text outside the pin file' "$first_pin" true false false
+
+    check17_expect_miss 'comment' '# reads "$root/.hivemind/broods/$id/manifest.json" through the reader' true false false
+    check17_expect_miss 'indented comment' '    # state.json lives under .hivemind/runs/<run-id>' true false false
+    check17_expect_miss 'manifest reader call' 'manifest_json="$(hivemind_brood_read_manifest "$checkout_root" "$brood_id")"' true false false
+    check17_expect_miss 'ledger reader call' 'hivemind_brood_read_child_ledger "$wt" "$run_id"' true false false
+    check17_expect_miss 'state.json outside brood scope' 'ledger="$repo_root/.hivemind/runs/$run_id/state.json"' false false false
+    check17_expect_miss 'facts producer naming .hivemind/facts' 'facts_dir="$canon_root/.hivemind/facts"' false true false
+
+    check17_expect_scope 'brood skill directory' 0 'plugin/skills/brood-status/scripts/x.sh' /dev/null
+    check17_expect_scope 'sources ledger-project.sh' 0 'plugin/skills/x/scripts/x.sh' <(printf '%s\n' '. "$plugin_root/skills/_shared/ledger-project.sh" || blocker "x"')
+    check17_expect_scope 'commented source line' 1 'plugin/skills/x/scripts/x.sh' <(printf '%s\n' '# . "$plugin_root/skills/_shared/brood-state.sh"')
+
+    check17_expect_pin_problems 'every pin present once' 0 <(printf '%s\n' "${CHECK17_PIN_LINES[@]}")
+    check17_expect_miss 'pinned line' "$first_pin" true false true
+    check17_expect_pin_problems 'one pin missing' 1 <(printf '%s\n' "${CHECK17_PIN_LINES[@]:1}")
+    check17_expect_pin_problems 'one pin duplicated' 1 <(printf '%s\n' "${CHECK17_PIN_LINES[@]}" "$first_pin")
+    check17_expect_hit 'duplicated pin exempts nothing' "$first_pin" true false true
+    check17_evaluate_pins "$REPO_ROOT/tests/policy/fixtures/check17-no-such-file" || unread_rc=$?
+    if [[ "$unread_rc" -ne 1 ]]; then
+        check17_canary_finding "an unreadable pin file returned ${unread_rc}, expected 1 -- the pin check no longer fails closed"
+    fi
+    return 0
+}
+
+check17_run_detection_canary
+
+if [[ "$check17_found" == false ]]; then
+    echo "[PASS] Check 17: All ${CHECK17_SCRIPTS_SCANNED} skill scripts name brood-state locations only through ${CHECK17_READER_FILE} (${#CHECK17_PIN_LINES[@]} spawn-brood writer and record lines pinned)"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'CHECK17'
 
 # ── SAFETY REGRESSION TESTS ────────────────────────────────────────────────
 
