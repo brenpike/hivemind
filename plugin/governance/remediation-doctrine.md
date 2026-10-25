@@ -1,6 +1,6 @@
 # Remediation Doctrine
 
-Shared vocabulary and policy for root-cause review remediation. Loaded by the `github-reviewer` and `local-reviewer` agents, the overlord, and the cerebrate so all four reason about review loops with one vocabulary. This doc is definitional and policy only: it carries no detection algorithm and no case studies. The detection mechanics live in the `hivemind:detect-remediation-signals` skill; few-shot exemplars ship in that skill's `references/`.
+Shared vocabulary and policy for root-cause review remediation, and the one home for these rules on both engines, per ADR-0038. Loaded by the `github-reviewer` and `local-reviewer` agents, the overlord, and the cerebrate so all four reason about review loops with one vocabulary; **Engine Consumers** names every consumer by role. This doc is definitional and policy only: it carries no detection algorithm and no case studies. The detection mechanics live in the `hivemind:detect-remediation-signals` skill; few-shot exemplars ship in that skill's `references/`.
 
 When any rule uses a term defined here, this definition is binding.
 
@@ -17,6 +17,17 @@ The cluster threshold N is tuned by severity per **Severity as Sensitivity Modif
 Before committing to any one-off fix, ask: would the next reviewer comment be this same shape with a different byte, field, or path? If yes, the root is unfixed — escalate to a structural fix rather than patch the instance.
 
 The same-framing test is applied per-candidate during classification. A "yes" answer is a primary input to **Root-Cluster** detection: it converts a lone finding into evidence that a class, not an instance, is at fault.
+
+## First-Finding Triage
+
+At the FIRST non-trivial finding, before any fix is planned or applied, answer the four questions below. Triage is keyed on the first finding, never on a finding count: a root cause found once is found.
+
+1. **Introduced or inherited.** Was the behavior introduced by this branch or inherited from trunk? Either way, a found root cause is fixed at its source in the PR that found it, even when that source lies outside the reviewed diff. Origin never licenses a deferral or a residual.
+2. **Root class and owning layer.** What is the root class, and which layer owns it? The fix lands in that layer, not at the symptom.
+3. **Remove before harden.** Can the surface be removed or retired instead of hardened? Removal is preferred: a removed surface emits no further findings.
+4. **Threat model.** Is the attacker or failure the finding assumes inside the recorded threat model? When a recorded threat model puts it outside, reject the finding at the source by citing the record, and do not harden. When no threat model is recorded, recording one is an architectural call for the user.
+
+The answers feed **Closed-by-Construction Preference** and **Surface-Growth Escalation**. A finding rejected under question 4 is handled per **Recorded Decisions and Repeat Findings**.
 
 ## Closed-by-Construction Preference
 
@@ -48,15 +59,23 @@ The two training shapes, generically:
 
 This gate refines the ordered preferences above: a preference is only satisfied when the chosen fix passes this test. A reject-enumeration that grows one entry per finding fails it; a positive allowlist or a real parser that makes the malformed class unrepresentable passes it.
 
+## Surface-Growth Escalation
+
+A fix that adds more surface than it removes is not applied. Count, by judgment, the new files, code paths, checks, state and lines the fix adds against those it removes. When the fix grows the surface, ask the user one architectural call instead: a one-line ask, options that include removing the surface and recording the threat model, and a recommendation. The call rides the engine's existing user-question path.
+
 ## Bounded-Impact Gating
 
-Assess the actual blast radius of a finding independent of the reviewer's severity badge: is it informational-only? does it touch only already-validated enum/charset surfaces? does the attacker already control the input? The assessed impact — not the badge — informs the fix-now vs defer vs accept decision. A badge is an input to this assessment, never a substitute for it.
+Assess the actual blast radius of a finding independent of the reviewer's severity badge: is it informational-only? does it touch only already-validated enum/charset surfaces? does the attacker already control the input? The assessed impact — not the badge — informs the fix-now vs defer vs accept decision for a finding that is not a found root cause. A badge is an input to this assessment, never a substitute for it.
+
+Impact never defers a found root cause. A found root cause is fixed at its source per **First-Finding Triage**, whatever its assessed impact.
 
 ## Defer-with-Scope
 
+Defer-with-Scope applies only to findings that are not a found root cause: for example, the edge-case and wording tail after the diminishing-returns exit. A found root cause, introduced or inherited, is fixed at its source per **First-Finding Triage** and is never deferred.
+
 A finding is never silently dropped. Every actionable finding left unfixed in the current loop MUST carry full root-cause scope, its linked threads, and a bounded-impact note (per **Bounded-Impact Gating**). That obligation is common to BOTH permitted destinations; what differs is WHERE the record lives.
 
-- **Tracked issue.** File or defer to a tracked issue when the finding is WORK someone should do: it is newly introduced by the change under review, or its remediation is genuinely wanted but out of scope for this loop, or it belongs to the same family as an already-tracked structural change. Default to an EXISTING tracked home; create a NEW issue only when no existing home fits.
+- **Tracked issue.** File or defer to a tracked issue when the finding is WORK someone should do: its remediation is genuinely wanted but out of scope for this loop, or it belongs to the same family as an already-tracked structural change. Default to an EXISTING tracked home; create a NEW issue only when no existing home fits.
 - **Recorded residual.** Record the decision in the repository per **Recorded Residual** below.
 
 The discriminating test: an issue asserts that SOMEONE WILL ACT; a recorded residual asserts that WE DECIDED, AND HERE IS WHY. Filing a decision as an issue is a category error — it inflates the backlog and buries the reasoning away from the code it concerns.
@@ -69,15 +88,30 @@ The actor that leaves a finding unfixed OWNS its destination: the issue filed or
 
 ### Recorded Residual
 
-When — and only when — the behavior is INHERITED rather than introduced by the change under review, AND its impact is BOUNDED and understood, AND the obvious remediation was CONSIDERED AND REJECTED ON THE MERITS, the finding is left unfixed as a recorded residual: write the reasoning into the repository adjacent to the code it concerns — the project's durable design record (an architecture-decision record wherever the project keeps them), or a code comment where a full record would be disproportionate — carrying the root cause, the bounded impact, and why the obvious remediation was rejected, and open NO tracker entry.
+A found, fixable root cause, introduced or inherited, is never recorded in place of a fix. A residual is admissible only on one of two grounds:
 
-All three conditions are CONJUNCTIVE; any one alone is not enough. "Inherited" on its own is a universal escape hatch that launders real work into a silent drop.
+- **Outside the threat model.** The attacker or failure the finding assumes is outside the recorded threat model, per **Recorded Decisions and Repeat Findings**.
+- **Unclosable on this engine.** No fix on this engine can close the class, and the user decided so.
+
+Origin is not a ground. "Inherited" is a universal escape hatch that launders real work into a silent drop.
+
+On either ground, the finding is left unfixed as a recorded residual: write the reasoning into the repository adjacent to the code it concerns — the project's durable design record (an architecture-decision record wherever the project keeps them), or a code comment where a full record would be disproportionate — carrying the root cause, the bounded impact, and the ground with its citation, and open NO tracker entry.
 
 A recorded residual is NOT a silent drop. The scope requirement is IDENTICAL to a deferral — full root-cause scope, linked threads, bounded-impact note — only the destination differs. Recording is PREFERRED over filing when the finding is a decision rather than work.
 
 Name the destination by ROLE, never by a presumed path: wherever this project keeps its durable design records. Where the project keeps none, or where a full record would be disproportionate to the finding, a code comment adjacent to the behavior is the FLOOR. Recording nothing is never a permitted destination.
 
-Recording is NOT one-way. A recorded residual whose reasoning is later invalidated — the impact turns out to be unbounded, or the behavior turns out to have been introduced by the change after all — is PROMOTED to a filed issue carrying the same scope.
+Recording is NOT one-way. A recorded residual whose reasoning is later invalidated — the impact turns out to be unbounded, the attacker or failure turns out to be inside the recorded threat model, or a fix on this engine turns out to close the class — is PROMOTED to a filed issue carrying the same scope.
+
+## Recorded Decisions and Repeat Findings
+
+A user's rejection of a finding and a threat model are DECISIONS. Each is recorded at its source in the project's durable design record — named by role: wherever this project keeps its durable design records — on the branch or on trunk.
+
+The key is the recorded decision, never a finding id or a question. A finding id is derived from the finding's file, lines and title, so it changes from run to run, and a question lives for one run only. Neither survives to the next review, so neither can carry a decision.
+
+A later finding that contests a recorded decision is a REPEAT. The reviewer rejects it by citing the record, lists it for the user before the PR, does not fix it, and never asks again. A finding that shows a failure the record does not cover is NEW, and gets **First-Finding Triage**.
+
+When the user rejects a finding, the next plan records that decision at its source, so the next review reads the record instead of asking again.
 
 ## Stop-and-Merge
 
@@ -92,7 +126,7 @@ The stop signal is NOT round count. Chasing zero-findings-per-push on a complex 
 
 ## Severity as Sensitivity Modifier
 
-Severity does NOT by itself trigger zoom-out. A lone high-severity finding is patched or escalated as usual; a review that finds a real high-severity issue is the process WORKING, not a signal to cluster. There is NO standalone P0/P1 zoom-out gate: a cross-cutting single fix already routes through planner-escalation, and whack-a-mole is detected by recurrence, not by severity.
+Severity does NOT by itself trigger zoom-out or a cluster. Every non-trivial finding, whatever its severity, gets **First-Finding Triage** before any fix. A lone high-severity finding is then fixed or escalated per that triage; a review that finds a real high-severity issue is the process WORKING, not a signal to cluster. There is NO standalone P0/P1 zoom-out gate: a cross-cutting single fix already routes through planner-escalation, and whack-a-mole is detected by recurrence, not by severity.
 
 Severity only TUNES the **Root-Cluster** threshold N:
 
@@ -107,17 +141,14 @@ A second root-cluster signal, ORTHOGONAL to the within-pass fix-framing + line-o
 
 This is a NEW CLUSTERING AXIS THAT TUNES N — the same shape as **Severity as Sensitivity Modifier**, which tunes N by severity. It is NOT a standalone trigger; it sets the threshold at which **Root-Cluster** trips for a qualifying surface. Two gates must both hold:
 
-- **Gate A — recurrence.** One surface (the same file or component) absorbs findings across **two or more DISTINCT loop iterations**, even when the line ranges are disjoint AND the fix-framings differ. Within-pass framing/line matching is NOT required for this gate; cross-iteration re-emission on the same surface is the whole signal.
+- **Gate A — recurrence.** One surface (the same file or component) absorbs findings across **two DISTINCT loop iterations with a fix between them**, even when the line ranges are disjoint AND the fix-framings differ. Within-pass framing/line matching is NOT required for this gate; cross-iteration re-emission on the same surface is the whole signal.
 - **Gate B — youth (HARD REQUIREMENT, AND'd with Gate A).** The surface was INTRODUCED or HEAVILY MODIFIED in THIS SAME PR or initiative. A young surface that keeps emitting findings is a design smell: code just written should not need repeated reviewer correction. Mature or legacy surfaces NEVER trip cross-iteration recurrence — they route to the existing **Stop-and-Merge** bounded-tail → merge-advisory path instead.
 
-Threshold N for this axis:
-
-- **N=2** when the recurring findings on the young surface touch a SHARED data-access / query / parse / serialization PRIMITIVE — a semantic/primitive clustering axis: the same underlying primitive is being patched at the edges across iterations.
-- **N=3** otherwise.
+Threshold N for this axis is **N=2**: the first re-emission on a young surface after a fix on it trips the axis. This axis has no N=3 default. When the recurring findings touch a SHARED data-access / query / parse / serialization PRIMITIVE — the same underlying primitive patched at the edges across iterations — that sharing is part of the cluster's same-framing rationale, not a separate threshold.
 
 Distinction from the within-pass axis (do not conflate): the "just-touched / same-framing surface" qualifier in **Severity as Sensitivity Modifier** is a WITHIN-PASS modifier scoped to a single classification pass. THIS axis is ACROSS-ITERATION — it spans the loop's distinct iterations — and is additive to and distinct from the within-pass modifier. A surface can be quiet within every individual pass and still trip this axis by re-emitting across iterations.
 
-Multiple roots per surface: the recurrence counter PERSISTS across structural fixes. Closing the FIRST root with an accepted structural fix does NOT reset the counter. A surface that has already yielded one root is held to a LOWER threshold for the next — having needed a structural fix once is evidence the surface is structurally hot, so the next recurrence trips sooner.
+Multiple roots per surface: the recurrence counter PERSISTS across structural fixes. Closing the FIRST root with an accepted structural fix does NOT reset the counter: the next fresh finding on that surface is a re-emission after a fix and trips this axis. Having needed a structural fix once is evidence the surface is structurally hot.
 
 ## Bounded-Tail vs Recurring-Class Disambiguation
 
@@ -175,15 +206,15 @@ authority for the exact block keys and inner field names is the
 
 The per-surface recurrence counter that drives **Cross-Iteration Same-Surface Recurrence** is RECONSTRUCTED each loop from GitHub ground truth — there is NO persisted local recurrence file. GitHub IS the ledger, consistent with the stateless github-reviewer that reconstructs its fix-ledger from ground truth rather than persisting one. The COUNTING UNIT is the distinct structural-remediation EVENT (a single accepted structural fix — one remediation commit / resolved-thread-citing-a-structural-fix on that surface), NOT the (fix, finding) pair. A structural-remediation event counts as ONE non-closing structural fix when it is followed by ONE OR MORE fresh findings on that same surface; multiple later findings attributable to the SAME single fix event are deduplicated to that one event before the threshold is applied. N fresh comments on a surface after ONE structural fix is ONE non-closing structural fix, not N. The count for a surface is reconstructed as: the number of DISTINCT structural-remediation events on that surface that each have at least one subsequent same-surface finding after the event.
 
-Forced zoom-out after the second non-closing structural fix: when a surface has absorbed TWO non-closing structural fixes — two accepted structural remediations each followed by a fresh finding on the same surface — the overlord forces an APPROACH-LEVEL zoom-out. That zoom-out questions the KEY or PRIMITIVE per the **Closed-by-Construction Acceptance Test**; it does NOT dispatch another conjunct-completion patch. A second structural fix that did not close the class is itself evidence the fixes are aiming at the wrong primitive.
+**Forced zoom-out after the first non-closing structural fix.** When a surface has absorbed ONE non-closing structural fix — one accepted structural remediation followed by a fresh finding on the same surface — the overlord forces an APPROACH-LEVEL zoom-out. That zoom-out reruns **First-Finding Triage** at the approach level and questions the KEY or PRIMITIVE per the **Closed-by-Construction Acceptance Test**; it does NOT dispatch another conjunct-completion patch. A structural fix that did not close the class is itself evidence the fix is aiming at the wrong primitive. On the script engine the trigger is a local review that sends the run back to planning after a remediation pass already ran.
 
-The counter PERSISTS across structural fixes (per **Cross-Iteration Same-Surface Recurrence**): a surface that already yielded one root is held to the lower threshold for the next, so the second non-closing fix is the trip point, not the start of a fresh count.
+The counter PERSISTS across structural fixes (per **Cross-Iteration Same-Surface Recurrence**): a surface that already yielded one root is held to the same trip point for the next, so the first non-closing fix after any accepted structural fix is the trip point, not the start of a fresh count.
 
 Zoom-out routing asymmetry: the user-only architecture zoom-out skill carries `disable-model-invocation: true`, so the overlord cannot invoke it directly. The overlord therefore routes an architectural zoom-out THROUGH the cerebrate, via the existing `review_remediation_plan` / `review_remediation_plan_postpr` remediation state (the same path a `root-cluster-suspected` exit_reason already takes to reach a structural fix). This is the intended path, not a workaround: cerebrate is the architectural-reasoning surface the overlord delegates to, and the disable-model-invocation constraint on the user-only skill is the reason the route goes via the remediation state rather than a direct skill call.
 
 ### Proactive Zoom-Out Ledger Marker
 
-When the overlord's reconstructed PROACTIVE same-surface recurrence counter trips — the second non-closing structural fix per **Forced zoom-out after the second non-closing structural fix** above, the EXISTING proactive trigger — the overlord records a NAMED overlord-judgment marker into the run ledger so the proactive origin of the resulting `root-cluster-suspected` transition is DISTINGUISHABLE from a reviewer-RETURNED `root-cluster-suspected`. Both origins reach the SAME remediation state (`review_remediation_plan` / `review_remediation_plan_postpr`) via the SAME `root-cluster-suspected` exit_reason described in the asymmetry paragraph above; without this marker the two are indistinguishable in the ledger.
+When the overlord's reconstructed PROACTIVE same-surface recurrence counter trips — the first non-closing structural fix per **Forced zoom-out after the first non-closing structural fix** above, the EXISTING proactive trigger — the overlord records a NAMED overlord-judgment marker into the run ledger so the proactive origin of the resulting `root-cluster-suspected` transition is DISTINGUISHABLE from a reviewer-RETURNED `root-cluster-suspected`. Both origins reach the SAME remediation state (`review_remediation_plan` / `review_remediation_plan_postpr`) via the SAME `root-cluster-suspected` exit_reason described in the asymmetry paragraph above; without this marker the two are indistinguishable in the ledger.
 
 The marker is a single key in the transition's `event.outputs` object. This subsection is the SINGLE SOURCE for its name and semantics; `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` and `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md` reference it BY NAME and never restate the mechanics.
 
@@ -192,7 +223,7 @@ The marker is a single key in the transition's `event.outputs` object. This subs
 - A reviewer-RETURNED cluster OMITS the key (or may carry the explicit value `"reviewer"`).
 - Absence semantics: an ABSENT `recurrence_origin` key ⇒ reviewer-returned / non-proactive. Consumers MUST treat absent as non-proactive and MUST NOT infer proactive origin from anything other than an explicit `"proactive"` value.
 
-This is RECORDED JUDGMENT, not new determinism. The judgment — whether the surface has absorbed two non-closing structural fixes — stays judgment per ADR-0025; the marker only makes the judgment's ORIGIN observable after the fact. It is recorded via the NORMAL `hivemind:record-state-result` `outputs` path on the already-wired `root-cluster-suspected` transition. Explicitly: it introduces NO new workflow state, NO workflow-graph change, and is NOT routed through `hivemind:mark-intent-fallback`. `mark-intent-fallback`'s sanctioned-write pattern — a judgment-origin event made observable in the ledger — is cited here as ANALOGY ONLY; its bypass engine is NOT reused, and `recurrence_origin` rides the standard `outputs` write, not any fallback path.
+This is RECORDED JUDGMENT, not new determinism. The judgment — whether the surface has absorbed one non-closing structural fix — stays judgment per ADR-0025; the marker only makes the judgment's ORIGIN observable after the fact. It is recorded via the NORMAL `hivemind:record-state-result` `outputs` path on the already-wired `root-cluster-suspected` transition. Explicitly: it introduces NO new workflow state, NO workflow-graph change, and is NOT routed through `hivemind:mark-intent-fallback`. `mark-intent-fallback`'s sanctioned-write pattern — a judgment-origin event made observable in the ledger — is cited here as ANALOGY ONLY; its bypass engine is NOT reused, and `recurrence_origin` rides the standard `outputs` write, not any fallback path.
 
 Producer-state-AGNOSTIC: the marker rides whichever producer-state result carries the `root-cluster-suspected` exit_reason — `github_review_loop`, `github_reviewer_fix`, or the post-PR mirror that targets `review_remediation_plan_postpr` — and is NOT pinned to one state. The marker lives STRICTLY in `event.outputs` and MUST NOT collide with `plan_steps` or any `plan.*` field; it is an origin annotation, not plan content.
 
@@ -248,6 +279,16 @@ The skeleton is a lossless set of deterministic facts. The interpretation overla
 label, iteration grouping, `fix_framing`, `root_class`) is agent judgment supplied on top
 before the detector call. This section is the single source of these criteria; neither
 github-reviewer step 5 nor step 9 restates them — both reference this section by name.
+
+## Engine Consumers
+
+These rules have one home, this doc, on both engines. Each consumer below references these sections by name and restates none:
+
+- **local-reviewer** — applies **First-Finding Triage**, **Recorded Decisions and Repeat Findings** and **Surface-Growth Escalation** to each local review pass.
+- **github-reviewer** — applies the same sections to each PR review pass.
+- **cerebrate** — applies them when planning a remediation, including script-engine replans that carry a review block.
+- **the overlord on the state machine** — applies them when routing review remediation, including the forced zoom-out in **Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry**.
+- **the standard-delivery script's review handling** — sends a review back to planning and lists repeat rejections per **Recorded Decisions and Repeat Findings**.
 
 ## Relationship to Existing Detectors
 
