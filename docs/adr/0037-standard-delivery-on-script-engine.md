@@ -580,3 +580,27 @@ Links: https://github.com/brenpike/hivemind/issues/453, https://github.com/brenp
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/453, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-25: a review answer needs no fingerprint of its question (local review finding abe9ef8c)
+
+**The finding.** Local review finding abe9ef8c, severity high, titled "Local-review answer binding ignores changed finding content", said the local reviewer matches `user_answer` to an open finding only by `finding_id` or `title` (`plugin/agents/local-reviewer.md`, The Loop step 1). If the body, recommendation or severity of a finding changed while its id or title stayed the same, an old reply could settle a version of the finding the user never saw. It recommended a persisted fingerprint of every field the question showed, checked on resume, with the answer dropped on any mismatch.
+
+**Decided 2026-10-25, user call: option A, rejected.** Keep the binding by `finding_id` or `title`, with no fingerprint of the question. This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings" (ADR-0038 decision 4). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons (the threat model).**
+
+- One writer. Between a review question and its answer, only the loop that asked writes the fix ledger at `.hivemind/review-loop/fix-ledger.yaml`. That loop writes the ledger before it returns the question, and the next write is by the same loop when the answer comes back to it.
+- No review pass in between. The answer goes back to the local reviewer. On the script engine the reply reruns the review gate with `user_answer` (`runGates` and `runReviewGate` in `plugin/workflow-src/standard-delivery/main.js`). On the state machine the `question` gate runs `local_review` again with `user_answer`. The Loop step 1 applies the reply before step 2, so no new review pass can change a finding before the answer is applied.
+- The id fixes what the question showed. A `finding_id` is the SHA-256 of the finding's file, lines and title (`plugin/skills/adaptation-cycle/SKILL.md`, step 8). The asking exit copied the ledger entry for that id into the question, and no one else writes the ledger, so the body, recommendation, severity and open findings the question showed are the values the ledger holds for that id at step 1.
+- A fingerprint guards only a case this threat model excludes. It adds a stored digest, a comparison on resume and a path that asks again, and it removes nothing (doctrine "## Surface-Growth Escalation"). It names no class it eliminates inside the threat model, so it fails "### Closed-by-Construction Acceptance Test".
+
+**Scope.** A finding is a REPEAT of this decision when it asks the local reviewer to bind `user_answer` to a fingerprint, digest or full copy of the fields the question showed, or flags that a changed body, recommendation, severity or open findings list behind the same `finding_id` or `title` could take an old reply. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a second writer of the fix ledger between a question and its answer, for example a concurrent review loop in the same checkout;
+- a review pass that runs before the answer is applied.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/453, `docs/adr/0038-root-cause-at-the-first-finding.md`.
