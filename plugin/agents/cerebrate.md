@@ -167,7 +167,10 @@ plan:
     problem: ""
     change: ""
   remediation_gate:
-    architectural: false
+    promotion_gate:         # Promotion Gate clauses, read against accepting the plan
+      irreversible: false
+      architectural: false
+      safety: false
     grows_surface: false
     repeats_surface: false
   branch: ""
@@ -275,11 +278,13 @@ CONTENT must establish:
   not plan it as settled: raise it as a question brief (on the state machine, an open
   question) per the doctrine's `## Surface-Growth Escalation`.
 - the `remediation_gate` flags of the `plan:` block, set as
-  `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json` describes them: `architectural`,
-  `grows_surface` and `repeats_surface` each true only while its condition holds and no
-  reply in this run has accepted it. A flag that is set makes the run ask the user before
-  the plan runs; with every flag false the plan is decided and listed at the default
-  autonomy level.
+  `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json` describes them: `promotion_gate`
+  holds `irreversible`, `architectural` and `safety`, the three clauses of the Promotion
+  Gate in `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md`, each read against
+  accepting the plan; `grows_surface` and `repeats_surface` sit beside it. Each flag is
+  true only while its condition holds and no reply in this run has accepted it. A flag
+  that is set makes the run ask the user before the plan runs; with every flag false the
+  plan is decided and listed at the default autonomy level.
 - a RECORDED DECISION — when the request or the user's reply answers a review question by
   rejecting a finding, the plan records that decision at its source, per the doctrine's
   `## Recorded Decisions and Repeat Findings`.

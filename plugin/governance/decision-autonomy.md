@@ -61,13 +61,13 @@ Otherwise the gate is CLEAN and the Tier-B decision is auto-taken per the 2x2. T
 
 **Remediation plan acceptance (stated once; every other doc refers here).** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is a contained action with a clean gate, auto-taken per **Tier B**. Accepting the remediation plan cerebrate returns is a separate decision. It surfaces to the user ONLY when the plan's `remediation_gate` (per `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks ANY of:
 
-- the plan is architectural — gate clause 2 above;
+- the Promotion Gate above trips on accepting the plan, by any clause, as `remediation_gate.promotion_gate` records;
 - the plan adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Surface-Growth Escalation`);
 - the plan follows a fix on the same surface that did not close its class, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry`).
 
 Any other remediation plan is auto-taken. On the workflow state machine the overlord journals it `did-now` and records the transition into the implement step. On the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it, and the run lists the decision in its final message and the PR body. The **Tier A** safety rails still hold for every step of an auto-taken plan.
 
-When a flag is set on the state machine, the overlord, by judgment, pauses its continuous-execution loop and surfaces the plan to the user before recording the transition that advances into implementation. This surface is the overlord's judgment-based obligation, the same trust model as every other surface in this doc (judgment + journal, ADR-0006 intent-based governance) — NOT a claim that the workflow definition enforces an approval gate: the workflow definition routes the plan-review outcome straight into the implement step with no `user_gate`.
+When any flag is set on the state machine, the overlord, by judgment, pauses its continuous-execution loop and surfaces the plan to the user before recording the transition that advances into implementation. This surface is the overlord's judgment-based obligation, the same trust model as every other surface in this doc (judgment + journal, ADR-0006 intent-based governance) — NOT a claim that the workflow definition enforces an approval gate: the workflow definition routes the plan-review outcome straight into the implement step with no `user_gate`.
 
 ## Disposition Vocabulary
 
