@@ -246,10 +246,11 @@
  *   so every planner call follows the facts of its own pass (ADR-0037
  *   invariant 3). Once local review sent the run back to planning, every
  *   later plan acceptance resolves through decide() kind
- *   remediation_plan_acceptance. Its brief sets gate.architectural when
- *   any flag of plan.remediation_gate is true, and its problem names each
- *   flag that holds, so it asks then and is taken otherwise at the
- *   default level (decision-autonomy.md, Promotion Gate).
+ *   remediation_plan_acceptance. Its brief gate is
+ *   plan.remediation_gate.promotion_gate copied whole, with architectural
+ *   also true when grows_surface or repeats_surface is, and its problem
+ *   names each flag that holds, so it asks then and is taken otherwise at
+ *   the default level (decision-autonomy.md, Promotion Gate).
  *   Every step that can change files ends with the commit runner, whatever
  *   the workers returned (ADR-0037 invariant 1, decision 12). Workers never
  *   commit.
@@ -1265,9 +1266,11 @@ function buildPlanDetailBlock(plan) {
 
 function remediationGateTexts() {
   return {
+    irreversible: 'cannot be undone',
     architectural: 'changes how the system is built',
+    safety: 'touches a safety check',
     grows_surface: 'adds more surface than it removes',
-    repeats_surface: 'follows a fix on the same surface that did not close its class'
+    repeats_surface: 'repeats a fix that did not close its class'
   };
 }
 
@@ -1289,13 +1292,17 @@ function buildPlanAcceptanceBrief(plan) {
 }
 
 function buildRemediationPlanBrief(plan) {
+  const remediationGate = plan.remediation_gate;
+  const flags = { ...remediationGate.promotion_gate, grows_surface: remediationGate.grows_surface, repeats_surface: remediationGate.repeats_surface };
   const texts = remediationGateTexts();
-  const flagTexts = Object.keys(texts).filter((flag) => plan.remediation_gate[flag]).map((flag) => texts[flag]);
-  const lead = 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again.';
-  return Object.assign(buildPlanAcceptanceBrief(plan), {
+  const flagTexts = Object.keys(texts).filter((flag) => flags[flag]).map((flag) => texts[flag]);
+  const lead = 'Run the remediation plan for the local review findings on the working branch, then every gate again.';
+  const brief = buildPlanAcceptanceBrief(plan);
+  return Object.assign(brief, {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
     problem: flagTexts.length === 0 ? lead : lead + ' I am asking because the plan ' + joinNames(flagTexts, 'and') + '.',
-    gate: { irreversible: false, architectural: flagTexts.length > 0, safety: false }
+    recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' },
+    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface || flags.repeats_surface }
   });
 }
 
@@ -2402,7 +2409,7 @@ function buildReviewEscalationBrief(review) {
       : 'Local review escalated finding ' + quoteReviewValue(review, 'finding_id') + ' to the planner. Go back to planning, from fresh facts, for its remediation?',
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
-    why: 'The finding needs more than a simple fix, and the remediation plan comes to you before any step of it runs.',
+    why: 'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.',
     evidence: 'local review exit reason ' + review.exit_reason
   });
 }

@@ -132,7 +132,7 @@ function makePlan(changes = {}) {
   return {
     summary: 'Add the cache layer.',
     digest: { problem: 'Reads hit the database every time.', change: 'Add a cache layer in front of the reads.' },
-    remediation_gate: { architectural: false, grows_surface: false, repeats_surface: false },
+    remediation_gate: { promotion_gate: { irreversible: false, architectural: false, safety: false }, grows_surface: false, repeats_surface: false },
     branch: 'feature/cache',
     base: 'main',
     trunk_freshness: 'fresh',
@@ -742,7 +742,8 @@ const FOURTH = '5'.repeat(40);
 const ESCALATION = { ...REVIEW_CLEAN, exit_reason: 'planner-escalation', findings_open: 1, finding_id: 'F5', classification: 'architecture', file: 'src/cache.js', title: 'The cache layer skips the "auth" check.' };
 const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.' };
 const DIMINISHING = { ...REVIEW_CLEAN, exit_reason: 'diminishing-returns', findings_open: 2, signals_observed: ['severity-decay'], latest_severity_max: 'low', recommendation_text: 'Stop here; the rest is style.' };
-const ARCHITECTURAL_GATE = { architectural: true, grows_surface: false, repeats_surface: false };
+const ARCHITECTURAL_GATE = { promotion_gate: { irreversible: false, architectural: true, safety: false }, grows_surface: false, repeats_surface: false };
+const FULL_GATE = { promotion_gate: { irreversible: true, architectural: true, safety: true }, grows_surface: true, repeats_surface: true };
 const REMEDIATION_PLAN = makePlan({ summary: 'Route the cache through the auth check.', remediation_gate: ARCHITECTURAL_GATE, steps: [makeStep('STEP-002', ['src/auth.js'])] });
 const CLEAN_REMEDIATION_PLAN = { ...REMEDIATION_PLAN, remediation_gate: makePlan().remediation_gate };
 
@@ -3332,9 +3333,12 @@ const ROW_TESTS = {
     });
   },
   'SD-40': () => {
-    const GATE_FLAGS = ['architectural', 'grows_surface', 'repeats_surface'];
+    const GATE_FLAGS = { irreversible: 'gate_irreversible', architectural: 'gate_architectural', safety: 'gate_safety', grows_surface: 'gate_architectural', repeats_surface: 'gate_architectural' };
     const CLEAN_GATE = makePlan().remediation_gate;
     function gateWith(flag) {
+      if (Object.prototype.hasOwnProperty.call(CLEAN_GATE.promotion_gate, flag)) {
+        return { ...CLEAN_GATE, promotion_gate: { ...CLEAN_GATE.promotion_gate, [flag]: true } };
+      }
       return { ...CLEAN_GATE, [flag]: true };
     }
     test('a remediation plan with a clean gate is taken at the default level and listed, with no pause', async () => {
@@ -3342,20 +3346,20 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
       const remediationBrief = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
-      assert.equal(remediationBrief.problem, 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again.');
+      assert.equal(remediationBrief.problem, 'Run the remediation plan for the local review findings on the working branch, then every gate again.');
       const taken = [{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, { brief: main.buildReviewEscalationBrief(ESCALATION) }, { brief: remediationBrief }];
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact(taken)), run.result.message);
     });
-    for (const flag of GATE_FLAGS) {
-      test(`a remediation plan whose gate sets ${flag} asks once, through the pause and revise path, and the run goes on once replied to`, async () => {
+    for (const [flag, reason] of Object.entries(GATE_FLAGS)) {
+      test(`a remediation plan whose gate sets ${flag} asks once with ${reason}, through the pause and revise path, and the run goes on once replied to`, async () => {
         const plan = { ...REMEDIATION_PLAN, remediation_gate: gateWith(flag) };
         const results = remediationResults(ESCALATION, { 'plan-2': planResult(plan), 'revise-1': reviseResult(planResult(plan), ['Q1']) });
         const paused = await runWorkflow(LAUNCH, results);
         assert.equal(paused.result.needs_user, true);
         assert.deepEqual(paused.result.resume_args, { answers: {} });
         const message = paused.result.message;
-        assert.ok(message.includes('Q1. Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again. I am asking because the plan ' + main.remediationGateTexts()[flag] + '.**'), message);
-        assert.ok(message.includes('Why I am asking: ' + lib.askReasonLine('gate_architectural')), message);
+        assert.ok(message.includes('Q1. Run the remediation plan for the local review findings on the working branch, then every gate again. I am asking because the plan ' + main.remediationGateTexts()[flag] + '.**'), message);
+        assert.ok(message.includes('Why I am asking: ' + lib.askReasonLine(reason)), message);
         assert.ok(message.includes('\n\n' + main.buildPlanDetailBlock(plan).text), message);
         assert.ok(!message.includes(plan.summary) && !message.includes('per-agent results'), message);
         const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, run it.'), results);
@@ -3367,10 +3371,15 @@ const ROW_TESTS = {
         assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact(taken)), run.result.message);
       });
     }
-    test('a remediation plan whose gate sets every flag names each in its problem', () => {
-      const plan = { ...REMEDIATION_PLAN, remediation_gate: { architectural: true, grows_surface: true, repeats_surface: true } };
+    test('a remediation plan whose gate sets every flag names each in its problem, within the problem bound', () => {
+      const plan = { ...REMEDIATION_PLAN, remediation_gate: FULL_GATE };
       const texts = main.remediationGateTexts();
-      assert.ok(main.buildRemediationPlanBrief(plan).problem.endsWith(' I am asking because the plan ' + texts.architectural + ', ' + texts.grows_surface + ' and ' + texts.repeats_surface + '.'));
+      assert.deepEqual(Object.keys(texts), Object.keys(GATE_FLAGS));
+      const brief = main.buildRemediationPlanBrief(plan);
+      assert.ok(brief.problem.endsWith(' I am asking because the plan ' + texts.irreversible + ', ' + texts.architectural + ', ' + texts.safety + ', ' + texts.grows_surface + ' and ' + texts.repeats_surface + '.'), brief.problem);
+      assert.ok(Array.from(brief.problem).length <= 300, String(Array.from(brief.problem).length));
+      assert.deepEqual({ ...brief.gate }, { irreversible: true, architectural: true, safety: true });
+      assert.ok(!/working branch/.test(brief.recommendation.why), brief.recommendation.why);
     });
     test('an accepted remediation plan whose revise rewrites the summary runs its steps with no re-ask', async () => {
       const rewritten = planResult({ ...REMEDIATION_PLAN, summary: REMEDIATION_PLAN.summary + ' The user accepted this plan.' });
@@ -3390,11 +3399,12 @@ const ROW_TESTS = {
       const clean = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
       assert.equal(clean.kind, 'remediation_plan_acceptance');
       assert.deepEqual({ ...clean.gate }, { irreversible: false, architectural: false, safety: false });
-      for (const flag of GATE_FLAGS) {
+      for (const [flag, reason] of Object.entries(GATE_FLAGS)) {
         const flagged = main.buildRemediationPlanBrief({ ...REMEDIATION_PLAN, remediation_gate: gateWith(flag) });
-        assert.deepEqual({ ...flagged.gate }, { irreversible: false, architectural: true, safety: false }, flag);
+        const expectedGate = { irreversible: flag === 'irreversible', architectural: reason === 'gate_architectural', safety: flag === 'safety' };
+        assert.deepEqual({ ...flagged.gate }, expectedGate, flag);
         for (const level of autonomyTable.levels) {
-          const expected = level === 'low' ? { action: 'ask', reason: 'table_surface' } : { action: 'ask', reason: 'gate_architectural' };
+          const expected = level === 'low' ? { action: 'ask', reason: 'table_surface' } : { action: 'ask', reason: reason };
           assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: level, brief: flagged }, autonomyTable, briefSchema) }, expected, flag + ' ' + level);
         }
       }
@@ -3423,7 +3433,7 @@ const ROW_TESTS = {
       const run = await runWorkflow({ ...LAUNCH, answers: { 'round-1': 'Yes, run it.' } }, results);
       assert.equal(run.result.needs_user, true);
       assert.deepEqual(labelsOf(run).slice(-2), ['facts-3', 'plan-3']);
-      assert.ok(run.result.message.includes('Q1. Start delivering the remediation plan for the local review findings'), run.result.message);
+      assert.ok(run.result.message.includes('Q1. Run the remediation plan for the local review findings'), run.result.message);
     });
   },
   'SD-41': () => {
@@ -4676,7 +4686,7 @@ const ROW_TESTS = {
       const paused = await runWorkflow(LAUNCH, maxResults(), buildWithSurfaceKinds(['plan_acceptance']));
       assert.equal(paused.result.needs_user, true);
       assertBounded(paused);
-      const flagged = { ...maxPlan, remediation_gate: { architectural: true, grows_surface: true, repeats_surface: true } };
+      const flagged = { ...maxPlan, remediation_gate: FULL_GATE };
       const remediation = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-1': planResult(maxPlan), 'work-1-STEP-001': undefined, [workLabel]: workerDone, 'plan-2': planResult(flagged) }));
       assert.equal(remediation.result.needs_user, true);
       assertBounded(remediation);
@@ -4723,7 +4733,7 @@ const ROW_TESTS = {
     });
     test('every code-built brief fits the brief schema with worst-case inputs', () => {
       const astralId = '\u{1F600}'.repeat(64);
-      const worstPlan = { ...maxPlan, remediation_gate: { architectural: true, grows_surface: true, repeats_surface: true } };
+      const worstPlan = { ...maxPlan, remediation_gate: FULL_GATE };
       const hugeCount = '9'.repeat(400);
       const worstFacts = parsedFacts({ trunk_freshness: 'diverged', trunk_ahead: hugeCount, trunk_behind: hugeCount });
       const longText = '\u{1F600}'.repeat(5000);

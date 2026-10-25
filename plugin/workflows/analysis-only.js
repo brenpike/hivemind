@@ -140,7 +140,7 @@ const AUTONOMY_TABLE = {
     "review_remediation_plan_postpr.multi",
     "standard-delivery.plan"
    ],
-   "when": "A planner returns a remediation plan for review findings and the overlord decides whether to accept it and implement. The decision is asked when any flag of plan.remediation_gate is true, since the gate then trips as architectural, and taken otherwise."
+   "when": "A planner returns a remediation plan for review findings and the overlord decides whether to accept it and implement. The decision is asked when any flag of plan.remediation_gate is true: the Promotion Gate trips on accepting the plan, by any clause, as plan.remediation_gate.promotion_gate records, or the plan grows the surface, or it repeats a surface whose earlier fix did not close its class. It is taken otherwise."
   },
   {
    "kind": "diminishing_returns_exit",
@@ -555,15 +555,35 @@ const PLAN_SCHEMA = {
    "type": "object",
    "additionalProperties": false,
    "required": [
-    "architectural",
+    "promotion_gate",
     "grows_surface",
     "repeats_surface"
    ],
-   "description": "Whether accepting a plan that remediates review findings goes to the user, per the remediation plan rule of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate). Each flag is true only for a plan that remediates review findings, and only while no reply in this run has accepted that condition. Every flag is false for any other plan.",
+   "description": "Whether accepting a plan that remediates review findings goes to the user, per the remediation plan rule of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate). Each flag, and each flag of promotion_gate, is true only for a plan that remediates review findings, and only while no reply in this run has accepted that condition. Every flag is false for any other plan.",
    "properties": {
-    "architectural": {
-     "type": "boolean",
-     "description": "True when the remediation is architectural, clause 2 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+    "promotion_gate": {
+     "type": "object",
+     "additionalProperties": false,
+     "required": [
+      "irreversible",
+      "architectural",
+      "safety"
+     ],
+     "description": "The whole Promotion Gate of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md, read against accepting the remediation plan. Its keys, required list and types are those of the gate of a decision brief in ${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json.",
+     "properties": {
+      "irreversible": {
+       "type": "boolean",
+       "description": "True when accepting the remediation plan is irreversible, clause 1 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+      },
+      "architectural": {
+       "type": "boolean",
+       "description": "True when accepting the remediation plan has architectural blast radius, clause 2 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+      },
+      "safety": {
+       "type": "boolean",
+       "description": "True when accepting the remediation plan is safety-relevant, clause 3 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md, which names the categories by reference to the Destructive Fix Gate."
+      }
+     }
     },
     "grows_surface": {
      "type": "boolean",
