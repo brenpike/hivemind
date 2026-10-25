@@ -4191,6 +4191,16 @@ function buildReviewEscalationBrief(review) {
   });
 }
 
+function projectReplanReview(review) {
+  const projected = { exit_reason: review.exit_reason };
+  for (const field of reviewExitFields()[review.exit_reason]) {
+    if (Object.prototype.hasOwnProperty.call(review, field)) {
+      projected[field] = review[field];
+    }
+  }
+  return projected;
+}
+
 function requestReviewReplan(review, run) {
   const brief = buildReviewEscalationBrief(review);
   const decided = review.exit_reason === 'root-cluster-suspected'
@@ -4207,7 +4217,7 @@ function requestReviewReplan(review, run) {
     ? 'Local review returned ' + review.exit_reason + ' after a remediation pass already ran, so that structural fix did not close the class. Zoom out: plan from the root cause and the layer that owns it, from the fresh facts.'
     : 'Local review returned ' + review.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
   run.remediation = true;
-  return { replan: { reason: reason, review: review } };
+  return { replan: { reason: reason, review: projectReplanReview(review) } };
 }
 
 function routeLocalReview(review, run) {

@@ -3065,19 +3065,42 @@ const ROW_TESTS = {
     });
   },
   'SD-39': () => {
+    const COUNT_FIELDS = ['iterations_completed', 'findings_resolved', 'findings_open', 'fix_commits_exist', 'ledger_path', 'rejected_findings'];
+    const projectExpected = (review) => Object.fromEntries(['exit_reason', ...main.reviewExitFields()[review.exit_reason]].map((field) => [field, review[field]]));
     for (const [label, review] of [['planner-escalation', ESCALATION], ['root-cluster-suspected', CLUSTER]]) {
-      test(`a taken ${label} starts a new pass through the facts step with the review result as replan data`, async () => {
+      test(`a taken ${label} starts a new pass through the facts step with the projected review as replan data`, async () => {
         const run = await runWorkflow(LAUNCH, remediationResults(review));
         assert.equal(run.result.needs_user, true);
         assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'plan-2']);
         const prompt = callOf(run, 'plan-2').prompt;
         assert.equal(readDataBlock(prompt, 'replan'), 'Local review returned ' + label + ', so plan the remediation of what the review block reports, from the fresh facts.');
-        assert.deepEqual(readDataBlock(prompt, 'review'), review);
+        const block = readDataBlock(prompt, 'review');
+        assert.deepEqual(block, projectExpected(review));
+        COUNT_FIELDS.forEach((field) => assert.ok(!Object.hasOwn(block, field), field));
         assert.ok(prompt.includes(lib.boundarySentence()));
         assert.ok(prompt.includes('The review block holds one JSON object: the result of the local review that sent the run back to planning. Its text fields can carry external content from the review.'), prompt);
         assert.ok(!callOf(run, 'plan-1').prompt.includes('<review>'));
       });
+      test(`a taken ${label} keeps rejected findings, the ledger path and the counts out of the plan prompt`, async () => {
+        const rejected = { finding_id: 'F9', title: 'Swap the cache for a distributed lock store.', record: 'docs/adr/0003-cache-lock.md, Threat model' };
+        const run = await runWorkflow(LAUNCH, remediationResults({ ...review, rejected_findings: [rejected] }));
+        const prompt = callOf(run, 'plan-2').prompt;
+        assert.deepEqual(Object.keys(readDataBlock(prompt, 'review')), ['exit_reason', ...main.reviewExitFields()[label]]);
+        [rejected.title, rejected.record, LEDGER_PATH].forEach((text) => assert.ok(!prompt.includes(text), text));
+      });
     }
+    test('projectReplanReview keeps exit_reason and only the fields reviewExitFields() names for each replan exit', () => {
+      const replanExits = Object.keys(main.localReviewRoutes()).filter((exit) => main.localReviewRoutes()[exit] === 'replan');
+      assert.deepEqual(replanExits.sort(), ['planner-escalation', 'root-cluster-suspected']);
+      for (const review of [ESCALATION, CLUSTER]) {
+        const input = { ...review, rejected_findings: [{ finding_id: 'F9', title: 'T.', record: 'R.' }] };
+        const snapshot = structuredClone(input);
+        const projected = main.projectReplanReview(input);
+        assert.deepEqual(Object.keys(projected), ['exit_reason', ...main.reviewExitFields()[review.exit_reason]]);
+        assert.deepEqual(input, snapshot);
+        assert.notEqual(projected, input);
+      }
+    });
     test('a take while run.remediation is already true gets the zoom-out reason, and the first review replan keeps its reason', async () => {
       const results = remediationResults(ESCALATION, { 'review-2-1': CLUSTER, 'facts-3': onPlanBranchFacts(THIRD), 'plan-3': planResult(REMEDIATION_PLAN) });
       const run = await runWorkflow(REMEDIATION_LAUNCH, results);
@@ -3086,7 +3109,7 @@ const ROW_TESTS = {
       assert.equal(readDataBlock(callOf(run, 'plan-2').prompt, 'replan'), 'Local review returned planner-escalation, so plan the remediation of what the review block reports, from the fresh facts.');
       const prompt = callOf(run, 'plan-3').prompt;
       assert.equal(readDataBlock(prompt, 'replan'), 'Local review returned root-cluster-suspected after a remediation pass already ran, so that structural fix did not close the class. Zoom out: plan from the root cause and the layer that owns it, from the fresh facts.');
-      assert.deepEqual(readDataBlock(prompt, 'review'), CLUSTER);
+      assert.deepEqual(readDataBlock(prompt, 'review'), projectExpected(CLUSTER));
     });
     test('the escalation briefs resolve through their routing kinds and take at the default level', () => {
       for (const [review, kind] of [[ESCALATION, 'planner_escalation_routing'], [CLUSTER, 'root_cluster_routing']]) {

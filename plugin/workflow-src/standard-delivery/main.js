@@ -137,9 +137,12 @@
  *           localReviewRoutes() routes each exit_reason: clean holds,
  *           diminishing returns resolve through decide() and a take holds,
  *           a planner escalation or root cluster resolves through decide()
- *           and a take starts a new pass with the review result as replan
- *           data, a question of the review ends the run with it open, and
- *           every other exit_reason stops the run blocked. A take after a
+ *           and a take starts a new pass with replan data: the review
+ *           projected to its exit_reason and the fields reviewExitFields()
+ *           names for it, so rejected_findings, open_findings, ledger_path
+ *           and the counts never reach the planner. A question of the review
+ *           ends the run with it open, and every other exit_reason stops
+ *           the run blocked. A take after a
  *           remediation pass already ran is the first non-closing
  *           structural fix, so its replan reason names the zoom-out of
  *           remediation-doctrine.md: plan from the root cause and the layer
@@ -2224,6 +2227,20 @@ function buildReviewEscalationBrief(review) {
   });
 }
 
+/**
+ * Returns a new object holding the review's exit_reason, then each field
+ * reviewExitFields() names for it that the review has, in that order.
+ */
+function projectReplanReview(review) {
+  const projected = { exit_reason: review.exit_reason };
+  for (const field of reviewExitFields()[review.exit_reason]) {
+    if (Object.prototype.hasOwnProperty.call(review, field)) {
+      projected[field] = review[field];
+    }
+  }
+  return projected;
+}
+
 function requestReviewReplan(review, run) {
   const brief = buildReviewEscalationBrief(review);
   const decided = review.exit_reason === 'root-cluster-suspected'
@@ -2240,7 +2257,7 @@ function requestReviewReplan(review, run) {
     ? 'Local review returned ' + review.exit_reason + ' after a remediation pass already ran, so that structural fix did not close the class. Zoom out: plan from the root cause and the layer that owns it, from the fresh facts.'
     : 'Local review returned ' + review.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
   run.remediation = true;
-  return { replan: { reason: reason, review: review } };
+  return { replan: { reason: reason, review: projectReplanReview(review) } };
 }
 
 function routeLocalReview(review, run) {
