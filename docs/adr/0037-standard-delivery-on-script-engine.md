@@ -555,3 +555,28 @@ It updates these places in place, each with a dated note:
 `docs/adr/0038-root-cause-at-the-first-finding.md` gains matching notes on decision 4, the Q1 C option and the consequence on the first rejection. The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/453, https://github.com/brenpike/hivemind/issues/434, https://github.com/brenpike/hivemind/issues/441, https://github.com/brenpike/hivemind/issues/444, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-25: no cumulative pause cap for delivery runs (local review finding 2884d256)
+
+**The finding.** Local review finding 2884d256, severity high, titled "Standard-delivery no longer has a finite pause/resume bound", said the issue 453 change removed the `canPause` and `pauseLimit` guard from standard-delivery. A planner that keeps returning a changed or unsettled question then makes the loop call `pauseDelivery` again with no ceiling. It recommended a fixed, persisted cumulative pause ceiling.
+
+**Decided 2026-10-25, user call: option A, rejected.** Keep the issue 453 design with no cumulative pause cap for standard-delivery. This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings" (ADR-0038 decision 4). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons (the threat model).**
+
+- Every new pause needs a user reply. `takeNextReply` returns the stored reply for an answered round, or the one pending reply once. A new round with no reply pauses again through `pauseDelivery`. No agent can resume a run. Only the user's reply does. So a planner that keeps asking cannot loop on its own: each round waits for the user.
+- Replies are finite. `canCarry` in `plugin/workflow-src/lib/result.js` limits `resume_args` to half of the 8000 character notice budget. After a finite number of replies the run ends blocked with stop reason `reply_size`. That byte budget is the final bound.
+- A tail-ask replan that does not count against `maxReplans()` always follows a user reply. A replan with no reply (`needs_replan`, a branch switch, a taken review escalation) still counts against `maxReplans()`.
+- A round-count cap would reverse issue 453. Whether a run pauses or ends would again depend on a count, not on whether a question is open. It would also add surface and name no class it eliminates, so it fails "### Closed-by-Construction Acceptance Test" (doctrine "## Surface-Growth Escalation").
+
+**Scope.** A finding is a REPEAT of this decision when it asks standard-delivery for a cap on the number of pauses, rounds or user-answered replans, or flags that no such cap exists. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a path where a pause or a replan proceeds with no new user reply;
+- a resume path that bypasses `canCarry`;
+- a replan with no user reply that does not count against `maxReplans()`.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/453, `docs/adr/0038-root-cause-at-the-first-finding.md`.
