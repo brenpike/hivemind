@@ -447,3 +447,242 @@ describe('the decision brief schema', () => {
     ]);
   });
 });
+
+const OUTCOME_VALUES = ['complete', 'blocked', 'needs_replan'];
+
+function makeTaggedSpec(overrides = {}) {
+  return {
+    tag: 'outcome',
+    properties: {
+      outcome: { type: 'string', enum: OUTCOME_VALUES.slice() },
+      summary: { type: 'string', description: 'What changed.' },
+      plan: { type: 'object', description: 'The plan.', properties: { steps: { type: 'array', items: { type: 'string' } } } },
+      blocker: { type: 'string', description: 'Why it stopped.' },
+      next_action: { type: 'string', enum: ['fix_cause', 'run_again'] },
+      note: { type: 'string', description: 'A note.' }
+    },
+    required: ['outcome', 'summary'],
+    variants: {
+      needs_replan: { required: [], optional: ['note', 'blocker'] },
+      blocked: { required: ['blocker'], optional: ['next_action', 'note', 'summary'] },
+      complete: { required: ['plan'], optional: ['note'] }
+    },
+    ...overrides
+  };
+}
+
+function buildTagged(spec) {
+  return structuredClone(lib.buildTaggedSchema(spec));
+}
+
+function collectAnyOfPaths(schema, path, paths) {
+  if (schema.anyOf !== undefined) {
+    paths.push(path);
+    schema.anyOf.forEach((branch, index) => collectAnyOfPaths(branch, path + '.anyOf[' + index + ']', paths));
+  }
+  for (const [name, child] of Object.entries(schema.properties || {})) {
+    collectAnyOfPaths(child, path + '.' + name, paths);
+  }
+  if (schema.items !== undefined) {
+    collectAnyOfPaths(schema.items, path + '[]', paths);
+  }
+  return paths;
+}
+
+describe('buildTaggedSchema', () => {
+  test('returns the flat object schema with one anyOf branch per tag value, in enum order', () => {
+    const schema = buildTagged(makeTaggedSpec());
+    assert.deepEqual(Object.keys(schema), ['type', 'additionalProperties', 'required', 'properties', 'anyOf']);
+    assert.equal(schema.type, 'object');
+    assert.equal(schema.additionalProperties, false);
+    assert.deepEqual(schema.required, ['outcome', 'summary']);
+    assert.deepEqual(Object.keys(schema.properties), ['outcome', 'summary', 'plan', 'blocker', 'next_action', 'note']);
+    assert.deepEqual(schema.anyOf.map((branch) => branch.properties.outcome), OUTCOME_VALUES.map((value) => ({ enum: [value] })));
+  });
+  test('every branch is an allowlist of the tag, every shared field and the fields of its value', () => {
+    const schema = buildTagged(makeTaggedSpec());
+    const expected = {
+      complete: { fields: ['outcome', 'summary', 'plan', 'note'], required: ['plan'] },
+      blocked: { fields: ['outcome', 'summary', 'blocker', 'next_action', 'note'], required: ['blocker'] },
+      needs_replan: { fields: ['outcome', 'summary', 'blocker', 'note'], required: [] }
+    };
+    OUTCOME_VALUES.forEach((value, index) => {
+      const branch = schema.anyOf[index];
+      assert.deepEqual(Object.keys(branch).sort(), ['additionalProperties', 'properties', 'required'], value);
+      assert.equal(branch.additionalProperties, false, value);
+      assert.deepEqual(branch.required, expected[value].required, value);
+      assert.deepEqual(Object.keys(branch.properties), expected[value].fields, value);
+      for (const name of expected[value].fields.slice(1)) {
+        assert.deepEqual(branch.properties[name], {}, value + ' ' + name);
+      }
+    });
+  });
+  test('accepts a value of each tag value with its own fields', () => {
+    const schema = lib.buildTaggedSchema(makeTaggedSpec());
+    const goods = [
+      { outcome: 'complete', summary: 'S', plan: { steps: ['a'] } },
+      { outcome: 'complete', summary: 'S', plan: {}, note: 'N' },
+      { outcome: 'blocked', summary: 'S', blocker: 'B', next_action: 'run_again' },
+      { outcome: 'needs_replan', summary: 'S' },
+      { outcome: 'needs_replan', summary: 'S', blocker: 'B', note: 'N' }
+    ];
+    for (const good of goods) {
+      assert.deepEqual(validate(schema, good), { ok: true, errors: [] }, JSON.stringify(good));
+    }
+  });
+  test('a field from another tag value fails with exactly one anyOf error', () => {
+    const schema = lib.buildTaggedSchema(makeTaggedSpec());
+    const bads = [
+      { outcome: 'complete', summary: 'S', plan: {}, blocker: 'B' },
+      { outcome: 'needs_replan', summary: 'S', next_action: 'fix_cause' },
+      { outcome: 'blocked', summary: 'S', blocker: 'B', plan: {} }
+    ];
+    for (const bad of bads) {
+      assert.deepEqual(validate(schema, bad), { ok: false, errors: ['$: anyOf: matches no branch'] }, JSON.stringify(bad));
+    }
+  });
+  test('a missing variant-required field fails', () => {
+    const schema = lib.buildTaggedSchema(makeTaggedSpec());
+    assert.deepEqual(validate(schema, { outcome: 'complete', summary: 'S' }).errors, ['$: anyOf: matches no branch']);
+    assert.deepEqual(validate(schema, { outcome: 'blocked', summary: 'S' }).errors, ['$: anyOf: matches no branch']);
+  });
+  test('a missing shared field and a field schema violation still report at their paths', () => {
+    const schema = lib.buildTaggedSchema(makeTaggedSpec());
+    assert.deepEqual(validate(schema, { outcome: 'needs_replan' }).errors, ['$: required: missing summary']);
+    assert.deepEqual(validate(schema, { outcome: 'blocked', summary: 'S', blocker: 'B', next_action: 'later' }).errors, [
+      '$.next_action: enum: not one of fix_cause, run_again'
+    ]);
+  });
+  test('each field that is not shared gets its Only with sentence, values in enum order', () => {
+    const properties = buildTagged(makeTaggedSpec()).properties;
+    assert.equal(properties.plan.description, 'The plan. Only with outcome complete.');
+    assert.equal(properties.blocker.description, 'Why it stopped. Only with outcome blocked or needs_replan.');
+    assert.equal(properties.note.description, 'A note. Only with outcome complete, blocked or needs_replan.');
+  });
+  test('a field with no description gets the sentence alone', () => {
+    assert.equal(buildTagged(makeTaggedSpec()).properties.next_action.description, 'Only with outcome blocked.');
+  });
+  test('shared fields get no sentence, even when a variant names them', () => {
+    const properties = buildTagged(makeTaggedSpec()).properties;
+    assert.equal(properties.summary.description, 'What changed.');
+    assert.equal(properties.outcome.description, undefined);
+  });
+  test('every other keyword of a field is kept and the spec is not changed', () => {
+    const spec = makeTaggedSpec();
+    const before = structuredClone(spec);
+    const schema = buildTagged(spec);
+    assert.deepEqual(spec, before);
+    const { description: _planDescription, ...planRest } = schema.properties.plan;
+    const { description: _specDescription, ...specPlanRest } = before.properties.plan;
+    assert.deepEqual(planRest, specPlanRest);
+    assert.deepEqual(schema.properties.outcome, before.properties.outcome);
+  });
+  test('the output passes the validateSchema keyword walk', () => {
+    const schema = lib.buildTaggedSchema(makeTaggedSpec());
+    assert.doesNotThrow(() => lib.validateSchema(schema, {}));
+    const supported = [...lib.supportedSchemaKeywords()];
+    const used = [...collectKeywords(schema, new Set())];
+    schema.anyOf.forEach((branch) => collectKeywords(branch, new Set(used)).forEach((keyword) => used.push(keyword)));
+    assert.deepEqual(used.filter((keyword) => !supported.includes(keyword)), []);
+  });
+  test('throws when a tag value has no variant', () => {
+    const variants = { blocked: { required: [], optional: ['blocker', 'next_action', 'note'] }, complete: { required: ['plan'], optional: [] } };
+    assert.throws(() => lib.buildTaggedSchema(makeTaggedSpec({ variants })), (error) => error.message === 'buildTaggedSchema: tag value needs_replan has no variant');
+  });
+  test('throws when a variant names a field that is not in properties', () => {
+    const spec = makeTaggedSpec();
+    spec.variants.complete.optional.push('extra');
+    const isUnknownField = (error) => error.message === 'buildTaggedSchema: variant complete names field extra, which is not in properties';
+    assert.throws(() => lib.buildTaggedSchema(spec), isUnknownField);
+  });
+  test('throws when a field that is not shared is listed by no variant', () => {
+    const spec = makeTaggedSpec();
+    spec.properties.orphan = { type: 'string' };
+    const isOrphan = (error) => error.message === 'buildTaggedSchema: field orphan is not shared and no variant lists it';
+    assert.throws(() => lib.buildTaggedSchema(spec), isOrphan);
+  });
+  test('throws when a variant is not a tag value', () => {
+    const spec = makeTaggedSpec();
+    spec.variants.skipped = { required: [], optional: [] };
+    assert.throws(() => lib.buildTaggedSchema(spec), (error) => error.message === 'buildTaggedSchema: variant skipped is not a value of tag outcome');
+  });
+  test('throws when the tag is not a required property with an enum', () => {
+    assert.throws(() => lib.buildTaggedSchema(makeTaggedSpec({ required: ['summary'] })), /^Error: buildTaggedSchema: tag outcome must be required$/);
+    assert.throws(() => lib.buildTaggedSchema(makeTaggedSpec({ tag: 'kind' })), /^Error: buildTaggedSchema: tag kind must be a property/);
+  });
+});
+
+describe('toAgentSchema', () => {
+  const nested = structuredClone({
+    type: 'object',
+    additionalProperties: false,
+    required: ['results'],
+    anyOf: [{ required: ['results'] }],
+    properties: {
+      results: {
+        type: 'array',
+        minItems: 1,
+        description: 'The results.',
+        items: lib.buildTaggedSchema(makeTaggedSpec())
+      },
+      either: { anyOf: [{ type: 'string' }, { type: 'null' }], description: 'Either.' }
+    }
+  });
+  test('removes every anyOf at any depth', () => {
+    assert.ok(collectAnyOfPaths(nested, '$', []).length > 2);
+    assert.deepEqual(collectAnyOfPaths(lib.toAgentSchema(nested), '$', []), []);
+  });
+  test('keeps every other keyword', () => {
+    const flat = structuredClone(lib.toAgentSchema(nested));
+    const { anyOf: _items, ...itemsRest } = structuredClone(nested.properties.results.items);
+    assert.deepEqual(flat, {
+      type: 'object',
+      additionalProperties: false,
+      required: ['results'],
+      properties: {
+        results: { type: 'array', minItems: 1, description: 'The results.', items: itemsRest },
+        either: { description: 'Either.' }
+      }
+    });
+  });
+  test('never changes its input and returns a copy', () => {
+    const input = structuredClone(nested);
+    const flat = lib.toAgentSchema(input);
+    assert.deepEqual(input, nested);
+    flat.properties.results.items.required.push('changed');
+    assert.deepEqual(input, nested);
+  });
+  test('the agent copy passes the validateSchema keyword walk', () => {
+    assert.doesNotThrow(() => lib.validateSchema(lib.toAgentSchema(nested), {}));
+  });
+});
+
+describe('the scan step schema', () => {
+  const libDir = repoRoot + 'plugin/workflow-src/lib/';
+  const factsLib = loadLibs(['schema.js', 'result.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js'].map((name) => libDir + name));
+  const facts = { facts_file: '.hivemind/facts/facts-20261021T101500Z-0123456789ab.json', facts_lines: '9', external_texts: '1' };
+  const unusable = 'The injection scan returned a result it could not use, so the delivery stopped before planning.';
+  test('ties each suspect field to verdict injection-suspect', () => {
+    const items = structuredClone(factsLib.scanStepSchema().properties.results.items);
+    assert.deepEqual(items.required, ['item_ref', 'verdict']);
+    assert.deepEqual(items.anyOf.map((branch) => Object.keys(branch.properties)), [
+      ['item_ref', 'verdict'],
+      ['item_ref', 'verdict', 'pattern_category', 'field_excerpt', 'reason']
+    ]);
+    assert.equal(items.properties.pattern_category.description, 'Only with verdict injection-suspect.');
+    assert.equal(items.properties.field_excerpt.description, 'The first 200 characters of the flagged text. Only with verdict injection-suspect.');
+    assert.equal(items.properties.reason.description, 'The pattern matched. Only with verdict injection-suspect.');
+  });
+  test('the scan agent gets the flat copy', () => {
+    const options = structuredClone(factsLib.scanOptions());
+    assert.deepEqual(options.schema, structuredClone(factsLib.toAgentSchema(factsLib.scanStepSchema())));
+    assert.deepEqual(collectAnyOfPaths(options.schema, '$', []), []);
+  });
+  test('a clean result that carries a suspect field is a result the scan could not use', () => {
+    for (const field of [{ pattern_category: 'P1' }, { field_excerpt: 'x' }, { reason: 'r' }]) {
+      const scan = { results: [{ item_ref: 't1', verdict: 'clean', ...field }] };
+      assert.equal(factsLib.describeScanProblem(scan, facts, 'delivery'), unusable, JSON.stringify(field));
+    }
+    assert.equal(factsLib.describeScanProblem({ results: [{ item_ref: 't1', verdict: 'clean' }] }, facts, 'delivery'), undefined);
+  });
+});

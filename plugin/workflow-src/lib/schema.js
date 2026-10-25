@@ -1,6 +1,8 @@
 /*
  * schema.js: checks a value against the JSON Schema subset the plugin's
- * schemas use, such as the decision brief schema.
+ * schemas use, such as the decision brief schema, builds a step result
+ * schema whose fields depend on one tag field, and makes the agent copy of
+ * a schema.
  *
  * Inputs
  *   validateSchema(schema, value)
@@ -8,6 +10,18 @@
  *     value   any value, such as a decision brief from the model.
  *   supportedSchemaKeywords()
  *     no input.
+ *   buildTaggedSchema(spec)
+ *     spec  {tag, properties, required, variants}, the one table of a
+ *           result whose fields depend on one tag field.
+ *       tag         the name of the tag field.
+ *       properties  every field with its full schema, the tag included
+ *                   with its enum.
+ *       required    the fields every outcome carries, the tag included.
+ *                   These are the shared fields.
+ *       variants    one entry per tag enum value, {required, optional}:
+ *                   the fields only that value carries.
+ *   toAgentSchema(schema)
+ *     schema  a schema, such as one buildTaggedSchema built.
  *
  * Outputs
  *   validateSchema  {ok, errors}. errors lists one string per violation,
@@ -18,6 +32,27 @@
  *                   as is when it holds only letters, digits, _ and -, and
  *                   JSON-encoded otherwise.
  *   supportedSchemaKeywords  every keyword validateSchema accepts.
+ *   buildTaggedSchema  {type: 'object', additionalProperties: false,
+ *                   required, properties, anyOf}. anyOf holds one branch
+ *                   per tag value, in enum order. Each branch is an
+ *                   allowlist in the facts schema form: additionalProperties
+ *                   false, the tag as {enum: [value]}, every shared field
+ *                   and every field of that value as a {} placeholder, and
+ *                   required set to that value's required list. Each field
+ *                   that is not shared gets ' Only with <tag> <values>.'
+ *                   appended to its description, or that sentence alone
+ *                   when it has none. The values are the tag values that
+ *                   list the field, in enum order, joined as 'a or b' or
+ *                   'a, b or c'. A field that is shared and also named by
+ *                   a variant counts as shared and gets no sentence.
+ *                   Throws when the tag is not a required property with a
+ *                   non-empty enum, a shared field is not in properties, a
+ *                   variant is not a tag value, a tag value has no
+ *                   variant, a variant names a field not in properties, or
+ *                   a field that is not shared is listed by no variant.
+ *   toAgentSchema   a deep copy of schema with every anyOf removed, at any
+ *                   depth, and nothing else changed. schema is never
+ *                   changed.
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. The schema is a parameter.
@@ -59,6 +94,14 @@
  *   structured outputs docs list no numeric bound keyword such as minimum.
  *   A model-written count can then never be negative, as a model-written
  *   string can never be blank.
+ *   buildTaggedSchema puts the tie between an outcome and its fields in the
+ *   schema. A flat list of every outcome's fields kept that tie only in
+ *   description prose, so no check rejected a field from another outcome.
+ *   One table gives both the anyOf branches and the 'Only with' sentences,
+ *   so the two cannot drift apart.
+ *   toAgentSchema exists because the Messages API rejects a tool
+ *   input_schema with anyOf at its top level. So every agent gets the flat
+ *   copy and the script checks the full schema with validateSchema.
  */
 
 function supportedSchemaKeywords() {
@@ -266,4 +309,133 @@ function collectArrayErrors(schema, list, path, errors) {
   if (schema.items !== undefined) {
     list.forEach((item, index) => collectSchemaErrors(schema.items, item, path + '[' + index + ']', errors));
   }
+}
+
+function buildTaggedSchema(spec) {
+  const tagValues = readTagValues(spec);
+  assertTaggedSpec(spec, tagValues);
+  const properties = copySchemaValue(spec.properties);
+  for (const name of Object.keys(properties)) {
+    if (spec.required.indexOf(name) === -1) {
+      properties[name].description = describeTaggedField(properties[name].description, spec.tag, listTaggedValues(spec, tagValues, name));
+    }
+  }
+  return {
+    type: 'object',
+    additionalProperties: false,
+    required: spec.required.slice(),
+    properties: properties,
+    anyOf: tagValues.map((value) => buildTaggedBranch(spec, value))
+  };
+}
+
+function failTaggedSchema(message) {
+  throw new Error('buildTaggedSchema: ' + message);
+}
+
+function readTagValues(spec) {
+  if (!isSchemaRecord(spec) || !isSchemaRecord(spec.properties) || !Array.isArray(spec.required) || !isSchemaRecord(spec.variants)) {
+    failTaggedSchema('spec must hold tag, properties, required and variants');
+  }
+  const tagSchema = spec.properties[spec.tag];
+  if (!isSchemaRecord(tagSchema) || !Array.isArray(tagSchema.enum) || tagSchema.enum.length === 0) {
+    failTaggedSchema('tag ' + spec.tag + ' must be a property with a non-empty enum');
+  }
+  if (spec.required.indexOf(spec.tag) === -1) {
+    failTaggedSchema('tag ' + spec.tag + ' must be required');
+  }
+  return tagSchema.enum.slice();
+}
+
+function listVariantFields(variant) {
+  return variant.required.concat(variant.optional);
+}
+
+function assertTaggedSpec(spec, tagValues) {
+  const isKnownField = (name) => Object.prototype.hasOwnProperty.call(spec.properties, name);
+  for (const name of spec.required) {
+    if (!isKnownField(name)) {
+      failTaggedSchema('required field ' + name + ' is not in properties');
+    }
+  }
+  for (const value of Object.keys(spec.variants)) {
+    if (tagValues.indexOf(value) === -1) {
+      failTaggedSchema('variant ' + value + ' is not a value of tag ' + spec.tag);
+    }
+  }
+  for (const value of tagValues) {
+    assertTaggedVariant(spec, value, isKnownField);
+  }
+  for (const name of Object.keys(spec.properties)) {
+    if (spec.required.indexOf(name) === -1 && listTaggedValues(spec, tagValues, name).length === 0) {
+      failTaggedSchema('field ' + name + ' is not shared and no variant lists it');
+    }
+  }
+}
+
+function assertTaggedVariant(spec, value, isKnownField) {
+  const variant = spec.variants[value];
+  if (!Object.prototype.hasOwnProperty.call(spec.variants, value) || !isSchemaRecord(variant)) {
+    failTaggedSchema('tag value ' + value + ' has no variant');
+  }
+  if (!Array.isArray(variant.required) || !Array.isArray(variant.optional)) {
+    failTaggedSchema('variant ' + value + ' must hold required and optional lists');
+  }
+  for (const name of listVariantFields(variant)) {
+    if (!isKnownField(name)) {
+      failTaggedSchema('variant ' + value + ' names field ' + name + ', which is not in properties');
+    }
+  }
+}
+
+function listTaggedValues(spec, tagValues, name) {
+  return tagValues.filter((value) => listVariantFields(spec.variants[value]).indexOf(name) !== -1);
+}
+
+function joinTagValues(values) {
+  if (values.length < 3) {
+    return values.join(' or ');
+  }
+  return values.slice(0, -1).join(', ') + ' or ' + values[values.length - 1];
+}
+
+function describeTaggedField(description, tag, values) {
+  const sentence = 'Only with ' + tag + ' ' + joinTagValues(values) + '.';
+  return description === undefined ? sentence : description + ' ' + sentence;
+}
+
+function buildTaggedBranch(spec, value) {
+  const variant = spec.variants[value];
+  const variantFields = listVariantFields(variant);
+  const properties = {};
+  for (const name of Object.keys(spec.properties)) {
+    if (name === spec.tag) {
+      properties[name] = { enum: [value] };
+    } else if (spec.required.indexOf(name) !== -1 || variantFields.indexOf(name) !== -1) {
+      properties[name] = {};
+    }
+  }
+  return { additionalProperties: false, required: variant.required.slice(), properties: properties };
+}
+
+function copySchemaValue(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function toAgentSchema(schema) {
+  return removeSchemaAnyOf(copySchemaValue(schema));
+}
+
+function removeSchemaAnyOf(schema) {
+  if (!isSchemaRecord(schema)) {
+    return schema;
+  }
+  delete schema.anyOf;
+  if (isSchemaRecord(schema.properties)) {
+    Object.values(schema.properties).forEach(removeSchemaAnyOf);
+  }
+  if (schema.items !== undefined) {
+    removeSchemaAnyOf(schema.items);
+  }
+  return schema;
 }

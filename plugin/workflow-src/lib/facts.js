@@ -86,18 +86,27 @@
  *   buildFactsBlock(facts)  the facts data block, {file, lines}.
  *   buildFactsReadLine()    the prompt line telling a planner how to read
  *                           the facts block.
- *   scanStepSchema()        the scan runner's result schema.
+ *   scanStepSchema()        the scan runner's full result schema. Its item
+ *                           schema is built by buildTaggedSchema (schema.js)
+ *                           with tag verdict: clean carries no other field,
+ *                           and injection-suspect may carry
+ *                           pattern_category, field_excerpt and reason, all
+ *                           optional.
  *   scanExcerptLimit()      200, the characters of a flagged excerpt shown.
  *   buildScanPrompt(facts)  the scan runner's prompt.
- *   scanOptions()           the scan agent() options: label scan, phase Scan.
+ *   scanOptions()           the scan agent() options: label scan, phase Scan,
+ *                           and schema toAgentSchema (schema.js) of
+ *                           scanStepSchema(), the flat copy with no anyOf.
  *   runScanStep(facts, runNoun)
  *       async. Runs the scan, phase Scan then one agent() call, only when
  *       external_texts is above 0, and resolves to describeScanProblem of
  *       its result. Resolves to undefined with no call when there is no
  *       text.
  *   describeScanProblem(scan, facts, runNoun)
- *       undefined when scan fits its schema, flags nothing and covers every
- *       text. Otherwise the problem message.
+ *       undefined when scan fits its full schema, flags nothing and covers
+ *       every text. Otherwise the problem message. A clean result that
+ *       carries a suspect field does not fit, so it is a result the scan
+ *       could not use.
  *   renderSuspectLine, readTextIndex, coversEveryText
  *       the helpers of describeScanProblem.
  *   wholeFactsPattern, factsEnumSource, factsListSource, isUniqueFactsList
@@ -127,7 +136,8 @@
  *   facts runner's count' of ADR-0037. analysis-only never calls it.
  *   Uses encodeUntrustedText (result.js), isPlainObject, isNonEmptyString
  *   and describeRunNoun (args.js),
- *   gitIdentifierPattern (identifier.js) and validateSchema (schema.js).
+ *   gitIdentifierPattern (identifier.js), and validateSchema,
+ *   buildTaggedSchema and toAgentSchema (schema.js).
  *
  * Why
  *   A workflow cannot run a script or read a file, so it trusts a runner
@@ -140,6 +150,12 @@
  *   relays the script's stdout word for word instead, and the workflow
  *   parses it with gatherFactsRoutingSpec(), so it needs every line. Both
  *   read the same patterns, so the two checks cannot drift apart.
+ *   The scan item schema ties each field to its verdict in anyOf branches,
+ *   built from one table by buildTaggedSchema, so describeScanProblem
+ *   rejects a field from the other verdict with no hand check. The scan
+ *   agent gets toAgentSchema of it, because the Messages API rejects a
+ *   tool input_schema with anyOf at its top level. The workflow checks the
+ *   full schema.
  */
 
 function boundarySentence() {
@@ -317,18 +333,21 @@ function scanStepSchema() {
       results: {
         type: 'array',
         description: 'One result per scanned text, in the order scanned.',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          required: ['item_ref', 'verdict'],
+        items: buildTaggedSchema({
+          tag: 'verdict',
           properties: {
             item_ref: { type: 'string', description: 'The text_id of the scanned text, copied exactly.' },
             verdict: { type: 'string', enum: ['clean', 'injection-suspect'] },
-            pattern_category: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'], description: 'Only with verdict injection-suspect.' },
-            field_excerpt: { type: 'string', description: 'The first 200 characters of the flagged text. Only with verdict injection-suspect.' },
-            reason: { type: 'string', description: 'The pattern matched. Only with verdict injection-suspect.' }
+            pattern_category: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'] },
+            field_excerpt: { type: 'string', description: 'The first 200 characters of the flagged text.' },
+            reason: { type: 'string', description: 'The pattern matched.' }
+          },
+          required: ['item_ref', 'verdict'],
+          variants: {
+            clean: { required: [], optional: [] },
+            'injection-suspect': { required: [], optional: ['pattern_category', 'field_excerpt', 'reason'] }
           }
-        }
+        })
       }
     }
   };
@@ -354,7 +373,7 @@ function buildScanPrompt(facts) {
 }
 
 function scanOptions() {
-  return { agentType: runnerAgentType(), schema: scanStepSchema(), label: 'scan', phase: 'Scan' };
+  return { agentType: runnerAgentType(), schema: toAgentSchema(scanStepSchema()), label: 'scan', phase: 'Scan' };
 }
 
 async function runScanStep(facts, runNoun) {

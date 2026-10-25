@@ -138,3 +138,17 @@ This amendment changes Decision 14 in one place. The rest of ADR-0036 is unchang
 Links: https://github.com/brenpike/hivemind/issues/448, `docs/adr/0038-root-cause-at-the-first-finding.md`.
 
 Text: `plugin/workflow-src/lib/schema.js`.
+
+## Amendment 2026-10-25: tagged step results
+
+This amendment changes Decision 14 in one place. The rest of ADR-0036 is unchanged.
+
+- **Every step result schema whose fields depend on its outcome or `exit_reason` is built by `buildTaggedSchema`** in `plugin/workflow-src/lib/schema.js`. It takes one table per result. From that table it yields the `anyOf` allowlist branches, in the form the facts schema already uses, and the "Only with" field descriptions. The tie between an outcome and its fields then has one source, so it can no longer drift between prose and code.
+- **The validator enforces the tie.** It rejects a field that belongs to another outcome and a missing field the outcome requires. The per-consumer hand checks are gone.
+- **Agents get `toAgentSchema`.** It returns a copy of the schema with every `anyOf` removed, because the Messages API rejects a tool input schema with `anyOf` at its top level. The script checks the full schema. This narrows the 2026-10-21 amendment's line that a schema using `anyOf` can still be an agent output schema: that holds only for the schema the script checks, never for the copy sent to an agent. Agents see the same schemas as before.
+- **The checks are stricter.** A stray field from another outcome now blocks the step as malformed, where before it passed.
+- **Every other keyword still throws.** The validator supports only the keywords the schemas use, as Decision 14 says.
+
+Links: https://github.com/brenpike/hivemind/issues/448, local review finding a2822c10.
+
+Text: `plugin/workflow-src/lib/schema.js`, `plugin/workflow-src/lib/facts.js`, `plugin/workflow-src/standard-delivery/main.js`, `plugin/workflow-src/analysis-only/main.js`.

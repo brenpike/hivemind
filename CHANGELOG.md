@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - These rules have one home, `plugin/governance/remediation-doctrine.md`, on both engines. The local reviewer, the GitHub reviewer, cerebrate, the overlord and the standard-delivery script cite it and copy none of it. The state-machine definitions are unchanged (#448).
 - On the script engine, a local review that sends the run back to planning passes the planner only its escalation: the exit reason and that reason's fields. A finding rejected under a recorded decision no longer re-enters remediation planning (#448).
 - On the script engine, a local review result whose fields are present but empty, or whose counts are negative, now stops the run as malformed instead of reaching planning. The local reviewer no longer returns `member_count`, because the cluster's finding ids carry the count (#448).
+- On the script engine, a step result that carries a field of another outcome, or lacks a field its outcome needs, now stops the step as malformed instead of passing, in standard-delivery, analysis-only and the injection scan. Agents see the same schemas as before (#448).
 
 ## [7.1.0] - 2026-10-24
 
