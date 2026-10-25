@@ -3,10 +3,12 @@
 # Shared-library unit runner for the brood-status read-side projection (issue #161).
 #
 # PURE UNIT TESTS — CI-runnable with ONLY jq present (NO tmux / claude / gh). Exercises the
-# three sourced libraries the brood-status-project.sh entrypoint composes:
+# sourced libraries the brood-status-project.sh entrypoint composes:
 #   - plugin/skills/_shared/allowlist.sh      (identifier / path / presentation)
-#   - plugin/skills/_shared/manifest-json.sh  (hivemind_manifest_strain_names / _field)
-#   - plugin/skills/_shared/ledger-project.sh (hivemind_project_run_status / _state_current)
+#   - plugin/skills/_shared/manifest-json.sh  (content-snapshot shape / count / field_at)
+#   - plugin/skills/_shared/ledger-project.sh (hivemind_project_run_status_content / _state_current_content)
+#   - plugin/skills/_shared/brood-state.sh    (the only reader of brood state: listing, manifest,
+#                                              child ledger, facts evidence, facts guard)
 #
 # Each lib is SOURCED (these are sourced fragments, not executables) and its functions called
 # directly. Mirrors tools/test_brood_compat.sh's pass/fail counter + exit-nonzero-on-failure
@@ -35,6 +37,7 @@ FN_MALFORMED="$REPO_ROOT/tests/fetch-normalize/malformed.json"
 for required in "$LEDGER_PRESENT" \
                 "$SHARED_DIR/allowlist.sh" "$SHARED_DIR/manifest-json.sh" "$SHARED_DIR/ledger-project.sh" \
                 "$SHARED_DIR/brood-status-derive.sh" "$SHARED_DIR/containment.sh" \
+                "$SHARED_DIR/brood-state.sh" \
                 "$SHARED_DIR/ledger-reconstruct-parse.sh" "$SHARED_DIR/ledger-reconstruct-fold.sh" \
                 "$SHARED_DIR/fetch-normalize-core.sh" "$SHARED_DIR/ledger-engine-io.sh" \
                 "$SHARED_DIR/json-normalize.sh" \
@@ -60,6 +63,11 @@ command -v jq >/dev/null 2>&1 || { echo "FAIL: jq is required to run this suite"
 . "$SHARED_DIR/brood-status-derive.sh"
 # shellcheck source=/dev/null
 . "$SHARED_DIR/containment.sh"
+# brood-state.sh works through the containment.sh verified-handle helpers and projects child
+# ledgers with the ledger-project.sh content projectors; both are sourced above, satisfying its
+# caller contract before this source line.
+# shellcheck source=/dev/null
+. "$SHARED_DIR/brood-state.sh"
 # shellcheck source=/dev/null
 . "$SHARED_DIR/ledger-reconstruct-parse.sh"
 # shellcheck source=/dev/null
@@ -259,13 +267,14 @@ fi
 
 # ── Section 2: manifest-json.sh ─────────────────────────────────────────────────
 echo ''
-echo '=== manifest-json.sh: hivemind_manifest_strain_names / hivemind_manifest_field ==='
+echo '=== manifest-json.sh: content-snapshot field extraction ==='
 #
 # JSON manifests are built inline in WORKDIR so this section is self-contained (the shared
 # JSON manifest fixtures under tests/brood/ are owned by STEP-004). Each fixture mirrors the
 # shape spawn-brood.sh's jq emitter writes (manifest_version 3): a top-level object with a
 # `strains` array; each strain carries name/worktree_path/branch/tmux_session/status and a
-# nested `run` object.
+# nested `run` object. manifest-json.sh opens no file: every helper takes the content snapshot
+# hivemind_brood_read_manifest produces (Section 3d covers the reader itself).
 
 # v3 manifest with a single "api" strain carrying a full run block.
 MANIFEST_V3="$WORKDIR/manifest-v3.json"
@@ -290,57 +299,59 @@ jq -n '{
   ],
   merge_order: []
 }' > "$MANIFEST_V3"
+V3_CONTENT="$(cat "$MANIFEST_V3")"
 
-assert_eq "manifest:v3-names" "api" \
-  "$(hivemind_manifest_strain_names "$MANIFEST_V3")" "v3 strain names"
+assert_eq "manifest:v3-count" "1" \
+  "$(hivemind_manifest_strain_count_snapshot "$V3_CONTENT")" "v3 strain count"
 assert_eq "manifest:v3-worktree" "/repo/.claude/worktrees/api" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "api" "worktree_path")" "v3 worktree_path"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "worktree_path")" "v3 worktree_path"
 assert_eq "manifest:v3-branch" "feature/api-slice" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "api" "branch")" "v3 branch"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "branch")" "v3 branch"
 assert_eq "manifest:v3-tmux" "brood-api" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "api" "tmux_session")" "v3 tmux_session"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "tmux_session")" "v3 tmux_session"
 assert_eq "manifest:v3-status" "running" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "api" "status")" "v3 status"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "status")" "v3 status"
 assert_eq "manifest:v3-suggested-id" "2026-05-30T22-10-00Z--api" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "api" "run.suggested_id")" "v3 run.suggested_id"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "run.suggested_id")" "v3 run.suggested_id"
 assert_eq "manifest:v3-suggested-ledger" "/repo/.claude/worktrees/api/.hivemind/runs/2026-05-30T22-10-00Z--api/state.json" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "api" "run.suggested_ledger")" "v3 run.suggested_ledger"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "run.suggested_ledger")" "v3 run.suggested_ledger"
 assert_eq "manifest:v3-workflow-hint" "standard-delivery" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "api" "workflow_hint")" "v3 workflow_hint"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "workflow_hint")" "v3 workflow_hint"
 
 # run.* prefix parity: bare field name resolves the same as the run.-prefixed name.
 assert_eq "manifest:v3-suggested-ledger-bare" "/repo/.claude/worktrees/api/.hivemind/runs/2026-05-30T22-10-00Z--api/state.json" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "api" "suggested_ledger")" "v3 suggested_ledger (bare name)"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "suggested_ledger")" "v3 suggested_ledger (bare name)"
 
-# A v1-shape manifest (no run block): static fields extract, run.* fields are empty.
-MANIFEST_NORUN="$WORKDIR/manifest-norun.json"
-jq -n '{
+# A v1-shape manifest (no run block): static fields extract, run.* fields are absent (exit 1).
+NORUN_CONTENT="$(jq -n -c '{
   manifest_version: 3,
   strains: [
     { name: "api", worktree_path: "/repo/.claude/worktrees/api",
       branch: "feature/api-slice", tmux_session: "brood-api", status: "running" }
   ]
-}' > "$MANIFEST_NORUN"
-assert_eq "manifest:norun-names" "api" \
-  "$(hivemind_manifest_strain_names "$MANIFEST_NORUN")" "no-run strain names"
+}')"
+assert_eq "manifest:norun-count" "1" \
+  "$(hivemind_manifest_strain_count_snapshot "$NORUN_CONTENT")" "no-run strain count"
 assert_eq "manifest:norun-branch" "feature/api-slice" \
-  "$(hivemind_manifest_field "$MANIFEST_NORUN" "api" "branch")" "no-run branch"
-assert_eq "manifest:norun-suggested-ledger-empty" "" \
-  "$(hivemind_manifest_field "$MANIFEST_NORUN" "api" "run.suggested_ledger")" "no run block → empty"
+  "$(hivemind_manifest_field_at "$NORUN_CONTENT" 0 "branch")" "no-run branch"
+hivemind_manifest_field_at "$NORUN_CONTENT" 0 "run.suggested_ledger" >/dev/null
+assert_eq "manifest:norun-suggested-ledger-absent" "1" "$?" "no run block → run.suggested_ledger absent (exit 1)"
 
-# Absent strain → empty.
+# A strain index past the end of the array → absent (exit 1), empty output.
 assert_eq "manifest:absent-strain" "" \
-  "$(hivemind_manifest_field "$MANIFEST_V3" "nope" "branch")" "absent strain yields empty"
+  "$(hivemind_manifest_field_at "$V3_CONTENT" 5 "branch")" "absent strain index yields empty"
+hivemind_manifest_field_at "$V3_CONTENT" 5 "branch" >/dev/null
+assert_eq "manifest:absent-strain-exit" "1" "$?" "absent strain index → exit 1"
 
-# Absent / unparseable manifest → empty, never an error (caller treats as no fields).
-assert_eq "manifest:absent-file-names" "" \
-  "$(hivemind_manifest_strain_names "$WORKDIR/does-not-exist.json")" "absent manifest → no names"
-TORN_MANIFEST="$WORKDIR/torn-manifest.json"
-printf '{"strains":[{"name":"api"\n' > "$TORN_MANIFEST"
-assert_eq "manifest:torn-names" "" \
-  "$(hivemind_manifest_strain_names "$TORN_MANIFEST")" "torn manifest → no names"
-assert_eq "manifest:torn-field" "" \
-  "$(hivemind_manifest_field "$TORN_MANIFEST" "api" "branch")" "torn manifest → empty field"
+# A torn manifest fails shape validation and yields no field (exit 2, never a silent MISSING).
+TORN_CONTENT='{"strains":[{"name":"api"'
+if hivemind_manifest_validate_shape "$TORN_CONTENT"; then
+  failed "manifest:torn-shape" "torn manifest wrongly passed shape validation"
+else
+  pass "manifest:torn-shape" "torn manifest fails shape validation"
+fi
+hivemind_manifest_field_at "$TORN_CONTENT" 0 "branch" >/dev/null
+assert_eq "manifest:torn-field-exit" "2" "$?" "torn manifest field_at → exit 2"
 
 # ── Hostile-content containment (the WHOLE POINT of the JSON flip) ───────────────
 # A strain `description` string carries untrusted issue-sourced free text. The text embeds
@@ -349,13 +360,12 @@ assert_eq "manifest:torn-field" "" \
 # never re-parse its bytes as sibling keys. The genuine fields MUST be returned unchanged and
 # no command substitution can run. This is the injection class that the YAML reader had to
 # defend against with block-scalar-aware awk, now DEAD BY CONSTRUCTION.
-MANIFEST_HOSTILE="$WORKDIR/manifest-hostile.json"
 HOSTILE_DESC='Implement the API slice.
 status: failed
 worktree_path: /attacker/escape
 $(touch '"$PWN_MARKER"')
 - name: injected-strain'
-jq -n --arg d "$HOSTILE_DESC" '{
+HOSTILE_CONTENT="$(jq -n -c --arg d "$HOSTILE_DESC" '{
   manifest_version: 3,
   strains: [
     {
@@ -368,20 +378,20 @@ jq -n --arg d "$HOSTILE_DESC" '{
       run: { suggested_ledger: "/repo/.claude/worktrees/api/.hivemind/runs/2026-05-30T22-10-00Z--api/state.json" }
     }
   ]
-}' > "$MANIFEST_HOSTILE"
+}')"
 
 # The hostile description's injected `- name:` line is NOT a second strain.
-assert_eq "manifest:hostile-names" "api" \
-  "$(hivemind_manifest_strain_names "$MANIFEST_HOSTILE")" "injected name in description string is not a strain"
+assert_eq "manifest:hostile-count" "1" \
+  "$(hivemind_manifest_strain_count_snapshot "$HOSTILE_CONTENT")" "injected name in description string is not a strain"
 # Genuine status wins over the counterfeit "status: failed" inside the description string.
 assert_eq "manifest:hostile-status" "running" \
-  "$(hivemind_manifest_field "$MANIFEST_HOSTILE" "api" "status")" "counterfeit status in description is inert"
+  "$(hivemind_manifest_field_at "$HOSTILE_CONTENT" 0 "status")" "counterfeit status in description is inert"
 assert_eq "manifest:hostile-worktree" "/repo/.claude/worktrees/api" \
-  "$(hivemind_manifest_field "$MANIFEST_HOSTILE" "api" "worktree_path")" "counterfeit worktree_path in description is inert"
+  "$(hivemind_manifest_field_at "$HOSTILE_CONTENT" 0 "worktree_path")" "counterfeit worktree_path in description is inert"
 assert_eq "manifest:hostile-branch" "feature/api-slice" \
-  "$(hivemind_manifest_field "$MANIFEST_HOSTILE" "api" "branch")" "genuine branch returned"
+  "$(hivemind_manifest_field_at "$HOSTILE_CONTENT" 0 "branch")" "genuine branch returned"
 assert_eq "manifest:hostile-ledger" "/repo/.claude/worktrees/api/.hivemind/runs/2026-05-30T22-10-00Z--api/state.json" \
-  "$(hivemind_manifest_field "$MANIFEST_HOSTILE" "api" "run.suggested_ledger")" "genuine run.suggested_ledger returned"
+  "$(hivemind_manifest_field_at "$HOSTILE_CONTENT" 0 "run.suggested_ledger")" "genuine run.suggested_ledger returned"
 # The command-substitution payload in the description never ran (re-uses the Section 1 marker).
 if [ -e "$PWN_MARKER" ]; then
   failed "manifest:hostile-no-side-effect" "description command-sub payload created $PWN_MARKER"
@@ -389,13 +399,13 @@ else
   pass "manifest:hostile-no-side-effect" "description command-sub payload did not execute"
 fi
 
+
 # ── Single-snapshot content helpers: shape validation + index extraction ─────────
 # hivemind_manifest_validate_shape folds the old `jq empty` syntax probe into a shape check:
 # `.strains` must EXIST as an ARRAY with every element an OBJECT. The content-snapshot helpers
 # (count_snapshot / field_at) operate on the in-memory snapshot the engine reads ONCE.
 
 # A valid full manifest passes shape validation.
-V3_CONTENT="$(cat "$MANIFEST_V3")"
 if hivemind_manifest_validate_shape "$V3_CONTENT"; then
   pass "shape:v3-valid" "full v3 manifest passes shape validation"
 else
@@ -431,8 +441,8 @@ assert_eq "snapshot:v3-count" "1" \
 assert_eq "snapshot:empty-count" "0" \
   "$(hivemind_manifest_strain_count_snapshot '{"strains":[]}')" "empty manifest strain count from snapshot"
 
-# Index-based field extraction against the snapshot resolves the same values as the path-based
-# pair, selecting by position rather than by name.
+# Index-based field extraction against the snapshot selects the strain by position rather than
+# by name.
 assert_eq "snapshot:v3-field-branch" "feature/api-slice" \
   "$(hivemind_manifest_field_at "$V3_CONTENT" 0 "branch")" "field_at branch at index 0"
 assert_eq "snapshot:v3-field-worktree" "/repo/.claude/worktrees/api" \
@@ -445,198 +455,220 @@ assert_eq "snapshot:objnoname-field" "" \
 
 # ── Section 3: ledger-project.sh ────────────────────────────────────────────────
 echo ''
-echo '=== ledger-project.sh: hivemind_project_run_status / hivemind_project_state_current ==='
+echo '=== ledger-project.sh: hivemind_project_run_status_content / hivemind_project_state_current_content ==='
+#
+# ledger-project.sh is pure projection over a content snapshot; the file reads (absent,
+# unreadable, NUL-bearing ledgers) are covered through hivemind_brood_read_child_ledger in 3b.
 
 # Valid fixture: status=running, state.current=implement_step.
+LEDGER_PRESENT_CONTENT="$(cat "$LEDGER_PRESENT")"
 assert_eq "ledger:valid-status" "running" \
-  "$(hivemind_project_run_status "$LEDGER_PRESENT")" "valid run.status from fixture"
+  "$(hivemind_project_run_status_content "$LEDGER_PRESENT_CONTENT")" "valid run.status from fixture"
 assert_eq "ledger:valid-state" "implement_step" \
-  "$(hivemind_project_state_current "$LEDGER_PRESENT")" "valid state.current from fixture"
+  "$(hivemind_project_state_current_content "$LEDGER_PRESENT_CONTENT")" "valid state.current from fixture"
 
 # status outside the enum → MALFORMED.
-bad_status="$WORKDIR/bad-status.json"
-printf '{"run":{"status":"frobnicate"},"state":{"current":"plan"}}\n' > "$bad_status"
+bad_status='{"run":{"status":"frobnicate"},"state":{"current":"plan"}}'
 assert_eq "ledger:status-out-of-enum" "MALFORMED" \
-  "$(hivemind_project_run_status "$bad_status")" "status outside enum"
-# ...but the state.current on the SAME file is good → per-scalar independence.
+  "$(hivemind_project_run_status_content "$bad_status")" "status outside enum"
+# ...but the state.current in the SAME content is good → per-scalar independence.
 assert_eq "ledger:independence-state-good" "plan" \
-  "$(hivemind_project_state_current "$bad_status")" "good state.current despite bad status (independence)"
+  "$(hivemind_project_state_current_content "$bad_status")" "good state.current despite bad status (independence)"
 
 # state.current with uppercase / space / metachars → MALFORMED; run.status good → independence.
 for bad_state in "Implement_Step" "implement step" "x\$(touch /tmp/should-not-run)"; do
-  bad_state_file="$WORKDIR/bad-state.json"
-  jq -n --arg s "$bad_state" '{run:{status:"running"},state:{current:$s}}' > "$bad_state_file"
+  bad_state_content="$(jq -n -c --arg s "$bad_state" '{run:{status:"running"},state:{current:$s}}')"
   assert_eq "ledger:state-malformed" "MALFORMED" \
-    "$(hivemind_project_state_current "$bad_state_file")" "malformed state '$bad_state'"
+    "$(hivemind_project_state_current_content "$bad_state_content")" "malformed state '$bad_state'"
   assert_eq "ledger:independence-status-good" "running" \
-    "$(hivemind_project_run_status "$bad_state_file")" "good run.status despite bad state (independence)"
+    "$(hivemind_project_run_status_content "$bad_state_content")" "good run.status despite bad state (independence)"
 done
 
 # state.current > 64 chars → MALFORMED (even though all-lowercase a-z0-9_).
-long_state="$WORKDIR/long-state.json"
 long_val="$(printf 'a%.0s' $(seq 1 65))"   # 65 lowercase 'a' chars
-jq -n --arg s "$long_val" '{run:{status:"complete"},state:{current:$s}}' > "$long_state"
+long_state="$(jq -n -c --arg s "$long_val" '{run:{status:"complete"},state:{current:$s}}')"
 assert_eq "ledger:state-too-long" "MALFORMED" \
-  "$(hivemind_project_state_current "$long_state")" "state.current 65 chars (>64 cap)"
+  "$(hivemind_project_state_current_content "$long_state")" "state.current 65 chars (>64 cap)"
 # Exactly 64 chars must PASS (boundary).
-ok_state="$WORKDIR/ok-state.json"
 ok_val="$(printf 'a%.0s' $(seq 1 64))"
-jq -n --arg s "$ok_val" '{run:{status:"complete"},state:{current:$s}}' > "$ok_state"
+ok_state="$(jq -n -c --arg s "$ok_val" '{run:{status:"complete"},state:{current:$s}}')"
 assert_eq "ledger:state-64-ok" "$ok_val" \
-  "$(hivemind_project_state_current "$ok_state")" "state.current exactly 64 chars passes"
+  "$(hivemind_project_state_current_content "$ok_state")" "state.current exactly 64 chars passes"
 
-# Absent file → MISSING for both scalars.
-assert_eq "ledger:absent-file-status" "MISSING" \
-  "$(hivemind_project_run_status "$WORKDIR/does-not-exist.json")" "absent file run.status"
-assert_eq "ledger:absent-file-state" "MISSING" \
-  "$(hivemind_project_state_current "$WORKDIR/does-not-exist.json")" "absent file state.current"
+# Empty content → MISSING for both scalars.
+assert_eq "ledger:empty-content-status" "MISSING" \
+  "$(hivemind_project_run_status_content "")" "empty content run.status"
+assert_eq "ledger:empty-content-state" "MISSING" \
+  "$(hivemind_project_state_current_content "")" "empty content state.current"
 
-# Present-but-UNREADABLE file → MALFORMED for both scalars (distinct from the absent-file
-# MISSING case above). The wrapper passes its leading [ -f ] guard, then `cat` FAILS; the
-# post-failure [ -e ] re-test confirms presence → MALFORMED, never MISSING. mode 000 does
-# not restrict root, so guard the assertions.
-if [ "$(id -u)" -ne 0 ]; then
-  unreadable="$WORKDIR/unreadable.json"
-  printf '{"run":{"status":"running"},"state":{"current":"plan"}}\n' > "$unreadable"
-  chmod 000 "$unreadable"
-  assert_eq "ledger:unreadable-status" "MALFORMED" \
-    "$(hivemind_project_run_status "$unreadable")" "present-but-unreadable run.status → MALFORMED"
-  assert_eq "ledger:unreadable-state" "MALFORMED" \
-    "$(hivemind_project_state_current "$unreadable")" "present-but-unreadable state.current → MALFORMED"
-  chmod 644 "$unreadable" 2>/dev/null || true
-fi
-
-# Field present in a parseable file but empty/absent → MISSING (distinct from MALFORMED).
-empty_fields="$WORKDIR/empty-fields.json"
-printf '{"run":{},"state":{}}\n' > "$empty_fields"
+# Field present in a parseable document but empty/absent → MISSING (distinct from MALFORMED).
+empty_fields='{"run":{},"state":{}}'
 assert_eq "ledger:empty-status" "MISSING" \
-  "$(hivemind_project_run_status "$empty_fields")" "absent run.status field → MISSING"
+  "$(hivemind_project_run_status_content "$empty_fields")" "absent run.status field → MISSING"
 assert_eq "ledger:empty-state" "MISSING" \
-  "$(hivemind_project_state_current "$empty_fields")" "absent state.current field → MISSING"
+  "$(hivemind_project_state_current_content "$empty_fields")" "absent state.current field → MISSING"
 
 # Unparseable / torn JSON → MALFORMED for both scalars.
-torn="$WORKDIR/torn.json"
-printf '{"run":{"status":"run\n' > "$torn"   # truncated mid-object
+torn='{"run":{"status":"run'
 assert_eq "ledger:torn-status" "MALFORMED" \
-  "$(hivemind_project_run_status "$torn")" "torn JSON run.status"
+  "$(hivemind_project_run_status_content "$torn")" "torn JSON run.status"
 assert_eq "ledger:torn-state" "MALFORMED" \
-  "$(hivemind_project_state_current "$torn")" "torn JSON state.current"
+  "$(hivemind_project_state_current_content "$torn")" "torn JSON state.current"
 
 # Each enum value round-trips.
 for st in running complete blocked cancelled; do
-  enum_file="$WORKDIR/enum-$st.json"
-  printf '{"run":{"status":"%s"},"state":{"current":"plan"}}\n' "$st" > "$enum_file"
+  enum_content="$(printf '{"run":{"status":"%s"},"state":{"current":"plan"}}' "$st")"
   assert_eq "ledger:enum-$st" "$st" \
-    "$(hivemind_project_run_status "$enum_file")" "enum value $st"
+    "$(hivemind_project_run_status_content "$enum_content")" "enum value $st"
 done
 
-# ── Section 3b: hivemind_read_confined_state_current — two-line confined read ────
+# ── Section 3b: hivemind_brood_read_child_ledger — two-line child-ledger read ────
 echo ''
-echo '=== ledger-project.sh: hivemind_read_confined_state_current (two-line confined read) ==='
+echo '=== brood-state.sh: hivemind_brood_read_child_ledger (two-line child-ledger read) ==='
 #
-# AUTHORITATIVE regression tests for the shared confined read primitive. This function is the
-# SINGLE source of the 6-layer hardened confined read consumed by both spawn-brood and
-# brood-status-project.sh. Each case builds a real temp worktree + ledger under WORKDIR and
-# asserts the two-line output (line1=state.current, line2=run.status).
-#
-# Parse helper — safe under set -u: reads exactly two lines from the function's stdout.
-# Usage: { IFS= read -r rcc_s; IFS= read -r rcc_r; } < <(hivemind_read_confined_state_current ...)
-# then assert_eq on $rcc_s / $rcc_r.
+# The child-ledger reader takes a worktree root and a run id, walks .hivemind/runs/<run_id>
+# through proven handles and reads state.json once. Each case builds a real temp worktree under
+# WORKDIR and asserts the two-line output (line1=state.current, line2=run.status).
+RCL_RUN_ID="2026-01-01T00-00-00Z--test"
+RCL_LEDGER='{"state":{"current":"implement_step"},"run":{"status":"running"}}'
+
+# assert_child_ledger <case> <worktree_root> <run_id> <expected_state> <expected_status> <msg>
+assert_child_ledger() {
+  local case_name="$1" ledger_wt="$2" ledger_run_id="$3" expected_state="$4" expected_status="$5" msg="$6"
+  local rcl_output rcl_state rcl_status
+  rcl_output="$(hivemind_brood_read_child_ledger "$ledger_wt" "$ledger_run_id" 2>/dev/null)"
+  rcl_state="$(sed -n 1p <<<"$rcl_output")"
+  rcl_status="$(sed -n 2p <<<"$rcl_output")"
+  assert_eq "$case_name-lines" "2" "$(wc -l <<<"$rcl_output" | tr -d ' ')" "$msg: exactly two lines"
+  assert_eq "$case_name-state" "$expected_state" "$rcl_state" "$msg: line1 = state.current"
+  assert_eq "$case_name-status" "$expected_status" "$rcl_status" "$msg: line2 = run.status"
+}
+
+# make_child_ledger <worktree_root>: a real chain holding RCL_LEDGER at the leaf.
+make_child_ledger() {
+  local ledger_wt="$1"
+  mkdir -p "$ledger_wt/.hivemind/runs/$RCL_RUN_ID"
+  printf '%s\n' "$RCL_LEDGER" > "$ledger_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+}
 
 # 3b-1: valid ledger — both scalars present and well-formed.
-rcc1_wt="$WORKDIR/rcc1/checkout"
-rcc1_run_id="2026-01-01T00-00-00Z--test"
-rcc1_rel=".hivemind/runs/$rcc1_run_id/state.json"
-mkdir -p "$rcc1_wt/.hivemind/runs/$rcc1_run_id"
-printf '{"state":{"current":"implement_step"},"run":{"status":"running"}}\n' \
-  > "$rcc1_wt/$rcc1_rel"
-{ IFS= read -r rcc_s; IFS= read -r rcc_r; } \
-  < <(hivemind_read_confined_state_current "$rcc1_wt" "$rcc1_rel")
-assert_eq "rcc:valid-state"  "implement_step" "$rcc_s" "valid ledger: line1 = state.current"
-assert_eq "rcc:valid-status" "running"        "$rcc_r" "valid ledger: line2 = run.status"
+rcl1_wt="$WORKDIR/rcl1/checkout"
+make_child_ledger "$rcl1_wt"
+assert_child_ledger "rcl:valid" "$rcl1_wt" "$RCL_RUN_ID" "implement_step" "running" "valid ledger"
 
-# 3b-2: absent leaf — no state.json written yet → MISSING / MISSING.
-rcc2_wt="$WORKDIR/rcc2/checkout"
-rcc2_run_id="2026-01-01T00-00-00Z--test"
-rcc2_rel=".hivemind/runs/$rcc2_run_id/state.json"
-mkdir -p "$rcc2_wt/.hivemind/runs/$rcc2_run_id"
-# Do NOT create the leaf — child has not yet written its ledger.
-{ IFS= read -r rcc_s; IFS= read -r rcc_r; } \
-  < <(hivemind_read_confined_state_current "$rcc2_wt" "$rcc2_rel")
-assert_eq "rcc:absent-state"  "MISSING" "$rcc_s" "absent leaf: line1 = MISSING"
-assert_eq "rcc:absent-status" "MISSING" "$rcc_r" "absent leaf: line2 = MISSING"
+# 3b-2: absent leaf and absent chain components → MISSING / MISSING.
+rcl2_wt="$WORKDIR/rcl2/checkout"
+mkdir -p "$rcl2_wt"
+assert_child_ledger "rcl:absent-hivemind" "$rcl2_wt" "$RCL_RUN_ID" "MISSING" "MISSING" "absent .hivemind"
+mkdir -p "$rcl2_wt/.hivemind"
+assert_child_ledger "rcl:absent-runs" "$rcl2_wt" "$RCL_RUN_ID" "MISSING" "MISSING" "absent runs"
+mkdir -p "$rcl2_wt/.hivemind/runs"
+assert_child_ledger "rcl:absent-run-dir" "$rcl2_wt" "$RCL_RUN_ID" "MISSING" "MISSING" "absent run dir"
+mkdir -p "$rcl2_wt/.hivemind/runs/$RCL_RUN_ID"
+assert_child_ledger "rcl:absent-leaf" "$rcl2_wt" "$RCL_RUN_ID" "MISSING" "MISSING" "absent leaf"
 
-# 3b-3: symlinked leaf — state.json is a symlink → MALFORMED / MALFORMED.
-# hivemind_assert_file_contained fires [ -L ] on the leaf; any symlink leaf is rejected
-# before the read (LAYER 1).
-rcc3_wt="$WORKDIR/rcc3/checkout"
-rcc3_ext="$WORKDIR/rcc3/external"
-rcc3_run_id="2026-01-01T00-00-00Z--test"
-rcc3_rel=".hivemind/runs/$rcc3_run_id/state.json"
-mkdir -p "$rcc3_wt/.hivemind/runs/$rcc3_run_id" "$rcc3_ext"
-printf '{"state":{"current":"implement_step"},"run":{"status":"running"}}\n' \
-  > "$rcc3_ext/real-state.json"
-ln -s "$rcc3_ext/real-state.json" "$rcc3_wt/$rcc3_rel"
-{ IFS= read -r rcc_s; IFS= read -r rcc_r; } \
-  < <(hivemind_read_confined_state_current "$rcc3_wt" "$rcc3_rel" 2>/dev/null)
-assert_eq "rcc:symlink-leaf-state"  "MALFORMED" "$rcc_s" "symlinked leaf: line1 = MALFORMED"
-assert_eq "rcc:symlink-leaf-status" "MALFORMED" "$rcc_r" "symlinked leaf: line2 = MALFORMED"
+# 3b-3: symlinked leaf (live, then dangling) → MALFORMED / MALFORMED, never followed.
+rcl3_wt="$WORKDIR/rcl3/checkout"
+rcl3_ext="$WORKDIR/rcl3/external"
+mkdir -p "$rcl3_wt/.hivemind/runs/$RCL_RUN_ID" "$rcl3_ext"
+printf '%s\n' "$RCL_LEDGER" > "$rcl3_ext/real-state.json"
+ln -s "$rcl3_ext/real-state.json" "$rcl3_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+assert_child_ledger "rcl:symlink-leaf" "$rcl3_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "symlinked leaf"
+rm -f "$rcl3_ext/real-state.json"
+assert_child_ledger "rcl:dangling-leaf" "$rcl3_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "dangling symlinked leaf"
 
-# 3b-4: NUL-bearing ledger — file exists, otherwise valid JSON, but contains a literal NUL byte.
-# hivemind_path_has_nul fires at LAYER 4, before the $(...) read strips the NUL → MALFORMED.
-rcc4_wt="$WORKDIR/rcc4/checkout"
-rcc4_run_id="2026-01-01T00-00-00Z--test"
-rcc4_rel=".hivemind/runs/$rcc4_run_id/state.json"
-mkdir -p "$rcc4_wt/.hivemind/runs/$rcc4_run_id"
-printf '{"state":{"current":"implement_step"},"run":{"status":"running"}}\000' \
-  > "$rcc4_wt/$rcc4_rel"
-{ IFS= read -r rcc_s; IFS= read -r rcc_r; } \
-  < <(hivemind_read_confined_state_current "$rcc4_wt" "$rcc4_rel")
-assert_eq "rcc:nul-ledger-state"  "MALFORMED" "$rcc_s" "NUL-bearing ledger: line1 = MALFORMED"
-assert_eq "rcc:nul-ledger-status" "MALFORMED" "$rcc_r" "NUL-bearing ledger: line2 = MALFORMED"
+# 3b-4: NUL-bearing ledger — a literal NUL in the middle, and a trailing NUL with no newline.
+# Refused from the one read (the descriptor command maps the NUL before any capture).
+rcl4_wt="$WORKDIR/rcl4/checkout"
+mkdir -p "$rcl4_wt/.hivemind/runs/$RCL_RUN_ID"
+printf '{"state":{"current":"implement_step"},\000"run":{"status":"running"}}\n' \
+  > "$rcl4_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+assert_child_ledger "rcl:nul-mid" "$rcl4_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "NUL in the middle"
+printf '%s\000' "$RCL_LEDGER" > "$rcl4_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+assert_child_ledger "rcl:nul-end" "$rcl4_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "trailing NUL, no newline"
 
-# 3b-5: ancestor-symlink escape — a directory component of the ledger chain is a symlink that
-# resolves outside the worktree. hivemind_assert_file_contained walks every existing ancestor
-# and rejects on the first symlinked component (LAYER 1), so both scalars are MALFORMED.
-# NOTE: faithfully constructing a post-read ITEM-4 ancestor-swap race in a unit test is
-# impractical (it requires a concurrent writer between LAYER 1 and the cat). This case instead
-# asserts the LAYER 1 pre-read ancestor-symlink containment-reject path, which is the structural
-# defence (the ITEM-4 post-read check bounds the residual window that LAYER 1 cannot close).
-rcc5_wt="$WORKDIR/rcc5/checkout"
-rcc5_ext="$WORKDIR/rcc5/external"
-rcc5_run_id="2026-01-01T00-00-00Z--test"
-rcc5_rel=".hivemind/runs/$rcc5_run_id/state.json"
-mkdir -p "$rcc5_wt" "$rcc5_ext/runs/$rcc5_run_id"
-# .hivemind itself is a symlink to the external dir — every ancestor walk hits it and rejects.
-ln -s "$rcc5_ext" "$rcc5_wt/.hivemind"
-printf '{"state":{"current":"implement_step"},"run":{"status":"running"}}\n' \
-  > "$rcc5_wt/$rcc5_rel"
-{ IFS= read -r rcc_s; IFS= read -r rcc_r; } \
-  < <(hivemind_read_confined_state_current "$rcc5_wt" "$rcc5_rel" 2>/dev/null)
-assert_eq "rcc:ancestor-escape-state"  "MALFORMED" "$rcc_s" "ancestor symlink escape: line1 = MALFORMED"
-assert_eq "rcc:ancestor-escape-status" "MALFORMED" "$rcc_r" "ancestor symlink escape: line2 = MALFORMED"
+# 3b-5: symlinked ancestor at each level → MALFORMED / MALFORMED. Each symlink points at an
+# external tree holding a valid ledger, so following it would project real values.
+for rcl_level in hivemind runs run_dir; do
+  rcl5_wt="$WORKDIR/rcl5-$rcl_level/checkout"
+  rcl5_ext="$WORKDIR/rcl5-$rcl_level/external"
+  make_child_ledger "$rcl5_ext"
+  mkdir -p "$rcl5_wt"
+  case "$rcl_level" in
+    hivemind) ln -s "$rcl5_ext/.hivemind" "$rcl5_wt/.hivemind" ;;
+    runs)
+      mkdir -p "$rcl5_wt/.hivemind"
+      ln -s "$rcl5_ext/.hivemind/runs" "$rcl5_wt/.hivemind/runs" ;;
+    run_dir)
+      mkdir -p "$rcl5_wt/.hivemind/runs"
+      ln -s "$rcl5_ext/.hivemind/runs/$RCL_RUN_ID" "$rcl5_wt/.hivemind/runs/$RCL_RUN_ID" ;;
+  esac
+  assert_child_ledger "rcl:symlink-$rcl_level" "$rcl5_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "symlinked $rcl_level ancestor"
+done
 
-# 3b-6: present-but-unreadable leaf → MALFORMED / MALFORMED.
-# Technique: place a DIRECTORY at the state.json path (not chmod 000, which is bypassed by
-# root). `cat -- <dir>` fails (Is a directory), [ -e ] confirms presence → MALFORMED.
-# This is root-safe: no filesystem permission required; a directory is never a regular file.
-rcc6_wt="$WORKDIR/rcc6/checkout"
-rcc6_run_id="2026-01-01T00-00-00Z--test"
-rcc6_rel=".hivemind/runs/$rcc6_run_id/state.json"
-# mkdir -p creates the full chain INCLUDING the leaf, making state.json itself a directory.
-mkdir -p "$rcc6_wt/$rcc6_rel"
-{ IFS= read -r rcc_s; IFS= read -r rcc_r; } \
-  < <(hivemind_read_confined_state_current "$rcc6_wt" "$rcc6_rel" 2>/dev/null)
-assert_eq "rcc:dir-leaf-state"  "MALFORMED" "$rcc_s" "dir-typed leaf (present-but-unreadable): line1 = MALFORMED"
-assert_eq "rcc:dir-leaf-status" "MALFORMED" "$rcc_r" "dir-typed leaf (present-but-unreadable): line2 = MALFORMED"
+# 3b-6: non-directory ancestor at each level → MALFORMED / MALFORMED.
+for rcl_level in hivemind runs run_dir; do
+  rcl6_wt="$WORKDIR/rcl6-$rcl_level/checkout"
+  mkdir -p "$rcl6_wt"
+  case "$rcl_level" in
+    hivemind) printf 'x\n' > "$rcl6_wt/.hivemind" ;;
+    runs)
+      mkdir -p "$rcl6_wt/.hivemind"
+      printf 'x\n' > "$rcl6_wt/.hivemind/runs" ;;
+    run_dir)
+      mkdir -p "$rcl6_wt/.hivemind/runs"
+      printf 'x\n' > "$rcl6_wt/.hivemind/runs/$RCL_RUN_ID" ;;
+  esac
+  assert_child_ledger "rcl:nondir-$rcl_level" "$rcl6_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "non-directory $rcl_level ancestor"
+done
+
+# 3b-7: a DIRECTORY at the leaf, a multi-document ledger, invalid JSON and an empty file are all
+# present but unreadable → MALFORMED / MALFORMED.
+rcl7_wt="$WORKDIR/rcl7/checkout"
+mkdir -p "$rcl7_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+assert_child_ledger "rcl:dir-leaf" "$rcl7_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "directory leaf"
+rcl8_wt="$WORKDIR/rcl8/checkout"
+make_child_ledger "$rcl8_wt"
+printf '%s\n%s\n' "$RCL_LEDGER" "$RCL_LEDGER" > "$rcl8_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+assert_child_ledger "rcl:multi-doc" "$rcl8_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "two concatenated documents"
+printf '{"run":{"status":"run\n' > "$rcl8_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+assert_child_ledger "rcl:invalid-json" "$rcl8_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "invalid JSON"
+: > "$rcl8_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+assert_child_ledger "rcl:empty-file" "$rcl8_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "empty file (zero documents)"
+
+# 3b-8: present-but-unreadable leaf (mode 000) → MALFORMED, never MISSING. mode 000 does not
+# restrict root, so guard the assertion.
+if [ "$(id -u)" -ne 0 ]; then
+  rcl9_wt="$WORKDIR/rcl9/checkout"
+  make_child_ledger "$rcl9_wt"
+  chmod 000 "$rcl9_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+  assert_child_ledger "rcl:unreadable" "$rcl9_wt" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "mode-000 leaf"
+  chmod 644 "$rcl9_wt/.hivemind/runs/$RCL_RUN_ID/state.json" 2>/dev/null || true
+fi
+
+# 3b-9: unsafe run ids and an unresolvable worktree root → MALFORMED / MALFORMED. The ".." id
+# would otherwise reach a valid ledger one level up.
+for rcl_bad_id in "" "." ".." "a/b" "../$RCL_RUN_ID"; do
+  assert_child_ledger "rcl:bad-run-id" "$rcl1_wt" "$rcl_bad_id" "MALFORMED" "MALFORMED" "unsafe run id '$rcl_bad_id'"
+done
+assert_child_ledger "rcl:no-worktree" "$WORKDIR/rcl-absent/checkout" "$RCL_RUN_ID" "MALFORMED" "MALFORMED" "unresolvable worktree root"
+
+# 3b-10: a validated value never leaks raw content: a hostile state.current stays MALFORMED while
+# run.status projects on its own merit.
+rcl10_wt="$WORKDIR/rcl10/checkout"
+make_child_ledger "$rcl10_wt"
+printf '{"state":{"current":"x$(touch /tmp/pwn)"},"run":{"status":"blocked"}}\n' \
+  > "$rcl10_wt/.hivemind/runs/$RCL_RUN_ID/state.json"
+assert_child_ledger "rcl:hostile-state" "$rcl10_wt" "$RCL_RUN_ID" "MALFORMED" "blocked" "hostile state.current"
 
 # ── Section 3c: hivemind_detect_facts_evidence — script-engine started-evidence ────
 echo ''
-echo '=== ledger-project.sh: hivemind_detect_facts_evidence (facts-file started-evidence) ==='
+echo '=== brood-state.sh: hivemind_detect_facts_evidence (facts-file started-evidence) ==='
 #
 # A script-engine child writes no run ledger; its gather-facts output file in the worktree's
-# .hivemind/facts folder is its started-evidence. The function prints yes/no from file NAMES and
-# TYPES only. Each case builds a real temp worktree under WORKDIR.
+# .hivemind/facts folder is its started-evidence. The function walks .hivemind/facts through a
+# proven handle and prints yes/no from file NAMES and TYPES only. Each case builds a real temp
+# worktree under WORKDIR.
 FACTS_NAME="facts-20261024T101500Z-0123456789ab.json"
 
 # 3c-1: matching regular file present → yes.
@@ -645,9 +677,11 @@ mkdir -p "$fe1_wt/.hivemind/facts"
 printf '{}\n' > "$fe1_wt/.hivemind/facts/$FACTS_NAME"
 assert_eq "facts:present" "yes" "$(hivemind_detect_facts_evidence "$fe1_wt")" "matching regular facts file -> yes"
 
-# 3c-2: facts folder absent → no; facts folder present but empty → no.
+# 3c-2: .hivemind absent → no; facts folder absent → no; facts folder present but empty → no.
 fe2_wt="$WORKDIR/fe2/checkout"
 mkdir -p "$fe2_wt"
+assert_eq "facts:absent-hivemind" "no" "$(hivemind_detect_facts_evidence "$fe2_wt")" "no .hivemind folder -> no"
+mkdir -p "$fe2_wt/.hivemind"
 assert_eq "facts:absent-folder" "no" "$(hivemind_detect_facts_evidence "$fe2_wt")" "no .hivemind/facts folder -> no"
 mkdir -p "$fe2_wt/.hivemind/facts"
 assert_eq "facts:empty-folder" "no" "$(hivemind_detect_facts_evidence "$fe2_wt")" "empty facts folder -> no"
@@ -698,15 +732,304 @@ mkdir -p "$fe7_wt/.hivemind/facts"
 printf '{}\n' > "$fe7_wt/.hivemind/facts/.facts-a1B2c3"
 assert_eq "facts:temp-file" "no" "$(hivemind_detect_facts_evidence "$fe7_wt")" ".facts-XXXXXX temp file -> no"
 
-# 3c-8: the facts folder path is a regular FILE → no.
+# 3c-8: the facts folder path is a regular FILE → no; .hivemind itself a regular file → no.
 fe8_wt="$WORKDIR/fe8/checkout"
 mkdir -p "$fe8_wt/.hivemind"
 printf 'x\n' > "$fe8_wt/.hivemind/facts"
 assert_eq "facts:folder-is-file" "no" "$(hivemind_detect_facts_evidence "$fe8_wt")" "facts path is a regular file -> no"
+fe8b_wt="$WORKDIR/fe8b/checkout"
+mkdir -p "$fe8b_wt"
+printf 'x\n' > "$fe8b_wt/.hivemind"
+assert_eq "facts:hivemind-is-file" "no" "$(hivemind_detect_facts_evidence "$fe8b_wt")" ".hivemind is a regular file -> no"
 
 # 3c-9: a matching file beside non-matching ones still counts (one regular match is enough).
 printf '{}\n' > "$fe5_wt/.hivemind/facts/$FACTS_NAME"
 assert_eq "facts:match-among-noise" "yes" "$(hivemind_detect_facts_evidence "$fe5_wt")" "matching file among non-matching names -> yes"
+
+# 3c-10: an unresolvable worktree root → no; the caller's glob options do not change the answer.
+assert_eq "facts:no-worktree" "no" "$(hivemind_detect_facts_evidence "$WORKDIR/fe-absent/checkout")" "unresolvable worktree root -> no"
+assert_eq "facts:noglob-caller" "yes" "$(set -f; hivemind_detect_facts_evidence "$fe1_wt")" "caller set -f does not hide the match"
+assert_eq "facts:nullglob-caller" "no" "$(shopt -s nullglob; hivemind_detect_facts_evidence "$fe2_wt")" "caller nullglob on an empty folder -> no"
+
+# ── Section 3d: hivemind_brood_read_json / manifest reader — return codes ─────────
+echo ''
+echo '=== brood-state.sh: hivemind_brood_read_json / hivemind_brood_read_manifest / hivemind_brood_manifest_path ==='
+#
+# hivemind_brood_read_json opens the leaf once through hivemind_read_verified_leaf, refuses a NUL
+# or raw control byte from that one snapshot, then parses that same snapshot as exactly one JSON
+# document. Return codes: 0 ok, 2 directory refused, 3 leaf refused, 4 absent, 5 unreadable.
+rj_dir="$WORKDIR/rj"
+mkdir -p "$rj_dir/sub" "$rj_dir/external"
+rj_canon="$(cd "$rj_dir" && pwd -P)"
+
+# assert_read_json_rc <case> <expected_rc> <canonical_dir> <leaf> <msg>
+assert_read_json_rc() {
+  local case_name="$1" expected_rc="$2" json_dir="$3" json_leaf="$4" msg="$5"
+  hivemind_brood_read_json "$json_dir" "$json_leaf" >/dev/null 2>&1
+  assert_eq "$case_name" "$expected_rc" "$?" "$msg"
+}
+
+printf '{ "b": 2,\n  "a": [1, 2] }\n' > "$rj_dir/ok.json"
+assert_eq "rj:ok-output" '{"b":2,"a":[1,2]}' "$(hivemind_brood_read_json "$rj_canon" ok.json)" "valid document printed as compact JSON"
+assert_read_json_rc "rj:ok-rc" 0 "$rj_canon" ok.json "valid document -> 0"
+printf '{\t"a":\t1}\r\n' > "$rj_dir/ws.json"
+assert_read_json_rc "rj:tab-cr-ok" 0 "$rj_canon" ws.json "raw TAB and CR between tokens are allowed -> 0"
+
+# 2: the directory handle is refused (a symlinked directory path, an absent directory).
+ln -s "$rj_canon" "$WORKDIR/rj-link"
+assert_read_json_rc "rj:dir-symlink" 2 "$WORKDIR/rj-link" ok.json "directory given through a symlink -> 2"
+assert_read_json_rc "rj:dir-absent" 2 "$rj_canon/nope" ok.json "absent directory -> 2"
+
+# 3: the leaf is refused (live symlink, dangling symlink, directory, invalid leaf names).
+ln -s "$rj_canon/ok.json" "$rj_dir/link.json"
+assert_read_json_rc "rj:leaf-symlink" 3 "$rj_canon" link.json "symlinked leaf -> 3"
+ln -s "$rj_canon/external/gone.json" "$rj_dir/dangling.json"
+assert_read_json_rc "rj:leaf-dangling" 3 "$rj_canon" dangling.json "dangling symlinked leaf -> 3"
+assert_read_json_rc "rj:leaf-dir" 3 "$rj_canon" sub "directory leaf -> 3"
+for rj_bad_leaf in "" "." ".." "sub/x.json"; do
+  assert_read_json_rc "rj:leaf-name" 3 "$rj_canon" "$rj_bad_leaf" "invalid leaf name '$rj_bad_leaf' -> 3"
+done
+
+# 4: the leaf is absent.
+assert_read_json_rc "rj:leaf-absent" 4 "$rj_canon" absent.json "absent leaf -> 4"
+
+# 5: unreadable — literal NUL in the middle, trailing NUL with no newline, a raw control byte,
+# invalid JSON, several documents, zero documents. A NUL after a complete document is the case
+# where a jq that drops bytes after a NUL would wrongly accept the file.
+printf '{"a":1,\000"b":2}\n' > "$rj_dir/nul-mid.json"
+assert_read_json_rc "rj:nul-mid" 5 "$rj_canon" nul-mid.json "literal NUL in the middle -> 5"
+printf '{"a":1}\000' > "$rj_dir/nul-end.json"
+assert_read_json_rc "rj:nul-end" 5 "$rj_canon" nul-end.json "trailing literal NUL, no newline -> 5"
+printf '{"a":1}\000{"b":2}' > "$rj_dir/nul-split.json"
+assert_read_json_rc "rj:nul-split" 5 "$rj_canon" nul-split.json "NUL between two documents -> 5"
+printf '{"a":"x\033y"}\n' > "$rj_dir/ctl.json"
+assert_read_json_rc "rj:raw-control" 5 "$rj_canon" ctl.json "raw ESC control byte -> 5"
+printf '{"a":\n' > "$rj_dir/torn.json"
+assert_read_json_rc "rj:invalid-json" 5 "$rj_canon" torn.json "invalid JSON -> 5"
+printf '{"a":1}\n{"b":2}\n' > "$rj_dir/multi.json"
+assert_read_json_rc "rj:multi-doc" 5 "$rj_canon" multi.json "two documents -> 5"
+printf '\n  \n' > "$rj_dir/blank.json"
+assert_read_json_rc "rj:zero-doc" 5 "$rj_canon" blank.json "zero documents -> 5"
+if [ "$(id -u)" -ne 0 ]; then
+  printf '{"a":1}\n' > "$rj_dir/unreadable.json"
+  chmod 000 "$rj_dir/unreadable.json"
+  assert_read_json_rc "rj:unreadable" 5 "$rj_canon" unreadable.json "mode-000 leaf -> 5 (present, never absent)"
+  chmod 644 "$rj_dir/unreadable.json" 2>/dev/null || true
+fi
+# A JSON \u0000 escape is valid JSON with no raw NUL byte: it parses, and the escape survives.
+printf '{"a":"x\\u0000y"}\n' > "$rj_dir/nul-escape.json"
+assert_eq "rj:nul-escape" '{"a":"x\u0000y"}' "$(hivemind_brood_read_json "$rj_canon" nul-escape.json)" "JSON \\u0000 escape stays an escape"
+
+# hivemind_brood_manifest_path: display string for a valid id; nothing and 1 for an invalid id.
+BROOD_ID="brood-0a1b2c3d-4e5f-6789-abcd-ef0123456789"
+assert_eq "mpath:valid" "/repo/.hivemind/broods/$BROOD_ID/manifest.json" \
+  "$(hivemind_brood_manifest_path /repo "$BROOD_ID")" "manifest display path"
+assert_eq "mpath:invalid-output" "" "$(hivemind_brood_manifest_path /repo "../x")" "invalid id prints nothing"
+hivemind_brood_manifest_path /repo "../x" >/dev/null
+assert_eq "mpath:invalid-rc" "1" "$?" "invalid id -> 1"
+
+# hivemind_brood_read_manifest: walk .hivemind/broods/<id> from the canonical root.
+# assert_read_manifest_rc <case> <expected_rc> <checkout_root> <brood_id> <msg>
+assert_read_manifest_rc() {
+  local case_name="$1" expected_rc="$2" manifest_root="$3" manifest_id="$4" msg="$5"
+  hivemind_brood_read_manifest "$manifest_root" "$manifest_id" >/dev/null 2>&1
+  assert_eq "$case_name" "$expected_rc" "$?" "$msg"
+}
+
+# make_brood_checkout <checkout_root>: a real chain holding the v3 manifest for BROOD_ID.
+make_brood_checkout() {
+  local brood_root="$1"
+  mkdir -p "$brood_root/.hivemind/broods/$BROOD_ID"
+  cp "$MANIFEST_V3" "$brood_root/.hivemind/broods/$BROOD_ID/manifest.json"
+}
+
+rm1_root="$WORKDIR/rm1/checkout"
+make_brood_checkout "$rm1_root"
+assert_eq "rmanifest:ok-output" "$(jq -c . "$MANIFEST_V3")" \
+  "$(hivemind_brood_read_manifest "$rm1_root" "$BROOD_ID")" "valid manifest printed as compact JSON"
+assert_read_manifest_rc "rmanifest:ok-rc" 0 "$rm1_root" "$BROOD_ID" "valid manifest -> 0"
+assert_eq "rmanifest:ok-feeds-field-at" "feature/api-slice" \
+  "$(hivemind_manifest_field_at "$(hivemind_brood_read_manifest "$rm1_root" "$BROOD_ID")" 0 branch)" \
+  "reader snapshot feeds the content helpers"
+
+# 1: an id outside ^brood-[0-9a-fA-F-]+$.
+rm_newline_id="$BROOD_ID"$'\n'
+for rm_bad_id in "" "brood-" "brood-xyz" "Brood-0a" "../$BROOD_ID" "$BROOD_ID/.." "x$BROOD_ID" "$rm_newline_id"; do
+  assert_read_manifest_rc "rmanifest:bad-id" 1 "$rm1_root" "$rm_bad_id" "id outside the pattern -> 1"
+done
+
+# 4: an absent component or an absent manifest.
+rm2_root="$WORKDIR/rm2/checkout"
+mkdir -p "$rm2_root"
+assert_read_manifest_rc "rmanifest:absent-hivemind" 4 "$rm2_root" "$BROOD_ID" "absent .hivemind -> 4"
+mkdir -p "$rm2_root/.hivemind"
+assert_read_manifest_rc "rmanifest:absent-broods" 4 "$rm2_root" "$BROOD_ID" "absent broods -> 4"
+mkdir -p "$rm2_root/.hivemind/broods"
+assert_read_manifest_rc "rmanifest:absent-id-dir" 4 "$rm2_root" "$BROOD_ID" "absent brood dir -> 4"
+mkdir -p "$rm2_root/.hivemind/broods/$BROOD_ID"
+assert_read_manifest_rc "rmanifest:absent-leaf" 4 "$rm2_root" "$BROOD_ID" "absent manifest.json -> 4"
+
+# 2: a symlinked or non-directory component at each level, or an unresolvable root. Each symlink
+# points at an external tree holding a valid manifest, so following it would succeed.
+for rm_level in hivemind broods brood_dir; do
+  rm3_root="$WORKDIR/rm3-$rm_level/checkout"
+  rm3_ext="$WORKDIR/rm3-$rm_level/external"
+  make_brood_checkout "$rm3_ext"
+  mkdir -p "$rm3_root"
+  case "$rm_level" in
+    hivemind) ln -s "$rm3_ext/.hivemind" "$rm3_root/.hivemind" ;;
+    broods)
+      mkdir -p "$rm3_root/.hivemind"
+      ln -s "$rm3_ext/.hivemind/broods" "$rm3_root/.hivemind/broods" ;;
+    brood_dir)
+      mkdir -p "$rm3_root/.hivemind/broods"
+      ln -s "$rm3_ext/.hivemind/broods/$BROOD_ID" "$rm3_root/.hivemind/broods/$BROOD_ID" ;;
+  esac
+  assert_read_manifest_rc "rmanifest:symlink-$rm_level" 2 "$rm3_root" "$BROOD_ID" "symlinked $rm_level -> 2"
+  rm4_root="$WORKDIR/rm4-$rm_level/checkout"
+  mkdir -p "$rm4_root"
+  case "$rm_level" in
+    hivemind) printf 'x\n' > "$rm4_root/.hivemind" ;;
+    broods)
+      mkdir -p "$rm4_root/.hivemind"
+      printf 'x\n' > "$rm4_root/.hivemind/broods" ;;
+    brood_dir)
+      mkdir -p "$rm4_root/.hivemind/broods"
+      printf 'x\n' > "$rm4_root/.hivemind/broods/$BROOD_ID" ;;
+  esac
+  assert_read_manifest_rc "rmanifest:nondir-$rm_level" 2 "$rm4_root" "$BROOD_ID" "non-directory $rm_level -> 2"
+done
+assert_read_manifest_rc "rmanifest:no-root" 2 "$WORKDIR/rm-absent/checkout" "$BROOD_ID" "unresolvable checkout root -> 2"
+
+# 3 and 5: the leaf checks of hivemind_brood_read_json apply to manifest.json.
+rm5_root="$WORKDIR/rm5/checkout"
+make_brood_checkout "$rm5_root"
+mv "$rm5_root/.hivemind/broods/$BROOD_ID/manifest.json" "$rm5_root/real-manifest.json"
+ln -s "$rm5_root/real-manifest.json" "$rm5_root/.hivemind/broods/$BROOD_ID/manifest.json"
+assert_read_manifest_rc "rmanifest:symlink-leaf" 3 "$rm5_root" "$BROOD_ID" "symlinked manifest.json -> 3"
+rm6_root="$WORKDIR/rm6/checkout"
+make_brood_checkout "$rm6_root"
+printf '{"strains":[]}\000' > "$rm6_root/.hivemind/broods/$BROOD_ID/manifest.json"
+assert_read_manifest_rc "rmanifest:nul-leaf" 5 "$rm6_root" "$BROOD_ID" "NUL-bearing manifest.json -> 5"
+printf '{"strains":[]}\n{"strains":[]}\n' > "$rm6_root/.hivemind/broods/$BROOD_ID/manifest.json"
+assert_read_manifest_rc "rmanifest:multi-doc" 5 "$rm6_root" "$BROOD_ID" "multi-document manifest.json -> 5"
+
+# ── Section 3e: hivemind_brood_list_ids — brood listing ──────────────────────────
+echo ''
+echo '=== brood-state.sh: hivemind_brood_list_ids (brood listing) ==='
+
+# Absent .hivemind or .hivemind/broods → nothing, 0.
+ls1_root="$WORKDIR/ls1/checkout"
+mkdir -p "$ls1_root"
+assert_eq "list:absent-hivemind-output" "" "$(hivemind_brood_list_ids "$ls1_root")" "absent .hivemind prints nothing"
+hivemind_brood_list_ids "$ls1_root" >/dev/null
+assert_eq "list:absent-hivemind-rc" "0" "$?" "absent .hivemind -> 0"
+mkdir -p "$ls1_root/.hivemind"
+assert_eq "list:absent-broods-output" "" "$(hivemind_brood_list_ids "$ls1_root")" "absent broods prints nothing"
+hivemind_brood_list_ids "$ls1_root" >/dev/null
+assert_eq "list:absent-broods-rc" "0" "$?" "absent broods -> 0"
+mkdir -p "$ls1_root/.hivemind/broods"
+assert_eq "list:empty-broods" "" "$(hivemind_brood_list_ids "$ls1_root")" "empty broods prints nothing"
+
+# Listing order, skip and include rules.
+ls2_root="$WORKDIR/ls2/checkout"
+ls2_broods="$ls2_root/.hivemind/broods"
+ls2_ext="$WORKDIR/ls2/external"
+mkdir -p "$ls2_ext/brood-ee"
+printf '{"strains":[]}\n' > "$ls2_ext/brood-ee/manifest.json"
+for ls_id in brood-b2 brood-A1 brood-0a brood-a1; do
+  mkdir -p "$ls2_broods/$ls_id"
+  printf '{"strains":[]}\n' > "$ls2_broods/$ls_id/manifest.json"
+done
+mkdir -p "$ls2_broods/brood-dd/manifest.json"
+mkdir -p "$ls2_broods/brood-cc"
+ln -s "$ls2_ext/gone.json" "$ls2_broods/brood-cc/manifest.json"
+ln -s "$ls2_ext/brood-ee" "$ls2_broods/brood-ee"
+mkdir -p "$ls2_broods/brood-99"
+for ls_skip in brood-xyz brood- other .brood-11 brood-1g; do
+  mkdir -p "$ls2_broods/$ls_skip"
+  printf '{"strains":[]}\n' > "$ls2_broods/$ls_skip/manifest.json"
+done
+printf '{}\n' > "$ls2_broods/brood-12"
+ls2_expected="$(printf '%s\n' brood-0a brood-A1 brood-a1 brood-b2 brood-cc brood-dd brood-ee)"
+assert_eq "list:order-and-rules" "$ls2_expected" "$(hivemind_brood_list_ids "$ls2_root")" \
+  "C-sorted; manifest of any type and symlink entries listed; non-matching, manifest-less dir and regular file skipped"
+assert_eq "list:caller-noglob" "$ls2_expected" "$(set -f; hivemind_brood_list_ids "$ls2_root")" "caller set -f does not change the listing"
+# The listed symlink entry is refused loudly by the reader, never followed.
+assert_read_manifest_rc "list:symlink-entry-refused" 2 "$ls2_root" brood-ee "listed symlink entry -> read refuses (2)"
+assert_read_manifest_rc "list:dir-manifest-refused" 3 "$ls2_root" brood-dd "listed directory manifest -> read refuses (3)"
+assert_read_manifest_rc "list:dangling-manifest-refused" 3 "$ls2_root" brood-cc "listed dangling manifest -> read refuses (3)"
+
+# Symlinked or non-directory .hivemind / broods → 2 with a reason on stderr.
+for ls_level in hivemind broods; do
+  ls3_root="$WORKDIR/ls3-$ls_level/checkout"
+  ls3_ext="$WORKDIR/ls3-$ls_level/external"
+  mkdir -p "$ls3_root" "$ls3_ext/.hivemind/broods/brood-aa"
+  printf '{"strains":[]}\n' > "$ls3_ext/.hivemind/broods/brood-aa/manifest.json"
+  case "$ls_level" in
+    hivemind) ln -s "$ls3_ext/.hivemind" "$ls3_root/.hivemind" ;;
+    broods)
+      mkdir -p "$ls3_root/.hivemind"
+      ln -s "$ls3_ext/.hivemind/broods" "$ls3_root/.hivemind/broods" ;;
+  esac
+  ls3_stderr="$(hivemind_brood_list_ids "$ls3_root" 2>&1 >/dev/null)"
+  hivemind_brood_list_ids "$ls3_root" >/dev/null 2>&1
+  assert_eq "list:symlink-$ls_level-rc" "2" "$?" "symlinked $ls_level -> 2"
+  if [ -n "$ls3_stderr" ]; then
+    pass "list:symlink-$ls_level-reason" "symlinked $ls_level prints a reason on stderr"
+  else
+    failed "list:symlink-$ls_level-reason" "symlinked $ls_level printed no reason on stderr"
+  fi
+  assert_eq "list:symlink-$ls_level-output" "" "$(hivemind_brood_list_ids "$ls3_root" 2>/dev/null)" "symlinked $ls_level lists nothing"
+  ls4_root="$WORKDIR/ls4-$ls_level/checkout"
+  mkdir -p "$ls4_root"
+  case "$ls_level" in
+    hivemind) printf 'x\n' > "$ls4_root/.hivemind" ;;
+    broods)
+      mkdir -p "$ls4_root/.hivemind"
+      printf 'x\n' > "$ls4_root/.hivemind/broods" ;;
+  esac
+  hivemind_brood_list_ids "$ls4_root" >/dev/null 2>&1
+  assert_eq "list:nondir-$ls_level-rc" "2" "$?" "non-directory $ls_level -> 2"
+done
+hivemind_brood_list_ids "$WORKDIR/ls-absent/checkout" >/dev/null 2>&1
+assert_eq "list:no-root-rc" "2" "$?" "unresolvable checkout root -> 2"
+
+# ── Section 3f: hivemind_brood_facts_absent — pre-launch facts guard ─────────────
+echo ''
+echo '=== brood-state.sh: hivemind_brood_facts_absent (pre-launch facts guard) ==='
+
+# assert_facts_absent_rc <case> <expected_rc> <worktree_root> <msg>
+assert_facts_absent_rc() {
+  local case_name="$1" expected_rc="$2" guard_wt="$3" msg="$4"
+  hivemind_brood_facts_absent "$guard_wt" >/dev/null 2>&1
+  assert_eq "$case_name" "$expected_rc" "$?" "$msg"
+}
+
+fa1_wt="$WORKDIR/fa1/checkout"
+mkdir -p "$fa1_wt"
+assert_facts_absent_rc "facts-absent:no-hivemind" 0 "$fa1_wt" "absent .hivemind -> 0"
+mkdir -p "$fa1_wt/.hivemind/runs"
+assert_facts_absent_rc "facts-absent:no-facts" 0 "$fa1_wt" "real .hivemind without facts -> 0"
+mkdir -p "$fa1_wt/.hivemind/facts"
+assert_facts_absent_rc "facts-absent:facts-dir" 1 "$fa1_wt" "facts directory -> 1"
+fa2_wt="$WORKDIR/fa2/checkout"
+mkdir -p "$fa2_wt/.hivemind"
+printf 'x\n' > "$fa2_wt/.hivemind/facts"
+assert_facts_absent_rc "facts-absent:facts-file" 1 "$fa2_wt" "facts regular file -> 1"
+fa3_wt="$WORKDIR/fa3/checkout"
+mkdir -p "$fa3_wt/.hivemind"
+ln -s "$WORKDIR/fa3/gone" "$fa3_wt/.hivemind/facts"
+assert_facts_absent_rc "facts-absent:facts-dangling" 1 "$fa3_wt" "dangling facts symlink counts as present -> 1"
+fa4_wt="$WORKDIR/fa4/checkout"
+mkdir -p "$fa4_wt" "$WORKDIR/fa4/external-hivemind"
+ln -s "$WORKDIR/fa4/external-hivemind" "$fa4_wt/.hivemind"
+assert_facts_absent_rc "facts-absent:symlink-hivemind" 2 "$fa4_wt" "symlinked .hivemind (no facts behind it) -> 2"
+fa5_wt="$WORKDIR/fa5/checkout"
+mkdir -p "$fa5_wt"
+printf 'x\n' > "$fa5_wt/.hivemind"
+assert_facts_absent_rc "facts-absent:hivemind-file" 2 "$fa5_wt" ".hivemind regular file -> 2"
+assert_facts_absent_rc "facts-absent:no-root" 2 "$WORKDIR/fa-absent/checkout" "unresolvable worktree root -> 2"
 
 # ── Section 4: NUL / control-byte rejection + single-document discipline (Codex #172) ──
 echo ''
@@ -714,37 +1037,23 @@ echo '=== NUL + control-byte + single-document (Codex #172 root cluster) ==='
 #
 # ROOT (documented at each fix site): bash command substitution `$(...)` SILENTLY STRIPS NUL
 # bytes, so a value validated AFTER a `$(...)` round-trip differs from what jq produced. Defended
-# at TWO layers: (1) FILE-LEVEL — reject any manifest/ledger file containing a LITERAL NUL byte
-# before it is read into a shell var (hivemind_path_has_nul); (2) SCALAR-LEVEL — every jq field
-# projection whose output bash consumes rejects a value containing ANY C0 control byte INSIDE jq
-# (so a JSON ` ` escape jq -r would decode to a real NUL is caught while the bytes are intact).
-# Plus: jq accepts a STREAM of documents, so shape validation now requires EXACTLY ONE document.
+# at TWO layers: (1) FILE-LEVEL — brood-state.sh refuses any manifest/ledger holding a LITERAL NUL
+# or raw control byte from its one read, before any capture can erase it (Sections 3b and 3d);
+# (2) SCALAR-LEVEL — every jq field projection whose output bash consumes rejects a value
+# containing ANY C0 control byte INSIDE jq (so a JSON ` ` escape jq -r would decode to a real NUL
+# is caught while the bytes are intact). Plus: jq accepts a STREAM of documents, so shape
+# validation now requires EXACTLY ONE document.
 
-# ── 4a. hivemind_path_has_nul: byte-accurate literal-NUL detection ──
-nul_file="$WORKDIR/has-nul.bin"
-printf '{"run":{"status":"running"}}\000\n' > "$nul_file"   # literal NUL embedded via \000
-clean_file="$WORKDIR/no-nul.json"
-printf '{"run":{"status":"running"}}\n' > "$clean_file"
-if hivemind_path_has_nul "$nul_file"; then
-  pass "nul:detect-present" "hivemind_path_has_nul detects a literal NUL byte"
-else
-  failed "nul:detect-present" "hivemind_path_has_nul missed a literal NUL byte"
-fi
-if hivemind_path_has_nul "$clean_file"; then
-  failed "nul:detect-absent" "hivemind_path_has_nul false-positived on a clean file"
-else
-  pass "nul:detect-absent" "hivemind_path_has_nul reports no NUL on a clean file"
-fi
+# ── 4a/4b. File-level: a literal NUL is refused from the one read (both readers) ──
+nul_root="$WORKDIR/nul4/checkout"
+mkdir -p "$nul_root/.hivemind/runs/run-nul" "$nul_root/.hivemind/broods/brood-0f"
+printf '{"run":{"status":"running"},"state":{"current":"plan"}}\000' > "$nul_root/.hivemind/runs/run-nul/state.json"
+assert_eq "nul:ledger-literal" "$(printf 'MALFORMED\nMALFORMED')" \
+  "$(hivemind_brood_read_child_ledger "$nul_root" run-nul)" "literal-NUL ledger → MALFORMED / MALFORMED"
+printf '{"strains":[]}\000\n' > "$nul_root/.hivemind/broods/brood-0f/manifest.json"
+hivemind_brood_read_manifest "$nul_root" brood-0f >/dev/null 2>&1
+assert_eq "nul:manifest-literal" "5" "$?" "literal-NUL manifest → 5 (unreadable)"
 
-# ── 4b. Ledger wrapper: a ledger file with a LITERAL NUL → MALFORMED (both scalars) ──
-# The on-disk JSON is otherwise valid; the trailing literal NUL would be stripped by the `$(...)`
-# read, so the file-level guard must reject it as MALFORMED before any read.
-nul_ledger="$WORKDIR/nul-ledger.json"
-printf '{"run":{"status":"running"},"state":{"current":"plan"}}\000' > "$nul_ledger"
-assert_eq "ledger:literal-nul-status" "MALFORMED" \
-  "$(hivemind_project_run_status "$nul_ledger")" "literal-NUL ledger run.status → MALFORMED"
-assert_eq "ledger:literal-nul-state" "MALFORMED" \
-  "$(hivemind_project_state_current "$nul_ledger")" "literal-NUL ledger state.current → MALFORMED"
 
 # ── 4c. Scalar-level: a JSON ` ` ESCAPE (valid JSON) → field projects EMPTY, not stripped ──
 # The FILE has no literal NUL (the escape is 6 ASCII bytes \u0000), so the file-level check misses

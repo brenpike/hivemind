@@ -32,7 +32,7 @@ set -u
 #
 # <facts_evidence> (OPTIONAL 7th argument) is the projector's field 11: `yes` when a gather-facts
 # output file sits in the strain's ground-truth worktree (hivemind_detect_facts_evidence in
-# ledger-project.sh), the started-evidence of a script-engine child, which writes no run ledger.
+# brood-state.sh), the started-evidence of a script-engine child, which writes no run ledger.
 # Only the exact value `yes` counts; an ABSENT argument (every 6-argument call), an empty value or
 # any other value means `no`, so every 6-argument call keeps its result.
 #

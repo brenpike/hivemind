@@ -96,6 +96,11 @@
   },
   {
     "rule": "CHECK13",
+    "path": "plugin/skills/_shared/brood-state.sh",
+    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. The sole reader of coordinator brood state: verified-handle reads reported through return codes and MISSING/MALFORMED or yes/no tokens; callers own set -u and error routing (this lib never exits)."
+  },
+  {
+    "rule": "CHECK13",
     "path": "plugin/skills/_shared/brood-status-derive.sh",
     "reason": "P18 documented exception (ADR-0020): SOURCED library carrying set -u ONLY. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; set -u alone is safe to inherit. Pure status-derivation/aggregation: inputs in, string out, no I/O, no exit."
   },
