@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The local reviewer's `user-input-required` and `high-severity-rejection` exits return `question` or `rationale_text` and `recommendation_text`, short fields in the reviewer's own words. Each open finding carries a short `summary` and `recommendation` in place of `title` and `body` (#441).
 - Accepting a remediation plan asks the user only when its `remediation_gate` trips the Promotion Gate (irreversible, architectural or safety-relevant), or marks it surface-growing or a repeat on a surface whose earlier fix did not close it, on both engines. The question's gate is the plan's `promotion_gate`, copied unchanged. The rule has one home, `plugin/governance/decision-autonomy.md` (Promotion Gate). The `remediation_plan_acceptance` table row is auto at the high and balanced levels and surface at low (#452).
 - The overlord's relay rule has one home, `plugin/agents/overlord.md` (`## Engine`). `plugin/workflow-src/lib/result.js` keeps only a pointer to it (#445).
+- Built workflow scripts write each data constant with no indent, one key or element per line, which keeps `standard-delivery.js` within its 190,000 character budget (#445).
 - Docs: a new amendment to ADR-0037 and a dated note on ADR-0038. The README describes remediation plans that are decided for you and questions that show short fields (#441, #445, #452).
 
 ### Fixed
