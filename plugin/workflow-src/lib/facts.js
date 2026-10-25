@@ -92,7 +92,8 @@
  *                           and injection-suspect may carry
  *                           pattern_category, field_excerpt and reason, all
  *                           optional. The user rejected local review
- *                           finding 87c0420e, which asked to require them,
+ *                           finding 87c0420e, which asked to make them
+ *                           mandatory,
  *                           because a suspect stops the run before planning
  *                           either way (ADR-0037, Amendment 2026-10-25: a
  *                           suspect scan result needs no diagnostic field).
