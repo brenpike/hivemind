@@ -23,7 +23,9 @@
  *     open        non-empty array of {brief} for questions still unanswered
  *                 when the run stops asking. Entries of asks fit.
  *     stopReason  why the run stopped asking: 'pause_limit' (the default),
- *                 'reply_size', 'exact_text_size' or 'before_pr'.
+ *                 'reply_size' or 'exact_text_size'. Only analysis-only
+ *                 stops at 'pause_limit': standard-delivery pauses for
+ *                 every open question while its replies fit.
  *
  * Outputs
  *   renderQuestions  one message, the ask first, its sections apart by
@@ -64,11 +66,9 @@
  *   renderOpenQuestions  one block: a line saying why the run stopped
  *     asking: after pauseLimit() rounds ('pause_limit'), because the
  *     replies so far are too long to carry into another round
- *     ('reply_size'), because the exact text of a question is too long to
- *     show in full ('exact_text_size'), or because the run stopped before
- *     the pull request for questions that need the user's answer
- *     ('before_pr'). The line names no next action: the workflow adds its
- *     own next-step line. Then one line per
+ *     ('reply_size'), or because the exact text of a question is too long
+ *     to show in full ('exact_text_size'). The line names no next action:
+ *     the workflow adds its own next-step line. Then one line per
  *     question labelled Q1..Qn by position, with its problem and the option
  *     the report assumes, or the line 'I have no recommendation of my own.'
  *
@@ -203,8 +203,6 @@ function renderStopIntro(stopReason) {
       return 'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
     case 'exact_text_size':
       return 'I stopped asking because the exact text of a question is too long to show you in full. These are still open:';
-    case 'before_pr':
-      return 'I stopped before the pull request because these questions need your answer. These are still open:';
     default:
       throw new Error('renderOpenQuestions: no intro for stop reason ' + JSON.stringify(stopReason));
   }

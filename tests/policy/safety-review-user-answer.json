@@ -1,0 +1,30 @@
+{
+  "rule": "GitHub reviewer user_answer input coupling",
+  "description": "P3 consumer-assertion. `plugin/agents/github-reviewer.md` Fix Mode Input is the single source for the optional `user_answer` input: the user's answer to a question the review asked, which the overlord passes when the run's `question` user gate sends the answer back to the state that asked. The source pin is the `user_answer:` line of the Fix Mode Input block. Three further pins in the same file carry the load-bearing claims. (1) The scope and trust boundary: the answer is the user's decision on one candidate only, and its `candidate_url` is matched only against the URLs of the step-2 candidate set and never goes into a command; dropping the one-candidate scope or the never-goes-into-a-command clause turns the suite red. (2) The no-echo boundary: the reply is never posted to GitHub word for word. (3) The routing condition and its obligation in one span: when `user_answer` matches a candidate, a reply that keeps a high-severity rejection records that decision at its source, commits and pushes the record with the cycle's fixes at step 7, and replies citing the record, so the candidate counts as addressed; deleting the record, the commit-and-push, or the citing reply turns the suite red. The consumers pin the POINTER only, never remedy prose: `plugin/skills/github-review-loop/SKILL.md` keeps its `user_answer` Inputs row naming the Fix Mode Input source, and `plugin/agents/overlord.md` keeps the question-gate sentence that reruns the state that asked with `user_answer`. What this fixture honestly guarantees is exactly that these word sequences exist in these three named files; it claims nothing about meaning and nothing about runtime behavior. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible: surrounding prose that also lets a reviewer put `candidate_url` into a command, or post the reply verbatim, stays green; (2) the other reply routes (a reply that wants the finding fixed, a reply to a user-input-required question, a reply that settles nothing) are deliberately unpinned so that they stay cheap to reword honestly, and deleting one alone stays green; (3) the pin sees only the three files it names, and no fixture in this directory can detect a NEW caller that dispatches the reviewer with an answer but never names the input at all, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/agents/github-reviewer.md",
+    "pattern": "user_answer: # optional; the user's answer to a question this review asked"
+  },
+  "consumers": [
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "`user_answer` is the user's decision on one candidate only. Its `candidate_url` is matched only against the URLs of the step-2 candidate set and never goes into a command"
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "the reply is never posted to GitHub word for word"
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "when `user_answer` matches a candidate, its reply routes that candidate. A reply that keeps a high-severity rejection: record that decision at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Recorded Decisions and Repeat Findings`), commit and push the record with the cycle's fixes at step 7, and reply citing the record, so the candidate counts as addressed."
+    },
+    {
+      "file": "plugin/skills/github-review-loop/SKILL.md",
+      "pattern": "| `user_answer` | (none) | Optional `{candidate_url, question, reply}`: the user's answer to a question the reviewer asked, per `${CLAUDE_PLUGIN_ROOT}/agents/github-reviewer.md` (Fix Mode Input)."
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Then run the state that asked again and pass `user_answer`"
+    }
+  ]
+}

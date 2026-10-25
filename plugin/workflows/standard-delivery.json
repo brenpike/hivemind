@@ -1,8 +1,8 @@
 {
   "id": "standard-delivery",
-  "version": 5,
+  "version": 6,
   "start": "plan",
-  "terminal": ["complete", "blocked", "cancelled", "hatchery_monitor", "user_input_required", "review_rejected", "review_exhausted", "merge_advised", "review_window_elapsed"],
+  "terminal": ["complete", "blocked", "cancelled", "hatchery_monitor", "review_exhausted", "merge_advised", "review_window_elapsed"],
   "states": {
     "plan": {
       "type": "agent",
@@ -12,7 +12,7 @@
         "single": "git_preflight",
         "multi": "git_preflight",
         "brood": "brood_confirm",
-        "open_questions": "blocked",
+        "open_questions": "question",
         "blocked": "blocked"
       }
     },
@@ -144,8 +144,8 @@
         "break-fix-break": "review_exhausted",
         "diminishing-returns": "diminishing_returns_decision",
         "injection-suspect": "blocked",
-        "user-input-required": "user_input_required",
-        "high-severity-rejection": "review_rejected",
+        "user-input-required": "question",
+        "high-severity-rejection": "question",
         "blocked": "blocked"
       }
     },
@@ -161,13 +161,13 @@
     },
     "review_remediation_plan": {
       "type": "agent",
-      "description": "Cerebrate re-plans remediation when review escalates to the planner. Declares every cerebrate outcome (single|multi|brood|open_questions|blocked); a re-plan that yields steps routes to implementation, brood routes to the brood_confirm gate, open_questions/blocked surface to the user.",
+      "description": "Cerebrate re-plans remediation when review escalates to the planner. Declares every cerebrate outcome (single|multi|brood|open_questions|blocked); a re-plan that yields steps routes to implementation, brood routes to the brood_confirm gate, open_questions goes to the question gate, blocked surfaces to the user.",
       "agent": "hivemind:cerebrate",
       "transitions": {
         "single": "implement_next_step",
         "multi": "implement_next_step",
         "brood": "brood_confirm",
-        "open_questions": "blocked",
+        "open_questions": "question",
         "blocked": "blocked"
       }
     },
@@ -213,20 +213,20 @@
         "root-cluster-suspected": "review_remediation_plan_postpr",
         "merge-advised": "merge_advised",
         "injection-suspect": "blocked",
-        "high-severity-rejection": "review_rejected",
-        "user-input-required": "user_input_required",
+        "high-severity-rejection": "question",
+        "user-input-required": "question",
         "blocked": "blocked"
       }
     },
     "review_remediation_plan_postpr": {
       "type": "agent",
-      "description": "Post-PR remediation re-plan: cerebrate re-plans when GitHub review escalates to the planner after the PR is open. Declares every cerebrate outcome (single|multi|brood|open_questions|blocked); a re-plan that yields steps routes to the post-PR implementation loop, open_questions/blocked surface to the user. The post-PR loop pushes remediation commits and re-enters the existing review loop — it never re-creates the PR. brood is BLOCKED in this post-PR context: a brood routes through brood_confirm -> spawn_brood -> hatchery_monitor (terminal), which would strand the already-open PR before it could reach validate_postpr -> push_remediation -> github_review_loop. Brood-shaped post-PR remediation must be surfaced to the user (matching pr-feedback-remediation's handling of brood in a post-PR context).",
+      "description": "Post-PR remediation re-plan: cerebrate re-plans when GitHub review escalates to the planner after the PR is open. Declares every cerebrate outcome (single|multi|brood|open_questions|blocked); a re-plan that yields steps routes to the post-PR implementation loop, open_questions goes to the question gate, blocked surfaces to the user. The post-PR loop pushes remediation commits and re-enters the existing review loop — it never re-creates the PR. brood is BLOCKED in this post-PR context: a brood routes through brood_confirm -> spawn_brood -> hatchery_monitor (terminal), which would strand the already-open PR before it could reach validate_postpr -> push_remediation -> github_review_loop. Brood-shaped post-PR remediation must be surfaced to the user (matching pr-feedback-remediation's handling of brood in a post-PR context).",
       "agent": "hivemind:cerebrate",
       "transitions": {
         "single": "implement_next_step_postpr",
         "multi": "implement_next_step_postpr",
         "brood": "blocked",
-        "open_questions": "blocked",
+        "open_questions": "question",
         "blocked": "blocked"
       }
     },
@@ -278,11 +278,21 @@
         "blocked": "blocked"
       }
     },
+    "question": {
+      "type": "user_gate",
+      "description": "Question gate: a state asked the user a question (a planner's open_questions, or a reviewer's user-input-required or high-severity-rejection). The overlord asks the user, and the answer goes back to the state that asked, in the same run: the outcome is the name of that state, which runs again with the answer as user_answer. cancelled ends the run.",
+      "transitions": {
+        "plan": "plan",
+        "local_review": "local_review",
+        "review_remediation_plan": "review_remediation_plan",
+        "github_review_loop": "github_review_loop",
+        "review_remediation_plan_postpr": "review_remediation_plan_postpr",
+        "cancelled": "cancelled"
+      }
+    },
     "complete": { "type": "terminal" },
     "blocked": { "type": "terminal" },
     "cancelled": { "type": "terminal" },
-    "user_input_required": { "type": "terminal" },
-    "review_rejected": { "type": "terminal" },
     "review_exhausted": { "type": "terminal" },
     "merge_advised": { "type": "terminal" },
     "review_window_elapsed": { "type": "terminal" }

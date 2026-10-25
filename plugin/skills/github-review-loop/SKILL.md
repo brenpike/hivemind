@@ -35,6 +35,7 @@ Monitor is a main-session cross-turn primitive — a subagent dispatch orphans a
 | `max_watch_duration` | `3600` | Idle-window seconds per Monitor arm (1h). |
 | `max_remediation_cycles` | `$(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor)` | Max real remediation rounds (findings_resolved ≥ 1). |
 | `poll_interval` | `60` | Seconds between polls. |
+| `user_answer` | (none) | Optional `{candidate_url, question, reply}`: the user's answer to a question the reviewer asked, per `${CLAUDE_PLUGIN_ROOT}/agents/github-reviewer.md` (Fix Mode Input). Passed to the cycle-0 reviewer dispatch only. |
 
 `max_watch_duration` is an IDLE window, not a total budget: a completed remediation
 cycle re-arms a fresh full window, and a window that elapses with no actionable
@@ -86,7 +87,8 @@ Capture BEFORE cycle 0: a seed taken after cycle 0 opens a blind window, in
 which feedback that arrived during cycle 0 is never seen by the watch.
 
 **3. Cycle 0.** Dispatch `hivemind:github-reviewer` fix mode (see Dispatch contract)
-over pre-existing PR feedback before arming the Monitor. NEVER prefiltered. Handle
+over pre-existing PR feedback before arming the Monitor. Pass `user_answer`, when
+given, to this dispatch only. NEVER prefiltered. Handle
 return per Reviewer-return handling. Pass the return through `loop-state.sh
 cycle-decision`; arm the Monitor ONLY when `EXIT_REASON=none`. Any other
 `EXIT_REASON` is terminal — emit the terminal report and end the loop here; do NOT arm the Monitor.
@@ -277,7 +279,8 @@ unwatched — the bounded gap every terminal has.
 Spawn `hivemind:github-reviewer` with `mode: fix`, `pr`, `working_branch`, `base`,
 `reviewer_filter` (scoped per `${CLAUDE_PLUGIN_ROOT}/references/github-pr-review-graphql.md`
 Author Filtering). Omit `target` — absent target is the full pass over unresolved
-feedback. Returns `exit_reason ∈ {clean, injection-suspect, user-input-required,
+feedback. Pass `user_answer` on the cycle-0 dispatch only, when the skill was given
+one; every later dispatch carries none. Returns `exit_reason ∈ {clean, injection-suspect, user-input-required,
 planner-escalation, high-severity-rejection, root-cluster-suspected, merge-advised,
 blocked}` plus `findings_resolved` / `findings_open` and escalation-conditional
 fields. Skill consumes; does not re-fetch or re-classify.

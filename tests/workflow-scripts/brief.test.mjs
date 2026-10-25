@@ -425,17 +425,11 @@ describe('open questions stop reasons', () => {
       '  Q1. FIRST_OPEN The report assumes option A.'
     ].join('\n'));
   });
-  test('before_pr says the run stopped before the pull request and names no next action', () => {
-    assert.equal(lib.renderOpenQuestions(open, 'before_pr'), [
-      'I stopped before the pull request because these questions need your answer. These are still open:',
-      '  Q1. FIRST_OPEN The report assumes option A.'
-    ].join('\n'));
-  });
   test('every stop reason has its own intro', () => {
-    const intros = ['pause_limit', 'reply_size', 'exact_text_size', 'before_pr'].map((stopReason) => lib.renderOpenQuestions(open, stopReason).split('\n')[0]);
+    const intros = ['pause_limit', 'reply_size', 'exact_text_size'].map((stopReason) => lib.renderOpenQuestions(open, stopReason).split('\n')[0]);
     assert.equal(new Set(intros).size, intros.length);
   });
-  for (const stopReason of ['nonsense', null, '']) {
+  for (const stopReason of ['nonsense', null, '', 'before_pr']) {
     test(`stop reason ${JSON.stringify(stopReason)} throws`, () => {
       assert.throws(() => lib.renderOpenQuestions(open, stopReason), /renderOpenQuestions: no intro for stop reason/);
     });
@@ -526,7 +520,7 @@ describe('exact entries', () => {
       lib.renderQuestionsCompact([plain, exact], taken),
       lib.renderDecisions(taken),
       lib.renderDecisionsCompact(taken),
-      ...['pause_limit', 'reply_size', 'exact_text_size', 'before_pr'].map((stopReason) => lib.renderOpenQuestions([exact], stopReason))
+      ...['pause_limit', 'reply_size', 'exact_text_size'].map((stopReason) => lib.renderOpenQuestions([exact], stopReason))
     ];
     for (const output of outputs) {
       assert.equal(output.includes('Exact text'), false, output);

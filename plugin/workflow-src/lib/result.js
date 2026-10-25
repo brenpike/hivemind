@@ -51,7 +51,7 @@
  *                 so it returns instead of throwing.
  *   resultFields  every top-level field name a result can carry.
  *   replyField    the args key a resumed run reads the reply from: 'reply'.
- *   pauseLimit    the most times one run may pause: 3.
+ *   pauseLimit    the most times an analysis-only run may pause: 3.
  *   canPause      true when pausesSoFar is below pauseLimit().
  *   noticeBudget  the most notice chars a whole result may take.
  *   noticeLength  the chars value takes in the completion notice.
@@ -124,11 +124,13 @@
  *   has room for at least a marker.
  *
  * Invariants
- *   A run pauses at most pauseLimit() times. The limit belongs to this
- *   lib; each workflow decides what happens at it, and its message lists
- *   the questions still open: analysis-only finishes with outcome
- *   'complete', and standard-delivery ends 'blocked' with the next action
- *   named, so its 'complete' always means a pull request exists.
+ *   The pause limit applies to analysis-only: it pauses at most
+ *   pauseLimit() times, then finishes with outcome 'complete' and lists the
+ *   questions still open. standard-delivery has no pause limit: it pauses
+ *   for every open question as long as canCarry holds for its replies, and
+ *   only when they no longer fit, or an exact question cannot be shown
+ *   whole, does it end 'blocked' with the next action named, so its
+ *   'complete' always means a pull request exists.
  *   resume_args is the only state that crosses a pause, so the workflow keeps
  *   its pause count and earlier answers there, in fields it alone reads.
  *   resume_args never has a reply key, so a stale reply cannot be replayed.

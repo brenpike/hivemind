@@ -1,18 +1,18 @@
 {
   "id": "hatchery-dispatch",
-  "version": 1,
+  "version": 2,
   "start": "brood_plan",
   "terminal": ["hatchery_monitor", "blocked", "cancelled"],
   "states": {
     "brood_plan": {
       "type": "agent",
-      "description": "Cerebrate produces a brood-plan decomposing work into independent strains. Parent-side dispatch only; children run the shared engine themselves. Declares every cerebrate outcome (single|multi|brood|open_questions|blocked); only brood proceeds to the brood_confirm gate — if cerebrate decides the work is single/multi or has open questions, hatchery dispatch cannot proceed and surfaces to the user as blocked.",
+      "description": "Cerebrate produces a brood-plan decomposing work into independent strains. Parent-side dispatch only; children run the shared engine themselves. Declares every cerebrate outcome (single|multi|brood|open_questions|blocked); only brood proceeds to the brood_confirm gate — if cerebrate decides the work is single/multi, hatchery dispatch cannot proceed and surfaces to the user as blocked; open questions go to the question gate.",
       "agent": "hivemind:cerebrate",
       "transitions": {
         "single": "blocked",
         "multi": "blocked",
         "brood": "brood_confirm",
-        "open_questions": "blocked",
+        "open_questions": "question",
         "blocked": "blocked"
       }
     },
@@ -32,6 +32,14 @@
       "transitions": {
         "complete": "hatchery_monitor",
         "blocked": "blocked"
+      }
+    },
+    "question": {
+      "type": "user_gate",
+      "description": "Question gate: the brood plan returned open_questions. The overlord asks the user, and the answer goes back to the state that asked, in the same run: the outcome is the name of that state, which runs again with the answer. cancelled ends the run.",
+      "transitions": {
+        "brood_plan": "brood_plan",
+        "cancelled": "cancelled"
       }
     },
     "hatchery_monitor": { "type": "terminal" },
