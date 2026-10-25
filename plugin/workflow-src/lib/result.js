@@ -83,21 +83,9 @@
  *                 undefined. A reason is quoted whole up to 600 code points.
  *
  * Contract the overlord relays
- *   Only the harness completion notice carries the result. A model's own
- *   summary of the run never counts.
- *   The overlord presents message, for a question and for the final report
- *   alike, as its whole reply in the user's active output style, such as a
- *   terse style. It keeps exactly as written every question label, every
- *   option and reply token, the recommendation, and every number, path,
- *   URL, commit, branch and identifier. It adds no line before or after
- *   message and no comment on what it says, and drops nothing the user must
- *   answer.
- *   needs_user true: show message to the user. Then relaunch the same
- *   run with args built in this order: the launch args, then the keys of
- *   resume_args over them, then reply set to the user's reply word for word.
- *   That is the only resume rule: nothing else in args is read as a reply.
- *   Never answer for the user.
- *   needs_user false: show message to the user. The run is over.
+ *   The relay and resume rule has one home,
+ *   ${CLAUDE_PLUGIN_ROOT}/agents/overlord.md (## Engine), and is not
+ *   restated here.
  *
  * Size
  *   The harness cuts the completion notice at a fixed length of the escaped
@@ -150,10 +138,16 @@
  *   the user's terminal raw, start a line of its own or forge the
  *   next-step line. Markdown inside the quote stays as text. Planner prose
  *   written for the user is not encoded: the brief fields and verbatim
- *   text lib/brief.js renders, which include the plan summary and an
- *   irreversible effect's text, and the analysis-only report show as
- *   written. Both are residuals ADR-0037 records (Risks, step text in a
- *   blocked message, (a) and (b)).
+ *   text lib/brief.js renders, which include an irreversible effect's
+ *   text, the plan digest a delivery plan acceptance shows, and the
+ *   analysis-only report show as written. Both are residuals ADR-0037
+ *   records (Risks, step text in a blocked message, (a) and (b)).
+ *   Bounded fields: what a workflow shows of a step result comes from
+ *   fields written for the user with a maxLength in their step schema,
+ *   such as the brief fields of decision-brief-schema.json, the plan
+ *   digest and the blocker of each step result, so a message is short
+ *   before it is fitted (issue 445). The fit below stays the backstop for
+ *   any long text, such as the analysis-only report.
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means

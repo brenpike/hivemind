@@ -131,6 +131,8 @@ function makeStep(id, files, changes = {}) {
 function makePlan(changes = {}) {
   return {
     summary: 'Add the cache layer.',
+    digest: { problem: 'Reads hit the database every time.', change: 'Add a cache layer in front of the reads.' },
+    remediation_gate: { promotion_gate: { irreversible: false, architectural: false, safety: false }, grows_surface: false, repeats_surface: false },
     branch: 'feature/cache',
     base: 'main',
     trunk_freshness: 'fresh',
@@ -327,6 +329,20 @@ function makeBrief(changes = {}) {
 
 function makeGatedBrief(problem) {
   return makeBrief({ problem: problem, gate: { irreversible: false, architectural: true, safety: false } });
+}
+
+/**
+ * A gated planner question whose every bounded field holds its most code
+ * points: the largest question a plan result can carry.
+ */
+function makeMaxBrief(index) {
+  const brief = makeGatedBrief(('MAX_PROBLEM_' + index + ' ').padEnd(300, 'p'));
+  return {
+    ...brief,
+    criticality: { ...brief.criticality, blast_radius: 'b'.repeat(160), if_ignored: 'i'.repeat(160) },
+    options: brief.options.map((option) => ({ ...option, summary: (option.id + ' ').padEnd(160, 's') })),
+    recommendation: { ...brief.recommendation, why: 'w'.repeat(200) }
+  };
 }
 
 async function runWorkflow(args, results, target = workflow) {
@@ -726,7 +742,10 @@ const FOURTH = '5'.repeat(40);
 const ESCALATION = { ...REVIEW_CLEAN, exit_reason: 'planner-escalation', findings_open: 1, finding_id: 'F5', classification: 'architecture', file: 'src/cache.js', title: 'The cache layer skips the "auth" check.' };
 const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.' };
 const DIMINISHING = { ...REVIEW_CLEAN, exit_reason: 'diminishing-returns', findings_open: 2, signals_observed: ['severity-decay'], latest_severity_max: 'low', recommendation_text: 'Stop here; the rest is style.' };
-const REMEDIATION_PLAN = makePlan({ summary: 'Route the cache through the auth check.', steps: [makeStep('STEP-002', ['src/auth.js'])] });
+const ARCHITECTURAL_GATE = { promotion_gate: { irreversible: false, architectural: true, safety: false }, grows_surface: false, repeats_surface: false };
+const FULL_GATE = { promotion_gate: { irreversible: true, architectural: true, safety: true }, grows_surface: true, repeats_surface: true };
+const REMEDIATION_PLAN = makePlan({ summary: 'Route the cache through the auth check.', remediation_gate: ARCHITECTURAL_GATE, steps: [makeStep('STEP-002', ['src/auth.js'])] });
+const CLEAN_REMEDIATION_PLAN = { ...REMEDIATION_PLAN, remediation_gate: makePlan().remediation_gate };
 
 /**
  * Reads the yaml block under a heading of local-reviewer.md: the top-level
@@ -1363,7 +1382,7 @@ const ROW_TESTS = {
     });
     test('a plan acceptance waits for an open planner question, and the plan it accepts is the plan that runs', async () => {
       const surfaced = buildWithSurfaceKinds(['plan_acceptance']);
-      const revisedPlan = makePlan({ summary: 'Add the cache layer with hashed keys.' });
+      const revisedPlan = makePlan({ summary: 'Add the cache layer with hashed keys.', digest: { problem: 'Reads hit the database every time.', change: 'Add a cache layer keyed by hashed paths.' } });
       const results = happyResults({
         'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]),
         'revise-1': reviseResult(planResult(revisedPlan), ['Q1']),
@@ -1379,7 +1398,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(second), ['facts-1', 'plan-1', 'revise-1']);
       assert.ok(second.result.message.startsWith('**Answer Q1 so I can go on: pick one of its options.**'), second.result.message);
       assert.ok(second.result.message.includes('Q1. Start delivering the plan'), second.result.message);
-      assert.ok(second.result.message.includes('The plan: feat: Add the cache layer with hashed keys, 1 step on branch "feature/cache".'), second.result.message);
+      assert.ok(second.result.message.includes('\n\nWhat the plan addresses: Reads hit the database every time.\nWhat it changes: Add a cache layer keyed by hashed paths.\nIt has 1 step and touches 1 file on branch "feature/cache": "src/cache.js".'), second.result.message);
       assert.ok(!second.result.message.includes(revisedPlan.summary), second.result.message);
       assert.ok(!second.result.message.includes('GATED_PROBLEM'), second.result.message);
       const run = await runWorkflow(resumeWith(LAUNCH, second.result, 'Yes, go.'), results, surfaced);
@@ -1611,6 +1630,19 @@ const ROW_TESTS = {
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, publish it.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+    });
+    test('a replied effect does not settle the same effect of a step whose id shares the shown prefix', async () => {
+      const prefix = 'STEP-abcdefghijkl-';
+      const sharedStep = (suffix, file) => makeStep(prefix + suffix, [file], { external_effects: [{ summary: summary, reversible: false }] });
+      const onePlan = makePlan({ steps: [sharedStep('001', 'src/cache.js')] });
+      const twoPlan = makePlan({ steps: [sharedStep('001', 'src/cache.js'), sharedStep('002', 'src/store.js')] });
+      const results = happyResults({ 'plan-1': planResult(onePlan), 'revise-1': reviseResult(planResult(twoPlan), ['Q1']) });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, publish it for the first step.'), results);
+      assert.equal(run.result.needs_user, true, run.result.message);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1']);
+      assert.ok(run.result.message.includes('Word for word:\n' + summary), run.result.message);
     });
     test('a changed effect is asked again', async () => {
       const results = happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': reviseResult(planResult(effectPlan('Publish to a staging registry.', false)), ['Q1']) });
@@ -2103,8 +2135,8 @@ const ROW_TESTS = {
     });
   },
   'SD-20': () => {
-    const longCriticality = { ...makeBrief().criticality, blast_radius: 'S'.repeat(8000) };
-    const longQuestion = makeBrief({ problem: 'LONG_PROBLEM', criticality: longCriticality, gate: { irreversible: false, architectural: true, safety: false } });
+    const longCriticality = { ...makeBrief().criticality, blast_radius: 'S'.repeat(160) };
+    const longQuestions = Array.from({ length: 30 }, (_, index) => makeBrief({ problem: 'LONG_PROBLEM_' + index, criticality: longCriticality, gate: { irreversible: false, architectural: true, safety: false } }));
     test('only external_effect asks are exact', () => {
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       const plan = effectPlan('Publish to the registry.', false);
@@ -2116,29 +2148,31 @@ const ROW_TESTS = {
     test('a pause forced into compact form keeps each irreversible effect exact text verbatim', async () => {
       const summaries = ['Publish version 2 to the package registry.', 'Send the release email to every customer.'];
       const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { external_effects: summaries.map((summary) => ({ summary: summary, reversible: false })) })] });
-      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(plan, [longQuestion]) });
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(plan, longQuestions) });
       assert.equal(run.result.needs_user, true);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1']);
       const message = run.result.message;
       assert.ok(message.startsWith(lib.noticeMarker('compact') + '\n\n'), message.slice(0, 300));
       assert.ok(!message.includes('S'.repeat(100)), 'the pause is in compact form');
-      assert.ok(message.includes('Q1. LONG_PROBLEM'), message);
+      assert.ok(message.includes('Q1. LONG_PROBLEM_0'), message);
       summaries.forEach((summary) => assert.ok(message.includes('Word for word:\n' + summary + '\n'), message));
     });
     test('a long effect summary stays whole while the compact form drops the long planner detail', async () => {
-      const summary = 'Run this migration on the production database: ' + 'step m; '.repeat(500);
-      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(effectPlan(summary, false), [longQuestion]) });
+      const summary = 'Run this migration on the production database: ' + 'step m; '.repeat(31).trimEnd();
+      assert.ok(Array.from(summary).length <= 300);
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(effectPlan(summary, false), longQuestions) });
       assert.equal(run.result.needs_user, true);
       assert.ok(run.result.message.startsWith(lib.noticeMarker('compact') + '\n\n'), run.result.message.slice(0, 300));
       assert.ok(run.result.message.includes('Word for word:\n' + summary), run.result.message.slice(0, 300));
       assert.ok(!run.result.message.includes(lib.noticeMarker('cut')));
     });
-    test('an effect summary too long to show whole finishes blocked with no branch or wave call', async () => {
-      const summary = 'Run this migration: ' + 'M'.repeat(9000);
-      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(effectPlan(summary, false)) }));
+    test('effect summaries too long to show whole together finish blocked with no branch or wave call', async () => {
+      const summaries = Array.from({ length: 30 }, (_, index) => ('Run migration ' + index + ': ').padEnd(300, 'M'));
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { external_effects: summaries.map((summary) => ({ summary: summary, reversible: false })) })] });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
       assert.equal(run.result.needs_user, false);
       assert.equal(run.result.outcome, 'blocked');
-      const openQuestions = lib.renderOpenQuestions([{ brief: main.buildExternalEffectBrief('STEP-001', summary) }], 'exact_text_size');
+      const openQuestions = lib.renderOpenQuestions(summaries.map((summary) => ({ brief: main.buildExternalEffectBrief('STEP-001', summary) })), 'exact_text_size');
       assert.ok(run.result.message.startsWith(OPEN_LEAD + '\n\n' + RUN_AGAIN + '\n\n' + openQuestions + '\n\n'), run.result.message.slice(0, 600));
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1']);
     });
@@ -2147,9 +2181,9 @@ const ROW_TESTS = {
       assert.deepEqual(stops, ['reply_size', 'exact_text_size']);
       assert.ok(!mainSource.includes('before_pr') && !mainSource.includes('pause_limit'));
     });
-    test('a pause with no effect ask is not whole: an over-long question is cut as before', async () => {
-      const hugeQuestion = makeGatedBrief('HUGE_PROBLEM ' + 'h'.repeat(9000));
-      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [hugeQuestion]) });
+    test('a pause with no effect ask is not whole: questions too long for the notice are cut as before', async () => {
+      const maxQuestions = Array.from({ length: 15 }, (_, index) => makeMaxBrief(index));
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), maxQuestions) });
       assert.equal(run.result.needs_user, true);
       assert.ok(run.result.message.endsWith(lib.noticeMarker('cut')), run.result.message.slice(-300));
     });
@@ -2257,7 +2291,7 @@ const ROW_TESTS = {
       const bumpBrief = main.buildBumpTypeBrief(parsedBump());
       assert.ok(bumpBrief.problem.includes('need no version bump'), bumpBrief.problem);
       assert.ok(run.result.message.includes(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: bumpBrief }])), run.result.message);
-      assert.ok(run.result.message.includes('  D1. Start delivering the plan: create or confirm its working branch and run its steps. The plan: feat: Add the cache layer, 1 step on branch "feature/cache". The full plan is in this run\'s per-agent results. Chose option A.'), run.result.message);
+      assert.ok(run.result.message.includes('  D1. Start delivering the plan: create or confirm its working branch and run its steps. Chose option A.'), run.result.message);
       assert.ok(!run.result.message.includes('Word for word:'), run.result.message);
     });
     for (const [label, changes] of [
@@ -2306,7 +2340,7 @@ const ROW_TESTS = {
       assert.ok(mainSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };'));
       assert.ok(mainSource.includes('  return replanFromTailAsk(resolution.asks, run);\n}'));
       assert.equal((mainSource.match(/replanFromTailAsk\(\[buildUndecidedAsk\(/g) || []).length, 2);
-      assert.ok(mainSource.includes('return askTail([buildUndecidedAsk(buildReviewQuestionBrief('));
+      assert.ok(mainSource.includes('return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));'));
     });
     test('a tail round shares the round numbering with the planning rounds, and its resume replays every earlier agent', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
@@ -2788,7 +2822,7 @@ const ROW_TESTS = {
     });
   },
   'SD-33': () => {
-    const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'rationale_text', 'open_findings', 'blocker', 'rejected_findings'];
+    const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'question', 'rationale_text', 'open_findings', 'blocker', 'rejected_findings'];
     test('REVIEW_SCHEMA holds the Output Contract fields, requires the always-present ones, and labels each Codex-derived text field', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const agentSchema = callOf(run, 'review-1-1').opts.schema;
@@ -2811,8 +2845,11 @@ const ROW_TESTS = {
       const findingItem = schema.properties.open_findings.items;
       assert.equal(findingItem.type, 'object');
       assert.equal(findingItem.additionalProperties, false);
-      assert.deepEqual(findingItem.required, ['finding_id', 'severity', 'title', 'body', 'recommendation']);
+      assert.deepEqual(findingItem.required, ['finding_id', 'severity', 'summary', 'recommendation']);
       assert.deepEqual(Object.keys(findingItem.properties), findingItem.required);
+      assert.deepEqual([findingItem.properties.summary.maxLength, findingItem.properties.recommendation.maxLength, findingItem.properties.recommendation.minLength], [200, 200, 0]);
+      assert.equal(findingItem.properties.finding_id.maxLength, undefined);
+      assert.deepEqual([schema.properties.question.maxLength, schema.properties.rationale_text.maxLength, schema.properties.recommendation_text.maxLength, schema.properties.recommendation_text.minLength, schema.properties.blocker.maxLength], [300, 300, 200, 0, 300]);
       Object.values(findingItem.properties).forEach((property) => assert.ok(property.type === 'string' && property.description.startsWith('Can carry external content. '), property.description));
       assert.ok(schema.properties.open_findings.description.endsWith('Only with exit_reason user-input-required or high-severity-rejection.'), schema.properties.open_findings.description);
       const rejectedItem = schema.properties.rejected_findings.items;
@@ -2826,11 +2863,18 @@ const ROW_TESTS = {
       assert.ok(lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [rejected] }).ok);
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [{ ...rejected, note: 'x' }] }).ok);
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [{ ...rejected, record: undefined }] }).ok);
-      const finding = { finding_id: 'F1', severity: 'high', title: 'T.', body: 'B.', recommendation: '' };
-      const question = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.' };
+      const finding = { finding_id: 'F1', severity: 'high', summary: 'S.', recommendation: '' };
+      const question = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.', question: 'Q?', recommendation_text: '' };
       assert.ok(lib.validateSchema(schema, { ...question, open_findings: [finding] }).ok);
       assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, note: 'x' }] }).ok);
-      assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, body: undefined }] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, summary: undefined }] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, body: 'B.' }] }).ok, 'an open finding carries no body');
+      assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [{ ...finding, summary: 's'.repeat(201) }] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, question: 'q'.repeat(301), open_findings: [finding] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, recommendation_text: 'r'.repeat(201), open_findings: [finding] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...question, question: undefined, open_findings: [finding] }).ok, 'a user-input-required result lacks question');
+      assert.ok(!lib.validateSchema(schema, { ...question, recommendation_text: undefined, open_findings: [finding] }).ok, 'a user-input-required result lacks recommendation_text');
+      assert.ok(!lib.validateSchema(schema, { ...question, rationale_text: 'R.', open_findings: [finding] }).ok, 'rationale_text belongs to high-severity-rejection');
       assert.ok(!lib.validateSchema(schema, question).ok, 'a user-input-required result lacks open_findings');
       assert.ok(!lib.validateSchema(schema, { ...question, open_findings: [finding], cluster_ids: ['F2'] }).ok, 'cluster_ids belongs to root-cluster-suspected');
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, finding_id: 'F1' }).ok, 'a clean result carries no finding_id');
@@ -2877,7 +2921,8 @@ const ROW_TESTS = {
       ['empty signals_fired', { ...breakFix, signals_fired: [] }],
       ['empty conflicting_findings', { ...breakFix, conflicting_findings: [] }],
       ['empty signals_observed', { ...DIMINISHING, signals_observed: [] }],
-      ['empty open_findings', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.', open_findings: [] }],
+      ['empty open_findings', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.', question: 'Q?', recommendation_text: '', open_findings: [] }],
+      ['a blocker over 300 characters', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'b'.repeat(301), stage: 'invoke_review' }],
       ['a root-cluster-suspected result carrying member_count', { ...CLUSTER, member_count: 2 }],
       ['a clean result carrying finding_id', { ...REVIEW_CLEAN, finding_id: 'F1' }],
       ['a planner-escalation result carrying cluster_ids', { ...ESCALATION, cluster_ids: ['F1'] }],
@@ -3106,30 +3151,50 @@ const ROW_TESTS = {
     });
   },
   'SD-37': () => {
-    const tenantFinding = { finding_id: 'F4', severity: 'medium', title: 'Should the cache be shared across tenants?', body: 'Tenants share one process.', recommendation: 'Key the cache by tenant.' };
-    const lockFinding = { finding_id: 'F6', severity: 'high', title: 'Use a distributed lock.', body: 'Two writers can race.', recommendation: '' };
-    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Should the cache be shared across tenants?', open_findings: [tenantFinding] };
-    const rejection = { ...REVIEW_CLEAN, exit_reason: 'high-severity-rejection', findings_open: 2, finding_id: 'F6', title: 'Use a distributed lock.', rationale_text: 'A process lock is enough for one writer.', open_findings: [lockFinding, tenantFinding] };
-    const tenantLine = '- "F4", severity "medium", "Should the cache be shared across tenants?": "Tenants share one process." Recommendation: "Key the cache by tenant."';
-    const lockLine = '- "F6", severity "high", "Use a distributed lock.": "Two writers can race." Recommendation: no recommendation from the reviewer';
+    const tenantFinding = { finding_id: 'F4', severity: 'medium', summary: 'Tenants share one cache process.', recommendation: 'Key the cache by tenant.' };
+    const lockFinding = { finding_id: 'F6', severity: 'high', summary: 'Two writers can race on the cache.', recommendation: '' };
+    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Codex title of F4.', question: 'Should the cache be shared across tenants?', recommendation_text: 'Keep one cache per tenant.', open_findings: [tenantFinding] };
+    const rejection = { ...REVIEW_CLEAN, exit_reason: 'high-severity-rejection', findings_open: 2, finding_id: 'F6', title: 'Codex title of F6.', rationale_text: 'A process lock is enough for one writer.', recommendation_text: '', open_findings: [lockFinding, tenantFinding] };
+    const tenantLine = '- "F4", severity "medium": "Tenants share one cache process." Recommendation: "Key the cache by tenant."';
+    const lockLine = '- "F6", severity "high": "Two writers can race on the cache." Recommendation: none';
     const heading = 'Findings still open, each value quoted as the review returned it:';
-    for (const [label, review, text, detail] of [
-      ['user-input-required', userInput, 'Local review needs your answer on finding "F4", titled "Should the cache be shared across tenants?", before the pull request. 1 finding is still open.', [heading, tenantLine]],
-      ['high-severity-rejection', rejection, 'Local review rejected high severity finding "F6", titled "Use a distributed lock.", and left it unfixed, because: "A process lock is enough for one writer.". Should it be fixed before the pull request? 2 findings are still open.', [heading, lockLine, tenantLine]]
+    for (const [label, review, text, detail, recommendationLine] of [
+      ['user-input-required', userInput, 'Local review asks you about finding "F4" before the pull request, as below. 1 finding still open.', ['Local review asks: "Should the cache be shared across tenants?"', 'It recommends: "Keep one cache per tenant."', heading, tenantLine], 'Recommendation: option A (weak). Why: See its recommendation below. Only you can settle a question the review raises.'],
+      ['high-severity-rejection', rejection, 'Local review rejected high severity finding "F6" and left it unfixed, for the reason below. Should it be fixed before the pull request? 2 findings still open.', ['Rejected because: "A process lock is enough for one writer."', 'It makes no recommendation.', heading, lockLine, tenantLine], 'Recommendation: none.']
     ]) {
-      test(`${label} pauses the run with the reviewer question and the open findings detail block`, async () => {
+      test(`${label} pauses the run with a short code-built question and the detail block right after it`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
         const brief = main.buildReviewQuestionBrief(review, OTHER, review.open_findings);
         assert.equal(brief.problem, text);
         assert.equal(brief.kind, main.reviewQuestionKinds()[label]);
         assert.ok(lib.validateSchema(briefSchema, brief).ok);
-        assert.equal(lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema).action, 'ask');
-        assertTailPause(run, [limitAsk(brief)], 'review-commit-1-1');
-        assert.ok(run.result.message.startsWith(lib.renderQuestions([limitAsk(brief)], []) + '\n\n' + detail.join('\n') + '\n\nCommits this run made:'), run.result.message);
+        const decision = lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema);
+        assert.equal(decision.action, 'ask');
+        const ask = { brief: brief, reason: decision.reason };
+        assertTailPause(run, [ask], 'review-commit-1-1');
+        assert.ok(run.result.message.startsWith(lib.renderQuestions([ask], []) + '\n\n' + detail.join('\n') + '\n\nCommits this run made:'), run.result.message);
+        assert.equal(main.buildReviewDetailBlock(review, review.open_findings).text, detail.join('\n'));
         assert.ok(run.result.message.includes('**Q1. ' + text + '**'), run.result.message);
-        assert.ok(run.result.message.includes('Recommendation: none.'), run.result.message);
+        assert.ok(run.result.message.includes(recommendationLine), run.result.message);
+        assert.ok(!run.result.message.includes('Codex title'), run.result.message);
       });
     }
+    test('a question whose review gives a recommendation never says there is none', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': userInput }));
+      const message = run.result.message;
+      assert.ok(!message.includes('Recommendation: none.') && !message.includes(lib.askReasonLine('no_recommendation')), message);
+      assert.ok(message.includes('- A: Answer the finding: this run gives your answer to local review, which goes on with it. (recommended)'), message);
+      assert.ok(message.includes('Why I am asking: ' + lib.askReasonLine('table_surface')), message);
+      const brief = main.buildReviewQuestionBrief({ ...rejection, recommendation_text: 'Keep the process lock.' }, OTHER, rejection.open_findings);
+      assert.deepEqual({ ...brief.recommendation }, { option_id: 'A', strength: 'weak', why: 'See its recommendation below. Only you can settle a question the review raises.' });
+      assert.equal(main.buildReviewQuestionBrief({ ...userInput, recommendation_text: ' ' }, OTHER, userInput.open_findings).recommendation.strength, 'none');
+    });
+    test('both review question kinds ask at every autonomy level', () => {
+      for (const kind of Object.values(main.reviewQuestionKinds())) {
+        const row = autonomyTable.rows.find((candidate) => candidate.kind === kind);
+        assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface'], kind);
+      }
+    });
     test('each option says what a reply does on this run, and option A of high_severity_rejection says local review records the decision at its source and goes on', () => {
       const options = main.buildReviewQuestionBrief(rejection, OTHER, rejection.open_findings).options;
       assert.equal(options[0].id, 'A');
@@ -3140,22 +3205,35 @@ const ROW_TESTS = {
       assert.equal(answerOptions[1].summary, 'Stop: local review ends blocked on this run, before the pull request.');
       assert.equal(main.buildBumpTypeBrief(parsedBump()).options[1].summary, 'Plan again: this run gives your reply to the planner before anything goes further.');
     });
-    test('the detail block comes right after the questions block, and its compact form keeps the id, severity and title only', () => {
-      const block = main.buildOpenFindingsBlock([tenantFinding]);
-      assert.equal(block.text, heading + '\n' + tenantLine);
-      assert.equal(block.compact, heading + '\n- "F4", severity "medium", "Should the cache be shared across tenants?"');
-      assert.equal(main.buildOpenFindingsBlock([]), undefined);
+    test('the detail block shows up to 5 open findings, then one line counting the rest, and has no compact form', () => {
+      const many = Array.from({ length: 7 }, (unused, index) => ({ ...tenantFinding, finding_id: 'F' + index }));
+      const block = main.buildReviewDetailBlock({ ...userInput, open_findings: many }, many);
+      const lines = block.text.split('\n');
+      assert.equal(lines.length, 2 + 1 + 5 + 1);
+      assert.equal(lines.at(-1), '2 more open findings.');
+      assert.ok(!block.text.includes('"F5"') && block.text.includes('"F4"'), block.text);
+      assert.equal(main.buildReviewDetailBlock({ ...userInput, open_findings: many.slice(0, 6) }, many.slice(0, 6)).text.split('\n').at(-1), '1 more open finding.');
+      assert.deepEqual(Object.keys(main.buildReviewDetailBlock(userInput, [tenantFinding])), ['text']);
     });
     test('each finding is named by the first 8 code points of its finding_id, and each value is encoded', async () => {
       const longId = 'a1b2c3d4'.repeat(8);
-      const hostile = { finding_id: longId, severity: 'high\u001b[2J', title: 'Line\nbreak', body: 'B'.repeat(100) + ' ' + 'C'.repeat(300), recommendation: '@owner fix it' };
-      const review = { ...userInput, finding_id: longId, open_findings: [hostile] };
+      const hostile = { finding_id: longId, severity: 'high\u001b[2J', summary: 'Line\nbreak', recommendation: '@owner fix it' };
+      const review = { ...userInput, finding_id: longId, question: 'Ask\u0007 me?', open_findings: [hostile] };
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
       const message = run.result.message;
       assert.ok(!message.includes(longId), message);
-      assert.ok(message.includes('finding "a1b2c3d4", titled'), message);
-      assert.ok(message.includes('- "a1b2c3d4", severity "high\\u001b[2J", "Line\\nbreak": "' + 'B'.repeat(100) + '" (cut) Recommendation: "@owner fix it"'), message);
-      assert.ok(main.buildReviewEscalationBrief({ ...ESCALATION, finding_id: longId }).problem.includes('finding "a1b2c3d4", titled'));
+      assert.ok(message.includes('finding "a1b2c3d4" before'), message);
+      assert.ok(message.includes('Local review asks: "Ask\\u0007 me?"'), message);
+      assert.ok(message.includes('- "a1b2c3d4", severity "high\\u001b[2J": "Line\\nbreak" Recommendation: "@owner fix it"'), message);
+      assert.ok(main.buildReviewEscalationBrief({ ...ESCALATION, finding_id: longId }).problem.includes('finding "a1b2c3d4" to the planner'));
+    });
+    test('the rerun review gets the questions block and the detail block as user_answer.question', () => {
+      const state = main.createRunState({ argsObject: { answers: {}, reply: 'Yes.' }, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      state.head = OTHER;
+      const asked = main.askReviewQuestion(userInput, state);
+      const brief = main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings);
+      const reason = lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema).reason;
+      assert.deepEqual(structuredClone(asked.answer), { question: lib.renderQuestions([{ brief: brief, reason: reason }], []) + '\n\n' + main.buildReviewDetailBlock(userInput, userInput.open_findings).text, reply: 'Yes.' });
     });
   },
   'SD-38': () => {
@@ -3164,7 +3242,8 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const brief = main.buildDiminishingReturnsBrief(DIMINISHING, OTHER);
       assert.equal(brief.kind, 'diminishing_returns_exit');
-      assert.ok(brief.problem.includes('2 findings still open, the highest severity "low"'), brief.problem);
+      assert.ok(brief.problem.includes('with 2 findings still open. Stop fixing'), brief.problem);
+      assert.ok(!brief.problem.includes('"low"'), brief.problem);
       assert.ok(run.result.message.startsWith(HELD_ALL + OTHER + '.'), run.result.message);
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, { brief: brief }])), run.result.message);
       assert.deepEqual({ ...lib.decide({ kind: 'diminishing_returns_exit', level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
@@ -3237,8 +3316,8 @@ const ROW_TESTS = {
         assert.ok(lib.validateSchema(briefSchema, brief).ok);
         assert.deepEqual({ ...lib.decide({ kind: kind, level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
       }
-      assert.ok(main.buildReviewEscalationBrief(ESCALATION).problem.includes('finding "F5", titled "The cache layer skips the \\"auth\\" check.", in file "src/cache.js"'));
-      assert.equal(main.buildReviewEscalationBrief(CLUSTER).problem, 'Local review found findings that share one suspected root, "The cache key is built from raw input.". Go back to planning, from fresh facts, for a remediation that closes the class?');
+      assert.equal(main.buildReviewEscalationBrief(ESCALATION).problem, 'Local review escalated finding "F5" to the planner. Go back to planning, from fresh facts, for its remediation?');
+      assert.equal(main.buildReviewEscalationBrief(CLUSTER).problem, 'Local review found 2 findings in 1 file that share one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?');
     });
     for (const [review, kind] of [[ESCALATION, 'planner_escalation_routing'], [CLUSTER, 'root_cluster_routing']]) {
       test(`a surfaced ${kind} pauses asking, with no new pass until the reply`, async () => {
@@ -3267,22 +3346,53 @@ const ROW_TESTS = {
     });
   },
   'SD-40': () => {
-    test('the remediation plan acceptance always asks, through the pause and revise path, and the run goes on once replied to', async () => {
-      const results = remediationResults(ESCALATION);
-      const paused = await runWorkflow(LAUNCH, results);
-      assert.equal(paused.result.needs_user, true);
-      assert.deepEqual(paused.result.resume_args, { answers: {} });
-      assert.ok(paused.result.message.includes('Q1. Start delivering the remediation plan for the local review findings'), paused.result.message);
-      assert.ok(paused.result.message.includes('Why I am asking: ' + lib.askReasonLine('table_surface')), paused.result.message);
-      assert.ok(paused.result.message.includes('then every gate again. The plan: feat: Route the cache through the auth check, 1 step on branch "feature/cache". The full plan is in this run\'s per-agent results.'), paused.result.message);
-      assert.ok(!paused.result.message.includes(REMEDIATION_PLAN.summary), paused.result.message);
-      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, run it.'), results);
+    const GATE_FLAGS = { irreversible: 'gate_irreversible', architectural: 'gate_architectural', safety: 'gate_safety', grows_surface: 'gate_architectural', repeats_surface: 'gate_architectural' };
+    const CLEAN_GATE = makePlan().remediation_gate;
+    function gateWith(flag) {
+      if (Object.prototype.hasOwnProperty.call(CLEAN_GATE.promotion_gate, flag)) {
+        return { ...CLEAN_GATE, promotion_gate: { ...CLEAN_GATE.promotion_gate, [flag]: true } };
+      }
+      return { ...CLEAN_GATE, [flag]: true };
+    }
+    test('a remediation plan with a clean gate is taken at the default level and listed, with no pause', async () => {
+      const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
-      assert.equal(readDataBlock(callOf(run, 'revise-1').prompt, 'reply'), 'Yes, run it.');
-      assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'), run.result.message);
-      const taken = [{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, { brief: main.buildReviewEscalationBrief(ESCALATION) }];
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+      const remediationBrief = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
+      assert.equal(remediationBrief.problem, 'Run the remediation plan for the local review findings on the working branch, then every gate again.');
+      const taken = [{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, { brief: main.buildReviewEscalationBrief(ESCALATION) }, { brief: remediationBrief }];
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact(taken)), run.result.message);
+    });
+    for (const [flag, reason] of Object.entries(GATE_FLAGS)) {
+      test(`a remediation plan whose gate sets ${flag} asks once with ${reason}, through the pause and revise path, and the run goes on once replied to`, async () => {
+        const plan = { ...REMEDIATION_PLAN, remediation_gate: gateWith(flag) };
+        const results = remediationResults(ESCALATION, { 'plan-2': planResult(plan), 'revise-1': reviseResult(planResult(plan), ['Q1']) });
+        const paused = await runWorkflow(LAUNCH, results);
+        assert.equal(paused.result.needs_user, true);
+        assert.deepEqual(paused.result.resume_args, { answers: {} });
+        const message = paused.result.message;
+        assert.ok(message.includes('Q1. Run the remediation plan for the local review findings on the working branch, then every gate again. I am asking because the plan ' + main.remediationGateTexts()[flag] + '.**'), message);
+        assert.ok(message.includes('Why I am asking: ' + lib.askReasonLine(reason)), message);
+        assert.ok(message.includes('\n\n' + main.buildPlanDetailBlock(plan).text), message);
+        assert.ok(!message.includes(plan.summary) && !message.includes('per-agent results'), message);
+        const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, run it.'), results);
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
+        assert.equal(readDataBlock(callOf(run, 'revise-1').prompt, 'reply'), 'Yes, run it.');
+        assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'), run.result.message);
+        const taken = [{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, { brief: main.buildReviewEscalationBrief(ESCALATION) }];
+        assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact(taken)), run.result.message);
+      });
+    }
+    test('a remediation plan whose gate sets every flag names each in its problem, within the problem bound', () => {
+      const plan = { ...REMEDIATION_PLAN, remediation_gate: FULL_GATE };
+      const texts = main.remediationGateTexts();
+      assert.deepEqual(Object.keys(texts), Object.keys(GATE_FLAGS));
+      const brief = main.buildRemediationPlanBrief(plan);
+      assert.ok(brief.problem.endsWith(' I am asking because the plan ' + texts.irreversible + ', ' + texts.architectural + ', ' + texts.safety + ', ' + texts.grows_surface + ' and ' + texts.repeats_surface + '.'), brief.problem);
+      assert.ok(Array.from(brief.problem).length <= 300, String(Array.from(brief.problem).length));
+      assert.deepEqual({ ...brief.gate }, { irreversible: true, architectural: true, safety: true });
+      assert.ok(!/working branch/.test(brief.recommendation.why), brief.recommendation.why);
     });
     test('an accepted remediation plan whose revise rewrites the summary runs its steps with no re-ask', async () => {
       const rewritten = planResult({ ...REMEDIATION_PLAN, summary: REMEDIATION_PLAN.summary + ' The user accepted this plan.' });
@@ -3298,12 +3408,22 @@ const ROW_TESTS = {
       assert.ok(!run.result.message.includes('effect outside the repo'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-2').startsWith('```\n' + REMEDIATION_PLAN.summary + '\n```'), prBodyOf(run, 'pr-2'));
     });
-    test('remediation_plan_acceptance asks at every level, and every later pass of the run uses it', () => {
-      const brief = main.buildRemediationPlanBrief(REMEDIATION_PLAN);
-      assert.equal(brief.kind, 'remediation_plan_acceptance');
-      assert.ok(lib.validateSchema(briefSchema, brief).ok);
+    test('remediation_plan_acceptance takes a clean gate at high and balanced, asks a set flag there, asks at low, and every later pass of the run uses it', () => {
+      const clean = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
+      assert.equal(clean.kind, 'remediation_plan_acceptance');
+      assert.deepEqual({ ...clean.gate }, { irreversible: false, architectural: false, safety: false });
+      for (const [flag, reason] of Object.entries(GATE_FLAGS)) {
+        const flagged = main.buildRemediationPlanBrief({ ...REMEDIATION_PLAN, remediation_gate: gateWith(flag) });
+        const expectedGate = { irreversible: flag === 'irreversible', architectural: reason === 'gate_architectural', safety: flag === 'safety' };
+        assert.deepEqual({ ...flagged.gate }, expectedGate, flag);
+        for (const level of autonomyTable.levels) {
+          const expected = level === 'low' ? { action: 'ask', reason: 'table_surface' } : { action: 'ask', reason: reason };
+          assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: level, brief: flagged }, autonomyTable, briefSchema) }, expected, flag + ' ' + level);
+        }
+      }
       for (const level of autonomyTable.levels) {
-        assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: level, brief: brief }, autonomyTable, briefSchema) }, { action: 'ask', reason: 'table_surface' }, level);
+        const expected = level === 'low' ? { action: 'ask', reason: 'table_surface' } : { action: 'take', reason: 'auto' };
+        assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: level, brief: clean }, autonomyTable, briefSchema) }, expected, level);
       }
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
       const first = { asks: [], taken: [] };
@@ -3312,18 +3432,21 @@ const ROW_TESTS = {
       const later = { asks: [], taken: [] };
       assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, later), 'ask');
       assert.equal(later.asks[0].brief.kind, 'remediation_plan_acceptance');
+      const cleanLater = { asks: [], taken: [] };
+      assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, cleanLater), 'take');
+      assert.equal(cleanLater.taken[0].kind, 'remediation_plan_acceptance');
     });
-    test('a needs_replan pass after a remediation pass asks the remediation plan acceptance again', async () => {
+    test('a needs_replan pass after a remediation pass resolves its plan as a remediation plan again', async () => {
       const results = remediationResults(ESCALATION, {
         'work-2-STEP-002': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The auth API moved.' },
         'commit-2-1': commitRelay({ commit: OTHER, committed: 'false' }),
         'facts-3': onPlanBranchFacts(OTHER),
-        'plan-3': planResult(makePlan({ summary: 'Route the cache through the new auth API.', steps: [makeStep('STEP-003', ['src/auth.js'])] }))
+        'plan-3': planResult(makePlan({ summary: 'Route the cache through the new auth API.', remediation_gate: ARCHITECTURAL_GATE, steps: [makeStep('STEP-003', ['src/auth.js'])] }))
       });
       const run = await runWorkflow({ ...LAUNCH, answers: { 'round-1': 'Yes, run it.' } }, results);
       assert.equal(run.result.needs_user, true);
       assert.deepEqual(labelsOf(run).slice(-2), ['facts-3', 'plan-3']);
-      assert.ok(run.result.message.includes('Q1. Start delivering the remediation plan for the local review findings'), run.result.message);
+      assert.ok(run.result.message.includes('Q1. Run the remediation plan for the local review findings'), run.result.message);
     });
   },
   'SD-41': () => {
@@ -3616,7 +3739,8 @@ const ROW_TESTS = {
           assert.ok(!text.includes(reviewerText), reviewerText);
         }
       }
-      assert.ok(run.result.message.includes('the highest severity "low"'), 'the final message keeps the JSON-encoded reviewer value');
+      assert.ok(run.result.message.includes('with 2 findings still open. Stop fixing'), run.result.message);
+      assert.ok(!run.result.message.includes('"low"'), 'the final message shows no reviewer text');
     });
     for (const [review, kind, reviewerTexts] of [[ESCALATION, 'planner_escalation_routing', ['F5', 'skips the', 'src/cache.js']], [CLUSTER, 'root_cluster_routing', ['The cache key is built from raw input.', 'input-keying']]]) {
       test(`a taken ${kind} shows a fixed problem and no reviewer text`, async () => {
@@ -3642,8 +3766,7 @@ const ROW_TESTS = {
     });
     test('decisions go compact when the full form would pass maxPullRequestTextLength()', async () => {
       assert.equal(main.maxPullRequestTextLength(), 60000);
-      const longOptions = makeBrief().options.map((option) => ({ ...option, summary: 'S'.repeat(61000) }));
-      const question = makeBrief({ problem: 'LONG_OPTION_PROBLEM', options: longOptions });
+      const question = makeBrief({ problem: 'LONG_VERBATIM_PROBLEM', verbatim: 'S'.repeat(61000) });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [question]) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
@@ -3654,8 +3777,7 @@ const ROW_TESTS = {
       }
     });
     test('a body still too long in compact form stops the run blocked naming its size, with no PR call', async () => {
-      const question = makeBrief({ problem: 'P'.repeat(61000) });
-      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [question]) }));
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ summary: 'P'.repeat(61000) })) }));
       assert.equal(run.result.outcome, 'blocked');
       const match = run.result.message.match(/^The pull request body would be ([0-9]+) characters even with the decisions in short form, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing\./);
       assert.ok(match, run.result.message.slice(0, 300));
@@ -3977,9 +4099,20 @@ const ROW_TESTS = {
       assert.equal(expectQuote('reason', HOSTILE_PAYLOADS[1]), '"\\u001b[2J\\u202e\\u2028x ' + NEXT_STEP_LINE + '" (cut)');
       assert.equal(expectQuote('excerpt', HOSTILE_PAYLOADS[0]), '"\\u001b[2J\\u202e\\u2028' + 'Z'.repeat(194) + '"');
     });
+    const BOUNDED_HOSTILE_PAYLOADS = HOSTILE_PAYLOADS.map((payload) => payload.replace('Z'.repeat(5000), 'Z'.repeat(300)));
+    const REVIEW_HOSTILE_PAYLOADS = HOSTILE_PAYLOADS.map((payload) => payload.replace('Z'.repeat(5000), 'Z'.repeat(200)));
+    function hostilePayloadsOf(label, kind) {
+      if (label === 'blocked review') {
+        return REVIEW_HOSTILE_PAYLOADS;
+      }
+      return kind === 'reason' ? BOUNDED_HOSTILE_PAYLOADS : HOSTILE_PAYLOADS;
+    }
+    test('the hostile review blockers fit the 300 code point blocker bound of REVIEW_SCHEMA', () => {
+      assert.ok(REVIEW_HOSTILE_PAYLOADS.every((payload) => Array.from(payload).length <= 300));
+    });
     for (const [label, kind, buildResults] of hostileSites) {
-      test(`a hostile ${label} reaches the message as one cut quote of printable ASCII, and the next-step line stays`, async () => {
-        for (const payload of HOSTILE_PAYLOADS) {
+      test(`a hostile ${label} reaches the message as one quote of printable ASCII, cut past its bound, and the next-step line stays`, async () => {
+        for (const payload of hostilePayloadsOf(label, kind)) {
           const run = await runWorkflow(LAUNCH, buildResults(payload));
           const message = run.result.message;
           assert.equal(run.result.outcome, 'blocked', message.slice(0, 300));
@@ -3988,6 +4121,14 @@ const ROW_TESTS = {
           assert.ok(paragraphs[0].includes(expectQuote(kind, payload)), paragraphs[0].slice(0, 600));
           assert.equal(paragraphs[1], NEXT_STEP_LINE);
           assert.equal(message.split('\n').filter((line) => line === NEXT_STEP_LINE).length, 1);
+        }
+        if (kind === 'reason') {
+          assert.ok(BOUNDED_HOSTILE_PAYLOADS.every((payload) => Array.from(payload).length <= 400));
+          const overBound = await runWorkflow(LAUNCH, buildResults(HOSTILE_PAYLOADS[0]));
+          assert.equal(overBound.result.outcome, 'blocked');
+          assert.ok(/^[\t\n\x20-\x7e]*$/.test(overBound.result.message), overBound.result.message.slice(0, 300));
+          assert.ok(!overBound.result.message.includes('Z'.repeat(10)), overBound.result.message.slice(0, 300));
+          assert.equal(overBound.result.message.split('\n\n')[1], NEXT_STEP_LINE);
         }
       });
     }
@@ -4018,9 +4159,9 @@ const ROW_TESTS = {
       assert.deepEqual(stray, []);
       assert.ok(allowed.throw > 0 && allowed.questionKey === 1 && allowed.acceptResolution === 1, JSON.stringify(allowed));
     });
-    test('no reviewFieldTexts() field marked isExternal is read by name in main.js', () => {
+    test('no reviewFieldTexts() field marked isExternal is read by name in main.js but for its length', () => {
       const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
-      const reads = [...mainCode.matchAll(/\breview\.(\w+)/g)].map((match) => match[1]);
+      const reads = [...mainCode.matchAll(/\breview\.(\w+)(?!\w|\.length\b)/g)].map((match) => match[1]);
       assert.ok(external.includes('blocker') && external.includes('field_excerpt') && reads.includes('exit_reason'));
       assert.deepEqual(reads.filter((name) => external.includes(name)), ['open_findings']);
       assert.equal(mainCode.split('review.open_findings').length - 1, 1);
@@ -4045,12 +4186,12 @@ const ROW_TESTS = {
     });
     const longBlocker = 'B'.repeat(20000);
     for (const [label, results, leadStart] of [
-      ['planner', { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: longBlocker, questions: [] } }, 'The planner could not plan the delivery: '],
+      ['planner', { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: longBlocker, questions: [] } }, 'The planner returned a plan that does not fit the plan schema'],
       ['worker', happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: longBlocker } }), 'A worker did not finish its step'],
       ['branch relay', happyResults({ 'branch-1': { outcome: 'blocked', stderr: 'blocker: ' + longBlocker + '\n' } }), 'The branch step was blocked'],
-      ['validation', happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }), 'The validation step was blocked'],
+      ['validation', happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }), 'The validation step returned no usable result'],
       ['fix round', fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: longBlocker }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }), 'The validation fix round was blocked'],
-      ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'Local review was blocked']
+      ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'The local review step returned no usable result']
     ]) {
       test(`a ${label} blocker too long for the notice keeps the next-step line, without a throw`, async () => {
         const run = await runWorkflow(LAUNCH, results);
@@ -4166,14 +4307,14 @@ const ROW_TESTS = {
     });
   },
   'SD-53': () => {
-    const MESSAGE_BOUND = 3000;
+    const MESSAGE_BOUND = 2000;
     const LONG_SUMMARY = 'Add the cache layer. ' + 'It keeps hot keys in memory. '.repeat(120).trim();
     const longPlan = makePlan({ summary: LONG_SUMMARY });
     const longRemediation = { ...REMEDIATION_PLAN, summary: 'Route the cache through the auth check. ' + 'Each read checks the caller first. '.repeat(110).trim() };
-    const causeBlocker = 'The fix round could not finish. ' + 'The suite ran one more slow test file. '.repeat(20) + 'The cause is machine load, so a later run passes.';
+    const causeBlocker = 'The fix round could not finish. ' + 'The suite ran one more slow test file. '.repeat(8) + 'The cause is machine load, so a later run passes.';
     const findingIds = ['a1b2c3d4'.repeat(8), 'e5f6a7b8'.repeat(8)];
-    const openFindings = findingIds.map((findingId, index) => ({ finding_id: findingId, severity: 'medium', title: 'Finding ' + index + ' title.', body: 'Body text of the finding. '.repeat(20).trim(), recommendation: index === 0 ? 'Key the cache by tenant.' : '' }));
-    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 2, finding_id: findingIds[0], title: 'Should the cache be shared across tenants?', open_findings: openFindings };
+    const openFindings = findingIds.map((findingId, index) => ({ finding_id: findingId, severity: 'medium', summary: 'Finding ' + index + ' summary.', recommendation: index === 0 ? 'Key the cache by tenant.' : '' }));
+    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 2, finding_id: findingIds[0], title: 'Codex title.', question: 'Should the cache be shared across tenants?', recommendation_text: '', open_findings: openFindings };
     const takenBriefs = Array.from({ length: 5 }, (_, index) => makeBrief({ problem: 'Taken question ' + index + '.' }));
     /**
      * Asserts the message shape every SD-53 run shares and returns the
@@ -4183,6 +4324,7 @@ const ROW_TESTS = {
      */
     function assertMessageShape(message, summaries, cutSources) {
       assert.ok(!message.includes('Exact text') && !message.includes('Word for word'), message);
+      assert.ok(!message.includes('per-agent results'), message);
       summaries.forEach((summary) => assert.ok(!message.includes(summary) && !message.includes(summary.split('. ').slice(1, 3).join('. ')), message));
       const decided = message.split('\n\n').find((paragraph) => paragraph.startsWith('Decided for you:'));
       if (decided !== undefined) {
@@ -4199,28 +4341,34 @@ const ROW_TESTS = {
       assert.ok(message.length <= MESSAGE_BOUND, String(message.length));
       return message;
     }
-    test('a plan acceptance pause shows the short plan line and never the plan summary', async () => {
+    test('a plan acceptance pause shows a code-built problem and the digest detail block, never the plan summary', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan) }), buildWithSurfaceKinds(['plan_acceptance']));
       assert.equal(run.result.needs_user, true);
       const message = assertMessageShape(run.result.message, [LONG_SUMMARY], []);
-      assert.ok(message.includes('Q1. Start delivering the plan: create or confirm its working branch and run its steps. The plan: feat: Add the cache layer, 1 step on branch "feature/cache". The full plan is in this run\'s per-agent results.'), message);
+      assert.ok(message.includes('**Q1. Start delivering the plan: create or confirm its working branch and run its steps.**\n'), message);
+      const blocks = message.split('\n\n');
+      assert.equal(blocks[blocks.indexOf('Reply with a label and an option, like Q1 A, or in your own words.') + 1], 'What the plan addresses: Reads hit the database every time.\nWhat it changes: Add a cache layer in front of the reads.\nIt has 1 step and touches 1 file on branch "feature/cache": "src/cache.js".');
       assert.equal(main.buildPlanAcceptanceBrief(longPlan).verbatim, LONG_SUMMARY);
     });
-    test('a remediation acceptance pause shows the short plan line and never the plan summary', async () => {
+    test('a remediation acceptance pause shows a code-built problem and the digest detail block, never the plan summary', async () => {
       const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(longRemediation) }));
       assert.equal(run.result.needs_user, true);
       const message = assertMessageShape(run.result.message, [longRemediation.summary], []);
-      assert.ok(message.includes('The plan: feat: Route the cache through the auth check, 1 step on branch "feature/cache".'), message);
+      assert.ok(message.includes('\n\n' + main.buildPlanDetailBlock(longRemediation).text), message);
       assert.equal(main.buildRemediationPlanBrief(longRemediation).verbatim, longRemediation.summary);
     });
-    test('a blocked fix round quotes its blocker up to a sentence end, with the cut mark and the run again line', async () => {
+    test('the detail block names up to 5 encoded file paths, then the count of the rest', () => {
+      const files = ['a.js', 'b.js', 'c\u001b.js', 'd.js', 'e.js', 'f.js', 'g.js'];
+      const plan = makePlan({ digest: { problem: 'Line one\nline two.', change: 'Change it.' }, steps: [makeStep('S1', files.slice(0, 4)), makeStep('S2', files.slice(2))] });
+      assert.equal(main.buildPlanDetailBlock(plan).text, 'What the plan addresses: Line one line two.\nWhat it changes: Change it.\nIt has 2 steps and touches 7 files on branch "feature/cache": "a.js", "b.js", "c\\u001b.js", "d.js", "e.js" and 2 more.');
+    });
+    test('a blocked fix round quotes its blocker whole within its bound, with the run again line', async () => {
       const results = fixFlowResults({ 'plan-1': planResult(longPlan), 'fix-1-1': { outcome: 'blocked', files: [], blocker: causeBlocker, next_action: 'run_again' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'blocked');
       const message = assertMessageShape(run.result.message, [LONG_SUMMARY], [causeBlocker]);
-      assert.ok(Array.from(causeBlocker).length > 600);
-      assert.ok(message.includes(JSON.stringify(lib.cutAtBoundary(causeBlocker, 600)) + ' (cut).'), message);
-      assert.ok(!message.includes('machine load'), message);
+      assert.ok(Array.from(causeBlocker).length <= 400);
+      assert.ok(message.includes(JSON.stringify(causeBlocker) + '.'), message);
       assert.equal(message.split('\n\n')[1], main.nextStepLine('run_again'));
     });
     test('an open-question stop with 6 taken decisions shows each on one line', async () => {
@@ -4235,11 +4383,11 @@ const ROW_TESTS = {
     test('a user-input-required pause with 2 open findings names each by its short id', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan), 'review-1-1': userInput }));
       assert.equal(run.result.needs_user, true);
-      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], openFindings.map((finding) => finding.body));
-      assert.ok(message.includes('finding "a1b2c3d4", titled'), message);
-      assert.ok(message.includes('2 findings are still open.'), message);
-      assert.ok(message.includes('- "e5f6a7b8", severity "medium", "Finding 1 title.": '), message);
-      assert.ok(message.includes('Recommendation: no recommendation from the reviewer'), message);
+      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], []);
+      assert.ok(message.includes('finding "a1b2c3d4" before'), message);
+      assert.ok(message.includes('2 findings still open.'), message);
+      assert.ok(message.includes('- "e5f6a7b8", severity "medium": "Finding 1 summary." Recommendation: none'), message);
+      assert.ok(!message.includes('Codex title.'), message);
     });
     test('a complete PR run keeps the plan summary in the pull request body only', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan) }));
@@ -4438,11 +4586,14 @@ const ROW_TESTS = {
     }
   },
   'SD-57': () => {
-    const tenantFinding = { finding_id: 'F4', severity: 'medium', title: 'Should the cache be shared across tenants?', body: 'Tenants share one process.', recommendation: 'Key the cache by tenant.' };
-    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Should the cache be shared across tenants?', open_findings: [tenantFinding] };
+    const tenantFinding = { finding_id: 'F4', severity: 'medium', summary: 'Tenants share one cache process.', recommendation: 'Key the cache by tenant.' };
+    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Codex title of F4.', question: 'Should the cache be shared across tenants?', recommendation_text: 'Keep one cache per tenant.', open_findings: [tenantFinding] };
     const reviewReply = 'Key it by tenant.';
+    function reviewAsk() {
+      return surfacedAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings));
+    }
     function reviewQuestionText() {
-      return lib.renderQuestions([limitAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings))], []);
+      return lib.renderQuestions([reviewAsk()], []) + '\n\n' + main.buildReviewDetailBlock(userInput, userInput.open_findings).text;
     }
     function answeredReviewResults(changes = {}) {
       return happyResults({ 'review-1-1': userInput, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }), ...changes });
@@ -4450,7 +4601,8 @@ const ROW_TESTS = {
     test('a resumed review question reruns the reviewer with user_answer on the current head while every earlier agent replays from cache', async () => {
       const results = answeredReviewResults();
       const paused = await runWorkflow(LAUNCH, results);
-      assertTailPause(paused, [limitAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings))], 'review-commit-1-1');
+      assertTailPause(paused, [reviewAsk()], 'review-commit-1-1');
+      assert.ok(paused.result.message.startsWith(reviewQuestionText() + '\n\n'), paused.result.message);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reviewReply), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'pr-1']);
@@ -4496,6 +4648,135 @@ const ROW_TESTS = {
       assert.deepEqual(structuredClone(replanned.replan.answer), { question: lib.renderQuestions([bumpAskOf()], []), reply: TAIL_REPLY });
       assert.equal(state.replans, main.maxReplans());
       assert.deepEqual([...state.replies], [TAIL_REPLY]);
+    });
+  },
+  'SD-58': () => {
+    const MESSAGE_BOUND = 2500;
+    const UNBOUNDED = 'U'.repeat(5000);
+    const FAILURES = 'F'.repeat(5000);
+    const maxStepId = 'S'.repeat(64);
+    const maxPlan = makePlan({
+      summary: UNBOUNDED,
+      digest: { problem: 'p'.repeat(200), change: 'c'.repeat(200) },
+      steps: [makeStep(maxStepId, ['src/cache.js'], { outcome: UNBOUNDED, external_effects: [{ summary: 'r'.repeat(300), reversible: true }] })]
+    });
+    const workerDone = { outcome: 'complete', summary: UNBOUNDED };
+    const workLabel = 'work-1-' + maxStepId;
+    function maxResults(changes = {}) {
+      return happyResults({ 'plan-1': planResult(maxPlan), 'work-1-STEP-001': undefined, [workLabel]: workerDone, ...changes });
+    }
+    function assertBounded(run) {
+      const message = run.result.message;
+      assert.ok(message.length <= MESSAGE_BOUND, String(message.length));
+      assert.ok(!message.includes('U'.repeat(100)) && !message.includes('F'.repeat(100)), message);
+      return message;
+    }
+    test('every planner, worker and validation field a message shows has a maxLength in its step schema', () => {
+      const brief = briefSchema.properties;
+      assert.deepEqual([brief.problem.maxLength, brief.options.items.properties.summary.maxLength, brief.recommendation.properties.why.maxLength, brief.criticality.properties.blast_radius.maxLength], [300, 160, 200, 160]);
+      const plan = planSchema.properties;
+      const step = plan.steps.items.properties;
+      assert.deepEqual([plan.digest.properties.problem.maxLength, plan.digest.properties.change.maxLength, step.id.maxLength, step.external_effects.items.properties.summary.maxLength], [200, 200, 64, 300]);
+      const schemas = [main.buildPlanResultSchema(planSchema, briefSchema), main.buildWorkerSchema(), main.buildGateEditSchema(false), main.buildGateEditSchema(true), main.buildValidateSchema()];
+      schemas.forEach((schema) => assert.equal(schema.properties.blocker.maxLength, 400));
+      for (const name of ['summary']) {
+        assert.equal(plan[name].maxLength, undefined);
+        assert.equal(main.buildWorkerSchema().properties[name].maxLength, undefined);
+      }
+      assert.equal(main.buildValidateSchema().properties.failures.maxLength, undefined);
+    });
+    test('a complete run with every unbounded agent field at 5000 characters stays within the bound', async () => {
+      const run = await runWorkflow(LAUNCH, maxResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message.slice(0, 300));
+      assertBounded(run);
+    });
+    test('a validation fix run with 5000 characters of failures stays within the bound', async () => {
+      const run = await runWorkflow(LAUNCH, fixFlowResults({ 'plan-1': planResult(maxPlan), 'work-1-STEP-001': undefined, [workLabel]: workerDone, 'validate-1-1': { outcome: 'failed', failures: FAILURES } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message.slice(0, 300));
+      assertBounded(run);
+    });
+    test('a plan acceptance pause and a flagged remediation pause stay within the bound', async () => {
+      const paused = await runWorkflow(LAUNCH, maxResults(), buildWithSurfaceKinds(['plan_acceptance']));
+      assert.equal(paused.result.needs_user, true);
+      assertBounded(paused);
+      const flagged = { ...maxPlan, remediation_gate: FULL_GATE };
+      const remediation = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-1': planResult(maxPlan), 'work-1-STEP-001': undefined, [workLabel]: workerDone, 'plan-2': planResult(flagged) }));
+      assert.equal(remediation.result.needs_user, true);
+      assertBounded(remediation);
+    });
+    test('a blocked worker with a 5000 character summary and a 400 code point blocker stays within the bound', async () => {
+      const run = await runWorkflow(LAUNCH, maxResults({ [workLabel]: { outcome: 'blocked', summary: UNBOUNDED, blocker: 'b'.repeat(400) } }));
+      assert.equal(run.result.outcome, 'blocked');
+      assertBounded(run);
+    });
+    test('every local review string a message shows has a maxLength in REVIEW_SCHEMA or is cut by code', () => {
+      const schema = main.buildReviewSchema();
+      const findingItem = schema.properties.open_findings.items.properties;
+      assert.deepEqual([schema.properties.question.maxLength, schema.properties.rationale_text.maxLength, schema.properties.recommendation_text.maxLength, schema.properties.blocker.maxLength], [300, 300, 200, 300]);
+      assert.deepEqual([findingItem.summary.maxLength, findingItem.recommendation.maxLength], [200, 200]);
+      const review = { ...REVIEW_CLEAN, exit_reason: 'break-fix-break', signals_fired: Array.from({ length: 7 }, () => UNBOUNDED), conflicting_findings: ['F2'], prior_fix_commit: UNBOUNDED };
+      assert.equal(main.quoteReviewValue(review, 'signals_fired'), JSON.stringify(Array.from({ length: 5 }, () => 'U'.repeat(200))) + ' and 2 more');
+      assert.equal(main.quoteReviewValue(review, 'prior_fix_commit'), JSON.stringify('U'.repeat(200)));
+      assert.equal(main.quoteReviewValue({ ...review, rationale_text: 'r'.repeat(300) }, 'rationale_text'), JSON.stringify('r'.repeat(300)));
+    });
+    const REVIEW_BOUND = 6000;
+    const longFindings = Array.from({ length: 60 }, (unused, index) => ({ finding_id: index + UNBOUNDED, severity: UNBOUNDED, summary: 's'.repeat(200), recommendation: 'r'.repeat(200) }));
+    const reviewCases = [
+      ['user-input-required', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 60, finding_id: UNBOUNDED, title: UNBOUNDED, question: 'q'.repeat(300), recommendation_text: 'r'.repeat(200), open_findings: longFindings }, true],
+      ['high-severity-rejection', { ...REVIEW_CLEAN, exit_reason: 'high-severity-rejection', findings_open: 60, finding_id: UNBOUNDED, title: UNBOUNDED, rationale_text: 'w'.repeat(300), recommendation_text: 'r'.repeat(200), open_findings: longFindings }, true],
+      ['break-fix-break', { ...REVIEW_CLEAN, exit_reason: 'break-fix-break', signals_fired: Array.from({ length: 60 }, () => UNBOUNDED), conflicting_findings: Array.from({ length: 60 }, () => UNBOUNDED), prior_fix_commit: UNBOUNDED }, false],
+      ['injection-suspect', { ...REVIEW_CLEAN, exit_reason: 'injection-suspect', finding_id: UNBOUNDED, pattern_category: UNBOUNDED, field_excerpt: UNBOUNDED }, false],
+      ['blocked', { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'b'.repeat(300), stage: UNBOUNDED }, false]
+    ];
+    for (const [label, review, pauses] of reviewCases) {
+      test(`a ${label} review with every unbounded review string at 5000 characters stays within the bound`, async () => {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
+        assert.equal(run.result.needs_user, pauses, run.result.message.slice(0, 300));
+        const message = run.result.message;
+        assert.ok(message.length <= REVIEW_BOUND, String(message.length));
+        assert.ok(!message.includes('U'.repeat(201)), message);
+      });
+    }
+    test('a complete run with 60 rejected findings of 5000 character titles and records shows each cut by code', async () => {
+      const rejected = Array.from({ length: 60 }, (unused, index) => ({ finding_id: 'R' + index, title: UNBOUNDED, record: UNBOUNDED }));
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, rejected_findings: rejected } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message.slice(0, 300));
+      assert.ok(!run.result.message.includes('U'.repeat(201)), run.result.message);
+      assert.equal(main.renderRejectedFindingLine(rejected[0], false), '- "R0", ' + JSON.stringify('U'.repeat(200)) + ', record ' + JSON.stringify('U'.repeat(200)));
+    });
+    test('every code-built brief fits the brief schema with worst-case inputs', () => {
+      const astralId = '\u{1F600}'.repeat(64);
+      const worstPlan = { ...maxPlan, remediation_gate: FULL_GATE };
+      const hugeCount = '9'.repeat(400);
+      const worstFacts = parsedFacts({ trunk_freshness: 'diverged', trunk_ahead: hugeCount, trunk_behind: hugeCount });
+      const longText = '\u{1F600}'.repeat(5000);
+      const worstReview = { ...REVIEW_CLEAN, findings_open: Number.MAX_SAFE_INTEGER, finding_id: astralId, title: longText, file: longText, classification: longText, latest_severity_max: longText, recommendation_text: longText, signals_observed: ['x'], hypothesized_root: longText, cluster_files: [longText], cluster_ids: [longText], root_class: longText, same_framing_rationale: longText };
+      const gates = { held: { bump: OTHER, validate: OTHER, review: OTHER } };
+      const briefs = [
+        main.buildPlanAcceptanceBrief(worstPlan),
+        main.buildRemediationPlanBrief(worstPlan),
+        main.buildTrunkStaleBrief(worstFacts),
+        main.buildExternalEffectBrief(astralId, 'r'.repeat(300)),
+        main.buildBumpTypeBrief(parsedBump(MINOR_BUMP)),
+        main.buildBumpIndeterminableBrief(parsedBump(MINOR_BUMP)),
+        main.buildBumpIndeterminableBrief(parsedBump(ASK_USER_BUMP)),
+        main.buildValidationRemediationBrief('f'.repeat(64), main.maxFixRounds()),
+        main.buildFixLimitBrief('f'.repeat(64)),
+        main.buildGateRerunBrief(['bump', 'validate', 'review'], gates, 'f'.repeat(64), true),
+        main.buildGateRerunBrief(['bump', 'validate', 'review'], gates, 'f'.repeat(64), false),
+        main.buildDiminishingReturnsBrief({ ...worstReview, exit_reason: 'diminishing-returns' }, 'f'.repeat(64)),
+        main.buildReviewEscalationBrief({ ...worstReview, exit_reason: 'planner-escalation' }),
+        main.buildReviewEscalationBrief({ ...worstReview, exit_reason: 'root-cluster-suspected' }),
+        main.buildReviewQuestionBrief({ ...worstReview, exit_reason: 'user-input-required', recommendation_text: 'r'.repeat(200) }, 'f'.repeat(64), Array.from({ length: 1000 }, () => ({}))),
+        main.buildReviewQuestionBrief({ ...worstReview, exit_reason: 'high-severity-rejection', recommendation_text: '' }, 'f'.repeat(64), Array.from({ length: 1000 }, () => ({})))
+      ];
+      for (const brief of briefs) {
+        const verdict = lib.validateSchema(briefSchema, brief);
+        assert.ok(verdict.ok, brief.kind + ': ' + JSON.stringify(verdict.errors));
+      }
+      for (const brief of briefs.slice(-5)) {
+        assert.ok(brief.problem.split('\\ud83d').length - 1 <= 8, brief.problem);
+      }
     });
   }
 };

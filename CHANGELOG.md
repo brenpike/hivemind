@@ -13,6 +13,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.1.3] - 2026-10-25
+
+### Changed
+
+- The plan gains a required `digest`, two short sentences on what the plan addresses and what it changes, and a required `remediation_gate`, which the planner sets for a plan that remediates review findings: the whole Promotion Gate as `promotion_gate` (`irreversible`, `architectural` and `safety`, as in a decision brief's gate), plus `grows_surface` and `repeats_surface`. A parity test ties `promotion_gate` to the brief schema, so no Promotion Gate clause can be left out of remediation acceptance, the class local review finding be73abc8 found in a gate that copied only the architectural clause (#445, #452).
+- Planner question briefs, blocker fields, plan step ids and external effect summaries gain length bounds (`maxLength`) in their step schemas, each field written for the user. A result that breaks a bound blocks the step like any schema breach (#445).
+- The local reviewer's `user-input-required` and `high-severity-rejection` exits return `question` or `rationale_text` and `recommendation_text`, short fields in the reviewer's own words. Each open finding carries a short `summary` and `recommendation` in place of `title` and `body` (#441).
+- Accepting a remediation plan asks the user only when its `remediation_gate` trips the Promotion Gate (irreversible, architectural or safety-relevant), or marks it surface-growing or a repeat on a surface whose earlier fix did not close it, on both engines. The question's gate is the plan's `promotion_gate`, copied unchanged. The rule has one home, `plugin/governance/decision-autonomy.md` (Promotion Gate). The `remediation_plan_acceptance` table row is auto at the high and balanced levels and surface at low (#452).
+- The overlord's relay rule has one home, `plugin/agents/overlord.md` (`## Engine`). `plugin/workflow-src/lib/result.js` keeps only a pointer to it (#445).
+- Built workflow scripts write each data constant with no indent, one key or element per line, which keeps `standard-delivery.js` within its 190,000 character budget (#445).
+- Docs: a new amendment to ADR-0037 and a dated note on ADR-0038. The README describes remediation plans that are decided for you and questions that show short fields (#441, #445, #452).
+
+### Fixed
+
+- Run messages and questions no longer paste agent free text. Every agent text a message shows is a short field the agent writes for the user, bounded in its step schema, and the rest is text built in code (#445).
+- A plan acceptance question shows what the plan addresses, what it changes and what it touches: the step count, the file count, the branch and up to 5 file paths. It no longer points to the run's per-agent results (#452).
+- A clear, reversible remediation plan is no longer asked about. It is decided for you and listed in the final message and the PR body (#452).
+- A local review question shows the reviewer's own one-line question or rejection reason, its recommendation, and up to 5 open findings as short summaries, never Codex bodies. It no longer says there is no recommendation when the reviewer made one (#441).
+
 ## [7.1.2] - 2026-10-25
 
 ### Added

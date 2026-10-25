@@ -57,11 +57,33 @@ describe('autonomy table', () => {
     assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface']);
     assert.deepEqual(row.resolved_at, ['standard-delivery.gates']);
   });
+  test('remediation_plan_acceptance takes at high and balanced, asks at low, and its rule names plan.remediation_gate', () => {
+    const row = table.rows.find((entry) => entry.kind === 'remediation_plan_acceptance');
+    assert.ok(row !== undefined, 'remediation_plan_acceptance is not a row');
+    assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface']);
+    assert.ok(row.when.includes('plan.remediation_gate'), row.when);
+  });
   test('row kinds and hard stop names are unique and disjoint', () => {
     const names = [...table.rows.map((row) => row.kind), ...table.hard_stops.map((stop) => stop.hard_stop)];
     assert.ok(names.every((name) => typeof name === 'string' && name !== ''));
     assert.equal(new Set(names).size, names.length);
   });
+});
+
+describe('brief schema bounds the fields written for the user', () => {
+  const properties = schema.properties;
+  for (const [path, node, bound] of [
+    ['problem', properties.problem, 300],
+    ['options[].summary', properties.options.items.properties.summary, 160],
+    ['recommendation.why', properties.recommendation.properties.why, 200],
+    ['criticality.blast_radius', properties.criticality.properties.blast_radius, 160],
+    ['criticality.if_ignored', properties.criticality.properties.if_ignored, 160]
+  ]) {
+    test(`${path} has maxLength ${bound} and says it is written for the user`, () => {
+      assert.equal(node.maxLength, bound);
+      assert.ok(node.description.startsWith('Written for the user'), node.description);
+    });
+  }
 });
 
 describe('brief schema stays inside the structured-output subset', () => {

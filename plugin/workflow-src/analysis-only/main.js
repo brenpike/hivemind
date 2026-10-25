@@ -102,6 +102,9 @@
  *   Each agent gets toAgentSchema of its full schema, the same schema with
  *   every anyOf removed, because the Messages API rejects a tool input
  *   schema that has anyOf at its top level.
+ *   The planner blocker has maxLength 400 in the analysis schema, so a
+ *   result with a longer one fails the check and finishes blocked as
+ *   malformed.
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
  *   quoted whole up to maxReasonLength() code points, 600, else cut by
@@ -182,7 +185,8 @@ function buildAnalysisSpec(questionSchema) {
       },
       blocker: {
         type: 'string',
-        description: 'Why the analysis cannot be done.'
+        maxLength: 400,
+        description: 'Why the analysis cannot be done, in one or two short sentences written for the user.'
       },
       questions: {
         type: 'array',

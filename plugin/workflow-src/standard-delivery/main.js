@@ -44,10 +44,35 @@
  *   6f87ce62). A chat message shows the taken decisions only in their
  *   compact one-line form (toMessageBlock); the pull request body and
  *   comment keep the full form, with its compact fallback (issue 445).
- *   No question shows the plan summary: a plan acceptance shows a short
- *   line built from the plan alone, its title, step count and branch, and
- *   says the full plan is in this run's per-agent results. Only an
+ *   No question shows the plan summary or names this run's per-agent
+ *   results. A plan or remediation plan acceptance has a short code-built
+ *   problem, and its pause carries a detail block right after the
+ *   questions block (buildPlanDetailBlock): the plan digest, problem and
+ *   change as the planner wrote them for the user, each made one line,
+ *   then one line of what the plan touches, its step count, its distinct
+ *   file count, its branch and up to 5 of its file paths, each cut by
+ *   cutExcerpt and encoded, then the count of the rest. Only an
  *   irreversible effect, an exact ask, shows its text word for word.
+ *   Bounded fields (issue 445): every planner, worker and validation
+ *   string a message shows comes from a step-schema field with maxLength,
+ *   the brief fields of decision-brief-schema.json, the digest, step id
+ *   and effect summary of plan-schema.json, and the blocker of the plan
+ *   result, worker, gate edit and validate schemas, 400 code points. The
+ *   unbounded agent fields never reach a message: plan.summary reaches
+ *   only the pull request title and body, a worker summary nothing, and
+ *   validate failures only the fix prompt. The code-built brief of every
+ *   plan, trunk, effect, bump, validation, gate rerun and review routing
+ *   decision fits BRIEF_SCHEMA with worst-case inputs, so the diminishing
+ *   returns, escalation, root cluster and review question problems embed
+ *   no reviewer free text, only a short finding id and counts.
+ *   Every local review string a message shows has a maxLength in
+ *   REVIEW_SCHEMA, written by the reviewer for the user: question and
+ *   rationale_text 300, recommendation_text 200, blocker 300, and each open
+ *   finding's summary and recommendation 200. The rest is cut by code: a
+ *   finding id to its first 8 code points, the blocker and field_excerpt by
+ *   quoteDiagnostic, a list to its first 5 entries, and
+ *   every other string, list entry, severity and rejected finding title and
+ *   record by cutExcerpt.
  *   Every blocked result carries one next-step line as a whole block right
  *   after its first block, and no block carries shorten:
  *   nextStepLine(nextAction), or at an open question stop
@@ -87,13 +112,21 @@
  *   toPrintableAscii. JSON.stringify is left only in throw messages, in
  *   questionKey and in the acceptResolution comparison. Planner prose
  *   written for the user is not encoded: the brief fields and verbatim
- *   text lib/brief.js renders, which include the plan title in a plan
- *   acceptance and an irreversible effect's text, show as written. That
+ *   text lib/brief.js renders, which include an irreversible effect's
+ *   text, and the plan digest in a plan acceptance detail block, show as
+ *   written. That
  *   is the residual ADR-0037 records (Risks, step text in a blocked
  *   message, (b)).
- *   A local review question names each finding by the first 8 code points
- *   of its finding_id, and its detail block lists every open finding the
- *   review returned in open_findings, each value encoded (issue 441).
+ *   A local review question names its finding by the first 8 code points
+ *   of its finding_id, in a short code-built problem. Its recommendation is
+ *   option A, weak, pointing at the reviewer recommendation when the review
+ *   gives one, else none, and its ask reason comes from decide(). Its
+ *   detail block (buildReviewDetailBlock) shows the reviewer's question or
+ *   rejection reason, its recommendation, and up to 5
+ *   open findings, each its short id, severity, summary and recommendation,
+ *   every value encoded, then one line counting the rest (issue 441). The
+ *   rerun review's user_answer.question is the questions block and the
+ *   detail block, the text the user saw.
  *
  * Steps, in code order (one pass)
  *   Facts   a haiku hivemind:drone runner invokes hivemind:gather-facts and
@@ -183,8 +216,8 @@
  *   request step runs only when every configured gate holds on the head.
  *   Tail asks: a question after the last wave pauses like any other open
  *   question, through pauseDelivery with its question, the commits and
- *   each gate that did not run, and a local review question also with the
- *   open findings detail block. That
+ *   each gate that did not run, and a local review question also with its
+ *   detail block. That
  *   covers the asks of resolveTailDecision, the fix round and gate rerun
  *   limits, and the user-input-required and high-severity-rejection
  *   questions; each ask carries a reason renderQuestions shows. Tail rounds
@@ -213,7 +246,11 @@
  *   so every planner call follows the facts of its own pass (ADR-0037
  *   invariant 3). Once local review sent the run back to planning, every
  *   later plan acceptance resolves through decide() kind
- *   remediation_plan_acceptance, which always asks (decision 17).
+ *   remediation_plan_acceptance. Its brief gate is
+ *   plan.remediation_gate.promotion_gate copied whole, with architectural
+ *   also true when grows_surface or repeats_surface is, and its problem
+ *   names each flag that holds, so it asks then and is taken otherwise at
+ *   the default level (decision-autonomy.md, Promotion Gate).
  *   Every step that can change files ends with the commit runner, whatever
  *   the workers returned (ADR-0037 invariant 1, decision 12). Workers never
  *   commit.
@@ -612,7 +649,7 @@ function buildPlanResultSpec(planSchema, briefSchema) {
         description: 'One decision brief for each decision the repository and the request do not settle.',
         items: omitSchemaDialect(briefSchema)
       },
-      blocker: { type: 'string', description: 'Why the delivery cannot be planned.' }
+      blocker: { type: 'string', maxLength: 400, description: 'Why the delivery cannot be planned, in one or two short sentences written for the user.' }
     },
     required: ['outcome', 'questions'],
     variants: { complete: { required: ['plan'], optional: [] }, blocked: { required: [], optional: ['blocker'] } }
@@ -665,7 +702,7 @@ function buildWorkerSchema() {
         description: 'complete when the step outcome holds. blocked when the step cannot be done. needs_replan when the plan must change before the step can be done.'
       },
       summary: { type: 'string', description: 'What you changed, in one or two sentences.' },
-      blocker: { type: 'string', description: 'Why the step is blocked or needs a new plan.' },
+      blocker: { type: 'string', maxLength: 400, description: 'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty()
     },
     required: ['outcome', 'summary'],
@@ -682,7 +719,7 @@ function buildGateEditSchema(hasFiles) {
     tag: 'outcome',
     properties: {
       outcome: { type: 'string', enum: ['complete', 'blocked'], description: 'complete when the task is done. blocked when it cannot be done.' },
-      blocker: { type: 'string', description: 'Why the task cannot be done.' },
+      blocker: { type: 'string', maxLength: 400, description: 'Why the task cannot be done, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty()
     },
     required: ['outcome'],
@@ -705,7 +742,7 @@ function buildValidateSchema() {
         description: 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.'
       },
       failures: { type: 'string', description: 'What failed: each failing command with its failure output.' },
-      blocker: { type: 'string', description: 'The command that cannot run and why.' },
+      blocker: { type: 'string', maxLength: 400, description: 'The command that cannot run and why, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty()
     },
     required: ['outcome'],
@@ -741,9 +778,9 @@ function reviewExitFields() {
     'root-cluster-suspected': ['cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale'],
     'diminishing-returns': ['signals_observed', 'latest_severity_max', 'findings_open', 'recommendation_text'],
     'injection-suspect': ['finding_id', 'pattern_category', 'field_excerpt'],
-    'user-input-required': ['finding_id', 'title', 'open_findings'],
+    'user-input-required': ['finding_id', 'title', 'question', 'recommendation_text', 'open_findings'],
     'planner-escalation': ['finding_id', 'classification', 'file', 'title'],
-    'high-severity-rejection': ['finding_id', 'title', 'rationale_text', 'open_findings'],
+    'high-severity-rejection': ['finding_id', 'title', 'rationale_text', 'recommendation_text', 'open_findings'],
     blocked: ['blocker', 'stage']
   };
 }
@@ -764,16 +801,17 @@ function reviewFieldTexts() {
     same_framing_rationale: { type: 'string', text: 'Why the findings share one framing.', isExternal: true },
     signals_observed: { type: 'list', text: 'Each diminishing returns signal observed.', isExternal: false },
     latest_severity_max: { type: 'string', text: 'The highest severity of the latest findings.', isExternal: true },
-    recommendation_text: { type: 'string', text: 'What the reviewer recommends.', isExternal: true },
+    recommendation_text: { type: 'string', text: 'What the reviewer recommends, or empty.', isExternal: true, bounds: { maxLength: 200, minLength: 0 } },
     finding_id: { type: 'string', text: 'The id of the finding.', isExternal: true },
     pattern_category: { type: 'string', text: 'The injection pattern category.', isExternal: false },
     field_excerpt: { type: 'string', text: 'The excerpt of the flagged field.', isExternal: true },
     classification: { type: 'string', text: 'The classification of the finding.', isExternal: true },
     file: { type: 'string', text: 'The file of the finding.', isExternal: true },
     title: { type: 'string', text: 'The title of the finding.', isExternal: true },
-    rationale_text: { type: 'string', text: 'Why the reviewer rejects the finding.', isExternal: true },
+    question: { type: 'string', text: 'The ask to the user.', isExternal: true, bounds: { maxLength: 300 } },
+    rationale_text: { type: 'string', text: 'Why the reviewer rejects the finding.', isExternal: true, bounds: { maxLength: 300 } },
     open_findings: { type: 'findings', text: 'Every finding still open in the fix ledger.', isExternal: true },
-    blocker: { type: 'string', text: 'What blocked the review.', isExternal: true },
+    blocker: { type: 'string', text: 'What blocked the review.', isExternal: true, bounds: { maxLength: 300 } },
     stage: { type: 'string', text: 'The loop stage that was blocked.', isExternal: false }
   };
 }
@@ -831,9 +869,8 @@ function openFindingTexts() {
   return {
     finding_id: 'The id of the finding.',
     severity: 'The severity of the finding.',
-    title: 'The title of the finding.',
-    body: 'The body of the finding.',
-    recommendation: 'What the reviewer recommends for the finding, empty when the fix ledger holds no recommendation.'
+    summary: 'What is wrong, in one plain sentence for the user.',
+    recommendation: 'What the reviewer recommends for the finding, in one plain sentence, or empty.'
   };
 }
 
@@ -855,6 +892,8 @@ function buildFindingItemSchema(texts) {
 
 function buildOpenFindingSchema() {
   const schema = buildFindingItemSchema(openFindingTexts());
+  schema.properties.summary.maxLength = 200;
+  schema.properties.recommendation.maxLength = 200;
   schema.properties.recommendation.minLength = 0;
   return schema;
 }
@@ -869,7 +908,7 @@ function buildReviewFieldSchema(name, entry) {
     return { type: 'array', description: description, minItems: 1, items: { type: 'string', description: itemDescription } };
   }
   if (entry.type === 'string') {
-    return { type: 'string', description: description };
+    return Object.assign({ type: 'string', description: description }, entry.bounds);
   }
   throw new Error('buildReviewFieldSchema: field ' + name + ' has type ' + JSON.stringify(entry.type) + ', which states no domain');
 }
@@ -1203,16 +1242,43 @@ function questionKey(kind, content) {
   return JSON.stringify([kind, content]);
 }
 
-function describePlanLine(plan) {
-  const stepCount = plan.steps.length + (plan.steps.length === 1 ? ' step' : ' steps');
-  return 'The plan: ' + buildPullRequestTitle(plan) + ', ' + stepCount + ' on branch ' + encodeUntrustedText(plan.branch) + '. The full plan is in this run\'s per-agent results.';
+function describeCount(count, noun) {
+  return count + ' ' + noun + (count === 1 ? '' : 's');
+}
+
+function toOneLine(text) {
+  return text.trim().split(/\s*[\r\n]+\s*/).join(' ');
+}
+
+function buildPlanDetailBlock(plan) {
+  const files = listStepFiles(plan.steps);
+  const shownPaths = files.slice(0, 5).map((file) => encodeUntrustedText(cutExcerpt(file)));
+  const restCount = files.length - shownPaths.length;
+  const paths = joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and');
+  return {
+    text: [
+      'What the plan addresses: ' + toOneLine(plan.digest.problem),
+      'What it changes: ' + toOneLine(plan.digest.change),
+      'It has ' + describeCount(plan.steps.length, 'step') + ' and touches ' + describeCount(files.length, 'file') + ' on branch ' + encodeUntrustedText(cutExcerpt(plan.branch)) + ': ' + paths + '.'
+    ].join('\n')
+  };
+}
+
+function remediationGateTexts() {
+  return {
+    irreversible: 'cannot be undone',
+    architectural: 'changes how the system is built',
+    safety: 'touches a safety check',
+    grows_surface: 'adds more surface than it removes',
+    repeats_surface: 'repeats a fix that did not close its class'
+  };
 }
 
 function buildPlanAcceptanceBrief(plan) {
   return {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the plan: create or confirm its working branch and run its steps. ' + describePlanLine(plan),
+    problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: 'Nothing is delivered.' },
     options: [
       { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: 'The plan passed every check, and its changes stay on the working branch until you merge them.', straw_man: 'A step can still change something you did not expect before you see the pull request.', effort: 'medium', value: 'high', reversible: true },
@@ -1226,9 +1292,17 @@ function buildPlanAcceptanceBrief(plan) {
 }
 
 function buildRemediationPlanBrief(plan) {
-  return Object.assign(buildPlanAcceptanceBrief(plan), {
+  const remediationGate = plan.remediation_gate;
+  const flags = { ...remediationGate.promotion_gate, grows_surface: remediationGate.grows_surface, repeats_surface: remediationGate.repeats_surface };
+  const texts = remediationGateTexts();
+  const flagTexts = Object.keys(texts).filter((flag) => flags[flag]).map((flag) => texts[flag]);
+  const lead = 'Run the remediation plan for the local review findings on the working branch, then every gate again.';
+  const brief = buildPlanAcceptanceBrief(plan);
+  return Object.assign(brief, {
     kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the remediation plan for the local review findings: run its steps on the working branch, then every gate again. ' + describePlanLine(plan)
+    problem: flagTexts.length === 0 ? lead : lead + ' I am asking because the plan ' + joinNames(flagTexts, 'and') + '.',
+    recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' },
+    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface || flags.repeats_surface }
   });
 }
 
@@ -1236,7 +1310,7 @@ function buildTrunkStaleBrief(facts) {
   return {
     id: 'trunk',
     kind: TRUNK_STALE_KIND,
-    problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + facts.trunk_ahead + ' commits ahead of its remote and ' + facts.trunk_behind + ' behind. Create or confirm the working branch from it anyway?',
+    problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
     criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: 'The branch may need a rebase before it merges.' },
     options: [
       { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: 'The branch can be rebased later, and the pull request shows its base.', straw_man: 'The branch may start from an old trunk and conflict later.', effort: 'trivial', value: 'medium', reversible: true },
@@ -1252,7 +1326,7 @@ function buildExternalEffectBrief(stepId, summary) {
   return {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
-    problem: 'Plan step ' + encodeUntrustedText(stepId) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
+    problem: 'Plan step ' + encodeUntrustedText(Array.from(stepId).slice(0, 16).join('')) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: 'The step runs before any pull request exists.' },
     options: [
       { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: 'The step is part of the delivery you asked for.', straw_man: 'The effect happens before you see the pull request and cannot be undone.', effort: 'small', value: 'high', reversible: false },
@@ -1302,11 +1376,14 @@ function resolveExternalEffects(plan, run, resolution) {
         continue;
       }
       /*
-       * INVARIANT: the key holds the rendered question, which shows the step
-       * id and the exact effect summary, so a changed irreversible text is a
-       * new question the user must approve word for word.
+       * INVARIANT: the key holds the full step id in its scope and the
+       * rendered question, which shows the exact effect summary, so a
+       * changed irreversible text is a new question the user must approve
+       * word for word, and two steps whose ids share the shown prefix are
+       * two questions. The shown step id is cut for the message only, never
+       * for the key.
        */
-      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), 'run', run, resolution);
+      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), ['run', step.id], run, resolution);
     }
   }
 }
@@ -1549,7 +1626,8 @@ async function runPlanningPass(run, facts, replan) {
     const round = run.replies.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {
-      return { result: pauseDelivery(resolution, questions, run) };
+      const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
+      return { result: pauseDelivery(resolution, questions, run, isAcceptance ? buildPlanDetailBlock(planResult.plan) : undefined) };
     }
     run.replies.push(reply);
     phase('Revise');
@@ -1902,7 +1980,7 @@ function askTail(asks, run, detail) {
     return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };
   }
   run.replies.push(reply);
-  return { answer: { question: questions, reply: reply } };
+  return { answer: { question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply } };
 }
 
 function replanFromTailAsk(asks, run) {
@@ -2193,11 +2271,31 @@ function quoteOrEmpty(text) {
   return quoteDiagnostic(text) || encodeUntrustedText('');
 }
 
+/**
+ * Returns the review value of field as the user sees it: a finding id cut
+ * to its short id, the blocker and the excerpt quoted by quoteDiagnostic, a
+ * list cut to its first 5 entries, each cut by
+ * cutExcerpt, then the count of the rest, a count as it is, and every other
+ * string encoded whole when its schema field has bounds, else cut by
+ * cutExcerpt first.
+ */
 function quoteReviewValue(review, field) {
+  const value = review[field];
   if (field === 'finding_id') {
-    return quoteShortFindingId(review[field]);
+    return quoteShortFindingId(value);
   }
-  return field === 'blocker' || field === 'field_excerpt' ? quoteOrEmpty(review[field]) : encodeUntrustedText(review[field]);
+  if (field === 'blocker' || field === 'field_excerpt') {
+    return quoteOrEmpty(value);
+  }
+  if (Array.isArray(value)) {
+    const restCount = value.length - 5;
+    return encodeUntrustedText(value.slice(0, 5).map(cutExcerpt)) + (restCount > 0 ? ' and ' + restCount + ' more' : '');
+  }
+  return encodeUntrustedText(typeof value === 'number' || reviewFieldTexts()[field].bounds ? value : cutExcerpt(value));
+}
+
+function hasReviewText(review, field) {
+  return review[field].trim() !== '';
 }
 
 function describeReviewStop(review, head) {
@@ -2214,34 +2312,33 @@ function quoteShortFindingId(findingId) {
   return encodeUntrustedText(Array.from(findingId).slice(0, 8).join(''));
 }
 
-function describeOpenFindingCount(openFindings) {
-  const count = openFindings.length;
-  return count === 1 ? '1 finding is still open.' : count + ' findings are still open.';
+function renderOpenFindingLine(finding) {
+  const recommendation = finding.recommendation.trim() === '' ? 'none' : encodeUntrustedText(finding.recommendation);
+  return '- ' + quoteShortFindingId(finding.finding_id) + ', severity ' + encodeUntrustedText(cutExcerpt(finding.severity)) + ': ' + encodeUntrustedText(finding.summary) + ' Recommendation: ' + recommendation;
 }
 
-function renderOpenFindingLine(finding, isCompact) {
-  const head = '- ' + quoteShortFindingId(finding.finding_id) + ', severity ' + encodeUntrustedText(finding.severity) + ', ' + encodeUntrustedText(finding.title);
-  if (isCompact) {
-    return head;
+/**
+ * Returns the detail block of a local review question: the question or the
+ * rejection reason, the reviewer recommendation, then up to
+ * 5 open findings and one line counting the rest.
+ */
+function buildReviewDetailBlock(review, openFindings) {
+  const lines = [
+    review.exit_reason === 'high-severity-rejection' ? 'Rejected because: ' + quoteReviewValue(review, 'rationale_text') : 'Local review asks: ' + quoteReviewValue(review, 'question'),
+    hasReviewText(review, 'recommendation_text') ? 'It recommends: ' + quoteReviewValue(review, 'recommendation_text') : 'It makes no recommendation.',
+    'Findings still open, each value quoted as the review returned it:',
+    ...openFindings.slice(0, 5).map(renderOpenFindingLine)
+  ];
+  const restCount = openFindings.length - 5;
+  if (restCount > 0) {
+    lines.push(describeCount(restCount, 'more open finding') + '.');
   }
-  const recommendation = finding.recommendation.trim() === '' ? 'no recommendation from the reviewer' : encodeUntrustedText(finding.recommendation);
-  return head + ': ' + quoteOrEmpty(finding.body) + ' Recommendation: ' + recommendation;
-}
-
-function buildOpenFindingsBlock(openFindings) {
-  if (openFindings.length === 0) {
-    return undefined;
-  }
-  const heading = 'Findings still open, each value quoted as the review returned it:';
-  return {
-    text: [heading, ...openFindings.map((finding) => renderOpenFindingLine(finding, false))].join('\n'),
-    compact: [heading, ...openFindings.map((finding) => renderOpenFindingLine(finding, true))].join('\n')
-  };
+  return { text: lines.join('\n') };
 }
 
 function renderRejectedFindingLine(finding, isCompact) {
-  const head = '- ' + quoteShortFindingId(finding.finding_id) + ', ' + encodeUntrustedText(finding.title);
-  return isCompact ? head : head + ', record ' + encodeUntrustedText(finding.record);
+  const head = '- ' + quoteShortFindingId(finding.finding_id) + ', ' + encodeUntrustedText(cutExcerpt(finding.title));
+  return isCompact ? head : head + ', record ' + encodeUntrustedText(cutExcerpt(finding.record));
 }
 
 function buildRejectedFindingsBlock(note, rejectedFindings) {
@@ -2252,31 +2349,40 @@ function buildRejectedFindingsBlock(note, rejectedFindings) {
   };
 }
 
+/**
+ * Returns the code-built brief of a local review question. Its problem
+ * names the finding by its short id and the open finding count, and its
+ * recommendation is option A, weak, pointing at the reviewer
+ * recommendation in the detail block when the review gives one, or none.
+ */
 function buildReviewQuestionBrief(review, head, openFindings) {
-  const finding = 'finding ' + quoteReviewValue(review, 'finding_id') + ', titled ' + quoteReviewValue(review, 'title');
+  const finding = 'finding ' + quoteReviewValue(review, 'finding_id');
   const isRejection = review.exit_reason === 'high-severity-rejection';
+  const hasRecommendation = hasReviewText(review, 'recommendation_text');
   return buildTailBrief({
     kind: reviewQuestionKinds()[review.exit_reason],
     problem: (isRejection
-      ? 'Local review rejected high severity ' + finding + ', and left it unfixed, because: ' + quoteReviewValue(review, 'rationale_text') + '. Should it be fixed before the pull request?'
-      : 'Local review needs your answer on ' + finding + ', before the pull request.') + ' ' + describeOpenFindingCount(openFindings),
+      ? 'Local review rejected high severity ' + finding + ' and left it unfixed, for the reason below. Should it be fixed before the pull request?'
+      : 'Local review asks you about ' + finding + ' before the pull request, as below.') + ' ' + describeCount(openFindings.length, 'finding') + ' still open.',
     goOn: isRejection ? 'Reject the finding and go on with it unfixed: local review records the decision at its source and goes on.' : 'Answer the finding: this run gives your answer to local review, which goes on with it.',
     other: isRejection ? 'Fix the finding: local review fixes it, or sends it to the planner, and goes on.' : 'Stop: local review ends blocked on this run, before the pull request.',
-    strength: 'none',
-    why: 'Only you can settle a question the review raises.',
+    strength: hasRecommendation ? 'weak' : 'none',
+    why: (hasRecommendation ? 'See its recommendation below. ' : '') + 'Only you can settle a question the review raises.',
     evidence: 'local review exit reason ' + review.exit_reason + ' on commit ' + head
   });
 }
 
 function askReviewQuestion(review, run) {
   const openFindings = review.open_findings;
-  return askTail([buildUndecidedAsk(buildReviewQuestionBrief(review, run.head, openFindings))], run, buildOpenFindingsBlock(openFindings));
+  const resolution = { asks: [], taken: [] };
+  resolveDecision(reviewQuestionKinds()[review.exit_reason], buildReviewQuestionBrief(review, run.head, openFindings), undefined, run, resolution);
+  return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));
 }
 
 function buildDiminishingReturnsBrief(review, head) {
   return buildTailBrief({
     kind: DIMINISHING_RETURNS_EXIT_KIND,
-    problem: 'Local review on commit ' + head + ' sees diminishing returns, with ' + review.findings_open + ' findings still open, the highest severity ' + quoteReviewValue(review, 'latest_severity_max') + '. Stop fixing and hold the local review gate on this commit with those findings open?',
+    problem: 'Local review on commit ' + head + ' sees diminishing returns, with ' + describeCount(review.findings_open, 'finding') + ' still open. Stop fixing and hold the local review gate on this commit with those findings open?',
     goOn: 'Stop fixing and go on with the open findings.',
     strength: 'strong',
     why: 'More review rounds fix little now, and the open findings stay on the record for you before the merge.',
@@ -2302,11 +2408,11 @@ function buildReviewEscalationBrief(review) {
   return buildTailBrief({
     kind: isCluster ? ROOT_CLUSTER_ROUTING_KIND : PLANNER_ESCALATION_ROUTING_KIND,
     problem: isCluster
-      ? 'Local review found findings that share one suspected root, ' + quoteReviewValue(review, 'hypothesized_root') + '. Go back to planning, from fresh facts, for a remediation that closes the class?'
-      : 'Local review escalated finding ' + quoteReviewValue(review, 'finding_id') + ', titled ' + quoteReviewValue(review, 'title') + ', in file ' + quoteReviewValue(review, 'file') + ', to the planner. Go back to planning, from fresh facts, for its remediation?',
+      ? 'Local review found ' + describeCount(review.cluster_ids.length, 'finding') + ' in ' + describeCount(review.cluster_files.length, 'file') + ' that share one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?'
+      : 'Local review escalated finding ' + quoteReviewValue(review, 'finding_id') + ' to the planner. Go back to planning, from fresh facts, for its remediation?',
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
-    why: 'The finding needs more than a simple fix, and the remediation plan comes to you before any step of it runs.',
+    why: 'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.',
     evidence: 'local review exit reason ' + review.exit_reason
   });
 }

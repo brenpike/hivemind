@@ -270,7 +270,7 @@ describe('brief.kind never picks the rule', () => {
     assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ kind: hardStopKinds[0] })), takeAuto);
   });
   test('an auto kind named in brief.kind does not make a surface kind take', () => {
-    const decision = decideWith('remediation_plan_acceptance', 'high', makeBrief({ kind: 'plan_acceptance' }));
+    const decision = decideWith('version_bump_indeterminable', 'high', makeBrief({ kind: 'plan_acceptance' }));
     assert.deepEqual(decision, { action: 'ask', reason: 'table_surface' });
   });
 });
