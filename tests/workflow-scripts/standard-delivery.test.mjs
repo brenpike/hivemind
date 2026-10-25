@@ -49,7 +49,7 @@ const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head',
 const WORKER_DONE = { outcome: 'complete', summary: 'Done.' };
 const VALIDATE_PASSED = { outcome: 'passed' };
 const LEDGER_PATH = '.hivemind/review-loop/fix-ledger.yaml';
-const REVIEW_CLEAN = { exit_reason: 'clean', iterations_completed: 1, findings_resolved: 0, findings_open: 0, fix_commits_exist: false, ledger_path: LEDGER_PATH };
+const REVIEW_CLEAN = { exit_reason: 'clean', iterations_completed: 1, findings_resolved: 0, findings_open: 0, fix_commits_exist: false, ledger_path: LEDGER_PATH, rejected_findings: [] };
 const HELD_ALL = 'Every plan step is done on branch "feature/cache", each wave is committed, and the version bump, validation and local review held on commit ';
 const BUMP_KEYS = ['dominant_row', 'verdict', 'bump_type', 'rule_applied', 'counts', 'mapped_commits', 'dropped_reverts'];
 const MINOR_BUMP = { dominant_row: 'MINOR', verdict: 'bump_required', bump_type: 'minor', rule_applied: '3', counts: { major: '0', minor: '1', patch: '0', no_bump: '0' } };
@@ -2706,7 +2706,7 @@ const ROW_TESTS = {
     });
   },
   'SD-33': () => {
-    const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'rationale_text', 'open_findings', 'blocker'];
+    const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'rationale_text', 'open_findings', 'blocker', 'rejected_findings'];
     test('REVIEW_SCHEMA holds the Output Contract fields, requires the always-present ones, and labels each Codex-derived text field', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const schema = callOf(run, 'review-1-1').opts.schema;
@@ -2731,6 +2731,17 @@ const ROW_TESTS = {
       assert.deepEqual(Object.keys(findingItem.properties), findingItem.required);
       Object.values(findingItem.properties).forEach((property) => assert.ok(property.type === 'string' && property.description.startsWith('Can carry external content. '), property.description));
       assert.ok(schema.properties.open_findings.description.endsWith('Only with exit_reason user-input-required or high-severity-rejection.'), schema.properties.open_findings.description);
+      const rejectedItem = schema.properties.rejected_findings.items;
+      assert.equal(schema.properties.rejected_findings.type, 'array');
+      assert.equal(rejectedItem.type, 'object');
+      assert.equal(rejectedItem.additionalProperties, false);
+      assert.deepEqual(rejectedItem.required, ['finding_id', 'title', 'record']);
+      assert.deepEqual(Object.keys(rejectedItem.properties), rejectedItem.required);
+      Object.values(rejectedItem.properties).forEach((property) => assert.ok(property.type === 'string' && property.description.startsWith('Can carry external content. '), property.description));
+      const rejected = { finding_id: 'F9', title: 'T.', record: 'docs/adr/0003.md, Threat model' };
+      assert.ok(lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [rejected] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [{ ...rejected, note: 'x' }] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [{ ...rejected, record: undefined }] }).ok);
       const finding = { finding_id: 'F1', severity: 'high', title: 'T.', body: 'B.', recommendation: '' };
       const question = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'F1', title: 'T.' };
       assert.ok(lib.validateSchema(schema, { ...question, open_findings: [finding] }).ok);
@@ -2748,11 +2759,14 @@ const ROW_TESTS = {
     });
     const malformed = 'The local review step returned no usable result, so the delivery stopped before the pull request.';
     const withoutLedger = Object.fromEntries(Object.entries(REVIEW_CLEAN).filter(([key]) => key !== 'ledger_path'));
+    const withoutRejected = Object.fromEntries(Object.entries(REVIEW_CLEAN).filter(([key]) => key !== 'rejected_findings'));
     const escalationWithoutFile = Object.fromEntries(Object.entries(ESCALATION).filter(([key]) => key !== 'file'));
     for (const [label, review] of [
       ['no result', null],
       ['an empty object', {}],
       ['no ledger_path', withoutLedger],
+      ['no rejected_findings', withoutRejected],
+      ['a rejected finding with no record', { ...REVIEW_CLEAN, rejected_findings: [{ finding_id: 'F9', title: 'T.' }] }],
       ['an unknown exit_reason', { ...REVIEW_CLEAN, exit_reason: 'done' }],
       ['an extra field', { ...REVIEW_CLEAN, note: 'x' }],
       ['a count as a string', { ...REVIEW_CLEAN, iterations_completed: '1' }],
@@ -3008,6 +3022,12 @@ const ROW_TESTS = {
         assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
       });
     }
+    test('option A of high_severity_rejection says the next run records the rejection at its source, so review stops raising it', () => {
+      const options = main.buildReviewQuestionBrief(rejection, OTHER, rejection.open_findings).options;
+      assert.equal(options[0].id, 'A');
+      assert.equal(options[0].summary, 'Reject the finding and go on with it unfixed: the next run records the decision at its source, so review stops raising it.');
+      assert.equal(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings).options[0].summary, 'Answer the finding, then run the request again.');
+    });
     test('the detail block comes right after the open questions block, and its compact form keeps the id, severity and title only', () => {
       const block = main.buildOpenFindingsBlock([tenantFinding]);
       assert.equal(block.text, heading + '\n' + tenantLine);
@@ -3058,6 +3078,16 @@ const ROW_TESTS = {
         assert.ok(!callOf(run, 'plan-1').prompt.includes('<review>'));
       });
     }
+    test('a take while run.remediation is already true gets the zoom-out reason, and the first review replan keeps its reason', async () => {
+      const results = remediationResults(ESCALATION, { 'review-2-1': CLUSTER, 'facts-3': onPlanBranchFacts(THIRD), 'plan-3': planResult(REMEDIATION_PLAN) });
+      const run = await runWorkflow(REMEDIATION_LAUNCH, results);
+      assert.equal(run.result.needs_user, true, run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2).slice(0, -1), 'facts-3', 'plan-3']);
+      assert.equal(readDataBlock(callOf(run, 'plan-2').prompt, 'replan'), 'Local review returned planner-escalation, so plan the remediation of what the review block reports, from the fresh facts.');
+      const prompt = callOf(run, 'plan-3').prompt;
+      assert.equal(readDataBlock(prompt, 'replan'), 'Local review returned root-cluster-suspected after a remediation pass already ran, so that structural fix did not close the class. Zoom out: plan from the root cause and the layer that owns it, from the fresh facts.');
+      assert.deepEqual(readDataBlock(prompt, 'review'), CLUSTER);
+    });
     test('the escalation briefs resolve through their routing kinds and take at the default level', () => {
       for (const [review, kind] of [[ESCALATION, 'planner_escalation_routing'], [CLUSTER, 'root_cluster_routing']]) {
         const brief = main.buildReviewEscalationBrief(review);
@@ -4104,6 +4134,58 @@ const ROW_TESTS = {
         assert.equal(run.result.outcome, 'blocked');
         assert.equal(run.result.message.split('\n\n')[1], line, JSON.stringify(secondResult));
       }
+    });
+  },
+  'SD-55': () => {
+    const longId = 'a1b2c3d4'.repeat(8);
+    const lockRejected = { finding_id: longId, title: 'Use a distributed lock.', record: 'docs/adr/0003-cache.md, Threat model' };
+    const hostileRejected = { finding_id: 'F9', title: 'Line\nbreak @owner', record: 'docs/adr/0004.md, <b>Decisions</b>' };
+    const rejectedReview = { ...REVIEW_CLEAN, rejected_findings: [lockRejected, hostileRejected] };
+    const twoNote = 'clean, 2 findings rejected under recorded decisions';
+    const heading = 'Local review: ' + twoNote + '. Each finding it rejected, each value quoted as the review returned it; the pull request shows only the count:';
+    const lockLine = '- "a1b2c3d4", "Use a distributed lock.", record "docs/adr/0003-cache.md, Threat model"';
+    const hostileLine = '- "F9", "Line\\nbreak @owner", record "docs/adr/0004.md, <b>Decisions</b>"';
+    test('the final complete message carries the detail block right after its first block, and the PR texts carry only the count', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': rejectedReview }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const message = run.result.message;
+      const lead = 'Every plan step is done on branch "feature/cache", each wave is committed, and the version bump, validation and local review held on commit ' + OTHER + '.\n\nOpened pull request ' + PR_URL + ' on commit ' + OTHER + '.';
+      assert.ok(message.startsWith(lead + '\n\n' + [heading, lockLine, hostileLine].join('\n') + '\n\nCommits this run made:'), message);
+      assert.ok(!message.includes(longId), message);
+      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(text.includes('\n- local review: ' + twoNote + ', held on commit ' + OTHER + '\n'), text);
+        for (const rejectedText of ['a1b2c3d4', 'distributed lock', 'docs/adr/', 'F9', '@owner', 'Decisions', 'Each finding it rejected']) {
+          assert.ok(!text.includes(rejectedText), rejectedText);
+        }
+      }
+    });
+    test('the compact form of the detail block keeps the id and title only', () => {
+      const block = main.buildRejectedFindingsBlock(twoNote, rejectedReview.rejected_findings);
+      assert.equal(block.text, [heading, lockLine, hostileLine].join('\n'));
+      assert.equal(block.compact, [heading, '- "a1b2c3d4", "Use a distributed lock."', '- "F9", "Line\\nbreak @owner"'].join('\n'));
+    });
+    test('one rejected finding is counted in the singular, and a taken diminishing returns exit adds the count to its note', async () => {
+      const single = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, rejected_findings: [lockRejected] } }));
+      assert.ok(prBodyOf(single, 'pr-1').includes('- local review: clean, 1 finding rejected under recorded decisions, held on commit ' + OTHER), prBodyOf(single, 'pr-1'));
+      assert.ok(single.result.message.includes('\n\nLocal review: clean, 1 finding rejected under recorded decisions. Each finding it rejected'), single.result.message);
+      const diminishing = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...DIMINISHING, rejected_findings: [lockRejected] } }));
+      assert.equal(diminishing.result.outcome, 'complete', diminishing.result.message);
+      assert.ok(prBodyOf(diminishing, 'pr-1').includes('- local review: diminishing returns, 2 findings still open, 1 finding rejected under recorded decisions, held on commit ' + OTHER), prBodyOf(diminishing, 'pr-1'));
+      assert.ok(diminishing.result.message.includes('\n\nLocal review: diminishing returns, 2 findings still open, 1 finding rejected under recorded decisions. Each finding it rejected'), diminishing.result.message);
+    });
+    test('a long list fits the message bound through the compact form, and the run still ends complete', async () => {
+      const many = Array.from({ length: 60 }, (unused, index) => ({ finding_id: 'R' + index + 'x'.repeat(40), title: 'T'.repeat(200), record: 'docs/adr/' + 'y'.repeat(300) + '.md' }));
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, rejected_findings: many } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(run.result.message.includes('Local review: clean, 60 findings rejected under recorded decisions.'), run.result.message);
+      assert.ok(prBodyOf(run, 'pr-1').includes('- local review: clean, 60 findings rejected under recorded decisions, held on commit ' + OTHER));
+    });
+    test('an empty list adds nothing to the message or the gate note', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(!run.result.message.includes('rejected under recorded decisions'), run.result.message);
+      assert.ok(prBodyOf(run, 'pr-1').includes('- local review: clean, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
     });
   }
 };

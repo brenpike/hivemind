@@ -1,0 +1,42 @@
+{
+  "rule": "Surface-Growth Escalation doctrine section coupling",
+  "description": "`plugin/governance/remediation-doctrine.md` `## Surface-Growth Escalation` is the single source for the rule that a remediation which grows the surface is escalated to the user rather than applied. The source pin is the section heading. Four further pins in the same file carry the load-bearing claims. (1) The prohibition: a fix that adds more surface than it removes is not applied. (2) The measure that decides the condition: count, by judgment, the new files, code paths, checks, state and lines the fix adds against those it removes; deleting a counted kind turns the suite red. (3) The obligation: when the fix grows the surface, ask the user one architectural call, made of a one-line ask, options that include removing the surface and recording the threat model, and a recommendation. (4) The transport: the call rides the engine's existing user-question path, so no engine gains a new stop kind for it. The consumers pin the POINTER only, never remedy prose, so honest rewording of the doctrine body does not break them: `plugin/agents/local-reviewer.md`, `plugin/agents/github-reviewer.md` and `plugin/agents/overlord.md` must still name `## Surface-Growth Escalation` in the doctrine file, and `plugin/agents/cerebrate.md` must still name it as the doctrine's section. What this pin honestly guarantees is exactly that these word sequences exist in these five named files; it claims nothing about meaning. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible: surrounding prose that lets a surface-growing fix proceed under some exception stays green; (2) the count is a judgment, and no pin can check that an actor counted honestly; (3) the pin sees only the five files it names, and no fixture in this directory can detect a NEW remediation actor that never points at the section at all, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/remediation-doctrine.md",
+    "pattern": "## Surface-Growth Escalation"
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "A fix that adds more surface than it removes is not applied."
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "Count, by judgment, the new files, code paths, checks, state and lines the fix adds against those it removes."
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "When the fix grows the surface, ask the user one architectural call instead: a one-line ask, options that include removing the surface and recording the threat model, and a recommendation."
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "The call rides the engine's existing user-question path."
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "remediation-doctrine.md` (`## Surface-Growth Escalation`)"
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "remediation-doctrine.md` (`## Surface-Growth Escalation`)"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "remediation-doctrine.md` (`## Surface-Growth Escalation`)"
+    },
+    {
+      "file": "plugin/agents/cerebrate.md",
+      "pattern": "doctrine's `## Surface-Growth Escalation`"
+    }
+  ]
+}
