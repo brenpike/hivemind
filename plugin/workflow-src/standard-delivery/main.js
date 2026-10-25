@@ -1376,11 +1376,14 @@ function resolveExternalEffects(plan, run, resolution) {
         continue;
       }
       /*
-       * INVARIANT: the key holds the rendered question, which shows the step
-       * id and the exact effect summary, so a changed irreversible text is a
-       * new question the user must approve word for word.
+       * INVARIANT: the key holds the full step id in its scope and the
+       * rendered question, which shows the exact effect summary, so a
+       * changed irreversible text is a new question the user must approve
+       * word for word, and two steps whose ids share the shown prefix are
+       * two questions. The shown step id is cut for the message only, never
+       * for the key.
        */
-      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), 'run', run, resolution);
+      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), ['run', step.id], run, resolution);
     }
   }
 }

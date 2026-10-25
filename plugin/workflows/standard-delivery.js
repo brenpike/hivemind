@@ -3496,7 +3496,7 @@ function resolveExternalEffects(plan, run, resolution) {
         resolution.reversibleEffects.push({ stepId: step.id, summary: effect.summary });
         continue;
       }
-      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), 'run', run, resolution);
+      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), ['run', step.id], run, resolution);
     }
   }
 }

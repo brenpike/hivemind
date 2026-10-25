@@ -1631,6 +1631,19 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
     });
+    test('a replied effect does not settle the same effect of a step whose id shares the shown prefix', async () => {
+      const prefix = 'STEP-abcdefghijkl-';
+      const sharedStep = (suffix, file) => makeStep(prefix + suffix, [file], { external_effects: [{ summary: summary, reversible: false }] });
+      const onePlan = makePlan({ steps: [sharedStep('001', 'src/cache.js')] });
+      const twoPlan = makePlan({ steps: [sharedStep('001', 'src/cache.js'), sharedStep('002', 'src/store.js')] });
+      const results = happyResults({ 'plan-1': planResult(onePlan), 'revise-1': reviseResult(planResult(twoPlan), ['Q1']) });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, publish it for the first step.'), results);
+      assert.equal(run.result.needs_user, true, run.result.message);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1']);
+      assert.ok(run.result.message.includes('Word for word:\n' + summary), run.result.message);
+    });
     test('a changed effect is asked again', async () => {
       const results = happyResults({ 'plan-1': planResult(effectPlan(summary, false)), 'revise-1': reviseResult(planResult(effectPlan('Publish to a staging registry.', false)), ['Q1']) });
       const paused = await runWorkflow(LAUNCH, results);
