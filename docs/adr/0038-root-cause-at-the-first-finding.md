@@ -11,7 +11,7 @@ Review remediation played whack-a-mole on every 7.x session that ran a local rev
 - **Rejected findings came back.** One finding, that spawn turns on remote control by default, was raised in four runs as d570f77e, ca0bf1bb, e8b38871 and 7dc90a91. The user rejected it each time. Each Codex review starts fresh, and a finding id is new every run, so the user was asked the same question again. The fourth time, the run request already said that any repeat is rejected and is not a question. The local review ladder still turned the high-severity rejection into a user question, so the carry-over has to live in the review engine, not in the request text (https://github.com/brenpike/hivemind/issues/448#issuecomment-6390967948, https://github.com/brenpike/hivemind/issues/448#issuecomment-6391852770).
 - **A boundary that does not exist.** Finding 3918bfb0 came back after two structural fixes, each covering only the sites already named. Three structural fixes, about 3,600 lines, hardened a boundary that does not exist: same-user brood children are not a security boundary against the coordinator. The question that would have stopped the spin at the first finding is whether the attacker the review assumes is inside the threat model (https://github.com/brenpike/hivemind/issues/448#issuecomment-6391852770).
 
-This ADR records the decisions. It does not restate the rules. Each rule is stated once in `plugin/governance/remediation-doctrine.md`, the one home for them on both engines, and the sections named below are its text. This decision spans ADR-0023, ADR-0025 and ADR-0037, so it gets its own record, and each of those ADRs carries a dated note that points here.
+This ADR records the decisions. It does not restate the rules. Each rule is stated once in `plugin/governance/remediation-doctrine.md`, the one home for them on both engines, and the sections named below are its text. This decision spans ADR-0023, ADR-0025, ADR-0036 and ADR-0037, so it gets its own record, and each of those ADRs carries a dated note that points here.
 
 ## Decision
 
@@ -39,7 +39,7 @@ Each file this decision changed, and what changed in it:
 
 - `plugin/governance/remediation-doctrine.md`: the opening paragraph and the sections named in each decision above.
 - `plugin/governance/decision-autonomy.md`: the `recorded` disposition is admissible only on a ground named in `### Recorded Residual`.
-- `plugin/agents/local-reviewer.md`: the `rejected_findings` Output Contract field; step 5 (the triage, recorded-decision repeats as `status: rejected`, and surface-growth escalation); the `open` to `rejected` ledger transition.
+- `plugin/agents/local-reviewer.md`: the `rejected_findings` Output Contract field; the Output Contract drops `member_count`, the member count being the number of `cluster_ids`; step 5 (the triage, recorded-decision repeats as `status: rejected`, and surface-growth escalation); the `open` to `rejected` ledger transition.
 - `plugin/agents/github-reviewer.md`: step 4 (the triage, a cited-record rationale reply that counts as addressed, and surface-growth escalation); step 8 (a found root cause is never deferred).
 - `plugin/agents/cerebrate.md`: Remediation Zoom-Out Mode covers both engines, runs the triage first, and plans the scope boundary, the surface account and the recorded-decision step.
 - `plugin/agents/overlord.md`: First-finding triage before any fix; the proactive trigger and counter persistence, which now point to the doctrine's trip point; Surface-growth escalation; Repeat rejections at `pr_confirm`; Defer-with-scope.
@@ -54,8 +54,10 @@ Each file this decision changed, and what changed in it:
   - `requestReviewReplan`: the zoom-out replan reason.
   - `projectReplanReview` and `requestReviewReplan`: the replan carries only the review's `exit_reason` and the fields that `exit_reason` names, so no rejected finding reaches the planner.
   - `buildReviewQuestionBrief`: the rejection option text.
+  - `reviewFieldTexts`, `reviewExitFields`, `buildReviewFieldSchema` and `buildReviewEscalationBrief`: review values carry their domain. Each conditional array field holds at least one entry, `buildReviewFieldSchema` throws on a conditional field type without a domain, and `member_count` is gone, so the root-cluster brief names no count.
 
   The generated `plugin/workflows/standard-delivery.js` follows.
+- `plugin/workflow-src/lib/schema.js`: every integer value must be zero or more, so a negative count is a schema error (ADR-0036, Amendment 2026-10-24: integers are counts). The generated `plugin/workflows/analysis-only.js` and `plugin/workflows/standard-delivery.js` follow.
 - `plugin/workflow-src/standard-delivery/contract.js`: rows SD-33, SD-37, SD-39 and the new SD-55, each tested in `tests/workflow-scripts/standard-delivery.test.mjs`.
 - Policy fixtures: `tests/policy/safety-first-finding-triage.json`, `tests/policy/safety-recorded-decision-repeat.json`, `tests/policy/safety-surface-growth-escalation.json` (new) and `tests/policy/safety-recorded-residual.json` (updated), which pin the doctrine sections and their consumers.
 
@@ -77,4 +79,4 @@ Each file this decision changed, and what changed in it:
 - **More work lands in the PR that finds it.** A root cause inherited from trunk is no longer deferred or recorded, so a PR can grow past its request. Surface-growth escalation bounds this: a fix that grows the surface goes to the user as one call, and a threat-model record can reject the class.
 - **No new state, stop kind or definition version.** The surface-growth call rides the existing question paths, and the state-machine definitions are unchanged.
 
-Links: https://github.com/brenpike/hivemind/issues/448, https://github.com/brenpike/hivemind/issues/444, https://github.com/brenpike/hivemind/issues/409, `docs/adr/0023-root-cause-remediation-doctrine.md`, `docs/adr/0025-young-surface-recurrence-and-github-as-ledger.md`, `docs/adr/0037-standard-delivery-on-script-engine.md`.
+Links: https://github.com/brenpike/hivemind/issues/448, https://github.com/brenpike/hivemind/issues/444, https://github.com/brenpike/hivemind/issues/409, `docs/adr/0023-root-cause-remediation-doctrine.md`, `docs/adr/0025-young-surface-recurrence-and-github-as-ledger.md`, `docs/adr/0036-analysis-only-first-workflow-on-script-engine.md`, `docs/adr/0037-standard-delivery-on-script-engine.md`.
