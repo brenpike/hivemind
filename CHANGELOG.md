@@ -17,13 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- A Scope step in the `standard-delivery` script, after the facts step and the scan and before planning. Each pass runs the planner agent once in its new Scope Mode, on Sonnet at effort high, and it returns the slice of each document the request names and whether each path that slice names exists now, with any drift. The plan and revise prompts carry the checked scope, so the planner reads no named document whole and checks no named path again. A scope result that fails its schema, or names a path that is not plain, stops the run before planning (#463).
+- A Scope step in the `standard-delivery` script, after the facts step and the scan and before planning. Each pass runs the planner agent once in its new Scope Mode, on Sonnet at effort high, and it returns the line ranges of each slice of the documents the request names, with no copied text, and whether each path a slice names exists now, with any drift. The plan and revise prompts carry the checked scope, so the planner reads only those line ranges, no named document whole, and checks no named path again. A scope result that fails its schema, or names a path that is not plain, stops the run before planning (#463).
 
 ### Changed
 
 - The planner, the drone and the overlord load `remediation-doctrine.md` only in the sections that use it, for review remediation, instead of on every dispatch. The planner reads `versioning.md` only at the versioning decision, and `definitions.md` only at the sections a rule cites. The local and GitHub reviewers still load the doctrine on every dispatch (#463).
 - `cerebrate.md` gains read discipline: independent reads and searches go in one turn as parallel calls, a file is read by line range after a search, nothing already in context is read again, long append-only documents are searched instead of read whole, and only the section of a named document that the request is about is read (#463).
-- The `standard-delivery` prose budget rises from 42,000 to 43,000 characters for the Scope step. The built script is 150,722 characters, within the unchanged 190,000 budget (#463).
+- The `standard-delivery` prose budget rises from 42,000 to 43,000 characters for the Scope step. The built script is 150,820 characters, within the unchanged 190,000 budget (#463).
 - Docs: a new amendment to ADR-0037, with a dated note on the fixed agent calls per run. The README lifecycle lists the Scope step (#463).
 
 ## [7.1.4] - 2026-10-27

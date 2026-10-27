@@ -234,7 +234,7 @@ A `standard-delivery` script run, from request to PR:
 
 1. **Facts.** A runner gathers the branch facts into one facts file (`hivemind:gather-facts`).
 2. **Scan.** A runner scans the text of the issues and PRs the request names for prompt injection (`hivemind:injection-scan`).
-3. **Scope.** The cerebrate, on Sonnet, returns the slice of each document the request names and checks each path that slice names, so the planner reads neither again. A scope result the script cannot use stops the run before planning.
+3. **Scope.** The cerebrate, on Sonnet, returns the line ranges of each slice of the documents the request names and checks each path a slice names, so the planner reads only those ranges and checks no named path again. A scope result the script cannot use stops the run before planning.
 4. **Plan.** The cerebrate plans what is left of the request on this branch, and the plan is checked against `plugin/references/plan-schema.json`. After a pause, the planner revises the plan with your reply.
 5. **Branch.** A runner creates or confirms the working branch (`hivemind:create-working-branch`).
 6. **Waves.** The script computes each ready wave of plan steps in `plugin/workflow-src/lib/waves.js`. Workers run each wave in parallel, and a runner commits the wave's files after each wave (`hivemind:molt`).
