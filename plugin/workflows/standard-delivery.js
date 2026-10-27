@@ -4,6 +4,7 @@ export const meta = {
   phases: [
     { title: 'Facts', detail: 'a runner gathers the branch facts into one facts file' },
     { title: 'Scan', detail: 'a runner scans the named issues and pull requests for prompt injection' },
+    { title: 'Scope', detail: 'the planner, on a smaller model, slices the documents the request names' },
     { title: 'Plan', detail: 'the planner plans what is left of the request on this branch' },
     { title: 'Revise', detail: 'the planner revises the plan with the user reply' },
     { title: 'Branch', detail: 'a runner creates or confirms the working branch' },
@@ -38,6 +39,7 @@ export const meta = {
  *   plugin/workflow-src/standard-delivery/record.js
  *   plugin/workflow-src/standard-delivery/relay.js
  *   plugin/workflow-src/standard-delivery/review.js
+ *   plugin/workflow-src/standard-delivery/scope.js
  *   plugin/workflow-src/standard-delivery/waves.js
  *   plugin/workflow-src/standard-delivery/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
@@ -2670,7 +2672,7 @@ return itemProblem;
 }
 return'';
 }
-function buildPlanPrompt(request,facts,replan){
+function buildPlanPrompt(request,facts,scope,replan){
 const hasAnswer=hasReplanAnswer(replan);
 const lines=[
 'Plan the delivery of the user request below in this repository, as one plan on one working branch.',
@@ -2680,7 +2682,7 @@ dataBlocksSentence(hasAnswer?'The reply in the answer block':undefined)
 if(replan!==undefined){
 lines.push('This is a new plan in a run that already started: the replan block says why.');
 }
-lines.push('',buildFactsBlock(facts),formatDataBlock('request',request));
+lines.push('',buildFactsBlock(facts),formatDataBlock('request',request),formatDataBlock('scope',scope));
 if(replan!==undefined){
 lines.push(formatDataBlock('replan',replan.reason));
 }
@@ -2695,7 +2697,7 @@ return lines.join('\n');
 function hasReplanAnswer(replan){
 return replan!==undefined&&replan.answer!==undefined;
 }
-function buildPlanRevisePrompt({request,facts,plan,questions,reply}){
+function buildPlanRevisePrompt({request,facts,scope,plan,questions,reply}){
 return[
 'Revise your plan for the delivery of the user request below with the user reply below.',
 boundarySentence(),
@@ -2703,6 +2705,7 @@ dataBlocksSentence('The reply block'),
 '',
 buildFactsBlock(facts),
 formatDataBlock('request',request),
+formatDataBlock('scope',scope),
 formatDataBlock('earlier_plan',plan),
 formatDataBlock('questions',questions),
 formatDataBlock('reply',reply)
@@ -2926,13 +2929,13 @@ const pendingReply=run.pendingReply;
 run.pendingReply=undefined;
 return pendingReply;
 }
-async function runPlanningPass(run,facts,replan){
+async function runPlanningPass(run,facts,scope,replan){
 phase('Plan');
 let resultSchema=PLAN_RESULT_SCHEMA;
 let shownAsks=[];
 let shownResult;
 const settledKinds=new Set();
-const planPrompt=buildPlanPrompt(run.request,facts,replan);
+const planPrompt=buildPlanPrompt(run.request,facts,scope,replan);
 let planResult=await agent(hasReplanAnswer(replan)?planPrompt:addResumeNote(planPrompt,run),plannerCallOptions('plan-'+run.pass,'Plan',resultSchema));
 for(;;){
 const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk);
@@ -2966,7 +2969,7 @@ phase('Revise');
 shownAsks=resolution.asks;
 shownResult=planResult;
 resultSchema=buildReviseResultSchema(shownAsks);
-const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,plan:planResult.plan,questions:questions,reply:reply});
+const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,plan:planResult.plan,questions:questions,reply:reply});
 planResult=await agent(revisePrompt,plannerCallOptions('revise-'+round,'Revise',resultSchema));
 }
 }
@@ -3937,6 +3940,62 @@ function notConfiguredReviewLine(){
 return'local review: the run was launched with local_review false, so the gate is not configured and does not count as held.';
 }
 
+function buildScopeSchema(){
+const pathField={type:'string',maxLength:400,description:repositoryPathMark()};
+const documentItem={
+type:'object',
+properties:{
+path:pathField,
+lines:{type:'string',maxLength:100,description:'The line ranges of the slice, like 12-40.'},
+text:{type:'string',maxLength:20000,description:'The slice, word for word.'}
+},
+required:['path','lines','text'],
+additionalProperties:false
+};
+const pathItem={
+type:'object',
+properties:{
+path:pathField,
+exists:{type:'boolean',description:'true when the path exists now.'},
+drift:{type:'string',minLength:0,maxLength:400,description:'How the path differs from what the slice says, empty when it does not.'}
+},
+required:['path','exists','drift'],
+additionalProperties:false
+};
+return{
+type:'object',
+properties:{
+documents:{type:'array',description:'One slice per named document, empty when none.',items:documentItem},
+paths:{type:'array',description:'One entry per path a slice or the request names for the work, empty when none.',items:pathItem}
+},
+required:['documents','paths'],
+additionalProperties:false
+};
+}
+function buildScopePrompt(request,facts){
+return[
+'Scope the user request below for its planner, in Scope Mode.',
+boundarySentence(),
+dataBlocksSentence(),
+'',
+buildFactsBlock(facts),
+formatDataBlock('request',request)
+].join('\n');
+}
+function scopeOptions(pass){
+return{agentType:PLANNER_AGENT,model:SCOPE_MODEL,effort:'high',schema:toAgentSchema(SCOPE_SCHEMA),label:'scope-'+pass,phase:'Scope'};
+}
+function describeScopeProblem(scope){
+const isUsable=validateSchema(SCOPE_SCHEMA,scope).ok&&findRepositoryPathProblem(SCOPE_SCHEMA,scope,'')==='';
+return isUsable?undefined:'The scope step returned a result it could not use, so '+RUN_NAME+' stopped before planning.';
+}
+async function runScopeStep(run,facts){
+phase('Scope');
+const scope=await agent(addResumeNote(buildScopePrompt(run.request,facts),run),scopeOptions(run.pass));
+const problem=describeScopeProblem(scope);
+return problem===undefined?{scope:scope}:{problem:problem};
+}
+
 function buildNextActionProperty(){
 return{
 type:'string',
@@ -4063,6 +4122,7 @@ const RUN_NOUN='delivery';
 const RUN_NAME=describeRunNoun(RUN_NOUN);
 const PLANNER_AGENT='hivemind:cerebrate';
 const RUNNER_MODEL='haiku';
+const SCOPE_MODEL='sonnet';
 const PLANNER_QUESTION_KIND='planner_question';
 const PLAN_ACCEPTANCE_KIND='plan_acceptance';
 const TRUNK_STALE_KIND='trunk_stale';
@@ -4083,6 +4143,7 @@ const BUMP_EDIT_SCHEMA=buildGateEditSchema(false);
 const FIX_SCHEMA=buildGateEditSchema(true);
 const VALIDATE_SCHEMA=buildValidateSchema();
 const REVIEW_SCHEMA=buildReviewSchema();
+const SCOPE_SCHEMA=buildScopeSchema();
 function maxReplans(){
 return 3;
 }
@@ -4173,7 +4234,11 @@ const checked=await runFactsStep(run);
 if(checked.problem!==undefined){
 return{result:finishDeliveryBlocked(checked.problem,run)};
 }
-const planned=await runPlanningPass(run,checked.facts,replan);
+const scoped=await runScopeStep(run,checked.facts);
+if(scoped.problem!==undefined){
+return{result:finishDeliveryBlocked(scoped.problem,run)};
+}
+const planned=await runPlanningPass(run,checked.facts,scoped.scope,replan);
 if(planned.result!==undefined){
 return planned;
 }

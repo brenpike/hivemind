@@ -11,9 +11,9 @@
  *
  * The phase modules of this directory hold every other function, and the
  * build bundles them, in name order, ahead of this file: gates.js, plan.js,
- * pr.js, record.js, relay.js, review.js and waves.js. Each opens with the
- * contract of its steps. This file holds the launch reading, the run state,
- * the pass loop and every top-level constant and limit.
+ * pr.js, record.js, relay.js, review.js, scope.js and waves.js. Each opens
+ * with the contract of its steps. This file holds the launch reading, the
+ * run state, the pass loop and every top-level constant and limit.
  *
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only
@@ -32,7 +32,8 @@
  *          never read: the level is the table's default_level until slice 3
  *          (ADR-0037 decision 23).
  *   AUTONOMY_TABLE, BRIEF_SCHEMA, PLAN_SCHEMA  data constants copied in by
- *          the build.
+ *          the build. SCOPE_SCHEMA, built here by buildScopeSchema
+ *          (scope.js), is the scope step result schema.
  *
  * Outputs
  *   pauseForUser({resumeArgs, blocks}) when a question needs the user,
@@ -153,7 +154,9 @@
  *   escalation or root cluster, or after a reply to a tail ask other than
  *   a local review question, and every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
- *   invariant 3).
+ *   invariant 3). Then the scope step (scope.js) runs once, after the facts
+ *   step and the scan and before planning, and its checked scope reaches
+ *   only the plan and revise prompts of its pass.
  *   Every step result schema whose fields depend on its outcome, or on
  *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
  *   from one table, which gives both its anyOf branches and its 'Only with'
@@ -185,6 +188,7 @@ const RUN_NOUN = 'delivery';
 const RUN_NAME = describeRunNoun(RUN_NOUN);
 const PLANNER_AGENT = 'hivemind:cerebrate';
 const RUNNER_MODEL = 'haiku';
+const SCOPE_MODEL = 'sonnet';
 const PLANNER_QUESTION_KIND = 'planner_question';
 const PLAN_ACCEPTANCE_KIND = 'plan_acceptance';
 const TRUNK_STALE_KIND = 'trunk_stale';
@@ -205,6 +209,7 @@ const BUMP_EDIT_SCHEMA = buildGateEditSchema(false);
 const FIX_SCHEMA = buildGateEditSchema(true);
 const VALIDATE_SCHEMA = buildValidateSchema();
 const REVIEW_SCHEMA = buildReviewSchema();
+const SCOPE_SCHEMA = buildScopeSchema();
 
 function maxReplans() {
   return 3;
@@ -312,7 +317,11 @@ async function runDeliveryPass(run, replan) {
   if (checked.problem !== undefined) {
     return { result: finishDeliveryBlocked(checked.problem, run) };
   }
-  const planned = await runPlanningPass(run, checked.facts, replan);
+  const scoped = await runScopeStep(run, checked.facts);
+  if (scoped.problem !== undefined) {
+    return { result: finishDeliveryBlocked(scoped.problem, run) };
+  }
+  const planned = await runPlanningPass(run, checked.facts, scoped.scope, replan);
   if (planned.result !== undefined) {
     return planned;
   }
