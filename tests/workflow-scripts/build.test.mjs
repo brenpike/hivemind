@@ -4,13 +4,14 @@ import { spawnSync } from 'node:child_process';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadWorkflow, loadWorkflowSource } from './harness.mjs';
 import {
   LIB_FILES,
   MAX_BUILT_LINE_LENGTH,
   MAX_BUILT_LINE_SQUARES,
   MAX_BUILT_SCRIPT_LENGTH,
+  PROSE_BUDGETS,
   WORKFLOW_APPROVAL_LIMIT,
   WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT,
   WORKFLOW_PREVIEW_LINE_LIMIT,
@@ -20,7 +21,9 @@ import {
   builtPathFor,
   compactCode,
   compactSource,
+  countProseCharacters,
   discoverWorkflowIds,
+  findCopiedSentences,
   findNonRegularOutputs,
   findOrphanWorkflowIds,
   findTopLevelStatement,
@@ -28,12 +31,14 @@ import {
   listDraftWorkflowIds,
   listLiveWorkflowIds,
   listModulePaths,
+  listNamedPromptFiles,
   listSourcePaths,
   REPOSITORY_PATH_MARK,
   projectAutonomyTable,
   projectSchema,
   readDataConstant,
   runCli,
+  splitProseSentences,
   stripComments,
   stripCommentsAndStrings,
   tokenizeSource
@@ -48,7 +53,12 @@ const draftIds = listDraftWorkflowIds(repoRoot);
 const DRAFT_ID = 'draft-check';
 const MAX_SOURCE_LINES = 600;
 const DELIVERY_MODULES = ['gates.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review.js', 'waves.js'];
+const PROSE_BUDGETS_PATTERN = /export const PROSE_BUDGETS = Object\.freeze\(\{[^}]*\}\);/;
+const MAX_PROSE_MARGIN = 1000;
+const CEREBRATE_SENTENCE = 'You do not write or edit code.';
+const PLAN_PROMPT_OPENING = '\'Plan the delivery of the user request below in this repository, as one plan on one working branch.';
 const scratchRoots = [];
+let scratchBuilderCount = 0;
 
 function readBuilt(id) {
   return readFileSync(join(repoRoot, builtPathFor(id)), 'utf8').replace(/\r/g, '');
@@ -57,10 +67,52 @@ function readBuilt(id) {
 function makeScratchCopy() {
   const scratchRoot = mkdtempSync(join(tmpdir(), 'build-workflows-'));
   scratchRoots.push(scratchRoot);
-  for (const dir of ['plugin/workflow-src', 'plugin/references', 'plugin/workflows']) {
+  for (const dir of ['plugin/workflow-src', 'plugin/references', 'plugin/workflows', 'plugin/agents']) {
     cpSync(join(repoRoot, dir), join(scratchRoot, dir), { recursive: true });
   }
+  copySkillFiles(scratchRoot);
   return scratchRoot;
+}
+
+/**
+ * Copies plugin/skills/<name>/SKILL.md of every skill into a scratch copy,
+ * the files the duplication check reads.
+ */
+function copySkillFiles(scratchRoot) {
+  const skillNames = readdirSync(join(repoRoot, 'plugin/skills')).filter((name) => existsSync(join(repoRoot, 'plugin/skills', name, 'SKILL.md')));
+  for (const name of skillNames) {
+    mkdirSync(join(scratchRoot, 'plugin/skills', name), { recursive: true });
+    cpSync(join(repoRoot, 'plugin/skills', name, 'SKILL.md'), join(scratchRoot, 'plugin/skills', name, 'SKILL.md'));
+  }
+}
+
+/**
+ * Writes a copy of tools/build_workflows.mjs under a new name into
+ * scratchRoot whose PROSE_BUDGETS is budgets, and returns the imported copy.
+ */
+async function loadScratchBuilder(scratchRoot, budgets) {
+  const builderSource = readFileSync(builderPath, 'utf8');
+  assert.ok(PROSE_BUDGETS_PATTERN.test(builderSource), 'PROSE_BUDGETS is not one frozen object literal');
+  scratchBuilderCount += 1;
+  const scratchBuilderPath = join(scratchRoot, 'tools/build_workflows.' + scratchBuilderCount + '.mjs');
+  mkdirSync(join(scratchRoot, 'tools'), { recursive: true });
+  writeFileSync(scratchBuilderPath, builderSource.replace(PROSE_BUDGETS_PATTERN, 'export const PROSE_BUDGETS = Object.freeze(' + JSON.stringify(budgets) + ');'));
+  return import(pathToFileURL(scratchBuilderPath).href);
+}
+
+function loadDraftBuilder(scratchRoot) {
+  return loadScratchBuilder(scratchRoot, { ...PROSE_BUDGETS, [DRAFT_ID]: PROSE_BUDGETS['analysis-only'] });
+}
+
+/**
+ * Seeds sentence into the opening line of the standard-delivery plan
+ * prompt of a scratch copy.
+ */
+function seedPlanPromptSentence(scratchRoot, sentence) {
+  const planPath = join(scratchRoot, 'plugin/workflow-src/standard-delivery/plan.js');
+  const planSource = readFileSync(planPath, 'utf8');
+  assert.ok(planSource.includes(PLAN_PROMPT_OPENING), 'the plan prompt opening moved');
+  writeFileSync(planPath, planSource.replace(PLAN_PROMPT_OPENING, PLAN_PROMPT_OPENING + ' ' + sentence));
 }
 
 /**
@@ -147,10 +199,10 @@ function createStream() {
   return { write: (chunk) => chunks.push(chunk), text: () => chunks.join('') };
 }
 
-function runCliIn(root, argv) {
+function runCliIn(root, argv, run = runCli) {
   const stdout = createStream();
   const stderr = createStream();
-  const code = runCli(argv, { root, stdout, stderr });
+  const code = run(argv, { root, stdout, stderr });
   return { code, stdout: stdout.text(), stderr: stderr.text() };
 }
 
@@ -626,13 +678,14 @@ describe('build_workflows length budget', () => {
     appendAnalysisMainLines(scratchRoot, ['log(\'a' + '́'.repeat(9) + '\');']);
     assertBuildAndCheckThrow(scratchRoot, /analysis-only: line \d+ of the built script has a run of 9 combining or zero-width characters, over the budget of 8 \(the Workflow approval limit is a run of 8\)/);
   });
-  test('a run of exactly 8 combining characters and a line of exactly 2048 characters build', () => {
+  test('a run of exactly 8 combining characters and a line of exactly 2048 characters build', async () => {
     const scratchRoot = makeScratchCopy();
+    const builder = await loadScratchBuilder(scratchRoot, { ...PROSE_BUDGETS, 'analysis-only': PROSE_BUDGETS['analysis-only'] + MAX_BUILT_LINE_LENGTH + MAX_PROSE_MARGIN });
     appendAnalysisMainLines(scratchRoot, ['log(\'a' + '́'.repeat(8) + '\');', makeLogLine(MAX_BUILT_LINE_LENGTH)]);
-    const source = buildWorkflow(scratchRoot, 'analysis-only');
+    const source = builder.buildWorkflow(scratchRoot, 'analysis-only');
     assert.equal(findLongestLineLength(source), MAX_BUILT_LINE_LENGTH);
     assert.equal(findLongestCombiningRun(source), 8);
-    const check = runCliIn(scratchRoot, ['--check']);
+    const check = runCliIn(scratchRoot, ['--check'], builder.runCli);
     assert.equal(check.code, 1);
     assert.equal(check.stderr, 'plugin/workflows/analysis-only.js is stale. Rebuild with: ' + REBUILD_COMMAND + '\n');
   });
@@ -667,15 +720,17 @@ describe('build_workflows drafts', () => {
     assert.ok(!build.stdout.includes('wrote plugin/workflows/' + DRAFT_ID + '.js'), build.stdout);
     assert.equal(existsSync(join(scratchRoot, builtPathFor(DRAFT_ID))), false);
   });
-  test('--check passes on a draft with no built file', () => {
-    const run = runCliIn(makeScratchDraftCopy(), ['--check']);
+  test('--check passes on a draft with no built file', async () => {
+    const scratchRoot = makeScratchDraftCopy();
+    const run = runCliIn(scratchRoot, ['--check'], (await loadDraftBuilder(scratchRoot)).runCli);
     assert.equal(run.code, 0, run.stderr);
     assert.equal(run.stderr, '');
   });
-  test('--check fails when a draft has a built file, naming the file and the marker', () => {
+  test('--check fails when a draft has a built file, naming the file and the marker', async () => {
     const scratchRoot = makeScratchDraftCopy();
-    writeFileSync(join(scratchRoot, builtPathFor(DRAFT_ID)), buildWorkflow(scratchRoot, DRAFT_ID));
-    const run = runCliIn(scratchRoot, ['--check']);
+    const builder = await loadDraftBuilder(scratchRoot);
+    writeFileSync(join(scratchRoot, builtPathFor(DRAFT_ID)), builder.buildWorkflow(scratchRoot, DRAFT_ID));
+    const run = runCliIn(scratchRoot, ['--check'], builder.runCli);
     assert.equal(run.code, 1);
     assert.ok(run.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js exists but plugin/workflow-src/' + DRAFT_ID + '/DRAFT'), run.stderr);
     assert.ok(!run.stderr.includes('orphan'), run.stderr);
@@ -692,14 +747,15 @@ describe('build_workflows drafts', () => {
     appendFileSync(join(scratchRoot, 'plugin/workflow-src', DRAFT_ID, 'main.js'), '\nimport x from \'y\';\n');
     assert.throws(() => runCliIn(scratchRoot, ['--check']), new RegExp(DRAFT_ID + ': the built script uses import or require'));
   });
-  test('removing the marker reports the script missing, and a stale one stale', () => {
+  test('removing the marker reports the script missing, and a stale one stale', async () => {
     const scratchRoot = makeScratchDraftCopy();
+    const builder = await loadDraftBuilder(scratchRoot);
     rmSync(join(scratchRoot, 'plugin/workflow-src', DRAFT_ID, 'DRAFT'));
-    const missing = runCliIn(scratchRoot, ['--check']);
+    const missing = runCliIn(scratchRoot, ['--check'], builder.runCli);
     assert.equal(missing.code, 1);
     assert.ok(missing.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js is stale'), missing.stderr);
     writeFileSync(join(scratchRoot, builtPathFor(DRAFT_ID)), readBuilt('analysis-only'));
-    const stale = runCliIn(scratchRoot, ['--check']);
+    const stale = runCliIn(scratchRoot, ['--check'], builder.runCli);
     assert.equal(stale.code, 1);
     assert.ok(stale.stderr.includes('plugin/workflows/' + DRAFT_ID + '.js is stale'), stale.stderr);
   });
@@ -720,7 +776,7 @@ describe('build_workflows drafts', () => {
   });
   test('the in-memory draft loads and its meta.name equals its id', async () => {
     const scratchRoot = makeScratchDraftCopy();
-    const source = buildWorkflow(scratchRoot, DRAFT_ID);
+    const source = (await loadDraftBuilder(scratchRoot)).buildWorkflow(scratchRoot, DRAFT_ID);
     const run = await loadWorkflowSource(source, DRAFT_ID + ' (in memory)').run({ args: undefined, results: {} });
     assert.equal(run.meta.name, DRAFT_ID);
   });
@@ -764,6 +820,75 @@ describe('build_workflows schema projection', () => {
   test('a field named title or description is a field, not an annotation', () => {
     const schema = { title: 'T', type: 'object', properties: { title: { type: 'string', description: 'D' }, description: { type: 'string' } }, items: { description: REPOSITORY_PATH_MARK + ' More.', enum: [{ description: 'kept' }] } };
     assert.deepEqual(projectSchema(schema), { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' } }, items: { description: REPOSITORY_PATH_MARK, enum: [{ description: 'kept' }] } });
+  });
+});
+
+describe('build_workflows prose guards', () => {
+  test('the prose budgets are pinned, one per workflow id', () => {
+    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 19000, 'standard-delivery': 42000 });
+    assert.ok(Object.isFrozen(PROSE_BUDGETS));
+    assert.deepEqual(Object.keys(PROSE_BUDGETS).sort(), workflowIds);
+  });
+  test('splitProseSentences joins wrapped lines, splits at markers and keeps sentences of five words or more', () => {
+    const text = '# A heading of five words\nOne two three four five\n  six. Too short here.\n- a list item of words.\n| a table row of words |\nAfter the table, five words.';
+    assert.deepEqual(splitProseSentences(text), ['A heading of five words', 'One two three four five six.', 'a list item of words.', '| a table row of words |', 'After the table, five words.']);
+  });
+  for (const id of liveIds) {
+    test(builtPathFor(id) + ' is within its prose budget by a margin of at most ' + MAX_PROSE_MARGIN, () => {
+      const count = countProseCharacters(readBuilt(id));
+      assert.ok(count <= PROSE_BUDGETS[id], id + ' holds ' + count);
+      assert.ok(PROSE_BUDGETS[id] - count <= MAX_PROSE_MARGIN, id + ' holds ' + count + '; lower its budget');
+    });
+    test(builtPathFor(id) + ' names cerebrate.md and copies no sentence of a file it names', () => {
+      const source = readBuilt(id);
+      assert.ok(listNamedPromptFiles(repoRoot, [source]).includes('plugin/agents/cerebrate.md'));
+      assert.deepEqual(findCopiedSentences(repoRoot, source), []);
+    });
+    test('a prose budget one under the count of ' + id + ' fails the build and --check, naming the id, the count and the budget', async () => {
+      const scratchRoot = makeScratchCopy();
+      const count = countProseCharacters(readBuilt(id));
+      const under = await loadScratchBuilder(scratchRoot, { ...PROSE_BUDGETS, [id]: count - 1 });
+      const pattern = new RegExp('^Error: ' + id + ': the built script holds ' + count + ' characters of string and template literals, over its prose budget of ' + (count - 1) + '\\.');
+      assert.throws(() => under.buildWorkflow(scratchRoot, id), (error) => pattern.test(String(error)));
+      assert.throws(() => runCliIn(scratchRoot, ['--check'], under.runCli), (error) => pattern.test(String(error)));
+      const exact = await loadScratchBuilder(scratchRoot, { ...PROSE_BUDGETS, [id]: count });
+      assert.equal(exact.buildWorkflow(scratchRoot, id), readBuilt(id));
+    });
+  }
+  test('a workflow id with no prose budget fails the build and --check, naming it, live or draft', async () => {
+    const scratchRoot = makeScratchCopy();
+    const { 'analysis-only': analysisBudget, ...otherBudgets } = PROSE_BUDGETS;
+    assert.ok(analysisBudget > 0);
+    const unbudgeted = await loadScratchBuilder(scratchRoot, otherBudgets);
+    const pattern = new RegExp('^Error: analysis-only: the workflow has no prose budget\\. Add one to PROSE_BUDGETS in tools/build_workflows\\.mjs: its measured count of ' + countProseCharacters(readBuilt('analysis-only')) + ' ');
+    for (const argv of [[], ['--check']]) {
+      assert.throws(() => runCliIn(scratchRoot, argv, unbudgeted.runCli), (error) => pattern.test(String(error)));
+    }
+    assert.throws(() => runCliIn(makeScratchDraftCopy(), ['--check']), /^Error: draft-check: the workflow has no prose budget\./);
+  });
+  test('a cerebrate.md sentence seeded into the plan prompt fails the build and --check, naming the script, the file and the sentence', () => {
+    assert.ok(splitProseSentences(readFileSync(join(repoRoot, 'plugin/agents/cerebrate.md'), 'utf8')).includes(CEREBRATE_SENTENCE));
+    const pattern = /^Error: standard-delivery: a literal of plugin\/workflows\/standard-delivery\.js repeats a sentence of plugin\/agents\/cerebrate\.md: "You do not write or edit code\."/;
+    for (const seeded of [CEREBRATE_SENTENCE, 'You do not  write or\\n  edit code.']) {
+      const scratchRoot = makeScratchCopy();
+      seedPlanPromptSentence(scratchRoot, seeded);
+      assert.throws(() => buildWorkflow(scratchRoot, 'standard-delivery'), (error) => pattern.test(String(error)), seeded);
+      for (const argv of [[], ['--check']]) {
+        assert.throws(() => runCliIn(scratchRoot, argv), (error) => pattern.test(String(error)), seeded);
+      }
+    }
+  });
+  test('a sentence under five words and a sentence of a file no literal names do not fail the build', () => {
+    const source = readBuilt('standard-delivery');
+    const namedFiles = listNamedPromptFiles(repoRoot, [source]);
+    assert.ok(!namedFiles.includes('plugin/agents/overlord.md'));
+    const overlordSentence = splitProseSentences(readFileSync(join(repoRoot, 'plugin/agents/overlord.md'), 'utf8')).find((sentence) => /^[A-Za-z ,.]+$/.test(sentence) && sentence.length < 120);
+    assert.ok(overlordSentence !== undefined);
+    const scratchRoot = makeScratchCopy();
+    seedPlanPromptSentence(scratchRoot, 'You create plans only. ' + overlordSentence);
+    const seededSource = buildWorkflow(scratchRoot, 'standard-delivery');
+    assert.ok(seededSource.includes('You create plans only. ' + overlordSentence));
+    assert.deepEqual(findCopiedSentences(scratchRoot, seededSource), []);
   });
 });
 

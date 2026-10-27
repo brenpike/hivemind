@@ -71,6 +71,19 @@
  *   throws naming the file, in both modes. So every top-level const stays
  *   in main.js, which runs after every module, and the module order cannot
  *   change what runs.
+ *   Two prose guards run on every built script, live or draft, in both
+ *   modes (docs/engineering-principles.md P24). The prose budget: the
+ *   characters of the string and template literal tokens tokenizeSource
+ *   finds in the built script are at most that workflow's entry in
+ *   PROSE_BUDGETS, and a workflow id with no entry fails the build, naming
+ *   it. Each budget is the measured count plus a margin of at most 1,000,
+ *   and raising a budget is a visible, reviewed change to this file. The
+ *   duplication check: each hivemind:<name> inside a string or template
+ *   literal that names plugin/agents/<name>.md or
+ *   plugin/skills/<name>/SKILL.md adds that file, and a literal sentence of
+ *   at least five words that equals a sentence of an added file, once
+ *   whitespace is normalized, fails the build, naming the script, the file
+ *   and the sentence (findCopiedSentences).
  *   An entry named DRAFT that is not a regular file (a directory, a
  *   symlink, anything else) fails the build in both modes.
  *   --check compares each live workflow with its committed file after
@@ -98,6 +111,10 @@
  *   planner, and their home is plugin/references, which the planner reads
  *   (docs/engineering-principles.md P24), so the copy carries only the
  *   repository path mark the plan check reads.
+ *   A running script cannot read an agent's or a skill's file, so a rule
+ *   copied into a prompt is a second copy that drifts from its home and
+ *   grows the script toward the approval limit. The prose guards make that
+ *   copy fail the build instead of relying on review (P24, P3).
  *   The overlord launches the committed scripts by path, so a symlink there
  *   could run content that --check never compared, and a write through one
  *   would change a file outside plugin/workflows/. Only regular files are
@@ -834,6 +851,125 @@ function assertBuiltScript(id, output) {
   assertParses(id, output);
 }
 
+/**
+ * PROSE_BUDGETS pins, for each workflow id, the most characters of string
+ * and template literal tokens its built script may hold (P24). Each budget
+ * is the script's measured count plus a margin of at most 1,000. Raising a
+ * budget is a visible, reviewed change to this file, never a quiet edit to
+ * make the build pass.
+ */
+export const PROSE_BUDGETS = Object.freeze({
+  'analysis-only': 19000,
+  'standard-delivery': 42000
+});
+const PROSE_TOKEN_KINDS = Object.freeze(['string', 'template']);
+const MIN_COPIED_SENTENCE_WORDS = 5;
+const NAMED_PROMPT_PATTERN = /hivemind:([a-z0-9-]+)/g;
+const PROSE_LINE_MARKER = /^\s*(?:#+|[-*+>]|\d+\.)\s+/;
+const PROSE_BLOCK_START = /^\s*(?:[-*+>]|\d+\.)\s/;
+const PROSE_SINGLE_LINE = /^\s*(?:#+\s|\||```)/;
+
+function listProseTokens(source) {
+  return tokenizeSource(source).filter((token) => PROSE_TOKEN_KINDS.includes(token.kind));
+}
+
+/**
+ * Returns the number of characters of the string and template literal
+ * tokens of source, quotes, backticks and escapes included.
+ */
+export function countProseCharacters(source) {
+  return listProseTokens(source).reduce((sum, token) => sum + token.text.length, 0);
+}
+
+function decodeEscape(escapeText, escaped) {
+  if (escaped.length === 5) {
+    return String.fromCharCode(parseInt(escaped.slice(1), 16));
+  }
+  if (escaped === 't') {
+    return ' ';
+  }
+  return escaped === 'n' || escaped === 'r' ? '\n' : escaped;
+}
+
+/**
+ * Returns the text of a string token or a template piece without its
+ * delimiters, with \n and \r read as line breaks, \t as a space, \uXXXX as
+ * its character and every other escape as the character it escapes.
+ */
+function readLiteralContent(token) {
+  const inner = token.kind === 'string' ? token.text.slice(1, -1) : token.text.replace(/^[`}]/, '').replace(/(?:`|\$\{)$/, '');
+  return inner.replace(/\\(u[0-9a-fA-F]{4}|[\s\S])/g, decodeEscape);
+}
+
+function appendProseLine(blocks, line) {
+  if (line.trim() === '') {
+    blocks.push('');
+  } else if (PROSE_SINGLE_LINE.test(line)) {
+    blocks.push(line.replace(PROSE_LINE_MARKER, ''), '');
+  } else if (blocks.length === 0 || blocks[blocks.length - 1] === '' || PROSE_BLOCK_START.test(line)) {
+    blocks.push(line.replace(PROSE_LINE_MARKER, ''));
+  } else {
+    blocks[blocks.length - 1] += ' ' + line;
+  }
+}
+
+/**
+ * Returns the sentences of text of at least MIN_COPIED_SENTENCE_WORDS words,
+ * whitespace normalized to one space. A line joins the line before it unless
+ * either is blank, it starts a list item or a quote, or either is a heading,
+ * a table row or a fence. A heading, list or quote marker is dropped. Each
+ * joined block is split after ., ! or ? followed by a blank.
+ */
+export function splitProseSentences(text) {
+  const blocks = [];
+  text.split('\n').forEach((line) => appendProseLine(blocks, line));
+  return blocks
+    .flatMap((block) => block.split(/(?<=[.!?])\s+/))
+    .map((sentence) => sentence.replace(/\s+/g, ' ').trim())
+    .filter((sentence) => sentence !== '' && sentence.split(' ').length >= MIN_COPIED_SENTENCE_WORDS);
+}
+
+/**
+ * Returns, sorted, the paths of plugin/agents/<name>.md and
+ * plugin/skills/<name>/SKILL.md that exist as regular files for each
+ * hivemind:<name> in contents, the texts of string and template literals.
+ */
+export function listNamedPromptFiles(root, contents) {
+  const names = new Set(contents.flatMap((content) => [...content.matchAll(NAMED_PROMPT_PATTERN)].map((match) => match[1])));
+  const candidates = [...names].flatMap((name) => ['plugin/agents/' + name + '.md', 'plugin/skills/' + name + '/SKILL.md']);
+  return candidates.filter((path) => readEntryKind(root, path) === 'file').sort();
+}
+
+/**
+ * Returns {path, sentence} for each sentence of a string or template literal
+ * of source that equals a sentence of a prompt file the literals name (see
+ * listNamedPromptFiles), in literal order.
+ */
+export function findCopiedSentences(root, source) {
+  const contents = listProseTokens(source).map(readLiteralContent);
+  const promptFiles = listNamedPromptFiles(root, contents).map((path) => ({ path: path, sentences: new Set(splitProseSentences(readSource(root, path))) }));
+  return contents.flatMap(splitProseSentences).flatMap((sentence) => promptFiles
+    .filter((promptFile) => promptFile.sentences.has(sentence))
+    .map((promptFile) => ({ path: promptFile.path, sentence: sentence })));
+}
+
+function assertProseBudget(id, output) {
+  const count = countProseCharacters(output);
+  if (!Object.hasOwn(PROSE_BUDGETS, id)) {
+    throw new Error(id + ': the workflow has no prose budget. Add one to PROSE_BUDGETS in tools/build_workflows.mjs: its measured count of ' + count + ' plus a margin of at most 1000');
+  }
+  if (count > PROSE_BUDGETS[id]) {
+    throw new Error(id + ': the built script holds ' + count + ' characters of string and template literals, over its prose budget of ' + PROSE_BUDGETS[id] + '. Move agent and skill rules into their own files (docs/engineering-principles.md P24); raising a budget is a reviewed change to PROSE_BUDGETS in tools/build_workflows.mjs');
+  }
+}
+
+function assertNoCopiedSentences(root, id, output) {
+  const copies = findCopiedSentences(root, output);
+  if (copies.length > 0) {
+    throw new Error(id + ': a literal of ' + builtPathFor(id) + ' repeats a sentence of ' + copies[0].path + ': ' + JSON.stringify(copies[0].sentence) + '. Keep the rule in ' + copies[0].path + ' and pass only the task and the data (docs/engineering-principles.md P24)');
+  }
+}
+
 function readStrippedSource(root, relativePath) {
   try {
     return stripComments(readSource(root, relativePath)).trim();
@@ -870,6 +1006,8 @@ export function buildWorkflow(root, id) {
   ];
   const output = parts.join('\n\n') + '\n';
   assertBuiltScript(id, output);
+  assertProseBudget(id, output);
+  assertNoCopiedSentences(root, id, output);
   return output;
 }
 
