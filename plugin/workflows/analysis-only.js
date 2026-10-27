@@ -383,6 +383,7 @@ const PLAN_SCHEMA = {
 "classification",
 "breaking",
 "versioning",
+"validation_commands",
 "delivery",
 "steps"
 ],
@@ -510,6 +511,12 @@ const PLAN_SCHEMA = {
 "description": "Can carry external content. Repository path."
 }
 }
+}
+},
+"validation_commands": {
+"type": "array",
+"items": {
+"type": "string"
 }
 },
 "delivery": {

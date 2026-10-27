@@ -14,6 +14,7 @@
     "classification",
     "breaking",
     "versioning",
+    "validation_commands",
     "delivery",
     "steps"
   ],
@@ -161,6 +162,14 @@
             "description": "Can carry external content. Repository path. One file that holds a version."
           }
         }
+      }
+    },
+    "validation_commands": {
+      "type": "array",
+      "description": "Each entry is one gate command line the project's CLAUDE.md names. The validate step runs each entry once, in order, and the list never holds two forms of the same suites, such as a fuller and a narrower run of them. Empty when the planner can name no command: the validate step then runs the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md, which runs the gate command CLAUDE.md names, once, so validation is never skipped.",
+      "items": {
+        "type": "string",
+        "description": "Can carry external content. One gate command line, copied from the project's CLAUDE.md. The plan check refuses the plan, before the branch step, when an entry is blank or holds a control character or a line break."
       }
     },
     "delivery": {

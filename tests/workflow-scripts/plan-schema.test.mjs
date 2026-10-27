@@ -6,6 +6,7 @@ import { loadLibs } from './harness.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/schema.js']);
+const planCheck = loadLibs([repoRoot + 'plugin/workflow-src/standard-delivery/plan.js']);
 const planSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/plan-schema.json', 'utf8'));
 const factsSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/facts-schema.json', 'utf8'));
 const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
@@ -72,6 +73,7 @@ function makePlan() {
     classification: 'feature',
     breaking: false,
     versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['plugin/.claude-plugin/plugin.json'] },
+    validation_commands: ['bash tools/validate.sh --changed'],
     delivery: 'multi',
     steps: [
       {
@@ -138,6 +140,7 @@ describe('plan schema', () => {
       '$.branch',
       '$.base',
       '$.versioning.artifact_files[]',
+      '$.validation_commands[]',
       '$.steps[].id',
       '$.steps[].files[]',
       '$.steps[].outcome',
@@ -226,6 +229,9 @@ describe('plan schema', () => {
     ['a plan without branch', (plan) => delete plan.branch, '$: required: missing branch'],
     ['a plan without base', (plan) => delete plan.base, '$: required: missing base'],
     ['a plan without versioning.artifact_files', (plan) => delete plan.versioning.artifact_files, '$.versioning: required: missing artifact_files'],
+    ['a plan without validation_commands', (plan) => delete plan.validation_commands, '$: required: missing validation_commands'],
+    ['a validation command that is not a string', (plan) => { plan.validation_commands = [5]; }, '$.validation_commands[0]: type string expected'],
+    ['a blank validation command', (plan) => { plan.validation_commands = [' \t ']; }, '$.validation_commands[0]: type string: blank'],
     ['a trunk_freshness outside the enum', (plan) => { plan.trunk_freshness = 'stale'; }, '$.trunk_freshness: enum: not one of fresh, behind, ahead, diverged, no_remote, fetch_failed, no_local_trunk, no_trunk'],
     ['a classification outside the enum', (plan) => { plan.classification = 'feat'; }, '$.classification: enum: not one of feature, bugfix, hotfix, refactor, chore, docs, test, ci'],
     ['a brood delivery', (plan) => { plan.delivery = 'brood'; }, '$.delivery: enum: not one of single, multi'],
@@ -254,4 +260,33 @@ describe('plan schema', () => {
       assert.ok(verdict.errors.includes(expectedError), 'errors: ' + JSON.stringify(verdict.errors));
     });
   }
+
+  const commandCases = [
+    ['a validation command with a line break', 'bash tools/validate.sh --changed\nrm -rf x', 'holds a line break'],
+    ['a validation command with a carriage return', 'bash tools/validate.sh\r', 'holds a line break'],
+    ['a validation command with a line separator', 'bash tools/validate.sh\u2028x', 'holds a line break'],
+    ['a validation command with a control character', 'bash tools/validate.sh\u001b[0m', 'holds a control character'],
+    ['a validation command with a C1 control character', 'bash tools/validate.sh\u009b', 'holds a control character']
+  ];
+
+  for (const [name, command, expectedReason] of commandCases) {
+    test('the plan check rejects ' + name, () => {
+      const plan = makePlan();
+      plan.validation_commands = ['bash tools/validate.sh --changed', command];
+      assert.deepEqual(validate(plan), { ok: true, errors: [] });
+      const reasons = plan.validation_commands.map((entry) => planCheck.describeValidationCommandProblem(entry));
+      assert.deepEqual(reasons, ['', expectedReason]);
+    });
+  }
+
+  test('the plan check also refuses a blank or empty validation command', () => {
+    assert.deepEqual([' \t ', ''].map((entry) => planCheck.describeValidationCommandProblem(entry)), ['is blank', 'is blank']);
+  });
+
+  test('the plan check accepts the sample commands and an empty command list', () => {
+    const plan = makePlan();
+    assert.deepEqual(plan.validation_commands.map((entry) => planCheck.describeValidationCommandProblem(entry)), ['']);
+    plan.validation_commands = [];
+    assert.deepEqual(validate(plan), { ok: true, errors: [] });
+  });
 });

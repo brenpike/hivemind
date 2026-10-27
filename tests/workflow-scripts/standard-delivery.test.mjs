@@ -153,6 +153,7 @@ function makePlan(changes = {}) {
     classification: 'feature',
     breaking: false,
     versioning: { bump_trigger: 'no', no_bump_match: 'no', artifact_files: [] },
+    validation_commands: ['npm test'],
     delivery: 'single',
     steps: [makeStep('STEP-001', ['src/cache.js'])],
     ...changes
@@ -1208,7 +1209,10 @@ const ROW_TESTS = {
         'an unsafe version file path in ' + JSON.stringify(artifactFiles),
         planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles } })),
         'The plan names a version file path that is not a safe git path, so the delivery stopped.'
-      ])
+      ]),
+      ['a blank validation command', planResult(makePlan({ validation_commands: ['npm test', '  '] })), schemaProblem],
+      ['a validation command with a line break', planResult(makePlan({ validation_commands: ['npm test', 'npm test\nrm -rf x'] })), 'The plan names a validation command at validation_commands[1] that holds a line break, so the delivery stopped.'],
+      ['a validation command with a control character', planResult(makePlan({ validation_commands: ['npm test\u001b[0m'] })), 'The plan names a validation command at validation_commands[0] that holds a control character, so the delivery stopped.']
     ]) {
       test(`${label} blocks before the branch step`, async () => {
         const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': result });

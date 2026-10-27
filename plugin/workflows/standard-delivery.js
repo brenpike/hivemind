@@ -400,6 +400,7 @@ const PLAN_SCHEMA = {
 "classification",
 "breaking",
 "versioning",
+"validation_commands",
 "delivery",
 "steps"
 ],
@@ -527,6 +528,12 @@ const PLAN_SCHEMA = {
 "description": "Can carry external content. Repository path."
 }
 }
+}
+},
+"validation_commands": {
+"type": "array",
+"items": {
+"type": "string"
 }
 },
 "delivery": {
@@ -2719,6 +2726,19 @@ formatDataBlock('questions',questions),
 formatDataBlock('reply',reply)
 ].join('\n');
 }
+function describeValidationCommandProblem(command){
+if(command.trim()===''){
+return'is blank';
+}
+const codePoints=Array.from(command).map((character)=>character.codePointAt(0));
+if(codePoints.some((codePoint)=>[10,13,0x85,0x2028,0x2029].includes(codePoint))){
+return'holds a line break';
+}
+if(codePoints.some((codePoint)=>codePoint<32||(codePoint>=127&&codePoint<=0x9f))){
+return'holds a control character';
+}
+return'';
+}
 function describePlanProblem(planResult,resultSchema,facts,trunk){
 if(!isPlainObject(planResult)){
 return'The planner returned no result, so '+RUN_NAME+' stopped.';
@@ -2746,6 +2766,12 @@ return'The plan names a branch or base that is not a safe git name, so '+RUN_NAM
 }
 if(!plan.versioning.artifact_files.every((artifactPath)=>isGitIdentifier(artifactPath))){
 return'The plan names a version file path that is not a safe git path, so '+RUN_NAME+' stopped.';
+}
+for(let index=0;index<plan.validation_commands.length;index+=1){
+const commandProblem=describeValidationCommandProblem(plan.validation_commands[index]);
+if(commandProblem!==''){
+return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+', so '+RUN_NAME+' stopped.';
+}
 }
 const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
 if(isOnOtherBranch&&plan.branch!==facts.branch){
