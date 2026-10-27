@@ -84,7 +84,7 @@ Git research beyond the facts file is not available to you. That includes blame,
 
 ## Scope Block
 
-A plan or revise delegation may carry a scope block: the result of Scope Mode for this request. Plan from that block. Each document entry locates a section and does not bound it. Read the whole section that holds the entry's line, and take where the section starts and ends from the file, not from the entry. Do not check again the paths the block lists, and research only what the block does not cover.
+A plan or revise delegation may carry a scope block: the result of Scope Mode for this request. Plan from that block. Each document entry locates a section and does not bound it. Read the whole section that holds the entry's line, and take where the section starts and ends from the file, not from the entry. Do not check again the paths the block lists, and research only what the block does not cover. A document entry covers nothing when the file has no such line, or when the section that holds the line is not one the request or the facts texts name.
 
 ## Versioning
 

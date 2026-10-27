@@ -24,7 +24,8 @@ const READ_DISCIPLINE_RULES = [
   'When the request names a document, read only the section the request is about.'
 ];
 const SCOPE_BLOCK_RULE = 'Plan from that block. Each document entry locates a section and does not bound it. Read the whole section that holds the entry\'s line, and take where the section starts and ends from the file, not from the entry. Do not check again the paths the block lists, and research only what the block does not cover.';
-const SCOPE_MODE_LOCATOR_RULE = 'For each section of a repository document that the request or the facts texts name, the document\'s path and the line the section starts on. Find the line with Grep, and copy no text. Leave a section you cannot find for the planner.';
+const SCOPE_BLOCK_COVERAGE_RULE = 'A document entry covers nothing when the file has no such line, or when the section that holds the line is not one the request or the facts texts name.';
+const SCOPE_MODE_LOCATOR_RULE ='For each section of a repository document that the request or the facts texts name, the document\'s path and the line the section starts on. Find the line with Grep, and copy no text. Leave a section you cannot find for the planner.';
 
 function readSection(text, heading) {
   const lines = text.split('\n');
@@ -152,6 +153,9 @@ describe('cerebrate research reads only what the plan needs', () => {
   });
   test('a plan or revise delegation with a scope block plans from it and reads the whole section at each locator', () => {
     assert.ok(readSection(cerebrateText, '## Scope Block').includes(SCOPE_BLOCK_RULE), SCOPE_BLOCK_RULE);
+  });
+  test('a document entry whose line is missing or lands outside a named section covers nothing, so the planner researches that section', () => {
+    assert.ok(readSection(cerebrateText, '## Scope Block').includes(SCOPE_BLOCK_COVERAGE_RULE), SCOPE_BLOCK_COVERAGE_RULE);
   });
   test('the Scope Block no longer bounds reads by the line ranges of a locator', () => {
     assert.ok(!readSection(cerebrateText, '## Scope Block').includes('read only the line ranges'));

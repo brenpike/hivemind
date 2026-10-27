@@ -52,7 +52,10 @@
  *   cannot read files, so it could never check a copied slice or a stated
  *   range against its file. A start line bounds nothing, so a wrong one
  *   cannot cut what the planner reads; the file the planner reads is
- *   ground truth. The maxItems bounds keep the cost of a run bounded.
+ *   ground truth. The maxItems bounds keep the size of the scope block,
+ *   which every plan and revise prompt carries, bounded. They do not bound
+ *   what the planner reads: each read is a whole section, never more than
+ *   the whole document the planner read before the scope step.
  */
 
 function buildScopeSchema() {
