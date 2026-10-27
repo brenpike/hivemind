@@ -370,6 +370,7 @@ docs/
   engineering-principles.md
 tools/                      # dev-only validation scripts (validate.sh dispatcher, policy linter, report validator)
   build_workflows.mjs       # builds plugin/workflow-src/ into plugin/workflows/*.js; --check is the drift check
+  vendor/acorn/             # the vendored acorn parser that build_workflows.mjs reads sources with
 tests/                      # dev-only test fixtures and checks (policy, reports, plugin compatibility)
   workflow-scripts/         # node tests for the workflow scripts (run by tools/test_workflow_scripts.sh)
 package.json                # website tooling (npm scripts: build, test)
