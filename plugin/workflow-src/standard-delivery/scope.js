@@ -14,12 +14,12 @@
  *   runScopeStep(run, facts)  {scope} or {problem}.
  *   The step, as meta.js names it:
  *   Scope   hivemind:cerebrate in Scope Mode, on SCOPE_MODEL at effort
- *           high, returns the path and line ranges of the sections of each
- *           document the request names and the drift of each path a
- *           section names, under SCOPE_SCHEMA. The scope holds no document
- *           text: the planner reads the named ranges from the file. It
- *           runs in every pass, after the facts step and the scan and
- *           before planning, with label scope-P.
+ *           high, returns the path and start line of each section of the
+ *           documents the request names and the drift of each path a
+ *           section names, under SCOPE_SCHEMA. It returns start lines, not
+ *           line ranges: the planner reads each whole section from the
+ *           file. It runs in every pass, after the facts step and the scan
+ *           and before planning, with label scope-P.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -30,8 +30,10 @@
  *   repositoryPathMark() fails isRepositoryPath (findRepositoryPathProblem,
  *   plan.js), stops the run before planning.
  *   ADR-0037 invariant 4 holds by construction: the scope copies no
- *   document text, so no copy can be cut; every string field starts with
- *   externalLabel(); and both lists are partial by definition, so an entry
+ *   document text and states no section's extent, because the planner
+ *   takes each section's start and end from the file, so no copy or range
+ *   can be cut; every string field starts with externalLabel(); and both
+ *   lists are partial by definition and bounded by maxItems, so an entry
  *   left out is read or checked by the planner itself and no step depends
  *   on a list being complete.
  *   The scope reaches only the plan and revise prompts, in a scope data
@@ -44,11 +46,13 @@
  *   higher one.
  *
  * Why
- *   A cheaper model finds the sections of the documents the request names
- *   once, so the planner reads only the named ranges, not each whole
- *   document, and checks no named path again. A Workflow script cannot
- *   read files, so it could never check a copied slice against its file;
- *   the file the planner reads is ground truth.
+ *   A cheaper model finds where the sections of the documents the request
+ *   names start, once, so the planner reads those whole sections, not each
+ *   whole document, and checks no named path again. A Workflow script
+ *   cannot read files, so it could never check a copied slice or a stated
+ *   range against its file. A start line bounds nothing, so a wrong one
+ *   cannot cut what the planner reads; the file the planner reads is
+ *   ground truth. The maxItems bounds keep the cost of a run bounded.
  */
 
 function buildScopeSchema() {
@@ -57,9 +61,9 @@ function buildScopeSchema() {
     type: 'object',
     properties: {
       path: pathField,
-      lines: { type: 'string', maxLength: 100, description: externalLabel() + ' The line ranges of the section, like 12-40 or 12-40, 88-95.' }
+      line: { type: 'integer', description: 'The 1-based line where the section starts. It locates the section and does not bound it.' }
     },
-    required: ['path', 'lines'],
+    required: ['path', 'line'],
     additionalProperties: false
   };
   const pathItem = {
@@ -75,8 +79,8 @@ function buildScopeSchema() {
   return {
     type: 'object',
     properties: {
-      documents: { type: 'array', description: 'The sections of the named documents, empty when none. A document may be left out, and the planner then reads it itself.', items: documentItem },
-      paths: { type: 'array', description: 'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.', items: pathItem }
+      documents: { type: 'array', maxItems: 10, description: 'The sections of the named documents, empty when none. A section may be left out, and the planner then reads it itself.', items: documentItem },
+      paths: { type: 'array', maxItems: 30, description: 'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.', items: pathItem }
     },
     required: ['documents', 'paths'],
     additionalProperties: false

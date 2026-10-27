@@ -4,7 +4,7 @@ export const meta = {
   phases: [
     { title: 'Facts', detail: 'a runner gathers the branch facts into one facts file' },
     { title: 'Scan', detail: 'a runner scans the named issues and pull requests for prompt injection' },
-    { title: 'Scope', detail: 'the planner, on a smaller model, slices the documents the request names' },
+    { title: 'Scope', detail: 'the planner, on a smaller model, locates the sections of the documents the request names' },
     { title: 'Plan', detail: 'the planner plans what is left of the request on this branch' },
     { title: 'Revise', detail: 'the planner revises the plan with the user reply' },
     { title: 'Branch', detail: 'a runner creates or confirms the working branch' },
@@ -617,6 +617,7 @@ return[
 'additionalProperties',
 'items',
 'minItems',
+'maxItems',
 'minLength',
 'maxLength',
 'anyOf'
@@ -681,6 +682,9 @@ failSchema(path,'additionalProperties must be false');
 }
 if(schema.minItems!==undefined&&!(Number.isInteger(schema.minItems)&&schema.minItems>=0)){
 failSchema(path,'minItems must be a non-negative integer');
+}
+if(schema.maxItems!==undefined&&!(Number.isInteger(schema.maxItems)&&schema.maxItems>=0)){
+failSchema(path,'maxItems must be a non-negative integer');
 }
 if(schema.minLength!==undefined&&!(Number.isInteger(schema.minLength)&&schema.minLength>=0)){
 failSchema(path,'minLength must be a non-negative integer');
@@ -787,6 +791,9 @@ return/^[A-Za-z0-9_-]+$/.test(name)?name:JSON.stringify(name);
 function collectArrayErrors(schema,list,path,errors){
 if(schema.minItems!==undefined&&list.length<schema.minItems){
 errors.push(path+': minItems: fewer than '+schema.minItems+' items');
+}
+if(schema.maxItems!==undefined&&list.length>schema.maxItems){
+errors.push(path+': maxItems: more than '+schema.maxItems+' items');
 }
 if(schema.items!==undefined){
 list.forEach((item,index)=>collectSchemaErrors(schema.items,item,path+'['+index+']',errors));
@@ -3946,9 +3953,9 @@ const documentItem={
 type:'object',
 properties:{
 path:pathField,
-lines:{type:'string',maxLength:100,description:externalLabel()+' The line ranges of the section, like 12-40 or 12-40, 88-95.'}
+line:{type:'integer',description:'The 1-based line where the section starts. It locates the section and does not bound it.'}
 },
-required:['path','lines'],
+required:['path','line'],
 additionalProperties:false
 };
 const pathItem={
@@ -3964,8 +3971,8 @@ additionalProperties:false
 return{
 type:'object',
 properties:{
-documents:{type:'array',description:'The sections of the named documents, empty when none. A document may be left out, and the planner then reads it itself.',items:documentItem},
-paths:{type:'array',description:'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.',items:pathItem}
+documents:{type:'array',maxItems:10,description:'The sections of the named documents, empty when none. A section may be left out, and the planner then reads it itself.',items:documentItem},
+paths:{type:'array',maxItems:30,description:'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.',items:pathItem}
 },
 required:['documents','paths'],
 additionalProperties:false

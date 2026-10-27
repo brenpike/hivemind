@@ -2,6 +2,7 @@ import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { splitProseSentences } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const cerebrateText = readFileSync(repoRoot + 'plugin/agents/cerebrate.md', 'utf8').replace(/\r/g, '');
@@ -12,6 +13,9 @@ const PLAN_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json';
 const BRIEF_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json';
 const SCHEMA_READ_SENTENCE = 'Before you return a plan or a question, read `' + PLAN_SCHEMA_PATH + '` and `' + BRIEF_SCHEMA_PATH + '` with Read for what each field means.';
 const DOCTRINE_PATH = '${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md';
+const GOVERNANCE_PATH_PREFIX = '${CLAUDE_PLUGIN_ROOT}/governance/';
+const SECTION_READ_PATTERN = /read the `## /i;
+const LOAD_AND_FOLLOW_PATTERN = /load and follow/i;
 const READ_DISCIPLINE_RULES = [
   'Put every independent Read, Grep and Glob of a research step in one turn, as parallel calls.',
   'Grep to locate, then Read only the needed line range with `offset` and `limit`.',
@@ -19,8 +23,8 @@ const READ_DISCIPLINE_RULES = [
   'Grep long append-only documents (a changelog, an ADR, a plan, a handoff); never read them whole.',
   'When the request names a document, read only the section the request is about.'
 ];
-const SCOPE_BLOCK_RULE = 'Plan from that block. For each document it lists, read only the line ranges it names, and do not check again the paths it lists. Research only what the block does not cover.';
-const SCOPE_MODE_RANGE_RULE = 'its path and the line ranges of the whole section the request is about. Find them with Grep, and copy no text. Leave out a document whose section you cannot bound, for the planner.';
+const SCOPE_BLOCK_RULE = 'Plan from that block. Each document entry locates a section and does not bound it. Read the whole section that holds the entry\'s line, and take where the section starts and ends from the file, not from the entry. Do not check again the paths the block lists, and research only what the block does not cover.';
+const SCOPE_MODE_LOCATOR_RULE = 'For each section of a repository document that the request or the facts texts name, the document\'s path and the line the section starts on. Find the line with Grep, and copy no text. Leave a section you cannot find for the planner.';
 
 function readSection(text, heading) {
   const lines = text.split('\n');
@@ -124,6 +128,11 @@ describe('cerebrate loads each governance doc only where a rule uses it', () => 
   test('Remediation Zoom-Out Mode names remediation-doctrine.md', () => {
     assert.ok(readSection(cerebrateText, '### Remediation Zoom-Out Mode').includes(DOCTRINE_PATH), DOCTRINE_PATH);
   });
+  test('every sentence that names a governance doc reads a named section of it or loads and follows it', () => {
+    const citing = splitProseSentences(cerebrateText).filter((sentence) => sentence.includes(GOVERNANCE_PATH_PREFIX));
+    assert.ok(citing.length > 0);
+    assert.deepEqual(citing.filter((sentence) => !SECTION_READ_PATTERN.test(sentence) && !LOAD_AND_FOLLOW_PATTERN.test(sentence)), []);
+  });
 });
 
 describe('cerebrate research reads only what the plan needs', () => {
@@ -138,10 +147,13 @@ describe('cerebrate research reads only what the plan needs', () => {
   test('the Scope Mode section exists and plans nothing', () => {
     assert.ok(readSection(cerebrateText, '### Scope Mode').includes('In this mode you plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.'));
   });
-  test('Scope Mode returns line ranges, not copied text', () => {
-    assert.ok(readSection(cerebrateText, '### Scope Mode').includes(SCOPE_MODE_RANGE_RULE), SCOPE_MODE_RANGE_RULE);
+  test('Scope Mode returns a locator for each section, not copied text', () => {
+    assert.ok(readSection(cerebrateText, '### Scope Mode').includes(SCOPE_MODE_LOCATOR_RULE), SCOPE_MODE_LOCATOR_RULE);
   });
-  test('a plan or revise delegation with a scope block plans from it', () => {
+  test('a plan or revise delegation with a scope block plans from it and reads the whole section at each locator', () => {
     assert.ok(readSection(cerebrateText, '## Scope Block').includes(SCOPE_BLOCK_RULE), SCOPE_BLOCK_RULE);
+  });
+  test('the Scope Block no longer bounds reads by the line ranges of a locator', () => {
+    assert.ok(!readSection(cerebrateText, '## Scope Block').includes('read only the line ranges'));
   });
 });

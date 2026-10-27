@@ -3239,7 +3239,7 @@ const ROW_TESTS = {
       assert.equal(main.buildBumpTypeBrief(parsedBump()).options[1].summary, 'Plan again: this run gives your reply to the planner before anything goes further.');
     });
     test('the detail block shows up to 5 open findings, then one line counting the rest, and has no compact form', () => {
-      const many = Array.from({ length: 7 }, (unused, index) => ({ ...tenantFinding, finding_id: 'F' + index }));
+      const many = Array.from({ length: 7 }, (_, index) => ({ ...tenantFinding, finding_id: 'F' + index }));
       const block = main.buildReviewDetailBlock({ ...userInput, open_findings: many }, many);
       const lines = block.text.split('\n');
       assert.equal(lines.length, 2 + 1 + 5 + 1);
@@ -4512,7 +4512,7 @@ const ROW_TESTS = {
       assert.ok(diminishing.result.message.includes('\n\nLocal review: diminishing returns, 2 findings still open, 1 finding rejected under recorded decisions. Each finding it rejected'), diminishing.result.message);
     });
     test('a long list fits the message bound through the compact form, and the run still ends complete', async () => {
-      const many = Array.from({ length: 60 }, (unused, index) => ({ finding_id: 'R' + index + 'x'.repeat(40), title: 'T'.repeat(200), record: 'docs/adr/' + 'y'.repeat(300) + '.md' }));
+      const many = Array.from({ length: 60 }, (_, index) => ({ finding_id: 'R' + index + 'x'.repeat(40), title: 'T'.repeat(200), record: 'docs/adr/' + 'y'.repeat(300) + '.md' }));
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, rejected_findings: many } }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(run.result.message.includes('Local review: clean, 60 findings rejected under recorded decisions.'), run.result.message);
@@ -4755,7 +4755,7 @@ const ROW_TESTS = {
       assert.equal(main.quoteReviewValue({ ...review, rationale_text: 'r'.repeat(300) }, 'rationale_text'), JSON.stringify('r'.repeat(300)));
     });
     const REVIEW_BOUND = 6000;
-    const longFindings = Array.from({ length: 60 }, (unused, index) => ({ finding_id: index + UNBOUNDED, severity: UNBOUNDED, summary: 's'.repeat(200), recommendation: 'r'.repeat(200) }));
+    const longFindings = Array.from({ length: 60 }, (_, index) => ({ finding_id: index + UNBOUNDED, severity: UNBOUNDED, summary: 's'.repeat(200), recommendation: 'r'.repeat(200) }));
     const reviewCases = [
       ['user-input-required', { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 60, finding_id: UNBOUNDED, title: UNBOUNDED, question: 'q'.repeat(300), recommendation_text: 'r'.repeat(200), open_findings: longFindings }, true],
       ['high-severity-rejection', { ...REVIEW_CLEAN, exit_reason: 'high-severity-rejection', findings_open: 60, finding_id: UNBOUNDED, title: UNBOUNDED, rationale_text: 'w'.repeat(300), recommendation_text: 'r'.repeat(200), open_findings: longFindings }, true],
@@ -4773,7 +4773,7 @@ const ROW_TESTS = {
       });
     }
     test('a complete run with 60 rejected findings of 5000 character titles and records shows each cut by code', async () => {
-      const rejected = Array.from({ length: 60 }, (unused, index) => ({ finding_id: 'R' + index, title: UNBOUNDED, record: UNBOUNDED }));
+      const rejected = Array.from({ length: 60 }, (_, index) => ({ finding_id: 'R' + index, title: UNBOUNDED, record: UNBOUNDED }));
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, rejected_findings: rejected } }));
       assert.equal(run.result.outcome, 'complete', run.result.message.slice(0, 300));
       assert.ok(!run.result.message.includes('U'.repeat(201)), run.result.message);
@@ -4867,12 +4867,14 @@ const ROW_TESTS = {
     });
   },
   'SD-61': () => {
-    test('SCOPE_SCHEMA holds documents and paths, labels every string field, marks each path field and bounds every string', () => {
+    test('SCOPE_SCHEMA holds documents and paths, labels every string field, marks each path field, bounds every string and bounds both lists', () => {
       const schema = structuredClone(main.buildScopeSchema());
       assert.deepEqual(schema.required, ['documents', 'paths']);
       const documentItem = schema.properties.documents.items;
       const pathItem = schema.properties.paths.items;
-      assert.deepEqual([Object.keys(documentItem.properties), documentItem.required], [['path', 'lines'], ['path', 'lines']]);
+      assert.deepEqual([Object.keys(documentItem.properties), documentItem.required], [['path', 'line'], ['path', 'line']]);
+      assert.equal(documentItem.properties.line.type, 'integer');
+      assert.deepEqual([schema.properties.documents.maxItems, schema.properties.paths.maxItems], [10, 30]);
       assert.deepEqual([Object.keys(pathItem.properties), pathItem.required], [['path', 'exists', 'drift'], ['path', 'exists', 'drift']]);
       assert.equal(pathItem.properties.exists.type, 'boolean');
       for (const item of [documentItem, pathItem]) {
@@ -4882,6 +4884,11 @@ const ROW_TESTS = {
         assert.ok(stringFields.every((field) => field.description.startsWith(main.externalLabel())), JSON.stringify(item));
       }
       assert.ok(lib.validateSchema(schema, { documents: [], paths: [{ path: 'src/a.js', exists: false, drift: '' }] }).ok);
+      const fullScope = {
+        documents: Array.from({ length: 10 }, (_, index) => ({ path: 'docs/a.md', line: index + 1 })),
+        paths: Array.from({ length: 30 }, (_, index) => ({ path: 'src/f' + index + '.js', exists: true, drift: '' }))
+      };
+      assert.ok(lib.validateSchema(schema, fullScope).ok);
     });
   },
   'SD-62': () => {
@@ -4890,9 +4897,14 @@ const ROW_TESTS = {
         null,
         { documents: [] },
         { documents: [], paths: [], extra: true },
-        { documents: [{ path: 'docs/a.md', lines: '1-2', text: 'Slice.' }], paths: [] },
+        { documents: [{ path: 'docs/a.md', line: 1, text: 'Slice.' }], paths: [] },
+        { documents: [{ path: 'docs/a.md', lines: '1-2' }], paths: [] },
+        { documents: [{ path: 'docs/a.md', line: '1' }], paths: [] },
+        { documents: [{ path: 'docs/a.md', line: 1.5 }], paths: [] },
+        { documents: Array.from({ length: 11 }, (_, index) => ({ path: 'docs/a.md', line: index + 1 })), paths: [] },
+        { documents: [], paths: Array.from({ length: 31 }, (_, index) => ({ path: 'src/f' + index + '.js', exists: true, drift: '' })) },
         { documents: [], paths: [{ path: 'src/a.js', exists: 'yes', drift: '' }] },
-        { documents: [{ path: '../outside.md', lines: '1-2' }], paths: [] },
+        { documents: [{ path: '../outside.md', line: 1 }], paths: [] },
         { documents: [], paths: [{ path: '/etc/passwd', exists: true, drift: '' }] },
         { documents: [], paths: [{ path: '.git/config', exists: true, drift: '' }] }
       ];
@@ -4907,7 +4919,7 @@ const ROW_TESTS = {
   },
   'SD-63': () => {
     test('the plan and revise prompts carry the scope right after the request block, and no other prompt or message carries it', async () => {
-      const scope = { documents: [{ path: 'docs/handoff.md', lines: '10-12' }], paths: [{ path: 'src/cache.js', exists: true, drift: 'SCOPE_MARKER_QZ drift.' }] };
+      const scope = { documents: [{ path: 'docs/handoff.md', line: 10 }], paths: [{ path: 'src/cache.js', exists: true, drift: 'SCOPE_MARKER_QZ drift.' }] };
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
       const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': scope, 'plan-1': gated });
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go with A.'), happyResults({ 'scope-1': scope, 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) }));
