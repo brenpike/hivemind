@@ -29,7 +29,11 @@
  *   Comments are stripped from meta.js, each library, each module and
  *   main.js by stripComments, and each data constant is
  *   JSON.stringify(data, null, 1) with the leading spaces removed from every
- *   line: one key or element per line, no indent. JSON.stringify escapes
+ *   line: one key or element per line, no indent. data is the parsed file
+ *   cut to the fields a script reads (readDataConstant): AUTONOMY_TABLE
+ *   keeps only what projectAutonomyTable returns, and BRIEF_SCHEMA and
+ *   PLAN_SCHEMA stay whole, since validateSchema reads every keyword of a
+ *   schema. JSON.stringify escapes
  *   newlines inside strings, so every leading space it writes is
  *   indentation.
  *
@@ -70,6 +74,8 @@
  * Why
  *   A running workflow script cannot import or read files, so the build
  *   copies data and libraries in, and --check keeps the copies in step.
+ *   A data field no script reads only adds length toward the approval
+ *   limit, so the copy leaves it out (issue 459).
  *   The overlord launches the committed scripts by path, so a symlink there
  *   could run content that --check never compared, and a write through one
  *   would change a file outside plugin/workflows/. Only regular files are
@@ -88,10 +94,37 @@ const DRAFT_MARKER = 'DRAFT';
 const NON_MODULE_FILES = Object.freeze(['meta.js', 'main.js', 'contract.js']);
 export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'waves.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js']);
 const DATA_CONSTANTS = [
-  { name: 'AUTONOMY_TABLE', path: 'plugin/references/decision-autonomy-table.json' },
-  { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json' },
-  { name: 'PLAN_SCHEMA', path: 'plugin/references/plan-schema.json' }
+  { name: 'AUTONOMY_TABLE', path: 'plugin/references/decision-autonomy-table.json', project: projectAutonomyTable },
+  { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json', project: (data) => data },
+  { name: 'PLAN_SCHEMA', path: 'plugin/references/plan-schema.json', project: (data) => data }
 ];
+
+/**
+ * Returns the fields of the decision autonomy table that a script reads:
+ * levels, default_level, each hard stop's hard_stop, and each row's kind
+ * and its high, balanced and low cells, in that order. Every other field,
+ * such as $comment, version, when and resolved_at, is left out.
+ */
+export function projectAutonomyTable(table) {
+  return {
+    levels: table.levels,
+    default_level: table.default_level,
+    hard_stops: table.hard_stops.map((stop) => ({ hard_stop: stop.hard_stop })),
+    rows: table.rows.map((row) => ({ kind: row.kind, high: row.high, balanced: row.balanced, low: row.low }))
+  };
+}
+
+/**
+ * Returns the data that the built script holds for the data constant named
+ * name: the parsed file, cut by that constant's projection.
+ */
+export function readDataConstant(root, name) {
+  const constant = DATA_CONSTANTS.find((candidate) => candidate.name === name);
+  if (constant === undefined) {
+    throw new Error('readDataConstant: no data constant named ' + JSON.stringify(name));
+  }
+  return constant.project(JSON.parse(readSource(root, constant.path)));
+}
 
 /**
  * WORKFLOW_APPROVAL_LIMIT is the script length, in UTF-16 code units, above
@@ -213,7 +246,7 @@ function renderBanner(root, id) {
 }
 
 function renderDataConstant(root, constant) {
-  const data = JSON.parse(readSource(root, constant.path));
+  const data = readDataConstant(root, constant.name);
   return 'const ' + constant.name + ' = ' + JSON.stringify(data, null, 1).replace(/^ +/gm, '') + ';';
 }
 

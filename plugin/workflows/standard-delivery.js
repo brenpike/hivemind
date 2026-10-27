@@ -44,8 +44,6 @@ export const meta = {
  */
 
 const AUTONOMY_TABLE = {
-"$comment": "${CLAUDE_PLUGIN_ROOT}/workflow-src/lib/decide.js is the only place a decision is resolved. resolved_at binds each row to its decision sites.",
-"version": 1,
 "levels": [
 "high",
 "balanced",
@@ -54,28 +52,22 @@ const AUTONOMY_TABLE = {
 "default_level": "high",
 "hard_stops": [
 {
-"hard_stop": "destructive_fix_gate",
-"when": "A review or remediation fix would match a category of the Destructive Fix Gate per ${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md (Destructive Fix Gate)."
+"hard_stop": "destructive_fix_gate"
 },
 {
-"hard_stop": "trunk_commit_push",
-"when": "A commit or push would land directly on the trunk branch instead of a working branch."
+"hard_stop": "trunk_commit_push"
 },
 {
-"hard_stop": "injection_suspect",
-"when": "An injection scan flags external content as a suspected prompt injection attempt."
+"hard_stop": "injection_suspect"
 },
 {
-"hard_stop": "merge_recommendation",
-"when": "A run reaches the point where the overlord would recommend merging the pull request, and the user decides whether to merge."
+"hard_stop": "merge_recommendation"
 },
 {
-"hard_stop": "brood_strain_approval",
-"when": "A brood strain would start or proceed on work that requires the user to approve the strain first."
+"hard_stop": "brood_strain_approval"
 },
 {
-"hard_stop": "external_effect",
-"when": "A plan declares an irreversible effect outside the repo, such as a deploy, publish, migration or write to an outside service, and the run reaches the plan's first wave."
+"hard_stop": "external_effect"
 }
 ],
 "rows": [
@@ -83,192 +75,97 @@ const AUTONOMY_TABLE = {
 "kind": "plan_acceptance",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"plan.single",
-"plan.multi",
-"standard-delivery.plan"
-],
-"when": "Cerebrate returns a plan with no open questions and the overlord decides whether to start implementing it."
+"low": "surface"
 },
 {
 "kind": "planner_question",
 "high": "auto",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"plan",
-"brood_plan",
-"analyze",
-"standard-delivery.plan"
-],
-"when": "A planner raises a decision in a plan or an analysis, either an open question or a choice among several viable options, and the overlord resolves it before proceeding."
+"low": "surface"
 },
 {
 "kind": "remediation_approach",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"review_remediation_plan",
-"review_remediation_plan_postpr"
-],
-"when": "A planner raises a decision while planning the remediation of review findings, such as which of several valid fixes to take, and the overlord resolves it before proceeding."
+"low": "surface"
 },
 {
 "kind": "planner_escalation_routing",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"local_review.planner-escalation",
-"github_review_loop.planner-escalation",
-"github_reviewer_fix.planner-escalation",
-"implement_step.needs_replan",
-"implement_step_postpr.needs_replan",
-"standard-delivery.local_review"
-],
-"when": "A worker or a reviewer escalates a blocker to the planner and the overlord decides where that escalation is routed."
+"low": "surface"
 },
 {
 "kind": "root_cluster_routing",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"local_review.root-cluster-suspected",
-"github_review_loop.root-cluster-suspected",
-"github_reviewer_fix.root-cluster-suspected",
-"standard-delivery.local_review"
-],
-"when": "Accumulated findings are detected as a root cluster and the overlord decides whether to route them to a zoomed-out planner pass."
+"low": "surface"
 },
 {
 "kind": "remediation_plan_acceptance",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"review_remediation_plan.single",
-"review_remediation_plan.multi",
-"review_remediation_plan_postpr.single",
-"review_remediation_plan_postpr.multi",
-"standard-delivery.plan"
-],
-"when": "A planner returns a remediation plan for review findings and the overlord decides whether to accept it and implement. The decision is asked when any flag of plan.remediation_gate is true: the Promotion Gate trips on accepting the plan, by any clause, as plan.remediation_gate.promotion_gate records, or the plan grows the surface, or it repeats a surface whose earlier fix did not close its class. It is taken otherwise."
+"low": "surface"
 },
 {
 "kind": "diminishing_returns_exit",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"diminishing_returns_decision",
-"standard-delivery.local_review"
-],
-"when": "The review loop detects diminishing returns and the overlord decides whether to stop remediating and exit the loop."
+"low": "surface"
 },
 {
 "kind": "validation_remediation",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"validate",
-"validate_postpr",
-"standard-delivery.validate"
-],
-"when": "Any validate state fails and the overlord decides how to remediate before the run moves past validation."
+"low": "surface"
 },
 {
 "kind": "version_bump_type",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"version_bump_decision.required",
-"version_bump_decision.not_required",
-"standard-delivery.bump"
-],
-"when": "The bump-type derivation yields a verdict and the overlord decides which version bump type to apply."
+"low": "surface"
 },
 {
 "kind": "version_bump_indeterminable",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"version_bump_decision.ambiguous",
-"standard-delivery.bump"
-],
-"when": "The bump-type derivation cannot determine a bump type from the commits and the overlord needs a decision."
+"low": "surface"
 },
 {
 "kind": "trunk_stale",
 "high": "auto",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"git_preflight",
-"standard-delivery.branch"
-],
-"when": "The Trunk Freshness check at git preflight reports a non-zero count and the overlord decides how to proceed."
+"low": "surface"
 },
 {
 "kind": "gate_rerun",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"standard-delivery.gates"
-],
-"when": "A commit lands after a gate held and the run goes back through every gate that ended on an earlier commit."
+"low": "surface"
 },
 {
 "kind": "route_ambiguous",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"classify.ambiguous"
-],
-"when": "Route-workflow reports an ambiguous classification and the overlord cannot select a single handling workflow."
+"low": "surface"
 },
 {
 "kind": "resume_or_skew",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"resume_on_start"
-],
-"when": "The overlord resumes a prior run or detects version skew in a run ledger and must decide whether to continue or restart."
+"low": "surface"
 },
 {
 "kind": "review_question",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"exit_reason": "user-input-required",
-"resolved_at": [
-"local_review.user-input-required",
-"github_review_loop.user-input-required",
-"github_reviewer_fix.user-input-required"
-],
-"when": "A reviewer comment asks the user a question that only the user can answer, so the review loop cannot continue."
+"low": "surface"
 },
 {
 "kind": "high_severity_rejection",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"exit_reason": "high-severity-rejection",
-"resolved_at": [
-"local_review.high-severity-rejection",
-"github_review_loop.high-severity-rejection",
-"github_reviewer_fix.high-severity-rejection"
-],
-"when": "The overlord would reject a high-severity review finding and decides whether the loop proceeds."
+"low": "surface"
 }
 ]
 };
@@ -2622,24 +2519,20 @@ function buildValidateSchema() {
   });
 }
 
-function buildTailBrief({ kind, problem, goOn, other, strength, why, evidence }) {
+function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
   return {
     id: 'tail',
     kind: kind,
     problem: problem,
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: 'The delivery stops before the pull request.' },
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: goOn, steel_man: 'The delivery goes on, and every change stays on the working branch until you merge it.', straw_man: 'It happens before you read it, though it is listed for you.', effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: 'Nothing goes further without your say.', straw_man: 'The run waits for something fixed rules may settle.', effort: 'trivial', value: 'low', reversible: true }
+      { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true },
+      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
     ],
     recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
-    assumptions: [{ statement: 'The state this question names comes from this run.', origin: 'repo', evidence: evidence }],
+    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false }
   };
-}
-
-function describeBumpEvidence(values) {
-  return 'bump verdict ' + values.verdict + ', bump type ' + values.bump_type + ', dominant row ' + values.dominant_row + ', rule ' + values.rule_applied;
 }
 
 function buildBumpTypeBrief(values) {
@@ -2651,8 +2544,7 @@ function buildBumpTypeBrief(values) {
       : 'The commits on the branch since the trunk need no version bump: each version file the plan names keeps its trunk version.',
     goOn: isBump ? 'Make the ' + values.bump_type + ' version bump.' : 'Go on with no version bump.',
     strength: 'strong',
-    why: 'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.',
-    evidence: describeBumpEvidence(values)
+    why: 'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.'
   });
 }
 
@@ -2665,8 +2557,7 @@ function buildBumpIndeterminableBrief(values) {
       : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
     goOn: hasVerdict ? 'Name the version files: this run plans again with your reply.' : 'Name the version bump: this run plans again with your reply.',
     strength: 'none',
-    why: 'Only you can decide the version of this delivery.',
-    evidence: describeBumpEvidence(values)
+    why: 'Only you can decide the version of this delivery.'
   });
 }
 
@@ -2676,8 +2567,7 @@ function buildValidationRemediationBrief(head, round) {
     problem: 'Validation failed on commit ' + head + '. Run fix round ' + round + ' of at most ' + maxFixRounds() + ', where a worker fixes the failures and the run commits the fix and checks again?',
     goOn: 'Run a fix round.',
     strength: 'strong',
-    why: 'A fix round stays on the branch and is listed for you, and every check runs again on its commit.',
-    evidence: 'validation failed on commit ' + head
+    why: 'A fix round stays on the branch and is listed for you, and every check runs again on its commit.'
   });
 }
 
@@ -2687,16 +2577,11 @@ function buildFixLimitBrief(head) {
     problem: 'Validation still fails on commit ' + head + ' after ' + maxFixRounds() + ' fix rounds. How should the failures be fixed?',
     goOn: 'Say how to fix the failures: this run plans the fix from your reply.',
     strength: 'none',
-    why: 'The fix rounds did not make validation pass, so only you can decide what comes next.',
-    evidence: 'validation failed on commit ' + head + ' after ' + maxFixRounds() + ' fix rounds'
+    why: 'The fix rounds did not make validation pass, so only you can decide what comes next.'
   });
 }
 
-function describeStaleGates(staleIds, gates) {
-  return staleIds.map((gateId) => gateNames()[gateId] + ' held on commit ' + gates.held[gateId]).join(', ');
-}
-
-function buildGateRerunBrief(staleIds, gates, head, isLimit) {
+function buildGateRerunBrief(staleIds, head, isLimit) {
   const names = joinNames(staleIds.map((gateId) => gateNames()[gateId]), 'and');
   const landed = 'Commit ' + head + ' landed after ' + names + ' held on an earlier commit.';
   return buildTailBrief({
@@ -2708,8 +2593,7 @@ function buildGateRerunBrief(staleIds, gates, head, isLimit) {
     strength: isLimit ? 'none' : 'strong',
     why: isLimit
       ? 'Commits kept landing after the checks, so only you can decide what comes next.'
-      : 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.',
-    evidence: describeStaleGates(staleIds, gates)
+      : 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
   });
 }
 
@@ -2936,10 +2820,10 @@ function resolveGateRerun(run, gates) {
     return {};
   }
   if (gates.reruns >= maxGateReruns()) {
-    return replanFromTailAsk([buildUndecidedAsk(buildGateRerunBrief(staleIds, gates, run.head, true))], run);
+    return replanFromTailAsk([buildUndecidedAsk(buildGateRerunBrief(staleIds, run.head, true))], run);
   }
   gates.reruns += 1;
-  return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, gates, run.head, false), run);
+  return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, false), run);
 }
 
 function runGateStep(gateId, run, plan, facts, gates) {
@@ -3189,18 +3073,22 @@ function remediationGateTexts() {
   };
 }
 
+function unshownBriefText() {
+  return 'Not shown.';
+}
+
 function buildPlanAcceptanceBrief(plan) {
   return {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
     problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: 'Nothing is delivered.' },
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: 'The plan passed every check, and its changes stay on the working branch until you merge them.', straw_man: 'A step can still change something you did not expect before you see the pull request.', effort: 'medium', value: 'high', reversible: true },
-      { id: 'B', summary: 'Stop before any step runs.', steel_man: 'Nothing changes until you have read the plan.', straw_man: 'The run stops once more, for a plan that passed every check.', effort: 'trivial', value: 'low', reversible: true }
+      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true },
+      { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Every change stays on the working branch, and every decision taken is listed for you before the merge.' },
-    assumptions: [{ statement: 'The plan declares every effect it has outside the repo.', origin: 'assumed', evidence: 'The planner declares those effects, and the run asks before any that cannot be undone.' }],
+    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false },
     verbatim: plan.summary
   };
@@ -3226,13 +3114,13 @@ function buildTrunkStaleBrief(facts) {
     id: 'trunk',
     kind: TRUNK_STALE_KIND,
     problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
-    criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: 'The branch may need a rebase before it merges.' },
+    criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: 'The branch can be rebased later, and the pull request shows its base.', straw_man: 'The branch may start from an old trunk and conflict later.', effort: 'trivial', value: 'medium', reversible: true },
-      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: 'The branch starts from the newest trunk.', straw_man: 'The run stops for something a rebase can fix later.', effort: 'small', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true },
+      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'A stale base costs at most a rebase, and the run goes on.' },
-    assumptions: [{ statement: 'The trunk freshness comes from the facts step of this pass.', origin: 'repo', evidence: 'trunk_freshness ' + facts.trunk_freshness }],
+    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false }
   };
 }
@@ -3242,13 +3130,13 @@ function buildExternalEffectBrief(stepId, summary) {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
     problem: 'Plan step ' + encodeUntrustedText(Array.from(stepId).slice(0, 16).join('')) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
-    criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: 'The step runs before any pull request exists.' },
+    criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: 'The step is part of the delivery you asked for.', straw_man: 'The effect happens before you see the pull request and cannot be undone.', effort: 'small', value: 'high', reversible: false },
-      { id: 'B', summary: 'Change or drop the step first.', steel_man: 'Nothing happens outside the repo without your say.', straw_man: 'The delivery may be left incomplete.', effort: 'small', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false },
+      { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
     ],
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
-    assumptions: [{ statement: 'The effect cannot be undone.', origin: 'assumed', evidence: 'The plan declares it with reversible false.' }],
+    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
     gate: { irreversible: true, architectural: false, safety: false },
     verbatim: summary
   };
@@ -4338,7 +4226,7 @@ function buildRejectedFindingsBlock(note, rejectedFindings) {
   };
 }
 
-function buildReviewQuestionBrief(review, head, openFindings) {
+function buildReviewQuestionBrief(review, openFindings) {
   const finding = 'finding ' + quoteReviewValue(review, 'finding_id');
   const isRejection = review.exit_reason === 'high-severity-rejection';
   const hasRecommendation = hasReviewText(review, 'recommendation_text');
@@ -4350,15 +4238,14 @@ function buildReviewQuestionBrief(review, head, openFindings) {
     goOn: isRejection ? 'Reject the finding and go on with it unfixed: local review records the decision at its source and goes on.' : 'Answer the finding: this run gives your answer to local review, which goes on with it.',
     other: isRejection ? 'Fix the finding: local review fixes it, or sends it to the planner, and goes on.' : 'Stop: local review ends blocked on this run, before the pull request.',
     strength: hasRecommendation ? 'weak' : 'none',
-    why: (hasRecommendation ? 'See its recommendation below. ' : '') + 'Only you can settle a question the review raises.',
-    evidence: 'local review exit reason ' + review.exit_reason + ' on commit ' + head
+    why: (hasRecommendation ? 'See its recommendation below. ' : '') + 'Only you can settle a question the review raises.'
   });
 }
 
 function askReviewQuestion(review, run) {
   const openFindings = review.open_findings;
   const resolution = { asks: [], taken: [] };
-  resolveDecision(reviewQuestionKinds()[review.exit_reason], buildReviewQuestionBrief(review, run.head, openFindings), undefined, run, resolution);
+  resolveDecision(reviewQuestionKinds()[review.exit_reason], buildReviewQuestionBrief(review, openFindings), undefined, run, resolution);
   return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));
 }
 
@@ -4368,8 +4255,7 @@ function buildDiminishingReturnsBrief(review, head) {
     problem: 'Local review on commit ' + head + ' sees diminishing returns, with ' + describeCount(review.findings_open, 'finding') + ' still open. Stop fixing and hold the local review gate on this commit with those findings open?',
     goOn: 'Stop fixing and go on with the open findings.',
     strength: 'strong',
-    why: 'More review rounds fix little now, and the open findings stay on the record for you before the merge.',
-    evidence: 'reviewer recommendation ' + quoteReviewValue(review, 'recommendation_text')
+    why: 'More review rounds fix little now, and the open findings stay on the record for you before the merge.'
   });
 }
 
@@ -4395,8 +4281,7 @@ function buildReviewEscalationBrief(review) {
       : 'Local review escalated finding ' + quoteReviewValue(review, 'finding_id') + ' to the planner. Go back to planning, from fresh facts, for its remediation?',
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
-    why: 'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.',
-    evidence: 'local review exit reason ' + review.exit_reason
+    why: 'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
   });
 }
 

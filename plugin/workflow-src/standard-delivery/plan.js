@@ -309,18 +309,27 @@ function remediationGateTexts() {
   };
 }
 
+/**
+ * Returns the one text every code-built brief puts in the fields no
+ * message shows (lib/brief.js): steel_man, straw_man,
+ * criticality.if_ignored and each assumption's statement and evidence.
+ */
+function unshownBriefText() {
+  return 'Not shown.';
+}
+
 function buildPlanAcceptanceBrief(plan) {
   return {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
     problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: 'Nothing is delivered.' },
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: 'The plan passed every check, and its changes stay on the working branch until you merge them.', straw_man: 'A step can still change something you did not expect before you see the pull request.', effort: 'medium', value: 'high', reversible: true },
-      { id: 'B', summary: 'Stop before any step runs.', steel_man: 'Nothing changes until you have read the plan.', straw_man: 'The run stops once more, for a plan that passed every check.', effort: 'trivial', value: 'low', reversible: true }
+      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true },
+      { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Every change stays on the working branch, and every decision taken is listed for you before the merge.' },
-    assumptions: [{ statement: 'The plan declares every effect it has outside the repo.', origin: 'assumed', evidence: 'The planner declares those effects, and the run asks before any that cannot be undone.' }],
+    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false },
     verbatim: plan.summary
   };
@@ -346,13 +355,13 @@ function buildTrunkStaleBrief(facts) {
     id: 'trunk',
     kind: TRUNK_STALE_KIND,
     problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
-    criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: 'The branch may need a rebase before it merges.' },
+    criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: 'The branch can be rebased later, and the pull request shows its base.', straw_man: 'The branch may start from an old trunk and conflict later.', effort: 'trivial', value: 'medium', reversible: true },
-      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: 'The branch starts from the newest trunk.', straw_man: 'The run stops for something a rebase can fix later.', effort: 'small', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true },
+      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'A stale base costs at most a rebase, and the run goes on.' },
-    assumptions: [{ statement: 'The trunk freshness comes from the facts step of this pass.', origin: 'repo', evidence: 'trunk_freshness ' + facts.trunk_freshness }],
+    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false }
   };
 }
@@ -362,13 +371,13 @@ function buildExternalEffectBrief(stepId, summary) {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
     problem: 'Plan step ' + encodeUntrustedText(Array.from(stepId).slice(0, 16).join('')) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
-    criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: 'The step runs before any pull request exists.' },
+    criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: 'The step is part of the delivery you asked for.', straw_man: 'The effect happens before you see the pull request and cannot be undone.', effort: 'small', value: 'high', reversible: false },
-      { id: 'B', summary: 'Change or drop the step first.', steel_man: 'Nothing happens outside the repo without your say.', straw_man: 'The delivery may be left incomplete.', effort: 'small', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false },
+      { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
     ],
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
-    assumptions: [{ statement: 'The effect cannot be undone.', origin: 'assumed', evidence: 'The plan declares it with reversible false.' }],
+    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
     gate: { irreversible: true, architectural: false, safety: false },
     verbatim: summary
   };

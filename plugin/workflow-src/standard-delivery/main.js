@@ -68,7 +68,9 @@
  *   only the pull request title and body, a worker summary nothing, and
  *   validate failures only the fix prompt. The code-built brief of every
  *   plan, trunk, effect, bump, validation, gate rerun and review routing
- *   decision fits BRIEF_SCHEMA with worst-case inputs, so the diminishing
+ *   decision fits BRIEF_SCHEMA with worst-case inputs, holds
+ *   unshownBriefText() (plan.js) in each field no message shows, so the
+ *   bundle carries no text the user never reads, and the diminishing
  *   returns, escalation, root cluster and review question problems embed
  *   no reviewer free text, only a short finding id and counts.
  *   Every local review string a message shows has a maxLength in

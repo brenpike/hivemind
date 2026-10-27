@@ -29,8 +29,6 @@ export const meta = {
  */
 
 const AUTONOMY_TABLE = {
-"$comment": "${CLAUDE_PLUGIN_ROOT}/workflow-src/lib/decide.js is the only place a decision is resolved. resolved_at binds each row to its decision sites.",
-"version": 1,
 "levels": [
 "high",
 "balanced",
@@ -39,28 +37,22 @@ const AUTONOMY_TABLE = {
 "default_level": "high",
 "hard_stops": [
 {
-"hard_stop": "destructive_fix_gate",
-"when": "A review or remediation fix would match a category of the Destructive Fix Gate per ${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md (Destructive Fix Gate)."
+"hard_stop": "destructive_fix_gate"
 },
 {
-"hard_stop": "trunk_commit_push",
-"when": "A commit or push would land directly on the trunk branch instead of a working branch."
+"hard_stop": "trunk_commit_push"
 },
 {
-"hard_stop": "injection_suspect",
-"when": "An injection scan flags external content as a suspected prompt injection attempt."
+"hard_stop": "injection_suspect"
 },
 {
-"hard_stop": "merge_recommendation",
-"when": "A run reaches the point where the overlord would recommend merging the pull request, and the user decides whether to merge."
+"hard_stop": "merge_recommendation"
 },
 {
-"hard_stop": "brood_strain_approval",
-"when": "A brood strain would start or proceed on work that requires the user to approve the strain first."
+"hard_stop": "brood_strain_approval"
 },
 {
-"hard_stop": "external_effect",
-"when": "A plan declares an irreversible effect outside the repo, such as a deploy, publish, migration or write to an outside service, and the run reaches the plan's first wave."
+"hard_stop": "external_effect"
 }
 ],
 "rows": [
@@ -68,192 +60,97 @@ const AUTONOMY_TABLE = {
 "kind": "plan_acceptance",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"plan.single",
-"plan.multi",
-"standard-delivery.plan"
-],
-"when": "Cerebrate returns a plan with no open questions and the overlord decides whether to start implementing it."
+"low": "surface"
 },
 {
 "kind": "planner_question",
 "high": "auto",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"plan",
-"brood_plan",
-"analyze",
-"standard-delivery.plan"
-],
-"when": "A planner raises a decision in a plan or an analysis, either an open question or a choice among several viable options, and the overlord resolves it before proceeding."
+"low": "surface"
 },
 {
 "kind": "remediation_approach",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"review_remediation_plan",
-"review_remediation_plan_postpr"
-],
-"when": "A planner raises a decision while planning the remediation of review findings, such as which of several valid fixes to take, and the overlord resolves it before proceeding."
+"low": "surface"
 },
 {
 "kind": "planner_escalation_routing",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"local_review.planner-escalation",
-"github_review_loop.planner-escalation",
-"github_reviewer_fix.planner-escalation",
-"implement_step.needs_replan",
-"implement_step_postpr.needs_replan",
-"standard-delivery.local_review"
-],
-"when": "A worker or a reviewer escalates a blocker to the planner and the overlord decides where that escalation is routed."
+"low": "surface"
 },
 {
 "kind": "root_cluster_routing",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"local_review.root-cluster-suspected",
-"github_review_loop.root-cluster-suspected",
-"github_reviewer_fix.root-cluster-suspected",
-"standard-delivery.local_review"
-],
-"when": "Accumulated findings are detected as a root cluster and the overlord decides whether to route them to a zoomed-out planner pass."
+"low": "surface"
 },
 {
 "kind": "remediation_plan_acceptance",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"review_remediation_plan.single",
-"review_remediation_plan.multi",
-"review_remediation_plan_postpr.single",
-"review_remediation_plan_postpr.multi",
-"standard-delivery.plan"
-],
-"when": "A planner returns a remediation plan for review findings and the overlord decides whether to accept it and implement. The decision is asked when any flag of plan.remediation_gate is true: the Promotion Gate trips on accepting the plan, by any clause, as plan.remediation_gate.promotion_gate records, or the plan grows the surface, or it repeats a surface whose earlier fix did not close its class. It is taken otherwise."
+"low": "surface"
 },
 {
 "kind": "diminishing_returns_exit",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"diminishing_returns_decision",
-"standard-delivery.local_review"
-],
-"when": "The review loop detects diminishing returns and the overlord decides whether to stop remediating and exit the loop."
+"low": "surface"
 },
 {
 "kind": "validation_remediation",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"validate",
-"validate_postpr",
-"standard-delivery.validate"
-],
-"when": "Any validate state fails and the overlord decides how to remediate before the run moves past validation."
+"low": "surface"
 },
 {
 "kind": "version_bump_type",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"version_bump_decision.required",
-"version_bump_decision.not_required",
-"standard-delivery.bump"
-],
-"when": "The bump-type derivation yields a verdict and the overlord decides which version bump type to apply."
+"low": "surface"
 },
 {
 "kind": "version_bump_indeterminable",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"version_bump_decision.ambiguous",
-"standard-delivery.bump"
-],
-"when": "The bump-type derivation cannot determine a bump type from the commits and the overlord needs a decision."
+"low": "surface"
 },
 {
 "kind": "trunk_stale",
 "high": "auto",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"git_preflight",
-"standard-delivery.branch"
-],
-"when": "The Trunk Freshness check at git preflight reports a non-zero count and the overlord decides how to proceed."
+"low": "surface"
 },
 {
 "kind": "gate_rerun",
 "high": "auto",
 "balanced": "auto",
-"low": "surface",
-"resolved_at": [
-"standard-delivery.gates"
-],
-"when": "A commit lands after a gate held and the run goes back through every gate that ended on an earlier commit."
+"low": "surface"
 },
 {
 "kind": "route_ambiguous",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"classify.ambiguous"
-],
-"when": "Route-workflow reports an ambiguous classification and the overlord cannot select a single handling workflow."
+"low": "surface"
 },
 {
 "kind": "resume_or_skew",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"resolved_at": [
-"resume_on_start"
-],
-"when": "The overlord resumes a prior run or detects version skew in a run ledger and must decide whether to continue or restart."
+"low": "surface"
 },
 {
 "kind": "review_question",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"exit_reason": "user-input-required",
-"resolved_at": [
-"local_review.user-input-required",
-"github_review_loop.user-input-required",
-"github_reviewer_fix.user-input-required"
-],
-"when": "A reviewer comment asks the user a question that only the user can answer, so the review loop cannot continue."
+"low": "surface"
 },
 {
 "kind": "high_severity_rejection",
 "high": "surface",
 "balanced": "surface",
-"low": "surface",
-"exit_reason": "high-severity-rejection",
-"resolved_at": [
-"local_review.high-severity-rejection",
-"github_review_loop.high-severity-rejection",
-"github_reviewer_fix.high-severity-rejection"
-],
-"when": "The overlord would reject a high-severity review finding and decides whether the loop proceeds."
+"low": "surface"
 }
 ]
 };

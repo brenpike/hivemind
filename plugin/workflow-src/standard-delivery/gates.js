@@ -162,24 +162,20 @@ function buildValidateSchema() {
   });
 }
 
-function buildTailBrief({ kind, problem, goOn, other, strength, why, evidence }) {
+function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
   return {
     id: 'tail',
     kind: kind,
     problem: problem,
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: 'The delivery stops before the pull request.' },
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: goOn, steel_man: 'The delivery goes on, and every change stays on the working branch until you merge it.', straw_man: 'It happens before you read it, though it is listed for you.', effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: 'Nothing goes further without your say.', straw_man: 'The run waits for something fixed rules may settle.', effort: 'trivial', value: 'low', reversible: true }
+      { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true },
+      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
     ],
     recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
-    assumptions: [{ statement: 'The state this question names comes from this run.', origin: 'repo', evidence: evidence }],
+    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false }
   };
-}
-
-function describeBumpEvidence(values) {
-  return 'bump verdict ' + values.verdict + ', bump type ' + values.bump_type + ', dominant row ' + values.dominant_row + ', rule ' + values.rule_applied;
 }
 
 function buildBumpTypeBrief(values) {
@@ -191,8 +187,7 @@ function buildBumpTypeBrief(values) {
       : 'The commits on the branch since the trunk need no version bump: each version file the plan names keeps its trunk version.',
     goOn: isBump ? 'Make the ' + values.bump_type + ' version bump.' : 'Go on with no version bump.',
     strength: 'strong',
-    why: 'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.',
-    evidence: describeBumpEvidence(values)
+    why: 'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.'
   });
 }
 
@@ -205,8 +200,7 @@ function buildBumpIndeterminableBrief(values) {
       : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
     goOn: hasVerdict ? 'Name the version files: this run plans again with your reply.' : 'Name the version bump: this run plans again with your reply.',
     strength: 'none',
-    why: 'Only you can decide the version of this delivery.',
-    evidence: describeBumpEvidence(values)
+    why: 'Only you can decide the version of this delivery.'
   });
 }
 
@@ -216,8 +210,7 @@ function buildValidationRemediationBrief(head, round) {
     problem: 'Validation failed on commit ' + head + '. Run fix round ' + round + ' of at most ' + maxFixRounds() + ', where a worker fixes the failures and the run commits the fix and checks again?',
     goOn: 'Run a fix round.',
     strength: 'strong',
-    why: 'A fix round stays on the branch and is listed for you, and every check runs again on its commit.',
-    evidence: 'validation failed on commit ' + head
+    why: 'A fix round stays on the branch and is listed for you, and every check runs again on its commit.'
   });
 }
 
@@ -227,16 +220,11 @@ function buildFixLimitBrief(head) {
     problem: 'Validation still fails on commit ' + head + ' after ' + maxFixRounds() + ' fix rounds. How should the failures be fixed?',
     goOn: 'Say how to fix the failures: this run plans the fix from your reply.',
     strength: 'none',
-    why: 'The fix rounds did not make validation pass, so only you can decide what comes next.',
-    evidence: 'validation failed on commit ' + head + ' after ' + maxFixRounds() + ' fix rounds'
+    why: 'The fix rounds did not make validation pass, so only you can decide what comes next.'
   });
 }
 
-function describeStaleGates(staleIds, gates) {
-  return staleIds.map((gateId) => gateNames()[gateId] + ' held on commit ' + gates.held[gateId]).join(', ');
-}
-
-function buildGateRerunBrief(staleIds, gates, head, isLimit) {
+function buildGateRerunBrief(staleIds, head, isLimit) {
   const names = joinNames(staleIds.map((gateId) => gateNames()[gateId]), 'and');
   const landed = 'Commit ' + head + ' landed after ' + names + ' held on an earlier commit.';
   return buildTailBrief({
@@ -248,8 +236,7 @@ function buildGateRerunBrief(staleIds, gates, head, isLimit) {
     strength: isLimit ? 'none' : 'strong',
     why: isLimit
       ? 'Commits kept landing after the checks, so only you can decide what comes next.'
-      : 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.',
-    evidence: describeStaleGates(staleIds, gates)
+      : 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
   });
 }
 
@@ -476,10 +463,10 @@ function resolveGateRerun(run, gates) {
     return {};
   }
   if (gates.reruns >= maxGateReruns()) {
-    return replanFromTailAsk([buildUndecidedAsk(buildGateRerunBrief(staleIds, gates, run.head, true))], run);
+    return replanFromTailAsk([buildUndecidedAsk(buildGateRerunBrief(staleIds, run.head, true))], run);
   }
   gates.reruns += 1;
-  return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, gates, run.head, false), run);
+  return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, false), run);
 }
 
 function runGateStep(gateId, run, plan, facts, gates) {

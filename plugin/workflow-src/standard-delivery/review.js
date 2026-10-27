@@ -345,7 +345,7 @@ function buildRejectedFindingsBlock(note, rejectedFindings) {
  * recommendation is option A, weak, pointing at the reviewer
  * recommendation in the detail block when the review gives one, or none.
  */
-function buildReviewQuestionBrief(review, head, openFindings) {
+function buildReviewQuestionBrief(review, openFindings) {
   const finding = 'finding ' + quoteReviewValue(review, 'finding_id');
   const isRejection = review.exit_reason === 'high-severity-rejection';
   const hasRecommendation = hasReviewText(review, 'recommendation_text');
@@ -357,15 +357,14 @@ function buildReviewQuestionBrief(review, head, openFindings) {
     goOn: isRejection ? 'Reject the finding and go on with it unfixed: local review records the decision at its source and goes on.' : 'Answer the finding: this run gives your answer to local review, which goes on with it.',
     other: isRejection ? 'Fix the finding: local review fixes it, or sends it to the planner, and goes on.' : 'Stop: local review ends blocked on this run, before the pull request.',
     strength: hasRecommendation ? 'weak' : 'none',
-    why: (hasRecommendation ? 'See its recommendation below. ' : '') + 'Only you can settle a question the review raises.',
-    evidence: 'local review exit reason ' + review.exit_reason + ' on commit ' + head
+    why: (hasRecommendation ? 'See its recommendation below. ' : '') + 'Only you can settle a question the review raises.'
   });
 }
 
 function askReviewQuestion(review, run) {
   const openFindings = review.open_findings;
   const resolution = { asks: [], taken: [] };
-  resolveDecision(reviewQuestionKinds()[review.exit_reason], buildReviewQuestionBrief(review, run.head, openFindings), undefined, run, resolution);
+  resolveDecision(reviewQuestionKinds()[review.exit_reason], buildReviewQuestionBrief(review, openFindings), undefined, run, resolution);
   return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));
 }
 
@@ -375,8 +374,7 @@ function buildDiminishingReturnsBrief(review, head) {
     problem: 'Local review on commit ' + head + ' sees diminishing returns, with ' + describeCount(review.findings_open, 'finding') + ' still open. Stop fixing and hold the local review gate on this commit with those findings open?',
     goOn: 'Stop fixing and go on with the open findings.',
     strength: 'strong',
-    why: 'More review rounds fix little now, and the open findings stay on the record for you before the merge.',
-    evidence: 'reviewer recommendation ' + quoteReviewValue(review, 'recommendation_text')
+    why: 'More review rounds fix little now, and the open findings stay on the record for you before the merge.'
   });
 }
 
@@ -402,8 +400,7 @@ function buildReviewEscalationBrief(review) {
       : 'Local review escalated finding ' + quoteReviewValue(review, 'finding_id') + ' to the planner. Go back to planning, from fresh facts, for its remediation?',
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
-    why: 'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.',
-    evidence: 'local review exit reason ' + review.exit_reason
+    why: 'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
   });
 }
 

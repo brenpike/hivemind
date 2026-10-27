@@ -26,6 +26,8 @@ import {
   listLiveWorkflowIds,
   listModulePaths,
   listSourcePaths,
+  projectAutonomyTable,
+  readDataConstant,
   runCli,
   stripComments,
   stripCommentsAndStrings,
@@ -670,10 +672,12 @@ for (const id of liveIds) {
       assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
       assert.deepEqual([...positions].sort((left, right) => left - right), positions);
     });
-    test('each data constant is unindented JSON, one key or element per line, over more than one line, equal to its file', () => {
-      const constants = [['AUTONOMY_TABLE', 'decision-autonomy-table.json'], ['BRIEF_SCHEMA', 'decision-brief-schema.json'], ['PLAN_SCHEMA', 'plan-schema.json']];
-      for (const [name, file] of constants) {
-        const fileData = JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8'));
+    test('each data constant is unindented JSON, one key or element per line, over more than one line, equal to the projection of its file', () => {
+      const keepWhole = (data) => data;
+      const constants = [['AUTONOMY_TABLE', 'decision-autonomy-table.json', projectAutonomyTable], ['BRIEF_SCHEMA', 'decision-brief-schema.json', keepWhole], ['PLAN_SCHEMA', 'plan-schema.json', keepWhole]];
+      for (const [name, file, project] of constants) {
+        const fileData = project(JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8')));
+        assert.deepEqual(readDataConstant(repoRoot, name), fileData, name);
         const prefix = 'const ' + name + ' = ';
         assert.ok(source.includes(prefix + JSON.stringify(fileData, null, 1).replace(/^ +/gm, '') + ';'), name);
         const start = source.indexOf(prefix) + prefix.length;
@@ -682,6 +686,17 @@ for (const id of liveIds) {
         assert.ok(jsonText.includes('\n'), name);
         assert.deepEqual(JSON.parse(jsonText), fileData, name);
       }
+    });
+    test('AUTONOMY_TABLE holds only the fields a script reads', () => {
+      const start = source.indexOf('const AUTONOMY_TABLE = ') + 'const AUTONOMY_TABLE = '.length;
+      const table = JSON.parse(source.slice(start, source.indexOf('\n};', start) + 2));
+      assert.deepEqual(Object.keys(table), ['levels', 'default_level', 'hard_stops', 'rows']);
+      assert.ok(table.hard_stops.length > 0 && table.hard_stops.every((stop) => JSON.stringify(Object.keys(stop)) === '["hard_stop"]'));
+      assert.ok(table.rows.length > 0 && table.rows.every((row) => JSON.stringify(Object.keys(row)) === '["kind","high","balanced","low"]'));
+      for (const dropped of ['"$comment"', '"version"', '"when"', '"resolved_at"']) {
+        assert.ok(!source.slice(start, source.indexOf('\n};', start)).includes(dropped), dropped);
+      }
+      assert.throws(() => readDataConstant(repoRoot, 'NO_SUCH_CONSTANT'), /no data constant named "NO_SUCH_CONSTANT"/);
     });
     test('has no comment other than the GENERATED banner', () => {
       const comments = tokenizeSource(source).filter((token) => token.kind === 'comment');

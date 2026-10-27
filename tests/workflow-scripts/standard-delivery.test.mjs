@@ -2555,7 +2555,7 @@ const ROW_TESTS = {
       assert.ok(!withoutDataBlock(call.prompt, 'failures').includes(FAILURE_TEXT));
       assert.deepEqual(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'inputs'), { files: ['src/cache.js'], commit_type: 'feat', breaking: false, trunk: 'main' });
       const remediation = { brief: main.buildValidationRemediationBrief(OTHER, 1) };
-      assert.ok(run.result.message.includes(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, remediation, { brief: main.buildGateRerunBrief(['bump'], { held: { bump: OTHER } }, THIRD, false) }])), run.result.message);
+      assert.ok(run.result.message.includes(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, remediation, { brief: main.buildGateRerunBrief(['bump'], THIRD, false) }])), run.result.message);
       assert.ok(run.result.message.includes('Commits this run made:\n- ' + OTHER + '\n- ' + THIRD));
     });
     test('the validation fix sentence is the validation fix task trigger of drone.md and nothing more', () => {
@@ -2619,7 +2619,7 @@ const ROW_TESTS = {
     test('a fix commit sends the run back through the gates that held on an earlier commit, resolved once through gate_rerun', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults());
       assert.deepEqual(labelsOf(run).slice(-6), ['bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
-      const rerunBrief = main.buildGateRerunBrief(['bump'], { held: { bump: OTHER } }, THIRD, false);
+      const rerunBrief = main.buildGateRerunBrief(['bump'], THIRD, false);
       assert.equal(run.result.message.split(rerunBrief.problem).length - 1, 1, run.result.message);
       assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'));
     });
@@ -2632,7 +2632,7 @@ const ROW_TESTS = {
     });
     test('a surfaced gate_rerun asks at the first going back', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults(), buildWithSurfaceKinds(['gate_rerun']));
-      const brief = main.buildGateRerunBrief(['bump'], { held: { bump: OTHER } }, THIRD, false);
+      const brief = main.buildGateRerunBrief(['bump'], THIRD, false);
       assertTailPause(run, [surfacedAsk(brief)], 'fix-commit-1-1');
     });
     test('after maxGateReruns() going-backs the run pauses asking, and the reply starts a new pass', async () => {
@@ -2654,17 +2654,17 @@ const ROW_TESTS = {
       }
       const run = await runWorkflow(LAUNCH, results);
       assert.deepEqual(labelsOf(run), labels);
-      const limitBrief = main.buildGateRerunBrief(['bump'], { held: { bump: bumpCommits[2] } }, validateCommits[2], true);
+      const limitBrief = main.buildGateRerunBrief(['bump'], validateCommits[2], true);
       assertTailPause(run, [limitAsk(limitBrief)]);
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Stop bumping twice.'), { ...results, 'facts-2': STOP_FACTS });
       assert.deepEqual(labelsOf(resumed), [...labels, 'facts-2']);
     });
     test('the gates are the version bump, then validation, then local review, and the gate_rerun brief takes at the default level', () => {
       assert.deepEqual([...main.gateIds()], ['bump', 'validate', 'review']);
-      const brief = main.buildGateRerunBrief(['bump', 'validate'], { held: { bump: OTHER, validate: OTHER } }, THIRD, false);
+      const brief = main.buildGateRerunBrief(['bump', 'validate'], THIRD, false);
       assert.ok(lib.validateSchema(briefSchema, brief).ok);
       assert.deepEqual({ ...lib.decide({ kind: 'gate_rerun', level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
-      assert.ok(lib.validateSchema(briefSchema, main.buildGateRerunBrief(['bump'], { held: { bump: OTHER } }, THIRD, true)).ok);
+      assert.ok(lib.validateSchema(briefSchema, main.buildGateRerunBrief(['bump'], THIRD, true)).ok);
       assert.ok(lib.validateSchema(briefSchema, main.buildValidationRemediationBrief(OTHER, 1)).ok);
       assert.ok(lib.validateSchema(briefSchema, main.buildFixLimitBrief(OTHER)).ok);
     });
@@ -3178,7 +3178,7 @@ const ROW_TESTS = {
     ]) {
       test(`${label} pauses the run with a short code-built question and the detail block right after it`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
-        const brief = main.buildReviewQuestionBrief(review, OTHER, review.open_findings);
+        const brief = main.buildReviewQuestionBrief(review, review.open_findings);
         assert.equal(brief.problem, text);
         assert.equal(brief.kind, main.reviewQuestionKinds()[label]);
         assert.ok(lib.validateSchema(briefSchema, brief).ok);
@@ -3199,9 +3199,9 @@ const ROW_TESTS = {
       assert.ok(!message.includes('Recommendation: none.') && !message.includes(lib.askReasonLine('no_recommendation')), message);
       assert.ok(message.includes('- A: Answer the finding: this run gives your answer to local review, which goes on with it. (recommended)'), message);
       assert.ok(message.includes('Why I am asking: ' + lib.askReasonLine('table_surface')), message);
-      const brief = main.buildReviewQuestionBrief({ ...rejection, recommendation_text: 'Keep the process lock.' }, OTHER, rejection.open_findings);
+      const brief = main.buildReviewQuestionBrief({ ...rejection, recommendation_text: 'Keep the process lock.' }, rejection.open_findings);
       assert.deepEqual({ ...brief.recommendation }, { option_id: 'A', strength: 'weak', why: 'See its recommendation below. Only you can settle a question the review raises.' });
-      assert.equal(main.buildReviewQuestionBrief({ ...userInput, recommendation_text: ' ' }, OTHER, userInput.open_findings).recommendation.strength, 'none');
+      assert.equal(main.buildReviewQuestionBrief({ ...userInput, recommendation_text: ' ' }, userInput.open_findings).recommendation.strength, 'none');
     });
     test('both review question kinds ask at every autonomy level', () => {
       for (const kind of Object.values(main.reviewQuestionKinds())) {
@@ -3210,11 +3210,11 @@ const ROW_TESTS = {
       }
     });
     test('each option says what a reply does on this run, and option A of high_severity_rejection says local review records the decision at its source and goes on', () => {
-      const options = main.buildReviewQuestionBrief(rejection, OTHER, rejection.open_findings).options;
+      const options = main.buildReviewQuestionBrief(rejection, rejection.open_findings).options;
       assert.equal(options[0].id, 'A');
       assert.equal(options[0].summary, 'Reject the finding and go on with it unfixed: local review records the decision at its source and goes on.');
       assert.equal(options[1].summary, 'Fix the finding: local review fixes it, or sends it to the planner, and goes on.');
-      const answerOptions = main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings).options;
+      const answerOptions = main.buildReviewQuestionBrief(userInput, userInput.open_findings).options;
       assert.equal(answerOptions[0].summary, 'Answer the finding: this run gives your answer to local review, which goes on with it.');
       assert.equal(answerOptions[1].summary, 'Stop: local review ends blocked on this run, before the pull request.');
       assert.equal(main.buildBumpTypeBrief(parsedBump()).options[1].summary, 'Plan again: this run gives your reply to the planner before anything goes further.');
@@ -3245,7 +3245,7 @@ const ROW_TESTS = {
       const state = main.createRunState({ argsObject: { answers: {}, reply: 'Yes.' }, request: REQUEST, trunk: 'main', references: [], localReview: true });
       state.head = OTHER;
       const asked = main.askReviewQuestion(userInput, state);
-      const brief = main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings);
+      const brief = main.buildReviewQuestionBrief(userInput, userInput.open_findings);
       const reason = lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema).reason;
       assert.deepEqual(structuredClone(asked.answer), { question: lib.renderQuestions([{ brief: brief, reason: reason }], []) + '\n\n' + main.buildReviewDetailBlock(userInput, userInput.open_findings).text, reply: 'Yes.' });
     });
@@ -3477,7 +3477,7 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'), run.result.message);
-      const rerun = main.buildGateRerunBrief(['bump', 'validate'], { held: { bump: OTHER, validate: OTHER } }, THIRD, false);
+      const rerun = main.buildGateRerunBrief(['bump', 'validate'], THIRD, false);
       assert.equal(run.result.message.split(rerun.problem).length - 1, 1, run.result.message);
     });
     test('a fix commit after local review held sends the run back through local review as well', async () => {
@@ -3499,7 +3499,7 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-3', 'validate-1-3', 'validate-commit-1-3', 'review-1-2', 'review-commit-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + FOURTH + '.'), run.result.message);
-      const rerun = main.buildGateRerunBrief(['bump', 'validate', 'review'], { held: { bump: THIRD, validate: OTHER, review: THIRD } }, FOURTH, false);
+      const rerun = main.buildGateRerunBrief(['bump', 'validate', 'review'], FOURTH, false);
       assert.ok(rerun.problem.startsWith('Commit ' + FOURTH + ' landed after the version bump, validation and local review held on an earlier commit.'), rerun.problem);
       assert.ok(run.result.message.includes(rerun.problem), run.result.message);
       assert.ok(run.result.message.includes('Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD + '\n- ' + FOURTH), run.result.message);
@@ -4606,7 +4606,7 @@ const ROW_TESTS = {
     const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'F4', title: 'Codex title of F4.', question: 'Should the cache be shared across tenants?', recommendation_text: 'Keep one cache per tenant.', open_findings: [tenantFinding] };
     const reviewReply = 'Key it by tenant.';
     function reviewAsk() {
-      return surfacedAsk(main.buildReviewQuestionBrief(userInput, OTHER, userInput.open_findings));
+      return surfacedAsk(main.buildReviewQuestionBrief(userInput, userInput.open_findings));
     }
     function reviewQuestionText() {
       return lib.renderQuestions([reviewAsk()], []) + '\n\n' + main.buildReviewDetailBlock(userInput, userInput.open_findings).text;
@@ -4767,7 +4767,6 @@ const ROW_TESTS = {
       const worstFacts = parsedFacts({ trunk_freshness: 'diverged', trunk_ahead: hugeCount, trunk_behind: hugeCount });
       const longText = '\u{1F600}'.repeat(5000);
       const worstReview = { ...REVIEW_CLEAN, findings_open: Number.MAX_SAFE_INTEGER, finding_id: astralId, title: longText, file: longText, classification: longText, latest_severity_max: longText, recommendation_text: longText, signals_observed: ['x'], hypothesized_root: longText, cluster_files: [longText], cluster_ids: [longText], root_class: longText, same_framing_rationale: longText };
-      const gates = { held: { bump: OTHER, validate: OTHER, review: OTHER } };
       const briefs = [
         main.buildPlanAcceptanceBrief(worstPlan),
         main.buildRemediationPlanBrief(worstPlan),
@@ -4778,13 +4777,13 @@ const ROW_TESTS = {
         main.buildBumpIndeterminableBrief(parsedBump(ASK_USER_BUMP)),
         main.buildValidationRemediationBrief('f'.repeat(64), main.maxFixRounds()),
         main.buildFixLimitBrief('f'.repeat(64)),
-        main.buildGateRerunBrief(['bump', 'validate', 'review'], gates, 'f'.repeat(64), true),
-        main.buildGateRerunBrief(['bump', 'validate', 'review'], gates, 'f'.repeat(64), false),
+        main.buildGateRerunBrief(['bump', 'validate', 'review'], 'f'.repeat(64), true),
+        main.buildGateRerunBrief(['bump', 'validate', 'review'], 'f'.repeat(64), false),
         main.buildDiminishingReturnsBrief({ ...worstReview, exit_reason: 'diminishing-returns' }, 'f'.repeat(64)),
         main.buildReviewEscalationBrief({ ...worstReview, exit_reason: 'planner-escalation' }),
         main.buildReviewEscalationBrief({ ...worstReview, exit_reason: 'root-cluster-suspected' }),
-        main.buildReviewQuestionBrief({ ...worstReview, exit_reason: 'user-input-required', recommendation_text: 'r'.repeat(200) }, 'f'.repeat(64), Array.from({ length: 1000 }, () => ({}))),
-        main.buildReviewQuestionBrief({ ...worstReview, exit_reason: 'high-severity-rejection', recommendation_text: '' }, 'f'.repeat(64), Array.from({ length: 1000 }, () => ({})))
+        main.buildReviewQuestionBrief({ ...worstReview, exit_reason: 'user-input-required', recommendation_text: 'r'.repeat(200) }, Array.from({ length: 1000 }, () => ({}))),
+        main.buildReviewQuestionBrief({ ...worstReview, exit_reason: 'high-severity-rejection', recommendation_text: '' }, Array.from({ length: 1000 }, () => ({})))
       ];
       for (const brief of briefs) {
         const verdict = lib.validateSchema(briefSchema, brief);
