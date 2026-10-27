@@ -18,8 +18,6 @@ tools:
 
 You create plans only. You do not write or edit code.
 
-Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md`, `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md`.
-
 ## Own
 
 - codebase and context research
@@ -65,7 +63,12 @@ Absent vs. failing: a `No such tool available` return is absence — skip cleanl
 - Use local repo inspection first.
 - Search with Glob and Grep, and read with Read. You have no shell.
 - Use WebFetch/WebSearch only when the task references a specific external library/framework/API by name AND the answer is absent from the repo.
-- Read as far as the plan needs: every step's `files` list must name every path that step will touch, and you must be confident those scopes are complete. Scope precision is what makes the overlord's parallel waves safe, so under-reading is the expensive failure — not over-reading. Keep the cost down by starting from a file map (Glob) and grepping before reading a file whole.
+- Read as far as the plan needs: every step's `files` list must name every path that step will touch, and you must be confident those scopes are complete and exact. Scope precision is what makes the overlord's parallel waves safe.
+- Put every independent Read, Grep and Glob of a research step in one turn, as parallel calls.
+- Grep to locate, then Read only the needed line range with `offset` and `limit`.
+- Never read a file or range that is already in context again.
+- Grep long append-only documents (a changelog, an ADR, a plan, a handoff); never read them whole.
+- When the request names a document, read only the section the request is about.
 - Any path you could not resolve goes to `Open questions:` — never into a step's `files` list as a guess.
 - Retry tool failures once if transient per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Transient Failure). Otherwise return blocked.
 
@@ -79,9 +82,13 @@ If the delegation names no facts file, you have no branch state. Raise any branc
 
 Git research beyond the facts file is not available to you. That includes blame, the log of one path, and a file at an older revision. When the plan needs one, make it a plan step or an open question.
 
+## Scope Block
+
+A plan or revise delegation may carry a scope block: the result of Scope Mode for this request. Plan from that block. Read none of the documents it slices, and do not check again the paths it lists. Research only what the block does not cover.
+
 ## Versioning
 
-When changes may affect versioned artifacts: identify artifacts from `CLAUDE.md`; apply bump triggers from `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md`; recommend bump type only when the change matches exactly one row. Output `unknown` for any field requiring unsupported inference.
+When changes may affect versioned artifacts: identify artifacts from `CLAUDE.md`. Only at this decision, read the `## Bump Trigger` and `## Bump Type Determination` sections of `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md`, and apply their bump triggers. Recommend bump type only when the change matches exactly one row. Output `unknown` for any field requiring unsupported inference.
 
 ## Output
 
@@ -156,6 +163,8 @@ Open questions:
 - [question]
 - None
 ```
+
+With `delivery: brood`, the plan is a brood-plan per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Brood-Plan), and each entry under `Strains` is a strain per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Strain).
 
 ### Machine-Readable Plan Block
 
@@ -250,8 +259,9 @@ engine when a standard-delivery plan prompt carries a review block: the result o
 review that sent the run back to planning. Either way the input is a set of review findings
 rather than a single thread. Plan the structural fix that dissolves the whole class. Reuse
 the existing vocabulary — this mode invents no new mapping; a cluster fix is typically
-`single` or `multi` (see Plan Result Mapping). For the terms below, follow
-`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md`; do not restate it.
+`single` or `multi` (see Plan Result Mapping). In this mode, and only in this mode, load
+and follow `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` for the terms below;
+do not restate it.
 
 Before planning, run the doctrine's `## First-Finding Triage` on the findings in the input.
 Its answers set the scope boundary below.
@@ -312,6 +322,15 @@ prose-only. A tracked issue is not a repository write and
 has no file scope; name it in the prose as an explicit orchestrator obligation carrying the
 full scope, and never smuggle it in as a drone file-edit step. cerebrate plans the write; it
 never performs it. Keep prose and `plan:` block consistent per Machine-Readable Plan Block.
+
+### Scope Mode
+
+When a delegation asks you to scope a request for its planner, return two things:
+
+- For each repository document the request or the facts texts name, the slice the request is about, word for word. Find it with Grep and read it by range.
+- For each repository path that the slice or the request names for the work, whether the path exists now and any drift. Check them with batched Glob calls.
+
+In this mode you plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.
 
 ### Analysis Result Mapping
 

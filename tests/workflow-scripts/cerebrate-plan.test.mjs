@@ -11,6 +11,15 @@ const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decisi
 const PLAN_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json';
 const BRIEF_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json';
 const SCHEMA_READ_SENTENCE = 'Before you return a plan or a question, read `' + PLAN_SCHEMA_PATH + '` and `' + BRIEF_SCHEMA_PATH + '` with Read for what each field means.';
+const DOCTRINE_PATH = '${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md';
+const READ_DISCIPLINE_RULES = [
+  'Put every independent Read, Grep and Glob of a research step in one turn, as parallel calls.',
+  'Grep to locate, then Read only the needed line range with `offset` and `limit`.',
+  'Never read a file or range that is already in context again.',
+  'Grep long append-only documents (a changelog, an ADR, a plan, a handoff); never read them whole.',
+  'When the request names a document, read only the section the request is about.'
+];
+const SCOPE_BLOCK_RULE = 'Plan from that block. Read none of the documents it slices, and do not check again the paths it lists. Research only what the block does not cover.';
 
 function readSection(text, heading) {
   const lines = text.split('\n');
@@ -103,5 +112,32 @@ describe('cerebrate reads the plan and brief schemas for field meanings', () => 
     assert.ok(sentences.length > 0);
     const copied = sentences.filter((sentence) => cerebrateText.includes(sentence));
     assert.deepEqual(copied, []);
+  });
+});
+
+describe('cerebrate loads each governance doc only where a rule uses it', () => {
+  test('no Load and follow line names remediation-doctrine.md', () => {
+    const loadLines = cerebrateText.split('\n').filter((line) => /^load and follow/i.test(line.trim()));
+    assert.deepEqual(loadLines.filter((line) => line.includes('remediation-doctrine.md')), []);
+  });
+  test('Remediation Zoom-Out Mode names remediation-doctrine.md', () => {
+    assert.ok(readSection(cerebrateText, '### Remediation Zoom-Out Mode').includes(DOCTRINE_PATH), DOCTRINE_PATH);
+  });
+});
+
+describe('cerebrate research reads only what the plan needs', () => {
+  for (const rule of READ_DISCIPLINE_RULES) {
+    test(`Research Rules carry: ${rule}`, () => {
+      assert.ok(readSection(cerebrateText, '## Research Rules').includes(rule), rule);
+    });
+  }
+  test('Research Rules drop the framing that over-reading is the cheap failure', () => {
+    assert.ok(!readSection(cerebrateText, '## Research Rules').includes('under-reading is the expensive failure'));
+  });
+  test('the Scope Mode section exists and plans nothing', () => {
+    assert.ok(readSection(cerebrateText, '### Scope Mode').includes('In this mode you plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.'));
+  });
+  test('a plan or revise delegation with a scope block plans from it', () => {
+    assert.ok(readSection(cerebrateText, '## Scope Block').includes(SCOPE_BLOCK_RULE), SCOPE_BLOCK_RULE);
   });
 });
