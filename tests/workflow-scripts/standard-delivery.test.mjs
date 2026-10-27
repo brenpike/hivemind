@@ -301,7 +301,6 @@ function tailResults(pass, head, changes = {}) {
   return {
     ['bump-type-' + pass + '-1']: bumpRelay(),
     ['validate-' + pass + '-1']: VALIDATE_PASSED,
-    ['validate-commit-' + pass + '-1']: commitRelay({ commit: head, committed: 'false' }),
     ['review-' + pass + '-1']: REVIEW_CLEAN,
     ['review-commit-' + pass + '-1']: commitRelay({ commit: head, committed: 'false' }),
     ['pr-' + pass]: cannedPrRunner(),
@@ -310,7 +309,7 @@ function tailResults(pass, head, changes = {}) {
 }
 
 function tailLabels(pass) {
-  return ['bump-type-' + pass + '-1', 'validate-' + pass + '-1', 'validate-commit-' + pass + '-1', 'review-' + pass + '-1', 'review-commit-' + pass + '-1', 'pr-' + pass];
+  return ['bump-type-' + pass + '-1', 'validate-' + pass + '-1', 'review-' + pass + '-1', 'review-commit-' + pass + '-1', 'pr-' + pass];
 }
 
 function happyResults(changes = {}) {
@@ -522,7 +521,6 @@ function realTailResults(scratch, pass) {
   return {
     ['bump-type-' + pass + '-1']: bumpRelay(),
     ['validate-' + pass + '-1']: VALIDATE_PASSED,
-    ['validate-commit-' + pass + '-1']: realCommitRunner(scratch),
     ['review-' + pass + '-1']: REVIEW_CLEAN,
     ['review-commit-' + pass + '-1']: realCommitRunner(scratch),
     ['pr-' + pass]: cannedPrRunner()
@@ -704,7 +702,7 @@ function recordRelays(runner, relays) {
 }
 
 const FAILURE_TEXT = 'FAILURE_TEXT_ZQ: test cache.test.js failed';
-const FIX_FLOW_LABELS = ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'validate-commit-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1'];
+const FIX_FLOW_LABELS = ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1'];
 
 /**
  * One failed validation, one fix round committed as THIRD, the bump step
@@ -718,7 +716,6 @@ function fixFlowResults(changes = {}) {
     'fix-commit-1-1': commitRelay({ commit: THIRD }),
     'bump-type-1-2': bumpRelay(),
     'validate-1-2': VALIDATE_PASSED,
-    'validate-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' }),
     'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
     ...changes
   });
@@ -1739,7 +1736,6 @@ const ROW_TESTS = {
         'plan-1': planResult(makePlan({ branch: 'feature/branch-zq', base: 'base-zq', classification: 'bugfix' })),
         'branch-1': branchRelay({ branch: 'feature/branch-zq' }),
         'commit-1-1': commitRelay({ branch: 'feature/branch-zq' }),
-        'validate-commit-1-1': commitRelay({ branch: 'feature/branch-zq', committed: 'false' }),
         'review-commit-1-1': commitRelay({ branch: 'feature/branch-zq', committed: 'false' })
       });
       const run = await runWorkflow({ request: REQUEST, trunk: 'trunk-zq' }, results);
@@ -1908,7 +1904,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, waveResults);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-S1', 'work-1-S2', 'commit-1-1', 'work-1-S3', 'commit-1-2', ...tailLabels(1)]);
-      assert.deepEqual(run.phases.slice(-10), ['Waves', 'Commit', 'Waves', 'Commit', 'Bump', 'Validate', 'Commit', 'Review', 'Commit', 'PR']);
+      assert.deepEqual(run.phases.slice(-9), ['Waves', 'Commit', 'Waves', 'Commit', 'Bump', 'Validate', 'Review', 'Commit', 'PR']);
     });
     test('each worker gets its step, wave_scopes, branch, base and trunk as data under the boundary sentence', async () => {
       const run = await runWorkflow(LAUNCH, waveResults);
@@ -2080,7 +2076,7 @@ const ROW_TESTS = {
     const results = happyResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'clean' }] } });
     test('runner prompts carry no request text', async () => {
       const run = await runWorkflow(LAUNCH, results);
-      for (const label of ['facts-1', 'scan', 'branch-1', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']) {
+      for (const label of ['facts-1', 'scan', 'branch-1', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']) {
         assert.ok(!callOf(run, label).prompt.includes('REQUEST_MARKER_ZQ'), label);
       }
       assert.ok(callOf(run, 'plan-1').prompt.includes('REQUEST_MARKER_ZQ'));
@@ -2091,7 +2087,7 @@ const ROW_TESTS = {
       assert.ok(callOf(run, 'scan').prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(callOf(run, 'bump-type-1-1').prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(callOf(run, 'validate-1-1').prompt.includes(lib.runnerReadOnlySentence()));
-      for (const [label, skill] of [['branch-1', 'hivemind:create-working-branch'], ['commit-1-1', 'hivemind:molt'], ['validate-commit-1-1', 'hivemind:molt'], ['review-commit-1-1', 'hivemind:molt'], ['pr-1', 'hivemind:open-plan-pr']]) {
+      for (const [label, skill] of [['branch-1', 'hivemind:create-working-branch'], ['commit-1-1', 'hivemind:molt'], ['review-commit-1-1', 'hivemind:molt'], ['pr-1', 'hivemind:open-plan-pr']]) {
         const prompt = callOf(run, label).prompt;
         assert.ok(prompt.includes(main.gitScriptSentence(skill)), label);
         assert.ok(!prompt.includes(lib.runnerReadOnlySentence()), label);
@@ -2311,12 +2307,11 @@ const ROW_TESTS = {
         'bump-type-1-1': bumpRelay(MINOR_BUMP),
         'bump-1-1': { outcome: 'complete' },
         'bump-commit-1-1': commitRelay({ commit: THIRD }),
-        'validate-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
         'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' })
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run).slice(5), ['commit-1-1', 'bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.deepEqual(labelsOf(run).slice(5), ['commit-1-1', 'bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       const bumpBrief = main.buildBumpTypeBrief(parsedBump(MINOR_BUMP));
       assert.ok(bumpBrief.problem.includes('call for a minor version bump'), bumpBrief.problem);
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(plan) }, { brief: bumpBrief }])), run.result.message);
@@ -2411,7 +2406,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       assert.equal(readDataBlock(callOf(run, 'bump-type-1-1').prompt, 'inputs').base, trunkCommit);
       const bumpValues = lib.parseRoutingLines(bumpRelays[0].stdout, main.bumpTypeRoutingSpec()).values;
       assert.equal(bumpValues.verdict, 'bump_required');
@@ -2437,11 +2432,10 @@ const ROW_TESTS = {
         'bump-1-2': realBumpWorker(scratch),
         'bump-commit-1-2': recordRelays(realCommitRunner(scratch), bumpCommitRelays),
         'validate-1-2': VALIDATE_PASSED,
-        'validate-commit-1-2': realCommitRunner(scratch)
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run).slice(6), ['bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'validate-commit-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'bump-1-2', 'bump-commit-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.deepEqual(labelsOf(run).slice(6), ['bump-type-1-1', 'bump-1-1', 'bump-commit-1-1', 'validate-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'bump-1-2', 'bump-commit-1-2', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       const moltSpec = main.moltRoutingSpec();
       const firstBump = lib.parseRoutingLines(bumpCommitRelays[0].stdout, moltSpec).values;
@@ -2459,7 +2453,6 @@ const ROW_TESTS = {
         'bump-type-1-1': bumpRelay({ ...MINOR_BUMP, dominant_row: 'MAJOR', bump_type: 'major', rule_applied: '2', counts: { major: '1', minor: '0', patch: '0', no_bump: '0' } }),
         'bump-1-1': { outcome: 'complete' },
         'bump-commit-1-1': commitRelay({ commit: THIRD }),
-        'validate-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
         'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' })
       });
       const run = await runWorkflow(LAUNCH, results);
@@ -2500,49 +2493,76 @@ const ROW_TESTS = {
     }
   },
   'SD-25': () => {
-    test('the validate drone runs on its default model under the validation task and runner read-only sentences, then the commit runner gets an empty file list', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults());
+    test('with validation commands the validate drone gets them in its inputs block under the commands sentence, no commit runner follows it, and no not_run is offered', async () => {
+      const commands = ['npm test', 'npm run lint'];
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ validation_commands: commands })) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'validate-1-1');
       assert.equal(call.opts.agentType, 'hivemind:drone');
       assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
       assert.equal(call.opts.phase, 'Validate');
-      assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'not_run', 'blocked']);
+      assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'blocked']);
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'failures', 'blocker', 'next_action']);
-      assert.deepEqual(call.prompt.split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationTaskSentence(), lib.runnerReadOnlySentence()]);
-      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.');
-      const commit = callOf(run, 'validate-commit-1-1');
-      assert.deepEqual(readDataBlock(commit.prompt, 'inputs'), { files: [], commit_type: 'feat', breaking: false, trunk: 'main' });
-      assert.ok(commit.prompt.includes(main.gitScriptSentence('hivemind:molt')));
+      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every command passes. failed when any fails. blocked when a command cannot run.');
+      assert.deepEqual(withoutDataBlock(call.prompt, 'inputs').split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), '']);
+      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { commands: commands });
+      assert.ok(!labelsOf(run).some((label) => label.startsWith('validate-commit')), JSON.stringify(labelsOf(run)));
+      const labels = labelsOf(run);
+      assert.equal(labels[labels.indexOf('validate-1-1') + 1], 'review-1-1');
     });
-    test('the validation task sentence names the Validation Procedure clause of definitions.md as the whole task', () => {
-      const start = definitionsText.indexOf('On the script engine, ');
+    test('with validation commands a not_run result stops the run as unusable', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'not_run' } }));
+      assert.equal(run.result.outcome, 'blocked');
+      assert.equal(run.result.message.split('\n\n')[0], 'The validation step returned no usable result, so the delivery stopped before the pull request.');
+      assert.equal(labelsOf(run).at(-1), 'validate-1-1');
+    });
+    test('an empty validation_commands list still runs validation: the fallback prompt names the Validation Procedure and offers not_run', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ validation_commands: [] })) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const call = callOf(run, 'validate-1-1');
+      assert.equal(call.opts.agentType, 'hivemind:drone');
+      assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
+      assert.deepEqual(call.prompt.split('\n'), ['Run the project\'s validation on the working branch as it is checked out.', main.validationTaskSentence(), lib.runnerReadOnlySentence()]);
+      assert.deepEqual(call.opts.schema.properties.outcome.enum, ['passed', 'failed', 'not_run', 'blocked']);
+      assert.equal(call.opts.schema.properties.outcome.description, 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.');
+    });
+    test('the validation sentences match the Validation Procedure clause of definitions.md', () => {
+      const procedureStart = definitionsText.indexOf('## Validation Procedure');
+      assert.notEqual(procedureStart, -1);
+      const procedure = definitionsText.slice(procedureStart, definitionsText.indexOf('\n## ', procedureStart + 1));
+      assert.ok(procedure.includes('Run each gate command the project\'s `CLAUDE.md` names, once.'), procedure);
+      const start = procedure.indexOf('On the script engine, ');
       assert.notEqual(start, -1);
-      const clause = definitionsText.slice(start, definitionsText.indexOf('not a Worker Self-Check.', start) + 'not a Worker Self-Check.'.length);
-      const sentence = main.validationTaskSentence();
-      for (const phrase of ['its whole task', 'not a Worker Self-Check']) {
+      const clause = procedure.slice(start, procedure.indexOf('not a Worker Self-Check.', start) + 'not a Worker Self-Check.'.length);
+      for (const phrase of ['the plan\'s validation commands, once per gate run', 'running each once is its whole task', 'When the plan names none, the drone runs this procedure itself as its whole task, so an empty list never skips validation.', 'not a Worker Self-Check']) {
         assert.ok(clause.includes(phrase), phrase);
-        assert.ok(sentence.includes(phrase), phrase);
       }
-      assert.ok(definitionsText.includes('## Validation Procedure'));
-      assert.ok(sentence.includes('the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md'));
-      assert.ok(definitionsText.includes('If `CLAUDE.md` lists no validation commands, validation is "Not run"'));
-      assert.ok(main.buildValidateSchema().properties.outcome.description.includes('not_run when the project documents no validation commands'));
+      const commandsSentence = main.validationCommandsSentence();
+      assert.equal(commandsSentence, 'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.');
+      assert.ok(!commandsSentence.includes('governance') && !commandsSentence.includes('${CLAUDE_PLUGIN_ROOT}'), 'the commands sentence names no governance doc');
+      const taskSentence = main.validationTaskSentence();
+      for (const phrase of ['its whole task', 'not a Worker Self-Check', 'the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md']) {
+        assert.ok(taskSentence.includes(phrase), phrase);
+      }
+      assert.ok(procedure.includes('If `CLAUDE.md` lists no validation commands, validation is "Not run"'));
+      assert.ok(main.buildValidateSchema(false).properties.outcome.description.includes('not_run when the project documents no validation commands'));
+      assert.ok(!main.buildValidateSchema(true).properties.outcome.description.includes('not_run'));
     });
     test('passed holds the gate and the run names the commit', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       assert.ok(run.result.message.startsWith(HELD_ALL + OTHER + '.'));
       assert.ok(!run.result.message.includes('Gates that did not run'));
     });
-    test('not_run holds the gate and is listed', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'not_run' } }));
+    test('with an empty list not_run holds the gate and is listed', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ validation_commands: [] })), 'validate-1-1': { outcome: 'not_run' } }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(run.result.message.includes('\n\nGates that did not run:\n- validation: the project documents no validation commands.\n\n'), run.result.message);
     });
-    test('blocked stops the run after the validation commit', async () => {
+    test('blocked stops the run at the validation step', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' } }));
       assert.equal(run.result.outcome, 'blocked');
       assert.equal(run.result.message.split('\n\n')[0], 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is not installed.".');
-      assert.equal(labelsOf(run).at(-1), 'validate-commit-1-1');
+      assert.equal(labelsOf(run).at(-1), 'validate-1-1');
     });
     for (const [label, result] of [['no result', null], ['failed with no failures', { outcome: 'failed' }], ['an extra field', { outcome: 'passed', note: 'x' }]]) {
       test(`a validation result with ${label} stops the run`, async () => {
@@ -2551,7 +2571,7 @@ const ROW_TESTS = {
         assert.equal(run.result.message.split('\n\n')[0], 'The validation step returned no usable result, so the delivery stopped before the pull request.');
       });
     }
-    test('real molt.sh: the empty-list commit refuses a path the validation left dirty', async () => {
+    test('real molt.sh: the review commit runner refuses a path the validation left dirty', async () => {
       const scratch = makeScratchRepo();
       const dirtyValidation = () => {
         writeRepoFile(scratch, 'coverage.txt', 'report\n');
@@ -2559,7 +2579,8 @@ const ROW_TESTS = {
       };
       const run = await runWorkflow(LAUNCH, realResults(scratch, { 'validate-1-1': dirtyValidation }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files".\nDirty paths outside the files of the validation run:\n- "coverage.txt"'), run.result.message);
+      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files".\nDirty paths outside the files of the local review:\n- "coverage.txt"'), run.result.message);
+      assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
     });
   },
   'SD-26': () => {
@@ -2595,17 +2616,16 @@ const ROW_TESTS = {
       const failed = { outcome: 'failed', failures: FAILURE_TEXT };
       const fixCommits = ['a', 'b', 'c'].map((digit) => digit.repeat(40));
       const results = happyResults({ 'validate-1-1': failed });
-      const labels = ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'validate-1-1', 'validate-commit-1-1'];
+      const labels = ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'validate-1-1'];
       fixCommits.forEach((fixCommit, index) => {
         const round = index + 1;
         Object.assign(results, {
           ['fix-1-' + round]: { outcome: 'complete', files: ['src/cache.js'] },
           ['fix-commit-1-' + round]: commitRelay({ commit: fixCommit }),
           ['bump-type-1-' + (round + 1)]: bumpRelay(),
-          ['validate-1-' + (round + 1)]: failed,
-          ['validate-commit-1-' + (round + 1)]: commitRelay({ commit: fixCommit, committed: 'false' })
+          ['validate-1-' + (round + 1)]: failed
         });
-        labels.push('fix-1-' + round, 'fix-commit-1-' + round, 'bump-type-1-' + (round + 1), 'validate-1-' + (round + 1), 'validate-commit-1-' + (round + 1));
+        labels.push('fix-1-' + round, 'fix-commit-1-' + round, 'bump-type-1-' + (round + 1), 'validate-1-' + (round + 1));
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.deepEqual(labelsOf(run), labels);
@@ -2617,7 +2637,24 @@ const ROW_TESTS = {
     });
     test('a surfaced validation_remediation asks before any fix round', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults(), buildWithSurfaceKinds(['validation_remediation']));
-      assertTailPause(run, [surfacedAsk(main.buildValidationRemediationBrief(OTHER, 1))], 'validate-commit-1-1');
+      assertTailPause(run, [surfacedAsk(main.buildValidationRemediationBrief(OTHER, 1))], 'validate-1-1');
+    });
+    test('a fix round that commits nothing runs no validate agent: the next fix round gets the kept failures, and at maxFixRounds() the run asks', async () => {
+      const results = happyResults({ 'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT } });
+      const labels = ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'bump-type-1-1', 'validate-1-1'];
+      for (let round = 1; round <= main.maxFixRounds(); round += 1) {
+        Object.assign(results, {
+          ['fix-1-' + round]: { outcome: 'complete', files: [] },
+          ['fix-commit-1-' + round]: commitRelay({ commit: OTHER, committed: 'false' })
+        });
+        labels.push('fix-1-' + round, 'fix-commit-1-' + round);
+      }
+      const run = await runWorkflow(LAUNCH, results);
+      assert.deepEqual(labelsOf(run), labels);
+      for (let round = 1; round <= main.maxFixRounds(); round += 1) {
+        assert.equal(readDataBlock(callOf(run, 'fix-1-' + round).prompt, 'failures'), FAILURE_TEXT);
+      }
+      assertTailPause(run, [limitAsk(main.buildFixLimitBrief(OTHER))], 'fix-commit-1-' + main.maxFixRounds());
     });
     test('a blocked fix round stops the run after its commit', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'The test needs a database.' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }));
@@ -2636,24 +2673,31 @@ const ROW_TESTS = {
   'SD-27': () => {
     test('a bump commit moves the head: validation runs on it and the run names it', async () => {
       const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
-      const results = happyResults({ 'plan-1': planResult(plan), 'bump-type-1-1': bumpRelay(MINOR_BUMP), 'bump-1-1': { outcome: 'complete' }, 'bump-commit-1-1': commitRelay({ commit: THIRD }), 'validate-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }), 'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }) });
+      const results = happyResults({ 'plan-1': planResult(plan), 'bump-type-1-1': bumpRelay(MINOR_BUMP), 'bump-1-1': { outcome: 'complete' }, 'bump-commit-1-1': commitRelay({ commit: THIRD }), 'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
       assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'), run.result.message);
       assert.ok(!run.result.message.includes('landed after'), 'no gate held on an earlier commit, so no gate_rerun decision');
     });
     test('a fix commit sends the run back through the gates that held on an earlier commit, resolved once through gate_rerun', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults());
-      assert.deepEqual(labelsOf(run).slice(-6), ['bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.deepEqual(labelsOf(run).slice(-5), ['bump-type-1-2', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       const rerunBrief = main.buildGateRerunBrief(['bump'], THIRD, false);
       assert.equal(run.result.message.split(rerunBrief.problem).length - 1, 1, run.result.message);
       assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'));
     });
-    test('a fix round that commits nothing reruns only validation', async () => {
-      const results = fixFlowResults({ 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }), 'validate-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }), 'review-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
+    test('a fix round that commits nothing reruns no gate and no validation: the kept failure on the head goes to the next fix round', async () => {
+      const results = fixFlowResults({
+        'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }),
+        'fix-1-2': { outcome: 'complete', files: ['src/cache.js'] },
+        'fix-commit-1-2': commitRelay({ commit: THIRD })
+      });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run).slice(-7), ['fix-1-1', 'fix-commit-1-1', 'validate-1-2', 'validate-commit-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
-      assert.ok(!run.result.message.includes('landed after'));
+      assert.deepEqual(labelsOf(run).slice(7), ['validate-1-1', 'fix-1-1', 'fix-commit-1-1', 'fix-1-2', 'fix-commit-1-2', 'bump-type-1-2', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.equal(readDataBlock(callOf(run, 'fix-1-2').prompt, 'failures'), FAILURE_TEXT);
+      const rerunBrief = main.buildGateRerunBrief(['bump'], THIRD, false);
+      assert.equal(run.result.message.split(rerunBrief.problem).length - 1, 1, run.result.message);
+      assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'));
     });
     test('a surfaced gate_rerun asks at the first going back', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults(), buildWithSurfaceKinds(['gate_rerun']));
@@ -2664,7 +2708,7 @@ const ROW_TESTS = {
       assert.equal(main.maxGateReruns(), 4);
       const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
       const bumpCommits = ['a', 'b', 'c'].map((digit) => digit.repeat(40));
-      const validateCommits = ['d', 'e', 'f'].map((digit) => digit.repeat(40));
+      const reviewCommits = ['d', 'e', 'f'].map((digit) => digit.repeat(40));
       const results = happyResults({ 'plan-1': planResult(plan) });
       const labels = ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1'];
       for (let count = 1; count <= 3; count += 1) {
@@ -2673,15 +2717,16 @@ const ROW_TESTS = {
           ['bump-1-' + count]: { outcome: 'complete' },
           ['bump-commit-1-' + count]: commitRelay({ commit: bumpCommits[count - 1] }),
           ['validate-1-' + count]: VALIDATE_PASSED,
-          ['validate-commit-1-' + count]: commitRelay({ commit: validateCommits[count - 1], committed: 'false' })
+          ['review-1-' + count]: REVIEW_CLEAN,
+          ['review-commit-1-' + count]: commitRelay({ commit: reviewCommits[count - 1], committed: 'false' })
         });
-        labels.push('bump-type-1-' + count, 'bump-1-' + count, 'bump-commit-1-' + count, 'validate-1-' + count, 'validate-commit-1-' + count);
+        labels.push('bump-type-1-' + count, 'bump-1-' + count, 'bump-commit-1-' + count, 'validate-1-' + count, 'review-1-' + count, 'review-commit-1-' + count);
       }
       const run = await runWorkflow(LAUNCH, results);
       assert.deepEqual(labelsOf(run), labels);
-      const limitBrief = main.buildGateRerunBrief(['bump'], validateCommits[2], true);
+      const limitBrief = main.buildGateRerunBrief(['bump', 'validate'], reviewCommits[2], true);
       assertTailPause(run, [limitAsk(limitBrief)]);
-      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Stop bumping twice.'), { ...results, 'facts-2': STOP_FACTS });
+      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Stop the review commits.'), { ...results, 'facts-2': STOP_FACTS });
       assert.deepEqual(labelsOf(resumed), [...labels, 'facts-2']);
     });
     test('the gates are the version bump, then validation, then local review, and the gate_rerun brief takes at the default level', () => {
@@ -2697,14 +2742,15 @@ const ROW_TESTS = {
   'SD-28': () => {
     test('gate step labels come only from the pass, the gate step and its run count', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults());
-      const tailLabelPattern = /^(?:bump-type|bump|bump-commit|validate|validate-commit|fix|fix-commit|review|review-commit)-1-[1-9][0-9]*$/;
+      const tailLabelPattern = /^(?:bump-type|bump|bump-commit|validate|fix|fix-commit|review|review-commit)-1-[1-9][0-9]*$/;
       const labels = labelsOf(run);
       assert.ok(labels.slice(6, -1).every((label) => tailLabelPattern.test(label)), JSON.stringify(labels));
       assert.equal(labels.at(-1), 'pr-1');
       assert.equal(new Set(labels).size, labels.length);
       const names = [...moduleSource.matchAll(/gateLabel\('([a-z-]+)', run, /g)].map((match) => match[1]);
-      assert.deepEqual([...new Set(names)].sort(), ['bump', 'bump-commit', 'bump-type', 'fix', 'fix-commit', 'review', 'review-commit', 'validate', 'validate-commit']);
-      assert.equal(main.gateLabel('validate-commit', { pass: 2 }, 3), 'validate-commit-2-3');
+      assert.deepEqual([...new Set(names)].sort(), ['bump', 'bump-commit', 'bump-type', 'fix', 'fix-commit', 'review', 'review-commit', 'validate']);
+      assert.ok(!moduleSource.includes('validate-commit'), 'no validate-commit runner');
+      assert.equal(main.gateLabel('validate', { pass: 2 }, 3), 'validate-2-3');
     });
     test('a run again replays every prompt byte for byte', async () => {
       const first = await runWorkflow(LAUNCH, fixFlowResults());
@@ -2812,7 +2858,7 @@ const ROW_TESTS = {
     test('once validation holds the local reviewer gets base, working_branch, trunk and max_iterations 10 under the boundary sentence', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const labels = labelsOf(run);
-      assert.equal(labels[labels.indexOf('validate-commit-1-1') + 1], 'review-1-1');
+      assert.equal(labels[labels.indexOf('validate-1-1') + 1], 'review-1-1');
       const call = callOf(run, 'review-1-1');
       assert.equal(call.opts.agentType, 'hivemind:local-reviewer');
       assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
@@ -2848,7 +2894,6 @@ const ROW_TESTS = {
         'plan-1': planResult(makePlan({ branch: 'feature/branch-zq', base: 'base-zq' })),
         'branch-1': branchRelay({ branch: 'feature/branch-zq' }),
         'commit-1-1': commitRelay({ branch: 'feature/branch-zq' }),
-        'validate-commit-1-1': commitRelay({ branch: 'feature/branch-zq', committed: 'false' }),
         'review-commit-1-1': commitRelay({ branch: 'feature/branch-zq', committed: 'false' })
       });
       const run = await runWorkflow({ request: REQUEST, trunk: 'trunk-zq' }, results);
@@ -3022,14 +3067,13 @@ const ROW_TESTS = {
         'review-commit-1-1': recordRelays(realCommitRunner(scratch), commitRelays),
         'bump-type-1-2': bumpRelay(),
         'validate-1-2': VALIDATE_PASSED,
-        'validate-commit-1-2': realCommitRunner(scratch)
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       assert.equal(runGitIn(scratch, ['log', '-1', '--format=%s']), 'fix: review finding');
       assert.deepEqual({ ...lib.parseRoutingLines(commitRelays[0].stdout, main.moltRoutingSpec()).values }, { branch: 'feature/cache', commit: head, committed: 'false' });
-      assert.deepEqual(labelsOf(run).slice(-6), ['review-1-1', 'review-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'pr-1']);
+      assert.deepEqual(labelsOf(run).slice(-5), ['review-1-1', 'review-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + head + '.'), run.result.message);
     });
     test('a review commit that reports a moved head with nothing committed records the range from the previous head', async () => {
@@ -3038,7 +3082,6 @@ const ROW_TESTS = {
         'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
         'bump-type-1-2': bumpRelay(),
         'validate-1-2': VALIDATE_PASSED,
-        'validate-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' })
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -3496,11 +3539,10 @@ const ROW_TESTS = {
         'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
         'bump-type-1-2': bumpRelay(),
         'validate-1-2': VALIDATE_PASSED,
-        'validate-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' })
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'pr-1']);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'), run.result.message);
       const rerun = main.buildGateRerunBrief(['bump', 'validate'], THIRD, false);
       assert.equal(run.result.message.split(rerun.problem).length - 1, 1, run.result.message);
@@ -3511,18 +3553,16 @@ const ROW_TESTS = {
         'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
         'bump-type-1-2': bumpRelay(),
         'validate-1-2': { outcome: 'failed', failures: FAILURE_TEXT },
-        'validate-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' }),
         'fix-1-1': { outcome: 'complete', files: ['src/cache.js'] },
         'fix-commit-1-1': commitRelay({ commit: FOURTH }),
         'bump-type-1-3': bumpRelay(),
         'validate-1-3': VALIDATE_PASSED,
-        'validate-commit-1-3': commitRelay({ commit: FOURTH, committed: 'false' }),
         'review-1-2': REVIEW_CLEAN,
         'review-commit-1-2': commitRelay({ commit: FOURTH, committed: 'false' })
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'validate-commit-1-2', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-3', 'validate-1-3', 'validate-commit-1-3', 'review-1-2', 'review-commit-1-2', 'pr-1']);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'bump-type-1-2', 'validate-1-2', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-3', 'validate-1-3', 'review-1-2', 'review-commit-1-2', 'pr-1']);
       assert.ok(run.result.message.startsWith(HELD_ALL + FOURTH + '.'), run.result.message);
       const rerun = main.buildGateRerunBrief(['bump', 'validate', 'review'], FOURTH, false);
       assert.ok(rerun.problem.startsWith('Commit ' + FOURTH + ' landed after the version bump, validation and local review held on an earlier commit.'), rerun.problem);
@@ -3563,7 +3603,7 @@ const ROW_TESTS = {
     for (const [label, results, head, args = LAUNCH] of [
       ['a run with no fix', happyResults(), OTHER],
       ['a run with a fix round', fixFlowResults(), THIRD],
-      ['a run with a reviewer fix commit', happyResults({ 'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }), 'bump-type-1-2': bumpRelay(), 'validate-1-2': VALIDATE_PASSED, 'validate-commit-1-2': commitRelay({ commit: THIRD, committed: 'false' }) }), THIRD],
+      ['a run with a reviewer fix commit', happyResults({ 'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }), 'bump-type-1-2': bumpRelay(), 'validate-1-2': VALIDATE_PASSED }), THIRD],
       ['a run with a remediation pass', remediationResults(ESCALATION), THIRD, REMEDIATION_LAUNCH]
     ]) {
       test(`${label}: the PR prompt is the only push prompt, once, and its expect_commit is the commit every gate held on`, async () => {
@@ -3759,8 +3799,8 @@ const ROW_TESTS = {
       ['Commits this run made:', '- ' + OTHER].forEach((line) => assert.ok(bodyOutside.includes(line), line));
     });
     test('a bump type, a validation not run and a local review not configured are each named', async () => {
-      const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
-      const results = happyResults({ 'plan-1': planResult(plan), 'bump-type-1-1': bumpRelay(MINOR_BUMP), 'bump-1-1': { outcome: 'complete' }, 'bump-commit-1-1': commitRelay({ commit: THIRD }), 'validate-1-1': { outcome: 'not_run' }, 'validate-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }) });
+      const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] }, validation_commands: [] });
+      const results = happyResults({ 'plan-1': planResult(plan), 'bump-type-1-1': bumpRelay(MINOR_BUMP), 'bump-1-1': { outcome: 'complete' }, 'bump-commit-1-1': commitRelay({ commit: THIRD }), 'validate-1-1': { outcome: 'not_run' } });
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
@@ -4442,7 +4482,7 @@ const ROW_TESTS = {
     const RUN_AGAIN_LINE = 'Nothing in the repo needs a fix: run the request again once the cause named above has passed, for example when the machine is idle.';
     const timedOut = 'The test run timed out.';
     test('each blocked-capable schema carries an optional next_action of fix_cause or run_again', () => {
-      const schemas = [main.buildWorkerSchema(), main.buildGateEditSchema(false), main.buildGateEditSchema(true), main.buildValidateSchema()];
+      const schemas = [main.buildWorkerSchema(), main.buildGateEditSchema(false), main.buildGateEditSchema(true), main.buildValidateSchema(false), main.buildValidateSchema(true)];
       for (const schema of schemas) {
         assert.deepEqual([...schema.properties.next_action.enum], ['fix_cause', 'run_again']);
         assert.equal(schema.properties.next_action.description, 'run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise. Only with outcome blocked.');
@@ -4548,7 +4588,8 @@ const ROW_TESTS = {
       worker: main.buildWorkerSchema(),
       'bump edit': main.buildGateEditSchema(false),
       fix: main.buildGateEditSchema(true),
-      validate: main.buildValidateSchema(),
+      validate: main.buildValidateSchema(false),
+      'validate commands': main.buildValidateSchema(true),
       review: main.buildReviewSchema(),
       'scan item': main.scanStepSchema().properties.results.items
     });
@@ -4588,7 +4629,7 @@ const ROW_TESTS = {
         assert.deepEqual(collectAnyOfPaths(call.opts.schema, '$', []), [], call.opts.label);
       }
       const schemas = fullSchemas();
-      for (const [label, name] of [['facts-1', 'relay'], ['plan-1', 'plan result'], ['work-1-STEP-001', 'worker'], ['validate-1-1', 'validate'], ['review-1-1', 'review']]) {
+      for (const [label, name] of [['facts-1', 'relay'], ['plan-1', 'plan result'], ['work-1-STEP-001', 'worker'], ['validate-1-1', 'validate commands'], ['review-1-1', 'review']]) {
         assert.deepEqual(callOf(happy, label).opts.schema, structuredClone(lib.toAgentSchema(schemas[name])), label);
       }
       assert.deepEqual(callOf(replan, 'revise-1').opts.schema, structuredClone(lib.toAgentSchema(main.buildReviseResultSchema([{}]))));
@@ -4610,10 +4651,10 @@ const ROW_TESTS = {
       ['a complete bump edit carrying next_action', LAUNCH, bumpResults({ outcome: 'complete', next_action: 'fix_cause' }), bumpUnusable, 'bump-commit-1-1'],
       ['a complete fix carrying blocker', LAUNCH, fixResults({ outcome: 'complete', files: ['src/cache.js'], blocker: 'x' }), fixUnusable, 'fix-commit-1-1'],
       ['a fix with no files', LAUNCH, fixResults({ outcome: 'complete' }), fixUnusable, 'fix-commit-1-1'],
-      ['a passed validation carrying failures', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'passed', failures: 'x' } }), validateUnusable, 'validate-commit-1-1'],
-      ['a not_run validation carrying blocker', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'not_run', blocker: 'x' } }), validateUnusable, 'validate-commit-1-1'],
-      ['a failed validation carrying next_action', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT, next_action: 'run_again' } }), validateUnusable, 'validate-commit-1-1'],
-      ['a failed validation with no failures', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'failed' } }), validateUnusable, 'validate-commit-1-1'],
+      ['a passed validation carrying failures', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'passed', failures: 'x' } }), validateUnusable, 'validate-1-1'],
+      ['a not_run validation carrying blocker', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'not_run', blocker: 'x' } }), validateUnusable, 'validate-1-1'],
+      ['a failed validation carrying next_action', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT, next_action: 'run_again' } }), validateUnusable, 'validate-1-1'],
+      ['a failed validation with no failures', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'failed' } }), validateUnusable, 'validate-1-1'],
       ['a clean review carrying finding_id', LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, finding_id: 'F1' } }), reviewUnusable, 'review-commit-1-1'],
       ['a diminishing-returns review carrying cluster_ids', LAUNCH, happyResults({ 'review-1-1': { ...DIMINISHING, cluster_ids: ['F1'] } }), reviewUnusable, 'review-commit-1-1'],
       ['a planner-escalation review with no file', LAUNCH, happyResults({ 'review-1-1': escalationWithoutFile }), reviewUnusable, 'review-commit-1-1']
@@ -4718,13 +4759,14 @@ const ROW_TESTS = {
       const plan = planSchema.properties;
       const step = plan.steps.items.properties;
       assert.deepEqual([plan.digest.properties.problem.maxLength, plan.digest.properties.change.maxLength, step.id.maxLength, step.external_effects.items.properties.summary.maxLength], [200, 200, 64, 300]);
-      const schemas = [main.buildPlanResultSchema(planSchema, briefSchema), main.buildWorkerSchema(), main.buildGateEditSchema(false), main.buildGateEditSchema(true), main.buildValidateSchema()];
+      const schemas = [main.buildPlanResultSchema(planSchema, briefSchema), main.buildWorkerSchema(), main.buildGateEditSchema(false), main.buildGateEditSchema(true), main.buildValidateSchema(false), main.buildValidateSchema(true)];
       schemas.forEach((schema) => assert.equal(schema.properties.blocker.maxLength, 400));
       for (const name of ['summary']) {
         assert.equal(plan[name].maxLength, undefined);
         assert.equal(main.buildWorkerSchema().properties[name].maxLength, undefined);
       }
-      assert.equal(main.buildValidateSchema().properties.failures.maxLength, undefined);
+      assert.equal(main.buildValidateSchema(false).properties.failures.maxLength, undefined);
+      assert.equal(main.buildValidateSchema(true).properties.failures.maxLength, undefined);
     });
     test('a complete run with every unbounded agent field at 5000 characters stays within the bound', async () => {
       const run = await runWorkflow(LAUNCH, maxResults());

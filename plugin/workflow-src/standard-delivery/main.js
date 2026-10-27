@@ -161,7 +161,7 @@
  *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
  *   from one table, which gives both its anyOf branches and its 'Only with'
  *   descriptions: the plan result and revise schemas, the relay, worker,
- *   bump edit, fix, validate and review schemas. validateSchema checks the
+ *   bump edit, fix, both validate and review schemas. validateSchema checks the
  *   full schema, so a result that carries a field of another outcome, or
  *   lacks a field its outcome requires, blocks the step that reads it with
  *   that step's malformed or schema message, and no consumer checks the tie
@@ -207,7 +207,8 @@ const RELAY_SCHEMA = buildRelaySchema();
 const WORKER_SCHEMA = buildWorkerSchema();
 const BUMP_EDIT_SCHEMA = buildGateEditSchema(false);
 const FIX_SCHEMA = buildGateEditSchema(true);
-const VALIDATE_SCHEMA = buildValidateSchema();
+const VALIDATE_SCHEMA = buildValidateSchema(false);
+const VALIDATE_COMMANDS_SCHEMA = buildValidateSchema(true);
 const REVIEW_SCHEMA = buildReviewSchema();
 const SCOPE_SCHEMA = buildScopeSchema();
 

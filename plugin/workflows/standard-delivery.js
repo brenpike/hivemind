@@ -2259,14 +2259,14 @@ spec.properties.files={type:'array',description:'Every path you created, edited 
 }
 return buildTaggedSchema(spec);
 }
-function buildValidateSchema(){
-return buildTaggedSchema({
+function buildValidateSchema(hasCommands){
+const spec={
 tag:'outcome',
 properties:{
 outcome:{
 type:'string',
-enum:['passed','failed','not_run','blocked'],
-description:'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.'
+enum:['passed','failed','blocked'],
+description:'passed when every command passes. failed when any fails. blocked when a command cannot run.'
 },
 failures:{type:'string',description:'What failed: each failing command with its failure output.'},
 blocker:{type:'string',maxLength:400,description:'The command that cannot run and why, in one or two short sentences written for the user.'},
@@ -2276,10 +2276,15 @@ required:['outcome'],
 variants:{
 passed:{required:[],optional:[]},
 failed:{required:['failures'],optional:[]},
-not_run:{required:[],optional:[]},
 blocked:{required:[],optional:['blocker','next_action']}
 }
-});
+};
+if(!hasCommands){
+spec.properties.outcome.enum=['passed','failed','not_run','blocked'];
+spec.properties.outcome.description='passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.';
+spec.variants.not_run={required:[],optional:[]};
+}
+return buildTaggedSchema(spec);
 }
 function buildTailBrief({kind,problem,goOn,other,strength,why}){
 return{
@@ -2477,15 +2482,24 @@ return{held:true,note:note};
 const edited=await runBumpEdit(run,plan,facts,checked.values.bump_type,count);
 return edited.held?{held:true,note:note}:edited;
 }
-function buildValidatePrompt(){
+function buildValidatePrompt(commands){
+const taskLine='Run the project\'s validation on the working branch as it is checked out.';
+if(commands.length===0){
+return[taskLine,validationTaskSentence(),runnerReadOnlySentence()].join('\n');
+}
 return[
-'Run the project\'s validation on the working branch as it is checked out.',
-validationTaskSentence(),
-runnerReadOnlySentence()
+taskLine,
+validationCommandsSentence(),
+runnerReadOnlySentence(),
+'',
+formatDataBlock('inputs',{commands:commands})
 ].join('\n');
 }
-function readValidateOutcome(result){
-if(!validateSchema(VALIDATE_SCHEMA,result).ok){
+function selectValidateSchema(plan){
+return plan.validation_commands.length>0?VALIDATE_COMMANDS_SCHEMA:VALIDATE_SCHEMA;
+}
+function readValidateOutcome(result,schema){
+if(!validateSchema(schema,result).ok){
 return{problem:'The validation step returned no usable result, so '+RUN_NAME+' stopped before the pull request.'};
 }
 if(result.outcome==='blocked'){
@@ -2523,15 +2537,18 @@ if(!run.notRunGates.includes(line)){
 run.notRunGates.push(line);
 }
 }
-async function runValidateGate(run,plan,gates){
-const count=gates.runs.validate;
-phase('Validate');
-const result=await agent(addResumeNote(buildValidatePrompt(),run),droneOptions(gateLabel('validate',run,count),'Validate',VALIDATE_SCHEMA));
-const committed=await runCommitStep(run,plan,[],gateLabel('validate-commit',run,count),'validate');
-if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run)};
+function hasKeptFailure(run,gates){
+return Object.hasOwn(gates.failures,run.head);
 }
-const validation=readValidateOutcome(result);
+async function runValidateStep(run,plan,gates){
+phase('Validate');
+const schema=selectValidateSchema(plan);
+const prompt=addResumeNote(buildValidatePrompt(plan.validation_commands),run);
+const result=await agent(prompt,droneOptions(gateLabel('validate',run,gates.runs.validate),'Validate',schema));
+return readValidateOutcome(result,schema);
+}
+async function runValidateGate(run,plan,gates){
+const validation=hasKeptFailure(run,gates)?{status:'failed',failures:gates.failures[run.head]}:await runValidateStep(run,plan,gates);
 if(validation.problem!==undefined){
 return{result:finishDeliveryBlocked(validation.problem,run,validation.nextAction)};
 }
@@ -2541,6 +2558,7 @@ listNotRunGate(run,'validation: the project documents no validation commands.');
 if(validation.status!=='failed'){
 return{held:true,note:validation.status==='passed'?'passed':'not run, the project documents no validation commands'};
 }
+gates.failures[run.head]=validation.failures;
 if(gates.fixRounds>=maxFixRounds()){
 return replanFromTailAsk([buildUndecidedAsk(buildFixLimitBrief(run.head))],run);
 }
@@ -2573,7 +2591,7 @@ return runValidateGate(run,plan,gates);
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{bump:0,validate:0,review:0},fixRounds:0,reruns:0,rejected:[],answer:undefined};
+const gates={held:{},notes:{},runs:{bump:0,validate:0,review:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
@@ -2585,7 +2603,9 @@ if(gates.held[gateId]===run.head){
 index+=1;
 continue;
 }
+if(gateId!=='validate'||!hasKeptFailure(run,gates)){
 gates.runs[gateId]+=1;
+}
 const ended=await runGateStep(gateId,run,plan,facts,gates);
 if(isRunEnd(ended)){
 return ended;
@@ -3361,6 +3381,9 @@ return'This delegation explicitly grants commit authority for this one task: one
 function validationTaskSentence(){
 return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
 }
+function validationCommandsSentence(){
+return'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.';
+}
 function validationFixSentence(){
 return'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
 }
@@ -3542,8 +3565,6 @@ case'wave':
 return{purpose:'the wave of plan steps that just ran',noun:'the wave'};
 case'bump':
 return{purpose:'the version bump that just ran',noun:'the version bump'};
-case'validate':
-return{purpose:'the validation run that just ran, with an empty file list',noun:'the validation run'};
 case'fix':
 return{purpose:'the validation fix round that just ran',noun:'the fix round'};
 case'review':
@@ -4191,7 +4212,8 @@ const RELAY_SCHEMA=buildRelaySchema();
 const WORKER_SCHEMA=buildWorkerSchema();
 const BUMP_EDIT_SCHEMA=buildGateEditSchema(false);
 const FIX_SCHEMA=buildGateEditSchema(true);
-const VALIDATE_SCHEMA=buildValidateSchema();
+const VALIDATE_SCHEMA=buildValidateSchema(false);
+const VALIDATE_COMMANDS_SCHEMA=buildValidateSchema(true);
 const REVIEW_SCHEMA=buildReviewSchema();
 const SCOPE_SCHEMA=buildScopeSchema();
 function maxReplans(){

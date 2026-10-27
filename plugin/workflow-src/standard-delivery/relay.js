@@ -39,7 +39,9 @@
  *   function of this module.
  *   Every step that can change files ends with the commit runner, whatever
  *   the workers returned (ADR-0037 invariant 1, decision 12). Workers never
- *   commit.
+ *   commit. Validation edits nothing, so no commit runner follows it: a
+ *   dirty path it leaves is refused by the next commit runner or by the
+ *   dirty check of hivemind:open-plan-pr.
  *   Every payload that crosses a step is checked against its schema or
  *   routing spec before it is read, and a failed check blocks the step that
  *   reads it (ADR-0037 invariant 4).
@@ -191,6 +193,10 @@ function commitGrantSentence() {
 
 function validationTaskSentence() {
   return 'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
+}
+
+function validationCommandsSentence() {
+  return 'This is a validation task: running each command of the inputs block once, in order and in the foreground, is its whole task, not a Worker Self-Check.';
 }
 
 function validationFixSentence() {
@@ -397,8 +403,6 @@ function commitStepTexts(stepName) {
       return { purpose: 'the wave of plan steps that just ran', noun: 'the wave' };
     case 'bump':
       return { purpose: 'the version bump that just ran', noun: 'the version bump' };
-    case 'validate':
-      return { purpose: 'the validation run that just ran, with an empty file list', noun: 'the validation run' };
     case 'fix':
       return { purpose: 'the validation fix round that just ran', noun: 'the fix round' };
     case 'review':
