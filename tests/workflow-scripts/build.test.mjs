@@ -15,8 +15,11 @@ import {
   WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT,
   WORKFLOW_PREVIEW_LINE_LIMIT,
   WORKFLOW_PREVIEW_SQUARES_LIMIT,
+  assertCompactionPreserves,
   buildWorkflow,
   builtPathFor,
+  compactCode,
+  compactSource,
   discoverWorkflowIds,
   findNonRegularOutputs,
   findOrphanWorkflowIds,
@@ -426,6 +429,78 @@ describe('build_workflows stripComments', () => {
   });
 });
 
+describe('build_workflows compactCode', () => {
+  const compacted = [
+    ['two plus signs apart', 'x = a + +b;', 'x=a+ +b;'],
+    ['two minus signs apart', 'x = a - -b;', 'x=a- -b;'],
+    ['a plus before a prefix ++', 'x = a + ++b;', 'x=a+ ++b;'],
+    ['a postfix ++ before a plus', 'x = a++ + b;', 'x=a++ +b;'],
+    ['a division before a regex', 'x = a / /b/.source;', 'x=a/ /b/.source;'],
+    ['a regex before a star', 'x = /a/ * 2;', 'x=/a/ *2;'],
+    ['a < before !--', 'x = a < !--b;', 'x=a< !--b;'],
+    ['a postfix -- before >', 'x = a-- > b;', 'x=a-- >b;'],
+    ['two words', 'const value = typeof item;', 'const value=typeof item;'],
+    ['a regex before a word', 'x = /a/ in y;', 'x=/a/ in y;'],
+    ['a regex with flags before a word', 'x = /a/g in y;', 'x=/a/g in y;'],
+    ['a digit before a dot', 'x = 1 .toString();', 'x=1 .toString();'],
+    ['indentation, trailing blanks and blank lines, keeping every newline', 'function a() {  \n  if (x) {\n\n    return 1;\n  }\n}\n', 'function a(){\nif(x){\nreturn 1;\n}\n}'],
+    ['a line break automatic semicolon insertion reads', 'a = b\n  (c)\nreturn\n  x', 'a=b\n(c)\nreturn\nx'],
+    ['code inside a substitution, keeping the literal bytes', 'x = \'a  b\' + `c  ${ d  +  e }  f` + /g  h/;', 'x=\'a  b\'+`c  ${d+e}  f`+/g  h/;'],
+    ['the last line the harness reads', '  return await runDelivery(args);\n', 'return await runDelivery(args);']
+  ];
+  for (const [name, source, expected] of compacted) {
+    test('compacts ' + name, () => {
+      const output = compactCode(source);
+      assert.equal(output, expected);
+      assert.doesNotThrow(() => assertCompactionPreserves('case.js', source, output));
+    });
+  }
+  test('keeps every literal of every compacted source byte for byte, every newline, and changes only whitespace', () => {
+    const listLiterals = (source) => tokenizeSource(source).filter((token) => token.kind !== 'code').map((token) => token.text);
+    const countCodeNewlines = (source) => tokenizeSource(source).filter((token) => token.kind === 'code').map((token) => token.text.replace(/\s*\n\s*/g, '\n')).join('').split('\n').length;
+    for (const sourcePath of listWorkflowSourcePaths()) {
+      const stripped = stripComments(readFileSync(join(repoRoot, 'plugin/workflow-src', sourcePath), 'utf8').replace(/\r/g, '')).trim();
+      const output = compactSource(sourcePath, stripped);
+      assert.deepEqual(listLiterals(output), listLiterals(stripped), sourcePath);
+      assert.equal(countCodeNewlines(output), countCodeNewlines(stripped), sourcePath);
+      assert.ok(output.length < stripped.length, sourcePath);
+    }
+  });
+  const broken = [
+    ['a changed literal', 'x = "a";', 'x="b";', /^Error: lib\/seeded\.js: compaction changed literal 1 from "string \\"a\\"" to "string \\"b\\""/],
+    ['a dropped literal', 'x = "a" + "b";', 'x="a"+b;', /^Error: lib\/seeded\.js: compaction changed literal 2 from "string \\"b\\"" to undefined/],
+    ['an added literal', 'x = a;', 'x="a";', /^Error: lib\/seeded\.js: compaction changed literal 1 from undefined to "string \\"a\\""/],
+    ['two literals in a new order', 'x = "a" + "b";', 'x="b"+"a";', /^Error: lib\/seeded\.js: compaction changed literal 1/],
+    ['a division joined with a regex into a comment', 'x = a / /b/.source;', 'x=a//b/.source;', /^Error: lib\/seeded\.js: compaction changed literal 1 from "regex \/b\/" to "comment \/\/b\/.source;"/],
+    ['changed code', 'x = a;', 'x=b;', /^Error: lib\/seeded\.js: compaction changed the code once all whitespace is removed$/],
+    ['a literal moved across code', 'x = a + "b";', 'x="b"+a;', /^Error: lib\/seeded\.js: compaction changed the code once all whitespace is removed$/]
+  ];
+  for (const [name, original, output, pattern] of broken) {
+    test('the equivalence check fails on ' + name + ', naming the file', () => {
+      assert.throws(() => assertCompactionPreserves('lib/seeded.js', original, output), (error) => pattern.test(String(error)));
+    });
+  }
+  for (const id of liveIds) {
+    test(builtPathFor(id) + ' keeps the layout of meta.js and the data constants and compacts the libraries, modules and main.js', () => {
+      const source = readBuilt(id);
+      const meta = stripComments(readFileSync(join(repoRoot, 'plugin/workflow-src', id, 'meta.js'), 'utf8').replace(/\r/g, '')).trim();
+      assert.ok(source.startsWith(meta + '\n\n/*\n * GENERATED'), id);
+      assert.ok(meta.includes('\n  '), id);
+      for (const name of ['AUTONOMY_TABLE', 'BRIEF_SCHEMA', 'PLAN_SCHEMA']) {
+        assert.ok(source.includes('\n\nconst ' + name + ' = ' + JSON.stringify(readDataConstant(repoRoot, name), null, 1).replace(/^ +/gm, '') + ';\n\n'), name);
+      }
+      const codePaths = listSourcePaths(repoRoot, id).filter((path) => path.startsWith('plugin/workflow-src/') && !path.endsWith('/meta.js'));
+      for (const path of codePaths) {
+        const stripped = stripComments(readFileSync(join(repoRoot, path), 'utf8').replace(/\r/g, '')).trim();
+        assert.ok(source.includes('\n\n' + compactCode(stripped) + '\n'), path);
+      }
+    });
+  }
+  test('the built standard-delivery.js keeps its last line return await runDelivery(args);', () => {
+    assert.ok(readBuilt('standard-delivery').endsWith('\nreturn await runDelivery(args);\n'));
+  });
+});
+
 describe('build_workflows modules', () => {
   test('the source list is meta.js, the data, the libraries, the modules in name order, then main.js', () => {
     const expected = [
@@ -452,7 +527,7 @@ describe('build_workflows modules', () => {
       const moduleSource = readFileSync(join(repoRoot, 'plugin/workflow-src/standard-delivery', name), 'utf8');
       return /^(?:async )?function \w+\(/m.exec(moduleSource)[0];
     });
-    const markers = ['function gatherFactsRoutingSpec(', ...firstFunctions, 'const RUN_NOUN = '];
+    const markers = ['function gatherFactsRoutingSpec(', ...firstFunctions, 'const RUN_NOUN='];
     const positions = markers.map((marker) => source.indexOf(marker));
     assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
     assert.deepEqual([...positions].sort((left, right) => left - right), positions);
@@ -522,7 +597,7 @@ describe('build_workflows length budget', () => {
     const mainBefore = readFileSync(mainPath, 'utf8').replace(/\r/g, '');
     const mainAfter = mainBefore + '\nlog(\'' + 'x'.repeat(MAX_BUILT_SCRIPT_LENGTH) + '\');\n';
     writeFileSync(mainPath, mainAfter);
-    const length = readBuilt('analysis-only').length + stripComments(mainAfter).trim().length - stripComments(mainBefore).trim().length;
+    const length = readBuilt('analysis-only').length + compactCode(stripComments(mainAfter).trim()).length - compactCode(stripComments(mainBefore).trim()).length;
     const pattern = new RegExp('analysis-only: the built script is ' + length + ' characters, over the budget of 190000');
     assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), pattern);
     assert.throws(() => runCliIn(scratchRoot, ['--check']), pattern);

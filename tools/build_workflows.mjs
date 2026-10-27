@@ -39,6 +39,15 @@
  *   findRepositoryPathProblem walks the schema for it. JSON.stringify
  *   escapes newlines inside strings, so every leading space it writes is
  *   indentation.
+ *   After stripComments, the code of each library, each module and main.js
+ *   is compacted by compactCode: leading indentation, trailing blanks, blank
+ *   lines and every space or tab go, except one space between two word
+ *   characters, between a regex literal and a word character, between a
+ *   digit and a dot, and where the join would form another token (+ +, - -,
+ *   a / before / or *, < before !--, -- before >). Every newline between
+ *   code stays, so automatic semicolon insertion sees the same line breaks.
+ *   meta.js, the banner, the data constants and the bytes of every string,
+ *   template and regex literal are never compacted.
  *
  * Invariants
  *   CR is stripped from every input and the output is written with LF only.
@@ -54,6 +63,10 @@
  *   combining or zero-width characters, or the build throws, in both modes.
  *   Lengths are JavaScript string lengths of the lines split on LF, and an
  *   empty line counts 0.
+ *   The compacted code of each library, module and main.js has the same
+ *   literal tokens in the same order as its stripped source and the same
+ *   code once all whitespace is removed, or the build throws naming the
+ *   file, in both modes (assertCompactionPreserves).
  *   A module holds only function declarations at top level, or the build
  *   throws naming the file, in both modes. So every top-level const stays
  *   in main.js, which runs after every module, and the module order cannot
@@ -78,7 +91,9 @@
  *   A running workflow script cannot import or read files, so the build
  *   copies data and libraries in, and --check keeps the copies in step.
  *   A data field no script reads only adds length toward the approval
- *   limit, so the copy leaves it out (issue 459).
+ *   limit, so the copy leaves it out (issue 459). Indentation and blanks
+ *   inside lines do the same, so the build compacts code, and the
+ *   equivalence check proves it changed only whitespace.
  *   The title and description of each schema field are prose for the
  *   planner, and their home is plugin/references, which the planner reads
  *   (docs/engineering-principles.md P24), so the copy carries only the
@@ -574,6 +589,126 @@ function writeToken(writer, token, nextToken) {
   }
 }
 
+const COMPACTION_HAZARDS = Object.freeze(['++', '--', '//', '/*', '<!--', '-->']);
+
+/**
+ * Returns true when left and right, written with no blank between them,
+ * would form a hazard of COMPACTION_HAZARDS that spans the join.
+ */
+function formsHazardAcrossJoin(left, right) {
+  return COMPACTION_HAZARDS.some((hazard) => hazardSpansJoin(left, right, hazard));
+}
+
+function hazardSpansJoin(left, right, hazard) {
+  const joined = left + right;
+  for (let start = Math.max(0, left.length - hazard.length + 1); start < left.length; start += 1) {
+    if (joined.startsWith(hazard, start)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function needsSeparator(compactor, nextText) {
+  const lastCharacter = compactor.text[compactor.text.length - 1];
+  const nextCharacter = nextText[0];
+  if (lastCharacter === undefined || nextCharacter === undefined || lastCharacter === '\n') {
+    return false;
+  }
+  if (WORD_CHARACTER.test(nextCharacter) && (WORD_CHARACTER.test(lastCharacter) || compactor.lastKind === 'regex')) {
+    return true;
+  }
+  if (nextCharacter === '.' && /[0-9]/.test(lastCharacter)) {
+    return true;
+  }
+  return formsHazardAcrossJoin(compactor.text.slice(-3), nextText.slice(0, 3));
+}
+
+function splitCompactionPieces(tokens) {
+  return tokens.flatMap((token) => {
+    if (token.kind !== 'code') {
+      return [token];
+    }
+    return token.text.split(/(\s+)/).filter((text) => text !== '').map((text) => ({ kind: /^\s/.test(text) ? 'blank' : 'code', text: text }));
+  });
+}
+
+function writeCompactedBlank(compactor, blank, nextPiece) {
+  if (nextPiece === undefined || compactor.text === '') {
+    return;
+  }
+  if (blank.includes('\n')) {
+    if (!compactor.text.endsWith('\n')) {
+      compactor.text += '\n';
+    }
+  } else if (needsSeparator(compactor, nextPiece.text)) {
+    compactor.text += ' ';
+  }
+}
+
+/**
+ * Returns source with its code compacted and the bytes of every string,
+ * template and regex literal unchanged. A run of blanks holding a newline
+ * becomes one newline, so leading indentation, trailing blanks and blank
+ * lines go, and automatic semicolon insertion sees the same line breaks. A
+ * run of spaces or tabs is dropped, except that one space stays between two
+ * word characters, between a regex literal and a word character, between a
+ * digit and a dot, and where the join would form a hazard of
+ * COMPACTION_HAZARDS, such as + +, - -, a / before / or *, or < before !--.
+ */
+export function compactCode(source) {
+  const pieces = splitCompactionPieces(tokenizeSource(source));
+  const compactor = { text: '', lastKind: undefined };
+  pieces.forEach((piece, position) => writeCompactionPiece(compactor, piece, pieces[position + 1]));
+  return compactor.text;
+}
+
+function writeCompactionPiece(compactor, piece, nextPiece) {
+  if (piece.kind === 'blank') {
+    writeCompactedBlank(compactor, piece.text, nextPiece);
+    return;
+  }
+  compactor.text += piece.text;
+  compactor.lastKind = piece.kind;
+}
+
+function listLiteralTexts(tokens) {
+  return tokens.filter((token) => token.kind !== 'code').map((token) => token.kind + ' ' + token.text);
+}
+
+function joinCodeWithoutBlanks(tokens) {
+  return tokens.map((token) => token.kind === 'code' ? token.text.replace(/\s+/g, '') : '\u0000').join('');
+}
+
+/**
+ * Throws, naming relativePath, unless compacted has the same literal tokens
+ * as original in the same order and the same code once all whitespace is
+ * removed.
+ */
+export function assertCompactionPreserves(relativePath, original, compacted) {
+  const originalTokens = tokenizeSource(original);
+  const compactedTokens = tokenizeSource(compacted);
+  const originalLiterals = listLiteralTexts(originalTokens);
+  const compactedLiterals = listLiteralTexts(compactedTokens);
+  const changedIndex = originalLiterals.findIndex((literal, index) => literal !== compactedLiterals[index]);
+  if (changedIndex !== -1 || compactedLiterals.length !== originalLiterals.length) {
+    const index = changedIndex === -1 ? originalLiterals.length : changedIndex;
+    throw new Error(relativePath + ': compaction changed literal ' + (index + 1) + ' from ' + JSON.stringify(originalLiterals[index]) + ' to ' + JSON.stringify(compactedLiterals[index]));
+  }
+  if (joinCodeWithoutBlanks(originalTokens) !== joinCodeWithoutBlanks(compactedTokens)) {
+    throw new Error(relativePath + ': compaction changed the code once all whitespace is removed');
+  }
+}
+
+/**
+ * Returns compactCode(source), after assertCompactionPreserves checks it.
+ */
+export function compactSource(relativePath, source) {
+  const compacted = compactCode(source);
+  assertCompactionPreserves(relativePath, source, compacted);
+  return compacted;
+}
+
 const LEADING_BLANKS = /\s*/y;
 const FUNCTION_DECLARATION_START = /(?:async\s+)?function\s*\*?\s*[A-Za-z_$][\w$]*\s*\(/y;
 
@@ -717,7 +852,11 @@ function readModuleSource(root, relativePath) {
   if (statement !== undefined) {
     throw new Error(relativePath + ': a module holds only function declarations at top level, but it holds ' + JSON.stringify(statement.slice(0, 80)) + '. Put every top-level const in main.js.');
   }
-  return stripped;
+  return compactSource(relativePath, stripped);
+}
+
+function readCompactedSource(root, relativePath) {
+  return compactSource(relativePath, readStrippedSource(root, relativePath));
 }
 
 export function buildWorkflow(root, id) {
@@ -725,9 +864,9 @@ export function buildWorkflow(root, id) {
     readStrippedSource(root, SOURCE_DIR + '/' + id + '/meta.js'),
     renderBanner(root, id),
     ...DATA_CONSTANTS.map((constant) => renderDataConstant(root, constant)),
-    ...LIB_FILES.map((file) => readStrippedSource(root, SOURCE_DIR + '/lib/' + file)),
+    ...LIB_FILES.map((file) => readCompactedSource(root, SOURCE_DIR + '/lib/' + file)),
     ...listModulePaths(root, id).map((path) => readModuleSource(root, path)),
-    readStrippedSource(root, SOURCE_DIR + '/' + id + '/main.js')
+    readCompactedSource(root, SOURCE_DIR + '/' + id + '/main.js')
   ];
   const output = parts.join('\n\n') + '\n';
   assertBuiltScript(id, output);
