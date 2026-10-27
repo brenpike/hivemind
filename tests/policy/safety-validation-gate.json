@@ -1,9 +1,9 @@
 {
   "rule": "Validation gate",
-  "description": "P3 coupling. The open-plan-pr consumer pin carries the outcome discriminator — Blocked (`stage: validation`). WHICH report outcome forces exit 1 is the claim-carrying antecedent; pinning only the obligation leaves the exit rekeyable on a different outcome with the suite green.",
+  "description": "P3 coupling. The source pin spans the gate's claim-carrying clauses: the obligation (each gate command the project's CLAUDE.md names runs once), the discriminator that keeps fuller or narrower forms of the same suites, diagnostics and CI-only runs out of the gate, and the script-engine fallback that an empty plan list runs this procedure rather than skipping validation. Rewriting any of these (back to every listed command, dropping the exclusion, or letting an empty list skip) turns the suite red. Residual: the pin proves the word sequence exists, not that agents obey it. The open-plan-pr consumer pin carries the outcome discriminator — Blocked (`stage: validation`). WHICH report outcome forces exit 1 is the claim-carrying antecedent; pinning only the obligation leaves the exit rekeyable on a different outcome with the suite green.",
   "source": {
     "file": "plugin/governance/definitions.md",
-    "pattern": "Execute every command listed in the project's `CLAUDE.md` validation section. No duration cap."
+    "pattern": "Run each gate command the project's `CLAUDE.md` names, once. A command `CLAUDE.md` lists as another form of the same suites (a fuller or narrower run), a diagnostic, or a CI-only run is not part of the gate and is not run. On the script engine, the workflow's validate step gives a drone the plan's validation commands, once per gate run (ADR-0037 invariant 2), and running each once is its whole task. When the plan names none, the drone runs this procedure itself as its whole task, so an empty list never skips validation."
   },
   "consumers": [
     {

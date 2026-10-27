@@ -50,6 +50,27 @@
 # set). Either signal — self EYES reaction OR legacy `Addresses:` harvest — marks
 # a non-thread node handled.
 #
+# CODEX SUMMARY HANDLED SIGNAL (toplevel only): Codex keeps one Review Summary
+# comment per PR and edits it in place. Such a comment is ALSO `handled` when ALL
+# of these hold:
+#   - its author is the Codex registry bot account (reviewer-identity.jq, the
+#     `codex-only` filter mode, so a Bot account per `is_bot` and never self);
+#   - its body STARTS with `<!-- codex-pull-request-review-summary -->`;
+#   - it carries a `<!-- codex-review-state:v1 {json} -->` state whose JSON parses
+#     to an object; and
+#   - either no review entry of that object (`code_review`, `security_review`, ...)
+#     reports `has_any_findings == true`, or `code_review.status == "running"`.
+# The summary itself carries no finding: Codex posts each finding as its own
+# review or thread comment, which this filter classifies on its own surface.
+# A summary whose state is missing, does not parse, or reports findings falls
+# back to the two signals above (self EYES or `Addresses:`), else actionable.
+# The parse is total (`try`/`catch`), so a malformed state never errors the
+# filter. The same markers from any other author (a human, another bot, or any
+# account that is not a Bot per `is_bot`) stay actionable: the markers alone are
+# forgeable, the bot account is not. The state is re-read on every fetch, so
+# a summary edited in place to a findings state turns actionable again unless a
+# self EYES or `Addresses:` signal covers it.
+#
 # 2. INPUT CONTRACT (exact GraphQL fields read)
 # ---------------------------------------------
 # Both consumers MUST feed a payload conforming to this contract:
@@ -157,10 +178,13 @@
 #                      EYES group with viewerHasReacted == true (our self-authored
 #                      reaction marker), OR (legacy backward-compat) the node's own
 #                      `url` is in the `Addresses: <url>` harvest set of a self-
-#                      authored top-level comment. A missing/empty reactionGroups,
-#                      an EYES group with viewerHasReacted == false, or no EYES group
-#                      at all AND no legacy `Addresses:` harvest match => not handled
-#                      (actionable).
+#                      authored top-level comment. toplevel ONLY: OR the node is a
+#                      Codex Review Summary whose state reports no findings or a
+#                      running code review (CODEX SUMMARY HANDLED SIGNAL in §1).
+#                      A missing/empty reactionGroups, an EYES group with
+#                      viewerHasReacted == false, or no EYES group at all AND no
+#                      legacy `Addresses:` harvest match AND no clear Codex summary
+#                      state => not handled (actionable).
 #   followup-after-fix in-thread ONLY, and ONLY when the thread's LATEST
 #                      disposition is a FIX: databaseId > that disposition's id
 #                      AND own body has no marker. A non-self comment that
@@ -254,6 +278,31 @@ def matches_filter($a; $t): reviewer_matches_filter($a; $t; $login; $filter);
 def has_self_eyes_reaction:
   ((.reactionGroups // [])
    | any(.content == "EYES" and (.viewerHasReacted == true)));
+
+# Codex Review Summary state: the parsed JSON of the node body's
+# `<!-- codex-review-state:v1 {json} -->` marker, or null when the marker is
+# absent or its JSON does not parse. Total: any error in the extract or the parse
+# yields null, never a filter error.
+def codex_summary_state:
+  try (
+    ([(.body // "") | capture("<!-- codex-review-state:v1 (?<state>.*?) -->") | .state]
+     | .[0]) as $raw
+    | if $raw == null then null else ($raw | fromjson) end
+  ) catch null;
+
+# Codex summary handled predicate (CODEX SUMMARY HANDLED SIGNAL in the header).
+# True only for a Codex registry bot author (`codex-only` mode, never self) whose
+# body starts with the summary marker and whose state object reports no findings
+# on any review entry, or a running code review. A missing, unparseable, or
+# non-object state is false, so the node keeps the EYES / `Addresses:` rule.
+def is_clear_codex_summary:
+  . as $c
+  | reviewer_matches_filter($c.author.login; $c.author.__typename; $login; "codex-only")
+    and (($c.body // "") | startswith("<!-- codex-pull-request-review-summary -->"))
+    and (codex_summary_state as $state
+         | ($state | type) == "object"
+           and (([$state.code_review | objects | .status == "running"] | any)
+                or ([$state[] | objects | .has_any_findings == true] | any | not)));
 
 .data.repository.pullRequest as $pr |
 $pr.reviewThreads as $rt |
@@ -406,6 +455,7 @@ $pr.reviewThreads as $rt |
       classification: (
         if ($c | has_self_eyes_reaction) then "handled"
         elif ($addressed_urls | index($u)) != null then "handled"
+        elif ($c | is_clear_codex_summary) then "handled"
         else "actionable"
         end
       )

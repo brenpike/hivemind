@@ -1,0 +1,41 @@
+{
+  "data": {
+    "repository": {
+      "pullRequest": {
+        "reviewThreads": {
+          "totalCount": 0,
+          "nodes": []
+        },
+        "comments": {
+          "totalCount": 2,
+          "nodes": [
+            {
+              "id": "IC_kwDOcase24comment2400",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 {\"code_review\":{\"has_any_findings\":false, -->\n\n## Codex Review Summary\n\nThis comment shows the latest Codex review activity on this pull request.\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2400",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase24comment2401",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n\n\n## Codex Review Summary\n\nThis comment shows the latest Codex review activity on this pull request.\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2401",
+              "reactionGroups": []
+            }
+          ]
+        },
+        "reviews": {
+          "totalCount": 0,
+          "nodes": []
+        }
+      }
+    }
+  }
+}

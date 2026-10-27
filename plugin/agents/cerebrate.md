@@ -80,7 +80,7 @@ Plan only what is left: the facts list the commits and changed paths the branch 
 
 If the delegation names no facts file, you have no branch state. Raise any branch fact the plan needs as an open question.
 
-Git research beyond the facts file is not available to you. That includes blame, the log of one path, and a file at an older revision. When the plan needs one, make it a plan step or an open question.
+Git research beyond the facts file is not available to you. That includes blame, the log of one path, and a file at an older revision. Every plan step changes files, so never make research, a probe or a measurement a plan step. Research, probes and measurements are your own work, and what your tools cannot answer goes to `Open questions:`.
 
 ## Scope Block
 
@@ -221,6 +221,7 @@ The `plan:` block mirrors the prose blocks above (it does not replace them). Kee
 The overlord's implement loop fans out independent steps as parallel waves, so `depends_on` and `files` are read as scheduling inputs, not just documentation — get either wrong and delivery is either unsafe or needlessly slow.
 
 - `depends_on` must reflect TRUE ordering constraints only. A spurious/defensive dependency needlessly serializes steps that could otherwise run concurrently, slowing delivery. Declare a dependency only when the step genuinely cannot begin until the other completes.
+- Size each step as one concern that one drone can carry. A step that mixes concerns, or that edits more than about four files beyond its own tests and generated output, is split along its file or concern seams. The split steps get `depends_on` only where the order is real.
 - `files` must be complete and exact — the full set of paths the step will touch, as concrete paths. The overlord computes wave membership by pairwise file-disjointness across ready steps; an under-declared `files` list risks two steps that actually share a file being dispatched concurrently. A vague or glob scope (wildcards `* ? [`, trailing-slash directory scopes, or a path that is a directory-prefix of another step's file) is treated conservatively as conflicting-with-everything and forces that step to run alone (serialized) — so precise, complete file lists maximize safe parallelism.
 
 ### Questions and Replies

@@ -60,23 +60,25 @@ No compiler or code-coverage suite. This is mostly a Markdown plugin; the only b
 
 ### Local pre-merge
 
-Validation runs **once, before opening the PR**, at the `validate` workflow state. The canonical local command is:
+Validation runs **once, before opening the PR**, at the `validate` workflow state. The gate is exactly one command:
 
 ```bash
 bash tools/validate.sh --changed
 ```
 
+It escalates to the full suite by itself (see the FAIL-CLOSED guarantee below), so the gate never also runs `--all` or `--self-test`. Those two stay CI and manual checks, listed below for that use only.
+
 This resolves the merge-base against `origin/main` → `main` → `HEAD~1`, computes the changed-file set (committed diff + uncommitted working-tree changes), and runs only the suites relevant to those paths. The path→suite mapping lives in `tools/validate.sh`; docs here summarise it rather than duplicate it.
 
 **FAIL-CLOSED guarantee:** any unmapped path inside a code-bearing tree, an unresolvable base ref, or any edit to `tools/**` (validator bootstrap) escalates automatically to the full suite. `.claude/settings.json` routes to two suites: the policy suite, because a policy fixture asserts its rule set as raw text, and the `json-manifests` parse gate, because only a real `json.load` proves Claude Code can still load the file after an edit; the rest of `.claude/` stays docs-only by design. Nothing relevant is ever silently skipped.
 
-For an exhaustive local run identical to the push-to-main CI gate:
+Not part of the gate: for a manual exhaustive local run identical to the push-to-main CI gate:
 
 ```bash
 bash tools/validate.sh --all
 ```
 
-To assert the path→suite mapping covers every suite and test directory (no coverage gaps):
+Not part of the gate: to assert manually that the path→suite mapping covers every suite and test directory (no coverage gaps):
 
 ```bash
 bash tools/validate.sh --self-test

@@ -192,6 +192,7 @@ cleanup() {
     # spawn case set WORKDIR first, PROJ_WORKDIR is a separate dir and needs its own reap.
     [ -n "${PROJ_WORKDIR:-}" ] && [ "${PROJ_WORKDIR:-}" != "${WORKDIR:-}" ] && rm -rf "$PROJ_WORKDIR"
     [ -n "${TMUX_TMPDIR:-}" ] && rm -rf "$TMUX_TMPDIR"
+    [ -n "${SEED_ROOT:-}" ] && rm -rf "$SEED_ROOT"
     return 0
 }
 trap cleanup EXIT
@@ -201,6 +202,11 @@ trap cleanup EXIT
 # assignment would be confined to the subshell and never reach the parent. STUB_BIN is reaped by
 # cleanup() on EXIT. After this, $STUB_BIN is non-empty for every spawn-invoking case to prepend.
 build_claude_stub
+
+# SEED_ROOT holds one seed repo per git fixture shape (see copy_seed_repo). It is made in
+# the main shell for the same subshell reason as STUB_BIN; each seed is built on first use, so a
+# case that SKIPs on a missing dependency never runs git. Reaped by cleanup() on EXIT.
+SEED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-seed.XXXXXX")"
 
 # extract_tmux_session: pull the first strain's tmux_session value the SAME way the
 # spawn-brood liveness guard and brood-status read it from the JSON manifest — `jq -r
@@ -262,21 +268,49 @@ assert_v2_new() {
     fi
 }
 
+# ── Shared git fixture seeds ─────────────────────────────────────────────────────
+# build_seed_repo <shape> <seed>: create the seed repo for one fixture shape.
+#   init-only — `git init` and nothing else (no identity, no commit).
+#   committed — a git repo with a local identity and one empty commit on git's default branch.
+#   spawn     — committed, plus real .hivemind/.claude dirs, with the branch pinned to `main`.
+build_seed_repo() {
+    local shape="$1" seed="$2"
+    mkdir -p "$seed"
+    git -C "$seed" init -q
+    case "$shape" in
+        init-only) return 0 ;;
+        committed|spawn) ;;
+        *) echo "FAIL: unknown seed repo shape: $shape" >&2; return 2 ;;
+    esac
+    git -C "$seed" config user.email test@example.com
+    git -C "$seed" config user.name test
+    [ "$shape" = "spawn" ] && mkdir -p "$seed/.hivemind" "$seed/.claude"
+    git -C "$seed" commit -q --allow-empty -m "seed"
+    # Pin the branch to `main` (the inputs base): `git init`'s default branch is host-config
+    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
+    [ "$shape" = "spawn" ] && git -C "$seed" branch -M main
+    return 0
+}
+
+# copy_seed_repo <shape> <dest>: give <dest> its own isolated copy of the <shape> seed repo,
+# building that seed under SEED_ROOT on first use. Cases mutate only their copy, never the seed.
+copy_seed_repo() {
+    local shape="$1" dest="$2"
+    # INVARIANT: build_seed_repo runs as a plain statement, never on the right of `||`, so
+    # `set -e` stays armed inside it and a failed git step aborts the suite.
+    if [ ! -d "$SEED_ROOT/$shape" ]; then
+        build_seed_repo "$shape" "$SEED_ROOT/$shape"
+    fi
+    mkdir -p "$dest"
+    cp -a "$SEED_ROOT/$shape/." "$dest/"
+}
+
 # ── Shared spawn-case helpers ────────────────────────────────────────────────────
 # init_spawn_repo <gitroot>: create the coordinator checkout every spawn case past the guards
 # uses — a git repo with real .hivemind/.claude dirs and one commit on `main`. No origin remote
 # is needed: spawn-brood creates no branch, so it has no remote branch-collision check.
 init_spawn_repo() {
-    local gitroot="$1"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    # Pin the branch to `main` (the inputs base): `git init`'s default branch is host-config
-    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
-    git -C "$gitroot" branch -M main
+    copy_seed_repo spawn "$1"
 }
 
 # write_one_strain_inputs <inputs-path> <base> <description>: author minimal valid one-strain
@@ -468,8 +502,7 @@ assert_spawn_brood_symlink_escape_blocked() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
+    copy_seed_repo init-only "$gitroot"
     # External dir OUTSIDE the checkout, the symlink's escape target. Symlink the gitroot's
     # `.hivemind` to it so the derived "$repo_root/.hivemind/brood" STATE path resolves
     # THROUGH the symlink to the external target — the first chain the guard checks.
@@ -570,8 +603,7 @@ assert_spawn_brood_inputs_external_rejected() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
+    copy_seed_repo init-only "$gitroot"
     # `.hivemind` stays a REAL dir (the write-chain guard is NOT the subject here). The hostile
     # element is a symlinked ANCESTOR for the inputs file: $gitroot/link -> external.
     local external="$WORKDIR/brood-external"
@@ -655,15 +687,10 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
     # The COORDINATOR checkout is SAFE: its OWN `.hivemind`/`.claude` are REAL dirs, so the
     # coordinator-side write-chain guard passes (this case is NOT testing that guard).
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    # Seed an initial commit on the default branch so a worktree can be added from a base ref.
-    git -C "$gitroot" commit -q --allow-empty -m "init"
+    # Seed an initial commit on `main` so a worktree can be added from a base ref.
+    init_spawn_repo "$gitroot"
 
     # External dir OUTSIDE the checkout — the symlink's escape target.
     local external="$WORKDIR/brood-external"
@@ -786,14 +813,9 @@ assert_spawn_brood_child_leaf_task_escape_blocked() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
     # COORDINATOR checkout is SAFE: real .hivemind/.claude dirs, so the coordinator-side
     # write-chain guard (assertion 4) and child-worktree dir-guard (assertion 6) both pass.
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
+    init_spawn_repo "$gitroot"
 
     # External dir — the symlink leaf's escape target. The leaf points at $external/task.md
     # (a FILE path inside this dir), NOT at $external itself, so the unguarded `printf >`
@@ -916,15 +938,10 @@ assert_spawn_brood_child_leaf_settings_escape_blocked() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
+    init_spawn_repo "$gitroot"
     # COORDINATOR has a REAL settings.local.json so the `if [ -f "$settings_local" ]`
     # propagation path is actually reached and the leaf guard is exercised.
     printf '{"permissions":{"allow":[]}}\n' > "$gitroot/.claude/settings.local.json"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
 
     local external="$WORKDIR/brood-external"
     mkdir -p "$external"
@@ -1047,12 +1064,7 @@ assert_spawn_brood_child_leaf_regular_ok() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
+    init_spawn_repo "$gitroot"
 
     # Build the `safe` base ref: REAL .hivemind/brood/task.md REGULAR FILE (not a symlink).
     # This is the normal case: a repo that pre-stages a real task file in its base tree.
@@ -1300,15 +1312,7 @@ assert_spawn_brood_task_identity_not_cross_wired() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    # Pin the branch to `main` (the inputs base): `git init`'s default branch is host-config
-    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
-    git -C "$gitroot" branch -M main
+    init_spawn_repo "$gitroot"
 
     # >=3 strains whose names sanitize to DISTINCT shorts. The pre-fix bug bled the LAST strain's
     # short (charlie-three) into the earlier strains' task.md strain.id; with three strains, TWO
@@ -1414,15 +1418,7 @@ assert_spawn_brood_alive_no_evidence_starting() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    # Pin the branch to `main` (the inputs base): `git init`'s default branch is host-config
-    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
-    git -C "$gitroot" branch -M main
+    init_spawn_repo "$gitroot"
 
     # A DEDICATED long-lived stub for THIS case: the suite-wide stub sleeps only ~4s, which can be
     # shorter than the ready-wait + grace window, risking a flake into the dead-session `failed`
@@ -1562,15 +1558,7 @@ assert_spawn_brood_tail_death_reconciled() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    # Pin the branch to `main` (the inputs base): git init's default branch is host-config
-    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
-    git -C "$gitroot" branch -M main
+    init_spawn_repo "$gitroot"
 
     # DEDICATED tail-death stub: emit READY (Pass-2 match), stay alive past the low grace (so the
     # verify probe sees ALIVE → starting), then EXIT — dying inside the RECONCILE_SETTLE window. It
@@ -1673,13 +1661,7 @@ assert_spawn_brood_tail_started_promoted() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    git -C "$gitroot" branch -M main
+    init_spawn_repo "$gitroot"
 
     # DEDICATED promotion stub: emit READY, stay un-started past the low grace (no ledger yet → the
     # verify probe classifies `starting`), THEN parse run.suggested_id from the provisioned task.md
@@ -2196,14 +2178,11 @@ ensure_proj_workdir() {
     if [ -z "$PROJ_WORKDIR" ]; then
         PROJ_WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-proj.XXXXXX")"
         PROJ_WORKDIR="$(cd "$PROJ_WORKDIR" && pwd -P)"
-        git -C "$PROJ_WORKDIR" init -q
         # A seed commit is REQUIRED: the #168 ground-truth worktree discovery cases register real
         # git worktrees (`git worktree add -b <branch> <path> HEAD`) so the engine can resolve each
         # strain's worktree from `git worktree list --porcelain`; worktree-add needs a commit to
-        # branch from. Configure identity locally so the commit succeeds on a bare CI checkout.
-        git -C "$PROJ_WORKDIR" config user.email test@example.com
-        git -C "$PROJ_WORKDIR" config user.name test
-        git -C "$PROJ_WORKDIR" commit -q --allow-empty -m "proj-seed"
+        # branch from. The committed seed carries a local identity for a bare CI checkout.
+        copy_seed_repo committed "$PROJ_WORKDIR"
         # Fold into WORKDIR so the existing cleanup() reaps it when no spawn case set it;
         # otherwise reap PROJ_WORKDIR explicitly in cleanup (handled below).
         if [ -z "$WORKDIR" ]; then
@@ -3695,8 +3674,7 @@ assert_proj_manifest_outside_root() {
     local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-proj-outside.XXXXXX")"
     tmp="$(cd "$tmp" && pwd -P)"
     local root="$tmp/repo"
-    mkdir -p "$root"
-    git -C "$root" init -q
+    copy_seed_repo init-only "$root"
     local brood_id; brood_id="$(proj_brood_id "$name")"
     proj_outside_manifest "$tmp/outside/broods/$brood_id/manifest.json" "$brood_id" "outsideleaksentinel"
     ln -s "$tmp/outside" "$root/.hivemind"
@@ -3802,11 +3780,7 @@ assert_proj_nested_worktree_anchor() {
 # discover_mkrepo: create a throwaway git checkout under a fresh mktemp dir, echo its root.
 # Caller is responsible for reaping the returned dir's PARENT (captured separately).
 discover_seed_repo() {
-    local root="$1"
-    git -C "$root" init -q
-    git -C "$root" config user.email test@example.com
-    git -C "$root" config user.name test
-    git -C "$root" commit -q --allow-empty -m "discover-seed"
+    copy_seed_repo committed "$1"
 }
 
 # discover_stub_manifest: write a minimal non-empty manifest stub at $1 (creating parents).
@@ -4006,11 +3980,7 @@ COLLECT_BROOD_ID="brood-8a8a8a8a-8b8b-4c8c-8d8d-8e8e8e8e8e8e"
 # collect_seed_repo: a throwaway git checkout root (real toplevel for the entrypoint's
 # git rev-parse --show-toplevel anchor).
 collect_seed_repo() {
-    local root="$1"
-    git -C "$root" init -q
-    git -C "$root" config user.email test@example.com
-    git -C "$root" config user.name test
-    git -C "$root" commit -q --allow-empty -m "collect-seed"
+    copy_seed_repo committed "$1"
 }
 
 # ── COLLECT-EMPTY: no broods → well-formed doc with empty broods + zeroed global ──

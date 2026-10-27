@@ -26,6 +26,8 @@ const READ_DISCIPLINE_RULES = [
 const SCOPE_BLOCK_RULE = 'Plan from that block. Each document entry locates a section and does not bound it. Read the whole section that holds the entry\'s line, and take where the section starts and ends from the file, not from the entry. Do not check again the paths the block lists, and research only what the block does not cover.';
 const SCOPE_BLOCK_COVERAGE_RULE = 'A document entry covers nothing when the file has no such line, or when the section that holds the line is not one the request or the facts texts name.';
 const SCOPE_MODE_LOCATOR_RULE ='For each section of a repository document that the request or the facts texts name, the document\'s path and the line the section starts on. Find the line with Grep, and copy no text. Leave a section you cannot find for the planner.';
+const STEP_SIZE_RULE = 'Size each step as one concern that one drone can carry. A step that mixes concerns, or that edits more than about four files beyond its own tests and generated output, is split along its file or concern seams. The split steps get `depends_on` only where the order is real.';
+const RESEARCH_NOT_A_STEP_RULE = 'Every plan step changes files, so never make research, a probe or a measurement a plan step. Research, probes and measurements are your own work, and what your tools cannot answer goes to `Open questions:`.';
 
 function readSection(text, heading) {
   const lines = text.split('\n');
@@ -159,5 +161,17 @@ describe('cerebrate research reads only what the plan needs', () => {
   });
   test('the Scope Block no longer bounds reads by the line ranges of a locator', () => {
     assert.ok(!readSection(cerebrateText, '## Scope Block').includes('read only the line ranges'));
+  });
+});
+
+describe('cerebrate sizes steps and keeps research out of them', () => {
+  test('the Accuracy Note splits a step that mixes concerns or edits more than about four files', () => {
+    assert.ok(readSection(cerebrateText, '### Accuracy Note: `depends_on` and `files` Are Concurrency-Load-Bearing').includes(STEP_SIZE_RULE), STEP_SIZE_RULE);
+  });
+  test('Branch Facts sends research, probes and measurements to the planner or to Open questions, never to a plan step', () => {
+    assert.ok(readSection(cerebrateText, '## Branch Facts').includes(RESEARCH_NOT_A_STEP_RULE), RESEARCH_NOT_A_STEP_RULE);
+  });
+  test('Branch Facts no longer makes git research a plan step', () => {
+    assert.ok(!readSection(cerebrateText, '## Branch Facts').includes('make it a plan step'));
   });
 });
