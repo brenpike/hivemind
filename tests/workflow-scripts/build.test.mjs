@@ -1050,6 +1050,19 @@ describe('build_workflows prose guards', () => {
     assert.ok(seededSource.includes('You create plans only.'));
     assert.deepEqual(findCopiedSentences(scratchRoot, seededSource), []);
   });
+  test('a sentence written with any escape form in one literal is read as acorn decodes it and found', () => {
+    const plain = findCopiedSentences(repoRoot, 'const a = ' + JSON.stringify(CEREBRATE_SENTENCE) + ';');
+    assert.ok(plain.some((copy) => copy.path === 'plugin/agents/cerebrate.md' && copy.sentence === CEREBRATE_SENTENCE));
+    const escaped = ['\'You do not write or edit code\\x2e\'', '\'You do not write or edit \\u{63}ode.\'', '\'You do\\u0020not write or edit code.\'', '\'You do not write \\\nor edit code.\'', '`You do not write or edit code\\x2e`', '`You do not write\\r\\nor edit code.`'];
+    for (const literal of escaped) {
+      assert.deepEqual(findCopiedSentences(repoRoot, 'const a = ' + literal + ';'), plain, literal);
+    }
+  });
+  test('a sentence split across literals or template pieces passes: the check is a verbatim-copy tripwire (ADR-0037, finding c5199443)', () => {
+    for (const split of ['\'You do not write \' + \'or edit code.\'', '`You do not write ${\'\'}or edit code.`', '[\'You do not write\', \'or edit code.\'].join(\' \')']) {
+      assert.deepEqual(findCopiedSentences(repoRoot, 'const a = ' + split + ';'), [], split);
+    }
+  });
 });
 
 for (const id of draftIds) {

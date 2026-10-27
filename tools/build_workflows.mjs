@@ -92,12 +92,16 @@
  *   it. Each budget is the measured count plus a margin of at most 1,000,
  *   and raising a budget is a visible, reviewed change to this file. The
  *   duplication check compares each sentence of at least five words of a
- *   string or template literal with every regular file plugin/agents/*.md
- *   and plugin/skills/<name>/SKILL.md, found by listing those two
- *   directories, never from names in the literals (listPromptFiles). A
- *   literal sentence that equals a sentence of one of them, once whitespace
- *   is normalized, fails the build, naming the script, the file and the
- *   sentence (findCopiedSentences).
+ *   string literal or a template piece, read as acorn decodes it, with
+ *   every regular file plugin/agents/*.md and plugin/skills/<name>/SKILL.md,
+ *   found by listing those two directories, never from names in the
+ *   literals (listPromptFiles). A literal sentence that equals a sentence of
+ *   one of them, once whitespace is normalized, fails the build, naming the
+ *   script, the file and the sentence (findCopiedSentences). It is a
+ *   verbatim-copy tripwire. It reads each literal and each template piece on
+ *   its own, so a sentence split across literals joined by +, across a
+ *   template substitution or across a join, or reworded, passes it and
+ *   rests on review (ADR-0037, local review finding c5199443).
  *   An entry named DRAFT that is not a regular file (a directory, a
  *   symlink, anything else) fails the build in both modes.
  *   --check compares each live workflow with its committed file after
@@ -130,8 +134,10 @@
  *   repository path mark the plan check reads.
  *   A running script cannot read an agent's or a skill's file, so a rule
  *   copied into a prompt is a second copy that drifts from its home and
- *   grows the script toward the approval limit. The prose guards make that
- *   copy fail the build instead of relying on review (P24, P3).
+ *   grows the script toward the approval limit. The prose budget bounds all
+ *   prompt text, and the duplication check fails the build on a rule pasted
+ *   whole into one literal, instead of relying on review (P24, P3). A split
+ *   or reworded copy still rests on review.
  *   The overlord launches the committed scripts by path, so a symlink there
  *   could run content that --check never compared, and a write through one
  *   would change a file outside plugin/workflows/. Only regular files are
@@ -780,24 +786,20 @@ export function countProseCharacters(source, parsed = parseJavaScript(source, BU
   return listProsePieces(parsed).reduce((sum, piece) => sum + piece.text.length, 0);
 }
 
-function decodeEscape(escapeText, escaped) {
-  if (escaped.length === 5) {
-    return String.fromCharCode(parseInt(escaped.slice(1), 16));
-  }
-  if (escaped === 't') {
-    return ' ';
-  }
-  return escaped === 'n' || escaped === 'r' ? '\n' : escaped;
-}
+const PROSE_TOKEN_TYPES = Object.freeze([tokTypes.string, ...TEMPLATE_TOKEN_TYPES]);
 
 /**
- * Returns the text of a string literal or a template piece without its
- * delimiters, with \n and \r read as line breaks, \t as a space, \uXXXX as
- * its character and every other escape as the character it escapes.
+ * Returns the text of each string literal and each template piece of
+ * parsed, in source order, as acorn decodes it: every escape form read as
+ * the character it stands for and a line continuation removed, with \r\n
+ * and \r read as line breaks. A template piece with an invalid escape,
+ * legal only in a tagged template, has no decoded text, so acorn gives its
+ * source text.
  */
-function readLiteralContent(piece) {
-  const inner = piece.kind === 'string' ? piece.text.slice(1, -1) : piece.text.replace(/^[`}]/, '').replace(/(?:`|\$\{)$/, '');
-  return inner.replace(/\\(u[0-9a-fA-F]{4}|[\s\S])/g, decodeEscape);
+function readProseValues(parsed) {
+  return parsed.tokens
+    .filter((token) => PROSE_TOKEN_TYPES.includes(token.type))
+    .map((token) => token.value.replace(/\r\n?/g, '\n'));
 }
 
 function appendProseLine(blocks, line) {
@@ -860,13 +862,16 @@ export function listPromptFiles(root) {
 }
 
 /**
- * Returns {path, sentence} for each sentence of a string or template literal
- * of source, a built script, that equals a sentence of an agent or skill
- * file (see listPromptFiles), in literal order. parsed is source parsed as a
- * built script.
+ * Returns {path, sentence} for each sentence of a string literal or a
+ * template piece of source, a built script, read as acorn decodes it, that
+ * equals a sentence of an agent or skill file (see listPromptFiles), in
+ * literal order. parsed is source parsed as a built script. It is a
+ * verbatim-copy tripwire: it reads each literal and each template piece on
+ * its own, so a sentence split across literals or template pieces, or
+ * reworded, passes it (ADR-0037, local review finding c5199443).
  */
 export function findCopiedSentences(root, source, parsed = parseJavaScript(source, BUILT_SCRIPT_PARSE_OPTIONS)) {
-  const contents = listProsePieces(parsed).map(readLiteralContent);
+  const contents = readProseValues(parsed);
   const promptFiles = listPromptFiles(root).map((path) => ({ path: path, sentences: new Set(splitProseSentences(readSource(root, path))) }));
   return contents.flatMap(splitProseSentences).flatMap((sentence) => promptFiles
     .filter((promptFile) => promptFile.sentences.has(sentence))
