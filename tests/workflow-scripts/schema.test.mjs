@@ -135,6 +135,11 @@ describe('validateSchema keywords', () => {
     assert.equal(validate(schema, [0]).ok, true);
     assert.deepEqual(validate(schema, []).errors, ['$: minItems: fewer than 1 items']);
   });
+  test('maxItems rejects a longer array', () => {
+    const schema = { type: 'array', maxItems: 2 };
+    assert.equal(validate(schema, [0, 1]).ok, true);
+    assert.deepEqual(validate(schema, [0, 1, 2]).errors, ['$: maxItems: more than 2 items']);
+  });
   test('$schema, title and description change nothing', () => {
     const schema = { $schema: 'https://json-schema.org/draft/2020-12/schema', title: 'T', description: 'D', type: 'string' };
     assert.equal(validate(schema, 'x').ok, true);
@@ -344,7 +349,7 @@ describe('validateSchema anyOf', () => {
 });
 
 describe('validateSchema fails closed on the schema', () => {
-  for (const keyword of ['oneOf', 'allOf', 'not', 'if', 'then', 'else', 'pattern', 'maxItems', 'const', '$ref', 'multipleOf', 'default']) {
+  for (const keyword of ['oneOf', 'allOf', 'not', 'if', 'then', 'else', 'pattern', 'const', '$ref', 'multipleOf', 'default']) {
     test(`unsupported keyword ${keyword} throws`, () => {
       const isUnsupported = (error) => error.message === 'validateSchema: $: unsupported keyword ' + keyword;
       assert.throws(() => lib.validateSchema({ type: 'string', [keyword]: 1 }, 'x'), isUnsupported);
@@ -370,6 +375,8 @@ describe('validateSchema fails closed on the schema', () => {
     'items an array': { items: [] },
     'minItems negative': { minItems: -1 },
     'minItems not an integer': { minItems: 1.5 },
+    'maxItems negative': { maxItems: -1 },
+    'maxItems not an integer': { maxItems: 1.5 },
     'minLength negative': { minLength: -1 },
     'minLength not an integer': { minLength: 1.5 },
     'maxLength negative': { maxLength: -1 },
@@ -389,7 +396,7 @@ describe('validateSchema fails closed on the schema', () => {
   }
   test('supportedSchemaKeywords lists exactly the supported keywords', () => {
     assert.deepEqual([...lib.supportedSchemaKeywords()].sort(), [
-      '$schema', 'additionalProperties', 'anyOf', 'description', 'enum', 'items', 'maxLength', 'minItems', 'minLength', 'properties',
+      '$schema', 'additionalProperties', 'anyOf', 'description', 'enum', 'items', 'maxItems', 'maxLength', 'minItems', 'minLength', 'properties',
       'required', 'title', 'type'
     ]);
   });

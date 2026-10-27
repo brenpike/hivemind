@@ -600,6 +600,7 @@ return[
 'additionalProperties',
 'items',
 'minItems',
+'maxItems',
 'minLength',
 'maxLength',
 'anyOf'
@@ -664,6 +665,9 @@ failSchema(path,'additionalProperties must be false');
 }
 if(schema.minItems!==undefined&&!(Number.isInteger(schema.minItems)&&schema.minItems>=0)){
 failSchema(path,'minItems must be a non-negative integer');
+}
+if(schema.maxItems!==undefined&&!(Number.isInteger(schema.maxItems)&&schema.maxItems>=0)){
+failSchema(path,'maxItems must be a non-negative integer');
 }
 if(schema.minLength!==undefined&&!(Number.isInteger(schema.minLength)&&schema.minLength>=0)){
 failSchema(path,'minLength must be a non-negative integer');
@@ -770,6 +774,9 @@ return/^[A-Za-z0-9_-]+$/.test(name)?name:JSON.stringify(name);
 function collectArrayErrors(schema,list,path,errors){
 if(schema.minItems!==undefined&&list.length<schema.minItems){
 errors.push(path+': minItems: fewer than '+schema.minItems+' items');
+}
+if(schema.maxItems!==undefined&&list.length>schema.maxItems){
+errors.push(path+': maxItems: more than '+schema.maxItems+' items');
 }
 if(schema.items!==undefined){
 list.forEach((item,index)=>collectSchemaErrors(schema.items,item,path+'['+index+']',errors));

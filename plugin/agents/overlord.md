@@ -34,7 +34,7 @@ If the launch is refused or blocked (denied, not found, or workflows turned off)
 
 When the user asks to stop a launched run, from any surface including Remote Control, call `TaskStop` with the `taskId` the `Workflow` tool returned for the running invocation, and say in one line that the run stopped. Stop a run only when the user asks. A stopped run keeps every completed agent result. When the user asks to go on, resume it by name: call the `Workflow` tool with `name` set to the name you launched and `resumeFromRunId` from the launch, with the args of its last launch or resume.
 
-Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md`, `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md`, `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`, `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md`, `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md`.
+Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md`, `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md`, `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`, `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md`.
 
 ## Safety Rails
 
@@ -120,7 +120,7 @@ Intent-driven execution is the universal fallback for the whole machine. Wheneve
 
 ## Review Remediation Posture
 
-The overlord's remediation stance follows `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (binding vocabulary: root-cluster, defer-with-scope, bounded-impact, stop-and-merge). Do not duplicate that doctrine here — apply it.
+When routing or applying review remediation, load and follow `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md`. The overlord's remediation stance follows `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (binding vocabulary: root-cluster, defer-with-scope, bounded-impact, stop-and-merge). Do not duplicate that doctrine here — apply it.
 
 **Surface-vs-auto posture for remediation judgment calls.** A reviewer/escalation outcome that is a Tier-B judgment call is NOT surfaced for confirmation by default: per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Tiers → Tier B) and (The Autonomy 2x2), the overlord auto-takes its recommendation and journals it, surfacing ONLY when the promotion gate trips (per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Promotion Gate)) — and merge recommendations always surface, since the overlord never merges. This changes only the surface-vs-auto posture; it does NOT alter the root-cluster, `merge_advised`, recurrence, or defer-with-scope routing MECHANICS below, which already route correctly.
 

@@ -57,8 +57,8 @@
  * Invariants
  *   Pure: no clock, no randomness, no I/O. The schema is a parameter.
  *   Validation keywords: type (one string), enum, required, properties,
- *   additionalProperties (false only), items, minItems, minLength, maxLength,
- *   anyOf. Annotation keywords $schema, title and description are accepted
+ *   additionalProperties (false only), items, minItems, maxItems, minLength,
+ *   maxLength, anyOf. Annotation keywords $schema, title and description are accepted
  *   and change nothing.
  *   Fails closed: the whole schema is walked before the value is read, and
  *   any other keyword, a non-object schema, or a keyword value of the wrong
@@ -102,6 +102,9 @@
  *   toAgentSchema exists because the Messages API rejects a tool
  *   input_schema with anyOf at its top level. So every agent gets the flat
  *   copy and the script checks the full schema with validateSchema.
+ *   maxItems, like maxLength, is outside the strict structured-output
+ *   subset. It relies on the Workflow agent schema check and on the script
+ *   check here. The ADR-0037 harness record never tested it.
  *   The harness record of ADR-0037 (Amendment 2026-10-26) keeps every
  *   check of agent() output: the root anyOf probe failed with that API
  *   error, a failed agent() call returned null to the script, no probe
@@ -120,6 +123,7 @@ function supportedSchemaKeywords() {
     'additionalProperties',
     'items',
     'minItems',
+    'maxItems',
     'minLength',
     'maxLength',
     'anyOf'
@@ -191,6 +195,9 @@ function assertKeywordShapes(schema, path) {
   }
   if (schema.minItems !== undefined && !(Number.isInteger(schema.minItems) && schema.minItems >= 0)) {
     failSchema(path, 'minItems must be a non-negative integer');
+  }
+  if (schema.maxItems !== undefined && !(Number.isInteger(schema.maxItems) && schema.maxItems >= 0)) {
+    failSchema(path, 'maxItems must be a non-negative integer');
   }
   if (schema.minLength !== undefined && !(Number.isInteger(schema.minLength) && schema.minLength >= 0)) {
     failSchema(path, 'minLength must be a non-negative integer');
@@ -309,6 +316,9 @@ function describeUnexpectedSchemaKey(name) {
 function collectArrayErrors(schema, list, path, errors) {
   if (schema.minItems !== undefined && list.length < schema.minItems) {
     errors.push(path + ': minItems: fewer than ' + schema.minItems + ' items');
+  }
+  if (schema.maxItems !== undefined && list.length > schema.maxItems) {
+    errors.push(path + ': maxItems: more than ' + schema.maxItems + ' items');
   }
   if (schema.items !== undefined) {
     list.forEach((item, index) => collectSchemaErrors(schema.items, item, path + '[' + index + ']', errors));

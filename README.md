@@ -234,13 +234,14 @@ A `standard-delivery` script run, from request to PR:
 
 1. **Facts.** A runner gathers the branch facts into one facts file (`hivemind:gather-facts`).
 2. **Scan.** A runner scans the text of the issues and PRs the request names for prompt injection (`hivemind:injection-scan`).
-3. **Plan.** The cerebrate plans what is left of the request on this branch, and the plan is checked against `plugin/references/plan-schema.json`. After a pause, the planner revises the plan with your reply.
-4. **Branch.** A runner creates or confirms the working branch (`hivemind:create-working-branch`).
-5. **Waves.** The script computes each ready wave of plan steps in `plugin/workflow-src/lib/waves.js`. Workers run each wave in parallel, and a runner commits the wave's files after each wave (`hivemind:molt`).
-6. **Bump.** A runner derives the version bump (`hivemind:bump-type`), a drone sets the version files, and a runner commits them.
-7. **Validate.** A drone runs the project's validation commands. A failure gets a bounded number of fix rounds, one at a time, each one committed; after the last round the run asks you.
-8. **Review.** The local reviewer reviews the branch and commits its simple fixes, when local review is on.
-9. **PR.** A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (`hivemind:open-plan-pr`).
+3. **Scope.** The cerebrate, on Sonnet, returns the line each section of the documents the request names starts on, and checks each path a section names. The planner reads the whole section at each of those lines, taking where it starts and ends from the file, and checks no named path again. A scope result the script cannot use stops the run before planning.
+4. **Plan.** The cerebrate plans what is left of the request on this branch, and the plan is checked against `plugin/references/plan-schema.json`. After a pause, the planner revises the plan with your reply.
+5. **Branch.** A runner creates or confirms the working branch (`hivemind:create-working-branch`).
+6. **Waves.** The script computes each ready wave of plan steps in `plugin/workflow-src/lib/waves.js`. Workers run each wave in parallel, and a runner commits the wave's files after each wave (`hivemind:molt`).
+7. **Bump.** A runner derives the version bump (`hivemind:bump-type`), a drone sets the version files, and a runner commits them.
+8. **Validate.** A drone runs the project's validation commands. A failure gets a bounded number of fix rounds, one at a time, each one committed; after the last round the run asks you.
+9. **Review.** The local reviewer reviews the branch and commits its simple fixes, when local review is on.
+10. **PR.** A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (`hivemind:open-plan-pr`).
 
 **Gates hold on one commit.** The bump, validation and local review are gates. Each gate holds only for the commit it ended on, and the PR step pushes only a commit every configured gate held on. So a later commit, such as a validation fix round or a local-review fix, reruns the gates it invalidates: every gate that ended on an earlier commit. The reruns are bounded, and the run asks you at the bound. A gate not configured for the run, such as local review without the Codex plugin, is listed on the PR.
 

@@ -9,6 +9,7 @@
  *           request, trunk, level, pass, storedAnswers and pendingReply,
  *           and updates replies, answeredKeys, taken and reversibleEffects.
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
+ *   scope   the checked scope of the pass, from runScopeStep (scope.js).
  *   replan  undefined at launch, else the replan data of the step that
  *           sent the run back to planning: its reason, and the review or
  *           the answer when it carries one.
@@ -16,7 +17,7 @@
  *   main.js.
  *
  * Outputs
- *   runPlanningPass(run, facts, replan)  {plan, freshness} once every
+ *   runPlanningPass(run, facts, scope, replan)  {plan, freshness} once every
  *           question of the pass is settled or taken, else {result}: the
  *           pause of an open question or a blocked finish.
  *   takeNextReply(run, round)  the reply to a round, also read by the
@@ -94,6 +95,8 @@
  *   An irreversible effect is asked as an exact entry, so the pause keeps
  *   its exact text whole in every fit tier (lib/result.js whole blocks): the
  *   user never answers an effect question without its verbatim text.
+ *   The plan and revise prompts carry the scope in a scope data block right
+ *   after the request block, and no other planning text holds it.
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
  *   P24): how to read the facts, what is left to plan, the review block and
@@ -190,7 +193,7 @@ function findRepositoryPathProblem(schema, value, location) {
   return '';
 }
 
-function buildPlanPrompt(request, facts, replan) {
+function buildPlanPrompt(request, facts, scope, replan) {
   const hasAnswer = hasReplanAnswer(replan);
   const lines = [
     'Plan the delivery of the user request below in this repository, as one plan on one working branch.',
@@ -200,7 +203,7 @@ function buildPlanPrompt(request, facts, replan) {
   if (replan !== undefined) {
     lines.push('This is a new plan in a run that already started: the replan block says why.');
   }
-  lines.push('', buildFactsBlock(facts), formatDataBlock('request', request));
+  lines.push('', buildFactsBlock(facts), formatDataBlock('request', request), formatDataBlock('scope', scope));
   if (replan !== undefined) {
     lines.push(formatDataBlock('replan', replan.reason));
   }
@@ -217,7 +220,7 @@ function hasReplanAnswer(replan) {
   return replan !== undefined && replan.answer !== undefined;
 }
 
-function buildPlanRevisePrompt({ request, facts, plan, questions, reply }) {
+function buildPlanRevisePrompt({ request, facts, scope, plan, questions, reply }) {
   return [
     'Revise your plan for the delivery of the user request below with the user reply below.',
     boundarySentence(),
@@ -225,6 +228,7 @@ function buildPlanRevisePrompt({ request, facts, plan, questions, reply }) {
     '',
     buildFactsBlock(facts),
     formatDataBlock('request', request),
+    formatDataBlock('scope', scope),
     formatDataBlock('earlier_plan', plan),
     formatDataBlock('questions', questions),
     formatDataBlock('reply', reply)
@@ -497,13 +501,13 @@ function takeNextReply(run, round) {
   return pendingReply;
 }
 
-async function runPlanningPass(run, facts, replan) {
+async function runPlanningPass(run, facts, scope, replan) {
   phase('Plan');
   let resultSchema = PLAN_RESULT_SCHEMA;
   let shownAsks = [];
   let shownResult;
   const settledKinds = new Set();
-  const planPrompt = buildPlanPrompt(run.request, facts, replan);
+  const planPrompt = buildPlanPrompt(run.request, facts, scope, replan);
   let planResult = await agent(hasReplanAnswer(replan) ? planPrompt : addResumeNote(planPrompt, run), plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
   for (;;) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk);
@@ -544,7 +548,7 @@ async function runPlanningPass(run, facts, replan) {
     shownAsks = resolution.asks;
     shownResult = planResult;
     resultSchema = buildReviseResultSchema(shownAsks);
-    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, plan: planResult.plan, questions: questions, reply: reply });
+    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
   }
 }
