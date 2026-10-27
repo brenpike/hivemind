@@ -1,11 +1,13 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { loadWorkflow, loadWorkflowSource } from './harness.mjs';
+import { parse, tokTypes } from '../../tools/vendor/acorn/acorn.mjs';
 import {
   LIB_FILES,
   MAX_BUILT_LINE_LENGTH,
@@ -17,16 +19,15 @@ import {
   WORKFLOW_PREVIEW_LINE_LIMIT,
   WORKFLOW_PREVIEW_SQUARES_LIMIT,
   assertCompactionPreserves,
+  assertStrippingPreserves,
   buildWorkflow,
   builtPathFor,
   compactCode,
-  compactSource,
   countProseCharacters,
   discoverWorkflowIds,
   findCopiedSentences,
   findNonRegularOutputs,
   findOrphanWorkflowIds,
-  findTopLevelStatement,
   isDraftWorkflow,
   listDraftWorkflowIds,
   listLiveWorkflowIds,
@@ -40,8 +41,7 @@ import {
   runCli,
   splitProseSentences,
   stripComments,
-  stripCommentsAndStrings,
-  tokenizeSource
+  stripCommentsAndStrings
 } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -57,6 +57,10 @@ const PROSE_BUDGETS_PATTERN = /export const PROSE_BUDGETS = Object\.freeze\(\{[^
 const MAX_PROSE_MARGIN = 1000;
 const CEREBRATE_SENTENCE = 'You do not write or edit code.';
 const PLAN_PROMPT_OPENING = '\'Plan the delivery of the user request below in this repository, as one plan on one working branch.';
+const ACORN_PATH = 'tools/vendor/acorn/acorn.mjs';
+const ACORN_SHA256 = '76254fc76529713b4dfd2532972d17a991ffd9aafeebb1f977445b5506b9fb0b';
+const LITERAL_TOKEN_TYPES = [tokTypes.string, tokTypes.regexp, tokTypes.template, tokTypes.invalidTemplate];
+const SEEDED_MODULE_PATH = 'plugin/workflow-src/analysis-only/seeded.js';
 const scratchRoots = [];
 let scratchBuilderCount = 0;
 
@@ -64,10 +68,35 @@ function readBuilt(id) {
   return readFileSync(join(repoRoot, builtPathFor(id)), 'utf8').replace(/\r/g, '');
 }
 
+/**
+ * Returns the tokens, end of input left out, and the comments acorn finds in
+ * source, read as a script in which return, await, import and export may
+ * appear anywhere, so a source, meta.js and a built script all parse.
+ */
+function readSyntax(source) {
+  const tokens = [];
+  const comments = [];
+  parse(source, { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowImportExportEverywhere: true, onToken: tokens, onComment: comments });
+  return { tokens: tokens.filter((token) => token.type !== tokTypes.eof), comments: comments };
+}
+
+function listLiteralTexts(source) {
+  return readSyntax(source).tokens.filter((token) => LITERAL_TOKEN_TYPES.includes(token.type)).map((token) => source.slice(token.start, token.end));
+}
+
+function countTokenLineBreaks(source) {
+  const { tokens } = readSyntax(source);
+  return tokens.filter((token, index) => index > 0 && source.slice(tokens[index - 1].end, token.start).includes('\n')).length;
+}
+
+function readStrippedCode(path) {
+  return stripComments(readFileSync(join(repoRoot, path), 'utf8').replace(/\r/g, '')).trim();
+}
+
 function makeScratchCopy() {
   const scratchRoot = mkdtempSync(join(tmpdir(), 'build-workflows-'));
   scratchRoots.push(scratchRoot);
-  for (const dir of ['plugin/workflow-src', 'plugin/references', 'plugin/workflows', 'plugin/agents']) {
+  for (const dir of ['plugin/workflow-src', 'plugin/references', 'plugin/workflows', 'plugin/agents', 'tools/vendor']) {
     cpSync(join(repoRoot, dir), join(scratchRoot, dir), { recursive: true });
   }
   copySkillFiles(scratchRoot);
@@ -89,6 +118,7 @@ function copySkillFiles(scratchRoot) {
 /**
  * Writes a copy of tools/build_workflows.mjs under a new name into
  * scratchRoot whose PROSE_BUDGETS is budgets, and returns the imported copy.
+ * The copy imports acorn from the tools/vendor/ that makeScratchCopy copies.
  */
 async function loadScratchBuilder(scratchRoot, budgets) {
   const builderSource = readFileSync(builderPath, 'utf8');
@@ -235,6 +265,21 @@ function runCliIn(root, argv, run = runCli) {
 
 after(() => {
   scratchRoots.forEach((scratchRoot) => rmSync(scratchRoot, { recursive: true, force: true }));
+});
+
+describe('build_workflows vendored acorn', () => {
+  test(ACORN_PATH + ' has the sha256 that tools/vendor/acorn/README.md records', () => {
+    const digest = createHash('sha256').update(readFileSync(join(repoRoot, ACORN_PATH))).digest('hex');
+    assert.equal(digest, ACORN_SHA256);
+    const readme = readFileSync(join(repoRoot, 'tools/vendor/acorn/README.md'), 'utf8');
+    assert.ok(readme.includes('| `acorn.mjs` sha256 | `' + ACORN_SHA256 + '` |'), 'the README records another sha256');
+  });
+  test('a scratch builder imports acorn from the copied tools/vendor/', async () => {
+    const scratchRoot = makeScratchCopy();
+    assert.ok(existsSync(join(scratchRoot, ACORN_PATH)));
+    const builder = await loadScratchBuilder(scratchRoot, PROSE_BUDGETS);
+    assert.equal(builder.buildWorkflow(scratchRoot, 'analysis-only'), readBuilt('analysis-only'));
+  });
 });
 
 describe('build_workflows --check', () => {
@@ -388,10 +433,20 @@ describe('build_workflows guards', () => {
     assert.equal(run.code, 1);
     assert.ok(run.stderr.includes('plugin/workflows/copy-check.js is stale'));
   });
-  test('an import in code fails the build', () => {
+  test('an import in main.js fails the build, naming the file acorn cannot parse as a script', () => {
     const scratchRoot = makeScratchCopy();
     appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nimport x from \'y\';\n');
-    assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), /import or require/);
+    assertBuildAndCheckThrow(scratchRoot, /^Error: plugin\/workflow-src\/analysis-only\/main\.js: acorn cannot parse it: 'import' and 'export' may appear only with 'sourceType: module'/);
+  });
+  test('an import in meta.js, which parses as a module, fails the build', () => {
+    const scratchRoot = makeScratchCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/meta.js'), '\nimport x from \'y\';\n');
+    assertBuildAndCheckThrow(scratchRoot, /^Error: analysis-only: the built script uses import or require\( as code/);
+  });
+  test('a dynamic import( in code fails the build', () => {
+    const scratchRoot = makeScratchCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nconst seeded = import(\'y\');\n');
+    assertBuildAndCheckThrow(scratchRoot, /^Error: analysis-only: the built script uses import or require\( as code/);
   });
   test('a require( call in code fails the build', () => {
     const scratchRoot = makeScratchCopy();
@@ -409,7 +464,7 @@ describe('build_workflows guards', () => {
     assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), /declared more than once: decide/);
   });
   test('stripCommentsAndStrings keeps code and drops comments and literals', () => {
-    assert.equal(stripCommentsAndStrings('a /* x */ b // y\nc \'d\' "e" `f`'), 'a  b \nc "" "" ""');
+    assert.equal(stripCommentsAndStrings('a /* x */ + b // y\nc + \'d\' + "e" + `f`'), 'a  + b \nc + "" + "" + ""');
   });
   test('stripCommentsAndStrings hides a regex literal and keeps template substitution code', () => {
     assert.equal(stripCommentsAndStrings('x = /import/; y = `a${require(z)}b`'), 'x = ""; y = ""require(z)""');
@@ -420,13 +475,24 @@ describe('build_workflows guards', () => {
   });
   test('a syntax error in the built script fails the build', () => {
     const scratchRoot = makeScratchCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/lib/schema.js'), '\nconst SEEDED_TWICE = 1;\n');
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nconst SEEDED_TWICE = 2;\n');
+    assertBuildAndCheckThrow(scratchRoot, /^Error: analysis-only: the built script does not parse: Identifier 'SEEDED_TWICE' has already been declared/);
+  });
+  test('a syntax error in main.js fails the build and --check, naming the file', () => {
+    const scratchRoot = makeScratchCopy();
     appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nconst = 1;\n');
-    assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), /analysis-only: the built script does not parse/);
+    assertBuildAndCheckThrow(scratchRoot, /^Error: plugin\/workflow-src\/analysis-only\/main\.js: acorn cannot parse it: Unexpected token/);
   });
   test('an unterminated literal in a source fails the build, naming the file', () => {
     const scratchRoot = makeScratchCopy();
     appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nlog(`open);\n');
-    assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), /plugin\/workflow-src\/analysis-only\/main\.js: unterminated template literal/);
+    assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), /^Error: plugin\/workflow-src\/analysis-only\/main\.js: acorn cannot parse it: Unterminated template/);
+  });
+  test('a meta.js acorn cannot parse as a module fails the build, naming the file', () => {
+    const scratchRoot = makeScratchCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/meta.js'), '\nexport const = 1;\n');
+    assertBuildAndCheckThrow(scratchRoot, /^Error: plugin\/workflow-src\/analysis-only\/meta\.js: acorn cannot parse it: Unexpected token/);
   });
   test('LIB_FILES is every .js in plugin/workflow-src/lib/', () => {
     const libFiles = readdirSync(join(repoRoot, 'plugin/workflow-src/lib'), { withFileTypes: true })
@@ -468,7 +534,7 @@ describe('build_workflows stripComments', () => {
     ['a line comment after division', 'x = a / b // c', 'x = a / b'],
     ['a block comment inside a substitution', 'x = `${ /* c */ 1 }`;', 'x = `${ 1 }`;'],
     ['a block comment holding a newline, keeping one newline', 'return /*\n*/ x', 'return\n x'],
-    ['a block comment between tokens, keeping them apart', 'a/* c */b', 'a b'],
+    ['a block comment between tokens, keeping them apart', 'typeof/* c */b', 'typeof b'],
     ['a block comment before code, keeping its indent', '  /* c */ x();', '  x();'],
     ['a comment-only line', 'function a() {\n  // c\n  return 1;\n}', 'function a() {\n  return 1;\n}'],
     ['a doc comment above a function', 'x();\n\n/**\n * d\n */\nfunction a() {}\n', 'x();\n\nfunction a() {}\n'],
@@ -484,26 +550,30 @@ describe('build_workflows stripComments', () => {
     });
   }
   const unterminated = [
-    ['template', 'x = `abc', /unterminated template literal at line 1/],
-    ['template substitution', 'x = `${ a', /unterminated template literal substitution/],
-    ['string', 'x = \'abc\ny = 1;', /unterminated string literal at line 1/],
-    ['block comment', 'x = 1;\n/* c', /unterminated block comment at line 2/],
-    ['regex', 'x = /abc\n', /unterminated regex literal at line 1/]
+    ['template', 'x = `abc', /^SyntaxError: Unterminated template \(1:5\)/],
+    ['template substitution', 'x = `${ a', /^SyntaxError: Unexpected token \(1:9\)/],
+    ['string', 'x = \'abc\ny = 1;', /^SyntaxError: Unterminated string constant \(1:4\)/],
+    ['block comment', 'x = 1;\n/* c', /^SyntaxError: Unterminated comment \(2:0\)/],
+    ['regex', 'x = /abc\n', /^SyntaxError: Unterminated regular expression \(1:5\)/]
   ];
   for (const [name, source, pattern] of unterminated) {
     test('throws on an unterminated ' + name, () => {
-      assert.throws(() => stripComments(source), pattern);
+      assert.throws(() => stripComments(source), (error) => pattern.test(String(error)));
     });
   }
+  test('parses meta.js as a module and rejects an unknown source type', () => {
+    assert.equal(stripComments('// c\nexport const meta = {};\n', 'module'), 'export const meta = {};\n');
+    assert.throws(() => stripComments('export const meta = {};\n'), (error) => /^SyntaxError: 'import' and 'export' may appear only with 'sourceType: module'/.test(String(error)));
+    assert.throws(() => stripComments('x = 1;', 'commonjs'), /unknown source type "commonjs"; expected script or module/);
+  });
   test('keeps every literal of every source byte for byte', () => {
     const sourcePaths = listWorkflowSourcePaths();
     assert.ok(DELIVERY_MODULES.every((name) => sourcePaths.includes('standard-delivery/' + name)), JSON.stringify(sourcePaths));
-    const listLiterals = (source) => tokenizeSource(source).filter((token) => token.kind !== 'code' && token.kind !== 'comment').map((token) => token.text);
     for (const sourcePath of sourcePaths) {
       const source = readFileSync(join(repoRoot, 'plugin/workflow-src', sourcePath), 'utf8').replace(/\r/g, '');
-      const output = stripComments(source);
-      assert.deepEqual(listLiterals(output), listLiterals(source), sourcePath);
-      assert.ok(tokenizeSource(output).every((token) => token.kind !== 'comment'), sourcePath);
+      const output = stripComments(source, sourcePath.endsWith('/meta.js') ? 'module' : 'script');
+      assert.deepEqual(listLiteralTexts(output), listLiteralTexts(source), sourcePath);
+      assert.deepEqual(readSyntax(output).comments, [], sourcePath);
     }
   });
 });
@@ -534,35 +604,74 @@ describe('build_workflows compactCode', () => {
       assert.doesNotThrow(() => assertCompactionPreserves('case.js', source, output));
     });
   }
-  test('keeps every literal of every compacted source byte for byte, every newline, and changes only whitespace', () => {
-    const listLiterals = (source) => tokenizeSource(source).filter((token) => token.kind !== 'code').map((token) => token.text);
-    const countCodeNewlines = (source) => tokenizeSource(source).filter((token) => token.kind === 'code').map((token) => token.text.replace(/\s*\n\s*/g, '\n')).join('').split('\n').length;
-    for (const sourcePath of listWorkflowSourcePaths()) {
-      const stripped = stripComments(readFileSync(join(repoRoot, 'plugin/workflow-src', sourcePath), 'utf8').replace(/\r/g, '')).trim();
-      const output = compactSource(sourcePath, stripped);
-      assert.deepEqual(listLiterals(output), listLiterals(stripped), sourcePath);
-      assert.equal(countCodeNewlines(output), countCodeNewlines(stripped), sourcePath);
+  test('keeps every literal of every compacted source byte for byte, every newline, and the syntax tree', () => {
+    const codePaths = listWorkflowSourcePaths().filter((sourcePath) => !sourcePath.endsWith('/meta.js'));
+    for (const sourcePath of codePaths) {
+      const stripped = readStrippedCode('plugin/workflow-src/' + sourcePath);
+      const output = compactCode(stripped);
+      assert.doesNotThrow(() => assertCompactionPreserves(sourcePath, stripped, output), sourcePath);
+      assert.deepEqual(listLiteralTexts(output), listLiteralTexts(stripped), sourcePath);
+      assert.equal(countTokenLineBreaks(output), countTokenLineBreaks(stripped), sourcePath);
       assert.ok(output.length < stripped.length, sourcePath);
     }
   });
+  const COMPACTION_CHANGED = 'Error: lib/seeded.js: compaction changed the code: the compacted code ';
+  const DIFFERENT_TREE = 'parses to a different syntax tree than the stripped source, at Program.body[0].expression.right';
   const broken = [
-    ['a changed literal', 'x = "a";', 'x="b";', /^Error: lib\/seeded\.js: compaction changed literal 1 from "string \\"a\\"" to "string \\"b\\""/],
-    ['a dropped literal', 'x = "a" + "b";', 'x="a"+b;', /^Error: lib\/seeded\.js: compaction changed literal 2 from "string \\"b\\"" to undefined/],
-    ['an added literal', 'x = a;', 'x="a";', /^Error: lib\/seeded\.js: compaction changed literal 1 from undefined to "string \\"a\\""/],
-    ['two literals in a new order', 'x = "a" + "b";', 'x="b"+"a";', /^Error: lib\/seeded\.js: compaction changed literal 1/],
-    ['a division joined with a regex into a comment', 'x = a / /b/.source;', 'x=a//b/.source;', /^Error: lib\/seeded\.js: compaction changed literal 1 from "regex \/b\/" to "comment \/\/b\/.source;"/],
-    ['changed code', 'x = a;', 'x=b;', /^Error: lib\/seeded\.js: compaction changed the code once all whitespace is removed$/],
-    ['a literal moved across code', 'x = a + "b";', 'x="b"+a;', /^Error: lib\/seeded\.js: compaction changed the code once all whitespace is removed$/]
+    ['a changed literal', 'x = "a";', 'x="b";', DIFFERENT_TREE + '.value'],
+    ['a dropped literal', 'x = "a" + "b";', 'x="a"+b;', DIFFERENT_TREE + '.right'],
+    ['an added literal', 'x = a;', 'x="a";', DIFFERENT_TREE],
+    ['two literals in a new order', 'x = "a" + "b";', 'x="b"+"a";', DIFFERENT_TREE + '.left.value'],
+    ['changed code', 'x = a;', 'x=b;', DIFFERENT_TREE + '.name'],
+    ['a literal moved across code', 'x = a + "b";', 'x="b"+a;', DIFFERENT_TREE + '.left'],
+    ['a + +b merged into a++b', 'x = a + +b;', 'x=a++b;', 'does not parse: Unexpected token (1:5)'],
+    ['a / /b/ merged into a//b/, a comment', 'x = a / /b/.source;', 'x=a//b/.source;', DIFFERENT_TREE],
+    ['1 .x merged into 1.x', 'x = 1 .x;', 'x=1.x;', 'does not parse: Identifier directly after number (1:4)'],
+    ['/a +b/ rewritten to /a+b/', 'x = /a +b/;', 'x=/a+b/;', DIFFERENT_TREE + '.value']
   ];
-  for (const [name, original, output, pattern] of broken) {
-    test('the equivalence check fails on ' + name + ', naming the file', () => {
-      assert.throws(() => assertCompactionPreserves('lib/seeded.js', original, output), (error) => pattern.test(String(error)));
+  for (const [name, stripped, output, ending] of broken) {
+    test('the compaction check fails on ' + name + ', naming the file', () => {
+      assert.throws(() => assertCompactionPreserves('lib/seeded.js', stripped, output), (error) => String(error) === COMPACTION_CHANGED + ending);
     });
   }
+  test('the compaction check names the file when the stripped source does not parse', () => {
+    assert.throws(() => assertCompactionPreserves('lib/seeded.js', 'x = ;', 'x=;'), /^Error: lib\/seeded\.js: acorn cannot parse it: Unexpected token/);
+  });
+  test('the stripping check fails on a stripped output that drops or breaks code, naming the file', () => {
+    assert.doesNotThrow(() => assertStrippingPreserves('lib/seeded.js', 'x = a; // c\ny = b;', 'x = a;\ny = b;'));
+    assert.throws(() => assertStrippingPreserves('lib/seeded.js', 'x = a; // c\ny = b;', 'x = a;'), (error) => String(error) === 'Error: lib/seeded.js: comment stripping changed the code: the stripped source parses to a different syntax tree than the original source, at Program.body');
+    assert.throws(() => assertStrippingPreserves('lib/seeded.js', 'x = a; /* c */ y = b;', 'x = a; y = '), /^Error: lib\/seeded\.js: comment stripping changed the code: the stripped source does not parse: Unexpected token/);
+  });
+  const regexStatements = [
+    ['a regex statement after if (...)', 'if (enabled) /a +b/.test(value);', 'if(enabled)/a +b/.test(value);'],
+    ['a regex starting with a blank after while (...)', 'while (x) / x/.test(s);', 'while(x)/ x/.test(s);'],
+    ['a regex class of a blank and a slash after for (...)', 'for (;;) /[ /]/.test(s);', 'for(;;)/[ /]/.test(s);'],
+    ['a regex class of a slash and a star after if (...)', 'if (x) /[/*]/.test(s);', 'if(x)/[/*]/.test(s);'],
+    ['a regex statement after the closing brace of a block', 'if (x) {\n  y();\n}\n/a +b/.test(s);', 'if(x){\ny();\n}\n/a +b/.test(s);'],
+    ['a regex statement after a closing brace on one line', '{ y(); } /a +b/.test(s);', '{y();}/a +b/.test(s);']
+  ];
+  for (const [name, source, expected] of regexStatements) {
+    test('keeps every byte of ' + name + ' through stripComments and compactCode', () => {
+      assert.equal(stripComments(source), source);
+      assert.equal(compactCode(source), expected);
+      assert.deepEqual(listLiteralTexts(compactCode(source)), listLiteralTexts(source));
+    });
+  }
+  test('a build of a seeded module keeps every byte of each regex statement', () => {
+    const scratchRoot = makeScratchCopy();
+    const body = regexStatements.map(([, source]) => source.replace(/^/gm, '  ')).join('\n');
+    writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), 'function seededRegexStatements(enabled, value, x, s) {\n' + body + '\n}\n');
+    const built = buildWorkflow(scratchRoot, 'analysis-only');
+    const compactedModule = '\nfunction seededRegexStatements(enabled,value,x,s){\n' + regexStatements.map(([, , expected]) => expected).join('\n') + '\n}\n';
+    assert.ok(built.includes(compactedModule), 'the seeded module is not in the built script, compacted');
+    for (const [name, source] of regexStatements) {
+      assert.ok(listLiteralTexts(source).every((literal) => built.includes(literal)), name);
+    }
+  });
   for (const id of liveIds) {
     test(builtPathFor(id) + ' keeps the layout of meta.js and the data constants and compacts the libraries, modules and main.js', () => {
       const source = readBuilt(id);
-      const meta = stripComments(readFileSync(join(repoRoot, 'plugin/workflow-src', id, 'meta.js'), 'utf8').replace(/\r/g, '')).trim();
+      const meta = stripComments(readFileSync(join(repoRoot, 'plugin/workflow-src', id, 'meta.js'), 'utf8').replace(/\r/g, ''), 'module').trim();
       assert.ok(source.startsWith(meta + '\n\n/*\n * GENERATED'), id);
       assert.ok(meta.includes('\n  '), id);
       for (const name of ['AUTONOMY_TABLE', 'BRIEF_SCHEMA', 'PLAN_SCHEMA']) {
@@ -570,8 +679,7 @@ describe('build_workflows compactCode', () => {
       }
       const codePaths = listSourcePaths(repoRoot, id).filter((path) => path.startsWith('plugin/workflow-src/') && !path.endsWith('/meta.js'));
       for (const path of codePaths) {
-        const stripped = stripComments(readFileSync(join(repoRoot, path), 'utf8').replace(/\r/g, '')).trim();
-        assert.ok(source.includes('\n\n' + compactCode(stripped) + '\n'), path);
+        assert.ok(source.includes('\n\n' + compactCode(readStrippedCode(path)) + '\n'), path);
       }
     });
   }
@@ -631,23 +739,31 @@ describe('build_workflows modules', () => {
   test('a top-level const seeded into a standard-delivery module fails both modes, naming the file', () => {
     const scratchRoot = makeScratchCopy();
     appendFileSync(join(scratchRoot, 'plugin/workflow-src/standard-delivery/relay.js'), '\nconst SEEDED_NAME = \'relay\';\n');
-    const pattern = /plugin\/workflow-src\/standard-delivery\/relay\.js: a module holds only function declarations at top level, but it holds "const SEEDED_NAME = \\"\\";"/;
+    const pattern = /plugin\/workflow-src\/standard-delivery\/relay\.js: a module holds only function declarations at top level, but it holds "const SEEDED_NAME = 'relay';"/;
     assert.throws(() => buildWorkflow(scratchRoot, 'standard-delivery'), pattern);
     assert.throws(() => runCliIn(scratchRoot, ['--check']), pattern);
     assert.throws(() => runCliIn(scratchRoot, []), pattern);
   });
+  const MODULE_RULE = 'a module holds only function declarations at top level, but it holds ';
   const topLevelCases = [
-    ['function declarations only', 'function a() {}\nasync function b(c = { d: [1] }) {\n  return { e: (c) };\n}\n', undefined],
-    ['a const after a function', 'function a() {}\nconst b = 1;\n', 'const b = 1;'],
-    ['a call statement', 'f();\nfunction a() {}\n', 'f();'],
-    ['a stray semicolon', 'function a() {};\n', ';'],
-    ['an exported function', 'export function a() {}\n', 'export function a() {}'],
-    ['a function expression call', '(function a() {})();\n', '(function a() {})();'],
-    ['an unclosed function body', 'function a() {\n', 'function a() {']
+    ['function declarations only', 'function seededA() {}\nasync function seededB(c = { d: [1] }) {\n  return { e: (c) };\n}\nfunction* seededC() {}\n', undefined],
+    ['a const after a function', 'function seededA() {}\nconst b = 1;\n', MODULE_RULE + '"const b = 1;"'],
+    ['a call statement', 'f();\nfunction seededA() {}\n', MODULE_RULE + '"f();"'],
+    ['a stray semicolon', 'function seededA() {};\n', MODULE_RULE + '";"'],
+    ['a statement over several lines, by its first line', 'if (x) {\n  f();\n}\n', MODULE_RULE + '"if (x) {"'],
+    ['a function expression call', '(function seededA() {})();\n', MODULE_RULE + '"(function seededA() {})();"'],
+    ['an exported function, which a script cannot hold', 'export function seededA() {}\n', 'acorn cannot parse it: \'import\' and \'export\' may appear only with \'sourceType: module\''],
+    ['an unclosed function body', 'function seededA() {\n', 'acorn cannot parse it: Unexpected token (2:0)']
   ];
   for (const [name, code, expected] of topLevelCases) {
-    test('findTopLevelStatement finds ' + name, () => {
-      assert.equal(findTopLevelStatement(code), expected);
+    test('a seeded module of ' + name + (expected === undefined ? ' builds' : ' fails the build, naming the file'), () => {
+      const scratchRoot = makeScratchCopy();
+      writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), code);
+      if (expected === undefined) {
+        assert.doesNotThrow(() => buildWorkflow(scratchRoot, 'analysis-only'));
+        return;
+      }
+      assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), (error) => String(error).startsWith('Error: ' + SEEDED_MODULE_PATH + ': ' + expected));
     });
   }
   test('every workflow source file is at most ' + MAX_SOURCE_LINES + ' lines', () => {
@@ -772,7 +888,7 @@ describe('build_workflows drafts', () => {
   test('--check fails on a draft that does not build', () => {
     const scratchRoot = makeScratchDraftCopy();
     appendFileSync(join(scratchRoot, 'plugin/workflow-src', DRAFT_ID, 'main.js'), '\nimport x from \'y\';\n');
-    assert.throws(() => runCliIn(scratchRoot, ['--check']), new RegExp(DRAFT_ID + ': the built script uses import or require'));
+    assert.throws(() => runCliIn(scratchRoot, ['--check']), new RegExp('^Error: plugin/workflow-src/' + DRAFT_ID + '/main\\.js: acorn cannot parse it: '));
   });
   test('removing the marker reports the script missing, and a stale one stale', async () => {
     const scratchRoot = makeScratchDraftCopy();
@@ -1004,9 +1120,9 @@ for (const id of liveIds) {
       assert.throws(() => readDataConstant(repoRoot, 'NO_SUCH_CONSTANT'), /no data constant named "NO_SUCH_CONSTANT"/);
     });
     test('has no comment other than the GENERATED banner', () => {
-      const comments = tokenizeSource(source).filter((token) => token.kind === 'comment');
+      const { comments } = readSyntax(source);
       assert.equal(comments.length, 1);
-      assert.ok(comments[0].text.startsWith('/*\n * GENERATED by tools/build_workflows.mjs'));
+      assert.ok(comments[0].value.startsWith('\n * GENERATED by tools/build_workflows.mjs'));
     });
     test('has no import or require', () => {
       assert.ok(!/\bimport\b/.test(source));

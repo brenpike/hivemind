@@ -26,6 +26,13 @@
  *   than meta.js, main.js and contract.js, in name order. contract.js is
  *   test data and is never bundled. listSourcePaths returns this order, and
  *   the banner names each source in it.
+ *   The build reads every source only through acorn.parse of the vendored
+ *   acorn (tools/vendor/acorn/), with ecmaVersion latest: its syntax tree,
+ *   and the tokens and comments of its onToken and onComment callbacks,
+ *   never a standalone tokenizer. Each library, each module and main.js
+ *   parses as a script with top-level return and await allowed. meta.js
+ *   parses as a module, since it holds export const meta. A source acorn
+ *   cannot parse fails the build, naming the file, in both modes.
  *   Comments are stripped from meta.js, each library, each module and
  *   main.js by stripComments, and each data constant is
  *   JSON.stringify(data, null, 1) with the leading spaces removed from every
@@ -40,22 +47,22 @@
  *   escapes newlines inside strings, so every leading space it writes is
  *   indentation.
  *   After stripComments, the code of each library, each module and main.js
- *   is compacted by compactCode: leading indentation, trailing blanks, blank
- *   lines and every space or tab go, except one space between two word
- *   characters, between a regex literal and a word character, between a
- *   digit and a dot, and where the join would form another token (+ +, - -,
- *   a / before / or *, < before !--, -- before >). Every newline between
- *   code stays, so automatic semicolon insertion sees the same line breaks.
- *   meta.js, the banner, the data constants and the bytes of every string,
- *   template and regex literal are never compacted.
+ *   is compacted by compactCode, which writes acorn's tokens of the stripped
+ *   source: a newline wherever the stripped source has one between two
+ *   tokens, so automatic semicolon insertion sees the same line breaks, one
+ *   space only where the two tokens written together would read as other
+ *   tokens (see joinsIntoOtherTokens), and nothing elsewhere. meta.js, the
+ *   banner, the data constants and the bytes of every string, template and
+ *   regex literal are never compacted.
  *
  * Invariants
  *   CR is stripped from every input and the output is written with LF only.
- *   The built script starts with `export const meta`, has no import or
- *   require( outside comments and strings, declares each top-level function
- *   once, compiles as the body of an async function, and is at most
- *   MAX_BUILT_SCRIPT_LENGTH characters long, or the build throws, in both
- *   modes.
+ *   The built script starts with `export const meta`, parses with acorn as
+ *   a script in which import and export may appear, holds no
+ *   ImportDeclaration, no ImportExpression and no call of require, declares
+ *   each top-level function once, compiles as the body of an async
+ *   function, and is at most MAX_BUILT_SCRIPT_LENGTH characters long, or the
+ *   build throws, in both modes.
  *   The built script also keeps every line at most MAX_BUILT_LINE_LENGTH
  *   characters, keeps the sum of its squared line lengths at most
  *   MAX_BUILT_LINE_SQUARES, never contains the preview truncation marker
@@ -63,18 +70,24 @@
  *   combining or zero-width characters, or the build throws, in both modes.
  *   Lengths are JavaScript string lengths of the lines split on LF, and an
  *   empty line counts 0.
- *   The compacted code of each library, module and main.js has the same
- *   literal tokens in the same order as its stripped source and the same
- *   code once all whitespace is removed, or the build throws naming the
- *   file, in both modes (assertCompactionPreserves).
- *   A module holds only function declarations at top level, or the build
- *   throws naming the file, in both modes. So every top-level const stays
- *   in main.js, which runs after every module, and the module order cannot
- *   change what runs.
+ *   Two equivalence checks run on each library, module and main.js, and
+ *   each fails the build, naming the file, in both modes. The original
+ *   source and the stripped source parse to equal syntax trees
+ *   (assertStrippingPreserves), and the stripped source and the compacted
+ *   code parse to equal syntax trees (assertCompactionPreserves). Trees are
+ *   equal when every field other than the position fields start, end, loc
+ *   and range is equal, literal raw text included. Neither check uses a rule
+ *   of the stripper or the compactor, so any change either makes to the
+ *   code, a rewritten regex or two tokens merged into one, fails the build.
+ *   Every top-level node of a module's syntax tree is a FunctionDeclaration,
+ *   or the build throws naming the file, in both modes. So every top-level
+ *   const stays in main.js, which runs after every module, and the module
+ *   order cannot change what runs.
  *   Two prose guards run on every built script, live or draft, in both
  *   modes (docs/engineering-principles.md P24). The prose budget: the
- *   characters of the string and template literal tokens tokenizeSource
- *   finds in the built script are at most that workflow's entry in
+ *   characters of the built script's string and template literals, read
+ *   from acorn's tokens (countProseCharacters), are at most that workflow's
+ *   entry in
  *   PROSE_BUDGETS, and a workflow id with no entry fails the build, naming
  *   it. Each budget is the measured count plus a margin of at most 1,000,
  *   and raising a budget is a visible, reviewed change to this file. The
@@ -107,7 +120,10 @@
  *   A data field no script reads only adds length toward the approval
  *   limit, so the copy leaves it out (issue 459). Indentation and blanks
  *   inside lines do the same, so the build compacts code, and the
- *   equivalence check proves it changed only whitespace.
+ *   equivalence checks prove that stripping and compaction left the code
+ *   the same. A hand-written lexer cannot tell a regex from a division after
+ *   every token, so the build reads code only through a parser that follows
+ *   the spec.
  *   The title and description of each schema field are prose for the
  *   planner, and their home is plugin/references, which the planner reads
  *   (docs/engineering-principles.md P24), so the copy carries only the
@@ -125,6 +141,7 @@ import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
+import { parse, tokTypes } from './vendor/acorn/acorn.mjs';
 
 const REPO_ROOT = fileURLToPath(new URL('../', import.meta.url));
 const REBUILD_COMMAND = 'node tools/build_workflows.mjs';
@@ -315,204 +332,112 @@ function renderDataConstant(root, constant) {
   return 'const ' + constant.name + ' = ' + JSON.stringify(data, null, 1).replace(/^ +/gm, '') + ';';
 }
 
-const REGEX_AFTER_KEYWORDS = new Set(['return', 'typeof', 'instanceof', 'in', 'of', 'new', 'delete', 'void', 'throw', 'case', 'do', 'else', 'yield', 'await']);
-const WORD_CHARACTER = /[\w$\u0080-￿]/;
+const SCRIPT_PARSE_OPTIONS = Object.freeze({ ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true });
+const SOURCE_PARSE_OPTIONS = Object.freeze({
+  script: SCRIPT_PARSE_OPTIONS,
+  module: Object.freeze({ ecmaVersion: 'latest', sourceType: 'module' })
+});
+const BUILT_SCRIPT_PARSE_OPTIONS = Object.freeze({ ...SCRIPT_PARSE_OPTIONS, allowImportExportEverywhere: true });
+const TEMPLATE_TOKEN_TYPES = Object.freeze([tokTypes.template, tokTypes.invalidTemplate]);
+const POSITION_FIELDS = Object.freeze(['start', 'end', 'loc', 'range']);
+const LINE_TERMINATOR = /[\n\u2028\u2029]/;
+const WORD_CHARACTER = /[\w$\\\u0080-\uffff]/;
+const MERGING_BOUNDARIES = Object.freeze(['++', '--', '//', '/*', '<!', '->']);
+const STRIPPING_STEP = Object.freeze({ name: 'comment stripping', input: 'the original source', output: 'the stripped source' });
+const COMPACTION_STEP = Object.freeze({ name: 'compaction', input: 'the stripped source', output: 'the compacted code' });
 
-function describeOffset(source, offset) {
-  return 'line ' + (source.slice(0, offset).split('\n').length);
-}
-
-function findBlockCommentEnd(source, start) {
-  const end = source.indexOf('*/', start + 2);
-  if (end === -1) {
-    throw new Error('unterminated block comment at ' + describeOffset(source, start));
-  }
-  return end + 2;
-}
-
-function findLineCommentEnd(source, start) {
-  const end = source.indexOf('\n', start);
-  return end === -1 ? source.length : end;
-}
-
-function findQuotedEnd(source, start) {
-  const quote = source[start];
-  let index = start + 1;
-  while (index < source.length && source[index] !== '\n') {
-    if (source[index] === quote) {
-      return index + 1;
-    }
-    index += source[index] === '\\' ? 2 : 1;
-  }
-  throw new Error('unterminated string literal at ' + describeOffset(source, start));
+/**
+ * Returns {source, ast, tokens, comments} for source parsed by acorn with
+ * options: the syntax tree, every token but the end of input, and every
+ * comment. Throws acorn's error when source does not parse.
+ */
+function parseJavaScript(source, options) {
+  const tokens = [];
+  const comments = [];
+  const ast = parse(source, { ...options, onToken: tokens, onComment: comments });
+  return { source: source, ast: ast, tokens: tokens.filter((token) => token.type !== tokTypes.eof), comments: comments };
 }
 
 /**
- * Scans one piece of a template literal that starts at start, on the opening
- * backtick or on the } that closes a substitution. Returns {end, opensSubstitution}:
- * the piece ends after the closing backtick or after the next ${.
+ * Returns parseJavaScript(source, options). Throws, naming relativePath,
+ * when acorn cannot parse source.
  */
-function findTemplatePieceEnd(source, start) {
-  let index = start + 1;
-  while (index < source.length) {
-    if (source[index] === '\\') {
-      index += 2;
-    } else if (source[index] === '`') {
-      return { end: index + 1, opensSubstitution: false };
-    } else if (source[index] === '$' && source[index + 1] === '{') {
-      return { end: index + 2, opensSubstitution: true };
-    } else {
-      index += 1;
-    }
-  }
-  throw new Error('unterminated template literal at ' + describeOffset(source, start));
-}
-
-function findRegexEnd(source, start) {
-  let index = start + 1;
-  let inClass = false;
-  while (index < source.length && source[index] !== '\n') {
-    const character = source[index];
-    if (character === '\\') {
-      index += 2;
-    } else if (character === '/' && !inClass) {
-      index += 1;
-      while (index < source.length && /[A-Za-z]/.test(source[index])) {
-        index += 1;
-      }
-      return index;
-    } else {
-      if (character === '[' || character === ']') {
-        inClass = character === '[';
-      }
-      index += 1;
-    }
-  }
-  throw new Error('unterminated regex literal at ' + describeOffset(source, start));
-}
-
-function flushCode(lexer) {
-  if (lexer.codeStart < lexer.index) {
-    lexer.tokens.push({ kind: 'code', text: lexer.source.slice(lexer.codeStart, lexer.index) });
+function parseNamedSource(relativePath, source, options) {
+  try {
+    return parseJavaScript(source, options);
+  } catch (error) {
+    throw new Error(relativePath + ': acorn cannot parse it: ' + error.message, { cause: error });
   }
 }
 
-function pushToken(lexer, kind, end) {
-  flushCode(lexer);
-  lexer.tokens.push({ kind: kind, text: lexer.source.slice(lexer.index, end) });
-  lexer.index = end;
-  lexer.codeStart = end;
-}
-
-function lexTemplatePiece(lexer) {
-  const piece = findTemplatePieceEnd(lexer.source, lexer.index);
-  pushToken(lexer, 'template', piece.end);
-  if (piece.opensSubstitution) {
-    lexer.braceStack.push('template');
+function readSourceParseOptions(sourceType) {
+  if (!Object.hasOwn(SOURCE_PARSE_OPTIONS, sourceType)) {
+    throw new Error('unknown source type ' + JSON.stringify(sourceType) + '; expected script or module');
   }
-  lexer.regexAllowed = piece.opensSubstitution;
-}
-
-function lexSlash(lexer) {
-  const next = lexer.source[lexer.index + 1];
-  if (next === '/') {
-    pushToken(lexer, 'comment', findLineCommentEnd(lexer.source, lexer.index));
-  } else if (next === '*') {
-    pushToken(lexer, 'comment', findBlockCommentEnd(lexer.source, lexer.index));
-  } else if (lexer.regexAllowed) {
-    pushToken(lexer, 'regex', findRegexEnd(lexer.source, lexer.index));
-    lexer.regexAllowed = false;
-  } else {
-    lexer.index += 1;
-    lexer.regexAllowed = true;
-  }
-}
-
-function lexWord(lexer) {
-  const start = lexer.index;
-  while (lexer.index < lexer.source.length && WORD_CHARACTER.test(lexer.source[lexer.index])) {
-    lexer.index += 1;
-  }
-  lexer.regexAllowed = REGEX_AFTER_KEYWORDS.has(lexer.source.slice(start, lexer.index));
-}
-
-function lexClosingBrace(lexer) {
-  if (lexer.braceStack.pop() === 'template') {
-    lexTemplatePiece(lexer);
-    return;
-  }
-  lexer.index += 1;
-  lexer.regexAllowed = true;
+  return SOURCE_PARSE_OPTIONS[sourceType];
 }
 
 /**
- * INVARIANT: a regex literal never directly follows ++ or --. After the
- * postfix form a / is division, and after the prefix form the next token is
- * an operand, so ++ and -- are each read as one token that leaves
- * regexAllowed false. A third + or - after them is its own punctuator.
+ * Returns the literal piece of the token at index of tokens, as an array of
+ * none or one {kind, start, end}: a string, a regex, or one piece of a
+ * template literal, from the backtick or the } that opens it to the
+ * backtick or the ${ that closes it. acorn writes a template token for each
+ * piece, between those two delimiter tokens, even when the piece is empty.
  */
-function lexPunctuator(lexer, character) {
-  if (character === '{') {
-    lexer.braceStack.push('brace');
+function readLiteralPiece(tokens, index) {
+  const token = tokens[index];
+  if (token.type === tokTypes.string) {
+    return [{ kind: 'string', start: token.start, end: token.end }];
   }
-  if ((character === '+' || character === '-') && lexer.source[lexer.index + 1] === character) {
-    lexer.index += 2;
-    lexer.regexAllowed = false;
-    return;
+  if (token.type === tokTypes.regexp) {
+    return [{ kind: 'regex', start: token.start, end: token.end }];
   }
-  lexer.index += 1;
-  if (!/\s/.test(character)) {
-    lexer.regexAllowed = character !== ')' && character !== ']';
+  if (TEMPLATE_TOKEN_TYPES.includes(token.type)) {
+    return [{ kind: 'template', start: tokens[index - 1].start, end: tokens[index + 1].end }];
   }
-}
-
-function lexNext(lexer) {
-  const character = lexer.source[lexer.index];
-  if (character === '/') {
-    lexSlash(lexer);
-  } else if (character === '\'' || character === '"') {
-    pushToken(lexer, 'string', findQuotedEnd(lexer.source, lexer.index));
-    lexer.regexAllowed = false;
-  } else if (character === '`') {
-    lexTemplatePiece(lexer);
-  } else if (character === '}') {
-    lexClosingBrace(lexer);
-  } else if (WORD_CHARACTER.test(character)) {
-    lexWord(lexer);
-  } else {
-    lexPunctuator(lexer, character);
-  }
+  return [];
 }
 
 /**
- * Splits JavaScript source into tokens of kind code, comment, string,
- * template or regex, whose texts join back to source. A template literal
- * with substitutions is one template token per piece, with the code of each
- * substitution between them as code and comment tokens. A / starts a regex
- * literal at the start of source, after a punctuator other than ), ], ++
- * and --, and after the keywords in REGEX_AFTER_KEYWORDS; after any other
- * word, a literal, ++ or -- it is division. Throws on an unterminated
- * comment, string, template or regex literal.
+ * Returns {kind, start, end, text} for each string, regex and template
+ * piece of parsed, in source order.
  */
-export function tokenizeSource(source) {
-  const lexer = { source: source, index: 0, codeStart: 0, tokens: [], braceStack: [], regexAllowed: true };
-  while (lexer.index < source.length) {
-    lexNext(lexer);
+function listLiteralPieces(parsed) {
+  return parsed.tokens
+    .flatMap((token, index) => readLiteralPiece(parsed.tokens, index))
+    .map((piece) => ({ ...piece, text: parsed.source.slice(piece.start, piece.end) }));
+}
+
+/**
+ * Returns segments of kind code, comment, string, template or regex whose
+ * texts join back to the source of parsed. A comment segment carries
+ * lineComment, true for a line comment.
+ */
+function listSourceSegments(parsed) {
+  const comments = parsed.comments.map((comment) => ({ kind: 'comment', start: comment.start, end: comment.end, text: parsed.source.slice(comment.start, comment.end), lineComment: comment.type === 'Line' }));
+  const marked = [...comments, ...listLiteralPieces(parsed)].sort((left, right) => left.start - right.start);
+  const segments = [];
+  let codeStart = 0;
+  for (const piece of marked) {
+    if (codeStart < piece.start) {
+      segments.push({ kind: 'code', text: parsed.source.slice(codeStart, piece.start) });
+    }
+    segments.push(piece);
+    codeStart = piece.end;
   }
-  if (lexer.braceStack.includes('template')) {
-    throw new Error('unterminated template literal substitution at end of source');
+  if (codeStart < parsed.source.length) {
+    segments.push({ kind: 'code', text: parsed.source.slice(codeStart) });
   }
-  flushCode(lexer);
-  return lexer.tokens;
+  return segments;
 }
 
 /**
  * Returns source with comments removed and string, template and regex
- * literals each replaced by "".
+ * literals each replaced by "". source parses as a script.
  */
 export function stripCommentsAndStrings(source) {
-  return tokenizeSource(source)
-    .map((token) => token.kind === 'code' ? token.text : token.kind === 'comment' ? '' : '""')
+  return listSourceSegments(parseJavaScript(source, SCRIPT_PARSE_OPTIONS))
+    .map((segment) => segment.kind === 'code' ? segment.text : segment.kind === 'comment' ? '' : '""')
     .join('');
 }
 
@@ -570,11 +495,11 @@ function writeInlineCommentGap(writer, nextCharacter) {
   }
 }
 
-function writeRemovedComment(writer, text, nextCharacter) {
+function writeRemovedComment(writer, comment, nextCharacter) {
   writer.lineDirty = true;
-  if (text.startsWith('//')) {
+  if (comment.lineComment) {
     trimTrailingBlanks(writer);
-  } else if (text.includes('\n')) {
+  } else if (comment.text.includes('\n')) {
     trimTrailingBlanks(writer);
     writeCodeNewline(writer);
   } else {
@@ -582,216 +507,172 @@ function writeRemovedComment(writer, text, nextCharacter) {
   }
 }
 
-/**
- * Returns source with every comment removed and the bytes of every string,
- * template and regex literal unchanged. A block comment holding a newline
- * becomes one newline, so automatic semicolon insertion sees the same line
- * breaks. Blanks before a removed comment that ends its line are dropped, a
- * line left blank by a removed comment is dropped, and a line that starts
- * with code keeps its start.
- */
-export function stripComments(source) {
-  const tokens = tokenizeSource(source);
+function writeSegment(writer, segment, nextSegment) {
+  if (segment.kind === 'code') {
+    writeCode(writer, segment.text);
+  } else if (segment.kind === 'comment') {
+    writeRemovedComment(writer, segment, nextSegment === undefined ? undefined : nextSegment.text[0]);
+  } else {
+    writeLiteral(writer, segment.text);
+  }
+}
+
+function writeStrippedSource(parsed) {
+  const segments = listSourceSegments(parsed);
   const writer = { text: '', lineStart: 0, lineInCode: true, lineDirty: false, skipLeadingBlanks: false };
-  tokens.forEach((token, position) => writeToken(writer, token, tokens[position + 1]));
+  segments.forEach((segment, position) => writeSegment(writer, segment, segments[position + 1]));
   return writer.text;
 }
 
-function writeToken(writer, token, nextToken) {
-  if (token.kind === 'code') {
-    writeCode(writer, token.text);
-  } else if (token.kind === 'comment') {
-    writeRemovedComment(writer, token.text, nextToken === undefined ? undefined : nextToken.text[0]);
-  } else {
-    writeLiteral(writer, token.text);
-  }
-}
-
-const COMPACTION_HAZARDS = Object.freeze(['++', '--', '//', '/*', '<!--', '-->']);
-
 /**
- * Returns true when left and right, written with no blank between them,
- * would form a hazard of COMPACTION_HAZARDS that spans the join.
+ * Returns source with every comment removed and the bytes of every string,
+ * template and regex literal unchanged. source parses as sourceType, script
+ * or module, and acorn finds its comments and literals. A block comment
+ * holding a newline becomes one newline, so automatic semicolon insertion
+ * sees the same line breaks. Blanks before a removed comment that ends its
+ * line are dropped, a line left blank by a removed comment is dropped, and
+ * a line that starts with code keeps its start.
  */
-function formsHazardAcrossJoin(left, right) {
-  return COMPACTION_HAZARDS.some((hazard) => hazardSpansJoin(left, right, hazard));
-}
-
-function hazardSpansJoin(left, right, hazard) {
-  const joined = left + right;
-  for (let start = Math.max(0, left.length - hazard.length + 1); start < left.length; start += 1) {
-    if (joined.startsWith(hazard, start)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function needsSeparator(compactor, nextText) {
-  const lastCharacter = compactor.text[compactor.text.length - 1];
-  const nextCharacter = nextText[0];
-  if (lastCharacter === undefined || nextCharacter === undefined || lastCharacter === '\n') {
-    return false;
-  }
-  if (WORD_CHARACTER.test(nextCharacter) && (WORD_CHARACTER.test(lastCharacter) || compactor.lastKind === 'regex')) {
-    return true;
-  }
-  if (nextCharacter === '.' && /[0-9]/.test(lastCharacter)) {
-    return true;
-  }
-  return formsHazardAcrossJoin(compactor.text.slice(-3), nextText.slice(0, 3));
-}
-
-function splitCompactionPieces(tokens) {
-  return tokens.flatMap((token) => {
-    if (token.kind !== 'code') {
-      return [token];
-    }
-    return token.text.split(/(\s+)/).filter((text) => text !== '').map((text) => ({ kind: /^\s/.test(text) ? 'blank' : 'code', text: text }));
-  });
-}
-
-function writeCompactedBlank(compactor, blank, nextPiece) {
-  if (nextPiece === undefined || compactor.text === '') {
-    return;
-  }
-  if (blank.includes('\n')) {
-    if (!compactor.text.endsWith('\n')) {
-      compactor.text += '\n';
-    }
-  } else if (needsSeparator(compactor, nextPiece.text)) {
-    compactor.text += ' ';
-  }
+export function stripComments(source, sourceType = 'script') {
+  return writeStrippedSource(parseJavaScript(source, readSourceParseOptions(sourceType)));
 }
 
 /**
- * Returns source with its code compacted and the bytes of every string,
- * template and regex literal unchanged. A run of blanks holding a newline
- * becomes one newline, so leading indentation, trailing blanks and blank
- * lines go, and automatic semicolon insertion sees the same line breaks. A
- * run of spaces or tabs is dropped, except that one space stays between two
- * word characters, between a regex literal and a word character, between a
- * digit and a dot, and where the join would form a hazard of
- * COMPACTION_HAZARDS, such as + +, - -, a / before / or *, or < before !--.
+ * Returns true when left and right, two tokens of source, written with no
+ * blank between them would read as other tokens: two word characters that
+ * would read as one word, a regex whose flags would take a word, a number
+ * that would take a dot, or a boundary of MERGING_BOUNDARIES, which would
+ * read as ++, --, a comment, or the start of an HTML-like comment.
+ */
+function joinsIntoOtherTokens(source, left, right) {
+  const lastCharacter = source[left.end - 1];
+  const nextCharacter = source[right.start];
+  if (WORD_CHARACTER.test(nextCharacter) && (WORD_CHARACTER.test(lastCharacter) || left.type === tokTypes.regexp)) {
+    return true;
+  }
+  if (nextCharacter === '.' && left.type === tokTypes.num) {
+    return true;
+  }
+  return MERGING_BOUNDARIES.includes(lastCharacter + nextCharacter);
+}
+
+function writeCompactionGap(parsed, index) {
+  if (index === 0) {
+    return '';
+  }
+  const left = parsed.tokens[index - 1];
+  const right = parsed.tokens[index];
+  const gap = parsed.source.slice(left.end, right.start);
+  if (LINE_TERMINATOR.test(gap)) {
+    return '\n';
+  }
+  return gap !== '' && joinsIntoOtherTokens(parsed.source, left, right) ? ' ' : '';
+}
+
+function writeCompactedTokens(parsed) {
+  return parsed.tokens.map((token, index) => writeCompactionGap(parsed, index) + parsed.source.slice(token.start, token.end)).join('');
+}
+
+/**
+ * Returns the tokens of source, which parses as a script, written with one
+ * newline wherever source has one between two tokens, one space where two
+ * tokens written together would read as other tokens (joinsIntoOtherTokens),
+ * and nothing elsewhere. The bytes of every token, so of every string,
+ * template and regex literal, are unchanged, and anything before the first
+ * token or after the last is dropped.
  */
 export function compactCode(source) {
-  const pieces = splitCompactionPieces(tokenizeSource(source));
-  const compactor = { text: '', lastKind: undefined };
-  pieces.forEach((piece, position) => writeCompactionPiece(compactor, piece, pieces[position + 1]));
-  return compactor.text;
-}
-
-function writeCompactionPiece(compactor, piece, nextPiece) {
-  if (piece.kind === 'blank') {
-    writeCompactedBlank(compactor, piece.text, nextPiece);
-    return;
-  }
-  compactor.text += piece.text;
-  compactor.lastKind = piece.kind;
-}
-
-function listLiteralTexts(tokens) {
-  return tokens.filter((token) => token.kind !== 'code').map((token) => token.kind + ' ' + token.text);
-}
-
-function joinCodeWithoutBlanks(tokens) {
-  return tokens.map((token) => token.kind === 'code' ? token.text.replace(/\s+/g, '') : '\u0000').join('');
+  return writeCompactedTokens(parseJavaScript(source, SCRIPT_PARSE_OPTIONS));
 }
 
 /**
- * Throws, naming relativePath, unless compacted has the same literal tokens
- * as original in the same order and the same code once all whitespace is
- * removed.
+ * Returns the path of the first field where the syntax trees left and right
+ * differ, or undefined when they are equal. Position fields are ignored, a
+ * regex value is compared by its text, and every other field, raw text
+ * included, must be equal.
  */
-export function assertCompactionPreserves(relativePath, original, compacted) {
-  const originalTokens = tokenizeSource(original);
-  const compactedTokens = tokenizeSource(compacted);
-  const originalLiterals = listLiteralTexts(originalTokens);
-  const compactedLiterals = listLiteralTexts(compactedTokens);
-  const changedIndex = originalLiterals.findIndex((literal, index) => literal !== compactedLiterals[index]);
-  if (changedIndex !== -1 || compactedLiterals.length !== originalLiterals.length) {
-    const index = changedIndex === -1 ? originalLiterals.length : changedIndex;
-    throw new Error(relativePath + ': compaction changed literal ' + (index + 1) + ' from ' + JSON.stringify(originalLiterals[index]) + ' to ' + JSON.stringify(compactedLiterals[index]));
+function findTreeDifference(left, right, path) {
+  if (left instanceof RegExp || right instanceof RegExp) {
+    return String(left) === String(right) ? undefined : path;
   }
-  if (joinCodeWithoutBlanks(originalTokens) !== joinCodeWithoutBlanks(compactedTokens)) {
-    throw new Error(relativePath + ': compaction changed the code once all whitespace is removed');
+  if (left === null || right === null || typeof left !== 'object' || typeof right !== 'object') {
+    return Object.is(left, right) ? undefined : path;
   }
-}
-
-/**
- * Returns compactCode(source), after assertCompactionPreserves checks it.
- */
-export function compactSource(relativePath, source) {
-  const compacted = compactCode(source);
-  assertCompactionPreserves(relativePath, source, compacted);
-  return compacted;
-}
-
-const LEADING_BLANKS = /\s*/y;
-const FUNCTION_DECLARATION_START = /(?:async\s+)?function\s*\*?\s*[A-Za-z_$][\w$]*\s*\(/y;
-
-function skipBlanks(code, start) {
-  LEADING_BLANKS.lastIndex = start;
-  LEADING_BLANKS.test(code);
-  return LEADING_BLANKS.lastIndex;
-}
-
-/**
- * Returns the index after the bracket that closes the one at start, or -1
- * when it never closes. code holds no comment or literal, so every bracket
- * in it is code.
- */
-function skipBracketed(code, start) {
-  let depth = 0;
-  for (let index = start; index < code.length; index += 1) {
-    if ('([{'.includes(code[index])) {
-      depth += 1;
-    } else if (')]}'.includes(code[index])) {
-      depth -= 1;
-      if (depth === 0) {
-        return index + 1;
-      }
+  if (Array.isArray(left) !== Array.isArray(right)) {
+    return path;
+  }
+  const leftKeys = Object.keys(left).filter((key) => !POSITION_FIELDS.includes(key));
+  const rightKeys = Object.keys(right).filter((key) => !POSITION_FIELDS.includes(key));
+  if (leftKeys.join() !== rightKeys.join()) {
+    return path;
+  }
+  for (const key of leftKeys) {
+    const difference = findTreeDifference(left[key], right[key], path + (Array.isArray(left) ? '[' + key + ']' : '.' + key));
+    if (difference !== undefined) {
+      return difference;
     }
-  }
-  return -1;
-}
-
-/**
- * Returns the index after the function declaration that starts at start,
- * or -1 when no function declaration starts there.
- */
-function findFunctionDeclarationEnd(code, start) {
-  FUNCTION_DECLARATION_START.lastIndex = start;
-  if (!FUNCTION_DECLARATION_START.test(code)) {
-    return -1;
-  }
-  const paramsEnd = skipBracketed(code, FUNCTION_DECLARATION_START.lastIndex - 1);
-  if (paramsEnd === -1) {
-    return -1;
-  }
-  const bodyStart = skipBlanks(code, paramsEnd);
-  return code[bodyStart] === '{' ? skipBracketed(code, bodyStart) : -1;
-}
-
-/**
- * Returns the first line of the first top-level statement of code that is
- * not a function declaration, or undefined when there is none. code holds
- * no comment or literal: see stripCommentsAndStrings.
- */
-export function findTopLevelStatement(code) {
-  let index = skipBlanks(code, 0);
-  while (index < code.length) {
-    const end = findFunctionDeclarationEnd(code, index);
-    if (end === -1) {
-      return code.slice(index).split('\n')[0];
-    }
-    index = skipBlanks(code, end);
   }
   return undefined;
 }
 
-function findDuplicateFunctions(source) {
-  const names = [...source.matchAll(/^(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/gm)].map((match) => match[1]);
+/**
+ * Returns output parsed as a script. Throws, naming relativePath and step,
+ * when output does not parse or parses to a syntax tree other than
+ * expectedTree, the tree of the step's input.
+ */
+function parseEquivalentSource(relativePath, step, expectedTree, output) {
+  let parsed;
+  try {
+    parsed = parseJavaScript(output, SCRIPT_PARSE_OPTIONS);
+  } catch (error) {
+    throw new Error(relativePath + ': ' + step.name + ' changed the code: ' + step.output + ' does not parse: ' + error.message, { cause: error });
+  }
+  const difference = findTreeDifference(expectedTree, parsed.ast, 'Program');
+  if (difference !== undefined) {
+    throw new Error(relativePath + ': ' + step.name + ' changed the code: ' + step.output + ' parses to a different syntax tree than ' + step.input + ', at ' + difference);
+  }
+  return parsed;
+}
+
+/**
+ * Throws, naming relativePath, unless original and stripped, both scripts,
+ * parse to equal syntax trees (findTreeDifference).
+ */
+export function assertStrippingPreserves(relativePath, original, stripped) {
+  parseEquivalentSource(relativePath, STRIPPING_STEP, parseNamedSource(relativePath, original, SCRIPT_PARSE_OPTIONS).ast, stripped);
+}
+
+/**
+ * Throws, naming relativePath, unless stripped and compacted, both scripts,
+ * parse to equal syntax trees (findTreeDifference).
+ */
+export function assertCompactionPreserves(relativePath, stripped, compacted) {
+  parseEquivalentSource(relativePath, COMPACTION_STEP, parseNamedSource(relativePath, stripped, SCRIPT_PARSE_OPTIONS).ast, compacted);
+}
+
+/**
+ * Returns every node of the syntax tree under value, value included, in
+ * walk order.
+ */
+function collectSyntaxNodes(value, nodes) {
+  if (Array.isArray(value)) {
+    value.forEach((item) => collectSyntaxNodes(item, nodes));
+  } else if (value !== null && typeof value === 'object' && typeof value.type === 'string') {
+    nodes.push(value);
+    Object.values(value).forEach((child) => collectSyntaxNodes(child, nodes));
+  }
+  return nodes;
+}
+
+function isModuleLoad(node) {
+  if (node.type === 'ImportDeclaration' || node.type === 'ImportExpression') {
+    return true;
+  }
+  return node.type === 'CallExpression' && node.callee.type === 'Identifier' && node.callee.name === 'require';
+}
+
+function findDuplicateFunctions(ast) {
+  const names = ast.body.filter((node) => node.type === 'FunctionDeclaration').map((node) => node.id.name);
   return names.filter((name, index) => names.indexOf(name) !== index);
 }
 
@@ -833,7 +714,21 @@ function assertPreviewLines(id, lines) {
   }
 }
 
-function assertBuiltScript(id, output) {
+/**
+ * Returns the built script output parsed by acorn as a script in which
+ * import and export may appear, so meta's export parses and an import
+ * shows as a node the import check finds. Throws, naming id, when it does
+ * not parse.
+ */
+function parseBuiltScript(id, output) {
+  try {
+    return parseJavaScript(output, BUILT_SCRIPT_PARSE_OPTIONS);
+  } catch (error) {
+    throw new Error(id + ': the built script does not parse: ' + error.message, { cause: error });
+  }
+}
+
+function assertBuiltScript(id, output, parsed) {
   if (!output.startsWith('export const meta = {')) {
     throw new Error(id + ': meta.js must start with `export const meta = {`');
   }
@@ -841,11 +736,10 @@ function assertBuiltScript(id, output) {
     throw new Error(id + ': the built script is ' + output.length + ' characters, over the budget of ' + MAX_BUILT_SCRIPT_LENGTH + ' (the Workflow approval limit is ' + WORKFLOW_APPROVAL_LIMIT + ')');
   }
   assertPreviewLines(id, output.split('\n'));
-  const code = stripCommentsAndStrings(output);
-  if (/\bimport\b/.test(code) || /\brequire\s*\(/.test(code)) {
+  if (collectSyntaxNodes(parsed.ast, []).some(isModuleLoad)) {
     throw new Error(id + ': the built script uses import or require( as code; workflow scripts cannot load modules');
   }
-  const duplicates = findDuplicateFunctions(output);
+  const duplicates = findDuplicateFunctions(parsed.ast);
   if (duplicates.length > 0) {
     throw new Error(id + ': top-level functions declared more than once: ' + duplicates.join(', '));
   }
@@ -863,7 +757,7 @@ export const PROSE_BUDGETS = Object.freeze({
   'analysis-only': 19000,
   'standard-delivery': 42000
 });
-const PROSE_TOKEN_KINDS = Object.freeze(['string', 'template']);
+const PROSE_PIECE_KINDS = Object.freeze(['string', 'template']);
 const MIN_COPIED_SENTENCE_WORDS = 5;
 const AGENT_DIR = 'plugin/agents';
 const SKILL_DIR = 'plugin/skills';
@@ -872,16 +766,18 @@ const PROSE_LINE_MARKER = /^\s*(?:#+|[-*+>]|\d+\.)\s+/;
 const PROSE_BLOCK_START = /^\s*(?:[-*+>]|\d+\.)\s/;
 const PROSE_SINGLE_LINE = /^\s*(?:#+\s|\||```)/;
 
-function listProseTokens(source) {
-  return tokenizeSource(source).filter((token) => PROSE_TOKEN_KINDS.includes(token.kind));
+function listProsePieces(parsed) {
+  return listLiteralPieces(parsed).filter((piece) => PROSE_PIECE_KINDS.includes(piece.kind));
 }
 
 /**
- * Returns the number of characters of the string and template literal
- * tokens of source, quotes, backticks and escapes included.
+ * Returns the number of characters of the string and template literals of
+ * source, a built script: the source text of each string literal and of
+ * each template literal outside its substitutions, quotes, backticks, ${, }
+ * and escapes included. parsed is source parsed as a built script.
  */
-export function countProseCharacters(source) {
-  return listProseTokens(source).reduce((sum, token) => sum + token.text.length, 0);
+export function countProseCharacters(source, parsed = parseJavaScript(source, BUILT_SCRIPT_PARSE_OPTIONS)) {
+  return listProsePieces(parsed).reduce((sum, piece) => sum + piece.text.length, 0);
 }
 
 function decodeEscape(escapeText, escaped) {
@@ -895,12 +791,12 @@ function decodeEscape(escapeText, escaped) {
 }
 
 /**
- * Returns the text of a string token or a template piece without its
+ * Returns the text of a string literal or a template piece without its
  * delimiters, with \n and \r read as line breaks, \t as a space, \uXXXX as
  * its character and every other escape as the character it escapes.
  */
-function readLiteralContent(token) {
-  const inner = token.kind === 'string' ? token.text.slice(1, -1) : token.text.replace(/^[`}]/, '').replace(/(?:`|\$\{)$/, '');
+function readLiteralContent(piece) {
+  const inner = piece.kind === 'string' ? piece.text.slice(1, -1) : piece.text.replace(/^[`}]/, '').replace(/(?:`|\$\{)$/, '');
   return inner.replace(/\\(u[0-9a-fA-F]{4}|[\s\S])/g, decodeEscape);
 }
 
@@ -965,19 +861,20 @@ export function listPromptFiles(root) {
 
 /**
  * Returns {path, sentence} for each sentence of a string or template literal
- * of source that equals a sentence of an agent or skill file (see
- * listPromptFiles), in literal order.
+ * of source, a built script, that equals a sentence of an agent or skill
+ * file (see listPromptFiles), in literal order. parsed is source parsed as a
+ * built script.
  */
-export function findCopiedSentences(root, source) {
-  const contents = listProseTokens(source).map(readLiteralContent);
+export function findCopiedSentences(root, source, parsed = parseJavaScript(source, BUILT_SCRIPT_PARSE_OPTIONS)) {
+  const contents = listProsePieces(parsed).map(readLiteralContent);
   const promptFiles = listPromptFiles(root).map((path) => ({ path: path, sentences: new Set(splitProseSentences(readSource(root, path))) }));
   return contents.flatMap(splitProseSentences).flatMap((sentence) => promptFiles
     .filter((promptFile) => promptFile.sentences.has(sentence))
     .map((promptFile) => ({ path: promptFile.path, sentence: sentence })));
 }
 
-function assertProseBudget(id, output) {
-  const count = countProseCharacters(output);
+function assertProseBudget(id, output, parsed) {
+  const count = countProseCharacters(output, parsed);
   if (!Object.hasOwn(PROSE_BUDGETS, id)) {
     throw new Error(id + ': the workflow has no prose budget. Add one to PROSE_BUDGETS in tools/build_workflows.mjs: its measured count of ' + count + ' plus a margin of at most 1000');
   }
@@ -986,41 +883,61 @@ function assertProseBudget(id, output) {
   }
 }
 
-function assertNoCopiedSentences(root, id, output) {
-  const copies = findCopiedSentences(root, output);
+function assertNoCopiedSentences(root, id, output, parsed) {
+  const copies = findCopiedSentences(root, output, parsed);
   if (copies.length > 0) {
     throw new Error(id + ': a literal of ' + builtPathFor(id) + ' repeats a sentence of ' + copies[0].path + ': ' + JSON.stringify(copies[0].sentence) + '. The build compares each literal sentence of at least ' + MIN_COPIED_SENTENCE_WORDS + ' words with every ' + AGENT_DIR + '/*.md and ' + SKILL_DIR + '/<name>/' + SKILL_FILE + '. Keep the rule in ' + copies[0].path + ' and pass only the task and the data (docs/engineering-principles.md P24)');
   }
 }
 
-function readStrippedSource(root, relativePath) {
-  try {
-    return stripComments(readSource(root, relativePath)).trim();
-  } catch (error) {
-    throw new Error(relativePath + ': ' + error.message);
-  }
+/**
+ * Returns meta.js, parsed as a module, with its comments stripped.
+ */
+function readStrippedMeta(root, relativePath) {
+  return writeStrippedSource(parseNamedSource(relativePath, readSource(root, relativePath), SOURCE_PARSE_OPTIONS.module)).trim();
 }
 
 /**
- * Returns a module with its comments stripped. Throws, naming the file,
- * when it holds anything at top level other than function declarations.
+ * Returns a library, a module or main.js, parsed as a script, with its
+ * comments stripped, parsed. Throws, naming the file, unless the original
+ * and the stripped source parse to equal syntax trees.
+ */
+function readStrippedCode(root, relativePath) {
+  const original = parseNamedSource(relativePath, readSource(root, relativePath), SCRIPT_PARSE_OPTIONS);
+  return parseEquivalentSource(relativePath, STRIPPING_STEP, original.ast, writeStrippedSource(original).trim());
+}
+
+/**
+ * Returns the compacted code of stripped, a parsed stripped source. Throws,
+ * naming the file, unless it parses to the syntax tree of stripped.
+ */
+function compactStrippedCode(relativePath, stripped) {
+  const compacted = writeCompactedTokens(stripped);
+  parseEquivalentSource(relativePath, COMPACTION_STEP, stripped.ast, compacted);
+  return compacted;
+}
+
+/**
+ * Returns a module, stripped and compacted. Throws, naming the file, when
+ * a top-level node of its syntax tree is not a FunctionDeclaration.
  */
 function readModuleSource(root, relativePath) {
-  const stripped = readStrippedSource(root, relativePath);
-  const statement = findTopLevelStatement(stripCommentsAndStrings(stripped));
+  const stripped = readStrippedCode(root, relativePath);
+  const statement = stripped.ast.body.find((node) => node.type !== 'FunctionDeclaration');
   if (statement !== undefined) {
-    throw new Error(relativePath + ': a module holds only function declarations at top level, but it holds ' + JSON.stringify(statement.slice(0, 80)) + '. Put every top-level const in main.js.');
+    const statementLine = stripped.source.slice(statement.start, statement.end).split('\n')[0];
+    throw new Error(relativePath + ': a module holds only function declarations at top level, but it holds ' + JSON.stringify(statementLine.slice(0, 80)) + '. Put every top-level const in main.js.');
   }
-  return compactSource(relativePath, stripped);
+  return compactStrippedCode(relativePath, stripped);
 }
 
 function readCompactedSource(root, relativePath) {
-  return compactSource(relativePath, readStrippedSource(root, relativePath));
+  return compactStrippedCode(relativePath, readStrippedCode(root, relativePath));
 }
 
 export function buildWorkflow(root, id) {
   const parts = [
-    readStrippedSource(root, SOURCE_DIR + '/' + id + '/meta.js'),
+    readStrippedMeta(root, SOURCE_DIR + '/' + id + '/meta.js'),
     renderBanner(root, id),
     ...DATA_CONSTANTS.map((constant) => renderDataConstant(root, constant)),
     ...LIB_FILES.map((file) => readCompactedSource(root, SOURCE_DIR + '/lib/' + file)),
@@ -1028,9 +945,10 @@ export function buildWorkflow(root, id) {
     readCompactedSource(root, SOURCE_DIR + '/' + id + '/main.js')
   ];
   const output = parts.join('\n\n') + '\n';
-  assertBuiltScript(id, output);
-  assertProseBudget(id, output);
-  assertNoCopiedSentences(root, id, output);
+  const parsed = parseBuiltScript(id, output);
+  assertBuiltScript(id, output, parsed);
+  assertProseBudget(id, output, parsed);
+  assertNoCopiedSentences(root, id, output, parsed);
   return output;
 }
 
