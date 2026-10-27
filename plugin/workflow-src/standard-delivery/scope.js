@@ -7,11 +7,16 @@
  *   run    the run state of main.js createRunState: request, pass and
  *          replies.
  *   facts  the checked facts of the pass, from runFactsStep (relay.js).
+ *          Its root line, the checkout root, converts scope paths.
  *   scope  the planner result in Scope Mode, under SCOPE_SCHEMA.
  *   PLANNER_AGENT, SCOPE_MODEL and SCOPE_SCHEMA from main.js.
  *
  * Outputs
- *   runScopeStep(run, facts)  {scope} or {problem}.
+ *   runScopeStep(run, facts)  {scope} or {problem}. The scope holds only
+ *                             the entries whose path passes
+ *                             isRepositoryPath, after a path under the
+ *                             checkout root is made relative to it
+ *                             (toRepositoryRelativePath).
  *   The step, as meta.js names it:
  *   Scope   hivemind:cerebrate in Scope Mode, on SCOPE_MODEL at effort
  *           high, returns the path and start line of each section of the
@@ -26,9 +31,13 @@
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
  *   The scope result is checked before any field is read: a result that
- *   fails SCOPE_SCHEMA, or whose value at a field marked with
- *   repositoryPathMark() fails isRepositoryPath (findRepositoryPathProblem,
- *   plan.js), stops the run before planning.
+ *   fails SCOPE_SCHEMA stops the run before planning. A path, the field
+ *   marked with repositoryPathMark(), that starts with the facts root line
+ *   and a slash is first cut to the rest after that slash; a root line of
+ *   none, or no root line, converts nothing. An entry whose path then fails
+ *   isRepositoryPath (plan.js) is dropped from the scope
+ *   (keepRepositoryPathEntries), as an entry left out: the planner then
+ *   reads or checks it itself.
  *   ADR-0037 invariant 4 holds by construction: the scope copies no
  *   document text and states no section's extent, because the planner
  *   takes each section's start and end from the file, so no copy or range
@@ -59,7 +68,7 @@
  */
 
 function buildScopeSchema() {
-  const pathField = { type: 'string', maxLength: 400, description: repositoryPathMark() };
+  const pathField = { type: 'string', maxLength: 400, description: repositoryPathMark() + ' It is relative to the repository root, like tools/validate.sh, never absolute.' };
   const documentItem = {
     type: 'object',
     properties: {
@@ -106,13 +115,33 @@ function scopeOptions(pass) {
 }
 
 function describeScopeProblem(scope) {
-  const isUsable = validateSchema(SCOPE_SCHEMA, scope).ok && findRepositoryPathProblem(SCOPE_SCHEMA, scope, '') === '';
+  const isUsable = validateSchema(SCOPE_SCHEMA, scope).ok;
   return isUsable ? undefined : 'The scope step returned a result it could not use, so ' + RUN_NAME + ' stopped before planning.';
+}
+
+function toRepositoryRelativePath(path, root) {
+  if (typeof root !== 'string' || root === 'none') {
+    return path;
+  }
+  const prefix = root.endsWith('/') ? root : root + '/';
+  return path.startsWith(prefix) ? path.slice(prefix.length) : path;
+}
+
+function relativizeScopeEntry(entry, root) {
+  return Object.assign({}, entry, { path: toRepositoryRelativePath(entry.path, root) });
+}
+
+function keepRepositoryPathEntries(scope, root) {
+  const keepEntries = (entries) => entries.map((entry) => relativizeScopeEntry(entry, root)).filter((entry) => isRepositoryPath(entry.path));
+  return {
+    documents: keepEntries(scope.documents),
+    paths: keepEntries(scope.paths)
+  };
 }
 
 async function runScopeStep(run, facts) {
   phase('Scope');
   const scope = await agent(addResumeNote(buildScopePrompt(run.request, facts), run), scopeOptions(run.pass));
   const problem = describeScopeProblem(scope);
-  return problem === undefined ? { scope: scope } : { problem: problem };
+  return problem === undefined ? { scope: keepRepositoryPathEntries(scope, facts.root) } : { problem: problem };
 }

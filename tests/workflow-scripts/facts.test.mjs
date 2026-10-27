@@ -189,7 +189,8 @@ describe('gatherFactsRoutingSpec shape', () => {
     for (const [key, value] of Object.entries(sample)) {
       assert.equal(spec[key].pattern.flags, '', key);
       assert.equal(lib.matchesFactsLine(key, value), true, key);
-      for (const bent of [value + '\n', ' ' + value, value + ' ', '!' + value, value + '!', '']) {
+      const bentValues = key === 'root' ? [value + '\n', '\t' + value, value + '\u007f', ''] : [value + '\n', ' ' + value, value + ' ', '!' + value, value + '!', ''];
+      for (const bent of bentValues) {
         assert.equal(lib.matchesFactsLine(key, bent), false, key + ' ' + JSON.stringify(bent));
       }
     }
@@ -203,7 +204,8 @@ describe('gatherFactsRoutingSpec shape', () => {
     ['trunk', ['main', 'release/1.2'], ['-main', 'ma..in', 'ma$in']],
     ['trunk_ahead', ['0', '7'], ['01', '-1', '1.0']],
     ['cut', ['none', 'pull_requests', 'references,pull_requests'], ['none,references', 'history', 'references,']],
-    ['delivery_stops', ['none', 'dirty_paths,cut_fields'], ['none,dirty_paths', 'dirty', ',dirty_paths']]
+    ['delivery_stops', ['none', 'dirty_paths,cut_fields'], ['none,dirty_paths', 'dirty', ',dirty_paths']],
+    ['root', ['none', '/home/user/repo', '/a b/c d', 'C:/repo'], ['', '/a\tb', '/a\nb', '/a\u0000b', '/a\u001fb', '/a\u007fb']]
   ]) {
     test(`${key} accepts ${JSON.stringify(good)} and rejects ${JSON.stringify(bad)}`, () => {
       good.forEach((value) => assert.equal(lib.matchesFactsLine(key, value), true, value));

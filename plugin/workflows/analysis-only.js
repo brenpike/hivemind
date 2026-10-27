@@ -2024,7 +2024,8 @@ trunk_commit:{pattern:wholeFactsPattern('none|[0-9a-f]{40}|[0-9a-f]{64}'),requir
 cut:{pattern:wholeFactsPattern(factsListSource(factsCutFields())),required:true},
 external_texts:{pattern:count,required:true},
 delivery:{pattern:wholeFactsPattern(factsEnumSource(factsDeliveryValues())),required:true},
-delivery_stops:{pattern:wholeFactsPattern(factsListSource(factsDeliveryStops())),required:true}
+delivery_stops:{pattern:wholeFactsPattern(factsListSource(factsDeliveryStops())),required:true},
+root:{pattern:wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'),required:true}
 };
 }
 function matchesFactsLine(key,value){

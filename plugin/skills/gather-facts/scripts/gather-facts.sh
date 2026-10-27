@@ -84,7 +84,7 @@
 #
 # OUTPUT on success (exit 0), on stdout in ONE write, `key: value` lines holding only enum or
 # gated values (a gated value is shorter than the facts line holding it, so the line bound bounds
-# every routing line), in this order:
+# every routing line but root, which the facts file does not hold), in this order:
 #   facts_file       checkout-relative path of the facts file
 #   facts_lines      its line count (wc -l)
 #   head_state       branch|detached|unsafe_name
@@ -103,6 +103,8 @@
 #   delivery         ready|stop
 #   delivery_stops   none, or a comma list from dirty_paths, operation_in_progress,
 #                    closed_pr_on_branch, history_unavailable, cut_fields, branch_name_unsafe
+#   root             the absolute checkout root from `git rev-parse --show-toplevel`, or none
+#                    when it holds a control character (0x00-0x1f, 0x7f)
 # A MERGED or CLOSED pull request stops delivery when its relation is in_history or
 # ahead_of_head. A detached HEAD and an unavailable lookup are reported, never a stop.
 # EXIT CONTRACT:
@@ -637,4 +639,8 @@ hivemind_assert_file_contained "$canon_root" "$facts_relative" >/dev/null 2>&1 |
 mv -- "$facts_temp" "$canon_root/$facts_relative" 2>/dev/null || blocker "$write_reason"
 facts_temp=''
 
-printf 'facts_file: %s\nfacts_lines: %s\n%s\n' "$facts_relative" "$facts_lines" "$routing_text"
+root_value="$repo_root"
+case "$root_value" in
+  *[[:cntrl:]]*) root_value='none' ;;
+esac
+printf 'facts_file: %s\nfacts_lines: %s\n%s\nroot: %s\n' "$facts_relative" "$facts_lines" "$routing_text" "$root_value"
