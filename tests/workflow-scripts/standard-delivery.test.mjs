@@ -7,12 +7,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs, loadWorkflowSource } from './harness.mjs';
-import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraftWorkflow, stripCommentsAndStrings } from '../../tools/build_workflows.mjs';
+import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraftWorkflow, listSourcePaths, stripCommentsAndStrings } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
 const sourceDir = join(repoRoot, 'plugin/workflow-src', WORKFLOW_ID);
-const mainSource = readText(join(sourceDir, 'main.js'));
+const moduleSource = readModuleSet();
 const metaSource = readText(join(sourceDir, 'meta.js'));
 const contractPath = join(sourceDir, 'contract.js');
 const contractSource = readText(contractPath);
@@ -76,6 +76,15 @@ function readText(path) {
 
 function readJson(relativePath) {
   return JSON.parse(readText(join(repoRoot, relativePath)));
+}
+
+/**
+ * Returns the text of every workflow module and of main.js, in build order,
+ * so a source-text check reads the whole module set.
+ */
+function readModuleSet() {
+  const modulePaths = listSourcePaths(repoRoot, WORKFLOW_ID).filter((path) => path.startsWith('plugin/workflow-src/' + WORKFLOW_ID + '/') && !path.endsWith('/meta.js'));
+  return modulePaths.map((path) => readText(join(repoRoot, path))).join('\n');
 }
 
 /**
@@ -391,10 +400,10 @@ function assertBlockedBeforeWaves(run, message) {
 
 /**
  * Builds the workflow from a scratch copy whose autonomy table rows for
- * the given kinds are surface at every level, with editMain applied to the
- * copy of main.js.
+ * the given kinds are surface at every level, with editSource applied to
+ * the copy of the workflow module moduleFile.
  */
-function buildWithSurfaceKinds(kinds, editMain = (source) => source) {
+function buildWithSurfaceKinds(kinds, editSource = (source) => source, moduleFile = 'main.js') {
   const scratchRoot = realpathSync(mkdtempSync(join(tmpdir(), 'hivemind-delivery-table-')));
   scratchRoots.push(scratchRoot);
   for (const dir of ['plugin/workflow-src', 'plugin/references']) {
@@ -404,8 +413,8 @@ function buildWithSurfaceKinds(kinds, editMain = (source) => source) {
   const table = JSON.parse(readFileSync(tablePath, 'utf8'));
   table.rows.filter((row) => kinds.includes(row.kind)).forEach((row) => Object.assign(row, { high: 'surface', balanced: 'surface', low: 'surface' }));
   writeFileSync(tablePath, JSON.stringify(table));
-  const mainPath = join(scratchRoot, 'plugin/workflow-src', WORKFLOW_ID, 'main.js');
-  writeFileSync(mainPath, editMain(readFileSync(mainPath, 'utf8')));
+  const modulePath = join(scratchRoot, 'plugin/workflow-src', WORKFLOW_ID, moduleFile);
+  writeFileSync(modulePath, editSource(readFileSync(modulePath, 'utf8')));
   return loadWorkflowSource(buildWorkflow(scratchRoot, WORKFLOW_ID), WORKFLOW_ID + ' (surface table)');
 }
 
@@ -995,7 +1004,7 @@ const ROW_TESTS = {
       });
     }
     test('the check is lib/facts.js isConsistentFactsRelay against the launch trunk', async () => {
-      assert.ok(/isConsistentFactsRelay\(facts, trunk\)/.test(mainSource));
+      assert.ok(/isConsistentFactsRelay\(facts, trunk\)/.test(moduleSource));
       const results = happyResults({ 'facts-1': factsRelay({ trunk: 'develop', branch: 'develop' }), 'plan-1': planResult(makePlan({ base: 'develop' })) });
       const run = await runWorkflow({ request: REQUEST, trunk: 'develop' }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -1035,7 +1044,7 @@ const ROW_TESTS = {
     test('every facts delivery stop has a fixed line, and an unknown stop throws', () => {
       for (const stop of lib.factsDeliveryStops()) {
         assert.ok(main.deliveryStopLine(stop).length > 0, stop);
-        assert.ok(mainSource.includes('case \'' + stop + '\':'), stop);
+        assert.ok(moduleSource.includes('case \'' + stop + '\':'), stop);
       }
       assert.throws(() => main.deliveryStopLine('dirty'), /no line for stop/);
     });
@@ -1334,7 +1343,7 @@ const ROW_TESTS = {
       assert.deepEqual(run.result.resume_args, { answers: answers });
       assert.ok(run.result.message.includes('Q1. GATED_PROBLEM'), run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1', 'revise-1', 'revise-2', 'revise-3']);
-      assert.ok(!mainSource.includes('canPause(') && !mainSource.includes('pause_limit'));
+      assert.ok(!moduleSource.includes('canPause(') && !moduleSource.includes('pause_limit'));
     });
     test('replies too long to carry finish blocked with the next action and the open questions', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
@@ -1347,7 +1356,7 @@ const ROW_TESTS = {
     test('an autonomy arg is ignored: the table default level takes the plan', async () => {
       const run = await runWorkflow({ ...LAUNCH, autonomy: 'low' }, happyResults());
       assert.equal(run.result.outcome, 'complete');
-      assert.ok(!mainSource.includes('.autonomy'));
+      assert.ok(!moduleSource.includes('.autonomy'));
     });
     test('a plan acceptance ask pauses and is not asked again once replied to', async () => {
       const surfaced = buildWithSurfaceKinds(['plan_acceptance']);
@@ -1505,7 +1514,7 @@ const ROW_TESTS = {
           assert.equal(source.split(call).length - 1, 1, call);
           return source.replace(call, driftingCall);
         };
-        const surfaced = buildWithSurfaceKinds([kind], driftKey);
+        const surfaced = buildWithSurfaceKinds([kind], driftKey, 'plan.js');
         const shownPlan = planResult(makePlan({ trunk_freshness: freshness }));
         const results = happyResults({ 'facts-1': factsRelay({ trunk_freshness: freshness, trunk_behind: freshness === 'behind' ? '4' : '0' }), 'plan-1': shownPlan, 'revise-1': reviseResult(shownPlan, ['Q1']) });
         const paused = await runWorkflow(LAUNCH, results, surfaced);
@@ -2083,7 +2092,7 @@ const ROW_TESTS = {
     test('no prompt and no source line uses git with -C', async () => {
       const run = await runWorkflow(LAUNCH, results);
       assert.ok(run.calls.every((call) => !call.prompt.includes('git -C')));
-      assert.ok(!mainSource.includes('git -C'));
+      assert.ok(!moduleSource.includes('git -C'));
     });
   },
   'SD-19': () => {
@@ -2177,9 +2186,9 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), ['facts-1', 'plan-1']);
     });
     test('reply_size and exact_text_size are the only open question stops', () => {
-      const stops = [...mainSource.matchAll(/finishOpenQuestions\([^,]+, '([a-z_]+)'/g)].map((match) => match[1]);
+      const stops = [...moduleSource.matchAll(/finishOpenQuestions\([^,]+, '([a-z_]+)'/g)].map((match) => match[1]);
       assert.deepEqual(stops, ['reply_size', 'exact_text_size']);
-      assert.ok(!mainSource.includes('before_pr') && !mainSource.includes('pause_limit'));
+      assert.ok(!moduleSource.includes('before_pr') && !moduleSource.includes('pause_limit'));
     });
     test('a pause with no effect ask is not whole: questions too long for the notice are cut as before', async () => {
       const maxQuestions = Array.from({ length: 15 }, (_, index) => makeMaxBrief(index));
@@ -2335,12 +2344,12 @@ const ROW_TESTS = {
       assert.ok(run.calls.every((call) => !/push/i.test(call.prompt.replace(/never push|no push|grants no push|, push/gi, ''))), 'no call pushes');
     });
     test('every tail ask goes through askTail, and no tail ask ends the run', () => {
-      assert.ok(!mainSource.includes('finishTailAsk') && !mainSource.includes('before_pr'));
-      assert.ok(/function askTail\(asks, run, detail\) \{\n {2}const questions = renderQuestions\(asks, \[\]\);/.test(mainSource));
-      assert.ok(mainSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };'));
-      assert.ok(mainSource.includes('  return replanFromTailAsk(resolution.asks, run);\n}'));
-      assert.equal((mainSource.match(/replanFromTailAsk\(\[buildUndecidedAsk\(/g) || []).length, 2);
-      assert.ok(mainSource.includes('return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));'));
+      assert.ok(!moduleSource.includes('finishTailAsk') && !moduleSource.includes('before_pr'));
+      assert.ok(/function askTail\(asks, run, detail\) \{\n {2}const questions = renderQuestions\(asks, \[\]\);/.test(moduleSource));
+      assert.ok(moduleSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };'));
+      assert.ok(moduleSource.includes('  return replanFromTailAsk(resolution.asks, run);\n}'));
+      assert.equal((moduleSource.match(/replanFromTailAsk\(\[buildUndecidedAsk\(/g) || []).length, 2);
+      assert.ok(moduleSource.includes('return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));'));
     });
     test('a tail round shares the round numbering with the planning rounds, and its resume replays every earlier agent', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
@@ -2359,7 +2368,7 @@ const ROW_TESTS = {
       for (const stopRun of [{ commits: [OTHER], branch: 'feature/cache' }, { commits: [], branch: undefined }]) {
         assert.ok(!/pull request/i.test(main.nextActionLine(stopRun)), JSON.stringify(stopRun));
       }
-      assert.ok(!mainSource.includes('can be opened from those commits'));
+      assert.ok(!moduleSource.includes('can be opened from those commits'));
     });
   },
   'SD-24': () => {
@@ -2665,7 +2674,7 @@ const ROW_TESTS = {
       assert.ok(labels.slice(5, -1).every((label) => tailLabelPattern.test(label)), JSON.stringify(labels));
       assert.equal(labels.at(-1), 'pr-1');
       assert.equal(new Set(labels).size, labels.length);
-      const names = [...mainSource.matchAll(/gateLabel\('([a-z-]+)', run, /g)].map((match) => match[1]);
+      const names = [...moduleSource.matchAll(/gateLabel\('([a-z-]+)', run, /g)].map((match) => match[1]);
       assert.deepEqual([...new Set(names)].sort(), ['bump', 'bump-commit', 'bump-type', 'fix', 'fix-commit', 'review', 'review-commit', 'validate', 'validate-commit']);
       assert.equal(main.gateLabel('validate-commit', { pass: 2 }, 3), 'validate-commit-2-3');
     });
@@ -2677,17 +2686,17 @@ const ROW_TESTS = {
     });
   },
   'SD-29': () => {
-    test('every decide() kind main.js uses is a hard stop or a table row resolved at a standard-delivery site', () => {
-      const kinds = [...mainSource.matchAll(/^const [A-Z_]+_KIND = '([a-z_]+)';$/gm)].map((match) => match[1]);
+    test('every decide() kind the workflow modules use is a hard stop or a table row resolved at a standard-delivery site', () => {
+      const kinds = [...moduleSource.matchAll(/^const [A-Z_]+_KIND = '([a-z_]+)';$/gm)].map((match) => match[1]);
       assert.deepEqual(kinds, ['planner_question', 'plan_acceptance', 'trunk_stale', 'external_effect', 'version_bump_type', 'version_bump_indeterminable', 'validation_remediation', 'gate_rerun', 'diminishing_returns_exit', 'planner_escalation_routing', 'root_cluster_routing', 'remediation_plan_acceptance']);
       for (const kind of kinds) {
         const isHardStop = autonomyTable.hard_stops.some((stop) => stop.hard_stop === kind);
         const row = autonomyTable.rows.find((candidate) => candidate.kind === kind);
         assert.ok(isHardStop || (row !== undefined && row.resolved_at.some((site) => site.startsWith('standard-delivery.'))), kind);
       }
-      assert.equal((mainSource.match(/\bdecide\(\{/g) || []).length, 1);
-      assert.ok(mainSource.includes('decide({ kind: kind, level: run.level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA)'));
-      const kindArgs = [...mainSource.matchAll(/\bresolve(?:Tail)?Decision\(([A-Za-z_]+),/g)].map((match) => match[1]);
+      assert.equal((moduleSource.match(/\bdecide\(\{/g) || []).length, 1);
+      assert.ok(moduleSource.includes('decide({ kind: kind, level: run.level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA)'));
+      const kindArgs = [...moduleSource.matchAll(/\bresolve(?:Tail)?Decision\(([A-Za-z_]+),/g)].map((match) => match[1]);
       assert.ok(kindArgs.length > 0);
       kindArgs.filter((name) => name !== 'kind').forEach((name) => assert.ok(/^[A-Z_]+_KIND$/.test(name), name));
     });
@@ -2711,7 +2720,7 @@ const ROW_TESTS = {
     test('the launch check is readLocalReview, after the trunk check', () => {
       assert.deepEqual({ ...main.readLocalReview({}) }, { localReview: true });
       assert.deepEqual({ ...main.readLocalReview({ local_review: false }) }, { localReview: false });
-      assert.ok(mainSource.indexOf('readLocalReview(argsObject)') > mainSource.indexOf('isGitIdentifier(launchInputs.trunk)'));
+      assert.ok(moduleSource.indexOf('readLocalReview(argsObject)') > moduleSource.indexOf('isGitIdentifier(launchInputs.trunk)'));
     });
   },
   'SD-48': () => {
@@ -2732,7 +2741,7 @@ const ROW_TESTS = {
     test('the launch check is readDraft, after readLocalReview', () => {
       assert.deepEqual({ ...main.readDraft({}) }, { draft: false });
       assert.deepEqual({ ...main.readDraft({ draft: true }) }, { draft: true });
-      assert.ok(mainSource.indexOf('readDraft(argsObject)') > mainSource.indexOf('readLocalReview(argsObject)'));
+      assert.ok(moduleSource.indexOf('readDraft(argsObject)') > moduleSource.indexOf('readLocalReview(argsObject)'));
     });
     test('real open-plan-pr.sh opens a draft PR for draft true and a ready PR for an absent draft', async () => {
       for (const [args, wantDraft] of [[{ ...LAUNCH, draft: true }, true], [LAUNCH, false]]) {
@@ -4132,17 +4141,17 @@ const ROW_TESTS = {
         }
       });
     }
-    const mainCode = stripCommentsAndStrings(mainSource);
-    test('every .blocker and .stderr read in main.js is the argument of describeReason, describeRelayBlocker or describeCommitBlocker', () => {
-      const reads = mainCode.match(/\.(?:blocker|stderr)\b/g) || [];
-      const encoded = mainCode.match(/\b(?:describeReason|describeRelayBlocker|describeCommitBlocker)\(\w+\.(?:blocker|stderr)\b/g) || [];
+    const moduleCode = stripCommentsAndStrings(moduleSource);
+    test('every .blocker and .stderr read in the workflow modules is the argument of describeReason, describeRelayBlocker or describeCommitBlocker', () => {
+      const reads = moduleCode.match(/\.(?:blocker|stderr)\b/g) || [];
+      const encoded = moduleCode.match(/\b(?:describeReason|describeRelayBlocker|describeCommitBlocker)\(\w+\.(?:blocker|stderr)\b/g) || [];
       assert.ok(reads.length >= 9, String(reads.length));
       assert.equal(encoded.length, reads.length);
     });
-    test('every JSON.stringify( in main.js sits in a throw, in questionKey or in the acceptResolution comparison', () => {
+    test('every JSON.stringify( in the workflow modules sits in a throw, in questionKey or in the acceptResolution comparison', () => {
       const allowed = { throw: 0, questionKey: 0, acceptResolution: 0 };
       const stray = [];
-      for (const chunk of mainCode.split(/\n(?=(?:async )?function \w+\()/)) {
+      for (const chunk of moduleCode.split(/\n(?=(?:async )?function \w+\()/)) {
         const functionName = (/^(?:async )?function (\w+)\(/.exec(chunk) || [])[1];
         for (const line of chunk.split('\n').filter((codeLine) => codeLine.includes('JSON.stringify('))) {
           if (/\bthrow new Error\(/.test(line)) {
@@ -4159,14 +4168,14 @@ const ROW_TESTS = {
       assert.deepEqual(stray, []);
       assert.ok(allowed.throw > 0 && allowed.questionKey === 1 && allowed.acceptResolution === 1, JSON.stringify(allowed));
     });
-    test('no reviewFieldTexts() field marked isExternal is read by name in main.js but for its length', () => {
+    test('no reviewFieldTexts() field marked isExternal is read by name in the workflow modules but for its length', () => {
       const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
-      const reads = [...mainCode.matchAll(/\breview\.(\w+)(?!\w|\.length\b)/g)].map((match) => match[1]);
+      const reads = [...moduleCode.matchAll(/\breview\.(\w+)(?!\w|\.length\b)/g)].map((match) => match[1]);
       assert.ok(external.includes('blocker') && external.includes('field_excerpt') && reads.includes('exit_reason'));
       assert.deepEqual(reads.filter((name) => external.includes(name)), ['open_findings']);
-      assert.equal(mainCode.split('review.open_findings').length - 1, 1);
-      assert.ok(mainSource.includes('const openFindings = review.open_findings;'));
-      assert.ok(!/\breview\[""\]/.test(mainCode));
+      assert.equal(moduleCode.split('review.open_findings').length - 1, 1);
+      assert.ok(moduleSource.includes('const openFindings = review.open_findings;'));
+      assert.ok(!/\breview\[""\]/.test(moduleCode));
     });
   },
   'SD-51': () => {
@@ -4817,19 +4826,19 @@ describe('standard-delivery live', () => {
     assert.equal(run.meta.name, WORKFLOW_ID);
     assert.deepEqual(structuredClone(run.meta.phases).map((phase) => phase.title), ['Facts', 'Scan', 'Plan', 'Revise', 'Branch', 'Waves', 'Commit', 'Bump', 'Validate', 'Fix', 'Review', 'PR']);
   });
-  test('main.js and meta.js are ASCII with no em dash, no hash before a digit and no clock or randomness', () => {
-    for (const source of [mainSource, metaSource, contractSource]) {
+  test('the workflow modules, meta.js and contract.js are ASCII with no em dash, no hash before a digit and no clock or randomness', () => {
+    for (const source of [moduleSource, metaSource, contractSource]) {
       assert.ok(/^[\x09\x0a\x20-\x7e]*$/.test(source));
       assert.ok(!/#[0-9]/.test(source));
       assert.ok(!/\bDate\s*\(|\bDate\.now|Math\.random/.test(source));
     }
   });
-  test('no taken or asked brief built in main.js has a problem promising exact text', () => {
-    const builderNames = [...mainSource.matchAll(/^function (build\w*Brief)\(/gm)].map((match) => match[1]);
+  test('no taken or asked brief built in the workflow modules has a problem promising exact text', () => {
+    const builderNames = [...moduleSource.matchAll(/^function (build\w*Brief)\(/gm)].map((match) => match[1]);
     assert.ok(builderNames.length >= 4, builderNames.join(','));
     for (const name of builderNames) {
-      const start = mainSource.indexOf('\nfunction ' + name + '(');
-      const body = mainSource.slice(start, mainSource.indexOf('\n}\n', start));
+      const start = moduleSource.indexOf('\nfunction ' + name + '(');
+      const body = moduleSource.slice(start, moduleSource.indexOf('\n}\n', start));
       assert.doesNotMatch(body, /exact text/i, name);
     }
     const briefs = [

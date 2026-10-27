@@ -20,9 +20,12 @@ import {
   discoverWorkflowIds,
   findNonRegularOutputs,
   findOrphanWorkflowIds,
+  findTopLevelStatement,
   isDraftWorkflow,
   listDraftWorkflowIds,
   listLiveWorkflowIds,
+  listModulePaths,
+  listSourcePaths,
   runCli,
   stripComments,
   stripCommentsAndStrings,
@@ -36,6 +39,8 @@ const workflowIds = discoverWorkflowIds(repoRoot);
 const liveIds = listLiveWorkflowIds(repoRoot);
 const draftIds = listDraftWorkflowIds(repoRoot);
 const DRAFT_ID = 'draft-check';
+const MAX_SOURCE_LINES = 600;
+const DELIVERY_MODULES = ['gates.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review.js', 'waves.js'];
 const scratchRoots = [];
 
 function readBuilt(id) {
@@ -96,6 +101,19 @@ function appendAnalysisMainLines(scratchRoot, lines) {
 function assertBuildAndCheckThrow(scratchRoot, pattern) {
   assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), pattern);
   assert.throws(() => runCliIn(scratchRoot, ['--check']), pattern);
+}
+
+/**
+ * Returns every workflow source path the build reads from
+ * plugin/workflow-src/, relative to it, once each.
+ */
+function listWorkflowSourcePaths() {
+  const paths = workflowIds.flatMap((id) => listSourcePaths(repoRoot, id)).filter((path) => path.startsWith('plugin/workflow-src/'));
+  return [...new Set(paths)].map((path) => path.slice('plugin/workflow-src/'.length));
+}
+
+function countLines(source) {
+  return source.split('\n').length - (source.endsWith('\n') ? 1 : 0);
 }
 
 function createStream() {
@@ -373,13 +391,94 @@ describe('build_workflows stripComments', () => {
     });
   }
   test('keeps every literal of every source byte for byte', () => {
-    const sourcePaths = [...workflowIds.flatMap((id) => [id + '/meta.js', id + '/main.js']), ...LIB_FILES.map((file) => 'lib/' + file)];
+    const sourcePaths = listWorkflowSourcePaths();
+    assert.ok(DELIVERY_MODULES.every((name) => sourcePaths.includes('standard-delivery/' + name)), JSON.stringify(sourcePaths));
     const listLiterals = (source) => tokenizeSource(source).filter((token) => token.kind !== 'code' && token.kind !== 'comment').map((token) => token.text);
     for (const sourcePath of sourcePaths) {
       const source = readFileSync(join(repoRoot, 'plugin/workflow-src', sourcePath), 'utf8').replace(/\r/g, '');
       const output = stripComments(source);
       assert.deepEqual(listLiterals(output), listLiterals(source), sourcePath);
       assert.ok(tokenizeSource(output).every((token) => token.kind !== 'comment'), sourcePath);
+    }
+  });
+});
+
+describe('build_workflows modules', () => {
+  test('the source list is meta.js, the data, the libraries, the modules in name order, then main.js', () => {
+    const expected = [
+      'plugin/workflow-src/standard-delivery/meta.js',
+      'plugin/references/decision-autonomy-table.json',
+      'plugin/references/decision-brief-schema.json',
+      'plugin/references/plan-schema.json',
+      ...LIB_FILES.map((file) => 'plugin/workflow-src/lib/' + file),
+      ...DELIVERY_MODULES.map((name) => 'plugin/workflow-src/standard-delivery/' + name),
+      'plugin/workflow-src/standard-delivery/main.js'
+    ];
+    assert.deepEqual(listSourcePaths(repoRoot, 'standard-delivery'), expected);
+    assert.deepEqual(listModulePaths(repoRoot, 'standard-delivery'), DELIVERY_MODULES.map((name) => 'plugin/workflow-src/standard-delivery/' + name));
+    assert.deepEqual(listModulePaths(repoRoot, 'analysis-only'), []);
+  });
+  test('contract.js is test data and is never bundled', () => {
+    assert.ok(existsSync(join(repoRoot, 'plugin/workflow-src/standard-delivery/contract.js')));
+    assert.ok(!listSourcePaths(repoRoot, 'standard-delivery').some((path) => path.endsWith('/contract.js')));
+    assert.ok(!buildWorkflow(repoRoot, 'standard-delivery').includes('function contractRows('));
+  });
+  test('the modules come after the libraries and before main.js, in name order', () => {
+    const source = buildWorkflow(repoRoot, 'standard-delivery');
+    const firstFunctions = DELIVERY_MODULES.map((name) => {
+      const moduleSource = readFileSync(join(repoRoot, 'plugin/workflow-src/standard-delivery', name), 'utf8');
+      return /^(?:async )?function \w+\(/m.exec(moduleSource)[0];
+    });
+    const markers = ['function gatherFactsRoutingSpec(', ...firstFunctions, 'const RUN_NOUN = '];
+    const positions = markers.map((marker) => source.indexOf(marker));
+    assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
+    assert.deepEqual([...positions].sort((left, right) => left - right), positions);
+  });
+  test('a module of function declarations builds, and the banner names it before main.js', () => {
+    const scratchRoot = makeScratchCopy();
+    writeFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/extra.js'), '/*\n * extra.js: a seeded module.\n */\n\nasync function seededHelper(value = { key: [1] }) {\n  return { value: value, text: \'const X = 1;\' };\n}\n\nfunction seededOther() {\n  return /[{(]/.test(\'}\');\n}\n');
+    writeFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/notes.txt'), 'const NOT_A_MODULE = 1;\n');
+    assert.deepEqual(listModulePaths(scratchRoot, 'analysis-only'), ['plugin/workflow-src/analysis-only/extra.js']);
+    const source = buildWorkflow(scratchRoot, 'analysis-only');
+    const banner = source.slice(source.indexOf('/*\n * GENERATED'), source.indexOf('*/'));
+    assert.ok(banner.includes(' *   plugin/workflow-src/analysis-only/extra.js\n *   plugin/workflow-src/analysis-only/main.js\n'), banner);
+    assert.ok(source.indexOf('async function seededHelper(') > source.indexOf('function gatherFactsRoutingSpec('));
+    assert.ok(!source.includes('extra.js: a seeded module'));
+    assert.ok(!source.includes('NOT_A_MODULE'));
+  });
+  test('a top-level const in a module fails the build and --check, naming the file', () => {
+    const scratchRoot = makeScratchCopy();
+    writeFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/seeded.js'), 'function seededHelper() {\n  return SEEDED_LIMIT;\n}\n\nconst SEEDED_LIMIT = 3;\n');
+    assertBuildAndCheckThrow(scratchRoot, /plugin\/workflow-src\/analysis-only\/seeded\.js: a module holds only function declarations at top level, but it holds "const SEEDED_LIMIT = 3;"/);
+  });
+  test('a top-level const seeded into a standard-delivery module fails both modes, naming the file', () => {
+    const scratchRoot = makeScratchCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/standard-delivery/relay.js'), '\nconst SEEDED_NAME = \'relay\';\n');
+    const pattern = /plugin\/workflow-src\/standard-delivery\/relay\.js: a module holds only function declarations at top level, but it holds "const SEEDED_NAME = \\"\\";"/;
+    assert.throws(() => buildWorkflow(scratchRoot, 'standard-delivery'), pattern);
+    assert.throws(() => runCliIn(scratchRoot, ['--check']), pattern);
+    assert.throws(() => runCliIn(scratchRoot, []), pattern);
+  });
+  const topLevelCases = [
+    ['function declarations only', 'function a() {}\nasync function b(c = { d: [1] }) {\n  return { e: (c) };\n}\n', undefined],
+    ['a const after a function', 'function a() {}\nconst b = 1;\n', 'const b = 1;'],
+    ['a call statement', 'f();\nfunction a() {}\n', 'f();'],
+    ['a stray semicolon', 'function a() {};\n', ';'],
+    ['an exported function', 'export function a() {}\n', 'export function a() {}'],
+    ['a function expression call', '(function a() {})();\n', '(function a() {})();'],
+    ['an unclosed function body', 'function a() {\n', 'function a() {']
+  ];
+  for (const [name, code, expected] of topLevelCases) {
+    test('findTopLevelStatement finds ' + name, () => {
+      assert.equal(findTopLevelStatement(code), expected);
+    });
+  }
+  test('every workflow source file is at most ' + MAX_SOURCE_LINES + ' lines', () => {
+    const sourceFiles = readdirSync(join(repoRoot, 'plugin/workflow-src')).flatMap((dir) => readdirSync(join(repoRoot, 'plugin/workflow-src', dir)).filter((name) => name.endsWith('.js')).map((name) => dir + '/' + name));
+    assert.ok(sourceFiles.length > DELIVERY_MODULES.length);
+    for (const sourceFile of sourceFiles) {
+      const lineCount = countLines(readFileSync(join(repoRoot, 'plugin/workflow-src', sourceFile), 'utf8'));
+      assert.ok(lineCount <= MAX_SOURCE_LINES, sourceFile + ' has ' + lineCount + ' lines');
     }
   });
 });
@@ -557,6 +656,8 @@ for (const id of liveIds) {
       const bannerStart = source.indexOf('/*\n * GENERATED by tools/build_workflows.mjs');
       assert.ok(metaEnd !== -1 && bannerStart === metaEnd + 5, 'banner must follow meta');
       const banner = source.slice(bannerStart, source.indexOf('*/', bannerStart));
+      const sourceLines = banner.split('\n').filter((line) => line.startsWith(' *   ')).map((line) => line.slice(' *   '.length));
+      assert.deepEqual(sourceLines, listSourcePaths(repoRoot, id));
       for (const name of ['workflow-src/' + id + '/meta.js', 'workflow-src/' + id + '/main.js', ...LIB_FILES.map((file) => 'workflow-src/lib/' + file), 'decision-autonomy-table.json', 'plan-schema.json']) {
         assert.ok(banner.includes(name), name);
       }

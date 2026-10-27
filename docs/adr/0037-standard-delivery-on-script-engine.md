@@ -645,3 +645,50 @@ It updates these places in place, each with a dated note:
 `docs/adr/0038-root-cause-at-the-first-finding.md` gains a matching note on the consequence "On the script engine the zoom-out is the planner's judgment". The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/441, https://github.com/brenpike/hivemind/issues/445, https://github.com/brenpike/hivemind/issues/445#issuecomment-6401203012, https://github.com/brenpike/hivemind/issues/452, `docs/adr/0038-root-cause-at-the-first-finding.md`.
+
+## Amendment 2026-10-26: the harness schema check on agent() output (issue 459)
+
+This amendment holds the headless harness record for https://github.com/brenpike/hivemind/issues/459. It records which JSON Schema keywords the Workflow harness enforces on `agent()` output. It changes no decision. The engine checks that duplicate this record are a later step of issue 459.
+
+**Setup.** Claude Code 2.1.311. Each probe was a throwaway workflow with one `agent()` call, launched by one headless `claude -p --permission-mode default --allowedTools Workflow --output-format json` run, from a scratch folder outside the repository, as the `maxLength` check of https://github.com/brenpike/hivemind/pull/458 did (https://github.com/brenpike/hivemind/pull/458#issuecomment-6403161172). The agent was the default workflow subagent on the session model, `claude-opus-5-5`. Its prompt named a breaching answer for its first StructuredOutput call, and a valid answer to send only if the first was rejected. The script caught any rejection of `agent()` and returned `{kind, value}` or `{kind: 'threw', message}`. Every result below is read from the agent transcript (each StructuredOutput call and its tool result), the workflow journal, and the result in the completion notice, not from a model summary. No probe file was written inside the repository.
+
+"Accepted" means `agent()` took the schema and the agent ran. "Rejected and retried" means the harness answered the breaching call with a schema error, the agent called again, and only the valid value reached the script.
+
+| Probe | Schema under test | Breaching answer | Accepted | Rejected and retried | Result seen |
+|---|---|---|---|---|---|
+| type-object | `inner: {type: object}` | `{"inner": 5}` | Yes | Yes | `/inner: must be object`; the script got `{"inner": {"a": "x"}}` |
+| type-array | `list: {type: array}` | `{"list": 5}` | Yes | Yes | `/list: must be array`; the script got `{"list": ["x"]}` |
+| type-string | `text: {type: string}` | `{"text": 42}`, then `true` and `null` in two reruns | Yes | Not observed | Each value reached the tool as a string (`"42"`, `"true"`, `"null"`) and was accepted. The transcript does not show whether the model or the harness made it a string. The script got a string each time |
+| type-boolean | `flag: {type: boolean}` | `{"flag": 1}` | Yes | Yes | `/flag: must be boolean`; the script got `{"flag": true}` |
+| type-integer | `count: {type: integer}` | `{"count": 2.5}` | Yes | Yes | `/count: must be integer`; the script got `{"count": 2}` |
+| enum | `kind: {enum: [red, blue]}` | `{"kind": "green"}` | Yes | Yes | `/kind: must be equal to one of the allowed values: ["red","blue"]`; the script got `red` |
+| required | `required: [a, b]` | `{"a": "x"}` | Yes | Yes | `root: must have required property 'b'`; the script got both keys |
+| properties | nested `inner.a: {type: integer}` | `{"inner": {"a": "seven"}}` | Yes | Yes | `/inner/a: must be integer`; the script got `{"inner": {"a": 7}}` |
+| additionalProperties false | root `additionalProperties: false` | `{"a": "x", "extra": "y"}` | Yes | Yes | `root: must NOT have additional properties ('extra' is not allowed)`; the script got `{"a": "x"}` |
+| items | `items: {type: integer}` | `{"list": [1, "two"]}` | Yes | Yes | `/list/1: must be integer`; the script got `[1, 2]` |
+| minItems | `minItems: 2` | `{"list": ["x"]}` | Yes | Yes | `/list: must NOT have fewer than 2 items (got 1)`; the script got two items |
+| minLength | `minLength: 5` | `{"text": "ab"}` | Yes | Yes | `/text: must NOT have fewer than 5 characters (got 2)`; the script got `abcdef` |
+| maxLength, ASCII | `maxLength: 10` | 26 ASCII letters | Yes | Yes | `/text: must NOT have more than 10 characters (got 26)`; the script got `abcde` |
+| maxLength, outside ASCII | `maxLength: 5` | 7 × `é` (7 code points, 7 UTF-16 units) | Yes | Yes | `/text: must NOT have more than 5 characters (got 7)`; the script got 3 × `é` |
+| maxLength, counting | `maxLength: 5` | 4 × U+1F600 (4 code points, 8 UTF-16 units) | Yes | Not rejected | Accepted on the first call, and the script got the 4 emoji. The harness counts code points, not UTF-16 units |
+| pattern | `pattern: ^[a-z]+$` | `{"code": "ABC-123"}` | Yes | Yes | `/code: must match pattern "^[a-z]+$"`; the script got `abc` |
+| minimum | `type: integer, minimum: 0` | `{"count": -3}` | Yes | Yes | `/count: must be >= 0`; the script got `3` |
+| anyOf at the top level | root `anyOf: [{required: [a]}, {required: [b]}]` | `{"kind": "x"}` | No | No call made | `agent()` did not throw. The first model request failed with `API Error: 400 tools.9.custom.input_schema: input_schema does not support oneOf, allOf, or anyOf at the top level`, the journal marked the agent `failed`, and `agent()` returned `null` |
+| retry limit, agent keeps breaching | `maxLength: 10` | 26 ASCII letters on every call | Yes | Rejected 5 times, no valid value | After 5 rejected calls `agent()` rejected with `agent({schema}): StructuredOutput retry cap (5) exceeded — 5 failed calls with no valid output — last StructuredOutput error: Output does not match required schema: /text: must NOT have more than 10 characters (got 26)`. The journal marked the agent `failed`. The bad value never reached the script |
+| retry limit, agent stops calling | `maxLength: 10` | 26 ASCII letters, then the agent ends its turn | Yes | Rejected twice, no valid value | After the first rejection the agent ended its turn with text. The harness sent one nudge, `[structured-output-enforce] You MUST call the StructuredOutput tool to complete this request. Call this tool now.`, the agent breached once more and ended again, and `agent()` rejected with `agent({schema}): subagent completed without calling StructuredOutput (after in-conversation nudge)` |
+
+Notes on the record:
+
+- **What agent() gives the script past the retry limit: a rejected call.** It is not the bad value and not an ended run. In both retry-limit probes the script's catch got the error, and the run went on to return the script's value with status `completed`. A rejection left uncaught by the script was not probed.
+- **Type breaches written as unquoted words.** The first type-object, type-array and type-boolean probes asked for a string in place of the object, array or boolean. The agent sent the word without quotes, such as `{"list": not-an-array}`. The harness rejected it as `InputValidationError: StructuredOutput was called with input that could not be parsed as JSON`, and the agent retried with the valid value. Those probes were rerun with a number as the breach, and the reruns are the rows above.
+- **A retry-limit probe where the agent gave in.** One more retry-limit probe asked for up to 25 identical calls. The agent sent the valid value after the first rejection, so it did not breach past the limit and is not a row above.
+
+Not probed:
+
+- an agent with an `agentType`, such as `hivemind:drone` or `hivemind:cerebrate`. Every probe used the default workflow subagent.
+- `anyOf` below the top level of a schema. `toAgentSchema` in `plugin/workflow-src/lib/schema.js` removes every `anyOf` before a schema reaches `agent()`.
+- a breach of `type: string` that reaches the schema check as a non-string value.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/459, https://github.com/brenpike/hivemind/pull/458#issuecomment-6403161172.

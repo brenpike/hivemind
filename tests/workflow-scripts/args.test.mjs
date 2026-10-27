@@ -4,6 +4,7 @@ import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs } from './harness.mjs';
+import { discoverWorkflowIds, listModulePaths } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sourceRoot = repoRoot + 'plugin/workflow-src/';
@@ -145,10 +146,13 @@ describe('pause rounds', () => {
   });
 });
 
-function listWorkflowMains() {
-  return readdirSync(sourceRoot, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory() && entry.name !== 'lib')
-    .map((entry) => sourceRoot + entry.name + '/main.js')
+/**
+ * Returns the path of every workflow module and main.js the build bundles,
+ * for every workflow.
+ */
+function listWorkflowModules() {
+  return discoverWorkflowIds(repoRoot)
+    .flatMap((id) => [...listModulePaths(repoRoot, id).map((path) => repoRoot + path), sourceRoot + id + '/main.js'])
     .filter((path) => existsSync(path));
 }
 
@@ -182,11 +186,11 @@ describe('the new libs are plain workflow libs', () => {
         assert.equal(typeof context[key], 'function', `${key} is not a function`);
       }
     });
-    test(`${name} shares no function name with another lib or a workflow main`, () => {
+    test(`${name} shares no function name with another lib or a workflow module`, () => {
       const otherPaths = readdirSync(libDir)
         .filter((fileName) => fileName.endsWith('.js') && fileName !== name)
         .map((fileName) => libDir + fileName)
-        .concat(listWorkflowMains());
+        .concat(listWorkflowModules());
       const taken = new Map();
       for (const otherPath of otherPaths) {
         listFunctionNames(readFileSync(otherPath, 'utf8')).forEach((functionName) => taken.set(functionName, otherPath));
@@ -196,7 +200,11 @@ describe('the new libs are plain workflow libs', () => {
       }
     });
   }
-  test('the workflow mains checked include analysis-only', () => {
-    assert.ok(listWorkflowMains().includes(sourceRoot + 'analysis-only/main.js'));
+  test('the workflow modules checked include analysis-only main.js and every standard-delivery module', () => {
+    const modules = listWorkflowModules();
+    assert.ok(modules.includes(sourceRoot + 'analysis-only/main.js'));
+    for (const name of ['main.js', 'relay.js', 'plan.js', 'waves.js', 'gates.js', 'review.js', 'pr.js', 'record.js']) {
+      assert.ok(modules.includes(sourceRoot + 'standard-delivery/' + name), name);
+    }
   });
 });

@@ -4,15 +4,16 @@
  *
  * Outputs
  *   contractRows()  an array of {id, step, check, rule}: id is SD-NN, step
- *                   the step the rule governs, check the main.js function
- *                   that enforces it, and rule one sentence.
+ *                   the step the rule governs, check the function of the
+ *                   built script that enforces it, and rule one sentence.
  *
  * Invariants
  *   Each row has one test in tests/workflow-scripts/standard-delivery.test.mjs,
  *   which loads this file with loadLibs and requires each check to be a
- *   function of the built script.
- *   The build reads only meta.js and main.js, so this file never reaches the
- *   built script.
+ *   function of the built script, not of main.js: a check can live in main.js
+ *   or in any module the build bundles.
+ *   The build bundles every .js file of this directory but this one, so this
+ *   file never reaches the built script.
  *
  * Why
  *   The rows are test data, so keeping them out of the built script leaves
