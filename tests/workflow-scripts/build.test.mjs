@@ -31,7 +31,7 @@ import {
   listDraftWorkflowIds,
   listLiveWorkflowIds,
   listModulePaths,
-  listNamedPromptFiles,
+  listPromptFiles,
   listSourcePaths,
   REPOSITORY_PATH_MARK,
   projectAutonomyTable,
@@ -113,6 +113,33 @@ function seedPlanPromptSentence(scratchRoot, sentence) {
   const planSource = readFileSync(planPath, 'utf8');
   assert.ok(planSource.includes(PLAN_PROMPT_OPENING), 'the plan prompt opening moved');
   writeFileSync(planPath, planSource.replace(PLAN_PROMPT_OPENING, PLAN_PROMPT_OPENING + ' ' + sentence));
+}
+
+/**
+ * Returns the first sentence of the prompt file at path made only of
+ * letters, spaces, commas and periods, under 120 characters, that no other
+ * agent or skill file holds.
+ */
+function findOwnPlainSentence(path) {
+  const sentencesByPath = new Map(listPromptFiles(repoRoot).map((promptPath) => [promptPath, splitProseSentences(readFileSync(join(repoRoot, promptPath), 'utf8'))]));
+  const otherSentences = new Set([...sentencesByPath].filter(([promptPath]) => promptPath !== path).flatMap(([, sentences]) => sentences));
+  const sentence = sentencesByPath.get(path).find((candidate) => /^[A-Za-z ,.]+$/.test(candidate) && candidate.length < 120 && !otherSentences.has(candidate));
+  assert.ok(sentence !== undefined, path + ' holds no plain sentence of its own');
+  return sentence;
+}
+
+/**
+ * Seeds text into the plan prompt of a scratch copy and asserts that the
+ * build and --check fail, naming the script, path and sentence.
+ */
+function assertSeededCopyFails(text, path, sentence) {
+  const scratchRoot = makeScratchCopy();
+  seedPlanPromptSentence(scratchRoot, text);
+  const prefix = 'Error: standard-delivery: a literal of plugin/workflows/standard-delivery.js repeats a sentence of ' + path + ': ' + JSON.stringify(sentence) + '.';
+  assert.throws(() => buildWorkflow(scratchRoot, 'standard-delivery'), (error) => String(error).startsWith(prefix), text);
+  for (const argv of [[], ['--check']]) {
+    assert.throws(() => runCliIn(scratchRoot, argv), (error) => String(error).startsWith(prefix), text);
+  }
 }
 
 /**
@@ -839,10 +866,8 @@ describe('build_workflows prose guards', () => {
       assert.ok(count <= PROSE_BUDGETS[id], id + ' holds ' + count);
       assert.ok(PROSE_BUDGETS[id] - count <= MAX_PROSE_MARGIN, id + ' holds ' + count + '; lower its budget');
     });
-    test(builtPathFor(id) + ' names cerebrate.md and copies no sentence of a file it names', () => {
-      const source = readBuilt(id);
-      assert.ok(listNamedPromptFiles(repoRoot, [source]).includes('plugin/agents/cerebrate.md'));
-      assert.deepEqual(findCopiedSentences(repoRoot, source), []);
+    test(builtPathFor(id) + ' copies no sentence of an agent or skill file', () => {
+      assert.deepEqual(findCopiedSentences(repoRoot, readBuilt(id)), []);
     });
     test('a prose budget one under the count of ' + id + ' fails the build and --check, naming the id, the count and the budget', async () => {
       const scratchRoot = makeScratchCopy();
@@ -878,16 +903,35 @@ describe('build_workflows prose guards', () => {
       }
     }
   });
-  test('a sentence under five words and a sentence of a file no literal names do not fail the build', () => {
-    const source = readBuilt('standard-delivery');
-    const namedFiles = listNamedPromptFiles(repoRoot, [source]);
-    assert.ok(!namedFiles.includes('plugin/agents/overlord.md'));
-    const overlordSentence = splitProseSentences(readFileSync(join(repoRoot, 'plugin/agents/overlord.md'), 'utf8')).find((sentence) => /^[A-Za-z ,.]+$/.test(sentence) && sentence.length < 120);
-    assert.ok(overlordSentence !== undefined);
+  test('the comparison set is exactly every agent file and every SKILL.md in the repository', () => {
+    const agentPaths = readdirSync(join(repoRoot, 'plugin/agents')).filter((name) => name.endsWith('.md')).map((name) => 'plugin/agents/' + name);
+    const skillPaths = readdirSync(join(repoRoot, 'plugin/skills')).filter((name) => existsSync(join(repoRoot, 'plugin/skills', name, 'SKILL.md'))).map((name) => 'plugin/skills/' + name + '/SKILL.md');
+    assert.deepEqual(listPromptFiles(repoRoot), [...agentPaths, ...skillPaths].sort());
+    assert.ok(agentPaths.includes('plugin/agents/overlord.md') && skillPaths.length > 0);
+  });
+  test('an overlord.md sentence seeded into the plan prompt with no hivemind: name near it fails the build and --check, naming plugin/agents/overlord.md', () => {
+    const builtSource = readBuilt('standard-delivery');
+    assert.ok(!builtSource.includes('hivemind:overlord') && !builtSource.includes('overlord.md'));
+    const sentence = findOwnPlainSentence('plugin/agents/overlord.md');
+    assertSeededCopyFails(sentence, 'plugin/agents/overlord.md', sentence);
+  });
+  test('a changeling.md sentence seeded into a literal fails the build and --check, naming plugin/agents/changeling.md', () => {
+    const sentence = findOwnPlainSentence('plugin/agents/changeling.md');
+    assertSeededCopyFails(sentence, 'plugin/agents/changeling.md', sentence);
+  });
+  test('a sentence seeded beside a ${CLAUDE_PLUGIN_ROOT}/agents/<name>.md reference fails the build and --check, naming that file', () => {
+    const sentence = findOwnPlainSentence('plugin/agents/drone.md');
+    assertSeededCopyFails('Load ${CLAUDE_PLUGIN_ROOT}/agents/drone.md before you start. ' + sentence, 'plugin/agents/drone.md', sentence);
+  });
+  test('a SKILL.md sentence seeded into a literal fails the build and --check, naming plugin/skills/<name>/SKILL.md', () => {
+    const sentence = findOwnPlainSentence('plugin/skills/molt/SKILL.md');
+    assertSeededCopyFails(sentence, 'plugin/skills/molt/SKILL.md', sentence);
+  });
+  test('a sentence under five words does not fail the build', () => {
     const scratchRoot = makeScratchCopy();
-    seedPlanPromptSentence(scratchRoot, 'You create plans only. ' + overlordSentence);
+    seedPlanPromptSentence(scratchRoot, 'You create plans only.');
     const seededSource = buildWorkflow(scratchRoot, 'standard-delivery');
-    assert.ok(seededSource.includes('You create plans only. ' + overlordSentence));
+    assert.ok(seededSource.includes('You create plans only.'));
     assert.deepEqual(findCopiedSentences(scratchRoot, seededSource), []);
   });
 });

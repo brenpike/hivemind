@@ -10,3 +10,5 @@ plugin/workflow-src/** text eol=lf
 plugin/references/*.json text eol=lf
 tests/workflow-scripts/** text eol=lf
 tools/*.mjs text eol=lf
+# Check out vendored third-party files byte for byte, so their sha256 pins hold on every checkout
+tools/vendor/** -text

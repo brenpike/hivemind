@@ -78,12 +78,13 @@
  *   PROSE_BUDGETS, and a workflow id with no entry fails the build, naming
  *   it. Each budget is the measured count plus a margin of at most 1,000,
  *   and raising a budget is a visible, reviewed change to this file. The
- *   duplication check: each hivemind:<name> inside a string or template
- *   literal that names plugin/agents/<name>.md or
- *   plugin/skills/<name>/SKILL.md adds that file, and a literal sentence of
- *   at least five words that equals a sentence of an added file, once
- *   whitespace is normalized, fails the build, naming the script, the file
- *   and the sentence (findCopiedSentences).
+ *   duplication check compares each sentence of at least five words of a
+ *   string or template literal with every regular file plugin/agents/*.md
+ *   and plugin/skills/<name>/SKILL.md, found by listing those two
+ *   directories, never from names in the literals (listPromptFiles). A
+ *   literal sentence that equals a sentence of one of them, once whitespace
+ *   is normalized, fails the build, naming the script, the file and the
+ *   sentence (findCopiedSentences).
  *   An entry named DRAFT that is not a regular file (a directory, a
  *   symlink, anything else) fails the build in both modes.
  *   --check compares each live workflow with its committed file after
@@ -864,7 +865,9 @@ export const PROSE_BUDGETS = Object.freeze({
 });
 const PROSE_TOKEN_KINDS = Object.freeze(['string', 'template']);
 const MIN_COPIED_SENTENCE_WORDS = 5;
-const NAMED_PROMPT_PATTERN = /hivemind:([a-z0-9-]+)/g;
+const AGENT_DIR = 'plugin/agents';
+const SKILL_DIR = 'plugin/skills';
+const SKILL_FILE = 'SKILL.md';
 const PROSE_LINE_MARKER = /^\s*(?:#+|[-*+>]|\d+\.)\s+/;
 const PROSE_BLOCK_START = /^\s*(?:[-*+>]|\d+\.)\s/;
 const PROSE_SINGLE_LINE = /^\s*(?:#+\s|\||```)/;
@@ -930,24 +933,44 @@ export function splitProseSentences(text) {
 }
 
 /**
- * Returns, sorted, the paths of plugin/agents/<name>.md and
- * plugin/skills/<name>/SKILL.md that exist as regular files for each
- * hivemind:<name> in contents, the texts of string and template literals.
+ * Returns the entries of the directory at relativePath, or none when there
+ * is no entry by that name. Throws when the entry is not a directory, a
+ * symlink included.
  */
-export function listNamedPromptFiles(root, contents) {
-  const names = new Set(contents.flatMap((content) => [...content.matchAll(NAMED_PROMPT_PATTERN)].map((match) => match[1])));
-  const candidates = [...names].flatMap((name) => ['plugin/agents/' + name + '.md', 'plugin/skills/' + name + '/SKILL.md']);
-  return candidates.filter((path) => readEntryKind(root, path) === 'file').sort();
+function listDirectoryEntries(root, relativePath) {
+  const kind = readEntryKind(root, relativePath);
+  if (kind === 'missing') {
+    return [];
+  }
+  if (kind !== 'directory') {
+    throw new Error(relativePath + ' must be a directory, found kind ' + kind + '. The duplication check lists it to find every agent and skill file');
+  }
+  return readdirSync(join(root, relativePath), { withFileTypes: true });
+}
+
+/**
+ * Returns, sorted, the path of every regular file plugin/agents/*.md and
+ * plugin/skills/<name>/SKILL.md, found by listing those two directories.
+ */
+export function listPromptFiles(root) {
+  const agentPaths = listDirectoryEntries(root, AGENT_DIR)
+    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .map((entry) => AGENT_DIR + '/' + entry.name);
+  const skillPaths = listDirectoryEntries(root, SKILL_DIR)
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => SKILL_DIR + '/' + entry.name + '/' + SKILL_FILE)
+    .filter((path) => readEntryKind(root, path) === 'file');
+  return [...agentPaths, ...skillPaths].sort();
 }
 
 /**
  * Returns {path, sentence} for each sentence of a string or template literal
- * of source that equals a sentence of a prompt file the literals name (see
- * listNamedPromptFiles), in literal order.
+ * of source that equals a sentence of an agent or skill file (see
+ * listPromptFiles), in literal order.
  */
 export function findCopiedSentences(root, source) {
   const contents = listProseTokens(source).map(readLiteralContent);
-  const promptFiles = listNamedPromptFiles(root, contents).map((path) => ({ path: path, sentences: new Set(splitProseSentences(readSource(root, path))) }));
+  const promptFiles = listPromptFiles(root).map((path) => ({ path: path, sentences: new Set(splitProseSentences(readSource(root, path))) }));
   return contents.flatMap(splitProseSentences).flatMap((sentence) => promptFiles
     .filter((promptFile) => promptFile.sentences.has(sentence))
     .map((promptFile) => ({ path: promptFile.path, sentence: sentence })));
@@ -966,7 +989,7 @@ function assertProseBudget(id, output) {
 function assertNoCopiedSentences(root, id, output) {
   const copies = findCopiedSentences(root, output);
   if (copies.length > 0) {
-    throw new Error(id + ': a literal of ' + builtPathFor(id) + ' repeats a sentence of ' + copies[0].path + ': ' + JSON.stringify(copies[0].sentence) + '. Keep the rule in ' + copies[0].path + ' and pass only the task and the data (docs/engineering-principles.md P24)');
+    throw new Error(id + ': a literal of ' + builtPathFor(id) + ' repeats a sentence of ' + copies[0].path + ': ' + JSON.stringify(copies[0].sentence) + '. The build compares each literal sentence of at least ' + MIN_COPIED_SENTENCE_WORDS + ' words with every ' + AGENT_DIR + '/*.md and ' + SKILL_DIR + '/<name>/' + SKILL_FILE + '. Keep the rule in ' + copies[0].path + ' and pass only the task and the data (docs/engineering-principles.md P24)');
   }
 }
 
