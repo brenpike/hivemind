@@ -22,7 +22,7 @@
  *   Each built script is, in order: <id>/meta.js, a GENERATED banner, the
  *   data constants from plugin/references/, the shared libraries from
  *   plugin/workflow-src/lib/ in LIB_FILES order, the modules of <id>/, and
- *   <id>/main.js last. The modules are the regular .js files of <id>/ other
+ *   <id>/main.js last. The modules are the .js entries of <id>/ other
  *   than meta.js, main.js and contract.js, in name order. contract.js is
  *   test data and is never bundled. listSourcePaths returns this order, and
  *   the banner names each source in it.
@@ -93,7 +93,7 @@
  *   and raising a budget is a visible, reviewed change to this file. The
  *   duplication check compares each sentence of at least five words of a
  *   string literal or a template piece, read as acorn decodes it, with
- *   every regular file plugin/agents/*.md and plugin/skills/<name>/SKILL.md,
+ *   every plugin/agents/*.md and plugin/skills/<name>/SKILL.md,
  *   found by listing those two directories, never from names in the
  *   literals (listPromptFiles). A literal sentence that equals a sentence of
  *   one of them, once whitespace is normalized, fails the build, naming the
@@ -102,6 +102,19 @@
  *   its own, so a sentence split across literals joined by +, across a
  *   template substitution or across a join, or reworded, passes it and
  *   rests on review (ADR-0037, local review finding c5199443).
+ *   Every file the build reads, a source, a data file, an agent or skill
+ *   file or a committed script, goes through readSource, its only file
+ *   read, and every input directory it lists goes through readDirectory.
+ *   readSource fails the build, naming the path, in both modes, unless the
+ *   entry is a regular file that resolves to its own path under the real
+ *   path of the root, so a symlink at the leaf or at any parent directory
+ *   fails it (assertRepositoryPath). readDirectory fails the same way when
+ *   the directory does not resolve to its own path or an entry is a symlink
+ *   or neither a file nor a directory. A listing never drops an entry for
+ *   its kind: a .js entry of a workflow directory, an .md entry of
+ *   plugin/agents/ and a SKILL.md that are not regular files fail the
+ *   build. Both modes also fail before they list, read or write anything
+ *   under plugin/workflows/ unless it resolves to its own path.
  *   An entry named DRAFT that is not a regular file (a directory, a
  *   symlink, anything else) fails the build in both modes.
  *   --check compares each live workflow with its committed file after
@@ -142,8 +155,13 @@
  *   could run content that --check never compared, and a write through one
  *   would change a file outside plugin/workflows/. Only regular files are
  *   allowed, and nothing else is followed.
+ *   The inputs follow the same rule. A committed symlink among them could
+ *   copy a file from outside the repository into a built script, where
+ *   review or a commit would expose it, and a listing that drops a
+ *   symlinked module builds the script without it and says nothing
+ *   (ADR-0037, local review finding 0de223ac).
  */
-import { lstatSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
@@ -252,12 +270,53 @@ export const MAX_BUILT_LINE_SQUARES = 50000000;
 const PREVIEW_MARKER_TEXT = '… [+';
 const COMBINING_RUN_PATTERN = /[\p{M}\p{Cf}]+/gu;
 
+const BUILD_INPUT_RULE = 'The build reads only regular files and directories at their own path inside the repository, and follows no symlink';
+const ENTRY_KIND_TEXT = Object.freeze({ missing: 'missing', symlink: 'a symlink', directory: 'a directory', other: 'not a file, a directory or a symlink' });
+
+/**
+ * Throws, naming relativePath, unless the entry at relativePath resolves to
+ * that same path under the real path of root, so that no component of it,
+ * the leaf or a parent directory, is a symlink.
+ */
+function assertRepositoryPath(root, relativePath) {
+  if (realpathSync(join(root, relativePath)) !== join(realpathSync(root), relativePath)) {
+    throw new Error(relativePath + ' resolves to another path through a symlink. ' + BUILD_INPUT_RULE);
+  }
+}
+
+/**
+ * Returns the text of the file at relativePath with CR stripped. It is the
+ * build's only file read. Throws, naming relativePath, unless the entry is a
+ * regular file that resolves to its own path (assertRepositoryPath).
+ */
 function readSource(root, relativePath) {
+  const kind = readEntryKind(root, relativePath);
+  if (kind !== 'file') {
+    throw new Error(relativePath + ' is ' + ENTRY_KIND_TEXT[kind] + ', not a regular file. ' + BUILD_INPUT_RULE);
+  }
+  assertRepositoryPath(root, relativePath);
   return readFileSync(join(root, relativePath), 'utf8').replace(/\r/g, '');
 }
 
+/**
+ * Returns the entries of the directory at relativePath. It is the build's
+ * only listing of an input directory. Throws, naming the path, when the
+ * directory does not resolve to its own path, or when an entry is a symlink
+ * or neither a file nor a directory, so a listing never drops such an entry.
+ */
+function readDirectory(root, relativePath) {
+  assertRepositoryPath(root, relativePath);
+  const entries = readdirSync(join(root, relativePath), { withFileTypes: true });
+  const odd = entries.find((entry) => !entry.isFile() && !entry.isDirectory());
+  if (odd !== undefined) {
+    const oddPath = relativePath + '/' + odd.name;
+    throw new Error(oddPath + ' is ' + ENTRY_KIND_TEXT[readEntryKind(root, oddPath)] + '. ' + BUILD_INPUT_RULE);
+  }
+  return entries;
+}
+
 export function discoverWorkflowIds(root) {
-  return readdirSync(join(root, SOURCE_DIR), { withFileTypes: true })
+  return readDirectory(root, SOURCE_DIR)
     .filter((entry) => entry.isDirectory() && entry.name !== 'lib')
     .map((entry) => entry.name)
     .sort();
@@ -297,12 +356,13 @@ export function listDraftWorkflowIds(root) {
 }
 
 /**
- * Returns the paths of the modules of plugin/workflow-src/<id>/: its
- * regular .js files other than NON_MODULE_FILES, in name order.
+ * Returns the paths of the modules of plugin/workflow-src/<id>/: its .js
+ * entries other than NON_MODULE_FILES, in name order. readSource fails the
+ * build on one that is not a regular file, so none drops out.
  */
 export function listModulePaths(root, id) {
-  return readdirSync(join(root, SOURCE_DIR, id), { withFileTypes: true })
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.js') && !NON_MODULE_FILES.includes(entry.name))
+  return readDirectory(root, SOURCE_DIR + '/' + id)
+    .filter((entry) => entry.name.endsWith('.js') && !NON_MODULE_FILES.includes(entry.name))
     .map((entry) => entry.name)
     .sort()
     .map((name) => SOURCE_DIR + '/' + id + '/' + name);
@@ -843,21 +903,23 @@ function listDirectoryEntries(root, relativePath) {
   if (kind !== 'directory') {
     throw new Error(relativePath + ' must be a directory, found kind ' + kind + '. The duplication check lists it to find every agent and skill file');
   }
-  return readdirSync(join(root, relativePath), { withFileTypes: true });
+  return readDirectory(root, relativePath);
 }
 
 /**
- * Returns, sorted, the path of every regular file plugin/agents/*.md and
+ * Returns, sorted, the path of every plugin/agents/*.md and
  * plugin/skills/<name>/SKILL.md, found by listing those two directories.
+ * readSource fails the build on one that is not a regular file, so none
+ * drops out of the comparison set.
  */
 export function listPromptFiles(root) {
   const agentPaths = listDirectoryEntries(root, AGENT_DIR)
-    .filter((entry) => entry.isFile() && entry.name.endsWith('.md'))
+    .filter((entry) => entry.name.endsWith('.md'))
     .map((entry) => AGENT_DIR + '/' + entry.name);
   const skillPaths = listDirectoryEntries(root, SKILL_DIR)
     .filter((entry) => entry.isDirectory())
     .map((entry) => SKILL_DIR + '/' + entry.name + '/' + SKILL_FILE)
-    .filter((path) => readEntryKind(root, path) === 'file');
+    .filter((path) => readEntryKind(root, path) !== 'missing');
   return [...agentPaths, ...skillPaths].sort();
 }
 
@@ -987,8 +1049,7 @@ export function findNonRegularOutputs(root) {
 }
 
 function describeNonRegularOutput(entry) {
-  const kindText = entry.kind === 'other' ? 'not a file, a directory or a symlink' : 'a ' + entry.kind;
-  return entry.path + ' is ' + kindText + '. Every entry under ' + OUTPUT_DIR + '/ must be a regular file. Remove it, then rebuild with: ' + REBUILD_COMMAND;
+  return entry.path + ' is ' + ENTRY_KIND_TEXT[entry.kind] + '. Every entry under ' + OUTPUT_DIR + '/ must be a regular file. Remove it, then rebuild with: ' + REBUILD_COMMAND;
 }
 
 function isStale(root, id) {
@@ -1065,6 +1126,7 @@ export function runCli(argv, { root, stdout, stderr }) {
     stderr.write('build_workflows: unknown argument ' + unknown[0] + '. Usage: ' + REBUILD_COMMAND + ' [--check]\n');
     return 2;
   }
+  assertRepositoryPath(root, OUTPUT_DIR);
   if (argv.includes('--check')) {
     const stale = findStaleWorkflows(root);
     const orphanIds = findOrphanWorkflowIds(root);

@@ -2,7 +2,7 @@ import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -414,6 +414,65 @@ describe('build_workflows regular files only', () => {
     mkdirSync(builtPath);
     assert.throws(() => runCliIn(scratchRoot, []), /plugin\/workflows\/analysis-only\.js is a directory/);
   });
+  test('both modes refuse a symlinked plugin/workflows/ before reading or writing anything', () => {
+    const scratchRoot = makeScratchCopy();
+    appendFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js'), '\nlog(\'changed\');\n');
+    const outsidePath = moveOutside(scratchRoot, 'plugin/workflows');
+    const pattern = /^Error: plugin\/workflows resolves to another path through a symlink\. The build reads only regular files/;
+    for (const argv of [[], ['--check']]) {
+      assert.throws(() => runCliIn(scratchRoot, argv), (error) => pattern.test(String(error)), argv.join(' '));
+    }
+    assert.equal(readFileSync(join(outsidePath, 'analysis-only.js'), 'utf8'), readBuilt('analysis-only'));
+  });
+});
+
+/**
+ * Moves the entry at relativePath of a scratch copy out of its repository
+ * path, puts a symlink to it in its place, and returns the new path.
+ */
+function moveOutside(scratchRoot, relativePath) {
+  const outsidePath = join(scratchRoot, 'outside', relativePath.replaceAll('/', '-'));
+  mkdirSync(join(scratchRoot, 'outside'), { recursive: true });
+  renameSync(join(scratchRoot, relativePath), outsidePath);
+  symlinkSync(outsidePath, join(scratchRoot, relativePath));
+  return outsidePath;
+}
+
+describe('build_workflows inputs are regular files at their own path (ADR-0037, finding 0de223ac)', () => {
+  const RULE = ' The build reads only regular files and directories at their own path inside the repository, and follows no symlink';
+  const isSymlink = (path) => path + ' is a symlink' + '(, not a regular file)?\\.' + RULE;
+  const resolvesElsewhere = (path) => path + ' resolves to another path through a symlink\\.' + RULE;
+  const seedOutsideModule = (scratchRoot) => {
+    writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), 'function seededHelper() {}\n');
+    moveOutside(scratchRoot, SEEDED_MODULE_PATH);
+  };
+  const inputCases = [
+    ['a symlinked meta.js', (root) => moveOutside(root, 'plugin/workflow-src/analysis-only/meta.js'), isSymlink('plugin/workflow-src/analysis-only/meta\\.js'), true],
+    ['a symlinked main.js', (root) => moveOutside(root, 'plugin/workflow-src/analysis-only/main.js'), isSymlink('plugin/workflow-src/analysis-only/main\\.js'), true],
+    ['a symlinked library', (root) => moveOutside(root, 'plugin/workflow-src/lib/schema.js'), isSymlink('plugin/workflow-src/lib/schema\\.js'), true],
+    ['a symlinked data file', (root) => moveOutside(root, 'plugin/references/plan-schema.json'), isSymlink('plugin/references/plan-schema\\.json'), true],
+    ['a symlinked module, which never drops out', seedOutsideModule, isSymlink('plugin/workflow-src/analysis-only/seeded\\.js'), true],
+    ['a directory named like a module', (root) => mkdirSync(join(root, SEEDED_MODULE_PATH)), 'plugin/workflow-src/analysis-only/seeded\\.js is a directory, not a regular file\\.' + RULE, true],
+    ['a symlinked agent file', (root) => moveOutside(root, 'plugin/agents/drone.md'), isSymlink('plugin/agents/drone\\.md'), true],
+    ['a symlinked SKILL.md', (root) => moveOutside(root, 'plugin/skills/molt/SKILL.md'), isSymlink('plugin/skills/molt/SKILL\\.md'), true],
+    ['a symlinked skill directory', (root) => moveOutside(root, 'plugin/skills/molt'), isSymlink('plugin/skills/molt'), true],
+    ['a symlinked library directory', (root) => moveOutside(root, 'plugin/workflow-src/lib'), '(' + resolvesElsewhere('plugin/workflow-src/lib/schema\\.js') + '|' + isSymlink('plugin/workflow-src/lib') + ')', true],
+    ['a symlinked references directory', (root) => moveOutside(root, 'plugin/references'), resolvesElsewhere('plugin/references/decision-autonomy-table\\.json'), true],
+    ['a symlinked workflow directory', (root) => moveOutside(root, 'plugin/workflow-src/analysis-only'), isSymlink('plugin/workflow-src/analysis-only'), false]
+  ];
+  for (const [name, setUp, message, buildFails] of inputCases) {
+    test(name + ' fails the build and --check, naming the path', () => {
+      const scratchRoot = makeScratchCopy();
+      setUp(scratchRoot);
+      const pattern = new RegExp('^Error: ' + message + '$');
+      if (buildFails) {
+        assert.throws(() => buildWorkflow(scratchRoot, 'analysis-only'), (error) => pattern.test(String(error)), name);
+      }
+      for (const argv of [[], ['--check']]) {
+        assert.throws(() => runCliIn(scratchRoot, argv), (error) => pattern.test(String(error)), name + ' ' + argv.join(' '));
+      }
+    });
+  }
 });
 
 describe('build_workflows guards', () => {
