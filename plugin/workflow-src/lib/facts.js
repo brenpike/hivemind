@@ -34,7 +34,7 @@
  *       the keys of that script's OUTPUT header in its order: facts_file,
  *       facts_lines, head_state, branch, head, trunk, trunk_freshness,
  *       trunk_ahead, trunk_behind, trunk_commit, cut, external_texts,
- *       delivery, delivery_stops. Every key is required but branch. Every pattern is
+ *       delivery, delivery_stops, root. Every key is required but branch. Every pattern is
  *       anchored at both ends and has no flags:
  *         facts_file  .hivemind/facts/facts-<UTC>-<random>.json as the
  *                     script names it: 8 digits, T, 6 digits, Z, a dash
@@ -47,6 +47,9 @@
  *                     with no leading zero.
  *         head_state, trunk_freshness, delivery  one value of its enum.
  *         cut, delivery_stops  none, or a comma list of its enum values.
+ *         root        one or more characters, none of them a control
+ *                     character (U+0000 to U+001F, U+007F): the absolute
+ *                     checkout root, or none.
  *       The enums are those of plugin/references/facts-schema.json, and
  *       tests/workflow-scripts/facts.test.mjs holds them equal.
  *   factsHeadStates, factsTrunkFreshnessValues, factsCutFields,
@@ -244,7 +247,8 @@ function gatherFactsRoutingSpec() {
     cut: { pattern: wholeFactsPattern(factsListSource(factsCutFields())), required: true },
     external_texts: { pattern: count, required: true },
     delivery: { pattern: wholeFactsPattern(factsEnumSource(factsDeliveryValues())), required: true },
-    delivery_stops: { pattern: wholeFactsPattern(factsListSource(factsDeliveryStops())), required: true }
+    delivery_stops: { pattern: wholeFactsPattern(factsListSource(factsDeliveryStops())), required: true },
+    root: { pattern: wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'), required: true }
   };
 }
 

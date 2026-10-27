@@ -48,7 +48,8 @@ const OTHER = '2'.repeat(40);
 const THIRD = '3'.repeat(40);
 const TRUNK_COMMIT = '4'.repeat(40);
 const FACTS_FILE = '.hivemind/facts/facts-20261021T120000Z-0123456789ab.json';
-const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head', 'trunk', 'trunk_freshness', 'trunk_ahead', 'trunk_behind', 'trunk_commit', 'cut', 'external_texts', 'delivery', 'delivery_stops'];
+const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head', 'trunk', 'trunk_freshness', 'trunk_ahead', 'trunk_behind', 'trunk_commit', 'cut', 'external_texts', 'delivery', 'delivery_stops', 'root'];
+const CHECKOUT_ROOT = '/work/checkout';
 const WORKER_DONE = { outcome: 'complete', summary: 'Done.' };
 const VALIDATE_PASSED = { outcome: 'passed' };
 const LEDGER_PATH = '.hivemind/review-loop/fix-ledger.yaml';
@@ -119,6 +120,7 @@ function factsStdout(changes = {}) {
     external_texts: '0',
     delivery: 'ready',
     delivery_stops: 'none',
+    root: CHECKOUT_ROOT,
     ...changes
   };
   return FACTS_KEYS.filter((key) => values[key] !== undefined).map((key) => key + ': ' + values[key]).join('\n') + '\n';
@@ -4892,7 +4894,7 @@ const ROW_TESTS = {
     });
   },
   'SD-62': () => {
-    test('a scope result that fails its schema or names a path that is not plain blocks before planning, and an empty scope goes on', async () => {
+    test('a scope result that fails its schema blocks before planning, and an empty scope goes on', async () => {
       const unusable = [
         null,
         { documents: [] },
@@ -4903,10 +4905,7 @@ const ROW_TESTS = {
         { documents: [{ path: 'docs/a.md', line: 1.5 }], paths: [] },
         { documents: Array.from({ length: 11 }, (_, index) => ({ path: 'docs/a.md', line: index + 1 })), paths: [] },
         { documents: [], paths: Array.from({ length: 31 }, (_, index) => ({ path: 'src/f' + index + '.js', exists: true, drift: '' })) },
-        { documents: [], paths: [{ path: 'src/a.js', exists: 'yes', drift: '' }] },
-        { documents: [{ path: '../outside.md', line: 1 }], paths: [] },
-        { documents: [], paths: [{ path: '/etc/passwd', exists: true, drift: '' }] },
-        { documents: [], paths: [{ path: '.git/config', exists: true, drift: '' }] }
+        { documents: [], paths: [{ path: 'src/a.js', exists: 'yes', drift: '' }] }
       ];
       for (const scope of unusable) {
         const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': scope });
@@ -4915,6 +4914,57 @@ const ROW_TESTS = {
       }
       const usable = await runWorkflow(LAUNCH, happyResults({ 'scope-1': { documents: [], paths: [] } }));
       assert.equal(usable.result.outcome, 'complete', usable.result.message);
+    });
+    test('a scope entry whose path is not a plain repository path is dropped, and planning goes on with the rest', async () => {
+      const kept = { documents: [{ path: 'docs/a.md', line: 3 }], paths: [{ path: 'tools/validate.sh', exists: true, drift: '' }] };
+      const scope = {
+        documents: [{ path: '../outside.md', line: 1 }, ...kept.documents, { path: '/home/user/repo/docs/b.md', line: 2 }],
+        paths: [{ path: '/etc/passwd', exists: true, drift: '' }, { path: '.git/config', exists: true, drift: '' }, { path: 'src/../a.js', exists: true, drift: '' }, ...kept.paths]
+      };
+      const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': scope }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), kept);
+      const emptied = await runWorkflow(LAUNCH, happyResults({ 'scope-1': { documents: [{ path: '/abs.md', line: 1 }], paths: [] } }));
+      assert.equal(emptied.result.outcome, 'complete', emptied.result.message);
+      assert.deepEqual(readDataBlock(callOf(emptied, 'plan-1').prompt, 'scope'), { documents: [], paths: [] });
+    });
+    test('a scope path under the checkout root is made relative to it and kept, and a path outside it is dropped', async () => {
+      const scope = {
+        documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }, { path: '/work/other/docs/b.md', line: 2 }, { path: CHECKOUT_ROOT + 'x/docs/c.md', line: 1 }],
+        paths: [{ path: CHECKOUT_ROOT + '/tools/validate.sh', exists: true, drift: '' }, { path: CHECKOUT_ROOT, exists: true, drift: '' }, { path: CHECKOUT_ROOT + '/', exists: true, drift: '' }, { path: CHECKOUT_ROOT + '/../etc/passwd', exists: true, drift: '' }, { path: 'src/a.js', exists: false, drift: '' }]
+      };
+      const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': scope }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), {
+        documents: [{ path: 'docs/a.md', line: 3 }],
+        paths: [{ path: 'tools/validate.sh', exists: true, drift: '' }, { path: 'src/a.js', exists: false, drift: '' }]
+      });
+    });
+    test('a checkout root that ends with a slash converts with no doubled slash', async () => {
+      const scope = { documents: [{ path: '/srv/docs/a.md', line: 1 }], paths: [{ path: '/srv//b.js', exists: true, drift: '' }] };
+      const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ root: '/srv/' }), 'scope-1': scope }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/a.md', line: 1 }], paths: [] });
+    });
+    test('a root line of none converts nothing, so every absolute path is dropped', async () => {
+      const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }, { path: 'docs/b.md', line: 1 }], paths: [{ path: 'none/a.js', exists: true, drift: '' }] };
+      const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ root: 'none' }), 'scope-1': scope }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/b.md', line: 1 }], paths: [{ path: 'none/a.js', exists: true, drift: '' }] });
+    });
+    test('no root value converts nothing', () => {
+      const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }], paths: [{ path: 'src/a.js', exists: true, drift: '' }] };
+      assert.deepEqual(structuredClone(main.keepRepositoryPathEntries(scope, undefined)), { documents: [], paths: [{ path: 'src/a.js', exists: true, drift: '' }] });
+    });
+    test('a facts relay with no root line or a root with a control character blocks as malformed facts', async () => {
+      for (const changes of [{ root: undefined }, { root: '/work/check\tout' }]) {
+        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(changes) });
+        assertBlockedBeforeWaves(run, MALFORMED_FACTS);
+      }
+    });
+    test('the scope path field says the path is relative to the repository root', () => {
+      const pathField = structuredClone(main.buildScopeSchema()).properties.paths.items.properties.path;
+      assert.ok(pathField.description.startsWith(main.repositoryPathMark() + ' It is relative to the repository root, like tools/validate.sh'), pathField.description);
     });
   },
   'SD-63': () => {

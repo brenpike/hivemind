@@ -2041,7 +2041,8 @@ trunk_commit:{pattern:wholeFactsPattern('none|[0-9a-f]{40}|[0-9a-f]{64}'),requir
 cut:{pattern:wholeFactsPattern(factsListSource(factsCutFields())),required:true},
 external_texts:{pattern:count,required:true},
 delivery:{pattern:wholeFactsPattern(factsEnumSource(factsDeliveryValues())),required:true},
-delivery_stops:{pattern:wholeFactsPattern(factsListSource(factsDeliveryStops())),required:true}
+delivery_stops:{pattern:wholeFactsPattern(factsListSource(factsDeliveryStops())),required:true},
+root:{pattern:wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'),required:true}
 };
 }
 function matchesFactsLine(key,value){
@@ -3948,7 +3949,7 @@ return'local review: the run was launched with local_review false, so the gate i
 }
 
 function buildScopeSchema(){
-const pathField={type:'string',maxLength:400,description:repositoryPathMark()};
+const pathField={type:'string',maxLength:400,description:repositoryPathMark()+' It is relative to the repository root, like tools/validate.sh, never absolute.'};
 const documentItem={
 type:'object',
 properties:{
@@ -3992,14 +3993,31 @@ function scopeOptions(pass){
 return{agentType:PLANNER_AGENT,model:SCOPE_MODEL,effort:'high',schema:toAgentSchema(SCOPE_SCHEMA),label:'scope-'+pass,phase:'Scope'};
 }
 function describeScopeProblem(scope){
-const isUsable=validateSchema(SCOPE_SCHEMA,scope).ok&&findRepositoryPathProblem(SCOPE_SCHEMA,scope,'')==='';
+const isUsable=validateSchema(SCOPE_SCHEMA,scope).ok;
 return isUsable?undefined:'The scope step returned a result it could not use, so '+RUN_NAME+' stopped before planning.';
+}
+function toRepositoryRelativePath(path,root){
+if(typeof root!=='string'||root==='none'){
+return path;
+}
+const prefix=root.endsWith('/')?root:root+'/';
+return path.startsWith(prefix)?path.slice(prefix.length):path;
+}
+function relativizeScopeEntry(entry,root){
+return Object.assign({},entry,{path:toRepositoryRelativePath(entry.path,root)});
+}
+function keepRepositoryPathEntries(scope,root){
+const keepEntries=(entries)=>entries.map((entry)=>relativizeScopeEntry(entry,root)).filter((entry)=>isRepositoryPath(entry.path));
+return{
+documents:keepEntries(scope.documents),
+paths:keepEntries(scope.paths)
+};
 }
 async function runScopeStep(run,facts){
 phase('Scope');
 const scope=await agent(addResumeNote(buildScopePrompt(run.request,facts),run),scopeOptions(run.pass));
 const problem=describeScopeProblem(scope);
-return problem===undefined?{scope:scope}:{problem:problem};
+return problem===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:{problem:problem};
 }
 
 function buildNextActionProperty(){

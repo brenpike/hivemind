@@ -553,7 +553,7 @@ test_freshness() {
     create_world fresh
     run_engine fresh "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok fresh
-    assert_equal fresh-keys 'facts_file,facts_lines,head_state,branch,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops' \
+    assert_equal fresh-keys 'facts_file,facts_lines,head_state,branch,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops,root' \
         "$(route_keys)" "routing keys and order"
     assert_route fresh-state trunk_freshness fresh
     assert_route fresh-branch branch "$BRANCH"
@@ -564,6 +564,7 @@ test_freshness() {
     assert_route fresh-no-stops delivery_stops none
     assert_route fresh-no-cut cut none
     assert_route fresh-no-texts external_texts 0
+    assert_route fresh-root root "$(run_git "$WORK_TREE" rev-parse --show-toplevel)"
     assert_fact fresh-no-text-ids '[.. | objects | select(has("text_id"))] | length' 0
     assert_fact fresh-remote '.repository.remote' origin
     assert_fact fresh-base '.history.base' remote_trunk
@@ -847,7 +848,7 @@ test_head_states() {
     run_engine unsafe-name "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok unsafe-name
     assert_route unsafe-name-state head_state unsafe_name
-    assert_equal unsafe-name-keys 'facts_file,facts_lines,head_state,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops' \
+    assert_equal unsafe-name-keys 'facts_file,facts_lines,head_state,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops,root' \
         "$(route_keys)" "no branch line"
     assert_fact unsafe-name-no-branch-key '.repository | has("branch")' false
     assert_route unsafe-name-stop delivery_stops branch_name_unsafe
@@ -865,6 +866,16 @@ test_head_states() {
     assert_route shallow-fetched trunk_freshness no_local_trunk
     assert_fact shallow-history '[.history.status, .history.commits.complete] | @tsv' $'unavailable\tfalse'
     assert_route shallow-stop delivery_stops history_unavailable
+}
+
+# ── The checkout root line ──────────────────────────────────────────────────
+
+test_root() {
+    create_world $'root\tcontrol'
+    run_engine root-control "$WORK_TREE" "$STUB_PATH" --trunk main
+    assert_ok root-control
+    assert_route root-control-none root none
+    assert_route root-control-ready delivery ready
 }
 
 # ── Past the bound: a history whose facts file passes 256 KB ────────────────
@@ -1657,6 +1668,7 @@ test_operations
 test_paths_and_subjects
 test_history_shapes
 test_head_states
+test_root
 test_big_history
 test_references
 test_pull_requests
