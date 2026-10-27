@@ -14,8 +14,10 @@
  *   runScopeStep(run, facts)  {scope} or {problem}.
  *   The step, as meta.js names it:
  *   Scope   hivemind:cerebrate in Scope Mode, on SCOPE_MODEL at effort
- *           high, returns the slice of each document the request names and
- *           the drift of each path the slice names, under SCOPE_SCHEMA. It
+ *           high, returns the path and line ranges of the sections of each
+ *           document the request names and the drift of each path a
+ *           section names, under SCOPE_SCHEMA. The scope holds no document
+ *           text: the planner reads the named ranges from the file. It
  *           runs in every pass, after the facts step and the scan and
  *           before planning, with label scope-P.
  *
@@ -27,6 +29,11 @@
  *   fails SCOPE_SCHEMA, or whose value at a field marked with
  *   repositoryPathMark() fails isRepositoryPath (findRepositoryPathProblem,
  *   plan.js), stops the run before planning.
+ *   ADR-0037 invariant 4 holds by construction: the scope copies no
+ *   document text, so no copy can be cut; every string field starts with
+ *   externalLabel(); and both lists are partial by definition, so an entry
+ *   left out is read or checked by the planner itself and no step depends
+ *   on a list being complete.
  *   The scope reaches only the plan and revise prompts, in a scope data
  *   block after the request block. It never reaches a message, the pull
  *   request texts or a worker prompt.
@@ -37,8 +44,11 @@
  *   higher one.
  *
  * Why
- *   A cheaper model slices the documents the request names once, so the
- *   planner reads no whole document and checks no named path again.
+ *   A cheaper model finds the sections of the documents the request names
+ *   once, so the planner reads only the named ranges, not each whole
+ *   document, and checks no named path again. A Workflow script cannot
+ *   read files, so it could never check a copied slice against its file;
+ *   the file the planner reads is ground truth.
  */
 
 function buildScopeSchema() {
@@ -47,10 +57,9 @@ function buildScopeSchema() {
     type: 'object',
     properties: {
       path: pathField,
-      lines: { type: 'string', maxLength: 100, description: 'The line ranges of the slice, like 12-40.' },
-      text: { type: 'string', maxLength: 20000, description: 'The slice, word for word.' }
+      lines: { type: 'string', maxLength: 100, description: externalLabel() + ' The line ranges of the section, like 12-40 or 12-40, 88-95.' }
     },
-    required: ['path', 'lines', 'text'],
+    required: ['path', 'lines'],
     additionalProperties: false
   };
   const pathItem = {
@@ -58,7 +67,7 @@ function buildScopeSchema() {
     properties: {
       path: pathField,
       exists: { type: 'boolean', description: 'true when the path exists now.' },
-      drift: { type: 'string', minLength: 0, maxLength: 400, description: 'How the path differs from what the slice says, empty when it does not.' }
+      drift: { type: 'string', minLength: 0, maxLength: 400, description: externalLabel() + ' How the path differs from what the section says, empty when it does not.' }
     },
     required: ['path', 'exists', 'drift'],
     additionalProperties: false
@@ -66,8 +75,8 @@ function buildScopeSchema() {
   return {
     type: 'object',
     properties: {
-      documents: { type: 'array', description: 'One slice per named document, empty when none.', items: documentItem },
-      paths: { type: 'array', description: 'One entry per path a slice or the request names for the work, empty when none.', items: pathItem }
+      documents: { type: 'array', description: 'The sections of the named documents, empty when none. A document may be left out, and the planner then reads it itself.', items: documentItem },
+      paths: { type: 'array', description: 'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.', items: pathItem }
     },
     required: ['documents', 'paths'],
     additionalProperties: false

@@ -3946,10 +3946,9 @@ const documentItem={
 type:'object',
 properties:{
 path:pathField,
-lines:{type:'string',maxLength:100,description:'The line ranges of the slice, like 12-40.'},
-text:{type:'string',maxLength:20000,description:'The slice, word for word.'}
+lines:{type:'string',maxLength:100,description:externalLabel()+' The line ranges of the section, like 12-40 or 12-40, 88-95.'}
 },
-required:['path','lines','text'],
+required:['path','lines'],
 additionalProperties:false
 };
 const pathItem={
@@ -3957,7 +3956,7 @@ type:'object',
 properties:{
 path:pathField,
 exists:{type:'boolean',description:'true when the path exists now.'},
-drift:{type:'string',minLength:0,maxLength:400,description:'How the path differs from what the slice says, empty when it does not.'}
+drift:{type:'string',minLength:0,maxLength:400,description:externalLabel()+' How the path differs from what the section says, empty when it does not.'}
 },
 required:['path','exists','drift'],
 additionalProperties:false
@@ -3965,8 +3964,8 @@ additionalProperties:false
 return{
 type:'object',
 properties:{
-documents:{type:'array',description:'One slice per named document, empty when none.',items:documentItem},
-paths:{type:'array',description:'One entry per path a slice or the request names for the work, empty when none.',items:pathItem}
+documents:{type:'array',description:'The sections of the named documents, empty when none. A document may be left out, and the planner then reads it itself.',items:documentItem},
+paths:{type:'array',description:'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.',items:pathItem}
 },
 required:['documents','paths'],
 additionalProperties:false

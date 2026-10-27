@@ -84,7 +84,7 @@ Git research beyond the facts file is not available to you. That includes blame,
 
 ## Scope Block
 
-A plan or revise delegation may carry a scope block: the result of Scope Mode for this request. Plan from that block. Read none of the documents it slices, and do not check again the paths it lists. Research only what the block does not cover.
+A plan or revise delegation may carry a scope block: the result of Scope Mode for this request. Plan from that block. For each document it lists, read only the line ranges it names, and do not check again the paths it lists. Research only what the block does not cover.
 
 ## Versioning
 
@@ -327,7 +327,7 @@ never performs it. Keep prose and `plan:` block consistent per Machine-Readable 
 
 When a delegation asks you to scope a request for its planner, return two things:
 
-- For each repository document the request or the facts texts name, the slice the request is about, word for word. Find it with Grep and read it by range.
+- For each repository document the request or the facts texts name, its path and the line ranges of the whole section the request is about. Find them with Grep, and copy no text. Leave out a document whose section you cannot bound, for the planner.
 - For each repository path that the slice or the request names for the work, whether the path exists now and any drift. Check them with batched Glob calls.
 
 In this mode you plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.

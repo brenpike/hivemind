@@ -19,7 +19,8 @@ const READ_DISCIPLINE_RULES = [
   'Grep long append-only documents (a changelog, an ADR, a plan, a handoff); never read them whole.',
   'When the request names a document, read only the section the request is about.'
 ];
-const SCOPE_BLOCK_RULE = 'Plan from that block. Read none of the documents it slices, and do not check again the paths it lists. Research only what the block does not cover.';
+const SCOPE_BLOCK_RULE = 'Plan from that block. For each document it lists, read only the line ranges it names, and do not check again the paths it lists. Research only what the block does not cover.';
+const SCOPE_MODE_RANGE_RULE = 'its path and the line ranges of the whole section the request is about. Find them with Grep, and copy no text. Leave out a document whose section you cannot bound, for the planner.';
 
 function readSection(text, heading) {
   const lines = text.split('\n');
@@ -136,6 +137,9 @@ describe('cerebrate research reads only what the plan needs', () => {
   });
   test('the Scope Mode section exists and plans nothing', () => {
     assert.ok(readSection(cerebrateText, '### Scope Mode').includes('In this mode you plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.'));
+  });
+  test('Scope Mode returns line ranges, not copied text', () => {
+    assert.ok(readSection(cerebrateText, '### Scope Mode').includes(SCOPE_MODE_RANGE_RULE), SCOPE_MODE_RANGE_RULE);
   });
   test('a plan or revise delegation with a scope block plans from it', () => {
     assert.ok(readSection(cerebrateText, '## Scope Block').includes(SCOPE_BLOCK_RULE), SCOPE_BLOCK_RULE);

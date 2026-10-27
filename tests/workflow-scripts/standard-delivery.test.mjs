@@ -4867,32 +4867,32 @@ const ROW_TESTS = {
     });
   },
   'SD-61': () => {
-    test('SCOPE_SCHEMA holds documents and paths, marks each path field and bounds every string', () => {
+    test('SCOPE_SCHEMA holds documents and paths, labels every string field, marks each path field and bounds every string', () => {
       const schema = structuredClone(main.buildScopeSchema());
       assert.deepEqual(schema.required, ['documents', 'paths']);
       const documentItem = schema.properties.documents.items;
       const pathItem = schema.properties.paths.items;
-      assert.deepEqual([Object.keys(documentItem.properties), documentItem.required], [['path', 'lines', 'text'], ['path', 'lines', 'text']]);
+      assert.deepEqual([Object.keys(documentItem.properties), documentItem.required], [['path', 'lines'], ['path', 'lines']]);
       assert.deepEqual([Object.keys(pathItem.properties), pathItem.required], [['path', 'exists', 'drift'], ['path', 'exists', 'drift']]);
       assert.equal(pathItem.properties.exists.type, 'boolean');
       for (const item of [documentItem, pathItem]) {
         assert.ok(item.properties.path.description.startsWith(main.repositoryPathMark()));
         const stringFields = Object.values(item.properties).filter((property) => property.type === 'string');
         assert.ok(stringFields.every((field) => Number.isInteger(field.maxLength)), JSON.stringify(item));
+        assert.ok(stringFields.every((field) => field.description.startsWith(main.externalLabel())), JSON.stringify(item));
       }
       assert.ok(lib.validateSchema(schema, { documents: [], paths: [{ path: 'src/a.js', exists: false, drift: '' }] }).ok);
     });
   },
   'SD-62': () => {
     test('a scope result that fails its schema or names a path that is not plain blocks before planning, and an empty scope goes on', async () => {
-      const textLimit = structuredClone(main.buildScopeSchema()).properties.documents.items.properties.text.maxLength;
       const unusable = [
         null,
         { documents: [] },
         { documents: [], paths: [], extra: true },
-        { documents: [{ path: 'docs/a.md', lines: '1-2', text: 't'.repeat(textLimit + 1) }], paths: [] },
+        { documents: [{ path: 'docs/a.md', lines: '1-2', text: 'Slice.' }], paths: [] },
         { documents: [], paths: [{ path: 'src/a.js', exists: 'yes', drift: '' }] },
-        { documents: [{ path: '../outside.md', lines: '1-2', text: 'Slice.' }], paths: [] },
+        { documents: [{ path: '../outside.md', lines: '1-2' }], paths: [] },
         { documents: [], paths: [{ path: '/etc/passwd', exists: true, drift: '' }] },
         { documents: [], paths: [{ path: '.git/config', exists: true, drift: '' }] }
       ];
@@ -4907,7 +4907,7 @@ const ROW_TESTS = {
   },
   'SD-63': () => {
     test('the plan and revise prompts carry the scope right after the request block, and no other prompt or message carries it', async () => {
-      const scope = { documents: [{ path: 'docs/handoff.md', lines: '10-12', text: 'SCOPE_MARKER_QZ slice.' }], paths: [{ path: 'src/cache.js', exists: true, drift: '' }] };
+      const scope = { documents: [{ path: 'docs/handoff.md', lines: '10-12' }], paths: [{ path: 'src/cache.js', exists: true, drift: 'SCOPE_MARKER_QZ drift.' }] };
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
       const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': scope, 'plan-1': gated });
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go with A.'), happyResults({ 'scope-1': scope, 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) }));
