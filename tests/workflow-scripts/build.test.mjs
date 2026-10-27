@@ -26,7 +26,9 @@ import {
   listLiveWorkflowIds,
   listModulePaths,
   listSourcePaths,
+  REPOSITORY_PATH_MARK,
   projectAutonomyTable,
+  projectSchema,
   readDataConstant,
   runCli,
   stripComments,
@@ -83,6 +85,25 @@ function sumLineSquares(source) {
 
 function findLongestLineLength(source) {
   return source.split('\n').reduce((longest, line) => Math.max(longest, line.length), 0);
+}
+
+/**
+ * Returns [location, node] for schema and every node under its properties
+ * and items, in walk order.
+ */
+function collectSchemaNodes(schema, location, nodes) {
+  nodes.push([location, schema]);
+  Object.entries(schema.properties === undefined ? {} : schema.properties).forEach(([name, field]) => collectSchemaNodes(field, location + '.' + name, nodes));
+  if (schema.items !== undefined) {
+    collectSchemaNodes(schema.items, location + '[]', nodes);
+  }
+  return nodes;
+}
+
+function listMarkedLocations(schema) {
+  return collectSchemaNodes(schema, '$', [])
+    .filter(([, node]) => typeof node.description === 'string' && node.description.startsWith(REPOSITORY_PATH_MARK))
+    .map(([location]) => location);
 }
 
 function findLongestCombiningRun(source) {
@@ -630,6 +651,47 @@ describe('build_workflows drafts', () => {
   });
 });
 
+describe('build_workflows schema projection', () => {
+  const schemaFiles = [['BRIEF_SCHEMA', 'decision-brief-schema.json'], ['PLAN_SCHEMA', 'plan-schema.json']];
+  test('the repository path mark is the one the plan schema description quotes', () => {
+    const planSchema = JSON.parse(readFileSync(join(repoRoot, 'plugin/references/plan-schema.json'), 'utf8'));
+    assert.equal(REPOSITORY_PATH_MARK, 'Can carry external content. Repository path.');
+    assert.ok(planSchema.description.includes('"' + REPOSITORY_PATH_MARK + '"'));
+  });
+  for (const [name, file] of schemaFiles) {
+    test(name + ' drops only title and description, keeps the mark, and keeps $schema and every validation keyword', () => {
+      const fileData = JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8'));
+      const projected = readDataConstant(repoRoot, name);
+      const fileNodes = collectSchemaNodes(fileData, '$', []);
+      const projectedNodes = collectSchemaNodes(projected, '$', []);
+      assert.deepEqual(projectedNodes.map(([location]) => location), fileNodes.map(([location]) => location));
+      assert.equal(projected.$schema, fileData.$schema);
+      fileNodes.forEach(([location, fileNode], index) => {
+        const projectedNode = projectedNodes[index][1];
+        const isMarked = typeof fileNode.description === 'string' && fileNode.description.startsWith(REPOSITORY_PATH_MARK);
+        const keptKeys = Object.keys(fileNode).filter((key) => key !== 'title' && (key !== 'description' || isMarked));
+        assert.deepEqual(Object.keys(projectedNode), keptKeys, location);
+        for (const key of keptKeys.filter((kept) => !['description', 'properties', 'items'].includes(kept))) {
+          assert.deepEqual(projectedNode[key], fileNode[key], location + '.' + key);
+        }
+        assert.equal(projectedNode.description, isMarked ? REPOSITORY_PATH_MARK : undefined, location);
+      });
+    });
+    test(name + ' keeps the mark on every repository path field', () => {
+      const fileData = JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8'));
+      const projected = readDataConstant(repoRoot, name);
+      assert.deepEqual(listMarkedLocations(projected), listMarkedLocations(fileData));
+    });
+  }
+  test('the plan schema has repository path fields to keep', () => {
+    assert.deepEqual(listMarkedLocations(readDataConstant(repoRoot, 'PLAN_SCHEMA')), ['$.versioning.artifact_files[]', '$.steps[].files[]']);
+  });
+  test('a field named title or description is a field, not an annotation', () => {
+    const schema = { title: 'T', type: 'object', properties: { title: { type: 'string', description: 'D' }, description: { type: 'string' } }, items: { description: REPOSITORY_PATH_MARK + ' More.', enum: [{ description: 'kept' }] } };
+    assert.deepEqual(projectSchema(schema), { type: 'object', properties: { title: { type: 'string' }, description: { type: 'string' } }, items: { description: REPOSITORY_PATH_MARK, enum: [{ description: 'kept' }] } });
+  });
+});
+
 for (const id of draftIds) {
   describe('draft plugin/workflow-src/' + id + '/', () => {
     test('builds in memory and has no built file', () => {
@@ -673,8 +735,7 @@ for (const id of liveIds) {
       assert.deepEqual([...positions].sort((left, right) => left - right), positions);
     });
     test('each data constant is unindented JSON, one key or element per line, over more than one line, equal to the projection of its file', () => {
-      const keepWhole = (data) => data;
-      const constants = [['AUTONOMY_TABLE', 'decision-autonomy-table.json', projectAutonomyTable], ['BRIEF_SCHEMA', 'decision-brief-schema.json', keepWhole], ['PLAN_SCHEMA', 'plan-schema.json', keepWhole]];
+      const constants = [['AUTONOMY_TABLE', 'decision-autonomy-table.json', projectAutonomyTable], ['BRIEF_SCHEMA', 'decision-brief-schema.json', projectSchema], ['PLAN_SCHEMA', 'plan-schema.json', projectSchema]];
       for (const [name, file, project] of constants) {
         const fileData = project(JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8')));
         assert.deepEqual(readDataConstant(repoRoot, name), fileData, name);

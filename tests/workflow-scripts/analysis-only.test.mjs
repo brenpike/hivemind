@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadLibs, loadWorkflow } from './harness.mjs';
+import { readDataConstant } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const builtPath = repoRoot + 'plugin/workflows/analysis-only.js';
 const workflow = loadWorkflow(builtPath);
 const builtSource = readFileSync(builtPath, 'utf8').replace(/\r/g, '');
-const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
+const briefSchema = readDataConstant(repoRoot, 'BRIEF_SCHEMA');
 const factsSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/facts-schema.json', 'utf8'));
 const cerebrateText = readFileSync(repoRoot + 'plugin/agents/cerebrate.md', 'utf8');
 const libDir = repoRoot + 'plugin/workflow-src/lib/';

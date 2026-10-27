@@ -7,7 +7,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
 import { loadLibs, loadWorkflowSource } from './harness.mjs';
-import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraftWorkflow, listSourcePaths, stripCommentsAndStrings } from '../../tools/build_workflows.mjs';
+import { LIB_FILES, MAX_BUILT_SCRIPT_LENGTH, buildWorkflow, builtPathFor, isDraftWorkflow, listSourcePaths, readDataConstant, stripCommentsAndStrings } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const WORKFLOW_ID = 'standard-delivery';
@@ -24,6 +24,8 @@ const contract = loadLibs([contractPath]);
 const factsSchema = readJson('plugin/references/facts-schema.json');
 const planSchema = readJson('plugin/references/plan-schema.json');
 const briefSchema = readJson('plugin/references/decision-brief-schema.json');
+const agentPlanSchema = readDataConstant(repoRoot, 'PLAN_SCHEMA');
+const agentBriefSchema = readDataConstant(repoRoot, 'BRIEF_SCHEMA');
 const droneText = readText(join(repoRoot, 'plugin/agents/drone.md'));
 const gatherFactsPath = join(repoRoot, 'plugin/skills/gather-facts/scripts/gather-facts.sh');
 const createBranchPath = join(repoRoot, 'plugin/skills/create-working-branch/scripts/create-working-branch.sh');
@@ -1217,10 +1219,10 @@ const ROW_TESTS = {
       const schema = options.schema;
       assert.deepEqual(Object.keys(schema.properties), ['outcome', 'plan', 'questions', 'blocker']);
       assert.deepEqual(schema.required, ['outcome', 'questions']);
-      const { $schema: planDialect, ...planWithoutDialect } = planSchema;
+      const { $schema: planDialect, ...planWithoutDialect } = agentPlanSchema;
       assert.ok(planDialect !== undefined);
-      assert.deepEqual(schema.properties.plan, { ...planWithoutDialect, description: planSchema.description + ' Only with outcome complete.' });
-      const { $schema: briefDialect, ...briefWithoutDialect } = briefSchema;
+      assert.deepEqual(schema.properties.plan, { ...planWithoutDialect, description: 'Only with outcome complete.' });
+      const { $schema: briefDialect, ...briefWithoutDialect } = agentBriefSchema;
       assert.ok(briefDialect !== undefined);
       assert.deepEqual(schema.properties.questions.items, briefWithoutDialect);
     });
@@ -4517,7 +4519,7 @@ const ROW_TESTS = {
     const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
     const reviseArgs = { ...LAUNCH, answers: { 'round-1': 'Take option A.' } };
     const fullSchemas = () => ({
-      'plan result': main.buildPlanResultSchema(planSchema, briefSchema),
+      'plan result': main.buildPlanResultSchema(agentPlanSchema, agentBriefSchema),
       revise: main.buildReviseResultSchema([{}]),
       relay: main.buildRelaySchema(),
       worker: main.buildWorkerSchema(),
@@ -4548,7 +4550,7 @@ const ROW_TESTS = {
       }
     });
     test('the revise schema is the plan result schema with settled as one more shared field, built through the same builder', () => {
-      const plan = structuredClone(main.buildPlanResultSchema(planSchema, briefSchema));
+      const plan = structuredClone(main.buildPlanResultSchema(agentPlanSchema, agentBriefSchema));
       const revise = structuredClone(main.buildReviseResultSchema([{}]));
       assert.deepEqual(revise.required, [...plan.required, 'settled']);
       assert.deepEqual(Object.keys(revise.properties), [...Object.keys(plan.properties), 'settled']);

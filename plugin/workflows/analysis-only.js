@@ -157,8 +157,6 @@ const AUTONOMY_TABLE = {
 
 const BRIEF_SCHEMA = {
 "$schema": "https://json-schema.org/draft/2020-12/schema",
-"title": "Decision Brief",
-"description": "Shape of a decision brief. Usable as-is as a structured-output schema.",
 "type": "object",
 "additionalProperties": false,
 "required": [
@@ -173,17 +171,14 @@ const BRIEF_SCHEMA = {
 ],
 "properties": {
 "id": {
-"type": "string",
-"description": "Short answerable id for the decision, e.g. Q1."
+"type": "string"
 },
 "kind": {
-"type": "string",
-"description": "A hard_stops or rows kind from ${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json."
+"type": "string"
 },
 "problem": {
 "type": "string",
-"maxLength": 300,
-"description": "Written for the user: the decision in plain language, one or two sentences, no internal mechanism names."
+"maxLength": 300
 },
 "criticality": {
 "type": "object",
@@ -194,7 +189,6 @@ const BRIEF_SCHEMA = {
 "blast_radius",
 "if_ignored"
 ],
-"description": "How much this decision matters.",
 "properties": {
 "level": {
 "type": "string",
@@ -203,8 +197,7 @@ const BRIEF_SCHEMA = {
 "medium",
 "high",
 "critical"
-],
-"description": "Overall criticality of the decision."
+]
 },
 "likelihood": {
 "type": "string",
@@ -213,25 +206,21 @@ const BRIEF_SCHEMA = {
 "occasional",
 "common",
 "certain"
-],
-"description": "How likely the problem is to bite."
+]
 },
 "blast_radius": {
 "type": "string",
-"maxLength": 160,
-"description": "Written for the user: what and how much is affected if it goes wrong. One short sentence."
+"maxLength": 160
 },
 "if_ignored": {
 "type": "string",
-"maxLength": 160,
-"description": "Written for the user: what happens if the decision is not made or is ignored. One short sentence."
+"maxLength": 160
 }
 }
 },
 "options": {
 "type": "array",
 "minItems": 1,
-"description": "Only options that survive steel-manning and straw-manning.",
 "items": {
 "type": "object",
 "additionalProperties": false,
@@ -246,21 +235,17 @@ const BRIEF_SCHEMA = {
 ],
 "properties": {
 "id": {
-"type": "string",
-"description": "Option id: A, B, or C."
+"type": "string"
 },
 "summary": {
 "type": "string",
-"maxLength": 160,
-"description": "Written for the user: what this option does, in plain language."
+"maxLength": 160
 },
 "steel_man": {
-"type": "string",
-"description": "The strongest honest case for this option."
+"type": "string"
 },
 "straw_man": {
-"type": "string",
-"description": "The strongest honest case against this option, or how it fails."
+"type": "string"
 },
 "effort": {
 "type": "string",
@@ -269,8 +254,7 @@ const BRIEF_SCHEMA = {
 "small",
 "medium",
 "large"
-],
-"description": "Effort to carry out this option."
+]
 },
 "value": {
 "type": "string",
@@ -278,19 +262,16 @@ const BRIEF_SCHEMA = {
 "low",
 "medium",
 "high"
-],
-"description": "Value delivered by this option."
+]
 },
 "reversible": {
-"type": "boolean",
-"description": "True when this option can be undone cheaply."
+"type": "boolean"
 }
 }
 }
 },
 "ruled_out": {
 "type": "array",
-"description": "Optional. Options considered and eliminated.",
 "items": {
 "type": "object",
 "additionalProperties": false,
@@ -300,12 +281,10 @@ const BRIEF_SCHEMA = {
 ],
 "properties": {
 "summary": {
-"type": "string",
-"description": "What the eliminated option would have done."
+"type": "string"
 },
 "why": {
-"type": "string",
-"description": "Why it was ruled out."
+"type": "string"
 }
 }
 }
@@ -318,11 +297,9 @@ const BRIEF_SCHEMA = {
 "strength",
 "why"
 ],
-"description": "The producer's recommendation.",
 "properties": {
 "option_id": {
-"type": "string",
-"description": "Id of the recommended option. Never blank. When strength is none, still name an option id; the run asks the user either way."
+"type": "string"
 },
 "strength": {
 "type": "string",
@@ -330,19 +307,16 @@ const BRIEF_SCHEMA = {
 "strong",
 "weak",
 "none"
-],
-"description": "Confidence in the recommendation."
+]
 },
 "why": {
 "type": "string",
-"maxLength": 200,
-"description": "Written for the user: reasoning tied to criticality and to effort versus value, in one or two short sentences."
+"maxLength": 200
 }
 }
 },
 "assumptions": {
 "type": "array",
-"description": "Assumptions the brief rests on.",
 "items": {
 "type": "object",
 "additionalProperties": false,
@@ -353,8 +327,7 @@ const BRIEF_SCHEMA = {
 ],
 "properties": {
 "statement": {
-"type": "string",
-"description": "The assumption, stated plainly."
+"type": "string"
 },
 "origin": {
 "type": "string",
@@ -362,12 +335,10 @@ const BRIEF_SCHEMA = {
 "user",
 "repo",
 "assumed"
-],
-"description": "Source of the assumption. assumed means agent-inferred."
+]
 },
 "evidence": {
-"type": "string",
-"description": "Quote or path for user or repo origin; the reason for assumed origin."
+"type": "string"
 }
 }
 }
@@ -380,33 +351,26 @@ const BRIEF_SCHEMA = {
 "architectural",
 "safety"
 ],
-"description": "Producer's read of the RECOMMENDED action against the Promotion Gate clauses.",
 "properties": {
 "irreversible": {
-"type": "boolean",
-"description": "True when the recommended action is irreversible."
+"type": "boolean"
 },
 "architectural": {
-"type": "boolean",
-"description": "True when the recommended action is architectural."
+"type": "boolean"
 },
 "safety": {
-"type": "boolean",
-"description": "True when the recommended action touches safety."
+"type": "boolean"
 }
 }
 },
 "verbatim": {
-"type": "string",
-"description": "Optional. Omit when there is no such text. Text another rule requires shown to the user, e.g. normalized brood strain text."
+"type": "string"
 }
 }
 };
 
 const PLAN_SCHEMA = {
 "$schema": "https://json-schema.org/draft/2020-12/schema",
-"title": "Plan",
-"description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md. It reaches a shell command only as one argument that first passes the identifier gate there (Shell Identifier Discipline), or through an inputs file the script reads as data (Inert Inputs-File Navigator Pattern), and is never spliced into command text. A field whose description starts with \"Can carry external content. Repository path.\" holds one path relative to the top of the repository. The plan check refuses the plan, before the branch step and any later agent call, when such a path is empty, starts with /, has an empty, ., .. or .git (any case) part, or holds a control character, as the files rule of ${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh does.",
 "type": "object",
 "additionalProperties": false,
 "required": [
@@ -424,8 +388,7 @@ const PLAN_SCHEMA = {
 ],
 "properties": {
 "summary": {
-"type": "string",
-"description": "Can carry external content. What the plan delivers."
+"type": "string"
 },
 "digest": {
 "type": "object",
@@ -434,17 +397,14 @@ const PLAN_SCHEMA = {
 "problem",
 "change"
 ],
-"description": "The plan in two short sentences written for the user. A question about accepting the plan shows them as written, in place of the summary.",
 "properties": {
 "problem": {
 "type": "string",
-"maxLength": 200,
-"description": "Can carry external content. Written for the user: one plain sentence saying what the plan addresses, the ask of the request or the root cause a review found."
+"maxLength": 200
 },
 "change": {
 "type": "string",
-"maxLength": 200,
-"description": "Can carry external content. Written for the user: one plain sentence saying what the plan changes."
+"maxLength": 200
 }
 }
 },
@@ -456,7 +416,6 @@ const PLAN_SCHEMA = {
 "grows_surface",
 "repeats_surface"
 ],
-"description": "Whether accepting a plan that remediates review findings goes to the user, per the remediation plan rule of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate). Each flag, and each flag of promotion_gate, is true only for a plan that remediates review findings, and only while no reply in this run has accepted that condition. Every flag is false for any other plan.",
 "properties": {
 "promotion_gate": {
 "type": "object",
@@ -466,39 +425,31 @@ const PLAN_SCHEMA = {
 "architectural",
 "safety"
 ],
-"description": "The whole Promotion Gate of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md, read against accepting the remediation plan. Its keys, required list and types are those of the gate of a decision brief in ${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json.",
 "properties": {
 "irreversible": {
-"type": "boolean",
-"description": "True when accepting the remediation plan is irreversible, clause 1 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+"type": "boolean"
 },
 "architectural": {
-"type": "boolean",
-"description": "True when accepting the remediation plan has architectural blast radius, clause 2 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+"type": "boolean"
 },
 "safety": {
-"type": "boolean",
-"description": "True when accepting the remediation plan is safety-relevant, clause 3 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md, which names the categories by reference to the Destructive Fix Gate."
+"type": "boolean"
 }
 }
 },
 "grows_surface": {
-"type": "boolean",
-"description": "True when the remediation adds more surface than it removes, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Surface-Growth Escalation)."
+"type": "boolean"
 },
 "repeats_surface": {
-"type": "boolean",
-"description": "True when the remediation follows a fix on the same surface that did not close its class, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Forced zoom-out after the first non-closing structural fix)."
+"type": "boolean"
 }
 }
 },
 "branch": {
-"type": "string",
-"description": "Can carry external content. The working branch the run delivers on. A run that starts on a branch other than trunk names that branch."
+"type": "string"
 },
 "base": {
-"type": "string",
-"description": "Can carry external content. The branch the working branch is created from: trunk unless the work stacks on another branch. Never the working branch itself. The branch step passes it to create-working-branch."
+"type": "string"
 },
 "trunk_freshness": {
 "type": "string",
@@ -511,8 +462,7 @@ const PLAN_SCHEMA = {
 "fetch_failed",
 "no_local_trunk",
 "no_trunk"
-],
-"description": "Copied from repository.trunk_freshness in the facts file the plan was made from. The workflow checks it against the facts step and decides trunk freshness from the facts, not from this field."
+]
 },
 "classification": {
 "type": "string",
@@ -525,12 +475,10 @@ const PLAN_SCHEMA = {
 "docs",
 "test",
 "ci"
-],
-"description": "The work classification. The branch step passes it to create-working-branch, and each commit takes its type from it."
+]
 },
 "breaking": {
-"type": "boolean",
-"description": "True when the change breaks compatibility. Each commit then carries the breaking marker."
+"type": "boolean"
 },
 "versioning": {
 "type": "object",
@@ -540,30 +488,26 @@ const PLAN_SCHEMA = {
 "no_bump_match",
 "artifact_files"
 ],
-"description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The bump step passes the two answers to bump-type unchanged.",
 "properties": {
 "bump_trigger": {
 "type": "string",
 "enum": [
 "yes",
 "no"
-],
-"description": "yes when the change satisfies any Bump Trigger bullet. Passed to bump-type as --bump-trigger."
+]
 },
 "no_bump_match": {
 "type": "string",
 "enum": [
 "yes",
 "no"
-],
-"description": "yes when the change matches one or more bullets of the list of changes that need no bump by default. Passed to bump-type as --no-bump-match."
+]
 },
 "artifact_files": {
 "type": "array",
-"description": "Each repository path holding a version the bump step sets, as the project's versioning docs name it. Empty when the project names none. The bump commit takes exactly these paths.",
 "items": {
 "type": "string",
-"description": "Can carry external content. Repository path. One file that holds a version."
+"description": "Can carry external content. Repository path."
 }
 }
 }
@@ -573,13 +517,11 @@ const PLAN_SCHEMA = {
 "enum": [
 "single",
 "multi"
-],
-"description": "How the plan delivers. Both values run as one branch and one pull request. Brood is not a value."
+]
 },
 "steps": {
 "type": "array",
 "minItems": 1,
-"description": "The plan's steps. depends_on sets their order.",
 "items": {
 "type": "object",
 "additionalProperties": false,
@@ -591,45 +533,37 @@ const PLAN_SCHEMA = {
 "depends_on",
 "external_effects"
 ],
-"description": "One step of the plan, done by one worker.",
 "properties": {
 "id": {
 "type": "string",
-"maxLength": 64,
-"description": "Can carry external content. The step id, unique in the plan. depends_on names steps by it."
+"maxLength": 64
 },
 "owner": {
 "type": "string",
 "enum": [
 "hivemind:drone",
 "hivemind:changeling"
-],
-"description": "The worker agent that does the step."
+]
 },
 "files": {
 "type": "array",
 "minItems": 1,
-"description": "Every repository path the step may create or edit. The wave's commit takes exactly these paths.",
 "items": {
 "type": "string",
-"description": "Can carry external content. Repository path. One file the step may create or edit."
+"description": "Can carry external content. Repository path."
 }
 },
 "outcome": {
-"type": "string",
-"description": "Can carry external content. What is true when the step is done."
+"type": "string"
 },
 "depends_on": {
 "type": "array",
-"description": "The steps that must finish before this one starts. Empty means none.",
 "items": {
-"type": "string",
-"description": "Can carry external content. The id of a step in this plan."
+"type": "string"
 }
 },
 "external_effects": {
 "type": "array",
-"description": "Each effect the step has outside the repo, such as a deploy, a publish, a migration or other write to shared data, or a write to an outside service over the network. Empty means the step declares no effect outside the repo.",
 "items": {
 "type": "object",
 "additionalProperties": false,
@@ -637,16 +571,13 @@ const PLAN_SCHEMA = {
 "summary",
 "reversible"
 ],
-"description": "One effect outside the repo.",
 "properties": {
 "summary": {
 "type": "string",
-"maxLength": 300,
-"description": "Can carry external content. What the effect does and where."
+"maxLength": 300
 },
 "reversible": {
-"type": "boolean",
-"description": "False when the effect cannot be undone. A plan that declares such an effect goes to the user before the first wave."
+"type": "boolean"
 }
 }
 }

@@ -89,6 +89,8 @@ Use **compact** output when all are true: one specialist owner, one or two exist
 
 Otherwise use **full** output.
 
+Before you return a plan or a question, read `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json` and `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json` with Read for what each field means. The schema a workflow script gives you carries each field's type and limits, not its meaning.
+
 Output style (compact vs full) is independent of the machine-readable `plan:` block: ANY plan that routes to an implementation loop MUST also emit the `plan:` block with populated `steps[]` (see Machine-Readable Plan Block), even when compact — the overlord needs `plan.steps` to drive the implement loop.
 
 ### Compact

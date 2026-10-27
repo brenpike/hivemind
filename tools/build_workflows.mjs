@@ -32,9 +32,12 @@
  *   line: one key or element per line, no indent. data is the parsed file
  *   cut to the fields a script reads (readDataConstant): AUTONOMY_TABLE
  *   keeps only what projectAutonomyTable returns, and BRIEF_SCHEMA and
- *   PLAN_SCHEMA stay whole, since validateSchema reads every keyword of a
- *   schema. JSON.stringify escapes
- *   newlines inside strings, so every leading space it writes is
+ *   PLAN_SCHEMA keep only what projectSchema returns: $schema and every
+ *   validation keyword, since validateSchema reads them, and no title and
+ *   no description, except that a description starting with
+ *   REPOSITORY_PATH_MARK becomes exactly that mark, since
+ *   findRepositoryPathProblem walks the schema for it. JSON.stringify
+ *   escapes newlines inside strings, so every leading space it writes is
  *   indentation.
  *
  * Invariants
@@ -76,6 +79,10 @@
  *   copies data and libraries in, and --check keeps the copies in step.
  *   A data field no script reads only adds length toward the approval
  *   limit, so the copy leaves it out (issue 459).
+ *   The title and description of each schema field are prose for the
+ *   planner, and their home is plugin/references, which the planner reads
+ *   (docs/engineering-principles.md P24), so the copy carries only the
+ *   repository path mark the plan check reads.
  *   The overlord launches the committed scripts by path, so a symlink there
  *   could run content that --check never compared, and a write through one
  *   would change a file outside plugin/workflows/. Only regular files are
@@ -95,9 +102,11 @@ const NON_MODULE_FILES = Object.freeze(['meta.js', 'main.js', 'contract.js']);
 export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'waves.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js']);
 const DATA_CONSTANTS = [
   { name: 'AUTONOMY_TABLE', path: 'plugin/references/decision-autonomy-table.json', project: projectAutonomyTable },
-  { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json', project: (data) => data },
-  { name: 'PLAN_SCHEMA', path: 'plugin/references/plan-schema.json', project: (data) => data }
+  { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json', project: projectSchema },
+  { name: 'PLAN_SCHEMA', path: 'plugin/references/plan-schema.json', project: projectSchema }
 ];
+export const REPOSITORY_PATH_MARK = 'Can carry external content. Repository path.';
+const SCHEMA_ANNOTATION_KEYS = Object.freeze(['title', 'description']);
 
 /**
  * Returns the fields of the decision autonomy table that a script reads:
@@ -112,6 +121,29 @@ export function projectAutonomyTable(table) {
     hard_stops: table.hard_stops.map((stop) => ({ hard_stop: stop.hard_stop })),
     rows: table.rows.map((row) => ({ kind: row.kind, high: row.high, balanced: row.balanced, low: row.low }))
   };
+}
+
+/**
+ * Returns a copy of the JSON schema node schema with no title and no
+ * description, walking properties and items as findRepositoryPathProblem
+ * does. A description starting with REPOSITORY_PATH_MARK is kept as exactly
+ * that mark. Every other key, $schema and each validation keyword, is kept
+ * unchanged, and the keys of properties are field names, never annotations.
+ */
+export function projectSchema(schema) {
+  const projected = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === 'description' && typeof value === 'string' && value.startsWith(REPOSITORY_PATH_MARK)) {
+      projected.description = REPOSITORY_PATH_MARK;
+    } else if (key === 'properties') {
+      projected.properties = Object.fromEntries(Object.entries(value).map(([name, field]) => [name, projectSchema(field)]));
+    } else if (key === 'items') {
+      projected.items = projectSchema(value);
+    } else if (!SCHEMA_ANNOTATION_KEYS.includes(key)) {
+      projected[key] = value;
+    }
+  }
+  return projected;
 }
 
 /**
