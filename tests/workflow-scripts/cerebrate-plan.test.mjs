@@ -6,8 +6,11 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const cerebrateText = readFileSync(repoRoot + 'plugin/agents/cerebrate.md', 'utf8').replace(/\r/g, '');
 const planSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/plan-schema.json', 'utf8'));
+const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
 
 const PLAN_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json';
+const BRIEF_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json';
+const SCHEMA_READ_SENTENCE = 'Before you return a plan or a question, read `' + PLAN_SCHEMA_PATH + '` and `' + BRIEF_SCHEMA_PATH + '` with Read for what each field means.';
 
 function readSection(text, heading) {
   const lines = text.split('\n');
@@ -42,6 +45,23 @@ function readKeyPaths(yamlText) {
   return keyPaths;
 }
 
+function collectAnnotations(schema, texts) {
+  for (const key of ['title', 'description']) {
+    if (typeof schema[key] === 'string') {
+      texts.push(schema[key]);
+    }
+  }
+  Object.values(schema.properties === undefined ? {} : schema.properties).forEach((field) => collectAnnotations(field, texts));
+  if (schema.items !== undefined) {
+    collectAnnotations(schema.items, texts);
+  }
+  return texts;
+}
+
+function splitSentences(text) {
+  return text.split(/(?<=\.)\s+/).map((sentence) => sentence.trim()).filter((sentence) => sentence.split(' ').length >= 6);
+}
+
 const planSection = readSection(cerebrateText, '### Machine-Readable Plan Block');
 const planYaml = readYamlBlock(planSection);
 const planKeyPaths = readKeyPaths(planYaml);
@@ -71,5 +91,17 @@ describe('cerebrate plan block against plan-schema.json', () => {
   }
   test('plan block section names the plan-schema path', () => {
     assert.ok(planSection.includes(PLAN_SCHEMA_PATH), `section does not name ${PLAN_SCHEMA_PATH}`);
+  });
+});
+
+describe('cerebrate reads the plan and brief schemas for field meanings', () => {
+  test('the Output section tells the planner to read both schema files before it returns a plan or a question', () => {
+    assert.ok(readSection(cerebrateText, '## Output').includes(SCHEMA_READ_SENTENCE), SCHEMA_READ_SENTENCE);
+  });
+  test('cerebrate.md restates no title or description sentence of either schema', () => {
+    const sentences = [...collectAnnotations(planSchema, []), ...collectAnnotations(briefSchema, [])].flatMap(splitSentences);
+    assert.ok(sentences.length > 0);
+    const copied = sentences.filter((sentence) => cerebrateText.includes(sentence));
+    assert.deepEqual(copied, []);
   });
 });

@@ -73,6 +73,8 @@ Absent vs. failing: a `No such tool available` return is absence — skip cleanl
 
 The delegation names `facts_file`, a path relative to the checkout, and `facts_lines`, its line count. Read that file with Read, one page at a time, until you have read every line. Follow its `content_rule`. A list whose `complete` is `false` is only part of the list, so never treat it as all of it. Field meanings are in `${CLAUDE_PLUGIN_ROOT}/references/facts-schema.json`.
 
+Plan only what is left: the facts list the commits and changed paths the branch already has. A run that starts on a branch other than the trunk delivers on that branch, so the plan names it as its branch.
+
 If the delegation names no facts file, you have no branch state. Raise any branch fact the plan needs as an open question.
 
 Git research beyond the facts file is not available to you. That includes blame, the log of one path, and a file at an older revision. When the plan needs one, make it a plan step or an open question.
@@ -86,6 +88,8 @@ When changes may affect versioned artifacts: identify artifacts from `CLAUDE.md`
 Use **compact** output when all are true: one specialist owner, one or two existing files by full path, trivial change, no architecture/versioning/review-remediation/delivery-shape decisions needed.
 
 Otherwise use **full** output.
+
+Before you return a plan or a question, read `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json` and `${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json` with Read for what each field means. The schema a workflow script gives you carries each field's type and limits, not its meaning.
 
 Output style (compact vs full) is independent of the machine-readable `plan:` block: ANY plan that routes to an implementation loop MUST also emit the `plan:` block with populated `steps[]` (see Machine-Readable Plan Block), even when compact — the overlord needs `plan.steps` to drive the implement loop.
 
@@ -209,6 +213,16 @@ The overlord's implement loop fans out independent steps as parallel waves, so `
 
 - `depends_on` must reflect TRUE ordering constraints only. A spurious/defensive dependency needlessly serializes steps that could otherwise run concurrently, slowing delivery. Declare a dependency only when the step genuinely cannot begin until the other completes.
 - `files` must be complete and exact — the full set of paths the step will touch, as concrete paths. The overlord computes wave membership by pairwise file-disjointness across ready steps; an under-declared `files` list risks two steps that actually share a file being dispatched concurrently. A vague or glob scope (wildcards `* ? [`, trailing-slash directory scopes, or a path that is a directory-prefix of another step's file) is treated conservatively as conflicting-with-everything and forces that step to run alone (serialized) — so precise, complete file lists maximize safe parallelism.
+
+### Questions and Replies
+
+Raise each decision the repository and the request do not settle as a question with your recommendation, and write the plan or report assuming each raised question's recommendation.
+
+When a delegation gives the user's reply to the questions shown and asks you to revise:
+
+- A reply that declines a question of the workflow itself (accepting the plan, going on from a trunk that may not be up to date, a step with an outside effect that cannot be undone) changes or drops the step it names, or you return blocked with the reason.
+- Return the full revised plan or report, not only what changed.
+- Raise again every decision the reply does not settle, the ones decided for the user included, each with your recommendation.
 
 ### Plan Result Mapping
 

@@ -102,6 +102,10 @@
  *   toAgentSchema exists because the Messages API rejects a tool
  *   input_schema with anyOf at its top level. So every agent gets the flat
  *   copy and the script checks the full schema with validateSchema.
+ *   The harness record of ADR-0037 (Amendment 2026-10-26) keeps every
+ *   check of agent() output: the root anyOf probe failed with that API
+ *   error, a failed agent() call returned null to the script, no probe
+ *   used an agentType, and no probe showed a type string breach rejected.
  */
 
 function supportedSchemaKeywords() {

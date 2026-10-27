@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.1.4] - 2026-10-27
+
+### Changed
+
+- The built `standard-delivery.js` shrinks from 188,937 to 148,222 characters, and `analysis-only.js` from 94,244 to 69,999, well within the 190,000 character budget, which is unchanged. The delivery engine's `main.js` is split into modules, no workflow source module is over 600 lines, and the prompts carry only the task and the run's data. Every engine check of agent output stays (#459).
+- The bundled `BRIEF_SCHEMA` and `PLAN_SCHEMA` carry no field titles or descriptions, only the repository path mark the plan check reads. The planner reads `plugin/references/plan-schema.json` and `plugin/references/decision-brief-schema.json` for what each field means (#459).
+- The build compacts the code of each library, module and `main.js`: indentation, blank lines and spaces inside lines go, and every newline between code stays. The build fails unless the compacted code parses to the same syntax tree as its stripped source (#459).
+- Two build guards keep agent prose out of the built scripts: a per-workflow prose budget on string and template literals, and a duplication check that fails the build when a literal sentence copies a sentence of any agent definition in `plugin/agents/` or skill in `plugin/skills/` (#459).
+- Docs: a new amendment to ADR-0037, with dated notes on decision 18 and on the harness schema check amendment (#459).
+
+### Fixed
+
+- Comment stripping in the workflow build could misread a regex after a closing parenthesis or brace as division and change the built code with no error. The build now reads every source with a vendored acorn parser (`tools/vendor/acorn/`), and checks that stripping and compaction keep the code the same by comparing syntax trees (#459).
+- The workflow build read through any input that was not a regular file at its own repository path, such as a committed symlink at the file or at a parent directory. It now refuses such an input. An input directory listing that holds a symlink or another non-regular entry now fails the build instead of dropping the entry (#459).
+
 ## [7.1.3] - 2026-10-25
 
 ### Changed
