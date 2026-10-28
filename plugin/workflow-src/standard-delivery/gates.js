@@ -10,9 +10,10 @@
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   facts  the checked facts of the pass: trunk_commit is the bump base.
  *   gates  the gate loop state runGates builds: held, notes, runs,
- *          failures, fixRounds, reruns, rejected and answer. failures maps
- *          a head to the failures validation reported on it.
- *   BUMP_EDIT_SCHEMA, FIX_SCHEMA, VALIDATE_SCHEMA,
+ *          failures, fixRounds, reruns, rejected, answer and bumpMark.
+ *          failures maps a head to the failures validation reported on it,
+ *          and bumpMark is the run.commits length when the bump last held.
+ *   BUMP_SCHEMA, BUMP_MODEL, FIX_SCHEMA, VALIDATE_SCHEMA,
  *   VALIDATE_COMMANDS_SCHEMA and the limits of main.js.
  *
  * Outputs
@@ -23,12 +24,13 @@
  *   the user answered a review question, or a run end, {result} or
  *   {replan}, which isRunEnd tells apart.
  *   The steps, as meta.js names them:
- *   Bump    a gate, after the last wave. A haiku runner invokes
- *           hivemind:bump-type with the pass's facts trunk_commit as base and
- *           the plan's two versioning answers, and relays its stdout, which
- *           parses with bumpTypeRoutingSpec(). Its verdict resolves through
- *           decide(). When the plan names version files, a drone sets each
- *           to its version at trunk_commit raised by the bump type
+ *   Bump    a gate, after the last wave. With no version files a haiku
+ *           runner, else one drone on BUMP_MODEL, invokes hivemind:bump-type
+ *           with the pass's facts trunk_commit as base and the plan's two
+ *           versioning answers, and relays its stdout, which parses with
+ *           bumpTypeRoutingSpec(); its verdict resolves through decide().
+ *           Only on bump_required or no_bump the drone also sets each version
+ *           file to its version at trunk_commit raised by the bump type
  *           (ADR-0037 decision 26), and the commit runner commits exactly
  *           those files, so a bump step run again with trunk unmoved
  *           commits nothing.
@@ -62,6 +64,12 @@
  *   again. Each such going back resolves once through decide() kind
  *   gate_rerun, and after maxGateReruns() of them the run asks. The pull
  *   request step runs only when every configured gate holds on the head.
+ *   keepBumpHeld keeps the bump held over a head move, with no agent call,
+ *   when every commit since is a runner commit of the pass with the plan
+ *   commit type and breaking flag and no version file, which cannot change
+ *   the verdict; a recorded range reruns it. The bump drone edits before
+ *   decide() reads its verdict: the edit stays local and unpushed, and an
+ *   ask leaves it to the dirty check of the next facts step.
  *   Tail asks: a question after the last wave pauses like any other open
  *   question, through pauseDelivery with its question, the commits and
  *   each gate that did not run, and a local review question also with its
@@ -132,22 +140,33 @@ function gateLabel(stepName, run, count) {
   return stepName + '-' + run.pass + '-' + count;
 }
 
-function buildGateEditSchema(hasFiles) {
-  const spec = {
+function buildGateEditSchema() {
+  return buildTaggedSchema({
     tag: 'outcome',
     properties: {
       outcome: { type: 'string', enum: ['complete', 'blocked'], description: 'complete when the task is done. blocked when it cannot be done.' },
       blocker: { type: 'string', maxLength: 400, description: 'Why the task cannot be done, in one or two short sentences written for the user.' },
+      next_action: buildNextActionProperty(),
+      files: { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } }
+    },
+    required: ['outcome', 'files'],
+    variants: { complete: { required: [], optional: [] }, blocked: { required: [], optional: ['blocker', 'next_action'] } }
+  });
+}
+
+function buildBumpSchema() {
+  return buildTaggedSchema({
+    tag: 'outcome',
+    properties: {
+      outcome: { type: 'string', enum: ['ran', 'blocked'], description: 'ran when the skill exited 0. blocked when it exited 1 or a version file cannot be set.' },
+      stdout: { type: 'string', description: 'The skill stdout, word for word, every line.' },
+      stderr: { type: 'string', description: 'The skill stderr, word for word, every line.' },
+      blocker: { type: 'string', maxLength: 400, description: 'Why a version file cannot be set, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty()
     },
     required: ['outcome'],
-    variants: { complete: { required: [], optional: [] }, blocked: { required: [], optional: ['blocker', 'next_action'] } }
-  };
-  if (hasFiles) {
-    spec.required = ['outcome', 'files'];
-    spec.properties.files = { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } };
-  }
-  return buildTaggedSchema(spec);
+    variants: { ran: { required: ['stdout'], optional: [] }, blocked: { required: [], optional: ['stderr', 'blocker', 'next_action'] } }
+  });
 }
 
 function buildValidateSchema(hasCommands) {
@@ -291,24 +310,33 @@ function resolveTailDecision(kind, brief, run) {
   return replanFromTailAsk(resolution.asks, run);
 }
 
+function bumpTypeTaskLine() {
+  return 'Invoke the hivemind:bump-type skill once, with each value of the inputs block below as the input of the same name.';
+}
+
+function buildBumpTypeInputs(trunkCommit, versioning) {
+  return { base: trunkCommit, bump_trigger: versioning.bump_trigger, no_bump_match: versioning.no_bump_match };
+}
+
 function buildBumpTypePrompt(trunkCommit, versioning) {
   return [
-    'Invoke the hivemind:bump-type skill once, with each value of the inputs block below as the input of the same name.',
+    bumpTypeTaskLine(),
     runnerReadOnlySentence(),
     dataBlocksSentence(),
     runnerToolSentence(),
     '',
-    formatDataBlock('inputs', { base: trunkCommit, bump_trigger: versioning.bump_trigger, no_bump_match: versioning.no_bump_match })
+    formatDataBlock('inputs', buildBumpTypeInputs(trunkCommit, versioning))
   ].join('\n');
 }
 
-function checkBumpTypeRelay(relay) {
+function checkBumpTypeRelay(relay, schema) {
   const stopped = 'so ' + RUN_NAME + ' stopped before validation.';
-  if (!validateSchema(RELAY_SCHEMA, relay).ok) {
+  if (!validateSchema(schema, relay).ok) {
     return { problem: 'The bump step returned a result it could not use, ' + stopped };
   }
   if (relay.outcome === 'blocked') {
-    return { problem: 'The bump step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
+    const said = Object.hasOwn(relay, 'blocker') ? describeReason(relay.blocker) : describeRelayBlocker(relay.stderr, true);
+    return { problem: 'The bump step was blocked, ' + stopped + ' ' + said.charAt(0).toUpperCase() + said.slice(1), nextAction: relay.next_action };
   }
   const values = readRelayedLines(relay, bumpTypeRoutingSpec());
   if (values === undefined || !isConsistentBumpRelay(values)) {
@@ -325,14 +353,16 @@ function resolveBumpVerdict(values, plan, run) {
   return resolveTailDecision(VERSION_BUMP_TYPE_KIND, buildBumpTypeBrief(values), run);
 }
 
-function buildBumpPrompt(trunkCommit, bumpType, plan, trunk) {
+function buildBumpPrompt(trunkCommit, plan, trunk) {
   return [
-    'Set the version in each file of artifact_files below, as one step of the approved delivery plan: read the file as it is at trunk_commit with plain git show <trunk_commit>:<path> run from the repo folder, take the version it holds, raise it by bump_type (major, minor or patch; none keeps it as it is), and write that version in the file, never raising the version the file holds now.',
+    bumpTypeTaskLine(),
+    'Only on a bump_required or no_bump verdict, set each file of artifact_files below, as one step of the approved delivery plan: read it at trunk_commit with plain git show <trunk_commit>:<path> run from the repo folder, raise the version it holds by the bump_type line (none keeps it), and write that version in the file, never raising the version the file holds now. On any other verdict, edit nothing.',
     boundarySentence(),
     dataBlocksSentence(),
     'Each path in artifact_files passed the plan check as a safe git path, so it goes into that git show command as it is.',
     '',
-    formatDataBlock('inputs', { trunk_commit: trunkCommit, bump_type: bumpType, artifact_files: plan.versioning.artifact_files }),
+    formatDataBlock('inputs', buildBumpTypeInputs(trunkCommit, plan.versioning)),
+    formatDataBlock('version_files', { trunk_commit: trunkCommit, artifact_files: plan.versioning.artifact_files }),
     formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: trunk })
   ].join('\n');
 }
@@ -341,56 +371,71 @@ function readGateEditOutcome(result, schema) {
   if (!validateSchema(schema, result).ok) {
     return { status: 'blocked', reason: 'it returned no usable result.', files: [] };
   }
-  const files = result.files === undefined ? [] : result.files;
   if (result.outcome === 'blocked') {
-    return { status: 'blocked', reason: describeReason(result.blocker), files: files, nextAction: result.next_action };
+    return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: result.next_action };
   }
-  return { status: 'complete', files: files };
+  return { status: 'complete', files: result.files };
+}
+
+function describeCommitEnd(commitValues) {
+  const isCommitted = commitValues.committed === 'true';
+  return isCommitted ? 'Its files were committed as ' + commitValues.commit + ', so that commit can hold partial edits.' : 'It left nothing to commit, so the branch head stays ' + commitValues.commit + '.';
 }
 
 function describeBlockedGateStep(stepTitle, reason, commitValues) {
-  const lines = [stepTitle + ' was blocked, so ' + RUN_NAME + ' stopped after its commit: ' + reason];
-  if (commitValues.committed === 'true') {
-    lines.push('Its files were committed as ' + commitValues.commit + ', so that commit can hold partial edits.');
-  } else {
-    lines.push('It left nothing to commit, so the branch head stays ' + commitValues.commit + '.');
-  }
-  return lines.join('\n');
+  return stepTitle + ' was blocked, so ' + RUN_NAME + ' stopped after its commit: ' + reason + '\n' + describeCommitEnd(commitValues);
 }
 
-async function runBumpEdit(run, plan, facts, bumpType, count) {
-  phase('Bump');
-  const prompt = addResumeNote(buildBumpPrompt(facts.trunk_commit, bumpType, plan, run.trunk), run);
-  const result = await agent(prompt, droneOptions(gateLabel('bump', run, count), 'Bump', BUMP_EDIT_SCHEMA));
+function runBumpStep(run, plan, facts, count) {
+  if (plan.versioning.artifact_files.length === 0) {
+    return agent(addResumeNote(buildBumpTypePrompt(facts.trunk_commit, plan.versioning), run), runnerOptions(gateLabel('bump-type', run, count), 'Bump'));
+  }
+  return agent(addResumeNote(buildBumpPrompt(facts.trunk_commit, plan, run.trunk), run), Object.assign(droneOptions(gateLabel('bump', run, count), 'Bump', BUMP_SCHEMA), { model: BUMP_MODEL }));
+}
+
+function describeBumpNote(values) {
+  return values.verdict === 'bump_required' ? values.bump_type + ' bump' : 'no bump';
+}
+
+async function commitBumpEdit(run, plan, count, checked) {
   const committed = await runCommitStep(run, plan, plan.versioning.artifact_files, gateLabel('bump-commit', run, count), 'bump');
   if (committed.problem !== undefined) {
     return { result: finishDeliveryBlocked(committed.problem, run) };
   }
-  const edit = readGateEditOutcome(result, BUMP_EDIT_SCHEMA);
-  if (edit.status === 'blocked') {
-    return { result: finishDeliveryBlocked(describeBlockedGateStep('The version bump step', edit.reason, committed.values), run, edit.nextAction) };
+  if (checked.problem !== undefined) {
+    return { result: finishDeliveryBlocked(checked.problem + '\n' + describeCommitEnd(committed.values), run, checked.nextAction) };
   }
-  return { held: true };
+  return { held: true, note: describeBumpNote(checked.values) };
 }
 
 async function runBumpGate(run, plan, facts, gates) {
   const count = gates.runs.bump;
+  const hasFiles = plan.versioning.artifact_files.length > 0;
   phase('Bump');
-  const relay = await agent(addResumeNote(buildBumpTypePrompt(facts.trunk_commit, plan.versioning), run), runnerOptions(gateLabel('bump-type', run, count), 'Bump'));
-  const checked = checkBumpTypeRelay(relay);
+  const result = await runBumpStep(run, plan, facts, count);
+  const checked = checkBumpTypeRelay(result, hasFiles ? BUMP_SCHEMA : RELAY_SCHEMA);
   if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked(checked.problem, run) };
+    return hasFiles ? commitBumpEdit(run, plan, count, checked) : { result: finishDeliveryBlocked(checked.problem, run) };
   }
   const verdict = resolveBumpVerdict(checked.values, plan, run);
   if (isRunEnd(verdict)) {
     return verdict;
   }
-  const note = checked.values.verdict === 'bump_required' ? checked.values.bump_type + ' bump' : 'no bump';
-  if (plan.versioning.artifact_files.length === 0) {
-    return { held: true, note: note };
+  return hasFiles ? commitBumpEdit(run, plan, count, checked) : { held: true, note: describeBumpNote(checked.values) };
+}
+
+function isKeptRunnerCommit(entry, run, plan) {
+  const record = Object.hasOwn(run.runnerCommits, entry) ? run.runnerCommits[entry] : undefined;
+  return record !== undefined && record.commitType === commitTypeMap()[plan.classification] && record.breaking === plan.breaking
+    && !record.files.some((file) => plan.versioning.artifact_files.includes(file));
+}
+
+function keepBumpHeld(run, plan, gates) {
+  const since = run.commits.slice(gates.bumpMark);
+  if (gates.held.bump !== undefined && since.length > 0 && since.every((entry) => isKeptRunnerCommit(entry, run, plan))) {
+    gates.held.bump = run.head;
+    gates.bumpMark = run.commits.length;
   }
-  const edited = await runBumpEdit(run, plan, facts, checked.values.bump_type, count);
-  return edited.held ? { held: true, note: note } : edited;
 }
 
 function buildValidatePrompt(commands) {
@@ -513,7 +558,7 @@ function runGateStep(gateId, run, plan, facts, gates) {
 
 async function runGates(run, plan, facts) {
   const gateList = configuredGateIds(run);
-  const gates = { held: {}, notes: {}, runs: { bump: 0, validate: 0, review: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
+  const gates = { held: {}, notes: {}, runs: { bump: 0, validate: 0, review: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined, bumpMark: 0 };
   if (!run.localReview) {
     listNotRunGate(run, notConfiguredReviewLine());
   }
@@ -535,6 +580,7 @@ async function runGates(run, plan, facts) {
     if (ended.held) {
       gates.held[gateId] = run.head;
       gates.notes[gateId] = ended.note;
+      gates.bumpMark = gateId === 'bump' ? run.commits.length : gates.bumpMark;
     }
     if (ended.answer !== undefined) {
       gates.answer = ended.answer;
@@ -543,6 +589,7 @@ async function runGates(run, plan, facts) {
       continue;
     }
     checkedHead = run.head;
+    keepBumpHeld(run, plan, gates);
     const rerun = resolveGateRerun(run, gates);
     if (isRunEnd(rerun)) {
       return rerun;

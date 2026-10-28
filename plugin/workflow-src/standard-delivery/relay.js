@@ -6,7 +6,9 @@
  * Inputs
  *   run    the run state of main.js createRunState. The steps read trunk,
  *          references, pass, replies and head, and runCommitStep updates
- *          commits, head and branch.
+ *          commits, runnerCommits, head and branch. runnerCommits maps each
+ *          commit the runner made to its files, commit type and breaking
+ *          flag.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   relay  each runner result: {outcome, stdout, stderr} under
  *          RELAY_SCHEMA, its stdout read with lib/routing.js.
@@ -471,6 +473,7 @@ async function runCommitStep(run, plan, files, label, stepName) {
   }
   if (checked.values.committed === 'true') {
     run.commits.push(checked.values.commit);
+    run.runnerCommits[checked.values.commit] = { files: files, commitType: commitTypeMap()[plan.classification], breaking: plan.breaking };
   } else if (run.head !== undefined && checked.values.commit !== run.head) {
     run.commits.push(run.head + '..' + checked.values.commit);
   }

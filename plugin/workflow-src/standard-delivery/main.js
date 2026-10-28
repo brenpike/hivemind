@@ -161,7 +161,7 @@
  *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
  *   from one table, which gives both its anyOf branches and its 'Only with'
  *   descriptions: the plan result and revise schemas, the relay, worker,
- *   bump edit, fix, both validate and review schemas. validateSchema checks the
+ *   bump, fix, both validate and review schemas. validateSchema checks the
  *   full schema, so a result that carries a field of another outcome, or
  *   lacks a field its outcome requires, blocks the step that reads it with
  *   that step's malformed or schema message, and no consumer checks the tie
@@ -189,6 +189,7 @@ const RUN_NAME = describeRunNoun(RUN_NOUN);
 const PLANNER_AGENT = 'hivemind:cerebrate';
 const RUNNER_MODEL = 'haiku';
 const SCOPE_MODEL = 'sonnet';
+const BUMP_MODEL = 'sonnet';
 const PLANNER_QUESTION_KIND = 'planner_question';
 const PLAN_ACCEPTANCE_KIND = 'plan_acceptance';
 const TRUNK_STALE_KIND = 'trunk_stale';
@@ -205,8 +206,8 @@ const REVIEWER_AGENT = 'hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA = buildPlanResultSchema(PLAN_SCHEMA, BRIEF_SCHEMA);
 const RELAY_SCHEMA = buildRelaySchema();
 const WORKER_SCHEMA = buildWorkerSchema();
-const BUMP_EDIT_SCHEMA = buildGateEditSchema(false);
-const FIX_SCHEMA = buildGateEditSchema(true);
+const BUMP_SCHEMA = buildBumpSchema();
+const FIX_SCHEMA = buildGateEditSchema();
 const VALIDATE_SCHEMA = buildValidateSchema(false);
 const VALIDATE_COMMANDS_SCHEMA = buildValidateSchema(true);
 const REVIEW_SCHEMA = buildReviewSchema();
@@ -303,6 +304,7 @@ function createRunState(launch) {
     taken: [],
     reversibleEffects: [],
     commits: [],
+    runnerCommits: {},
     head: undefined,
     branch: undefined,
     notRunGates: [],
