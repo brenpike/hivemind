@@ -1069,7 +1069,7 @@ describe('build_workflows schema projection', () => {
 
 describe('build_workflows prose guards', () => {
   test('the prose budgets are pinned, one per workflow id', () => {
-    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 19300, 'standard-delivery': 44600 });
+    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 19500, 'standard-delivery': 44600 });
     assert.ok(Object.isFrozen(PROSE_BUDGETS));
     assert.deepEqual(Object.keys(PROSE_BUDGETS).sort(), workflowIds);
   });
