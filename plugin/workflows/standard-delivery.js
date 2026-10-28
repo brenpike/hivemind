@@ -2172,7 +2172,7 @@ buildFactsBlock(facts)
 ].join('\n');
 }
 function scanOptions(){
-return{agentType:runnerAgentType(),schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
+return{agentType:runnerAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
 }
 async function runScanStep(facts,runNoun){
 if(Number(facts.external_texts)>0){
@@ -3817,7 +3817,7 @@ function reviewerOptions(label){
 return{agentType:REVIEWER_AGENT,schema:toAgentSchema(REVIEW_SCHEMA),label:label,phase:'Review'};
 }
 function buildReviewPrompt(plan,trunk,answer){
-const inputs={base:plan.base,working_branch:plan.branch,trunk:trunk,max_iterations:maxReviewIterations()};
+const inputs={base:plan.base,working_branch:plan.branch,trunk:trunk,max_iterations:maxReviewIterations(),caller_validates:true};
 if(answer!==undefined){
 inputs.user_answer=answer;
 }

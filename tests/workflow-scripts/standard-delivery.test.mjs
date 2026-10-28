@@ -1115,6 +1115,7 @@ const ROW_TESTS = {
       const call = callOf(run, 'scan');
       assert.equal(call.prompt, lib.buildScanPrompt(parsedFacts({ external_texts: '2' })));
       assert.deepEqual(call.opts, structuredClone(lib.scanOptions()));
+      assert.equal(call.opts.model, 'sonnet');
       assert.deepEqual(run.phases.slice(0, 4), ['Facts', 'Scan', 'Scope', 'Plan']);
     });
     test('no external text means no scan', async () => {
@@ -2890,7 +2891,7 @@ const ROW_TESTS = {
     });
   },
   'SD-32': () => {
-    test('once validation holds the local reviewer gets base, working_branch, trunk and max_iterations 10 under the boundary sentence', async () => {
+    test('once validation holds the local reviewer gets base, working_branch, trunk, max_iterations 10 and caller_validates true under the boundary sentence', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const labels = labelsOf(run);
       assert.equal(labels[labels.indexOf('validate-1-1') + 1], 'review-1-1');
@@ -2899,7 +2900,7 @@ const ROW_TESTS = {
       assert.ok(!Object.prototype.hasOwnProperty.call(call.opts, 'model'));
       assert.equal(call.opts.phase, 'Review');
       assert.equal(call.opts.label, 'review-1-1');
-      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10 });
+      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10, caller_validates: true });
       assert.ok(call.prompt.includes(lib.boundarySentence()));
       assert.ok(!call.prompt.includes('REQUEST_MARKER_ZQ'));
       assert.ok(!/never commit|no commit|do not commit/i.test(call.prompt), 'the prompt never forbids the loop checkpoint commit');
@@ -2910,18 +2911,20 @@ const ROW_TESTS = {
     test('a review run after a reply to its question also gets user_answer in its inputs block', () => {
       const answer = { question: 'QUESTION_ZQ', reply: 'REPLY_ZQ' };
       const prompt = main.buildReviewPrompt(makePlan(), 'main', answer);
-      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10, user_answer: answer });
+      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10, caller_validates: true, user_answer: answer });
       assert.ok(prompt.includes(lib.dataBlocksSentence('The reply in user_answer')), prompt);
       assert.ok(reviewerText.includes('`user_answer` is the user\'s answer to the question this loop returned'));
       assert.ok(!withoutDataBlock(prompt, 'inputs').includes('REPLY_ZQ'));
       assert.ok(!main.buildReviewPrompt(makePlan(), 'main').includes('user_answer'));
     });
-    test('the inputs are local-reviewer Input Contract keys, and max_iterations matches it', () => {
+    test('the inputs are local-reviewer Input Contract keys, and max_iterations and caller_validates match it', () => {
       const contract = readReviewerContract('## Input Contract');
-      for (const key of ['base', 'working_branch', 'trunk', 'max_iterations', 'user_answer']) {
+      for (const key of ['base', 'working_branch', 'trunk', 'max_iterations', 'caller_validates', 'user_answer']) {
         assert.ok(contract.keys.includes(key), key);
       }
       assert.equal(contract.values.max_iterations, String(main.maxReviewIterations()));
+      assert.ok(contract.values.caller_validates.startsWith('true | false'), contract.values.caller_validates);
+      assert.ok(reviewerText.includes('With `caller_validates: true`, the check is the Worker Self-Check'));
     });
     test('branch, base and trunk names appear only in the inputs block', async () => {
       const results = happyResults({
@@ -2934,7 +2937,7 @@ const ROW_TESTS = {
       const run = await runWorkflow({ request: REQUEST, trunk: 'trunk-zq' }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const prompt = callOf(run, 'review-1-1').prompt;
-      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'base-zq', working_branch: 'feature/branch-zq', trunk: 'trunk-zq', max_iterations: 10 });
+      assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'base-zq', working_branch: 'feature/branch-zq', trunk: 'trunk-zq', max_iterations: 10, caller_validates: true });
       for (const name of ['trunk-zq', 'branch-zq', 'base-zq']) {
         assert.ok(!withoutDataBlock(prompt, 'inputs').includes(name), name);
       }

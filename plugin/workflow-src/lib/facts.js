@@ -110,8 +110,9 @@
  *   scanExcerptLimit()      200, the characters of a flagged excerpt shown.
  *   buildScanPrompt(facts)  the scan runner's prompt.
  *   scanOptions()           the scan agent() options: label scan, phase Scan,
- *                           and schema toAgentSchema (schema.js) of
- *                           scanStepSchema(), the flat copy with no anyOf.
+ *                           model sonnet, and schema toAgentSchema
+ *                           (schema.js) of scanStepSchema(), the flat copy
+ *                           with no anyOf.
  *   runScanStep(facts, runNoun)
  *       async. Runs the scan, phase Scan then one agent() call, only when
  *       external_texts is above 0, and resolves to describeScanProblem of
@@ -387,7 +388,7 @@ function buildScanPrompt(facts) {
 }
 
 function scanOptions() {
-  return { agentType: runnerAgentType(), schema: toAgentSchema(scanStepSchema()), label: 'scan', phase: 'Scan' };
+  return { agentType: runnerAgentType(), model: 'sonnet', schema: toAgentSchema(scanStepSchema()), label: 'scan', phase: 'Scan' };
 }
 
 async function runScanStep(facts, runNoun) {

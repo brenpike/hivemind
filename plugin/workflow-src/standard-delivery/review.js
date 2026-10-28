@@ -17,8 +17,12 @@
  *          the pause of a review question or a blocked finish.
  *   The step, as meta.js names it:
  *   Review  a gate when configured. hivemind:local-reviewer runs its loop on
- *           the branch with base, working_branch, trunk and max_iterations
- *           in its inputs block, and commits its own fixes. Then the commit
+ *           the branch with base, working_branch, trunk, max_iterations and
+ *           caller_validates true in its inputs block, and commits its own
+ *           fixes. caller_validates true holds because a review that ends
+ *           on a new commit sends the run back to the first gate, so
+ *           validation runs again on that commit, and the reviewer checks
+ *           only the files each fix touched. Then the commit
  *           runner runs with an empty file list, so any edit left behind
  *           stops it, and the gate holds on the commit it reports.
  *           localReviewRoutes() routes each exit_reason: clean holds,
@@ -207,7 +211,7 @@ function reviewerOptions(label) {
 }
 
 function buildReviewPrompt(plan, trunk, answer) {
-  const inputs = { base: plan.base, working_branch: plan.branch, trunk: trunk, max_iterations: maxReviewIterations() };
+  const inputs = { base: plan.base, working_branch: plan.branch, trunk: trunk, max_iterations: maxReviewIterations(), caller_validates: true };
   if (answer !== undefined) {
     inputs.user_answer = answer;
   }

@@ -893,8 +893,9 @@ describe('analysis-only: injection scan', () => {
     assert.deepEqual(labelsOf(run.calls), ['facts', 'scan', 'analyze']);
     assert.deepEqual(run.phases, ['Facts', 'Scan', 'Analyze']);
     const scanCall = run.calls[1];
-    assert.deepEqual(Object.keys(scanCall.opts).sort(), ['agentType', 'label', 'phase', 'schema']);
+    assert.deepEqual(Object.keys(scanCall.opts).sort(), ['agentType', 'label', 'model', 'phase', 'schema']);
     assert.equal(scanCall.opts.agentType, 'hivemind:drone');
+    assert.equal(scanCall.opts.model, 'sonnet');
     assert.equal(scanCall.opts.label, 'scan');
     assert.equal(scanCall.opts.phase, 'Scan');
     const itemSchema = scanCall.opts.schema.properties.results.items;
