@@ -64,7 +64,11 @@
  *   change as the planner wrote them for the user, each made one line,
  *   then one line of what the plan touches, its step count, its distinct
  *   file count, its branch and up to 5 of its file paths, each cut by
- *   cutExcerpt and encoded, then the count of the rest. Only an
+ *   cutExcerpt and encoded, then the count of the rest. When the scope sets
+ *   limits and the plan edits files outside them that no earlier accepted
+ *   plan covered, the acceptance has no recommendation, so it is asked at
+ *   every level, and the detail block adds one line of up to 5 of those
+ *   paths, encoded, then the count of the rest (plan.js). Only an
  *   irreversible effect, an exact ask, shows its text word for word.
  *   Bounded fields (issue 445): every planner, worker and validation
  *   string a message shows comes from a step-schema field with maxLength,
@@ -161,8 +165,10 @@
  *   a local review question, and every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
  *   invariant 3). Then the scope step (scope.js) runs once, after the facts
- *   step and the scan and before planning, and its checked scope reaches
- *   only the plan and revise prompts of its pass.
+ *   step and the scan and before planning, and again after each reply round
+ *   of the pass unless the reply settled the shown plan acceptance
+ *   (plan.js). Its checked scope reaches only the plan and revise prompts
+ *   and the plan acceptance check of its pass.
  *   Every step result schema whose fields depend on its outcome, or on
  *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
  *   from one table, which gives both its anyOf branches and its 'Only with'
@@ -309,6 +315,7 @@ function createRunState(launch) {
     answeredKeys: new Set(),
     taken: [],
     reversibleEffects: [],
+    acceptedPaths: [],
     commits: [],
     runnerCommits: {},
     head: undefined,

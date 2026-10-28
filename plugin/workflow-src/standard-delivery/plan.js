@@ -7,9 +7,17 @@
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
  *           request, trunk, level, pass, storedAnswers and pendingReply,
- *           and updates answerLog, answeredKeys, taken and reversibleEffects.
+ *           and updates answerLog, answeredKeys, taken, reversibleEffects
+ *           and acceptedPaths.
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
+ *           After a reply round whose revise result passes the plan check,
+ *           unless the reply settled the shown plan acceptance and the shown
+ *           result was restored, the pass scopes again with
+ *           runScopeStep(run, facts, round), label scope-P-R. That scope
+ *           replaces the pass scope for the acceptance check and every later
+ *           revise prompt of the pass, and its problem stops the run blocked
+ *           as a pass-start scope problem does.
  *   replan  undefined at launch, else the replan data of the step that
  *           sent the run back to planning: its reason, and the review when
  *           it carries one.
@@ -107,6 +115,16 @@
  *   own round, so a replan never asks or reverses a settled answer (issue
  *   472). With an empty log, the plan and first revise prompts are the
  *   prompts of a run with no answers, so a resume replays them from cache.
+ *   Outside-limit ask: when scope.limits is not empty, a plan step file
+ *   that neither equals a limit nor sits under limit + '/', and is not in
+ *   run.acceptedPaths, makes the plan or remediation plan acceptance brief
+ *   recommendation strength none, so decide() asks it no_recommendation at
+ *   every level. Its problem names their count when it fits, and the detail
+ *   block lists up to 5 of them, then the count of the rest. Empty limits
+ *   leave the brief as it was. The outside paths of an acceptance that
+ *   resolves answered join run.acceptedPaths in acceptResolution, after
+ *   resolution, so a restored settled acceptance renders as shown and its
+ *   key holds.
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
  *   P24): how to read the facts, what is left to plan, the review block and
@@ -327,18 +345,55 @@ function toOneLine(text) {
   return text.trim().split(/\s*[\r\n]+\s*/).join(' ');
 }
 
-function buildPlanDetailBlock(plan) {
-  const files = listStepFiles(plan.steps);
+function listShownPaths(files) {
   const shownPaths = files.slice(0, 5).map((file) => encodeUntrustedText(cutExcerpt(file)));
   const restCount = files.length - shownPaths.length;
-  const paths = joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and');
-  return {
-    text: [
-      'What the plan addresses: ' + toOneLine(plan.digest.problem),
-      'What it changes: ' + toOneLine(plan.digest.change),
-      'It has ' + describeCount(plan.steps.length, 'step') + ' and touches ' + describeCount(files.length, 'file') + ' on branch ' + encodeUntrustedText(cutExcerpt(plan.branch)) + ': ' + paths + '.'
-    ].join('\n')
-  };
+  return joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and');
+}
+
+function buildPlanDetailBlock(plan, outsidePaths) {
+  const files = listStepFiles(plan.steps);
+  const lines = [
+    'What the plan addresses: ' + toOneLine(plan.digest.problem),
+    'What it changes: ' + toOneLine(plan.digest.change),
+    'It has ' + describeCount(plan.steps.length, 'step') + ' and touches ' + describeCount(files.length, 'file') + ' on branch ' + encodeUntrustedText(cutExcerpt(plan.branch)) + ': ' + listShownPaths(files) + '.'
+  ];
+  if (outsidePaths.length > 0) {
+    lines.push('Outside the limits you set: ' + listShownPaths(outsidePaths) + '.');
+  }
+  return { text: lines.join('\n') };
+}
+
+/**
+ * Returns the plan step files outside every limit of the scope that no
+ * accepted plan acceptance of the run already covers, or [] when the scope
+ * sets no limit. A file is inside a limit when it equals the limit or sits
+ * under limit + '/'. A limit that fails isRepositoryPath matches no file.
+ */
+function listOutsidePaths(plan, scope, run) {
+  if (scope.limits.length === 0) {
+    return [];
+  }
+  const limits = scope.limits.filter((limit) => isRepositoryPath(limit));
+  const isInsideLimits = (file) => limits.some((limit) => file === limit || file.startsWith(limit + '/'));
+  return listStepFiles(plan.steps).filter((file) => !isInsideLimits(file) && !run.acceptedPaths.includes(file));
+}
+
+function markOutsideLimits(brief, outsidePaths) {
+  if (outsidePaths.length === 0) {
+    return brief;
+  }
+  const problem = brief.problem + ' It changes ' + describeCount(outsidePaths.length, 'file') + ' outside the limits you set.';
+  /*
+   * INVARIANT: the problem names the count only when it fits the brief
+   * problem maxLength, so the brief stays valid with every remediation flag
+   * set. The detail block of the pause names the outside paths and their
+   * count in every case.
+   */
+  return Object.assign(brief, {
+    problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem,
+    recommendation: { ...brief.recommendation, strength: 'none', why: 'Only you can say if the plan may change files outside the limits.' }
+  });
 }
 
 function remediationGateTexts() {
@@ -474,16 +529,17 @@ function resolveExternalEffects(plan, run, resolution) {
   }
 }
 
-function resolvePlanAcceptance(plan, run, resolution) {
+function resolvePlanAcceptance(plan, run, resolution, scope) {
   const isRemediation = run.taken.some((entry) => entry.kind === PLANNER_ESCALATION_ROUTING_KIND || entry.kind === ROOT_CLUSTER_ROUTING_KIND);
+  resolution.outsidePaths = listOutsidePaths(plan, scope, run);
   if (isRemediation) {
-    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, buildRemediationPlanBrief(plan), [run.pass, plan], run, resolution);
+    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildRemediationPlanBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution);
   }
-  return resolveDecision(PLAN_ACCEPTANCE_KIND, buildPlanAcceptanceBrief(plan), [run.pass, plan], run, resolution);
+  return resolveDecision(PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution);
 }
 
-function resolvePlanAsks(planResult, facts, run) {
-  const resolution = { asks: [], taken: [], freshness: undefined, reversibleEffects: [] };
+function resolvePlanAsks(planResult, facts, run, scope) {
+  const resolution = { asks: [], taken: [], freshness: undefined, reversibleEffects: [], outsidePaths: [] };
   const plan = planResult.plan;
   /*
    * INVARIANT: a planner question key holds the pass and the question as
@@ -495,7 +551,7 @@ function resolvePlanAsks(planResult, facts, run) {
    * round is open: the plan the user accepts is the plan that runs.
    */
   planResult.questions.forEach((brief) => resolveDecision(PLANNER_QUESTION_KIND, brief, run.pass, run, resolution));
-  const acceptance = resolvePlanAcceptance(plan, run, resolution);
+  const acceptance = resolvePlanAcceptance(plan, run, resolution, scope);
   const acceptanceAsk = resolution.asks[resolution.asks.length - 1];
   resolution.freshness = resolveTrunkFreshness(facts, run, resolution);
   resolveExternalEffects(plan, run, resolution);
@@ -518,6 +574,9 @@ function acceptResolution(resolution, run) {
       run.reversibleEffects.push(effect);
     }
   }
+  if (resolution.outsidePaths !== undefined) {
+    run.acceptedPaths.push(...resolution.outsidePaths);
+  }
 }
 
 function markSettledAsks(settledLabels, shownAsks, run, settledKinds) {
@@ -539,8 +598,9 @@ function takeNextReply(run, round) {
   return pendingReply;
 }
 
-async function runPlanningPass(run, facts, scope, replan) {
+async function runPlanningPass(run, facts, passScope, replan) {
   phase('Plan');
+  let scope = passScope;
   let resultSchema = PLAN_RESULT_SCHEMA;
   let shownAsks = [];
   let shownResult;
@@ -556,9 +616,15 @@ async function runPlanningPass(run, facts, scope, replan) {
       markSettledAsks(planResult.settled, shownAsks, run, settledKinds);
       if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
         planResult = shownResult;
+      } else {
+        const rescoped = await runScopeStep(run, facts, run.answerLog.length);
+        if (rescoped.problem !== undefined) {
+          return { result: finishDeliveryBlocked(rescoped.problem, run) };
+        }
+        scope = rescoped.scope;
       }
     }
-    const resolution = resolvePlanAsks(planResult, facts, run);
+    const resolution = resolvePlanAsks(planResult, facts, run, scope);
     if (resolution.asks.length === 0) {
       acceptResolution(resolution, run);
       return { plan: planResult.plan, freshness: resolution.freshness };
@@ -576,7 +642,7 @@ async function runPlanningPass(run, facts, scope, replan) {
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
     const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
-    const detail = isAcceptance ? buildPlanDetailBlock(planResult.plan) : undefined;
+    const detail = isAcceptance ? buildPlanDetailBlock(planResult.plan, resolution.outsidePaths) : undefined;
     const round = run.answerLog.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {
