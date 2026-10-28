@@ -4,7 +4,8 @@
  * Inputs
  *   args   the Workflow args global. One of:
  *            a string: the request itself (slash-command form);
- *            an object {request, trunk?, references?, answers?, reply?};
+ *            an object {request, trunk?, references?, answers?, build?,
+ *            reply?};
  *            undefined.
  *          request comes from the launch args only. A resumed run still
  *          has it because the overlord relaunches with the launch args, then
@@ -13,6 +14,10 @@
  *          answers is this script's own field: it comes only from the
  *          resume_args of an earlier pause, holds the reply to round N as
  *          answers['round-N'], and is read only when it is a plain object.
+ *          build is the BUILD_ID the pause wrote with answers. A resume
+ *          whose build is absent or not this script's BUILD_ID stops before
+ *          any agent call (lib/args.js): the plugin changed while it was
+ *          paused. A fresh launch ignores build.
  *          reply is the user's reply to that pause, per the result.js
  *          contract. It answers the first round with no stored answer, and
  *          only when answers is present, since that marks a pending pause.
@@ -28,7 +33,8 @@
  *          and deduplicated in order; more than 20, or any other shape,
  *          blocks. The facts skill's input gate is the charset check on
  *          both, so no second allowlist is kept here.
- *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
+ *   AUTONOMY_TABLE, BRIEF_SCHEMA, BUILD_ID  constants copied in by the
+ *   build.
  *   The launch args and pause rounds are read with lib/args.js. The facts
  *   patterns and messages, the prompt sentences and the scan step come from
  *   lib/facts.js. Both take the run noun 'analysis', so every message keeps
@@ -86,8 +92,15 @@
  *   fixed here. The brief's own kind is never used.
  *   The facts and scan prompts depend only on the launch args and the facts
  *   step result, and the analyze prompt never carries answers or the reply,
- *   so a resumed run gets all three results from cache. The revise-N prompt depends only on
- *   earlier results and on the reply to round N.
+ *   so a resumed run gets all three results from cache. The revise-N prompt
+ *   depends only on earlier results and on the replies to rounds 1 to N.
+ *   Each reply a pause consumes goes once into the answer log as {question,
+ *   reply}, the question being the full questions text of its round. The
+ *   revise-N prompt carries the entries of rounds 1 to N-1 in an answers
+ *   data block, with a data line naming them settled decisions, so a later
+ *   pass never asks or reverses an earlier answer (issue 472). The revise-1
+ *   prompt has no answers block, so it is the prompt of a run with no
+ *   answers.
  *   The revise-N prompt always shows the planner the full questions text,
  *   even when the pause message was in compact form.
  *   A run pauses at most pauseLimit() times. After that it completes and
@@ -117,12 +130,12 @@
  *   reason.' when it has none. So a control character, an escape sequence,
  *   a bidi mark or a line feed in it never reaches the user raw.
  *   Open questions never end it blocked: only a missing request, a bad
- *   trunk or references arg, a facts or scan stop, or a planner result it
- *   cannot use does.
- *   No run record: resume_args is {answers} alone, every reply so far. The
- *   request is never in it, because the launch args already hold it. It
- *   always has answers, so a relaunch with it is a resume, and never has
- *   request, reply or an autonomy key.
+ *   trunk or references arg, a build skew on resume, a facts or scan stop,
+ *   or a planner result it cannot use does.
+ *   No run record: resume_args is {answers, build} alone, every reply so
+ *   far and BUILD_ID. The request is never in it, because the launch args
+ *   already hold it. It always has answers, so a relaunch with it is a
+ *   resume, and never has request, reply or an autonomy key.
  *   A reply is ignored when no pause is pending: when the run was not
  *   launched with answers, or when it finishes before it reaches a round
  *   with no stored answer.
@@ -225,18 +238,21 @@ function buildAnalyzePrompt(request, facts) {
   ].join('\n');
 }
 
-function buildRevisePrompt({ request, facts, report, questions, reply }) {
-  return [
+function buildRevisePrompt({ request, facts, answers, report, questions, reply }) {
+  const hasAnswers = answers.length > 0;
+  const lines = [
     'Revise your analysis of the user request below with the user reply below.',
     boundarySentence(),
-    dataBlocksSentence('The reply block'),
+    hasAnswers ? dataBlocksSentence() + ' The answers and reply blocks hold the user\'s settled decisions: never ask them again, never reverse them.' : dataBlocksSentence('The reply block'),
     '',
     buildFactsBlock(facts),
-    formatDataBlock('request', request),
-    formatDataBlock('earlier_report', report),
-    formatDataBlock('questions', questions),
-    formatDataBlock('reply', reply)
-  ].join('\n');
+    formatDataBlock('request', request)
+  ];
+  if (hasAnswers) {
+    lines.push(formatDataBlock('answers', answers));
+  }
+  lines.push(formatDataBlock('earlier_report', report), formatDataBlock('questions', questions), formatDataBlock('reply', reply));
+  return lines.join('\n');
 }
 
 function plannerOptions(label, phaseTitle) {
@@ -324,8 +340,8 @@ function finishComplete(report, openQuestions, taken) {
   return finish({ outcome: 'complete', blocks: blocks });
 }
 
-function pauseOrStopAsking(report, resolution, questions, replies) {
-  const resumeArgs = buildResumeArgs(replies);
+function pauseOrStopAsking(report, resolution, questions, answerLog) {
+  const resumeArgs = buildResumeArgs(answerLog.map((entry) => entry.reply), BUILD_ID);
   if (!canCarry(resumeArgs)) {
     return finishComplete(report, renderOpenQuestions(resolution.asks, 'reply_size'), resolution.taken);
   }
@@ -338,7 +354,7 @@ async function runAnalysis(rawArgs) {
   if (!isNonEmptyString(argsObject.request)) {
     return finishBlocked('No request was given, so there is nothing to analyze.');
   }
-  const launchInputs = readLaunchInputs(argsObject, RUN_NOUN);
+  const launchInputs = readLaunchInputs(argsObject, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {
     return finishBlocked(launchInputs.problem);
   }
@@ -350,7 +366,7 @@ async function runAnalysis(rawArgs) {
   const level = resolveLevel(undefined, AUTONOMY_TABLE);
   const storedAnswers = readStoredAnswers(argsObject);
   let pendingReply = readPendingReply(argsObject);
-  const replies = [];
+  const answerLog = [];
   phase('Analyze');
   let analysis = await agent(buildAnalyzePrompt(argsObject.request, facts), plannerOptions('analyze', 'Analyze'));
   for (let round = 1; ; round += 1) {
@@ -372,11 +388,11 @@ async function runAnalysis(rawArgs) {
       pendingReply = undefined;
     }
     if (reply === undefined) {
-      return pauseOrStopAsking(analysis.report, resolution, questions, replies);
+      return pauseOrStopAsking(analysis.report, resolution, questions, answerLog);
     }
-    replies.push(reply);
+    answerLog.push({ question: questions, reply: reply });
     phase('Revise');
-    const revisePrompt = buildRevisePrompt({ request: argsObject.request, facts: facts, report: analysis.report, questions: questions, reply: reply });
+    const revisePrompt = buildRevisePrompt({ request: argsObject.request, facts: facts, answers: answerLog.slice(0, round - 1), report: analysis.report, questions: questions, reply: reply });
     analysis = await agent(revisePrompt, plannerOptions('revise-' + round, 'Revise'));
   }
 }

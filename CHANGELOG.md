@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.3.1] - 2026-10-28
+
+### Fixed
+
+- A replan no longer forgets the user's answers. Every later planning pass gets the earlier answers as settled decisions it may not ask again or reverse (#472).
+- A resume after the plugin changed while the run was paused stops before anything runs and asks to run the request again, instead of binding stored answers to the wrong questions (#472).
+- A plan whose files leave the paths the request or the user's answers limit the work to is always asked, never decided for the user (#472).
+
 ## [7.3.0] - 2026-10-27
 
 ### Added

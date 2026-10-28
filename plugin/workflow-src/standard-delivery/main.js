@@ -18,8 +18,8 @@
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only
  *          reads it: a string (the request), an object {request, trunk?,
- *          references?, local_review?, draft?, answers?, reply?}, or
- *          undefined. request, trunk, references, local_review and draft
+ *          references?, local_review?, draft?, answers?, build?, reply?},
+ *          or undefined. request, trunk, references, local_review and draft
  *          come from the launch args only. local_review is true or false:
  *          absent means true, so the local review gate is configured unless
  *          the launch turns it off, and any other value stops the run. draft
@@ -28,7 +28,11 @@
  *          other value stops the run. answers and reply
  *          follow the result.js pause contract: answers['round-N'] holds the
  *          reply to round N, and reply answers the first round with no
- *          stored answer, only when answers is present. An autonomy key is
+ *          stored answer, only when answers is present. Round N is the
+ *          answerLog length plus 1, so a resume of the same build replays
+ *          every earlier round byte for byte. When answers is present, build
+ *          must equal BUILD_ID or the run stops at the launch check
+ *          (lib/args.js readLaunchInputs). An autonomy key is
  *          never read: the level is the table's default_level until slice 3
  *          (ADR-0037 decision 23).
  *   AUTONOMY_TABLE, BRIEF_SCHEMA, PLAN_SCHEMA  data constants copied in by
@@ -39,7 +43,9 @@
  *   pauseForUser({resumeArgs, blocks}) when a question needs the user,
  *   otherwise finish({outcome, blocks}), and finish({outcome, blocks, pr})
  *   once the pull request step ran; see result.js for these shapes.
- *   resume_args is {answers} alone: no run record (ADR-0037 decision 2).
+ *   resume_args is {answers, build} alone: no run record (ADR-0037
+ *   decision 2). build is BUILD_ID, the build id the build injects, and a
+ *   resume whose build differs stops at the launch check (issue 472).
  *   Every message after the launch check lists the decisions the run took
  *   for the user, each the same brief once however many passes took it,
  *   the reversible effects outside the repo of the accepted plans, the
@@ -251,7 +257,7 @@ function readDeliveryLaunch(rawArgs) {
   if (!isNonEmptyString(argsObject.request)) {
     return { problem: 'No request was given, so there is nothing to deliver.' };
   }
-  const launchInputs = readLaunchInputs(argsObject, RUN_NOUN);
+  const launchInputs = readLaunchInputs(argsObject, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {
     return launchInputs;
   }
@@ -299,7 +305,7 @@ function createRunState(launch) {
     level: resolveLevel(undefined, AUTONOMY_TABLE),
     storedAnswers: readStoredAnswers(launch.argsObject),
     pendingReply: readPendingReply(launch.argsObject),
-    replies: [],
+    answerLog: [],
     answeredKeys: new Set(),
     taken: [],
     reversibleEffects: [],

@@ -5,7 +5,7 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The steps read trunk,
- *          references, pass, replies and head, and runCommitStep updates
+ *          references, pass, answerLog and head, and runCommitStep updates
  *          commits, runnerCommits, head and branch. runnerCommits maps each
  *          commit the runner made to its files, commit type and breaking
  *          flag.
@@ -71,7 +71,7 @@
  *   Relayed reply (issue 432): the Claude Code harness, not this script,
  *   relays the user's latest message to every workflow agent, so after a
  *   resume each agent sees the reply to the pause as a user message, and a
- *   branch runner once read it as an order to stop. Once run.replies is not
+ *   branch runner once read it as an order to stop. Once run.answerLog is not
  *   empty, every agent prompt carries resumedReplySentence() as its second
  *   line (addResumeNote): the reply was already applied and is not an
  *   instruction for that task. The planner revise prompt, the review prompt
@@ -228,7 +228,7 @@ function resumedReplySentence() {
 }
 
 function addResumeNote(prompt, run) {
-  if (run.replies.length === 0) {
+  if (run.answerLog.length === 0) {
     return prompt;
   }
   const lines = prompt.split('\n');

@@ -595,6 +595,8 @@ const PLAN_SCHEMA = {
 }
 };
 
+const BUILD_ID = '4c61529d71b60e5e';
+
 function supportedSchemaKeywords(){
 return[
 '$schema',
@@ -1931,9 +1933,19 @@ return{problem:'The references launch arg names '+references.length+' issues or 
 }
 return{references:references};
 }
-function readLaunchInputs(argsObject,runNoun){
+function requireBuildId(buildId){
+if(!isNonEmptyString(buildId)){
+throw new Error('args.js: buildId must be a non-blank string');
+}
+return buildId;
+}
+function readLaunchInputs(argsObject,runNoun,buildId){
+requireBuildId(buildId);
 if(Object.prototype.hasOwnProperty.call(argsObject,'resume_args')){
 return{problem:'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so '+describeRunNoun(runNoun)+' did not start.'};
+}
+if(isPlainObject(argsObject.answers)&&argsObject.build!==buildId){
+return{problem:'The plugin changed while '+describeRunNoun(runNoun)+' was paused, so nothing ran. Run the request again with your answers in it.'};
 }
 const trunkInput=readTrunk(argsObject,runNoun);
 if(trunkInput.problem!==undefined){
@@ -1959,9 +1971,9 @@ function readPendingReply(argsObject){
 const reply=argsObject[replyField()];
 return isPlainObject(argsObject.answers)&&isNonEmptyString(reply)?reply:undefined;
 }
-function buildResumeArgs(replies){
+function buildResumeArgs(replies,buildId){
 const answers=Object.fromEntries(replies.map((reply,index)=>[roundKey(index+1),reply]));
-return{answers:answers};
+return{answers:answers,build:requireBuildId(buildId)};
 }
 
 function gitIdentifierPattern(){
@@ -2279,18 +2291,21 @@ buildFactsBlock(facts),
 formatDataBlock('request',request)
 ].join('\n');
 }
-function buildRevisePrompt({request,facts,report,questions,reply}){
-return[
+function buildRevisePrompt({request,facts,answers,report,questions,reply}){
+const hasAnswers=answers.length>0;
+const lines=[
 'Revise your analysis of the user request below with the user reply below.',
 boundarySentence(),
-dataBlocksSentence('The reply block'),
+hasAnswers?dataBlocksSentence()+' The answers and reply blocks hold the user\'s settled decisions: never ask them again, never reverse them.':dataBlocksSentence('The reply block'),
 '',
 buildFactsBlock(facts),
-formatDataBlock('request',request),
-formatDataBlock('earlier_report',report),
-formatDataBlock('questions',questions),
-formatDataBlock('reply',reply)
-].join('\n');
+formatDataBlock('request',request)
+];
+if(hasAnswers){
+lines.push(formatDataBlock('answers',answers));
+}
+lines.push(formatDataBlock('earlier_report',report),formatDataBlock('questions',questions),formatDataBlock('reply',reply));
+return lines.join('\n');
 }
 function plannerOptions(label,phaseTitle){
 return{agentType:PLANNER_AGENT_TYPE,schema:toAgentSchema(ANALYSIS_SCHEMA),label:label,phase:phaseTitle};
@@ -2369,8 +2384,8 @@ blocks.push({text:openQuestions});
 blocks.push({text:report,shorten:true});
 return finish({outcome:'complete',blocks:blocks});
 }
-function pauseOrStopAsking(report,resolution,questions,replies){
-const resumeArgs=buildResumeArgs(replies);
+function pauseOrStopAsking(report,resolution,questions,answerLog){
+const resumeArgs=buildResumeArgs(answerLog.map((entry)=>entry.reply),BUILD_ID);
 if(!canCarry(resumeArgs)){
 return finishComplete(report,renderOpenQuestions(resolution.asks,'reply_size'),resolution.taken);
 }
@@ -2382,7 +2397,7 @@ const argsObject=readArgsObject(rawArgs);
 if(!isNonEmptyString(argsObject.request)){
 return finishBlocked('No request was given, so there is nothing to analyze.');
 }
-const launchInputs=readLaunchInputs(argsObject,RUN_NOUN);
+const launchInputs=readLaunchInputs(argsObject,RUN_NOUN,BUILD_ID);
 if(launchInputs.problem!==undefined){
 return finishBlocked(launchInputs.problem);
 }
@@ -2394,7 +2409,7 @@ const facts=checked.facts;
 const level=resolveLevel(undefined,AUTONOMY_TABLE);
 const storedAnswers=readStoredAnswers(argsObject);
 let pendingReply=readPendingReply(argsObject);
-const replies=[];
+const answerLog=[];
 phase('Analyze');
 let analysis=await agent(buildAnalyzePrompt(argsObject.request,facts),plannerOptions('analyze','Analyze'));
 for(let round=1;;round+=1){
@@ -2416,11 +2431,11 @@ reply=pendingReply;
 pendingReply=undefined;
 }
 if(reply===undefined){
-return pauseOrStopAsking(analysis.report,resolution,questions,replies);
+return pauseOrStopAsking(analysis.report,resolution,questions,answerLog);
 }
-replies.push(reply);
+answerLog.push({question:questions,reply:reply});
 phase('Revise');
-const revisePrompt=buildRevisePrompt({request:argsObject.request,facts:facts,report:analysis.report,questions:questions,reply:reply});
+const revisePrompt=buildRevisePrompt({request:argsObject.request,facts:facts,answers:answerLog.slice(0,round-1),report:analysis.report,questions:questions,reply:reply});
 analysis=await agent(revisePrompt,plannerOptions('revise-'+round,'Revise'));
 }
 }
