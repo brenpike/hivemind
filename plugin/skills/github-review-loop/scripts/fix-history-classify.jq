@@ -62,6 +62,11 @@
 #     reports `has_any_findings == true`, or `code_review.status == "running"`.
 # The summary itself carries no finding: Codex posts each finding as its own
 # review or thread comment, which this filter classifies on its own surface.
+# A running code review keeps the summary handled even when findings are already
+# reported, by the user's decision recorded in
+# docs/adr/0037-standard-delivery-on-script-engine.md, Amendment 2026-10-27:
+# workflow cost outside the planner (issue 464), "Recorded decision: a running
+# Codex review keeps the summary handled".
 # A summary whose state is missing, does not parse, or reports findings falls
 # back to the two signals above (self EYES or `Addresses:`), else actionable.
 # The parse is total (`try`/`catch`), so a malformed state never errors the

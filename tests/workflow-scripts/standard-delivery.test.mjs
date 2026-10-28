@@ -5111,20 +5111,33 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(labelsOf(run).includes('bump-type-1-2'), JSON.stringify(labelsOf(run)));
     });
-    test('keepBumpHeld keeps the bump only over runner commits of the plan commit type and breaking flag with no version file', () => {
+    test('a wave that commits nothing holds the bump on no kept runner commit, so a runner fix commit runs the bump again', async () => {
+      const run = await runWorkflow(LAUNCH, fixFlowResults({ 'commit-1-1': commitRelay({ commit: HEAD, committed: 'false' }), 'bump-type-1-2': bumpRelay() }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(6), ['bump-type-1-1', 'validate-1-1', 'fix-1-1', 'fix-commit-1-1', 'bump-type-1-2', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      const rerun = main.buildGateRerunBrief(['bump'], THIRD, false);
+      assert.equal(run.result.message.split(rerun.problem).length - 1, 1, run.result.message);
+      assert.ok(run.result.message.startsWith(HELD_ALL + THIRD + '.'), run.result.message);
+    });
+    test('keepBumpHeld keeps the bump only on one relayed row with no dropped revert, a kept runner commit before the mark, and kept runner commits since', () => {
       const plan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
       const record = (changes) => ({ files: ['src/cache.js'], commitType: 'feat', breaking: false, ...changes });
-      for (const [label, commits, runnerCommits, kept] of [
-        ['a runner commit', [OTHER, THIRD], { [THIRD]: record({}) }, true],
-        ['two runner commits', [OTHER, THIRD, FOURTH], { [THIRD]: record({}), [FOURTH]: record({ files: [] }) }, true],
-        ['another commit type', [OTHER, THIRD], { [THIRD]: record({ commitType: 'fix' }) }, false],
-        ['another breaking flag', [OTHER, THIRD], { [THIRD]: record({ breaking: true }) }, false],
-        ['a version file', [OTHER, THIRD], { [THIRD]: record({ files: ['src/cache.js', 'VERSION'] }) }, false],
-        ['a recorded range', [OTHER, OTHER + '..' + THIRD], {}, false],
-        ['a runner commit after a range', [OTHER, OTHER + '..' + THIRD, FOURTH], { [FOURTH]: record({}) }, false]
+      const marked = { [OTHER]: record({}) };
+      const twoRows = parsedBump({ counts: { major: '0', minor: '1', patch: '1', no_bump: '0' }, mapped_commits: '2' });
+      for (const [label, commits, runnerCommits, kept, values = parsedBump()] of [
+        ['a runner commit', [OTHER, THIRD], { ...marked, [THIRD]: record({}) }, true],
+        ['two runner commits', [OTHER, THIRD, FOURTH], { ...marked, [THIRD]: record({}), [FOURTH]: record({ files: [] }) }, true],
+        ['another commit type', [OTHER, THIRD], { ...marked, [THIRD]: record({ commitType: 'fix' }) }, false],
+        ['another breaking flag', [OTHER, THIRD], { ...marked, [THIRD]: record({ breaking: true }) }, false],
+        ['a version file', [OTHER, THIRD], { ...marked, [THIRD]: record({ files: ['src/cache.js', 'VERSION'] }) }, false],
+        ['a recorded range', [OTHER, OTHER + '..' + THIRD], { ...marked }, false],
+        ['a runner commit after a range', [OTHER, OTHER + '..' + THIRD, FOURTH], { ...marked, [FOURTH]: record({}) }, false],
+        ['two non-zero rows', [OTHER, THIRD], { ...marked, [THIRD]: record({}) }, false, twoRows],
+        ['a dropped revert', [OTHER, THIRD], { ...marked, [THIRD]: record({}) }, false, parsedBump({ dropped_reverts: '1' })],
+        ['no kept runner commit before the mark', [OTHER, THIRD], { [THIRD]: record({}) }, false]
       ]) {
         const run = { commits: commits, runnerCommits: runnerCommits, head: commits.at(-1).split('..').at(-1) };
-        const gates = { held: { bump: OTHER }, bumpMark: 1 };
+        const gates = { held: { bump: OTHER }, bumpMark: 1, bumpValues: values };
         main.keepBumpHeld(run, plan, gates);
         assert.equal(gates.held.bump, kept ? run.head : OTHER, label);
         assert.equal(gates.bumpMark, kept ? commits.length : 1, label);

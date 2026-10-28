@@ -35,7 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The GitHub review loop read a Codex Review Summary with no findings as actionable on every fetch. `fix-history-classify.jq` now reads the summary state, and a summary from the Codex bot that reports no findings or a running review is handled; a missing, unparseable or findings state falls back to the `EYES` rule (#464).
+- The GitHub review loop read a Codex Review Summary with no findings as actionable on every fetch. `fix-history-classify.jq` now reads the summary state, and a summary from the Codex bot that reports no findings or a running review is handled; a missing, unparseable or findings state falls back to the `EYES` rule. A running review keeps the summary handled even when it already reports findings, by the user's decision recorded in ADR-0037 (#464).
 
 ## [7.2.0] - 2026-10-27
 

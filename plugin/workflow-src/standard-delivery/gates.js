@@ -1,120 +1,115 @@
 /*
- * standard-delivery gates.js: the gates of the standard-delivery
- * workflow. It holds the gate ids, names and labels, the tail briefs and
- * asks, the bump, validate and fix steps, the gate rerun and the gate
- * loop.
+ * standard-delivery gates.js: the gates of the standard-delivery workflow. It
+ * holds the gate ids, names and labels, the tail briefs and asks, the bump,
+ * validate and fix steps, the gate rerun and the gate loop.
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
  *          replies, head, trunk and localReview, and update notRunGates.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   facts  the checked facts of the pass: trunk_commit is the bump base.
- *   gates  the gate loop state runGates builds: held, notes, runs,
- *          failures, fixRounds, reruns, rejected, answer and bumpMark.
+ *   gates  the gate loop state runGates builds: held, notes, runs, failures,
+ *          fixRounds, reruns, rejected, answer, bumpMark and bumpValues.
  *          failures maps a head to the failures validation reported on it,
  *          and bumpMark is the run.commits length when the bump last held.
  *   BUMP_SCHEMA, BUMP_MODEL, FIX_SCHEMA, VALIDATE_SCHEMA,
  *   VALIDATE_COMMANDS_SCHEMA and the limits of main.js.
  *
  * Outputs
- *   runGates(run, plan, facts)  what runPullRequestStep (pr.js) returns
- *          once every configured gate holds on the head, else {result} or
- *          {replan}.
- *   A gate step returns {held} with a note when it held, {answer} when
- *   the user answered a review question, or a run end, {result} or
- *   {replan}, which isRunEnd tells apart.
+ *   runGates(run, plan, facts)  what runPullRequestStep (pr.js) returns once
+ *          every configured gate holds on the head, else {result} or {replan}.
+ *   A gate step returns {held} with a note when it held, {answer} when the user
+ *   answered a review question, or a run end, {result} or {replan}, which
+ *   isRunEnd tells apart.
  *   The steps, as meta.js names them:
- *   Bump    a gate, after the last wave. With no version files a haiku
- *           runner, else one drone on BUMP_MODEL, invokes hivemind:bump-type
- *           with the pass's facts trunk_commit as base and the plan's two
- *           versioning answers, and relays its stdout, which parses with
- *           bumpTypeRoutingSpec(); its verdict resolves through decide().
- *           Only on bump_required or no_bump the drone also sets each version
- *           file to its version at trunk_commit raised by the bump type
- *           (ADR-0037 decision 26), and the commit runner commits exactly
- *           those files, so a bump step run again with trunk unmoved
- *           commits nothing.
+ *   Bump    a gate, after the last wave. With no version files a haiku runner,
+ *           else one drone on BUMP_MODEL, invokes hivemind:bump-type with the
+ *           pass's facts trunk_commit as base and the plan's two versioning
+ *           answers, and relays its stdout, which parses with
+ *           bumpTypeRoutingSpec(); its verdict resolves through decide(). Only
+ *           on bump_required or no_bump the drone also sets each version file
+ *           to its version at trunk_commit raised by the bump type (ADR-0037
+ *           decision 26), and the commit runner commits exactly those files, so
+ *           a bump step run again with trunk unmoved commits nothing.
  *   Validate a gate. A drone runs validation as its whole task and edits
- *           nothing, and no commit runner follows it: a dirty path it leaves
- *           is refused by the next commit runner or by the dirty check of
- *           hivemind:open-plan-pr. When plan.validation_commands is not
- *           empty, the drone runs each of those commands once, from the
- *           inputs block, and VALIDATE_COMMANDS_SCHEMA offers no not_run.
- *           When it is empty, the drone runs the Validation Procedure of
- *           definitions.md, and VALIDATE_SCHEMA keeps not_run, so an empty
- *           list never skips validation.
- *   Fix     a failed validation resolves through decide(). Each taken
- *           round is a drone that fixes the failures and reports its files,
- *           which the commit runner commits; at maxFixRounds() the run asks.
- *           A failed result is kept for the head it ran on, so when a fix
- *           round commits nothing no validate agent runs again on that
- *           head: the next fix-round decision takes the kept failures.
+ *           nothing, and no commit runner follows it: a dirty path it leaves is
+ *           refused by the next commit runner or by the dirty check of
+ *           hivemind:open-plan-pr. When plan.validation_commands is not empty,
+ *           the drone runs each of those commands once, from the inputs block,
+ *           and VALIDATE_COMMANDS_SCHEMA offers no not_run. When it is empty,
+ *           the drone runs the Validation Procedure of definitions.md, and
+ *           VALIDATE_SCHEMA keeps not_run, so an empty list never skips
+ *           validation.
+ *   Fix     a failed validation resolves through decide(). Each taken round is
+ *           a drone that fixes the failures and reports its files, which the
+ *           commit runner commits; at maxFixRounds() the run asks. A failed
+ *           result is kept for the head it ran on, so when a fix round commits
+ *           nothing no validate agent runs again on that head: the next
+ *           fix-round decision takes the kept failures.
  *
  * Invariants
- *   A contractRows() check is a function of the built script, not of
- *   main.js: the build bundles this module into it, so a row can name a
- *   function of this module.
- *   A gate holds only for the commit its step ended on, read from the
- *   commit runner's routing line; validation, which has no commit runner,
- *   ends on the head it ran on. The configured gates run in gateIds()
- *   order, local review only when the launch configures it, and a
- *   gate that already holds on the head is not run again. When a step ends
- *   on a commit other than the head the gates last checked, the run goes
- *   back to the first gate: each gate that held on an earlier commit runs
- *   again. Each such going back resolves once through decide() kind
- *   gate_rerun, and after maxGateReruns() of them the run asks. The pull
- *   request step runs only when every configured gate holds on the head.
- *   keepBumpHeld keeps the bump held over a head move, with no agent call,
- *   when every commit since is a runner commit of the pass with the plan
- *   commit type and breaking flag and no version file, which cannot change
- *   the verdict; a recorded range reruns it. The bump drone edits before
- *   decide() reads its verdict: the edit stays local and unpushed, and an
- *   ask leaves it to the dirty check of the next facts step.
+ *   A contractRows() check is a function of the built script, not of main.js:
+ *   the build bundles this module into it, so a row can name a function of this
+ *   module.
+ *   A gate holds only for the commit its step ended on, read from the commit
+ *   runner's routing line; validation, which has no commit runner, ends on the
+ *   head it ran on. The configured gates run in gateIds() order, local review
+ *   only when the launch configures it, and a gate that already holds on the
+ *   head is not run again. When a step ends on a commit other than the head the
+ *   gates last checked, the run goes back to the first gate: each gate that
+ *   held on an earlier commit runs again. Each such going back resolves once
+ *   through decide() kind gate_rerun, and after maxGateReruns() of them the run
+ *   asks. The pull request step runs only when every configured gate holds on
+ *   the head.
+ *   keepBumpHeld keeps the bump held over a head move, with no agent call, only
+ *   when bumpValues, the held bump's routing values, count one non-zero row and
+ *   dropped_reverts 0, and a commit before bumpMark and every commit since are
+ *   runner commits of the pass with the plan commit type and breaking flag and
+ *   no version file, which add only to that row; any other move reruns it. The
+ *   bump drone edits before decide() reads its verdict: the edit stays local
+ *   and unpushed, and an ask leaves it to the next facts step's dirty check.
  *   Tail asks: a question after the last wave pauses like any other open
- *   question, through pauseDelivery with its question, the commits and
- *   each gate that did not run, and a local review question also with its
- *   detail block. That
- *   covers the asks of resolveTailDecision, the fix round and gate rerun
- *   limits, and the user-input-required and high-severity-rejection
+ *   question, through pauseDelivery with its question, the commits and each
+ *   gate that did not run, and a local review question also with its detail
+ *   block. That covers the asks of resolveTailDecision, the fix round and gate
+ *   rerun limits, and the user-input-required and high-severity-rejection
  *   questions; each ask carries a reason renderQuestions shows. Tail rounds
- *   share run.replies and the answers round numbering with planning
- *   rounds, so a resume replays every earlier agent from cache and takes
- *   the reply at the ask (askTail). A reply to a local review question
- *   reruns the review gate on the current head, after any gate the head
- *   move made stale, with the next gateLabel count and user_answer
- *   {question, reply} in its inputs block; the commit runner and
- *   localReviewRoutes() then apply as for any review run. A reply to any
- *   other tail ask starts a new pass through the facts step whose plan
- *   prompt carries the answer block {question, reply}; that replan does not
- *   count against maxReplans(). Nothing is pushed before every configured
+ *   share run.replies and the answers round numbering with planning rounds, so
+ *   a resume replays every earlier agent from cache and takes the reply at the
+ *   ask (askTail). A reply to a local review question reruns the review gate on
+ *   the current head, after any gate the head move made stale, with the next
+ *   gateLabel count and user_answer {question, reply} in its inputs block; the
+ *   commit runner and localReviewRoutes() then apply as for any review run. A
+ *   reply to any other tail ask starts a new pass through the facts step whose
+ *   plan prompt carries the answer block {question, reply}; that replan does
+ *   not count against maxReplans(). Nothing is pushed before every configured
  *   gate holds on one commit.
- *   The bump prompt names each versioning.artifact_files path in a git
- *   show command, and that list is planner text that can carry external
- *   content (review finding 143374b9). The impact is bounded:
- *   describePlanProblem refuses each path that fails isGitIdentifier, so a
- *   version file path with a character outside A-Z a-z 0-9 . _ / -, a
- *   leading '-' or '..' stops the run at the plan check, before the branch
- *   step and any later agent call, naming the reason, and the bump is left
- *   to the user. Rejected for now: a committed bump script that reads each
- *   file at trunk_commit from an inputs file costs a script, a skill and
- *   tests for a case no known project has.
- *   A version file path that passes isGitIdentifier can still lead through
- *   a symlink out of the checkout (review finding 8a9a66f3). That is the
- *   filesystem-alias residual ADR-0037 records for plan step files: the
- *   drone holds the whole Bash tool, and this script cannot read the file
- *   system, so no check here can close it. The impact is bounded: the bump
- *   reads each path with git show at trunk_commit, and the git tree holds a
- *   symlink as its link text and no path below one, so a path through a
- *   symlink in trunk yields no version and the drone stops blocked; a
- *   symlink added on the branch is in a branch commit the PR shows; only a
- *   drone that ignores its task writes through a link, and then the commit
- *   runner finds nothing to commit and the PR shows no version change.
- *   Rejected: a containment check in a committed bump script covers the
- *   bump only, while plan step files keep the same exposure.
+ *   The bump prompt names each versioning.artifact_files path in a git show
+ *   command, and that list is planner text that can carry external content
+ *   (review finding 143374b9). The impact is bounded: describePlanProblem
+ *   refuses each path that fails isGitIdentifier, so a version file path with a
+ *   character outside A-Z a-z 0-9 . _ / -, a leading '-' or '..' stops the run
+ *   at the plan check, before the branch step and any later agent call, naming
+ *   the reason, and the bump is left to the user. Rejected for now: a committed
+ *   bump script that reads each file at trunk_commit from an inputs file costs
+ *   a script, a skill and tests for a case no known project has.
+ *   A version file path that passes isGitIdentifier can still lead through a
+ *   symlink out of the checkout (review finding 8a9a66f3). That is the
+ *   filesystem-alias residual ADR-0037 records for plan step files: the drone
+ *   holds the whole Bash tool, and this script cannot read the file system, so
+ *   no check here can close it. The impact is bounded: the bump reads each path
+ *   with git show at trunk_commit, and the git tree holds a symlink as its link
+ *   text and no path below one, so a path through a symlink in trunk yields no
+ *   version and the drone stops blocked; a symlink added on the branch is in a
+ *   branch commit the PR shows; only a drone that ignores its task writes
+ *   through a link, and then the commit runner finds nothing to commit and the
+ *   PR shows no version change. Rejected: a containment check in a committed
+ *   bump script covers the bump only, while plan step files keep the same
+ *   exposure.
  *
  * Why
- *   A gate holds only on a commit, so one loop decides which gate runs
- *   next from the head each step ends on.
+ *   A gate holds only on a commit, so one loop decides which gate runs next
+ *   from the head each step ends on.
  */
 
 function gateIds() {
@@ -405,7 +400,7 @@ async function commitBumpEdit(run, plan, count, checked) {
   if (checked.problem !== undefined) {
     return { result: finishDeliveryBlocked(checked.problem + '\n' + describeCommitEnd(committed.values), run, checked.nextAction) };
   }
-  return { held: true, note: describeBumpNote(checked.values) };
+  return { held: true, note: describeBumpNote(checked.values), values: checked.values };
 }
 
 async function runBumpGate(run, plan, facts, gates) {
@@ -421,7 +416,7 @@ async function runBumpGate(run, plan, facts, gates) {
   if (isRunEnd(verdict)) {
     return verdict;
   }
-  return hasFiles ? commitBumpEdit(run, plan, count, checked) : { held: true, note: describeBumpNote(checked.values) };
+  return hasFiles ? commitBumpEdit(run, plan, count, checked) : { held: true, note: describeBumpNote(checked.values), values: checked.values };
 }
 
 function isKeptRunnerCommit(entry, run, plan) {
@@ -430,9 +425,14 @@ function isKeptRunnerCommit(entry, run, plan) {
     && !record.files.some((file) => plan.versioning.artifact_files.includes(file));
 }
 
+function isSingleRowBump(values) {
+  return [values.counts.major, values.counts.minor, values.counts.patch, values.counts.no_bump].filter((count) => Number(count) !== 0).length === 1 && Number(values.dropped_reverts) === 0;
+}
+
 function keepBumpHeld(run, plan, gates) {
-  const since = run.commits.slice(gates.bumpMark);
-  if (gates.held.bump !== undefined && since.length > 0 && since.every((entry) => isKeptRunnerCommit(entry, run, plan))) {
+  const isKept = (entry) => isKeptRunnerCommit(entry, run, plan);
+  if (gates.held.bump !== undefined && isSingleRowBump(gates.bumpValues) && run.commits.slice(0, gates.bumpMark).some(isKept)
+    && run.commits.length > gates.bumpMark && run.commits.slice(gates.bumpMark).every(isKept)) {
     gates.held.bump = run.head;
     gates.bumpMark = run.commits.length;
   }
@@ -558,7 +558,7 @@ function runGateStep(gateId, run, plan, facts, gates) {
 
 async function runGates(run, plan, facts) {
   const gateList = configuredGateIds(run);
-  const gates = { held: {}, notes: {}, runs: { bump: 0, validate: 0, review: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined, bumpMark: 0 };
+  const gates = { held: {}, notes: {}, runs: { bump: 0, validate: 0, review: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined, bumpMark: 0, bumpValues: undefined };
   if (!run.localReview) {
     listNotRunGate(run, notConfiguredReviewLine());
   }
@@ -580,7 +580,7 @@ async function runGates(run, plan, facts) {
     if (ended.held) {
       gates.held[gateId] = run.head;
       gates.notes[gateId] = ended.note;
-      gates.bumpMark = gateId === 'bump' ? run.commits.length : gates.bumpMark;
+      Object.assign(gates, gateId === 'bump' ? { bumpMark: run.commits.length, bumpValues: ended.values } : {});
     }
     if (ended.answer !== undefined) {
       gates.answer = ended.answer;

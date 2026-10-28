@@ -2482,7 +2482,7 @@ return{result:finishDeliveryBlocked(committed.problem,run)};
 if(checked.problem!==undefined){
 return{result:finishDeliveryBlocked(checked.problem+'\n'+describeCommitEnd(committed.values),run,checked.nextAction)};
 }
-return{held:true,note:describeBumpNote(checked.values)};
+return{held:true,note:describeBumpNote(checked.values),values:checked.values};
 }
 async function runBumpGate(run,plan,facts,gates){
 const count=gates.runs.bump;
@@ -2497,16 +2497,20 @@ const verdict=resolveBumpVerdict(checked.values,plan,run);
 if(isRunEnd(verdict)){
 return verdict;
 }
-return hasFiles?commitBumpEdit(run,plan,count,checked):{held:true,note:describeBumpNote(checked.values)};
+return hasFiles?commitBumpEdit(run,plan,count,checked):{held:true,note:describeBumpNote(checked.values),values:checked.values};
 }
 function isKeptRunnerCommit(entry,run,plan){
 const record=Object.hasOwn(run.runnerCommits,entry)?run.runnerCommits[entry]:undefined;
 return record!==undefined&&record.commitType===commitTypeMap()[plan.classification]&&record.breaking===plan.breaking
 &&!record.files.some((file)=>plan.versioning.artifact_files.includes(file));
 }
+function isSingleRowBump(values){
+return[values.counts.major,values.counts.minor,values.counts.patch,values.counts.no_bump].filter((count)=>Number(count)!==0).length===1&&Number(values.dropped_reverts)===0;
+}
 function keepBumpHeld(run,plan,gates){
-const since=run.commits.slice(gates.bumpMark);
-if(gates.held.bump!==undefined&&since.length>0&&since.every((entry)=>isKeptRunnerCommit(entry,run,plan))){
+const isKept=(entry)=>isKeptRunnerCommit(entry,run,plan);
+if(gates.held.bump!==undefined&&isSingleRowBump(gates.bumpValues)&&run.commits.slice(0,gates.bumpMark).some(isKept)
+&&run.commits.length>gates.bumpMark&&run.commits.slice(gates.bumpMark).every(isKept)){
 gates.held.bump=run.head;
 gates.bumpMark=run.commits.length;
 }
@@ -2620,7 +2624,7 @@ return runValidateGate(run,plan,gates);
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{bump:0,validate:0,review:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined,bumpMark:0};
+const gates={held:{},notes:{},runs:{bump:0,validate:0,review:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined,bumpMark:0,bumpValues:undefined};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
@@ -2642,7 +2646,7 @@ return ended;
 if(ended.held){
 gates.held[gateId]=run.head;
 gates.notes[gateId]=ended.note;
-gates.bumpMark=gateId==='bump'?run.commits.length:gates.bumpMark;
+Object.assign(gates,gateId==='bump'?{bumpMark:run.commits.length,bumpValues:ended.values}:{});
 }
 if(ended.answer!==undefined){
 gates.answer=ended.answer;
