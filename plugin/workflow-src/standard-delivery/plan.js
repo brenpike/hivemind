@@ -12,10 +12,10 @@
  *           reversibleEffects.
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
- *           After a reply round whose revise result passes the plan check,
- *           unless the reply settled the shown plan acceptance and the shown
- *           result was restored, the pass scopes again with
- *           runScopeStep(run, facts, round), label scope-P-R. That scope
+ *           Once the revise result of a reply round passes the plan check,
+ *           the pass logs the reply, then, unless the reply settled the shown
+ *           plan acceptance and the shown result was restored, scopes again
+ *           with runScopeStep(run, facts, round), label scope-P-R. That scope
  *           replaces the pass scope for the acceptance check and every later
  *           revise prompt of the pass, and its problem stops the run blocked
  *           as a pass-start scope problem does.
@@ -35,7 +35,8 @@
  *   Plan    hivemind:cerebrate returns a plan result: PLAN_SCHEMA under
  *           plan, with outcome, questions and blocker.
  *   Revise  the planner revises the plan with the user reply and names, in
- *           settled, the label of each shown question the reply settles.
+ *           settled, the label of each shown question or decision made for
+ *           you the reply settles.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -63,11 +64,11 @@
  *   does not ask again (issue 433). The residual: a planner question raised
  *   again with other rendered text, a changed recommendation too, is a new
  *   question, asked again in the next pause. The planner's revise pass
- *   reads the reply. The
- *   revise result names in settled, by label like Q1, the shown questions the
- *   reply settled: only the keys of those count as answered and are not
- *   asked again, and every other question resolves again and goes in the
- *   next pause. Which shown questions a reply settles is the planner's
+ *   reads the reply. The revise result names in settled, by label like Q1
+ *   or D1, the shown questions and decisions the reply settled: only the
+ *   keys of those questions count as answered and are not asked again, a
+ *   D label keys nothing, and every other question resolves again and goes
+ *   in the next pause. Which shown questions a reply settles is the planner's
  *   judgment, as its gate flags are (ADR-0037 decision 3). The impact is
  *   bounded: a question the planner does not name is asked again, the
  *   settled enum allows only the labels shown, and nothing runs while a
@@ -107,12 +108,17 @@
  *   The plan and revise prompts carry the scope in a scope data block right
  *   after the request block, and no other planning text holds it.
  *   Each reply a plan pause consumes goes once into run.answerLog as
- *   {question, reply}, the question being the text the pause showed. Every
- *   plan prompt once the log is not empty carries the whole log in an
- *   answers data block, and a revise prompt carries the entries before its
- *   own round, so a replan never asks or reverses a settled answer (issue
- *   472). With an empty log, the plan and first revise prompts are the
- *   prompts of a run with no answers, so a resume replays them from cache.
+ *   {question, settled, reply}, pushed once the revise of its round passes
+ *   the plan check and before any rescope: the question is the text the
+ *   pause showed, settled the shown labels the revise names, in shown
+ *   order, [] when it names none. Every plan prompt once the log is not
+ *   empty carries the whole log in an answers data block, and a revise
+ *   prompt the entries of earlier rounds. Its data line calls settled only
+ *   what the settled labels of an entry name, never the reply of the round
+ *   being revised, so a replan never asks or reverses a settled answer and
+ *   never takes an open question as settled (issue 472). With an empty log,
+ *   the plan and first revise prompts are the prompts of a run with no
+ *   answers, so a resume replays them from cache.
  *   Outside-limit ask: when scope.limits is not empty, a plan step file
  *   that neither equals a limit nor sits under limit + '/' makes the plan or
  *   remediation plan acceptance brief recommendation strength none, so
@@ -161,12 +167,12 @@ function buildPlanResultSchema(planSchema, briefSchema) {
   return buildTaggedSchema(buildPlanResultSpec(planSchema, briefSchema));
 }
 
-function buildReviseResultSchema(shownAsks) {
+function buildReviseResultSchema(shownAsks, shownTaken) {
   const spec = buildPlanResultSpec(PLAN_SCHEMA, BRIEF_SCHEMA);
   spec.properties.settled = {
     type: 'array',
-    description: 'The label, like Q1, of each shown question the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
-    items: { type: 'string', enum: shownAsks.map((ask, index) => questionLabel(index)) }
+    description: 'The label, like Q1 or D1, of each shown question or decision made for you the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
+    items: { type: 'string', enum: listShownLabels(shownAsks, shownTaken) }
   };
   spec.required.push('settled');
   return buildTaggedSchema(spec);
@@ -217,8 +223,8 @@ function findRepositoryPathProblem(schema, value, location) {
   return '';
 }
 
-function settledAnswersSentence(home) {
-  return dataBlocksSentence(undefined) + ' ' + home + ' hold the user\'s settled decisions: never ask them again, never reverse them.';
+function settledAnswersSentence(replyHome) {
+  return dataBlocksSentence(replyHome) + ' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
 }
 
 function buildPlanPrompt(request, facts, scope, replan, answerLog) {
@@ -226,7 +232,7 @@ function buildPlanPrompt(request, facts, scope, replan, answerLog) {
   const lines = [
     'Plan the delivery of the user request below in this repository, as one plan on one working branch.',
     boundarySentence(),
-    hasAnswers ? settledAnswersSentence('The entries of the answers block') : dataBlocksSentence(undefined)
+    hasAnswers ? settledAnswersSentence(undefined) : dataBlocksSentence(undefined)
   ];
   if (replan !== undefined) {
     lines.push('This is a new plan in a run that already started: the replan block says why.');
@@ -249,7 +255,7 @@ function buildPlanRevisePrompt({ request, facts, scope, answers, plan, questions
   const lines = [
     'Revise your plan for the delivery of the user request below with the user reply below.',
     boundarySentence(),
-    hasAnswers ? settledAnswersSentence('The answers and reply blocks') : dataBlocksSentence('The reply block'),
+    hasAnswers ? settledAnswersSentence('The reply block') : dataBlocksSentence('The reply block'),
     '',
     buildFactsBlock(facts),
     formatDataBlock('request', request),
@@ -521,7 +527,9 @@ async function runPlanningPass(run, facts, passScope, replan) {
   let scope = passScope;
   let resultSchema = PLAN_RESULT_SCHEMA;
   let shownAsks = [];
+  let shownTaken = [];
   let shownResult;
+  let shownEntry;
   const settledKinds = new Set();
   const planPrompt = buildPlanPrompt(run.request, facts, scope, replan, run.answerLog);
   let planResult = await agent(planPrompt, plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
@@ -531,6 +539,8 @@ async function runPlanningPass(run, facts, passScope, replan) {
       return { result: finishDeliveryBlocked(problem, run) };
     }
     if (shownAsks.length > 0) {
+      const settledLabels = listShownLabels(shownAsks, shownTaken).filter((label) => planResult.settled.includes(label));
+      run.answerLog.push({ question: shownEntry.question, settled: settledLabels, reply: shownEntry.reply });
       markSettledAsks(planResult.settled, shownAsks, run, settledKinds);
       if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
         planResult = shownResult;
@@ -566,12 +576,13 @@ async function runPlanningPass(run, facts, passScope, replan) {
     if (reply === undefined) {
       return { result: pauseDelivery(resolution, questions, run, detail) };
     }
-    run.answerLog.push({ question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply });
     phase('Revise');
     shownAsks = resolution.asks;
+    shownTaken = resolution.taken;
     shownResult = planResult;
-    resultSchema = buildReviseResultSchema(shownAsks);
-    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: run.answerLog.slice(0, round - 1), plan: planResult.plan, questions: questions, reply: reply });
+    shownEntry = { question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply };
+    resultSchema = buildReviseResultSchema(shownAsks, shownTaken);
+    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: run.answerLog, plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
   }
 }

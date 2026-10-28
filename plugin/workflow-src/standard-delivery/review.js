@@ -368,7 +368,7 @@ function askReviewQuestion(review, run) {
   const openFindings = review.open_findings;
   const resolution = { asks: [], taken: [] };
   resolveDecision(reviewQuestionKinds()[review.exit_reason], buildReviewQuestionBrief(review, openFindings), undefined, run, resolution);
-  return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));
+  return askTail(resolution.asks[0], run, buildReviewDetailBlock(review, openFindings));
 }
 
 function buildDiminishingReturnsBrief(review, head) {

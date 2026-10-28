@@ -527,3 +527,91 @@ describe('exact entries', () => {
     }
   });
 });
+
+describe('decisionLabel', () => {
+  test('labels a position as D followed by position plus one', () => {
+    assert.equal(lib.decisionLabel(0), 'D1');
+    assert.equal(lib.decisionLabel(1), 'D2');
+    assert.equal(lib.decisionLabel(2), 'D3');
+  });
+  for (const index of [-1, 1.5, '0', undefined]) {
+    test(`index ${JSON.stringify(index)} throws`, () => {
+      assert.throws(() => lib.decisionLabel(index), /decisionLabel: index must be a non-negative integer/);
+    });
+  }
+  const taken = [0, 1, 2].map((position) => ({ brief: makeBrief({ problem: `TAKEN_${position}` }) }));
+  const ask = [{ brief: makeBrief(), reason: 'hard_stop' }];
+  const renderers = [
+    ['renderQuestions', () => lib.renderQuestions(ask, taken), '- '],
+    ['renderQuestionsCompact', () => lib.renderQuestionsCompact(ask, taken), '- '],
+    ['renderDecisions', () => lib.renderDecisions(taken), '  '],
+    ['renderDecisionsCompact', () => lib.renderDecisionsCompact(taken), '  ']
+  ];
+  for (const [name, render, indent] of renderers) {
+    test(`${name} shows decisionLabel by position`, () => {
+      const text = render();
+      taken.forEach((entry, index) => {
+        assert.ok(text.includes(`${indent}${lib.decisionLabel(index)}. TAKEN_${index}`), `label ${index}`);
+      });
+    });
+  }
+  test('renderers keep their exact decision lines', () => {
+    assert.equal(lib.renderDecisions([taken[0]]), [
+      'Decided for you:',
+      '  D1. TAKEN_0',
+      '    Chose option A: SUMMARY_A',
+      '    Why: WHY_TEXT',
+      '    Word for word:',
+      'VERBATIM_TEXT'
+    ].join('\n'));
+    assert.equal(lib.renderDecisionsCompact(taken.slice(0, 2)), [
+      'Decided for you:',
+      '  D1. TAKEN_0 Chose option A. Why: WHY_TEXT',
+      '  D2. TAKEN_1 Chose option A. Why: WHY_TEXT'
+    ].join('\n'));
+    for (const text of [lib.renderQuestions(ask, taken.slice(0, 2)), lib.renderQuestionsCompact(ask, taken.slice(0, 2))]) {
+      assert.ok(text.endsWith([
+        'Decided for you:',
+        '- D1. TAKEN_0 Chose option A.',
+        '- D2. TAKEN_1 Chose option A.',
+        'You can change any of these in the same reply.',
+        '',
+        REPLY_LINE
+      ].join('\n')));
+    }
+  });
+});
+
+describe('listShownLabels', () => {
+  const asks = ['FIRST', 'SECOND', 'THIRD'].map((problem, index) => ({
+    brief: makeBrief({ id: 'Q' + (7 - index), problem }),
+    reason: 'gate_irreversible'
+  }));
+  const taken = [
+    { brief: makeBrief({ id: 'D8', problem: 'TAKEN_ONE' }) },
+    { brief: makeBrief({ id: 'D9', problem: 'TAKEN_TWO' }) }
+  ];
+  test('lists Q1..Qn for asks, then D1..Dm for taken decisions', () => {
+    assert.deepEqual([...lib.listShownLabels(asks, taken)], ['Q1', 'Q2', 'Q3', 'D1', 'D2']);
+  });
+  test('lists only question labels when nothing was taken', () => {
+    assert.deepEqual([...lib.listShownLabels(asks.slice(0, 1), [])], ['Q1']);
+  });
+  test('uses questionLabel and decisionLabel by position', () => {
+    assert.deepEqual([...lib.listShownLabels(asks, taken)], [
+      ...asks.map((entry, index) => lib.questionLabel(index)),
+      ...taken.map((entry, index) => lib.decisionLabel(index))
+    ]);
+  });
+  test('equals the labels the full and compact question messages show', () => {
+    const labels = [...lib.listShownLabels(asks, taken)];
+    assert.deepEqual(labelsOf(lib.renderQuestions(asks, taken)), labels);
+    assert.deepEqual(labelsOf(lib.renderQuestionsCompact(asks, taken)), labels);
+  });
+  test('argument checks', () => {
+    assert.throws(() => lib.listShownLabels([], []), /listShownLabels: asks must be a non-empty array/);
+    assert.throws(() => lib.listShownLabels(undefined, []), /listShownLabels: asks must be a non-empty array/);
+    assert.throws(() => lib.listShownLabels(asks, null), /listShownLabels: taken must be an array/);
+    assert.throws(() => lib.listShownLabels(asks, undefined), /listShownLabels: taken must be an array/);
+  });
+});

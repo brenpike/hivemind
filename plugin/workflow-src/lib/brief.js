@@ -19,6 +19,10 @@
  *   questionLabel(index)
  *     index  non-negative integer, the position of a question in asks or
  *            open.
+ *   decisionLabel(index)
+ *     index  non-negative integer, the position of a decision in taken.
+ *   listShownLabels(asks, taken)
+ *     asks, taken  as for renderQuestions.
  *   renderOpenQuestions(open, stopReason)
  *     open        non-empty array of {brief} for questions still unanswered
  *                 when the run stops asking. Entries of asks fit.
@@ -63,6 +67,12 @@
  *   askReasonLine    one plain sentence for the reason.
  *   questionLabel    the label renderQuestions, renderQuestionsCompact and
  *     renderOpenQuestions show by position: 'Q' + (index + 1).
+ *   decisionLabel    the label renderQuestions, renderQuestionsCompact,
+ *     renderDecisions and renderDecisionsCompact show for a taken decision
+ *     by position: 'D' + (index + 1).
+ *   listShownLabels  the labels a question message shows, in order: Q1..Qn
+ *     from questionLabel, one per ask, then D1..Dm from decisionLabel, one
+ *     per taken decision.
  *   renderOpenQuestions  one block: a line saying why the run stopped
  *     asking: after pauseLimit() rounds ('pause_limit'), because the
  *     replies so far are too long to carry into another round
@@ -91,7 +101,8 @@
  *   One question with two options and no verbatim renders in about 10
  *   lines.
  *   Invalid arguments, unknown reasons and unknown stop reasons throw. So
- *   does questionLabel for anything but a non-negative integer.
+ *   do questionLabel and decisionLabel for anything but a non-negative
+ *   integer.
  *   renderOpenQuestions with 'pause_limit' calls pauseLimit() from
  *   result.js, and renderDecisionsCompact calls cutAtBoundary and
  *   maxExcerptLength() from it, so they run only where result.js is loaded
@@ -106,7 +117,8 @@
  *   message does not paste the plan again (issue 445).
  *   Labels and reply tokens come from code so the reply can point at a
  *   question without trusting a model-written id. Question labels have one
- *   home, questionLabel, so the three renderers cannot drift apart.
+ *   home, questionLabel, and decision labels one home, decisionLabel, so the
+ *   renderers and listShownLabels cannot drift apart.
  */
 
 function renderQuestions(asks, taken) {
@@ -221,6 +233,26 @@ function questionLabel(index) {
   return 'Q' + (index + 1);
 }
 
+function decisionLabel(index) {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error('decisionLabel: index must be a non-negative integer');
+  }
+  return 'D' + (index + 1);
+}
+
+function listShownLabels(asks, taken) {
+  if (!Array.isArray(asks) || asks.length === 0) {
+    throw new Error('listShownLabels: asks must be a non-empty array');
+  }
+  if (!Array.isArray(taken)) {
+    throw new Error('listShownLabels: taken must be an array');
+  }
+  return [
+    ...asks.map((entry, index) => questionLabel(index)),
+    ...taken.map((entry, index) => decisionLabel(index))
+  ];
+}
+
 function renderHeading(count) {
   if (count === 1) {
     return '**Answer ' + questionLabel(0) + ' so I can go on: pick one of its options.**';
@@ -242,7 +274,7 @@ function renderTakenLines(taken) {
 
 function renderTakenLine(entry, index) {
   const brief = readField(entry, 'brief');
-  return '- D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
+  return '- ' + decisionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
     + renderText(readField(readField(brief, 'recommendation'), 'option_id')) + '.';
 }
 
@@ -333,7 +365,7 @@ function renderTakenDecision(entry, index) {
   const optionId = readField(recommendation, 'option_id');
   const chosen = findOptionById(readField(brief, 'options'), optionId);
   const lines = [
-    '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')),
+    '  ' + decisionLabel(index) + '. ' + renderText(readField(brief, 'problem')),
     '    Chose option ' + renderText(optionId) + ': ' + renderText(readField(chosen, 'summary')),
     '    Why: ' + renderText(readField(recommendation, 'why'))
   ];
@@ -345,7 +377,7 @@ function renderCompactDecision(entry, index) {
   const brief = readField(entry, 'brief');
   const recommendation = readField(brief, 'recommendation');
   const whyLine = renderText(readField(recommendation, 'why')).split(/\s*[\r\n]+\s*/).join(' ');
-  return '  D' + (index + 1) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
+  return '  ' + decisionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' Chose option '
     + renderText(readField(recommendation, 'option_id')) + '. Why: ' + cutAtBoundary(whyLine, maxExcerptLength());
 }
 

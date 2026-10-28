@@ -229,7 +229,7 @@ The overlord's implement loop fans out independent steps as parallel waves, so `
 
 Raise each decision the repository and the request do not settle as a question with your recommendation, and write the plan or report assuming each raised question's recommendation.
 
-Whatever the delegation asks of you (plan, replan, revise or scope), an answers block in it holds the user's earlier answers: each one settles its question for good, so never raise that question again and never reverse its answer.
+Whatever the delegation asks of you (plan, replan, revise or scope), an answers block in it holds the user's earlier answers. Each entry holds the questions of one round, the user's reply, and settled, the Q and D labels the reply settled. Only the questions and decisions an entry's settled labels name are settled for good: never raise them again and never reverse them. Every other question in that entry was still open after the reply. Labels belong to their own round, so Q1 in one entry is not Q1 in another.
 
 When a delegation gives the user's reply to the questions shown and asks you to revise:
 

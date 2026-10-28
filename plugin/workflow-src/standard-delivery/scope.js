@@ -52,7 +52,9 @@
  *   With an empty answerLog the scope prompt is the prompt of a run with
  *   no answers, and it carries no resume note, so a resume replays it from
  *   cache. Otherwise it carries the whole log in an answers data block
- *   right after the request block, as settled decisions.
+ *   right after the request block, and its data line calls settled only
+ *   what the settled labels of each entry name, so an open question shown
+ *   in the same round is never taken as settled.
  *   ADR-0037 invariant 4 holds by construction: the scope copies no
  *   document text and states no section's extent, because the planner
  *   takes each section's start and end from the file, so no copy or range
@@ -121,7 +123,7 @@ function buildScopePrompt(request, facts, answerLog) {
   const lines = [
     'Scope the user request below for its planner, in Scope Mode.',
     boundarySentence(),
-    hasAnswers ? settledAnswersSentence('The entries of the answers block') : dataBlocksSentence(),
+    hasAnswers ? settledAnswersSentence(undefined) : dataBlocksSentence(),
     '',
     buildFactsBlock(facts),
     formatDataBlock('request', request)

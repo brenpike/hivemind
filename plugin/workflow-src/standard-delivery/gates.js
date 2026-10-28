@@ -77,9 +77,10 @@
  *   questions; each ask carries a reason renderQuestions shows. Tail rounds
  *   share run.answerLog and the answers round numbering with planning rounds,
  *   so a resume replays every earlier agent from cache and takes the reply at
- *   the ask (askTail). askTail adds {question, reply} to run.answerLog, the
- *   question as shown with its detail block, so every later plan prompt shows
- *   it in the answers block. A reply to a local review question reruns the
+ *   the ask (askTail). askTail takes one ask and adds {question, settled,
+ *   reply} to run.answerLog, the question as shown with its detail block and
+ *   settled naming its one question label, so every later plan prompt shows
+ *   it in the answers block; it returns {question, reply} as the answer. A reply to a local review question reruns the
  *   review gate on the current head, after any gate the head move made stale,
  *   with the next gateLabel count and user_answer {question, reply} in its
  *   inputs block; the commit runner and localReviewRoutes() then apply as for
@@ -198,19 +199,19 @@ function isRunEnd(outcome) {
   return outcome.result !== undefined || outcome.replan !== undefined;
 }
 
-function askTail(asks, run, detail) {
-  const questions = renderQuestions(asks, []);
+function askTail(ask, run, detail) {
+  const questions = renderQuestions([ask], []);
   const reply = takeNextReply(run, run.answerLog.length + 1);
   if (reply === undefined) {
-    return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };
+    return { result: pauseDelivery({ asks: [ask], taken: [] }, questions, run, detail) };
   }
-  const answer = { question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply };
-  run.answerLog.push(answer);
-  return { answer: answer };
+  const question = detail === undefined ? questions : questions + '\n\n' + detail.text;
+  run.answerLog.push({ question: question, settled: [questionLabel(0)], reply: reply });
+  return { answer: { question: question, reply: reply } };
 }
 
-function replanFromTailAsk(asks, run) {
-  const asked = askTail(asks, run, undefined);
+function replanFromTailAsk(ask, run) {
+  const asked = askTail(ask, run, undefined);
   if (asked.answer === undefined) {
     return asked;
   }
@@ -227,7 +228,7 @@ function resolveTailDecision(kind, brief, run) {
     acceptResolution(resolution, run);
     return {};
   }
-  return replanFromTailAsk(resolution.asks, run);
+  return replanFromTailAsk(resolution.asks[0], run);
 }
 
 function bumpTypeTaskLine() {
@@ -449,7 +450,7 @@ async function runValidateGate(run, plan, gates) {
   }
   gates.failures[run.head] = validation.failures;
   if (gates.fixRounds >= maxFixRounds()) {
-    return replanFromTailAsk([buildUndecidedAsk(buildFixLimitBrief(run.head))], run);
+    return replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)), run);
   }
   const decided = resolveTailDecision(VALIDATION_REMEDIATION_KIND, buildValidationRemediationBrief(run.head, gates.fixRounds + 1), run);
   if (isRunEnd(decided)) {
@@ -465,7 +466,7 @@ function resolveGateRerun(run, gates) {
     return {};
   }
   if (gates.reruns >= maxGateReruns()) {
-    return replanFromTailAsk([buildUndecidedAsk(buildGateRerunBrief(staleIds, run.head, true))], run);
+    return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds, run.head, true)), run);
   }
   gates.reruns += 1;
   return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, false), run);
