@@ -5,26 +5,32 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState: request, pass and
- *          replies.
+ *          answerLog.
  *   facts  the checked facts of the pass, from runFactsStep (relay.js).
  *          Its root line, the checkout root, converts scope paths.
  *   scope  the planner result in Scope Mode, under SCOPE_SCHEMA.
+ *   round  undefined for the scope of a pass, else the answer round after
+ *          whose reply the same pass scopes again.
  *   PLANNER_AGENT, SCOPE_MODEL and SCOPE_SCHEMA from main.js.
  *
  * Outputs
- *   runScopeStep(run, facts)  {scope} or {problem}. The scope holds only
- *                             the entries whose path passes
- *                             isRepositoryPath, after a path under the
- *                             checkout root is made relative to it
- *                             (toRepositoryRelativePath).
+ *   runScopeStep(run, facts, round)  {scope} or {problem}. The scope
+ *                             holds only the documents and paths entries
+ *                             whose path passes isRepositoryPath, after a
+ *                             path under the checkout root is made relative
+ *                             to it (toRepositoryRelativePath), and every
+ *                             limit.
  *   The step, as meta.js names it:
  *   Scope   hivemind:cerebrate in Scope Mode, on SCOPE_MODEL at effort
  *           high, returns the path and start line of each section of the
  *           documents the request names and the drift of each path a
  *           section names, under SCOPE_SCHEMA. It returns start lines, not
  *           line ranges: the planner reads each whole section from the
- *           file. It runs in every pass, after the facts step and the scan
- *           and before planning, with label scope-P.
+ *           file. It also returns the limits the request and the user's
+ *           answers set on the work. It runs once in every pass, after the
+ *           facts step and the scan and before planning, with label
+ *           scope-P. A re-scope runs it again in the same pass after the
+ *           reply of answer round R, with label scope-P-R.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -38,13 +44,23 @@
  *   isRepositoryPath (plan.js) is dropped from the scope
  *   (keepRepositoryPathEntries), as an entry left out: the planner then
  *   reads or checks it itself.
+ *   A limit is made relative to the facts root the same way and loses a
+ *   trailing '/', but is never dropped: a dropped limit would widen the
+ *   work. A limit that fails isRepositoryPath matches no plan file, so the
+ *   check of edits outside the limits asks: it fails closed by
+ *   construction.
+ *   With an empty answerLog the scope prompt is the prompt of a run with
+ *   no answers, and it carries no resume note, so a resume replays it from
+ *   cache. Otherwise it carries the whole log in an answers data block
+ *   right after the request block, as settled decisions.
  *   ADR-0037 invariant 4 holds by construction: the scope copies no
  *   document text and states no section's extent, because the planner
  *   takes each section's start and end from the file, so no copy or range
- *   can be cut; every string field starts with externalLabel(); and both
- *   lists are partial by definition and bounded by maxItems, so an entry
- *   left out is read or checked by the planner itself and no step depends
- *   on a list being complete.
+ *   can be cut; every string field starts with externalLabel(); and the
+ *   documents and paths lists are partial by definition and bounded by
+ *   maxItems, so an entry left out is read or checked by the planner itself
+ *   and no step depends on a list being complete. The limits list is
+ *   bounded by maxItems too.
  *   The scope reaches only the plan and revise prompts, in a scope data
  *   block after the request block. It never reaches a message, the pull
  *   request texts or a worker prompt.
@@ -92,26 +108,33 @@ function buildScopeSchema() {
     type: 'object',
     properties: {
       documents: { type: 'array', maxItems: 10, description: 'The sections of the named documents, empty when none. A section may be left out, and the planner then reads it itself.', items: documentItem },
-      paths: { type: 'array', maxItems: 30, description: 'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.', items: pathItem }
+      paths: { type: 'array', maxItems: 30, description: 'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.', items: pathItem },
+      limits: { type: 'array', maxItems: 30, description: 'The paths or directories the request and the user\'s answers limit the work to, empty when none.', items: pathField }
     },
-    required: ['documents', 'paths'],
+    required: ['documents', 'paths', 'limits'],
     additionalProperties: false
   };
 }
 
-function buildScopePrompt(request, facts) {
-  return [
+function buildScopePrompt(request, facts, answerLog) {
+  const hasAnswers = answerLog.length > 0;
+  const lines = [
     'Scope the user request below for its planner, in Scope Mode.',
     boundarySentence(),
-    dataBlocksSentence(),
+    hasAnswers ? settledAnswersSentence('The entries of the answers block') : dataBlocksSentence(),
     '',
     buildFactsBlock(facts),
     formatDataBlock('request', request)
-  ].join('\n');
+  ];
+  if (hasAnswers) {
+    lines.push(formatDataBlock('answers', answerLog));
+  }
+  return lines.join('\n');
 }
 
-function scopeOptions(pass) {
-  return { agentType: PLANNER_AGENT, model: SCOPE_MODEL, effort: 'high', schema: toAgentSchema(SCOPE_SCHEMA), label: 'scope-' + pass, phase: 'Scope' };
+function scopeOptions(pass, round) {
+  const label = round === undefined ? 'scope-' + pass : 'scope-' + pass + '-' + round;
+  return { agentType: PLANNER_AGENT, model: SCOPE_MODEL, effort: 'high', schema: toAgentSchema(SCOPE_SCHEMA), label: label, phase: 'Scope' };
 }
 
 function describeScopeProblem(scope) {
@@ -131,17 +154,23 @@ function relativizeScopeEntry(entry, root) {
   return Object.assign({}, entry, { path: toRepositoryRelativePath(entry.path, root) });
 }
 
+function toLimitPath(limit, root) {
+  const relativeLimit = toRepositoryRelativePath(limit, root);
+  return relativeLimit.endsWith('/') ? relativeLimit.slice(0, -1) : relativeLimit;
+}
+
 function keepRepositoryPathEntries(scope, root) {
   const keepEntries = (entries) => entries.map((entry) => relativizeScopeEntry(entry, root)).filter((entry) => isRepositoryPath(entry.path));
   return {
     documents: keepEntries(scope.documents),
-    paths: keepEntries(scope.paths)
+    paths: keepEntries(scope.paths),
+    limits: scope.limits.map((limit) => toLimitPath(limit, root))
   };
 }
 
-async function runScopeStep(run, facts) {
+async function runScopeStep(run, facts, round) {
   phase('Scope');
-  const scope = await agent(addResumeNote(buildScopePrompt(run.request, facts), run), scopeOptions(run.pass));
+  const scope = await agent(buildScopePrompt(run.request, facts, run.answerLog), scopeOptions(run.pass, round));
   const problem = describeScopeProblem(scope);
   return problem === undefined ? { scope: keepRepositoryPathEntries(scope, facts.root) } : { problem: problem };
 }
