@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The prose budgets rise: `standard-delivery` from 44,000 to 44,600 characters and `analysis-only` from 19,000 to 19,500, each the measured count plus a margin under 1,000. The `standard-delivery` built script is 161,186 characters, with 44,412 characters of string and template literals. `analysis-only` is 73,072 characters, with 19,289 characters of literals. Both are within the unchanged 190,000 script budget (#472).
+- The prose budgets rise: `standard-delivery` from 44,000 to 45,000 characters and `analysis-only` from 19,000 to 19,500, each the measured count plus a margin under 1,000. The `standard-delivery` built script is 161,673 characters, with 44,531 characters of string and template literals. `analysis-only` is 73,410 characters, with 19,406 characters of literals. Both are within the unchanged 190,000 script budget (#472).
 
 ### Fixed
 

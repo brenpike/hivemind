@@ -613,7 +613,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '1b5b4241ba2f03ae';
+const BUILD_ID = 'ea775fc364fc1a5e';
 
 function supportedSchemaKeywords(){
 return[
@@ -1120,6 +1120,18 @@ return[
 ...asks.map((entry,index)=>questionLabel(index)),
 ...taken.map((entry,index)=>decisionLabel(index))
 ];
+}
+function buildAnswerEntry(round,revise){
+const shownLabels=readField(round,'labels');
+if(!Array.isArray(shownLabels)){
+throw new Error('buildAnswerEntry: round.labels must be an array');
+}
+const reviseLabels=revise===undefined?[]:readField(revise,'settled');
+if(!Array.isArray(reviseLabels)){
+throw new Error('buildAnswerEntry: revise.settled must be an array');
+}
+const settled=shownLabels.filter((label,index)=>reviseLabels.includes(label)&&shownLabels.indexOf(label)===index);
+return{question:round.question,settled:settled,reply:round.reply};
 }
 function renderHeading(count){
 if(count===1){
@@ -2480,7 +2492,7 @@ if(reply===undefined){
 return{result:pauseDelivery({asks:[ask],taken:[]},questions,run,detail)};
 }
 const question=detail===undefined?questions:questions+'\n\n'+detail.text;
-run.answerLog.push({question:question,settled:[questionLabel(0)],reply:reply});
+run.answerLog.push(buildAnswerEntry({question:question,labels:[],reply:reply},undefined));
 return{answer:{question:question,reply:reply}};
 }
 function replanFromTailAsk(ask,run){
@@ -2488,7 +2500,7 @@ const asked=askTail(ask,run,undefined);
 if(asked.answer===undefined){
 return asked;
 }
-return{replan:{reason:'The user answered a question the run asked after the last wave, so plan again from the fresh facts with the answers block.'}};
+return{replan:{reason:'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.'}};
 }
 function buildUndecidedAsk(brief){
 return{brief:brief,reason:'no_recommendation'};
@@ -3094,9 +3106,8 @@ if(problem!==undefined){
 return{result:finishDeliveryBlocked(problem,run)};
 }
 if(shownAsks.length>0){
-const settledLabels=listShownLabels(shownAsks,shownTaken).filter((label)=>planResult.settled.includes(label));
-run.answerLog.push({question:shownEntry.question,settled:settledLabels,reply:shownEntry.reply});
-markSettledAsks(planResult.settled,shownAsks,run,settledKinds);
+run.answerLog.push(buildAnswerEntry(shownEntry,planResult));
+markSettledAsks(run.answerLog[run.answerLog.length-1].settled,shownAsks,run,settledKinds);
 if(shownAsks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind)&&run.answeredKeys.has(ask.key))){
 planResult=shownResult;
 }else{
@@ -3128,7 +3139,7 @@ phase('Revise');
 shownAsks=resolution.asks;
 shownTaken=resolution.taken;
 shownResult=planResult;
-shownEntry={question:detail===undefined?questions:questions+'\n\n'+detail.text,reply:reply};
+shownEntry={question:detail===undefined?questions:questions+'\n\n'+detail.text,labels:listShownLabels(shownAsks,shownTaken),reply:reply};
 resultSchema=buildReviseResultSchema(shownAsks,shownTaken);
 const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:run.answerLog,plan:planResult.plan,questions:questions,reply:reply});
 planResult=await agent(revisePrompt,plannerCallOptions('revise-'+round,'Revise',resultSchema));

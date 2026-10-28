@@ -1,7 +1,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { loadLibs } from './harness.mjs';
+import { listSourcePaths, stripCommentsAndStrings } from '../../tools/build_workflows.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const libDir = repoRoot + 'plugin/workflow-src/lib/';
@@ -644,5 +646,131 @@ describe('buildAnswerEntry', () => {
     assert.throws(() => lib.buildAnswerEntry(undefined, undefined), /buildAnswerEntry: round.labels must be an array/);
     assert.throws(() => lib.buildAnswerEntry(round, {}), /buildAnswerEntry: revise.settled must be an array/);
     assert.throws(() => lib.buildAnswerEntry(round, null), /buildAnswerEntry: revise.settled must be an array/);
+  });
+});
+
+const ANSWER_ENTRY_PATH = 'plugin/workflow-src/lib/brief.js';
+const ANSWER_ENTRY_FUNCTION = 'function buildAnswerEntry(';
+
+function findFunctionBodyRange(code, opener) {
+  const start = code.indexOf(opener);
+  if (start === -1) {
+    return undefined;
+  }
+  let depth = 0;
+  for (let index = code.indexOf('{', start); index < code.length; index += 1) {
+    depth += code[index] === '{' ? 1 : code[index] === '}' ? -1 : 0;
+    if (depth === 0) {
+      return { start: start, end: index + 1 };
+    }
+  }
+  return undefined;
+}
+
+function checkSettledKeys(path, code, violations) {
+  const offsets = [...code.matchAll(/\bsettled\s*:/g)].map((match) => match.index);
+  if (path !== ANSWER_ENTRY_PATH) {
+    offsets.forEach(() => violations.push(`${path}: settled key outside ${ANSWER_ENTRY_PATH}`));
+    return;
+  }
+  if (offsets.length !== 1) {
+    violations.push(`${path}: ${offsets.length} settled keys, expected exactly 1`);
+  }
+  const body = findFunctionBodyRange(code, ANSWER_ENTRY_FUNCTION);
+  if (body === undefined) {
+    violations.push(`${path}: no ${ANSWER_ENTRY_FUNCTION}`);
+    return;
+  }
+  offsets.filter((offset) => offset < body.start || offset >= body.end)
+    .forEach(() => violations.push(`${path}: settled key outside buildAnswerEntry`));
+}
+
+function checkAnswerLogPushes(path, code, violations) {
+  const offsets = [...code.matchAll(/answerLog\.push\(/g)].map((match) => match.index + match[0].length);
+  offsets.filter((offset) => !/^\s*buildAnswerEntry\(/.test(code.slice(offset)))
+    .forEach(() => violations.push(`${path}: answerLog.push not directly followed by buildAnswerEntry(`));
+  return offsets.length;
+}
+
+/**
+ * Checks sources, a list of { path, source }, after stripping comments and
+ * literals: a settled key appears only once, inside buildAnswerEntry of
+ * brief.js, and every answerLog.push( is directly followed by
+ * buildAnswerEntry(. Returns { violations, pushSites, settledFileSeen }.
+ */
+function findAnswerLogViolations(sources) {
+  const violations = [];
+  let pushSites = 0;
+  for (const { path, source } of sources) {
+    const code = stripCommentsAndStrings(source);
+    checkSettledKeys(path, code, violations);
+    pushSites += checkAnswerLogPushes(path, code, violations);
+  }
+  const settledFileSeen = sources.some((entry) => entry.path === ANSWER_ENTRY_PATH);
+  if (!settledFileSeen) {
+    violations.push(`${ANSWER_ENTRY_PATH} not among the sources`);
+  }
+  return { violations: violations, pushSites: pushSites, settledFileSeen: settledFileSeen };
+}
+
+const META_PREFIX = 'export const meta = {';
+
+function readScriptSource(path) {
+  const source = readFileSync(repoRoot + path, 'utf8').replace(/\r/g, '');
+  if (!path.endsWith('/meta.js')) {
+    return source;
+  }
+  assert.ok(source.startsWith(META_PREFIX), `${path} must start with ${META_PREFIX}`);
+  return source.slice('export '.length);
+}
+
+function readWorkflowSources(id) {
+  return listSourcePaths(repoRoot, id)
+    .filter((path) => path.startsWith('plugin/workflow-src/'))
+    .map((path) => ({ path: path, source: readScriptSource(path) }));
+}
+
+describe('buildAnswerEntry is the one writer of settled', () => {
+  for (const id of ['analysis-only', 'standard-delivery']) {
+    test(`${id} sources write settled only in buildAnswerEntry and push only its entries`, () => {
+      const sources = readWorkflowSources(id);
+      assert.ok(sources.length > 0, `${id} has no workflow-src paths`);
+      const result = findAnswerLogViolations(sources);
+      assert.equal(result.settledFileSeen, true);
+      assert.ok(result.pushSites >= 1, `${id} has no answerLog.push site`);
+      assert.deepEqual(result.violations, []);
+    });
+  }
+  const briefSource = 'function buildAnswerEntry(round, revise) {\n  return { question: round.question, settled: [], reply: round.reply };\n}\n';
+  const goodPush = { path: 'plugin/workflow-src/x/main.js', source: 'answerLog.push(buildAnswerEntry(round, undefined));\n' };
+  const goodBrief = { path: ANSWER_ENTRY_PATH, source: briefSource };
+  test('a clean fixture passes, and settled in a comment or string is ignored', () => {
+    const quiet = { path: 'plugin/workflow-src/x/plan.js', source: '// settled: x\nconst text = "settled: y";\n' };
+    const result = findAnswerLogViolations([goodBrief, goodPush, quiet]);
+    assert.deepEqual(result.violations, []);
+    assert.equal(result.pushSites, 1);
+  });
+  test('a settled key in another file bites', () => {
+    const stray = { path: 'plugin/workflow-src/x/gates.js', source: 'const entry = { settled: [] };\n' };
+    assert.match(findAnswerLogViolations([goodBrief, goodPush, stray]).violations.join('\n'), /gates\.js: settled key outside/);
+  });
+  test('a second settled key in brief.js bites', () => {
+    const twice = { path: ANSWER_ENTRY_PATH, source: briefSource + 'function other() {\n  return { settled: [] };\n}\n' };
+    const violations = findAnswerLogViolations([twice, goodPush]).violations.join('\n');
+    assert.match(violations, /2 settled keys, expected exactly 1/);
+    assert.match(violations, /settled key outside buildAnswerEntry/);
+  });
+  test('the one settled key outside buildAnswerEntry bites', () => {
+    const moved = { path: ANSWER_ENTRY_PATH, source: 'function buildAnswerEntry(round) {\n  return round;\n}\nfunction other() {\n  return { settled: [] };\n}\n' };
+    assert.match(findAnswerLogViolations([moved, goodPush]).violations.join('\n'), /settled key outside buildAnswerEntry/);
+  });
+  test('an answerLog.push of a bare object bites', () => {
+    const bare = { path: 'plugin/workflow-src/x/plan.js', source: 'run.answerLog.push({ question: q, reply: r });\n' };
+    const result = findAnswerLogViolations([goodBrief, bare]);
+    assert.equal(result.pushSites, 1);
+    assert.match(result.violations.join('\n'), /plan\.js: answerLog\.push not directly followed by buildAnswerEntry\(/);
+  });
+  test('a missing brief.js bites', () => {
+    assert.match(findAnswerLogViolations([goodPush]).violations.join('\n'), /lib\/brief\.js not among the sources/);
   });
 });

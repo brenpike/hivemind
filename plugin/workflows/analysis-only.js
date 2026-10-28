@@ -595,7 +595,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'c4499e2ac0e81fd9';
+const BUILD_ID = 'b984ee279f7588a2';
 
 function supportedSchemaKeywords(){
 return[
@@ -1102,6 +1102,18 @@ return[
 ...asks.map((entry,index)=>questionLabel(index)),
 ...taken.map((entry,index)=>decisionLabel(index))
 ];
+}
+function buildAnswerEntry(round,revise){
+const shownLabels=readField(round,'labels');
+if(!Array.isArray(shownLabels)){
+throw new Error('buildAnswerEntry: round.labels must be an array');
+}
+const reviseLabels=revise===undefined?[]:readField(revise,'settled');
+if(!Array.isArray(reviseLabels)){
+throw new Error('buildAnswerEntry: revise.settled must be an array');
+}
+const settled=shownLabels.filter((label,index)=>reviseLabels.includes(label)&&shownLabels.indexOf(label)===index);
+return{question:round.question,settled:settled,reply:round.reply};
 }
 function renderHeading(count){
 if(count===1){
@@ -2404,13 +2416,6 @@ asks.push({brief:brief,reason:decision.reason});
 }
 return{asks:asks,taken:taken};
 }
-function buildAnswerEntry(shownRound,settledLabels){
-return{
-question:shownRound.question,
-settled:shownRound.shownLabels.filter((label)=>settledLabels.includes(label)),
-reply:shownRound.reply
-};
-}
 function finishBlocked(message){
 return finish({outcome:'blocked',blocks:[{text:message,shorten:true}]});
 }
@@ -2461,7 +2466,7 @@ if(problem!==undefined){
 return finishBlocked(problem);
 }
 if(shownRound!==undefined){
-answerLog.push(buildAnswerEntry(shownRound,analysis.settled));
+answerLog.push(buildAnswerEntry(shownRound,analysis));
 }
 const resolution=resolveQuestions(analysis.questions,level);
 if(resolution.asks.length===0){
@@ -2485,7 +2490,7 @@ phase('Revise');
 const revisePrompt=buildRevisePrompt({request:argsObject.request,facts:facts,answers:answerLog,report:analysis.report,questions:questions,reply:reply});
 analysis=await agent(revisePrompt,plannerOptions('revise-'+round,'Revise',reviseSchemas.agent));
 checkSchema=reviseSchemas.check;
-shownRound={question:questions,shownLabels:shownLabels,reply:reply};
+shownRound={question:questions,labels:shownLabels,reply:reply};
 }
 }
 return await runAnalysis(args);
