@@ -17,11 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- The prose budgets rise: `standard-delivery` from 44,000 to 44,600 characters and `analysis-only` from 19,000 to 19,300, each the measured count plus a margin under 1,000. The `standard-delivery` built script is 160,381 characters, with 44,243 characters of string and template literals. `analysis-only` is 71,361 characters, with 18,961 characters of literals. Both are within the unchanged 190,000 script budget (#472).
+- The prose budgets rise: `standard-delivery` from 44,000 to 44,600 characters and `analysis-only` from 19,000 to 19,300, each the measured count plus a margin under 1,000. The `standard-delivery` built script is 161,186 characters, with 44,412 characters of string and template literals. `analysis-only` is 73,072 characters, with 19,289 characters of literals. Both are within the unchanged 190,000 script budget (#472).
 
 ### Fixed
 
-- A replan no longer forgets the user's answers. Every later planning pass gets the earlier answers as settled decisions it may not ask again or reverse (#472).
+- A replan no longer forgets the user's answers. Every later planning pass gets the earlier answers, but only the questions and decisions a reply settled count as settled and may not be asked again or reversed. A question the reply left open is asked again. This holds in both `standard-delivery` and `analysis-only` (#472).
 - A resume after the plugin changed while the run was paused stops before anything runs and asks to run the request again, instead of binding stored answers to the wrong questions (#472).
 - A plan whose files leave the paths the request or the user's answers limit the work to is always asked, never decided for the user (#472).
 

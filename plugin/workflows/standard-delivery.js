@@ -613,7 +613,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '33402d2a1670433f';
+const BUILD_ID = '1b5b4241ba2f03ae';
 
 function supportedSchemaKeywords(){
 return[
@@ -1103,6 +1103,24 @@ throw new Error('questionLabel: index must be a non-negative integer');
 }
 return'Q'+(index+1);
 }
+function decisionLabel(index){
+if(!Number.isInteger(index)||index<0){
+throw new Error('decisionLabel: index must be a non-negative integer');
+}
+return'D'+(index+1);
+}
+function listShownLabels(asks,taken){
+if(!Array.isArray(asks)||asks.length===0){
+throw new Error('listShownLabels: asks must be a non-empty array');
+}
+if(!Array.isArray(taken)){
+throw new Error('listShownLabels: taken must be an array');
+}
+return[
+...asks.map((entry,index)=>questionLabel(index)),
+...taken.map((entry,index)=>decisionLabel(index))
+];
+}
 function renderHeading(count){
 if(count===1){
 return'**Answer '+questionLabel(0)+' so I can go on: pick one of its options.**';
@@ -1121,7 +1139,7 @@ return lines.join('\n');
 }
 function renderTakenLine(entry,index){
 const brief=readField(entry,'brief');
-return'- D'+(index+1)+'. '+renderText(readField(brief,'problem'))+' Chose option '
+return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose option '
 +renderText(readField(readField(brief,'recommendation'),'option_id'))+'.';
 }
 function renderQuestion(entry,index){
@@ -1201,7 +1219,7 @@ const recommendation=readField(brief,'recommendation');
 const optionId=readField(recommendation,'option_id');
 const chosen=findOptionById(readField(brief,'options'),optionId);
 const lines=[
-'  D'+(index+1)+'. '+renderText(readField(brief,'problem')),
+'  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem')),
 '    Chose option '+renderText(optionId)+': '+renderText(readField(chosen,'summary')),
 '    Why: '+renderText(readField(recommendation,'why'))
 ];
@@ -1212,7 +1230,7 @@ function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
 const recommendation=readField(brief,'recommendation');
 const whyLine=renderText(readField(recommendation,'why')).split(/\s*[\r\n]+\s*/).join(' ');
-return'  D'+(index+1)+'. '+renderText(readField(brief,'problem'))+' Chose option '
+return'  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose option '
 +renderText(readField(recommendation,'option_id'))+'. Why: '+cutAtBoundary(whyLine,maxExcerptLength());
 }
 function findOptionById(options,optionId){
@@ -2455,18 +2473,18 @@ return buildTaggedSchema(spec);
 function isRunEnd(outcome){
 return outcome.result!==undefined||outcome.replan!==undefined;
 }
-function askTail(asks,run,detail){
-const questions=renderQuestions(asks,[]);
+function askTail(ask,run,detail){
+const questions=renderQuestions([ask],[]);
 const reply=takeNextReply(run,run.answerLog.length+1);
 if(reply===undefined){
-return{result:pauseDelivery({asks:asks,taken:[]},questions,run,detail)};
+return{result:pauseDelivery({asks:[ask],taken:[]},questions,run,detail)};
 }
-const answer={question:detail===undefined?questions:questions+'\n\n'+detail.text,reply:reply};
-run.answerLog.push(answer);
-return{answer:answer};
+const question=detail===undefined?questions:questions+'\n\n'+detail.text;
+run.answerLog.push({question:question,settled:[questionLabel(0)],reply:reply});
+return{answer:{question:question,reply:reply}};
 }
-function replanFromTailAsk(asks,run){
-const asked=askTail(asks,run,undefined);
+function replanFromTailAsk(ask,run){
+const asked=askTail(ask,run,undefined);
 if(asked.answer===undefined){
 return asked;
 }
@@ -2481,7 +2499,7 @@ if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
 acceptResolution(resolution,run);
 return{};
 }
-return replanFromTailAsk(resolution.asks,run);
+return replanFromTailAsk(resolution.asks[0],run);
 }
 function bumpTypeTaskLine(){
 return'Invoke the hivemind:bump-type skill once, with each value of the inputs block below as the input of the same name.';
@@ -2678,7 +2696,7 @@ return{held:true,note:validation.status==='passed'?'passed':'not run, the projec
 }
 gates.failures[run.head]=validation.failures;
 if(gates.fixRounds>=maxFixRounds()){
-return replanFromTailAsk([buildUndecidedAsk(buildFixLimitBrief(run.head))],run);
+return replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)),run);
 }
 const decided=resolveTailDecision(VALIDATION_REMEDIATION_KIND,buildValidationRemediationBrief(run.head,gates.fixRounds+1),run);
 if(isRunEnd(decided)){
@@ -2693,7 +2711,7 @@ if(staleIds.length===0){
 return{};
 }
 if(gates.reruns>=maxGateReruns()){
-return replanFromTailAsk([buildUndecidedAsk(buildGateRerunBrief(staleIds,run.head,true))],run);
+return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds,run.head,true)),run);
 }
 gates.reruns+=1;
 return resolveTailDecision(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head,false),run);
@@ -2777,12 +2795,12 @@ variants:{complete:{required:['plan'],optional:[]},blocked:{required:[],optional
 function buildPlanResultSchema(planSchema,briefSchema){
 return buildTaggedSchema(buildPlanResultSpec(planSchema,briefSchema));
 }
-function buildReviseResultSchema(shownAsks){
+function buildReviseResultSchema(shownAsks,shownTaken){
 const spec=buildPlanResultSpec(PLAN_SCHEMA,BRIEF_SCHEMA);
 spec.properties.settled={
 type:'array',
-description:'The label, like Q1, of each shown question the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
-items:{type:'string',enum:shownAsks.map((ask,index)=>questionLabel(index))}
+description:'The label, like Q1 or D1, of each shown question or decision made for you the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
+items:{type:'string',enum:listShownLabels(shownAsks,shownTaken)}
 };
 spec.required.push('settled');
 return buildTaggedSchema(spec);
@@ -2827,15 +2845,15 @@ return itemProblem;
 }
 return'';
 }
-function settledAnswersSentence(home){
-return dataBlocksSentence(undefined)+' '+home+' hold the user\'s settled decisions: never ask them again, never reverse them.';
+function settledAnswersSentence(replyHome){
+return dataBlocksSentence(replyHome)+' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
 }
 function buildPlanPrompt(request,facts,scope,replan,answerLog){
 const hasAnswers=answerLog.length>0;
 const lines=[
 'Plan the delivery of the user request below in this repository, as one plan on one working branch.',
 boundarySentence(),
-hasAnswers?settledAnswersSentence('The entries of the answers block'):dataBlocksSentence(undefined)
+hasAnswers?settledAnswersSentence(undefined):dataBlocksSentence(undefined)
 ];
 if(replan!==undefined){
 lines.push('This is a new plan in a run that already started: the replan block says why.');
@@ -2857,7 +2875,7 @@ const hasAnswers=answers.length>0;
 const lines=[
 'Revise your plan for the delivery of the user request below with the user reply below.',
 boundarySentence(),
-hasAnswers?settledAnswersSentence('The answers and reply blocks'):dataBlocksSentence('The reply block'),
+hasAnswers?settledAnswersSentence('The reply block'):dataBlocksSentence('The reply block'),
 '',
 buildFactsBlock(facts),
 formatDataBlock('request',request),
@@ -3064,7 +3082,9 @@ phase('Plan');
 let scope=passScope;
 let resultSchema=PLAN_RESULT_SCHEMA;
 let shownAsks=[];
+let shownTaken=[];
 let shownResult;
+let shownEntry;
 const settledKinds=new Set();
 const planPrompt=buildPlanPrompt(run.request,facts,scope,replan,run.answerLog);
 let planResult=await agent(planPrompt,plannerCallOptions('plan-'+run.pass,'Plan',resultSchema));
@@ -3074,6 +3094,8 @@ if(problem!==undefined){
 return{result:finishDeliveryBlocked(problem,run)};
 }
 if(shownAsks.length>0){
+const settledLabels=listShownLabels(shownAsks,shownTaken).filter((label)=>planResult.settled.includes(label));
+run.answerLog.push({question:shownEntry.question,settled:settledLabels,reply:shownEntry.reply});
 markSettledAsks(planResult.settled,shownAsks,run,settledKinds);
 if(shownAsks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind)&&run.answeredKeys.has(ask.key))){
 planResult=shownResult;
@@ -3102,12 +3124,13 @@ const reply=takeNextReply(run,round);
 if(reply===undefined){
 return{result:pauseDelivery(resolution,questions,run,detail)};
 }
-run.answerLog.push({question:detail===undefined?questions:questions+'\n\n'+detail.text,reply:reply});
 phase('Revise');
 shownAsks=resolution.asks;
+shownTaken=resolution.taken;
 shownResult=planResult;
-resultSchema=buildReviseResultSchema(shownAsks);
-const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:run.answerLog.slice(0,round-1),plan:planResult.plan,questions:questions,reply:reply});
+shownEntry={question:detail===undefined?questions:questions+'\n\n'+detail.text,reply:reply};
+resultSchema=buildReviseResultSchema(shownAsks,shownTaken);
+const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:run.answerLog,plan:planResult.plan,questions:questions,reply:reply});
 planResult=await agent(revisePrompt,plannerCallOptions('revise-'+round,'Revise',resultSchema));
 }
 }
@@ -3995,7 +4018,7 @@ function askReviewQuestion(review,run){
 const openFindings=review.open_findings;
 const resolution={asks:[],taken:[]};
 resolveDecision(reviewQuestionKinds()[review.exit_reason],buildReviewQuestionBrief(review,openFindings),undefined,run,resolution);
-return askTail(resolution.asks,run,buildReviewDetailBlock(review,openFindings));
+return askTail(resolution.asks[0],run,buildReviewDetailBlock(review,openFindings));
 }
 function buildDiminishingReturnsBrief(review,head){
 return buildTailBrief({
@@ -4131,7 +4154,7 @@ const hasAnswers=answerLog.length>0;
 const lines=[
 'Scope the user request below for its planner, in Scope Mode.',
 boundarySentence(),
-hasAnswers?settledAnswersSentence('The entries of the answers block'):dataBlocksSentence(),
+hasAnswers?settledAnswersSentence(undefined):dataBlocksSentence(),
 '',
 buildFactsBlock(facts),
 formatDataBlock('request',request)
