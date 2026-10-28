@@ -315,7 +315,6 @@ function createRunState(launch) {
     answeredKeys: new Set(),
     taken: [],
     reversibleEffects: [],
-    acceptedPaths: [],
     commits: [],
     runnerCommits: {},
     head: undefined,

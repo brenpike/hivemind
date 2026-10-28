@@ -613,7 +613,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'd4fe0dab839e3498';
+const BUILD_ID = '33402d2a1670433f';
 
 function supportedSchemaKeywords(){
 return[
@@ -2948,13 +2948,13 @@ lines.push('Outside the limits you set: '+listShownPaths(outsidePaths)+'.');
 }
 return{text:lines.join('\n')};
 }
-function listOutsidePaths(plan,scope,run){
+function listOutsidePaths(plan,scope){
 if(scope.limits.length===0){
 return[];
 }
 const limits=scope.limits.filter((limit)=>isRepositoryPath(limit));
 const isInsideLimits=(file)=>limits.some((limit)=>file===limit||file.startsWith(limit+'/'));
-return listStepFiles(plan.steps).filter((file)=>!isInsideLimits(file)&&!run.acceptedPaths.includes(file));
+return listStepFiles(plan.steps).filter((file)=>!isInsideLimits(file));
 }
 function markOutsideLimits(brief,outsidePaths){
 if(outsidePaths.length===0){
@@ -3009,7 +3009,7 @@ resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(step.id,effect.sum
 }
 function resolvePlanAcceptance(plan,run,resolution,scope){
 const isRemediation=run.taken.some((entry)=>entry.kind===PLANNER_ESCALATION_ROUTING_KIND||entry.kind===ROOT_CLUSTER_ROUTING_KIND);
-resolution.outsidePaths=listOutsidePaths(plan,scope,run);
+resolution.outsidePaths=listOutsidePaths(plan,scope);
 if(isRemediation){
 return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND,markOutsideLimits(buildRemediationPlanBrief(plan),resolution.outsidePaths),[run.pass,plan],run,resolution);
 }
@@ -3040,9 +3040,6 @@ const isListed=run.reversibleEffects.some((listed)=>listed.stepId===effect.stepI
 if(!isListed){
 run.reversibleEffects.push(effect);
 }
-}
-if(resolution.outsidePaths!==undefined){
-run.acceptedPaths.push(...resolution.outsidePaths);
 }
 }
 function markSettledAsks(settledLabels,shownAsks,run,settledKinds){
@@ -4411,7 +4408,6 @@ answerLog:[],
 answeredKeys:new Set(),
 taken:[],
 reversibleEffects:[],
-acceptedPaths:[],
 commits:[],
 runnerCommits:{},
 head:undefined,

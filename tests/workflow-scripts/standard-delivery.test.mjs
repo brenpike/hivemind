@@ -5360,9 +5360,6 @@ const ROW_TESTS = {
     function limitsScope(limits) {
       return { documents: [], paths: [], limits: limits };
     }
-    function makeLimitRun() {
-      return main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
-    }
     function outsideProblem(brief, count) {
       return brief.problem + ' It changes ' + count + ' outside the limits you set.';
     }
@@ -5385,8 +5382,7 @@ const ROW_TESTS = {
       return { results: results, paused: second };
     }
     test('empty limits leave the brief unchanged and the plan taken', async () => {
-      const run = makeLimitRun();
-      assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([]), run)], []);
+      assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([]))], []);
       assert.deepEqual(structuredClone(main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), [])), structuredClone(main.buildPlanAcceptanceBrief(makePlan())));
       assert.equal(main.buildPlanDetailBlock(makePlan(), []).text.split('\n').length, 3);
       const taken = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([]) }));
@@ -5394,10 +5390,9 @@ const ROW_TESTS = {
       assert.ok(!taken.result.message.includes('outside the limits'), taken.result.message);
     });
     test('a file equal to a limit or under it, with or without a trailing slash, is inside', async () => {
-      const run = makeLimitRun();
       const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', 'src/deep/a.js', 'srcx/b.js', 'docs/x.md', 'docs/x.mdx'])] });
-      assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src', 'docs/x.md']), run)], ['srcx/b.js', 'docs/x.mdx']);
-      assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src', 'srcx', 'docs']), run)], []);
+      assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src', 'docs/x.md']))], ['srcx/b.js', 'docs/x.mdx']);
+      assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src', 'srcx', 'docs']))], []);
       assert.deepEqual([...main.keepRepositoryPathEntries(limitsScope(['src/', CHECKOUT_ROOT + '/docs/', 'docs/x.md']), CHECKOUT_ROOT).limits], ['src', 'docs', 'docs/x.md']);
       for (const limit of ['src', 'src/', CHECKOUT_ROOT + '/src/', 'src/cache.js']) {
         const inside = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
@@ -5458,13 +5453,17 @@ const ROW_TESTS = {
       assert.equal(callOf(run, 'scope-1-1').prompt, callOf(paused, 'scope-1-1').prompt);
       assert.equal(readDataBlock(callOf(run, 'scope-1-2').prompt, 'answers').length, 2);
     });
-    test('a settled outside-limit acceptance runs no re-scope, is not asked again, and its files are not asked in a later pass', async () => {
+    /**
+     * Runs a pass 1 whose outside-limit acceptance the user settles, then a
+     * pass 2 that replans the same plan under `limits`.
+     */
+    async function runSettledThenReplan(limits) {
       const results = happyResults({
         'scope-1': limitsScope(['docs']),
         'revise-1': reviseResult(planResult(), ['Q1']),
         'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
         'facts-2': onPlanBranchFacts(OTHER),
-        'scope-2': limitsScope(['docs']),
+        'scope-2': limitsScope(limits),
         'plan-2': planResult(),
         'branch-2': branchRelay({ created: 'false', commit: OTHER }),
         'work-2-STEP-001': WORKER_DONE,
@@ -5474,20 +5473,26 @@ const ROW_TESTS = {
       const paused = await runWorkflow(LAUNCH, results);
       assert.equal(paused.result.needs_user, true);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, src may change.'), results);
-      assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(!labelsOf(run).includes('scope-1-1') && !labelsOf(run).includes('revise-2'), JSON.stringify(labelsOf(run)));
-      assert.ok(labelsOf(run).includes('scope-2') && labelsOf(run).includes('work-2-STEP-001'), JSON.stringify(labelsOf(run)));
-      const state = makeLimitRun();
-      state.acceptedPaths.push('src/cache.js');
-      const grown = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', 'src/store.js'])] });
-      assert.deepEqual([...main.listOutsidePaths(grown, limitsScope(['docs']), state)], ['src/store.js']);
+      assert.ok(labelsOf(run).includes('work-1-STEP-001') && labelsOf(run).includes('scope-2'), JSON.stringify(labelsOf(run)));
+      return run;
+    }
+    test('a settled outside-limit acceptance runs no re-scope, and a later pass with the same limits asks the outside file again', async () => {
+      const run = await runSettledThenReplan(['docs']);
+      assert.equal(run.result.needs_user, true);
+      assert.deepEqual(labelsOf(run).slice(-3), ['facts-2', 'scope-2', 'plan-2']);
+      assertOutsideAsk(run.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
+    });
+    test('a later pass whose re-scoped limits include the outside file takes the plan', async () => {
+      const run = await runSettledThenReplan(['docs', 'src']);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(labelsOf(run).includes('work-2-STEP-001'), JSON.stringify(labelsOf(run)));
     });
     test('an absolute or .. limit is kept, matches nothing and asks', async () => {
-      const run = makeLimitRun();
       const limits = ['/other/src', '../src', 'src/..'];
       assert.deepEqual([...main.keepRepositoryPathEntries(limitsScope(limits), CHECKOUT_ROOT).limits], limits);
       for (const limit of limits) {
-        assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([limit]), run)], ['src/cache.js'], limit);
+        assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([limit]))], ['src/cache.js'], limit);
         const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
         assert.equal(paused.result.needs_user, true, limit);
         assert.ok(paused.result.message.includes('Why I am asking: ' + lib.askReasonLine('no_recommendation')), paused.result.message);

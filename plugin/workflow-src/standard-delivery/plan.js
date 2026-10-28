@@ -8,8 +8,8 @@
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
  *           request, trunk, level, pass, storedAnswers and pendingReply,
- *           and updates answerLog, answeredKeys, taken, reversibleEffects
- *           and acceptedPaths.
+ *           and updates answerLog, answeredKeys, taken and
+ *           reversibleEffects.
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
  *           After a reply round whose revise result passes the plan check,
@@ -114,15 +114,13 @@
  *   472). With an empty log, the plan and first revise prompts are the
  *   prompts of a run with no answers, so a resume replays them from cache.
  *   Outside-limit ask: when scope.limits is not empty, a plan step file
- *   that neither equals a limit nor sits under limit + '/', and is not in
- *   run.acceptedPaths, makes the plan or remediation plan acceptance brief
- *   recommendation strength none, so decide() asks it no_recommendation at
- *   every level. Its problem names their count when it fits, and the detail
- *   block lists up to 5 of them, then the count of the rest. Empty limits
- *   leave the brief as it was. The outside paths of an acceptance that
- *   resolves answered join run.acceptedPaths in acceptResolution, after
- *   resolution, so a restored settled acceptance renders as shown and its
- *   key holds.
+ *   that neither equals a limit nor sits under limit + '/' makes the plan or
+ *   remediation plan acceptance brief recommendation strength none, so
+ *   decide() asks it no_recommendation at every level. Its problem names
+ *   their count when it fits, and the detail block lists up to 5 of them,
+ *   then the count of the rest. Empty limits leave the brief as it was.
+ *   The limits come only from the scope step, so a later pass asks a file
+ *   outside them again.
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
  *   P24): how to read the facts, what is left to plan, the review block and
@@ -363,18 +361,18 @@ function buildPlanDetailBlock(plan, outsidePaths) {
 }
 
 /**
- * Returns the plan step files outside every limit of the scope that no
- * accepted plan acceptance of the run already covers, or [] when the scope
- * sets no limit. A file is inside a limit when it equals the limit or sits
- * under limit + '/'. A limit that fails isRepositoryPath matches no file.
+ * Returns the plan step files outside every limit of the scope, or [] when
+ * the scope sets no limit. A file is inside a limit when it equals the
+ * limit or sits under limit + '/'. A limit that fails isRepositoryPath
+ * matches no file.
  */
-function listOutsidePaths(plan, scope, run) {
+function listOutsidePaths(plan, scope) {
   if (scope.limits.length === 0) {
     return [];
   }
   const limits = scope.limits.filter((limit) => isRepositoryPath(limit));
   const isInsideLimits = (file) => limits.some((limit) => file === limit || file.startsWith(limit + '/'));
-  return listStepFiles(plan.steps).filter((file) => !isInsideLimits(file) && !run.acceptedPaths.includes(file));
+  return listStepFiles(plan.steps).filter((file) => !isInsideLimits(file));
 }
 
 function markOutsideLimits(brief, outsidePaths) {
@@ -454,7 +452,7 @@ function resolveExternalEffects(plan, run, resolution) {
 
 function resolvePlanAcceptance(plan, run, resolution, scope) {
   const isRemediation = run.taken.some((entry) => entry.kind === PLANNER_ESCALATION_ROUTING_KIND || entry.kind === ROOT_CLUSTER_ROUTING_KIND);
-  resolution.outsidePaths = listOutsidePaths(plan, scope, run);
+  resolution.outsidePaths = listOutsidePaths(plan, scope);
   if (isRemediation) {
     return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildRemediationPlanBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution);
   }
@@ -496,9 +494,6 @@ function acceptResolution(resolution, run) {
     if (!isListed) {
       run.reversibleEffects.push(effect);
     }
-  }
-  if (resolution.outsidePaths !== undefined) {
-    run.acceptedPaths.push(...resolution.outsidePaths);
   }
 }
 
