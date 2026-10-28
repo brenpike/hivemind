@@ -595,6 +595,8 @@ const PLAN_SCHEMA = {
 }
 };
 
+const BUILD_ID = 'b984ee279f7588a2';
+
 function supportedSchemaKeywords(){
 return[
 '$schema',
@@ -1083,6 +1085,36 @@ throw new Error('questionLabel: index must be a non-negative integer');
 }
 return'Q'+(index+1);
 }
+function decisionLabel(index){
+if(!Number.isInteger(index)||index<0){
+throw new Error('decisionLabel: index must be a non-negative integer');
+}
+return'D'+(index+1);
+}
+function listShownLabels(asks,taken){
+if(!Array.isArray(asks)||asks.length===0){
+throw new Error('listShownLabels: asks must be a non-empty array');
+}
+if(!Array.isArray(taken)){
+throw new Error('listShownLabels: taken must be an array');
+}
+return[
+...asks.map((entry,index)=>questionLabel(index)),
+...taken.map((entry,index)=>decisionLabel(index))
+];
+}
+function buildAnswerEntry(round,revise){
+const shownLabels=readField(round,'labels');
+if(!Array.isArray(shownLabels)){
+throw new Error('buildAnswerEntry: round.labels must be an array');
+}
+const reviseLabels=revise===undefined?[]:readField(revise,'settled');
+if(!Array.isArray(reviseLabels)){
+throw new Error('buildAnswerEntry: revise.settled must be an array');
+}
+const settled=shownLabels.filter((label,index)=>reviseLabels.includes(label)&&shownLabels.indexOf(label)===index);
+return{question:round.question,settled:settled,reply:round.reply};
+}
 function renderHeading(count){
 if(count===1){
 return'**Answer '+questionLabel(0)+' so I can go on: pick one of its options.**';
@@ -1101,7 +1133,7 @@ return lines.join('\n');
 }
 function renderTakenLine(entry,index){
 const brief=readField(entry,'brief');
-return'- D'+(index+1)+'. '+renderText(readField(brief,'problem'))+' Chose option '
+return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose option '
 +renderText(readField(readField(brief,'recommendation'),'option_id'))+'.';
 }
 function renderQuestion(entry,index){
@@ -1181,7 +1213,7 @@ const recommendation=readField(brief,'recommendation');
 const optionId=readField(recommendation,'option_id');
 const chosen=findOptionById(readField(brief,'options'),optionId);
 const lines=[
-'  D'+(index+1)+'. '+renderText(readField(brief,'problem')),
+'  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem')),
 '    Chose option '+renderText(optionId)+': '+renderText(readField(chosen,'summary')),
 '    Why: '+renderText(readField(recommendation,'why'))
 ];
@@ -1192,7 +1224,7 @@ function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
 const recommendation=readField(brief,'recommendation');
 const whyLine=renderText(readField(recommendation,'why')).split(/\s*[\r\n]+\s*/).join(' ');
-return'  D'+(index+1)+'. '+renderText(readField(brief,'problem'))+' Chose option '
+return'  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose option '
 +renderText(readField(recommendation,'option_id'))+'. Why: '+cutAtBoundary(whyLine,maxExcerptLength());
 }
 function findOptionById(options,optionId){
@@ -1931,9 +1963,19 @@ return{problem:'The references launch arg names '+references.length+' issues or 
 }
 return{references:references};
 }
-function readLaunchInputs(argsObject,runNoun){
+function requireBuildId(buildId){
+if(!isNonEmptyString(buildId)){
+throw new Error('args.js: buildId must be a non-blank string');
+}
+return buildId;
+}
+function readLaunchInputs(argsObject,runNoun,buildId){
+requireBuildId(buildId);
 if(Object.prototype.hasOwnProperty.call(argsObject,'resume_args')){
 return{problem:'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so '+describeRunNoun(runNoun)+' did not start.'};
+}
+if(isPlainObject(argsObject.answers)&&argsObject.build!==buildId){
+return{problem:'The plugin changed while '+describeRunNoun(runNoun)+' was paused, so nothing ran. Run the request again with your answers in it.'};
 }
 const trunkInput=readTrunk(argsObject,runNoun);
 if(trunkInput.problem!==undefined){
@@ -1959,9 +2001,9 @@ function readPendingReply(argsObject){
 const reply=argsObject[replyField()];
 return isPlainObject(argsObject.answers)&&isNonEmptyString(reply)?reply:undefined;
 }
-function buildResumeArgs(replies){
+function buildResumeArgs(replies,buildId){
 const answers=Object.fromEntries(replies.map((reply,index)=>[roundKey(index+1),reply]));
-return{answers:answers};
+return{answers:answers,build:requireBuildId(buildId)};
 }
 
 function gitIdentifierPattern(){
@@ -2259,6 +2301,22 @@ required:['outcome','questions'],
 variants:{complete:{required:['report'],optional:[]},blocked:{required:[],optional:['blocker']}}
 };
 }
+function buildReviseSpec(questionSchema,shownLabels){
+const spec=buildAnalysisSpec(questionSchema);
+spec.properties.settled={
+type:'array',
+description:'The label, like Q1 or D1, of each shown question or decision made for you the reply settles.',
+items:{type:'string',enum:shownLabels.slice()}
+};
+spec.required.push('settled');
+return spec;
+}
+function buildReviseSchemas(shownLabels){
+return{
+agent:buildTaggedSchema(buildReviseSpec(omitSchemaDialect(BRIEF_SCHEMA),shownLabels)),
+check:buildTaggedSchema(buildReviseSpec({},shownLabels))
+};
+}
 function buildFactsPrompt(trunk,references){
 return[
 'Invoke the hivemind:gather-facts skill once, with the trunk and references in the inputs block below and no remote.',
@@ -2279,21 +2337,24 @@ buildFactsBlock(facts),
 formatDataBlock('request',request)
 ].join('\n');
 }
-function buildRevisePrompt({request,facts,report,questions,reply}){
-return[
+function buildRevisePrompt({request,facts,answers,report,questions,reply}){
+const hasAnswers=answers.length>0;
+const lines=[
 'Revise your analysis of the user request below with the user reply below.',
 boundarySentence(),
-dataBlocksSentence('The reply block'),
+hasAnswers?dataBlocksSentence('The reply block')+' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.':dataBlocksSentence('The reply block'),
 '',
 buildFactsBlock(facts),
-formatDataBlock('request',request),
-formatDataBlock('earlier_report',report),
-formatDataBlock('questions',questions),
-formatDataBlock('reply',reply)
-].join('\n');
+formatDataBlock('request',request)
+];
+if(hasAnswers){
+lines.push(formatDataBlock('answers',answers));
 }
-function plannerOptions(label,phaseTitle){
-return{agentType:PLANNER_AGENT_TYPE,schema:toAgentSchema(ANALYSIS_SCHEMA),label:label,phase:phaseTitle};
+lines.push(formatDataBlock('earlier_report',report),formatDataBlock('questions',questions),formatDataBlock('reply',reply));
+return lines.join('\n');
+}
+function plannerOptions(label,phaseTitle,schema){
+return{agentType:PLANNER_AGENT_TYPE,schema:toAgentSchema(schema),label:label,phase:phaseTitle};
 }
 function factsOptions(){
 return{agentType:runnerAgentType(),model:'haiku',schema:toAgentSchema(FACTS_STEP_SCHEMA),label:'facts',phase:'Facts'};
@@ -2330,11 +2391,11 @@ return{problem:scanProblem};
 }
 return{facts:facts};
 }
-function describeReplyProblem(analysis){
+function describeReplyProblem(analysis,checkSchema){
 if(!isPlainObject(analysis)){
 return'The planner returned no result, so the analysis stopped.';
 }
-if(!validateSchema(ANALYSIS_CHECK_SCHEMA,analysis).ok){
+if(!validateSchema(checkSchema,analysis).ok){
 return'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
 }
 if(analysis.outcome==='blocked'){
@@ -2369,8 +2430,8 @@ blocks.push({text:openQuestions});
 blocks.push({text:report,shorten:true});
 return finish({outcome:'complete',blocks:blocks});
 }
-function pauseOrStopAsking(report,resolution,questions,replies){
-const resumeArgs=buildResumeArgs(replies);
+function pauseOrStopAsking(report,resolution,questions,answerLog){
+const resumeArgs=buildResumeArgs(answerLog.map((entry)=>entry.reply),BUILD_ID);
 if(!canCarry(resumeArgs)){
 return finishComplete(report,renderOpenQuestions(resolution.asks,'reply_size'),resolution.taken);
 }
@@ -2382,7 +2443,7 @@ const argsObject=readArgsObject(rawArgs);
 if(!isNonEmptyString(argsObject.request)){
 return finishBlocked('No request was given, so there is nothing to analyze.');
 }
-const launchInputs=readLaunchInputs(argsObject,RUN_NOUN);
+const launchInputs=readLaunchInputs(argsObject,RUN_NOUN,BUILD_ID);
 if(launchInputs.problem!==undefined){
 return finishBlocked(launchInputs.problem);
 }
@@ -2394,13 +2455,18 @@ const facts=checked.facts;
 const level=resolveLevel(undefined,AUTONOMY_TABLE);
 const storedAnswers=readStoredAnswers(argsObject);
 let pendingReply=readPendingReply(argsObject);
-const replies=[];
+const answerLog=[];
+let checkSchema=ANALYSIS_CHECK_SCHEMA;
+let shownRound;
 phase('Analyze');
-let analysis=await agent(buildAnalyzePrompt(argsObject.request,facts),plannerOptions('analyze','Analyze'));
+let analysis=await agent(buildAnalyzePrompt(argsObject.request,facts),plannerOptions('analyze','Analyze',ANALYSIS_SCHEMA));
 for(let round=1;;round+=1){
-const problem=describeReplyProblem(analysis);
+const problem=describeReplyProblem(analysis,checkSchema);
 if(problem!==undefined){
 return finishBlocked(problem);
+}
+if(shownRound!==undefined){
+answerLog.push(buildAnswerEntry(shownRound,analysis));
 }
 const resolution=resolveQuestions(analysis.questions,level);
 if(resolution.asks.length===0){
@@ -2416,12 +2482,15 @@ reply=pendingReply;
 pendingReply=undefined;
 }
 if(reply===undefined){
-return pauseOrStopAsking(analysis.report,resolution,questions,replies);
+return pauseOrStopAsking(analysis.report,resolution,questions,answerLog);
 }
-replies.push(reply);
+const shownLabels=listShownLabels(resolution.asks,resolution.taken);
+const reviseSchemas=buildReviseSchemas(shownLabels);
 phase('Revise');
-const revisePrompt=buildRevisePrompt({request:argsObject.request,facts:facts,report:analysis.report,questions:questions,reply:reply});
-analysis=await agent(revisePrompt,plannerOptions('revise-'+round,'Revise'));
+const revisePrompt=buildRevisePrompt({request:argsObject.request,facts:facts,answers:answerLog,report:analysis.report,questions:questions,reply:reply});
+analysis=await agent(revisePrompt,plannerOptions('revise-'+round,'Revise',reviseSchemas.agent));
+checkSchema=reviseSchemas.check;
+shownRound={question:questions,labels:shownLabels,reply:reply};
 }
 }
 return await runAnalysis(args);

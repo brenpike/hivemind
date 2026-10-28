@@ -1,18 +1,27 @@
 /*
  * standard-delivery plan.js: the planning pass of the standard-delivery
  * workflow. It holds the plan result and revise schemas, the path checks
- * of plan values, the plan and revise prompts, the plan check, the plan
- * briefs and the resolution of every decision of a planning pass.
+ * of plan values, the plan and revise prompts, the plan check, the
+ * outside-limit check and the resolution of every decision of a planning
+ * pass. Its code-built briefs live in briefs.js.
  *
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
  *           request, trunk, level, pass, storedAnswers and pendingReply,
- *           and updates replies, answeredKeys, taken and reversibleEffects.
+ *           and updates answerLog, answeredKeys, taken and
+ *           reversibleEffects.
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
+ *           Once the revise result of a reply round passes the plan check,
+ *           the pass logs the reply, then, unless the reply settled the shown
+ *           plan acceptance and the shown result was restored, scopes again
+ *           with runScopeStep(run, facts, round), label scope-P-R. That scope
+ *           replaces the pass scope for the acceptance check and every later
+ *           revise prompt of the pass, and its problem stops the run blocked
+ *           as a pass-start scope problem does.
  *   replan  undefined at launch, else the replan data of the step that
- *           sent the run back to planning: its reason, and the review or
- *           the answer when it carries one.
+ *           sent the run back to planning: its reason, and the review when
+ *           it carries one.
  *   PLAN_SCHEMA, BRIEF_SCHEMA, AUTONOMY_TABLE and the kind constants of
  *   main.js.
  *
@@ -26,7 +35,8 @@
  *   Plan    hivemind:cerebrate returns a plan result: PLAN_SCHEMA under
  *           plan, with outcome, questions and blocker.
  *   Revise  the planner revises the plan with the user reply and names, in
- *           settled, the label of each shown question the reply settles.
+ *           settled, the label of each shown question or decision made for
+ *           you the reply settles.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -34,11 +44,8 @@
  *   function of this module.
  *   Once local review sent the run back to planning, every later plan
  *   acceptance resolves through decide() kind
- *   remediation_plan_acceptance. Its brief gate is
- *   plan.remediation_gate.promotion_gate copied whole, with architectural
- *   also true when grows_surface or repeats_surface is, and its problem
- *   names each flag that holds, so it asks then and is taken otherwise at
- *   the default level (decision-autonomy.md, Promotion Gate).
+ *   remediation_plan_acceptance, with the brief of
+ *   buildRemediationPlanBrief (briefs.js).
  *   Every decision resolves through decide() with its kind fixed here,
  *   never from brief.kind. Every question of a plan pass is keyed through
  *   questionKey by its kind, a scope its call site passes and the question
@@ -57,11 +64,11 @@
  *   does not ask again (issue 433). The residual: a planner question raised
  *   again with other rendered text, a changed recommendation too, is a new
  *   question, asked again in the next pause. The planner's revise pass
- *   reads the reply. The
- *   revise result names in settled, by label like Q1, the shown questions the
- *   reply settled: only the keys of those count as answered and are not
- *   asked again, and every other question resolves again and goes in the
- *   next pause. Which shown questions a reply settles is the planner's
+ *   reads the reply. The revise result names in settled, by label like Q1
+ *   or D1, the shown questions and decisions the reply settled: only the
+ *   keys of those questions count as answered and are not asked again, a
+ *   D label keys nothing, and every other question resolves again and goes
+ *   in the next pause. Which shown questions a reply settles is the planner's
  *   judgment, as its gate flags are (ADR-0037 decision 3). The impact is
  *   bounded: a question the planner does not name is asked again, the
  *   settled enum allows only the labels shown, and nothing runs while a
@@ -69,19 +76,19 @@
  *   pause per effect adds stops (review finding d5619285, option C).
  *   Every plan value at a field whose PLAN_SCHEMA description starts with
  *   repositoryPathMark() must pass isRepositoryPath (review finding
- *   461fe942). findRepositoryPathProblem walks the schema for the mark, so
- *   a new path field is checked once it carries the mark, and
- *   describePlanProblem runs it after the schema check and before
- *   computeWave, so a bad path stops the run before the branch step and
- *   any later agent call. The rule is the files rule of molt.sh, its home,
- *   and a parity test runs one corpus through both and requires the same
- *   verdicts, so a change lands in both. The check is lexical, so a
- *   symlinked path or one that names a directory is left to molt.sh. Fix
- *   round files are not plan fields: they reach only molt.sh, which
- *   applies the same rule before any change. The user rejected local
- *   review finding c2e0ada3, which asked for a check of fix round files
- *   members in the workflow, on this basis (ADR-0037, Amendment
- *   2026-10-25). isGitIdentifier stays on
+ *   461fe942). collectRepositoryPaths walks the schema for the mark, so a
+ *   new path field is read once it carries the mark, by
+ *   findRepositoryPathProblem and by listPlanPaths. describePlanProblem
+ *   runs the path check after the schema check and before computeWave, so
+ *   a bad path stops the run before the branch step and any later agent
+ *   call. The rule is the files rule of molt.sh, its home, and a parity test
+ *   runs one corpus through both and requires the same verdicts, so a change
+ *   lands in both. The check is lexical, so a symlinked path or one that
+ *   names a directory is left to molt.sh. Fix round files are not plan
+ *   fields: they reach only molt.sh, which applies the same rule before any
+ *   change. The user rejected local review finding c2e0ada3, which asked for
+ *   a check of fix round files members in the workflow, on this basis
+ *   (ADR-0037, Amendment 2026-10-25). isGitIdentifier stays on
  *   artifact_files for the git show splice in the bump prompt, since the
  *   path rule allows spaces, shell characters and a leading '-'.
  *   Each validation_commands entry is one command line: describePlanProblem
@@ -100,6 +107,32 @@
  *   user never answers an effect question without its verbatim text.
  *   The plan and revise prompts carry the scope in a scope data block right
  *   after the request block, and no other planning text holds it.
+ *   Each reply a plan pause consumes goes once into run.answerLog as the
+ *   {question, settled, reply} entry buildAnswerEntry (lib/brief.js) builds
+ *   from the round and its revise, pushed once the revise of its round
+ *   passes the plan check and before any rescope: the question is the text
+ *   the pause showed, settled the shown labels the revise names, in shown
+ *   order, [] when it names none. The answered keys of the round come from
+ *   that logged settled, so the keys and the log share one derivation.
+ *   Every plan prompt once the log is not empty carries the whole log in
+ *   an answers data block, and a revise prompt the entries of earlier
+ *   rounds. Its data line calls settled only
+ *   what the settled labels of an entry name, never the reply of the round
+ *   being revised, so a replan never asks or reverses a settled answer and
+ *   never takes an open question as settled (issue 472). With an empty log,
+ *   the plan and first revise prompts are the prompts of a run with no
+ *   answers, so a resume replays them from cache.
+ *   Outside-limit ask: the limit check and the detail line read every plan
+ *   path through the mark walk (listPlanPaths): the version files and step
+ *   files the bump and wave commits take. When scope.limits is not empty, a
+ *   plan path that neither equals a limit nor sits under limit + '/' makes
+ *   the plan or remediation plan acceptance brief recommendation strength
+ *   none, so decide() asks it no_recommendation at every level. Its problem
+ *   names their count when it fits, and the detail block lists up to 5 of
+ *   them, then the count of the rest. Empty limits leave the brief as it
+ *   was. The limits come only from the scope step, so a later pass asks a
+ *   file outside them again. Validation fix round and local review edits are
+ *   not plan paths and are outside the limits (ADR-0037, finding 2ecc5af1).
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
  *   P24): how to read the facts, what is left to plan, the review block and
@@ -140,12 +173,12 @@ function buildPlanResultSchema(planSchema, briefSchema) {
   return buildTaggedSchema(buildPlanResultSpec(planSchema, briefSchema));
 }
 
-function buildReviseResultSchema(shownAsks) {
+function buildReviseResultSchema(shownAsks, shownTaken) {
   const spec = buildPlanResultSpec(PLAN_SCHEMA, BRIEF_SCHEMA);
   spec.properties.settled = {
     type: 'array',
-    description: 'The label, like Q1, of each shown question the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
-    items: { type: 'string', enum: shownAsks.map((ask, index) => questionLabel(index)) }
+    description: 'The label, like Q1 or D1, of each shown question or decision made for you the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
+    items: { type: 'string', enum: listShownLabels(shownAsks, shownTaken) }
   };
   spec.required.push('settled');
   return buildTaggedSchema(spec);
@@ -171,37 +204,47 @@ function isRepositoryPath(value) {
   return isOneLine && value.split('/').every((part) => !['', '.', '..', '.git'].includes(toAsciiLowerCase(part)));
 }
 
-function findRepositoryPathProblem(schema, value, location) {
-  const isMarked = typeof schema.description === 'string' && schema.description.startsWith(repositoryPathMark());
-  if (isMarked && !isRepositoryPath(value)) {
-    return location;
+/**
+ * Pushes {location, value} to found for each value at a node the mark names,
+ * in pre-order over the present properties and items. Returns found.
+ */
+function collectRepositoryPaths(schema, value, location, found) {
+  if (typeof schema.description === 'string' && schema.description.startsWith(repositoryPathMark())) {
+    found.push({ location: location, value: value });
   }
   if (schema.properties !== undefined && isPlainObject(value)) {
     const presentNames = Object.keys(schema.properties).filter((name) => Object.prototype.hasOwnProperty.call(value, name));
-    for (const name of presentNames) {
-      const childProblem = findRepositoryPathProblem(schema.properties[name], value[name], location === '' ? name : location + '.' + name);
-      if (childProblem !== '') {
-        return childProblem;
-      }
-    }
+    presentNames.forEach((name) => collectRepositoryPaths(schema.properties[name], value[name], location === '' ? name : location + '.' + name, found));
   }
   if (schema.items !== undefined && Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const itemProblem = findRepositoryPathProblem(schema.items, value[index], location + '[' + index + ']');
-      if (itemProblem !== '') {
-        return itemProblem;
-      }
-    }
+    value.forEach((item, index) => collectRepositoryPaths(schema.items, item, location + '[' + index + ']', found));
   }
-  return '';
+  return found;
 }
 
-function buildPlanPrompt(request, facts, scope, replan) {
-  const hasAnswer = hasReplanAnswer(replan);
+function findRepositoryPathProblem(schema, value, location) {
+  const problem = collectRepositoryPaths(schema, value, location, []).find((entry) => !isRepositoryPath(entry.value));
+  return problem === undefined ? '' : problem.location;
+}
+
+/**
+ * Returns the distinct plan paths in walk order: the values at PLAN_SCHEMA
+ * fields the mark names, version files then step files.
+ */
+function listPlanPaths(plan) {
+  return [...new Set(collectRepositoryPaths(PLAN_SCHEMA, plan, '', []).map((entry) => entry.value))];
+}
+
+function settledAnswersSentence(replyHome) {
+  return dataBlocksSentence(replyHome) + ' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
+}
+
+function buildPlanPrompt(request, facts, scope, replan, answerLog) {
+  const hasAnswers = answerLog.length > 0;
   const lines = [
     'Plan the delivery of the user request below in this repository, as one plan on one working branch.',
     boundarySentence(),
-    dataBlocksSentence(hasAnswer ? 'The reply in the answer block' : undefined)
+    hasAnswers ? settledAnswersSentence(undefined) : dataBlocksSentence(undefined)
   ];
   if (replan !== undefined) {
     lines.push('This is a new plan in a run that already started: the replan block says why.');
@@ -213,29 +256,28 @@ function buildPlanPrompt(request, facts, scope, replan) {
   if (replan !== undefined && replan.review !== undefined) {
     lines.push(formatDataBlock('review', replan.review));
   }
-  if (hasAnswer) {
-    lines.push(formatDataBlock('answer', replan.answer));
+  if (hasAnswers) {
+    lines.push(formatDataBlock('answers', answerLog));
   }
   return lines.join('\n');
 }
 
-function hasReplanAnswer(replan) {
-  return replan !== undefined && replan.answer !== undefined;
-}
-
-function buildPlanRevisePrompt({ request, facts, scope, plan, questions, reply }) {
-  return [
+function buildPlanRevisePrompt({ request, facts, scope, answers, plan, questions, reply }) {
+  const hasAnswers = answers.length > 0;
+  const lines = [
     'Revise your plan for the delivery of the user request below with the user reply below.',
     boundarySentence(),
-    dataBlocksSentence('The reply block'),
+    hasAnswers ? settledAnswersSentence('The reply block') : dataBlocksSentence('The reply block'),
     '',
     buildFactsBlock(facts),
     formatDataBlock('request', request),
-    formatDataBlock('scope', scope),
-    formatDataBlock('earlier_plan', plan),
-    formatDataBlock('questions', questions),
-    formatDataBlock('reply', reply)
-  ].join('\n');
+    formatDataBlock('scope', scope)
+  ];
+  if (hasAnswers) {
+    lines.push(formatDataBlock('answers', answers));
+  }
+  lines.push(formatDataBlock('earlier_plan', plan), formatDataBlock('questions', questions), formatDataBlock('reply', reply));
+  return lines.join('\n');
 }
 
 /**
@@ -317,28 +359,55 @@ function toOneLine(text) {
   return text.trim().split(/\s*[\r\n]+\s*/).join(' ');
 }
 
-function buildPlanDetailBlock(plan) {
-  const files = listStepFiles(plan.steps);
+function listShownPaths(files) {
   const shownPaths = files.slice(0, 5).map((file) => encodeUntrustedText(cutExcerpt(file)));
   const restCount = files.length - shownPaths.length;
-  const paths = joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and');
-  return {
-    text: [
-      'What the plan addresses: ' + toOneLine(plan.digest.problem),
-      'What it changes: ' + toOneLine(plan.digest.change),
-      'It has ' + describeCount(plan.steps.length, 'step') + ' and touches ' + describeCount(files.length, 'file') + ' on branch ' + encodeUntrustedText(cutExcerpt(plan.branch)) + ': ' + paths + '.'
-    ].join('\n')
-  };
+  return joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and');
 }
 
-function remediationGateTexts() {
-  return {
-    irreversible: 'cannot be undone',
-    architectural: 'changes how the system is built',
-    safety: 'touches a safety check',
-    grows_surface: 'adds more surface than it removes',
-    repeats_surface: 'repeats a fix that did not close its class'
-  };
+function buildPlanDetailBlock(plan, outsidePaths) {
+  const files = listPlanPaths(plan);
+  const lines = [
+    'What the plan addresses: ' + toOneLine(plan.digest.problem),
+    'What it changes: ' + toOneLine(plan.digest.change),
+    'It has ' + describeCount(plan.steps.length, 'step') + ' and touches ' + describeCount(files.length, 'file') + ' on branch ' + encodeUntrustedText(cutExcerpt(plan.branch)) + ': ' + listShownPaths(files) + '.'
+  ];
+  if (outsidePaths.length > 0) {
+    lines.push('Outside the limits you set: ' + listShownPaths(outsidePaths) + '.');
+  }
+  return { text: lines.join('\n') };
+}
+
+/**
+ * Returns the plan paths (listPlanPaths) outside every limit of the scope,
+ * or [] when the scope sets no limit. A path is inside a limit when it
+ * equals the limit or sits under limit + '/'. A limit that fails
+ * isRepositoryPath matches no path.
+ */
+function listOutsidePaths(plan, scope) {
+  if (scope.limits.length === 0) {
+    return [];
+  }
+  const limits = scope.limits.filter((limit) => isRepositoryPath(limit));
+  const isInsideLimits = (file) => limits.some((limit) => file === limit || file.startsWith(limit + '/'));
+  return listPlanPaths(plan).filter((file) => !isInsideLimits(file));
+}
+
+function markOutsideLimits(brief, outsidePaths) {
+  if (outsidePaths.length === 0) {
+    return brief;
+  }
+  const problem = brief.problem + ' It changes ' + describeCount(outsidePaths.length, 'file') + ' outside the limits you set.';
+  /*
+   * INVARIANT: the problem names the count only when it fits the brief
+   * problem maxLength, so the brief stays valid with every remediation flag
+   * set. The detail block of the pause names the outside paths and their
+   * count in every case.
+   */
+  return Object.assign(brief, {
+    problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem,
+    recommendation: { ...brief.recommendation, strength: 'none', why: 'Only you can say if the plan may change files outside the limits.' }
+  });
 }
 
 /**
@@ -348,71 +417,6 @@ function remediationGateTexts() {
  */
 function unshownBriefText() {
   return 'Not shown.';
-}
-
-function buildPlanAcceptanceBrief(plan) {
-  return {
-    id: 'plan',
-    kind: PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true },
-      { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
-    ],
-    recommendation: { option_id: 'A', strength: 'strong', why: 'Every change stays on the working branch, and every decision taken is listed for you before the merge.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
-    gate: { irreversible: false, architectural: false, safety: false },
-    verbatim: plan.summary
-  };
-}
-
-function buildRemediationPlanBrief(plan) {
-  const remediationGate = plan.remediation_gate;
-  const flags = { ...remediationGate.promotion_gate, grows_surface: remediationGate.grows_surface, repeats_surface: remediationGate.repeats_surface };
-  const texts = remediationGateTexts();
-  const flagTexts = Object.keys(texts).filter((flag) => flags[flag]).map((flag) => texts[flag]);
-  const lead = 'Run the remediation plan for the local review findings on the working branch, then every gate again.';
-  const brief = buildPlanAcceptanceBrief(plan);
-  return Object.assign(brief, {
-    kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: flagTexts.length === 0 ? lead : lead + ' I am asking because the plan ' + joinNames(flagTexts, 'and') + '.',
-    recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' },
-    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface || flags.repeats_surface }
-  });
-}
-
-function buildTrunkStaleBrief(facts) {
-  return {
-    id: 'trunk',
-    kind: TRUNK_STALE_KIND,
-    problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
-    criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true },
-      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
-    ],
-    recommendation: { option_id: 'A', strength: 'strong', why: 'A stale base costs at most a rebase, and the run goes on.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
-    gate: { irreversible: false, architectural: false, safety: false }
-  };
-}
-
-function buildExternalEffectBrief(stepId, summary) {
-  return {
-    id: 'effect',
-    kind: EXTERNAL_EFFECT_KIND,
-    problem: 'Plan step ' + encodeUntrustedText(Array.from(stepId).slice(0, 16).join('')) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
-    criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false },
-      { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
-    ],
-    recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
-    gate: { irreversible: true, architectural: false, safety: false },
-    verbatim: summary
-  };
 }
 
 function resolveDecision(kind, brief, scope, run, resolution) {
@@ -464,16 +468,17 @@ function resolveExternalEffects(plan, run, resolution) {
   }
 }
 
-function resolvePlanAcceptance(plan, run, resolution) {
+function resolvePlanAcceptance(plan, run, resolution, scope) {
   const isRemediation = run.taken.some((entry) => entry.kind === PLANNER_ESCALATION_ROUTING_KIND || entry.kind === ROOT_CLUSTER_ROUTING_KIND);
+  resolution.outsidePaths = listOutsidePaths(plan, scope);
   if (isRemediation) {
-    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, buildRemediationPlanBrief(plan), [run.pass, plan], run, resolution);
+    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildRemediationPlanBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution);
   }
-  return resolveDecision(PLAN_ACCEPTANCE_KIND, buildPlanAcceptanceBrief(plan), [run.pass, plan], run, resolution);
+  return resolveDecision(PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution);
 }
 
-function resolvePlanAsks(planResult, facts, run) {
-  const resolution = { asks: [], taken: [], freshness: undefined, reversibleEffects: [] };
+function resolvePlanAsks(planResult, facts, run, scope) {
+  const resolution = { asks: [], taken: [], freshness: undefined, reversibleEffects: [], outsidePaths: [] };
   const plan = planResult.plan;
   /*
    * INVARIANT: a planner question key holds the pass and the question as
@@ -485,7 +490,7 @@ function resolvePlanAsks(planResult, facts, run) {
    * round is open: the plan the user accepts is the plan that runs.
    */
   planResult.questions.forEach((brief) => resolveDecision(PLANNER_QUESTION_KIND, brief, run.pass, run, resolution));
-  const acceptance = resolvePlanAcceptance(plan, run, resolution);
+  const acceptance = resolvePlanAcceptance(plan, run, resolution, scope);
   const acceptanceAsk = resolution.asks[resolution.asks.length - 1];
   resolution.freshness = resolveTrunkFreshness(facts, run, resolution);
   resolveExternalEffects(plan, run, resolution);
@@ -529,26 +534,36 @@ function takeNextReply(run, round) {
   return pendingReply;
 }
 
-async function runPlanningPass(run, facts, scope, replan) {
+async function runPlanningPass(run, facts, passScope, replan) {
   phase('Plan');
+  let scope = passScope;
   let resultSchema = PLAN_RESULT_SCHEMA;
   let shownAsks = [];
+  let shownTaken = [];
   let shownResult;
+  let shownEntry;
   const settledKinds = new Set();
-  const planPrompt = buildPlanPrompt(run.request, facts, scope, replan);
-  let planResult = await agent(hasReplanAnswer(replan) ? planPrompt : addResumeNote(planPrompt, run), plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
+  const planPrompt = buildPlanPrompt(run.request, facts, scope, replan, run.answerLog);
+  let planResult = await agent(planPrompt, plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
   for (;;) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk);
     if (problem !== undefined) {
       return { result: finishDeliveryBlocked(problem, run) };
     }
     if (shownAsks.length > 0) {
-      markSettledAsks(planResult.settled, shownAsks, run, settledKinds);
+      run.answerLog.push(buildAnswerEntry(shownEntry, planResult));
+      markSettledAsks(run.answerLog[run.answerLog.length - 1].settled, shownAsks, run, settledKinds);
       if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
         planResult = shownResult;
+      } else {
+        const rescoped = await runScopeStep(run, facts, run.answerLog.length);
+        if (rescoped.problem !== undefined) {
+          return { result: finishDeliveryBlocked(rescoped.problem, run) };
+        }
+        scope = rescoped.scope;
       }
     }
-    const resolution = resolvePlanAsks(planResult, facts, run);
+    const resolution = resolvePlanAsks(planResult, facts, run, scope);
     if (resolution.asks.length === 0) {
       acceptResolution(resolution, run);
       return { plan: planResult.plan, freshness: resolution.freshness };
@@ -565,18 +580,20 @@ async function runPlanningPass(run, facts, scope, replan) {
       return { result: finishDeliveryBlocked('Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', run) };
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
-    const round = run.replies.length + 1;
+    const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
+    const detail = isAcceptance ? buildPlanDetailBlock(planResult.plan, resolution.outsidePaths) : undefined;
+    const round = run.answerLog.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {
-      const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
-      return { result: pauseDelivery(resolution, questions, run, isAcceptance ? buildPlanDetailBlock(planResult.plan) : undefined) };
+      return { result: pauseDelivery(resolution, questions, run, detail) };
     }
-    run.replies.push(reply);
     phase('Revise');
     shownAsks = resolution.asks;
+    shownTaken = resolution.taken;
     shownResult = planResult;
-    resultSchema = buildReviseResultSchema(shownAsks);
-    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, plan: planResult.plan, questions: questions, reply: reply });
+    shownEntry = { question: detail === undefined ? questions : questions + '\n\n' + detail.text, labels: listShownLabels(shownAsks, shownTaken), reply: reply };
+    resultSchema = buildReviseResultSchema(shownAsks, shownTaken);
+    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: run.answerLog, plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
   }
 }

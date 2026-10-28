@@ -112,7 +112,7 @@ describe('overlord Engine section', () => {
   }
   test('Engine resumes with one flat object: the launch args, the keys of resume_args at the top level, then the reply arg', () => {
     const replyName = resultLib.replyField();
-    assert.ok(engineSection.includes('with args set to one flat object: the launch args, then each key of `resume_args` (today `answers`) at the top level of args, never nested under a `resume_args` key, then `' + replyName + '` set to the user\'s reply verbatim.'), `${replyName} resume clause is missing from ## Engine`);
+    assert.ok(engineSection.includes('with args set to one flat object: the launch args, then each key of `resume_args` (today `answers` and `build`) at the top level of args, never nested under a `resume_args` key, then `' + replyName + '` set to the user\'s reply verbatim.'), `${replyName} resume clause is missing from ## Engine`);
   });
   test('Engine never nests the resume args under a resume_args key', () => {
     assert.ok(engineSection.includes('never nested under a `resume_args` key'), '## Engine resume clause lacks the never-nested clause');

@@ -6,7 +6,7 @@
  * Inputs
  *   run     the run state of main.js createRunState, or undefined when the
  *           launch check failed: commits, reversibleEffects, notRunGates,
- *           taken, branch, head, waveCount and replies.
+ *           taken, branch, head, waveCount and answerLog.
  *   gates   the gate loop state of runGates (gates.js), once the gates ran.
  *   result.js finish, pauseForUser, renderQuestions and the fit helpers.
  *
@@ -147,7 +147,7 @@ function finishOpenQuestions(resolution, stopReason, run, detail) {
 }
 
 function pauseDelivery(resolution, questions, run, detail) {
-  const resumeArgs = buildResumeArgs(run.replies);
+  const resumeArgs = buildResumeArgs(run.answerLog.map((entry) => entry.reply), BUILD_ID);
   if (!canCarry(resumeArgs)) {
     return finishOpenQuestions(resolution, 'reply_size', run, detail);
   }

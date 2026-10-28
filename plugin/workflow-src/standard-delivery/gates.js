@@ -1,11 +1,12 @@
 /*
  * standard-delivery gates.js: the gates of the standard-delivery workflow. It
- * holds the gate ids, names and labels, the tail briefs and asks, the bump,
- * validate and fix steps, the gate rerun and the gate loop.
+ * holds the gate ids, names and labels, the tail asks, the bump, validate
+ * and fix steps, the gate rerun and the gate loop. Its tail briefs live in
+ * briefs.js.
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
- *          replies, head, trunk and localReview, and update notRunGates.
+ *          head, trunk and localReview, and update answerLog and notRunGates.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   facts  the checked facts of the pass: trunk_commit is the bump base.
  *   gates  the gate loop state runGates builds: held, notes, runs, failures,
@@ -74,16 +75,23 @@
  *   block. That covers the asks of resolveTailDecision, the fix round and gate
  *   rerun limits, and the user-input-required and high-severity-rejection
  *   questions; each ask carries a reason renderQuestions shows. Tail rounds
- *   share run.replies and the answers round numbering with planning rounds, so
- *   a resume replays every earlier agent from cache and takes the reply at the
- *   ask (askTail). A reply to a local review question reruns the review gate on
- *   the current head, after any gate the head move made stale, with the next
- *   gateLabel count and user_answer {question, reply} in its inputs block; the
- *   commit runner and localReviewRoutes() then apply as for any review run. A
- *   reply to any other tail ask starts a new pass through the facts step whose
- *   plan prompt carries the answer block {question, reply}; that replan does
- *   not count against maxReplans(). Nothing is pushed before every configured
- *   gate holds on one commit.
+ *   share run.answerLog and the answers round numbering with planning rounds,
+ *   so a resume replays every earlier agent from cache and takes the reply at
+ *   the ask (askTail). askTail takes one ask and, at reply time, adds the
+ *   {question, settled, reply} entry buildAnswerEntry (lib/brief.js) builds
+ *   to run.answerLog, the question as shown with its detail block, so every
+ *   later plan prompt shows it in the answers block and a resume keeps the
+ *   round numbering; it returns {question, reply} as the answer. No revise
+ *   reads a tail reply, so its settled is always [] and it stays the user's
+ *   own words in every later answers block, review questions included: a
+ *   review decision lives in the reviewer's record. A reply to a local
+ *   review question reruns the
+ *   review gate on the current head, after any gate the head move made stale,
+ *   with the next gateLabel count and user_answer {question, reply} in its
+ *   inputs block; the commit runner and localReviewRoutes() then apply as for
+ *   any review run. A reply to any other tail ask starts a new pass through the
+ *   facts step; that replan does not count against maxReplans(). Nothing is
+ *   pushed before every configured gate holds on one commit.
  *   The bump prompt names each versioning.artifact_files path in a git show
  *   command, and that list is planner text that can carry external content
  *   (review finding 143374b9). The impact is bounded: describePlanProblem
@@ -192,104 +200,27 @@ function buildValidateSchema(hasCommands) {
   return buildTaggedSchema(spec);
 }
 
-function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
-  return {
-    id: 'tail',
-    kind: kind,
-    problem: problem,
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
-    ],
-    recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
-    gate: { irreversible: false, architectural: false, safety: false }
-  };
-}
-
-function buildBumpTypeBrief(values) {
-  const isBump = values.verdict === 'bump_required';
-  return buildTailBrief({
-    kind: VERSION_BUMP_TYPE_KIND,
-    problem: isBump
-      ? 'The commits on the branch since the trunk call for a ' + values.bump_type + ' version bump: each version file the plan names gets its trunk version raised by that bump.'
-      : 'The commits on the branch since the trunk need no version bump: each version file the plan names keeps its trunk version.',
-    goOn: isBump ? 'Make the ' + values.bump_type + ' version bump.' : 'Go on with no version bump.',
-    strength: 'strong',
-    why: 'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.'
-  });
-}
-
-function buildBumpIndeterminableBrief(values) {
-  const hasVerdict = values.verdict === 'bump_required';
-  return buildTailBrief({
-    kind: VERSION_BUMP_INDETERMINABLE_KIND,
-    problem: hasVerdict
-      ? 'The commits on the branch call for a ' + values.bump_type + ' version bump, but the plan names no file that holds the version. Where should the version be set?'
-      : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-    goOn: hasVerdict ? 'Name the version files: this run plans again with your reply.' : 'Name the version bump: this run plans again with your reply.',
-    strength: 'none',
-    why: 'Only you can decide the version of this delivery.'
-  });
-}
-
-function buildValidationRemediationBrief(head, round) {
-  return buildTailBrief({
-    kind: VALIDATION_REMEDIATION_KIND,
-    problem: 'Validation failed on commit ' + head + '. Run fix round ' + round + ' of at most ' + maxFixRounds() + ', where a worker fixes the failures and the run commits the fix and checks again?',
-    goOn: 'Run a fix round.',
-    strength: 'strong',
-    why: 'A fix round stays on the branch and is listed for you, and every check runs again on its commit.'
-  });
-}
-
-function buildFixLimitBrief(head) {
-  return buildTailBrief({
-    kind: VALIDATION_REMEDIATION_KIND,
-    problem: 'Validation still fails on commit ' + head + ' after ' + maxFixRounds() + ' fix rounds. How should the failures be fixed?',
-    goOn: 'Say how to fix the failures: this run plans the fix from your reply.',
-    strength: 'none',
-    why: 'The fix rounds did not make validation pass, so only you can decide what comes next.'
-  });
-}
-
-function buildGateRerunBrief(staleIds, head, isLimit) {
-  const names = joinNames(staleIds.map((gateId) => gateNames()[gateId]), 'and');
-  const landed = 'Commit ' + head + ' landed after ' + names + ' held on an earlier commit.';
-  return buildTailBrief({
-    kind: GATE_RERUN_KIND,
-    problem: isLimit
-      ? landed + ' The checks already ran again ' + maxGateReruns() + ' times after later commits. How should the delivery go on?'
-      : landed + ' Run ' + names + ' again on the new commit?',
-    goOn: isLimit ? 'Say how to go on: this run plans again from your reply.' : 'Run the checks again on the new commit.',
-    strength: isLimit ? 'none' : 'strong',
-    why: isLimit
-      ? 'Commits kept landing after the checks, so only you can decide what comes next.'
-      : 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
-  });
-}
-
 function isRunEnd(outcome) {
   return outcome.result !== undefined || outcome.replan !== undefined;
 }
 
-function askTail(asks, run, detail) {
-  const questions = renderQuestions(asks, []);
-  const reply = takeNextReply(run, run.replies.length + 1);
+function askTail(ask, run, detail) {
+  const questions = renderQuestions([ask], []);
+  const reply = takeNextReply(run, run.answerLog.length + 1);
   if (reply === undefined) {
-    return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };
+    return { result: pauseDelivery({ asks: [ask], taken: [] }, questions, run, detail) };
   }
-  run.replies.push(reply);
-  return { answer: { question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply } };
+  const question = detail === undefined ? questions : questions + '\n\n' + detail.text;
+  run.answerLog.push(buildAnswerEntry({ question: question, labels: [], reply: reply }, undefined));
+  return { answer: { question: question, reply: reply } };
 }
 
-function replanFromTailAsk(asks, run) {
-  const asked = askTail(asks, run, undefined);
+function replanFromTailAsk(ask, run) {
+  const asked = askTail(ask, run, undefined);
   if (asked.answer === undefined) {
     return asked;
   }
-  return { replan: { reason: 'The user answered a question the run asked after the last wave, so plan again from the fresh facts with the answer block.', answer: asked.answer } };
+  return { replan: { reason: 'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
 }
 
 function buildUndecidedAsk(brief) {
@@ -302,7 +233,7 @@ function resolveTailDecision(kind, brief, run) {
     acceptResolution(resolution, run);
     return {};
   }
-  return replanFromTailAsk(resolution.asks, run);
+  return replanFromTailAsk(resolution.asks[0], run);
 }
 
 function bumpTypeTaskLine() {
@@ -524,7 +455,7 @@ async function runValidateGate(run, plan, gates) {
   }
   gates.failures[run.head] = validation.failures;
   if (gates.fixRounds >= maxFixRounds()) {
-    return replanFromTailAsk([buildUndecidedAsk(buildFixLimitBrief(run.head))], run);
+    return replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)), run);
   }
   const decided = resolveTailDecision(VALIDATION_REMEDIATION_KIND, buildValidationRemediationBrief(run.head, gates.fixRounds + 1), run);
   if (isRunEnd(decided)) {
@@ -540,7 +471,7 @@ function resolveGateRerun(run, gates) {
     return {};
   }
   if (gates.reruns >= maxGateReruns()) {
-    return replanFromTailAsk([buildUndecidedAsk(buildGateRerunBrief(staleIds, run.head, true))], run);
+    return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds, run.head, true)), run);
   }
   gates.reruns += 1;
   return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, false), run);

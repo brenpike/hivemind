@@ -18,8 +18,8 @@
  * Inputs
  *   args   the Workflow args global, read with lib/args.js as analysis-only
  *          reads it: a string (the request), an object {request, trunk?,
- *          references?, local_review?, draft?, answers?, reply?}, or
- *          undefined. request, trunk, references, local_review and draft
+ *          references?, local_review?, draft?, answers?, build?, reply?},
+ *          or undefined. request, trunk, references, local_review and draft
  *          come from the launch args only. local_review is true or false:
  *          absent means true, so the local review gate is configured unless
  *          the launch turns it off, and any other value stops the run. draft
@@ -28,7 +28,11 @@
  *          other value stops the run. answers and reply
  *          follow the result.js pause contract: answers['round-N'] holds the
  *          reply to round N, and reply answers the first round with no
- *          stored answer, only when answers is present. An autonomy key is
+ *          stored answer, only when answers is present. Round N is the
+ *          answerLog length plus 1, so a resume of the same build replays
+ *          every earlier round byte for byte. When answers is present, build
+ *          must equal BUILD_ID or the run stops at the launch check
+ *          (lib/args.js readLaunchInputs). An autonomy key is
  *          never read: the level is the table's default_level until slice 3
  *          (ADR-0037 decision 23).
  *   AUTONOMY_TABLE, BRIEF_SCHEMA, PLAN_SCHEMA  data constants copied in by
@@ -39,7 +43,9 @@
  *   pauseForUser({resumeArgs, blocks}) when a question needs the user,
  *   otherwise finish({outcome, blocks}), and finish({outcome, blocks, pr})
  *   once the pull request step ran; see result.js for these shapes.
- *   resume_args is {answers} alone: no run record (ADR-0037 decision 2).
+ *   resume_args is {answers, build} alone: no run record (ADR-0037
+ *   decision 2). build is BUILD_ID, the build id the build injects, and a
+ *   resume whose build differs stops at the launch check (issue 472).
  *   Every message after the launch check lists the decisions the run took
  *   for the user, each the same brief once however many passes took it,
  *   the reversible effects outside the repo of the accepted plans, the
@@ -57,8 +63,12 @@
  *   questions block (buildPlanDetailBlock): the plan digest, problem and
  *   change as the planner wrote them for the user, each made one line,
  *   then one line of what the plan touches, its step count, its distinct
- *   file count, its branch and up to 5 of its file paths, each cut by
- *   cutExcerpt and encoded, then the count of the rest. Only an
+ *   plan path count, version files included, its branch and up to 5 of its
+ *   plan paths, each cut by cutExcerpt and encoded, then the count of the
+ *   rest. When the scope sets limits and a plan path lies outside them,
+ *   the acceptance has no recommendation, so it is asked at every level,
+ *   and the detail block adds one line of up to 5 of those paths, encoded,
+ *   then the count of the rest (plan.js listPlanPaths). Only an
  *   irreversible effect, an exact ask, shows its text word for word.
  *   Bounded fields (issue 445): every planner, worker and validation
  *   string a message shows comes from a step-schema field with maxLength,
@@ -155,8 +165,10 @@
  *   a local review question, and every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
  *   invariant 3). Then the scope step (scope.js) runs once, after the facts
- *   step and the scan and before planning, and its checked scope reaches
- *   only the plan and revise prompts of its pass.
+ *   step and the scan and before planning, and again after each reply round
+ *   of the pass unless the reply settled the shown plan acceptance
+ *   (plan.js). Its checked scope reaches only the plan and revise prompts
+ *   and the plan acceptance check of its pass.
  *   Every step result schema whose fields depend on its outcome, or on
  *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
  *   from one table, which gives both its anyOf branches and its 'Only with'
@@ -251,7 +263,7 @@ function readDeliveryLaunch(rawArgs) {
   if (!isNonEmptyString(argsObject.request)) {
     return { problem: 'No request was given, so there is nothing to deliver.' };
   }
-  const launchInputs = readLaunchInputs(argsObject, RUN_NOUN);
+  const launchInputs = readLaunchInputs(argsObject, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {
     return launchInputs;
   }
@@ -299,7 +311,7 @@ function createRunState(launch) {
     level: resolveLevel(undefined, AUTONOMY_TABLE),
     storedAnswers: readStoredAnswers(launch.argsObject),
     pendingReply: readPendingReply(launch.argsObject),
-    replies: [],
+    answerLog: [],
     answeredKeys: new Set(),
     taken: [],
     reversibleEffects: [],

@@ -4,7 +4,8 @@
  * Inputs
  *   args   the Workflow args global. One of:
  *            a string: the request itself (slash-command form);
- *            an object {request, trunk?, references?, answers?, reply?};
+ *            an object {request, trunk?, references?, answers?, build?,
+ *            reply?};
  *            undefined.
  *          request comes from the launch args only. A resumed run still
  *          has it because the overlord relaunches with the launch args, then
@@ -13,6 +14,10 @@
  *          answers is this script's own field: it comes only from the
  *          resume_args of an earlier pause, holds the reply to round N as
  *          answers['round-N'], and is read only when it is a plain object.
+ *          build is the BUILD_ID the pause wrote with answers. A resume
+ *          whose build is absent or not this script's BUILD_ID stops before
+ *          any agent call (lib/args.js): the plugin changed while it was
+ *          paused. A fresh launch ignores build.
  *          reply is the user's reply to that pause, per the result.js
  *          contract. It answers the first round with no stored answer, and
  *          only when answers is present, since that marks a pending pause.
@@ -28,7 +33,8 @@
  *          and deduplicated in order; more than 20, or any other shape,
  *          blocks. The facts skill's input gate is the charset check on
  *          both, so no second allowlist is kept here.
- *   AUTONOMY_TABLE, BRIEF_SCHEMA  data constants copied in by the build.
+ *   AUTONOMY_TABLE, BRIEF_SCHEMA, BUILD_ID  constants copied in by the
+ *   build.
  *   The launch args and pause rounds are read with lib/args.js. The facts
  *   patterns and messages, the prompt sentences and the scan step come from
  *   lib/facts.js. Both take the run noun 'analysis', so every message keeps
@@ -86,8 +92,26 @@
  *   fixed here. The brief's own kind is never used.
  *   The facts and scan prompts depend only on the launch args and the facts
  *   step result, and the analyze prompt never carries answers or the reply,
- *   so a resumed run gets all three results from cache. The revise-N prompt depends only on
- *   earlier results and on the reply to round N.
+ *   so a resumed run gets all three results from cache. The revise-N prompt
+ *   depends only on earlier results and on the replies to rounds 1 to N.
+ *   Each revise-N call gets its own revise schema: the analysis spec plus a
+ *   shared required settled array whose items enum is listShownLabels(asks,
+ *   taken), the labels Q1 to Qn and D1 to Dm round N showed. Its agent
+ *   schema and its check schema are both built from that spec each round,
+ *   the check one with the questions items check left out, as for analyze.
+ *   Each reply a pause consumes goes once into the answer log as {question,
+ *   settled, reply}, and only after its revise result passes its check. The
+ *   shared lib buildAnswerEntry is the one writer of settled: the question is
+ *   the full questions text of its round, settled the labels of
+ *   result.settled in shown order, and a reply that settles nothing logs
+ *   settled []. Only the questions and decisions settled names count as
+ *   settled, never the whole round, so a question the reply left open is
+ *   never called settled (issue 472). The revise-N prompt carries the whole
+ *   log, the entries of rounds 1 to N-1, in an answers data block, with a
+ *   data line saying only those labels in each entry are settled decisions,
+ *   never asked again or reversed. The revise-1 prompt has no answers block,
+ *   so it is the prompt of a run with no answers. resume_args still takes
+ *   its replies from the log.
  *   The revise-N prompt always shows the planner the full questions text,
  *   even when the pause message was in compact form.
  *   A run pauses at most pauseLimit() times. After that it completes and
@@ -99,7 +123,8 @@
  *   The analysis schema is built by buildTaggedSchema from one table too:
  *   outcome and questions are shared, complete requires report, and blocked
  *   may carry blocker. A planner result is checked against the full
- *   analysis schema with the questions items check left out, so decide()
+ *   analysis schema, or on a revise its revise schema, with the questions
+ *   items check left out, so decide()
  *   still checks each brief and a malformed brief is asked, never a reason
  *   to stop. A result that fails the check, a field of the other outcome
  *   included, finishes blocked with one plain malformed-result message.
@@ -117,12 +142,12 @@
  *   reason.' when it has none. So a control character, an escape sequence,
  *   a bidi mark or a line feed in it never reaches the user raw.
  *   Open questions never end it blocked: only a missing request, a bad
- *   trunk or references arg, a facts or scan stop, or a planner result it
- *   cannot use does.
- *   No run record: resume_args is {answers} alone, every reply so far. The
- *   request is never in it, because the launch args already hold it. It
- *   always has answers, so a relaunch with it is a resume, and never has
- *   request, reply or an autonomy key.
+ *   trunk or references arg, a build skew on resume, a facts or scan stop,
+ *   or a planner result it cannot use does.
+ *   No run record: resume_args is {answers, build} alone, every reply so
+ *   far and BUILD_ID. The request is never in it, because the launch args
+ *   already hold it. It always has answers, so a relaunch with it is a
+ *   resume, and never has request, reply or an autonomy key.
  *   A reply is ignored when no pause is pending: when the run was not
  *   launched with answers, or when it finishes before it reaches a round
  *   with no stored answer.
@@ -203,6 +228,24 @@ function buildAnalysisSpec(questionSchema) {
   };
 }
 
+function buildReviseSpec(questionSchema, shownLabels) {
+  const spec = buildAnalysisSpec(questionSchema);
+  spec.properties.settled = {
+    type: 'array',
+    description: 'The label, like Q1 or D1, of each shown question or decision made for you the reply settles.',
+    items: { type: 'string', enum: shownLabels.slice() }
+  };
+  spec.required.push('settled');
+  return spec;
+}
+
+function buildReviseSchemas(shownLabels) {
+  return {
+    agent: buildTaggedSchema(buildReviseSpec(omitSchemaDialect(BRIEF_SCHEMA), shownLabels)),
+    check: buildTaggedSchema(buildReviseSpec({}, shownLabels))
+  };
+}
+
 function buildFactsPrompt(trunk, references) {
   return [
     'Invoke the hivemind:gather-facts skill once, with the trunk and references in the inputs block below and no remote.',
@@ -225,22 +268,25 @@ function buildAnalyzePrompt(request, facts) {
   ].join('\n');
 }
 
-function buildRevisePrompt({ request, facts, report, questions, reply }) {
-  return [
+function buildRevisePrompt({ request, facts, answers, report, questions, reply }) {
+  const hasAnswers = answers.length > 0;
+  const lines = [
     'Revise your analysis of the user request below with the user reply below.',
     boundarySentence(),
-    dataBlocksSentence('The reply block'),
+    hasAnswers ? dataBlocksSentence('The reply block') + ' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.' : dataBlocksSentence('The reply block'),
     '',
     buildFactsBlock(facts),
-    formatDataBlock('request', request),
-    formatDataBlock('earlier_report', report),
-    formatDataBlock('questions', questions),
-    formatDataBlock('reply', reply)
-  ].join('\n');
+    formatDataBlock('request', request)
+  ];
+  if (hasAnswers) {
+    lines.push(formatDataBlock('answers', answers));
+  }
+  lines.push(formatDataBlock('earlier_report', report), formatDataBlock('questions', questions), formatDataBlock('reply', reply));
+  return lines.join('\n');
 }
 
-function plannerOptions(label, phaseTitle) {
-  return { agentType: PLANNER_AGENT_TYPE, schema: toAgentSchema(ANALYSIS_SCHEMA), label: label, phase: phaseTitle };
+function plannerOptions(label, phaseTitle, schema) {
+  return { agentType: PLANNER_AGENT_TYPE, schema: toAgentSchema(schema), label: label, phase: phaseTitle };
 }
 
 function factsOptions() {
@@ -281,11 +327,11 @@ async function gatherCheckedFacts(launchInputs) {
   return { facts: facts };
 }
 
-function describeReplyProblem(analysis) {
+function describeReplyProblem(analysis, checkSchema) {
   if (!isPlainObject(analysis)) {
     return 'The planner returned no result, so the analysis stopped.';
   }
-  if (!validateSchema(ANALYSIS_CHECK_SCHEMA, analysis).ok) {
+  if (!validateSchema(checkSchema, analysis).ok) {
     return 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
   }
   if (analysis.outcome === 'blocked') {
@@ -324,8 +370,8 @@ function finishComplete(report, openQuestions, taken) {
   return finish({ outcome: 'complete', blocks: blocks });
 }
 
-function pauseOrStopAsking(report, resolution, questions, replies) {
-  const resumeArgs = buildResumeArgs(replies);
+function pauseOrStopAsking(report, resolution, questions, answerLog) {
+  const resumeArgs = buildResumeArgs(answerLog.map((entry) => entry.reply), BUILD_ID);
   if (!canCarry(resumeArgs)) {
     return finishComplete(report, renderOpenQuestions(resolution.asks, 'reply_size'), resolution.taken);
   }
@@ -338,7 +384,7 @@ async function runAnalysis(rawArgs) {
   if (!isNonEmptyString(argsObject.request)) {
     return finishBlocked('No request was given, so there is nothing to analyze.');
   }
-  const launchInputs = readLaunchInputs(argsObject, RUN_NOUN);
+  const launchInputs = readLaunchInputs(argsObject, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {
     return finishBlocked(launchInputs.problem);
   }
@@ -350,13 +396,18 @@ async function runAnalysis(rawArgs) {
   const level = resolveLevel(undefined, AUTONOMY_TABLE);
   const storedAnswers = readStoredAnswers(argsObject);
   let pendingReply = readPendingReply(argsObject);
-  const replies = [];
+  const answerLog = [];
+  let checkSchema = ANALYSIS_CHECK_SCHEMA;
+  let shownRound;
   phase('Analyze');
-  let analysis = await agent(buildAnalyzePrompt(argsObject.request, facts), plannerOptions('analyze', 'Analyze'));
+  let analysis = await agent(buildAnalyzePrompt(argsObject.request, facts), plannerOptions('analyze', 'Analyze', ANALYSIS_SCHEMA));
   for (let round = 1; ; round += 1) {
-    const problem = describeReplyProblem(analysis);
+    const problem = describeReplyProblem(analysis, checkSchema);
     if (problem !== undefined) {
       return finishBlocked(problem);
+    }
+    if (shownRound !== undefined) {
+      answerLog.push(buildAnswerEntry(shownRound, analysis));
     }
     const resolution = resolveQuestions(analysis.questions, level);
     if (resolution.asks.length === 0) {
@@ -372,12 +423,15 @@ async function runAnalysis(rawArgs) {
       pendingReply = undefined;
     }
     if (reply === undefined) {
-      return pauseOrStopAsking(analysis.report, resolution, questions, replies);
+      return pauseOrStopAsking(analysis.report, resolution, questions, answerLog);
     }
-    replies.push(reply);
+    const shownLabels = listShownLabels(resolution.asks, resolution.taken);
+    const reviseSchemas = buildReviseSchemas(shownLabels);
     phase('Revise');
-    const revisePrompt = buildRevisePrompt({ request: argsObject.request, facts: facts, report: analysis.report, questions: questions, reply: reply });
-    analysis = await agent(revisePrompt, plannerOptions('revise-' + round, 'Revise'));
+    const revisePrompt = buildRevisePrompt({ request: argsObject.request, facts: facts, answers: answerLog, report: analysis.report, questions: questions, reply: reply });
+    analysis = await agent(revisePrompt, plannerOptions('revise-' + round, 'Revise', reviseSchemas.agent));
+    checkSchema = reviseSchemas.check;
+    shownRound = { question: questions, labels: shownLabels, reply: reply };
   }
 }
 

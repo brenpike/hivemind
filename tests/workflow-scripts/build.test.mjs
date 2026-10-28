@@ -14,6 +14,7 @@ import {
   MAX_BUILT_LINE_SQUARES,
   MAX_BUILT_SCRIPT_LENGTH,
   PROSE_BUDGETS,
+  BUILD_ID_LENGTH,
   WORKFLOW_APPROVAL_LIMIT,
   WORKFLOW_PREVIEW_COMBINING_RUN_LIMIT,
   WORKFLOW_PREVIEW_LINE_LIMIT,
@@ -52,7 +53,7 @@ const liveIds = listLiveWorkflowIds(repoRoot);
 const draftIds = listDraftWorkflowIds(repoRoot);
 const DRAFT_ID = 'draft-check';
 const MAX_SOURCE_LINES = 600;
-const DELIVERY_MODULES = ['gates.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review.js', 'scope.js', 'waves.js'];
+const DELIVERY_MODULES = ['briefs.js', 'gates.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review.js', 'scope.js', 'waves.js'];
 const PROSE_BUDGETS_PATTERN = /export const PROSE_BUDGETS = Object\.freeze\(\{[^}]*\}\);/;
 const MAX_PROSE_MARGIN = 1000;
 const CEREBRATE_SENTENCE = 'You do not write or edit code.';
@@ -61,6 +62,7 @@ const ACORN_PATH = 'tools/vendor/acorn/acorn.mjs';
 const ACORN_SHA256 = '76254fc76529713b4dfd2532972d17a991ffd9aafeebb1f977445b5506b9fb0b';
 const LITERAL_TOKEN_TYPES = [tokTypes.string, tokTypes.regexp, tokTypes.template, tokTypes.invalidTemplate];
 const SEEDED_MODULE_PATH = 'plugin/workflow-src/analysis-only/seeded.js';
+const BUILD_ID_LINE_PATTERN = /^const BUILD_ID = '([0-9a-f]*)';$/gm;
 const scratchRoots = [];
 let scratchBuilderCount = 0;
 
@@ -91,6 +93,16 @@ function countTokenLineBreaks(source) {
 
 function readStrippedCode(path) {
   return stripComments(readFileSync(join(repoRoot, path), 'utf8').replace(/\r/g, '')).trim();
+}
+
+/**
+ * Returns the BUILD_ID of a built script, asserting it holds exactly one
+ * BUILD_ID line.
+ */
+function readBuildId(source) {
+  const matches = [...source.matchAll(BUILD_ID_LINE_PATTERN)];
+  assert.equal(matches.length, 1, 'a built script holds exactly one BUILD_ID line');
+  return matches[0][1];
 }
 
 function makeScratchCopy() {
@@ -835,6 +847,36 @@ describe('build_workflows modules', () => {
   });
 });
 
+describe('build_workflows BUILD_ID', () => {
+  for (const id of liveIds) {
+    test(builtPathFor(id) + ' holds the hash of the built script without its BUILD_ID line', () => {
+      const source = buildWorkflow(repoRoot, id);
+      const buildId = readBuildId(source);
+      assert.equal(buildId.length, BUILD_ID_LENGTH);
+      const unstamped = source.replace('const BUILD_ID = \'' + buildId + '\';\n\n', '');
+      assert.equal(buildId, createHash('sha256').update(unstamped).digest('hex').slice(0, BUILD_ID_LENGTH));
+      assert.ok(source.includes('\n\nconst PLAN_SCHEMA = ' + JSON.stringify(readDataConstant(repoRoot, 'PLAN_SCHEMA'), null, 1).replace(/^ +/gm, '') + ';\n\nconst BUILD_ID = '));
+    });
+  }
+  test('the same sources build the same BUILD_ID', () => {
+    const scratchRoot = makeScratchCopy();
+    const buildId = readBuildId(buildWorkflow(repoRoot, 'analysis-only'));
+    assert.equal(readBuildId(buildWorkflow(repoRoot, 'analysis-only')), buildId);
+    assert.equal(readBuildId(buildWorkflow(scratchRoot, 'analysis-only')), buildId);
+  });
+  test('a change to the built script changes BUILD_ID', () => {
+    const scratchRoot = makeScratchCopy();
+    writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), 'function seededBuildIdProbe() {}\n');
+    assert.notEqual(readBuildId(buildWorkflow(scratchRoot, 'analysis-only')), readBuildId(buildWorkflow(repoRoot, 'analysis-only')));
+  });
+  test('a comment-only source edit leaves the built script and BUILD_ID unchanged', () => {
+    const scratchRoot = makeScratchCopy();
+    const mainPath = join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js');
+    writeFileSync(mainPath, '// seeded comment\n' + readFileSync(mainPath, 'utf8'));
+    assert.equal(buildWorkflow(scratchRoot, 'analysis-only'), buildWorkflow(repoRoot, 'analysis-only'));
+  });
+});
+
 describe('build_workflows length budget', () => {
   test('the limits are pinned', () => {
     assert.equal(WORKFLOW_APPROVAL_LIMIT, 200000);
@@ -1027,7 +1069,7 @@ describe('build_workflows schema projection', () => {
 
 describe('build_workflows prose guards', () => {
   test('the prose budgets are pinned, one per workflow id', () => {
-    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 19000, 'standard-delivery': 44000 });
+    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 19500, 'standard-delivery': 45000 });
     assert.ok(Object.isFrozen(PROSE_BUDGETS));
     assert.deepEqual(Object.keys(PROSE_BUDGETS).sort(), workflowIds);
   });
@@ -1161,7 +1203,7 @@ for (const id of liveIds) {
       assert.ok(banner.includes(REBUILD_COMMAND));
     });
     test('data constants and libraries come in build order', () => {
-      const markers = ['const AUTONOMY_TABLE = ', 'const BRIEF_SCHEMA = ', 'const PLAN_SCHEMA = ', 'function validateSchema(', 'function decisionReasons(', 'function renderQuestions(', 'function resultFields(', 'function computeWave(', 'function parseRoutingLines(', 'function readArgsObject(', 'function isGitIdentifier(', 'function gatherFactsRoutingSpec('];
+      const markers = ['const AUTONOMY_TABLE = ', 'const BRIEF_SCHEMA = ', 'const PLAN_SCHEMA = ', 'const BUILD_ID = ', 'function validateSchema(', 'function decisionReasons(', 'function renderQuestions(', 'function resultFields(', 'function computeWave(', 'function parseRoutingLines(', 'function readArgsObject(', 'function isGitIdentifier(', 'function gatherFactsRoutingSpec('];
       const positions = markers.map((marker) => source.indexOf(marker));
       assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
       assert.deepEqual([...positions].sort((left, right) => left - right), positions);

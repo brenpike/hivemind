@@ -13,6 +13,7 @@ const lib = loadLibs([libDir + 'result.js', libDir + 'args.js']);
 const NEW_LIBS = ['args.js', 'facts.js', 'identifier.js'];
 
 const RUN_NOUN = 'delivery';
+const BUILD_ID = 'build-a1';
 const BAD_TRUNK = 'The trunk launch arg must be a non-blank string, so the delivery did not start.';
 const BAD_REFERENCES = 'The references launch arg must be a list of issue or pull request numbers, so the delivery did not start.';
 
@@ -81,31 +82,64 @@ describe('readReferences', () => {
 
 describe('readLaunchInputs', () => {
   test('returns trunk and references together', () => {
-    assert.deepEqual(read(lib.readLaunchInputs({ trunk: 'develop', references: [3] }, RUN_NOUN)), { trunk: 'develop', references: ['3'] });
+    assert.deepEqual(read(lib.readLaunchInputs({ trunk: 'develop', references: [3] }, RUN_NOUN, BUILD_ID)), { trunk: 'develop', references: ['3'] });
   });
   test('a bad trunk is reported before bad references', () => {
-    assert.deepEqual(read(lib.readLaunchInputs({ trunk: 5, references: 'bad' }, RUN_NOUN)), { problem: BAD_TRUNK });
+    assert.deepEqual(read(lib.readLaunchInputs({ trunk: 5, references: 'bad' }, RUN_NOUN, BUILD_ID)), { problem: BAD_TRUNK });
   });
   test('the analysis noun gives the analysis-only text', () => {
-    assert.deepEqual(read(lib.readLaunchInputs({ trunk: ' ' }, 'analysis')), { problem: 'The trunk launch arg must be a non-blank string, so the analysis did not start.' });
+    assert.deepEqual(read(lib.readLaunchInputs({ trunk: ' ' }, 'analysis', BUILD_ID)), { problem: 'The trunk launch arg must be a non-blank string, so the analysis did not start.' });
   });
   for (const runNoun of [undefined, '', ' ', 5]) {
     test(`run noun ${JSON.stringify(runNoun)} throws`, () => {
-      assert.throws(() => lib.readLaunchInputs({}, runNoun), /runNoun must be a non-blank string/);
+      assert.throws(() => lib.readLaunchInputs({}, runNoun, BUILD_ID), /runNoun must be a non-blank string/);
     });
   }
   for (const runNoun of ['delivery', 'analysis']) {
     test(`a resume_args key is a problem before any other check, naming the ${runNoun}`, () => {
       const problem = 'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so the ' + runNoun + ' did not start.';
-      for (const nested of [{ answers: { 'round-1': 'SECRET_REPLY_ZQ' } }, null, 'SECRET_REPLY_ZQ']) {
-        const result = read(lib.readLaunchInputs({ trunk: 5, references: 'bad', resume_args: nested }, runNoun));
+      for (const nested of [{ answers: { 'round-1': 'SECRET_REPLY_ZQ' }, build: BUILD_ID }, null, 'SECRET_REPLY_ZQ']) {
+        const result = read(lib.readLaunchInputs({ trunk: 5, references: 'bad', answers: {}, resume_args: nested }, runNoun, BUILD_ID));
         assert.deepEqual(result, { problem: problem }, JSON.stringify(nested));
         assert.ok(!result.problem.includes('SECRET_REPLY_ZQ'));
       }
     });
   }
   test('args with no resume_args key pass the guard', () => {
-    assert.deepEqual(read(lib.readLaunchInputs({ answers: { 'round-1': 'R1' }, reply: 'R2' }, RUN_NOUN)), { trunk: 'main', references: [] });
+    assert.deepEqual(read(lib.readLaunchInputs({ answers: { 'round-1': 'R1' }, build: BUILD_ID, reply: 'R2' }, RUN_NOUN, BUILD_ID)), { trunk: 'main', references: [] });
+  });
+  for (const buildId of [undefined, null, '', ' ', 5, ['build-a1']]) {
+    test(`build id ${JSON.stringify(buildId)} throws, even on a fresh launch`, () => {
+      assert.throws(() => lib.readLaunchInputs({}, RUN_NOUN, buildId), /buildId must be a non-blank string/);
+      assert.throws(() => lib.readLaunchInputs({ answers: {}, build: buildId }, RUN_NOUN, buildId), /buildId must be a non-blank string/);
+    });
+  }
+  for (const runNoun of ['delivery', 'analysis']) {
+    test(`a resume from another build stops before trunk and references, naming the ${runNoun}`, () => {
+      const problem = 'The plugin changed while the ' + runNoun + ' was paused, so nothing ran. Run the request again with your answers in it.';
+      for (const build of [undefined, 'build-b2', 'SECRET_BUILD_ZQ', '', null, 5]) {
+        const args = { trunk: 5, references: 'bad', answers: { 'round-1': 'SECRET_REPLY_ZQ' }, reply: 'SECRET_REPLY_ZQ' };
+        if (build !== undefined) {
+          args.build = build;
+        }
+        const result = read(lib.readLaunchInputs(args, runNoun, BUILD_ID));
+        assert.deepEqual(result, { problem: problem }, JSON.stringify(build));
+        assert.ok(!result.problem.includes('SECRET_'));
+      }
+    });
+  }
+  test('a resume from the running build passes to the trunk and references checks', () => {
+    assert.deepEqual(read(lib.readLaunchInputs({ answers: {}, build: BUILD_ID, trunk: 5 }, RUN_NOUN, BUILD_ID)), { problem: BAD_TRUNK });
+    assert.deepEqual(read(lib.readLaunchInputs({ answers: { 'round-1': 'R1' }, build: BUILD_ID }, RUN_NOUN, BUILD_ID)), { trunk: 'main', references: [] });
+  });
+  test('a fresh launch ignores a stray build', () => {
+    for (const answers of [undefined, null, 'R1', ['R1']]) {
+      const args = { build: 'build-b2', reply: 'R1' };
+      if (answers !== undefined) {
+        args.answers = answers;
+      }
+      assert.deepEqual(read(lib.readLaunchInputs(args, RUN_NOUN, BUILD_ID)), { trunk: 'main', references: [] }, JSON.stringify(answers));
+    }
   });
   test('describeRunNoun names the run after "the"', () => {
     assert.equal(lib.describeRunNoun(RUN_NOUN), 'the delivery');
@@ -140,9 +174,18 @@ describe('pause rounds', () => {
     assert.equal(lib.readPendingReply({ answers: {}, reply: ' ' }), undefined);
     assert.equal(lib.readPendingReply({ answers: {}, reply: 5 }), undefined);
   });
-  test('resume args are {answers} alone, keyed by round', () => {
-    assert.deepEqual(read(lib.buildResumeArgs(['A', 'B'])), { answers: { 'round-1': 'A', 'round-2': 'B' } });
-    assert.deepEqual(read(lib.buildResumeArgs([])), { answers: {} });
+  test('resume args are {answers, build} alone, answers keyed by round', () => {
+    assert.deepEqual(read(lib.buildResumeArgs(['A', 'B'], BUILD_ID)), { answers: { 'round-1': 'A', 'round-2': 'B' }, build: BUILD_ID });
+    assert.deepEqual(read(lib.buildResumeArgs([], BUILD_ID)), { answers: {}, build: BUILD_ID });
+  });
+  test('resume args built without a build id throw', () => {
+    for (const buildId of [undefined, null, '', ' ', 5]) {
+      assert.throws(() => lib.buildResumeArgs(['A'], buildId), /buildId must be a non-blank string/, JSON.stringify(buildId));
+    }
+  });
+  test('resume args from the running build pass the build check', () => {
+    const resumeArgs = read(lib.buildResumeArgs(['A'], BUILD_ID));
+    assert.deepEqual(read(lib.readLaunchInputs({ request: 'r', ...resumeArgs, reply: 'B' }, RUN_NOUN, BUILD_ID)), { trunk: 'main', references: [] });
   });
 });
 

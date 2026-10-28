@@ -20,12 +20,19 @@
  *   plugin/workflows/, so it lands in pieces without going live (ADR-0037).
  *   Every other workflow is live.
  *   Each built script is, in order: <id>/meta.js, a GENERATED banner, the
- *   data constants from plugin/references/, the shared libraries from
- *   plugin/workflow-src/lib/ in LIB_FILES order, the modules of <id>/, and
- *   <id>/main.js last. The modules are the .js entries of <id>/ other
- *   than meta.js, main.js and contract.js, in name order. contract.js is
- *   test data and is never bundled. listSourcePaths returns this order, and
+ *   data constants from plugin/references/, the BUILD_ID line, the shared
+ *   libraries from plugin/workflow-src/lib/ in LIB_FILES order, the modules
+ *   of <id>/, and <id>/main.js last. The modules are the .js entries of
+ *   <id>/ other than meta.js, main.js and contract.js, in name order.
+ *   contract.js is test data and is never bundled. listSourcePaths returns
+ *   this order with the BUILD_ID line left out, since it has no source, and
  *   the banner names each source in it.
+ *   The BUILD_ID line is `const BUILD_ID = '<hex>';`, where <hex> is the
+ *   first BUILD_ID_LENGTH hex characters of the sha256 of the built script
+ *   without that line and the blank line after it (renderBuildId). Sources
+ *   may read BUILD_ID as a free identifier. The same built code always has
+ *   the same id, a change to the built script changes it, and a comment-only
+ *   source edit, which stripping removes, leaves it unchanged.
  *   The build reads every source only through acorn.parse of the vendored
  *   acorn (tools/vendor/acorn/), with ecmaVersion latest: its syntax tree,
  *   and the tokens and comments of its onToken and onComment callbacks,
@@ -141,6 +148,10 @@
  *   the same. A hand-written lexer cannot tell a regex from a division after
  *   every token, so the build reads code only through a parser that follows
  *   the spec.
+ *   A resumed run passes back the BUILD_ID of the script that wrote its
+ *   resume arguments, so a script can tell arguments written by another
+ *   build from its own. Hashing the built output, not the sources, keeps
+ *   the id fixed across edits that change no built byte.
  *   The title and description of each schema field are prose for the
  *   planner, and their home is plugin/references, which the planner reads
  *   (docs/engineering-principles.md P24), so the copy carries only the
@@ -161,6 +172,7 @@
  *   symlinked module builds the script without it and says nothing
  *   (ADR-0037, local review finding 0de223ac).
  */
+import { createHash } from 'node:crypto';
 import { lstatSync, readFileSync, readdirSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -179,6 +191,7 @@ const DATA_CONSTANTS = [
   { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json', project: projectSchema },
   { name: 'PLAN_SCHEMA', path: 'plugin/references/plan-schema.json', project: projectSchema }
 ];
+export const BUILD_ID_LENGTH = 16;
 export const REPOSITORY_PATH_MARK = 'Can carry external content. Repository path.';
 const SCHEMA_ANNOTATION_KEYS = Object.freeze(['title', 'description']);
 
@@ -396,6 +409,15 @@ function renderBanner(root, id) {
 function renderDataConstant(root, constant) {
   const data = readDataConstant(root, constant.name);
   return 'const ' + constant.name + ' = ' + JSON.stringify(data, null, 1).replace(/^ +/gm, '') + ';';
+}
+
+/**
+ * Returns the BUILD_ID line of a built script: the first BUILD_ID_LENGTH hex
+ * characters of the sha256 of unstamped, the built script without that line.
+ */
+function renderBuildId(unstamped) {
+  const digest = createHash('sha256').update(unstamped).digest('hex');
+  return 'const BUILD_ID = \'' + digest.slice(0, BUILD_ID_LENGTH) + '\';';
 }
 
 const SCRIPT_PARSE_OPTIONS = Object.freeze({ ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true });
@@ -820,8 +842,8 @@ function assertBuiltScript(id, output, parsed) {
  * make the build pass.
  */
 export const PROSE_BUDGETS = Object.freeze({
-  'analysis-only': 19000,
-  'standard-delivery': 44000
+  'analysis-only': 19500,
+  'standard-delivery': 45000
 });
 const PROSE_PIECE_KINDS = Object.freeze(['string', 'template']);
 const MIN_COPIED_SENTENCE_WORDS = 5;
@@ -1003,15 +1025,18 @@ function readCompactedSource(root, relativePath) {
 }
 
 export function buildWorkflow(root, id) {
-  const parts = [
+  const dataParts = [
     readStrippedMeta(root, SOURCE_DIR + '/' + id + '/meta.js'),
     renderBanner(root, id),
-    ...DATA_CONSTANTS.map((constant) => renderDataConstant(root, constant)),
+    ...DATA_CONSTANTS.map((constant) => renderDataConstant(root, constant))
+  ];
+  const codeParts = [
     ...LIB_FILES.map((file) => readCompactedSource(root, SOURCE_DIR + '/lib/' + file)),
     ...listModulePaths(root, id).map((path) => readModuleSource(root, path)),
     readCompactedSource(root, SOURCE_DIR + '/' + id + '/main.js')
   ];
-  const output = parts.join('\n\n') + '\n';
+  const unstamped = [...dataParts, ...codeParts].join('\n\n') + '\n';
+  const output = [...dataParts, renderBuildId(unstamped), ...codeParts].join('\n\n') + '\n';
   const parsed = parseBuiltScript(id, output);
   assertBuiltScript(id, output, parsed);
   assertProseBudget(id, output, parsed);

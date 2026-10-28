@@ -4,12 +4,14 @@
  * Inputs
  *   rawArgs     the Workflow args global. A string is the request itself
  *               (slash-command form). A plain object is read as
- *               {request, trunk?, references?, answers?, reply?}. Anything
+ *               {request, trunk?, references?, answers?, reply?, build?}. Anything
  *               else reads as an empty object.
  *   argsObject  the object readArgsObject returns.
  *   runNoun     the word for the run in a user-facing message, read after
  *               "the": 'analysis' gives "so the analysis did not start". A
  *               non-blank string, or the message function throws.
+ *   buildId     the build id of the running script, a non-blank string,
+ *               or readLaunchInputs and buildResumeArgs throw.
  *   round       a positive integer, the pause round.
  *   replies     the replies so far, round 1 first.
  *
@@ -24,6 +26,8 @@
  *   describeRunNoun(runNoun)   'the ' + runNoun, the run as a message names
  *                              it. Throws when runNoun is not a non-blank
  *                              string.
+ *   requireBuildId(buildId)    buildId. Throws when it is not a non-blank
+ *                              string.
  *   readTrunk(argsObject, runNoun)
  *     {trunk} when trunk is absent ('main') or a non-blank string, which
  *     passes through. Otherwise {problem}.
@@ -33,9 +37,11 @@
  *     {references} when references is absent (none) or a list whose every
  *     entry normalizes, deduplicated in order, at most maxReferences().
  *     Otherwise {problem}.
- *   readLaunchInputs(argsObject, runNoun)
+ *   readLaunchInputs(argsObject, runNoun, buildId)
  *     {trunk, references}, or the {problem} of the first bad arg: a
- *     resume_args key first, then trunk, then references.
+ *     resume_args key first, then the build, then trunk, then references.
+ *     The build is checked only on a resume, when answers is a plain
+ *     object: a build absent or not equal to buildId is a problem.
  *   roundKey(round)            'round-N', the answers key of round N.
  *   readStoredAnswers(argsObject)
  *     argsObject.answers when it is a plain object, else {}.
@@ -45,14 +51,18 @@
  *   readPendingReply(argsObject)
  *     the replyField() value when it is a non-blank string and answers is a
  *     plain object, since answers marks a pending pause. Else undefined.
- *   buildResumeArgs(replies)   {answers}, each reply under its roundKey.
+ *   buildResumeArgs(replies, buildId)
+ *     {answers, build}: each reply under its roundKey, and buildId.
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. Inputs are never changed.
  *   request, trunk and references come from the launch args only, so a
  *   string launch takes the defaults. A top-level 'round-N' key is never
- *   read. resume_args is {answers} alone: never the request, which the
- *   launch args already hold, and never a reply or an autonomy key.
+ *   read. resume_args is {answers, build} alone: never the request, which
+ *   the launch args already hold, and never a reply or an autonomy key.
+ *   A resume whose build is not the running build stops before any agent
+ *   call: the plugin changed while the run was paused, so the stored
+ *   answers may not fit the new script. A fresh launch ignores a build.
  *   Args that hold a resume_args key are a problem before any other check:
  *   the resume rule puts the keys of resume_args at the top level of args,
  *   so a nested resume_args would drop the stored answers and ask the same
@@ -60,8 +70,8 @@
  *   A digit string reference passes as it is, leading zeros included. The
  *   facts skill's input gate is the charset check on trunk and references,
  *   so no second allowlist is kept here.
- *   Every problem is one sentence ending "so the <runNoun> did not start."
- *   and never echoes an arg value. With runNoun 'analysis' the text is the
+ *   Every problem but the build problem is one sentence ending "so the
+ *   <runNoun> did not start.". No problem echoes an arg value. With runNoun 'analysis' the text is the
  *   analysis-only text, byte for byte.
  *   Uses replyField() from result.js.
  *
@@ -142,9 +152,20 @@ function readReferences(argsObject, runNoun) {
   return { references: references };
 }
 
-function readLaunchInputs(argsObject, runNoun) {
+function requireBuildId(buildId) {
+  if (!isNonEmptyString(buildId)) {
+    throw new Error('args.js: buildId must be a non-blank string');
+  }
+  return buildId;
+}
+
+function readLaunchInputs(argsObject, runNoun, buildId) {
+  requireBuildId(buildId);
   if (Object.prototype.hasOwnProperty.call(argsObject, 'resume_args')) {
     return { problem: 'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so ' + describeRunNoun(runNoun) + ' did not start.' };
+  }
+  if (isPlainObject(argsObject.answers) && argsObject.build !== buildId) {
+    return { problem: 'The plugin changed while ' + describeRunNoun(runNoun) + ' was paused, so nothing ran. Run the request again with your answers in it.' };
   }
   const trunkInput = readTrunk(argsObject, runNoun);
   if (trunkInput.problem !== undefined) {
@@ -175,7 +196,7 @@ function readPendingReply(argsObject) {
   return isPlainObject(argsObject.answers) && isNonEmptyString(reply) ? reply : undefined;
 }
 
-function buildResumeArgs(replies) {
+function buildResumeArgs(replies, buildId) {
   const answers = Object.fromEntries(replies.map((reply, index) => [roundKey(index + 1), reply]));
-  return { answers: answers };
+  return { answers: answers, build: requireBuildId(buildId) };
 }

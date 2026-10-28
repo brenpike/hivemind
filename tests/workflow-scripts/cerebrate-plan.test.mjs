@@ -26,6 +26,8 @@ const READ_DISCIPLINE_RULES = [
 const SCOPE_BLOCK_RULE = 'Plan from that block. Each document entry locates a section and does not bound it. Read the whole section that holds the entry\'s line, and take where the section starts and ends from the file, not from the entry. Do not check again the paths the block lists, and research only what the block does not cover.';
 const SCOPE_BLOCK_COVERAGE_RULE = 'A document entry covers nothing when the file has no such line, or when the section that holds the line is not one the request or the facts texts name.';
 const SCOPE_MODE_LOCATOR_RULE ='For each section of a repository document that the request or the facts texts name, the document\'s path and the line the section starts on. Find the line with Grep, and copy no text. Leave a section you cannot find for the planner.';
+const SCOPE_MODE_LIMITS_RULE = 'The paths or directories that the request confines the work to, along with the user\'s answers when the delegation carries an answers block. Where they disagree, a later answer beats both the request and any earlier answer. Return none when nothing confines the work.';
+const ANSWERS_SETTLE_RULE = 'an answers block in it holds the user\'s earlier answers. Each entry holds the questions of one round, the user\'s reply, and settled, the Q and D labels the reply settled. Only the questions and decisions an entry\'s settled labels name are settled for good: never raise them again and never reverse them. Every other question in that entry was still open after the reply. Labels belong to their own round, so Q1 in one entry is not Q1 in another.';
 const STEP_SIZE_RULE = 'Size each step as one concern that one drone can carry. A step that mixes concerns, or that edits more than about four files beyond its own tests and generated output, is split along its file or concern seams. The split steps get `depends_on` only where the order is real.';
 const RESEARCH_NOT_A_STEP_RULE = 'Every plan step changes files, so never make research, a probe or a measurement a plan step. Research, probes and measurements are your own work, and what your tools cannot answer goes to `Open questions:`.';
 
@@ -152,6 +154,19 @@ describe('cerebrate research reads only what the plan needs', () => {
   });
   test('Scope Mode returns a locator for each section, not copied text', () => {
     assert.ok(readSection(cerebrateText, '### Scope Mode').includes(SCOPE_MODE_LOCATOR_RULE), SCOPE_MODE_LOCATOR_RULE);
+  });
+  test('Scope Mode returns three things, the third the paths the request and the answers limit the work to', () => {
+    const scopeModeSection = readSection(cerebrateText, '### Scope Mode');
+    assert.ok(scopeModeSection.includes('return three things:'), 'Scope Mode does not return three things');
+    assert.ok(scopeModeSection.includes(SCOPE_MODE_LIMITS_RULE), SCOPE_MODE_LIMITS_RULE);
+  });
+  test('earlier answers settle for good only the questions their settled labels name', () => {
+    const section = readSection(cerebrateText, '### Questions and Replies');
+    const reviseStart = section.indexOf('asks you to revise:');
+    const ruleStart = section.indexOf(ANSWERS_SETTLE_RULE);
+    assert.notEqual(reviseStart, -1, 'the revise list is present');
+    assert.notEqual(ruleStart, -1, ANSWERS_SETTLE_RULE);
+    assert.ok(ruleStart < reviseStart, 'the answers rule sits before the revise list, so it applies to every delegation');
   });
   test('a plan or revise delegation with a scope block plans from it and reads the whole section at each locator', () => {
     assert.ok(readSection(cerebrateText, '## Scope Block').includes(SCOPE_BLOCK_RULE), SCOPE_BLOCK_RULE);

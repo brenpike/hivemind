@@ -229,6 +229,8 @@ The overlord's implement loop fans out independent steps as parallel waves, so `
 
 Raise each decision the repository and the request do not settle as a question with your recommendation, and write the plan or report assuming each raised question's recommendation.
 
+Whatever the delegation asks of you (plan, replan, revise or scope), an answers block in it holds the user's earlier answers. Each entry holds the questions of one round, the user's reply, and settled, the Q and D labels the reply settled. Only the questions and decisions an entry's settled labels name are settled for good: never raise them again and never reverse them. Every other question in that entry was still open after the reply. Labels belong to their own round, so Q1 in one entry is not Q1 in another.
+
 When a delegation gives the user's reply to the questions shown and asks you to revise:
 
 - A reply that declines a question of the workflow itself (accepting the plan, going on from a trunk that may not be up to date, a step with an outside effect that cannot be undone) changes or drops the step it names, or you return blocked with the reason.
@@ -328,10 +330,11 @@ never performs it. Keep prose and `plan:` block consistent per Machine-Readable 
 
 ### Scope Mode
 
-When a delegation asks you to scope a request for its planner, return two things:
+When a delegation asks you to scope a request for its planner, return three things:
 
 - For each section of a repository document that the request or the facts texts name, the document's path and the line the section starts on. Find the line with Grep, and copy no text. Leave a section you cannot find for the planner.
 - For each repository path that a section or the request names for the work, whether the path exists now and any drift. Check them with batched Glob calls.
+- The paths or directories that the request confines the work to, along with the user's answers when the delegation carries an answers block. Where they disagree, a later answer beats both the request and any earlier answer. Return none when nothing confines the work.
 
 In this mode you plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.
 

@@ -5,7 +5,7 @@
  * and the review gate step.
  *
  * Inputs
- *   run    the run state of main.js createRunState: pass, replies, head,
+ *   run    the run state of main.js createRunState: pass, answerLog, head,
  *          trunk and taken.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (gates.js): runs.review, answer
@@ -31,11 +31,10 @@
  *           and a take starts a new pass with replan data: the review
  *           projected to its exit_reason and the fields reviewExitFields()
  *           names for it, so rejected_findings, open_findings, ledger_path
- *           and the counts never reach the planner. When the review that
- *           escalated ran with user_answer, the replan carries that answer
- *           too, and the plan prompt shows it in an answer block next to
- *           the review block. A question of the review pauses the run, and
- *           the reply reruns the review gate with user_answer (Tail asks).
+ *           and the counts never reach the planner. A question of the
+ *           review pauses the run, and the reply, kept in run.answerLog for
+ *           every later plan prompt, reruns the review gate with
+ *           user_answer (Tail asks).
  *           Every other exit_reason stops the run blocked. The script sets
  *           no zoom-out trigger: the
  *           planner makes that call by judgment from the branch commits in
@@ -369,7 +368,7 @@ function askReviewQuestion(review, run) {
   const openFindings = review.open_findings;
   const resolution = { asks: [], taken: [] };
   resolveDecision(reviewQuestionKinds()[review.exit_reason], buildReviewQuestionBrief(review, openFindings), undefined, run, resolution);
-  return askTail(resolution.asks, run, buildReviewDetailBlock(review, openFindings));
+  return askTail(resolution.asks[0], run, buildReviewDetailBlock(review, openFindings));
 }
 
 function buildDiminishingReturnsBrief(review, head) {
@@ -422,7 +421,7 @@ function projectReplanReview(review) {
   return projected;
 }
 
-function requestReviewReplan(review, run, answer) {
+function requestReviewReplan(review, run) {
   const brief = buildReviewEscalationBrief(review);
   const decided = review.exit_reason === 'root-cluster-suspected'
     ? resolveTailDecision(ROOT_CLUSTER_ROUTING_KIND, brief, run)
@@ -435,21 +434,17 @@ function requestReviewReplan(review, run, answer) {
   }
   run.replans += 1;
   const reason = 'Local review returned ' + review.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
-  const replan = { reason: reason, review: projectReplanReview(review) };
-  if (answer !== undefined) {
-    replan.answer = answer;
-  }
-  return { replan: replan };
+  return { replan: { reason: reason, review: projectReplanReview(review) } };
 }
 
-function routeLocalReview(review, run, answer) {
+function routeLocalReview(review, run) {
   switch (localReviewRoutes()[review.exit_reason]) {
     case 'hold':
       return { held: true, note: 'clean' + describeRejectedCount(review.rejected_findings) };
     case 'diminishing':
       return resolveDiminishingReturns(review, run);
     case 'replan':
-      return requestReviewReplan(review, run, answer);
+      return requestReviewReplan(review, run);
     case 'question':
       return askReviewQuestion(review, run);
     case 'stop':
@@ -474,7 +469,7 @@ async function runReviewGate(run, plan, gates) {
   if (problem !== undefined) {
     return { result: finishDeliveryBlocked(problem, run) };
   }
-  const routed = routeLocalReview(review, run, answer);
+  const routed = routeLocalReview(review, run);
   if (routed.held) {
     gates.rejected = review.rejected_findings;
   }
