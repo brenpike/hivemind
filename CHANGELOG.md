@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - A replan no longer forgets the user's answers. Every later planning pass gets the earlier answers, but only the questions and decisions a reply settled count as settled and may not be asked again or reversed. A question the reply left open is asked again. This holds in both `standard-delivery` and `analysis-only`. A reply to a question asked after the last wave reaches later passes as the user's words and never counts as settled (#472).
 - A resume after the plugin changed while the run was paused stops before anything runs and asks to run the request again, instead of binding stored answers to the wrong questions (#472).
-- A plan whose files leave the paths the request or the user's answers limit the work to is always asked, never decided for the user (#472).
+- A plan whose files, version files included, leave the paths the request or the user's answers limit the work to is always asked, never decided for the user. Edits a validation fix round or local review makes are outside those limits (#472).
 
 ## [7.3.0] - 2026-10-27
 

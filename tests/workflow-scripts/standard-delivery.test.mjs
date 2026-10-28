@@ -5642,6 +5642,58 @@ const ROW_TESTS = {
       assert.ok(markedFull.problem === unmarkedProblem || markedFull.problem === unmarkedProblem + suffix, markedFull.problem);
       assert.equal(markedPlan.problem, main.buildPlanAcceptanceBrief(makePlan()).problem + suffix);
     });
+    for (const keyPath of collectPathFields(planSchema, [], [])) {
+      test(`a path outside the limits at ${describeKeyPath(keyPath)} asks plan_acceptance no_recommendation naming it`, async () => {
+        const plan = planWithValueAt(keyPath, 'outside/x.js');
+        const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['src']), 'plan-1': planResult(plan) }));
+        assert.equal(paused.result.needs_user, true);
+        assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
+        assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(plan), '1 file'), ['outside/x.js'], plan);
+      });
+    }
+    const VERSIONED_PLAN = { ...versionedPlan(), trunk_freshness: 'fresh' };
+    /**
+     * Runs a versioned plan, whose bump drone and bump commit follow the
+     * wave commit, under `limits`.
+     */
+    async function runVersionedUnder(limits) {
+      return runWorkflow(LAUNCH, happyResults({
+        'scope-1': limitsScope(limits),
+        'plan-1': planResult(VERSIONED_PLAN),
+        'bump-1-1': bumpRelay(MINOR_BUMP),
+        'bump-commit-1-1': commitRelay({ commit: THIRD }),
+        'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' })
+      }));
+    }
+    test('a version file outside the limits asks naming it, and a limit that holds it lets the bump run', async () => {
+      const paused = await runVersionedUnder(['src']);
+      assert.equal(paused.result.needs_user, true);
+      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
+      assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(VERSIONED_PLAN), '1 file'), ['VERSION'], VERSIONED_PLAN);
+      const run = await runVersionedUnder(['src', 'VERSION']);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const labels = labelsOf(run);
+      assert.deepEqual(labels.slice(labels.indexOf('commit-1-1') + 1, labels.indexOf('validate-1-1')), ['bump-1-1', 'bump-commit-1-1']);
+    });
+    test('every wave and bump commit takes only plan paths, and together they take every plan path', async () => {
+      const run = await runVersionedUnder(['src', 'VERSION']);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const planPaths = [...main.listPlanPaths(VERSIONED_PLAN)];
+      assert.deepEqual(planPaths, ['VERSION', 'src/cache.js']);
+      const commitLabels = labelsOf(run).filter((label) => /^(bump-)?commit-1-\d+$/.test(label));
+      assert.deepEqual(commitLabels, ['commit-1-1', 'bump-commit-1-1']);
+      const committedPaths = commitLabels.flatMap((label) => readDataBlock(callOf(run, label).prompt, 'inputs').files);
+      committedPaths.forEach((path) => assert.ok(planPaths.includes(path), path));
+      assert.deepEqual([...new Set(committedPaths)].sort(), [...planPaths].sort());
+    });
+    test('the plan path walk follows the mark, not the field names', () => {
+      const marked = structuredClone(planSchema);
+      marked.properties.summary.description = main.repositoryPathMark() + ' What the plan delivers.';
+      const plan = makePlan({ summary: 'docs/summary.md' });
+      const found = structuredClone(main.collectRepositoryPaths(marked, plan, '', []));
+      assert.ok(found.some((entry) => entry.location === 'summary' && entry.value === 'docs/summary.md'), JSON.stringify(found));
+      assert.ok(!main.listPlanPaths(plan).includes('docs/summary.md'));
+    });
   }
 };
 

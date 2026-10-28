@@ -63,12 +63,12 @@
  *   questions block (buildPlanDetailBlock): the plan digest, problem and
  *   change as the planner wrote them for the user, each made one line,
  *   then one line of what the plan touches, its step count, its distinct
- *   file count, its branch and up to 5 of its file paths, each cut by
- *   cutExcerpt and encoded, then the count of the rest. When the scope sets
- *   limits and the plan edits files outside them that no earlier accepted
- *   plan covered, the acceptance has no recommendation, so it is asked at
- *   every level, and the detail block adds one line of up to 5 of those
- *   paths, encoded, then the count of the rest (plan.js). Only an
+ *   plan path count, version files included, its branch and up to 5 of its
+ *   plan paths, each cut by cutExcerpt and encoded, then the count of the
+ *   rest. When the scope sets limits and a plan path lies outside them,
+ *   the acceptance has no recommendation, so it is asked at every level,
+ *   and the detail block adds one line of up to 5 of those paths, encoded,
+ *   then the count of the rest (plan.js listPlanPaths). Only an
  *   irreversible effect, an exact ask, shows its text word for word.
  *   Bounded fields (issue 445): every planner, worker and validation
  *   string a message shows comes from a step-schema field with maxLength,

@@ -76,19 +76,19 @@
  *   pause per effect adds stops (review finding d5619285, option C).
  *   Every plan value at a field whose PLAN_SCHEMA description starts with
  *   repositoryPathMark() must pass isRepositoryPath (review finding
- *   461fe942). findRepositoryPathProblem walks the schema for the mark, so
- *   a new path field is checked once it carries the mark, and
- *   describePlanProblem runs it after the schema check and before
- *   computeWave, so a bad path stops the run before the branch step and
- *   any later agent call. The rule is the files rule of molt.sh, its home,
- *   and a parity test runs one corpus through both and requires the same
- *   verdicts, so a change lands in both. The check is lexical, so a
- *   symlinked path or one that names a directory is left to molt.sh. Fix
- *   round files are not plan fields: they reach only molt.sh, which
- *   applies the same rule before any change. The user rejected local
- *   review finding c2e0ada3, which asked for a check of fix round files
- *   members in the workflow, on this basis (ADR-0037, Amendment
- *   2026-10-25). isGitIdentifier stays on
+ *   461fe942). collectRepositoryPaths walks the schema for the mark, so a
+ *   new path field is read once it carries the mark, by
+ *   findRepositoryPathProblem and by listPlanPaths. describePlanProblem
+ *   runs the path check after the schema check and before computeWave, so
+ *   a bad path stops the run before the branch step and any later agent
+ *   call. The rule is the files rule of molt.sh, its home, and a parity test
+ *   runs one corpus through both and requires the same verdicts, so a change
+ *   lands in both. The check is lexical, so a symlinked path or one that
+ *   names a directory is left to molt.sh. Fix round files are not plan
+ *   fields: they reach only molt.sh, which applies the same rule before any
+ *   change. The user rejected local review finding c2e0ada3, which asked for
+ *   a check of fix round files members in the workflow, on this basis
+ *   (ADR-0037, Amendment 2026-10-25). isGitIdentifier stays on
  *   artifact_files for the git show splice in the bump prompt, since the
  *   path rule allows spaces, shell characters and a leading '-'.
  *   Each validation_commands entry is one command line: describePlanProblem
@@ -122,14 +122,17 @@
  *   never takes an open question as settled (issue 472). With an empty log,
  *   the plan and first revise prompts are the prompts of a run with no
  *   answers, so a resume replays them from cache.
- *   Outside-limit ask: when scope.limits is not empty, a plan step file
- *   that neither equals a limit nor sits under limit + '/' makes the plan or
- *   remediation plan acceptance brief recommendation strength none, so
- *   decide() asks it no_recommendation at every level. Its problem names
- *   their count when it fits, and the detail block lists up to 5 of them,
- *   then the count of the rest. Empty limits leave the brief as it was.
- *   The limits come only from the scope step, so a later pass asks a file
- *   outside them again.
+ *   Outside-limit ask: the limit check and the detail line read every plan
+ *   path through the mark walk (listPlanPaths): the version files and step
+ *   files the bump and wave commits take. When scope.limits is not empty, a
+ *   plan path that neither equals a limit nor sits under limit + '/' makes
+ *   the plan or remediation plan acceptance brief recommendation strength
+ *   none, so decide() asks it no_recommendation at every level. Its problem
+ *   names their count when it fits, and the detail block lists up to 5 of
+ *   them, then the count of the rest. Empty limits leave the brief as it
+ *   was. The limits come only from the scope step, so a later pass asks a
+ *   file outside them again. Validation fix round and local review edits are
+ *   not plan paths and are outside the limits (ADR-0037, finding 2ecc5af1).
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
  *   P24): how to read the facts, what is left to plan, the review block and
@@ -201,29 +204,35 @@ function isRepositoryPath(value) {
   return isOneLine && value.split('/').every((part) => !['', '.', '..', '.git'].includes(toAsciiLowerCase(part)));
 }
 
-function findRepositoryPathProblem(schema, value, location) {
-  const isMarked = typeof schema.description === 'string' && schema.description.startsWith(repositoryPathMark());
-  if (isMarked && !isRepositoryPath(value)) {
-    return location;
+/**
+ * Pushes {location, value} to found for each value at a node the mark names,
+ * in pre-order over the present properties and items. Returns found.
+ */
+function collectRepositoryPaths(schema, value, location, found) {
+  if (typeof schema.description === 'string' && schema.description.startsWith(repositoryPathMark())) {
+    found.push({ location: location, value: value });
   }
   if (schema.properties !== undefined && isPlainObject(value)) {
     const presentNames = Object.keys(schema.properties).filter((name) => Object.prototype.hasOwnProperty.call(value, name));
-    for (const name of presentNames) {
-      const childProblem = findRepositoryPathProblem(schema.properties[name], value[name], location === '' ? name : location + '.' + name);
-      if (childProblem !== '') {
-        return childProblem;
-      }
-    }
+    presentNames.forEach((name) => collectRepositoryPaths(schema.properties[name], value[name], location === '' ? name : location + '.' + name, found));
   }
   if (schema.items !== undefined && Array.isArray(value)) {
-    for (let index = 0; index < value.length; index += 1) {
-      const itemProblem = findRepositoryPathProblem(schema.items, value[index], location + '[' + index + ']');
-      if (itemProblem !== '') {
-        return itemProblem;
-      }
-    }
+    value.forEach((item, index) => collectRepositoryPaths(schema.items, item, location + '[' + index + ']', found));
   }
-  return '';
+  return found;
+}
+
+function findRepositoryPathProblem(schema, value, location) {
+  const problem = collectRepositoryPaths(schema, value, location, []).find((entry) => !isRepositoryPath(entry.value));
+  return problem === undefined ? '' : problem.location;
+}
+
+/**
+ * Returns the distinct plan paths in walk order: the values at PLAN_SCHEMA
+ * fields the mark names, version files then step files.
+ */
+function listPlanPaths(plan) {
+  return [...new Set(collectRepositoryPaths(PLAN_SCHEMA, plan, '', []).map((entry) => entry.value))];
 }
 
 function settledAnswersSentence(replyHome) {
@@ -357,7 +366,7 @@ function listShownPaths(files) {
 }
 
 function buildPlanDetailBlock(plan, outsidePaths) {
-  const files = listStepFiles(plan.steps);
+  const files = listPlanPaths(plan);
   const lines = [
     'What the plan addresses: ' + toOneLine(plan.digest.problem),
     'What it changes: ' + toOneLine(plan.digest.change),
@@ -370,10 +379,10 @@ function buildPlanDetailBlock(plan, outsidePaths) {
 }
 
 /**
- * Returns the plan step files outside every limit of the scope, or [] when
- * the scope sets no limit. A file is inside a limit when it equals the
- * limit or sits under limit + '/'. A limit that fails isRepositoryPath
- * matches no file.
+ * Returns the plan paths (listPlanPaths) outside every limit of the scope,
+ * or [] when the scope sets no limit. A path is inside a limit when it
+ * equals the limit or sits under limit + '/'. A limit that fails
+ * isRepositoryPath matches no path.
  */
 function listOutsidePaths(plan, scope) {
   if (scope.limits.length === 0) {
@@ -381,7 +390,7 @@ function listOutsidePaths(plan, scope) {
   }
   const limits = scope.limits.filter((limit) => isRepositoryPath(limit));
   const isInsideLimits = (file) => limits.some((limit) => file === limit || file.startsWith(limit + '/'));
-  return listStepFiles(plan.steps).filter((file) => !isInsideLimits(file));
+  return listPlanPaths(plan).filter((file) => !isInsideLimits(file));
 }
 
 function markOutsideLimits(brief, outsidePaths) {

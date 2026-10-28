@@ -613,7 +613,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'ea775fc364fc1a5e';
+const BUILD_ID = '7b5111ba5e198c17';
 
 function supportedSchemaKeywords(){
 return[
@@ -2833,29 +2833,25 @@ return false;
 const isOneLine=Array.from(value).every((character)=>character.codePointAt(0)>=32&&character.codePointAt(0)!==127);
 return isOneLine&&value.split('/').every((part)=>!['','.','..','.git'].includes(toAsciiLowerCase(part)));
 }
-function findRepositoryPathProblem(schema,value,location){
-const isMarked=typeof schema.description==='string'&&schema.description.startsWith(repositoryPathMark());
-if(isMarked&&!isRepositoryPath(value)){
-return location;
+function collectRepositoryPaths(schema,value,location,found){
+if(typeof schema.description==='string'&&schema.description.startsWith(repositoryPathMark())){
+found.push({location:location,value:value});
 }
 if(schema.properties!==undefined&&isPlainObject(value)){
 const presentNames=Object.keys(schema.properties).filter((name)=>Object.prototype.hasOwnProperty.call(value,name));
-for(const name of presentNames){
-const childProblem=findRepositoryPathProblem(schema.properties[name],value[name],location===''?name:location+'.'+name);
-if(childProblem!==''){
-return childProblem;
-}
-}
+presentNames.forEach((name)=>collectRepositoryPaths(schema.properties[name],value[name],location===''?name:location+'.'+name,found));
 }
 if(schema.items!==undefined&&Array.isArray(value)){
-for(let index=0;index<value.length;index+=1){
-const itemProblem=findRepositoryPathProblem(schema.items,value[index],location+'['+index+']');
-if(itemProblem!==''){
-return itemProblem;
+value.forEach((item,index)=>collectRepositoryPaths(schema.items,item,location+'['+index+']',found));
 }
+return found;
 }
+function findRepositoryPathProblem(schema,value,location){
+const problem=collectRepositoryPaths(schema,value,location,[]).find((entry)=>!isRepositoryPath(entry.value));
+return problem===undefined?'':problem.location;
 }
-return'';
+function listPlanPaths(plan){
+return[...new Set(collectRepositoryPaths(PLAN_SCHEMA,plan,'',[]).map((entry)=>entry.value))];
 }
 function settledAnswersSentence(replyHome){
 return dataBlocksSentence(replyHome)+' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
@@ -2967,7 +2963,7 @@ const restCount=files.length-shownPaths.length;
 return joinNames(restCount>0?[...shownPaths,restCount+' more']:shownPaths,'and');
 }
 function buildPlanDetailBlock(plan,outsidePaths){
-const files=listStepFiles(plan.steps);
+const files=listPlanPaths(plan);
 const lines=[
 'What the plan addresses: '+toOneLine(plan.digest.problem),
 'What it changes: '+toOneLine(plan.digest.change),
@@ -2984,7 +2980,7 @@ return[];
 }
 const limits=scope.limits.filter((limit)=>isRepositoryPath(limit));
 const isInsideLimits=(file)=>limits.some((limit)=>file===limit||file.startsWith(limit+'/'));
-return listStepFiles(plan.steps).filter((file)=>!isInsideLimits(file));
+return listPlanPaths(plan).filter((file)=>!isInsideLimits(file));
 }
 function markOutsideLimits(brief,outsidePaths){
 if(outsidePaths.length===0){
