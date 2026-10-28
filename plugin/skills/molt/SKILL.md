@@ -44,6 +44,9 @@ The caller may pass these. When one is absent, this skill judges it, as it alway
 - `commit_type`: the commit type, one of the types in requirement 4. When it is absent, requirement 4 judges the type.
 - `breaking`: `true` when the change breaks a public contract, else `false`. When it is absent, it is `true` only when requirement 4 (b) applies.
 - `commit_body`: the commit body, per requirement 4 (d).
+- `subject`: the commit subject. When it is absent, requirement 4 judges the subject.
+
+When the caller passes both `files` and `subject`, this skill skips requirement 2 and runs no git command of its own: it writes the inputs file from the given values and runs the script.
 
 ## Requirements
 
@@ -52,7 +55,7 @@ Every commit runs through `${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh`. T
 **Input gate.** Before any Bash call, validate `trunk` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: trunk contains characters outside the safe allowlist`.
 
 1. Confirm current branch is not `trunk` and that git state is not unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State). The script makes these checks before any change, so this step needs no git command of its own.
-2. Review staged and unstaged diff.
+2. Review staged and unstaged diff. Skip this requirement when the caller passes both `files` and `subject`.
 3. Choose the files to commit. Use `files` when the caller passes it. Otherwise list only the files that belong to the completed phase, milestone, version bump, or review-remediation item. List each path exactly, relative to the top of the work tree. List each deleted path and both sides of a rename. Never list a directory. The script stages exactly the listed paths that are dirty. It refuses when any other path is dirty, so a dirty file that belongs to no item stops the commit.
 4. Create a commit message in the form `<type>(<optional scope>): <subject>`, where:
    - `<type>` is one of: `feat`, `fix`, `hotfix`, `refactor`, `docs`, `test`, `chore`, `ci`
@@ -60,6 +63,7 @@ Every commit runs through `${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh`. T
    - include a body only when one of: (a) the change reverts a prior commit, (b) the change includes a `BREAKING CHANGE:` footer, (c) the planner's delegation contains a `Why:` field, OR (d) the orchestrator passes `commit_body` explicitly. Otherwise omit the body.
    - the message must not contain any of the following strings (any case): `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship
    - use `commit_type` as `<type>` when the caller passes it
+   - use `subject` as `<subject>` exactly as given when the caller passes it; the script enforces its rules. When it contains a string the attribution rule above forbids, exit 1 with `blocker: subject contains a forbidden attribution string` and never rewrite it
    - when `breaking` is true, the script adds `!` before the colon. A `BREAKING CHANGE:` footer, or `!:` in the subject, needs `breaking` true; the script refuses it otherwise.
 
    The script checks the format, the type, the scope and the subject length. The attribution rule above is this skill's own check.

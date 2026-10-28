@@ -6,8 +6,9 @@
 #   plugin/skills/github-review-loop/scripts/pr-change-detect-poll.sh
 # through a PATH-shim fake `gh` that serves canned fixture bytes from tests/change-detect-poll/.
 # The REAL `jq` runs the script's REAL filters over those bytes, so the snapshot derivation under
-# test is the production one — only the transport and the watch-deadline clock are faked (a
-# PATH-shim fake `date`, see "PATH-shim fake date" below).
+# test is the production one — only the transport, the watch-deadline clock and the interval
+# sleep are faked (a PATH-shim fake `date` and fake `sleep`, see "PATH-shim fake date" and
+# "PATH-shim fake sleep" below).
 #
 # Mirrors tools/test_react_marker.sh's pass/fail counter + per-case assertion + exit-nonzero-on-any
 # -fail convention, extended with a THIRD counter (SKIP) for the cases that exercise the seeded
@@ -255,9 +256,9 @@ chmod +x "$STUB_BIN/gh"
 # is no fix: CHANGED does not end the process, so every CHANGED case would idle the whole wider
 # window out. The fake clock reads a fixed epoch plus the fake gh's snapshot-query counter
 # (`graphql.n`): every poll iteration issues exactly one snapshot query, so the deadline check
-# before poll N reads epoch + N-1 and MAX_WATCH counts polls. The real deadline arithmetic and
-# the real `sleep` between polls still run; only the clock's source is faked. Any other `date`
-# call exits non-zero so a new use of the clock cannot silently read the virtual one.
+# before poll N reads epoch + N-1 and MAX_WATCH counts polls. The real deadline arithmetic
+# still runs; only the clock's source is faked. Any other `date` call exits non-zero so a new use
+# of the clock cannot silently read the virtual one.
 cat > "$STUB_BIN/date" <<'STUB'
 #!/usr/bin/env bash
 set -u
@@ -268,6 +269,23 @@ printf '%s\n' "$((1700000000 + capture_count))"
 STUB
 chmod +x "$STUB_BIN/date"
 
+# ── PATH-shim fake sleep ────────────────────────────────────────────────────────────
+# The interval sleep between polls is wall time only: the fake clock above already advances the
+# deadline per snapshot query, so a real `sleep` adds no coverage and costs about one second per
+# poll across every case. The fake returns at once and appends its argument to the state dir's
+# `sleep.calls`, one line per call, so a case that needs the interval count reads it from there
+# (sleep_call_count). Any call that is not one integer argument exits non-zero so a new use of
+# `sleep` cannot silently pass through.
+cat > "$STUB_BIN/sleep" <<'STUB'
+#!/usr/bin/env bash
+set -u
+[ "$#" -eq 1 ] || { echo "fake sleep: unsupported call: $*" >&2; exit 1; }
+case "$1" in ''|*[!0-9]*) echo "fake sleep: unsupported call: $*" >&2; exit 1 ;; esac
+[ -n "${FAKE_GH_STATE_DIR:-}" ] || { echo "fake sleep: FAKE_GH_STATE_DIR unset" >&2; exit 1; }
+printf '%s\n' "$1" >> "$FAKE_GH_STATE_DIR/sleep.calls" || exit 1
+STUB
+chmod +x "$STUB_BIN/sleep"
+
 # new_state <name>: fresh fake-gh state dir with zeroed call counters.
 new_state() {
   local dir="$TMPDIR_TEST/state-$1"
@@ -275,6 +293,7 @@ new_state() {
   printf '0' > "$dir/graphql.n"
   printf '0' > "$dir/latestreviews.n"
   printf '0' > "$dir/reactions.n"
+  : > "$dir/sleep.calls"
   printf '%s' "$dir"
 }
 
@@ -375,6 +394,11 @@ run_check() {
 # <reactions>`; one capture is `1 1 1`.
 gh_call_counts() {
   printf '%s %s %s' "$(cat "$1/graphql.n")" "$(cat "$1/latestreviews.n")" "$(cat "$1/reactions.n")"
+}
+
+# sleep_call_count <state_dir>: the number of interval sleeps the fake `sleep` recorded.
+sleep_call_count() {
+  wc -l < "$1/sleep.calls" | tr -d ' '
 }
 
 # snapshot_raw <state_name> <arm_kind> <graphql_entry> <reactions_entry> [filter]: snapshot mode
@@ -1411,8 +1435,8 @@ fi
 # exactly `REVIEWER_APPROVED` with no trailing marker; (iii) discrimination: the same comment delta
 # WITHOUT an approval prints `CHANGED` and keeps polling to `WATCH_TIMEOUT`, so only the approval
 # edge ends the process. (i) runs under a watch window long enough for several polls after the
-# marker, so the snapshot-query count, not just stdout, catches a poll that outlives it; a passing
-# run exits at the marker and never waits that window out.
+# marker, so the snapshot-query count and the recorded interval-sleep count, not just stdout,
+# catch a poll that outlives it; a passing run exits at the marker and never waits that window out.
 LIFETIME_MAX_WATCH=8
 if [ "$SEED_SUPPORTED" -eq 1 ]; then
   lifetime_ok=1
@@ -1425,9 +1449,11 @@ if [ "$SEED_SUPPORTED" -eq 1 ]; then
     "$REVIEWER_FILTER" "$SELF_LOGIN" "$SEED")"
   status=$?
   graphql_calls="$(cat "$st/graphql.n")"
-  if [ "$out" != "REVIEWER_APPROVED" ] || [ "$status" -ne 0 ] || [ "$graphql_calls" != "2" ]; then
+  sleep_calls="$(sleep_call_count "$st")"
+  if [ "$out" != "REVIEWER_APPROVED" ] || [ "$status" -ne 0 ] || [ "$graphql_calls" != "2" ] \
+    || [ "$sleep_calls" != "1" ]; then
     lifetime_ok=0
-    lifetime_detail="$lifetime_detail lone: status=$status graphql_calls=$graphql_calls out=$(printf '%s' "$out" | tr '\n' ';')"
+    lifetime_detail="$lifetime_detail lone: status=$status graphql_calls=$graphql_calls sleep_calls=$sleep_calls out=$(printf '%s' "$out" | tr '\n' ';')"
   fi
 
   st="$(new_state lifetime-cofire)"

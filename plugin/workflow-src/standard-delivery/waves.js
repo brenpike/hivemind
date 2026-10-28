@@ -16,6 +16,10 @@
  *          {replan}, the reasons of a needs_replan wave.
  *   buildNextActionProperty()  the next_action property the worker, gate
  *          edit and validate schemas share.
+ *   buildWaveSubject(waveSteps, waveNumber)  the commit subject of a wave:
+ *          the outcome of its one step, or the ids of its steps then the
+ *          first outcome, through toCommitSubject (relay.js), whose
+ *          fallback names the wave.
  *   The step, as meta.js names it:
  *   Waves   workers run each computeWave() wave in parallel().
  *
@@ -86,6 +90,12 @@ function listStepFiles(steps) {
   return files;
 }
 
+function buildWaveSubject(waveSteps, waveNumber) {
+  const firstOutcome = waveSteps[0].outcome;
+  const text = waveSteps.length === 1 ? firstOutcome : waveSteps.map((step) => step.id).join(', ') + ': ' + firstOutcome;
+  return toCommitSubject(text, 'complete wave ' + waveNumber + ' of the delivery plan');
+}
+
 function findPlanStep(plan, stepId) {
   return plan.steps.find((step) => step.id === stepId);
 }
@@ -145,7 +155,7 @@ async function runPlanWaves(run, plan, facts) {
     phase('Waves');
     const workerResults = await parallel(waveSteps.map((step) => createWorkerTask(step, waveSteps, plan, run)));
     run.waveCount += 1;
-    const committed = await runCommitStep(run, plan, listStepFiles(waveSteps), 'commit-' + run.pass + '-' + waveNumber, 'wave');
+    const committed = await runCommitStep(run, plan, listStepFiles(waveSteps), 'commit-' + run.pass + '-' + waveNumber, 'wave', buildWaveSubject(waveSteps, waveNumber));
     if (committed.problem !== undefined) {
       return { result: finishDeliveryBlocked(committed.problem, run) };
     }

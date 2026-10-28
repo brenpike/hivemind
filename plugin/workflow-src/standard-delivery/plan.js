@@ -84,6 +84,9 @@
  *   2026-10-25). isGitIdentifier stays on
  *   artifact_files for the git show splice in the bump prompt, since the
  *   path rule allows spaces, shell characters and a leading '-'.
+ *   Each validation_commands entry is one command line: describePlanProblem
+ *   refuses a blank entry, or one that holds a line break or another
+ *   control character, naming the reason, before the branch step.
  *   Settled question guard: within one pass, a trunk_stale question a
  *   reply settled renders the same text for the whole run, and a settled
  *   plan_acceptance or remediation_plan_acceptance restores the plan result
@@ -235,6 +238,25 @@ function buildPlanRevisePrompt({ request, facts, scope, plan, questions, reply }
   ].join('\n');
 }
 
+/**
+ * Returns why one validation command of the plan cannot run as one command
+ * line: it is blank, holds a line break, or holds another control
+ * character. Returns '' for a command the plan check accepts.
+ */
+function describeValidationCommandProblem(command) {
+  if (command.trim() === '') {
+    return 'is blank';
+  }
+  const codePoints = Array.from(command).map((character) => character.codePointAt(0));
+  if (codePoints.some((codePoint) => [10, 13, 0x85, 0x2028, 0x2029].includes(codePoint))) {
+    return 'holds a line break';
+  }
+  if (codePoints.some((codePoint) => codePoint < 32 || (codePoint >= 127 && codePoint <= 0x9f))) {
+    return 'holds a control character';
+  }
+  return '';
+}
+
 function describePlanProblem(planResult, resultSchema, facts, trunk) {
   if (!isPlainObject(planResult)) {
     return 'The planner returned no result, so ' + RUN_NAME + ' stopped.';
@@ -262,6 +284,12 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
   }
   if (!plan.versioning.artifact_files.every((artifactPath) => isGitIdentifier(artifactPath))) {
     return 'The plan names a version file path that is not a safe git path, so ' + RUN_NAME + ' stopped.';
+  }
+  for (let index = 0; index < plan.validation_commands.length; index += 1) {
+    const commandProblem = describeValidationCommandProblem(plan.validation_commands[index]);
+    if (commandProblem !== '') {
+      return 'The plan names a validation command at validation_commands[' + index + '] that ' + commandProblem + ', so ' + RUN_NAME + ' stopped.';
+    }
   }
   const isOnOtherBranch = facts.head_state === 'branch' && facts.branch !== trunk;
   if (isOnOtherBranch && plan.branch !== facts.branch) {

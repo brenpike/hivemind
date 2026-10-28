@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const DOCTRINE_PATH = '${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md';
 const LOAD_LINE_PREFIX = 'Load and follow: ';
+const GOVERNANCE_PATH_PREFIX = '${CLAUDE_PLUGIN_ROOT}/governance/';
+const WORKER_AGENT_PATHS = ['plugin/agents/drone.md', 'plugin/agents/changeling.md'];
 const AGENT_SECTIONS = [
   { agentPath: 'plugin/agents/drone.md', remediationHeading: '## Review Remediation' },
   { agentPath: 'plugin/agents/overlord.md', remediationHeading: '## Review Remediation Posture' },
@@ -39,6 +41,15 @@ describe('agents load the remediation doctrine only in their review-remediation 
     test(`${agentPath}: ${remediationHeading} says to load and follow the doctrine`, () => {
       const section = readSection(readAgentText(agentPath), remediationHeading, agentPath);
       assert.ok(section.includes('load and follow `' + DOCTRINE_PATH + '`'), `${remediationHeading} does not load the doctrine`);
+    });
+  }
+});
+
+describe('worker agents load no governance doc whole on dispatch', () => {
+  for (const agentPath of WORKER_AGENT_PATHS) {
+    test(`${agentPath}: the Load and follow line names no governance path`, () => {
+      const loadLine = readLoadLine(readAgentText(agentPath), agentPath);
+      assert.ok(!loadLine.includes(GOVERNANCE_PATH_PREFIX), `${agentPath} loads a governance doc whole on every dispatch`);
     });
   }
 });

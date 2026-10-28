@@ -10,7 +10,7 @@ export const meta = {
     { title: 'Branch', detail: 'a runner creates or confirms the working branch' },
     { title: 'Waves', detail: 'workers run each ready wave of plan steps in parallel' },
     { title: 'Commit', detail: 'a runner commits the files of each wave and of each gate step' },
-    { title: 'Bump', detail: 'a runner derives the version bump and a drone sets the version files' },
+    { title: 'Bump', detail: 'a runner derives the version bump, or one drone derives it and sets the version files' },
     { title: 'Validate', detail: 'a drone runs the project validation commands' },
     { title: 'Fix', detail: 'a drone fixes a failed validation, one round at a time' },
     { title: 'Review', detail: 'the local reviewer reviews the branch and commits its simple fixes' },

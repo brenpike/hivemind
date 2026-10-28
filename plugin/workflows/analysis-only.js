@@ -383,6 +383,7 @@ const PLAN_SCHEMA = {
 "classification",
 "breaking",
 "versioning",
+"validation_commands",
 "delivery",
 "steps"
 ],
@@ -510,6 +511,12 @@ const PLAN_SCHEMA = {
 "description": "Can carry external content. Repository path."
 }
 }
+}
+},
+"validation_commands": {
+"type": "array",
+"items": {
+"type": "string"
 }
 },
 "delivery": {
@@ -2148,7 +2155,7 @@ buildFactsBlock(facts)
 ].join('\n');
 }
 function scanOptions(){
-return{agentType:runnerAgentType(),schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
+return{agentType:runnerAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
 }
 async function runScanStep(facts,runNoun){
 if(Number(facts.external_texts)>0){

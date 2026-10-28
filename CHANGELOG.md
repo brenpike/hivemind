@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.3.0] - 2026-10-27
+
+### Added
+
+- The plan gains a required `validation_commands` field: each gate command line the project's `CLAUDE.md` names. The `standard-delivery` validate step gives the drone those commands and runs each once. An empty list falls back to the Validation Procedure, which runs the gate command `CLAUDE.md` names, once, so validation is never skipped. The plan check refuses a blank entry or one that holds a line break or another control character, before the branch step (#464).
+- `hivemind:molt` takes an optional `subject`. Given both `files` and `subject`, it runs no git command of its own. The `standard-delivery` script builds every commit subject in code, so its commit runners no longer read `git status` or `git diff` (#464).
+- `hivemind:local-reviewer` takes an optional `caller_validates` input. With `true`, each fix is checked by a Worker Self-Check over only the files it touched, with no project-wide suite. The `standard-delivery` script passes `true`, since it validates every commit the review leaves (#464).
+- The planner sizes each plan step as one concern that one drone can carry, and never makes research, a probe or a measurement a plan step (#464).
+
+### Changed
+
+- The Validation Procedure runs each gate command the project's `CLAUDE.md` names, once, and never another form of the same suites, a diagnostic or a CI-only run. This repo's gate is `bash tools/validate.sh --changed` alone; `--all` and `--self-test` stay CI and manual checks (#464).
+- The `standard-delivery` validate step edits nothing and no commit runner follows it. A path it leaves dirty is refused by the next commit or by the pull request step. A failed result is kept for its commit, so a fix round that commits nothing does not validate the same commit again (#464).
+- With version files, the `standard-delivery` bump is one Sonnet drone that derives the bump type and sets the version files, then the commit runner: 2 agents, not 3. A later commit the commit runner made with the plan's commit type and no version file keeps the bump held with no agent call, only when the held bump counted one row with no dropped revert and its range already held such a commit; any other commit reruns the bump. The scan runs on Sonnet (#464).
+- The drone and the changeling load no governance doc on dispatch, and read a governance section only when a rule they reach names it (#464).
+- The local reviewer and `hivemind:adaptation-cycle` run long calls, the Codex review included, in the foreground with a timeout, and never poll a background process (#464).
+- `tools/test_change_detect_poll.sh` and `tools/test_brood_compat.sh` fake `sleep` instead of sleeping in real time, and `tools/test_brood_compat.sh` copies one seed repo per git fixture shape instead of building each fixture per case (#464).
+- The `standard-delivery` prose budget rises from 43,000 to 44,000 characters. The built script is 157,315 characters, with 43,614 characters of string and template literals, within the unchanged 190,000 budget. `analysis-only` is 70,488 characters, with 18,676 characters of literals, within its unchanged prose budget of 19,000 (#464).
+- Docs: a new amendment to ADR-0037, with dated notes on its Consequences and on the relayed user message risk, which is recorded as a limit. The README lifecycle, gate paragraph, `hivemind:molt` row and `plan-schema.json` row describe the new steps (#464).
+
+### Fixed
+
+- The GitHub review loop read a Codex Review Summary with no findings as actionable on every fetch. `fix-history-classify.jq` now reads the summary state, and a summary from the Codex bot that reports no findings or a running review is handled; a missing, unparseable or findings state falls back to the `EYES` rule. A running review keeps the summary handled even when it already reports findings, by the user's decision recorded in ADR-0037 (#464).
+
 ## [7.2.0] - 2026-10-27
 
 ### Added

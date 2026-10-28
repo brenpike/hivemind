@@ -120,12 +120,32 @@ reap_brood_sessions() { tmux kill-session -t brood-api 2>/dev/null || true; retu
 # which config surfaces are present relative to CWD) to a per-case launch-marker file passed via
 # the HIVEMIND_STUB_MARKER env var; prints the readiness line spawn-brood polls for
 # (`hivemind:overlord` — READY_SUBSTRING) so the positive case's Pass-2 capture-pane match
-# succeeds without burning the 90s READY_TIMEOUT; keeps the pane alive briefly so at least one
-# capture-pane poll (POLL_INTERVAL=2) reads the line; then exits 0. It uses only POSIX builtins +
-# printf redirection (it runs under `tmux new-session` as a detached pty with no stdin).
+# succeeds; writes its boot file; then keeps the pane alive until the case's exit file for its
+# strain appears (see FAKE CLOCK below), and exits 0. It runs under `tmux new-session` as a
+# detached pty with no stdin.
 #
 # The marker path is UNIQUE PER CASE (each case sets HIVEMIND_STUB_MARKER to its own file), so a
 # launch recorded by one case can never bleed into another case's assertions.
+#
+# FAKE CLOCK (STEP-003 of #464): no spawn case waits in real time for spawn-brood's timers. The
+# stub dir also holds `date` and `sleep` shims (hivemind-fake-clock), so every spawn subshell, which
+# prepends the stub dir to PATH, runs spawn-brood.sh on a virtual clock: `date +%s` reads it and
+# `sleep N` advances it by N seconds and returns at once. That covers POLL_INTERVAL, READY_TIMEOUT,
+# STARTED_EVIDENCE_TIMEOUT, RESEND_POLL_TIMEOUT, INJECT_SETTLE and RECONCILE_SETTLE. Each case
+# passes its own WORKDIR as HIVEMIND_TEST_SIGNAL_DIR, which holds the clock (clock-ms), the log of
+# sleep arguments (sleep-log) and the stub signal files:
+#   booted-<short>   a stub writes it after its readiness line. The `sleep` shim first waits, in real
+#                    time, until there is one per live tmux session, so the virtual clock never runs
+#                    out READY_TIMEOUT before a stub has printed its readiness line.
+#   exit-<short>     the stub for strain <short> exits once it exists. Only the case creates it.
+#   start-<short>, started-<short>  the promotion stub's act signal and its acknowledgement.
+# A case changes a stub's state at an exact point in spawn-brood's run through
+# HIVEMIND_FAKE_SLEEP_HOOK: the `sleep` shim runs that executable with the sleep argument after it
+# advances the clock, and returns only when the hook does.
+#
+# The stubs run inside tmux, whose server inherits the shimmed PATH, so they never call `sleep`:
+# they wait through hivemind-real-wait, which uses the real sleep (`command -p sleep`). Every real
+# wait has a cap, so a stub or hook can never wait forever.
 STUB_BIN=""
 build_claude_stub() {
     # Idempotent: build once, reuse across cases. Reaped via the EXIT cleanup() below.
@@ -133,7 +153,8 @@ build_claude_stub() {
     STUB_BIN="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-stub.XXXXXX")"
     cat > "$STUB_BIN/claude" <<'STUB_EOF'
 #!/usr/bin/env bash
-# Test-scoped `claude` stub (hivemind #169). NO real work — records the launch + exits 0.
+# Test-scoped `claude` stub (hivemind #169). NO real work — records the launch, prints the
+# readiness line, writes its boot file, then exits once the case creates its exit file.
 # Reads HIVEMIND_STUB_MARKER (per-case unique) for the launch-record path.
 marker="${HIVEMIND_STUB_MARKER:-}"
 if [ -n "$marker" ]; then
@@ -145,13 +166,91 @@ if [ -n "$marker" ]; then
         if [ -f .claude/settings.local.json ]; then printf 'settings_local=present\n'; else printf 'settings_local=absent\n'; fi
     } >> "$marker" 2>/dev/null || true
 fi
-# Emit the readiness chrome spawn-brood's capture-pane poll greps for (READY_SUBSTRING),
-# then keep the pane alive long enough for at least one POLL_INTERVAL=2 poll to read it.
+# Emit the readiness chrome spawn-brood's capture-pane poll greps for (READY_SUBSTRING).
 printf 'hivemind:overlord\n'
-sleep 4
+short="$(basename "$(pwd -P)")"
+: > "$HIVEMIND_TEST_SIGNAL_DIR/booted-$short"
+hivemind-real-wait 120 test -e "$HIVEMIND_TEST_SIGNAL_DIR/exit-$short"
 exit 0
 STUB_EOF
     chmod +x "$STUB_BIN/claude"
+
+    cat > "$STUB_BIN/hivemind-real-wait" <<'REALWAIT_EOF'
+#!/usr/bin/env bash
+# hivemind-real-wait <max-seconds> <command...>: run <command> every 0.05 s of real time until it
+# succeeds. Exits 0 when it does, or 1 with a message on stderr once <max-seconds> have passed.
+max_polls=$(( $1 * 20 ))
+shift
+polls=0
+until "$@"; do
+    if [ "$polls" -ge "$max_polls" ]; then
+        printf 'hivemind-real-wait: gave up waiting for: %s\n' "$*" >&2
+        exit 1
+    fi
+    command -p sleep 0.05
+    polls=$((polls + 1))
+done
+exit 0
+REALWAIT_EOF
+
+    cat > "$STUB_BIN/hivemind-stubs-booted" <<'BOOTED_EOF'
+#!/usr/bin/env bash
+# hivemind-stubs-booted: succeed when the signal dir holds at least one booted-<short> file per live
+# tmux session on the private server.
+shopt -s nullglob
+booted_files=("$HIVEMIND_TEST_SIGNAL_DIR"/booted-*)
+live_session_count="$(tmux list-sessions -F '#{session_name}' 2>/dev/null | wc -l)"
+[ "${#booted_files[@]}" -ge "$live_session_count" ]
+BOOTED_EOF
+
+    cat > "$STUB_BIN/hivemind-release-strain" <<'RELEASE_EOF'
+#!/usr/bin/env bash
+# hivemind-release-strain <short>: create the exit file for strain <short>, then wait until no live
+# tmux session name ends in -<short>, so the strain's session is gone before this returns.
+: > "$HIVEMIND_TEST_SIGNAL_DIR/exit-$1"
+hivemind-real-wait 30 bash -c '! tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -q -- "-$1\$"' _ "$1"
+RELEASE_EOF
+
+    cat > "$STUB_BIN/hivemind-fake-clock" <<'CLOCK_EOF'
+#!/usr/bin/env bash
+# Fake clock for spawn-brood.sh, installed as `date` and `sleep`. The virtual clock is
+# $HIVEMIND_TEST_SIGNAL_DIR/clock-ms, in milliseconds, started from the real time on first use.
+#   date +%s   prints the virtual clock in whole seconds. Any other `date` call runs the real date.
+#   sleep <N>  waits in real time until every live tmux session's stub has booted, advances the
+#              virtual clock by N seconds, appends N to sleep-log, runs HIVEMIND_FAKE_SLEEP_HOOK
+#              with N when it is set, and returns the hook's status.
+set -u
+tool_name="$(basename "$0")"
+if [ "$tool_name" = "date" ] && [ "$*" != "+%s" ]; then
+    exec "$(command -p -v date)" "$@"
+fi
+signal_dir="${HIVEMIND_TEST_SIGNAL_DIR:?HIVEMIND_TEST_SIGNAL_DIR must name the case signal dir}"
+clock_file="$signal_dir/clock-ms"
+[ -f "$clock_file" ] || printf '%s\n' "$(( $(command -p date +%s) * 1000 ))" > "$clock_file"
+clock_ms="$(cat "$clock_file")"
+if [ "$tool_name" = "date" ]; then
+    printf '%s\n' "$(( clock_ms / 1000 ))"
+    exit 0
+fi
+if [ "$#" -ne 1 ] || ! [[ "$1" =~ ^([0-9]+)(\.([0-9]{1,3}))?$ ]]; then
+    printf 'fake sleep: unsupported arguments: %s\n' "$*" >&2
+    exit 1
+fi
+fraction_digits="${BASH_REMATCH[3]}000"
+advance_ms=$(( 10#${BASH_REMATCH[1]} * 1000 + 10#${fraction_digits:0:3} ))
+hivemind-real-wait 30 hivemind-stubs-booted || exit 1
+printf '%s\n' "$(( clock_ms + advance_ms ))" > "$clock_file"
+printf '%s\n' "$1" >> "$signal_dir/sleep-log"
+if [ -n "${HIVEMIND_FAKE_SLEEP_HOOK:-}" ]; then
+    "$HIVEMIND_FAKE_SLEEP_HOOK" "$1" || exit 1
+fi
+exit 0
+CLOCK_EOF
+
+    chmod +x "$STUB_BIN/hivemind-real-wait" "$STUB_BIN/hivemind-stubs-booted" \
+        "$STUB_BIN/hivemind-release-strain" "$STUB_BIN/hivemind-fake-clock"
+    ln -s hivemind-fake-clock "$STUB_BIN/date"
+    ln -s hivemind-fake-clock "$STUB_BIN/sleep"
     return 0
 }
 
@@ -192,6 +291,7 @@ cleanup() {
     # spawn case set WORKDIR first, PROJ_WORKDIR is a separate dir and needs its own reap.
     [ -n "${PROJ_WORKDIR:-}" ] && [ "${PROJ_WORKDIR:-}" != "${WORKDIR:-}" ] && rm -rf "$PROJ_WORKDIR"
     [ -n "${TMUX_TMPDIR:-}" ] && rm -rf "$TMUX_TMPDIR"
+    [ -n "${SEED_ROOT:-}" ] && rm -rf "$SEED_ROOT"
     return 0
 }
 trap cleanup EXIT
@@ -201,6 +301,11 @@ trap cleanup EXIT
 # assignment would be confined to the subshell and never reach the parent. STUB_BIN is reaped by
 # cleanup() on EXIT. After this, $STUB_BIN is non-empty for every spawn-invoking case to prepend.
 build_claude_stub
+
+# SEED_ROOT holds one seed repo per git fixture shape (see copy_seed_repo). It is made in
+# the main shell for the same subshell reason as STUB_BIN; each seed is built on first use, so a
+# case that SKIPs on a missing dependency never runs git. Reaped by cleanup() on EXIT.
+SEED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-seed.XXXXXX")"
 
 # extract_tmux_session: pull the first strain's tmux_session value the SAME way the
 # spawn-brood liveness guard and brood-status read it from the JSON manifest — `jq -r
@@ -262,21 +367,49 @@ assert_v2_new() {
     fi
 }
 
+# ── Shared git fixture seeds ─────────────────────────────────────────────────────
+# build_seed_repo <shape> <seed>: create the seed repo for one fixture shape.
+#   init-only — `git init` and nothing else (no identity, no commit).
+#   committed — a git repo with a local identity and one empty commit on git's default branch.
+#   spawn     — committed, plus real .hivemind/.claude dirs, with the branch pinned to `main`.
+build_seed_repo() {
+    local shape="$1" seed="$2"
+    mkdir -p "$seed"
+    git -C "$seed" init -q
+    case "$shape" in
+        init-only) return 0 ;;
+        committed|spawn) ;;
+        *) echo "FAIL: unknown seed repo shape: $shape" >&2; return 2 ;;
+    esac
+    git -C "$seed" config user.email test@example.com
+    git -C "$seed" config user.name test
+    [ "$shape" = "spawn" ] && mkdir -p "$seed/.hivemind" "$seed/.claude"
+    git -C "$seed" commit -q --allow-empty -m "seed"
+    # Pin the branch to `main` (the inputs base): `git init`'s default branch is host-config
+    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
+    [ "$shape" = "spawn" ] && git -C "$seed" branch -M main
+    return 0
+}
+
+# copy_seed_repo <shape> <dest>: give <dest> its own isolated copy of the <shape> seed repo,
+# building that seed under SEED_ROOT on first use. Cases mutate only their copy, never the seed.
+copy_seed_repo() {
+    local shape="$1" dest="$2"
+    # INVARIANT: build_seed_repo runs as a plain statement, never on the right of `||`, so
+    # `set -e` stays armed inside it and a failed git step aborts the suite.
+    if [ ! -d "$SEED_ROOT/$shape" ]; then
+        build_seed_repo "$shape" "$SEED_ROOT/$shape"
+    fi
+    mkdir -p "$dest"
+    cp -a "$SEED_ROOT/$shape/." "$dest/"
+}
+
 # ── Shared spawn-case helpers ────────────────────────────────────────────────────
 # init_spawn_repo <gitroot>: create the coordinator checkout every spawn case past the guards
 # uses — a git repo with real .hivemind/.claude dirs and one commit on `main`. No origin remote
 # is needed: spawn-brood creates no branch, so it has no remote branch-collision check.
 init_spawn_repo() {
-    local gitroot="$1"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    # Pin the branch to `main` (the inputs base): `git init`'s default branch is host-config
-    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
-    git -C "$gitroot" branch -M main
+    copy_seed_repo spawn "$1"
 }
 
 # write_one_strain_inputs <inputs-path> <base> <description>: author minimal valid one-strain
@@ -338,18 +471,21 @@ check_detached_boot() {
     printf 'yes'
 }
 
-# write_started_stub <dir>: write a `claude` stub that STARTS: it prints the readiness chrome,
-# writes a gather-facts output file (started-evidence for a script-engine child) in its cwd (the
-# strain worktree), then stays alive recording every line it receives to
-# .hivemind/stub-received.txt until 40s pass with no input.
+# write_started_stub <dir>: write a `claude` stub that STARTS: it writes a gather-facts output file
+# (started-evidence for a script-engine child) in its cwd (the strain worktree) BEFORE it prints
+# the readiness chrome, so the evidence is on disk by the time Pass 2 sees the stub ready and
+# Pass 3's first poll finds it whatever the virtual clock reads. It then writes its boot file and
+# stays alive recording every line it receives to .hivemind/stub-received.txt. The case ends it
+# with `tmux kill-server`; the 40 s idle read timeout only stops a leaked stub.
 write_started_stub() {
     mkdir -p "$1"
     cat > "$1/claude" <<'STARTEDSTUB_EOF'
 #!/usr/bin/env bash
-# Started stub: readiness chrome, a facts file (started-evidence), then record received lines.
-printf 'hivemind:overlord\n'
+# Started stub: a facts file (started-evidence), readiness chrome, then record received lines.
 mkdir -p .hivemind/facts
 : > .hivemind/facts/facts-20261024T120000Z-0123456789ab.json
+printf 'hivemind:overlord\n'
+: > "$HIVEMIND_TEST_SIGNAL_DIR/booted-$(basename "$(pwd -P)")"
 while IFS= read -r -t 40 received_line; do
     printf '%s\n' "$received_line" >> .hivemind/stub-received.txt
 done
@@ -358,16 +494,10 @@ STARTEDSTUB_EOF
     chmod +x "$1/claude"
 }
 
-# wait_for_received_line <file> <line>: wait up to 10s for <file> to hold <line> exactly; the
-# stub records `/rc <short>` only after spawn-brood has already returned.
+# wait_for_received_line <file> <line>: wait up to 10s for <file> to hold <line> exactly, checking
+# every 0.05 s; the stub records a line only after spawn-brood or the case has sent it.
 wait_for_received_line() {
-    local waited=0
-    while [ "$waited" -lt 10 ]; do
-        grep -qxF -- "$2" "$1" 2>/dev/null && return 0
-        sleep 1
-        waited=$((waited + 1))
-    done
-    return 1
+    "$STUB_BIN/hivemind-real-wait" 10 grep -sqxF -- "$2" "$1"
 }
 
 # ── Assertion 3: injected task.md is DATA ONLY (ADR-0037 decision 24) ────────────
@@ -401,6 +531,7 @@ assert_spawn_brood_task_md_data_only() {
     # Pass 1, so its content is the assertion target regardless of how the child boots.
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
         STARTED_EVIDENCE_TIMEOUT=1 bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>&1 || rc=$?
     tmux kill-server 2>/dev/null || true
 
@@ -468,8 +599,7 @@ assert_spawn_brood_symlink_escape_blocked() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
+    copy_seed_repo init-only "$gitroot"
     # External dir OUTSIDE the checkout, the symlink's escape target. Symlink the gitroot's
     # `.hivemind` to it so the derived "$repo_root/.hivemind/brood" STATE path resolves
     # THROUGH the symlink to the external target — the first chain the guard checks.
@@ -513,7 +643,8 @@ assert_spawn_brood_symlink_escape_blocked() {
     # write-chain guard this case targets must be the one that rejected, NOT the inputs read-guard.
     local stderr_out="$WORKDIR/spawn-stderr.txt"
     reap_brood_sessions  # isolate from any brood-api session a prior case leaked (pre-flight 1d collision)
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
 
     # The guard must reject (non-zero) AND nothing may have been written under the external
     # escape target: no brood/ STATE dir, no manifest, no worktree. A successful escape would
@@ -570,8 +701,7 @@ assert_spawn_brood_inputs_external_rejected() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
+    copy_seed_repo init-only "$gitroot"
     # `.hivemind` stays a REAL dir (the write-chain guard is NOT the subject here). The hostile
     # element is a symlinked ANCESTOR for the inputs file: $gitroot/link -> external.
     local external="$WORKDIR/brood-external"
@@ -605,7 +735,8 @@ assert_spawn_brood_inputs_external_rejected() {
     # get past spawn-brood's dep gate to the guard under test. Real tmux/jq still resolve normally.
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions  # isolate from any brood-api session a prior case leaked (pre-flight 1d collision)
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>&1 || rc=$?
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>&1 || rc=$?
 
     # The read-guard must reject (non-zero) AND spawn-brood must have written NOTHING under the
     # external target. The inputs file itself lands at $external/brood-inputs.json (the harness
@@ -655,15 +786,10 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
     # The COORDINATOR checkout is SAFE: its OWN `.hivemind`/`.claude` are REAL dirs, so the
     # coordinator-side write-chain guard passes (this case is NOT testing that guard).
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    # Seed an initial commit on the default branch so a worktree can be added from a base ref.
-    git -C "$gitroot" commit -q --allow-empty -m "init"
+    # Seed an initial commit on `main` so a worktree can be added from a base ref.
+    init_spawn_repo "$gitroot"
 
     # External dir OUTSIDE the checkout — the symlink's escape target.
     local external="$WORKDIR/brood-external"
@@ -719,7 +845,8 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked() {
     # get past spawn-brood's dep gate to the guard under test. Real tmux/jq still resolve normally.
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions  # isolate from any brood-api session a prior case leaked (pre-flight 1d collision)
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>&1 || rc=$?
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>&1 || rc=$?
 
     # The child-worktree guard must reject (non-zero — the single strain fails) AND nothing may
     # have been written under the external escape target. A successful escape (OLD behavior) would
@@ -786,14 +913,9 @@ assert_spawn_brood_child_leaf_task_escape_blocked() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
     # COORDINATOR checkout is SAFE: real .hivemind/.claude dirs, so the coordinator-side
     # write-chain guard (assertion 4) and child-worktree dir-guard (assertion 6) both pass.
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
+    init_spawn_repo "$gitroot"
 
     # External dir — the symlink leaf's escape target. The leaf points at $external/task.md
     # (a FILE path inside this dir), NOT at $external itself, so the unguarded `printf >`
@@ -853,7 +975,8 @@ assert_spawn_brood_child_leaf_task_escape_blocked() {
     # the PATH prefix is required to reach the leaf guard. Real tmux/jq resolve normally.
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions  # isolate from any brood-api session a prior case leaked (pre-flight 1d collision)
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
 
     # Leaf guard must reject (non-zero) AND nothing written under external escape target.
     # A successful escape would CREATE external/task.md (followed from the symlink leaf).
@@ -916,15 +1039,10 @@ assert_spawn_brood_child_leaf_settings_escape_blocked() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
+    init_spawn_repo "$gitroot"
     # COORDINATOR has a REAL settings.local.json so the `if [ -f "$settings_local" ]`
     # propagation path is actually reached and the leaf guard is exercised.
     printf '{"permissions":{"allow":[]}}\n' > "$gitroot/.claude/settings.local.json"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
 
     local external="$WORKDIR/brood-external"
     mkdir -p "$external"
@@ -978,7 +1096,8 @@ assert_spawn_brood_child_leaf_settings_escape_blocked() {
     # the PATH prefix is required to reach the leaf guard. Real tmux/jq resolve normally.
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions  # isolate from any brood-api session a prior case leaked (pre-flight 1d collision)
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
 
     # Leaf guard must reject (non-zero) AND nothing written under external escape target.
     # A successful escape would write external/settings.local.json via cp.
@@ -1047,12 +1166,7 @@ assert_spawn_brood_child_leaf_regular_ok() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
+    init_spawn_repo "$gitroot"
 
     # Build the `safe` base ref: REAL .hivemind/brood/task.md REGULAR FILE (not a symlink).
     # This is the normal case: a repo that pre-stages a real task file in its base tree.
@@ -1093,14 +1207,18 @@ assert_spawn_brood_child_leaf_regular_ok() {
     # claude stub onto PATH for THIS spawn invocation only, with a per-case launch marker. Unlike
     # the negative cases, the stub IS exec'd here: the regular-file leaf passes the guard, the run
     # proceeds to `tmux new-session`, and the stub claude runs in the strain worktree, records the
-    # launch to $marker, prints the readiness chrome so Pass-2 capture-pane matches, and exits 0.
+    # launch to $marker, prints the readiness chrome so Pass-2 capture-pane matches, and stays alive
+    # until the session is reaped below.
     local rc=0
     local stderr_out stdout_out marker
     stderr_out="$WORKDIR/spawn-stderr.txt"
     stdout_out="$WORKDIR/spawn-stdout.txt"
     marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions  # isolate from any brood-api session a prior case leaked (pre-flight 1d collision)
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>"$stderr_out" || rc=$?
+    # The stub never writes evidence; a 1s grace keeps Pass 3 to one verify poll instead of 90.
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
+        STARTED_EVIDENCE_TIMEOUT=1 bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>"$stderr_out" || rc=$?
     # Reap the ACTUALLY-launched session. v4 namespacing makes the session <brood-id>-api with an
     # internally-generated brood-id, which the literal `brood-api`-scoped reap_brood_sessions does
     # NOT kill. Parse the session name from the spawn stdout `attach:` line and kill it on the
@@ -1216,7 +1334,8 @@ run_facts_base_refusal_case() {
     local stderr_out="$WORKDIR/spawn-stderr.txt"
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions
-    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" bash "$SPAWN_SCRIPT" "$inputs" ) \
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" bash "$SPAWN_SCRIPT" "$inputs" ) \
         >"$stdout_out" 2>"$stderr_out" || rc=$?
     local launched_session
     launched_session="$(sed -n 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$stdout_out" 2>/dev/null | head -1)"
@@ -1300,15 +1419,7 @@ assert_spawn_brood_task_identity_not_cross_wired() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    # Pin the branch to `main` (the inputs base): `git init`'s default branch is host-config
-    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
-    git -C "$gitroot" branch -M main
+    init_spawn_repo "$gitroot"
 
     # >=3 strains whose names sanitize to DISTINCT shorts. The pre-fix bug bled the LAST strain's
     # short (charlie-three) into the earlier strains' task.md strain.id; with three strains, TWO
@@ -1337,10 +1448,11 @@ assert_spawn_brood_task_identity_not_cross_wired() {
     # leaving task.md (authored in Pass 1) untouched — the assertion target.
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
         STARTED_EVIDENCE_TIMEOUT=1 bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>&1 || rc=$?
     # Reap every launched session (v4 sessions are <brood-id>-<short>, NOT the literal brood-api the
-    # default reap targets). The default stub sleeps then exits, but reap defensively so no detached
-    # session leaks past this case; the EXIT kill-server is the final net.
+    # default reap targets). The default stub stays alive until its exit file exists, so kill the
+    # server here so no detached session leaks past this case; the EXIT kill-server is the final net.
     tmux kill-server 2>/dev/null || true
 
     # parse_task_field <task.md> <top-key> <sub-key>: extract a 4-space-indented block-scalar value.
@@ -1395,11 +1507,11 @@ assert_spawn_brood_task_identity_not_cross_wired() {
 # only a DEAD session ⇒ `failed`/exit 1.
 #
 # This case drives that path deterministically: a claude stub that emits the READY_SUBSTRING (so
-# Pass-2 readiness passes and the strain reaches Pass-3 verify), stays ALIVE well past the grace,
-# and NEVER writes a run ledger (no started-evidence). A LOW STARTED_EVIDENCE_TIMEOUT makes the
-# grace expire WHILE the stub session is still alive (the stub's sleep far outlasts the grace, so
-# the verifier observes `has-session` true at exhaustion — the `starting` branch, never the
-# dead-session `failed` branch). Assert: the strain's manifest status == `starting`, spawn-brood
+# Pass-2 readiness passes and the strain reaches Pass-3 verify), stays ALIVE until the case kills
+# its session, and NEVER writes a run ledger (no started-evidence). A LOW STARTED_EVIDENCE_TIMEOUT
+# makes the virtual-clock grace expire WHILE the stub session is still alive (nothing ends the stub
+# before the case does, so the verifier observes `has-session` true at exhaustion — the `starting`
+# branch, never the dead-session `failed` branch). Assert: the strain's manifest status == `starting`, spawn-brood
 # exited 0, a `brood_id:` line was printed, and an `attach:` line exists for the starting strain.
 #
 # DEPENDENCY GATING: identical to the escape cases — gated on tmux+jq (claude via the stub). SKIP
@@ -1414,22 +1526,12 @@ assert_spawn_brood_alive_no_evidence_starting() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    # Pin the branch to `main` (the inputs base): `git init`'s default branch is host-config
-    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
-    git -C "$gitroot" branch -M main
+    init_spawn_repo "$gitroot"
 
-    # A DEDICATED long-lived stub for THIS case: the suite-wide stub sleeps only ~4s, which can be
-    # shorter than the ready-wait + grace window, risking a flake into the dead-session `failed`
-    # branch. This stub emits READY_SUBSTRING (so Pass-2 capture-pane matches) then sleeps far
-    # longer than any plausible ready-wait + low grace, guaranteeing the session is ALIVE when the
-    # grace exhausts. It NEVER writes a run ledger or a facts file, so no started-evidence ever
-    # appears. It records every line it receives to .hivemind/stub-received.txt in its cwd (the
+    # A DEDICATED reading stub for THIS case: it emits READY_SUBSTRING (so Pass-2 capture-pane
+    # matches), writes its boot file, then reads its pty until the case kills its session, so the
+    # session is ALIVE when the grace exhausts. The 45 s idle read timeout only stops a leaked stub.
+    # It NEVER writes a run ledger or a facts file, so no started-evidence ever appears. It records every line it receives to .hivemind/stub-received.txt in its cwd (the
     # strain worktree) so the case can prove no `/rc` reached it. It is prepended AHEAD of
     # $STUB_BIN on PATH for this invocation only (shadowing the default stub), and reaped with
     # WORKDIR on EXIT.
@@ -1437,9 +1539,10 @@ assert_spawn_brood_alive_no_evidence_starting() {
     mkdir -p "$long_stub"
     cat > "$long_stub/claude" <<'LONGSTUB_EOF'
 #!/usr/bin/env bash
-# Defect-B stub: emit readiness chrome, stay alive far past the low grace, never write evidence,
-# record every received line.
+# Defect-B stub: emit readiness chrome, stay alive until the case kills the session, never write
+# evidence, record every received line.
 printf 'hivemind:overlord\n'
+: > "$HIVEMIND_TEST_SIGNAL_DIR/booted-$(basename "$(pwd -P)")"
 while IFS= read -r -t 45 received_line; do
     printf '%s\n' "$received_line" >> .hivemind/stub-received.txt
 done
@@ -1465,26 +1568,32 @@ LONGSTUB_EOF
     local rc=0
     local stdout_out="$WORKDIR/spawn-stdout.txt"
     local marker="$WORKDIR/launch-marker.txt"
-    # LOW STARTED_EVIDENCE_TIMEOUT (3s): the grace exhausts quickly while the 45s-sleeping stub
+    # LOW STARTED_EVIDENCE_TIMEOUT (3 virtual s): the grace exhausts while the reading stub's
     # session is still alive → the `starting` branch. RESEND_POLL_TIMEOUT (8s) exceeds the grace,
     # so no bare-Enter nudge fires within the window — the path is a clean grace-exhaustion.
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$long_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
         STARTED_EVIDENCE_TIMEOUT=3 bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>/dev/null || rc=$?
-    # One-shot settle so any keystroke spawn-brood might have sent is recorded before the check.
-    sleep 1
-    # Reap the launched <brood-id>-api session (the 45s read loop would otherwise outlive the case).
-    local launched_session
+    # Send a sentinel line after spawn-brood returns and wait until the stub records it. The pty
+    # delivers lines in order, so every keystroke spawn-brood sent is recorded before the sentinel.
+    local launched_session wt received sentinel_seen=no
+    local sentinel_line="hivemind-test-sentinel"
     launched_session="$(sed -n 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$stdout_out" 2>/dev/null | head -1)"
+    wt="$(find_strain_worktree "$gitroot")"
+    received="$wt/.hivemind/stub-received.txt"
+    if [ -n "$launched_session" ] && tmux send-keys -t "$launched_session" "$sentinel_line" Enter 2>/dev/null \
+         && wait_for_received_line "$received" "$sentinel_line"; then
+        sentinel_seen=yes
+    fi
+    # Reap the launched <brood-id>-api session (the read loop would otherwise outlive the case).
     [ -n "$launched_session" ] && tmux kill-session -t "$launched_session" 2>/dev/null || true
     tmux kill-server 2>/dev/null || true
 
     # REMOTE CONTROL: a `starting` strain gets NO `/rc` keystroke, spawn-brood makes no rc-brood
     # call (no `remote: applied:` / `remote: summary:` line), and the strain gets exactly one
     # skipped line telling the operator to ask for enable-brood-remote later.
-    local wt received rc_received=no skipped_line=no rc_called=no boot
-    wt="$(find_strain_worktree "$gitroot")"
-    received="$wt/.hivemind/stub-received.txt"
+    local rc_received=no skipped_line=no rc_called=no boot
     grep -q '^/rc' "$received" 2>/dev/null && rc_received=yes
     [[ "$(grep -cxF 'remote: skipped: api (not started when spawn ended; ask for enable-brood-remote later)' "$stdout_out" 2>/dev/null || true)" == "1" ]] && skipped_line=yes
     grep -qE '^remote: (applied|summary|failed)' "$stdout_out" 2>/dev/null && rc_called=yes
@@ -1506,10 +1615,11 @@ LONGSTUB_EOF
     grep -q '^attach: tmux attach -t ' "$stdout_out" 2>/dev/null && attach_line=yes
 
     if [[ "$rc" -eq 0 && "$manifest_status" == "starting" && "$brood_id_line" == "yes" && "$attach_line" == "yes" \
-          && "$rc_received" == "no" && "$skipped_line" == "yes" && "$rc_called" == "no" && "$boot" == "yes" ]]; then
+          && "$sentinel_seen" == "yes" && "$rc_received" == "no" && "$skipped_line" == "yes" && "$rc_called" == "no" \
+          && "$boot" == "yes" ]]; then
         pass "$name" "alive session + no started-evidence within grace -> manifest status=starting; exit 0; brood_id+attach printed; no /rc sent, one remote skipped line; detached at base"
     else
-        failed "$name" "expected exit 0 + status=starting + brood_id + attach + no /rc + one skipped line + no rc-brood call + detached boot; rc=$rc status=$manifest_status brood_id_line=$brood_id_line attach_line=$attach_line rc_received=$rc_received skipped_line=$skipped_line rc_called=$rc_called boot=$boot manifest=${manifest:-<none>} stdout: $(cat "$stdout_out" 2>/dev/null)"
+        failed "$name" "expected exit 0 + status=starting + brood_id + attach + sentinel recorded + no /rc + one skipped line + no rc-brood call + detached boot; rc=$rc status=$manifest_status brood_id_line=$brood_id_line attach_line=$attach_line sentinel_seen=$sentinel_seen rc_received=$rc_received skipped_line=$skipped_line rc_called=$rc_called boot=$boot manifest=${manifest:-<none>} stdout: $(cat "$stdout_out" 2>/dev/null)"
     fi
 }
 
@@ -1522,30 +1632,17 @@ LONGSTUB_EOF
 # sweep re-probes every still-`starting` strain: started-evidence now present => running; session
 # now DEAD => failed (contributes exit 1); else stays `starting`.
 #
-# This case drives the DEAD-in-tail branch deterministically. A claude stub that:
+# This case drives the DEAD-in-tail branch deterministically, on the fake clock. The default claude
+# stub:
 #   - emits READY_SUBSTRING (Pass-2 readiness passes, strain reaches Pass-3 verify),
-#   - stays ALIVE just past a LOW STARTED_EVIDENCE_TIMEOUT (so verify_strain's grace-exhaustion
-#     `has-session` probe observes the session ALIVE → classifies `starting`, NOT the dead-session
-#     `failed` branch),
-#   - then EXITS (session dies) while the sweep's one-shot RECONCILE_SETTLE sleep is still running,
+#   - stays ALIVE until its exit file exists, so verify_strain's grace-exhaustion `has-session`
+#     probe observes the session ALIVE → classifies `starting`, NOT the dead-session `failed` branch,
 #   - and NEVER writes a run-ledger state.json (no started-evidence ever, so the sweep cannot
 #     promote to `running` — it must fall through to the DEAD branch).
-#
-# TIMING RATIONALE (concrete, non-racy — wall-clock measured from this strain's stub start):
-#   Ordering inside spawn-brood for one strain:
-#     Pass-2 readiness match: capture-pane polls every POLL_INTERVAL=2s; the stub prints READY at
-#       t≈0, so the match lands at t≈0..2s. Then submit_strain (fast tmux ops, ~0s).
-#     Pass-3 verify_strain: grace_deadline = match_time + STARTED_EVIDENCE_TIMEOUT. With
-#       STARTED_EVIDENCE_TIMEOUT=2, grace exhausts at ~t=2..5s. RESEND_POLL_TIMEOUT=8 > grace, so NO
-#       nudge fires inside the window — a clean grace-exhaustion. At exhaustion the stub is STILL
-#       ALIVE (it sleeps 8s) → `starting`.
-#     Reconciliation sweep: `sleep RECONCILE_SETTLE` (=14) runs ONCE, THEN the re-probe. The
-#       re-probe lands at ~t=(2..5)+14 = t≈16..19s.
-#   Stub lifetime: prints READY, sleeps 8s, exits → DEAD at t≈8s.
-#   Margins: ALIVE at verify probe — 8s lifetime vs ~5s worst-case exhaustion = ~3s slack. DEAD by
-#   re-probe — 8s lifetime vs ~16s earliest re-probe = ~8s slack. Both comfortably wide (no 1s
-#   races): the stub is reliably alive when verify classifies `starting` and reliably dead when the
-#   sweep re-probes → DEAD branch → failed → exit 1.
+# A sleep hook ends the stub INSIDE the sweep's one-shot RECONCILE_SETTLE sleep: on `sleep 14` it
+# creates exit-api and returns only once the api session is gone. 14 is the only sleep argument
+# that is the settle (POLL_INTERVAL is 2, INJECT_SETTLE 0.2), so the stub is alive at every verify
+# probe and dead at the re-probe, whatever the machine's speed.
 #
 # Assert: the single strain's manifest status == `failed`, spawn exited 1, and a
 # `blocker: 1 of 1 strains failed to spawn` line was emitted (to stderr).
@@ -1562,32 +1659,19 @@ assert_spawn_brood_tail_death_reconciled() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    # Pin the branch to `main` (the inputs base): git init's default branch is host-config
-    # dependent (master vs main), and spawn-brood blocks if `base` does not resolve to a commit.
-    git -C "$gitroot" branch -M main
+    init_spawn_repo "$gitroot"
 
-    # DEDICATED tail-death stub: emit READY (Pass-2 match), stay alive past the low grace (so the
-    # verify probe sees ALIVE → starting), then EXIT — dying inside the RECONCILE_SETTLE window. It
-    # NEVER writes a run ledger, so the sweep cannot promote to running; the only remaining branch
-    # is the DEAD re-probe → failed. Prepended AHEAD of $STUB_BIN for this invocation; reaped with
-    # WORKDIR on EXIT. sleep 8: alive at verify exhaustion (~t<=5), dead before the re-probe (~t>=16).
-    local death_stub="$WORKDIR/death-stub"
-    mkdir -p "$death_stub"
-    cat > "$death_stub/claude" <<'DEATHSTUB_EOF'
+    # Tail-death hook: the default stub stays alive until exit-api exists. The hook creates it on
+    # the RECONCILE_SETTLE sleep and waits until the session is gone, so the sweep's re-probe is the
+    # first probe that can see the session DEAD.
+    local death_hook="$WORKDIR/tail-death-hook"
+    cat > "$death_hook" <<'DEATHHOOK_EOF'
 #!/usr/bin/env bash
-# Tail-death stub: emit readiness chrome, stay alive past the low grace, then exit (session dies)
-# during the reconciliation settle window. Never writes a run ledger.
-printf 'hivemind:overlord\n'
-sleep 8
-exit 0
-DEATHSTUB_EOF
-    chmod +x "$death_stub/claude"
+# Tail-death hook: end the api stub during the one-shot RECONCILE_SETTLE sleep (14).
+[ "$1" = "14" ] || exit 0
+hivemind-release-strain api
+DEATHHOOK_EOF
+    chmod +x "$death_hook"
 
     local inputs="$gitroot/brood-inputs.json"
     jq -n \
@@ -1607,11 +1691,12 @@ DEATHSTUB_EOF
     local rc=0
     local stderr_out="$WORKDIR/spawn-stderr.txt"
     local marker="$WORKDIR/launch-marker.txt"
-    # STARTED_EVIDENCE_TIMEOUT=2 (low grace → verify exhausts while the 8s-sleeping stub is alive →
-    # starting). RECONCILE_SETTLE=14 (the one-shot settle outlasts the stub's death so the re-probe
-    # observes the session DEAD → failed). Capture stderr to assert the blocker line fired.
+    # STARTED_EVIDENCE_TIMEOUT=2 (low grace → verify exhausts while the stub is alive → starting).
+    # RECONCILE_SETTLE=14 (the hook ends the stub inside that settle, so the re-probe observes the
+    # session DEAD → failed). Capture stderr to assert the blocker line fired.
     reap_brood_sessions
-    ( cd "$gitroot" && PATH="$death_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" HIVEMIND_FAKE_SLEEP_HOOK="$death_hook" \
         STARTED_EVIDENCE_TIMEOUT=2 RECONCILE_SETTLE=14 bash "$SPAWN_SCRIPT" "$inputs" ) \
         >/dev/null 2>"$stderr_out" || rc=$?
     tmux kill-server 2>/dev/null || true
@@ -1650,15 +1735,14 @@ DEATHSTUB_EOF
 # ({"state":{"current":"implement_step"}}) at .hivemind/runs/<suggested_id>/state.json relative to
 # its cwd — exactly the leaf the confined reader projects.
 #
-# TIMING RATIONALE (measured from this strain's stub start; same Pass ordering as Assertion 12):
-#   Verify grace exhausts at ~t=2..5s (STARTED_EVIDENCE_TIMEOUT=2, POLL_INTERVAL=2). The ledger
-#   must be ABSENT at the verify probe (→ starting) and PRESENT at the re-probe (→ running). The
-#   stub sleeps 8s BEFORE writing the ledger, so the ledger does not exist until t≈8s — AFTER the
-#   verify probe (~t<=5; ~3s slack). RECONCILE_SETTLE=14 → re-probe at ~t=(2..5)+14 = t≈16..19s,
-#   well AFTER the ledger write at t≈8s (~8s slack). The stub then sleeps a long tail (40s) so the
-#   session stays ALIVE through manifest emission (the sweep's running-branch keys on evidence, not
-#   liveness, but a live session avoids any incidental dead-session interaction). Margins are wide
-#   on both sides → no 1s races.
+# ORDERING (fake clock, same Pass ordering as Assertion 12): the ledger must be ABSENT at the
+# verify probe (→ starting) and PRESENT at the re-probe (→ running). The stub writes no ledger until
+# start-api exists. A sleep hook creates start-api on the one-shot RECONCILE_SETTLE sleep (14, the
+# only sleep argument that is the settle) and returns only once the stub has written the ledger and
+# its started-api acknowledgement. So the ledger appears after every verify probe and before the
+# re-probe, whatever the machine's speed. The stub then stays alive until the case kills its
+# session, so the session is ALIVE through manifest emission (the sweep's running-branch needs a
+# live session as well as evidence).
 #
 # Assert: the single strain's manifest status == `running`, spawn exited 0.
 #
@@ -1673,29 +1757,26 @@ assert_spawn_brood_tail_started_promoted() {
 
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
-    mkdir -p "$gitroot"
-    git -C "$gitroot" init -q
-    git -C "$gitroot" config user.email test@example.com
-    git -C "$gitroot" config user.name test
-    mkdir -p "$gitroot/.hivemind" "$gitroot/.claude"
-    git -C "$gitroot" commit -q --allow-empty -m "init"
-    git -C "$gitroot" branch -M main
+    init_spawn_repo "$gitroot"
 
-    # DEDICATED promotion stub: emit READY, stay un-started past the low grace (no ledger yet → the
-    # verify probe classifies `starting`), THEN parse run.suggested_id from the provisioned task.md
-    # (cwd = child worktree root) and write a minimal valid ledger at the EXACT confined-reader leaf
-    # (.hivemind/runs/<suggested_id>/state.json) DURING the settle window, then stay alive long past
-    # the re-probe. The 4-space block-scalar parse mirrors the suite's parse_task_field awk.
+    # DEDICATED promotion stub: emit READY, stay un-started until start-api exists (no ledger yet →
+    # the verify probe classifies `starting`), THEN parse run.suggested_id from the provisioned
+    # task.md (cwd = child worktree root) and write a minimal valid ledger at the EXACT
+    # confined-reader leaf (.hivemind/runs/<suggested_id>/state.json) DURING the settle window,
+    # acknowledge with started-api, then stay alive until the case kills its session. The 4-space
+    # block-scalar parse mirrors the suite's parse_task_field awk.
     local promote_stub="$WORKDIR/promote-stub"
     mkdir -p "$promote_stub"
     cat > "$promote_stub/claude" <<'PROMOTESTUB_EOF'
 #!/usr/bin/env bash
-# Promotion stub: emit readiness chrome, stay un-started past the low grace, then cross the
-# started-evidence line DURING the reconciliation settle window by writing a valid run ledger at
-# the confined-reader leaf, then stay alive. cwd is the child worktree root.
+# Promotion stub: emit readiness chrome, stay un-started until the case signals start, then cross
+# the started-evidence line DURING the reconciliation settle window by writing a valid run ledger
+# at the confined-reader leaf, then stay alive. cwd is the child worktree root.
 printf 'hivemind:overlord\n'
-# Stay un-started past the verify grace (ledger absent at the verify probe → starting).
-sleep 8
+short="$(basename "$(pwd -P)")"
+: > "$HIVEMIND_TEST_SIGNAL_DIR/booted-$short"
+# Stay un-started until start-<short> exists (ledger absent at the verify probe → starting).
+hivemind-real-wait 120 test -e "$HIVEMIND_TEST_SIGNAL_DIR/start-$short" || exit 1
 # Resolve suggested_id from the provisioned task.md (run.suggested_id, 4-space block-scalar under
 # the top-level `run:` section). awk tracks the active top-level section so the `suggested_id` key
 # under `run:` is unambiguous.
@@ -1710,11 +1791,22 @@ if [ -n "$sid" ]; then
     printf '{"state":{"current":"implement_step"},"run":{"status":"running"}}\n' \
         > ".hivemind/runs/$sid/state.json" 2>/dev/null || true
 fi
+: > "$HIVEMIND_TEST_SIGNAL_DIR/started-$short"
 # Stay alive through manifest emission (re-probe + exit-code computation).
-sleep 40
+hivemind-real-wait 120 test -e "$HIVEMIND_TEST_SIGNAL_DIR/exit-$short"
 exit 0
 PROMOTESTUB_EOF
     chmod +x "$promote_stub/claude"
+    local promote_hook="$WORKDIR/tail-started-hook"
+    cat > "$promote_hook" <<'PROMOTEHOOK_EOF'
+#!/usr/bin/env bash
+# Tail-started hook: during the one-shot RECONCILE_SETTLE sleep (14), signal the api stub to write
+# its ledger and wait for its acknowledgement.
+[ "$1" = "14" ] || exit 0
+: > "$HIVEMIND_TEST_SIGNAL_DIR/start-api"
+hivemind-real-wait 30 test -e "$HIVEMIND_TEST_SIGNAL_DIR/started-api"
+PROMOTEHOOK_EOF
+    chmod +x "$promote_hook"
 
     local inputs="$gitroot/brood-inputs.json"
     jq -n \
@@ -1735,13 +1827,14 @@ PROMOTESTUB_EOF
     local stdout_out="$WORKDIR/spawn-stdout.txt"
     local marker="$WORKDIR/launch-marker.txt"
     # STARTED_EVIDENCE_TIMEOUT=2 (verify exhausts while the stub is still un-started → starting).
-    # RECONCILE_SETTLE=14 (the settle outlasts the stub's t~8s ledger write so the re-probe observes
-    # started-evidence → promote to running).
+    # RECONCILE_SETTLE=14 (the hook has the stub write its ledger inside that settle, so the
+    # re-probe observes started-evidence → promote to running).
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$promote_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" HIVEMIND_FAKE_SLEEP_HOOK="$promote_hook" \
         STARTED_EVIDENCE_TIMEOUT=2 RECONCILE_SETTLE=14 bash "$SPAWN_SCRIPT" "$inputs" ) \
         >"$stdout_out" 2>/dev/null || rc=$?
-    # Reap the launched session (the 40s sleep would otherwise outlive the case).
+    # Reap the launched session (the stub would otherwise wait out its exit-file cap).
     local launched_session
     launched_session="$(sed -n 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$stdout_out" 2>/dev/null | head -1)"
     [ -n "$launched_session" ] && tmux kill-session -t "$launched_session" 2>/dev/null || true
@@ -1795,6 +1888,7 @@ assert_spawn_brood_started_child_gets_remote_control() {
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$started_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
         STARTED_EVIDENCE_TIMEOUT=20 bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>/dev/null || rc=$?
 
     local wt received rc_line_seen=no
@@ -1859,6 +1953,7 @@ FAILRC_EOF
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$started_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
         STARTED_EVIDENCE_TIMEOUT=20 bash "$fake_plugin/skills/spawn-brood/scripts/spawn-brood.sh" "$inputs" ) \
         >"$stdout_out" 2>/dev/null || rc=$?
     tmux kill-server 2>/dev/null || true
@@ -1879,12 +1974,14 @@ FAILRC_EOF
 # ── Assertion 13d: EXACT-SESSION:dead-strain-never-alive-through-prefix-sibling (eadbd5d2) ──
 # tmux resolves a bare session name exact-first-then-PREFIX, so once <brood-id>-api is gone a bare
 # `has-session -t <brood-id>-api` resolves to the live sibling <brood-id>-api-x. One brood with
-# strains api and api-x and a claude stub keyed on the worktree name:
-#   api   prints the ready line, lives ~4s (past the Pass-2 readiness poll), then exits.
-#   api-x prints the ready line and stays alive past both strains' grace windows.
-# TIMING: STARTED_EVIDENCE_TIMEOUT=7 is below RESEND_POLL_TIMEOUT (8), so no nudge fires. api's
-# grace runs out ~7s after its Pass-3 entry (t ~2-3s), well after api died (t ~4-5s); api-x is
-# still alive when its own grace runs out (t ~16-17s) and at the reconciliation sweep.
+# strains api and api-x, both on the default claude stub, which prints the ready line and stays
+# alive until the case creates its exit file:
+#   api   is ended by a sleep hook at the first sleep after both strains' INJECT_SETTLE sleeps
+#         (0.2), that is inside Pass 3 after both submits, before api's own grace runs out.
+#   api-x is never ended by the case, so it is alive at both strains' probes and the sweep.
+# TIMING: STARTED_EVIDENCE_TIMEOUT=7 is below RESEND_POLL_TIMEOUT (8), so no nudge fires, and the
+# grace is longer than one POLL_INTERVAL sleep, so api's verify loop sleeps at least once and its
+# grace-exhaustion probe always runs after api died. All of it runs on the fake clock.
 # Assert: api is `failed` (never `starting` or `running`), api-x is `starting`, exit 1. Pre-fix
 # code probes liveness by bare name and records api `starting` with exit 0.
 #
@@ -1900,19 +1997,16 @@ assert_spawn_brood_exact_session_not_prefix_sibling() {
     WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
     local gitroot="$WORKDIR/brood-git"
     init_spawn_repo "$gitroot"
-    local keyed_stub="$WORKDIR/keyed-stub"
-    mkdir -p "$keyed_stub"
-    cat > "$keyed_stub/claude" <<'KEYEDSTUB_EOF'
+    local keyed_hook="$WORKDIR/exact-session-hook"
+    cat > "$keyed_hook" <<'KEYEDHOOK_EOF'
 #!/usr/bin/env bash
-# Keyed stub: the api child exits soon after it is ready; the api-x child stays alive.
-printf 'hivemind:overlord\n'
-case "$(basename "$(pwd -P)")" in
-    api) sleep 4 ;;
-    *) sleep 40 ;;
-esac
-exit 0
-KEYEDSTUB_EOF
-    chmod +x "$keyed_stub/claude"
+# Exact-session hook: end the api stub at the first sleep after both INJECT_SETTLE sleeps (0.2).
+[ "$1" != "0.2" ] || exit 0
+[ ! -e "$HIVEMIND_TEST_SIGNAL_DIR/exit-api" ] || exit 0
+[ "$(grep -cxF 0.2 "$HIVEMIND_TEST_SIGNAL_DIR/sleep-log")" -ge 2 ] || exit 0
+hivemind-release-strain api
+KEYEDHOOK_EOF
+    chmod +x "$keyed_hook"
 
     local inputs="$gitroot/brood-inputs.json"
     jq -n \
@@ -1934,7 +2028,8 @@ KEYEDSTUB_EOF
     local stdout_out="$WORKDIR/spawn-stdout.txt"
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions
-    ( cd "$gitroot" && PATH="$keyed_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" HIVEMIND_FAKE_SLEEP_HOOK="$keyed_hook" \
         STARTED_EVIDENCE_TIMEOUT=7 bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>/dev/null || rc=$?
     tmux kill-server 2>/dev/null || true
 
@@ -1996,6 +2091,7 @@ UUIDSTUB_EOF
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$uuid_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
         STARTED_EVIDENCE_TIMEOUT=3 bash "$SPAWN_SCRIPT" "$inputs" ) >"$stdout_out" 2>"$stderr_out" || rc=$?
     tmux kill-server 2>/dev/null || true
 
@@ -2072,6 +2168,7 @@ JQSTUB_EOF
     reap_brood_sessions
     tmux kill-server 2>/dev/null || true
     ( cd "$gitroot" && PATH="$jq_stub:$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
         STARTED_EVIDENCE_TIMEOUT=1 bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
     tmux kill-server 2>/dev/null || true
 
@@ -2134,6 +2231,7 @@ assert_spawn_brood_settings_symlink_source_refused() {
     local marker="$WORKDIR/launch-marker.txt"
     reap_brood_sessions
     ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$marker" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
         STARTED_EVIDENCE_TIMEOUT=1 bash "$SPAWN_SCRIPT" "$inputs" ) >/dev/null 2>"$stderr_out" || rc=$?
     tmux kill-server 2>/dev/null || true
 
@@ -2196,14 +2294,11 @@ ensure_proj_workdir() {
     if [ -z "$PROJ_WORKDIR" ]; then
         PROJ_WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-proj.XXXXXX")"
         PROJ_WORKDIR="$(cd "$PROJ_WORKDIR" && pwd -P)"
-        git -C "$PROJ_WORKDIR" init -q
         # A seed commit is REQUIRED: the #168 ground-truth worktree discovery cases register real
         # git worktrees (`git worktree add -b <branch> <path> HEAD`) so the engine can resolve each
         # strain's worktree from `git worktree list --porcelain`; worktree-add needs a commit to
-        # branch from. Configure identity locally so the commit succeeds on a bare CI checkout.
-        git -C "$PROJ_WORKDIR" config user.email test@example.com
-        git -C "$PROJ_WORKDIR" config user.name test
-        git -C "$PROJ_WORKDIR" commit -q --allow-empty -m "proj-seed"
+        # branch from. The committed seed carries a local identity for a bare CI checkout.
+        copy_seed_repo committed "$PROJ_WORKDIR"
         # Fold into WORKDIR so the existing cleanup() reaps it when no spawn case set it;
         # otherwise reap PROJ_WORKDIR explicitly in cleanup (handled below).
         if [ -z "$WORKDIR" ]; then
@@ -3695,8 +3790,7 @@ assert_proj_manifest_outside_root() {
     local tmp; tmp="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-proj-outside.XXXXXX")"
     tmp="$(cd "$tmp" && pwd -P)"
     local root="$tmp/repo"
-    mkdir -p "$root"
-    git -C "$root" init -q
+    copy_seed_repo init-only "$root"
     local brood_id; brood_id="$(proj_brood_id "$name")"
     proj_outside_manifest "$tmp/outside/broods/$brood_id/manifest.json" "$brood_id" "outsideleaksentinel"
     ln -s "$tmp/outside" "$root/.hivemind"
@@ -3802,11 +3896,7 @@ assert_proj_nested_worktree_anchor() {
 # discover_mkrepo: create a throwaway git checkout under a fresh mktemp dir, echo its root.
 # Caller is responsible for reaping the returned dir's PARENT (captured separately).
 discover_seed_repo() {
-    local root="$1"
-    git -C "$root" init -q
-    git -C "$root" config user.email test@example.com
-    git -C "$root" config user.name test
-    git -C "$root" commit -q --allow-empty -m "discover-seed"
+    copy_seed_repo committed "$1"
 }
 
 # discover_stub_manifest: write a minimal non-empty manifest stub at $1 (creating parents).
@@ -4006,11 +4096,7 @@ COLLECT_BROOD_ID="brood-8a8a8a8a-8b8b-4c8c-8d8d-8e8e8e8e8e8e"
 # collect_seed_repo: a throwaway git checkout root (real toplevel for the entrypoint's
 # git rev-parse --show-toplevel anchor).
 collect_seed_repo() {
-    local root="$1"
-    git -C "$root" init -q
-    git -C "$root" config user.email test@example.com
-    git -C "$root" config user.name test
-    git -C "$root" commit -q --allow-empty -m "collect-seed"
+    copy_seed_repo committed "$1"
 }
 
 # ── COLLECT-EMPTY: no broods → well-formed doc with empty broods + zeroed global ──
