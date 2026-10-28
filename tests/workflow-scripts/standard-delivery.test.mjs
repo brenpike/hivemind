@@ -2414,12 +2414,12 @@ const ROW_TESTS = {
       assert.equal((moduleSource.match(/replanFromTailAsk\(buildUndecidedAsk\(/g) || []).length, 2);
       assert.ok(moduleSource.includes('return askTail(resolution.asks[0], run, buildReviewDetailBlock(review, openFindings));'));
     });
-    test('askTail logs a reply with settled ["Q1"] and the detail block, and returns the answer as {question, reply}', () => {
+    test('askTail logs a reply with settled [] and the detail block, and returns the answer as {question, reply}', () => {
       const state = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
       const question = lib.renderQuestions([bumpAskOf()], []) + '\n\nDETAIL_ZQ';
       const asked = main.askTail(bumpAskOf(), state, { text: 'DETAIL_ZQ' });
       assert.deepEqual(structuredClone(asked), { answer: { question: question, reply: TAIL_REPLY } });
-      assert.deepEqual(structuredClone(state.answerLog), [{ question: question, settled: ['Q1'], reply: TAIL_REPLY }]);
+      assert.deepEqual(structuredClone(state.answerLog), [{ question: question, settled: [], reply: TAIL_REPLY }]);
     });
     test('a tail round shares the round numbering with the planning rounds, and its resume replays every earlier agent', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
@@ -4770,7 +4770,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'facts-2', 'scope-2', 'plan-2']);
       const prompt = callOf(run, 'plan-2').prompt;
       assert.deepEqual(readDataBlock(prompt, 'review'), structuredClone(main.projectReplanReview(ESCALATION)));
-      assert.deepEqual(readDataBlock(prompt, 'answers'), [{ question: reviewQuestionText(), settled: ['Q1'], reply: reviewReply }]);
+      assert.deepEqual(readDataBlock(prompt, 'answers'), [{ question: reviewQuestionText(), settled: [], reply: reviewReply }]);
       assert.equal(prompt.split('\n')[2], SETTLED_ANSWERS_LINE, prompt);
       assert.ok(prompt.indexOf('<review>') < prompt.indexOf('<answers>'));
       assert.ok(!prompt.split('\n').includes('<answer>'), prompt);
@@ -4780,13 +4780,24 @@ const ROW_TESTS = {
       assert.deepEqual(Object.keys(replanned.replan), ['reason', 'review']);
       assert.equal(state.replans, 1);
     });
-    test('one review reply gives the rerun user_answer {question, reply} and the replan answers entry settled ["Q1"]', async () => {
+    test('one review reply gives the rerun user_answer {question, reply} and the replan answers entry settled []', async () => {
       const results = answeredReviewResults({ 'review-1-2': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN) });
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reviewReply), results);
       assert.equal(run.result.needs_user, true, run.result.message);
       assert.deepEqual(readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs').user_answer, { question: reviewQuestionText(), reply: reviewReply });
-      assert.deepEqual(readDataBlock(callOf(run, 'scope-2').prompt, 'answers'), [{ question: reviewQuestionText(), settled: ['Q1'], reply: reviewReply }]);
+      assert.deepEqual(readDataBlock(callOf(run, 'scope-2').prompt, 'answers'), [{ question: reviewQuestionText(), settled: [], reply: reviewReply }]);
+    });
+    test('a review reply that reruns the review and then replans is logged settled [] in scope-2 and plan-2', async () => {
+      const results = answeredReviewResults({ 'review-1-2': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN) });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'not sure'), results);
+      assert.equal(run.result.needs_user, true, run.result.message);
+      assert.deepEqual(readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs').user_answer, { question: reviewQuestionText(), reply: 'not sure' });
+      const reviewEntry = { question: reviewQuestionText(), settled: [], reply: 'not sure' };
+      for (const label of ['scope-2', 'plan-2']) {
+        assert.deepEqual(readDataBlock(callOf(run, label).prompt, 'answers'), [reviewEntry], label);
+      }
     });
     test('a reply to any other tail ask starts a new pass whose plan prompt carries it in the answers block, and does not count against maxReplans()', async () => {
       const results = tailReplanResults();
@@ -4794,8 +4805,8 @@ const ROW_TESTS = {
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, TAIL_REPLY), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const prompt = callOf(run, 'plan-2').prompt;
-      assert.equal(readDataBlock(prompt, 'replan'), 'The user answered a question the run asked after the last wave, so plan again from the fresh facts with the answers block.');
-      assert.deepEqual(readDataBlock(prompt, 'answers'), [{ question: lib.renderQuestions([bumpAskOf()], []), settled: ['Q1'], reply: TAIL_REPLY }]);
+      assert.equal(readDataBlock(prompt, 'replan'), 'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.');
+      assert.deepEqual(readDataBlock(prompt, 'answers'), [{ question: lib.renderQuestions([bumpAskOf()], []), settled: [], reply: TAIL_REPLY }]);
       assert.ok(!prompt.includes('<review>'));
       assert.ok(!callOf(run, 'plan-1').prompt.includes('<answers>'));
       const state = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
@@ -4803,7 +4814,7 @@ const ROW_TESTS = {
       const replanned = main.replanFromTailAsk(bumpAskOf(), state);
       assert.deepEqual(Object.keys(replanned.replan), ['reason']);
       assert.equal(state.replans, main.maxReplans());
-      assert.deepEqual(structuredClone(state.answerLog), [{ question: lib.renderQuestions([bumpAskOf()], []), settled: ['Q1'], reply: TAIL_REPLY }]);
+      assert.deepEqual(structuredClone(state.answerLog), [{ question: lib.renderQuestions([bumpAskOf()], []), settled: [], reply: TAIL_REPLY }]);
     });
   },
   'SD-58': () => {
@@ -5319,7 +5330,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(answeredArgs({ 'round-2': TAIL_REPLY }), results);
       assert.equal(run.result.needs_user, true, run.result.message);
       assert.equal(labelsOf(run).at(-1), 'plan-2');
-      assertSettledAnswers(callOf(run, 'plan-2').prompt, [firstAnswerOf(run), { question: lib.renderQuestions([bumpAskOf()], []), settled: ['Q1'], reply: TAIL_REPLY }]);
+      assertSettledAnswers(callOf(run, 'plan-2').prompt, [firstAnswerOf(run), { question: lib.renderQuestions([bumpAskOf()], []), settled: [], reply: TAIL_REPLY }]);
     });
     test('a review replan carries the answer log into the next plan prompt next to the review block', async () => {
       const run = await runWorkflow(answeredArgs({}), answeredResults({ 'review-1-1': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN) }));
@@ -5362,7 +5373,7 @@ const ROW_TESTS = {
     }
     const partlySettledReplans = [
       ['branch', answeredArgs({}), happyResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, ...branchReplan, 'plan-2': secondAgain }), []],
-      ['tail', answeredArgs({ 'round-2': TAIL_REPLY }), tailReplanResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, 'plan-2': secondAgain }), [{ question: lib.renderQuestions([bumpAskOf()], []), settled: ['Q1'], reply: TAIL_REPLY }]],
+      ['tail', answeredArgs({ 'round-2': TAIL_REPLY }), tailReplanResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, 'plan-2': secondAgain }), [{ question: lib.renderQuestions([bumpAskOf()], []), settled: [], reply: TAIL_REPLY }]],
       ['review', answeredArgs({}), happyResults({ 'plan-1': twoGated, 'revise-1': partlyRevised, 'review-1-1': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN, [secondBrief]) }), []]
     ];
     for (const [label, args, results, laterEntries] of partlySettledReplans) {
@@ -5422,6 +5433,16 @@ const ROW_TESTS = {
       assert.equal(callOf(run, 'revise-1').prompt.split('\n')[2], lib.dataBlocksSentence('The reply block'));
       assert.equal(callOf(run, 'revise-2').prompt.split('\n')[2], lib.dataBlocksSentence('The reply block') + SETTLED_LABELS_SENTENCE);
       assert.equal(callOf(run, 'scope-1-1').prompt.split('\n')[2], SETTLED_ANSWERS_LINE);
+    });
+    test('a tail reply that settles nothing, "not sure", is logged settled [] and carried that way into scope-2 and plan-2', async () => {
+      const results = tailReplanResults();
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'not sure'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const tailEntry = { question: lib.renderQuestions([bumpAskOf()], []), settled: [], reply: 'not sure' };
+      for (const label of ['scope-2', 'plan-2']) {
+        assert.deepEqual(readDataBlock(callOf(run, label).prompt, 'answers'), [tailEntry], label);
+      }
     });
   },
   'SD-68': () => {

@@ -30,6 +30,14 @@
  *                 'reply_size' or 'exact_text_size'. Only analysis-only
  *                 stops at 'pause_limit': standard-delivery pauses for
  *                 every open question while its replies fit.
+ *   buildAnswerEntry(round, revise)
+ *     round   {question, labels, reply} for one answer round: question is
+ *             the questions text the pause showed, labels the labels it
+ *             showed, the settled enum of the revise that reads the round,
+ *             and reply the user's reply.
+ *     revise  the revise result of that round once it passed its check, or
+ *             undefined when no such result exists. Its settled array names
+ *             the shown labels the reply settled.
  *
  * Outputs
  *   renderQuestions  one message, the ask first, its sections apart by
@@ -81,6 +89,11 @@
  *     the workflow adds its own next-step line. Then one line per
  *     question labelled Q1..Qn by position, with its problem and the option
  *     the report assumes, or the line 'I have no recommendation of my own.'
+ *   buildAnswerEntry  one answer log entry {question, settled, reply}, in
+ *     that key order. question and reply are copied from round unchanged.
+ *     settled holds the labels of round.labels that revise.settled names,
+ *     in shown order, once each; [] when revise is undefined, and [] when
+ *     round.labels is empty.
  *
  * Invariants
  *   Bounded fields: the brief text fields shown are written for the user
@@ -108,6 +121,10 @@
  *   maxExcerptLength() from it, so they run only where result.js is loaded
  *   too, as in every built script.
  *   No size budget lives here: the caller picks the full or compact form.
+ *   Settled labels have one writer, buildAnswerEntry, and it is fed only a
+ *   revise result that passed its check. A label the revise names that the
+ *   round did not show is dropped, so an entry never calls settled a
+ *   question the user was not shown.
  *
  * Why
  *   The user answers from this text alone, so the ask comes first and each
@@ -119,6 +136,10 @@
  *   question without trusting a model-written id. Question labels have one
  *   home, questionLabel, and decision labels one home, decisionLabel, so the
  *   renderers and listShownLabels cannot drift apart.
+ *   Each workflow logs every reply as an answer entry, and later prompts
+ *   treat only the labels in its settled array as the user's settled
+ *   decisions (issue 472). Settled labels have one writer, buildAnswerEntry,
+ *   so the workflows cannot drift on which labels a reply settled.
  */
 
 function renderQuestions(asks, taken) {
@@ -251,6 +272,19 @@ function listShownLabels(asks, taken) {
     ...asks.map((entry, index) => questionLabel(index)),
     ...taken.map((entry, index) => decisionLabel(index))
   ];
+}
+
+function buildAnswerEntry(round, revise) {
+  const shownLabels = readField(round, 'labels');
+  if (!Array.isArray(shownLabels)) {
+    throw new Error('buildAnswerEntry: round.labels must be an array');
+  }
+  const reviseLabels = revise === undefined ? [] : readField(revise, 'settled');
+  if (!Array.isArray(reviseLabels)) {
+    throw new Error('buildAnswerEntry: revise.settled must be an array');
+  }
+  const settled = shownLabels.filter((label, index) => reviseLabels.includes(label) && shownLabels.indexOf(label) === index);
+  return { question: round.question, settled: settled, reply: round.reply };
 }
 
 function renderHeading(count) {

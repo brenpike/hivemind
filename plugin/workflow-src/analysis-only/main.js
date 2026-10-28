@@ -100,8 +100,9 @@
  *   schema and its check schema are both built from that spec each round,
  *   the check one with the questions items check left out, as for analyze.
  *   Each reply a pause consumes goes once into the answer log as {question,
- *   settled, reply}, and only after its revise result passes its check: the
- *   question is the full questions text of its round, settled the labels of
+ *   settled, reply}, and only after its revise result passes its check. The
+ *   shared lib buildAnswerEntry is the one writer of settled: the question is
+ *   the full questions text of its round, settled the labels of
  *   result.settled in shown order, and a reply that settles nothing logs
  *   settled []. Only the questions and decisions settled names count as
  *   settled, never the whole round, so a question the reply left open is
@@ -353,14 +354,6 @@ function resolveQuestions(questions, level) {
   return { asks: asks, taken: taken };
 }
 
-function buildAnswerEntry(shownRound, settledLabels) {
-  return {
-    question: shownRound.question,
-    settled: shownRound.shownLabels.filter((label) => settledLabels.includes(label)),
-    reply: shownRound.reply
-  };
-}
-
 function finishBlocked(message) {
   return finish({ outcome: 'blocked', blocks: [{ text: message, shorten: true }] });
 }
@@ -414,7 +407,7 @@ async function runAnalysis(rawArgs) {
       return finishBlocked(problem);
     }
     if (shownRound !== undefined) {
-      answerLog.push(buildAnswerEntry(shownRound, analysis.settled));
+      answerLog.push(buildAnswerEntry(shownRound, analysis));
     }
     const resolution = resolveQuestions(analysis.questions, level);
     if (resolution.asks.length === 0) {
@@ -438,7 +431,7 @@ async function runAnalysis(rawArgs) {
     const revisePrompt = buildRevisePrompt({ request: argsObject.request, facts: facts, answers: answerLog, report: analysis.report, questions: questions, reply: reply });
     analysis = await agent(revisePrompt, plannerOptions('revise-' + round, 'Revise', reviseSchemas.agent));
     checkSchema = reviseSchemas.check;
-    shownRound = { question: questions, shownLabels: shownLabels, reply: reply };
+    shownRound = { question: questions, labels: shownLabels, reply: reply };
   }
 }
 

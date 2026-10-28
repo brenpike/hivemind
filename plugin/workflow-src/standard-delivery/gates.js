@@ -77,10 +77,15 @@
  *   questions; each ask carries a reason renderQuestions shows. Tail rounds
  *   share run.answerLog and the answers round numbering with planning rounds,
  *   so a resume replays every earlier agent from cache and takes the reply at
- *   the ask (askTail). askTail takes one ask and adds {question, settled,
- *   reply} to run.answerLog, the question as shown with its detail block and
- *   settled naming its one question label, so every later plan prompt shows
- *   it in the answers block; it returns {question, reply} as the answer. A reply to a local review question reruns the
+ *   the ask (askTail). askTail takes one ask and, at reply time, adds the
+ *   {question, settled, reply} entry buildAnswerEntry (lib/brief.js) builds
+ *   to run.answerLog, the question as shown with its detail block, so every
+ *   later plan prompt shows it in the answers block and a resume keeps the
+ *   round numbering; it returns {question, reply} as the answer. No revise
+ *   reads a tail reply, so its settled is always [] and it stays the user's
+ *   own words in every later answers block, review questions included: a
+ *   review decision lives in the reviewer's record. A reply to a local
+ *   review question reruns the
  *   review gate on the current head, after any gate the head move made stale,
  *   with the next gateLabel count and user_answer {question, reply} in its
  *   inputs block; the commit runner and localReviewRoutes() then apply as for
@@ -206,7 +211,7 @@ function askTail(ask, run, detail) {
     return { result: pauseDelivery({ asks: [ask], taken: [] }, questions, run, detail) };
   }
   const question = detail === undefined ? questions : questions + '\n\n' + detail.text;
-  run.answerLog.push({ question: question, settled: [questionLabel(0)], reply: reply });
+  run.answerLog.push(buildAnswerEntry({ question: question, labels: [], reply: reply }, undefined));
   return { answer: { question: question, reply: reply } };
 }
 
@@ -215,7 +220,7 @@ function replanFromTailAsk(ask, run) {
   if (asked.answer === undefined) {
     return asked;
   }
-  return { replan: { reason: 'The user answered a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
+  return { replan: { reason: 'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
 }
 
 function buildUndecidedAsk(brief) {

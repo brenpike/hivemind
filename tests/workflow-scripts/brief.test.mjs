@@ -615,3 +615,34 @@ describe('listShownLabels', () => {
     assert.throws(() => lib.listShownLabels(asks, undefined), /listShownLabels: taken must be an array/);
   });
 });
+
+describe('buildAnswerEntry', () => {
+  const round = { question: 'QUESTION_TEXT', labels: ['Q1', 'Q2', 'D1'], reply: 'REPLY_TEXT' };
+  test('keeps shown order once each when the revise repeats or reorders labels', () => {
+    const entry = lib.buildAnswerEntry(round, { settled: ['D1', 'Q1', 'D1', 'Q1'] });
+    assert.deepEqual([...entry.settled], ['Q1', 'D1']);
+  });
+  test('drops a label the round did not show', () => {
+    const entry = lib.buildAnswerEntry(round, { settled: ['Q2', 'Q7', 'D3'] });
+    assert.deepEqual([...entry.settled], ['Q2']);
+  });
+  test('an undefined revise settles nothing', () => {
+    assert.deepEqual([...lib.buildAnswerEntry(round, undefined).settled], []);
+  });
+  test('a round that showed no labels settles nothing, even with a revise', () => {
+    const emptyRound = { question: 'QUESTION_TEXT', labels: [], reply: 'REPLY_TEXT' };
+    assert.deepEqual([...lib.buildAnswerEntry(emptyRound, { settled: ['Q1', 'D1'] }).settled], []);
+  });
+  test('copies question and reply unchanged, keys in order question, settled, reply', () => {
+    const entry = lib.buildAnswerEntry(round, { settled: ['Q1'] });
+    assert.deepEqual(Object.keys(entry), ['question', 'settled', 'reply']);
+    assert.equal(entry.question, 'QUESTION_TEXT');
+    assert.equal(entry.reply, 'REPLY_TEXT');
+  });
+  test('argument checks', () => {
+    assert.throws(() => lib.buildAnswerEntry({ question: 'Q', reply: 'R' }, undefined), /buildAnswerEntry: round.labels must be an array/);
+    assert.throws(() => lib.buildAnswerEntry(undefined, undefined), /buildAnswerEntry: round.labels must be an array/);
+    assert.throws(() => lib.buildAnswerEntry(round, {}), /buildAnswerEntry: revise.settled must be an array/);
+    assert.throws(() => lib.buildAnswerEntry(round, null), /buildAnswerEntry: revise.settled must be an array/);
+  });
+});

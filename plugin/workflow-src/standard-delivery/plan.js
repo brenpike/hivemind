@@ -107,13 +107,16 @@
  *   user never answers an effect question without its verbatim text.
  *   The plan and revise prompts carry the scope in a scope data block right
  *   after the request block, and no other planning text holds it.
- *   Each reply a plan pause consumes goes once into run.answerLog as
- *   {question, settled, reply}, pushed once the revise of its round passes
- *   the plan check and before any rescope: the question is the text the
- *   pause showed, settled the shown labels the revise names, in shown
- *   order, [] when it names none. Every plan prompt once the log is not
- *   empty carries the whole log in an answers data block, and a revise
- *   prompt the entries of earlier rounds. Its data line calls settled only
+ *   Each reply a plan pause consumes goes once into run.answerLog as the
+ *   {question, settled, reply} entry buildAnswerEntry (lib/brief.js) builds
+ *   from the round and its revise, pushed once the revise of its round
+ *   passes the plan check and before any rescope: the question is the text
+ *   the pause showed, settled the shown labels the revise names, in shown
+ *   order, [] when it names none. The answered keys of the round come from
+ *   that logged settled, so the keys and the log share one derivation.
+ *   Every plan prompt once the log is not empty carries the whole log in
+ *   an answers data block, and a revise prompt the entries of earlier
+ *   rounds. Its data line calls settled only
  *   what the settled labels of an entry name, never the reply of the round
  *   being revised, so a replan never asks or reverses a settled answer and
  *   never takes an open question as settled (issue 472). With an empty log,
@@ -539,9 +542,8 @@ async function runPlanningPass(run, facts, passScope, replan) {
       return { result: finishDeliveryBlocked(problem, run) };
     }
     if (shownAsks.length > 0) {
-      const settledLabels = listShownLabels(shownAsks, shownTaken).filter((label) => planResult.settled.includes(label));
-      run.answerLog.push({ question: shownEntry.question, settled: settledLabels, reply: shownEntry.reply });
-      markSettledAsks(planResult.settled, shownAsks, run, settledKinds);
+      run.answerLog.push(buildAnswerEntry(shownEntry, planResult));
+      markSettledAsks(run.answerLog[run.answerLog.length - 1].settled, shownAsks, run, settledKinds);
       if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
         planResult = shownResult;
       } else {
@@ -580,7 +582,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
     shownAsks = resolution.asks;
     shownTaken = resolution.taken;
     shownResult = planResult;
-    shownEntry = { question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply };
+    shownEntry = { question: detail === undefined ? questions : questions + '\n\n' + detail.text, labels: listShownLabels(shownAsks, shownTaken), reply: reply };
     resultSchema = buildReviseResultSchema(shownAsks, shownTaken);
     const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: run.answerLog, plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
