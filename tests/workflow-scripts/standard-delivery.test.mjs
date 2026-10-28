@@ -233,6 +233,28 @@ function moltRefusesPath(scratch, value, index) {
   return false;
 }
 
+/**
+ * Runs molt.sh on an inputs file with the subject and returns the last
+ * stderr line: the trunk refusal of the scratch repo on main when the
+ * subject passes every inputs check.
+ */
+function moltSubjectLine(scratch, subject, breaking, index) {
+  const inputsPath = '.hivemind/subject-' + index + '.json';
+  writeRepoFile(scratch, inputsPath, JSON.stringify({ type: 'feat', breaking: breaking, subject: subject, files: ['src/cache.js'] }));
+  const run = spawnSync('bash', [moltPath, '--trunk', 'main', '--inputs', inputsPath], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
+  return run.stderr.trim().split('\n').pop();
+}
+
+/**
+ * The input names the molt SKILL.md lists under its Required Inputs and
+ * Optional Inputs headings.
+ */
+function readMoltSkillInputs() {
+  const skillText = readText(join(repoRoot, 'plugin/skills/molt/SKILL.md'));
+  const inputsText = skillText.slice(skillText.indexOf('## Required Inputs'), skillText.indexOf('## Requirements'));
+  return [...inputsText.matchAll(/^- `([a-z_]+)`: /gm)].map((match) => match[1]);
+}
+
 function effectPlan(summary, reversible) {
   return makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { external_effects: [{ summary: summary, reversible: reversible }] })] });
 }
@@ -496,7 +518,7 @@ function realCommitRunner(scratch) {
     inputsCount += 1;
     const inputsPath = '.hivemind/molt-inputs-test-' + inputsCount + '.json';
     mkdirSync(join(scratch.repo, '.hivemind'), { recursive: true });
-    writeFileSync(join(scratch.repo, inputsPath), JSON.stringify({ type: inputs.commit_type, breaking: inputs.breaking, subject: 'deliver the wave', files: inputs.files }));
+    writeFileSync(join(scratch.repo, inputsPath), JSON.stringify({ type: inputs.commit_type, breaking: inputs.breaking, subject: inputs.subject, files: inputs.files }));
     return runScriptIn(scratch, moltPath, ['--trunk', inputs.trunk, '--inputs', inputsPath]);
   };
 }
@@ -968,7 +990,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       assert.equal(runGitIn(scratch, ['symbolic-ref', '--short', 'HEAD']), 'feature/cache');
-      assert.equal(runGitIn(scratch, ['log', '-1', '--format=%s']), 'feat: deliver the wave');
+      assert.equal(runGitIn(scratch, ['log', '-1', '--format=%s']), 'feat: Step STEP-001 is done.');
       assert.ok(run.result.message.includes('Commits this run made:\n- ' + head), run.result.message);
       assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'skipped');
     });
@@ -1950,7 +1972,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'commit-1-1');
-      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { files: ['src/a.js', 'src/b.js'], commit_type: 'fix', breaking: true, trunk: 'main' });
+      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { files: ['src/a.js', 'src/b.js'], commit_type: 'fix', breaking: true, subject: 'Step S1 is done.', trunk: 'main' });
       assert.ok(call.prompt.startsWith('Invoke the hivemind:molt skill once'));
       assert.ok(call.prompt.includes(main.commitGrantSentence()));
       assert.ok(call.prompt.includes(main.gitScriptSentence('hivemind:molt')));
@@ -2478,7 +2500,7 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(call.prompt, 'version_files'), { trunk_commit: TRUNK_COMMIT, artifact_files: ['package.json', 'VERSION'] });
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { branch: 'feature/cache', base: 'main', trunk: 'main' });
       const commit = callOf(run, 'bump-commit-1-1');
-      assert.deepEqual(readDataBlock(commit.prompt, 'inputs'), { files: ['package.json', 'VERSION'], commit_type: 'feat', breaking: true, trunk: 'main' });
+      assert.deepEqual(readDataBlock(commit.prompt, 'inputs'), { files: ['package.json', 'VERSION'], commit_type: 'feat', breaking: true, subject: 'bump the version', trunk: 'main' });
       assert.ok(commit.prompt.includes(main.commitGrantSentence()));
       assert.ok(commit.prompt.includes(main.gitScriptSentence('hivemind:molt')));
       assert.equal(commit.opts.phase, 'Commit');
@@ -2613,7 +2635,7 @@ const ROW_TESTS = {
       assert.equal(readDataBlock(call.prompt, 'plan_summary'), makePlan().summary);
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { branch: 'feature/cache', base: 'main', trunk: 'main' });
       assert.ok(!withoutDataBlock(call.prompt, 'failures').includes(FAILURE_TEXT));
-      assert.deepEqual(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'inputs'), { files: ['src/cache.js'], commit_type: 'feat', breaking: false, trunk: 'main' });
+      assert.deepEqual(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'inputs'), { files: ['src/cache.js'], commit_type: 'feat', breaking: false, subject: 'fix the failed validation', trunk: 'main' });
       const remediation = { brief: main.buildValidationRemediationBrief(OTHER, 1) };
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, remediation])), run.result.message);
       assert.ok(!run.result.message.includes('landed after'), run.result.message);
@@ -3037,7 +3059,7 @@ const ROW_TESTS = {
     test('the commit runner commits an empty file list after the review under the git-script sentence', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const commit = callOf(run, 'review-commit-1-1');
-      assert.deepEqual(readDataBlock(commit.prompt, 'inputs'), { files: [], commit_type: 'feat', breaking: false, trunk: 'main' });
+      assert.deepEqual(readDataBlock(commit.prompt, 'inputs'), { files: [], commit_type: 'feat', breaking: false, subject: 'apply the local review fixes', trunk: 'main' });
       assert.ok(commit.prompt.startsWith('Invoke the hivemind:molt skill once, with each value of the inputs block below as the input of the same name, to commit the local review that just ran, with an empty file list.'), commit.prompt);
       assert.ok(commit.prompt.includes(main.gitScriptSentence('hivemind:molt')));
       assert.equal(commit.opts.phase, 'Commit');
@@ -5104,6 +5126,84 @@ const ROW_TESTS = {
         assert.equal(gates.held.bump, kept ? run.head : OTHER, label);
         assert.equal(gates.bumpMark, kept ? commits.length : 1, label);
       }
+    });
+  },
+  'SD-66': () => {
+    const FALLBACK = 'complete wave 1 of the delivery plan';
+    const longOutcome = 'First line of the outcome\nsecond line ' + 'Clef \u{1d11e} '.repeat(20);
+    const fallbackOutcomes = [
+      ['blank', ' \n\t '],
+      ['an exclamation colon', 'Add the feat!: thing'],
+      ['a BREAKING CHANGE marker', 'Note a BREAKING CHANGE in the API'],
+      ['a breaking-change marker in lower case', 'Note a breaking-change in the API'],
+      ['a Co-Authored-By line', 'Done. Co-Authored-By: Bot'],
+      ['an Authored-by line', 'Done. authored-BY: an agent'],
+      ['a robot Generated mark', '\u{1f916} Generated the code'],
+      ['a Generated with mark', 'Generated with a tool'],
+      ['a Created with Claude mark', 'Created with Claude Code']
+    ];
+    test('a wave of one step gives its outcome, and a wave of several gives their ids then the first outcome', async () => {
+      const plan = makePlan({ steps: [makeStep('S1', ['src/a.js']), makeStep('S2', ['src/b.js'], { outcome: 'Step S2 is done too.' })] });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan), 'work-1-S1': WORKER_DONE, 'work-1-S2': WORKER_DONE }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(readDataBlock(callOf(run, 'commit-1-1').prompt, 'inputs').subject, 'S1, S2: Step S1 is done.');
+      const single = await runWorkflow(LAUNCH, happyResults());
+      assert.equal(readDataBlock(callOf(single, 'commit-1-1').prompt, 'inputs').subject, 'Step STEP-001 is done.');
+    });
+    test('a long outcome is made one line and cut at a word boundary to at most 72 code points', () => {
+      const subject = main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: longOutcome })], 1);
+      const oneLine = longOutcome.replace(/\s+/g, ' ').trim();
+      assert.equal(main.maxSubjectLength(), 72);
+      assert.ok(Array.from(subject).length <= 72, subject);
+      assert.ok(Array.from(subject).length > 60, subject);
+      assert.ok(oneLine.startsWith(subject + ' '), subject);
+      assert.ok(!/[\x00-\x1f]/.test(subject));
+      assert.equal(main.toCommitSubject('a\r\nb\u0085c', FALLBACK), 'a b c');
+    });
+    for (const [label, outcome] of fallbackOutcomes) {
+      test(`an outcome with ${label} falls back to the subject naming the wave`, () => {
+        assert.equal(main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: outcome })], 1), FALLBACK);
+        assert.equal(main.buildWaveSubject([makeStep('S1', ['src/a.js']), makeStep('S2', ['src/b.js'], { outcome: outcome })], 3), 'S1, S2: Step S1 is done.');
+      });
+    }
+    test('a step id with a breaking marker falls back for a wave of several', () => {
+      assert.equal(main.buildWaveSubject([makeStep('S1!', ['src/a.js']), makeStep('S2', ['src/b.js'])], 2), 'S1!, S2: Step S1! is done.');
+      assert.equal(main.buildWaveSubject([makeStep('S1', ['src/a.js']), makeStep('S2!', ['src/b.js'])], 2), 'complete wave 2 of the delivery plan');
+    });
+    test('the bump, fix round and review commits have fixed subjects, and the wave has none', () => {
+      assert.equal(main.commitStepTexts('bump').subject, 'bump the version');
+      assert.equal(main.commitStepTexts('fix').subject, 'fix the failed validation');
+      assert.equal(main.commitStepTexts('review').subject, 'apply the local review fixes');
+      assert.equal(main.commitStepTexts('wave').subject, undefined);
+    });
+    test('every key of the commit inputs block is an input of the molt SKILL.md', () => {
+      const skillInputs = readMoltSkillInputs();
+      assert.ok(skillInputs.includes('subject') && skillInputs.includes('trunk'), skillInputs.join(','));
+      for (const stepName of ['wave', 'bump', 'fix', 'review']) {
+        const subject = main.commitStepTexts(stepName).subject || 'Step S1 is done.';
+        const inputs = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', stepName, subject), 'inputs');
+        assert.deepEqual(Object.keys(inputs), ['files', 'commit_type', 'breaking', 'subject', 'trunk'], stepName);
+        Object.keys(inputs).forEach((key) => assert.ok(skillInputs.includes(key), stepName + ' ' + key));
+      }
+    });
+    test('real molt.sh: every subject passes its subject rules, and the raw fallback outcomes do not all', () => {
+      const scratch = makeScratchRepo();
+      const multiStep = [makeStep('S1', ['src/a.js'], { outcome: longOutcome }), makeStep('S2', ['src/b.js'])];
+      const subjects = [
+        ...['bump', 'fix', 'review'].map((stepName) => main.commitStepTexts(stepName).subject),
+        main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: longOutcome })], 1),
+        main.buildWaveSubject(multiStep, 1),
+        main.buildWaveSubject([makeStep('S'.repeat(64), ['src/a.js']), makeStep('T'.repeat(64), ['src/b.js'])], 1),
+        main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: 'x'.repeat(200) })], 1),
+        ...fallbackOutcomes.map(([, outcome]) => main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: outcome })], 9999))
+      ];
+      subjects.forEach((subject, index) => {
+        assert.equal(moltSubjectLine(scratch, subject, false, index), 'blocker: the current branch is trunk', JSON.stringify(subject));
+        assert.equal(moltSubjectLine(scratch, subject, true, index), 'blocker: the current branch is trunk', JSON.stringify(subject));
+      });
+      assert.equal(moltSubjectLine(scratch, ' ', false, 'blank'), 'blocker: subject must be one line of text');
+      assert.equal(moltSubjectLine(scratch, 'Add the feat!: thing', false, 'marker'), 'blocker: the subject or body has a breaking change marker but breaking is not true');
+      assert.equal(moltSubjectLine(scratch, 'x'.repeat(73), false, 'long'), 'blocker: subject must be 72 characters or fewer');
     });
   }
 };

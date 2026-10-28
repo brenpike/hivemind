@@ -3595,16 +3595,34 @@ switch(stepName){
 case'wave':
 return{purpose:'the wave of plan steps that just ran',noun:'the wave'};
 case'bump':
-return{purpose:'the version bump that just ran',noun:'the version bump'};
+return{purpose:'the version bump that just ran',noun:'the version bump',subject:'bump the version'};
 case'fix':
-return{purpose:'the validation fix round that just ran',noun:'the fix round'};
+return{purpose:'the validation fix round that just ran',noun:'the fix round',subject:'fix the failed validation'};
 case'review':
-return{purpose:'the local review that just ran, with an empty file list',noun:'the local review'};
+return{purpose:'the local review that just ran, with an empty file list',noun:'the local review',subject:'apply the local review fixes'};
 default:
 throw new Error('commitStepTexts: no texts for step '+JSON.stringify(stepName));
 }
 }
-function buildCommitPrompt(files,plan,trunk,stepName){
+function maxSubjectLength(){
+return 72;
+}
+function forbiddenSubjectTexts(){
+return['co-authored-by:','authored-by:','generated with','created with claude','\u{1f916} generated'];
+}
+function isUsableSubject(subject){
+const lowered=subject.toLowerCase();
+return subject!==''
+&&!subject.includes('!:')
+&&!/breaking[ -]change/i.test(subject)
+&&!forbiddenSubjectTexts().some((forbidden)=>lowered.includes(forbidden));
+}
+function toCommitSubject(text,fallbackSubject){
+const oneLine=text.replace(/[\s\x00-\x1f\x7f-\x9f]+/g,' ').trim();
+const subject=cutAtBoundary(oneLine,maxSubjectLength());
+return isUsableSubject(subject)?subject:fallbackSubject;
+}
+function buildCommitPrompt(files,plan,trunk,stepName,subject){
 return[
 'Invoke the hivemind:molt skill once, with each value of the inputs block below as the input of the same name, to commit '+commitStepTexts(stepName).purpose+'.',
 commitGrantSentence(),
@@ -3612,7 +3630,7 @@ gitScriptSentence('hivemind:molt'),
 dataBlocksSentence(),
 skillRunOnlySentence(),
 '',
-formatDataBlock('inputs',{files:files,commit_type:commitTypeMap()[plan.classification],breaking:plan.breaking,trunk:trunk})
+formatDataBlock('inputs',{files:files,commit_type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,trunk:trunk})
 ].join('\n');
 }
 function readOutsidePath(payload){
@@ -3650,9 +3668,9 @@ return{problem:'The commit step reported a branch other than the plan branch, '+
 }
 return{values:values};
 }
-async function runCommitStep(run,plan,files,label,stepName){
+async function runCommitStep(run,plan,files,label,stepName,subject=commitStepTexts(stepName).subject){
 phase('Commit');
-const relay=await agent(addResumeNote(buildCommitPrompt(files,plan,run.trunk,stepName),run),runnerOptions(label,'Commit'));
+const relay=await agent(addResumeNote(buildCommitPrompt(files,plan,run.trunk,stepName,subject),run),runnerOptions(label,'Commit'));
 const checked=checkCommitRelay(relay,plan,stepName);
 if(checked.problem!==undefined){
 return checked;
@@ -4150,6 +4168,11 @@ files.push(file);
 }
 return files;
 }
+function buildWaveSubject(waveSteps,waveNumber){
+const firstOutcome=waveSteps[0].outcome;
+const text=waveSteps.length===1?firstOutcome:waveSteps.map((step)=>step.id).join(', ')+': '+firstOutcome;
+return toCommitSubject(text,'complete wave '+waveNumber+' of the delivery plan');
+}
 function findPlanStep(plan,stepId){
 return plan.steps.find((step)=>step.id===stepId);
 }
@@ -4203,7 +4226,7 @@ const waveSteps=wave.wave.map((stepId)=>findPlanStep(plan,stepId));
 phase('Waves');
 const workerResults=await parallel(waveSteps.map((step)=>createWorkerTask(step,waveSteps,plan,run)));
 run.waveCount+=1;
-const committed=await runCommitStep(run,plan,listStepFiles(waveSteps),'commit-'+run.pass+'-'+waveNumber,'wave');
+const committed=await runCommitStep(run,plan,listStepFiles(waveSteps),'commit-'+run.pass+'-'+waveNumber,'wave',buildWaveSubject(waveSteps,waveNumber));
 if(committed.problem!==undefined){
 return{result:finishDeliveryBlocked(committed.problem,run)};
 }

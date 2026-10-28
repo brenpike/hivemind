@@ -18,8 +18,17 @@
  * Outputs
  *   runFactsStep(run)                {facts} or {problem}.
  *   runBranchStep(run, plan, freshness)  {values} or {problem}.
- *   runCommitStep(run, plan, files, label, stepName)  {values} or
- *                                    {problem}.
+ *   runCommitStep(run, plan, files, label, stepName, subject)  {values}
+ *                                    or {problem}. subject is the commit
+ *                                    subject, commitStepTexts(stepName)
+ *                                    .subject when it is not given.
+ *   toCommitSubject(text, fallbackSubject)  text made one line and cut by
+ *                                    cutAtBoundary (lib/result.js) to
+ *                                    maxSubjectLength() code points, or
+ *                                    fallbackSubject when that line is
+ *                                    blank, holds a breaking change marker
+ *                                    or holds an attribution string the
+ *                                    molt SKILL.md forbids.
  *   The options, sentences, routing specs and relay helpers every other
  *   runner step uses. The steps, as meta.js names them:
  *   Facts   a haiku hivemind:drone runner invokes hivemind:gather-facts and
@@ -34,6 +43,10 @@
  *           other than the previous head, as after local review fix commits,
  *           the range <previous head>..<new head> enters the run commits, so
  *           a commit made outside the commit runner reaches the run record.
+ *           Its inputs block carries a subject built by code, so the
+ *           runner reads no git state to write one: a wave subject comes
+ *           from its plan steps (waves.js buildWaveSubject), and the bump,
+ *           fix round and review commits have fixed subjects.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -404,17 +417,39 @@ function commitStepTexts(stepName) {
     case 'wave':
       return { purpose: 'the wave of plan steps that just ran', noun: 'the wave' };
     case 'bump':
-      return { purpose: 'the version bump that just ran', noun: 'the version bump' };
+      return { purpose: 'the version bump that just ran', noun: 'the version bump', subject: 'bump the version' };
     case 'fix':
-      return { purpose: 'the validation fix round that just ran', noun: 'the fix round' };
+      return { purpose: 'the validation fix round that just ran', noun: 'the fix round', subject: 'fix the failed validation' };
     case 'review':
-      return { purpose: 'the local review that just ran, with an empty file list', noun: 'the local review' };
+      return { purpose: 'the local review that just ran, with an empty file list', noun: 'the local review', subject: 'apply the local review fixes' };
     default:
       throw new Error('commitStepTexts: no texts for step ' + JSON.stringify(stepName));
   }
 }
 
-function buildCommitPrompt(files, plan, trunk, stepName) {
+function maxSubjectLength() {
+  return 72;
+}
+
+function forbiddenSubjectTexts() {
+  return ['co-authored-by:', 'authored-by:', 'generated with', 'created with claude', '\u{1f916} generated'];
+}
+
+function isUsableSubject(subject) {
+  const lowered = subject.toLowerCase();
+  return subject !== ''
+    && !subject.includes('!:')
+    && !/breaking[ -]change/i.test(subject)
+    && !forbiddenSubjectTexts().some((forbidden) => lowered.includes(forbidden));
+}
+
+function toCommitSubject(text, fallbackSubject) {
+  const oneLine = text.replace(/[\s\x00-\x1f\x7f-\x9f]+/g, ' ').trim();
+  const subject = cutAtBoundary(oneLine, maxSubjectLength());
+  return isUsableSubject(subject) ? subject : fallbackSubject;
+}
+
+function buildCommitPrompt(files, plan, trunk, stepName, subject) {
   return [
     'Invoke the hivemind:molt skill once, with each value of the inputs block below as the input of the same name, to commit ' + commitStepTexts(stepName).purpose + '.',
     commitGrantSentence(),
@@ -422,7 +457,7 @@ function buildCommitPrompt(files, plan, trunk, stepName) {
     dataBlocksSentence(),
     skillRunOnlySentence(),
     '',
-    formatDataBlock('inputs', { files: files, commit_type: commitTypeMap()[plan.classification], breaking: plan.breaking, trunk: trunk })
+    formatDataBlock('inputs', { files: files, commit_type: commitTypeMap()[plan.classification], breaking: plan.breaking, subject: subject, trunk: trunk })
   ].join('\n');
 }
 
@@ -464,9 +499,9 @@ function checkCommitRelay(relay, plan, stepName) {
   return { values: values };
 }
 
-async function runCommitStep(run, plan, files, label, stepName) {
+async function runCommitStep(run, plan, files, label, stepName, subject = commitStepTexts(stepName).subject) {
   phase('Commit');
-  const relay = await agent(addResumeNote(buildCommitPrompt(files, plan, run.trunk, stepName), run), runnerOptions(label, 'Commit'));
+  const relay = await agent(addResumeNote(buildCommitPrompt(files, plan, run.trunk, stepName, subject), run), runnerOptions(label, 'Commit'));
   const checked = checkCommitRelay(relay, plan, stepName);
   if (checked.problem !== undefined) {
     return checked;
