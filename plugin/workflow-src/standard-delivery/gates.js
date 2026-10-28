@@ -5,7 +5,7 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
- *          replies, head, trunk and localReview, and update notRunGates.
+ *          head, trunk and localReview, and update answerLog and notRunGates.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   facts  the checked facts of the pass: trunk_commit is the bump base.
  *   gates  the gate loop state runGates builds: held, notes, runs, failures,
@@ -74,16 +74,17 @@
  *   block. That covers the asks of resolveTailDecision, the fix round and gate
  *   rerun limits, and the user-input-required and high-severity-rejection
  *   questions; each ask carries a reason renderQuestions shows. Tail rounds
- *   share run.replies and the answers round numbering with planning rounds, so
- *   a resume replays every earlier agent from cache and takes the reply at the
- *   ask (askTail). A reply to a local review question reruns the review gate on
- *   the current head, after any gate the head move made stale, with the next
- *   gateLabel count and user_answer {question, reply} in its inputs block; the
- *   commit runner and localReviewRoutes() then apply as for any review run. A
- *   reply to any other tail ask starts a new pass through the facts step whose
- *   plan prompt carries the answer block {question, reply}; that replan does
- *   not count against maxReplans(). Nothing is pushed before every configured
- *   gate holds on one commit.
+ *   share run.answerLog and the answers round numbering with planning rounds,
+ *   so a resume replays every earlier agent from cache and takes the reply at
+ *   the ask (askTail). askTail adds {question, reply} to run.answerLog, the
+ *   question as shown with its detail block, so every later plan prompt shows
+ *   it in the answers block. A reply to a local review question reruns the
+ *   review gate on the current head, after any gate the head move made stale,
+ *   with the next gateLabel count and user_answer {question, reply} in its
+ *   inputs block; the commit runner and localReviewRoutes() then apply as for
+ *   any review run. A reply to any other tail ask starts a new pass through the
+ *   facts step; that replan does not count against maxReplans(). Nothing is
+ *   pushed before every configured gate holds on one commit.
  *   The bump prompt names each versioning.artifact_files path in a git show
  *   command, and that list is planner text that can carry external content
  *   (review finding 143374b9). The impact is bounded: describePlanProblem
@@ -276,12 +277,13 @@ function isRunEnd(outcome) {
 
 function askTail(asks, run, detail) {
   const questions = renderQuestions(asks, []);
-  const reply = takeNextReply(run, run.replies.length + 1);
+  const reply = takeNextReply(run, run.answerLog.length + 1);
   if (reply === undefined) {
     return { result: pauseDelivery({ asks: asks, taken: [] }, questions, run, detail) };
   }
-  run.replies.push(reply);
-  return { answer: { question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply } };
+  const answer = { question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply };
+  run.answerLog.push(answer);
+  return { answer: answer };
 }
 
 function replanFromTailAsk(asks, run) {
@@ -289,7 +291,7 @@ function replanFromTailAsk(asks, run) {
   if (asked.answer === undefined) {
     return asked;
   }
-  return { replan: { reason: 'The user answered a question the run asked after the last wave, so plan again from the fresh facts with the answer block.', answer: asked.answer } };
+  return { replan: { reason: 'The user answered a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
 }
 
 function buildUndecidedAsk(brief) {

@@ -7,12 +7,12 @@
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
  *           request, trunk, level, pass, storedAnswers and pendingReply,
- *           and updates replies, answeredKeys, taken and reversibleEffects.
+ *           and updates answerLog, answeredKeys, taken and reversibleEffects.
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
  *   replan  undefined at launch, else the replan data of the step that
- *           sent the run back to planning: its reason, and the review or
- *           the answer when it carries one.
+ *           sent the run back to planning: its reason, and the review when
+ *           it carries one.
  *   PLAN_SCHEMA, BRIEF_SCHEMA, AUTONOMY_TABLE and the kind constants of
  *   main.js.
  *
@@ -100,6 +100,13 @@
  *   user never answers an effect question without its verbatim text.
  *   The plan and revise prompts carry the scope in a scope data block right
  *   after the request block, and no other planning text holds it.
+ *   Each reply a plan pause consumes goes once into run.answerLog as
+ *   {question, reply}, the question being the text the pause showed. Every
+ *   plan prompt once the log is not empty carries the whole log in an
+ *   answers data block, and a revise prompt carries the entries before its
+ *   own round, so a replan never asks or reverses a settled answer (issue
+ *   472). With an empty log, the plan and first revise prompts are the
+ *   prompts of a run with no answers, so a resume replays them from cache.
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
  *   P24): how to read the facts, what is left to plan, the review block and
@@ -196,12 +203,16 @@ function findRepositoryPathProblem(schema, value, location) {
   return '';
 }
 
-function buildPlanPrompt(request, facts, scope, replan) {
-  const hasAnswer = hasReplanAnswer(replan);
+function settledAnswersSentence(home) {
+  return dataBlocksSentence(undefined) + ' ' + home + ' hold the user\'s settled decisions: never ask them again, never reverse them.';
+}
+
+function buildPlanPrompt(request, facts, scope, replan, answerLog) {
+  const hasAnswers = answerLog.length > 0;
   const lines = [
     'Plan the delivery of the user request below in this repository, as one plan on one working branch.',
     boundarySentence(),
-    dataBlocksSentence(hasAnswer ? 'The reply in the answer block' : undefined)
+    hasAnswers ? settledAnswersSentence('The entries of the answers block') : dataBlocksSentence(undefined)
   ];
   if (replan !== undefined) {
     lines.push('This is a new plan in a run that already started: the replan block says why.');
@@ -213,29 +224,28 @@ function buildPlanPrompt(request, facts, scope, replan) {
   if (replan !== undefined && replan.review !== undefined) {
     lines.push(formatDataBlock('review', replan.review));
   }
-  if (hasAnswer) {
-    lines.push(formatDataBlock('answer', replan.answer));
+  if (hasAnswers) {
+    lines.push(formatDataBlock('answers', answerLog));
   }
   return lines.join('\n');
 }
 
-function hasReplanAnswer(replan) {
-  return replan !== undefined && replan.answer !== undefined;
-}
-
-function buildPlanRevisePrompt({ request, facts, scope, plan, questions, reply }) {
-  return [
+function buildPlanRevisePrompt({ request, facts, scope, answers, plan, questions, reply }) {
+  const hasAnswers = answers.length > 0;
+  const lines = [
     'Revise your plan for the delivery of the user request below with the user reply below.',
     boundarySentence(),
-    dataBlocksSentence('The reply block'),
+    hasAnswers ? settledAnswersSentence('The answers and reply blocks') : dataBlocksSentence('The reply block'),
     '',
     buildFactsBlock(facts),
     formatDataBlock('request', request),
-    formatDataBlock('scope', scope),
-    formatDataBlock('earlier_plan', plan),
-    formatDataBlock('questions', questions),
-    formatDataBlock('reply', reply)
-  ].join('\n');
+    formatDataBlock('scope', scope)
+  ];
+  if (hasAnswers) {
+    lines.push(formatDataBlock('answers', answers));
+  }
+  lines.push(formatDataBlock('earlier_plan', plan), formatDataBlock('questions', questions), formatDataBlock('reply', reply));
+  return lines.join('\n');
 }
 
 /**
@@ -535,8 +545,8 @@ async function runPlanningPass(run, facts, scope, replan) {
   let shownAsks = [];
   let shownResult;
   const settledKinds = new Set();
-  const planPrompt = buildPlanPrompt(run.request, facts, scope, replan);
-  let planResult = await agent(hasReplanAnswer(replan) ? planPrompt : addResumeNote(planPrompt, run), plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
+  const planPrompt = buildPlanPrompt(run.request, facts, scope, replan, run.answerLog);
+  let planResult = await agent(planPrompt, plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
   for (;;) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk);
     if (problem !== undefined) {
@@ -565,18 +575,19 @@ async function runPlanningPass(run, facts, scope, replan) {
       return { result: finishDeliveryBlocked('Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', run) };
     }
     const questions = renderQuestions(resolution.asks, resolution.taken);
-    const round = run.replies.length + 1;
+    const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
+    const detail = isAcceptance ? buildPlanDetailBlock(planResult.plan) : undefined;
+    const round = run.answerLog.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {
-      const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
-      return { result: pauseDelivery(resolution, questions, run, isAcceptance ? buildPlanDetailBlock(planResult.plan) : undefined) };
+      return { result: pauseDelivery(resolution, questions, run, detail) };
     }
-    run.replies.push(reply);
+    run.answerLog.push({ question: detail === undefined ? questions : questions + '\n\n' + detail.text, reply: reply });
     phase('Revise');
     shownAsks = resolution.asks;
     shownResult = planResult;
     resultSchema = buildReviseResultSchema(shownAsks);
-    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, plan: planResult.plan, questions: questions, reply: reply });
+    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: run.answerLog.slice(0, round - 1), plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
   }
 }
