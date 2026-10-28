@@ -239,6 +239,7 @@ const BRIEF_SCHEMA = {
 "options": {
 "type": "array",
 "minItems": 1,
+"maxItems": 4,
 "items": {
 "type": "object",
 "additionalProperties": false,
@@ -465,7 +466,8 @@ const PLAN_SCHEMA = {
 }
 },
 "branch": {
-"type": "string"
+"type": "string",
+"maxLength": 200
 },
 "base": {
 "type": "string"
@@ -526,6 +528,7 @@ const PLAN_SCHEMA = {
 "type": "array",
 "items": {
 "type": "string",
+"maxLength": 400,
 "description": "Can carry external content. Repository path."
 }
 }
@@ -575,6 +578,7 @@ const PLAN_SCHEMA = {
 "minItems": 1,
 "items": {
 "type": "string",
+"maxLength": 400,
 "description": "Can carry external content. Repository path."
 }
 },
@@ -613,7 +617,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '7b5111ba5e198c17';
+const BUILD_ID = '8a96e63f34fdc2a8';
 
 function supportedSchemaKeywords(){
 return[
@@ -630,6 +634,7 @@ return[
 'maxItems',
 'minLength',
 'maxLength',
+'pattern',
 'anyOf'
 ];
 }
@@ -702,8 +707,21 @@ failSchema(path,'minLength must be a non-negative integer');
 if(schema.maxLength!==undefined&&!(Number.isInteger(schema.maxLength)&&schema.maxLength>=0)){
 failSchema(path,'maxLength must be a non-negative integer');
 }
+if(schema.pattern!==undefined){
+assertSchemaPattern(schema.pattern,path);
+}
 if(schema.anyOf!==undefined&&!(Array.isArray(schema.anyOf)&&schema.anyOf.length>0)){
 failSchema(path,'anyOf must be a non-empty array of schemas');
+}
+}
+function assertSchemaPattern(pattern,path){
+if(typeof pattern!=='string'){
+failSchema(path,'pattern must be a string');
+}
+try{
+new RegExp(pattern,'u');
+}catch(error){
+failSchema(path,'pattern does not compile: '+error.message);
 }
 }
 function matchesSchemaType(typeName,value){
@@ -743,6 +761,9 @@ return schema.minLength!==undefined&&typeof value==='string'&&countSchemaCodePoi
 function isLongSchemaString(schema,value){
 return schema.maxLength!==undefined&&typeof value==='string'&&countSchemaCodePoints(value)>schema.maxLength;
 }
+function isUnmatchedSchemaString(schema,value){
+return schema.pattern!==undefined&&typeof value==='string'&&!new RegExp(schema.pattern,'u').test(value);
+}
 function matchesSchemaBranch(branch,value,path){
 const branchErrors=[];
 collectSchemaErrors(branch,value,path,branchErrors);
@@ -764,6 +785,9 @@ errors.push(path+': minLength: fewer than '+schema.minLength+' characters');
 }
 if(isLongSchemaString(schema,value)){
 errors.push(path+': maxLength: more than '+schema.maxLength+' characters');
+}
+if(isUnmatchedSchemaString(schema,value)){
+errors.push(path+': pattern: does not match '+schema.pattern);
 }
 if(schema.enum!==undefined&&schema.enum.indexOf(value)===-1){
 errors.push(path+': enum: not one of '+schema.enum.join(', '));
@@ -999,19 +1023,12 @@ const idsAreUnique=optionIds.every((optionId,index)=>optionIds.indexOf(optionId)
 return idsAreUnique&&optionIds.indexOf(brief.recommendation.option_id)!==-1;
 }
 
-function renderQuestions(asks,taken){
+function renderQuestions(asks){
 if(!Array.isArray(asks)||asks.length===0){
 throw new Error('renderQuestions: asks must be a non-empty array');
 }
-if(!Array.isArray(taken)){
-throw new Error('renderQuestions: taken must be an array');
-}
-const blocks=[renderHeading(asks.length)];
-asks.forEach((entry,index)=>blocks.push(renderQuestion(entry,index)));
-if(taken.length>0){
-blocks.push(renderTakenLines(taken));
-}
-blocks.push(renderReplyLine());
+const blocks=asks.map((entry,index)=>renderQuestion(entry,index));
+blocks.push(renderReplyLine(asks.length));
 return blocks.join('\n\n');
 }
 function renderDecisions(taken){
@@ -1025,21 +1042,6 @@ const lines=['Decided for you:'];
 taken.forEach((entry,index)=>lines.push(renderTakenDecision(entry,index)));
 return lines.join('\n');
 }
-function renderQuestionsCompact(asks,taken){
-if(!Array.isArray(asks)||asks.length===0){
-throw new Error('renderQuestionsCompact: asks must be a non-empty array');
-}
-if(!Array.isArray(taken)){
-throw new Error('renderQuestionsCompact: taken must be an array');
-}
-const blocks=[renderHeading(asks.length)];
-asks.forEach((entry,index)=>blocks.push(renderCompactQuestion(entry,index)));
-if(taken.length>0){
-blocks.push(renderTakenLines(taken));
-}
-blocks.push(renderReplyLine());
-return blocks.join('\n\n');
-}
 function renderDecisionsCompact(taken){
 if(!Array.isArray(taken)){
 throw new Error('renderDecisionsCompact: taken must be an array');
@@ -1050,32 +1052,6 @@ return'';
 const lines=['Decided for you:'];
 taken.forEach((entry,index)=>lines.push(renderCompactDecision(entry,index)));
 return lines.join('\n');
-}
-function askReasonLine(reason){
-switch(reason){
-case'hard_stop':
-return'This is a step I always check with you before taking.';
-case'malformed_brief':
-return'The details I have for this decision are incomplete, so I will not decide it alone.';
-case'unknown_kind':
-return'I have no rule that lets me decide this kind of question on my own.';
-case'table_surface':
-return'Your autonomy setting has me check with you on this kind of decision.';
-case'bad_cell':
-return'My rule for this kind of decision is unclear, so I am checking with you.';
-case'gate_irreversible':
-return'The recommended option cannot be undone cheaply.';
-case'gate_architectural':
-return'The recommended option changes how the system is built.';
-case'gate_safety':
-return'The recommended option touches safety.';
-case'no_recommendation':
-return'I do not have a recommendation I am confident enough to act on.';
-case'recommendation_not_an_option':
-return'My recommendation does not match one of the options, so I need you to pick.';
-default:
-throw new Error('askReasonLine: no line for reason '+JSON.stringify(reason));
-}
 }
 function renderOpenQuestions(open,stopReason='pause_limit'){
 if(!Array.isArray(open)||open.length===0){
@@ -1109,17 +1085,23 @@ throw new Error('decisionLabel: index must be a non-negative integer');
 }
 return'D'+(index+1);
 }
-function listShownLabels(asks,taken){
+function optionLabel(index){
+if(!Number.isInteger(index)||index<0){
+throw new Error('optionLabel: index must be a non-negative integer');
+}
+let label='';
+let rest=index;
+do{
+label=String.fromCharCode(65+(rest%26))+label;
+rest=Math.floor(rest/26)-1;
+}while(rest>=0);
+return label;
+}
+function listShownLabels(asks){
 if(!Array.isArray(asks)||asks.length===0){
 throw new Error('listShownLabels: asks must be a non-empty array');
 }
-if(!Array.isArray(taken)){
-throw new Error('listShownLabels: taken must be an array');
-}
-return[
-...asks.map((entry,index)=>questionLabel(index)),
-...taken.map((entry,index)=>decisionLabel(index))
-];
+return asks.map((entry,index)=>questionLabel(index));
 }
 function buildAnswerEntry(round,revise){
 const shownLabels=readField(round,'labels');
@@ -1133,39 +1115,13 @@ throw new Error('buildAnswerEntry: revise.settled must be an array');
 const settled=shownLabels.filter((label,index)=>reviseLabels.includes(label)&&shownLabels.indexOf(label)===index);
 return{question:round.question,settled:settled,reply:round.reply};
 }
-function renderHeading(count){
+function renderReplyLine(count){
 if(count===1){
-return'**Answer '+questionLabel(0)+' so I can go on: pick one of its options.**';
+return'Reply with an option, like A, or in your own words.';
 }
-const joiner=count===2?' and ':' to ';
-return'**Answer '+questionLabel(0)+joiner+questionLabel(count-1)+' so I can go on: pick one option for each.**';
-}
-function renderReplyLine(){
-return'Reply with a label and an option, like Q1 A, or in your own words.';
-}
-function renderTakenLines(taken){
-const lines=['Decided for you:'];
-taken.forEach((entry,index)=>lines.push(renderTakenLine(entry,index)));
-lines.push('You can change any of these in the same reply.');
-return lines.join('\n');
-}
-function renderTakenLine(entry,index){
-const brief=readField(entry,'brief');
-return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose option '
-+renderText(readField(readField(brief,'recommendation'),'option_id'))+'.';
+return'Reply with a label and an option for each, like Q1 A, or in your own words.';
 }
 function renderQuestion(entry,index){
-const brief=readField(entry,'brief');
-const lines=renderAsk(brief,index);
-lines.push(renderWhyItMatters(readField(brief,'criticality')));
-lines.push('Why I am asking: '+askReasonLine(readField(entry,'reason')));
-const sections=[lines.join('\n')];
-if(readField(entry,'exact')===true){
-sections.push(...renderVerbatimSection(readField(brief,'verbatim')));
-}
-return sections.join('\n\n');
-}
-function renderCompactQuestion(entry,index){
 const brief=readField(entry,'brief');
 const sections=[renderAsk(brief,index).join('\n')];
 if(readField(entry,'exact')===true){
@@ -1174,65 +1130,66 @@ sections.push(...renderVerbatimSection(readField(brief,'verbatim')));
 return sections.join('\n\n');
 }
 function renderAsk(brief,index){
+const options=readField(brief,'options');
 const recommendation=readField(brief,'recommendation');
 return[
 '**'+questionLabel(index)+'. '+renderText(readField(brief,'problem'))+'**',
-...renderOptions(readField(brief,'options'),recommendation),
-renderRecommendation(recommendation)
+...renderOptions(options,findRecommendedIndex(options,recommendation)),
+renderRecommendation(recommendation,options)
 ];
 }
-function renderWhyItMatters(criticality){
-return'Why it matters: '+renderToken(readField(criticality,'level'))+' criticality, likelihood '
-+renderToken(readField(criticality,'likelihood'))+'. If it goes wrong: '
-+renderText(readField(criticality,'blast_radius'));
-}
-function renderOptions(options,recommendation){
+function renderOptions(options,recommendedIndex){
 if(!Array.isArray(options)||options.length===0){
 return['Options: not given.'];
 }
-const recommendedId=readField(recommendation,'strength')==='none'?undefined:readField(recommendation,'option_id');
-return options.map((option)=>renderOption(option,recommendedId));
+return options.map((option,index)=>renderOption(option,index,recommendedIndex));
 }
-function renderOption(option,recommendedId){
-const optionId=readField(option,'id');
-const mark=typeof optionId==='string'&&optionId===recommendedId?' (recommended)':'';
-return'- '+renderText(optionId)+': '+renderText(readField(option,'summary'))+mark;
+function renderOption(option,index,recommendedIndex){
+const mark=index===recommendedIndex?' (recommended)':'';
+return'- '+optionLabel(index)+': '+renderText(readField(option,'summary'))+mark;
 }
-function renderRecommendation(recommendation){
-const why='Why: '+renderText(readField(recommendation,'why'));
+function renderRecommendation(recommendation,options){
+const why=renderText(readField(recommendation,'why'));
 const strength=readField(recommendation,'strength');
 if(strength==='none'){
 return'Recommendation: none. '+why;
 }
-return'Recommendation: option '+renderText(readField(recommendation,'option_id'))+' ('
+return'Recommendation: '+renderOptionLetter(options,readField(recommendation,'option_id'))+' ('
 +renderToken(strength)+'). '+why;
 }
 function renderVerbatimSection(verbatim){
-const lines=renderVerbatim(verbatim,'');
-return lines.length===0?[]:[lines.join('\n')];
+if(!hasVerbatim(verbatim)){
+return[];
+}
+return['Word for word:\n'+encodeUntrustedText(verbatim)];
 }
 function renderVerbatim(verbatim,labelIndent){
-if(typeof verbatim!=='string'||verbatim===''){
+if(!hasVerbatim(verbatim)){
 return[];
 }
 return[labelIndent+'Word for word:',verbatim];
+}
+function hasVerbatim(verbatim){
+return typeof verbatim==='string'&&verbatim!=='';
 }
 function renderOpenQuestion(entry,index){
 const brief=readField(entry,'brief');
 const recommendation=readField(brief,'recommendation');
 const optionId=readField(recommendation,'option_id');
 const hasChoice=readField(recommendation,'strength')!=='none'&&typeof optionId==='string'&&optionId.trim()!=='';
-const choice=hasChoice?'The report assumes option '+renderText(optionId)+'.':'I have no recommendation of my own.';
+const choice=hasChoice
+?'The report assumes option '+renderOptionLetter(readField(brief,'options'),optionId)+'.'
+:'I have no recommendation of my own.';
 return'  '+questionLabel(index)+'. '+renderText(readField(brief,'problem'))+' '+choice;
 }
 function renderTakenDecision(entry,index){
 const brief=readField(entry,'brief');
+const options=readField(brief,'options');
 const recommendation=readField(brief,'recommendation');
 const optionId=readField(recommendation,'option_id');
-const chosen=findOptionById(readField(brief,'options'),optionId);
 const lines=[
 '  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem')),
-'    Chose option '+renderText(optionId)+': '+renderText(readField(chosen,'summary')),
+'    Chose option '+renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary')),
 '    Why: '+renderText(readField(recommendation,'why'))
 ];
 lines.push(...renderVerbatim(readField(brief,'verbatim'),'    '));
@@ -1240,16 +1197,30 @@ return lines.join('\n');
 }
 function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
-const recommendation=readField(brief,'recommendation');
-const whyLine=renderText(readField(recommendation,'why')).split(/\s*[\r\n]+\s*/).join(' ');
-return'  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose option '
-+renderText(readField(recommendation,'option_id'))+'. Why: '+cutAtBoundary(whyLine,maxExcerptLength());
+const options=readField(brief,'options');
+const optionId=readField(readField(brief,'recommendation'),'option_id');
+return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose '
++renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary'))+'.';
 }
-function findOptionById(options,optionId){
-if(!Array.isArray(options)){
-return undefined;
+function findRecommendedIndex(options,recommendation){
+if(readField(recommendation,'strength')==='none'){
+return-1;
 }
-return options.find((option)=>readField(option,'id')===optionId);
+return findOptionIndex(options,readField(recommendation,'option_id'));
+}
+function findOptionIndex(options,optionId){
+if(!Array.isArray(options)||typeof optionId!=='string'){
+return-1;
+}
+return options.findIndex((option)=>readField(option,'id')===optionId);
+}
+function readChosenOption(options,optionId){
+const index=findOptionIndex(options,optionId);
+return index===-1?undefined:options[index];
+}
+function renderOptionLetter(options,optionId){
+const index=findOptionIndex(options,optionId);
+return index===-1?'not given':optionLabel(index);
 }
 function readField(record,name){
 if(typeof record!=='object'||record===null||Array.isArray(record)){
@@ -1258,10 +1229,17 @@ return undefined;
 return record[name];
 }
 function renderText(value){
-if(typeof value!=='string'||value.trim()===''){
+if(typeof value!=='string'){
 return'not given';
 }
-return value.replace(/\s*\u2014\s*/g,', ');
+const lineText=value
+.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,' ')
+.replace(/\s+/g,' ')
+.trim();
+if(lineText===''){
+return'not given';
+}
+return lineText.replace(/\s*\u2014\s*/g,', ');
 }
 function renderToken(value){
 return renderText(value).replace(/_/g,' ');
@@ -1297,9 +1275,6 @@ return jsonText.length
 }
 function maxExcerptLength(){
 return 200;
-}
-function cutExcerpt(text){
-return Array.from(text).slice(0,maxExcerptLength()).join('');
 }
 function maxReasonLength(){
 return 600;
@@ -1362,6 +1337,12 @@ return encodeUntrustedText(keptLine)+(keptLine===joinedLine?'':' (cut)');
 function describeReason(text){
 const quoted=quoteDiagnostic(text,maxReasonLength());
 return quoted===undefined?'it gave no reason.':'it says '+quoted+'.';
+}
+function describeNoResult(result){
+if(result!==null){
+return'';
+}
+return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
 }
 function canCarry(resumeArgs){
 const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
@@ -2159,8 +2140,11 @@ return values.trunk===trunk
 &&(values.trunk_commit!=='none'||hasFactsStop(stops,'history_unavailable'))
 &&matchesFreshnessCounts(values.trunk_freshness,values.trunk_ahead,values.trunk_behind);
 }
-function malformedFactsMessage(runNoun){
-return'The facts step returned malformed facts, so '+describeRunNoun(runNoun)+' stopped before planning.';
+function malformedFactsMessage(runNoun,result){
+return appendSentence('The facts step returned malformed facts, so '+describeRunNoun(runNoun)+' stopped before planning.',describeNoResult(result));
+}
+function appendSentence(message,sentence){
+return sentence===''?message:message+' '+sentence;
 }
 function blockedFactsMessage(runNoun,blocker){
 const reason=isNonEmptyString(blocker)?blocker:'it gave no reason.';
@@ -2184,10 +2168,10 @@ description:'One result per scanned text, in the order scanned.',
 items:buildTaggedSchema({
 tag:'verdict',
 properties:{
-item_ref:{type:'string',description:'The text_id of the scanned text, copied exactly.'},
+item_ref:{type:'string',maxLength:16,description:'The text_id of the scanned text, copied exactly.'},
 verdict:{type:'string',enum:['clean','injection-suspect']},
 pattern_category:{type:'string',enum:['P1','P2','P3','P4']},
-field_excerpt:{type:'string',description:'The first 200 characters of the flagged text.'},
+field_excerpt:{type:'string',maxLength:scanExcerptLimit(),description:'The first 200 characters of the flagged text.'},
 reason:{type:'string',description:'The pattern matched.'}
 },
 required:['item_ref','verdict'],
@@ -2227,7 +2211,7 @@ return undefined;
 }
 function renderSuspectLine(result){
 const category=isNonEmptyString(result.pattern_category)?result.pattern_category:'no category given';
-const excerpt=typeof result.field_excerpt==='string'?Array.from(result.field_excerpt).slice(0,scanExcerptLimit()).join(''):'';
+const excerpt=typeof result.field_excerpt==='string'?result.field_excerpt:'';
 return'- '+encodeUntrustedText(result.item_ref)+' ('+category+'): '+encodeUntrustedText(excerpt);
 }
 function readTextIndex(itemRef){
@@ -2251,7 +2235,7 @@ return true;
 function describeScanProblem(scan,facts,runNoun){
 const stopped='so '+describeRunNoun(runNoun)+' stopped before planning.';
 if(!validateSchema(scanStepSchema(),scan).ok){
-return'The injection scan returned a result it could not use, '+stopped;
+return appendSentence('The injection scan returned a result it could not use, '+stopped,describeNoResult(scan));
 }
 const suspects=scan.results.filter((result)=>result.verdict==='injection-suspect');
 if(suspects.length>0){
@@ -2321,11 +2305,11 @@ assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefTe
 gate:{irreversible:false,architectural:false,safety:false}
 };
 }
-function buildExternalEffectBrief(stepId,summary){
+function buildExternalEffectBrief(summary){
 return{
 id:'effect',
 kind:EXTERNAL_EFFECT_KIND,
-problem:'Plan step '+encodeUntrustedText(Array.from(stepId).slice(0,16).join(''))+' has an effect outside the repo that cannot be undone. May the run go on to it?',
+problem:'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
 criticality:{level:'high',likelihood:'certain',blast_radius:'Something outside the repo, which no branch change can undo.',if_ignored:unshownBriefText()},
 options:[
 {id:'A',summary:'Go on and let the step make this effect.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:false},
@@ -2336,6 +2320,24 @@ assumptions:[{statement:unshownBriefText(),origin:'assumed',evidence:unshownBrie
 gate:{irreversible:true,architectural:false,safety:false},
 verbatim:summary
 };
+}
+function listOutsidePaths(plan,scope){
+if(scope.limits.length===0){
+return[];
+}
+const limits=scope.limits.filter((limit)=>isRepositoryPath(limit));
+const isInsideLimits=(file)=>limits.some((limit)=>file===limit||file.startsWith(limit+'/'));
+return listPlanPaths(plan).filter((file)=>!isInsideLimits(file));
+}
+function markOutsideLimits(brief,outsidePaths){
+if(outsidePaths.length===0){
+return brief;
+}
+const problem=brief.problem+' It changes '+describeCount(outsidePaths.length,'file')+' outside the limits you set.';
+return Object.assign(brief,{
+problem:problem.length<=BRIEF_SCHEMA.properties.problem.maxLength?problem:brief.problem,
+recommendation:{...brief.recommendation,strength:'none',why:'Only you can say if the plan may change files outside the limits.'}
+});
 }
 function buildTailBrief({kind,problem,goOn,other,strength,why}){
 return{
@@ -2485,13 +2487,16 @@ return buildTaggedSchema(spec);
 function isRunEnd(outcome){
 return outcome.result!==undefined||outcome.replan!==undefined;
 }
-function askTail(ask,run,detail){
-const questions=renderQuestions([ask],[]);
+function describeTailLead(run){
+return'Every plan step is committed on branch '+encodeUntrustedText(run.branch)+', with head '+run.head+'.';
+}
+function askTail(ask,run,lead){
+const leadText=lead===undefined?describeTailLead(run):lead;
 const reply=takeNextReply(run,run.answerLog.length+1);
 if(reply===undefined){
-return{result:pauseDelivery({asks:[ask],taken:[]},questions,run,detail)};
+return{result:pauseDelivery({asks:[ask],taken:[]},run,leadText)};
 }
-const question=detail===undefined?questions:questions+'\n\n'+detail.text;
+const question=leadText+'\n\n'+renderQuestions([ask]);
 run.answerLog.push(buildAnswerEntry({question:question,labels:[],reply:reply},undefined));
 return{answer:{question:question,reply:reply}};
 }
@@ -2532,7 +2537,7 @@ formatDataBlock('inputs',buildBumpTypeInputs(trunkCommit,versioning))
 function checkBumpTypeRelay(relay,schema){
 const stopped='so '+RUN_NAME+' stopped before validation.';
 if(!validateSchema(schema,relay).ok){
-return{problem:'The bump step returned a result it could not use, '+stopped};
+return describeUnusableResult('The bump step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
 const said=Object.hasOwn(relay,'blocker')?describeReason(relay.blocker):describeRelayBlocker(relay.stderr,true);
@@ -2566,19 +2571,16 @@ formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:trunk})
 }
 function readGateEditOutcome(result,schema){
 if(!validateSchema(schema,result).ok){
-return{status:'blocked',reason:'it returned no usable result.',files:[]};
+const unusable=describeUnusableResult('it returned no usable result.',result);
+return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction};
 }
 if(result.outcome==='blocked'){
 return{status:'blocked',reason:describeReason(result.blocker),files:result.files,nextAction:result.next_action};
 }
 return{status:'complete',files:result.files};
 }
-function describeCommitEnd(commitValues){
-const isCommitted=commitValues.committed==='true';
-return isCommitted?'Its files were committed as '+commitValues.commit+', so that commit can hold partial edits.':'It left nothing to commit, so the branch head stays '+commitValues.commit+'.';
-}
 function describeBlockedGateStep(stepTitle,reason,commitValues){
-return stepTitle+' was blocked, so '+RUN_NAME+' stopped after its commit: '+reason+'\n'+describeCommitEnd(commitValues);
+return stepTitle+' was blocked, so '+RUN_NAME+' stopped after its commit: '+reason+' '+describeCommitEnd(commitValues);
 }
 function runBumpStep(run,plan,facts,count){
 if(plan.versioning.artifact_files.length===0){
@@ -2592,10 +2594,10 @@ return values.verdict==='bump_required'?values.bump_type+' bump':'no bump';
 async function commitBumpEdit(run,plan,count,checked){
 const committed=await runCommitStep(run,plan,plan.versioning.artifact_files,gateLabel('bump-commit',run,count),'bump');
 if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run)};
+return{result:finishDeliveryBlocked(committed.problem,run,committed.nextAction)};
 }
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked(checked.problem+'\n'+describeCommitEnd(committed.values),run,checked.nextAction)};
+return{result:finishDeliveryBlocked(checked.problem+' '+describeCommitEnd(committed.values),run,checked.nextAction)};
 }
 return{held:true,note:describeBumpNote(checked.values),values:checked.values};
 }
@@ -2606,7 +2608,7 @@ phase('Bump');
 const result=await runBumpStep(run,plan,facts,count);
 const checked=checkBumpTypeRelay(result,hasFiles?BUMP_SCHEMA:RELAY_SCHEMA);
 if(checked.problem!==undefined){
-return hasFiles?commitBumpEdit(run,plan,count,checked):{result:finishDeliveryBlocked(checked.problem,run)};
+return hasFiles?commitBumpEdit(run,plan,count,checked):{result:finishDeliveryBlocked(checked.problem,run,checked.nextAction)};
 }
 const verdict=resolveBumpVerdict(checked.values,plan,run);
 if(isRunEnd(verdict)){
@@ -2648,7 +2650,7 @@ return plan.validation_commands.length>0?VALIDATE_COMMANDS_SCHEMA:VALIDATE_SCHEM
 }
 function readValidateOutcome(result,schema){
 if(!validateSchema(schema,result).ok){
-return{problem:'The validation step returned no usable result, so '+RUN_NAME+' stopped before the pull request.'};
+return describeUnusableResult('The validation step returned no usable result, so '+RUN_NAME+' stopped before the pull request.',result);
 }
 if(result.outcome==='blocked'){
 return{problem:'The validation step was blocked, so '+RUN_NAME+' stopped before the pull request: '+describeReason(result.blocker),nextAction:result.next_action};
@@ -2673,7 +2675,7 @@ const result=await agent(addResumeNote(buildFixPrompt(failures,plan,run.trunk),r
 const fix=readGateEditOutcome(result,FIX_SCHEMA);
 const committed=await runCommitStep(run,plan,fix.files,gateLabel('fix-commit',run,round),'fix');
 if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run)};
+return{result:finishDeliveryBlocked(committed.problem,run,committed.nextAction)};
 }
 if(fix.status==='blocked'){
 return{result:finishDeliveryBlocked(describeBlockedGateStep('The validation fix round',fix.reason,committed.values),run,fix.nextAction)};
@@ -2807,12 +2809,12 @@ variants:{complete:{required:['plan'],optional:[]},blocked:{required:[],optional
 function buildPlanResultSchema(planSchema,briefSchema){
 return buildTaggedSchema(buildPlanResultSpec(planSchema,briefSchema));
 }
-function buildReviseResultSchema(shownAsks,shownTaken){
+function buildReviseResultSchema(shownAsks){
 const spec=buildPlanResultSpec(PLAN_SCHEMA,BRIEF_SCHEMA);
 spec.properties.settled={
 type:'array',
-description:'The label, like Q1 or D1, of each shown question or decision made for you the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
-items:{type:'string',enum:listShownLabels(shownAsks,shownTaken)}
+description:'The label, like Q1, of each shown question the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
+items:{type:'string',enum:listShownLabels(shownAsks)}
 };
 spec.required.push('settled');
 return buildTaggedSchema(spec);
@@ -2854,7 +2856,7 @@ function listPlanPaths(plan){
 return[...new Set(collectRepositoryPaths(PLAN_SCHEMA,plan,'',[]).map((entry)=>entry.value))];
 }
 function settledAnswersSentence(replyHome){
-return dataBlocksSentence(replyHome)+' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
+return dataBlocksSentence(replyHome)+' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
 }
 function buildPlanPrompt(request,facts,scope,replan,answerLog){
 const hasAnswers=answerLog.length>0;
@@ -2910,7 +2912,7 @@ return'';
 }
 function describePlanProblem(planResult,resultSchema,facts,trunk){
 if(!isPlainObject(planResult)){
-return'The planner returned no result, so '+RUN_NAME+' stopped.';
+return appendSentence('The planner returned no result, so '+RUN_NAME+' stopped.',describeNoResult(planResult));
 }
 if(!validateSchema(resultSchema,planResult).ok){
 return'The planner returned a plan that does not fit the plan schema, so '+RUN_NAME+' stopped.';
@@ -2948,49 +2950,21 @@ return'The run started on branch '+encodeUntrustedText(facts.branch)+' and deliv
 }
 return undefined;
 }
-function questionKey(kind,content){
-return JSON.stringify([kind,content]);
+function questionKey(kind,scope,ask){
+return JSON.stringify([kind,scope,renderQuestions([ask])]);
 }
 function describeCount(count,noun){
 return count+' '+noun+(count===1?'':'s');
 }
-function toOneLine(text){
-return text.trim().split(/\s*[\r\n]+\s*/).join(' ');
-}
-function listShownPaths(files){
-const shownPaths=files.slice(0,5).map((file)=>encodeUntrustedText(cutExcerpt(file)));
-const restCount=files.length-shownPaths.length;
-return joinNames(restCount>0?[...shownPaths,restCount+' more']:shownPaths,'and');
-}
-function buildPlanDetailBlock(plan,outsidePaths){
-const files=listPlanPaths(plan);
-const lines=[
-'What the plan addresses: '+toOneLine(plan.digest.problem),
-'What it changes: '+toOneLine(plan.digest.change),
-'It has '+describeCount(plan.steps.length,'step')+' and touches '+describeCount(files.length,'file')+' on branch '+encodeUntrustedText(cutExcerpt(plan.branch))+': '+listShownPaths(files)+'.'
-];
-if(outsidePaths.length>0){
-lines.push('Outside the limits you set: '+listShownPaths(outsidePaths)+'.');
-}
-return{text:lines.join('\n')};
-}
-function listOutsidePaths(plan,scope){
-if(scope.limits.length===0){
-return[];
-}
-const limits=scope.limits.filter((limit)=>isRepositoryPath(limit));
-const isInsideLimits=(file)=>limits.some((limit)=>file===limit||file.startsWith(limit+'/'));
-return listPlanPaths(plan).filter((file)=>!isInsideLimits(file));
-}
-function markOutsideLimits(brief,outsidePaths){
+function describePlanLine(plan,outsidePaths){
+const fileCount=listPlanPaths(plan).length;
+const lead='The plan for branch '+encodeUntrustedText(plan.branch)+' has '+describeCount(plan.steps.length,'step')+' over '+describeCount(fileCount,'file')+': '+renderText(plan.digest.change);
 if(outsidePaths.length===0){
-return brief;
+return lead;
 }
-const problem=brief.problem+' It changes '+describeCount(outsidePaths.length,'file')+' outside the limits you set.';
-return Object.assign(brief,{
-problem:problem.length<=BRIEF_SCHEMA.properties.problem.maxLength?problem:brief.problem,
-recommendation:{...brief.recommendation,strength:'none',why:'Only you can say if the plan may change files outside the limits.'}
-});
+const shownPaths=outsidePaths.slice(0,maxListedItems()).map((file)=>encodeUntrustedText(file));
+const restCount=outsidePaths.length-shownPaths.length;
+return appendSentence(lead,'Outside the limits you set: '+joinNames(restCount>0?[...shownPaths,restCount+' more']:shownPaths,'and')+'.');
 }
 function unshownBriefText(){
 return'Not shown.';
@@ -3006,7 +2980,7 @@ if(kind===EXTERNAL_EFFECT_KIND){
 ask.exact=true;
 }
 if(scope!==undefined){
-ask.key=questionKey(kind,[scope,renderQuestions([ask],[])]);
+ask.key=questionKey(kind,scope,ask);
 if(run.answeredKeys.has(ask.key)){
 return'answered';
 }
@@ -3029,7 +3003,7 @@ if(effect.reversible){
 resolution.reversibleEffects.push({stepId:step.id,summary:effect.summary});
 continue;
 }
-resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(step.id,effect.summary),['run',step.id],run,resolution);
+resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(effect.summary),['run',step.id],run,resolution);
 }
 }
 }
@@ -3090,7 +3064,6 @@ phase('Plan');
 let scope=passScope;
 let resultSchema=PLAN_RESULT_SCHEMA;
 let shownAsks=[];
-let shownTaken=[];
 let shownResult;
 let shownEntry;
 const settledKinds=new Set();
@@ -3099,7 +3072,8 @@ let planResult=await agent(planPrompt,plannerCallOptions('plan-'+run.pass,'Plan'
 for(;;){
 const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk);
 if(problem!==undefined){
-return{result:finishDeliveryBlocked(problem,run)};
+const unusable=describeUnusableResult(problem,planResult);
+return{result:finishDeliveryBlocked(unusable.problem,run,unusable.nextAction)};
 }
 if(shownAsks.length>0){
 run.answerLog.push(buildAnswerEntry(shownEntry,planResult));
@@ -3109,7 +3083,7 @@ planResult=shownResult;
 }else{
 const rescoped=await runScopeStep(run,facts,run.answerLog.length);
 if(rescoped.problem!==undefined){
-return{result:finishDeliveryBlocked(rescoped.problem,run)};
+return{result:finishDeliveryBlocked(rescoped.problem,run,rescoped.nextAction)};
 }
 scope=rescoped.scope;
 }
@@ -3123,20 +3097,19 @@ const resettled=resolution.asks.find((ask)=>settledKinds.has(ask.kind)&&[PLAN_AC
 if(resettled!==undefined){
 return{result:finishDeliveryBlocked('Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',run)};
 }
-const questions=renderQuestions(resolution.asks,resolution.taken);
 const isAcceptance=resolution.asks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
-const detail=isAcceptance?buildPlanDetailBlock(planResult.plan,resolution.outsidePaths):undefined;
+const lead=describePlanLine(planResult.plan,isAcceptance?resolution.outsidePaths:[]);
 const round=run.answerLog.length+1;
 const reply=takeNextReply(run,round);
 if(reply===undefined){
-return{result:pauseDelivery(resolution,questions,run,detail)};
+return{result:pauseDelivery(resolution,run,lead)};
 }
 phase('Revise');
+const questions=lead+'\n\n'+renderQuestions(resolution.asks);
 shownAsks=resolution.asks;
-shownTaken=resolution.taken;
 shownResult=planResult;
-shownEntry={question:detail===undefined?questions:questions+'\n\n'+detail.text,labels:listShownLabels(shownAsks,shownTaken),reply:reply};
-resultSchema=buildReviseResultSchema(shownAsks,shownTaken);
+shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
+resultSchema=buildReviseResultSchema(shownAsks);
 const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:run.answerLog,plan:planResult.plan,questions:questions,reply:reply});
 planResult=await agent(revisePrompt,plannerCallOptions('revise-'+round,'Revise',resultSchema));
 }
@@ -3251,7 +3224,7 @@ formatDataBlock('inputs',{head:plan.branch,base:plan.base,expect_commit:head,tit
 function checkPullRequestRelay(relay,head){
 const stopped='so '+RUN_NAME+' stopped. The branch may be on its remote, and a pull request may be open for it.';
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return{problem:'The pull request step returned a result it could not use, '+stopped};
+return describeUnusableResult('The pull request step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
 return{problem:'The pull request step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true)};
@@ -3274,7 +3247,7 @@ phase('PR');
 const relay=await agent(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),runnerOptions('pr-'+run.pass,'PR'));
 const checked=checkPullRequestRelay(relay,run.head);
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked(checked.problem,run)};
+return{result:finishDeliveryBlocked(checked.problem,run,checked.nextAction)};
 }
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 }
@@ -3311,91 +3284,88 @@ parts.push({id:'decisions',text:renderDecisions(taken),compact:renderDecisionsCo
 }
 return parts;
 }
-function toMessageBlock(part){
-return{text:part.compact===undefined?part.text:part.compact};
-}
-function buildRunBlocks(lead,run,taken,secondText){
-const blocks=[{text:lead}];
-if(secondText!==''){
-blocks.push({text:secondText});
-}
-blocks.push(...buildRunRecordParts(run,taken,undefined).map(toMessageBlock));
-if(blocks.length===1){
-blocks[0].shorten=true;
-}
-return blocks;
-}
 function nextStepLine(nextAction){
 if(nextAction==='run_again'){
-return'Nothing in the repo needs a fix: run the request again once the cause named above has passed, for example when the machine is idle.';
+return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
 }
-return'Fix the cause named above, then run the request again.';
+return'Next: fix what stopped the run, then run the request again.';
 }
 function nextActionLine(run){
-const again='Run the request again with the answers in it.';
+const again='Next: run the request again with the answers in it.';
 if(run.commits.length===0){
 return again;
 }
-return again+' The new run plans what is left from the commits already on branch '+encodeUntrustedText(cutExcerpt(run.branch))+'.';
+return again+' The new run plans what is left from the commits already on branch '+encodeUntrustedText(run.branch)+'.';
 }
 function buildBlockedLead(message){
 const compact=cutAtBoundary(message,maxBlockedLeadLength());
 return compact===message?{text:message}:{text:message,compact:compact};
 }
+function describeBranchLine(run){
+return'Branch '+encodeUntrustedText(run.branch)+' holds '+describeCount(run.commits.length,'commit')+' this run made, with head '+run.head+'.';
+}
+function buildRecordTailBlocks(run,taken){
+const blocks=[];
+if(run.reversibleEffects.length>0){
+blocks.push({text:renderReversibleEffects(run.reversibleEffects)});
+}
+if(taken.length>0){
+blocks.push({text:renderDecisionsCompact(taken)});
+}
+return blocks;
+}
 function finishDeliveryBlocked(message,run,nextAction){
-const recordBlocks=run===undefined?[]:buildRunRecordParts(run,run.taken,undefined).map(toMessageBlock);
-return finish({outcome:'blocked',blocks:[buildBlockedLead(message),{text:nextStepLine(nextAction),whole:true},...recordBlocks]});
+const blocks=[buildBlockedLead(message),{text:nextStepLine(nextAction),whole:true}];
+if(run!==undefined&&run.commits.length>0){
+blocks.push({text:describeBranchLine(run)});
 }
-function describePullRequest(values){
-const lines=[values.created==='true'
-?'Opened pull request '+values.url+' on commit '+values.head_ref_oid+'.'
-:'Pushed commit '+values.head_ref_oid+' to the open pull request '+values.url+', and commented on it with the gates and the decisions taken.'];
-if(values.warning!==undefined){
-lines.push('The pull request step warned: '+values.warning+'.');
-}
-return lines.join('\n');
-}
-function finishDeliveryComplete(run,plan,prValues,gates){
-const held=joinNames(configuredGateIds(run).map((gateId)=>gateNames()[gateId]),'and');
-const heldLine='Every plan step is done on branch '+encodeUntrustedText(plan.branch)+', each wave is committed, and '+held+' held on commit '+run.head+'.';
-const lead=heldLine+'\n\n'+describePullRequest(prValues);
-const pr={url:prValues.url,head_ref_oid:prValues.head_ref_oid,created:prValues.created==='true'};
-const blocks=buildRunBlocks(lead,run,run.taken,'');
-if(gates.rejected.length>0){
-blocks.splice(1,0,buildRejectedFindingsBlock(gates.notes.review,gates.rejected));
-}
-return finish({outcome:'complete',blocks:blocks,pr:pr});
-}
-function finishOpenQuestions(resolution,stopReason,run,detail){
-const lead='The delivery ran no further step, because questions are still open.';
-const blocks=buildRunBlocks(lead,run,run.taken.concat(resolution.taken),renderOpenQuestions(resolution.asks,stopReason));
-blocks.splice(1,0,{text:nextActionLine(run),whole:true});
-if(detail!==undefined){
-blocks.splice(3,0,detail);
+if(run!==undefined){
+blocks.push(...buildRecordTailBlocks(run,run.taken));
 }
 return finish({outcome:'blocked',blocks:blocks});
 }
-function pauseDelivery(resolution,questions,run,detail){
+function describePullRequest(values){
+return values.created==='true'
+?'Opened pull request '+values.url+' on commit '+values.head_ref_oid+'.'
+:'Pushed commit '+values.head_ref_oid+' to the open pull request '+values.url+' and commented on it.';
+}
+function describeHeldGates(run){
+const held=configuredGateIds(run).map((gateId)=>gateNames()[gateId]);
+const notConfigured=gateIds().filter((gateId)=>!configuredGateIds(run).includes(gateId)).map((gateId)=>gateNames()[gateId]);
+const heldLine=joinNames(held,'and')+' held on commit '+run.head+'.';
+const line=heldLine.charAt(0).toUpperCase()+heldLine.slice(1);
+return notConfigured.length===0?line:line+' Not configured for this run: '+joinNames(notConfigured,'and')+'.';
+}
+function finishDeliveryComplete(run,plan,prValues,gates){
+const pr={url:prValues.url,head_ref_oid:prValues.head_ref_oid,created:prValues.created==='true'};
+const blocks=[{text:describePullRequest(prValues)},{text:describeHeldGates(run)}];
+if(prValues.warning!==undefined){
+blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
+}
+if(gates.rejected.length>0){
+blocks.push(buildRejectedFindingsBlock(gates.notes.review,gates.rejected));
+}
+blocks.push(...buildRecordTailBlocks(run,run.taken));
+return finish({outcome:'complete',blocks:blocks,pr:pr});
+}
+function finishOpenQuestions(resolution,stopReason,run){
+const lead='The delivery ran no further step, because questions are still open.';
+const blocks=[{text:lead},{text:nextActionLine(run),whole:true},{text:renderOpenQuestions(resolution.asks,stopReason)}];
+blocks.push(...buildRecordTailBlocks(run,run.taken.concat(resolution.taken)));
+return finish({outcome:'blocked',blocks:blocks});
+}
+function pauseDelivery(resolution,run,lead){
 const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
 if(!canCarry(resumeArgs)){
-return finishOpenQuestions(resolution,'reply_size',run,detail);
+return finishOpenQuestions(resolution,'reply_size',run);
 }
-const questionsBlock={text:questions,compact:renderQuestionsCompact(resolution.asks,resolution.taken)};
+const questionsBlock={text:renderQuestions(resolution.asks)};
 if(resolution.asks.some((ask)=>ask.exact===true)){
 questionsBlock.whole=true;
 }
-const blocks=[questionsBlock];
-if(detail!==undefined){
-blocks.push(detail);
-}
-if(run.waveCount>0){
-blocks.push({text:renderCommits(run.commits)});
-}
-if(run.notRunGates.length>0){
-blocks.push({text:renderNotRunGates(run.notRunGates)});
-}
+const blocks=[{text:lead},questionsBlock];
 if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
-return finishOpenQuestions(resolution,'exact_text_size',run,detail);
+return finishOpenQuestions(resolution,'exact_text_size',run);
 }
 return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
 }
@@ -3585,14 +3555,27 @@ default:
 throw new Error('deliveryStopLine: no line for stop '+JSON.stringify(stop));
 }
 }
+function maxListedItems(){
+return 5;
+}
+function capItemLines(itemLines){
+const restCount=itemLines.length-maxListedItems();
+return restCount>0?itemLines.slice(0,maxListedItems()).concat('- and '+restCount+' more.'):itemLines;
+}
+function describeUnusableResult(problem,result){
+if(result!==null){
+return{problem:problem};
+}
+const sentence=describeNoResult(result);
+return{problem:problem.endsWith(sentence)?problem:appendSentence(problem,sentence),nextAction:'run_again'};
+}
 function describeDeliveryStops(stops){
-const lines=['The branch is not ready for delivery, so '+RUN_NAME+' stopped before planning:'];
-stops.split(',').forEach((stop)=>lines.push('- '+deliveryStopLine(stop)));
-return lines.join('\n');
+const stopLines=stops.split(',').map((stop)=>'- '+deliveryStopLine(stop));
+return['The branch is not ready for delivery, so '+RUN_NAME+' stopped before planning:',...capItemLines(stopLines)].join('\n');
 }
 function checkDeliveryFacts(relay,trunk){
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return{problem:malformedFactsMessage(RUN_NOUN)};
+return describeUnusableResult(malformedFactsMessage(RUN_NOUN,relay),relay);
 }
 if(relay.outcome==='blocked'){
 return{problem:blockedFactsMessage(RUN_NOUN,describeRelayBlocker(relay.stderr,false))};
@@ -3610,15 +3593,15 @@ return{problem:describeDeliveryStops(facts.delivery_stops)};
 return{facts:facts};
 }
 async function runPassScan(facts,run){
-if(run.pass===1){
-return runScanStep(facts,RUN_NOUN);
-}
 if(Number(facts.external_texts)===0){
 return undefined;
 }
 phase('Scan');
-const scan=await agent(addResumeNote(buildScanPrompt(facts),run),Object.assign(scanOptions(),{label:'scan-'+run.pass}));
-return describeScanProblem(scan,facts,RUN_NOUN);
+const isFirstPass=run.pass===1;
+const prompt=isFirstPass?buildScanPrompt(facts):addResumeNote(buildScanPrompt(facts),run);
+const scan=await agent(prompt,isFirstPass?scanOptions():Object.assign(scanOptions(),{label:'scan-'+run.pass}));
+const problem=describeScanProblem(scan,facts,RUN_NOUN);
+return problem===undefined?undefined:describeUnusableResult(problem,scan);
 }
 async function runFactsStep(run){
 phase('Facts');
@@ -3627,8 +3610,8 @@ const checked=checkDeliveryFacts(relay,run.trunk);
 if(checked.problem!==undefined){
 return checked;
 }
-const scanProblem=await runPassScan(checked.facts,run);
-return scanProblem===undefined?checked:{problem:scanProblem};
+const scanned=await runPassScan(checked.facts,run);
+return scanned===undefined?checked:scanned;
 }
 function buildBranchPrompt(plan,freshness,trunk){
 return[
@@ -3643,7 +3626,7 @@ formatDataBlock('inputs',{base:plan.base,working_branch:plan.branch,classificati
 function checkBranchRelay(relay,plan,freshness){
 const stopped='so '+RUN_NAME+' stopped before any wave.';
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return{problem:'The branch step returned a result it could not use, '+stopped};
+return describeUnusableResult('The branch step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
 return{problem:'The branch step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true)};
@@ -3725,19 +3708,19 @@ return payload;
 }
 }
 function describeCommitBlocker(stderr,stepNoun){
-const lines=['The commit step was blocked, so '+RUN_NAME+' stopped: '+describeRelayBlocker(stderr,false)];
+const lead='The commit step was blocked, so '+RUN_NAME+' stopped: '+describeRelayBlocker(stderr,false);
 const outsideLines=splitStderrLines(stderr).filter((line)=>line.startsWith('outside: '));
-if(outsideLines.length>0){
-lines.push('Dirty paths outside the files of '+stepNoun+':');
-outsideLines.forEach((line)=>lines.push('- '+quoteOrEmpty(readOutsidePath(line.slice('outside: '.length)))));
+if(outsideLines.length===0){
+return lead;
 }
-return lines.join('\n');
+const pathLines=outsideLines.map((line)=>'- '+quoteOrEmpty(readOutsidePath(line.slice('outside: '.length))));
+return[lead+' Dirty paths outside the files of '+stepNoun+':',...capItemLines(pathLines)].join('\n');
 }
 function checkCommitRelay(relay,plan,stepName){
 const stepNoun=commitStepTexts(stepName).noun;
 const stopped='so '+RUN_NAME+' stopped. Check the branch for a commit of '+stepNoun+'.';
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return{problem:'The commit step returned a result it could not use, '+stopped};
+return describeUnusableResult('The commit step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
 return{problem:describeCommitBlocker(relay.stderr,stepNoun)};
@@ -3750,6 +3733,10 @@ if(values.branch!==plan.branch){
 return{problem:'The commit step reported a branch other than the plan branch, '+stopped};
 }
 return{values:values};
+}
+function describeCommitEnd(commitValues){
+const isCommitted=commitValues.committed==='true';
+return isCommitted?'Its files were committed as '+commitValues.commit+', so that commit can hold partial edits.':'It left nothing to commit, so the branch head stays '+commitValues.commit+'.';
 }
 async function runCommitStep(run,plan,files,label,stepName,subject=commitStepTexts(stepName).subject){
 phase('Commit');
@@ -3791,37 +3778,43 @@ clean:[],
 'root-cluster-suspected':['cluster_files','cluster_ids','hypothesized_root','root_class','same_framing_rationale'],
 'diminishing-returns':['signals_observed','latest_severity_max','findings_open','recommendation_text'],
 'injection-suspect':['finding_id','pattern_category','field_excerpt'],
-'user-input-required':['finding_id','title','question','recommendation_text','open_findings'],
+'user-input-required':['finding_id','user_question'],
 'planner-escalation':['finding_id','classification','file','title'],
-'high-severity-rejection':['finding_id','title','rationale_text','recommendation_text','open_findings'],
+'high-severity-rejection':['finding_id','user_question'],
 blocked:['blocker','stage']
 };
 }
 function reviewQuestionKinds(){
 return{'user-input-required':'review_question','high-severity-rejection':'high_severity_rejection'};
 }
+function findingIdField(){
+return{
+type:'string',
+text:'The id of the finding, taken from the fix ledger: 8 to 64 lowercase hex characters.',
+isExternal:true,
+bounds:{maxLength:64,pattern:'^[0-9a-f]{8,64}$'}
+};
+}
 function reviewFieldTexts(){
 return{
-signals_fired:{type:'list',text:'Each break-fix signal that fired.',isExternal:false},
-conflicting_findings:{type:'list',text:'Each finding the fix conflicts with.',isExternal:true},
+signals_fired:{type:'list',text:'Each break-fix signal that fired.',isExternal:false,maxItems:10},
+conflicting_findings:{type:'list',text:'Each finding the fix conflicts with.',isExternal:true,maxItems:20},
 prior_fix_commit:{type:'string',text:'The commit of the earlier fix.',isExternal:false},
-cluster_files:{type:'list',text:'Each file of the root cluster.',isExternal:true},
-cluster_ids:{type:'list',text:'Each finding id of the root cluster.',isExternal:true},
-hypothesized_root:{type:'string',text:'The root the cluster findings share.',isExternal:true},
-root_class:{type:'string',text:'The class of that root.',isExternal:true},
-same_framing_rationale:{type:'string',text:'Why the findings share one framing.',isExternal:true},
-signals_observed:{type:'list',text:'Each diminishing returns signal observed.',isExternal:false},
+cluster_files:{type:'list',text:'Each file of the root cluster.',isExternal:true,maxItems:20,itemBounds:{maxLength:400}},
+cluster_ids:{type:'list',text:'Each finding id of the root cluster.',isExternal:true,maxItems:20,itemBounds:{maxLength:64}},
+hypothesized_root:{type:'string',text:'The root the cluster findings share.',isExternal:true,bounds:{maxLength:300}},
+root_class:{type:'string',text:'The class of that root.',isExternal:true,bounds:{maxLength:100}},
+same_framing_rationale:{type:'string',text:'Why the findings share one framing.',isExternal:true,bounds:{maxLength:600}},
+signals_observed:{type:'list',text:'Each diminishing returns signal observed.',isExternal:false,maxItems:10},
 latest_severity_max:{type:'string',text:'The highest severity of the latest findings.',isExternal:true},
 recommendation_text:{type:'string',text:'What the reviewer recommends, or empty.',isExternal:true,bounds:{maxLength:200,minLength:0}},
-finding_id:{type:'string',text:'The id of the finding.',isExternal:true},
-pattern_category:{type:'string',text:'The injection pattern category.',isExternal:false},
-field_excerpt:{type:'string',text:'The excerpt of the flagged field.',isExternal:true},
-classification:{type:'string',text:'The classification of the finding.',isExternal:true},
-file:{type:'string',text:'The file of the finding.',isExternal:true},
-title:{type:'string',text:'The title of the finding.',isExternal:true},
-question:{type:'string',text:'The ask to the user.',isExternal:true,bounds:{maxLength:300}},
-rationale_text:{type:'string',text:'Why the reviewer rejects the finding.',isExternal:true,bounds:{maxLength:300}},
-open_findings:{type:'findings',text:'Every finding still open in the fix ledger.',isExternal:true},
+finding_id:findingIdField(),
+pattern_category:{type:'string',text:'The injection pattern category.',isExternal:false,bounds:{enum:['P1','P2','P3','P4']}},
+field_excerpt:{type:'string',text:'The excerpt of the flagged field.',isExternal:true,bounds:{maxLength:scanExcerptLimit()}},
+classification:{type:'string',text:'The classification of the finding.',isExternal:true,bounds:{maxLength:100}},
+file:{type:'string',text:'The file of the finding.',isExternal:true,bounds:{maxLength:400}},
+title:{type:'string',text:'The title of the finding.',isExternal:true,bounds:{maxLength:300}},
+user_question:{type:'question',text:'The question the user answers about the finding.',isExternal:true},
 blocker:{type:'string',text:'What blocked the review.',isExternal:true,bounds:{maxLength:300}},
 stage:{type:'string',text:'The loop stage that was blocked.',isExternal:false}
 };
@@ -3829,43 +3822,69 @@ stage:{type:'string',text:'The loop stage that was blocked.',isExternal:false}
 function describeReviewField(entry){
 return(entry.isExternal?externalLabel()+' ':'')+entry.text;
 }
-function openFindingTexts(){
-return{
-finding_id:'The id of the finding.',
-severity:'The severity of the finding.',
-summary:'What is wrong, in one plain sentence for the user.',
-recommendation:'What the reviewer recommends for the finding, in one plain sentence, or empty.'
-};
-}
 function rejectedFindingTexts(){
 return{
-finding_id:'The id of the finding.',
-title:'The title of the finding.',
-record:'The path and section of the recorded decision the reviewer cites.'
+finding_id:findingIdField(),
+title:{type:'string',text:'The title of the finding.',isExternal:true},
+record:{type:'string',text:'The path and section of the recorded decision the reviewer cites.',isExternal:true}
 };
 }
 function buildFindingItemSchema(texts){
 const properties={};
-for(const[name,text]of Object.entries(texts)){
-properties[name]={type:'string',description:externalLabel()+' '+text};
+for(const[name,entry]of Object.entries(texts)){
+properties[name]=buildReviewFieldSchema(name,entry);
 }
 return{type:'object',additionalProperties:false,required:Object.keys(texts),properties:properties};
 }
-function buildOpenFindingSchema(){
-const schema=buildFindingItemSchema(openFindingTexts());
-schema.properties.summary.maxLength=200;
-schema.properties.recommendation.maxLength=200;
-schema.properties.recommendation.minLength=0;
-return schema;
+function reviewOptionIds(){
+return['A','B','C','D'];
+}
+function buildLabelledText(maxLength,text){
+return{type:'string',maxLength:maxLength,description:externalLabel()+' '+text};
+}
+function buildUserQuestionSchema(description){
+const option={
+type:'object',
+additionalProperties:false,
+required:['id','summary'],
+properties:{id:{type:'string',enum:reviewOptionIds(),description:'The option id, by position: A first.'},summary:buildLabelledText(160,'What picking this option does.')}
+};
+const recommendation={
+type:'object',
+additionalProperties:false,
+required:['option_id','strength','why'],
+description:'The option the reviewer recommends.',
+properties:{
+option_id:{type:'string',enum:reviewOptionIds(),description:'The id of that option.'},
+strength:{type:'string',enum:['strong','weak','none'],description:'How sure the reviewer is.'},
+why:buildLabelledText(200,'Why that option.')
+}
+};
+return{
+type:'object',
+description:description,
+additionalProperties:false,
+required:['found','ask','options','recommendation'],
+properties:{
+found:buildLabelledText(200,'The claim of the finding and its impact.'),
+ask:buildLabelledText(200,'The question, on one line.'),
+options:{type:'array',minItems:2,maxItems:4,description:'The choices, 2 to 4.',items:option},
+recommendation:recommendation
+}
+};
 }
 function buildReviewFieldSchema(name,entry){
 const description=describeReviewField(entry);
-if(entry.type==='findings'){
-return{type:'array',description:description,minItems:1,items:buildOpenFindingSchema()};
+if(entry.type==='question'){
+return buildUserQuestionSchema(description);
 }
 if(entry.type==='list'){
+if(entry.maxItems===undefined){
+throw new Error('buildReviewFieldSchema: field '+name+' is a list with no maxItems');
+}
 const itemDescription=(entry.isExternal?externalLabel()+' ':'')+'One entry.';
-return{type:'array',description:description,minItems:1,items:{type:'string',description:itemDescription}};
+const items=Object.assign({type:'string',description:itemDescription},entry.itemBounds);
+return{type:'array',description:description,minItems:1,maxItems:entry.maxItems,items:items};
 }
 if(entry.type==='string'){
 return Object.assign({type:'string',description:description},entry.bounds);
@@ -3880,7 +3899,7 @@ findings_resolved:{type:'integer',description:'How many findings the loop fixed.
 findings_open:{type:'integer',description:'How many findings are still open.'},
 fix_commits_exist:{type:'boolean',description:'true when the loop committed at least one fix.'},
 ledger_path:{type:'string',description:'The path of the fix ledger.'},
-rejected_findings:{type:'array',description:externalLabel()+' Every finding the loop rejected under a recorded decision, empty when none.',items:buildFindingItemSchema(rejectedFindingTexts())}
+rejected_findings:{type:'array',description:externalLabel()+' Every finding the loop rejected under a recorded decision, empty when none.',maxItems:50,items:buildFindingItemSchema(rejectedFindingTexts())}
 };
 for(const[name,entry]of Object.entries(reviewFieldTexts())){
 properties[name]=buildReviewFieldSchema(name,entry);
@@ -3913,119 +3932,79 @@ formatDataBlock('inputs',inputs)
 ].join('\n');
 }
 function describeReviewProblem(review){
-if(!validateSchema(REVIEW_SCHEMA,review).ok){
-return'The local review step returned no usable result, so '+RUN_NAME+' stopped before the pull request.';
+const problem='The local review step returned no usable result, so '+RUN_NAME+' stopped before the pull request.';
+if(!validateSchema(REVIEW_SCHEMA,review).ok||hasUnusableQuestion(review.user_question)){
+return describeUnusableResult(problem,review);
 }
 return undefined;
 }
-function reviewStopTexts(exitReason){
-switch(exitReason){
+function hasUnusableQuestion(question){
+if(question===undefined){
+return false;
+}
+const optionIds=question.options.map((option)=>option.id);
+const isInOrder=optionIds.every((optionId,index)=>optionId===reviewOptionIds()[index]);
+return!isInOrder||!optionIds.includes(question.recommendation.option_id);
+}
+function reviewStopTexts(review){
+switch(review.exit_reason){
 case'max-iterations-reached':
-return{lead:'Local review reached its limit of '+maxReviewIterations()+' iterations with findings still open',fields:['iterations_completed','findings_open']};
+return{lead:'Local review reached its iteration limit'};
 case'break-fix-break':
-return{lead:'Local review found that a fix broke an earlier fix',fields:reviewExitFields()[exitReason]};
+return{lead:'Local review found that a fix broke an earlier fix',detail:'The fix conflicts with '+describeCount(review.conflicting_findings.length,'earlier finding')+'.'};
 case'injection-suspect':
-return{lead:'Local review flagged text of a review finding as a possible prompt injection',fields:reviewExitFields()[exitReason]};
-case'blocked':
-return{lead:'Local review was blocked',fields:reviewExitFields()[exitReason]};
-default:
-throw new Error('reviewStopTexts: no texts for exit reason '+JSON.stringify(exitReason));
-}
-}
-function reviewFieldNames(){
 return{
-iterations_completed:'Iterations run',
-findings_open:'Findings still open',
-signals_fired:'Signals that fired',
-conflicting_findings:'Conflicting findings',
-prior_fix_commit:'Earlier fix commit',
-finding_id:'Finding',
-pattern_category:'Pattern category',
-field_excerpt:'Excerpt, cut to '+maxExcerptLength()+' characters',
-blocker:'Blocker',
-stage:'Stage'
+lead:'Local review flagged the text of finding '+quoteShortFindingId(review.finding_id)+' as a possible prompt injection of category '+review.pattern_category,
+detail:'Flagged text: '+encodeUntrustedText(review.field_excerpt)
 };
+case'blocked':
+return{lead:'Local review was blocked',detail:'Blocker: '+quoteOrEmpty(review.blocker,reviewFieldTexts().blocker.bounds.maxLength)};
+default:
+throw new Error('reviewStopTexts: no texts for exit reason '+JSON.stringify(review.exit_reason));
 }
-function quoteOrEmpty(text){
-return quoteDiagnostic(text)||encodeUntrustedText('');
 }
-function quoteReviewValue(review,field){
-const value=review[field];
-if(field==='finding_id'){
-return quoteShortFindingId(value);
-}
-if(field==='blocker'||field==='field_excerpt'){
-return quoteOrEmpty(value);
-}
-if(Array.isArray(value)){
-const restCount=value.length-5;
-return encodeUntrustedText(value.slice(0,5).map(cutExcerpt))+(restCount>0?' and '+restCount+' more':'');
-}
-return encodeUntrustedText(typeof value==='number'||reviewFieldTexts()[field].bounds?value:cutExcerpt(value));
-}
-function hasReviewText(review,field){
-return review[field].trim()!=='';
+function quoteOrEmpty(text,limit){
+return quoteDiagnostic(text,limit)||encodeUntrustedText('');
 }
 function describeReviewStop(review,head){
-const texts=reviewStopTexts(review.exit_reason);
-const lines=[texts.lead+', so '+RUN_NAME+' stopped before the pull request. Each value below is quoted as the review returned it, encoded as JSON in printable ASCII.'];
-texts.fields.forEach((field)=>lines.push('- '+reviewFieldNames()[field]+': '+quoteReviewValue(review,field)));
-if(review.fix_commits_exist){
-lines.push('Local review committed fixes before it stopped, so the branch head is '+head+'.');
+const texts=reviewStopTexts(review);
+const lines=[texts.lead+' on commit '+head+' after '+describeCount(review.iterations_completed,'iteration')+', with '+describeCount(review.findings_open,'finding')+' still open, so '+RUN_NAME+' stopped before the pull request.'];
+if(texts.detail!==undefined){
+lines.push(texts.detail);
 }
 return lines.join('\n');
 }
 function quoteShortFindingId(findingId){
 return encodeUntrustedText(Array.from(findingId).slice(0,8).join(''));
 }
-function renderOpenFindingLine(finding){
-const recommendation=finding.recommendation.trim()===''?'none':encodeUntrustedText(finding.recommendation);
-return'- '+quoteShortFindingId(finding.finding_id)+', severity '+encodeUntrustedText(cutExcerpt(finding.severity))+': '+encodeUntrustedText(finding.summary)+' Recommendation: '+recommendation;
-}
-function buildReviewDetailBlock(review,openFindings){
-const lines=[
-review.exit_reason==='high-severity-rejection'?'Rejected because: '+quoteReviewValue(review,'rationale_text'):'Local review asks: '+quoteReviewValue(review,'question'),
-hasReviewText(review,'recommendation_text')?'It recommends: '+quoteReviewValue(review,'recommendation_text'):'It makes no recommendation.',
-'Findings still open, each value quoted as the review returned it:',
-...openFindings.slice(0,5).map(renderOpenFindingLine)
-];
-const restCount=openFindings.length-5;
-if(restCount>0){
-lines.push(describeCount(restCount,'more open finding')+'.');
-}
+function buildRejectedFindingsBlock(note,rejectedFindings){
+const lines=['Local review: '+note+'. The findings it rejected:'];
+rejectedFindings.forEach((finding)=>lines.push('- '+quoteShortFindingId(finding.finding_id)));
 return{text:lines.join('\n')};
 }
-function renderRejectedFindingLine(finding,isCompact){
-const head='- '+quoteShortFindingId(finding.finding_id)+', '+encodeUntrustedText(cutExcerpt(finding.title));
-return isCompact?head:head+', record '+encodeUntrustedText(cutExcerpt(finding.record));
+function buildReviewOption(option){
+return{id:option.id,summary:encodeUntrustedText(option.summary),steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true};
 }
-function buildRejectedFindingsBlock(note,rejectedFindings){
-const heading='Local review: '+note+'. Each finding it rejected, each value quoted as the review returned it; the pull request shows only the count:';
+function buildReviewQuestionBrief(review){
+const question=review.user_question;
 return{
-text:[heading,...rejectedFindings.map((finding)=>renderRejectedFindingLine(finding,false))].join('\n'),
-compact:[heading,...rejectedFindings.map((finding)=>renderRejectedFindingLine(finding,true))].join('\n')
+id:'tail',
+kind:reviewQuestionKinds()[review.exit_reason],
+problem:encodeUntrustedText(question.ask),
+criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
+options:question.options.map(buildReviewOption),
+recommendation:{option_id:question.recommendation.option_id,strength:question.recommendation.strength,why:encodeUntrustedText(question.recommendation.why)},
+assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
+gate:{irreversible:false,architectural:false,safety:false}
 };
 }
-function buildReviewQuestionBrief(review,openFindings){
-const finding='finding '+quoteReviewValue(review,'finding_id');
-const isRejection=review.exit_reason==='high-severity-rejection';
-const hasRecommendation=hasReviewText(review,'recommendation_text');
-return buildTailBrief({
-kind:reviewQuestionKinds()[review.exit_reason],
-problem:(isRejection
-?'Local review rejected high severity '+finding+' and left it unfixed, for the reason below. Should it be fixed before the pull request?'
-:'Local review asks you about '+finding+' before the pull request, as below.')+' '+describeCount(openFindings.length,'finding')+' still open.',
-goOn:isRejection?'Reject the finding and go on with it unfixed: local review records the decision at its source and goes on.':'Answer the finding: this run gives your answer to local review, which goes on with it.',
-other:isRejection?'Fix the finding: local review fixes it, or sends it to the planner, and goes on.':'Stop: local review ends blocked on this run, before the pull request.',
-strength:hasRecommendation?'weak':'none',
-why:(hasRecommendation?'See its recommendation below. ':'')+'Only you can settle a question the review raises.'
-});
+function describeReviewQuestionLead(review,head){
+return'Local review on commit '+head+', finding '+quoteShortFindingId(review.finding_id)+': '+encodeUntrustedText(review.user_question.found);
 }
 function askReviewQuestion(review,run){
-const openFindings=review.open_findings;
 const resolution={asks:[],taken:[]};
-resolveDecision(reviewQuestionKinds()[review.exit_reason],buildReviewQuestionBrief(review,openFindings),undefined,run,resolution);
-return askTail(resolution.asks[0],run,buildReviewDetailBlock(review,openFindings));
+resolveDecision(reviewQuestionKinds()[review.exit_reason],buildReviewQuestionBrief(review),undefined,run,resolution);
+return askTail(resolution.asks[0],run,describeReviewQuestionLead(review,run.head));
 }
 function buildDiminishingReturnsBrief(review,head){
 return buildTailBrief({
@@ -4053,7 +4032,7 @@ return buildTailBrief({
 kind:isCluster?ROOT_CLUSTER_ROUTING_KIND:PLANNER_ESCALATION_ROUTING_KIND,
 problem:isCluster
 ?'Local review found '+describeCount(review.cluster_ids.length,'finding')+' in '+describeCount(review.cluster_files.length,'file')+' that share one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?'
-:'Local review escalated finding '+quoteReviewValue(review,'finding_id')+' to the planner. Go back to planning, from fresh facts, for its remediation?',
+:'Local review escalated finding '+quoteShortFindingId(review.finding_id)+' to the planner. Go back to planning, from fresh facts, for its remediation?',
 goOn:'Plan the remediation from fresh facts.',
 strength:'strong',
 why:'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
@@ -4108,11 +4087,11 @@ const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run.trunk),
 const review=await agent(prompt,reviewerOptions(gateLabel('review',run,count)));
 const committed=await runCommitStep(run,plan,[],gateLabel('review-commit',run,count),'review');
 if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run)};
+return{result:finishDeliveryBlocked(committed.problem,run,committed.nextAction)};
 }
-const problem=describeReviewProblem(review);
-if(problem!==undefined){
-return{result:finishDeliveryBlocked(problem,run)};
+const unusable=describeReviewProblem(review);
+if(unusable!==undefined){
+return{result:finishDeliveryBlocked(unusable.problem,run,unusable.nextAction)};
 }
 const routed=routeLocalReview(review,run);
 if(routed.held){
@@ -4177,7 +4156,7 @@ return{agentType:PLANNER_AGENT,model:SCOPE_MODEL,effort:'high',schema:toAgentSch
 }
 function describeScopeProblem(scope){
 const isUsable=validateSchema(SCOPE_SCHEMA,scope).ok;
-return isUsable?undefined:'The scope step returned a result it could not use, so '+RUN_NAME+' stopped before planning.';
+return isUsable?undefined:describeUnusableResult('The scope step returned a result it could not use, so '+RUN_NAME+' stopped before planning.',scope);
 }
 function toRepositoryRelativePath(path,root){
 if(typeof root!=='string'||root==='none'){
@@ -4204,8 +4183,8 @@ limits:scope.limits.map((limit)=>toLimitPath(limit,root))
 async function runScopeStep(run,facts,round){
 phase('Scope');
 const scope=await agent(buildScopePrompt(run.request,facts,run.answerLog),scopeOptions(run.pass,round));
-const problem=describeScopeProblem(scope);
-return problem===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:{problem:problem};
+const unusable=describeScopeProblem(scope);
+return unusable===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:unusable;
 }
 
 function buildNextActionProperty(){
@@ -4275,7 +4254,8 @@ return()=>agent(prompt,options);
 }
 function readWorkerOutcome(step,result){
 if(!validateSchema(WORKER_SCHEMA,result).ok){
-return{stepId:step.id,status:'blocked',reason:'it returned no usable result.'};
+const unusable=describeUnusableResult('it returned no usable result.',result);
+return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction};
 }
 if(result.outcome==='complete'){
 return{stepId:step.id,status:'complete'};
@@ -4283,14 +4263,12 @@ return{stepId:step.id,status:'complete'};
 return{stepId:step.id,status:result.outcome,reason:describeReason(result.blocker),nextAction:result.next_action};
 }
 function describeBlockedWave(blockedOutcomes,commitValues){
-const lines=['A worker did not finish its step, so '+RUN_NAME+' stopped after the commit of its wave.'];
-blockedOutcomes.forEach((outcome)=>lines.push('Step '+encodeUntrustedText(outcome.stepId)+' was blocked: '+outcome.reason));
-if(commitValues.committed==='true'){
-lines.push('The wave was committed as '+commitValues.commit+', so that commit can hold partial edits of the steps above.');
-}else{
-lines.push('The wave left nothing to commit, so the branch head stays '+commitValues.commit+'.');
-}
-return lines.join('\n');
+const stopped='A worker did not finish its step, so '+RUN_NAME+' stopped after the commit of its wave: ';
+const lead=commitValues.committed==='true'
+?stopped+'the wave was committed as '+commitValues.commit+', so that commit can hold partial edits of the steps below.'
+:stopped+'the wave left nothing to commit, so the branch head stays '+commitValues.commit+'.';
+const stepLines=blockedOutcomes.map((outcome)=>'- Step '+encodeUntrustedText(outcome.stepId)+' was blocked: '+outcome.reason);
+return[lead,...capItemLines(stepLines)].join('\n');
 }
 function describeReplanReasons(replanOutcomes){
 return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)+' needs a new plan: '+outcome.reason).join('\n');
@@ -4319,7 +4297,7 @@ const workerResults=await parallel(waveSteps.map((step)=>createWorkerTask(step,w
 run.waveCount+=1;
 const committed=await runCommitStep(run,plan,listStepFiles(waveSteps),'commit-'+run.pass+'-'+waveNumber,'wave',buildWaveSubject(waveSteps,waveNumber));
 if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run)};
+return{result:finishDeliveryBlocked(committed.problem,run,committed.nextAction)};
 }
 const outcomes=waveSteps.map((step,index)=>readWorkerOutcome(step,workerResults[index]));
 const blockedOutcomes=outcomes.filter((outcome)=>outcome.status==='blocked');
@@ -4452,11 +4430,11 @@ branchSwitches:0
 async function runDeliveryPass(run,replan){
 const checked=await runFactsStep(run);
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked(checked.problem,run)};
+return{result:finishDeliveryBlocked(checked.problem,run,checked.nextAction)};
 }
 const scoped=await runScopeStep(run,checked.facts);
 if(scoped.problem!==undefined){
-return{result:finishDeliveryBlocked(scoped.problem,run)};
+return{result:finishDeliveryBlocked(scoped.problem,run,scoped.nextAction)};
 }
 const planned=await runPlanningPass(run,checked.facts,scoped.scope,replan);
 if(planned.result!==undefined){
@@ -4464,7 +4442,7 @@ return planned;
 }
 const branched=await runBranchStep(run,planned.plan,planned.freshness);
 if(branched.problem!==undefined){
-return{result:finishDeliveryBlocked(branched.problem,run)};
+return{result:finishDeliveryBlocked(branched.problem,run,branched.nextAction)};
 }
 if(needsBranchReplan(branched.values,checked.facts,planned.plan)){
 return requestBranchReplan(run);
