@@ -7,7 +7,7 @@
           "nodes": []
         },
         "comments": {
-          "totalCount": 2,
+          "totalCount": 9,
           "nodes": [
             {
               "id": "IC_kwDOcase24comment2400",
@@ -27,6 +27,76 @@
               },
               "body": "<!-- codex-pull-request-review-summary -->\n\n\n## Codex Review Summary\n\nThis comment shows the latest Codex review activity on this pull request.\n",
               "url": "https://github.com/o/r/pull/1#issuecomment-2401",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase24comment2402",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 {} -->\n\n## Codex Review Summary\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2402",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase24comment2403",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"completed\"}} -->\n\n## Codex Review Summary\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2403",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase24comment2404",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"completed\",\"has_any_findings\":\"false\"}} -->\n\n## Codex Review Summary\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2404",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase24comment2405",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"completed\",\"has_any_findings\":false},\"security_review\":\"done\"} -->\n\n## Codex Review Summary\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2405",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase24comment2406",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"queued\",\"has_any_findings\":false}} -->\n\n## Codex Review Summary\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2406",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase24comment2407",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 {\"code_review\":{\"status\":\"completed\",\"has_any_findings\":false},\"security_review\":{\"status\":\"completed\"}} -->\n\n## Codex Review Summary\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2407",
+              "reactionGroups": []
+            },
+            {
+              "id": "IC_kwDOcase24comment2408",
+              "author": {
+                "login": "chatgpt-codex-connector",
+                "__typename": "Bot"
+              },
+              "body": "<!-- codex-pull-request-review-summary -->\n<!-- codex-review-state:v1 \"code_review\" -->\n\n## Codex Review Summary\n",
+              "url": "https://github.com/o/r/pull/1#issuecomment-2408",
               "reactionGroups": []
             }
           ]

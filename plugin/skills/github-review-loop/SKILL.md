@@ -316,9 +316,10 @@ GitHub, strengthening the GitHub-is-the-ledger claim.
 A Codex Review Summary top-level comment also converges with no self marker: when
 the Codex registry bot account authors it, its body starts with
 `<!-- codex-pull-request-review-summary -->`, and its
-`<!-- codex-review-state:v1 {json} -->` state parses and reports no findings on any
-review entry or a running code review, the classifier reads it as handled. A
-missing, unparseable, or findings state falls back to the `EYES` rule. Signal
+`<!-- codex-review-state:v1 {json} -->` state parses to a known shape that reports
+no findings on any review entry or a running code review, the classifier reads it
+as handled. A missing, unparseable, unexpected, or findings state falls back to the
+`EYES` rule. Signal
 contract: `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/fix-history-classify.jq`
 (header §1).
 

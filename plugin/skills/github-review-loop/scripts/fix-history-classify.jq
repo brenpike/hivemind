@@ -57,9 +57,14 @@
 #     `codex-only` filter mode, so a Bot account per `is_bot` and never self);
 #   - its body STARTS with `<!-- codex-pull-request-review-summary -->`;
 #   - it carries a `<!-- codex-review-state:v1 {json} -->` state whose JSON parses
-#     to an object; and
-#   - either no review entry of that object (`code_review`, `security_review`, ...)
-#     reports `has_any_findings == true`, or `code_review.status == "running"`.
+#     to an object with a `code_review` object; and
+#   - either `code_review.status == "running"`, or `code_review.status ==
+#     "completed"` and every review entry of the object (`code_review`,
+#     `security_review`, ...) is an object that is completed with
+#     `has_any_findings == false`, or unused with `status` and `has_any_findings`
+#     both present and null. This is an allowlist of known shapes: any other
+#     shape (an empty object, a missing or non-boolean `has_any_findings`, an
+#     unknown status, a primitive entry) is not handled.
 # The summary itself carries no finding: Codex posts each finding as its own
 # review or thread comment, which this filter classifies on its own surface.
 # A running code review keeps the summary handled even when findings are already
@@ -67,8 +72,8 @@
 # docs/adr/0037-standard-delivery-on-script-engine.md, Amendment 2026-10-27:
 # workflow cost outside the planner (issue 464), "Recorded decision: a running
 # Codex review keeps the summary handled".
-# A summary whose state is missing, does not parse, or reports findings falls
-# back to the two signals above (self EYES or `Addresses:`), else actionable.
+# A summary whose state is missing, does not parse, has an unexpected shape, or
+# reports findings falls back to the two signals above (self EYES or `Addresses:`), else actionable.
 # The parse is total (`try`/`catch`), so a malformed state never errors the
 # filter. The same markers from any other author (a human, another bot, or any
 # account that is not a Bot per `is_bot`) stay actionable: the markers alone are
@@ -295,19 +300,36 @@ def codex_summary_state:
     | if $raw == null then null else ($raw | fromjson) end
   ) catch null;
 
+# One review entry of a Codex state, in a shape known to report no findings: an
+# object that is either completed with `has_any_findings` the boolean false, or
+# unused with both keys present and null. Any other shape is not clear.
+def is_clear_codex_entry:
+  type == "object"
+  and ((.status == "completed" and .has_any_findings == false)
+       or (has("status") and .status == null
+           and has("has_any_findings") and .has_any_findings == null));
+
+# A Codex state, in a shape known to be handled: an object whose `code_review` is
+# an object that is running, or that is completed with no findings while every
+# review entry is clear per is_clear_codex_entry. This is an allowlist: any other
+# shape, an empty object or a primitive entry included, is not handled.
+def is_clear_codex_state:
+  type == "object"
+  and (.code_review | type) == "object"
+  and (.code_review.status == "running"
+       or (.code_review.status == "completed"
+           and ([.[] | is_clear_codex_entry] | all)));
+
 # Codex summary handled predicate (CODEX SUMMARY HANDLED SIGNAL in the header).
 # True only for a Codex registry bot author (`codex-only` mode, never self) whose
-# body starts with the summary marker and whose state object reports no findings
-# on any review entry, or a running code review. A missing, unparseable, or
-# non-object state is false, so the node keeps the EYES / `Addresses:` rule.
+# body starts with the summary marker and whose state passes is_clear_codex_state.
+# A missing, unparseable, or unexpected state is false, so the node keeps the
+# EYES / `Addresses:` rule.
 def is_clear_codex_summary:
   . as $c
   | reviewer_matches_filter($c.author.login; $c.author.__typename; $login; "codex-only")
     and (($c.body // "") | startswith("<!-- codex-pull-request-review-summary -->"))
-    and (codex_summary_state as $state
-         | ($state | type) == "object"
-           and (([$state.code_review | objects | .status == "running"] | any)
-                or ([$state[] | objects | .has_any_findings == true] | any | not)));
+    and (codex_summary_state | is_clear_codex_state);
 
 .data.repository.pullRequest as $pr |
 $pr.reviewThreads as $rt |
