@@ -392,15 +392,15 @@ function makeMaxBrief(index) {
   };
 }
 
-const EMPTY_SCOPE = { documents: [], paths: [] };
+const EMPTY_SCOPE = { documents: [], paths: [], limits: [] };
 
 function isUnscriptedScopeLabel(results, label) {
-  return typeof label === 'string' && /^scope-\d+$/.test(label) && !Object.prototype.hasOwnProperty.call(results, label);
+  return typeof label === 'string' && /^scope-\d+(-\d+)?$/.test(label) && !Object.prototype.hasOwnProperty.call(results, label);
 }
 
 /**
- * Returns results with EMPTY_SCOPE as the result of every scope-N label
- * the test does not script.
+ * Returns results with EMPTY_SCOPE as the result of every scope-N and
+ * scope-N-R label the test does not script.
  */
 function withDefaultScopes(results) {
   return new Proxy(results, {
@@ -1407,7 +1407,7 @@ const ROW_TESTS = {
       assert.equal(run.result.needs_user, true);
       assert.deepEqual(run.result.resume_args, { answers: answers, build: BUILD_ID });
       assert.ok(run.result.message.includes('Q1. GATED_PROBLEM'), run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'revise-2', 'revise-3']);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'scope-1-2', 'revise-3', 'scope-1-3']);
       assert.ok(!moduleSource.includes('canPause(') && !moduleSource.includes('pause_limit'));
     });
     test('replies too long to carry finish blocked with the next action and the open questions', async () => {
@@ -1469,7 +1469,7 @@ const ROW_TESTS = {
       assert.ok(!first.result.message.includes('Start delivering the plan'), first.result.message);
       const second = await runWorkflow(resumeWith(LAUNCH, first.result, 'Take option A.'), results, surfaced);
       assert.equal(second.result.needs_user, true);
-      assert.deepEqual(labelsOf(second), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+      assert.deepEqual(labelsOf(second), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
       assert.ok(second.result.message.startsWith('**Answer Q1 so I can go on: pick one of its options.**'), second.result.message);
       assert.ok(second.result.message.includes('Q1. Start delivering the plan'), second.result.message);
       assert.ok(second.result.message.includes('\n\nWhat the plan addresses: Reads hit the database every time.\nWhat it changes: Add a cache layer keyed by hashed paths.\nIt has 1 step and touches 1 file on branch "feature/cache": "src/cache.js".'), second.result.message);
@@ -1477,7 +1477,7 @@ const ROW_TESTS = {
       assert.ok(!second.result.message.includes('GATED_PROBLEM'), second.result.message);
       const run = await runWorkflow(resumeWith(LAUNCH, second.result, 'Yes, go.'), results, surfaced);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'revise-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
       assert.ok(prBodyOf(run, 'pr-1').startsWith('```\n' + revisedPlan.summary + '\n```'), prBodyOf(run, 'pr-1'));
     });
     test('a settled planner question raised again with only unrendered fields changed is not asked again', async () => {
@@ -1497,7 +1497,7 @@ const ROW_TESTS = {
         const paused = await runWorkflow(LAUNCH, results);
         const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Take the recommendation.'), results);
         assert.equal(run.result.needs_user, true);
-        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
         assert.ok(run.result.message.includes(lib.renderRecommendation(recommendation)), run.result.message);
       });
     }
@@ -1511,7 +1511,7 @@ const ROW_TESTS = {
         const paused = await runWorkflow(LAUNCH, results);
         const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Take option A.'), results);
         assert.equal(run.result.needs_user, true);
-        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
         assert.ok(run.result.message.includes('Q1. ' + changed.problem), run.result.message);
       });
     }
@@ -1531,14 +1531,14 @@ const ROW_TESTS = {
       assert.ok(!paused.result.message.includes('Start delivering the plan'), paused.result.message);
       const second = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go on from the trunk.'), results, surfaced);
       assert.equal(second.result.needs_user, true);
-      assert.deepEqual(labelsOf(second), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+      assert.deepEqual(labelsOf(second), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
       assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'Go on from the trunk.' }, build: surfaced.buildId });
       assert.ok(second.result.message.startsWith('**Answer Q1 so I can go on: pick one of its options.**'), second.result.message);
       assert.ok(second.result.message.includes('Q1. Start delivering the plan'), second.result.message);
       assert.ok(!second.result.message.includes('The trunk may not be up to date'), second.result.message);
       const run = await runWorkflow(resumeWith(LAUNCH, second.result, 'Accept the plan.'), results, surfaced);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'revise-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
       assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'stale');
     });
     test('the revise call schema is the plan result schema with a required settled enum of the shown labels', async () => {
@@ -1569,11 +1569,11 @@ const ROW_TESTS = {
       assert.equal(run.result.needs_user, true);
       assert.ok(run.result.message.includes('Q1. Plan step "STEP-001" has an effect outside the repo that cannot be undone'), run.result.message);
       assert.ok(run.result.message.includes('Word for word:\n' + summary), run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'revise-2', 'revise-3']);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'scope-1-2', 'revise-3', 'scope-1-3']);
     });
-    for (const [kind, call, driftingCall, freshness] of [
-      ['plan_acceptance', 'buildPlanAcceptanceBrief(plan), [run.pass, plan]', 'buildPlanAcceptanceBrief(plan), [run.answerLog.length, plan]', 'fresh'],
-      ['trunk_stale', "buildTrunkStaleBrief(facts), 'run'", 'buildTrunkStaleBrief(facts), run.answerLog.length', 'behind']
+    for (const [kind, call, driftingCall, freshness, revisedLabels] of [
+      ['plan_acceptance', 'markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.pass, plan]', 'markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.answerLog.length, plan]', 'fresh', ['revise-1']],
+      ['trunk_stale', "buildTrunkStaleBrief(facts), 'run'", 'buildTrunkStaleBrief(facts), run.answerLog.length', 'behind', ['revise-1', 'scope-1-1']]
     ]) {
       test(`a settled ${kind} question asked again in its pass ends blocked as a workflow defect, with no pause counted`, async () => {
         const driftKey = (source) => {
@@ -1590,7 +1590,7 @@ const ROW_TESTS = {
         assert.equal(run.result.needs_user, false);
         assert.equal(run.result.outcome, 'blocked');
         assert.equal(run.result.message, withNextStep('Workflow defect: the ' + kind + ' question came back after a reply settled it, so the delivery stopped.'));
-        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', ...revisedLabels]);
       });
     }
     test('the shipped keys never trip the guard: a settled plan acceptance whose revise rewrites the summary is not asked again', async () => {
@@ -1609,7 +1609,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(args, results);
       assert.equal(run.result.needs_user, true);
       assert.ok(run.result.message.includes('Word for word:\nPublish version 4.'), run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'revise-2', 'revise-3']);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'scope-1-2', 'revise-3', 'scope-1-3']);
     });
     test('the reply_size stop of a later pass names the branch the earlier commits are on', async () => {
       const unsettled = reviseResult(planResult(REMEDIATION_PLAN), []);
@@ -1704,7 +1704,7 @@ const ROW_TESTS = {
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, publish it.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
     });
     test('a replied effect does not settle the same effect of a step whose id shares the shown prefix', async () => {
       const prefix = 'STEP-abcdefghijkl-';
@@ -1716,7 +1716,7 @@ const ROW_TESTS = {
       assert.equal(paused.result.needs_user, true);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, publish it for the first step.'), results);
       assert.equal(run.result.needs_user, true, run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
       assert.ok(run.result.message.includes('Word for word:\n' + summary), run.result.message);
     });
     test('a changed effect is asked again', async () => {
@@ -1745,7 +1745,7 @@ const ROW_TESTS = {
       const reply = 'Take option B on the key format.';
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
       assert.equal(run.result.needs_user, true);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1']);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
       assert.deepEqual(run.result.resume_args, { answers: { 'round-1': reply }, build: BUILD_ID });
       assert.ok(run.result.message.includes('Word for word:\n' + summary), run.result.message);
       assert.ok(labelsOf(run).every((label) => !/^(branch|work|commit)-/.test(label)), JSON.stringify(labelsOf(run)));
@@ -1755,7 +1755,7 @@ const ROW_TESTS = {
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Option B, and yes, publish it.'), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
     });
     test('a reversible effect is not asked and is listed in the final message', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(effectPlan('Post a preview link.', true)) }));
@@ -2211,7 +2211,7 @@ const ROW_TESTS = {
     test('only external_effect asks are exact', () => {
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       const plan = effectPlan('Publish to the registry.', false);
-      const resolution = main.resolvePlanAsks(planResult(plan, [makeGatedBrief('GATED_PROBLEM')]), parsedFacts(), run);
+      const resolution = main.resolvePlanAsks(planResult(plan, [makeGatedBrief('GATED_PROBLEM')]), parsedFacts(), run, EMPTY_SCOPE);
       const exactFlags = resolution.asks.map((ask) => ask.exact === true);
       assert.deepEqual([...exactFlags], [false, true]);
       assert.equal(resolution.asks[1].brief.kind, 'external_effect');
@@ -3507,7 +3507,7 @@ const ROW_TESTS = {
         const message = paused.result.message;
         assert.ok(message.includes('Q1. Run the remediation plan for the local review findings on the working branch, then every gate again. I am asking because the plan ' + main.remediationGateTexts()[flag] + '.**'), message);
         assert.ok(message.includes('Why I am asking: ' + lib.askReasonLine(reason)), message);
-        assert.ok(message.includes('\n\n' + main.buildPlanDetailBlock(plan).text), message);
+        assert.ok(message.includes('\n\n' + main.buildPlanDetailBlock(plan, []).text), message);
         assert.ok(!message.includes(plan.summary) && !message.includes('per-agent results'), message);
         const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, run it.'), results);
         assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -3561,13 +3561,13 @@ const ROW_TESTS = {
       }
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
       const first = { asks: [], taken: [] };
-      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, first), 'take');
+      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, first, EMPTY_SCOPE), 'take');
       run.taken.push({ brief: main.buildReviewEscalationBrief(ESCALATION), kind: 'planner_escalation_routing' });
       const later = { asks: [], taken: [] };
-      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, later), 'ask');
+      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, later, EMPTY_SCOPE), 'ask');
       assert.equal(later.asks[0].brief.kind, 'remediation_plan_acceptance');
       const cleanLater = { asks: [], taken: [] };
-      assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, cleanLater), 'take');
+      assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, cleanLater, EMPTY_SCOPE), 'take');
       assert.equal(cleanLater.taken[0].kind, 'remediation_plan_acceptance');
     });
     test('a needs_replan pass after a remediation pass resolves its plan as a remediation plan again', async () => {
@@ -4049,7 +4049,7 @@ const ROW_TESTS = {
   'SD-49': () => {
     const reply = "I don't have time for that";
     const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
-    const resumedLabels = ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)];
+    const resumedLabels = ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)];
     async function runResumed(results) {
       const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': gated });
       assert.equal(paused.result.needs_user, true);
@@ -4059,13 +4059,13 @@ const ROW_TESTS = {
     function assertNoteAfterRevise(run) {
       const reviseIndex = labelsOf(run).indexOf('revise-1');
       run.calls.forEach((call, index) => {
-        const isLaterPlan = index > reviseIndex && call.opts.label.startsWith('plan-');
+        const isLaterAnswerPrompt = index > reviseIndex && (call.opts.label.startsWith('plan-') || call.opts.label.startsWith('scope-'));
         const hasNote = call.prompt.includes(main.resumedReplySentence());
-        assert.equal(hasNote, index > reviseIndex && !isLaterPlan, call.opts.label + ' carries the resume sentence only after revise-1, and no plan prompt carries it');
+        assert.equal(hasNote, index > reviseIndex && !isLaterAnswerPrompt, call.opts.label + ' carries the resume sentence only after revise-1, and no scope or plan prompt carries it');
         if (hasNote) {
           assert.equal(call.prompt.split('\n')[1], main.resumedReplySentence(), call.opts.label);
         }
-        assert.equal(call.prompt.includes(reply), call.opts.label === 'revise-1' || isLaterPlan, call.opts.label + ' carries the reply only in revise-1 and a later plan prompt');
+        assert.equal(call.prompt.includes(reply), call.opts.label === 'revise-1' || isLaterAnswerPrompt, call.opts.label + ' carries the reply only in revise-1 and a later scope or plan prompt');
       });
     }
     test('a resume whose reply revise-1 settles runs branch-1 through pr-1, each later prompt with the sentence and only revise-1 with the reply', async () => {
@@ -4094,7 +4094,7 @@ const ROW_TESTS = {
       assert.ok(['bump-1-1', 'fix-1-1', 'bump-1-2'].every((label) => labelsOf(run).includes(label)), JSON.stringify(labelsOf(run)));
       assertNoteAfterRevise(run);
     });
-    test('the facts and scan steps of a later pass carry the sentence, and its plan step the reply in the answers block in place of it', async () => {
+    test('the facts and scan steps of a later pass carry the sentence, and its scope and plan steps the reply in the answers block in place of it', async () => {
       const results = happyResults({
         'plan-1': gated,
         'revise-1': reviseResult(planResult(), ['Q1']),
@@ -4109,19 +4109,20 @@ const ROW_TESTS = {
       });
       const { run } = await runResumed(results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(labelsOf(run).slice(7, 11), ['facts-2', 'scan-2', 'scope-2', 'plan-2']);
+      assert.deepEqual(labelsOf(run).slice(8, 12), ['facts-2', 'scan-2', 'scope-2', 'plan-2']);
       assertNoteAfterRevise(run);
       const questions = readDataBlock(callOf(run, 'revise-1').prompt, 'questions');
       assert.deepEqual(readDataBlock(callOf(run, 'plan-2').prompt, 'answers'), [{ question: questions, reply: reply }]);
+      assert.deepEqual(readDataBlock(callOf(run, 'scope-2').prompt, 'answers'), [{ question: questions, reply: reply }]);
     });
-    test('after a tail reply, the plan prompt carries the reply in the answers block and no sentence, and every other later prompt carries the sentence', async () => {
+    test('after a tail reply, the scope and plan prompts carry the reply in the answers block and no sentence, and every other later prompt carries the sentence', async () => {
       const results = tailReplanResults();
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, TAIL_REPLY), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const askIndex = labelsOf(run).indexOf('bump-type-1-1');
       run.calls.forEach((call, index) => {
-        const isAnswerPrompt = call.opts.label === 'plan-2';
+        const isAnswerPrompt = ['scope-2', 'plan-2'].includes(call.opts.label);
         assert.equal(call.prompt.includes(main.resumedReplySentence()), index > askIndex && !isAnswerPrompt, call.opts.label);
         assert.equal(call.prompt.includes(TAIL_REPLY), isAnswerPrompt, call.opts.label);
       });
@@ -4391,14 +4392,14 @@ const ROW_TESTS = {
       const run = makeKeyRun(2);
       run.taken.push({ brief: main.buildReviewEscalationBrief(ESCALATION), kind: 'planner_escalation_routing' });
       const first = { asks: [], taken: [] };
-      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, first), 'ask');
+      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, first, EMPTY_SCOPE), 'ask');
       run.answeredKeys.add(first.asks[0].key);
-      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, { asks: [], taken: [] }), 'answered');
+      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, { asks: [], taken: [] }, EMPTY_SCOPE), 'answered');
       for (const plan of [{ ...REMEDIATION_PLAN, steps: [makeStep('STEP-003', ['src/auth.js'])] }, { ...REMEDIATION_PLAN, summary: 'Another summary.' }]) {
-        assert.equal(main.resolvePlanAcceptance(plan, run, { asks: [], taken: [] }), 'ask', plan.summary);
+        assert.equal(main.resolvePlanAcceptance(plan, run, { asks: [], taken: [] }, EMPTY_SCOPE), 'ask', plan.summary);
       }
       run.pass = 3;
-      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, { asks: [], taken: [] }), 'ask');
+      assert.equal(main.resolvePlanAcceptance(REMEDIATION_PLAN, run, { asks: [], taken: [] }, EMPTY_SCOPE), 'ask');
     });
     test('an external_effect key holds the step id and the exact summary', () => {
       const run = makeKeyRun(1);
@@ -4430,16 +4431,16 @@ const ROW_TESTS = {
       const run = makeKeyRun(1);
       const facts = parsedFacts();
       const brief = makeGatedBrief('GATED_PROBLEM');
-      const first = main.resolvePlanAsks(planResult(makePlan(), [brief]), facts, run);
+      const first = main.resolvePlanAsks(planResult(makePlan(), [brief]), facts, run, EMPTY_SCOPE);
       run.answeredKeys.add(first.asks[0].key);
       const rewritten = { ...brief, id: 'Q9', assumptions: [], options: brief.options.map((option) => ({ ...option, steel_man: 'Other.' })) };
-      assert.equal(main.resolvePlanAsks(planResult(makePlan(), [rewritten]), facts, run).asks.length, 0);
+      assert.equal(main.resolvePlanAsks(planResult(makePlan(), [rewritten]), facts, run, EMPTY_SCOPE).asks.length, 0);
       const changes = [{ problem: 'OTHER_PROBLEM' }, { options: brief.options.map((option) => ({ ...option, id: option.id + '1' })), recommendation: { ...brief.recommendation, option_id: 'A1' } }, { recommendation: { option_id: 'B', strength: 'weak', why: 'Other.' } }];
       for (const changed of changes.map((change) => ({ ...brief, ...change }))) {
-        assert.equal(main.resolvePlanAsks(planResult(makePlan(), [changed]), facts, run).asks.length, 1, JSON.stringify(changed.recommendation));
+        assert.equal(main.resolvePlanAsks(planResult(makePlan(), [changed]), facts, run, EMPTY_SCOPE).asks.length, 1, JSON.stringify(changed.recommendation));
       }
       run.pass = 2;
-      assert.equal(main.resolvePlanAsks(planResult(makePlan(), [brief]), facts, run).asks.length, 1);
+      assert.equal(main.resolvePlanAsks(planResult(makePlan(), [brief]), facts, run, EMPTY_SCOPE).asks.length, 1);
     });
   },
   'SD-53': () => {
@@ -4490,13 +4491,13 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(longRemediation) }));
       assert.equal(run.result.needs_user, true);
       const message = assertMessageShape(run.result.message, [longRemediation.summary], []);
-      assert.ok(message.includes('\n\n' + main.buildPlanDetailBlock(longRemediation).text), message);
+      assert.ok(message.includes('\n\n' + main.buildPlanDetailBlock(longRemediation, []).text), message);
       assert.equal(main.buildRemediationPlanBrief(longRemediation).verbatim, longRemediation.summary);
     });
     test('the detail block names up to 5 encoded file paths, then the count of the rest', () => {
       const files = ['a.js', 'b.js', 'c\u001b.js', 'd.js', 'e.js', 'f.js', 'g.js'];
       const plan = makePlan({ digest: { problem: 'Line one\nline two.', change: 'Change it.' }, steps: [makeStep('S1', files.slice(0, 4)), makeStep('S2', files.slice(2))] });
-      assert.equal(main.buildPlanDetailBlock(plan).text, 'What the plan addresses: Line one line two.\nWhat it changes: Change it.\nIt has 2 steps and touches 7 files on branch "feature/cache": "a.js", "b.js", "c\\u001b.js", "d.js", "e.js" and 2 more.');
+      assert.equal(main.buildPlanDetailBlock(plan, []).text, 'What the plan addresses: Line one line two.\nWhat it changes: Change it.\nIt has 2 steps and touches 7 files on branch "feature/cache": "a.js", "b.js", "c\\u001b.js", "d.js", "e.js" and 2 more.');
     });
     test('a blocked fix round quotes its blocker whole within its bound, with the run again line', async () => {
       const results = fixFlowResults({ 'plan-1': planResult(longPlan), 'fix-1-1': { outcome: 'blocked', files: [], blocker: causeBlocker, next_action: 'run_again' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
@@ -4947,7 +4948,7 @@ const ROW_TESTS = {
     });
   },
   'SD-60': () => {
-    test('the scope prompt is the task line, the boundary sentence, the data line, the facts block and the request block, with the resume note once replied', async () => {
+    test('the scope prompt is the task line, the boundary sentence, the data line, the facts block and the request block, then the answers block once replied, and never the resume note', async () => {
       const taskLine = 'Scope the user request below for its planner, in Scope Mode.';
       const fresh = await runWorkflow(LAUNCH, happyResults());
       assert.equal(callOf(fresh, 'scope-1').prompt, [taskLine, lib.boundarySentence(), lib.dataBlocksSentence(), '', lib.buildFactsBlock(parsedFacts()), lib.formatDataBlock('request', REQUEST)].join('\n'));
@@ -4965,21 +4966,31 @@ const ROW_TESTS = {
         ...tailResults(2, THIRD)
       }));
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.equal(callOf(paused, 'scope-1').prompt, callOf(fresh, 'scope-1').prompt);
       assert.equal(callOf(resumed, 'scope-1').prompt, callOf(paused, 'scope-1').prompt);
-      const resumedLines = callOf(resumed, 'scope-2').prompt.split('\n');
-      assert.deepEqual(resumedLines.slice(0, 5), [taskLine, main.resumedReplySentence(), lib.boundarySentence(), lib.dataBlocksSentence(), '']);
-      assert.equal(resumedLines.at(-3), '<request>');
+      const answers = readDataBlock(callOf(resumed, 'plan-2').prompt, 'answers');
+      assert.equal(answers.length, 1);
+      for (const label of ['scope-1-1', 'scope-2']) {
+        const prompt = callOf(resumed, label).prompt;
+        const factsBlock = lib.buildFactsBlock(label === 'scope-2' ? parsedFacts({ branch: 'feature/cache', head: OTHER }) : parsedFacts());
+        assert.equal(prompt, [taskLine, lib.boundarySentence(), SETTLED_ANSWERS_LINE, '', factsBlock, lib.formatDataBlock('request', REQUEST), lib.formatDataBlock('answers', answers)].join('\n'), label);
+        assert.ok(!prompt.includes(main.resumedReplySentence()), label);
+      }
     });
   },
   'SD-61': () => {
-    test('SCOPE_SCHEMA holds documents and paths, labels every string field, marks each path field, bounds every string and bounds both lists', () => {
+    test('SCOPE_SCHEMA holds documents, paths and limits, labels every string field, marks each path field, bounds every string and bounds every list', () => {
       const schema = structuredClone(main.buildScopeSchema());
-      assert.deepEqual(schema.required, ['documents', 'paths']);
+      assert.deepEqual(schema.required, ['documents', 'paths', 'limits']);
       const documentItem = schema.properties.documents.items;
       const pathItem = schema.properties.paths.items;
       assert.deepEqual([Object.keys(documentItem.properties), documentItem.required], [['path', 'line'], ['path', 'line']]);
       assert.equal(documentItem.properties.line.type, 'integer');
-      assert.deepEqual([schema.properties.documents.maxItems, schema.properties.paths.maxItems], [10, 30]);
+      assert.deepEqual([schema.properties.documents.maxItems, schema.properties.paths.maxItems, schema.properties.limits.maxItems], [10, 30, 30]);
+      const limitItem = schema.properties.limits.items;
+      assert.equal(limitItem.type, 'string');
+      assert.ok(Number.isInteger(limitItem.maxLength));
+      assert.ok(limitItem.description.startsWith(main.repositoryPathMark()), limitItem.description);
       assert.deepEqual([Object.keys(pathItem.properties), pathItem.required], [['path', 'exists', 'drift'], ['path', 'exists', 'drift']]);
       assert.equal(pathItem.properties.exists.type, 'boolean');
       for (const item of [documentItem, pathItem]) {
@@ -4988,12 +4999,15 @@ const ROW_TESTS = {
         assert.ok(stringFields.every((field) => Number.isInteger(field.maxLength)), JSON.stringify(item));
         assert.ok(stringFields.every((field) => field.description.startsWith(main.externalLabel())), JSON.stringify(item));
       }
-      assert.ok(lib.validateSchema(schema, { documents: [], paths: [{ path: 'src/a.js', exists: false, drift: '' }] }).ok);
+      assert.ok(lib.validateSchema(schema, { documents: [], paths: [{ path: 'src/a.js', exists: false, drift: '' }], limits: [] }).ok);
       const fullScope = {
         documents: Array.from({ length: 10 }, (_, index) => ({ path: 'docs/a.md', line: index + 1 })),
-        paths: Array.from({ length: 30 }, (_, index) => ({ path: 'src/f' + index + '.js', exists: true, drift: '' }))
+        paths: Array.from({ length: 30 }, (_, index) => ({ path: 'src/f' + index + '.js', exists: true, drift: '' })),
+        limits: Array.from({ length: 30 }, (_, index) => 'src/d' + index)
       };
       assert.ok(lib.validateSchema(schema, fullScope).ok);
+      assert.ok(!lib.validateSchema(schema, { ...fullScope, limits: [...fullScope.limits, 'src/d30'] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...fullScope, limits: ['x'.repeat(limitItem.maxLength + 1)] }).ok);
     });
   },
   'SD-62': () => {
@@ -5001,63 +5015,69 @@ const ROW_TESTS = {
       const unusable = [
         null,
         { documents: [] },
-        { documents: [], paths: [], extra: true },
-        { documents: [{ path: 'docs/a.md', line: 1, text: 'Slice.' }], paths: [] },
-        { documents: [{ path: 'docs/a.md', lines: '1-2' }], paths: [] },
-        { documents: [{ path: 'docs/a.md', line: '1' }], paths: [] },
-        { documents: [{ path: 'docs/a.md', line: 1.5 }], paths: [] },
-        { documents: Array.from({ length: 11 }, (_, index) => ({ path: 'docs/a.md', line: index + 1 })), paths: [] },
-        { documents: [], paths: Array.from({ length: 31 }, (_, index) => ({ path: 'src/f' + index + '.js', exists: true, drift: '' })) },
-        { documents: [], paths: [{ path: 'src/a.js', exists: 'yes', drift: '' }] }
+        { documents: [], paths: [] },
+        { documents: [], paths: [], limits: [], extra: true },
+        { documents: [{ path: 'docs/a.md', line: 1, text: 'Slice.' }], paths: [], limits: [] },
+        { documents: [{ path: 'docs/a.md', lines: '1-2' }], paths: [], limits: [] },
+        { documents: [{ path: 'docs/a.md', line: '1' }], paths: [], limits: [] },
+        { documents: [{ path: 'docs/a.md', line: 1.5 }], paths: [], limits: [] },
+        { documents: Array.from({ length: 11 }, (_, index) => ({ path: 'docs/a.md', line: index + 1 })), paths: [], limits: [] },
+        { documents: [], paths: Array.from({ length: 31 }, (_, index) => ({ path: 'src/f' + index + '.js', exists: true, drift: '' })), limits: [] },
+        { documents: [], paths: [{ path: 'src/a.js', exists: 'yes', drift: '' }], limits: [] },
+        { documents: [], paths: [], limits: [1] },
+        { documents: [], paths: [], limits: Array.from({ length: 31 }, (_, index) => 'src/d' + index) }
       ];
       for (const scope of unusable) {
         const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': scope });
         assertBlockedBeforeWaves(run, 'The scope step returned a result it could not use, so the delivery stopped before planning.');
         assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1'], JSON.stringify(scope));
       }
-      const usable = await runWorkflow(LAUNCH, happyResults({ 'scope-1': { documents: [], paths: [] } }));
+      const usable = await runWorkflow(LAUNCH, happyResults({ 'scope-1': { documents: [], paths: [], limits: [] } }));
       assert.equal(usable.result.outcome, 'complete', usable.result.message);
     });
     test('a scope entry whose path is not a plain repository path is dropped, and planning goes on with the rest', async () => {
-      const kept = { documents: [{ path: 'docs/a.md', line: 3 }], paths: [{ path: 'tools/validate.sh', exists: true, drift: '' }] };
+      const kept = { documents: [{ path: 'docs/a.md', line: 3 }], paths: [{ path: 'tools/validate.sh', exists: true, drift: '' }], limits: [] };
       const scope = {
         documents: [{ path: '../outside.md', line: 1 }, ...kept.documents, { path: '/home/user/repo/docs/b.md', line: 2 }],
-        paths: [{ path: '/etc/passwd', exists: true, drift: '' }, { path: '.git/config', exists: true, drift: '' }, { path: 'src/../a.js', exists: true, drift: '' }, ...kept.paths]
+        paths: [{ path: '/etc/passwd', exists: true, drift: '' }, { path: '.git/config', exists: true, drift: '' }, { path: 'src/../a.js', exists: true, drift: '' }, ...kept.paths],
+        limits: []
       };
       const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': scope }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), kept);
-      const emptied = await runWorkflow(LAUNCH, happyResults({ 'scope-1': { documents: [{ path: '/abs.md', line: 1 }], paths: [] } }));
+      const emptied = await runWorkflow(LAUNCH, happyResults({ 'scope-1': { documents: [{ path: '/abs.md', line: 1 }], paths: [], limits: [] } }));
       assert.equal(emptied.result.outcome, 'complete', emptied.result.message);
-      assert.deepEqual(readDataBlock(callOf(emptied, 'plan-1').prompt, 'scope'), { documents: [], paths: [] });
+      assert.deepEqual(readDataBlock(callOf(emptied, 'plan-1').prompt, 'scope'), { documents: [], paths: [], limits: [] });
     });
     test('a scope path under the checkout root is made relative to it and kept, and a path outside it is dropped', async () => {
       const scope = {
         documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }, { path: '/work/other/docs/b.md', line: 2 }, { path: CHECKOUT_ROOT + 'x/docs/c.md', line: 1 }],
-        paths: [{ path: CHECKOUT_ROOT + '/tools/validate.sh', exists: true, drift: '' }, { path: CHECKOUT_ROOT, exists: true, drift: '' }, { path: CHECKOUT_ROOT + '/', exists: true, drift: '' }, { path: CHECKOUT_ROOT + '/../etc/passwd', exists: true, drift: '' }, { path: 'src/a.js', exists: false, drift: '' }]
+        paths: [{ path: CHECKOUT_ROOT + '/tools/validate.sh', exists: true, drift: '' }, { path: CHECKOUT_ROOT, exists: true, drift: '' }, { path: CHECKOUT_ROOT + '/', exists: true, drift: '' }, { path: CHECKOUT_ROOT + '/../etc/passwd', exists: true, drift: '' }, { path: 'src/a.js', exists: false, drift: '' }],
+        limits: []
       };
       const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': scope }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), {
         documents: [{ path: 'docs/a.md', line: 3 }],
-        paths: [{ path: 'tools/validate.sh', exists: true, drift: '' }, { path: 'src/a.js', exists: false, drift: '' }]
+        paths: [{ path: 'tools/validate.sh', exists: true, drift: '' }, { path: 'src/a.js', exists: false, drift: '' }],
+        limits: []
       });
     });
     test('a checkout root that ends with a slash converts with no doubled slash', async () => {
-      const scope = { documents: [{ path: '/srv/docs/a.md', line: 1 }], paths: [{ path: '/srv//b.js', exists: true, drift: '' }] };
+      const scope = { documents: [{ path: '/srv/docs/a.md', line: 1 }], paths: [{ path: '/srv//b.js', exists: true, drift: '' }], limits: ['/srv/src/'] };
       const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ root: '/srv/' }), 'scope-1': scope }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/a.md', line: 1 }], paths: [] });
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/a.md', line: 1 }], paths: [], limits: ['src'] });
     });
     test('a root line of none converts nothing, so every absolute path is dropped', async () => {
-      const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }, { path: 'docs/b.md', line: 1 }], paths: [{ path: 'none/a.js', exists: true, drift: '' }] };
+      const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }, { path: 'docs/b.md', line: 1 }], paths: [{ path: 'none/a.js', exists: true, drift: '' }], limits: [] };
       const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ root: 'none' }), 'scope-1': scope }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/b.md', line: 1 }], paths: [{ path: 'none/a.js', exists: true, drift: '' }] });
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/b.md', line: 1 }], paths: [{ path: 'none/a.js', exists: true, drift: '' }], limits: [] });
     });
     test('no root value converts nothing', () => {
-      const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }], paths: [{ path: 'src/a.js', exists: true, drift: '' }] };
-      assert.deepEqual(structuredClone(main.keepRepositoryPathEntries(scope, undefined)), { documents: [], paths: [{ path: 'src/a.js', exists: true, drift: '' }] });
+      const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }], paths: [{ path: 'src/a.js', exists: true, drift: '' }], limits: [CHECKOUT_ROOT + '/src/'] };
+      assert.deepEqual(structuredClone(main.keepRepositoryPathEntries(scope, undefined)), { documents: [], paths: [{ path: 'src/a.js', exists: true, drift: '' }], limits: [CHECKOUT_ROOT + '/src'] });
     });
     test('a facts relay with no root line or a root with a control character blocks as malformed facts', async () => {
       for (const changes of [{ root: undefined }, { root: '/work/check\tout' }]) {
@@ -5072,7 +5092,7 @@ const ROW_TESTS = {
   },
   'SD-63': () => {
     test('the plan and revise prompts carry the scope right after the request block, and no other prompt or message carries it', async () => {
-      const scope = { documents: [{ path: 'docs/handoff.md', line: 10 }], paths: [{ path: 'src/cache.js', exists: true, drift: 'SCOPE_MARKER_QZ drift.' }] };
+      const scope = { documents: [{ path: 'docs/handoff.md', line: 10 }], paths: [{ path: 'src/cache.js', exists: true, drift: 'SCOPE_MARKER_QZ drift.' }], limits: [] };
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
       const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'scope-1': scope, 'plan-1': gated });
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go with A.'), happyResults({ 'scope-1': scope, 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) }));
@@ -5086,6 +5106,20 @@ const ROW_TESTS = {
       const otherCalls = run.calls.filter((call) => !['plan-1', 'revise-1'].includes(call.opts.label));
       assert.ok(otherCalls.every((call) => !call.prompt.includes('SCOPE_MARKER_QZ')), JSON.stringify(otherCalls.map((call) => call.opts.label)));
       assert.ok(![paused.result, run.result].some((result) => JSON.stringify(result).includes('SCOPE_MARKER_QZ')));
+    });
+    test('a revise prompt after a re-scope carries the re-scope result as its scope block', async () => {
+      const rescoped = { documents: [], paths: [{ path: 'src/cache.js', exists: true, drift: '' }], limits: ['src'] };
+      const results = happyResults({
+        'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]),
+        'revise-1': reviseResult(planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM_TWO')]), ['Q1']),
+        'scope-1-1': rescoped,
+        'revise-2': reviseResult(planResult(), ['Q1'])
+      });
+      const run = await runWorkflow({ ...LAUNCH, build: BUILD_ID, answers: { 'round-1': 'Take option A.', 'round-2': 'Take option B.' } }, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(0, 7), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'scope-1-2']);
+      assert.deepEqual(readDataBlock(callOf(run, 'revise-1').prompt, 'scope'), EMPTY_SCOPE);
+      assert.deepEqual(readDataBlock(callOf(run, 'revise-2').prompt, 'scope'), rescoped);
     });
   },
   'SD-64': () => {
@@ -5317,6 +5351,171 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(paused.calls.map((call) => call.prompt), run.calls.slice(0, paused.calls.length).map((call) => call.prompt));
       assert.equal(labelsOf(run)[paused.calls.length], 'revise-1');
+    });
+  },
+  'SD-69': () => {
+    const LIMITS_WHY = 'Only you can say if the plan may change files outside the limits.';
+    const UNUSABLE_SCOPE = 'The scope step returned a result it could not use, so the delivery stopped before planning.';
+    const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
+    function limitsScope(limits) {
+      return { documents: [], paths: [], limits: limits };
+    }
+    function makeLimitRun() {
+      return main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+    }
+    function outsideProblem(brief, count) {
+      return brief.problem + ' It changes ' + count + ' outside the limits you set.';
+    }
+    function assertOutsideAsk(message, problem, outsidePaths, plan) {
+      assert.ok(message.includes('Q1. ' + problem), message);
+      assert.ok(message.includes('Why I am asking: ' + lib.askReasonLine('no_recommendation')), message);
+      assert.ok(message.includes(LIMITS_WHY), message);
+      assert.ok(message.includes('\n\n' + main.buildPlanDetailBlock(plan, outsidePaths).text), message);
+      assert.ok(message.includes('\nOutside the limits you set: ' + outsidePaths.map((path) => JSON.stringify(path)).join(', ') + '.'), message);
+    }
+    /**
+     * Pauses a run whose reply to a planner question gets a re-scope that
+     * returns `limits`, so its plan acceptance asks in the same pass.
+     */
+    async function pauseOnAnswerLimit(limits, changes = {}) {
+      const results = happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']), 'scope-1-1': limitsScope(limits), ...changes });
+      const first = await runWorkflow(LAUNCH, results);
+      assert.equal(first.result.needs_user, true);
+      const second = await runWorkflow(resumeWith(LAUNCH, first.result, 'Take option A, and change only docs.'), results);
+      return { results: results, paused: second };
+    }
+    test('empty limits leave the brief unchanged and the plan taken', async () => {
+      const run = makeLimitRun();
+      assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([]), run)], []);
+      assert.deepEqual(structuredClone(main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), [])), structuredClone(main.buildPlanAcceptanceBrief(makePlan())));
+      assert.equal(main.buildPlanDetailBlock(makePlan(), []).text.split('\n').length, 3);
+      const taken = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([]) }));
+      assert.equal(taken.result.outcome, 'complete', taken.result.message);
+      assert.ok(!taken.result.message.includes('outside the limits'), taken.result.message);
+    });
+    test('a file equal to a limit or under it, with or without a trailing slash, is inside', async () => {
+      const run = makeLimitRun();
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', 'src/deep/a.js', 'srcx/b.js', 'docs/x.md', 'docs/x.mdx'])] });
+      assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src', 'docs/x.md']), run)], ['srcx/b.js', 'docs/x.mdx']);
+      assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src', 'srcx', 'docs']), run)], []);
+      assert.deepEqual([...main.keepRepositoryPathEntries(limitsScope(['src/', CHECKOUT_ROOT + '/docs/', 'docs/x.md']), CHECKOUT_ROOT).limits], ['src', 'docs', 'docs/x.md']);
+      for (const limit of ['src', 'src/', CHECKOUT_ROOT + '/src/', 'src/cache.js']) {
+        const inside = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
+        assert.equal(inside.result.outcome, 'complete', limit + ' ' + inside.result.message);
+      }
+    });
+    test('a request limit with a file outside asks plan_acceptance no_recommendation at the default level with the detail line', async () => {
+      const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['docs']) }));
+      assert.equal(paused.result.needs_user, true);
+      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
+      assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
+      const marked = main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js']);
+      assert.deepEqual({ ...marked.recommendation }, { ...main.buildPlanAcceptanceBrief(makePlan()).recommendation, strength: 'none', why: LIMITS_WHY });
+      for (const level of autonomyTable.levels) {
+        assert.equal(lib.decide({ kind: 'plan_acceptance', level: level, brief: marked }, autonomyTable, briefSchema).action, 'ask', level);
+      }
+      assert.deepEqual({ ...lib.decide({ kind: 'plan_acceptance', level: autonomyTable.default_level, brief: marked }, autonomyTable, briefSchema) }, { action: 'ask', reason: 'no_recommendation' });
+    });
+    test('a request limit with a file outside asks remediation_plan_acceptance no_recommendation at the default level with the detail line', async () => {
+      const paused = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN), 'scope-2': limitsScope(['docs']) }));
+      assert.equal(paused.result.needs_user, true);
+      assert.deepEqual(labelsOf(paused), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2']);
+      assertOutsideAsk(paused.result.message, outsideProblem(main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), '1 file'), ['src/auth.js'], CLEAN_REMEDIATION_PLAN);
+      const marked = main.markOutsideLimits(main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), ['src/auth.js']);
+      assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: autonomyTable.default_level, brief: marked }, autonomyTable, briefSchema) }, { action: 'ask', reason: 'no_recommendation' });
+    });
+    test('an answer-only limit asks in the same pass after scope-1-1, whose prompt carries the answers block', async () => {
+      const { paused } = await pauseOnAnswerLimit(['docs']);
+      assert.equal(paused.result.needs_user, true);
+      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
+      assert.equal(readDataBlock(callOf(paused, 'scope-1-1').prompt, 'answers').length, 1);
+      assert.ok(!callOf(paused, 'scope-1').prompt.includes('<answers>'));
+      assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
+    });
+    test('an answer-only limit asks in a later pass whose scope-2 prompt carries the answers block', async () => {
+      const results = happyResults({
+        'plan-1': gated,
+        'revise-1': reviseResult(planResult(), ['Q1']),
+        'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
+        'facts-2': onPlanBranchFacts(OTHER),
+        'scope-2': limitsScope(['docs']),
+        'plan-2': planResult()
+      });
+      const first = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, first.result, 'Take option A, and change only docs.'), results);
+      assert.equal(run.result.needs_user, true);
+      assert.ok(labelsOf(run).includes('scope-1-1'), JSON.stringify(labelsOf(run)));
+      assert.deepEqual(labelsOf(run).slice(-3), ['facts-2', 'scope-2', 'plan-2']);
+      assert.deepEqual(readDataBlock(callOf(run, 'scope-2').prompt, 'answers'), readDataBlock(callOf(run, 'plan-2').prompt, 'answers'));
+      assertOutsideAsk(run.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
+    });
+    test('a later answer that widens the limit is taken, and a same-build resume replays scope-1-1 from cache', async () => {
+      const { results, paused } = await pauseOnAnswerLimit(['docs'], { 'revise-2': reviseResult(planResult(), []), 'scope-1-2': limitsScope(['docs', 'src']) });
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'src may change too.'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'scope-1-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
+      assert.deepEqual(paused.calls.map((call) => call.prompt), run.calls.slice(0, paused.calls.length).map((call) => call.prompt));
+      assert.equal(callOf(run, 'scope-1-1').prompt, callOf(paused, 'scope-1-1').prompt);
+      assert.equal(readDataBlock(callOf(run, 'scope-1-2').prompt, 'answers').length, 2);
+    });
+    test('a settled outside-limit acceptance runs no re-scope, is not asked again, and its files are not asked in a later pass', async () => {
+      const results = happyResults({
+        'scope-1': limitsScope(['docs']),
+        'revise-1': reviseResult(planResult(), ['Q1']),
+        'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
+        'facts-2': onPlanBranchFacts(OTHER),
+        'scope-2': limitsScope(['docs']),
+        'plan-2': planResult(),
+        'branch-2': branchRelay({ created: 'false', commit: OTHER }),
+        'work-2-STEP-001': WORKER_DONE,
+        'commit-2-1': commitRelay({ commit: THIRD }),
+        ...tailResults(2, THIRD)
+      });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Yes, src may change.'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(!labelsOf(run).includes('scope-1-1') && !labelsOf(run).includes('revise-2'), JSON.stringify(labelsOf(run)));
+      assert.ok(labelsOf(run).includes('scope-2') && labelsOf(run).includes('work-2-STEP-001'), JSON.stringify(labelsOf(run)));
+      const state = makeLimitRun();
+      state.acceptedPaths.push('src/cache.js');
+      const grown = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', 'src/store.js'])] });
+      assert.deepEqual([...main.listOutsidePaths(grown, limitsScope(['docs']), state)], ['src/store.js']);
+    });
+    test('an absolute or .. limit is kept, matches nothing and asks', async () => {
+      const run = makeLimitRun();
+      const limits = ['/other/src', '../src', 'src/..'];
+      assert.deepEqual([...main.keepRepositoryPathEntries(limitsScope(limits), CHECKOUT_ROOT).limits], limits);
+      for (const limit of limits) {
+        assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([limit]), run)], ['src/cache.js'], limit);
+        const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
+        assert.equal(paused.result.needs_user, true, limit);
+        assert.ok(paused.result.message.includes('Why I am asking: ' + lib.askReasonLine('no_recommendation')), paused.result.message);
+      }
+    });
+    test('a re-scope result that fails SCOPE_SCHEMA stops blocked before any wave', async () => {
+      const { paused } = await pauseOnAnswerLimit([], { 'scope-1-1': { documents: [], paths: [] } });
+      assertBlockedBeforeWaves(paused, UNUSABLE_SCOPE);
+      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
+    });
+    test('the detail line names up to 5 encoded outside paths, then the count of the rest', () => {
+      const outsidePaths = ['a.js', 'b.js', 'c\u001b.js', 'd.js', 'e.js', 'f.js', 'g.js'];
+      assert.equal(main.buildPlanDetailBlock(makePlan(), outsidePaths).text.split('\n').at(-1), 'Outside the limits you set: "a.js", "b.js", "c\\u001b.js", "d.js", "e.js" and 2 more.');
+    });
+    test('the worst-case acceptance brief with outside paths fits BRIEF_SCHEMA, naming the count only when it fits', () => {
+      const outsidePaths = Array.from({ length: 400 }, (_, index) => 'x/f' + index + '.js');
+      const fullBrief = main.buildRemediationPlanBrief({ ...REMEDIATION_PLAN, remediation_gate: FULL_GATE });
+      const unmarkedProblem = fullBrief.problem;
+      const markedFull = main.markOutsideLimits(fullBrief, outsidePaths);
+      const markedPlan = main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), outsidePaths);
+      for (const brief of [markedFull, markedPlan]) {
+        assert.ok(lib.validateSchema(briefSchema, brief).ok, brief.problem);
+        assert.ok(lib.validateSchema(agentBriefSchema, brief).ok, brief.problem);
+        assert.equal(brief.recommendation.strength, 'none');
+      }
+      const suffix = ' It changes 400 files outside the limits you set.';
+      assert.ok(markedFull.problem === unmarkedProblem || markedFull.problem === unmarkedProblem + suffix, markedFull.problem);
+      assert.equal(markedPlan.problem, main.buildPlanAcceptanceBrief(makePlan()).problem + suffix);
     });
   }
 };

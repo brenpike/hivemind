@@ -53,7 +53,7 @@ const liveIds = listLiveWorkflowIds(repoRoot);
 const draftIds = listDraftWorkflowIds(repoRoot);
 const DRAFT_ID = 'draft-check';
 const MAX_SOURCE_LINES = 600;
-const DELIVERY_MODULES = ['gates.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review.js', 'scope.js', 'waves.js'];
+const DELIVERY_MODULES = ['briefs.js', 'gates.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review.js', 'scope.js', 'waves.js'];
 const PROSE_BUDGETS_PATTERN = /export const PROSE_BUDGETS = Object\.freeze\(\{[^}]*\}\);/;
 const MAX_PROSE_MARGIN = 1000;
 const CEREBRATE_SENTENCE = 'You do not write or edit code.';
@@ -1069,7 +1069,7 @@ describe('build_workflows schema projection', () => {
 
 describe('build_workflows prose guards', () => {
   test('the prose budgets are pinned, one per workflow id', () => {
-    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 19000, 'standard-delivery': 44000 });
+    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 19300, 'standard-delivery': 44600 });
     assert.ok(Object.isFrozen(PROSE_BUDGETS));
     assert.deepEqual(Object.keys(PROSE_BUDGETS).sort(), workflowIds);
   });

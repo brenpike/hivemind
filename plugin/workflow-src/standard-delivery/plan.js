@@ -1,8 +1,9 @@
 /*
  * standard-delivery plan.js: the planning pass of the standard-delivery
  * workflow. It holds the plan result and revise schemas, the path checks
- * of plan values, the plan and revise prompts, the plan check, the plan
- * briefs and the resolution of every decision of a planning pass.
+ * of plan values, the plan and revise prompts, the plan check, the
+ * outside-limit check and the resolution of every decision of a planning
+ * pass. Its code-built briefs live in briefs.js.
  *
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
@@ -42,11 +43,8 @@
  *   function of this module.
  *   Once local review sent the run back to planning, every later plan
  *   acceptance resolves through decide() kind
- *   remediation_plan_acceptance. Its brief gate is
- *   plan.remediation_gate.promotion_gate copied whole, with architectural
- *   also true when grows_surface or repeats_surface is, and its problem
- *   names each flag that holds, so it asks then and is taken otherwise at
- *   the default level (decision-autonomy.md, Promotion Gate).
+ *   remediation_plan_acceptance, with the brief of
+ *   buildRemediationPlanBrief (briefs.js).
  *   Every decision resolves through decide() with its kind fixed here,
  *   never from brief.kind. Every question of a plan pass is keyed through
  *   questionKey by its kind, a scope its call site passes and the question
@@ -396,16 +394,6 @@ function markOutsideLimits(brief, outsidePaths) {
   });
 }
 
-function remediationGateTexts() {
-  return {
-    irreversible: 'cannot be undone',
-    architectural: 'changes how the system is built',
-    safety: 'touches a safety check',
-    grows_surface: 'adds more surface than it removes',
-    repeats_surface: 'repeats a fix that did not close its class'
-  };
-}
-
 /**
  * Returns the one text every code-built brief puts in the fields no
  * message shows (lib/brief.js): steel_man, straw_man,
@@ -413,71 +401,6 @@ function remediationGateTexts() {
  */
 function unshownBriefText() {
   return 'Not shown.';
-}
-
-function buildPlanAcceptanceBrief(plan) {
-  return {
-    id: 'plan',
-    kind: PLAN_ACCEPTANCE_KIND,
-    problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true },
-      { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
-    ],
-    recommendation: { option_id: 'A', strength: 'strong', why: 'Every change stays on the working branch, and every decision taken is listed for you before the merge.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
-    gate: { irreversible: false, architectural: false, safety: false },
-    verbatim: plan.summary
-  };
-}
-
-function buildRemediationPlanBrief(plan) {
-  const remediationGate = plan.remediation_gate;
-  const flags = { ...remediationGate.promotion_gate, grows_surface: remediationGate.grows_surface, repeats_surface: remediationGate.repeats_surface };
-  const texts = remediationGateTexts();
-  const flagTexts = Object.keys(texts).filter((flag) => flags[flag]).map((flag) => texts[flag]);
-  const lead = 'Run the remediation plan for the local review findings on the working branch, then every gate again.';
-  const brief = buildPlanAcceptanceBrief(plan);
-  return Object.assign(brief, {
-    kind: REMEDIATION_PLAN_ACCEPTANCE_KIND,
-    problem: flagTexts.length === 0 ? lead : lead + ' I am asking because the plan ' + joinNames(flagTexts, 'and') + '.',
-    recommendation: { ...brief.recommendation, why: 'The plan answers the local review findings, and every gate runs again on its commit before the pull request.' },
-    gate: { ...remediationGate.promotion_gate, architectural: flags.architectural || flags.grows_surface || flags.repeats_surface }
-  });
-}
-
-function buildTrunkStaleBrief(facts) {
-  return {
-    id: 'trunk',
-    kind: TRUNK_STALE_KIND,
-    problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
-    criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true },
-      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
-    ],
-    recommendation: { option_id: 'A', strength: 'strong', why: 'A stale base costs at most a rebase, and the run goes on.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
-    gate: { irreversible: false, architectural: false, safety: false }
-  };
-}
-
-function buildExternalEffectBrief(stepId, summary) {
-  return {
-    id: 'effect',
-    kind: EXTERNAL_EFFECT_KIND,
-    problem: 'Plan step ' + encodeUntrustedText(Array.from(stepId).slice(0, 16).join('')) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
-    criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false },
-      { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
-    ],
-    recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
-    assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
-    gate: { irreversible: true, architectural: false, safety: false },
-    verbatim: summary
-  };
 }
 
 function resolveDecision(kind, brief, scope, run, resolution) {

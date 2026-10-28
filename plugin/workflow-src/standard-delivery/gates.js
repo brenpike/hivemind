@@ -1,7 +1,8 @@
 /*
  * standard-delivery gates.js: the gates of the standard-delivery workflow. It
- * holds the gate ids, names and labels, the tail briefs and asks, the bump,
- * validate and fix steps, the gate rerun and the gate loop.
+ * holds the gate ids, names and labels, the tail asks, the bump, validate
+ * and fix steps, the gate rerun and the gate loop. Its tail briefs live in
+ * briefs.js.
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
@@ -191,84 +192,6 @@ function buildValidateSchema(hasCommands) {
     spec.variants.not_run = { required: [], optional: [] };
   }
   return buildTaggedSchema(spec);
-}
-
-function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
-  return {
-    id: 'tail',
-    kind: kind,
-    problem: problem,
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
-    ],
-    recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
-    gate: { irreversible: false, architectural: false, safety: false }
-  };
-}
-
-function buildBumpTypeBrief(values) {
-  const isBump = values.verdict === 'bump_required';
-  return buildTailBrief({
-    kind: VERSION_BUMP_TYPE_KIND,
-    problem: isBump
-      ? 'The commits on the branch since the trunk call for a ' + values.bump_type + ' version bump: each version file the plan names gets its trunk version raised by that bump.'
-      : 'The commits on the branch since the trunk need no version bump: each version file the plan names keeps its trunk version.',
-    goOn: isBump ? 'Make the ' + values.bump_type + ' version bump.' : 'Go on with no version bump.',
-    strength: 'strong',
-    why: 'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.'
-  });
-}
-
-function buildBumpIndeterminableBrief(values) {
-  const hasVerdict = values.verdict === 'bump_required';
-  return buildTailBrief({
-    kind: VERSION_BUMP_INDETERMINABLE_KIND,
-    problem: hasVerdict
-      ? 'The commits on the branch call for a ' + values.bump_type + ' version bump, but the plan names no file that holds the version. Where should the version be set?'
-      : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-    goOn: hasVerdict ? 'Name the version files: this run plans again with your reply.' : 'Name the version bump: this run plans again with your reply.',
-    strength: 'none',
-    why: 'Only you can decide the version of this delivery.'
-  });
-}
-
-function buildValidationRemediationBrief(head, round) {
-  return buildTailBrief({
-    kind: VALIDATION_REMEDIATION_KIND,
-    problem: 'Validation failed on commit ' + head + '. Run fix round ' + round + ' of at most ' + maxFixRounds() + ', where a worker fixes the failures and the run commits the fix and checks again?',
-    goOn: 'Run a fix round.',
-    strength: 'strong',
-    why: 'A fix round stays on the branch and is listed for you, and every check runs again on its commit.'
-  });
-}
-
-function buildFixLimitBrief(head) {
-  return buildTailBrief({
-    kind: VALIDATION_REMEDIATION_KIND,
-    problem: 'Validation still fails on commit ' + head + ' after ' + maxFixRounds() + ' fix rounds. How should the failures be fixed?',
-    goOn: 'Say how to fix the failures: this run plans the fix from your reply.',
-    strength: 'none',
-    why: 'The fix rounds did not make validation pass, so only you can decide what comes next.'
-  });
-}
-
-function buildGateRerunBrief(staleIds, head, isLimit) {
-  const names = joinNames(staleIds.map((gateId) => gateNames()[gateId]), 'and');
-  const landed = 'Commit ' + head + ' landed after ' + names + ' held on an earlier commit.';
-  return buildTailBrief({
-    kind: GATE_RERUN_KIND,
-    problem: isLimit
-      ? landed + ' The checks already ran again ' + maxGateReruns() + ' times after later commits. How should the delivery go on?'
-      : landed + ' Run ' + names + ' again on the new commit?',
-    goOn: isLimit ? 'Say how to go on: this run plans again from your reply.' : 'Run the checks again on the new commit.',
-    strength: isLimit ? 'none' : 'strong',
-    why: isLimit
-      ? 'Commits kept landing after the checks, so only you can decide what comes next.'
-      : 'A check holds only for the commit it ran on, and the pull request needs every check to hold on the commit it pushes.'
-  });
 }
 
 function isRunEnd(outcome) {

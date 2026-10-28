@@ -15,6 +15,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [7.3.1] - 2026-10-28
 
+### Changed
+
+- The prose budgets rise: `standard-delivery` from 44,000 to 44,600 characters and `analysis-only` from 19,000 to 19,300, each the measured count plus a margin under 1,000. The `standard-delivery` built script is 160,381 characters, with 44,243 characters of string and template literals. `analysis-only` is 71,361 characters, with 18,961 characters of literals. Both are within the unchanged 190,000 script budget (#472).
+
 ### Fixed
 
 - A replan no longer forgets the user's answers. Every later planning pass gets the earlier answers as settled decisions it may not ask again or reverse (#472).
