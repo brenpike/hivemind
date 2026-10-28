@@ -285,6 +285,35 @@ describe('validateSchema maxLength', () => {
   });
 });
 
+describe('validateSchema pattern', () => {
+  test('accepts a string that matches and rejects one that does not', () => {
+    const schema = { type: 'string', pattern: '^[a-z]+$' };
+    assert.deepEqual(validate(schema, 'abc'), { ok: true, errors: [] });
+    assert.deepEqual(validate(schema, 'ABC-123'), { ok: false, errors: ['$: pattern: does not match ^[a-z]+$'] });
+  });
+  test('the pattern is not anchored for the caller', () => {
+    assert.deepEqual(validate({ type: 'string', pattern: '[a-z]' }, 'ABc-123'), { ok: true, errors: [] });
+    assert.deepEqual(validate({ type: 'string', pattern: '[a-z]' }, 'ABC-123').errors, ['$: pattern: does not match [a-z]']);
+  });
+  test('the pattern compiles with the u flag', () => {
+    assert.deepEqual(validate({ type: 'string', pattern: '^\\u{1F600}$' }, '\u{1F600}'), { ok: true, errors: [] });
+    assert.deepEqual(validate({ type: 'string', pattern: '^.$' }, '\u{1F600}'), { ok: true, errors: [] });
+  });
+  test('pattern with no type applies to a string and ignores other values', () => {
+    for (const other of [12345, null, true, ['ABC'], { a: 'ABC' }]) {
+      assert.deepEqual(validate({ pattern: '^[a-z]+$' }, other), { ok: true, errors: [] }, JSON.stringify(other));
+    }
+    assert.deepEqual(validate({ pattern: '^[a-z]+$' }, 'ABC').errors, ['$: pattern: does not match ^[a-z]+$']);
+  });
+  test('a mismatched nested property is reported at its path', () => {
+    const schema = { type: 'object', properties: { code: { type: 'string', pattern: '^[a-z]+$' } } };
+    assert.deepEqual(validate(schema, { code: 'ABC-123' }).errors, ['$.code: pattern: does not match ^[a-z]+$']);
+  });
+  test('a type failure skips pattern', () => {
+    assert.deepEqual(validate({ type: 'integer', pattern: '^[a-z]+$' }, 'ABC').errors, ['$: type integer expected']);
+  });
+});
+
 describe('validateSchema anyOf', () => {
   const stringOrNull = { anyOf: [{ type: 'string' }, { type: 'null' }] };
   test('accepts a value that matches any one branch', () => {
@@ -339,8 +368,8 @@ describe('validateSchema anyOf', () => {
     assert.deepEqual(validate({ type: 'object', anyOf: [{ type: 'string' }] }, 1).errors, ['$: type object expected']);
   });
   test('an unreachable bad branch still throws', () => {
-    const schema = { anyOf: [{ type: 'string' }, { type: 'string', pattern: 'x' }] };
-    assert.throws(() => lib.validateSchema(schema, 'x'), (error) => error.message === 'validateSchema: $.anyOf[1]: unsupported keyword pattern');
+    const schema = { anyOf: [{ type: 'string' }, { type: 'string', const: 'x' }] };
+    assert.throws(() => lib.validateSchema(schema, 'x'), (error) => error.message === 'validateSchema: $.anyOf[1]: unsupported keyword const');
   });
   test('a bad branch inside an absent property still throws', () => {
     const schema = { type: 'object', properties: { a: { anyOf: [{ type: 'null' }, { anyOf: [{ type: 'text' }] }] } } };
@@ -349,7 +378,7 @@ describe('validateSchema anyOf', () => {
 });
 
 describe('validateSchema fails closed on the schema', () => {
-  for (const keyword of ['oneOf', 'allOf', 'not', 'if', 'then', 'else', 'pattern', 'const', '$ref', 'multipleOf', 'default']) {
+  for (const keyword of ['oneOf', 'allOf', 'not', 'if', 'then', 'else', 'const', '$ref', 'multipleOf', 'default']) {
     test(`unsupported keyword ${keyword} throws`, () => {
       const isUnsupported = (error) => error.message === 'validateSchema: $: unsupported keyword ' + keyword;
       assert.throws(() => lib.validateSchema({ type: 'string', [keyword]: 1 }, 'x'), isUnsupported);
@@ -382,6 +411,10 @@ describe('validateSchema fails closed on the schema', () => {
     'maxLength negative': { maxLength: -1 },
     'maxLength not an integer': { maxLength: 1.5 },
     'maxLength a string': { maxLength: '2' },
+    'pattern not a string': { pattern: 5 },
+    'pattern a RegExp object': { pattern: /a/ },
+    'pattern that does not compile': { pattern: '[a-' },
+    'pattern that does not compile with the u flag': { pattern: '\\-' },
     'anyOf not an array': { anyOf: { type: 'string' } },
     'anyOf empty': { anyOf: [] },
     'anyOf with a non-object branch': { anyOf: [{ type: 'string' }, true] },
@@ -396,8 +429,8 @@ describe('validateSchema fails closed on the schema', () => {
   }
   test('supportedSchemaKeywords lists exactly the supported keywords', () => {
     assert.deepEqual([...lib.supportedSchemaKeywords()].sort(), [
-      '$schema', 'additionalProperties', 'anyOf', 'description', 'enum', 'items', 'maxItems', 'maxLength', 'minItems', 'minLength', 'properties',
-      'required', 'title', 'type'
+      '$schema', 'additionalProperties', 'anyOf', 'description', 'enum', 'items', 'maxItems', 'maxLength', 'minItems', 'minLength', 'pattern',
+      'properties', 'required', 'title', 'type'
     ]);
   });
 });
@@ -658,6 +691,10 @@ describe('toAgentSchema', () => {
     assert.deepEqual(input, nested);
     flat.properties.results.items.required.push('changed');
     assert.deepEqual(input, nested);
+  });
+  test('keeps pattern', () => {
+    const withPattern = { type: 'object', properties: { code: { type: 'string', pattern: '^[a-z]+$' } }, anyOf: [{ required: ['code'] }] };
+    assert.deepEqual(structuredClone(lib.toAgentSchema(withPattern)), { type: 'object', properties: { code: { type: 'string', pattern: '^[a-z]+$' } } });
   });
   test('the agent copy passes the validateSchema keyword walk', () => {
     assert.doesNotThrow(() => lib.validateSchema(lib.toAgentSchema(nested), {}));

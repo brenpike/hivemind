@@ -46,30 +46,31 @@
  *   resume_args is {answers, build} alone: no run record (ADR-0037
  *   decision 2). build is BUILD_ID, the build id the build injects, and a
  *   resume whose build differs stops at the launch check (issue 472).
- *   Every message after the launch check lists the decisions the run took
- *   for the user, each the same brief once however many passes took it,
- *   the reversible effects outside the repo of the accepted plans, the
- *   commits the run made once a wave ran, and each gate that did not run.
- *   The final message, the pull request body and the pull request comment
- *   each carry the one run record buildRunRecordParts() returns: the
- *   commits, the reversible effects, the gates and the taken decisions, in
- *   that order (ADR-0037 decision 3; review findings 1a75f008 and
- *   6f87ce62). A chat message shows the taken decisions only in their
- *   compact one-line form (toMessageBlock); the pull request body and
- *   comment keep the full form, with its compact fallback (issue 445).
+ *   Every chat message has one shape (issue 460), built in record.js. A
+ *   pause is a one-line lead of what happened, then the questions
+ *   renderQuestions shows, with the reply line last: a planning pause leads
+ *   with describePlanLine(plan, outsidePaths) (plan.js), a tail ask with its
+ *   own lead (askTail, gates.js). A run end is its lead, then, when blocked,
+ *   the Next line, then only the records ADR-0037 decision 3 needs in chat:
+ *   the branch, commit count and head when the run made commits, the
+ *   reversible effects and the taken decisions, one line each. A complete
+ *   run names the pull request and its commit, the gates that held and any
+ *   gate not configured, the warning when there is one and the rejected
+ *   findings. No chat message shows a commit list, a criticality or ask
+ *   reason line, and no pause shows a taken decision.
+ *   The pull request body and comment each carry the one run record
+ *   buildRunRecordParts() returns: the commits, the reversible effects, the
+ *   gates and the taken decisions, in that order (ADR-0037 decision 3;
+ *   review findings 1a75f008 and 6f87ce62), the decisions in full with
+ *   their compact fallback (issue 445). Each decision is the same brief
+ *   once however many passes took it.
  *   No question shows the plan summary or names this run's per-agent
- *   results. A plan or remediation plan acceptance has a short code-built
- *   problem, and its pause carries a detail block right after the
- *   questions block (buildPlanDetailBlock): the plan digest, problem and
- *   change as the planner wrote them for the user, each made one line,
- *   then one line of what the plan touches, its step count, its distinct
- *   plan path count, version files included, its branch and up to 5 of its
- *   plan paths, each cut by cutExcerpt and encoded, then the count of the
- *   rest. When the scope sets limits and a plan path lies outside them,
+ *   results. When the scope sets limits and a plan path lies outside them,
  *   the acceptance has no recommendation, so it is asked at every level,
- *   and the detail block adds one line of up to 5 of those paths, encoded,
- *   then the count of the rest (plan.js listPlanPaths). Only an
- *   irreversible effect, an exact ask, shows its text word for word.
+ *   and the planning pause lead names up to maxListedItems() of those
+ *   paths, each encoded whole, then the count of the rest (plan.js
+ *   listPlanPaths). Only an irreversible effect, an exact ask, shows its
+ *   text word for word.
  *   Bounded fields (issue 445): every planner, worker and validation
  *   string a message shows comes from a step-schema field with maxLength,
  *   the brief fields of decision-brief-schema.json, the digest, step id
@@ -82,33 +83,40 @@
  *   decision fits BRIEF_SCHEMA with worst-case inputs, holds
  *   unshownBriefText() (plan.js) in each field no message shows, so the
  *   bundle carries no text the user never reads, and the diminishing
- *   returns, escalation, root cluster and review question problems embed
- *   no reviewer free text, only a short finding id and counts.
- *   Every local review string a message shows has a maxLength in
- *   REVIEW_SCHEMA, written by the reviewer for the user: question and
- *   rationale_text 300, recommendation_text 200, blocker 300, and each open
- *   finding's summary and recommendation 200. The rest is cut by code: a
- *   finding id to its first 8 code points, the blocker and field_excerpt by
- *   quoteDiagnostic, a list to its first 5 entries, and
- *   every other string, list entry, severity and rejected finding title and
- *   record by cutExcerpt.
- *   Every blocked result carries one next-step line as a whole block right
+ *   returns, escalation and root cluster problems embed no reviewer free
+ *   text, only a short finding id and counts.
+ *   No message cuts an agent value: a value is bounded at its source schema
+ *   and shown whole, or it is not shown. Every local review string a
+ *   message shows has a bound in REVIEW_SCHEMA, written by the reviewer for
+ *   the user: the user_question found, ask and recommendation why 200 and
+ *   each option summary 160, blocker 300, field_excerpt 200 and
+ *   pattern_category one of P1 to P4. A finding id is 8 to 64 lowercase hex
+ *   characters by its schema pattern, so its short id, the first 8, is
+ *   whole hex. A break-fix-break stop shows the count of conflicting
+ *   findings and no entry, and a rejected finding shows its short id alone.
+ *   Every blocked result carries one Next line as a whole block right
  *   after its first block, and no block carries shorten:
  *   nextStepLine(nextAction), or at an open question stop
- *   nextActionLine(). A worker, gate edit or validation result may carry
+ *   nextActionLine(). Each starts with 'Next:' and points at no cause its
+ *   lead does not name. A worker, gate edit or validation result may carry
  *   next_action with outcome blocked: run_again when the cause is outside
- *   the repo and passes with no change, fix_cause otherwise. run_again
- *   gives a line saying nothing in the repo needs a fix and to run the
- *   request again once the cause has passed; fix_cause or no value gives
- *   the fix-the-cause line. A blocked wave says run_again only when every
- *   blocked worker does. A first block longer than maxBlockedLeadLength()
- *   code points has as its compact form the cutAtBoundary prefix of at
- *   most those code points, so it never cuts mid-word, and the lead of an
- *   open question stop is fixed and short, so the fit keeps the next-step
- *   line in every tier and finish never throws.
+ *   the repo and passes with no change, fix_cause otherwise.
+ *   finishDeliveryBlocked takes the next action of the step that stopped.
+ *   One rule covers every step: a null result from any agent() call, an
+ *   agent failure, ends the run blocked with the describeNoResult sentence
+ *   in its first block and nextStepLine('run_again') as its second, and a
+ *   non-null unusable result keeps the fix line. run_again gives a line
+ *   saying nothing in the repo needs a fix and to run the request again
+ *   later; fix_cause or no value gives the fix line. A blocked wave says
+ *   run_again only when every blocked worker does. A first block longer
+ *   than maxBlockedLeadLength() code points has as its compact form the
+ *   cutAtBoundary prefix of at most those code points, so it never cuts
+ *   mid-word, and the lead of an open question stop is fixed and short, so
+ *   the fit keeps the Next line in every tier and finish never throws.
  *   nextActionLine() names the next action in one line: run the request
  *   again with the answers in it. When the run made commits, it names the
- *   branch, cut by cutExcerpt, and says the new run plans what is left
+ *   encoded branch, which plan-schema.json bounds by maxLength 200 and the
+ *   line shows whole, and says the new run plans what is left
  *   from the commits already on it (issue 434). It never offers a pull
  *   request from commits a gate did not hold on (issue 444).
  *   Only finishDeliveryComplete, with pr, ends complete, so complete
@@ -121,31 +129,36 @@
  *   non-blank stderr lines, and only a blank or missing stderr says it
  *   gave no reason (describeRelayBlocker). A planner, worker, gate edit or
  *   validation blocker goes through describeReason, and each dirty path a
- *   commit relay names, the blocker and the excerpt of a review stop go
- *   through quoteDiagnostic: each made one line and cut at a sentence or
- *   word boundary to maxExcerptLength() code points first, or to
- *   maxReasonLength() through describeReason, with the cut mark after a
- *   cut quote. Branch names, step ids,
- *   reversible effect summaries and the other review values go through
- *   encodeUntrustedText, and a scheduling problem through
+ *   commit relay names goes through quoteDiagnostic: each made one line and
+ *   cut at a sentence or word boundary to maxExcerptLength() code points
+ *   first, or to maxReasonLength() through describeReason, with the cut
+ *   mark after a cut quote. The blocker of a review stop goes through
+ *   quoteDiagnostic with a limit equal to its maxLength 300, so it is made
+ *   one line and never cut. Branch names, step ids, reversible effect
+ *   summaries and the other review values, the excerpt of a review stop
+ *   among them, go through encodeUntrustedText whole, and a scheduling
+ *   problem through
  *   toPrintableAscii. JSON.stringify is left only in throw messages, in
  *   questionKey and in the acceptResolution comparison. Planner prose
  *   written for the user is not encoded: the brief fields and verbatim
  *   text lib/brief.js renders, which include an irreversible effect's
- *   text, and the plan digest in a plan acceptance detail block, show as
+ *   text, and digest.change in the planning pause lead, show as
  *   written. That
  *   is the residual ADR-0037 records (Risks, step text in a blocked
  *   message, (b)).
- *   A local review question names its finding by the first 8 code points
- *   of its finding_id, in a short code-built problem. Its recommendation is
- *   option A, weak, pointing at the reviewer recommendation when the review
- *   gives one, else none, and its ask reason comes from decide(). Its
- *   detail block (buildReviewDetailBlock) shows the reviewer's question or
- *   rejection reason, its recommendation, and up to 5
- *   open findings, each its short id, severity, summary and recommendation,
- *   every value encoded, then one line counting the rest (issue 441). The
- *   rerun review's user_answer.question is the questions block and the
- *   detail block, the text the user saw.
+ *   A local review question is the reviewer's own: the review returns
+ *   finding_id and user_question, and the pause leads with one line, 'Local
+ *   review on commit', the head, the finding's first 8 code points and the
+ *   encoded found, then shows that question, the encoded ask, the
+ *   reviewer's 2 to 4 options with encoded summaries and its recommendation
+ *   and strength with the encoded why. No option and no strength comes from
+ *   code (issue 460), and its ask reason comes from decide(). The rerun
+ *   review's user_answer.question is that lead and the question, the text
+ *   the user saw. A review stop is one line naming the exit and its cause,
+ *   the head, the iterations and the open finding count, and at most one
+ *   detail line built in code: the count of conflicting findings, the whole
+ *   encoded excerpt under a line naming the short finding id and the
+ *   category, or the blocker.
  *
  * Invariants
  *   contractRows() in contract.js is the executable home of the step
@@ -330,11 +343,11 @@ function createRunState(launch) {
 async function runDeliveryPass(run, replan) {
   const checked = await runFactsStep(run);
   if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked(checked.problem, run) };
+    return { result: finishDeliveryBlocked(checked.problem, run, checked.nextAction) };
   }
   const scoped = await runScopeStep(run, checked.facts);
   if (scoped.problem !== undefined) {
-    return { result: finishDeliveryBlocked(scoped.problem, run) };
+    return { result: finishDeliveryBlocked(scoped.problem, run, scoped.nextAction) };
   }
   const planned = await runPlanningPass(run, checked.facts, scoped.scope, replan);
   if (planned.result !== undefined) {
@@ -342,7 +355,7 @@ async function runDeliveryPass(run, replan) {
   }
   const branched = await runBranchStep(run, planned.plan, planned.freshness);
   if (branched.problem !== undefined) {
-    return { result: finishDeliveryBlocked(branched.problem, run) };
+    return { result: finishDeliveryBlocked(branched.problem, run, branched.nextAction) };
   }
   if (needsBranchReplan(branched.values, checked.facts, planned.plan)) {
     return requestBranchReplan(run);

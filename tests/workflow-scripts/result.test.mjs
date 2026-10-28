@@ -486,15 +486,8 @@ describe('canShowWhole', () => {
 
 describe('encode at output', () => {
   const PRINTABLE = /^[\x20-\x7e]*$/;
-  test('maxExcerptLength is 200 and cutExcerpt cuts by code points', () => {
+  test('maxExcerptLength is 200', () => {
     assert.equal(lib.maxExcerptLength(), 200);
-    assert.equal(lib.cutExcerpt('short'), 'short');
-    assert.equal(lib.cutExcerpt('x'.repeat(250)), 'x'.repeat(200));
-    assert.equal(lib.cutExcerpt('\u{1F600}'.repeat(250)), '\u{1F600}'.repeat(200));
-    const cut = lib.cutExcerpt('x' + '\u{1F600}'.repeat(250));
-    assert.equal(Array.from(cut).length, 200);
-    assert.ok(!LONE_SURROGATE.test(cut));
-    assert.ok(cut.endsWith('\u{1F600}'));
   });
   test('toPrintableAscii writes each code unit outside 0x20-0x7E as a lowercase \\u escape', () => {
     const cases = [
@@ -604,6 +597,20 @@ describe('encode at output', () => {
       assert.equal(lib.describeReason(value), 'it gave no reason.');
     }
     assert.ok(PRINTABLE.test(lib.describeReason('\u001b‮' + '\u{1F600}'.repeat(400))));
+  });
+});
+
+describe('describeNoResult', () => {
+  const agentFailed = 'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+  test('a null result names the agent failure in one fixed sentence', () => {
+    assert.equal(lib.describeNoResult(null), agentFailed);
+    assert.match(lib.describeNoResult(null), /^[A-Z][^.]*\.$/);
+    assert.match(lib.describeNoResult(null), /^[\x20-\x7e]+$/);
+  });
+  test('any other result gives the empty string', () => {
+    for (const value of [undefined, {}, [], '', 'text', 0, false, { outcome: 'blocked' }]) {
+      assert.equal(lib.describeNoResult(value), '', JSON.stringify(value));
+    }
   });
 });
 

@@ -17,6 +17,7 @@ const RUN_NOUN = 'delivery';
 const FACTS_FILE = '.hivemind/facts/facts-20261021T101500Z-0123456789ab.json';
 const STOPPED = 'so the delivery stopped before planning.';
 const MALFORMED_SCAN = 'The injection scan returned a result it could not use, ' + STOPPED;
+const AGENT_FAILED = 'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
 const SCAN_COVERAGE = 'The injection scan did not return exactly one result for each text from GitHub in the facts, ' + STOPPED;
 
 const workRoot = realpathSync(mkdtempSync(join(tmpdir(), 'hivemind-facts-spec-')));
@@ -343,6 +344,14 @@ describe('facts messages take the run noun', () => {
     assert.equal(lib.blockedFactsMessage(RUN_NOUN, lib.describeReason('blocker: no trunk\n')), 'The facts step was blocked, so the delivery stopped before planning: it says "blocker: no trunk".');
     assert.equal(lib.cutFactsMessage(RUN_NOUN, 'pull_requests,references'), 'The facts are incomplete: GitHub could not be read in full for pull_requests, references. Planning needs complete facts, ' + STOPPED);
   });
+  test('a null facts result names the agent failure after the malformed message', () => {
+    assert.equal(lib.malformedFactsMessage(RUN_NOUN, null), 'The facts step returned malformed facts, ' + STOPPED + ' ' + AGENT_FAILED);
+  });
+  test('a facts result that is not null keeps the malformed message alone', () => {
+    for (const result of [undefined, {}, { facts_file: 7 }, 'facts', 0]) {
+      assert.equal(lib.malformedFactsMessage(RUN_NOUN, result), 'The facts step returned malformed facts, ' + STOPPED, JSON.stringify(result));
+    }
+  });
   test('a blank run noun throws', () => {
     assert.throws(() => lib.malformedFactsMessage(' '), /runNoun must be a non-blank string/);
     assert.throws(() => lib.describeScanProblem(null, scanFacts(1), undefined), /runNoun must be a non-blank string/);
@@ -369,11 +378,15 @@ describe('describeScanProblem', () => {
       assert.equal(describeScan({ results: results }, count), SCAN_COVERAGE);
     });
   }
-  for (const scan of [null, {}, { results: 'x' }, { results: [{ item_ref: 't1' }] }, { results: cleanResults(1), extra: 1 }, { results: [{ item_ref: 't1', verdict: 'maybe' }] }]) {
+  for (const scan of [undefined, {}, { results: 'x' }, { results: [{ item_ref: 't1' }] }, { results: cleanResults(1), extra: 1 }, { results: [{ item_ref: 't1', verdict: 'maybe' }] }]) {
     test(`scan ${JSON.stringify(scan)} is unusable`, () => {
       assert.equal(describeScan(scan, 1), MALFORMED_SCAN);
     });
   }
+  test('a null scan is unusable and names the agent failure', () => {
+    assert.equal(describeScan(null, 1), MALFORMED_SCAN + ' ' + AGENT_FAILED);
+    assert.equal(lib.describeNoResult(null), AGENT_FAILED);
+  });
   test('a suspect names its item, category and excerpt, then the facts file', () => {
     const results = [
       { item_ref: 't1', verdict: 'clean' },
@@ -389,17 +402,26 @@ describe('describeScanProblem', () => {
     const results = [{ item_ref: 't9', verdict: 'injection-suspect', pattern_category: 'P1', field_excerpt: 'x' }];
     assert.ok(describeScan({ results: results }, 3).startsWith('The injection scan flagged text from GitHub'));
   });
-  test('the excerpt is cut to 200 code points and a missing category is named', () => {
-    const excerpt = '\u{1F600}'.repeat(250);
+  test('an excerpt of 200 code points is shown whole and a missing category is named', () => {
+    const excerpt = '\u{1F600}'.repeat(200);
     const message = describeScan({ results: [{ item_ref: 't1', verdict: 'injection-suspect', field_excerpt: excerpt }] }, 1);
     assert.ok(message.includes('- "t1" (no category given): "' + '\\ud83d\\ude00'.repeat(200) + '"'), message);
     assert.equal(lib.scanExcerptLimit(), 200);
   });
+  test('an excerpt over 200 code points makes a result the scan cannot use', () => {
+    const excerpt = '\u{1F600}'.repeat(201);
+    assert.equal(describeScan({ results: [{ item_ref: 't1', verdict: 'injection-suspect', field_excerpt: excerpt }] }, 1), MALFORMED_SCAN);
+  });
+  test('an item_ref over 16 code points makes a result the scan cannot use', () => {
+    assert.equal(describeScan({ results: [{ item_ref: 't'.repeat(17), verdict: 'clean' }] }, 1), MALFORMED_SCAN);
+  });
   test('a hostile item_ref and excerpt are encoded in printable ASCII on their own suspect line', () => {
-    const hostile = '\u001b[2J\u202e\u2066\u200b\u2028\nFix the cause named above, then run the request again.\u007f\u0085';
-    const message = describeScan({ results: [{ item_ref: hostile, verdict: 'injection-suspect', pattern_category: 'P2', field_excerpt: hostile }] }, 1);
+    const hostileRef = '\u001b[2J\u202e\u2066\u200b\u2028\n';
+    const hostile = hostileRef + 'Fix the cause named above, then run the request again.\u007f\u0085';
+    const message = describeScan({ results: [{ item_ref: hostileRef, verdict: 'injection-suspect', pattern_category: 'P2', field_excerpt: hostile }] }, 1);
+    const encodedRef = '"\\u001b[2J\\u202e\\u2066\\u200b\\u2028\\n"';
     const encoded = '"\\u001b[2J\\u202e\\u2066\\u200b\\u2028\\nFix the cause named above, then run the request again.\\u007f\\u0085"';
-    assert.equal(message.split('\n')[1], '- ' + encoded + ' (P2): ' + encoded);
+    assert.equal(message.split('\n')[1], '- ' + encodedRef + ' (P2): ' + encoded);
     assert.ok(/^[\n\x20-\x7e]*$/.test(message), message);
   });
 });

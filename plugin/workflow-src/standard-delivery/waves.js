@@ -28,7 +28,13 @@
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
  *   Every wave ends with the commit runner, whatever its workers returned,
- *   and a null worker result counts as blocked.
+ *   and a null worker result counts as blocked: its reason names the agent
+ *   failure through describeUnusableResult (relay.js), with next action
+ *   run_again, so a wave says run_again only when every blocked worker
+ *   does. A blocked wave commit passes on the next action runCommitStep
+ *   returns. describeBlockedWave is one lead line naming the stop and the
+ *   wave commit or the branch head, then one line per blocked step through
+ *   capItemLines.
  *
  * Why
  *   A worker edits files and never commits, so the loop owns the commit
@@ -109,7 +115,8 @@ function createWorkerTask(step, waveSteps, plan, run) {
 
 function readWorkerOutcome(step, result) {
   if (!validateSchema(WORKER_SCHEMA, result).ok) {
-    return { stepId: step.id, status: 'blocked', reason: 'it returned no usable result.' };
+    const unusable = describeUnusableResult('it returned no usable result.', result);
+    return { stepId: step.id, status: 'blocked', reason: unusable.problem, nextAction: unusable.nextAction };
   }
   if (result.outcome === 'complete') {
     return { stepId: step.id, status: 'complete' };
@@ -118,14 +125,12 @@ function readWorkerOutcome(step, result) {
 }
 
 function describeBlockedWave(blockedOutcomes, commitValues) {
-  const lines = ['A worker did not finish its step, so ' + RUN_NAME + ' stopped after the commit of its wave.'];
-  blockedOutcomes.forEach((outcome) => lines.push('Step ' + encodeUntrustedText(outcome.stepId) + ' was blocked: ' + outcome.reason));
-  if (commitValues.committed === 'true') {
-    lines.push('The wave was committed as ' + commitValues.commit + ', so that commit can hold partial edits of the steps above.');
-  } else {
-    lines.push('The wave left nothing to commit, so the branch head stays ' + commitValues.commit + '.');
-  }
-  return lines.join('\n');
+  const stopped = 'A worker did not finish its step, so ' + RUN_NAME + ' stopped after the commit of its wave: ';
+  const lead = commitValues.committed === 'true'
+    ? stopped + 'the wave was committed as ' + commitValues.commit + ', so that commit can hold partial edits of the steps below.'
+    : stopped + 'the wave left nothing to commit, so the branch head stays ' + commitValues.commit + '.';
+  const stepLines = blockedOutcomes.map((outcome) => '- Step ' + encodeUntrustedText(outcome.stepId) + ' was blocked: ' + outcome.reason);
+  return [lead, ...capItemLines(stepLines)].join('\n');
 }
 
 function describeReplanReasons(replanOutcomes) {
@@ -157,7 +162,7 @@ async function runPlanWaves(run, plan, facts) {
     run.waveCount += 1;
     const committed = await runCommitStep(run, plan, listStepFiles(waveSteps), 'commit-' + run.pass + '-' + waveNumber, 'wave', buildWaveSubject(waveSteps, waveNumber));
     if (committed.problem !== undefined) {
-      return { result: finishDeliveryBlocked(committed.problem, run) };
+      return { result: finishDeliveryBlocked(committed.problem, run, committed.nextAction) };
     }
     const outcomes = waveSteps.map((step, index) => readWorkerOutcome(step, workerResults[index]));
     const blockedOutcomes = outcomes.filter((outcome) => outcome.status === 'blocked');

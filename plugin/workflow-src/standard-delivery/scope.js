@@ -14,12 +14,12 @@
  *   PLANNER_AGENT, SCOPE_MODEL and SCOPE_SCHEMA from main.js.
  *
  * Outputs
- *   runScopeStep(run, facts, round)  {scope} or {problem}. The scope
- *                             holds only the documents and paths entries
- *                             whose path passes isRepositoryPath, after a
- *                             path under the checkout root is made relative
- *                             to it (toRepositoryRelativePath), and every
- *                             limit.
+ *   runScopeStep(run, facts, round)  {scope} or {problem, nextAction}.
+ *                             The scope holds only the documents and paths
+ *                             entries whose path passes isRepositoryPath,
+ *                             after a path under the checkout root is made
+ *                             relative to it (toRepositoryRelativePath),
+ *                             and every limit.
  *   The step, as meta.js names it:
  *   Scope   hivemind:cerebrate in Scope Mode, on SCOPE_MODEL at effort
  *           high, returns the path and start line of each section of the
@@ -37,7 +37,10 @@
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
  *   The scope result is checked before any field is read: a result that
- *   fails SCOPE_SCHEMA stops the run before planning. A path, the field
+ *   fails SCOPE_SCHEMA stops the run before planning, through
+ *   describeUnusableResult (relay.js): a null result, an agent failure,
+ *   adds the describeNoResult sentence and next action run_again, and any
+ *   other unusable result keeps the fix line. A path, the field
  *   marked with repositoryPathMark(), that starts with the facts root line
  *   and a slash is first cut to the rest after that slash; a root line of
  *   none, or no root line, converts nothing. An entry whose path then fails
@@ -141,7 +144,7 @@ function scopeOptions(pass, round) {
 
 function describeScopeProblem(scope) {
   const isUsable = validateSchema(SCOPE_SCHEMA, scope).ok;
-  return isUsable ? undefined : 'The scope step returned a result it could not use, so ' + RUN_NAME + ' stopped before planning.';
+  return isUsable ? undefined : describeUnusableResult('The scope step returned a result it could not use, so ' + RUN_NAME + ' stopped before planning.', scope);
 }
 
 function toRepositoryRelativePath(path, root) {
@@ -173,6 +176,6 @@ function keepRepositoryPathEntries(scope, root) {
 async function runScopeStep(run, facts, round) {
   phase('Scope');
   const scope = await agent(buildScopePrompt(run.request, facts, run.answerLog), scopeOptions(run.pass, round));
-  const problem = describeScopeProblem(scope);
-  return problem === undefined ? { scope: keepRepositoryPathEntries(scope, facts.root) } : { problem: problem };
+  const unusable = describeScopeProblem(scope);
+  return unusable === undefined ? { scope: keepRepositoryPathEntries(scope, facts.root) } : unusable;
 }

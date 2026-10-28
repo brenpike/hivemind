@@ -29,7 +29,7 @@
  *     resumeArgs  plain JSON object.
  *   noticeLength(value)
  *     value       any JSON value.
- *   cutExcerpt(text), toPrintableAscii(text)
+ *   toPrintableAscii(text)
  *     text        a string.
  *   cutAtBoundary(text, limit)
  *     text        a string.
@@ -41,6 +41,8 @@
  *                 stderr line or path, as a step returned it.
  *     limit       optional positive integer, the most code points to quote.
  *                 maxExcerptLength() when absent.
+ *   describeNoResult(result)
+ *     result      any value. What one agent() call of a step returned.
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
@@ -58,8 +60,6 @@
  *   canCarry      true when a pause result with resumeArgs and an empty
  *                 message takes at most half of noticeBudget().
  *   maxExcerptLength  200, the code points of a quoted excerpt.
- *   cutExcerpt    the first maxExcerptLength() code points of text, so a
- *                 cut never splits a surrogate pair.
  *   maxReasonLength  600, the code points of a quoted reason.
  *   cutAtBoundary text unchanged when it has at most limit code points.
  *                 Otherwise the longest prefix of at most limit code points
@@ -81,6 +81,10 @@
  *   describeReason  'it says ' + quoteDiagnostic(text, maxReasonLength())
  *                 + '.', or 'it gave no reason.' when that quote is
  *                 undefined. A reason is quoted whole up to 600 code points.
+ *   describeNoResult  for a null result, one fixed sentence: the step's
+ *                 agent failed before it returned a result, as an agent API
+ *                 error such as an expired login, a rate limit or a network
+ *                 failure does. Otherwise the empty string.
  *
  * Contract the overlord relays
  *   The relay and resume rule has one home,
@@ -148,6 +152,9 @@
  *   digest and the blocker of each step result, so a message is short
  *   before it is fitted (issue 445). The fit below stays the backstop for
  *   any long text, such as the analysis-only report.
+ *   A null result is an agent failure: agent() returns null on an agent API
+ *   error, so describeNoResult names that failure and never the step's
+ *   output, which does not exist (issue 460).
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
@@ -156,6 +163,10 @@
  *   notice whole, so the overlord never needs the output file. A whole
  *   block carries text the user must read in full to answer, so the fit
  *   keeps it by its key, not by a rule in a prompt.
+ *   A null result told the user a step returned output it could not use,
+ *   which sent them to look for a cause in the repo. One sentence that
+ *   names the agent failure lets a message say what really happened
+ *   (issue 460).
  */
 
 function resultFields() {
@@ -208,10 +219,6 @@ function noticeLength(value) {
 
 function maxExcerptLength() {
   return 200;
-}
-
-function cutExcerpt(text) {
-  return Array.from(text).slice(0, maxExcerptLength()).join('');
 }
 
 function maxReasonLength() {
@@ -283,6 +290,13 @@ function quoteDiagnostic(text, limit = maxExcerptLength()) {
 function describeReason(text) {
   const quoted = quoteDiagnostic(text, maxReasonLength());
   return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
+}
+
+function describeNoResult(result) {
+  if (result !== null) {
+    return '';
+  }
+  return 'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
 }
 
 function canCarry(resumeArgs) {

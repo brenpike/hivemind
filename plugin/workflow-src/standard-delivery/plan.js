@@ -2,8 +2,9 @@
  * standard-delivery plan.js: the planning pass of the standard-delivery
  * workflow. It holds the plan result and revise schemas, the path checks
  * of plan values, the plan and revise prompts, the plan check, the
- * outside-limit check and the resolution of every decision of a planning
- * pass. Its code-built briefs live in briefs.js.
+ * planning pause lead and the resolution of every decision of a planning
+ * pass. Its code-built briefs and the outside-limit check live in
+ * briefs.js.
  *
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
@@ -35,8 +36,7 @@
  *   Plan    hivemind:cerebrate returns a plan result: PLAN_SCHEMA under
  *           plan, with outcome, questions and blocker.
  *   Revise  the planner revises the plan with the user reply and names, in
- *           settled, the label of each shown question or decision made for
- *           you the reply settles.
+ *           settled, the label of each shown question the reply settles.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -53,10 +53,11 @@
  *   saw and no hand-picked subset of brief or plan fields (issue 433,
  *   review findings 7578f16f and 0c804e49). The scope is the pass for a
  *   planner question, the pass and the whole plan for both plan
- *   acceptances, and 'run' for trunk_stale and an irreversible effect,
- *   whose rendered text holds the trunk facts, or the step id and exact
- *   summary, so a changed irreversible text is a new question the user must
- *   approve word for word. A tail decision has no scope and no key. A plan
+ *   acceptances, 'run' for trunk_stale, whose rendered text holds the trunk
+ *   facts, and 'run' with the step id for an irreversible effect, whose
+ *   rendered text holds the exact summary, so a changed irreversible text
+ *   is a new question the user must approve word for word. A tail decision
+ *   has no scope and no key. A plan
  *   acceptance ask waits while any other ask of its round is open, so the
  *   user accepts the plan that holds no open question. When a reply settles
  *   the shown acceptance, the plan result that was shown is the one that
@@ -64,12 +65,13 @@
  *   does not ask again (issue 433). The residual: a planner question raised
  *   again with other rendered text, a changed recommendation too, is a new
  *   question, asked again in the next pause. The planner's revise pass
- *   reads the reply. The revise result names in settled, by label like Q1
- *   or D1, the shown questions and decisions the reply settled: only the
- *   keys of those questions count as answered and are not asked again, a
- *   D label keys nothing, and every other question resolves again and goes
- *   in the next pause. Which shown questions a reply settles is the planner's
- *   judgment, as its gate flags are (ADR-0037 decision 3). The impact is
+ *   reads the reply. The revise result names in settled, by label like Q1,
+ *   the shown questions the reply settled: only the keys of those questions
+ *   count as answered and are not asked again, and every other question
+ *   resolves again and goes in the next pause. A pause shows no decision
+ *   made for you, so settled holds Q labels only. Which shown questions a
+ *   reply settles is the planner's judgment, as its gate flags are
+ *   (ADR-0037 decision 3). The impact is
  *   bounded: a question the planner does not name is asked again, the
  *   settled enum allows only the labels shown, and nothing runs while a
  *   question is open. Rejected: a free-text reply has no code parse, and a
@@ -91,6 +93,10 @@
  *   (ADR-0037, Amendment 2026-10-25). isGitIdentifier stays on
  *   artifact_files for the git show splice in the bump prompt, since the
  *   path rule allows spaces, shell characters and a leading '-'.
+ *   A null plan, revise or rescope result, an agent failure, adds the
+ *   describeNoResult sentence to its problem through describeUnusableResult
+ *   (relay.js), so it ends blocked with next action run_again; any other
+ *   unusable result keeps the fix line.
  *   Each validation_commands entry is one command line: describePlanProblem
  *   refuses a blank entry, or one that holds a line break or another
  *   control character, naming the reason, before the branch step.
@@ -102,6 +108,11 @@
  *   does not pause, and finishes blocked naming the question kind. An
  *   irreversible effect whose text changed, and a planner question that
  *   renders other text, are new questions and pause again.
+ *   A planning pause leads with describePlanLine(plan, outsidePaths), one
+ *   line: the encoded branch, the step count, the distinct file count and
+ *   digest.change through renderText. The answer log question and the
+ *   revise prompt's questions block hold that lead and the questions, the
+ *   text the user saw.
  *   An irreversible effect is asked as an exact entry, so the pause keeps
  *   its exact text whole in every fit tier (lib/result.js whole blocks): the
  *   user never answers an effect question without its verbatim text.
@@ -122,14 +133,15 @@
  *   never takes an open question as settled (issue 472). With an empty log,
  *   the plan and first revise prompts are the prompts of a run with no
  *   answers, so a resume replays them from cache.
- *   Outside-limit ask: the limit check and the detail line read every plan
+ *   Outside-limit ask: the limit check and the pause lead read every plan
  *   path through the mark walk (listPlanPaths): the version files and step
  *   files the bump and wave commits take. When scope.limits is not empty, a
  *   plan path that neither equals a limit nor sits under limit + '/' makes
  *   the plan or remediation plan acceptance brief recommendation strength
  *   none, so decide() asks it no_recommendation at every level. Its problem
- *   names their count when it fits, and the detail block lists up to 5 of
- *   them, then the count of the rest. Empty limits leave the brief as it
+ *   names their count when it fits, and the pause lead of a round that shows
+ *   the acceptance names up to maxListedItems() of them, each encoded whole,
+ *   then the count of the rest. Empty limits leave the brief as it
  *   was. The limits come only from the scope step, so a later pass asks a
  *   file outside them again. Validation fix round and local review edits are
  *   not plan paths and are outside the limits (ADR-0037, finding 2ecc5af1).
@@ -173,12 +185,12 @@ function buildPlanResultSchema(planSchema, briefSchema) {
   return buildTaggedSchema(buildPlanResultSpec(planSchema, briefSchema));
 }
 
-function buildReviseResultSchema(shownAsks, shownTaken) {
+function buildReviseResultSchema(shownAsks) {
   const spec = buildPlanResultSpec(PLAN_SCHEMA, BRIEF_SCHEMA);
   spec.properties.settled = {
     type: 'array',
-    description: 'The label, like Q1 or D1, of each shown question or decision made for you the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
-    items: { type: 'string', enum: listShownLabels(shownAsks, shownTaken) }
+    description: 'The label, like Q1, of each shown question the reply settles. List a question of the workflow itself (plan acceptance, trunk, effect outside the repo) only when the reply clearly lets the run go on with it as shown. A question left out is asked again.',
+    items: { type: 'string', enum: listShownLabels(shownAsks) }
   };
   spec.required.push('settled');
   return buildTaggedSchema(spec);
@@ -236,7 +248,7 @@ function listPlanPaths(plan) {
 }
 
 function settledAnswersSentence(replyHome) {
-  return dataBlocksSentence(replyHome) + ' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
+  return dataBlocksSentence(replyHome) + ' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
 }
 
 function buildPlanPrompt(request, facts, scope, replan, answerLog) {
@@ -301,7 +313,7 @@ function describeValidationCommandProblem(command) {
 
 function describePlanProblem(planResult, resultSchema, facts, trunk) {
   if (!isPlainObject(planResult)) {
-    return 'The planner returned no result, so ' + RUN_NAME + ' stopped.';
+    return appendSentence('The planner returned no result, so ' + RUN_NAME + ' stopped.', describeNoResult(planResult));
   }
   if (!validateSchema(resultSchema, planResult).ok) {
     return 'The planner returned a plan that does not fit the plan schema, so ' + RUN_NAME + ' stopped.';
@@ -341,73 +353,35 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
 }
 
 /**
- * Returns the key a question counts as answered under: its kind and its
- * content, which resolveDecision builds from the call site scope and the
- * question as renderQuestions shows it alone. A question the user saw
- * settled is not asked again after a revise that shows it the same way
- * (issue 433).
+ * Returns the key a question counts as answered under: its kind, the call
+ * site scope and the ask as renderQuestions shows it alone. A question the
+ * user saw settled is not asked again after a revise that shows it the
+ * same way (issue 433).
  */
-function questionKey(kind, content) {
-  return JSON.stringify([kind, content]);
+function questionKey(kind, scope, ask) {
+  return JSON.stringify([kind, scope, renderQuestions([ask])]);
 }
 
 function describeCount(count, noun) {
   return count + ' ' + noun + (count === 1 ? '' : 's');
 }
 
-function toOneLine(text) {
-  return text.trim().split(/\s*[\r\n]+\s*/).join(' ');
-}
-
-function listShownPaths(files) {
-  const shownPaths = files.slice(0, 5).map((file) => encodeUntrustedText(cutExcerpt(file)));
-  const restCount = files.length - shownPaths.length;
-  return joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and');
-}
-
-function buildPlanDetailBlock(plan, outsidePaths) {
-  const files = listPlanPaths(plan);
-  const lines = [
-    'What the plan addresses: ' + toOneLine(plan.digest.problem),
-    'What it changes: ' + toOneLine(plan.digest.change),
-    'It has ' + describeCount(plan.steps.length, 'step') + ' and touches ' + describeCount(files.length, 'file') + ' on branch ' + encodeUntrustedText(cutExcerpt(plan.branch)) + ': ' + listShownPaths(files) + '.'
-  ];
-  if (outsidePaths.length > 0) {
-    lines.push('Outside the limits you set: ' + listShownPaths(outsidePaths) + '.');
-  }
-  return { text: lines.join('\n') };
-}
-
 /**
- * Returns the plan paths (listPlanPaths) outside every limit of the scope,
- * or [] when the scope sets no limit. A path is inside a limit when it
- * equals the limit or sits under limit + '/'. A limit that fails
- * isRepositoryPath matches no path.
+ * Returns the one-line lead of a planning pause: the encoded branch, the
+ * step count, the distinct plan path count and digest.change through
+ * renderText. When outsidePaths is not empty, one sentence after it names
+ * up to maxListedItems() of them, each encoded whole, then the count of
+ * the rest.
  */
-function listOutsidePaths(plan, scope) {
-  if (scope.limits.length === 0) {
-    return [];
-  }
-  const limits = scope.limits.filter((limit) => isRepositoryPath(limit));
-  const isInsideLimits = (file) => limits.some((limit) => file === limit || file.startsWith(limit + '/'));
-  return listPlanPaths(plan).filter((file) => !isInsideLimits(file));
-}
-
-function markOutsideLimits(brief, outsidePaths) {
+function describePlanLine(plan, outsidePaths) {
+  const fileCount = listPlanPaths(plan).length;
+  const lead = 'The plan for branch ' + encodeUntrustedText(plan.branch) + ' has ' + describeCount(plan.steps.length, 'step') + ' over ' + describeCount(fileCount, 'file') + ': ' + renderText(plan.digest.change);
   if (outsidePaths.length === 0) {
-    return brief;
+    return lead;
   }
-  const problem = brief.problem + ' It changes ' + describeCount(outsidePaths.length, 'file') + ' outside the limits you set.';
-  /*
-   * INVARIANT: the problem names the count only when it fits the brief
-   * problem maxLength, so the brief stays valid with every remediation flag
-   * set. The detail block of the pause names the outside paths and their
-   * count in every case.
-   */
-  return Object.assign(brief, {
-    problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem,
-    recommendation: { ...brief.recommendation, strength: 'none', why: 'Only you can say if the plan may change files outside the limits.' }
-  });
+  const shownPaths = outsidePaths.slice(0, maxListedItems()).map((file) => encodeUntrustedText(file));
+  const restCount = outsidePaths.length - shownPaths.length;
+  return appendSentence(lead, 'Outside the limits you set: ' + joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and') + '.');
 }
 
 /**
@@ -430,7 +404,7 @@ function resolveDecision(kind, brief, scope, run, resolution) {
     ask.exact = true;
   }
   if (scope !== undefined) {
-    ask.key = questionKey(kind, [scope, renderQuestions([ask], [])]);
+    ask.key = questionKey(kind, scope, ask);
     if (run.answeredKeys.has(ask.key)) {
       return 'answered';
     }
@@ -459,11 +433,11 @@ function resolveExternalEffects(plan, run, resolution) {
        * INVARIANT: the key holds the full step id in its scope and the
        * rendered question, which shows the exact effect summary, so a
        * changed irreversible text is a new question the user must approve
-       * word for word, and two steps whose ids share the shown prefix are
-       * two questions. The shown step id is cut for the message only, never
-       * for the key.
+       * word for word, and two steps with the same summary are two
+       * questions. The message does not name the step, so no step id is
+       * cut; the step id lives only in the key.
        */
-      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(step.id, effect.summary), ['run', step.id], run, resolution);
+      resolveDecision(EXTERNAL_EFFECT_KIND, buildExternalEffectBrief(effect.summary), ['run', step.id], run, resolution);
     }
   }
 }
@@ -539,7 +513,6 @@ async function runPlanningPass(run, facts, passScope, replan) {
   let scope = passScope;
   let resultSchema = PLAN_RESULT_SCHEMA;
   let shownAsks = [];
-  let shownTaken = [];
   let shownResult;
   let shownEntry;
   const settledKinds = new Set();
@@ -548,7 +521,8 @@ async function runPlanningPass(run, facts, passScope, replan) {
   for (;;) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk);
     if (problem !== undefined) {
-      return { result: finishDeliveryBlocked(problem, run) };
+      const unusable = describeUnusableResult(problem, planResult);
+      return { result: finishDeliveryBlocked(unusable.problem, run, unusable.nextAction) };
     }
     if (shownAsks.length > 0) {
       run.answerLog.push(buildAnswerEntry(shownEntry, planResult));
@@ -558,7 +532,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
       } else {
         const rescoped = await runScopeStep(run, facts, run.answerLog.length);
         if (rescoped.problem !== undefined) {
-          return { result: finishDeliveryBlocked(rescoped.problem, run) };
+          return { result: finishDeliveryBlocked(rescoped.problem, run, rescoped.nextAction) };
         }
         scope = rescoped.scope;
       }
@@ -579,20 +553,19 @@ async function runPlanningPass(run, facts, passScope, replan) {
     if (resettled !== undefined) {
       return { result: finishDeliveryBlocked('Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', run) };
     }
-    const questions = renderQuestions(resolution.asks, resolution.taken);
     const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
-    const detail = isAcceptance ? buildPlanDetailBlock(planResult.plan, resolution.outsidePaths) : undefined;
+    const lead = describePlanLine(planResult.plan, isAcceptance ? resolution.outsidePaths : []);
     const round = run.answerLog.length + 1;
     const reply = takeNextReply(run, round);
     if (reply === undefined) {
-      return { result: pauseDelivery(resolution, questions, run, detail) };
+      return { result: pauseDelivery(resolution, run, lead) };
     }
     phase('Revise');
+    const questions = lead + '\n\n' + renderQuestions(resolution.asks);
     shownAsks = resolution.asks;
-    shownTaken = resolution.taken;
     shownResult = planResult;
-    shownEntry = { question: detail === undefined ? questions : questions + '\n\n' + detail.text, labels: listShownLabels(shownAsks, shownTaken), reply: reply };
-    resultSchema = buildReviseResultSchema(shownAsks, shownTaken);
+    shownEntry = { question: questions, labels: listShownLabels(shownAsks), reply: reply };
+    resultSchema = buildReviseResultSchema(shownAsks);
     const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: run.answerLog, plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
   }

@@ -1,23 +1,32 @@
 /*
  * standard-delivery briefs.js: the code-built decision briefs of the
  * standard-delivery workflow. It holds the plan acceptance, remediation
- * plan acceptance, trunk and effect briefs of a planning pass, and the
- * tail briefs of the gates.
+ * plan acceptance, trunk and effect briefs of a planning pass, the
+ * outside-limit check of a plan acceptance, and the tail briefs of the
+ * gates.
  *
  * Inputs
  *   plan     the plan of the plan result the pass checked, from
  *            runPlanningPass (plan.js).
  *   facts    the checked facts of the pass, from runFactsStep (relay.js).
+ *   scope    the checked scope of the pass, from runScopeStep (scope.js).
  *   values   the parsed routing values of a bump step (gates.js).
  *   head, round, staleIds and isLimit  the commit, fix round, stale gate
  *            ids and limit flag of a gate decision (gates.js).
- *   The kind constants of main.js, unshownBriefText (plan.js), and
- *   gateNames, joinNames, maxFixRounds and maxGateReruns.
+ *   The kind constants of main.js, unshownBriefText, isRepositoryPath,
+ *   listPlanPaths and describeCount (plan.js), and gateNames, joinNames,
+ *   maxFixRounds and maxGateReruns.
  *
  * Outputs
  *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan),
- *   buildTrunkStaleBrief(facts) and buildExternalEffectBrief(stepId,
- *   summary)  the briefs plan.js resolves through decide().
+ *   buildTrunkStaleBrief(facts) and buildExternalEffectBrief(summary)
+ *            the briefs plan.js resolves through decide(). The effect brief
+ *            names no step: the step id lives only in the question key.
+ *   listOutsidePaths(plan, scope)  the plan paths outside every limit of
+ *            the scope, [] when it sets none.
+ *   markOutsideLimits(brief, outsidePaths)  the acceptance brief with
+ *            recommendation strength none when a plan path is outside the
+ *            limits.
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
  *            shared shape of a tail brief, also used by review.js.
  *   buildBumpTypeBrief, buildBumpIndeterminableBrief,
@@ -101,11 +110,11 @@ function buildTrunkStaleBrief(facts) {
   };
 }
 
-function buildExternalEffectBrief(stepId, summary) {
+function buildExternalEffectBrief(summary) {
   return {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
-    problem: 'Plan step ' + encodeUntrustedText(Array.from(stepId).slice(0, 16).join('')) + ' has an effect outside the repo that cannot be undone. May the run go on to it?',
+    problem: 'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: unshownBriefText() },
     options: [
       { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false },
@@ -116,6 +125,38 @@ function buildExternalEffectBrief(stepId, summary) {
     gate: { irreversible: true, architectural: false, safety: false },
     verbatim: summary
   };
+}
+
+/**
+ * Returns the plan paths (listPlanPaths) outside every limit of the scope,
+ * or [] when the scope sets no limit. A path is inside a limit when it
+ * equals the limit or sits under limit + '/'. A limit that fails
+ * isRepositoryPath matches no path.
+ */
+function listOutsidePaths(plan, scope) {
+  if (scope.limits.length === 0) {
+    return [];
+  }
+  const limits = scope.limits.filter((limit) => isRepositoryPath(limit));
+  const isInsideLimits = (file) => limits.some((limit) => file === limit || file.startsWith(limit + '/'));
+  return listPlanPaths(plan).filter((file) => !isInsideLimits(file));
+}
+
+function markOutsideLimits(brief, outsidePaths) {
+  if (outsidePaths.length === 0) {
+    return brief;
+  }
+  const problem = brief.problem + ' It changes ' + describeCount(outsidePaths.length, 'file') + ' outside the limits you set.';
+  /*
+   * INVARIANT: the problem names the count only when it fits the brief
+   * problem maxLength, so the brief stays valid with every remediation flag
+   * set. The pause lead names the outside paths and their count in every
+   * case.
+   */
+  return Object.assign(brief, {
+    problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem,
+    recommendation: { ...brief.recommendation, strength: 'none', why: 'Only you can say if the plan may change files outside the limits.' }
+  });
 }
 
 function buildTailBrief({ kind, problem, goOn, other, strength, why }) {

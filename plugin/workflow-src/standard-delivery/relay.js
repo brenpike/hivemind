@@ -16,12 +16,25 @@
  *   main.js.
  *
  * Outputs
- *   runFactsStep(run)                {facts} or {problem}.
- *   runBranchStep(run, plan, freshness)  {values} or {problem}.
+ *   runFactsStep(run)                {facts} or {problem, nextAction}.
+ *   runBranchStep(run, plan, freshness)  {values} or {problem, nextAction}.
  *   runCommitStep(run, plan, files, label, stepName, subject)  {values}
- *                                    or {problem}. subject is the commit
- *                                    subject, commitStepTexts(stepName)
- *                                    .subject when it is not given.
+ *                                    or {problem, nextAction}. subject is
+ *                                    the commit subject,
+ *                                    commitStepTexts(stepName).subject when
+ *                                    it is not given. Every caller passes
+ *                                    nextAction to finishDeliveryBlocked.
+ *   describeUnusableResult(problem, result)  {problem, nextAction:
+ *                                    'run_again'} for a null result, with
+ *                                    the describeNoResult sentence of
+ *                                    lib/result.js after problem once,
+ *                                    else {problem} with no nextAction
+ *                                    key.
+ *   capItemLines(itemLines)          the first maxListedItems() item lines,
+ *                                    then a count of the rest.
+ *   describeCommitEnd(commitValues)  one sentence: the commit a gate step's
+ *                                    files went into, or the head when it
+ *                                    left nothing to commit.
  *   toCommitSubject(text, fallbackSubject)  text made one line and cut by
  *                                    cutAtBoundary (lib/result.js) to
  *                                    maxSubjectLength() code points, or
@@ -36,6 +49,10 @@
  *           gatherFactsRoutingSpec() and checks it with
  *           isConsistentFactsRelay (lib/facts.js).
  *   Scan    the shared scan step, when the facts count external texts.
+ *           runPassScan calls agent() itself on every pass and returns
+ *           {problem, nextAction}; on pass 1 with the prompt, options and
+ *           label scan of lib/facts.js runScanStep, byte for byte, so a
+ *           resumed run replays its cached result.
  *   Branch  a runner invokes hivemind:create-working-branch.
  *   Commit  a runner invokes hivemind:molt after every wave, and after
  *           every gate step that can change files. A commit it makes enters
@@ -60,6 +77,14 @@
  *   Every payload that crosses a step is checked against its schema or
  *   routing spec before it is read, and a failed check blocks the step that
  *   reads it (ADR-0037 invariant 4).
+ *   Agent failures (issue 460): agent() returns null on an agent API error,
+ *   so every step from the facts through the gates reads a null result
+ *   through describeUnusableResult: the problem names the step, adds the
+ *   describeNoResult sentence and carries next action run_again. A
+ *   non-null result that fails its schema or routing keeps the fix line.
+ *   Every blocked lead these steps build is one line naming the step and
+ *   its cause; a list of delivery stops or dirty paths after it goes
+ *   through capItemLines.
  *   Runner prompts carry no request text, use plain git only (never with
  *   -C, ADR-0037 decision 25), and put every branch and trunk name in their
  *   JSON inputs block only.
@@ -315,15 +340,38 @@ function deliveryStopLine(stop) {
   }
 }
 
+function maxListedItems() {
+  return 5;
+}
+
+function capItemLines(itemLines) {
+  const restCount = itemLines.length - maxListedItems();
+  return restCount > 0 ? itemLines.slice(0, maxListedItems()).concat('- and ' + restCount + ' more.') : itemLines;
+}
+
+/**
+ * Returns {problem, nextAction: 'run_again'} for a null result, the agent
+ * failure agent() reports on an agent API error, with the describeNoResult
+ * sentence after problem, once: a lib/facts.js message built with the
+ * result already ends with it. Any other result gives {problem} alone, so
+ * a result that fails its schema or routing keeps the fix line.
+ */
+function describeUnusableResult(problem, result) {
+  if (result !== null) {
+    return { problem: problem };
+  }
+  const sentence = describeNoResult(result);
+  return { problem: problem.endsWith(sentence) ? problem : appendSentence(problem, sentence), nextAction: 'run_again' };
+}
+
 function describeDeliveryStops(stops) {
-  const lines = ['The branch is not ready for delivery, so ' + RUN_NAME + ' stopped before planning:'];
-  stops.split(',').forEach((stop) => lines.push('- ' + deliveryStopLine(stop)));
-  return lines.join('\n');
+  const stopLines = stops.split(',').map((stop) => '- ' + deliveryStopLine(stop));
+  return ['The branch is not ready for delivery, so ' + RUN_NAME + ' stopped before planning:', ...capItemLines(stopLines)].join('\n');
 }
 
 function checkDeliveryFacts(relay, trunk) {
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return { problem: malformedFactsMessage(RUN_NOUN) };
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN, relay), relay);
   }
   if (relay.outcome === 'blocked') {
     return { problem: blockedFactsMessage(RUN_NOUN, describeRelayBlocker(relay.stderr, false)) };
@@ -342,15 +390,15 @@ function checkDeliveryFacts(relay, trunk) {
 }
 
 async function runPassScan(facts, run) {
-  if (run.pass === 1) {
-    return runScanStep(facts, RUN_NOUN);
-  }
   if (Number(facts.external_texts) === 0) {
     return undefined;
   }
   phase('Scan');
-  const scan = await agent(addResumeNote(buildScanPrompt(facts), run), Object.assign(scanOptions(), { label: 'scan-' + run.pass }));
-  return describeScanProblem(scan, facts, RUN_NOUN);
+  const isFirstPass = run.pass === 1;
+  const prompt = isFirstPass ? buildScanPrompt(facts) : addResumeNote(buildScanPrompt(facts), run);
+  const scan = await agent(prompt, isFirstPass ? scanOptions() : Object.assign(scanOptions(), { label: 'scan-' + run.pass }));
+  const problem = describeScanProblem(scan, facts, RUN_NOUN);
+  return problem === undefined ? undefined : describeUnusableResult(problem, scan);
 }
 
 async function runFactsStep(run) {
@@ -360,8 +408,8 @@ async function runFactsStep(run) {
   if (checked.problem !== undefined) {
     return checked;
   }
-  const scanProblem = await runPassScan(checked.facts, run);
-  return scanProblem === undefined ? checked : { problem: scanProblem };
+  const scanned = await runPassScan(checked.facts, run);
+  return scanned === undefined ? checked : scanned;
 }
 
 function buildBranchPrompt(plan, freshness, trunk) {
@@ -378,7 +426,7 @@ function buildBranchPrompt(plan, freshness, trunk) {
 function checkBranchRelay(relay, plan, freshness) {
   const stopped = 'so ' + RUN_NAME + ' stopped before any wave.';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return { problem: 'The branch step returned a result it could not use, ' + stopped };
+    return describeUnusableResult('The branch step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
     return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
@@ -471,20 +519,20 @@ function readOutsidePath(payload) {
 }
 
 function describeCommitBlocker(stderr, stepNoun) {
-  const lines = ['The commit step was blocked, so ' + RUN_NAME + ' stopped: ' + describeRelayBlocker(stderr, false)];
+  const lead = 'The commit step was blocked, so ' + RUN_NAME + ' stopped: ' + describeRelayBlocker(stderr, false);
   const outsideLines = splitStderrLines(stderr).filter((line) => line.startsWith('outside: '));
-  if (outsideLines.length > 0) {
-    lines.push('Dirty paths outside the files of ' + stepNoun + ':');
-    outsideLines.forEach((line) => lines.push('- ' + quoteOrEmpty(readOutsidePath(line.slice('outside: '.length)))));
+  if (outsideLines.length === 0) {
+    return lead;
   }
-  return lines.join('\n');
+  const pathLines = outsideLines.map((line) => '- ' + quoteOrEmpty(readOutsidePath(line.slice('outside: '.length))));
+  return [lead + ' Dirty paths outside the files of ' + stepNoun + ':', ...capItemLines(pathLines)].join('\n');
 }
 
 function checkCommitRelay(relay, plan, stepName) {
   const stepNoun = commitStepTexts(stepName).noun;
   const stopped = 'so ' + RUN_NAME + ' stopped. Check the branch for a commit of ' + stepNoun + '.';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return { problem: 'The commit step returned a result it could not use, ' + stopped };
+    return describeUnusableResult('The commit step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
     return { problem: describeCommitBlocker(relay.stderr, stepNoun) };
@@ -497,6 +545,11 @@ function checkCommitRelay(relay, plan, stepName) {
     return { problem: 'The commit step reported a branch other than the plan branch, ' + stopped };
   }
   return { values: values };
+}
+
+function describeCommitEnd(commitValues) {
+  const isCommitted = commitValues.committed === 'true';
+  return isCommitted ? 'Its files were committed as ' + commitValues.commit + ', so that commit can hold partial edits.' : 'It left nothing to commit, so the branch head stays ' + commitValues.commit + '.';
 }
 
 async function runCommitStep(run, plan, files, label, stepName, subject = commitStepTexts(stepName).subject) {

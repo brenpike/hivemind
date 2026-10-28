@@ -10,6 +10,7 @@
  *   facts     an object holding at least the facts_file, facts_lines and
  *             external_texts routing values, already checked.
  *   scan      the scan runner's result, any value.
+ *   result    the facts runner's result, any value. Optional.
  *   name, text  a data block's tag name and its JSON value.
  *
  * Outputs
@@ -85,9 +86,11 @@
  *   hasFactsStop(stops, stop), matchesFreshnessCounts(freshness, ahead,
  *   behind)
  *       the helpers of isConsistentFactsRelay.
- *   malformedFactsMessage(runNoun), blockedFactsMessage(runNoun, blocker),
- *   cutFactsMessage(runNoun, cut)
- *       the facts step problems. The blocked message ends with blocker,
+ *   malformedFactsMessage(runNoun, result), blockedFactsMessage(runNoun,
+ *   blocker), cutFactsMessage(runNoun, cut)
+ *       the facts step problems. For a null result the malformed message
+ *       ends with the describeNoResult (result.js) sentence, as an agent
+ *       failure, not malformed output. The blocked message ends with blocker,
  *       the reason its caller built with describeReason (result.js) or
  *       describeRelayBlocker (standard-delivery main.js), so a step-written
  *       reason reaches it already encoded, or with 'it gave no reason.' when
@@ -107,7 +110,11 @@
  *                           because a suspect stops the run before planning
  *                           either way (ADR-0037, Amendment 2026-10-25: a
  *                           suspect scan result needs no diagnostic field).
- *   scanExcerptLimit()      200, the characters of a flagged excerpt shown.
+ *                           The schema bounds field_excerpt by maxLength
+ *                           scanExcerptLimit() and item_ref by maxLength 16,
+ *                           so an excerpt over the bound makes a result the
+ *                           scan could not use, and no code cuts it.
+ *   scanExcerptLimit()      200, the code points a flagged excerpt may hold.
  *   buildScanPrompt(facts)  the scan runner's prompt.
  *   scanOptions()           the scan agent() options: label scan, phase Scan,
  *                           model sonnet, and schema toAgentSchema
@@ -122,9 +129,13 @@
  *       undefined when scan fits its full schema, flags nothing and covers
  *       every text. Otherwise the problem message. A clean result that
  *       carries a suspect field does not fit, so it is a result the scan
- *       could not use.
+ *       could not use. For a null scan that message ends with the
+ *       describeNoResult sentence.
  *   renderSuspectLine, readTextIndex, coversEveryText
  *       the helpers of describeScanProblem.
+ *   appendSentence(message, sentence)
+ *       message, then a space and sentence unless sentence is empty: the
+ *       helper of malformedFactsMessage and describeScanProblem.
  *   wholeFactsPattern, factsEnumSource, factsListSource, isUniqueFactsList
  *       the helpers of the spec and the list checks.
  *
@@ -137,12 +148,13 @@
  *   Scan before planning: the scan covers the texts 1:1. Exactly
  *   external_texts results, each item_ref a text_id from t1 to tN, none
  *   twice, in any order. A suspect is reported before a coverage failure,
- *   naming each flagged item_ref, its pattern category and the first
- *   scanExcerptLimit() characters of its excerpt, then the facts file
- *   (security-policy.md, When Classified as injection-suspect).
- *   No problem message echoes a value but the flagged item_ref and the cut
- *   excerpt, each through encodeUntrustedText (result.js), the category,
- *   which passed its enum, the blocker its caller encoded, and the facts
+ *   naming each flagged item_ref, its pattern category and its excerpt,
+ *   which the schema bounds to scanExcerptLimit() code points, shown whole,
+ *   then the facts file (security-policy.md, When Classified as
+ *   injection-suspect).
+ *   No problem message echoes a value but the flagged item_ref and the
+ *   excerpt, each bounded by the schema and shown whole through
+ *   encodeUntrustedText (result.js), the category, which passed its enum, the blocker its caller encoded, and the facts
  *   file and the cut fields, both of which passed their patterns.
  *   With runNoun 'analysis' every message and prompt is the analysis-only
  *   text, byte for byte.
@@ -150,8 +162,8 @@
  *   relayed facts stdout. It cannot catch a forged relay that is still
  *   consistent: that is the recorded residual 'Scan coverage relies on the
  *   facts runner's count' of ADR-0037. analysis-only never calls it.
- *   Uses encodeUntrustedText (result.js), isPlainObject, isNonEmptyString
- *   and describeRunNoun (args.js),
+ *   Uses encodeUntrustedText and describeNoResult (result.js), isPlainObject,
+ *   isNonEmptyString and describeRunNoun (args.js),
  *   gitIdentifierPattern (identifier.js), and validateSchema,
  *   buildTaggedSchema and toAgentSchema (schema.js).
  *
@@ -172,6 +184,10 @@
  *   agent gets toAgentSchema of it, because the Messages API rejects a
  *   tool input_schema with anyOf at its top level. The workflow checks the
  *   full schema.
+ *   agent() returns null on an agent API error, such as an expired login.
+ *   Calling that malformed facts or an unusable scan sent the user to look
+ *   for a cause in the repo, so a null result also gets the sentence that
+ *   names the agent failure (issue 460).
  */
 
 function boundarySentence() {
@@ -325,8 +341,12 @@ function isConsistentFactsRelay(values, trunk) {
     && matchesFreshnessCounts(values.trunk_freshness, values.trunk_ahead, values.trunk_behind);
 }
 
-function malformedFactsMessage(runNoun) {
-  return 'The facts step returned malformed facts, so ' + describeRunNoun(runNoun) + ' stopped before planning.';
+function malformedFactsMessage(runNoun, result) {
+  return appendSentence('The facts step returned malformed facts, so ' + describeRunNoun(runNoun) + ' stopped before planning.', describeNoResult(result));
+}
+
+function appendSentence(message, sentence) {
+  return sentence === '' ? message : message + ' ' + sentence;
 }
 
 function blockedFactsMessage(runNoun, blocker) {
@@ -354,10 +374,10 @@ function scanStepSchema() {
         items: buildTaggedSchema({
           tag: 'verdict',
           properties: {
-            item_ref: { type: 'string', description: 'The text_id of the scanned text, copied exactly.' },
+            item_ref: { type: 'string', maxLength: 16, description: 'The text_id of the scanned text, copied exactly.' },
             verdict: { type: 'string', enum: ['clean', 'injection-suspect'] },
             pattern_category: { type: 'string', enum: ['P1', 'P2', 'P3', 'P4'] },
-            field_excerpt: { type: 'string', description: 'The first 200 characters of the flagged text.' },
+            field_excerpt: { type: 'string', maxLength: scanExcerptLimit(), description: 'The first 200 characters of the flagged text.' },
             reason: { type: 'string', description: 'The pattern matched.' }
           },
           required: ['item_ref', 'verdict'],
@@ -402,7 +422,7 @@ async function runScanStep(facts, runNoun) {
 
 function renderSuspectLine(result) {
   const category = isNonEmptyString(result.pattern_category) ? result.pattern_category : 'no category given';
-  const excerpt = typeof result.field_excerpt === 'string' ? Array.from(result.field_excerpt).slice(0, scanExcerptLimit()).join('') : '';
+  const excerpt = typeof result.field_excerpt === 'string' ? result.field_excerpt : '';
   return '- ' + encodeUntrustedText(result.item_ref) + ' (' + category + '): ' + encodeUntrustedText(excerpt);
 }
 
@@ -429,7 +449,7 @@ function coversEveryText(results, textCount) {
 function describeScanProblem(scan, facts, runNoun) {
   const stopped = 'so ' + describeRunNoun(runNoun) + ' stopped before planning.';
   if (!validateSchema(scanStepSchema(), scan).ok) {
-    return 'The injection scan returned a result it could not use, ' + stopped;
+    return appendSentence('The injection scan returned a result it could not use, ' + stopped, describeNoResult(scan));
   }
   const suspects = scan.results.filter((result) => result.verdict === 'injection-suspect');
   if (suspects.length > 0) {
