@@ -18,11 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - The bump gate is removed. A plan step sets the version files, validation checks them through `hivemind:bump-type --version-file`, and the ADR and README notes follow (#457).
+- The pull request body and comment no longer list the run's commits, since GitHub lists them, and a blocked end names the branch and its head without a commit count (#457, PR #477 review).
 
 ### Fixed
 
 - Stops pause instead of ending blocked, and a version that is already set no longer stops a run (#457).
-- A reply to a validation, fix round, local review or pull request stop reads the branch head first, so the run never holds a gate on, or pushes, a head it did not read (#457, PR #477 review).
+- Every reply reads the branch head before a gate holds on it or the pull request pushes it, whatever the reply answered (#457, PR #477 review).
 
 ## [7.4.0] - 2026-10-28
 
