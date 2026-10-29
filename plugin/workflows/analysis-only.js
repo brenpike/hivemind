@@ -599,7 +599,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '0c45d14c3c8b3ee6';
+const BUILD_ID = 'e1b64b06ed7ee7a5';
 
 function supportedSchemaKeywords(){
 return[
@@ -1336,6 +1336,9 @@ function nextStepLine(nextAction){
 if(nextAction==='run_again'){
 return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
 }
+if(nextAction==='answer'){
+return'Next: run the request again with the answers in it.';
+}
 return'Next: fix what stopped the run, then run the request again.';
 }
 function maxBlockedLeadLength(){
@@ -1366,18 +1369,22 @@ function canShowWhole({resumeArgs,blocks}){
 const paused=buildEmptyPause('canShowWhole',resumeArgs,blocks);
 return fitMessage(blocks,roomForMessage(paused))!==null;
 }
-function finish({outcome,blocks,pr}){
+function finish({outcome,causes,blocks,pr}){
 if(outcome!=='complete'&&outcome!=='blocked'){
 throw new Error('finish: outcome must be complete or blocked, got '+JSON.stringify(outcome));
 }
-assertBlocks('finish',blocks);
+if((outcome==='blocked')!==(causes!==undefined)){
+throw new Error('finish: causes must be given exactly when outcome is blocked');
+}
+const messageBlocks=outcome==='blocked'?buildStopBlocks(causes).concat(blocks===undefined?[]:blocks):blocks;
+assertBlocks('finish',messageBlocks);
 const finished={needs_user:false,outcome:outcome};
 if(pr!==undefined){
 assertPullRequest(pr);
 finished.pr={url:pr.url,head_ref_oid:pr.head_ref_oid,created:pr.created};
 }
 finished.message='';
-finished.message=fitWholeMessage('finish',blocks,roomForMessage(finished));
+finished.message=fitWholeMessage('finish',messageBlocks,roomForMessage(finished));
 return assertWithinBudget(finished);
 }
 function buildEmptyPause(caller,resumeArgs,blocks){
@@ -1983,7 +1990,7 @@ if(Object.prototype.hasOwnProperty.call(argsObject,'resume_args')){
 return{problem:'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so '+describeRunNoun(runNoun)+' did not start.'};
 }
 if(isPlainObject(argsObject.answers)&&argsObject.build!==buildId){
-return{problem:'The plugin changed while '+describeRunNoun(runNoun)+' was paused, so nothing ran. Run the request again with your answers in it.'};
+return{problem:'The plugin changed while '+describeRunNoun(runNoun)+' was paused, so nothing ran.',nextAction:'answer'};
 }
 const trunkInput=readTrunk(argsObject,runNoun);
 if(trunkInput.problem!==undefined){
@@ -2426,7 +2433,7 @@ asks.push({brief:brief,reason:decision.reason});
 return{asks:asks,taken:taken};
 }
 function finishBlocked(causes){
-return finish({outcome:'blocked',blocks:buildStopBlocks(causes)});
+return finish({outcome:'blocked',causes:causes});
 }
 function finishComplete(report,openQuestions,taken){
 const blocks=[];
@@ -2460,7 +2467,7 @@ return finishBlocked([{problem:'No request was given, so there is nothing to ana
 }
 const launchInputs=readLaunchInputs(argsObject,RUN_NOUN,BUILD_ID);
 if(launchInputs.problem!==undefined){
-return finishBlocked([{problem:launchInputs.problem}]);
+return finishBlocked([launchInputs]);
 }
 const checked=await gatherCheckedFacts(launchInputs);
 if(checked.cause!==undefined){

@@ -617,7 +617,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'da61883c35a4f53b';
+const BUILD_ID = 'ff9b5939e1e22916';
 
 function supportedSchemaKeywords(){
 return[
@@ -1354,6 +1354,9 @@ function nextStepLine(nextAction){
 if(nextAction==='run_again'){
 return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
 }
+if(nextAction==='answer'){
+return'Next: run the request again with the answers in it.';
+}
 return'Next: fix what stopped the run, then run the request again.';
 }
 function maxBlockedLeadLength(){
@@ -1384,18 +1387,22 @@ function canShowWhole({resumeArgs,blocks}){
 const paused=buildEmptyPause('canShowWhole',resumeArgs,blocks);
 return fitMessage(blocks,roomForMessage(paused))!==null;
 }
-function finish({outcome,blocks,pr}){
+function finish({outcome,causes,blocks,pr}){
 if(outcome!=='complete'&&outcome!=='blocked'){
 throw new Error('finish: outcome must be complete or blocked, got '+JSON.stringify(outcome));
 }
-assertBlocks('finish',blocks);
+if((outcome==='blocked')!==(causes!==undefined)){
+throw new Error('finish: causes must be given exactly when outcome is blocked');
+}
+const messageBlocks=outcome==='blocked'?buildStopBlocks(causes).concat(blocks===undefined?[]:blocks):blocks;
+assertBlocks('finish',messageBlocks);
 const finished={needs_user:false,outcome:outcome};
 if(pr!==undefined){
 assertPullRequest(pr);
 finished.pr={url:pr.url,head_ref_oid:pr.head_ref_oid,created:pr.created};
 }
 finished.message='';
-finished.message=fitWholeMessage('finish',blocks,roomForMessage(finished));
+finished.message=fitWholeMessage('finish',messageBlocks,roomForMessage(finished));
 return assertWithinBudget(finished);
 }
 function buildEmptyPause(caller,resumeArgs,blocks){
@@ -2001,7 +2008,7 @@ if(Object.prototype.hasOwnProperty.call(argsObject,'resume_args')){
 return{problem:'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so '+describeRunNoun(runNoun)+' did not start.'};
 }
 if(isPlainObject(argsObject.answers)&&argsObject.build!==buildId){
-return{problem:'The plugin changed while '+describeRunNoun(runNoun)+' was paused, so nothing ran. Run the request again with your answers in it.'};
+return{problem:'The plugin changed while '+describeRunNoun(runNoun)+' was paused, so nothing ran.',nextAction:'answer'};
 }
 const trunkInput=readTrunk(argsObject,runNoun);
 if(trunkInput.problem!==undefined){
@@ -3302,13 +3309,6 @@ parts.push({id:'decisions',text:renderDecisions(taken),compact:renderDecisionsCo
 }
 return parts;
 }
-function nextActionLine(run){
-const again='Next: run the request again with the answers in it.';
-if(run.commits.length===0){
-return again;
-}
-return again+' The new run plans what is left from the commits already on branch '+encodeUntrustedText(run.branch)+'.';
-}
 function describeBranchLine(run){
 return'Branch '+encodeUntrustedText(run.branch)+' holds '+describeCount(run.commits.length,'commit')+' this run made, with head '+run.head+'.';
 }
@@ -3323,14 +3323,14 @@ blocks.push({text:renderDecisionsCompact(taken)});
 return blocks;
 }
 function finishDeliveryBlocked(causes,run,endLines=[]){
-const blocks=buildStopBlocks(causes).concat(endLines.map((line)=>({text:line})));
+const blocks=endLines.map((line)=>({text:line}));
 if(run!==undefined&&run.commits.length>0){
 blocks.push({text:describeBranchLine(run)});
 }
 if(run!==undefined){
 blocks.push(...buildRecordTailBlocks(run,run.taken));
 }
-return finish({outcome:'blocked',blocks:blocks});
+return finish({outcome:'blocked',causes:causes,blocks:blocks});
 }
 function describePullRequest(values){
 return values.created==='true'
@@ -3357,10 +3357,8 @@ blocks.push(...buildRecordTailBlocks(run,run.taken));
 return finish({outcome:'complete',blocks:blocks,pr:pr});
 }
 function finishOpenQuestions(resolution,stopReason,run){
-const lead='The delivery ran no further step, because questions are still open.';
-const blocks=[{text:lead},{text:nextActionLine(run),whole:true},{text:renderOpenQuestions(resolution.asks,stopReason)}];
-blocks.push(...buildRecordTailBlocks(run,run.taken.concat(resolution.taken)));
-return finish({outcome:'blocked',blocks:blocks});
+const cause={problem:'The delivery ran no further step, because questions are still open.',nextAction:'answer'};
+return finishDeliveryBlocked([cause],{...run,taken:run.taken.concat(resolution.taken)},[renderOpenQuestions(resolution.asks,stopReason)]);
 }
 function pauseDelivery(resolution,run,lead){
 const resumeArgs=buildResumeArgs(run.answerLog.map((entry)=>entry.reply),BUILD_ID);
@@ -4451,7 +4449,7 @@ return runPlanWaves(run,planned.plan,checked.facts);
 async function runDelivery(rawArgs){
 const launch=readDeliveryLaunch(rawArgs);
 if(launch.problem!==undefined){
-return finishDeliveryBlocked([{problem:launch.problem}],undefined);
+return finishDeliveryBlocked([launch],undefined);
 }
 const run=createRunState(launch);
 let replan;
