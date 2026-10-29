@@ -18,23 +18,22 @@
  * Outputs
  *   runFactsStep(run)                {facts} or {problem, nextAction}.
  *   runBranchStep(run, plan, freshness)  {values} or {problem, nextAction}.
- *   runCommitStep(run, plan, files, label, stepName, subject)  {values}
- *                                    or {problem, nextAction}. subject is
- *                                    the commit subject,
+ *   runCommitStep(run, plan, commit, stepCauses)  commit is {files,
+ *                                    label, stepName, subject?}, subject
  *                                    commitStepTexts(stepName).subject when
- *                                    it is not given. Every caller passes
- *                                    nextAction to finishDeliveryBlocked.
- *   describeUnusableResult(problem, result)  {problem, nextAction:
- *                                    'run_again'} for a null result, with
- *                                    the describeNoResult sentence of
- *                                    lib/result.js after problem once,
- *                                    else {problem} with no nextAction
- *                                    key.
+ *                                    not given; stepCauses is the array of
+ *                                    the step's own causes, or it throws.
+ *                                    {values} when the commit held and
+ *                                    stepCauses is empty, else {result}:
+ *                                    the blocked run end of
+ *                                    finishDeliveryBlocked over stepCauses,
+ *                                    then the commit cause when the commit
+ *                                    failed, or else the describeCommitEnd
+ *                                    end line when it committed.
  *   capItemLines(itemLines)          the first maxListedItems() item lines,
  *                                    then a count of the rest.
- *   describeCommitEnd(commitValues)  one sentence: the commit a gate step's
- *                                    files went into, or the head when it
- *                                    left nothing to commit.
+ *   describeCommitEnd(commitValues, stepName)  one sentence: the commit
+ *                                    the step's files went into.
  *   toCommitSubject(text, fallbackSubject)  text made one line and cut by
  *                                    cutAtBoundary (lib/result.js) to
  *                                    maxSubjectLength() code points, or
@@ -79,9 +78,14 @@
  *   reads it (ADR-0037 invariant 4).
  *   Agent failures (issue 460): agent() returns null on an agent API error,
  *   so every step from the facts through the gates reads a null result
- *   through describeUnusableResult: the problem names the step, adds the
- *   describeNoResult sentence and carries next action run_again. A
+ *   through describeUnusableResult (lib/result.js), the only place a null
+ *   result gets the describeNoResult sentence and next action run_again. A
  *   non-null result that fails its schema or routing keeps the fix line.
+ *   A file-changing step reads its own result before its commit and passes
+ *   its causes to runCommitStep, which ends the run itself: a failed commit
+ *   adds its cause after them, so a commit stop never hides the step's
+ *   cause, and buildStopBlocks (lib/result.js) orders them and picks the
+ *   Next line.
  *   Every blocked lead these steps build is one line naming the step and
  *   its cause; a list of delivery stops or dirty paths after it goes
  *   through capItemLines.
@@ -349,21 +353,6 @@ function capItemLines(itemLines) {
   return restCount > 0 ? itemLines.slice(0, maxListedItems()).concat('- and ' + restCount + ' more.') : itemLines;
 }
 
-/**
- * Returns {problem, nextAction: 'run_again'} for a null result, the agent
- * failure agent() reports on an agent API error, with the describeNoResult
- * sentence after problem, once: a lib/facts.js message built with the
- * result already ends with it. Any other result gives {problem} alone, so
- * a result that fails its schema or routing keeps the fix line.
- */
-function describeUnusableResult(problem, result) {
-  if (result !== null) {
-    return { problem: problem };
-  }
-  const sentence = describeNoResult(result);
-  return { problem: problem.endsWith(sentence) ? problem : appendSentence(problem, sentence), nextAction: 'run_again' };
-}
-
 function describeDeliveryStops(stops) {
   const stopLines = stops.split(',').map((stop) => '- ' + deliveryStopLine(stop));
   return ['The branch is not ready for delivery, so ' + RUN_NAME + ' stopped before planning:', ...capItemLines(stopLines)].join('\n');
@@ -371,7 +360,7 @@ function describeDeliveryStops(stops) {
 
 function checkDeliveryFacts(relay, trunk) {
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return describeUnusableResult(malformedFactsMessage(RUN_NOUN, relay), relay);
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN), relay);
   }
   if (relay.outcome === 'blocked') {
     return { problem: blockedFactsMessage(RUN_NOUN, describeRelayBlocker(relay.stderr, false)) };
@@ -454,7 +443,7 @@ function needsBranchReplan(branchValues, facts, plan) {
 
 function requestBranchReplan(run) {
   if (run.branchSwitches > 0) {
-    return { result: finishDeliveryBlocked('The branch step switched branch or commit again after a replan, so ' + RUN_NAME + ' stopped before any wave.', run) };
+    return { result: finishDeliveryBlocked([{ problem: 'The branch step switched branch or commit again after a replan, so ' + RUN_NAME + ' stopped before any wave.' }], run) };
   }
   run.branchSwitches += 1;
   return { replan: { reason: 'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.' } };
@@ -547,25 +536,33 @@ function checkCommitRelay(relay, plan, stepName) {
   return { values: values };
 }
 
-function describeCommitEnd(commitValues) {
-  const isCommitted = commitValues.committed === 'true';
-  return isCommitted ? 'Its files were committed as ' + commitValues.commit + ', so that commit can hold partial edits.' : 'It left nothing to commit, so the branch head stays ' + commitValues.commit + '.';
+function describeCommitEnd(commitValues, stepName) {
+  const noun = commitStepTexts(stepName).noun;
+  return noun.charAt(0).toUpperCase() + noun.slice(1) + ' was committed as ' + commitValues.commit + ', so that commit can hold partial edits.';
 }
 
-async function runCommitStep(run, plan, files, label, stepName, subject = commitStepTexts(stepName).subject) {
+async function runCommitStep(run, plan, commit, stepCauses) {
+  if (!Array.isArray(stepCauses)) {
+    throw new Error('runCommitStep: stepCauses must be an array');
+  }
+  const subject = commit.subject === undefined ? commitStepTexts(commit.stepName).subject : commit.subject;
   phase('Commit');
-  const relay = await agent(addResumeNote(buildCommitPrompt(files, plan, run.trunk, stepName, subject), run), runnerOptions(label, 'Commit'));
-  const checked = checkCommitRelay(relay, plan, stepName);
+  const relay = await agent(addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, commit.stepName, subject), run), runnerOptions(commit.label, 'Commit'));
+  const checked = checkCommitRelay(relay, plan, commit.stepName);
   if (checked.problem !== undefined) {
-    return checked;
+    return { result: finishDeliveryBlocked(stepCauses.concat([checked]), run) };
   }
   if (checked.values.committed === 'true') {
     run.commits.push(checked.values.commit);
-    run.runnerCommits[checked.values.commit] = { files: files, commitType: commitTypeMap()[plan.classification], breaking: plan.breaking };
+    run.runnerCommits[checked.values.commit] = { files: commit.files, commitType: commitTypeMap()[plan.classification], breaking: plan.breaking };
   } else if (run.head !== undefined && checked.values.commit !== run.head) {
     run.commits.push(run.head + '..' + checked.values.commit);
   }
   run.head = checked.values.commit;
   run.branch = plan.branch;
-  return checked;
+  if (stepCauses.length === 0) {
+    return { values: checked.values };
+  }
+  const endLines = checked.values.committed === 'true' ? [describeCommitEnd(checked.values, commit.stepName)] : [];
+  return { result: finishDeliveryBlocked(stepCauses, run, endLines) };
 }

@@ -94,9 +94,9 @@
  *   artifact_files for the git show splice in the bump prompt, since the
  *   path rule allows spaces, shell characters and a leading '-'.
  *   A null plan, revise or rescope result, an agent failure, adds the
- *   describeNoResult sentence to its problem through describeUnusableResult
- *   (relay.js), so it ends blocked with next action run_again; any other
- *   unusable result keeps the fix line.
+ *   agent-failure sentence to its problem through describeUnusableResult
+ *   (lib/result.js), so it ends blocked with next action run_again; any
+ *   other unusable result keeps the fix line.
  *   Each validation_commands entry is one command line: describePlanProblem
  *   refuses a blank entry, or one that holds a line break or another
  *   control character, naming the reason, before the branch step.
@@ -313,7 +313,7 @@ function describeValidationCommandProblem(command) {
 
 function describePlanProblem(planResult, resultSchema, facts, trunk) {
   if (!isPlainObject(planResult)) {
-    return appendSentence('The planner returned no result, so ' + RUN_NAME + ' stopped.', describeNoResult(planResult));
+    return 'The planner returned no result, so ' + RUN_NAME + ' stopped.';
   }
   if (!validateSchema(resultSchema, planResult).ok) {
     return 'The planner returned a plan that does not fit the plan schema, so ' + RUN_NAME + ' stopped.';
@@ -381,7 +381,7 @@ function describePlanLine(plan, outsidePaths) {
   }
   const shownPaths = outsidePaths.slice(0, maxListedItems()).map((file) => encodeUntrustedText(file));
   const restCount = outsidePaths.length - shownPaths.length;
-  return appendSentence(lead, 'Outside the limits you set: ' + joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and') + '.');
+  return lead + ' Outside the limits you set: ' + joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and') + '.';
 }
 
 /**
@@ -522,7 +522,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk);
     if (problem !== undefined) {
       const unusable = describeUnusableResult(problem, planResult);
-      return { result: finishDeliveryBlocked(unusable.problem, run, unusable.nextAction) };
+      return { result: finishDeliveryBlocked([unusable], run) };
     }
     if (shownAsks.length > 0) {
       run.answerLog.push(buildAnswerEntry(shownEntry, planResult));
@@ -532,7 +532,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
       } else {
         const rescoped = await runScopeStep(run, facts, run.answerLog.length);
         if (rescoped.problem !== undefined) {
-          return { result: finishDeliveryBlocked(rescoped.problem, run, rescoped.nextAction) };
+          return { result: finishDeliveryBlocked([rescoped], run) };
         }
         scope = rescoped.scope;
       }
@@ -551,7 +551,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
      */
     const resettled = resolution.asks.find((ask) => settledKinds.has(ask.kind) && [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, TRUNK_STALE_KIND].includes(ask.kind));
     if (resettled !== undefined) {
-      return { result: finishDeliveryBlocked('Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', run) };
+      return { result: finishDeliveryBlocked([{ problem: 'Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.' }], run) };
     }
     const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
     const lead = describePlanLine(planResult.plan, isAcceptance ? resolution.outsidePaths : []);

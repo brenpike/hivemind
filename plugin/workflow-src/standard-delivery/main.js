@@ -51,7 +51,8 @@
  *   renderQuestions shows, with the reply line last: a planning pause leads
  *   with describePlanLine(plan, outsidePaths) (plan.js), a tail ask with its
  *   own lead (askTail, gates.js). A run end is its lead, then, when blocked,
- *   the Next line, then only the records ADR-0037 decision 3 needs in chat:
+ *   the Next line, any later causes and the commit end line, then only the
+ *   records ADR-0037 decision 3 needs in chat:
  *   the branch, commit count and head when the run made commits, the
  *   reversible effects and the taken decisions, one line each. A complete
  *   run names the pull request and its commit, the gates that held and any
@@ -95,24 +96,32 @@
  *   whole hex. A break-fix-break stop shows the count of conflicting
  *   findings and no entry, and a rejected finding shows its short id alone.
  *   Every blocked result carries one Next line as a whole block right
- *   after its first block, and no block carries shorten:
- *   nextStepLine(nextAction), or at an open question stop
- *   nextActionLine(). Each starts with 'Next:' and points at no cause its
- *   lead does not name. A worker, gate edit or validation result may carry
+ *   after its first block, and no block carries shorten. A blocked run end
+ *   takes a list of causes, {problem, nextAction?} each, never a message:
+ *   finishDeliveryBlocked passes them to buildStopBlocks (lib/result.js),
+ *   which builds the lead, the Next line nextStepLine(nextAction) and one
+ *   block per later cause. An open question stop takes nextActionLine().
+ *   Each Next line starts with 'Next:' and points at no cause its lead
+ *   does not name. A worker, gate edit or validation result may carry
  *   next_action with outcome blocked: run_again when the cause is outside
  *   the repo and passes with no change, fix_cause otherwise.
- *   finishDeliveryBlocked takes the next action of the step that stopped.
  *   One rule covers every step: a null result from any agent() call, an
- *   agent failure, ends the run blocked with the describeNoResult sentence
- *   in its first block and nextStepLine('run_again') as its second, and a
- *   non-null unusable result keeps the fix line. run_again gives a line
- *   saying nothing in the repo needs a fix and to run the request again
- *   later; fix_cause or no value gives the fix line. A blocked wave says
- *   run_again only when every blocked worker does. A first block longer
- *   than maxBlockedLeadLength() code points has as its compact form the
- *   cutAtBoundary prefix of at most those code points, so it never cuts
- *   mid-word, and the lead of an open question stop is fixed and short, so
- *   the fit keeps the Next line in every tier and finish never throws.
+ *   agent failure, is a cause through describeUnusableResult
+ *   (lib/result.js), with the describeNoResult sentence once and next
+ *   action run_again, and a non-null unusable result keeps the fix line.
+ *   run_again gives a line saying nothing in the repo needs a fix and to
+ *   run the request again later; fix_cause or no value gives the fix line.
+ *   A blocked wave says run_again only when every blocked worker does.
+ *   Compound rule: a file-changing step passes its own causes to
+ *   runCommitStep (relay.js), which ends the run with them and a failed
+ *   commit's cause after them, so no stop hides another. Causes that need
+ *   a fix lead, with the fix line, then agent failures, each group in step
+ *   order, so the Next line is run_again only when every cause is. A lead
+ *   longer than maxBlockedLeadLength() code points has as its compact form
+ *   the cutAtBoundary prefix of at most those code points, so it never
+ *   cuts mid-word, and the lead of an open question stop is fixed and
+ *   short, so the fit keeps the lead and the Next line in every tier and
+ *   finish never throws.
  *   nextActionLine() names the next action in one line: run the request
  *   again with the answers in it. When the run made commits, it names the
  *   encoded branch, which plan-schema.json bounds by maxLength 200 and the
@@ -254,15 +263,6 @@ function maxReviewIterations() {
   return 10;
 }
 
-function maxBlockedLeadLength() {
-  /*
-   * 1000: a code point costs at most 6 notice chars (a control character
-   * JSON-encodes as \u00XX), so the compact first block, the next-step
-   * line and the cut marker always fit noticeBudget() together.
-   */
-  return 1000;
-}
-
 function maxTitleLength() {
   return 72;
 }
@@ -343,11 +343,11 @@ function createRunState(launch) {
 async function runDeliveryPass(run, replan) {
   const checked = await runFactsStep(run);
   if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked(checked.problem, run, checked.nextAction) };
+    return { result: finishDeliveryBlocked([checked], run) };
   }
   const scoped = await runScopeStep(run, checked.facts);
   if (scoped.problem !== undefined) {
-    return { result: finishDeliveryBlocked(scoped.problem, run, scoped.nextAction) };
+    return { result: finishDeliveryBlocked([scoped], run) };
   }
   const planned = await runPlanningPass(run, checked.facts, scoped.scope, replan);
   if (planned.result !== undefined) {
@@ -355,7 +355,7 @@ async function runDeliveryPass(run, replan) {
   }
   const branched = await runBranchStep(run, planned.plan, planned.freshness);
   if (branched.problem !== undefined) {
-    return { result: finishDeliveryBlocked(branched.problem, run, branched.nextAction) };
+    return { result: finishDeliveryBlocked([branched], run) };
   }
   if (needsBranchReplan(branched.values, checked.facts, planned.plan)) {
     return requestBranchReplan(run);
@@ -366,7 +366,7 @@ async function runDeliveryPass(run, replan) {
 async function runDelivery(rawArgs) {
   const launch = readDeliveryLaunch(rawArgs);
   if (launch.problem !== undefined) {
-    return finishDeliveryBlocked(launch.problem, undefined);
+    return finishDeliveryBlocked([{ problem: launch.problem }], undefined);
   }
   const run = createRunState(launch);
   let replan;

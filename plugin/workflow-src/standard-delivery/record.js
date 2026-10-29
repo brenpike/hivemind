@@ -1,7 +1,7 @@
 /*
  * standard-delivery record.js: the run record and the run ends of the
  * standard-delivery workflow. It holds the run record parts, the finish
- * and pause functions and the next-step lines.
+ * and pause functions and the open question Next line.
  *
  * Inputs
  *   run     the run state of main.js createRunState, or undefined when the
@@ -9,15 +9,17 @@
  *           taken, branch, head, waveCount and answerLog.
  *   gates   the gate loop state of runGates (gates.js), once the gates ran.
  *   lead    the what-happened line of a pause, built by its call site.
- *   result.js finish, pauseForUser and the fit helpers, and brief.js
- *   renderQuestions, renderOpenQuestions and renderDecisionsCompact.
+ *   causes  the causes of a blocked end, {problem, nextAction?} each.
+ *   result.js finish, pauseForUser, buildStopBlocks and the fit helpers,
+ *   and brief.js renderQuestions, renderOpenQuestions and
+ *   renderDecisionsCompact.
  *
  * Outputs
  *   finishDeliveryBlocked, finishDeliveryComplete, finishOpenQuestions and
  *   pauseDelivery  the only run results; see the Outputs of main.js.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
  *           request body and its comment carry, the commit list included.
- *   nextStepLine(nextAction) and nextActionLine(run)  the Next lines.
+ *   nextActionLine(run)  the Next line of an open question stop.
  *
  * Message shape (issue 460)
  *   Every chat message has one shape, built here:
@@ -29,11 +31,13 @@
  *           the open questions, then the reversible effects and the taken
  *           decisions, one line each, as every final message lists them
  *           (ADR-0037 decision 3).
- *   finishDeliveryBlocked(message, run, nextAction)  the lead, the Next
- *           line as a whole block, one line naming the encoded branch, the
- *           commit count and the head only when the run made commits, then
- *           the reversible effects and the taken decisions, one line each
- *           (renderDecisionsCompact).
+ *   finishDeliveryBlocked(causes, run, endLines)  buildStopBlocks(causes)
+ *           (lib/result.js): the lead, the Next line as a whole block and
+ *           one block per later cause. Then one block per end line, the
+ *           commit end runCommitStep passes, one line naming the encoded
+ *           branch, the commit count and the head only when the run made
+ *           commits, then the reversible effects and the taken decisions,
+ *           one line each (renderDecisionsCompact).
  *   finishDeliveryComplete  one line naming the pull request opened or
  *           pushed to and its commit, one line naming the gates that held
  *           and any gate not configured, the warning line when there is
@@ -101,24 +105,12 @@ function buildRunRecordParts(run, taken, gates) {
   return parts;
 }
 
-function nextStepLine(nextAction) {
-  if (nextAction === 'run_again') {
-    return 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
-  }
-  return 'Next: fix what stopped the run, then run the request again.';
-}
-
 function nextActionLine(run) {
   const again = 'Next: run the request again with the answers in it.';
   if (run.commits.length === 0) {
     return again;
   }
   return again + ' The new run plans what is left from the commits already on branch ' + encodeUntrustedText(run.branch) + '.';
-}
-
-function buildBlockedLead(message) {
-  const compact = cutAtBoundary(message, maxBlockedLeadLength());
-  return compact === message ? { text: message } : { text: message, compact: compact };
 }
 
 function describeBranchLine(run) {
@@ -136,8 +128,8 @@ function buildRecordTailBlocks(run, taken) {
   return blocks;
 }
 
-function finishDeliveryBlocked(message, run, nextAction) {
-  const blocks = [buildBlockedLead(message), { text: nextStepLine(nextAction), whole: true }];
+function finishDeliveryBlocked(causes, run, endLines = []) {
+  const blocks = buildStopBlocks(causes).concat(endLines.map((line) => ({ text: line })));
   if (run !== undefined && run.commits.length > 0) {
     blocks.push({ text: describeBranchLine(run) });
   }

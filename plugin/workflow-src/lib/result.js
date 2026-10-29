@@ -43,6 +43,10 @@
  *                 maxExcerptLength() when absent.
  *   describeNoResult(result)
  *     result      any value. What one agent() call of a step returned.
+ *   describeUnusableResult(problem, result)
+ *     problem     string. result as for describeNoResult.
+ *   nextStepLine(nextAction)  nextAction 'fix_cause', 'run_again' or absent.
+ *   buildStopBlocks(causes)  causes non-empty array of {problem, nextAction?}.
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
@@ -85,6 +89,16 @@
  *                 agent failed before it returned a result, as an agent API
  *                 error such as an expired login, a rate limit or a network
  *                 failure does. Otherwise the empty string.
+ *   describeUnusableResult  {problem: problem + ' ' + describeNoResult(null),
+ *                 nextAction: 'run_again'} for a null result, else {problem}.
+ *   nextStepLine  the Next line: run_again says nothing in the repo needs a
+ *                 fix; anything else is the fix line.
+ *   maxBlockedLeadLength  1000, the code points of a compact lead.
+ *   buildStopBlocks  the lead block, the Next line as a whole block, then a
+ *                 block per later cause. Causes not run_again lead, then
+ *                 run_again ones, each in given order. The lead compact is
+ *                 cutAtBoundary(problem, maxBlockedLeadLength()) only when
+ *                 shorter. The Next line is nextStepLine of the lead cause.
  *
  * Contract the overlord relays
  *   The relay and resume rule has one home,
@@ -155,6 +169,9 @@
  *   A null result is an agent failure: agent() returns null on an agent API
  *   error, so describeNoResult names that failure and never the step's
  *   output, which does not exist (issue 460).
+ *   One owner of a blocked stop: every blocked end on both engines is
+ *   buildStopBlocks over its causes, and describeUnusableResult is the only
+ *   place a null result gets that sentence and run_again.
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking the user means
@@ -166,7 +183,9 @@
  *   A null result told the user a step returned output it could not use,
  *   which sent them to look for a cause in the repo. One sentence that
  *   names the agent failure lets a message say what really happened
- *   (issue 460).
+ *   (issue 460). A stop built at each call site could hide an agent
+ *   failure behind a later commit stop or drop the Next line, so the
+ *   causes are composed once (findings 3827ab1a and 58a21e45).
  */
 
 function resultFields() {
@@ -297,6 +316,42 @@ function describeNoResult(result) {
     return '';
   }
   return 'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+
+function describeUnusableResult(problem, result) {
+  if (result !== null) {
+    return { problem: problem };
+  }
+  return { problem: problem + ' ' + describeNoResult(result), nextAction: 'run_again' };
+}
+
+function nextStepLine(nextAction) {
+  if (nextAction === 'run_again') {
+    return 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+  }
+  return 'Next: fix what stopped the run, then run the request again.';
+}
+
+function maxBlockedLeadLength() {
+  /*
+   * 1000: a code point costs at most 6 notice chars (a control character
+   * JSON-encodes as \u00XX), so the compact first block, the next-step
+   * line and the cut marker always fit noticeBudget() together.
+   */
+  return 1000;
+}
+
+function buildStopBlocks(causes) {
+  if (!Array.isArray(causes) || causes.length === 0) {
+    throw new Error('buildStopBlocks: causes must be a non-empty array');
+  }
+  const fixCauses = causes.filter((cause) => cause.nextAction !== 'run_again');
+  const orderedCauses = fixCauses.concat(causes.filter((cause) => cause.nextAction === 'run_again'));
+  const leadText = orderedCauses[0].problem;
+  const compactLead = cutAtBoundary(leadText, maxBlockedLeadLength());
+  const leadBlock = compactLead === leadText ? { text: leadText } : { text: leadText, compact: compactLead };
+  const laterBlocks = orderedCauses.slice(1).map((cause) => ({ text: cause.problem }));
+  return [leadBlock, { text: nextStepLine(orderedCauses[0].nextAction), whole: true }].concat(laterBlocks);
 }
 
 function canCarry(resumeArgs) {

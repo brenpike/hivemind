@@ -27,18 +27,22 @@
  *   A contractRows() check is a function of the built script, not of
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
- *   Every wave ends with the commit runner, whatever its workers returned,
- *   and a null worker result counts as blocked: its reason names the agent
- *   failure through describeUnusableResult (relay.js), with next action
- *   run_again, so a wave says run_again only when every blocked worker
- *   does. A blocked wave commit passes on the next action runCommitStep
- *   returns. describeBlockedWave is one lead line naming the stop and the
- *   wave commit or the branch head, then one line per blocked step through
- *   capItemLines.
+ *   Every wave ends with the commit runner, whatever its workers returned.
+ *   The loop reads every worker outcome before the commit, and a null
+ *   worker result counts as blocked: its reason names the agent failure
+ *   through describeUnusableResult (lib/result.js), with next action
+ *   run_again. describeBlockedWave makes the one cause of a blocked wave:
+ *   a lead line naming the stop, then one line per blocked step through
+ *   capItemLines, with next action run_again only when every blocked worker
+ *   says so. runCommitStep (relay.js) takes that cause as its step cause
+ *   and ends the run with it, so a commit stop never hides it, and the loop
+ *   returns that run end as is. needs_replan is handled only after a
+ *   successful commit.
  *
  * Why
  *   A worker edits files and never commits, so the loop owns the commit
- *   of each wave and reads every worker outcome only after it.
+ *   of each wave. It reads the outcomes first so the commit runner gets the
+ *   wave's cause, and it still commits whatever the workers left.
  */
 
 function buildNextActionProperty() {
@@ -124,13 +128,11 @@ function readWorkerOutcome(step, result) {
   return { stepId: step.id, status: result.outcome, reason: describeReason(result.blocker), nextAction: result.next_action };
 }
 
-function describeBlockedWave(blockedOutcomes, commitValues) {
-  const stopped = 'A worker did not finish its step, so ' + RUN_NAME + ' stopped after the commit of its wave: ';
-  const lead = commitValues.committed === 'true'
-    ? stopped + 'the wave was committed as ' + commitValues.commit + ', so that commit can hold partial edits of the steps below.'
-    : stopped + 'the wave left nothing to commit, so the branch head stays ' + commitValues.commit + '.';
+function describeBlockedWave(blockedOutcomes) {
+  const lead = 'A worker did not finish its step, so ' + RUN_NAME + ' stopped after its wave:';
   const stepLines = blockedOutcomes.map((outcome) => '- Step ' + encodeUntrustedText(outcome.stepId) + ' was blocked: ' + outcome.reason);
-  return [lead, ...capItemLines(stepLines)].join('\n');
+  const isRunAgain = blockedOutcomes.every((outcome) => outcome.nextAction === 'run_again');
+  return { problem: [lead, ...capItemLines(stepLines)].join('\n'), nextAction: isRunAgain ? 'run_again' : 'fix_cause' };
 }
 
 function describeReplanReasons(replanOutcomes) {
@@ -140,7 +142,7 @@ function describeReplanReasons(replanOutcomes) {
 function requestStepReplan(run, replanOutcomes) {
   const reasons = describeReplanReasons(replanOutcomes);
   if (run.replans >= maxReplans()) {
-    return { result: finishDeliveryBlocked('A worker asked for a new plan after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.\n' + reasons, run) };
+    return { result: finishDeliveryBlocked([{ problem: 'A worker asked for a new plan after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.\n' + reasons }], run) };
   }
   run.replans += 1;
   return { replan: { reason: reasons } };
@@ -151,7 +153,7 @@ async function runPlanWaves(run, plan, facts) {
   for (let waveNumber = 1; ; waveNumber += 1) {
     const wave = computeWave(plan.steps, doneIds);
     if (!wave.ok) {
-      return { result: finishDeliveryBlocked('The plan steps cannot be scheduled, so ' + RUN_NAME + ' stopped: ' + toPrintableAscii(wave.problem), run) };
+      return { result: finishDeliveryBlocked([{ problem: 'The plan steps cannot be scheduled, so ' + RUN_NAME + ' stopped: ' + toPrintableAscii(wave.problem) }], run) };
     }
     if (wave.all_done) {
       return runGates(run, plan, facts);
@@ -160,15 +162,13 @@ async function runPlanWaves(run, plan, facts) {
     phase('Waves');
     const workerResults = await parallel(waveSteps.map((step) => createWorkerTask(step, waveSteps, plan, run)));
     run.waveCount += 1;
-    const committed = await runCommitStep(run, plan, listStepFiles(waveSteps), 'commit-' + run.pass + '-' + waveNumber, 'wave', buildWaveSubject(waveSteps, waveNumber));
-    if (committed.problem !== undefined) {
-      return { result: finishDeliveryBlocked(committed.problem, run, committed.nextAction) };
-    }
     const outcomes = waveSteps.map((step, index) => readWorkerOutcome(step, workerResults[index]));
     const blockedOutcomes = outcomes.filter((outcome) => outcome.status === 'blocked');
-    if (blockedOutcomes.length > 0) {
-      const nextAction = blockedOutcomes.every((outcome) => outcome.nextAction === 'run_again') ? 'run_again' : 'fix_cause';
-      return { result: finishDeliveryBlocked(describeBlockedWave(blockedOutcomes, committed.values), run, nextAction) };
+    const stepCauses = blockedOutcomes.length > 0 ? [describeBlockedWave(blockedOutcomes)] : [];
+    const commit = { files: listStepFiles(waveSteps), label: 'commit-' + run.pass + '-' + waveNumber, stepName: 'wave', subject: buildWaveSubject(waveSteps, waveNumber) };
+    const committed = await runCommitStep(run, plan, commit, stepCauses);
+    if (committed.result !== undefined) {
+      return committed;
     }
     const replanOutcomes = outcomes.filter((outcome) => outcome.status === 'needs_replan');
     if (replanOutcomes.length > 0) {

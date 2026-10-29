@@ -656,3 +656,80 @@ describe('cutAtBoundary', () => {
     }
   });
 });
+
+describe('describeUnusableResult', () => {
+  test('a null result gets the describeNoResult sentence once and run_again', () => {
+    const sentence = lib.describeNoResult(null);
+    assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', null)), { problem: 'P. ' + sentence, nextAction: 'run_again' });
+    assert.equal(lib.describeUnusableResult('P.', null).problem.split(sentence).length - 1, 1);
+  });
+  test('any other result gives the problem alone', () => {
+    for (const result of [{}, undefined, 'x', 0]) {
+      assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', result)), { problem: 'P.' }, JSON.stringify(result));
+    }
+  });
+});
+
+describe('nextStepLine', () => {
+  test('run_again says nothing in the repo needs a fix, anything else gives the fix line', () => {
+    const runAgainLine = 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+    const fixLine = 'Next: fix what stopped the run, then run the request again.';
+    assert.equal(lib.nextStepLine('run_again'), runAgainLine);
+    for (const nextAction of ['fix_cause', undefined]) {
+      assert.equal(lib.nextStepLine(nextAction), fixLine, String(nextAction));
+    }
+  });
+});
+
+describe('buildStopBlocks', () => {
+  const fixLine = 'Next: fix what stopped the run, then run the request again.';
+  const runAgainLine = 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+  test('causes that need a fix lead with the fix line, then run_again causes, each in step order', () => {
+    const causes = [
+      { problem: 'A.', nextAction: 'run_again' },
+      { problem: 'B.' },
+      { problem: 'C.', nextAction: 'fix_cause' },
+      { problem: 'D.', nextAction: 'run_again' }
+    ];
+    assert.deepEqual(structuredClone(lib.buildStopBlocks(causes)), [
+      { text: 'B.' }, { text: fixLine, whole: true }, { text: 'C.' }, { text: 'A.' }, { text: 'D.' }
+    ]);
+  });
+  test('the run_again line shows only when every cause is run_again', () => {
+    const causes = [{ problem: 'A.', nextAction: 'run_again' }, { problem: 'B.', nextAction: 'run_again' }];
+    assert.deepEqual(structuredClone(lib.buildStopBlocks(causes)), [
+      { text: 'A.' }, { text: runAgainLine, whole: true }, { text: 'B.' }
+    ]);
+    assert.deepEqual(structuredClone(lib.buildStopBlocks([{ problem: 'A.', nextAction: 'fix_cause' }])), [
+      { text: 'A.' }, { text: fixLine, whole: true }
+    ]);
+  });
+  test('the lead has a compact form only when it is over maxBlockedLeadLength() code points', () => {
+    assert.equal(lib.maxBlockedLeadLength(), 1000);
+    const atLimit = 'x'.repeat(1000);
+    assert.deepEqual(structuredClone(lib.buildStopBlocks([{ problem: atLimit }])[0]), { text: atLimit });
+    const overLimit = 'word '.repeat(300).trim();
+    assert.deepEqual(structuredClone(lib.buildStopBlocks([{ problem: overLimit }])[0]), { text: overLimit, compact: lib.cutAtBoundary(overLimit, 1000) });
+    const laterBlock = lib.buildStopBlocks([{ problem: 'A.' }, { problem: overLimit }])[2];
+    assert.deepEqual(structuredClone(laterBlock), { text: overLimit });
+  });
+  test('throws unless causes is a non-empty array', () => {
+    for (const causes of [[], undefined, null, 'x', { problem: 'A.' }]) {
+      assert.throws(() => lib.buildStopBlocks(causes), /buildStopBlocks: causes must be a non-empty array/, JSON.stringify(causes));
+    }
+  });
+  test('a blocked finish over a 20,000-character costliest lead and two later causes keeps the Next line whole after the lead', () => {
+    const words = 'The planner could not plan the delivery: ' + ('\u0001'.repeat(9) + ' ').repeat(2000);
+    const unbroken = 'The planner could not plan the delivery: ' + '\u0001'.repeat(20000);
+    const laterCauses = [{ problem: 'Later one: ' + '<&>'.repeat(3000) }, { problem: 'Later two: ' + '\u0001'.repeat(5000), nextAction: 'run_again' }];
+    for (const lead of [words, unbroken]) {
+      const blocks = lib.buildStopBlocks([{ problem: lead }].concat(laterCauses));
+      const result = lib.finish({ outcome: 'blocked', blocks: blocks });
+      const paragraphs = result.message.split('\n\n');
+      const leadIndex = paragraphs.findIndex((paragraph) => paragraph.startsWith('The planner could not plan'));
+      assert.equal(paragraphs[leadIndex], lib.cutAtBoundary(lead, lib.maxBlockedLeadLength()));
+      assert.equal(paragraphs[leadIndex + 1], fixLine);
+      assert.ok(lib.noticeLength(result) <= lib.noticeBudget());
+    }
+  });
+});

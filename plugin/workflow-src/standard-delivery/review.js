@@ -54,8 +54,11 @@
  *           equal to its maxLength, so a valid value is never cut. A review
  *           result that fails REVIEW_SCHEMA, gives option ids other than A,
  *           B, C and D in that order, or recommends no option stops the run
- *           blocked, and a null result, an agent failure, adds the
- *           describeNoResult sentence and the run_again Next line. The
+ *           blocked. describeReviewProblem reads the result before the
+ *           commit runner, which takes that problem as its step cause, so a
+ *           commit stop never hides it, and a null result, an agent failure,
+ *           gets the describeNoResult sentence and the run_again Next line
+ *           through describeUnusableResult (lib/result.js). The
  *           script sets no zoom-out trigger: the
  *           planner makes that call by judgment from the branch commits in
  *           its fresh facts, per remediation-doctrine.md.
@@ -296,8 +299,8 @@ function buildReviewPrompt(plan, trunk, answer) {
  * Returns undefined for a usable review, else {problem, nextAction}: a
  * review that fails REVIEW_SCHEMA, gives user_question option ids other
  * than A, B, C and D in that order, or recommends no option of it is
- * unusable, and a null review, an agent failure, adds the describeNoResult
- * sentence with next action run_again.
+ * unusable. describeUnusableResult (lib/result.js) gives a null review, an
+ * agent failure, the describeNoResult sentence and next action run_again.
  */
 function describeReviewProblem(review) {
   const problem = 'The local review step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.';
@@ -461,7 +464,7 @@ function requestReviewReplan(review, run) {
     return decided;
   }
   if (run.replans >= maxReplans()) {
-    return { result: finishDeliveryBlocked('Local review returned ' + review.exit_reason + ' after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.', run) };
+    return { result: finishDeliveryBlocked([{ problem: 'Local review returned ' + review.exit_reason + ' after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.' }], run) };
   }
   run.replans += 1;
   const reason = 'Local review returned ' + review.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
@@ -479,7 +482,7 @@ function routeLocalReview(review, run) {
     case 'question':
       return askReviewQuestion(review, run);
     case 'stop':
-      return { result: finishDeliveryBlocked(describeReviewStop(review, run.head), run) };
+      return { result: finishDeliveryBlocked([{ problem: describeReviewStop(review, run.head) }], run) };
     default:
       throw new Error('routeLocalReview: no route for exit reason ' + JSON.stringify(review.exit_reason));
   }
@@ -492,13 +495,10 @@ async function runReviewGate(run, plan, gates) {
   phase('Review');
   const prompt = answer === undefined ? addResumeNote(buildReviewPrompt(plan, run.trunk), run) : buildReviewPrompt(plan, run.trunk, answer);
   const review = await agent(prompt, reviewerOptions(gateLabel('review', run, count)));
-  const committed = await runCommitStep(run, plan, [], gateLabel('review-commit', run, count), 'review');
-  if (committed.problem !== undefined) {
-    return { result: finishDeliveryBlocked(committed.problem, run, committed.nextAction) };
-  }
   const unusable = describeReviewProblem(review);
-  if (unusable !== undefined) {
-    return { result: finishDeliveryBlocked(unusable.problem, run, unusable.nextAction) };
+  const committed = await runCommitStep(run, plan, { files: [], label: gateLabel('review-commit', run, count), stepName: 'review' }, unusable === undefined ? [] : [unusable]);
+  if (committed.result !== undefined) {
+    return committed;
   }
   const routed = routeLocalReview(review, run);
   if (routed.held) {

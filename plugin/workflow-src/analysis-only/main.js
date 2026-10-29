@@ -136,10 +136,12 @@
  *   result with a longer one fails the check and finishes blocked as
  *   malformed.
  *   agent() returns null on an agent API error, such as an expired login.
- *   A null facts result blocks as malformed facts and a null analyze or
- *   revise result as no result, and each message then ends with the
- *   describeNoResult (result.js) sentence that names the agent failure,
- *   so the user does not look for a cause in the repo (issue 460).
+ *   A null facts result blocks as malformed facts, a null scan result as a
+ *   scan it cannot use, and a null analyze or revise result as no result.
+ *   Each goes through describeUnusableResult (result.js), the one place
+ *   that adds the describeNoResult sentence naming the agent failure and
+ *   the run_again Next line, so the user does not look for a cause in the
+ *   repo (issue 460). Any other blocked end gets the fix line.
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
  *   quoted whole up to maxReasonLength() code points, 600, else cut by
@@ -173,8 +175,10 @@
  *   the verbatim of its brief. A complete message is the decided-for-you
  *   block as renderDecisionsCompact alone, one line per decision with no
  *   verbatim, then any open-questions block, then the report last, the only
- *   block that may be shortened. A blocked message is one block that may be
- *   shortened.
+ *   block that may be shortened. Every blocked end passes a list of causes
+ *   {problem, nextAction?} to finishBlocked, and its message is
+ *   buildStopBlocks (result.js) over them: a lead, the Next line kept
+ *   whole, then any later causes.
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -304,20 +308,20 @@ function factsOptions() {
 
 function describeFactsProblem(facts) {
   if (!validateSchema(FACTS_STEP_SCHEMA, facts).ok) {
-    return malformedFactsMessage(RUN_NOUN, facts);
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN), facts);
   }
   if (facts.outcome === 'blocked') {
-    return blockedFactsMessage(RUN_NOUN, describeReason(facts.blocker));
+    return { problem: blockedFactsMessage(RUN_NOUN, describeReason(facts.blocker)) };
   }
   const isWellFormed = matchesFactsLine('facts_file', facts.facts_file)
     && matchesFactsLine('facts_lines', facts.facts_lines)
     && isCutList(facts.cut)
     && isTextCount(facts.external_texts);
   if (!isWellFormed) {
-    return malformedFactsMessage(RUN_NOUN, facts);
+    return { problem: malformedFactsMessage(RUN_NOUN) };
   }
   if (facts.cut !== 'none') {
-    return cutFactsMessage(RUN_NOUN, facts.cut);
+    return { problem: cutFactsMessage(RUN_NOUN, facts.cut) };
   }
   return undefined;
 }
@@ -325,26 +329,26 @@ function describeFactsProblem(facts) {
 async function gatherCheckedFacts(launchInputs) {
   phase('Facts');
   const facts = await agent(buildFactsPrompt(launchInputs.trunk, launchInputs.references), factsOptions());
-  const factsProblem = describeFactsProblem(facts);
-  if (factsProblem !== undefined) {
-    return { problem: factsProblem };
+  const factsCause = describeFactsProblem(facts);
+  if (factsCause !== undefined) {
+    return { cause: factsCause };
   }
-  const scanProblem = await runScanStep(facts, RUN_NOUN);
-  if (scanProblem !== undefined) {
-    return { problem: scanProblem };
+  const scanCause = await runScanStep(facts, RUN_NOUN);
+  if (scanCause !== undefined) {
+    return { cause: scanCause };
   }
   return { facts: facts };
 }
 
 function describeReplyProblem(analysis, checkSchema) {
   if (!isPlainObject(analysis)) {
-    return appendSentence('The planner returned no result, so the analysis stopped.', describeNoResult(analysis));
+    return describeUnusableResult('The planner returned no result, so the analysis stopped.', analysis);
   }
   if (!validateSchema(checkSchema, analysis).ok) {
-    return 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
+    return { problem: 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.' };
   }
   if (analysis.outcome === 'blocked') {
-    return 'The planner could not do the analysis: ' + describeReason(analysis.blocker);
+    return { problem: 'The planner could not do the analysis: ' + describeReason(analysis.blocker) };
   }
   return undefined;
 }
@@ -363,8 +367,8 @@ function resolveQuestions(questions, level) {
   return { asks: asks, taken: taken };
 }
 
-function finishBlocked(message) {
-  return finish({ outcome: 'blocked', blocks: [{ text: message, shorten: true }] });
+function finishBlocked(causes) {
+  return finish({ outcome: 'blocked', blocks: buildStopBlocks(causes) });
 }
 
 function finishComplete(report, openQuestions, taken) {
@@ -398,15 +402,15 @@ function pauseOrStopAsking(report, resolution, questions, answerLog) {
 async function runAnalysis(rawArgs) {
   const argsObject = readArgsObject(rawArgs);
   if (!isNonEmptyString(argsObject.request)) {
-    return finishBlocked('No request was given, so there is nothing to analyze.');
+    return finishBlocked([{ problem: 'No request was given, so there is nothing to analyze.' }]);
   }
   const launchInputs = readLaunchInputs(argsObject, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {
-    return finishBlocked(launchInputs.problem);
+    return finishBlocked([{ problem: launchInputs.problem }]);
   }
   const checked = await gatherCheckedFacts(launchInputs);
-  if (checked.problem !== undefined) {
-    return finishBlocked(checked.problem);
+  if (checked.cause !== undefined) {
+    return finishBlocked([checked.cause]);
   }
   const facts = checked.facts;
   const level = resolveLevel(undefined, AUTONOMY_TABLE);
@@ -418,9 +422,9 @@ async function runAnalysis(rawArgs) {
   phase('Analyze');
   let analysis = await agent(buildAnalyzePrompt(argsObject.request, facts), plannerOptions('analyze', 'Analyze', ANALYSIS_SCHEMA));
   for (let round = 1; ; round += 1) {
-    const problem = describeReplyProblem(analysis, checkSchema);
-    if (problem !== undefined) {
-      return finishBlocked(problem);
+    const replyCause = describeReplyProblem(analysis, checkSchema);
+    if (replyCause !== undefined) {
+      return finishBlocked([replyCause]);
     }
     if (shownRound !== undefined) {
       answerLog.push(buildAnswerEntry(shownRound, analysis));

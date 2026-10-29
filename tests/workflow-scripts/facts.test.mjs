@@ -344,11 +344,8 @@ describe('facts messages take the run noun', () => {
     assert.equal(lib.blockedFactsMessage(RUN_NOUN, lib.describeReason('blocker: no trunk\n')), 'The facts step was blocked, so the delivery stopped before planning: it says "blocker: no trunk".');
     assert.equal(lib.cutFactsMessage(RUN_NOUN, 'pull_requests,references'), 'The facts are incomplete: GitHub could not be read in full for pull_requests, references. Planning needs complete facts, ' + STOPPED);
   });
-  test('a null facts result names the agent failure after the malformed message', () => {
-    assert.equal(lib.malformedFactsMessage(RUN_NOUN, null), 'The facts step returned malformed facts, ' + STOPPED + ' ' + AGENT_FAILED);
-  });
-  test('a facts result that is not null keeps the malformed message alone', () => {
-    for (const result of [undefined, {}, { facts_file: 7 }, 'facts', 0]) {
+  test('the malformed message takes no result and never names the agent failure', () => {
+    for (const result of [null, undefined, {}, { facts_file: 7 }, 'facts', 0]) {
       assert.equal(lib.malformedFactsMessage(RUN_NOUN, result), 'The facts step returned malformed facts, ' + STOPPED, JSON.stringify(result));
     }
   });
@@ -383,8 +380,8 @@ describe('describeScanProblem', () => {
       assert.equal(describeScan(scan, 1), MALFORMED_SCAN);
     });
   }
-  test('a null scan is unusable and names the agent failure', () => {
-    assert.equal(describeScan(null, 1), MALFORMED_SCAN + ' ' + AGENT_FAILED);
+  test('a null scan is unusable and adds no agent-failure sentence', () => {
+    assert.equal(describeScan(null, 1), MALFORMED_SCAN);
     assert.equal(lib.describeNoResult(null), AGENT_FAILED);
   });
   test('a suspect names its item, category and excerpt, then the facts file', () => {
@@ -446,8 +443,18 @@ describe('runScanStep', () => {
       assert.equal(options.agentType, 'hivemind:drone');
       return { results: cleanResults(1) };
     };
-    assert.equal(await lib.runScanStep(scanFacts(2), RUN_NOUN), SCAN_COVERAGE);
+    assert.deepEqual({ ...(await lib.runScanStep(scanFacts(2), RUN_NOUN)) }, { problem: SCAN_COVERAGE });
     assert.deepEqual(calls, ['Scan', 'scan']);
+  });
+  test('a clean scan that covers every text resolves to undefined', async () => {
+    lib.phase = () => {};
+    lib.agent = async () => ({ results: cleanResults(2) });
+    assert.equal(await lib.runScanStep(scanFacts(2), RUN_NOUN), undefined);
+  });
+  test('a null scan agent resolves to a cause that names the agent failure and asks to run again', async () => {
+    lib.phase = () => {};
+    lib.agent = async () => null;
+    assert.deepEqual({ ...(await lib.runScanStep(scanFacts(1), RUN_NOUN)) }, { problem: MALFORMED_SCAN + ' ' + AGENT_FAILED, nextAction: 'run_again' });
   });
 });
 

@@ -10,7 +10,6 @@
  *   facts     an object holding at least the facts_file, facts_lines and
  *             external_texts routing values, already checked.
  *   scan      the scan runner's result, any value.
- *   result    the facts runner's result, any value. Optional.
  *   name, text  a data block's tag name and its JSON value.
  *
  * Outputs
@@ -86,11 +85,11 @@
  *   hasFactsStop(stops, stop), matchesFreshnessCounts(freshness, ahead,
  *   behind)
  *       the helpers of isConsistentFactsRelay.
- *   malformedFactsMessage(runNoun, result), blockedFactsMessage(runNoun,
- *   blocker), cutFactsMessage(runNoun, cut)
- *       the facts step problems. For a null result the malformed message
- *       ends with the describeNoResult (result.js) sentence, as an agent
- *       failure, not malformed output. The blocked message ends with blocker,
+ *   malformedFactsMessage(runNoun), blockedFactsMessage(runNoun, blocker),
+ *   cutFactsMessage(runNoun, cut)
+ *       the facts step problems. The malformed message adds no agent-failure
+ *       sentence: only describeUnusableResult (result.js) attaches it, for a
+ *       null result. The blocked message ends with blocker,
  *       the reason its caller built with describeReason (result.js) or
  *       describeRelayBlocker (standard-delivery main.js), so a step-written
  *       reason reaches it already encoded, or with 'it gave no reason.' when
@@ -122,20 +121,17 @@
  *                           with no anyOf.
  *   runScanStep(facts, runNoun)
  *       async. Runs the scan, phase Scan then one agent() call, only when
- *       external_texts is above 0, and resolves to describeScanProblem of
- *       its result. Resolves to undefined with no call when there is no
- *       text.
+ *       external_texts is above 0, and resolves to undefined when
+ *       describeScanProblem finds no problem, else to
+ *       describeUnusableResult(problem, scan) (result.js), a cause. Resolves
+ *       to undefined with no call when there is no text.
  *   describeScanProblem(scan, facts, runNoun)
  *       undefined when scan fits its full schema, flags nothing and covers
  *       every text. Otherwise the problem message. A clean result that
  *       carries a suspect field does not fit, so it is a result the scan
- *       could not use. For a null scan that message ends with the
- *       describeNoResult sentence.
+ *       could not use. It adds no agent-failure sentence.
  *   renderSuspectLine, readTextIndex, coversEveryText
  *       the helpers of describeScanProblem.
- *   appendSentence(message, sentence)
- *       message, then a space and sentence unless sentence is empty: the
- *       helper of malformedFactsMessage and describeScanProblem.
  *   wholeFactsPattern, factsEnumSource, factsListSource, isUniqueFactsList
  *       the helpers of the spec and the list checks.
  *
@@ -162,7 +158,7 @@
  *   relayed facts stdout. It cannot catch a forged relay that is still
  *   consistent: that is the recorded residual 'Scan coverage relies on the
  *   facts runner's count' of ADR-0037. analysis-only never calls it.
- *   Uses encodeUntrustedText and describeNoResult (result.js), isPlainObject,
+ *   Uses encodeUntrustedText and describeUnusableResult (result.js), isPlainObject,
  *   isNonEmptyString and describeRunNoun (args.js),
  *   gitIdentifierPattern (identifier.js), and validateSchema,
  *   buildTaggedSchema and toAgentSchema (schema.js).
@@ -187,7 +183,8 @@
  *   agent() returns null on an agent API error, such as an expired login.
  *   Calling that malformed facts or an unusable scan sent the user to look
  *   for a cause in the repo, so a null result also gets the sentence that
- *   names the agent failure (issue 460).
+ *   names the agent failure (issue 460). Only describeUnusableResult
+ *   (result.js) attaches that sentence, so the messages here carry none.
  */
 
 function boundarySentence() {
@@ -341,12 +338,8 @@ function isConsistentFactsRelay(values, trunk) {
     && matchesFreshnessCounts(values.trunk_freshness, values.trunk_ahead, values.trunk_behind);
 }
 
-function malformedFactsMessage(runNoun, result) {
-  return appendSentence('The facts step returned malformed facts, so ' + describeRunNoun(runNoun) + ' stopped before planning.', describeNoResult(result));
-}
-
-function appendSentence(message, sentence) {
-  return sentence === '' ? message : message + ' ' + sentence;
+function malformedFactsMessage(runNoun) {
+  return 'The facts step returned malformed facts, so ' + describeRunNoun(runNoun) + ' stopped before planning.';
 }
 
 function blockedFactsMessage(runNoun, blocker) {
@@ -415,7 +408,8 @@ async function runScanStep(facts, runNoun) {
   if (Number(facts.external_texts) > 0) {
     phase('Scan');
     const scan = await agent(buildScanPrompt(facts), scanOptions());
-    return describeScanProblem(scan, facts, runNoun);
+    const problem = describeScanProblem(scan, facts, runNoun);
+    return problem === undefined ? undefined : describeUnusableResult(problem, scan);
   }
   return undefined;
 }
@@ -449,7 +443,7 @@ function coversEveryText(results, textCount) {
 function describeScanProblem(scan, facts, runNoun) {
   const stopped = 'so ' + describeRunNoun(runNoun) + ' stopped before planning.';
   if (!validateSchema(scanStepSchema(), scan).ok) {
-    return appendSentence('The injection scan returned a result it could not use, ' + stopped, describeNoResult(scan));
+    return 'The injection scan returned a result it could not use, ' + stopped;
   }
   const suspects = scan.results.filter((result) => result.verdict === 'injection-suspect');
   if (suspects.length > 0) {

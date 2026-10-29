@@ -51,10 +51,12 @@
  *   A contractRows() check is a function of the built script, not of main.js:
  *   the build bundles this module into it, so a row can name a function of this
  *   module.
- *   A null gate result reads through describeUnusableResult (relay.js), next
- *   action run_again; the bump and fix commits pass on runCommitStep's next
- *   action; a blocked gate step or bump problem and describeCommitEnd
- *   (relay.js) make one lead line.
+ *   A null gate result reads through describeUnusableResult (lib/result.js),
+ *   next action run_again. The bump and fix steps read their result before
+ *   the commit and pass its cause, if any, to runCommitStep (relay.js), which
+ *   ends the run with every cause, so a commit stop never hides a step cause;
+ *   a run end it returns is returned as is. Every other blocked end passes
+ *   its causes to finishDeliveryBlocked (record.js).
  *   A gate holds only for the commit its step ended on, read from the commit
  *   runner's routing line; validation, which has no commit runner, ends on the
  *   head it ran on. The configured gates run in gateIds() order, local review
@@ -307,10 +309,6 @@ function readGateEditOutcome(result, schema) {
   return { status: 'complete', files: result.files };
 }
 
-function describeBlockedGateStep(stepTitle, reason, commitValues) {
-  return stepTitle + ' was blocked, so ' + RUN_NAME + ' stopped after its commit: ' + reason + ' ' + describeCommitEnd(commitValues);
-}
-
 function runBumpStep(run, plan, facts, count) {
   if (plan.versioning.artifact_files.length === 0) {
     return agent(addResumeNote(buildBumpTypePrompt(facts.trunk_commit, plan.versioning), run), runnerOptions(gateLabel('bump-type', run, count), 'Bump'));
@@ -323,12 +321,10 @@ function describeBumpNote(values) {
 }
 
 async function commitBumpEdit(run, plan, count, checked) {
-  const committed = await runCommitStep(run, plan, plan.versioning.artifact_files, gateLabel('bump-commit', run, count), 'bump');
-  if (committed.problem !== undefined) {
-    return { result: finishDeliveryBlocked(committed.problem, run, committed.nextAction) };
-  }
-  if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked(checked.problem + ' ' + describeCommitEnd(committed.values), run, checked.nextAction) };
+  const commit = { files: plan.versioning.artifact_files, label: gateLabel('bump-commit', run, count), stepName: 'bump' };
+  const committed = await runCommitStep(run, plan, commit, checked.problem !== undefined ? [checked] : []);
+  if (committed.result !== undefined) {
+    return committed;
   }
   return { held: true, note: describeBumpNote(checked.values), values: checked.values };
 }
@@ -340,7 +336,7 @@ async function runBumpGate(run, plan, facts, gates) {
   const result = await runBumpStep(run, plan, facts, count);
   const checked = checkBumpTypeRelay(result, hasFiles ? BUMP_SCHEMA : RELAY_SCHEMA);
   if (checked.problem !== undefined) {
-    return hasFiles ? commitBumpEdit(run, plan, count, checked) : { result: finishDeliveryBlocked(checked.problem, run, checked.nextAction) };
+    return hasFiles ? commitBumpEdit(run, plan, count, checked) : { result: finishDeliveryBlocked([checked], run) };
   }
   const verdict = resolveBumpVerdict(checked.values, plan, run);
   if (isRunEnd(verdict)) {
@@ -413,12 +409,10 @@ async function runFixRound(run, plan, failures, round) {
   phase('Fix');
   const result = await agent(addResumeNote(buildFixPrompt(failures, plan, run.trunk), run), droneOptions(gateLabel('fix', run, round), 'Fix', FIX_SCHEMA));
   const fix = readGateEditOutcome(result, FIX_SCHEMA);
-  const committed = await runCommitStep(run, plan, fix.files, gateLabel('fix-commit', run, round), 'fix');
-  if (committed.problem !== undefined) {
-    return { result: finishDeliveryBlocked(committed.problem, run, committed.nextAction) };
-  }
-  if (fix.status === 'blocked') {
-    return { result: finishDeliveryBlocked(describeBlockedGateStep('The validation fix round', fix.reason, committed.values), run, fix.nextAction) };
+  const stepCauses = fix.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + fix.reason, nextAction: fix.nextAction }] : [];
+  const committed = await runCommitStep(run, plan, { files: fix.files, label: gateLabel('fix-commit', run, round), stepName: 'fix' }, stepCauses);
+  if (committed.result !== undefined) {
+    return committed;
   }
   return { held: false };
 }
@@ -444,7 +438,7 @@ async function runValidateStep(run, plan, gates) {
 async function runValidateGate(run, plan, gates) {
   const validation = hasKeptFailure(run, gates) ? { status: 'failed', failures: gates.failures[run.head] } : await runValidateStep(run, plan, gates);
   if (validation.problem !== undefined) {
-    return { result: finishDeliveryBlocked(validation.problem, run, validation.nextAction) };
+    return { result: finishDeliveryBlocked([validation], run) };
   }
   if (validation.status === 'not_run') {
     listNotRunGate(run, 'validation: the project documents no validation commands.');
