@@ -68,7 +68,6 @@ const PLAN_PAUSE_START = /^The plan for branch "feature\/cache" has \d+ steps? o
 const RUN_AGAIN = 'Next: run the request again with the answers in it.';
 const SETTLED_LABELS_SENTENCE = " In each answers entry, only the questions its settled labels name are the user's settled decisions: never ask them again, never reverse them.";
 const SETTLED_ANSWERS_LINE = lib.dataBlocksSentence(undefined) + SETTLED_LABELS_SENTENCE;
-const ON_BRANCH_LINE = RUN_AGAIN + ' The new run plans what is left from the commits already on branch "feature/cache".';
 const scratchRoots = [];
 
 after(() => {
@@ -1706,8 +1705,9 @@ const ROW_TESTS = {
       const run = await runWorkflow(args, remediationResults(ESCALATION, { 'revise-1': unsettled }));
       assert.equal(run.result.outcome, 'blocked');
       const paragraphs = run.result.message.split('\n\n');
-      assert.deepEqual(paragraphs.slice(0, 2), [OPEN_LEAD, ON_BRANCH_LINE]);
+      assert.deepEqual(paragraphs.slice(0, 2), [OPEN_LEAD, RUN_AGAIN]);
       assert.ok(paragraphs[2].startsWith('I stopped asking because your replies so far are too long to carry'), run.result.message);
+      assert.ok(paragraphs.indexOf(branchLine(1, OTHER)) > 2, run.result.message);
       assert.ok(!labelsOf(run).includes('branch-2'));
     });
     test('a null revise result, an agent failure, gives the run_again Next line, and a revise result that fails its schema the fix line', async () => {
@@ -2692,8 +2692,8 @@ const ROW_TESTS = {
       second.calls.forEach((call, index) => assert.equal(run.calls[index].prompt, call.prompt, call.opts.label));
     });
     test('the next-action line never offers a pull request from commits a gate did not hold on', () => {
-      for (const stopRun of [{ commits: [OTHER], branch: 'feature/cache' }, { commits: [], branch: undefined }]) {
-        assert.ok(!/pull request/i.test(main.nextActionLine(stopRun)), JSON.stringify(stopRun));
+      for (const nextAction of [undefined, 'fix_cause', 'run_again', 'answer']) {
+        assert.ok(!/pull request/i.test(main.nextStepLine(nextAction)), String(nextAction));
       }
       assert.ok(!moduleSource.includes('can be opened from those commits'));
     });
@@ -4791,14 +4791,7 @@ const ROW_TESTS = {
         assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
       });
     }
-    test('nextActionLine() names the next action in one line, with the branch once the run made commits', () => {
-      const run = { commits: [], branch: undefined };
-      assert.equal(main.nextActionLine(run), RUN_AGAIN);
-      Object.assign(run, { commits: [OTHER], branch: 'feature/cache' });
-      assert.equal(main.nextActionLine(run), ON_BRANCH_LINE);
-      assert.equal(main.nextActionLine.length, 1);
-    });
-    test('an open question stop keeps nextActionLine() right after its first block, without a throw', () => {
+    test('an open question stop keeps the answer Next line right after its first block, without a throw', () => {
       const asks = Array.from({ length: 30 }, (_, index) => ({ brief: makeBrief({ problem: 'P' + index + ' ' + '\u0001'.repeat(2000) }) }));
       const run = { taken: [], waveCount: 1, commits: Array.from({ length: 400 }, () => OTHER), reversibleEffects: [], notRunGates: [], branch: 'b'.repeat(5000) };
       for (const stopReason of ['reply_size', 'exact_text_size']) {
@@ -4806,7 +4799,7 @@ const ROW_TESTS = {
         assert.equal(result.outcome, 'blocked');
         const paragraphs = result.message.split('\n\n');
         assert.equal(paragraphs[0], OPEN_LEAD);
-        assert.equal(paragraphs[1], main.nextActionLine(run));
+        assert.equal(paragraphs[1], lib.nextStepLine('answer'));
         assert.ok(!paragraphs[1].includes('\n'));
         assert.ok(lib.noticeLength(result) <= lib.noticeBudget());
       }
@@ -5029,13 +5022,14 @@ const ROW_TESTS = {
         assert.ok(!schema.required.includes('next_action'));
       }
     });
-    test('nextStepLine() maps fix_cause or no value to the fix-the-cause line and run_again to its own fixed line', () => {
+    test('nextStepLine() maps fix_cause or no value to the fix-the-cause line, and run_again and answer each to its own fixed line', () => {
       assert.equal(main.nextStepLine(), NEXT_STEP_LINE);
       assert.equal(main.nextStepLine('fix_cause'), NEXT_STEP_LINE);
       assert.equal(main.nextStepLine('run_again'), RUN_AGAIN_LINE);
+      assert.equal(main.nextStepLine('answer'), RUN_AGAIN);
     });
     test('every Next line starts with Next: and points at no cause its lead does not name', () => {
-      const lines = [main.nextStepLine(), main.nextStepLine('run_again'), main.nextActionLine({ commits: [] }), main.nextActionLine({ commits: [OTHER], branch: 'feature/cache' })];
+      const lines = [main.nextStepLine(), main.nextStepLine('run_again'), main.nextStepLine('answer')];
       for (const line of lines) {
         assert.ok(line.startsWith('Next: '), line);
         assert.ok(!/named above|above|the cause named/.test(line), line);
@@ -6033,7 +6027,7 @@ const ROW_TESTS = {
     });
   },
   'SD-68': () => {
-    const skewStop = withNextStep('The plugin changed while the delivery was paused, so nothing ran. Run the request again with your answers in it.');
+    const skewStop = 'The plugin changed while the delivery was paused, so nothing ran.' + '\n\n' + RUN_AGAIN;
     for (const [label, build] of [['no build', undefined], ['another build', 'f'.repeat(16)]]) {
       test('a resume with ' + label + ' stops blocked before any agent call', async () => {
         const args = { ...LAUNCH, answers: { 'round-1': 'Take option A.' }, reply: 'Take option A.' };

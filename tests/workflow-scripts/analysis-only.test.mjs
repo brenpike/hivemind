@@ -328,7 +328,7 @@ describe('analysis-only: pause and resume', () => {
 });
 
 describe('analysis-only: build id and answers across rounds', () => {
-  const SKEW_STOP = 'The plugin changed while the analysis was paused, so nothing ran. Run the request again with your answers in it.';
+  const SKEW_STOP = 'The plugin changed while the analysis was paused, so nothing ran.';
   const SETTLED_DATA_SENTENCE = REPLY_DATA_SENTENCE + ' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
   function readAnswersBlock(prompt) {
     const block = prompt.match(/\n<answers>\n(.*)\n<\/answers>\n/);
@@ -357,7 +357,7 @@ describe('analysis-only: build id and answers across rounds', () => {
         const launchArgs = build === undefined ? { request: REQUEST, ...resume } : { request: REQUEST, build: build, ...resume };
         const run = await runWorkflow(launchArgs, results);
         assert.equal(run.calls.length, 0, JSON.stringify(launchArgs));
-        assert.deepEqual(run.result, stopResult(SKEW_STOP));
+        assert.deepEqual(run.result, stopResult(SKEW_STOP, 'answer'));
       }
     }
   });
