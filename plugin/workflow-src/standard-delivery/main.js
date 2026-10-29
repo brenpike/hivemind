@@ -122,8 +122,11 @@
  *   run the request again later; fix_cause or no value gives the fix line.
  *   A blocked wave says run_again only when every blocked worker does.
  *   Compound rule: a file-changing step passes its own causes to
- *   runCommitStep (relay.js), which ends the run with them and a failed
- *   commit's cause after them, so no stop hides another. Causes that need
+ *   runCommitStep (relay.js), which stops through stopDelivery with them
+ *   and a failed commit's cause after them, so no stop hides another. A
+ *   facts, scan, scope, plan or branch stop goes through stopDelivery with
+ *   isReplan true, and its reply starts a new pass outside maxReplans();
+ *   the launch check alone ends in runDelivery. Causes that need
  *   a fix lead, with the fix line, then agent failures, each group in step
  *   order, so the Next line is run_again only when every cause is. A lead
  *   longer than maxBlockedLeadLength() code points has as its compact form
@@ -200,8 +203,9 @@
  *   result, or {replan}, the data the next pass plans from.
  *   A pass starts at launch, after a needs_replan wave, after a branch
  *   step that switched branch or commit, after a taken local review
- *   escalation or root cluster, or after a reply to a tail ask other than
- *   a local review question or a version question, and every pass starts with the facts step,
+ *   escalation or root cluster, after a reply to a tail ask other than a
+ *   local review question or a version question, or after a reply to a
+ *   stop with isReplan true, and every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
  *   invariant 3). Then the scope step (scope.js) runs once, after the facts
  *   step and the scan and before planning, and again after each reply round
@@ -360,19 +364,19 @@ function createRunState(launch) {
 async function runDeliveryPass(run, replan) {
   const checked = await runFactsStep(run);
   if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked([checked], run) };
+    return stopDelivery([checked], run, [], true);
   }
   const scoped = await runScopeStep(run, checked.facts);
   if (scoped.problem !== undefined) {
-    return { result: finishDeliveryBlocked([scoped], run) };
+    return stopDelivery([scoped], run, [], true);
   }
   const planned = await runPlanningPass(run, checked.facts, scoped.scope, replan);
-  if (planned.result !== undefined) {
+  if (planned.plan === undefined) {
     return planned;
   }
   const branched = await runBranchStep(run, planned.plan, planned.freshness);
   if (branched.problem !== undefined) {
-    return { result: finishDeliveryBlocked([branched], run) };
+    return stopDelivery([branched], run, [], true);
   }
   if (needsBranchReplan(branched.values, checked.facts, planned.plan)) {
     return requestBranchReplan(run);

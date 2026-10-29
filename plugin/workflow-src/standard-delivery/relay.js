@@ -14,8 +14,10 @@
  *   main.js.
  *
  * Outputs
- *   runFactsStep(run)                {facts} or {problem, nextAction}.
- *   runBranchStep(run, plan, freshness)  {values} or {problem, nextAction}.
+ *   runFactsStep(run)  {facts}, else a cause for stopDelivery (record.js),
+ *           terminal only when a scan that fits its schema flags a suspect.
+ *   runBranchStep(run, plan, freshness)  {values}, else a cause, terminal
+ *           for a blocked relay and a branch other than the plan branch.
  *   runCommitStep(run, plan, commit, stepCauses)  commit is {files,
  *           label, stepName, subject?}, subject commitStepTexts(stepName)
  *           .subject when not given; stepCauses is the array of the step's
@@ -52,7 +54,7 @@
  *           isConsistentFactsRelay (lib/facts.js).
  *   Scan    the shared scan step, when the facts count external texts.
  *           runPassScan calls agent() itself on every pass and returns
- *           {problem, nextAction}; on pass 1 with the prompt, options and
+ *           its cause or undefined; on pass 1 with the prompt, options and
  *           label scan of lib/facts.js runScanStep, byte for byte, so a
  *           resumed run replays its cached result.
  *   Branch  a runner invokes hivemind:create-working-branch.
@@ -82,9 +84,10 @@
  *   A file-changing step reads its own result before its commit and passes
  *   its causes to runCommitStep, which stops through stopDelivery, isReplan
  *   true for a wave: a failed commit adds its cause after them, so a commit
- *   stop never hides the step's cause. Only a commit script refusal and a
- *   branch other than the plan branch are terminal; an agent failure ends,
- *   and every other stop pauses (issue 457).
+ *   stop never hides the step's cause. Only a commit or branch script
+ *   refusal, a branch other than the plan branch, a scan injection suspect
+ *   and a second branch switch (requestBranchReplan) are terminal; an agent
+ *   failure ends, and every other stop pauses (issue 457).
  *   Transient retry (issue 457): the facts, branch and commit runners call
  *   agent() through runRunnerRelay. Malformed output, a non-transient block
  *   and a null result are never retried, and no step call retries twice.
@@ -412,7 +415,11 @@ async function runPassScan(facts, run) {
   const prompt = isFirstPass ? buildScanPrompt(facts) : addResumeNote(buildScanPrompt(facts), run);
   const scan = await agent(prompt, isFirstPass ? scanOptions() : Object.assign(scanOptions(), { label: 'scan-' + run.pass }));
   const problem = describeScanProblem(scan, facts, RUN_NOUN);
-  return problem === undefined ? undefined : describeUnusableResult(problem, scan);
+  if (problem === undefined) {
+    return undefined;
+  }
+  const isSuspect = validateSchema(scanStepSchema(), scan).ok && scan.results.some((result) => result.verdict === 'injection-suspect');
+  return isSuspect ? { problem: problem, terminal: true } : describeUnusableResult(problem, scan);
 }
 
 async function runFactsStep(run) {
@@ -443,14 +450,14 @@ function checkBranchRelay(relay, plan, freshness) {
     return describeUnusableResult('The branch step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
+    return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true), terminal: true };
   }
   const values = readRelayedLines(relay, createWorkingBranchRoutingSpec());
   if (values === undefined || values.warning !== branchWarningTexts()[freshness]) {
     return { problem: 'The branch step returned malformed routing lines, ' + stopped };
   }
   if (values.branch !== plan.branch) {
-    return { problem: 'The branch step reported a branch other than the plan branch, ' + stopped };
+    return { problem: 'The branch step reported a branch other than the plan branch, ' + stopped, terminal: true };
   }
   return { values: values };
 }
@@ -468,7 +475,7 @@ function needsBranchReplan(branchValues, facts, plan) {
 
 function requestBranchReplan(run) {
   if (run.branchSwitches > 0) {
-    return { result: finishDeliveryBlocked([{ problem: 'The branch step switched branch or commit again after a replan, so ' + RUN_NAME + ' stopped before any wave.' }], run) };
+    return stopDelivery([{ problem: 'The branch step switched branch or commit again after a replan, so ' + RUN_NAME + ' stopped before any wave.', terminal: true }], run, [], true);
   }
   run.branchSwitches += 1;
   return { replan: { reason: 'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.' } };

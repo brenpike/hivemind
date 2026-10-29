@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '94b69b3d39d17bb9';
+const BUILD_ID = 'fff9747064484c8b';
 
 function supportedSchemaKeywords(){
 return[
@@ -3119,8 +3119,10 @@ let planResult=await agent(planPrompt,plannerCallOptions('plan-'+run.pass,'Plan'
 for(;;){
 const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk);
 if(problem!==undefined){
-const unusable=describeUnusableResult(problem,planResult);
-return{result:finishDeliveryBlocked([unusable],run)};
+if(shownAsks.length>0){
+run.answerLog.push(buildAnswerEntry(shownEntry,undefined));
+}
+return stopDelivery([describeUnusableResult(problem,planResult)],run,[],true);
 }
 if(shownAsks.length>0){
 run.answerLog.push(buildAnswerEntry(shownEntry,planResult));
@@ -3130,7 +3132,7 @@ planResult=shownResult;
 }else{
 const rescoped=await runScopeStep(run,facts,run.answerLog.length);
 if(rescoped.problem!==undefined){
-return{result:finishDeliveryBlocked([rescoped],run)};
+return stopDelivery([rescoped],run,[],true);
 }
 scope=rescoped.scope;
 }
@@ -3142,7 +3144,7 @@ return{plan:planResult.plan,freshness:resolution.freshness};
 }
 const resettled=resolution.asks.find((ask)=>settledKinds.has(ask.kind)&&[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,TRUNK_STALE_KIND].includes(ask.kind));
 if(resettled!==undefined){
-return{result:finishDeliveryBlocked([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.'}],run)};
+return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true}],run,[],true);
 }
 const isAcceptance=resolution.asks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
 const lead=describePlanLine(planResult.plan,isAcceptance?resolution.outsidePaths:[]);
@@ -3671,7 +3673,11 @@ const isFirstPass=run.pass===1;
 const prompt=isFirstPass?buildScanPrompt(facts):addResumeNote(buildScanPrompt(facts),run);
 const scan=await agent(prompt,isFirstPass?scanOptions():Object.assign(scanOptions(),{label:'scan-'+run.pass}));
 const problem=describeScanProblem(scan,facts,RUN_NOUN);
-return problem===undefined?undefined:describeUnusableResult(problem,scan);
+if(problem===undefined){
+return undefined;
+}
+const isSuspect=validateSchema(scanStepSchema(),scan).ok&&scan.results.some((result)=>result.verdict==='injection-suspect');
+return isSuspect?{problem:problem,terminal:true}:describeUnusableResult(problem,scan);
 }
 async function runFactsStep(run){
 phase('Facts');
@@ -3699,14 +3705,14 @@ if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult('The branch step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
-return{problem:'The branch step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true)};
+return{problem:'The branch step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true),terminal:true};
 }
 const values=readRelayedLines(relay,createWorkingBranchRoutingSpec());
 if(values===undefined||values.warning!==branchWarningTexts()[freshness]){
 return{problem:'The branch step returned malformed routing lines, '+stopped};
 }
 if(values.branch!==plan.branch){
-return{problem:'The branch step reported a branch other than the plan branch, '+stopped};
+return{problem:'The branch step reported a branch other than the plan branch, '+stopped,terminal:true};
 }
 return{values:values};
 }
@@ -3721,7 +3727,7 @@ return(branchValues.created==='false'&&!isOnPlanBranch)||branchValues.commit!==f
 }
 function requestBranchReplan(run){
 if(run.branchSwitches>0){
-return{result:finishDeliveryBlocked([{problem:'The branch step switched branch or commit again after a replan, so '+RUN_NAME+' stopped before any wave.'}],run)};
+return stopDelivery([{problem:'The branch step switched branch or commit again after a replan, so '+RUN_NAME+' stopped before any wave.',terminal:true}],run,[],true);
 }
 run.branchSwitches+=1;
 return{replan:{reason:'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.'}};
@@ -4548,19 +4554,19 @@ versionAnswer:undefined
 async function runDeliveryPass(run,replan){
 const checked=await runFactsStep(run);
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked([checked],run)};
+return stopDelivery([checked],run,[],true);
 }
 const scoped=await runScopeStep(run,checked.facts);
 if(scoped.problem!==undefined){
-return{result:finishDeliveryBlocked([scoped],run)};
+return stopDelivery([scoped],run,[],true);
 }
 const planned=await runPlanningPass(run,checked.facts,scoped.scope,replan);
-if(planned.result!==undefined){
+if(planned.plan===undefined){
 return planned;
 }
 const branched=await runBranchStep(run,planned.plan,planned.freshness);
 if(branched.problem!==undefined){
-return{result:finishDeliveryBlocked([branched],run)};
+return stopDelivery([branched],run,[],true);
 }
 if(needsBranchReplan(branched.values,checked.facts,planned.plan)){
 return requestBranchReplan(run);
