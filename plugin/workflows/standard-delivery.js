@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'd3f2d8c12c9e3113';
+const BUILD_ID = '63546df6dda315be';
 
 function supportedSchemaKeywords(){
 return[
@@ -3326,6 +3326,15 @@ return lines.join('\n');
 function renderNotRunGates(lines){
 return['Gates that did not run:',...lines.map((line)=>'- '+line)].join('\n');
 }
+function observeHead(run,commit,committed,branch){
+if(committed){
+run.commits.push(commit);
+}else if(run.head!==undefined&&commit!==run.head){
+run.commits.push(run.head+'..'+commit);
+}
+run.head=commit;
+run.branch=branch;
+}
 function buildRunRecordParts(run,taken,gates){
 const parts=[];
 if(run.waveCount>0){
@@ -3832,13 +3841,7 @@ const checked=checkCommitRelay(relay,plan,commit.stepName);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
 }
-if(checked.values.committed==='true'){
-run.commits.push(checked.values.commit);
-}else if(run.head!==undefined&&checked.values.commit!==run.head){
-run.commits.push(run.head+'..'+checked.values.commit);
-}
-run.head=checked.values.commit;
-run.branch=plan.branch;
+observeHead(run,checked.values.commit,checked.values.committed==='true',plan.branch);
 if(stepCauses.length===0){
 return{values:checked.values};
 }
@@ -4593,6 +4596,7 @@ return keepReplanReview(stopDelivery([branched],run,[],true),replan);
 if(needsBranchReplan(branched.values,checked.facts,planned.plan)){
 return requestBranchReplan(run);
 }
+observeHead(run,branched.values.commit,false,planned.plan.branch);
 return runPlanWaves(run,planned.plan,checked.facts);
 }
 async function runDelivery(rawArgs){

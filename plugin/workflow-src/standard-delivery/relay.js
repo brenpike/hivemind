@@ -5,8 +5,8 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The steps read trunk,
- *          references, pass, answerLog and head, and runCommitStep updates
- *          commits, head and branch.
+ *          references, pass, answerLog and head, and runCommitStep passes its
+ *          checked commit to observeHead (record.js), their one writer.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   relay  each runner result: {outcome, stdout, stderr} under
  *          RELAY_SCHEMA, its stdout read with lib/routing.js.
@@ -59,12 +59,15 @@
  *           resumed run replays its cached result.
  *   Branch  a runner invokes hivemind:create-working-branch.
  *   Commit  a runner invokes hivemind:molt after every wave and every gate
- *           step that can change files. A commit it makes enters the run
- *           commits; when it commits nothing but reports a commit other than
- *           the previous head, as after local review fix commits, the range
- *           <previous head>..<new head> enters them. Its inputs block carries
- *           a code-built subject: a wave's from its plan steps (waves.js
- *           buildWaveSubject), and fixed ones for the fix and review commits.
+ *           step that can change files. Its checked commit goes to
+ *           observeHead (record.js), as the branch commit does at each pass
+ *           start (main.js): a commit it makes enters the run commits; when
+ *           it commits nothing but reports a commit other than the previous
+ *           head, as after local review fix commits, the range
+ *           <previous head>..<new head> enters them. Its inputs block
+ *           carries a code-built subject: a wave's from its plan steps
+ *           (waves.js buildWaveSubject), and fixed ones for the fix and
+ *           review commits.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -583,13 +586,7 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   if (checked.problem !== undefined) {
     return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);
   }
-  if (checked.values.committed === 'true') {
-    run.commits.push(checked.values.commit);
-  } else if (run.head !== undefined && checked.values.commit !== run.head) {
-    run.commits.push(run.head + '..' + checked.values.commit);
-  }
-  run.head = checked.values.commit;
-  run.branch = plan.branch;
+  observeHead(run, checked.values.commit, checked.values.committed === 'true', plan.branch);
   if (stepCauses.length === 0) {
     return { values: checked.values };
   }

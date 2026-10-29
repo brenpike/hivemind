@@ -101,6 +101,11 @@
  *   limit (finishOpenQuestions) or the launch check (issue 457). Every other
  *   stop pauses through stopDelivery (record.js) with one step_stop
  *   question, and the reply takes the stopped step again or plans again.
+ *   Each new pass reads the head from its branch step through observeHead
+ *   (record.js), the one writer of run.head, before any wave: that commit
+ *   equals the facts head by needsBranchReplan, so a commit made during a
+ *   pause, or by a commit runner whose relay could not be read, enters the
+ *   run commits as a range.
  *   No version question plans again: its reply becomes run.versionAnswer
  *   and runs one fix round, and no later version check of the run fails
  *   or asks (gates.js).
@@ -396,6 +401,7 @@ async function runDeliveryPass(run, replan) {
   if (needsBranchReplan(branched.values, checked.facts, planned.plan)) {
     return requestBranchReplan(run);
   }
+  observeHead(run, branched.values.commit, false, planned.plan.branch);
   return runPlanWaves(run, planned.plan, checked.facts);
 }
 

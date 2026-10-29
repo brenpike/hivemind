@@ -6661,6 +6661,41 @@ const ROW_TESTS = {
         assert.equal(labelsOf(run).at(-1), 'commit-1-1', JSON.stringify(relay));
       }
     });
+  },
+  'SD-72': () => {
+    function commitsPartOf(run, label) {
+      return prBodyOf(run, label).split('\n\n').find((part) => part.startsWith('Commits this run made:') || part === 'This run made no commit.');
+    }
+    test('the built script writes run.head and run.branch, and pushes onto run.commits, only inside observeHead', () => {
+      const code = stripCommentsAndStrings(builtSource.replace(/^export const meta\b/, 'const meta'));
+      const writes = [...code.matchAll(/\.(head|branch|commits)(?:\s*(?:\+=|=(?!=))|\.(?:push|unshift|splice)\()/g)];
+      assert.deepEqual(writes.map((write) => write[1]).sort(), ['branch', 'commits', 'commits', 'head']);
+      writes.forEach((write) => assert.equal(findEnclosingFunction(code, write.index), 'observeHead', code.slice(write.index - 40, write.index + 20)));
+    });
+    test('a malformed wave commit relay whose runner committed pauses, and the next pass reads the head from its branch step and records the range', async () => {
+      const results = happyResults({
+        'commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' },
+        'facts-2': onPlanBranchFacts(OTHER),
+        'plan-2': planResult(),
+        'branch-2': branchRelay({ created: 'false', commit: OTHER }),
+        'work-2-STEP-001': WORKER_DONE,
+        'commit-2-1': commitRelay({ commit: THIRD }),
+        ...tailResults(2, THIRD)
+      });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      assert.equal(labelsOf(paused).at(-1), 'commit-1-1');
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed, go on.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      const labels = labelsOf(resumed);
+      assert.deepEqual(labels.slice(labels.indexOf('commit-1-1') + 1), ['facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-001', 'commit-2-1', ...tailLabels(2)]);
+      assert.equal(commitsPartOf(resumed, 'pr-2'), 'Commits this run made:\n- ' + HEAD + '..' + OTHER + '\n- ' + THIRD, prBodyOf(resumed, 'pr-2'));
+    });
+    test('on pass 1 a wave commit with committed false at the branch head records nothing', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'commit-1-1': commitRelay({ commit: HEAD, committed: 'false' }), ...tailResults(1, HEAD) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(commitsPartOf(run, 'pr-1'), 'This run made no commit.', prBodyOf(run, 'pr-1'));
+    });
   }
 };
 

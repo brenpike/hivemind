@@ -13,6 +13,9 @@
  *           agentFailure?} each: terminal true marks a cause no reply can
  *           clear, and agentFailure comes only from describeUnusableResult.
  *   endLines  lines a stop shows after its causes, such as a commit end.
+ *   commit, committed, branch  a head read from a checked relay: the
+ *           commit and committed lines of a molt relay, or the commit of
+ *           a branch relay with committed false, and the plan branch.
  *   isReplan  true when a reply to a stop plans again from fresh facts.
  *   result.js finish, which builds a blocked message from the causes,
  *   pauseForUser and the fit helpers, and brief.js renderQuestions,
@@ -24,6 +27,10 @@
  *   stopDelivery(causes, run, endLines, isReplan)  {result}, the blocked end
  *           or the pause, or on a reply {replan: {reason}} when isReplan,
  *           a new pass outside maxReplans(), else {held: false}.
+ *   observeHead(run, commit, committed, branch)  pushes commit onto
+ *           run.commits when committed, else the range
+ *           <run.head>..<commit> when run.head is defined and differs from
+ *           commit, then sets run.head to commit and run.branch to branch.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
  *           request body and its comment carry, the commit list included.
  *
@@ -66,6 +73,13 @@
  *   A contractRows() check is a function of the built script, not of
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
+ *   One head writer (issue 457): observeHead is the only code that writes
+ *   run.head, run.branch or run.commits, and its callers feed it only a
+ *   commit read from a checked relay: runCommitStep (relay.js) the molt
+ *   commit, and runDeliveryPass (main.js) the branch commit of each new
+ *   pass before any wave. So a commit made during a pause, or by a commit
+ *   runner whose relay could not be read, enters the run commits as a
+ *   range once the run reads the head again.
  *   One stop path (issue 457): a stop ends the run only on a terminal
  *   cause, an agent failure, a size limit (finishOpenQuestions) or the
  *   launch check. Every other stop pauses through stopDelivery, and a reply
@@ -106,6 +120,16 @@ function renderReversibleEffects(effects) {
 
 function renderNotRunGates(lines) {
   return ['Gates that did not run:', ...lines.map((line) => '- ' + line)].join('\n');
+}
+
+function observeHead(run, commit, committed, branch) {
+  if (committed) {
+    run.commits.push(commit);
+  } else if (run.head !== undefined && commit !== run.head) {
+    run.commits.push(run.head + '..' + commit);
+  }
+  run.head = commit;
+  run.branch = branch;
 }
 
 function buildRunRecordParts(run, taken, gates) {
