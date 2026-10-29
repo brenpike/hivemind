@@ -6,12 +6,15 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
- *          head, trunk and localReview, and update answerLog and notRunGates.
+ *          head, trunk and localReview, and update answerLog, notRunGates
+ *          and versionAnswer.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
- *   facts  the checked facts of the pass, from runPlanWaves (waves.js).
- *   gates  the gate loop state runGates builds: held, notes, runs, failures,
- *          fixRounds, reruns, rejected and answer. failures maps a head to
- *          the failures validation reported on it.
+ *   facts  the checked facts of the pass, from runPlanWaves (waves.js):
+ *          trunk_commit is the base of the version check.
+ *   gates  the gate loop state runGates builds: held, notes, runs (validate,
+ *          review and fix), failures, fixRounds, reruns, rejected and answer.
+ *          failures maps a head to the kept failed validation on it:
+ *          {status, failures, versionOnly, versionLine}.
  *   FIX_SCHEMA, VALIDATE_SCHEMA, VALIDATE_COMMANDS_SCHEMA and the limits of
  *   main.js.
  *
@@ -29,13 +32,41 @@
  *           and VALIDATE_COMMANDS_SCHEMA offers no not_run. When it is empty,
  *           the drone runs the Validation Procedure of definitions.md, and
  *           VALIDATE_SCHEMA keeps not_run, so an empty list never skips
- *           validation.
+ *           validation. When plan.versioning.artifact_files is not empty,
+ *           the same drone also invokes hivemind:bump-type once with the
+ *           version block, the pass's facts trunk_commit as base, the plan's
+ *           two versioning answers and the version files, and relays it in
+ *           the version field the schema then requires under passed, failed
+ *           and not_run. Its stdout parses with versionCheckRoutingSpec()
+ *           and passes isConsistentVersionRelay (relay.js). With no version
+ *           file the prompt and schema are as before, and no bump-type run
+ *           happens.
  *   Fix     a failed validation resolves through decide(). Each taken round is
  *           a drone that fixes the failures and reports its files, which the
  *           commit runner commits; at maxFixRounds() the run asks. A failed
  *           result is kept for the head it ran on, so when a fix round commits
  *           nothing no validate agent runs again on that head: the next
- *           fix-round decision takes the kept failures.
+ *           fix-round decision takes the kept failures. Fix labels count
+ *           gates.runs.fix, every fix round of the pass.
+ *
+ * Version check (issue 457), while run.versionAnswer is unset:
+ *   match         the gate holds, its note naming the version.
+ *   mismatch      a code-built line naming expected_version and the bump
+ *                 joins the command failures, and the fix prompt gets the
+ *                 version_files block. A version-only failure runs its fix
+ *                 round with no decide() call, counted toward
+ *                 maxFixRounds(); at the limit it stops through
+ *                 stopDelivery, and the reply resets the round count and
+ *                 runs validation again. Any other failure keeps the fix
+ *                 limit ask.
+ *   undetermined, unreadable  the run asks version_bump_indeterminable with
+ *                 no decide() call (buildVersionQuestionBrief, briefs.js).
+ *                 The reply becomes run.versionAnswer and runs one fix round
+ *                 with the version_files and user_answer blocks, outside
+ *                 decide() and the round limit, and never starts a new pass.
+ *   Once run.versionAnswer is set, no later version check of the run fails
+ *   or asks, and the gate note says the version is as the user replied. No
+ *   version path plans again.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of main.js:
@@ -45,8 +76,12 @@
  *   next action run_again. The fix step reads its result before the commit
  *   and passes its cause, if any, to runCommitStep (relay.js), which ends
  *   the run with every cause, so a commit stop never hides a step cause;
- *   a run end it returns is returned as is. Every other blocked end passes
- *   its causes to finishDeliveryBlocked (record.js).
+ *   a run end it returns is returned as is. A blocked, malformed or
+ *   unusable validation or version relay goes through stopDelivery
+ *   (record.js) with isReplan false: an agent failure ends the run, and any
+ *   other cause pauses, the reply running validation again with the next
+ *   count. A user_answer fix prompt carries the reply in a data block and
+ *   not the resume note.
  *   A gate holds only for the commit its step ended on, read from the commit
  *   runner's routing line; validation, which has no commit runner, ends on the
  *   head it ran on. The configured gates run in gateIds() order, local review
@@ -119,7 +154,7 @@ function buildGateEditSchema() {
   });
 }
 
-function buildValidateSchema(hasCommands) {
+function buildValidateSchema(hasCommands, hasVersion) {
   const spec = {
     tag: 'outcome',
     properties: {
@@ -144,7 +179,15 @@ function buildValidateSchema(hasCommands) {
     spec.properties.outcome.description = 'passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.';
     spec.variants.not_run = { required: [], optional: [] };
   }
+  if (hasVersion) {
+    spec.properties.version = Object.assign(buildRelaySchema(), { description: 'The relay of the one hivemind:bump-type run.' });
+    Object.keys(spec.variants).forEach((value) => spec.variants[value][value === 'blocked' ? 'optional' : 'required'].push('version'));
+  }
   return buildTaggedSchema(spec);
+}
+
+function hasVersionFiles(plan) {
+  return plan.versioning.artifact_files.length > 0;
 }
 
 function isRunEnd(outcome) {
@@ -202,22 +245,27 @@ function readGateEditOutcome(result, schema) {
   return { status: 'complete', files: result.files };
 }
 
-function buildValidatePrompt(commands) {
-  const taskLine = 'Run the project\'s validation on the working branch as it is checked out.';
-  if (commands.length === 0) {
-    return [taskLine, validationTaskSentence(), runnerReadOnlySentence()].join('\n');
+function versionCheckSentence() {
+  return 'The hivemind:bump-type run is part of this validation task: invoke the hivemind:bump-type skill once, with each value of the version block below as the input of the same name, and relay that run in the version field.';
+}
+
+function buildValidatePrompt(plan, trunkCommit) {
+  const commands = plan.validation_commands;
+  const lines = ['Run the project\'s validation on the working branch as it is checked out.', commands.length === 0 ? validationTaskSentence() : validationCommandsSentence(), runnerReadOnlySentence()];
+  const blocks = commands.length === 0 ? [] : [formatDataBlock('inputs', { commands: commands })];
+  if (hasVersionFiles(plan)) {
+    lines.push(versionCheckSentence());
+    blocks.push(formatDataBlock('version', Object.assign(buildBumpTypeInputs(trunkCommit, plan.versioning), { version_files: plan.versioning.artifact_files })));
   }
-  return [
-    taskLine,
-    validationCommandsSentence(),
-    runnerReadOnlySentence(),
-    '',
-    formatDataBlock('inputs', { commands: commands })
-  ].join('\n');
+  return (blocks.length === 0 ? lines : lines.concat('', blocks)).join('\n');
 }
 
 function selectValidateSchema(plan) {
-  return plan.validation_commands.length > 0 ? VALIDATE_COMMANDS_SCHEMA : VALIDATE_SCHEMA;
+  const hasCommands = plan.validation_commands.length > 0;
+  if (hasVersionFiles(plan)) {
+    return buildValidateSchema(hasCommands, true);
+  }
+  return hasCommands ? VALIDATE_COMMANDS_SCHEMA : VALIDATE_SCHEMA;
 }
 
 function readValidateOutcome(result, schema) {
@@ -227,28 +275,99 @@ function readValidateOutcome(result, schema) {
   if (result.outcome === 'blocked') {
     return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: result.next_action };
   }
-  return { status: result.outcome, failures: result.failures };
+  const validation = { status: result.outcome, failures: result.failures };
+  if (Object.hasOwn(result, 'version')) {
+    validation.versionRelay = result.version;
+  }
+  return validation;
 }
 
-function buildFixPrompt(failures, plan, trunk) {
-  return [
+function checkVersionRelay(relay) {
+  const stopped = 'so ' + RUN_NAME + ' stopped before the pull request.';
+  if (relay.outcome === 'blocked') {
+    return { problem: 'The version check of the validation step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
+  }
+  const values = readRelayedLines(relay, versionCheckRoutingSpec());
+  if (values === undefined || !isConsistentVersionRelay(values)) {
+    return { problem: 'The version check of the validation step returned malformed routing lines, ' + stopped };
+  }
+  return { values: values };
+}
+
+function describeVersionMismatch(values) {
+  const source = values.verdict === 'bump_required' ? 'the trunk version ' + values.trunk_version + ' raised by a ' + values.bump_type + ' bump' : 'the trunk version, since the commits call for no version bump';
+  return 'Version check: each file of the version_files block must hold version ' + values.expected_version + ', ' + source + '.';
+}
+
+function describeVersionQuestionLine(values) {
+  const cause = values.version_check === 'unreadable' ? 'The check cannot read one version from the files of the version_files block.' : 'The commits since the trunk do not settle the version bump.';
+  return 'Version check: ' + cause + ' Set each file of the version_files block as the reply in the user_answer block says.';
+}
+
+function describeValidateNote(validation, plan, run) {
+  const note = validation.status === 'passed' ? 'passed' : 'not run, the project documents no validation commands';
+  if (!hasVersionFiles(plan)) {
+    return note;
+  }
+  return run.versionAnswer === undefined ? note + ', version ' + validation.version.expected_version : note + ', version as the user replied';
+}
+
+/**
+ * Returns the validation with the version check applied: {problem} for an
+ * unusable version relay, {question} with the routing values for
+ * undetermined or unreadable, else the validation with version set to the
+ * values, and on a mismatch status failed, the version line joined to the
+ * failures and versionOnly. A kept failure or a set run.versionAnswer skips
+ * the check.
+ */
+function applyVersionCheck(validation, run) {
+  if (validation.versionRelay === undefined || run.versionAnswer !== undefined) {
+    return validation;
+  }
+  const checked = checkVersionRelay(validation.versionRelay);
+  if (checked.problem !== undefined) {
+    return checked;
+  }
+  const values = checked.values;
+  if (values.version_check === 'undetermined' || values.version_check === 'unreadable') {
+    return { question: values, status: validation.status, failures: validation.failures };
+  }
+  if (values.version_check === 'match') {
+    return Object.assign(validation, { version: values });
+  }
+  const versionLine = describeVersionMismatch(values);
+  const isFailed = validation.status === 'failed';
+  return { status: 'failed', failures: isFailed ? validation.failures + '\n\n' + versionLine : versionLine, versionOnly: !isFailed, versionLine: versionLine };
+}
+
+function buildFixPrompt(fix, plan, trunk) {
+  const lines = [
     'Fix the failed validation of the delivery: the failures block below holds what the validation reported.',
     validationFixSentence(),
     boundarySentence(),
-    dataBlocksSentence(),
+    fix.userAnswer === undefined ? dataBlocksSentence() : dataBlocksSentence('The reply in user_answer'),
     '',
-    formatDataBlock('failures', failures),
-    formatDataBlock('plan_summary', plan.summary),
-    formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: trunk })
-  ].join('\n');
+    formatDataBlock('failures', fix.failures)
+  ];
+  if (fix.versionLine !== undefined) {
+    lines.push(formatDataBlock('version_files', plan.versioning.artifact_files));
+  }
+  if (fix.userAnswer !== undefined) {
+    lines.push(formatDataBlock('user_answer', fix.userAnswer));
+  }
+  lines.push(formatDataBlock('plan_summary', plan.summary), formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: trunk }));
+  return lines.join('\n');
 }
 
-async function runFixRound(run, plan, failures, round) {
+async function runFixRound(run, plan, fix, gates) {
   phase('Fix');
-  const result = await agent(addResumeNote(buildFixPrompt(failures, plan, run.trunk), run), droneOptions(gateLabel('fix', run, round), 'Fix', FIX_SCHEMA));
-  const fix = readGateEditOutcome(result, FIX_SCHEMA);
-  const stepCauses = fix.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + fix.reason, nextAction: fix.nextAction }] : [];
-  const committed = await runCommitStep(run, plan, { files: fix.files, label: gateLabel('fix-commit', run, round), stepName: 'fix' }, stepCauses);
+  gates.runs.fix += 1;
+  const count = gates.runs.fix;
+  const prompt = fix.userAnswer === undefined ? addResumeNote(buildFixPrompt(fix, plan, run.trunk), run) : buildFixPrompt(fix, plan, run.trunk);
+  const result = await agent(prompt, droneOptions(gateLabel('fix', run, count), 'Fix', FIX_SCHEMA));
+  const edit = readGateEditOutcome(result, FIX_SCHEMA);
+  const stepCauses = edit.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + edit.reason, nextAction: edit.nextAction }] : [];
+  const committed = await runCommitStep(run, plan, { files: edit.files, label: gateLabel('fix-commit', run, count), stepName: 'fix' }, stepCauses);
   if (committed.result !== undefined) {
     return committed;
   }
@@ -265,35 +384,62 @@ function hasKeptFailure(run, gates) {
   return Object.hasOwn(gates.failures, run.head);
 }
 
-async function runValidateStep(run, plan, gates) {
+async function runValidateStep(run, plan, facts, gates) {
   phase('Validate');
   const schema = selectValidateSchema(plan);
-  const prompt = addResumeNote(buildValidatePrompt(plan.validation_commands), run);
+  const prompt = addResumeNote(buildValidatePrompt(plan, facts.trunk_commit), run);
   const result = await agent(prompt, droneOptions(gateLabel('validate', run, gates.runs.validate), 'Validate', schema));
-  return readValidateOutcome(result, schema);
+  const validation = readValidateOutcome(result, schema);
+  return validation.problem === undefined ? applyVersionCheck(validation, run) : validation;
 }
 
-async function runValidateGate(run, plan, gates) {
-  const validation = hasKeptFailure(run, gates) ? { status: 'failed', failures: gates.failures[run.head] } : await runValidateStep(run, plan, gates);
+async function askVersionQuestion(run, plan, gates, validation) {
+  const asked = askTail(buildUndecidedAsk(buildVersionQuestionBrief(validation.question)), run, undefined);
+  if (asked.answer === undefined) {
+    return asked;
+  }
+  run.versionAnswer = asked.answer;
+  const versionLine = describeVersionQuestionLine(validation.question);
+  const failures = validation.status === 'failed' ? validation.failures + '\n\n' + versionLine : versionLine;
+  return runFixRound(run, plan, { failures: failures, versionLine: versionLine, userAnswer: asked.answer }, gates);
+}
+
+function stopVersionFixLimit(run, gates, kept) {
+  const cause = { problem: 'Validation still fails its version check on commit ' + run.head + ' after ' + maxFixRounds() + ' fix rounds, so ' + RUN_NAME + ' stopped before the pull request. ' + kept.versionLine };
+  const stopped = stopDelivery([cause], run, [], false);
+  if (stopped.held === false) {
+    gates.fixRounds = 0;
+    delete gates.failures[run.head];
+  }
+  return stopped;
+}
+
+async function runValidateGate(run, plan, facts, gates) {
+  const validation = hasKeptFailure(run, gates) ? gates.failures[run.head] : await runValidateStep(run, plan, facts, gates);
   if (validation.problem !== undefined) {
-    return { result: finishDeliveryBlocked([validation], run) };
+    return stopDelivery([validation], run, [], false);
+  }
+  if (validation.question !== undefined) {
+    return askVersionQuestion(run, plan, gates, validation);
   }
   if (validation.status === 'not_run') {
     listNotRunGate(run, 'validation: the project documents no validation commands.');
   }
   if (validation.status !== 'failed') {
-    return { held: true, note: validation.status === 'passed' ? 'passed' : 'not run, the project documents no validation commands' };
+    return { held: true, note: describeValidateNote(validation, plan, run) };
   }
-  gates.failures[run.head] = validation.failures;
+  gates.failures[run.head] = validation;
   if (gates.fixRounds >= maxFixRounds()) {
-    return replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)), run);
+    return validation.versionOnly === true ? stopVersionFixLimit(run, gates, validation) : replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)), run);
   }
-  const decided = resolveTailDecision(VALIDATION_REMEDIATION_KIND, buildValidationRemediationBrief(run.head, gates.fixRounds + 1), run);
-  if (isRunEnd(decided)) {
-    return decided;
+  if (validation.versionOnly !== true) {
+    const decided = resolveTailDecision(VALIDATION_REMEDIATION_KIND, buildValidationRemediationBrief(run.head, gates.fixRounds + 1), run);
+    if (isRunEnd(decided)) {
+      return decided;
+    }
   }
   gates.fixRounds += 1;
-  return runFixRound(run, plan, validation.failures, gates.fixRounds);
+  return runFixRound(run, plan, validation, gates);
 }
 
 function resolveGateRerun(run, gates) {
@@ -308,16 +454,16 @@ function resolveGateRerun(run, gates) {
   return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, false), run);
 }
 
-function runGateStep(gateId, run, plan, gates) {
+function runGateStep(gateId, run, plan, facts, gates) {
   if (gateId === 'review') {
     return runReviewGate(run, plan, gates);
   }
-  return runValidateGate(run, plan, gates);
+  return runValidateGate(run, plan, facts, gates);
 }
 
 async function runGates(run, plan, facts) {
   const gateList = configuredGateIds(run);
-  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
+  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
   if (!run.localReview) {
     listNotRunGate(run, notConfiguredReviewLine());
   }
@@ -332,7 +478,7 @@ async function runGates(run, plan, facts) {
     if (gateId !== 'validate' || !hasKeptFailure(run, gates)) {
       gates.runs[gateId] += 1;
     }
-    const ended = await runGateStep(gateId, run, plan, gates);
+    const ended = await runGateStep(gateId, run, plan, facts, gates);
     if (isRunEnd(ended)) {
       return ended;
     }

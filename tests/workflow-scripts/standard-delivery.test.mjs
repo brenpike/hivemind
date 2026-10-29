@@ -31,6 +31,7 @@ const droneText = readText(join(repoRoot, 'plugin/agents/drone.md'));
 const gatherFactsPath = join(repoRoot, 'plugin/skills/gather-facts/scripts/gather-facts.sh');
 const createBranchPath = join(repoRoot, 'plugin/skills/create-working-branch/scripts/create-working-branch.sh');
 const moltPath = join(repoRoot, 'plugin/skills/molt/scripts/molt.sh');
+const bumpTypePath = join(repoRoot, 'plugin/skills/bump-type/scripts/bump-type.sh');
 const openPlanPrPath = join(repoRoot, 'plugin/skills/open-plan-pr/scripts/open-plan-pr.sh');
 const openPlanPrText = readText(openPlanPrPath);
 const safetyRailsText = readText(join(repoRoot, 'plugin/governance/safety-rails.md'));
@@ -55,6 +56,11 @@ const VALIDATE_PASSED = { outcome: 'passed' };
 const LEDGER_PATH = '.hivemind/review-loop/fix-ledger.yaml';
 const REVIEW_CLEAN = { exit_reason: 'clean', iterations_completed: 1, findings_resolved: 0, findings_open: 0, fix_commits_exist: false, ledger_path: LEDGER_PATH, rejected_findings: [] };
 const HELD_ALL = 'Validation and local review held on commit ';
+const BUMP_KEYS = ['dominant_row', 'verdict', 'bump_type', 'rule_applied', 'counts', 'mapped_commits', 'dropped_reverts', 'version_check', 'trunk_version', 'expected_version'];
+const MINOR_MATCH = { dominant_row: 'MINOR', verdict: 'bump_required', bump_type: 'minor', rule_applied: '3', counts: { major: '0', minor: '1', patch: '0', no_bump: '0' }, mapped_commits: '1', dropped_reverts: '0', version_check: 'match', trunk_version: '1.2.3', expected_version: '1.3.0' };
+const MINOR_MISMATCH = { ...MINOR_MATCH, version_check: 'mismatch' };
+const ASK_UNDETERMINED = { ...MINOR_MATCH, dominant_row: 'MULTI', verdict: 'ask_user', bump_type: 'none', rule_applied: '1', counts: { major: '0', minor: '1', patch: '1', no_bump: '0' }, mapped_commits: '2', version_check: 'undetermined', expected_version: undefined };
+const MINOR_UNREADABLE = { ...MINOR_MATCH, version_check: 'unreadable', trunk_version: undefined, expected_version: undefined };
 const MALFORMED_FACTS = 'The facts step returned malformed facts, so the delivery stopped before planning.';
 const NOT_READY = 'The branch is not ready for delivery, so the delivery stopped before planning:';
 const PR_URL = 'https://github.com/o/r/pull/7';
@@ -291,6 +297,44 @@ function branchRelay(changes = {}) {
 
 function commitRelay(changes = {}) {
   return { outcome: 'ran', stdout: routingStdout({ branch: 'feature/cache', commit: OTHER, committed: 'true', ...changes }) };
+}
+
+/**
+ * The stdout of bump-type.sh with --version-file: MINOR_MATCH with
+ * `changes`, a key set to undefined left out, counts as a block.
+ */
+function bumpStdout(changes = {}) {
+  const values = { ...MINOR_MATCH, ...changes };
+  const lines = BUMP_KEYS.filter((key) => values[key] !== undefined).map((key) => {
+    if (key !== 'counts') {
+      return key + ': ' + values[key];
+    }
+    return ['counts:', ...Object.entries(values.counts).map(([name, value]) => '  ' + name + ': ' + value)].join('\n');
+  });
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * A validation result `result` that carries the version relay of
+ * bump-type.sh stdout with `changes`.
+ */
+function validateWithVersion(changes = {}, result = VALIDATE_PASSED) {
+  return { ...result, version: { outcome: 'ran', stdout: bumpStdout(changes) } };
+}
+
+function parsedVersion(changes) {
+  return lib.parseRoutingLines(bumpStdout(changes), main.versionCheckRoutingSpec()).values;
+}
+
+const VERSION_PLAN = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
+const VERSION_LINE = 'Version check: each file of the version_files block must hold version 1.3.0, the trunk version 1.2.3 raised by a minor bump.';
+
+/**
+ * The happy results of a run whose plan names the version file VERSION and
+ * whose first validation passes with a version match, with `changes`.
+ */
+function versionResults(changes = {}) {
+  return happyResults({ 'plan-1': planResult(VERSION_PLAN), 'validate-1-1': validateWithVersion(), ...changes });
 }
 
 function prRelay(changes = {}) {
@@ -693,6 +737,25 @@ function assertTailPause(run, asks, lastLabel) {
   assert.ok(run.result.message.endsWith('\n\n' + questions), run.result.message);
   const lead = run.result.message.slice(0, -(questions.length + 2));
   assert.ok(/^Every plan step is committed on branch "feature\/cache", with head [0-9a-f]{40}\.$/.test(lead), lead);
+  if (lastLabel !== undefined) {
+    assert.equal(labelsOf(run).at(-1), lastLabel);
+  }
+}
+
+/**
+ * Asserts the run paused on one step_stop question that takes the stopped
+ * step again: needs_user true, the lead starting with `leadStart`, no Next
+ * line, the step_stop question last, and, when given, `lastLabel` as the
+ * label of the last agent call. isRunAgain is whether every cause of the
+ * stop says run_again.
+ */
+function assertStepStopPause(run, leadStart, lastLabel, isRunAgain = false) {
+  assert.equal(run.result.needs_user, true, run.result.message);
+  const cause = isRunAgain ? { problem: leadStart, nextAction: 'run_again' } : { problem: leadStart };
+  const question = lib.renderQuestions([limitAsk(main.buildStepStopBrief([cause], false))]);
+  assert.ok(run.result.message.startsWith(leadStart), run.result.message);
+  assert.ok(run.result.message.endsWith('\n\n' + question), run.result.message);
+  assert.ok(!run.result.message.includes('Next: '), run.result.message);
   if (lastLabel !== undefined) {
     assert.equal(labelsOf(run).at(-1), lastLabel);
   }
@@ -2425,6 +2488,192 @@ const ROW_TESTS = {
       assert.ok(run.result.message.endsWith(lib.noticeMarker('cut')), run.result.message.slice(-300));
     });
   },
+  'SD-21': () => {
+    const unusableLead = 'The validation step returned no usable result, so the delivery stopped before the pull request.';
+    const malformedLead = 'The version check of the validation step returned malformed routing lines, so the delivery stopped before the pull request.';
+    test('with version files the validate drone gets the version check sentence and the version block, the schema requires the relay under passed, failed and not_run, and a match holds naming the version', async () => {
+      const run = await runWorkflow(LAUNCH, versionResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const call = callOf(run, 'validate-1-1');
+      const lines = withoutDataBlock(withoutDataBlock(call.prompt, 'inputs'), 'version').split('\n');
+      assert.deepEqual(lines, ['Run the project\'s validation on the working branch as it is checked out.', main.validationCommandsSentence(), lib.runnerReadOnlySentence(), main.versionCheckSentence(), '']);
+      assert.deepEqual(readDataBlock(call.prompt, 'version'), { base: TRUNK_COMMIT, bump_trigger: 'yes', no_bump_match: 'no', version_files: ['VERSION'] });
+      assert.deepEqual(call.opts.schema, structuredClone(lib.toAgentSchema(main.buildValidateSchema(true, true))));
+      const full = structuredClone(main.buildValidateSchema(false, true));
+      const requiredBy = Object.fromEntries(full.anyOf.map((branch) => [branch.properties.outcome.enum[0], branch.required.includes('version')]));
+      assert.deepEqual(requiredBy, { passed: true, failed: true, not_run: true, blocked: false });
+      assert.ok(full.anyOf.every((branch) => Object.hasOwn(branch.properties, 'version')));
+      assert.ok(main.versionCheckSentence().startsWith('The hivemind:bump-type run is part of this validation task'));
+      assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
+    });
+    test('with no version files the validate prompt and schema are as before, and no bump-type run happens', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      const call = callOf(run, 'validate-1-1');
+      assert.ok(run.calls.every((agentCall) => !agentCall.prompt.includes('hivemind:bump-type')));
+      assert.deepEqual(call.opts.schema, structuredClone(lib.toAgentSchema(main.buildValidateSchema(true))));
+      assert.ok(!Object.hasOwn(call.opts.schema.properties, 'version'));
+      assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
+    });
+    test('the routing spec keys are the OUTPUT keys of bump-type.sh in order, with counts as a block', () => {
+      const scriptText = readText(bumpTypePath);
+      const output = scriptText.slice(scriptText.indexOf('# OUTPUT on success'), scriptText.indexOf('# EXIT CONTRACT'));
+      const topKeys = [...output.matchAll(/^# {3}([a-z_]+):/gm)].map((match) => match[1]);
+      const countKeys = [...output.matchAll(/^# {5}([a-z_]+):/gm)].map((match) => match[1]);
+      const spec = main.versionCheckRoutingSpec();
+      assert.deepEqual(Object.keys(spec), topKeys);
+      assert.deepEqual(Object.keys(spec.counts.block), countKeys);
+      assert.deepEqual(BUMP_KEYS, topKeys);
+      assert.deepEqual(['version_check', 'trunk_version', 'expected_version'].map((key) => spec[key].required), [true, false, false]);
+      for (const values of [MINOR_MATCH, MINOR_MISMATCH, ASK_UNDETERMINED, MINOR_UNREADABLE]) {
+        assert.ok(main.isConsistentVersionRelay(parsedVersion(values)), values.version_check);
+      }
+    });
+    test('real bump-type.sh with --version-file parses with the spec: an unchanged version file is a mismatch, and one raised by the bump a match', () => {
+      const scratch = makeScratchRepo();
+      writeRepoFile(scratch, 'VERSION', '1.2.3\n');
+      runGitIn(scratch, ['add', 'VERSION']);
+      runGitIn(scratch, ['commit', '-q', '-m', 'chore: add the version file']);
+      const trunkCommit = runGitIn(scratch, ['rev-parse', 'HEAD']);
+      runGitIn(scratch, ['checkout', '-q', '-b', 'feature/cache']);
+      writeRepoFile(scratch, 'src/cache.js', 'cache\n');
+      runGitIn(scratch, ['add', 'src/cache.js']);
+      runGitIn(scratch, ['commit', '-q', '-m', 'feat: add the cache']);
+      const checkVersion = () => {
+        const relay = runScriptIn(scratch, bumpTypePath, [trunkCommit, '--bump-trigger', 'yes', '--no-bump-match', 'no', '--version-file', 'VERSION']);
+        assert.equal(relay.outcome, 'ran', relay.stderr);
+        const parsed = lib.parseRoutingLines(relay.stdout, main.versionCheckRoutingSpec());
+        assert.ok(parsed.ok, JSON.stringify(parsed));
+        assert.ok(main.isConsistentVersionRelay(parsed.values));
+        return [parsed.values.version_check, parsed.values.trunk_version, parsed.values.expected_version];
+      };
+      assert.deepEqual(checkVersion(), ['mismatch', '1.2.3', '1.3.0']);
+      writeRepoFile(scratch, 'VERSION', '1.3.0\n');
+      runGitIn(scratch, ['add', 'VERSION']);
+      runGitIn(scratch, ['commit', '-q', '--amend', '--no-edit']);
+      assert.deepEqual(checkVersion(), ['match', '1.2.3', '1.3.0']);
+    });
+    test('a blocked version relay pauses naming its blocker line, and the reply runs validation again with the next count', async () => {
+      const results = versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'blocked', stderr: 'blocker: base ref does not resolve to a commit\n' } }, 'validate-1-2': validateWithVersion() });
+      const run = await runWorkflow(LAUNCH, results);
+      assertStepStopPause(run, 'The version check of the validation step was blocked, so the delivery stopped before the pull request. Its blocker line says "base ref does not resolve to a commit".', 'validate-1-1');
+      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'The base is fixed.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+    });
+    for (const [label, changes] of [
+      ['no version_check line', { version_check: undefined }],
+      ['a match with no expected_version', { expected_version: undefined }],
+      ['a mismatch on an ask_user verdict', { ...ASK_UNDETERMINED, version_check: 'mismatch', expected_version: '1.3.0' }],
+      ['an undetermined check on a bump_required verdict', { version_check: 'undetermined', expected_version: undefined }],
+      ['an expected_version with no trunk_version', { ...MINOR_UNREADABLE, expected_version: '1.3.0' }],
+      ['a pre-release trunk_version', { trunk_version: '1.2.3-rc.1' }],
+      ['a version part of 16 digits', { expected_version: '1.' + '1'.repeat(16) + '.0' }],
+      ['counts that do not add up to mapped_commits', { mapped_commits: '2' }]
+    ]) {
+      test(`a version relay with ${label} pauses as malformed`, async () => {
+        assertStepStopPause(await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion(changes) })), malformedLead, 'validate-1-1');
+      });
+    }
+    test('a validation result with no version relay, or a ran relay with no stdout, pauses as unusable, and a null result still ends the run', async () => {
+      for (const result of [VALIDATE_PASSED, { ...VALIDATE_PASSED, version: { outcome: 'ran' } }]) {
+        assertStepStopPause(await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': result })), unusableLead, 'validate-1-1');
+      }
+      const failed = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': null }));
+      assert.equal(failed.result.outcome, 'blocked');
+      assert.equal(failed.result.message.split('\n\n')[1], main.nextStepLine('run_again'));
+    });
+    test('a blocked validation may carry the version relay, and pauses as blocked', async () => {
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion({}, { outcome: 'blocked', blocker: 'npm is missing.' }) }));
+      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is missing.".', 'validate-1-1');
+    });
+    test('a version already at its target in a pass after a replan passes, with no fix and no stop', async () => {
+      const results = versionResults({
+        'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' },
+        'facts-2': onPlanBranchFacts(OTHER),
+        'plan-2': planResult(VERSION_PLAN),
+        'branch-2': branchRelay({ created: 'false', commit: OTHER }),
+        'work-2-STEP-001': WORKER_DONE,
+        'commit-2-1': commitRelay({ commit: THIRD }),
+        ...tailResults(2, THIRD, { 'validate-2-1': validateWithVersion() })
+      });
+      const run = await runWorkflow(LAUNCH, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(-5), ['commit-2-1', ...tailLabels(2)]);
+      assert.ok(labelsOf(run).every((label) => !label.startsWith('fix')), JSON.stringify(labelsOf(run)));
+      assert.ok(prBodyOf(run, 'pr-2').includes('- validation: passed, version 1.3.0, held on commit ' + THIRD), prBodyOf(run, 'pr-2'));
+    });
+  },
+  'SD-22': () => {
+    const reply = 'B';
+    function versionAskOf(values) {
+      return limitAsk(main.buildVersionQuestionBrief(parsedVersion(values)));
+    }
+    test('undetermined asks version_bump_indeterminable with no decide() call, each option naming the version it gives', async () => {
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion(ASK_UNDETERMINED) }));
+      assertTailPause(run, [versionAskOf(ASK_UNDETERMINED)], 'validate-1-1');
+      const brief = structuredClone(main.buildVersionQuestionBrief(parsedVersion(ASK_UNDETERMINED)));
+      assert.equal(brief.kind, 'version_bump_indeterminable');
+      assert.deepEqual(brief.options.map((option) => option.summary), ['Make a major version bump, to version 2.0.0.', 'Make a minor version bump, to version 1.3.0.', 'Make a patch version bump, to version 1.2.4.', 'Make no version bump, keeping version 1.2.3.']);
+      const noTrunk = structuredClone(main.buildVersionQuestionBrief(parsedVersion({ ...ASK_UNDETERMINED, trunk_version: undefined })));
+      assert.deepEqual(noTrunk.options.map((option) => option.summary), ['Make a major version bump.', 'Make a minor version bump.', 'Make a patch version bump.', 'Make no version bump.']);
+      for (const shown of [brief, noTrunk]) {
+        assert.ok(lib.validateSchema(briefSchema, shown).ok, JSON.stringify(shown));
+        assert.equal(shown.recommendation.strength, 'none');
+        for (const level of ['high', 'balanced', 'low']) {
+          assert.equal(lib.decide({ kind: shown.kind, level: level, brief: shown }, autonomyTable, briefSchema).action, 'ask', level);
+        }
+      }
+      assert.ok(!/resolve(?:Tail)?Decision\(VERSION_BUMP_INDETERMINABLE_KIND/.test(moduleSource));
+      const row = autonomyTable.rows.find((candidate) => candidate.kind === 'version_bump_indeterminable');
+      assert.ok(row.resolved_at.includes('standard-delivery.validate') && !row.resolved_at.includes('standard-delivery.bump'), JSON.stringify(row.resolved_at));
+      assert.ok(autonomyTable.rows.every((candidate) => !candidate.resolved_at.includes('standard-delivery.bump')));
+    });
+    test('unreadable asks naming the formats the check reads, with options to keep the branch version or set the one the reply names', async () => {
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion(MINOR_UNREADABLE) }));
+      assertTailPause(run, [versionAskOf(MINOR_UNREADABLE)], 'validate-1-1');
+      const brief = structuredClone(main.buildVersionQuestionBrief(parsedVersion(MINOR_UNREADABLE)));
+      assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
+      for (const format of ['.json', '.toml', 'version = "X.Y.Z"', 'any other file whole']) {
+        assert.ok(brief.problem.includes(format), format);
+      }
+      assert.deepEqual(brief.options.map((option) => option.summary), ['Keep the version each file holds on the branch.', 'Set the version your reply names in each file.']);
+    });
+    for (const [checkName, values, causeLine] of [
+      ['undetermined', ASK_UNDETERMINED, 'Version check: The commits since the trunk do not settle the version bump.'],
+      ['unreadable', MINOR_UNREADABLE, 'Version check: The check cannot read one version from the files of the version_files block.']
+    ]) {
+      test(`the reply to ${checkName} runs one fix round with the version_files and user_answer blocks, and no later version check fails or asks`, async () => {
+        const results = versionResults({
+          'validate-1-1': validateWithVersion(values),
+          'fix-1-1': { outcome: 'complete', files: ['VERSION'] },
+          'fix-commit-1-1': commitRelay({ commit: THIRD }),
+          'validate-1-2': validateWithVersion(MINOR_MISMATCH),
+          'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' })
+        });
+        const paused = await runWorkflow(LAUNCH, results);
+        const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.deepEqual(labelsOf(run).slice(labelsOf(paused).length), ['fix-1-1', 'fix-commit-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+        const fixPrompt = callOf(run, 'fix-1-1').prompt;
+        assert.deepEqual(readDataBlock(fixPrompt, 'user_answer'), { question: TAIL_LEAD + '\n\n' + lib.renderQuestions([versionAskOf(values)]), reply: reply });
+        assert.deepEqual(readDataBlock(fixPrompt, 'version_files'), ['VERSION']);
+        assert.equal(readDataBlock(fixPrompt, 'failures'), causeLine + ' Set each file of the version_files block as the reply in the user_answer block says.');
+        assert.ok(fixPrompt.includes(lib.dataBlocksSentence('The reply in user_answer')), fixPrompt);
+        assert.ok(!fixPrompt.includes(main.resumedReplySentence()), fixPrompt);
+        assert.ok(callOf(run, 'validate-1-2').prompt.includes(main.resumedReplySentence()));
+        assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version as the user replied, held on commit ' + THIRD), prBodyOf(run, 'pr-1'));
+        assert.ok(!labelsOf(run).includes('facts-2'));
+        assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(VERSION_PLAN) }])), run.result.message);
+      });
+    }
+    test('a version question over failed commands gives the one fix round the command failures and the version line', async () => {
+      const results = versionResults({ 'validate-1-1': validateWithVersion(ASK_UNDETERMINED, { outcome: 'failed', failures: FAILURE_TEXT }), 'fix-1-1': null, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reply), results);
+      const failures = readDataBlock(callOf(run, 'fix-1-1').prompt, 'failures');
+      assert.ok(failures.startsWith(FAILURE_TEXT + '\n\nVersion check: '), failures);
+    });
+  },
   'SD-23': () => {
     test('a tail ask pauses with the code-built lead and its question, and pushes nothing', async () => {
       const surfaced = buildWithSurfaceKinds(['validation_remediation']);
@@ -2493,11 +2742,9 @@ const ROW_TESTS = {
       const labels = labelsOf(run);
       assert.equal(labels[labels.indexOf('validate-1-1') + 1], 'review-1-1');
     });
-    test('with validation commands a not_run result stops the run as unusable', async () => {
+    test('with validation commands a not_run result pauses as unusable', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'not_run' } }));
-      assert.equal(run.result.outcome, 'blocked');
-      assert.equal(run.result.message.split('\n\n')[0], 'The validation step returned no usable result, so the delivery stopped before the pull request.');
-      assert.equal(labelsOf(run).at(-1), 'validate-1-1');
+      assertStepStopPause(run, 'The validation step returned no usable result, so the delivery stopped before the pull request.', 'validate-1-1');
     });
     test('an empty validation_commands list still runs validation: the fallback prompt names the Validation Procedure and offers not_run', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ validation_commands: [] })) }));
@@ -2542,18 +2789,19 @@ const ROW_TESTS = {
       assert.ok(run.result.message.includes('\n\n' + HELD_ALL + OTHER + '.'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-1').includes('- validation: not run, the project documents no validation commands, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
     });
-    test('blocked stops the run at the validation step', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' } }));
-      assert.equal(run.result.outcome, 'blocked');
-      assert.equal(run.result.message.split('\n\n')[0], 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is not installed.".');
-      assert.equal(labelsOf(run).at(-1), 'validate-1-1');
+    test('blocked pauses at the validation step, and the reply runs validation again with the next count', async () => {
+      const results = happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' }, 'validate-1-2': VALIDATE_PASSED });
+      const run = await runWorkflow(LAUNCH, results);
+      assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is not installed.".', 'validate-1-1');
+      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'npm is installed now.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.deepEqual(labelsOf(resumed), [...labelsOf(run), 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.ok(!labelsOf(resumed).includes('facts-2'));
     });
     for (const [label, result] of [['failed with no failures', { outcome: 'failed' }], ['an extra field', { outcome: 'passed', note: 'x' }]]) {
-      test(`a validation result with ${label} stops the run`, async () => {
+      test(`a validation result with ${label} pauses as unusable`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': result }));
-        assert.equal(run.result.outcome, 'blocked');
-        assert.equal(run.result.message.split('\n\n')[0], 'The validation step returned no usable result, so the delivery stopped before the pull request.');
-        assert.equal(run.result.message.split('\n\n')[1], NEXT_STEP_LINE);
+        assertStepStopPause(run, 'The validation step returned no usable result, so the delivery stopped before the pull request.', 'validate-1-1');
       });
     }
     test('a null validation result, an agent failure, names the failure and says to run again', async () => {
@@ -2662,6 +2910,57 @@ const ROW_TESTS = {
       assert.ok(run.result.message.startsWith('The validation fix round was blocked, so the delivery stopped: it returned no usable result. ' + lib.describeNoResult(null) + '\n\n'), run.result.message);
       assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('run_again'));
     });
+    test('a version-only mismatch runs one fix round with no decide() call, even when validation_remediation surfaces, and holds on the fix commit', async () => {
+      const results = versionResults({
+        'validate-1-1': validateWithVersion(MINOR_MISMATCH),
+        'fix-1-1': { outcome: 'complete', files: ['VERSION'] },
+        'fix-commit-1-1': commitRelay({ commit: THIRD }),
+        'validate-1-2': validateWithVersion(),
+        'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' })
+      });
+      for (const target of [workflow, buildWithSurfaceKinds(['validation_remediation'])]) {
+        const run = await runWorkflow(LAUNCH, results, target);
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.deepEqual(labelsOf(run), FIX_FLOW_LABELS);
+        const prompt = callOf(run, 'fix-1-1').prompt;
+        assert.equal(readDataBlock(prompt, 'failures'), VERSION_LINE);
+        assert.deepEqual(readDataBlock(prompt, 'version_files'), ['VERSION']);
+        assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(VERSION_PLAN) }])), run.result.message);
+        assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + THIRD), prBodyOf(run, 'pr-1'));
+      }
+      const noBump = parsedVersion({ dominant_row: 'NO_BUMP', verdict: 'no_bump', bump_type: 'none', rule_applied: '4', counts: { major: '0', minor: '0', patch: '0', no_bump: '1' }, version_check: 'mismatch', expected_version: '1.2.3' });
+      assert.equal(main.describeVersionMismatch(noBump), 'Version check: each file of the version_files block must hold version 1.2.3, the trunk version, since the commits call for no version bump.');
+    });
+    test('a mismatch over failed commands joins the version line to the failures and resolves through validation_remediation', async () => {
+      const failed = validateWithVersion(MINOR_MISMATCH, { outcome: 'failed', failures: FAILURE_TEXT });
+      const results = versionResults({ 'validate-1-1': failed, 'fix-1-1': { outcome: 'complete', files: ['src/cache.js', 'VERSION'] }, 'fix-commit-1-1': commitRelay({ commit: THIRD }), 'validate-1-2': validateWithVersion(), 'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }) });
+      const run = await runWorkflow(LAUNCH, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(readDataBlock(callOf(run, 'fix-1-1').prompt, 'failures'), FAILURE_TEXT + '\n\n' + VERSION_LINE);
+      const surfaced = await runWorkflow(LAUNCH, results, buildWithSurfaceKinds(['validation_remediation']));
+      assertTailPause(surfaced, [surfacedAsk(main.buildValidationRemediationBrief(OTHER, 1))], 'validate-1-1');
+    });
+    test('a version-only failure at the fix limit pauses through stopDelivery, and the reply resets the round count and runs validation again', async () => {
+      const results = versionResults({ 'validate-1-1': validateWithVersion(MINOR_MISMATCH) });
+      const labels = ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'validate-1-1'];
+      for (let round = 1; round <= main.maxFixRounds(); round += 1) {
+        Object.assign(results, { ['fix-1-' + round]: { outcome: 'complete', files: ['VERSION'] }, ['fix-commit-1-' + round]: commitRelay({ commit: OTHER, committed: 'false' }) });
+        labels.push('fix-1-' + round, 'fix-commit-1-' + round);
+      }
+      const run = await runWorkflow(LAUNCH, results);
+      assert.deepEqual(labelsOf(run), labels);
+      assertStepStopPause(run, 'Validation still fails its version check on commit ' + OTHER + ' after 3 fix rounds, so the delivery stopped before the pull request. ' + VERSION_LINE, 'fix-commit-1-3');
+      Object.assign(results, {
+        'validate-1-2': validateWithVersion(MINOR_MISMATCH),
+        'fix-1-4': { outcome: 'complete', files: ['VERSION'] },
+        'fix-commit-1-4': commitRelay({ commit: THIRD }),
+        'validate-1-3': validateWithVersion(),
+        'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' })
+      });
+      const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'I fixed the version script.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.deepEqual(labelsOf(resumed).slice(labels.length), ['validate-1-2', 'fix-1-4', 'fix-commit-1-4', 'validate-1-3', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+    });
   },
   'SD-27': () => {
     test('a runner fix commit before any gate held gives no gate_rerun decision, and validation runs on the new head', async () => {
@@ -2751,7 +3050,7 @@ const ROW_TESTS = {
   'SD-29': () => {
     test('every decide() kind the workflow modules use is a hard stop or a table row resolved at a standard-delivery site', () => {
       const kinds = [...moduleSource.matchAll(/^const [A-Z_]+_KIND = '([a-z_]+)';$/gm)].map((match) => match[1]);
-      assert.deepEqual(kinds, ['planner_question', 'plan_acceptance', 'trunk_stale', 'external_effect', 'validation_remediation', 'gate_rerun', 'diminishing_returns_exit', 'planner_escalation_routing', 'root_cluster_routing', 'remediation_plan_acceptance', 'review_question', 'high_severity_rejection', 'step_stop']);
+      assert.deepEqual(kinds, ['planner_question', 'plan_acceptance', 'trunk_stale', 'external_effect', 'validation_remediation', 'gate_rerun', 'version_bump_indeterminable', 'diminishing_returns_exit', 'planner_escalation_routing', 'root_cluster_routing', 'remediation_plan_acceptance', 'review_question', 'high_severity_rejection', 'step_stop']);
       for (const kind of kinds) {
         const isHardStop = autonomyTable.hard_stops.some((stop) => stop.hard_stop === kind);
         const row = autonomyTable.rows.find((candidate) => candidate.kind === kind);
@@ -3811,7 +4110,7 @@ const ROW_TESTS = {
       });
     }
     test('a run that stops before every gate held makes no PR call', async () => {
-      const stopped = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is missing.' } }));
+      const stopped = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': null }));
       assert.equal(stopped.result.outcome, 'blocked');
       const asked = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': DIMINISHING }), buildWithSurfaceKinds(['diminishing_returns_exit']));
       assert.equal(asked.result.needs_user, true);
@@ -4384,7 +4683,6 @@ const ROW_TESTS = {
       ['planner', 'reason', (payload) => happyResults({ 'plan-1': { outcome: 'blocked', blocker: payload, questions: [] } })],
       ['blocked worker', 'reason', (payload) => happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: payload } })],
       ['needs_replan worker', 'reason', hostileReplanResults],
-      ['validation', 'reason', (payload) => happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: payload } })],
       ['fix round', 'reason', (payload) => fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: payload }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) })],
       ['blocked review', 'whole', (payload) => happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: payload, stage: 'invoke_review' } })],
       ['scan excerpt', 'excerpt', (payload) => happyResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'injection-suspect', pattern_category: 'P1', field_excerpt: payload }] } })]
@@ -4438,6 +4736,19 @@ const ROW_TESTS = {
         }
       });
     }
+    test('a hostile validation blocker reaches the pause lead as one quote of printable ASCII, cut or refused past its bound, with no Next line', async () => {
+      for (const payload of BOUNDED_HOSTILE_PAYLOADS) {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: payload } }));
+        const message = run.result.message;
+        assert.equal(run.result.needs_user, true, message.slice(0, 300));
+        assert.ok(/^[\t\n\x20-\x7e]*$/.test(message), message.slice(0, 300));
+        assert.ok(message.split('\n\n')[0].includes(expectQuote('reason', payload)), message.slice(0, 600));
+        assert.ok(!message.includes(NEXT_STEP_LINE + '\n'), message.slice(0, 600));
+      }
+      const overBound = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: HOSTILE_PAYLOADS[0] } }));
+      assertStepStopPause(overBound, 'The validation step returned no usable result, so the delivery stopped before the pull request.', 'validate-1-1');
+      assert.ok(!overBound.result.message.includes('Z'.repeat(10)), overBound.result.message.slice(0, 300));
+    });
     const moduleCode = stripCommentsAndStrings(moduleSource);
     test('every .blocker and .stderr read in the workflow modules is the argument of describeReason, describeRelayBlocker, describeCommitBlocker or quoteOrEmpty', () => {
       const reads = moduleCode.match(/(?<!\))\.(?:blocker|stderr)\b/g) || [];
@@ -4551,7 +4862,6 @@ const ROW_TESTS = {
       ['planner', { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: longBlocker, questions: [] } }, 'The planner returned a plan that does not fit the plan schema'],
       ['worker', happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: longBlocker } }), 'A worker did not finish its step'],
       ['branch relay', happyResults({ 'branch-1': { outcome: 'blocked', stderr: 'blocker: ' + longBlocker + '\n' } }), 'The branch step was blocked'],
-      ['validation', happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }), 'The validation step returned no usable result'],
       ['fix round', fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: longBlocker }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }), 'The validation fix round was blocked'],
       ['local review', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: longBlocker, stage: 'invoke_review' } }), 'The local review step returned no usable result']
     ]) {
@@ -4566,6 +4876,12 @@ const ROW_TESTS = {
         assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
       });
     }
+    test('a validation blocker too long for the notice pauses as unusable, without a throw', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: longBlocker } }));
+      assert.equal(run.failures, 0);
+      assertStepStopPause(run, 'The validation step returned no usable result', 'validate-1-1');
+      assert.ok(lib.noticeLength(run.result) <= lib.noticeBudget());
+    });
     test('an open question stop keeps the answer Next line right after its first block, without a throw', () => {
       const asks = Array.from({ length: 30 }, (_, index) => ({ brief: makeBrief({ problem: 'P' + index + ' ' + '\u0001'.repeat(2000) }) }));
       const run = { taken: [], waveCount: 1, commits: Array.from({ length: 400 }, () => OTHER), reversibleEffects: [], notRunGates: [], branch: 'b'.repeat(5000) };
@@ -4849,7 +5165,6 @@ const ROW_TESTS = {
     }
     for (const [label, buildResults] of [
       ['worker', (next) => happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: timedOut, ...next } })],
-      ['validation', (next) => happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: timedOut, ...next } })],
       ['fix round', (next) => fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: timedOut, ...next }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) })]
     ]) {
       test(`a blocked ${label} passes its next action through to the next-step line`, async () => {
@@ -4860,6 +5175,13 @@ const ROW_TESTS = {
         }
       });
     }
+    test('a blocked validation passes its next action through to the step_stop question it pauses with', async () => {
+      const lead = 'The validation step was blocked, so the delivery stopped before the pull request: ' + lib.describeReason(timedOut);
+      for (const [next, isRunAgain] of [[{ next_action: 'run_again' }, true], [{ next_action: 'fix_cause' }, false], [{}, false]]) {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: timedOut, ...next } }));
+        assertStepStopPause(run, lead, 'validate-1-1', isRunAgain);
+      }
+    });
     test('a blocked wave says run_again only when every blocked worker says run_again', async () => {
       const plan = makePlan({ steps: [makeStep('S1', ['src/a.js']), makeStep('S2', ['src/b.js'])] });
       const blocked = (nextAction) => ({ outcome: 'blocked', summary: 'Stopped.', blocker: timedOut, next_action: nextAction });
@@ -5004,10 +5326,6 @@ const ROW_TESTS = {
       ['a worker with no summary', LAUNCH, happyResults({ 'work-1-STEP-001': { outcome: 'complete' } }), workerUnusable, 'commit-1-1'],
       ['a complete fix carrying blocker', LAUNCH, fixResults({ outcome: 'complete', files: ['src/cache.js'], blocker: 'x' }), fixUnusable, 'fix-commit-1-1'],
       ['a fix with no files', LAUNCH, fixResults({ outcome: 'complete' }), fixUnusable, 'fix-commit-1-1'],
-      ['a passed validation carrying failures', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'passed', failures: 'x' } }), validateUnusable, 'validate-1-1'],
-      ['a not_run validation carrying blocker', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'not_run', blocker: 'x' } }), validateUnusable, 'validate-1-1'],
-      ['a failed validation carrying next_action', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT, next_action: 'run_again' } }), validateUnusable, 'validate-1-1'],
-      ['a failed validation with no failures', LAUNCH, happyResults({ 'validate-1-1': { outcome: 'failed' } }), validateUnusable, 'validate-1-1'],
       ['a clean review carrying finding_id', LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, finding_id: 'f1f1f1f1' } }), reviewUnusable, 'review-commit-1-1'],
       ['a diminishing-returns review carrying cluster_ids', LAUNCH, happyResults({ 'review-1-1': { ...DIMINISHING, cluster_ids: ['F1'] } }), reviewUnusable, 'review-commit-1-1'],
       ['a planner-escalation review with no file', LAUNCH, happyResults({ 'review-1-1': escalationWithoutFile }), reviewUnusable, 'review-commit-1-1']
@@ -5017,6 +5335,16 @@ const ROW_TESTS = {
         assert.equal(run.result.outcome, 'blocked', run.result.message);
         assert.ok(run.result.message.includes(expected), run.result.message);
         assert.equal(labelsOf(run).at(-1), lastLabel);
+      });
+    }
+    for (const [label, result] of [
+      ['a passed validation carrying failures', { outcome: 'passed', failures: 'x' }],
+      ['a not_run validation carrying blocker', { outcome: 'not_run', blocker: 'x' }],
+      ['a failed validation carrying next_action', { outcome: 'failed', failures: FAILURE_TEXT, next_action: 'run_again' }],
+      ['a failed validation with no failures', { outcome: 'failed' }]
+    ]) {
+      test(`${label} pauses at the validation step that reads it`, async () => {
+        assertStepStopPause(await runWorkflow(LAUNCH, happyResults({ 'validate-1-1': result })), validateUnusable, 'validate-1-1');
       });
     }
   },
@@ -5951,7 +6279,8 @@ const ROW_TESTS = {
     async function runVersionedUnder(limits, plan = VERSIONED_PLAN) {
       return runWorkflow(LAUNCH, happyResults({
         'scope-1': limitsScope(limits),
-        'plan-1': planResult(plan)
+        'plan-1': planResult(plan),
+        'validate-1-1': validateWithVersion()
       }));
     }
     test('a version file outside the limits asks naming it, and a limit that holds it lets the run go on to validation', async () => {

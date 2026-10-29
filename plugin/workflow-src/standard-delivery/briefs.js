@@ -12,6 +12,8 @@
  *   scope    the checked scope of the pass, from runScopeStep (scope.js).
  *   head, round, staleIds and isLimit  the commit, fix round, stale gate
  *            ids and limit flag of a gate decision (gates.js).
+ *   values   the routing values of a version check whose version_check is
+ *            undetermined or unreadable (gates.js).
  *   The kind constants of main.js, unshownBriefText, isRepositoryPath,
  *   listPlanPaths and describeCount (plan.js), and gateNames, joinNames,
  *   maxFixRounds and maxGateReruns.
@@ -36,6 +38,13 @@
  *            is run_again, that nothing in the repo needs a fix and to reply
  *            when ready, and whether the reply takes the stopped step again
  *            or plans again from fresh facts.
+ *   buildVersionQuestionBrief(values)  the version_bump_indeterminable
+ *            brief the validate gate asks with no decide() call, strength
+ *            none. For undetermined its options are a major, minor and
+ *            patch bump and no bump, each naming the version it gives
+ *            (raiseVersion) when trunk_version is known; for unreadable its
+ *            problem names the formats the check reads, and its options
+ *            keep the branch version or set the version the reply names.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -191,6 +200,41 @@ function buildStepStopBrief(causes, isReplan) {
       { id: 'A', summary: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true }
     ],
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can tell when what stopped the run is out of the way.' },
+    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    gate: { irreversible: false, architectural: false, safety: false }
+  };
+}
+
+function raiseVersion(version, bumpType) {
+  const parts = version.split('.').map(Number);
+  const raised = { major: [parts[0] + 1, 0, 0], minor: [parts[0], parts[1] + 1, 0], patch: [parts[0], parts[1], parts[2] + 1] };
+  return raised[bumpType].join('.');
+}
+
+function buildVersionOption(id, summary) {
+  return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true };
+}
+
+function listVersionOptions(values) {
+  if (values.version_check === 'unreadable') {
+    return [buildVersionOption('A', 'Keep the version each file holds on the branch.'), buildVersionOption('B', 'Set the version your reply names in each file.')];
+  }
+  const trunk = values.trunk_version;
+  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildVersionOption(id, 'Make a ' + bumpType + ' version bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
+  return bumpOptions.concat(buildVersionOption('D', 'Make no version bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
+}
+
+function buildVersionQuestionBrief(values) {
+  const isUnreadable = values.version_check === 'unreadable';
+  return {
+    id: 'version',
+    kind: VERSION_BUMP_INDETERMINABLE_KIND,
+    problem: isUnreadable
+      ? 'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
+      : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The version files on the working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
+    options: listVersionOptions(values),
+    recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide the version of this delivery.' },
     assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false }
   };

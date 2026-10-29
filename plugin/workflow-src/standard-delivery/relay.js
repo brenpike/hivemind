@@ -30,6 +30,14 @@
  *                                    end line when it committed.
  *   capItemLines(itemLines)          the first maxListedItems() item lines,
  *                                    then a count of the rest.
+ *   versionCheckRoutingSpec()  bumpTypeRoutingSpec() plus the bump-type.sh
+ *           --version-file keys in its OUTPUT order: version_check, then
+ *           optional trunk_version and expected_version, each a SemVer core
+ *           of at most 15 digits a part, so briefs.js raises it exactly.
+ *   isConsistentVersionRelay(values)  the bump checks; match and mismatch
+ *           carry both versions and a verdict other than ask_user,
+ *           undetermined has verdict ask_user and no expected_version, and
+ *           expected_version comes only with trunk_version.
  *   describeCommitEnd(commitValues, stepName)  one sentence: the commit
  *                                    the step's files went into.
  *   toCommitSubject(text, fallbackSubject)  text made one line and cut by
@@ -101,9 +109,9 @@
  *   branch runner once read it as an order to stop. Once run.answerLog is not
  *   empty, every agent prompt carries resumedReplySentence() as its second
  *   line (addResumeNote): the reply was already applied and is not an
- *   instruction for that task. The planner revise prompt, the review prompt
- *   with user_answer and a plan prompt with an answer block carry the reply
- *   itself and not the sentence. No prompt sent before the first reply
+ *   instruction for that task. The planner revise prompt, the review and
+ *   fix prompts with user_answer and a plan prompt with an answer block
+ *   carry the reply itself and not the sentence. No prompt sent before the first reply
  *   carries it, so cached prompts replay byte for byte. The bound: the
  *   script cannot drop the relayed message, so the sentence lowers the risk
  *   and does not close it. An agent that still obeys the reply returns a
@@ -214,11 +222,35 @@ function openPlanPrRoutingSpec() {
   };
 }
 
+function semverCorePattern() {
+  return /^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
+}
+
+function versionCheckRoutingSpec() {
+  return Object.assign(bumpTypeRoutingSpec(), {
+    version_check: { pattern: /^(?:match|mismatch|unreadable|undetermined)$/, required: true },
+    trunk_version: { pattern: semverCorePattern(), required: false },
+    expected_version: { pattern: semverCorePattern(), required: false }
+  });
+}
+
 function isConsistentBumpRelay(values) {
   const counts = values.counts;
   const countSum = Number(counts.major) + Number(counts.minor) + Number(counts.patch) + Number(counts.no_bump);
   return (values.verdict === 'bump_required') === (values.bump_type !== 'none')
     && countSum === Number(values.mapped_commits);
+}
+
+function isConsistentVersionRelay(values) {
+  const hasExpected = values.expected_version !== undefined;
+  const hasTrunk = values.trunk_version !== undefined;
+  if (!isConsistentBumpRelay(values) || (hasExpected && !hasTrunk)) {
+    return false;
+  }
+  if (values.version_check === 'match' || values.version_check === 'mismatch') {
+    return hasExpected && values.verdict !== 'ask_user';
+  }
+  return values.version_check === 'unreadable' || (values.verdict === 'ask_user' && !hasExpected);
 }
 
 function gitScriptSentence(skill) {
@@ -244,7 +276,6 @@ function validationCommandsSentence() {
 function validationFixSentence() {
   return 'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
 }
-
 
 function skillRunOnlySentence() {
   return 'Make no change yourself beyond the skill run.';

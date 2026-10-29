@@ -2,10 +2,12 @@
  * standard-delivery main.js: the body of the standard-delivery
  * workflow script. It delivers a request on one working branch: branch
  * facts, a checked plan, questions decided or asked, the working branch,
- * each wave of plan steps with its commit, then validation and local
- * review as gates (ADR-0037 invariant 2), then the pull request. The run ends at the pull request: once every configured
- * gate held on one commit, it pushes that commit and opens or reuses the
- * pull request, and ends complete naming it. Watching the pull request is
+ * each wave of plan steps with its commit, then validation, with its
+ * version check when the plan names version files, and local review as
+ * gates (ADR-0037 invariant 2), then the pull request. The run ends at
+ * the pull request: once every configured gate held on one commit, it
+ * pushes that commit and opens or reuses the pull request, and ends
+ * complete naming it. Watching the pull request is
  * the overlord's, not this script's (ADR-0037 decision 4).
  *
  * The phase modules of this directory hold every other function, and the
@@ -80,7 +82,7 @@
  *   unbounded agent fields never reach a message: plan.summary reaches
  *   only the pull request title and body, a worker summary nothing, and
  *   validate failures only the fix prompt. The code-built brief of every
- *   plan, trunk, effect, validation, gate rerun and review routing
+ *   plan, trunk, effect, validation, gate rerun, version and review routing
  *   decision fits BRIEF_SCHEMA with worst-case inputs, holds
  *   unshownBriefText() (plan.js) in each field no message shows, so the
  *   bundle carries no text the user never reads, and the diminishing
@@ -99,6 +101,9 @@
  *   limit (finishOpenQuestions) or the launch check (issue 457). Every other
  *   stop pauses through stopDelivery (record.js) with one step_stop
  *   question, and the reply takes the stopped step again or plans again.
+ *   No version question plans again: its reply becomes run.versionAnswer
+ *   and runs one fix round, and no later version check of the run fails
+ *   or asks (gates.js).
  *   Every blocked result carries one Next line as a whole block right
  *   after its first block, and no block carries shorten. A blocked run end
  *   takes a list of causes, {problem, nextAction?} each, never a message:
@@ -196,7 +201,7 @@
  *   A pass starts at launch, after a needs_replan wave, after a branch
  *   step that switched branch or commit, after a taken local review
  *   escalation or root cluster, or after a reply to a tail ask other than
- *   a local review question, and every pass starts with the facts step,
+ *   a local review question or a version question, and every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
  *   invariant 3). Then the scope step (scope.js) runs once, after the facts
  *   step and the scan and before planning, and again after each reply round
@@ -241,6 +246,7 @@ const TRUNK_STALE_KIND = 'trunk_stale';
 const EXTERNAL_EFFECT_KIND = 'external_effect';
 const VALIDATION_REMEDIATION_KIND = 'validation_remediation';
 const GATE_RERUN_KIND = 'gate_rerun';
+const VERSION_BUMP_INDETERMINABLE_KIND = 'version_bump_indeterminable';
 const DIMINISHING_RETURNS_EXIT_KIND = 'diminishing_returns_exit';
 const PLANNER_ESCALATION_ROUTING_KIND = 'planner_escalation_routing';
 const ROOT_CLUSTER_ROUTING_KIND = 'root_cluster_routing';
@@ -346,7 +352,8 @@ function createRunState(launch) {
     waveCount: 0,
     pass: 0,
     replans: 0,
-    branchSwitches: 0
+    branchSwitches: 0,
+    versionAnswer: undefined
   };
 }
 
