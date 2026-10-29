@@ -69,6 +69,23 @@ Any other remediation plan is auto-taken. On the workflow state machine the over
 
 When any flag is set on the state machine, the overlord, by judgment, pauses its continuous-execution loop and surfaces the plan to the user before recording the transition that advances into implementation. This surface is the overlord's judgment-based obligation, the same trust model as every other surface in this doc (judgment + journal, ADR-0006 intent-based governance) — NOT a claim that the workflow definition enforces an approval gate: the workflow definition routes the plan-review outcome straight into the implement step with no `user_gate`.
 
+### Review Calls
+
+This rule is the one home for who decides a reviewer's question. The local reviewer's `user-input-required` or `high-severity-rejection` call is written by the reviewer: the options, a recommendation with an honest strength, and the reviewer's read of clauses 1 and 2 of the Promotion Gate above on the recommended option. This rule decides the call, never the reviewer. Recording a new threat model, when a reviewer raises it, is a review call under this rule.
+
+A review call is taken when the overlord agrees with the reviewer's recommendation and the recommended option is reversible and not architectural. On the script engine that agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`, resolved through `decide()`. No second agent judges the call. Clause 3 is not read for a review call, because the Destructive Fix Gate (**Tier A**) stops any fix in its categories, whoever took the call.
+
+A taken call goes back to the reviewer as its answer. The reviewer records it at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Recorded Decisions and Repeat Findings`), naming the run as the one who decided. The run lists the call in its final message and in the PR body, so the user can veto it before merge.
+
+These review calls are asked of the user:
+
+- an irreversible call;
+- an architectural call;
+- a call whose recommendation has strength none;
+- every call at an autonomy level whose table cell for its row is `surface`.
+
+The **Tier A** hard stops are unchanged. On the workflow state machine, the `question` user gate still asks every question.
+
 ## Disposition Vocabulary
 
 Every Tier-B decision resolves to exactly one of four dispositions:
