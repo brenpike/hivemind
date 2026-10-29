@@ -160,14 +160,14 @@ const AUTONOMY_TABLE = {
 },
 {
 "kind": "review_question",
-"high": "surface",
-"balanced": "surface",
+"high": "auto",
+"balanced": "auto",
 "low": "surface"
 },
 {
 "kind": "high_severity_rejection",
-"high": "surface",
-"balanced": "surface",
+"high": "auto",
+"balanced": "auto",
 "low": "surface"
 }
 ]
@@ -617,7 +617,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'ff9b5939e1e22916';
+const BUILD_ID = '15982b2e59a50dfa';
 
 function supportedSchemaKeywords(){
 return[
@@ -3148,6 +3148,9 @@ return{
 };
 }
 function toPullRequestDecision(entry){
+if(Object.values(reviewQuestionKinds()).includes(entry.kind)){
+return{brief:removeReviewerText(entry.brief)};
+}
 const problem=reviewDecisionProblems()[entry.kind];
 return problem===undefined?{brief:entry.brief}:{brief:Object.assign({},entry.brief,{problem:problem})};
 }
@@ -3792,7 +3795,7 @@ blocked:['blocker','stage']
 };
 }
 function reviewQuestionKinds(){
-return{'user-input-required':'review_question','high-severity-rejection':'high_severity_rejection'};
+return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
 }
 function findingIdField(){
 return{
@@ -3867,16 +3870,27 @@ strength:{type:'string',enum:['strong','weak','none'],description:'How sure the 
 why:buildLabelledText(200,'Why that option.')
 }
 };
+const gate={
+type:'object',
+additionalProperties:false,
+required:['irreversible','architectural'],
+description:'The reviewer\'s read of the recommended option.',
+properties:{
+irreversible:{type:'boolean',description:'true when the recommended option cannot be undone.'},
+architectural:{type:'boolean',description:'true when the recommended option changes how the system is built.'}
+}
+};
 return{
 type:'object',
 description:description,
 additionalProperties:false,
-required:['found','ask','options','recommendation'],
+required:['found','ask','options','recommendation','gate'],
 properties:{
 found:buildLabelledText(200,'The claim of the finding and its impact.'),
 ask:buildLabelledText(200,'The question, on one line.'),
 options:{type:'array',minItems:2,maxItems:4,description:'The choices, 2 to 4.',items:option},
-recommendation:recommendation
+recommendation:recommendation,
+gate:gate
 }
 };
 }
@@ -3925,6 +3939,15 @@ variants:variants
 function reviewerOptions(label){
 return{agentType:REVIEWER_AGENT,schema:toAgentSchema(REVIEW_SCHEMA),label:label,phase:'Review'};
 }
+function describeReviewAnswerData(answer){
+if(answer===undefined){
+return dataBlocksSentence();
+}
+if(answer.decided_by==='run'){
+return dataBlocksSentence()+' The reply in user_answer is the run\'s decision, not the user\'s.';
+}
+return dataBlocksSentence('The reply in user_answer');
+}
 function buildReviewPrompt(plan,trunk,answer){
 const inputs={base:plan.base,working_branch:plan.branch,trunk:trunk,max_iterations:maxReviewIterations(),caller_validates:true};
 if(answer!==undefined){
@@ -3933,7 +3956,7 @@ inputs.user_answer=answer;
 return[
 'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
 boundarySentence(),
-dataBlocksSentence(answer===undefined?undefined:'The reply in user_answer'),
+describeReviewAnswerData(answer),
 '',
 formatDataBlock('inputs',inputs)
 ].join('\n');
@@ -3989,8 +4012,9 @@ const lines=['Local review: '+note+'. The findings it rejected:'];
 rejectedFindings.forEach((finding)=>lines.push('- '+quoteShortFindingId(finding.finding_id)));
 return{text:lines.join('\n')};
 }
-function buildReviewOption(option){
-return{id:option.id,summary:encodeUntrustedText(option.summary),steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true};
+function buildReviewOption(option,question){
+const isRecommended=option.id===question.recommendation.option_id;
+return{id:option.id,summary:encodeUntrustedText(option.summary),steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:!isRecommended||!question.gate.irreversible};
 }
 function buildReviewQuestionBrief(review){
 const question=review.user_question;
@@ -3999,19 +4023,44 @@ id:'tail',
 kind:reviewQuestionKinds()[review.exit_reason],
 problem:encodeUntrustedText(question.ask),
 criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
-options:question.options.map(buildReviewOption),
+options:question.options.map((option)=>buildReviewOption(option,question)),
 recommendation:{option_id:question.recommendation.option_id,strength:question.recommendation.strength,why:encodeUntrustedText(question.recommendation.why)},
 assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
-gate:{irreversible:false,architectural:false,safety:false}
+gate:{irreversible:question.gate.irreversible,architectural:question.gate.architectural,safety:false}
 };
+}
+function reviewCallTexts(){
+return{
+problem:'Local review asked about a finding, and the run took the option the reviewer recommended.',
+summary:'The option the reviewer recommended.',
+why:'The run took it because the call is reversible and not architectural. The reviewer recorded the decision on the branch, so you can veto it before you merge.'
+};
+}
+function removeReviewerText(brief){
+const texts=reviewCallTexts();
+return Object.assign({},brief,{
+problem:texts.problem,
+options:brief.options.map((option)=>Object.assign({},option,{summary:texts.summary})),
+recommendation:Object.assign({},brief.recommendation,{why:texts.why})
+});
 }
 function describeReviewQuestionLead(review,head){
 return'Local review on commit '+head+', finding '+quoteShortFindingId(review.finding_id)+': '+encodeUntrustedText(review.user_question.found);
 }
+function takeReviewCall(review,run,shown,lead){
+const listed=Object.assign({},shown,{problem:'Local review finding '+quoteShortFindingId(review.finding_id)+': '+shown.problem});
+acceptResolution({taken:[{brief:listed,kind:shown.kind}],reversibleEffects:[]},run);
+return{answer:{question:lead+'\n\n'+renderQuestions([{brief:shown}]),reply:shown.recommendation.option_id,decided_by:'run'}};
+}
 function askReviewQuestion(review,run){
+const kind=reviewQuestionKinds()[review.exit_reason];
+const shown=buildReviewQuestionBrief(review);
+const lead=describeReviewQuestionLead(review,run.head);
 const resolution={asks:[],taken:[]};
-resolveDecision(reviewQuestionKinds()[review.exit_reason],buildReviewQuestionBrief(review),undefined,run,resolution);
-return askTail(resolution.asks[0],run,describeReviewQuestionLead(review,run.head));
+if(resolveDecision(kind,removeReviewerText(shown),undefined,run,resolution)==='take'){
+return takeReviewCall(review,run,shown,lead);
+}
+return askTail(Object.assign({},resolution.asks[0],{brief:shown}),run,lead);
 }
 function buildDiminishingReturnsBrief(review,head){
 return buildTailBrief({
@@ -4331,6 +4380,8 @@ const DIMINISHING_RETURNS_EXIT_KIND='diminishing_returns_exit';
 const PLANNER_ESCALATION_ROUTING_KIND='planner_escalation_routing';
 const ROOT_CLUSTER_ROUTING_KIND='root_cluster_routing';
 const REMEDIATION_PLAN_ACCEPTANCE_KIND='remediation_plan_acceptance';
+const REVIEW_QUESTION_KIND='review_question';
+const HIGH_SEVERITY_REJECTION_KIND='high_severity_rejection';
 const REVIEWER_AGENT='hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA=buildPlanResultSchema(PLAN_SCHEMA,BRIEF_SCHEMA);
 const RELAY_SCHEMA=buildRelaySchema();

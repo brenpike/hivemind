@@ -34,8 +34,18 @@
  *           never reach the planner. A question of the review,
  *           user-input-required or high-severity-rejection, carries
  *           finding_id and the reviewer's user_question: found, ask, 2 to 4
- *           options with ids A, B, C and D in that order, and a
- *           recommendation with its strength. The run pauses with the lead
+ *           options with ids A, B, C and D in that order, a recommendation
+ *           with its strength, and the gate: irreversible and
+ *           architectural. Per decision-autonomy.md (Review Calls),
+ *           decide() reads the brief removeReviewerText builds in code from
+ *           those choices, with safety false because clause 3 is not read,
+ *           so it takes an agreed call that is reversible and not
+ *           architectural and asks every other one. A take never pauses and
+ *           never touches run.answerLog: takeReviewCall lists the call in
+ *           run.taken, named by the short finding id with the encoded ask,
+ *           and reruns the review gate with the next gateLabel count and
+ *           user_answer {question, reply, decided_by: 'run'}, the reply
+ *           being the recommended option id. An ask pauses with the lead
  *           describeReviewQuestionLead builds, the commit, the short finding
  *           id and the encoded found, then that question as the reviewer
  *           wrote it: the encoded ask, the reviewer's options with encoded
@@ -93,12 +103,14 @@
  *   text: REVIEW_SCHEMA labels each such field, it reaches the planner only
  *   in a data block under the boundary sentence, it reaches the user only
  *   encoded by encodeUntrustedText, and it never reaches the pull request texts: a decision
- *   taken on a review result is shown there with a fixed problem text, and
- *   the rejected findings only as the count in the review gate note, while
- *   each one's short id shows in the final message alone. A
- *   review question shows reviewer text, encoded, so its brief can exceed
- *   a BRIEF_SCHEMA bound once encoded: decide() then asks it as
- *   malformed_brief, and its kinds always ask anyway.
+ *   taken on a review result is shown there with a fixed problem text, a
+ *   taken review call with the fixed reviewCallTexts() and no finding id,
+ *   and the rejected findings only as the count in the review gate note,
+ *   while each one's short id shows in the final message alone. A review
+ *   question shows reviewer text, encoded, so its shown brief can exceed a
+ *   BRIEF_SCHEMA bound once encoded, but decide() reads only the code-built
+ *   brief of removeReviewerText, which always fits it, so a valid review
+ *   never asks as malformed_brief.
  *
  * Why
  *   The review result is the one step result that carries Codex-derived
@@ -136,7 +148,7 @@ function reviewExitFields() {
 }
 
 function reviewQuestionKinds() {
-  return { 'user-input-required': 'review_question', 'high-severity-rejection': 'high_severity_rejection' };
+  return { 'user-input-required': REVIEW_QUESTION_KIND, 'high-severity-rejection': HIGH_SEVERITY_REJECTION_KIND };
 }
 
 function findingIdField() {
@@ -219,16 +231,27 @@ function buildUserQuestionSchema(description) {
       why: buildLabelledText(200, 'Why that option.')
     }
   };
+  const gate = {
+    type: 'object',
+    additionalProperties: false,
+    required: ['irreversible', 'architectural'],
+    description: 'The reviewer\'s read of the recommended option.',
+    properties: {
+      irreversible: { type: 'boolean', description: 'true when the recommended option cannot be undone.' },
+      architectural: { type: 'boolean', description: 'true when the recommended option changes how the system is built.' }
+    }
+  };
   return {
     type: 'object',
     description: description,
     additionalProperties: false,
-    required: ['found', 'ask', 'options', 'recommendation'],
+    required: ['found', 'ask', 'options', 'recommendation', 'gate'],
     properties: {
       found: buildLabelledText(200, 'The claim of the finding and its impact.'),
       ask: buildLabelledText(200, 'The question, on one line.'),
       options: { type: 'array', minItems: 2, maxItems: 4, description: 'The choices, 2 to 4.', items: option },
-      recommendation: recommendation
+      recommendation: recommendation,
+      gate: gate
     }
   };
 }
@@ -281,6 +304,16 @@ function reviewerOptions(label) {
   return { agentType: REVIEWER_AGENT, schema: toAgentSchema(REVIEW_SCHEMA), label: label, phase: 'Review' };
 }
 
+function describeReviewAnswerData(answer) {
+  if (answer === undefined) {
+    return dataBlocksSentence();
+  }
+  if (answer.decided_by === 'run') {
+    return dataBlocksSentence() + ' The reply in user_answer is the run\'s decision, not the user\'s.';
+  }
+  return dataBlocksSentence('The reply in user_answer');
+}
+
 function buildReviewPrompt(plan, trunk, answer) {
   const inputs = { base: plan.base, working_branch: plan.branch, trunk: trunk, max_iterations: maxReviewIterations(), caller_validates: true };
   if (answer !== undefined) {
@@ -289,7 +322,7 @@ function buildReviewPrompt(plan, trunk, answer) {
   return [
     'Run your pre-PR local review loop once on the working branch as it is checked out, with the inputs in the inputs block below.',
     boundarySentence(),
-    dataBlocksSentence(answer === undefined ? undefined : 'The reply in user_answer'),
+    describeReviewAnswerData(answer),
     '',
     formatDataBlock('inputs', inputs)
   ].join('\n');
@@ -371,15 +404,18 @@ function buildRejectedFindingsBlock(note, rejectedFindings) {
   return { text: lines.join('\n') };
 }
 
-function buildReviewOption(option) {
-  return { id: option.id, summary: encodeUntrustedText(option.summary), steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true };
+function buildReviewOption(option, question) {
+  const isRecommended = option.id === question.recommendation.option_id;
+  return { id: option.id, summary: encodeUntrustedText(option.summary), steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: !isRecommended || !question.gate.irreversible };
 }
 
 /**
  * Returns the brief of a local review question, built from the reviewer's
  * user_question: the encoded ask as the problem, the reviewer's options
- * with encoded summaries, and the reviewer's option_id and strength with
- * the encoded why.
+ * with encoded summaries, the reviewer's option_id and strength with the
+ * encoded why, and the reviewer's gate with safety false, since clause 3
+ * is not read for a review call. The recommended option is reversible
+ * unless the gate says irreversible.
  */
 function buildReviewQuestionBrief(review) {
   const question = review.user_question;
@@ -388,21 +424,60 @@ function buildReviewQuestionBrief(review) {
     kind: reviewQuestionKinds()[review.exit_reason],
     problem: encodeUntrustedText(question.ask),
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
-    options: question.options.map(buildReviewOption),
+    options: question.options.map((option) => buildReviewOption(option, question)),
     recommendation: { option_id: question.recommendation.option_id, strength: question.recommendation.strength, why: encodeUntrustedText(question.recommendation.why) },
     assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
-    gate: { irreversible: false, architectural: false, safety: false }
+    gate: { irreversible: question.gate.irreversible, architectural: question.gate.architectural, safety: false }
   };
+}
+
+function reviewCallTexts() {
+  return {
+    problem: 'Local review asked about a finding, and the run took the option the reviewer recommended.',
+    summary: 'The option the reviewer recommended.',
+    why: 'The run took it because the call is reversible and not architectural. The reviewer recorded the decision on the branch, so you can veto it before you merge.'
+  };
+}
+
+/**
+ * Returns a copy of a review question brief whose problem, option
+ * summaries and why are the fixed reviewCallTexts(), so it holds no
+ * reviewer text and every text field is code-built.
+ */
+function removeReviewerText(brief) {
+  const texts = reviewCallTexts();
+  return Object.assign({}, brief, {
+    problem: texts.problem,
+    options: brief.options.map((option) => Object.assign({}, option, { summary: texts.summary })),
+    recommendation: Object.assign({}, brief.recommendation, { why: texts.why })
+  });
 }
 
 function describeReviewQuestionLead(review, head) {
   return 'Local review on commit ' + head + ', finding ' + quoteShortFindingId(review.finding_id) + ': ' + encodeUntrustedText(review.user_question.found);
 }
 
+/**
+ * Lists a taken review call in run.taken, its problem the short finding id
+ * and the encoded ask, and returns the answer that reruns the review gate:
+ * the lead and the rendered question, the recommended option id as the
+ * reply, and decided_by run. run.answerLog is not touched.
+ */
+function takeReviewCall(review, run, shown, lead) {
+  const listed = Object.assign({}, shown, { problem: 'Local review finding ' + quoteShortFindingId(review.finding_id) + ': ' + shown.problem });
+  acceptResolution({ taken: [{ brief: listed, kind: shown.kind }], reversibleEffects: [] }, run);
+  return { answer: { question: lead + '\n\n' + renderQuestions([{ brief: shown }]), reply: shown.recommendation.option_id, decided_by: 'run' } };
+}
+
 function askReviewQuestion(review, run) {
+  const kind = reviewQuestionKinds()[review.exit_reason];
+  const shown = buildReviewQuestionBrief(review);
+  const lead = describeReviewQuestionLead(review, run.head);
   const resolution = { asks: [], taken: [] };
-  resolveDecision(reviewQuestionKinds()[review.exit_reason], buildReviewQuestionBrief(review), undefined, run, resolution);
-  return askTail(resolution.asks[0], run, describeReviewQuestionLead(review, run.head));
+  if (resolveDecision(kind, removeReviewerText(shown), undefined, run, resolution) === 'take') {
+    return takeReviewCall(review, run, shown, lead);
+  }
+  return askTail(Object.assign({}, resolution.asks[0], { brief: shown }), run, lead);
 }
 
 function buildDiminishingReturnsBrief(review, head) {

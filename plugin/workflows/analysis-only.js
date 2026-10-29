@@ -142,14 +142,14 @@ const AUTONOMY_TABLE = {
 },
 {
 "kind": "review_question",
-"high": "surface",
-"balanced": "surface",
+"high": "auto",
+"balanced": "auto",
 "low": "surface"
 },
 {
 "kind": "high_severity_rejection",
-"high": "surface",
-"balanced": "surface",
+"high": "auto",
+"balanced": "auto",
 "low": "surface"
 }
 ]
@@ -599,7 +599,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'e1b64b06ed7ee7a5';
+const BUILD_ID = '85bf38967999217d';
 
 function supportedSchemaKeywords(){
 return[

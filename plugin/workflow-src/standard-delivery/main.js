@@ -157,7 +157,15 @@
  *   is the residual ADR-0037 records (Risks, step text in a blocked
  *   message, (b)).
  *   A local review question is the reviewer's own: the review returns
- *   finding_id and user_question, and the pause leads with one line, 'Local
+ *   finding_id and user_question, with the reviewer's gate. decide() reads
+ *   a brief built in code from the reviewer's option ids, recommendation,
+ *   strength and gate, per decision-autonomy.md (Review Calls): it takes an
+ *   agreed call that is reversible and not architectural, at the levels
+ *   whose cell is auto, and asks every other one. A take never pauses: the
+ *   final message lists the call by its short finding id with the encoded
+ *   ask and chosen summary, the pull request shows it with fixed texts, and
+ *   the review gate reruns with user_answer decided_by run. An ask pauses
+ *   with one line, 'Local
  *   review on commit', the head, the finding's first 8 code points and the
  *   encoded found, then shows that question, the encoded ask, the
  *   reviewer's 2 to 4 options with encoded summaries and its recommendation
@@ -237,6 +245,8 @@ const DIMINISHING_RETURNS_EXIT_KIND = 'diminishing_returns_exit';
 const PLANNER_ESCALATION_ROUTING_KIND = 'planner_escalation_routing';
 const ROOT_CLUSTER_ROUTING_KIND = 'root_cluster_routing';
 const REMEDIATION_PLAN_ACCEPTANCE_KIND = 'remediation_plan_acceptance';
+const REVIEW_QUESTION_KIND = 'review_question';
+const HIGH_SEVERITY_REJECTION_KIND = 'high_severity_rejection';
 const REVIEWER_AGENT = 'hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA = buildPlanResultSchema(PLAN_SCHEMA, BRIEF_SCHEMA);
 const RELAY_SCHEMA = buildRelaySchema();
