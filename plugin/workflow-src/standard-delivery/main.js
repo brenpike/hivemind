@@ -55,16 +55,16 @@
  *   own lead (askTail, gates.js). A run end is its lead, then, when blocked,
  *   the Next line, any later causes and the commit end line, then only the
  *   records ADR-0037 decision 3 needs in chat:
- *   the branch, commit count and head when the run made commits, the
+ *   the branch and its head once a wave ran, the
  *   reversible effects and the taken decisions, one line each. A complete
  *   run names the pull request and its commit, the gates that held and any
  *   gate not configured, the warning when there is one and the rejected
- *   findings. No chat message shows a commit list, a criticality or ask
+ *   findings. No message shows a commit list, a criticality or ask
  *   reason line, and no pause shows a taken decision.
  *   The pull request body and comment each carry the one run record
- *   buildRunRecordParts() returns: the commits, the reversible effects, the
- *   gates and the taken decisions, in that order (ADR-0037 decision 3;
- *   review findings 1a75f008 and 6f87ce62), the decisions in full with
+ *   buildRunRecordParts() returns: the reversible effects, the gates and
+ *   the taken decisions, in that order, and no commit list (ADR-0037
+ *   decisions 2 and 3; review findings 1a75f008 and 6f87ce62), the decisions in full with
  *   their compact fallback (issue 445). Each decision is the same brief
  *   once however many passes took it.
  *   No question shows the plan summary or names this run's per-agent
@@ -103,9 +103,9 @@
  *   question, and the reply takes the stopped step again or plans again.
  *   Each new pass reads the head from its branch step through observeHead
  *   (record.js), the one writer of run.head, before any wave: that commit
- *   equals the facts head by needsBranchReplan, so a commit made during a
- *   pause, or by a commit runner whose relay could not be read, enters the
- *   run commits as a range.
+ *   equals the facts head by needsBranchReplan, so the pass starts from a
+ *   commit made during a pause, or by a commit runner whose relay could
+ *   not be read.
  *   No version question plans again: its reply becomes run.versionAnswer
  *   and runs one fix round, and no later version check of the run fails
  *   or asks (gates.js).
@@ -141,8 +141,8 @@
  *   finish never throws.
  *   An open question stop and a resume across builds are each one cause
  *   with next action answer, so their Next line is nextStepLine('answer'):
- *   run the request again with the answers in it. When the run made
- *   commits, the branch line names the encoded branch, which
+ *   run the request again with the answers in it. Once a wave ran, the
+ *   branch line names its head and the encoded branch, which
  *   plan-schema.json bounds by maxLength 200 (issue 434). No Next line
  *   offers a pull request from commits a gate did not hold on (issue 444).
  *   Only finishDeliveryComplete, with pr, ends complete, so complete
@@ -357,7 +357,6 @@ function createRunState(launch) {
     answeredKeys: new Set(),
     taken: [],
     reversibleEffects: [],
-    commits: [],
     head: undefined,
     branch: undefined,
     notRunGates: [],
@@ -401,7 +400,7 @@ async function runDeliveryPass(run, replan) {
   if (needsBranchReplan(branched.values, checked.facts, planned.plan)) {
     return requestBranchReplan(run);
   }
-  observeHead(run, branched.values.commit, false, planned.plan.branch);
+  observeHead(run, branched.values.commit, planned.plan.branch);
   return runPlanWaves(run, planned.plan, checked.facts);
 }
 

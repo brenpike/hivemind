@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'eb05cec6ed6d01fc';
+const BUILD_ID = 'cc3874610bcb78f2';
 
 function supportedSchemaKeywords(){
 return[
@@ -3318,12 +3318,6 @@ return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 return stopDelivery([checked],run,[],false);
 }
 
-function renderCommits(commits){
-if(commits.length===0){
-return'This run made no commit.';
-}
-return['Commits this run made:',...commits.map((commit)=>'- '+commit)].join('\n');
-}
 function renderReversibleEffects(effects){
 const lines=['Effects outside the repo that the plan declares as reversible:'];
 effects.forEach((effect)=>lines.push('- step '+encodeUntrustedText(effect.stepId)+': '+encodeUntrustedText(effect.summary)));
@@ -3332,20 +3326,12 @@ return lines.join('\n');
 function renderNotRunGates(lines){
 return['Gates that did not run:',...lines.map((line)=>'- '+line)].join('\n');
 }
-function observeHead(run,commit,committed,branch){
-if(committed){
-run.commits.push(commit);
-}else if(run.head!==undefined&&commit!==run.head){
-run.commits.push(run.head+'..'+commit);
-}
+function observeHead(run,commit,branch){
 run.head=commit;
 run.branch=branch;
 }
 function buildRunRecordParts(run,taken,gates){
 const parts=[];
-if(run.waveCount>0){
-parts.push({id:'commits',text:renderCommits(run.commits),external:false});
-}
 if(run.reversibleEffects.length>0){
 parts.push({id:'reversible_effects',text:renderReversibleEffects(run.reversibleEffects),external:true});
 }
@@ -3360,7 +3346,7 @@ parts.push({id:'decisions',text:renderDecisions(taken),compact:renderDecisionsCo
 return parts;
 }
 function describeBranchLine(run){
-return'Branch '+encodeUntrustedText(run.branch)+' holds '+describeCount(run.commits.length,'commit')+' this run made, with head '+run.head+'.';
+return'Branch '+encodeUntrustedText(run.branch)+' is at commit '+run.head+'.';
 }
 function buildRecordTailBlocks(run,taken){
 const blocks=[];
@@ -3374,7 +3360,7 @@ return blocks;
 }
 function finishDeliveryBlocked(causes,run,endLines=[]){
 const blocks=endLines.map((line)=>({text:line}));
-if(run!==undefined&&run.commits.length>0){
+if(run!==undefined&&run.waveCount>0){
 blocks.push({text:describeBranchLine(run)});
 }
 if(run!==undefined){
@@ -3849,7 +3835,7 @@ const checked=checkCommitRelay(relay,plan,commit.stepName);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
 }
-observeHead(run,checked.values.commit,checked.values.committed==='true',plan.branch);
+observeHead(run,checked.values.commit,plan.branch);
 if(stepCauses.length===0){
 return{values:checked.values};
 }
@@ -4567,7 +4553,6 @@ answerLog:[],
 answeredKeys:new Set(),
 taken:[],
 reversibleEffects:[],
-commits:[],
 head:undefined,
 branch:undefined,
 notRunGates:[],
@@ -4604,7 +4589,7 @@ return keepReplanReview(stopDelivery([branched],run,[],true),replan);
 if(needsBranchReplan(branched.values,checked.facts,planned.plan)){
 return requestBranchReplan(run);
 }
-observeHead(run,branched.values.commit,false,planned.plan.branch);
+observeHead(run,branched.values.commit,planned.plan.branch);
 return runPlanWaves(run,planned.plan,checked.facts);
 }
 async function runDelivery(rawArgs){

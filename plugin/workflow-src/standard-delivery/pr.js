@@ -4,7 +4,7 @@
  * runner prompt, the check of its relay and the step.
  *
  * Inputs
- *   run    the run state of main.js createRunState: head, commits, taken,
+ *   run    the run state of main.js createRunState: head, taken,
  *          reversibleEffects, notRunGates and draft.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (gates.js): notes, rejected and
@@ -50,8 +50,8 @@
  *   and the external parts of that record, the reversible effects and the
  *   decisions, reach the pull request body and comment only through
  *   renderLiteralBlock(), so GitHub shows them as literal text and an
- *   at-mention, issue reference or HTML in them does nothing. The gates,
- *   the commits and the comment lead are code-built and stay plain. The
+ *   at-mention, issue reference or HTML in them does nothing. The
+ *   gates and the comment lead are code-built and stay plain. The
  *   title stays plain text: GitHub renders titles with code spans only and
  *   takes no mentions from them, and a wrapper would reach the squash
  *   commit subject.

@@ -63,10 +63,7 @@
  *           step that can change files, and with an empty file list as the
  *           head check of gates.js after a reply. Its checked commit goes to
  *           observeHead (record.js), as the branch commit does at each pass
- *           start (main.js): a commit it makes enters the run commits; when
- *           it commits nothing but reports a commit other than the previous
- *           head, as after local review fix commits, the range
- *           <previous head>..<new head> enters them. Its inputs block
+ *           start (main.js). Its inputs block
  *           carries a code-built subject: a wave's from its plan steps
  *           (waves.js buildWaveSubject), and fixed ones for the fix and
  *           review commits.
@@ -590,7 +587,7 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   if (checked.problem !== undefined) {
     return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);
   }
-  observeHead(run, checked.values.commit, checked.values.committed === 'true', plan.branch);
+  observeHead(run, checked.values.commit, plan.branch);
   if (stepCauses.length === 0) {
     return { values: checked.values };
   }

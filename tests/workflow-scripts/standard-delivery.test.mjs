@@ -81,8 +81,12 @@ function withNextStep(message) {
   return message + '\n\n' + NEXT_STEP_LINE;
 }
 
-function branchLine(count, head) {
-  return 'Branch "feature/cache" holds ' + count + ' commit' + (count === 1 ? '' : 's') + ' this run made, with head ' + head + '.';
+function branchLine(head) {
+  return 'Branch "feature/cache" is at commit ' + head + '.';
+}
+
+function listsCommits(text) {
+  return text.includes('Commits this run made') || text.includes('This run made no commit');
 }
 
 function readText(path) {
@@ -1057,7 +1061,7 @@ const ROW_TESTS = {
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       assert.equal(runGitIn(scratch, ['symbolic-ref', '--short', 'HEAD']), 'feature/cache');
       assert.equal(runGitIn(scratch, ['log', '-1', '--format=%s']), 'feat: Step STEP-001 is done.');
-      assert.ok(prBodyOf(run, 'pr-1').includes('Commits this run made:\n- ' + head), prBodyOf(run, 'pr-1'));
+      assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').expect_commit, head);
       assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'skipped');
     });
     test('the facts runner invokes gather-facts with a JSON inputs block under the runner read-only sentence', async () => {
@@ -1769,7 +1773,7 @@ const ROW_TESTS = {
       const paragraphs = run.result.message.split('\n\n');
       assert.deepEqual(paragraphs.slice(0, 2), [OPEN_LEAD, RUN_AGAIN]);
       assert.ok(paragraphs[2].startsWith('I stopped asking because your replies so far are too long to carry'), run.result.message);
-      assert.ok(paragraphs.indexOf(branchLine(1, OTHER)) > 2, run.result.message);
+      assert.ok(paragraphs.indexOf(branchLine(OTHER)) > 2, run.result.message);
       assert.ok(!labelsOf(run).includes('branch-2'));
     });
     test('a null revise result, an agent failure, ends with the run_again Next line, and a revise result that fails its schema pauses with the fix line brief', async () => {
@@ -2347,8 +2351,7 @@ const ROW_TESTS = {
       const scratch = makeScratchRepo();
       const run = await runWorkflow(LAUNCH, realResults(scratch, { 'work-1-STEP-001': WORKER_DONE }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.ok(prBodyOf(run, 'pr-1').includes('This run made no commit.'), prBodyOf(run, 'pr-1'));
-      assert.ok(!run.result.message.includes('commit this run made'), run.result.message);
+      assert.ok(!listsCommits(prBodyOf(run, 'pr-1')), prBodyOf(run, 'pr-1'));
     });
   },
   'SD-16': () => {
@@ -2428,7 +2431,6 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-001', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
-      assert.ok(prBodyOf(run, 'pr-2').includes('Commits this run made:\n- ' + OTHER), prBodyOf(run, 'pr-2'));
     });
     test('after maxReplans() replans a needs_replan asks naming the limit and the reason, and the reply starts a new pass with the worker reasons, not counted', async () => {
       assert.equal(main.maxReplans(), 3);
@@ -2502,7 +2504,7 @@ const ROW_TESTS = {
     });
   },
   'SD-19': () => {
-    test('the final message lists the reversible effects and every taken decision, and only the pull request body the commits', async () => {
+    test('the final message lists the reversible effects and every taken decision, and neither it nor the pull request body lists the commits', async () => {
       const plan = effectPlan('Post a preview link.', true);
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
@@ -2518,7 +2520,7 @@ const ROW_TESTS = {
           lib.renderDecisionsCompact(taken)
         ].join('\n\n')
       });
-      assert.ok(prBodyOf(run, 'pr-1').includes('Commits this run made:\n- ' + OTHER + '\n'), prBodyOf(run, 'pr-1'));
+      assert.ok(!listsCommits(prBodyOf(run, 'pr-1')), prBodyOf(run, 'pr-1'));
     });
     test('a pause after waves lists no commit, and a resume replays every earlier prompt byte for byte', async () => {
       const results = happyResults({
@@ -2542,7 +2544,6 @@ const ROW_TESTS = {
         assert.equal(resumed.calls[index].opts.label, call.opts.label);
         assert.equal(resumed.calls[index].prompt, call.prompt, call.opts.label);
       });
-      assert.ok(prBodyOf(resumed, 'pr-2').includes('Commits this run made:\n- ' + OTHER + '\n- ' + THIRD), prBodyOf(resumed, 'pr-2'));
     });
     test('every agent label of a run is unique', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'branch-1': branchRelay({ created: 'false' }), 'facts-2': onPlanBranchFacts(HEAD), 'plan-2': planResult(), 'branch-2': branchRelay({ created: 'false' }), 'work-2-STEP-001': WORKER_DONE, 'commit-2-1': commitRelay(), ...tailResults(2, OTHER) }));
@@ -2957,7 +2958,6 @@ const ROW_TESTS = {
       const remediation = { brief: main.buildValidationRemediationBrief(OTHER, 1) };
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, remediation])), run.result.message);
       assert.ok(!run.result.message.includes('landed after'), run.result.message);
-      assert.ok(prBodyOf(run, 'pr-1').includes('Commits this run made:\n- ' + OTHER + '\n- ' + THIRD));
     });
     test('the validation fix sentence is the validation fix task trigger of drone.md and nothing more', () => {
       const clause = readDroneClause('A validation fix task takes its scope from the fix: when the delegation says ', 'created, edited or deleted.');
@@ -3589,7 +3589,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run).slice(-4), ['review-1-1', 'review-commit-1-1', 'validate-1-2', 'pr-1']);
       assert.ok(run.result.message.includes('\n\n' + HELD_ALL + head + '.'), run.result.message);
     });
-    test('a review commit that reports a moved head with nothing committed records the range from the previous head', async () => {
+    test('a review commit that reports a moved head with nothing committed holds the review gate on that head', async () => {
       const results = happyResults({
         'review-1-1': { ...REVIEW_CLEAN, findings_resolved: 1, fix_commits_exist: true },
         'review-commit-1-1': commitRelay({ commit: THIRD, committed: 'false' }),
@@ -3597,16 +3597,11 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      const commits = 'Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD;
-      assert.equal(prBodyOf(run, 'pr-1').split('\n\n').find((part) => part.startsWith('Commits this run made:')), commits, prBodyOf(run, 'pr-1'));
       const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
-      assert.ok(inputs.body.includes(commits + '\n'), inputs.body);
-      assert.ok(inputs.comment.includes(commits + '\n'), inputs.comment);
-    });
-    test('a commit step that reports the same head with nothing committed records nothing', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults());
-      assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.equal(prBodyOf(run, 'pr-1').split('\n\n').find((part) => part.startsWith('Commits this run made:')), 'Commits this run made:\n- ' + OTHER, prBodyOf(run, 'pr-1'));
+      const gatesPart = inputs.body.split('\n\n').find((part) => part.startsWith('Gates:'));
+      assert.ok(gatesPart.includes('- local review: ') && gatesPart.split('\n').slice(1).every((line) => line.endsWith(', held on commit ' + THIRD)), inputs.body);
+      assert.ok(!listsCommits(inputs.body), inputs.body);
+      assert.ok(!listsCommits(inputs.comment), inputs.comment);
     });
   },
   'SD-35': () => {
@@ -4220,7 +4215,6 @@ const ROW_TESTS = {
       const rerun = main.buildGateRerunBrief(['validate', 'review'], FOURTH, false);
       assert.ok(rerun.problem.startsWith('Commit ' + FOURTH + ' landed after validation and local review held on an earlier commit.'), rerun.problem);
       assert.ok(run.result.message.includes(rerun.problem), run.result.message);
-      assert.ok(prBodyOf(run, 'pr-1').includes('Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD + '\n- ' + FOURTH), prBodyOf(run, 'pr-1'));
     });
     test('a gate that is not configured is never stale', async () => {
       const results = fixFlowResults();
@@ -4375,20 +4369,19 @@ const ROW_TESTS = {
     });
   },
   'SD-45': () => {
-    test('the body holds the summary and the run record, and the comment its lead and the same run record: commits, reversible effects, gates with their commits, every decision', async () => {
+    test('the body holds the summary and the run record, and the comment its lead and the same run record: reversible effects, gates with their commits, every decision', async () => {
       const plan = effectPlan('Post a preview link.', true);
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
       const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
       const decisions = lib.renderDecisions([{ brief: strong }, { brief: main.buildPlanAcceptanceBrief(plan) }]);
-      const record = ['Commits this run made:\n- ' + OTHER, '```\nEffects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."\n```', gates, '```\n' + decisions + '\n```'];
+      const record = ['```\nEffects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."\n```', gates, '```\n' + decisions + '\n```'];
       assert.equal(inputs.body, ['```\n' + plan.summary + '\n```', ...record].join('\n\n'));
       assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...record].join('\n\n'));
     });
     test('the body and the comment each carry the one run record buildRunRecordParts() returns, and no chat message builds it', () => {
       const run = main.createRunState({ request: REQUEST, trunk: 'main', references: [], localReview: false, argsObject: {} });
-      run.commits.push(OTHER);
       run.waveCount = 1;
       run.head = OTHER;
       run.reversibleEffects.push({ stepId: 'STEP-001', summary: 'Post a preview link.' });
@@ -4397,7 +4390,7 @@ const ROW_TESTS = {
       const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
       for (const gateArg of [undefined, gates]) {
         const parts = main.buildRunRecordParts(run, run.taken, gateArg);
-        assert.deepEqual([...parts.map((part) => part.id)], ['commits', 'reversible_effects', 'gates', 'decisions']);
+        assert.deepEqual([...parts.map((part) => part.id)], ['reversible_effects', 'gates', 'decisions']);
         assert.deepEqual([...parts.filter((part) => part.external).map((part) => part.id)], ['reversible_effects', 'decisions']);
       }
       const messageParts = main.buildRunRecordParts(run, run.taken, undefined);
@@ -4409,18 +4402,18 @@ const ROW_TESTS = {
       const rendered = [...prParts.map((part) => (part.external ? main.renderLiteralBlock(part.text) : part.text))];
       assert.equal(texts.body, [main.renderLiteralBlock(plan.summary), ...rendered].join('\n\n'));
       assert.equal(texts.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...rendered].join('\n\n'));
-      for (const id of ['commits', 'reversible_effects', 'decisions']) {
+      for (const id of ['reversible_effects', 'decisions']) {
         assert.equal(prParts.find((part) => part.id === id).text, messageParts.find((part) => part.id === id).text, id);
       }
       for (const name of ['buildPullRequestBody', 'buildPullRequestComment']) {
         const source = String(main[name]);
-        for (const renderer of ['renderCommits', 'renderReversibleEffects', 'renderNotRunGates', 'renderPullRequestGates', 'renderDecisions', 'renderDecisionsCompact']) {
+        for (const renderer of ['renderReversibleEffects', 'renderNotRunGates', 'renderPullRequestGates', 'renderDecisions', 'renderDecisionsCompact']) {
           assert.ok(!new RegExp('\\b' + renderer + '\\(').test(source), name + ' calls ' + renderer);
         }
       }
       assert.ok(String(main.renderPullRequestRecord).includes('buildRunRecordParts('));
       for (const name of ['pauseDelivery', 'finishOpenQuestions', 'finishDeliveryBlocked', 'finishDeliveryComplete', 'buildRecordTailBlocks']) {
-        assert.ok(!/\b(buildRunRecordParts|renderCommits|renderNotRunGates|renderPullRequestGates)\(/.test(String(main[name])), name);
+        assert.ok(!/\b(buildRunRecordParts|renderNotRunGates|renderPullRequestGates)\(/.test(String(main[name])), name);
       }
       for (const name of ['buildPullRequestBody', 'buildPullRequestComment']) {
         assert.ok(String(main[name]).includes('renderPullRequestRecord('), name);
@@ -4442,7 +4435,7 @@ const ROW_TESTS = {
         assert.equal(rendered.slice(fenceLength + 1, rendered.length - fenceLength - 1), text);
       }
     });
-    test('an at-mention in the plan text sits only inside closed fences of the body and the comment, and the gates and commits stay outside', async () => {
+    test('an at-mention in the plan text sits only inside closed fences of the body and the comment, and the gates stay outside', async () => {
       const summary = 'Ping @octocat with ```` code ```` now.\n```';
       const step = makeStep('STEP-001', ['src/@octocat.js'], { outcome: 'Tell @octocat it is done.', external_effects: [{ summary: 'Post to @octocat.', reversible: true }] });
       const plan = makePlan({ summary: summary, steps: [step] });
@@ -4463,8 +4456,6 @@ const ROW_TESTS = {
       }
       assert.ok(inputs.body.startsWith('`````\n' + summary + '\n`````\n\n'), inputs.body);
       assert.ok(inputs.body.includes('"Post to @octocat."'), inputs.body);
-      const bodyOutside = readFencedText(inputs.body).outside;
-      ['Commits this run made:', '- ' + OTHER].forEach((line) => assert.ok(bodyOutside.includes(line), line));
     });
     test('a validation not run and a local review not configured are each named', async () => {
       const plan = makePlan({ validation_commands: [] });
@@ -4538,11 +4529,11 @@ const ROW_TESTS = {
       const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean' } };
       const plan = makePlan({ summary: '' });
       const longWhy = { ...makeBrief().recommendation, why: 'W'.repeat(61000) };
-      const runWith = (problem) => ({ localReview: true, head: OTHER, commits: [OTHER], waveCount: 1, notRunGates: [], reversibleEffects: [], taken:[{ brief: makeBrief({ problem: problem, recommendation: longWhy }), kind: 'planner_question' }] });
+      const runWith = (problem) => ({ localReview: true, head: OTHER, waveCount: 1, notRunGates: [], reversibleEffects: [], taken:[{ brief: makeBrief({ problem: problem, recommendation: longWhy }), kind: 'planner_question' }] });
       const shortTexts = main.buildPullRequestTexts(runWith('P'), plan, gates);
       const bodyOverhead = shortTexts.body.length - 1;
       const commentOverhead = shortTexts.comment.length - 1;
-      assert.ok(commentOverhead > bodyOverhead, 'with no summary the comment lead is longer than the body commits');
+      assert.ok(commentOverhead > bodyOverhead, 'with no summary the comment lead is longer than the empty summary block of the body');
       const problem = 'P'.repeat(60000 - commentOverhead + 1);
       const texts = main.buildPullRequestTexts(runWith(problem), plan, gates);
       assert.equal(texts.problem, 'The pull request comment would be 60001 characters even with the decisions in short form, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing.');
@@ -4599,7 +4590,7 @@ const ROW_TESTS = {
         assert.equal(run.result.pr, undefined);
         if (isTerminal) {
           assert.equal(run.result.outcome, 'blocked');
-          assert.ok(run.result.message.startsWith(withNextStep(message) + '\n\n' + branchLine(1, OTHER)), run.result.message);
+          assert.ok(run.result.message.startsWith(withNextStep(message) + '\n\n' + branchLine(OTHER)), run.result.message);
         } else {
           assertStepStopPause(run, message + '\n\n', 'pr-1');
         }
@@ -4618,7 +4609,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': null }));
       assert.equal(run.result.outcome, 'blocked');
       assert.equal(run.result.pr, undefined);
-      assert.deepEqual(run.result.message.split('\n\n').slice(0, 3), [unusable + ' ' + lib.describeNoResult(null), main.nextStepLine('run_again'), branchLine(1, OTHER)]);
+      assert.deepEqual(run.result.message.split('\n\n').slice(0, 3), [unusable + ' ' + lib.describeNoResult(null), main.nextStepLine('run_again'), branchLine(OTHER)]);
     });
   },
   'SD-47': () => {
@@ -4670,13 +4661,12 @@ const ROW_TESTS = {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults({ 'plan-1': planResult(plan), 'pr-1': cannedPrRunner({ created: 'false', commented: 'true' }) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
-      const commits = 'Commits this run made:\n- ' + OTHER;
       const effects = 'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."';
       const taken = [{ brief: main.buildPlanAcceptanceBrief(plan) }];
       const decisions = lib.renderDecisions(taken);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: not configured for this run']);
       const comment = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').comment;
-      assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', commits, '```\n' + effects + '\n```', gates, '```\n' + decisions + '\n```'].join('\n\n'));
+      assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', '```\n' + effects + '\n```', gates, '```\n' + decisions + '\n```'].join('\n\n'));
       const pushed = 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.';
       const held = 'Validation held on commit ' + OTHER + '. Not configured for this run: local review.';
       assert.equal(run.result.message, [pushed, held, effects, lib.renderDecisionsCompact(taken)].join('\n\n'));
@@ -5043,15 +5033,22 @@ const ROW_TESTS = {
       assert.ok(paragraphs[0].startsWith('A worker did not finish its step'), paragraphs[0]);
       assert.equal(paragraphs[1], main.nextStepLine('run_again'));
       assert.equal(paragraphs[2], 'The wave was committed as ' + OTHER + ', so that commit can hold partial edits.');
-      assert.equal(paragraphs[3], branchLine(1, OTHER));
+      assert.equal(paragraphs[3], branchLine(OTHER));
       assert.equal(paragraphs.at(-1), lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }]));
       assert.equal(paragraphs.length, 5, run.result.message);
     });
     test('a blocked result before any commit shows no branch line', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(), 'branch-1': { outcome: 'blocked', stderr: 'blocker: No branch.\n' } });
       assert.equal(run.result.outcome, 'blocked');
-      assert.ok(!run.result.message.includes('this run made'), run.result.message);
+      assert.ok(!run.result.message.includes('Branch "feature/cache" is at commit'), run.result.message);
       assert.equal(run.result.message.split('\n\n')[1], NEXT_STEP_LINE);
+    });
+    test('a blocked result after a wave that committed nothing names the branch at its head', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults({ 'work-1-STEP-001': null, 'commit-1-1': commitRelay({ commit: HEAD, committed: 'false' }) }));
+      assert.equal(run.result.outcome, 'blocked');
+      const paragraphs = run.result.message.split('\n\n');
+      assert.equal(paragraphs[1], main.nextStepLine('run_again'));
+      assert.equal(paragraphs[2], branchLine(HEAD), run.result.message);
     });
     test('a launch problem gets the next-step line as its second block', async () => {
       const run = await runWorkflow({ request: REQUEST, trunk: 5 }, {});
@@ -5095,7 +5092,7 @@ const ROW_TESTS = {
     });
     test('an open question stop keeps the answer Next line right after its first block, without a throw', () => {
       const asks = Array.from({ length: 30 }, (_, index) => ({ brief: makeBrief({ problem: 'P' + index + ' ' + '\u0001'.repeat(2000) }) }));
-      const run = { taken: [], waveCount: 1, commits: Array.from({ length: 400 }, () => OTHER), reversibleEffects: [], notRunGates: [], branch: 'b'.repeat(5000) };
+      const run = { taken: [], waveCount: 1, reversibleEffects: [], notRunGates: [], branch: 'b'.repeat(5000) };
       for (const stopReason of ['reply_size', 'exact_text_size']) {
         const result = main.finishOpenQuestions({ asks: asks, taken: [] }, stopReason, run);
         assert.equal(result.outcome, 'blocked');
@@ -5107,7 +5104,7 @@ const ROW_TESTS = {
       }
     });
     test('a first block of the costliest characters still keeps the next-step line, without a throw, and its compact form never cuts mid-word', () => {
-      const run = { taken: [], waveCount: 1, commits: Array.from({ length: 400 }, () => OTHER), reversibleEffects: [], notRunGates: [], branch: 'b'.repeat(5000), head: OTHER };
+      const run = { taken: [], waveCount: 1, reversibleEffects: [], notRunGates: [], branch: 'b'.repeat(5000), head: OTHER };
       const words = 'The planner could not plan the delivery: ' + ('\u0001'.repeat(9) + ' ').repeat(2000);
       const unbroken = 'The planner could not plan the delivery: ' + '\u0001'.repeat(20000);
       for (const [message, compactLength] of [[words, 1000], [unbroken, 40]]) {
@@ -6673,16 +6670,14 @@ const ROW_TESTS = {
     });
   },
   'SD-72': () => {
-    function commitsPartOf(run, label) {
-      return prBodyOf(run, label).split('\n\n').find((part) => part.startsWith('Commits this run made:') || part === 'This run made no commit.');
-    }
-    test('the built script writes run.head and run.branch, and pushes onto run.commits, only inside observeHead', () => {
+    test('the built script writes run.head and run.branch only inside observeHead, and no code names run.commits', () => {
       const code = stripCommentsAndStrings(builtSource.replace(/^export const meta\b/, 'const meta'));
       const writes = [...code.matchAll(/\.(head|branch|commits)(?:\s*(?:\+=|=(?!=))|\.(?:push|unshift|splice)\()/g)];
-      assert.deepEqual(writes.map((write) => write[1]).sort(), ['branch', 'commits', 'commits', 'head']);
+      assert.deepEqual(writes.map((write) => write[1]).sort(), ['branch', 'head']);
       writes.forEach((write) => assert.equal(findEnclosingFunction(code, write.index), 'observeHead', code.slice(write.index - 40, write.index + 20)));
+      assert.ok(!/\.commits\b/.test(code));
     });
-    test('a malformed wave commit relay whose runner committed pauses, and the next pass reads the head from its branch step and records the range', async () => {
+    test('a malformed wave commit relay whose runner committed pauses, and the next pass reads the head from its branch step', async () => {
       const results = happyResults({
         'commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' },
         'facts-2': onPlanBranchFacts(OTHER),
@@ -6699,12 +6694,6 @@ const ROW_TESTS = {
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       const labels = labelsOf(resumed);
       assert.deepEqual(labels.slice(labels.indexOf('commit-1-1') + 1), ['facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-001', 'commit-2-1', ...tailLabels(2)]);
-      assert.equal(commitsPartOf(resumed, 'pr-2'), 'Commits this run made:\n- ' + HEAD + '..' + OTHER + '\n- ' + THIRD, prBodyOf(resumed, 'pr-2'));
-    });
-    test('on pass 1 a wave commit with committed false at the branch head records nothing', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults({ 'commit-1-1': commitRelay({ commit: HEAD, committed: 'false' }), ...tailResults(1, HEAD) }));
-      assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.equal(commitsPartOf(run, 'pr-1'), 'This run made no commit.', prBodyOf(run, 'pr-1'));
     });
   },
   'SD-73': () => {
@@ -6726,7 +6715,6 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'pr-1']);
       assert.equal(readDataBlock(callOf(resumed, 'pr-1').prompt, 'inputs').expect_commit, THIRD);
       assert.ok(resumed.result.message.startsWith(openedLine(THIRD)), resumed.result.message);
-      assert.ok(prBodyOf(resumed, 'pr-1').includes('Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD), prBodyOf(resumed, 'pr-1'));
     });
     test('the head check commits an empty file list with a fixed subject, and an unchanged head runs the stopped step again with the same inputs', async () => {
       const results = happyResults({ 'pr-1': prBlocked, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
@@ -6758,7 +6746,6 @@ const ROW_TESTS = {
       assert.equal(readDataBlock(callOf(resumed, 'pr-1-2').prompt, 'inputs').expect_commit, THIRD);
       assert.ok(resumed.result.message.includes('\n\n' + HELD_ALL + THIRD + '.'), resumed.result.message);
       assert.ok(resumed.result.message.includes(main.buildGateRerunBrief(['validate', 'review'], THIRD, false).problem), resumed.result.message);
-      assert.ok(prBodyOf(resumed, 'pr-1-2').includes('Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD), prBodyOf(resumed, 'pr-1-2'));
     });
     test('a malformed head check pauses, and its reply runs head-P-N with the next count', async () => {
       const results = happyResults({ 'pr-1': prBlocked, 'head-1-1': { outcome: 'ran', stdout: 'nonsense\n' }, 'head-1-2': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });

@@ -5,17 +5,16 @@
  *
  * Inputs
  *   run     the run state of main.js createRunState, or undefined when the
- *           launch check failed: commits, reversibleEffects, notRunGates,
- *           taken, branch, head, waveCount and answerLog.
+ *           launch check failed: reversibleEffects, notRunGates, taken,
+ *           branch, head, waveCount and answerLog.
  *   gates   the gate loop state of runGates (gates.js), once the gates ran.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a stop, {problem, nextAction?, terminal?,
  *           agentFailure?} each: terminal true marks a cause no reply can
  *           clear, and agentFailure comes only from describeUnusableResult.
  *   endLines  lines a stop shows after its causes, such as a commit end.
- *   commit, committed, branch  a head read from a checked relay: the
- *           commit and committed lines of a molt relay, or the commit of
- *           a branch relay with committed false, and the plan branch.
+ *   commit, branch  a head read from a checked relay: the commit line of
+ *           a molt relay or of a branch relay, and the plan branch.
  *   isReplan  true when a reply to a stop plans again from fresh facts.
  *   result.js finish, which builds a blocked message from the causes,
  *   pauseForUser and the fit helpers, and brief.js renderQuestions,
@@ -28,12 +27,10 @@
  *           or the pause, or on a reply {replan: {reason}} when isReplan,
  *           a new pass outside maxReplans(), else {rerun: true}: the gate
  *           loop (gates.js) runs the head check, then the stopped step.
- *   observeHead(run, commit, committed, branch)  pushes commit onto
- *           run.commits when committed, else the range
- *           <run.head>..<commit> when run.head is defined and differs from
- *           commit, then sets run.head to commit and run.branch to branch.
+ *   observeHead(run, commit, branch)  sets run.head to commit and
+ *           run.branch to branch.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
- *           request body and its comment carry, the commit list included.
+ *           request body and its comment carry, with no commit list.
  *
  * Message shape (issue 460)
  *   Every chat message has one shape, built here:
@@ -56,8 +53,8 @@
  *           buildStopBlocks(causes): the lead, the Next line as a whole
  *           block and one block per later cause. The blocks are one per end
  *           line (the open questions, or the commit end runCommitStep
- *           passes), one line naming the encoded branch, the commit count
- *           and the head only when the run made commits, then the
+ *           passes), one line naming the encoded branch and its head
+ *           only once a wave ran, then the
  *           reversible effects and the taken decisions, one line each
  *           (renderDecisionsCompact), as every final message lists them
  *           (ADR-0037 decision 3).
@@ -67,22 +64,22 @@
  *           one, the rejected findings block, then the reversible effects
  *           and the taken decisions, one line each.
  *   Every Next line starts with 'Next:' and points at no cause the lead
- *   does not name. No chat message lists the commits: only the pull
- *   request body and comment do, through buildRunRecordParts.
+ *   does not name. No message and no pull request text lists the
+ *   commits: the branch and the pull request on GitHub hold them
+ *   (ADR-0037 decision 2).
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
  *   One head writer (issue 457): observeHead is the only code that writes
- *   run.head, run.branch or run.commits, and its callers feed it only a
- *   commit read from a checked relay: runCommitStep (relay.js) the molt
- *   commit, the head check after each reply to a gate or PR stop
- *   (gates.js) included, and runDeliveryPass (main.js) the branch commit
- *   of each new pass before any wave. So every resume reads the head
- *   before a gate holds on it or the PR pushes it, and a commit made
- *   during a pause, or by a commit runner whose relay could not be read,
- *   enters the run commits as a range once the run reads the head again.
+ *   run.head or run.branch, and its callers feed it only a commit read
+ *   from a checked relay: runCommitStep (relay.js) the molt commit, the
+ *   head check after each reply to a gate or PR stop (gates.js)
+ *   included, and runDeliveryPass (main.js) the branch commit of each new
+ *   pass before any wave. So every resume reads the head before a gate
+ *   holds on it or the PR pushes it. The run keeps no commit list, so no
+ *   record of the run can drop a commit made during a pause.
  *   One stop path (issue 457): a stop ends the run only on a terminal
  *   cause, an agent failure, a size limit (finishOpenQuestions) or the
  *   launch check. Every other stop pauses through stopDelivery, and a reply
@@ -98,22 +95,17 @@
  *   (reply_size) or an exact question cannot be shown whole
  *   (exact_text_size): it finishes blocked through finishOpenQuestions,
  *   whose Next line is nextStepLine('answer'), lists the questions still
- *   open and runs nothing further. With commits, the branch line names
- *   the branch.
+ *   open and runs nothing further. Once a wave ran, the branch line
+ *   names the branch.
  *
  * Why
  *   Every message of the run is built here, so each one has the same short
- *   shape: what happened, then what the user decides or does next. The
- *   commit list, gate lines and detail blocks stood between the user and
- *   that choice (issue 460), so they stay in the pull request texts.
+ *   shape: what happened, then what the user decides or does next. Gate
+ *   lines and detail blocks stood between the user and that choice
+ *   (issue 460), so they stay in the pull request texts. A commit list
+ *   would be a second record of the branch (ADR-0037 decision 2), so
+ *   none exists.
  */
-
-function renderCommits(commits) {
-  if (commits.length === 0) {
-    return 'This run made no commit.';
-  }
-  return ['Commits this run made:', ...commits.map((commit) => '- ' + commit)].join('\n');
-}
 
 function renderReversibleEffects(effects) {
   const lines = ['Effects outside the repo that the plan declares as reversible:'];
@@ -125,21 +117,13 @@ function renderNotRunGates(lines) {
   return ['Gates that did not run:', ...lines.map((line) => '- ' + line)].join('\n');
 }
 
-function observeHead(run, commit, committed, branch) {
-  if (committed) {
-    run.commits.push(commit);
-  } else if (run.head !== undefined && commit !== run.head) {
-    run.commits.push(run.head + '..' + commit);
-  }
+function observeHead(run, commit, branch) {
   run.head = commit;
   run.branch = branch;
 }
 
 function buildRunRecordParts(run, taken, gates) {
   const parts = [];
-  if (run.waveCount > 0) {
-    parts.push({ id: 'commits', text: renderCommits(run.commits), external: false });
-  }
   if (run.reversibleEffects.length > 0) {
     parts.push({ id: 'reversible_effects', text: renderReversibleEffects(run.reversibleEffects), external: true });
   }
@@ -155,7 +139,7 @@ function buildRunRecordParts(run, taken, gates) {
 }
 
 function describeBranchLine(run) {
-  return 'Branch ' + encodeUntrustedText(run.branch) + ' holds ' + describeCount(run.commits.length, 'commit') + ' this run made, with head ' + run.head + '.';
+  return 'Branch ' + encodeUntrustedText(run.branch) + ' is at commit ' + run.head + '.';
 }
 
 function buildRecordTailBlocks(run, taken) {
@@ -171,7 +155,7 @@ function buildRecordTailBlocks(run, taken) {
 
 function finishDeliveryBlocked(causes, run, endLines = []) {
   const blocks = endLines.map((line) => ({ text: line }));
-  if (run !== undefined && run.commits.length > 0) {
+  if (run !== undefined && run.waveCount > 0) {
     blocks.push({ text: describeBranchLine(run) });
   }
   if (run !== undefined) {
