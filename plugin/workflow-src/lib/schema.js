@@ -58,7 +58,7 @@
  *   Pure: no clock, no randomness, no I/O. The schema is a parameter.
  *   Validation keywords: type (one string), enum, required, properties,
  *   additionalProperties (false only), items, minItems, maxItems, minLength,
- *   maxLength, anyOf. Annotation keywords $schema, title and description are accepted
+ *   maxLength, pattern, anyOf. Annotation keywords $schema, title and description are accepted
  *   and change nothing.
  *   Fails closed: the whole schema is walked before the value is read, and
  *   any other keyword, a non-object schema, or a keyword value of the wrong
@@ -72,6 +72,10 @@
  *   minLength and maxLength count Unicode code points, not UTF-16 units, and
  *   apply to any string value, with or without type. They ignore non-string
  *   values.
+ *   pattern must be a string that compiles as new RegExp(pattern, 'u'). It
+ *   applies to any string value, with or without type, and ignores
+ *   non-string values. It is not anchored for the caller: a schema that
+ *   needs a whole-string match writes ^ and $ itself.
  *   A value passes anyOf when at least one branch gives no errors. Otherwise
  *   anyOf adds exactly one error at that path, and no branch error is kept.
  *   Every string value whose schema has type string, no enum and no
@@ -105,6 +109,10 @@
  *   maxItems, like maxLength, is outside the strict structured-output
  *   subset. It relies on the Workflow agent schema check and on the script
  *   check here. The ADR-0037 harness record never tested it.
+ *   pattern is checked here too, though the harness enforces it: the
+ *   ADR-0037 harness record (Amendment 2026-10-26, pattern row) shows a
+ *   breach rejected. The script check keeps the full schema the one check
+ *   of agent() output, as for every other keyword.
  *   The harness record of ADR-0037 (Amendment 2026-10-26) keeps every
  *   check of agent() output: the root anyOf probe failed with that API
  *   error, a failed agent() call returned null to the script, no probe
@@ -126,6 +134,7 @@ function supportedSchemaKeywords() {
     'maxItems',
     'minLength',
     'maxLength',
+    'pattern',
     'anyOf'
   ];
 }
@@ -205,8 +214,22 @@ function assertKeywordShapes(schema, path) {
   if (schema.maxLength !== undefined && !(Number.isInteger(schema.maxLength) && schema.maxLength >= 0)) {
     failSchema(path, 'maxLength must be a non-negative integer');
   }
+  if (schema.pattern !== undefined) {
+    assertSchemaPattern(schema.pattern, path);
+  }
   if (schema.anyOf !== undefined && !(Array.isArray(schema.anyOf) && schema.anyOf.length > 0)) {
     failSchema(path, 'anyOf must be a non-empty array of schemas');
+  }
+}
+
+function assertSchemaPattern(pattern, path) {
+  if (typeof pattern !== 'string') {
+    failSchema(path, 'pattern must be a string');
+  }
+  try {
+    new RegExp(pattern, 'u');
+  } catch (error) {
+    failSchema(path, 'pattern does not compile: ' + error.message);
   }
 }
 
@@ -254,6 +277,10 @@ function isLongSchemaString(schema, value) {
   return schema.maxLength !== undefined && typeof value === 'string' && countSchemaCodePoints(value) > schema.maxLength;
 }
 
+function isUnmatchedSchemaString(schema, value) {
+  return schema.pattern !== undefined && typeof value === 'string' && !new RegExp(schema.pattern, 'u').test(value);
+}
+
 function matchesSchemaBranch(branch, value, path) {
   const branchErrors = [];
   collectSchemaErrors(branch, value, path, branchErrors);
@@ -276,6 +303,9 @@ function collectSchemaErrors(schema, value, path, errors) {
   }
   if (isLongSchemaString(schema, value)) {
     errors.push(path + ': maxLength: more than ' + schema.maxLength + ' characters');
+  }
+  if (isUnmatchedSchemaString(schema, value)) {
+    errors.push(path + ': pattern: does not match ' + schema.pattern);
   }
   if (schema.enum !== undefined && schema.enum.indexOf(value) === -1) {
     errors.push(path + ': enum: not one of ' + schema.enum.join(', '));

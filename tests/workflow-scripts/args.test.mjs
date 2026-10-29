@@ -116,14 +116,14 @@ describe('readLaunchInputs', () => {
   }
   for (const runNoun of ['delivery', 'analysis']) {
     test(`a resume from another build stops before trunk and references, naming the ${runNoun}`, () => {
-      const problem = 'The plugin changed while the ' + runNoun + ' was paused, so nothing ran. Run the request again with your answers in it.';
+      const problem = 'The plugin changed while the ' + runNoun + ' was paused, so nothing ran.';
       for (const build of [undefined, 'build-b2', 'SECRET_BUILD_ZQ', '', null, 5]) {
         const args = { trunk: 5, references: 'bad', answers: { 'round-1': 'SECRET_REPLY_ZQ' }, reply: 'SECRET_REPLY_ZQ' };
         if (build !== undefined) {
           args.build = build;
         }
         const result = read(lib.readLaunchInputs(args, runNoun, BUILD_ID));
-        assert.deepEqual(result, { problem: problem }, JSON.stringify(build));
+        assert.deepEqual(result, { problem: problem, nextAction: 'answer' }, JSON.stringify(build));
         assert.ok(!result.problem.includes('SECRET_'));
       }
     });

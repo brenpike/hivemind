@@ -221,6 +221,7 @@ const BRIEF_SCHEMA = {
 "options": {
 "type": "array",
 "minItems": 1,
+"maxItems": 4,
 "items": {
 "type": "object",
 "additionalProperties": false,
@@ -447,7 +448,8 @@ const PLAN_SCHEMA = {
 }
 },
 "branch": {
-"type": "string"
+"type": "string",
+"maxLength": 200
 },
 "base": {
 "type": "string"
@@ -508,6 +510,7 @@ const PLAN_SCHEMA = {
 "type": "array",
 "items": {
 "type": "string",
+"maxLength": 400,
 "description": "Can carry external content. Repository path."
 }
 }
@@ -557,6 +560,7 @@ const PLAN_SCHEMA = {
 "minItems": 1,
 "items": {
 "type": "string",
+"maxLength": 400,
 "description": "Can carry external content. Repository path."
 }
 },
@@ -595,7 +599,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'b984ee279f7588a2';
+const BUILD_ID = 'e1b64b06ed7ee7a5';
 
 function supportedSchemaKeywords(){
 return[
@@ -612,6 +616,7 @@ return[
 'maxItems',
 'minLength',
 'maxLength',
+'pattern',
 'anyOf'
 ];
 }
@@ -684,8 +689,21 @@ failSchema(path,'minLength must be a non-negative integer');
 if(schema.maxLength!==undefined&&!(Number.isInteger(schema.maxLength)&&schema.maxLength>=0)){
 failSchema(path,'maxLength must be a non-negative integer');
 }
+if(schema.pattern!==undefined){
+assertSchemaPattern(schema.pattern,path);
+}
 if(schema.anyOf!==undefined&&!(Array.isArray(schema.anyOf)&&schema.anyOf.length>0)){
 failSchema(path,'anyOf must be a non-empty array of schemas');
+}
+}
+function assertSchemaPattern(pattern,path){
+if(typeof pattern!=='string'){
+failSchema(path,'pattern must be a string');
+}
+try{
+new RegExp(pattern,'u');
+}catch(error){
+failSchema(path,'pattern does not compile: '+error.message);
 }
 }
 function matchesSchemaType(typeName,value){
@@ -725,6 +743,9 @@ return schema.minLength!==undefined&&typeof value==='string'&&countSchemaCodePoi
 function isLongSchemaString(schema,value){
 return schema.maxLength!==undefined&&typeof value==='string'&&countSchemaCodePoints(value)>schema.maxLength;
 }
+function isUnmatchedSchemaString(schema,value){
+return schema.pattern!==undefined&&typeof value==='string'&&!new RegExp(schema.pattern,'u').test(value);
+}
 function matchesSchemaBranch(branch,value,path){
 const branchErrors=[];
 collectSchemaErrors(branch,value,path,branchErrors);
@@ -746,6 +767,9 @@ errors.push(path+': minLength: fewer than '+schema.minLength+' characters');
 }
 if(isLongSchemaString(schema,value)){
 errors.push(path+': maxLength: more than '+schema.maxLength+' characters');
+}
+if(isUnmatchedSchemaString(schema,value)){
+errors.push(path+': pattern: does not match '+schema.pattern);
 }
 if(schema.enum!==undefined&&schema.enum.indexOf(value)===-1){
 errors.push(path+': enum: not one of '+schema.enum.join(', '));
@@ -981,19 +1005,12 @@ const idsAreUnique=optionIds.every((optionId,index)=>optionIds.indexOf(optionId)
 return idsAreUnique&&optionIds.indexOf(brief.recommendation.option_id)!==-1;
 }
 
-function renderQuestions(asks,taken){
+function renderQuestions(asks){
 if(!Array.isArray(asks)||asks.length===0){
 throw new Error('renderQuestions: asks must be a non-empty array');
 }
-if(!Array.isArray(taken)){
-throw new Error('renderQuestions: taken must be an array');
-}
-const blocks=[renderHeading(asks.length)];
-asks.forEach((entry,index)=>blocks.push(renderQuestion(entry,index)));
-if(taken.length>0){
-blocks.push(renderTakenLines(taken));
-}
-blocks.push(renderReplyLine());
+const blocks=asks.map((entry,index)=>renderQuestion(entry,index));
+blocks.push(renderReplyLine(asks.length));
 return blocks.join('\n\n');
 }
 function renderDecisions(taken){
@@ -1007,21 +1024,6 @@ const lines=['Decided for you:'];
 taken.forEach((entry,index)=>lines.push(renderTakenDecision(entry,index)));
 return lines.join('\n');
 }
-function renderQuestionsCompact(asks,taken){
-if(!Array.isArray(asks)||asks.length===0){
-throw new Error('renderQuestionsCompact: asks must be a non-empty array');
-}
-if(!Array.isArray(taken)){
-throw new Error('renderQuestionsCompact: taken must be an array');
-}
-const blocks=[renderHeading(asks.length)];
-asks.forEach((entry,index)=>blocks.push(renderCompactQuestion(entry,index)));
-if(taken.length>0){
-blocks.push(renderTakenLines(taken));
-}
-blocks.push(renderReplyLine());
-return blocks.join('\n\n');
-}
 function renderDecisionsCompact(taken){
 if(!Array.isArray(taken)){
 throw new Error('renderDecisionsCompact: taken must be an array');
@@ -1032,32 +1034,6 @@ return'';
 const lines=['Decided for you:'];
 taken.forEach((entry,index)=>lines.push(renderCompactDecision(entry,index)));
 return lines.join('\n');
-}
-function askReasonLine(reason){
-switch(reason){
-case'hard_stop':
-return'This is a step I always check with you before taking.';
-case'malformed_brief':
-return'The details I have for this decision are incomplete, so I will not decide it alone.';
-case'unknown_kind':
-return'I have no rule that lets me decide this kind of question on my own.';
-case'table_surface':
-return'Your autonomy setting has me check with you on this kind of decision.';
-case'bad_cell':
-return'My rule for this kind of decision is unclear, so I am checking with you.';
-case'gate_irreversible':
-return'The recommended option cannot be undone cheaply.';
-case'gate_architectural':
-return'The recommended option changes how the system is built.';
-case'gate_safety':
-return'The recommended option touches safety.';
-case'no_recommendation':
-return'I do not have a recommendation I am confident enough to act on.';
-case'recommendation_not_an_option':
-return'My recommendation does not match one of the options, so I need you to pick.';
-default:
-throw new Error('askReasonLine: no line for reason '+JSON.stringify(reason));
-}
 }
 function renderOpenQuestions(open,stopReason='pause_limit'){
 if(!Array.isArray(open)||open.length===0){
@@ -1091,17 +1067,23 @@ throw new Error('decisionLabel: index must be a non-negative integer');
 }
 return'D'+(index+1);
 }
-function listShownLabels(asks,taken){
+function optionLabel(index){
+if(!Number.isInteger(index)||index<0){
+throw new Error('optionLabel: index must be a non-negative integer');
+}
+let label='';
+let rest=index;
+do{
+label=String.fromCharCode(65+(rest%26))+label;
+rest=Math.floor(rest/26)-1;
+}while(rest>=0);
+return label;
+}
+function listShownLabels(asks){
 if(!Array.isArray(asks)||asks.length===0){
 throw new Error('listShownLabels: asks must be a non-empty array');
 }
-if(!Array.isArray(taken)){
-throw new Error('listShownLabels: taken must be an array');
-}
-return[
-...asks.map((entry,index)=>questionLabel(index)),
-...taken.map((entry,index)=>decisionLabel(index))
-];
+return asks.map((entry,index)=>questionLabel(index));
 }
 function buildAnswerEntry(round,revise){
 const shownLabels=readField(round,'labels');
@@ -1115,39 +1097,13 @@ throw new Error('buildAnswerEntry: revise.settled must be an array');
 const settled=shownLabels.filter((label,index)=>reviseLabels.includes(label)&&shownLabels.indexOf(label)===index);
 return{question:round.question,settled:settled,reply:round.reply};
 }
-function renderHeading(count){
+function renderReplyLine(count){
 if(count===1){
-return'**Answer '+questionLabel(0)+' so I can go on: pick one of its options.**';
+return'Reply with an option, like A, or in your own words.';
 }
-const joiner=count===2?' and ':' to ';
-return'**Answer '+questionLabel(0)+joiner+questionLabel(count-1)+' so I can go on: pick one option for each.**';
-}
-function renderReplyLine(){
-return'Reply with a label and an option, like Q1 A, or in your own words.';
-}
-function renderTakenLines(taken){
-const lines=['Decided for you:'];
-taken.forEach((entry,index)=>lines.push(renderTakenLine(entry,index)));
-lines.push('You can change any of these in the same reply.');
-return lines.join('\n');
-}
-function renderTakenLine(entry,index){
-const brief=readField(entry,'brief');
-return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose option '
-+renderText(readField(readField(brief,'recommendation'),'option_id'))+'.';
+return'Reply with a label and an option for each, like Q1 A, or in your own words.';
 }
 function renderQuestion(entry,index){
-const brief=readField(entry,'brief');
-const lines=renderAsk(brief,index);
-lines.push(renderWhyItMatters(readField(brief,'criticality')));
-lines.push('Why I am asking: '+askReasonLine(readField(entry,'reason')));
-const sections=[lines.join('\n')];
-if(readField(entry,'exact')===true){
-sections.push(...renderVerbatimSection(readField(brief,'verbatim')));
-}
-return sections.join('\n\n');
-}
-function renderCompactQuestion(entry,index){
 const brief=readField(entry,'brief');
 const sections=[renderAsk(brief,index).join('\n')];
 if(readField(entry,'exact')===true){
@@ -1156,65 +1112,66 @@ sections.push(...renderVerbatimSection(readField(brief,'verbatim')));
 return sections.join('\n\n');
 }
 function renderAsk(brief,index){
+const options=readField(brief,'options');
 const recommendation=readField(brief,'recommendation');
 return[
 '**'+questionLabel(index)+'. '+renderText(readField(brief,'problem'))+'**',
-...renderOptions(readField(brief,'options'),recommendation),
-renderRecommendation(recommendation)
+...renderOptions(options,findRecommendedIndex(options,recommendation)),
+renderRecommendation(recommendation,options)
 ];
 }
-function renderWhyItMatters(criticality){
-return'Why it matters: '+renderToken(readField(criticality,'level'))+' criticality, likelihood '
-+renderToken(readField(criticality,'likelihood'))+'. If it goes wrong: '
-+renderText(readField(criticality,'blast_radius'));
-}
-function renderOptions(options,recommendation){
+function renderOptions(options,recommendedIndex){
 if(!Array.isArray(options)||options.length===0){
 return['Options: not given.'];
 }
-const recommendedId=readField(recommendation,'strength')==='none'?undefined:readField(recommendation,'option_id');
-return options.map((option)=>renderOption(option,recommendedId));
+return options.map((option,index)=>renderOption(option,index,recommendedIndex));
 }
-function renderOption(option,recommendedId){
-const optionId=readField(option,'id');
-const mark=typeof optionId==='string'&&optionId===recommendedId?' (recommended)':'';
-return'- '+renderText(optionId)+': '+renderText(readField(option,'summary'))+mark;
+function renderOption(option,index,recommendedIndex){
+const mark=index===recommendedIndex?' (recommended)':'';
+return'- '+optionLabel(index)+': '+renderText(readField(option,'summary'))+mark;
 }
-function renderRecommendation(recommendation){
-const why='Why: '+renderText(readField(recommendation,'why'));
+function renderRecommendation(recommendation,options){
+const why=renderText(readField(recommendation,'why'));
 const strength=readField(recommendation,'strength');
 if(strength==='none'){
 return'Recommendation: none. '+why;
 }
-return'Recommendation: option '+renderText(readField(recommendation,'option_id'))+' ('
+return'Recommendation: '+renderOptionLetter(options,readField(recommendation,'option_id'))+' ('
 +renderToken(strength)+'). '+why;
 }
 function renderVerbatimSection(verbatim){
-const lines=renderVerbatim(verbatim,'');
-return lines.length===0?[]:[lines.join('\n')];
+if(!hasVerbatim(verbatim)){
+return[];
+}
+return['Word for word:\n'+encodeUntrustedText(verbatim)];
 }
 function renderVerbatim(verbatim,labelIndent){
-if(typeof verbatim!=='string'||verbatim===''){
+if(!hasVerbatim(verbatim)){
 return[];
 }
 return[labelIndent+'Word for word:',verbatim];
+}
+function hasVerbatim(verbatim){
+return typeof verbatim==='string'&&verbatim!=='';
 }
 function renderOpenQuestion(entry,index){
 const brief=readField(entry,'brief');
 const recommendation=readField(brief,'recommendation');
 const optionId=readField(recommendation,'option_id');
 const hasChoice=readField(recommendation,'strength')!=='none'&&typeof optionId==='string'&&optionId.trim()!=='';
-const choice=hasChoice?'The report assumes option '+renderText(optionId)+'.':'I have no recommendation of my own.';
+const choice=hasChoice
+?'The report assumes option '+renderOptionLetter(readField(brief,'options'),optionId)+'.'
+:'I have no recommendation of my own.';
 return'  '+questionLabel(index)+'. '+renderText(readField(brief,'problem'))+' '+choice;
 }
 function renderTakenDecision(entry,index){
 const brief=readField(entry,'brief');
+const options=readField(brief,'options');
 const recommendation=readField(brief,'recommendation');
 const optionId=readField(recommendation,'option_id');
-const chosen=findOptionById(readField(brief,'options'),optionId);
 const lines=[
 '  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem')),
-'    Chose option '+renderText(optionId)+': '+renderText(readField(chosen,'summary')),
+'    Chose option '+renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary')),
 '    Why: '+renderText(readField(recommendation,'why'))
 ];
 lines.push(...renderVerbatim(readField(brief,'verbatim'),'    '));
@@ -1222,16 +1179,30 @@ return lines.join('\n');
 }
 function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
-const recommendation=readField(brief,'recommendation');
-const whyLine=renderText(readField(recommendation,'why')).split(/\s*[\r\n]+\s*/).join(' ');
-return'  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose option '
-+renderText(readField(recommendation,'option_id'))+'. Why: '+cutAtBoundary(whyLine,maxExcerptLength());
+const options=readField(brief,'options');
+const optionId=readField(readField(brief,'recommendation'),'option_id');
+return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose '
++renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary'))+'.';
 }
-function findOptionById(options,optionId){
-if(!Array.isArray(options)){
-return undefined;
+function findRecommendedIndex(options,recommendation){
+if(readField(recommendation,'strength')==='none'){
+return-1;
 }
-return options.find((option)=>readField(option,'id')===optionId);
+return findOptionIndex(options,readField(recommendation,'option_id'));
+}
+function findOptionIndex(options,optionId){
+if(!Array.isArray(options)||typeof optionId!=='string'){
+return-1;
+}
+return options.findIndex((option)=>readField(option,'id')===optionId);
+}
+function readChosenOption(options,optionId){
+const index=findOptionIndex(options,optionId);
+return index===-1?undefined:options[index];
+}
+function renderOptionLetter(options,optionId){
+const index=findOptionIndex(options,optionId);
+return index===-1?'not given':optionLabel(index);
 }
 function readField(record,name){
 if(typeof record!=='object'||record===null||Array.isArray(record)){
@@ -1240,10 +1211,17 @@ return undefined;
 return record[name];
 }
 function renderText(value){
-if(typeof value!=='string'||value.trim()===''){
+if(typeof value!=='string'){
 return'not given';
 }
-return value.replace(/\s*\u2014\s*/g,', ');
+const lineText=value
+.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,' ')
+.replace(/\s+/g,' ')
+.trim();
+if(lineText===''){
+return'not given';
+}
+return lineText.replace(/\s*\u2014\s*/g,', ');
 }
 function renderToken(value){
 return renderText(value).replace(/_/g,' ');
@@ -1279,9 +1257,6 @@ return jsonText.length
 }
 function maxExcerptLength(){
 return 200;
-}
-function cutExcerpt(text){
-return Array.from(text).slice(0,maxExcerptLength()).join('');
 }
 function maxReasonLength(){
 return 600;
@@ -1345,6 +1320,42 @@ function describeReason(text){
 const quoted=quoteDiagnostic(text,maxReasonLength());
 return quoted===undefined?'it gave no reason.':'it says '+quoted+'.';
 }
+function describeNoResult(result){
+if(result!==null){
+return'';
+}
+return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+function describeUnusableResult(problem,result){
+if(result!==null){
+return{problem:problem};
+}
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again'};
+}
+function nextStepLine(nextAction){
+if(nextAction==='run_again'){
+return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+}
+if(nextAction==='answer'){
+return'Next: run the request again with the answers in it.';
+}
+return'Next: fix what stopped the run, then run the request again.';
+}
+function maxBlockedLeadLength(){
+return 1000;
+}
+function buildStopBlocks(causes){
+if(!Array.isArray(causes)||causes.length===0){
+throw new Error('buildStopBlocks: causes must be a non-empty array');
+}
+const fixCauses=causes.filter((cause)=>cause.nextAction!=='run_again');
+const orderedCauses=fixCauses.concat(causes.filter((cause)=>cause.nextAction==='run_again'));
+const leadText=orderedCauses[0].problem;
+const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
+const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
+const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
+return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
+}
 function canCarry(resumeArgs){
 const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
 return noticeLength(emptyPause)<=Math.floor(noticeBudget()/2);
@@ -1358,18 +1369,22 @@ function canShowWhole({resumeArgs,blocks}){
 const paused=buildEmptyPause('canShowWhole',resumeArgs,blocks);
 return fitMessage(blocks,roomForMessage(paused))!==null;
 }
-function finish({outcome,blocks,pr}){
+function finish({outcome,causes,blocks,pr}){
 if(outcome!=='complete'&&outcome!=='blocked'){
 throw new Error('finish: outcome must be complete or blocked, got '+JSON.stringify(outcome));
 }
-assertBlocks('finish',blocks);
+if((outcome==='blocked')!==(causes!==undefined)){
+throw new Error('finish: causes must be given exactly when outcome is blocked');
+}
+const messageBlocks=outcome==='blocked'?buildStopBlocks(causes).concat(blocks===undefined?[]:blocks):blocks;
+assertBlocks('finish',messageBlocks);
 const finished={needs_user:false,outcome:outcome};
 if(pr!==undefined){
 assertPullRequest(pr);
 finished.pr={url:pr.url,head_ref_oid:pr.head_ref_oid,created:pr.created};
 }
 finished.message='';
-finished.message=fitWholeMessage('finish',blocks,roomForMessage(finished));
+finished.message=fitWholeMessage('finish',messageBlocks,roomForMessage(finished));
 return assertWithinBudget(finished);
 }
 function buildEmptyPause(caller,resumeArgs,blocks){
@@ -1975,7 +1990,7 @@ if(Object.prototype.hasOwnProperty.call(argsObject,'resume_args')){
 return{problem:'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so '+describeRunNoun(runNoun)+' did not start.'};
 }
 if(isPlainObject(argsObject.answers)&&argsObject.build!==buildId){
-return{problem:'The plugin changed while '+describeRunNoun(runNoun)+' was paused, so nothing ran. Run the request again with your answers in it.'};
+return{problem:'The plugin changed while '+describeRunNoun(runNoun)+' was paused, so nothing ran.',nextAction:'answer'};
 }
 const trunkInput=readTrunk(argsObject,runNoun);
 if(trunkInput.problem!==undefined){
@@ -2166,10 +2181,10 @@ description:'One result per scanned text, in the order scanned.',
 items:buildTaggedSchema({
 tag:'verdict',
 properties:{
-item_ref:{type:'string',description:'The text_id of the scanned text, copied exactly.'},
+item_ref:{type:'string',maxLength:16,description:'The text_id of the scanned text, copied exactly.'},
 verdict:{type:'string',enum:['clean','injection-suspect']},
 pattern_category:{type:'string',enum:['P1','P2','P3','P4']},
-field_excerpt:{type:'string',description:'The first 200 characters of the flagged text.'},
+field_excerpt:{type:'string',maxLength:scanExcerptLimit(),description:'The first 200 characters of the flagged text.'},
 reason:{type:'string',description:'The pattern matched.'}
 },
 required:['item_ref','verdict'],
@@ -2203,13 +2218,14 @@ async function runScanStep(facts,runNoun){
 if(Number(facts.external_texts)>0){
 phase('Scan');
 const scan=await agent(buildScanPrompt(facts),scanOptions());
-return describeScanProblem(scan,facts,runNoun);
+const problem=describeScanProblem(scan,facts,runNoun);
+return problem===undefined?undefined:describeUnusableResult(problem,scan);
 }
 return undefined;
 }
 function renderSuspectLine(result){
 const category=isNonEmptyString(result.pattern_category)?result.pattern_category:'no category given';
-const excerpt=typeof result.field_excerpt==='string'?Array.from(result.field_excerpt).slice(0,scanExcerptLimit()).join(''):'';
+const excerpt=typeof result.field_excerpt==='string'?result.field_excerpt:'';
 return'- '+encodeUntrustedText(result.item_ref)+' ('+category+'): '+encodeUntrustedText(excerpt);
 }
 function readTextIndex(itemRef){
@@ -2305,7 +2321,7 @@ function buildReviseSpec(questionSchema,shownLabels){
 const spec=buildAnalysisSpec(questionSchema);
 spec.properties.settled={
 type:'array',
-description:'The label, like Q1 or D1, of each shown question or decision made for you the reply settles.',
+description:'The label, like Q1, of each shown question the reply settles.',
 items:{type:'string',enum:shownLabels.slice()}
 };
 spec.required.push('settled');
@@ -2342,7 +2358,7 @@ const hasAnswers=answers.length>0;
 const lines=[
 'Revise your analysis of the user request below with the user reply below.',
 boundarySentence(),
-hasAnswers?dataBlocksSentence('The reply block')+' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.':dataBlocksSentence('The reply block'),
+hasAnswers?dataBlocksSentence('The reply block')+' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.':dataBlocksSentence('The reply block'),
 '',
 buildFactsBlock(facts),
 formatDataBlock('request',request)
@@ -2361,45 +2377,45 @@ return{agentType:runnerAgentType(),model:'haiku',schema:toAgentSchema(FACTS_STEP
 }
 function describeFactsProblem(facts){
 if(!validateSchema(FACTS_STEP_SCHEMA,facts).ok){
-return malformedFactsMessage(RUN_NOUN);
+return describeUnusableResult(malformedFactsMessage(RUN_NOUN),facts);
 }
 if(facts.outcome==='blocked'){
-return blockedFactsMessage(RUN_NOUN,describeReason(facts.blocker));
+return{problem:blockedFactsMessage(RUN_NOUN,describeReason(facts.blocker))};
 }
 const isWellFormed=matchesFactsLine('facts_file',facts.facts_file)
 &&matchesFactsLine('facts_lines',facts.facts_lines)
 &&isCutList(facts.cut)
 &&isTextCount(facts.external_texts);
 if(!isWellFormed){
-return malformedFactsMessage(RUN_NOUN);
+return{problem:malformedFactsMessage(RUN_NOUN)};
 }
 if(facts.cut!=='none'){
-return cutFactsMessage(RUN_NOUN,facts.cut);
+return{problem:cutFactsMessage(RUN_NOUN,facts.cut)};
 }
 return undefined;
 }
 async function gatherCheckedFacts(launchInputs){
 phase('Facts');
 const facts=await agent(buildFactsPrompt(launchInputs.trunk,launchInputs.references),factsOptions());
-const factsProblem=describeFactsProblem(facts);
-if(factsProblem!==undefined){
-return{problem:factsProblem};
+const factsCause=describeFactsProblem(facts);
+if(factsCause!==undefined){
+return{cause:factsCause};
 }
-const scanProblem=await runScanStep(facts,RUN_NOUN);
-if(scanProblem!==undefined){
-return{problem:scanProblem};
+const scanCause=await runScanStep(facts,RUN_NOUN);
+if(scanCause!==undefined){
+return{cause:scanCause};
 }
 return{facts:facts};
 }
 function describeReplyProblem(analysis,checkSchema){
 if(!isPlainObject(analysis)){
-return'The planner returned no result, so the analysis stopped.';
+return describeUnusableResult('The planner returned no result, so the analysis stopped.',analysis);
 }
 if(!validateSchema(checkSchema,analysis).ok){
-return'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
+return{problem:'The planner returned a result that does not fit the analysis schema, so the analysis stopped.'};
 }
 if(analysis.outcome==='blocked'){
-return'The planner could not do the analysis: '+describeReason(analysis.blocker);
+return{problem:'The planner could not do the analysis: '+describeReason(analysis.blocker)};
 }
 return undefined;
 }
@@ -2416,8 +2432,8 @@ asks.push({brief:brief,reason:decision.reason});
 }
 return{asks:asks,taken:taken};
 }
-function finishBlocked(message){
-return finish({outcome:'blocked',blocks:[{text:message,shorten:true}]});
+function finishBlocked(causes){
+return finish({outcome:'blocked',causes:causes});
 }
 function finishComplete(report,openQuestions,taken){
 const blocks=[];
@@ -2430,26 +2446,32 @@ blocks.push({text:openQuestions});
 blocks.push({text:report,shorten:true});
 return finish({outcome:'complete',blocks:blocks});
 }
+function renderPauseLead(questionCount){
+if(questionCount===1){
+return'The analysis is drafted. 1 question needs your answer before the report is final.';
+}
+return'The analysis is drafted. '+questionCount+' questions need your answer before the report is final.';
+}
 function pauseOrStopAsking(report,resolution,questions,answerLog){
 const resumeArgs=buildResumeArgs(answerLog.map((entry)=>entry.reply),BUILD_ID);
 if(!canCarry(resumeArgs)){
 return finishComplete(report,renderOpenQuestions(resolution.asks,'reply_size'),resolution.taken);
 }
-const compactQuestions=renderQuestionsCompact(resolution.asks,resolution.taken);
-return pauseForUser({resumeArgs:resumeArgs,blocks:[{text:questions,compact:compactQuestions}]});
+const blocks=[{text:renderPauseLead(resolution.asks.length)},{text:questions}];
+return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
 }
 async function runAnalysis(rawArgs){
 const argsObject=readArgsObject(rawArgs);
 if(!isNonEmptyString(argsObject.request)){
-return finishBlocked('No request was given, so there is nothing to analyze.');
+return finishBlocked([{problem:'No request was given, so there is nothing to analyze.'}]);
 }
 const launchInputs=readLaunchInputs(argsObject,RUN_NOUN,BUILD_ID);
 if(launchInputs.problem!==undefined){
-return finishBlocked(launchInputs.problem);
+return finishBlocked([launchInputs]);
 }
 const checked=await gatherCheckedFacts(launchInputs);
-if(checked.problem!==undefined){
-return finishBlocked(checked.problem);
+if(checked.cause!==undefined){
+return finishBlocked([checked.cause]);
 }
 const facts=checked.facts;
 const level=resolveLevel(undefined,AUTONOMY_TABLE);
@@ -2461,9 +2483,9 @@ let shownRound;
 phase('Analyze');
 let analysis=await agent(buildAnalyzePrompt(argsObject.request,facts),plannerOptions('analyze','Analyze',ANALYSIS_SCHEMA));
 for(let round=1;;round+=1){
-const problem=describeReplyProblem(analysis,checkSchema);
-if(problem!==undefined){
-return finishBlocked(problem);
+const replyCause=describeReplyProblem(analysis,checkSchema);
+if(replyCause!==undefined){
+return finishBlocked([replyCause]);
 }
 if(shownRound!==undefined){
 answerLog.push(buildAnswerEntry(shownRound,analysis));
@@ -2475,7 +2497,7 @@ return finishComplete(analysis.report,'',resolution.taken);
 if(!canPause(round-1)){
 return finishComplete(analysis.report,renderOpenQuestions(resolution.asks,'pause_limit'),resolution.taken);
 }
-const questions=renderQuestions(resolution.asks,resolution.taken);
+const questions=renderQuestions(resolution.asks);
 let reply=readStoredReply(storedAnswers,round);
 if(reply===undefined){
 reply=pendingReply;
@@ -2484,7 +2506,7 @@ pendingReply=undefined;
 if(reply===undefined){
 return pauseOrStopAsking(analysis.report,resolution,questions,answerLog);
 }
-const shownLabels=listShownLabels(resolution.asks,resolution.taken);
+const shownLabels=listShownLabels(resolution.asks);
 const reviseSchemas=buildReviseSchemas(shownLabels);
 phase('Revise');
 const revisePrompt=buildRevisePrompt({request:argsObject.request,facts:facts,answers:answerLog,report:analysis.report,questions:questions,reply:reply});

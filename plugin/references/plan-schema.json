@@ -90,6 +90,7 @@
     },
     "branch": {
       "type": "string",
+      "maxLength": 200,
       "description": "Can carry external content. The working branch the run delivers on. A run that starts on a branch other than trunk names that branch."
     },
     "base": {
@@ -159,6 +160,7 @@
           "description": "Each repository path holding a version the bump step sets, as the project's versioning docs name it. Empty when the project names none. The bump commit takes exactly these paths.",
           "items": {
             "type": "string",
+            "maxLength": 400,
             "description": "Can carry external content. Repository path. One file that holds a version."
           }
         }
@@ -216,6 +218,7 @@
             "description": "Every repository path the step may create or edit. The wave's commit takes exactly these paths.",
             "items": {
               "type": "string",
+              "maxLength": 400,
               "description": "Can carry external content. Repository path. One file the step may create or edit."
             }
           },

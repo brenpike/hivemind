@@ -44,6 +44,11 @@
  *   title stays plain text: GitHub renders titles with code spans only and
  *   takes no mentions from them, and a wrapper would reach the squash
  *   commit subject.
+ *   The relay is read through describeUnusableResult (lib/result.js): a
+ *   null result, an agent failure, adds the agent-failure sentence and
+ *   next action run_again, which runPullRequestStep passes on in its
+ *   cause to finishDeliveryBlocked, and any other unusable result keeps
+ *   the fix line.
  *
  * Why
  *   The pull request is the one push of the run, so its texts and the
@@ -176,7 +181,7 @@ function buildPullRequestPrompt(plan, head, texts, draft) {
 function checkPullRequestRelay(relay, head) {
   const stopped = 'so ' + RUN_NAME + ' stopped. The branch may be on its remote, and a pull request may be open for it.';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return { problem: 'The pull request step returned a result it could not use, ' + stopped };
+    return describeUnusableResult('The pull request step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
     return { problem: 'The pull request step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
@@ -194,13 +199,13 @@ function checkPullRequestRelay(relay, head) {
 async function runPullRequestStep(run, plan, gates) {
   const texts = buildPullRequestTexts(run, plan, gates);
   if (texts.problem !== undefined) {
-    return { result: finishDeliveryBlocked(texts.problem, run) };
+    return { result: finishDeliveryBlocked([{ problem: texts.problem }], run) };
   }
   phase('PR');
   const relay = await agent(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), runnerOptions('pr-' + run.pass, 'PR'));
   const checked = checkPullRequestRelay(relay, run.head);
   if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked(checked.problem, run) };
+    return { result: finishDeliveryBlocked([checked], run) };
   }
   return { result: finishDeliveryComplete(run, plan, checked.values, gates) };
 }

@@ -16,12 +16,24 @@
  *   main.js.
  *
  * Outputs
- *   runFactsStep(run)                {facts} or {problem}.
- *   runBranchStep(run, plan, freshness)  {values} or {problem}.
- *   runCommitStep(run, plan, files, label, stepName, subject)  {values}
- *                                    or {problem}. subject is the commit
- *                                    subject, commitStepTexts(stepName)
- *                                    .subject when it is not given.
+ *   runFactsStep(run)                {facts} or {problem, nextAction}.
+ *   runBranchStep(run, plan, freshness)  {values} or {problem, nextAction}.
+ *   runCommitStep(run, plan, commit, stepCauses)  commit is {files,
+ *                                    label, stepName, subject?}, subject
+ *                                    commitStepTexts(stepName).subject when
+ *                                    not given; stepCauses is the array of
+ *                                    the step's own causes, or it throws.
+ *                                    {values} when the commit held and
+ *                                    stepCauses is empty, else {result}:
+ *                                    the blocked run end of
+ *                                    finishDeliveryBlocked over stepCauses,
+ *                                    then the commit cause when the commit
+ *                                    failed, or else the describeCommitEnd
+ *                                    end line when it committed.
+ *   capItemLines(itemLines)          the first maxListedItems() item lines,
+ *                                    then a count of the rest.
+ *   describeCommitEnd(commitValues, stepName)  one sentence: the commit
+ *                                    the step's files went into.
  *   toCommitSubject(text, fallbackSubject)  text made one line and cut by
  *                                    cutAtBoundary (lib/result.js) to
  *                                    maxSubjectLength() code points, or
@@ -36,6 +48,10 @@
  *           gatherFactsRoutingSpec() and checks it with
  *           isConsistentFactsRelay (lib/facts.js).
  *   Scan    the shared scan step, when the facts count external texts.
+ *           runPassScan calls agent() itself on every pass and returns
+ *           {problem, nextAction}; on pass 1 with the prompt, options and
+ *           label scan of lib/facts.js runScanStep, byte for byte, so a
+ *           resumed run replays its cached result.
  *   Branch  a runner invokes hivemind:create-working-branch.
  *   Commit  a runner invokes hivemind:molt after every wave, and after
  *           every gate step that can change files. A commit it makes enters
@@ -60,6 +76,19 @@
  *   Every payload that crosses a step is checked against its schema or
  *   routing spec before it is read, and a failed check blocks the step that
  *   reads it (ADR-0037 invariant 4).
+ *   Agent failures (issue 460): agent() returns null on an agent API error,
+ *   so every step from the facts through the gates reads a null result
+ *   through describeUnusableResult (lib/result.js), the only place a null
+ *   result gets the describeNoResult sentence and next action run_again. A
+ *   non-null result that fails its schema or routing keeps the fix line.
+ *   A file-changing step reads its own result before its commit and passes
+ *   its causes to runCommitStep, which ends the run itself: a failed commit
+ *   adds its cause after them, so a commit stop never hides the step's
+ *   cause, and buildStopBlocks (lib/result.js) orders them and picks the
+ *   Next line.
+ *   Every blocked lead these steps build is one line naming the step and
+ *   its cause; a list of delivery stops or dirty paths after it goes
+ *   through capItemLines.
  *   Runner prompts carry no request text, use plain git only (never with
  *   -C, ADR-0037 decision 25), and put every branch and trunk name in their
  *   JSON inputs block only.
@@ -315,15 +344,23 @@ function deliveryStopLine(stop) {
   }
 }
 
+function maxListedItems() {
+  return 5;
+}
+
+function capItemLines(itemLines) {
+  const restCount = itemLines.length - maxListedItems();
+  return restCount > 0 ? itemLines.slice(0, maxListedItems()).concat('- and ' + restCount + ' more.') : itemLines;
+}
+
 function describeDeliveryStops(stops) {
-  const lines = ['The branch is not ready for delivery, so ' + RUN_NAME + ' stopped before planning:'];
-  stops.split(',').forEach((stop) => lines.push('- ' + deliveryStopLine(stop)));
-  return lines.join('\n');
+  const stopLines = stops.split(',').map((stop) => '- ' + deliveryStopLine(stop));
+  return ['The branch is not ready for delivery, so ' + RUN_NAME + ' stopped before planning:', ...capItemLines(stopLines)].join('\n');
 }
 
 function checkDeliveryFacts(relay, trunk) {
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return { problem: malformedFactsMessage(RUN_NOUN) };
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN), relay);
   }
   if (relay.outcome === 'blocked') {
     return { problem: blockedFactsMessage(RUN_NOUN, describeRelayBlocker(relay.stderr, false)) };
@@ -342,15 +379,15 @@ function checkDeliveryFacts(relay, trunk) {
 }
 
 async function runPassScan(facts, run) {
-  if (run.pass === 1) {
-    return runScanStep(facts, RUN_NOUN);
-  }
   if (Number(facts.external_texts) === 0) {
     return undefined;
   }
   phase('Scan');
-  const scan = await agent(addResumeNote(buildScanPrompt(facts), run), Object.assign(scanOptions(), { label: 'scan-' + run.pass }));
-  return describeScanProblem(scan, facts, RUN_NOUN);
+  const isFirstPass = run.pass === 1;
+  const prompt = isFirstPass ? buildScanPrompt(facts) : addResumeNote(buildScanPrompt(facts), run);
+  const scan = await agent(prompt, isFirstPass ? scanOptions() : Object.assign(scanOptions(), { label: 'scan-' + run.pass }));
+  const problem = describeScanProblem(scan, facts, RUN_NOUN);
+  return problem === undefined ? undefined : describeUnusableResult(problem, scan);
 }
 
 async function runFactsStep(run) {
@@ -360,8 +397,8 @@ async function runFactsStep(run) {
   if (checked.problem !== undefined) {
     return checked;
   }
-  const scanProblem = await runPassScan(checked.facts, run);
-  return scanProblem === undefined ? checked : { problem: scanProblem };
+  const scanned = await runPassScan(checked.facts, run);
+  return scanned === undefined ? checked : scanned;
 }
 
 function buildBranchPrompt(plan, freshness, trunk) {
@@ -378,7 +415,7 @@ function buildBranchPrompt(plan, freshness, trunk) {
 function checkBranchRelay(relay, plan, freshness) {
   const stopped = 'so ' + RUN_NAME + ' stopped before any wave.';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return { problem: 'The branch step returned a result it could not use, ' + stopped };
+    return describeUnusableResult('The branch step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
     return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
@@ -406,7 +443,7 @@ function needsBranchReplan(branchValues, facts, plan) {
 
 function requestBranchReplan(run) {
   if (run.branchSwitches > 0) {
-    return { result: finishDeliveryBlocked('The branch step switched branch or commit again after a replan, so ' + RUN_NAME + ' stopped before any wave.', run) };
+    return { result: finishDeliveryBlocked([{ problem: 'The branch step switched branch or commit again after a replan, so ' + RUN_NAME + ' stopped before any wave.' }], run) };
   }
   run.branchSwitches += 1;
   return { replan: { reason: 'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.' } };
@@ -471,20 +508,20 @@ function readOutsidePath(payload) {
 }
 
 function describeCommitBlocker(stderr, stepNoun) {
-  const lines = ['The commit step was blocked, so ' + RUN_NAME + ' stopped: ' + describeRelayBlocker(stderr, false)];
+  const lead = 'The commit step was blocked, so ' + RUN_NAME + ' stopped: ' + describeRelayBlocker(stderr, false);
   const outsideLines = splitStderrLines(stderr).filter((line) => line.startsWith('outside: '));
-  if (outsideLines.length > 0) {
-    lines.push('Dirty paths outside the files of ' + stepNoun + ':');
-    outsideLines.forEach((line) => lines.push('- ' + quoteOrEmpty(readOutsidePath(line.slice('outside: '.length)))));
+  if (outsideLines.length === 0) {
+    return lead;
   }
-  return lines.join('\n');
+  const pathLines = outsideLines.map((line) => '- ' + quoteOrEmpty(readOutsidePath(line.slice('outside: '.length))));
+  return [lead + ' Dirty paths outside the files of ' + stepNoun + ':', ...capItemLines(pathLines)].join('\n');
 }
 
 function checkCommitRelay(relay, plan, stepName) {
   const stepNoun = commitStepTexts(stepName).noun;
   const stopped = 'so ' + RUN_NAME + ' stopped. Check the branch for a commit of ' + stepNoun + '.';
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
-    return { problem: 'The commit step returned a result it could not use, ' + stopped };
+    return describeUnusableResult('The commit step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
     return { problem: describeCommitBlocker(relay.stderr, stepNoun) };
@@ -499,20 +536,33 @@ function checkCommitRelay(relay, plan, stepName) {
   return { values: values };
 }
 
-async function runCommitStep(run, plan, files, label, stepName, subject = commitStepTexts(stepName).subject) {
+function describeCommitEnd(commitValues, stepName) {
+  const noun = commitStepTexts(stepName).noun;
+  return noun.charAt(0).toUpperCase() + noun.slice(1) + ' was committed as ' + commitValues.commit + ', so that commit can hold partial edits.';
+}
+
+async function runCommitStep(run, plan, commit, stepCauses) {
+  if (!Array.isArray(stepCauses)) {
+    throw new Error('runCommitStep: stepCauses must be an array');
+  }
+  const subject = commit.subject === undefined ? commitStepTexts(commit.stepName).subject : commit.subject;
   phase('Commit');
-  const relay = await agent(addResumeNote(buildCommitPrompt(files, plan, run.trunk, stepName, subject), run), runnerOptions(label, 'Commit'));
-  const checked = checkCommitRelay(relay, plan, stepName);
+  const relay = await agent(addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, commit.stepName, subject), run), runnerOptions(commit.label, 'Commit'));
+  const checked = checkCommitRelay(relay, plan, commit.stepName);
   if (checked.problem !== undefined) {
-    return checked;
+    return { result: finishDeliveryBlocked(stepCauses.concat([checked]), run) };
   }
   if (checked.values.committed === 'true') {
     run.commits.push(checked.values.commit);
-    run.runnerCommits[checked.values.commit] = { files: files, commitType: commitTypeMap()[plan.classification], breaking: plan.breaking };
+    run.runnerCommits[checked.values.commit] = { files: commit.files, commitType: commitTypeMap()[plan.classification], breaking: plan.breaking };
   } else if (run.head !== undefined && checked.values.commit !== run.head) {
     run.commits.push(run.head + '..' + checked.values.commit);
   }
   run.head = checked.values.commit;
   run.branch = plan.branch;
-  return checked;
+  if (stepCauses.length === 0) {
+    return { values: checked.values };
+  }
+  const endLines = checked.values.committed === 'true' ? [describeCommitEnd(checked.values, commit.stepName)] : [];
+  return { result: finishDeliveryBlocked(stepCauses, run, endLines) };
 }

@@ -20,8 +20,7 @@
  *   runGates(run, plan, facts)  what runPullRequestStep (pr.js) returns once
  *          every configured gate holds on the head, else {result} or {replan}.
  *   A gate step returns {held} with a note when it held, {answer} when the user
- *   answered a review question, or a run end, {result} or {replan}, which
- *   isRunEnd tells apart.
+ *   answered a review question, or a run end, {result} or {replan} (isRunEnd).
  *   The steps, as meta.js names them:
  *   Bump    a gate, after the last wave. With no version files a haiku runner,
  *           else one drone on BUMP_MODEL, invokes hivemind:bump-type with the
@@ -52,6 +51,12 @@
  *   A contractRows() check is a function of the built script, not of main.js:
  *   the build bundles this module into it, so a row can name a function of this
  *   module.
+ *   A null gate result reads through describeUnusableResult (lib/result.js),
+ *   next action run_again. The bump and fix steps read their result before
+ *   the commit and pass its cause, if any, to runCommitStep (relay.js), which
+ *   ends the run with every cause, so a commit stop never hides a step cause;
+ *   a run end it returns is returned as is. Every other blocked end passes
+ *   its causes to finishDeliveryBlocked (record.js).
  *   A gate holds only for the commit its step ended on, read from the commit
  *   runner's routing line; validation, which has no commit runner, ends on the
  *   head it ran on. The configured gates run in gateIds() order, local review
@@ -69,29 +74,25 @@
  *   no version file, which add only to that row; any other move reruns it. The
  *   bump drone edits before decide() reads its verdict: the edit stays local
  *   and unpushed, and an ask leaves it to the next facts step's dirty check.
- *   Tail asks: a question after the last wave pauses like any other open
- *   question, through pauseDelivery with its question, the commits and each
- *   gate that did not run, and a local review question also with its detail
- *   block. That covers the asks of resolveTailDecision, the fix round and gate
- *   rerun limits, and the user-input-required and high-severity-rejection
- *   questions; each ask carries a reason renderQuestions shows. Tail rounds
- *   share run.answerLog and the answers round numbering with planning rounds,
- *   so a resume replays every earlier agent from cache and takes the reply at
- *   the ask (askTail). askTail takes one ask and, at reply time, adds the
- *   {question, settled, reply} entry buildAnswerEntry (lib/brief.js) builds
- *   to run.answerLog, the question as shown with its detail block, so every
- *   later plan prompt shows it in the answers block and a resume keeps the
- *   round numbering; it returns {question, reply} as the answer. No revise
- *   reads a tail reply, so its settled is always [] and it stays the user's
- *   own words in every later answers block, review questions included: a
- *   review decision lives in the reviewer's record. A reply to a local
- *   review question reruns the
- *   review gate on the current head, after any gate the head move made stale,
- *   with the next gateLabel count and user_answer {question, reply} in its
- *   inputs block; the commit runner and localReviewRoutes() then apply as for
- *   any review run. A reply to any other tail ask starts a new pass through the
- *   facts step; that replan does not count against maxReplans(). Nothing is
- *   pushed before every configured gate holds on one commit.
+ *   Tail asks: a question after the last wave pauses through pauseDelivery
+ *   with a lead and its question: askTail(ask, run, lead) leads with the
+ *   given lead string, as a local review question passes, else with
+ *   describeTailLead(run), every plan step committed on the encoded branch
+ *   at the head. Tail rounds share run.answerLog and the answers round
+ *   numbering with planning rounds, so a resume replays every earlier agent
+ *   from cache and takes the reply at the ask. At reply time askTail adds
+ *   the {question, settled, reply} entry buildAnswerEntry (lib/brief.js)
+ *   builds to run.answerLog, the question being that lead and the question,
+ *   so every later plan prompt shows it in the answers block; it returns
+ *   {question, reply} as the answer. No revise reads a tail reply, so its
+ *   settled is always [] and it stays the user's own words in every later
+ *   answers block, review questions included: a review decision lives in the
+ *   reviewer's record. A reply to a local review question reruns the review
+ *   gate on the current head, after any stale gate, with the next gateLabel
+ *   count and user_answer {question, reply}. Any other tail reply starts a
+ *   new pass from the facts step with the answers block, outside
+ *   maxReplans(). Nothing is pushed before every configured gate holds on
+ *   one commit.
  *   The bump prompt names each versioning.artifact_files path in a git show
  *   command, and that list is planner text that can carry external content
  *   (review finding 143374b9). The impact is bounded: describePlanProblem
@@ -204,13 +205,17 @@ function isRunEnd(outcome) {
   return outcome.result !== undefined || outcome.replan !== undefined;
 }
 
-function askTail(ask, run, detail) {
-  const questions = renderQuestions([ask], []);
+function describeTailLead(run) {
+  return 'Every plan step is committed on branch ' + encodeUntrustedText(run.branch) + ', with head ' + run.head + '.';
+}
+
+function askTail(ask, run, lead) {
+  const leadText = lead === undefined ? describeTailLead(run) : lead;
   const reply = takeNextReply(run, run.answerLog.length + 1);
   if (reply === undefined) {
-    return { result: pauseDelivery({ asks: [ask], taken: [] }, questions, run, detail) };
+    return { result: pauseDelivery({ asks: [ask], taken: [] }, run, leadText) };
   }
-  const question = detail === undefined ? questions : questions + '\n\n' + detail.text;
+  const question = leadText + '\n\n' + renderQuestions([ask]);
   run.answerLog.push(buildAnswerEntry({ question: question, labels: [], reply: reply }, undefined));
   return { answer: { question: question, reply: reply } };
 }
@@ -258,7 +263,7 @@ function buildBumpTypePrompt(trunkCommit, versioning) {
 function checkBumpTypeRelay(relay, schema) {
   const stopped = 'so ' + RUN_NAME + ' stopped before validation.';
   if (!validateSchema(schema, relay).ok) {
-    return { problem: 'The bump step returned a result it could not use, ' + stopped };
+    return describeUnusableResult('The bump step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
     const said = Object.hasOwn(relay, 'blocker') ? describeReason(relay.blocker) : describeRelayBlocker(relay.stderr, true);
@@ -295,21 +300,13 @@ function buildBumpPrompt(trunkCommit, plan, trunk) {
 
 function readGateEditOutcome(result, schema) {
   if (!validateSchema(schema, result).ok) {
-    return { status: 'blocked', reason: 'it returned no usable result.', files: [] };
+    const unusable = describeUnusableResult('it returned no usable result.', result);
+    return { status: 'blocked', reason: unusable.problem, files: [], nextAction: unusable.nextAction };
   }
   if (result.outcome === 'blocked') {
     return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: result.next_action };
   }
   return { status: 'complete', files: result.files };
-}
-
-function describeCommitEnd(commitValues) {
-  const isCommitted = commitValues.committed === 'true';
-  return isCommitted ? 'Its files were committed as ' + commitValues.commit + ', so that commit can hold partial edits.' : 'It left nothing to commit, so the branch head stays ' + commitValues.commit + '.';
-}
-
-function describeBlockedGateStep(stepTitle, reason, commitValues) {
-  return stepTitle + ' was blocked, so ' + RUN_NAME + ' stopped after its commit: ' + reason + '\n' + describeCommitEnd(commitValues);
 }
 
 function runBumpStep(run, plan, facts, count) {
@@ -324,12 +321,10 @@ function describeBumpNote(values) {
 }
 
 async function commitBumpEdit(run, plan, count, checked) {
-  const committed = await runCommitStep(run, plan, plan.versioning.artifact_files, gateLabel('bump-commit', run, count), 'bump');
-  if (committed.problem !== undefined) {
-    return { result: finishDeliveryBlocked(committed.problem, run) };
-  }
-  if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked(checked.problem + '\n' + describeCommitEnd(committed.values), run, checked.nextAction) };
+  const commit = { files: plan.versioning.artifact_files, label: gateLabel('bump-commit', run, count), stepName: 'bump' };
+  const committed = await runCommitStep(run, plan, commit, checked.problem !== undefined ? [checked] : []);
+  if (committed.result !== undefined) {
+    return committed;
   }
   return { held: true, note: describeBumpNote(checked.values), values: checked.values };
 }
@@ -341,7 +336,7 @@ async function runBumpGate(run, plan, facts, gates) {
   const result = await runBumpStep(run, plan, facts, count);
   const checked = checkBumpTypeRelay(result, hasFiles ? BUMP_SCHEMA : RELAY_SCHEMA);
   if (checked.problem !== undefined) {
-    return hasFiles ? commitBumpEdit(run, plan, count, checked) : { result: finishDeliveryBlocked(checked.problem, run) };
+    return hasFiles ? commitBumpEdit(run, plan, count, checked) : { result: finishDeliveryBlocked([checked], run) };
   }
   const verdict = resolveBumpVerdict(checked.values, plan, run);
   if (isRunEnd(verdict)) {
@@ -389,7 +384,7 @@ function selectValidateSchema(plan) {
 
 function readValidateOutcome(result, schema) {
   if (!validateSchema(schema, result).ok) {
-    return { problem: 'The validation step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.' };
+    return describeUnusableResult('The validation step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.', result);
   }
   if (result.outcome === 'blocked') {
     return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: result.next_action };
@@ -414,12 +409,10 @@ async function runFixRound(run, plan, failures, round) {
   phase('Fix');
   const result = await agent(addResumeNote(buildFixPrompt(failures, plan, run.trunk), run), droneOptions(gateLabel('fix', run, round), 'Fix', FIX_SCHEMA));
   const fix = readGateEditOutcome(result, FIX_SCHEMA);
-  const committed = await runCommitStep(run, plan, fix.files, gateLabel('fix-commit', run, round), 'fix');
-  if (committed.problem !== undefined) {
-    return { result: finishDeliveryBlocked(committed.problem, run) };
-  }
-  if (fix.status === 'blocked') {
-    return { result: finishDeliveryBlocked(describeBlockedGateStep('The validation fix round', fix.reason, committed.values), run, fix.nextAction) };
+  const stepCauses = fix.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + fix.reason, nextAction: fix.nextAction }] : [];
+  const committed = await runCommitStep(run, plan, { files: fix.files, label: gateLabel('fix-commit', run, round), stepName: 'fix' }, stepCauses);
+  if (committed.result !== undefined) {
+    return committed;
   }
   return { held: false };
 }
@@ -445,7 +438,7 @@ async function runValidateStep(run, plan, gates) {
 async function runValidateGate(run, plan, gates) {
   const validation = hasKeptFailure(run, gates) ? { status: 'failed', failures: gates.failures[run.head] } : await runValidateStep(run, plan, gates);
   if (validation.problem !== undefined) {
-    return { result: finishDeliveryBlocked(validation.problem, run, validation.nextAction) };
+    return { result: finishDeliveryBlocked([validation], run) };
   }
   if (validation.status === 'not_run') {
     listNotRunGate(run, 'validation: the project documents no validation commands.');

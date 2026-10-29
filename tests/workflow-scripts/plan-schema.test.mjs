@@ -247,6 +247,9 @@ describe('plan schema', () => {
     ['a promotion_gate that is missing a clause', (plan) => delete plan.remediation_gate.promotion_gate.safety, '$.remediation_gate.promotion_gate: required: missing safety'],
     ['a promotion_gate flag that is not a boolean', (plan) => { plan.remediation_gate.promotion_gate.irreversible = 'yes'; }, '$.remediation_gate.promotion_gate.irreversible: type boolean expected'],
     ['a remediation_gate flag that is not a boolean', (plan) => { plan.remediation_gate.grows_surface = 'yes'; }, '$.remediation_gate.grows_surface: type boolean expected'],
+    ['a branch over 200 code points', (plan) => { plan.branch = 'b'.repeat(201); }, '$.branch: maxLength: more than 200 characters'],
+    ['a step file path over 400 code points', (plan) => { plan.steps[0].files[0] = 'f'.repeat(401); }, '$.steps[0].files[0]: maxLength: more than 400 characters'],
+    ['an artifact file path over 400 code points', (plan) => { plan.versioning.artifact_files[0] = '\u{1F600}'.repeat(401); }, '$.versioning.artifact_files[0]: maxLength: more than 400 characters'],
     ['a step id over 64 code points', (plan) => { plan.steps[0].id = 'S'.repeat(65); }, '$.steps[0].id: maxLength: more than 64 characters'],
     ['an effect summary over 300 code points', (plan) => { plan.steps[1].external_effects[0].summary = 'e'.repeat(301); }, '$.steps[1].external_effects[0].summary: maxLength: more than 300 characters']
   ];

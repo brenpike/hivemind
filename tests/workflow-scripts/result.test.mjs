@@ -7,6 +7,8 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
 
 const HARNESS_CUT = 8000;
+const FIX_LINE = 'Next: fix what stopped the run, then run the request again.';
+const ANSWER_LINE = 'Next: run the request again with the answers in it.';
 const PULL_REQUEST = { url: 'https://github.com/brenpike/hivemind/pull/409', head_ref_oid: 'a'.repeat(40), created: true };
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 const ALPHABETS = {
@@ -114,9 +116,13 @@ describe('result contract', () => {
     assert.deepEqual(Object.keys(paused), ['needs_user', 'resume_args', 'message']);
   });
   test('finish returns the finish shape for both outcomes', () => {
-    for (const outcome of ['complete', 'blocked']) {
-      const finished = structuredClone(lib.finish({ outcome, blocks: [{ text: 'Done.' }] }));
-      assert.deepEqual(finished, { needs_user: false, outcome, message: 'Done.' });
+    const finishCases = [
+      [{ outcome: 'complete', blocks: [{ text: 'Done.' }] }, 'Done.'],
+      [{ outcome: 'blocked', causes: [{ problem: 'Stopped.' }] }, 'Stopped.\n\n' + FIX_LINE]
+    ];
+    for (const [input, message] of finishCases) {
+      const finished = structuredClone(lib.finish(input));
+      assert.deepEqual(finished, { needs_user: false, outcome: input.outcome, message });
       assert.deepEqual(Object.keys(finished), ['needs_user', 'outcome', 'message']);
     }
   });
@@ -158,6 +164,13 @@ describe('result contract', () => {
   test('invalid finish input throws', () => {
     assert.throws(() => lib.finish({ outcome: 'paused', blocks: [{ text: 'm' }] }), /outcome must be complete or blocked/);
     assert.throws(() => lib.finish({ outcome: 'complete', blocks: [] }), /blocks must be a non-empty array/);
+  });
+  test('causes must be given exactly when the outcome is blocked', () => {
+    const causesError = /^Error: finish: causes must be given exactly when outcome is blocked$/;
+    assert.throws(() => lib.finish({ outcome: 'blocked', blocks: [{ text: 'Stopped.' }] }), causesError);
+    assert.throws(() => lib.finish({ outcome: 'blocked' }), causesError);
+    assert.throws(() => lib.finish({ outcome: 'complete', causes: [{ problem: 'P.' }], blocks: [{ text: 'Done.' }] }), causesError);
+    assert.throws(() => lib.finish({ outcome: 'blocked', causes: [] }), /buildStopBlocks: causes must be a non-empty array/);
   });
   test('invalid blocks throw', () => {
     const invalidCases = [
@@ -203,9 +216,10 @@ describe('notice size', () => {
       const blocks = buildBlocks(nextRandom);
       const result = caseIndex % 2 === 0
         ? lib.pauseForUser({ resumeArgs: buildCarriedResumeArgs(nextRandom), blocks })
-        : lib.finish({ outcome: nextRandom() < 0.5 ? 'complete' : 'blocked', blocks });
+        : lib.finish(nextRandom() < 0.5 ? { outcome: 'complete', blocks } : { outcome: 'blocked', causes: [{ problem: 'Stopped.' }], blocks });
       assertFitted(result);
-      const plainJoin = blocks.map((block) => block.text).join('\n\n');
+      const stopTexts = result.outcome === 'blocked' ? ['Stopped.', FIX_LINE] : [];
+      const plainJoin = stopTexts.concat(blocks.map((block) => block.text)).join('\n\n');
       const plainResult = { ...structuredClone(result), message: plainJoin };
       if (oracleNoticeLength(plainResult) <= lib.noticeBudget()) {
         assert.equal(result.message, plainJoin);
@@ -322,7 +336,7 @@ describe('pull request', () => {
     }
   });
   test('finish without pr has no pr key', () => {
-    const finished = lib.finish({ outcome: 'blocked', blocks: [{ text: 'Stopped.' }], pr: undefined });
+    const finished = lib.finish({ outcome: 'blocked', causes: [{ problem: 'Stopped.' }], pr: undefined });
     assert.deepEqual(Object.keys(finished), ['needs_user', 'outcome', 'message']);
   });
   test('pr takes room from the message, so the result still fits', () => {
@@ -486,15 +500,8 @@ describe('canShowWhole', () => {
 
 describe('encode at output', () => {
   const PRINTABLE = /^[\x20-\x7e]*$/;
-  test('maxExcerptLength is 200 and cutExcerpt cuts by code points', () => {
+  test('maxExcerptLength is 200', () => {
     assert.equal(lib.maxExcerptLength(), 200);
-    assert.equal(lib.cutExcerpt('short'), 'short');
-    assert.equal(lib.cutExcerpt('x'.repeat(250)), 'x'.repeat(200));
-    assert.equal(lib.cutExcerpt('\u{1F600}'.repeat(250)), '\u{1F600}'.repeat(200));
-    const cut = lib.cutExcerpt('x' + '\u{1F600}'.repeat(250));
-    assert.equal(Array.from(cut).length, 200);
-    assert.ok(!LONE_SURROGATE.test(cut));
-    assert.ok(cut.endsWith('\u{1F600}'));
   });
   test('toPrintableAscii writes each code unit outside 0x20-0x7E as a lowercase \\u escape', () => {
     const cases = [
@@ -607,6 +614,20 @@ describe('encode at output', () => {
   });
 });
 
+describe('describeNoResult', () => {
+  const agentFailed = 'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+  test('a null result names the agent failure in one fixed sentence', () => {
+    assert.equal(lib.describeNoResult(null), agentFailed);
+    assert.match(lib.describeNoResult(null), /^[A-Z][^.]*\.$/);
+    assert.match(lib.describeNoResult(null), /^[\x20-\x7e]+$/);
+  });
+  test('any other result gives the empty string', () => {
+    for (const value of [undefined, {}, [], '', 'text', 0, false, { outcome: 'blocked' }]) {
+      assert.equal(lib.describeNoResult(value), '', JSON.stringify(value));
+    }
+  });
+});
+
 describe('cutAtBoundary', () => {
   test('returns text unchanged when it has at most limit code points', () => {
     assert.equal(lib.cutAtBoundary('short', 5), 'short');
@@ -647,5 +668,103 @@ describe('cutAtBoundary', () => {
     for (const limit of [0, -1, 1.5, '3', undefined]) {
       assert.throws(() => lib.cutAtBoundary('text', limit), /cutAtBoundary: limit must be a positive integer/);
     }
+  });
+});
+
+describe('describeUnusableResult', () => {
+  test('a null result gets the describeNoResult sentence once and run_again', () => {
+    const sentence = lib.describeNoResult(null);
+    assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', null)), { problem: 'P. ' + sentence, nextAction: 'run_again' });
+    assert.equal(lib.describeUnusableResult('P.', null).problem.split(sentence).length - 1, 1);
+  });
+  test('any other result gives the problem alone', () => {
+    for (const result of [{}, undefined, 'x', 0]) {
+      assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', result)), { problem: 'P.' }, JSON.stringify(result));
+    }
+  });
+});
+
+describe('nextStepLine', () => {
+  test('run_again says nothing in the repo needs a fix, anything else gives the fix line', () => {
+    const runAgainLine = 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+    const fixLine = 'Next: fix what stopped the run, then run the request again.';
+    assert.equal(lib.nextStepLine('run_again'), runAgainLine);
+    for (const nextAction of ['fix_cause', undefined]) {
+      assert.equal(lib.nextStepLine(nextAction), fixLine, String(nextAction));
+    }
+  });
+  test('answer says to run the request again with the answers in it', () => {
+    assert.equal(lib.nextStepLine('answer'), ANSWER_LINE);
+  });
+});
+
+describe('buildStopBlocks', () => {
+  const fixLine = 'Next: fix what stopped the run, then run the request again.';
+  const runAgainLine = 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+  test('causes that need a fix lead with the fix line, then run_again causes, each in step order', () => {
+    const causes = [
+      { problem: 'A.', nextAction: 'run_again' },
+      { problem: 'B.' },
+      { problem: 'C.', nextAction: 'fix_cause' },
+      { problem: 'D.', nextAction: 'run_again' }
+    ];
+    assert.deepEqual(structuredClone(lib.buildStopBlocks(causes)), [
+      { text: 'B.' }, { text: fixLine, whole: true }, { text: 'C.' }, { text: 'A.' }, { text: 'D.' }
+    ]);
+  });
+  test('the run_again line shows only when every cause is run_again', () => {
+    const causes = [{ problem: 'A.', nextAction: 'run_again' }, { problem: 'B.', nextAction: 'run_again' }];
+    assert.deepEqual(structuredClone(lib.buildStopBlocks(causes)), [
+      { text: 'A.' }, { text: runAgainLine, whole: true }, { text: 'B.' }
+    ]);
+    assert.deepEqual(structuredClone(lib.buildStopBlocks([{ problem: 'A.', nextAction: 'fix_cause' }])), [
+      { text: 'A.' }, { text: fixLine, whole: true }
+    ]);
+  });
+  test('the lead has a compact form only when it is over maxBlockedLeadLength() code points', () => {
+    assert.equal(lib.maxBlockedLeadLength(), 1000);
+    const atLimit = 'x'.repeat(1000);
+    assert.deepEqual(structuredClone(lib.buildStopBlocks([{ problem: atLimit }])[0]), { text: atLimit });
+    const overLimit = 'word '.repeat(300).trim();
+    assert.deepEqual(structuredClone(lib.buildStopBlocks([{ problem: overLimit }])[0]), { text: overLimit, compact: lib.cutAtBoundary(overLimit, 1000) });
+    const laterBlock = lib.buildStopBlocks([{ problem: 'A.' }, { problem: overLimit }])[2];
+    assert.deepEqual(structuredClone(laterBlock), { text: overLimit });
+  });
+  test('throws unless causes is a non-empty array', () => {
+    for (const causes of [[], undefined, null, 'x', { problem: 'A.' }]) {
+      assert.throws(() => lib.buildStopBlocks(causes), /buildStopBlocks: causes must be a non-empty array/, JSON.stringify(causes));
+    }
+  });
+  test('a blocked finish over a 20,000-character costliest lead and two later causes keeps the Next line whole after the lead', () => {
+    const words = 'The planner could not plan the delivery: ' + ('\u0001'.repeat(9) + ' ').repeat(2000);
+    const unbroken = 'The planner could not plan the delivery: ' + '\u0001'.repeat(20000);
+    const laterCauses = [{ problem: 'Later one: ' + '<&>'.repeat(3000) }, { problem: 'Later two: ' + '\u0001'.repeat(5000), nextAction: 'run_again' }];
+    for (const lead of [words, unbroken]) {
+      const result = lib.finish({ outcome: 'blocked', causes: [{ problem: lead }].concat(laterCauses) });
+      const paragraphs = result.message.split('\n\n');
+      const leadIndex = paragraphs.findIndex((paragraph) => paragraph.startsWith('The planner could not plan'));
+      assert.equal(paragraphs[leadIndex], lib.cutAtBoundary(lead, lib.maxBlockedLeadLength()));
+      assert.equal(paragraphs[leadIndex + 1], fixLine);
+      assert.ok(lib.noticeLength(result) <= lib.noticeBudget());
+    }
+  });
+});
+
+describe('blocked finish', () => {
+  test('a blocked finish with no blocks shows the stop blocks alone', () => {
+    const finished = lib.finish({ outcome: 'blocked', causes: [{ problem: 'A.' }, { problem: 'B.', nextAction: 'run_again' }] });
+    assert.equal(finished.message, 'A.\n\n' + FIX_LINE + '\n\nB.');
+  });
+  test('the stop blocks come before the given blocks', () => {
+    const finished = lib.finish({ outcome: 'blocked', causes: [{ problem: 'A.' }], blocks: [{ text: 'Later.' }, { text: 'Tail.' }] });
+    assert.equal(finished.message, 'A.\n\n' + FIX_LINE + '\n\nLater.\n\nTail.');
+  });
+  test('a lone answer cause leads with the answer line', () => {
+    const causes = [{ problem: 'Questions are still open.', nextAction: 'answer' }];
+    assert.deepEqual(structuredClone(lib.buildStopBlocks(causes)), [
+      { text: 'Questions are still open.' }, { text: ANSWER_LINE, whole: true }
+    ]);
+    const finished = lib.finish({ outcome: 'blocked', causes, blocks: [{ text: 'Open questions.' }] });
+    assert.equal(finished.message, 'Questions are still open.\n\n' + ANSWER_LINE + '\n\nOpen questions.');
   });
 });

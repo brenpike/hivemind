@@ -50,7 +50,8 @@
     "options": {
       "type": "array",
       "minItems": 1,
-      "description": "Only options that survive steel-manning and straw-manning.",
+      "maxItems": 4,
+      "description": "Only options that survive steel-manning and straw-manning. At most 4, since the question shows them by position, A to D.",
       "items": {
         "type": "object",
         "additionalProperties": false,
@@ -58,7 +59,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "Option id: A, B, or C."
+            "description": "Option id, e.g. A. Internal: the question shows options by position, A to D, not by this id."
           },
           "summary": {
             "type": "string",
@@ -117,7 +118,7 @@
       "properties": {
         "option_id": {
           "type": "string",
-          "description": "Id of the recommended option. Never blank. When strength is none, still name an option id; the run asks the user either way."
+          "description": "Id of the recommended option, one of the options' ids. Never blank. When strength is none, still name an option id; the run asks the user either way. The question shows this option by its position, A to D, not by this id."
         },
         "strength": {
           "type": "string",

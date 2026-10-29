@@ -7,7 +7,41 @@ import { loadLibs } from './harness.mjs';
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const table = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-autonomy-table.json', 'utf8'));
 const schema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decision-brief-schema.json', 'utf8'));
+const briefSource = readFileSync(repoRoot + 'plugin/workflow-src/lib/brief.js', 'utf8');
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/schema.js', repoRoot + 'plugin/workflow-src/lib/decide.js']);
+
+const SHOWN_FIELD_PATHS = {
+  problem: ['problem'],
+  options: ['options'],
+  summary: ['options', 'items', 'summary'],
+  recommendation: ['recommendation'],
+  why: ['recommendation', 'why'],
+  strength: ['recommendation', 'strength']
+};
+const INTERNAL_FIELDS = ['id', 'option_id', 'kind'];
+const ASK_OR_ROUND_FIELDS = ['brief', 'exact', 'labels', 'settled'];
+const VERBATIM_FIELDS = ['verbatim'];
+
+function readSchemaNode(path) {
+  return path.reduce((node, name) => (name === 'items' ? node.items : node.properties[name]), schema);
+}
+
+function hasShownBound(node) {
+  if (node.type === 'string') {
+    return Object.hasOwn(node, 'maxLength') || Array.isArray(node.enum);
+  }
+  if (node.type === 'array') {
+    return Object.hasOwn(node, 'maxItems');
+  }
+  return node.type === 'object' && node.additionalProperties === false;
+}
+
+function listReadFieldCalls(source) {
+  const callCount = source.split('readField(').length - 1;
+  const definitionCount = source.split('function readField(').length - 1;
+  const names = [...source.matchAll(/(?=readField\((?:[^()]|\([^()]*\))*?,\s*'([A-Za-z_]+)'\))/g)].map((match) => match[1]);
+  return { names, unnamedCount: callCount - definitionCount - names.length };
+}
 
 function collectSchemaNodes(node, path, nodes) {
   nodes.push({ node, path });
@@ -91,9 +125,13 @@ describe('brief schema stays inside the structured-output subset', () => {
   test('the root is an object schema', () => {
     assert.equal(schema.type, 'object');
   });
+  test('only options has maxItems, and it is 4', () => {
+    const bounded = nodes.filter(({ node }) => Object.hasOwn(node, 'maxItems'));
+    assert.deepEqual(bounded.map(({ path }) => path), ['$.properties.options']);
+    assert.equal(schema.properties.options.maxItems, 4);
+  });
   for (const { node, path } of nodes) {
-    test(`${path} has no maxItems and minItems at most 1`, () => {
-      assert.equal(Object.hasOwn(node, 'maxItems'), false);
+    test(`${path} has minItems at most 1`, () => {
       if (Object.hasOwn(node, 'minItems')) {
         assert.ok(node.minItems <= 1, `minItems is ${node.minItems}`);
       }
@@ -110,4 +148,28 @@ describe('brief schema stays inside the structured-output subset', () => {
       });
     }
   }
+});
+
+describe('every brief field lib/brief.js reads is classified', () => {
+  const { names, unnamedCount } = listReadFieldCalls(briefSource);
+  test('every readField call names its field as a string literal', () => {
+    assert.ok(names.length > 0, 'no readField call found');
+    assert.equal(unnamedCount, 0, 'a readField call names its field some other way');
+  });
+  for (const name of [...new Set(names)].sort()) {
+    test(`readField name ${name} is shown with a bound, internal, an ask or round field, or verbatim`, () => {
+      if (Object.hasOwn(SHOWN_FIELD_PATHS, name)) {
+        const node = readSchemaNode(SHOWN_FIELD_PATHS[name]);
+        assert.ok(node !== undefined, `${name} has no node in the brief schema`);
+        assert.ok(hasShownBound(node), `${name} is shown but has no bound in the brief schema`);
+        return;
+      }
+      const otherClasses = [...INTERNAL_FIELDS, ...ASK_OR_ROUND_FIELDS, ...VERBATIM_FIELDS];
+      assert.ok(otherClasses.includes(name), `${name} is not classified`);
+    });
+  }
+  test('verbatim is shown encoded in exact asks and whole in the PR body', () => {
+    assert.ok(briefSource.includes("encodeUntrustedText(verbatim)"), 'an exact ask does not encode verbatim');
+    assert.ok(briefSource.includes("return [labelIndent + 'Word for word:', verbatim];"), 'the PR body does not show verbatim whole');
+  });
 });

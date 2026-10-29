@@ -17,7 +17,8 @@
  *          build is the BUILD_ID the pause wrote with answers. A resume
  *          whose build is absent or not this script's BUILD_ID stops before
  *          any agent call (lib/args.js): the plugin changed while it was
- *          paused. A fresh launch ignores build.
+ *          paused. That stop has the answer Next line. A fresh launch
+ *          ignores build.
  *          reply is the user's reply to that pause, per the result.js
  *          contract. It answers the first round with no stored answer, and
  *          only when answers is present, since that marks a pending pause.
@@ -42,8 +43,9 @@
  *
  * Outputs
  *   pauseForUser({resumeArgs, blocks}) when a question needs the user's
- *   answer, otherwise finish({outcome, blocks}). See result.js for both
- *   shapes and for how blocks are fitted to the completion notice.
+ *   answer, otherwise finish({outcome: 'blocked', causes}) or
+ *   finish({outcome: 'complete', blocks}). See result.js for the shapes and
+ *   for how blocks are fitted to the completion notice.
  *
  * Invariants
  *   Facts first: the first agent call is the facts step, a haiku drone that
@@ -95,25 +97,26 @@
  *   so a resumed run gets all three results from cache. The revise-N prompt
  *   depends only on earlier results and on the replies to rounds 1 to N.
  *   Each revise-N call gets its own revise schema: the analysis spec plus a
- *   shared required settled array whose items enum is listShownLabels(asks,
- *   taken), the labels Q1 to Qn and D1 to Dm round N showed. Its agent
+ *   shared required settled array whose items enum is
+ *   listShownLabels(asks), the labels Q1 to Qn round N showed. Its agent
  *   schema and its check schema are both built from that spec each round,
  *   the check one with the questions items check left out, as for analyze.
  *   Each reply a pause consumes goes once into the answer log as {question,
  *   settled, reply}, and only after its revise result passes its check. The
  *   shared lib buildAnswerEntry is the one writer of settled: the question is
- *   the full questions text of its round, settled the labels of
- *   result.settled in shown order, and a reply that settles nothing logs
- *   settled []. Only the questions and decisions settled names count as
+ *   the questions text of its round, renderQuestions of its asks, settled
+ *   the labels of result.settled in shown order, and a reply that settles
+ *   nothing logs settled []. Only the questions settled names count as
  *   settled, never the whole round, so a question the reply left open is
  *   never called settled (issue 472). The revise-N prompt carries the whole
  *   log, the entries of rounds 1 to N-1, in an answers data block, with a
- *   data line saying only those labels in each entry are settled decisions,
+ *   data line saying only the questions those labels in each entry name are
+ *   settled decisions,
  *   never asked again or reversed. The revise-1 prompt has no answers block,
  *   so it is the prompt of a run with no answers. resume_args still takes
  *   its replies from the log.
- *   The revise-N prompt always shows the planner the full questions text,
- *   even when the pause message was in compact form.
+ *   The revise-N prompt shows the planner the same questions text the
+ *   pause message showed the user, renderQuestions of the asks.
  *   A run pauses at most pauseLimit() times. After that it completes and
  *   lists the questions still open, with stop reason 'pause_limit'.
  *   A run also stops asking when the replies so far are too long to carry:
@@ -134,6 +137,14 @@
  *   The planner blocker has maxLength 400 in the analysis schema, so a
  *   result with a longer one fails the check and finishes blocked as
  *   malformed.
+ *   agent() returns null on an agent API error, such as an expired login.
+ *   A null facts result blocks as malformed facts, a null scan result as a
+ *   scan it cannot use, and a null analyze or revise result as no result.
+ *   Each goes through describeUnusableResult (result.js), the one place
+ *   that adds the describeNoResult sentence naming the agent failure and
+ *   the run_again Next line, so the user does not look for a cause in the
+ *   repo (issue 460). The build-skew stop gets the answer line, any other
+ *   blocked end the fix line.
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
  *   quoted whole up to maxReasonLength() code points, 600, else cut by
@@ -159,13 +170,18 @@
  *   is by design, not a defect (ADR-0036 decision 13).
  *   Every message is a list of blocks, highest priority first, which
  *   result.js fits to the completion notice (ADR-0036 decision 15). A pause
- *   message is one block: the questions with one line per taken decision,
- *   with renderQuestionsCompact as its compact form. No ask is marked
- *   exact, so a question never shows the verbatim of its brief. A complete
- *   message is the decided-for-you block as renderDecisionsCompact alone,
- *   one line per decision with no verbatim, then any open-questions block,
- *   then the report last, the only block that may be shortened. A blocked
- *   message is one block that may be shortened.
+ *   message is two blocks: a one-line lead built here, saying the analysis
+ *   is drafted and how many questions need the user's answer before the
+ *   report is final, then renderQuestions of the asks. It has no compact
+ *   form and no taken-decision line: a taken decision shows only in the
+ *   complete message. No ask is marked exact, so a question never shows
+ *   the verbatim of its brief. A complete message is the decided-for-you
+ *   block as renderDecisionsCompact alone, one line per decision with no
+ *   verbatim, then any open-questions block, then the report last, the only
+ *   block that may be shortened. Every blocked end passes a list of causes
+ *   {problem, nextAction?} to finishBlocked, and finish (result.js) builds
+ *   the message from them: a lead, the Next line kept whole, then any later
+ *   causes.
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -232,7 +248,7 @@ function buildReviseSpec(questionSchema, shownLabels) {
   const spec = buildAnalysisSpec(questionSchema);
   spec.properties.settled = {
     type: 'array',
-    description: 'The label, like Q1 or D1, of each shown question or decision made for you the reply settles.',
+    description: 'The label, like Q1, of each shown question the reply settles.',
     items: { type: 'string', enum: shownLabels.slice() }
   };
   spec.required.push('settled');
@@ -273,7 +289,7 @@ function buildRevisePrompt({ request, facts, answers, report, questions, reply }
   const lines = [
     'Revise your analysis of the user request below with the user reply below.',
     boundarySentence(),
-    hasAnswers ? dataBlocksSentence('The reply block') + ' In each answers entry, only the questions and decisions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.' : dataBlocksSentence('The reply block'),
+    hasAnswers ? dataBlocksSentence('The reply block') + ' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.' : dataBlocksSentence('The reply block'),
     '',
     buildFactsBlock(facts),
     formatDataBlock('request', request)
@@ -295,20 +311,20 @@ function factsOptions() {
 
 function describeFactsProblem(facts) {
   if (!validateSchema(FACTS_STEP_SCHEMA, facts).ok) {
-    return malformedFactsMessage(RUN_NOUN);
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN), facts);
   }
   if (facts.outcome === 'blocked') {
-    return blockedFactsMessage(RUN_NOUN, describeReason(facts.blocker));
+    return { problem: blockedFactsMessage(RUN_NOUN, describeReason(facts.blocker)) };
   }
   const isWellFormed = matchesFactsLine('facts_file', facts.facts_file)
     && matchesFactsLine('facts_lines', facts.facts_lines)
     && isCutList(facts.cut)
     && isTextCount(facts.external_texts);
   if (!isWellFormed) {
-    return malformedFactsMessage(RUN_NOUN);
+    return { problem: malformedFactsMessage(RUN_NOUN) };
   }
   if (facts.cut !== 'none') {
-    return cutFactsMessage(RUN_NOUN, facts.cut);
+    return { problem: cutFactsMessage(RUN_NOUN, facts.cut) };
   }
   return undefined;
 }
@@ -316,26 +332,26 @@ function describeFactsProblem(facts) {
 async function gatherCheckedFacts(launchInputs) {
   phase('Facts');
   const facts = await agent(buildFactsPrompt(launchInputs.trunk, launchInputs.references), factsOptions());
-  const factsProblem = describeFactsProblem(facts);
-  if (factsProblem !== undefined) {
-    return { problem: factsProblem };
+  const factsCause = describeFactsProblem(facts);
+  if (factsCause !== undefined) {
+    return { cause: factsCause };
   }
-  const scanProblem = await runScanStep(facts, RUN_NOUN);
-  if (scanProblem !== undefined) {
-    return { problem: scanProblem };
+  const scanCause = await runScanStep(facts, RUN_NOUN);
+  if (scanCause !== undefined) {
+    return { cause: scanCause };
   }
   return { facts: facts };
 }
 
 function describeReplyProblem(analysis, checkSchema) {
   if (!isPlainObject(analysis)) {
-    return 'The planner returned no result, so the analysis stopped.';
+    return describeUnusableResult('The planner returned no result, so the analysis stopped.', analysis);
   }
   if (!validateSchema(checkSchema, analysis).ok) {
-    return 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
+    return { problem: 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.' };
   }
   if (analysis.outcome === 'blocked') {
-    return 'The planner could not do the analysis: ' + describeReason(analysis.blocker);
+    return { problem: 'The planner could not do the analysis: ' + describeReason(analysis.blocker) };
   }
   return undefined;
 }
@@ -354,8 +370,8 @@ function resolveQuestions(questions, level) {
   return { asks: asks, taken: taken };
 }
 
-function finishBlocked(message) {
-  return finish({ outcome: 'blocked', blocks: [{ text: message, shorten: true }] });
+function finishBlocked(causes) {
+  return finish({ outcome: 'blocked', causes: causes });
 }
 
 function finishComplete(report, openQuestions, taken) {
@@ -370,27 +386,34 @@ function finishComplete(report, openQuestions, taken) {
   return finish({ outcome: 'complete', blocks: blocks });
 }
 
+function renderPauseLead(questionCount) {
+  if (questionCount === 1) {
+    return 'The analysis is drafted. 1 question needs your answer before the report is final.';
+  }
+  return 'The analysis is drafted. ' + questionCount + ' questions need your answer before the report is final.';
+}
+
 function pauseOrStopAsking(report, resolution, questions, answerLog) {
   const resumeArgs = buildResumeArgs(answerLog.map((entry) => entry.reply), BUILD_ID);
   if (!canCarry(resumeArgs)) {
     return finishComplete(report, renderOpenQuestions(resolution.asks, 'reply_size'), resolution.taken);
   }
-  const compactQuestions = renderQuestionsCompact(resolution.asks, resolution.taken);
-  return pauseForUser({ resumeArgs: resumeArgs, blocks: [{ text: questions, compact: compactQuestions }] });
+  const blocks = [{ text: renderPauseLead(resolution.asks.length) }, { text: questions }];
+  return pauseForUser({ resumeArgs: resumeArgs, blocks: blocks });
 }
 
 async function runAnalysis(rawArgs) {
   const argsObject = readArgsObject(rawArgs);
   if (!isNonEmptyString(argsObject.request)) {
-    return finishBlocked('No request was given, so there is nothing to analyze.');
+    return finishBlocked([{ problem: 'No request was given, so there is nothing to analyze.' }]);
   }
   const launchInputs = readLaunchInputs(argsObject, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {
-    return finishBlocked(launchInputs.problem);
+    return finishBlocked([launchInputs]);
   }
   const checked = await gatherCheckedFacts(launchInputs);
-  if (checked.problem !== undefined) {
-    return finishBlocked(checked.problem);
+  if (checked.cause !== undefined) {
+    return finishBlocked([checked.cause]);
   }
   const facts = checked.facts;
   const level = resolveLevel(undefined, AUTONOMY_TABLE);
@@ -402,9 +425,9 @@ async function runAnalysis(rawArgs) {
   phase('Analyze');
   let analysis = await agent(buildAnalyzePrompt(argsObject.request, facts), plannerOptions('analyze', 'Analyze', ANALYSIS_SCHEMA));
   for (let round = 1; ; round += 1) {
-    const problem = describeReplyProblem(analysis, checkSchema);
-    if (problem !== undefined) {
-      return finishBlocked(problem);
+    const replyCause = describeReplyProblem(analysis, checkSchema);
+    if (replyCause !== undefined) {
+      return finishBlocked([replyCause]);
     }
     if (shownRound !== undefined) {
       answerLog.push(buildAnswerEntry(shownRound, analysis));
@@ -416,7 +439,7 @@ async function runAnalysis(rawArgs) {
     if (!canPause(round - 1)) {
       return finishComplete(analysis.report, renderOpenQuestions(resolution.asks, 'pause_limit'), resolution.taken);
     }
-    const questions = renderQuestions(resolution.asks, resolution.taken);
+    const questions = renderQuestions(resolution.asks);
     let reply = readStoredReply(storedAnswers, round);
     if (reply === undefined) {
       reply = pendingReply;
@@ -425,7 +448,7 @@ async function runAnalysis(rawArgs) {
     if (reply === undefined) {
       return pauseOrStopAsking(analysis.report, resolution, questions, answerLog);
     }
-    const shownLabels = listShownLabels(resolution.asks, resolution.taken);
+    const shownLabels = listShownLabels(resolution.asks);
     const reviseSchemas = buildReviseSchemas(shownLabels);
     phase('Revise');
     const revisePrompt = buildRevisePrompt({ request: argsObject.request, facts: facts, answers: answerLog, report: analysis.report, questions: questions, reply: reply });

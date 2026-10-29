@@ -7,9 +7,10 @@
  *                 reply is added. It has no replyField() key and
  *                 canCarry(resumeArgs) is true.
  *     blocks      the text the user reads, as below.
- *   finish({outcome, blocks, pr})
+ *   finish({outcome, causes, blocks, pr})
  *     outcome     'complete' or 'blocked'.
- *     blocks      the run's final text for the user, as below.
+ *     causes      as for buildStopBlocks, given exactly when blocked.
+ *     blocks      the run's final text, as below. Optional when blocked.
  *     pr          optional. The pull request the run opened or reused:
  *                 {url, head_ref_oid, created}, no other key. url matches
  *                 ^https://[A-Za-z0-9._/-]+/pull/[0-9]+$, head_ref_oid is 40
@@ -29,7 +30,7 @@
  *     resumeArgs  plain JSON object.
  *   noticeLength(value)
  *     value       any JSON value.
- *   cutExcerpt(text), toPrintableAscii(text)
+ *   toPrintableAscii(text)
  *     text        a string.
  *   cutAtBoundary(text, limit)
  *     text        a string.
@@ -41,11 +42,17 @@
  *                 stderr line or path, as a step returned it.
  *     limit       optional positive integer, the most code points to quote.
  *                 maxExcerptLength() when absent.
+ *   describeNoResult(result)
+ *     result      any value. What one agent() call of a step returned.
+ *   describeUnusableResult(problem, result)
+ *     problem     string. result as for describeNoResult.
+ *   nextStepLine(nextAction)  'fix_cause', 'run_again', 'answer' or absent.
+ *   buildStopBlocks(causes)  causes non-empty array of {problem, nextAction?}.
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
  *   finish        {needs_user: false, outcome, pr?, message}, with pr only
- *                 when it was given.
+ *                 when given. Blocked: buildStopBlocks(causes), then blocks.
  *   message       the blocks fitted to the completion notice, see Size.
  *   canShowWhole  true exactly when pauseForUser fits every whole block,
  *                 so it returns instead of throwing.
@@ -58,8 +65,6 @@
  *   canCarry      true when a pause result with resumeArgs and an empty
  *                 message takes at most half of noticeBudget().
  *   maxExcerptLength  200, the code points of a quoted excerpt.
- *   cutExcerpt    the first maxExcerptLength() code points of text, so a
- *                 cut never splits a surrogate pair.
  *   maxReasonLength  600, the code points of a quoted reason.
  *   cutAtBoundary text unchanged when it has at most limit code points.
  *                 Otherwise the longest prefix of at most limit code points
@@ -81,6 +86,19 @@
  *   describeReason  'it says ' + quoteDiagnostic(text, maxReasonLength())
  *                 + '.', or 'it gave no reason.' when that quote is
  *                 undefined. A reason is quoted whole up to 600 code points.
+ *   describeNoResult  for a null result, one fixed sentence: the step's
+ *                 agent failed before it returned a result, as an agent API
+ *                 error such as an expired login, a rate limit or a network
+ *                 failure does. Otherwise the empty string.
+ *   describeUnusableResult  {problem: problem + ' ' + describeNoResult(null),
+ *                 nextAction: 'run_again'} for a null result, else {problem}.
+ *   nextStepLine  the Next line: run_again says nothing in the repo needs a
+ *                 fix; answer says rerun with the answers; else the fix line.
+ *   maxBlockedLeadLength  1000, the code points of a compact lead.
+ *   buildStopBlocks  the lead, then its Next line as a whole block, then a
+ *                 block per later cause. Causes not run_again lead, then
+ *                 run_again ones, in given order. The lead compact is
+ *                 cutAtBoundary(problem, maxBlockedLeadLength()) if shorter.
  *
  * Contract the overlord relays
  *   The relay and resume rule has one home,
@@ -148,14 +166,24 @@
  *   digest and the blocker of each step result, so a message is short
  *   before it is fitted (issue 445). The fit below stays the backstop for
  *   any long text, such as the analysis-only report.
+ *   A null result is an agent failure: agent() returns null on an agent API
+ *   error, so describeNoResult names that failure and never the step's
+ *   output, which does not exist (issue 460).
+ *   One owner of a blocked stop: on both engines finish builds every
+ *   blocked message from its causes, so no caller sets its lead or Next
+ *   line (finding 49be981e). describeUnusableResult alone gives a null
+ *   result that sentence and run_again.
  *
  * Why
- *   A running workflow cannot take input mid-run, so asking the user means
- *   returning. One fixed shape lets the overlord relay and resume any
- *   workflow the same way. Fitting the message in the workflow keeps the
- *   notice whole, so the overlord never needs the output file. A whole
- *   block carries text the user must read in full to answer, so the fit
- *   keeps it by its key, not by a rule in a prompt.
+ *   A running workflow cannot take input mid-run, so asking means returning.
+ *   One fixed shape lets the overlord relay and resume any workflow alike.
+ *   Fitting in the workflow keeps the notice whole, so the overlord never
+ *   needs the output file, and keeps a whole block, text the user must read
+ *   in full to answer, by its key, not by a prompt rule. A null result sent
+ *   the user to the repo for a cause; one sentence naming the agent failure
+ *   says what happened (issue 460). Call-site stops could hide an agent
+ *   failure behind a commit stop or drop or misstate the Next line, so
+ *   finish takes causes (findings 3827ab1a, 58a21e45 and 49be981e).
  */
 
 function resultFields() {
@@ -208,10 +236,6 @@ function noticeLength(value) {
 
 function maxExcerptLength() {
   return 200;
-}
-
-function cutExcerpt(text) {
-  return Array.from(text).slice(0, maxExcerptLength()).join('');
 }
 
 function maxReasonLength() {
@@ -285,6 +309,48 @@ function describeReason(text) {
   return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
 }
 
+function describeNoResult(result) {
+  if (result !== null) {
+    return '';
+  }
+  return 'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+
+function describeUnusableResult(problem, result) {
+  if (result !== null) {
+    return { problem: problem };
+  }
+  return { problem: problem + ' ' + describeNoResult(result), nextAction: 'run_again' };
+}
+
+function nextStepLine(nextAction) {
+  if (nextAction === 'run_again') {
+    return 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+  }
+  if (nextAction === 'answer') {
+    return 'Next: run the request again with the answers in it.';
+  }
+  return 'Next: fix what stopped the run, then run the request again.';
+}
+
+function maxBlockedLeadLength() {
+  /* 1000: a code point costs at most 6 notice chars (\u00XX), so the compact lead, Next line and cut marker fit noticeBudget(). */
+  return 1000;
+}
+
+function buildStopBlocks(causes) {
+  if (!Array.isArray(causes) || causes.length === 0) {
+    throw new Error('buildStopBlocks: causes must be a non-empty array');
+  }
+  const fixCauses = causes.filter((cause) => cause.nextAction !== 'run_again');
+  const orderedCauses = fixCauses.concat(causes.filter((cause) => cause.nextAction === 'run_again'));
+  const leadText = orderedCauses[0].problem;
+  const compactLead = cutAtBoundary(leadText, maxBlockedLeadLength());
+  const leadBlock = compactLead === leadText ? { text: leadText } : { text: leadText, compact: compactLead };
+  const laterBlocks = orderedCauses.slice(1).map((cause) => ({ text: cause.problem }));
+  return [leadBlock, { text: nextStepLine(orderedCauses[0].nextAction), whole: true }].concat(laterBlocks);
+}
+
 function canCarry(resumeArgs) {
   const emptyPause = { needs_user: true, resume_args: resumeArgs, message: '' };
   return noticeLength(emptyPause) <= Math.floor(noticeBudget() / 2);
@@ -301,18 +367,22 @@ function canShowWhole({ resumeArgs, blocks }) {
   return fitMessage(blocks, roomForMessage(paused)) !== null;
 }
 
-function finish({ outcome, blocks, pr }) {
+function finish({ outcome, causes, blocks, pr }) {
   if (outcome !== 'complete' && outcome !== 'blocked') {
     throw new Error('finish: outcome must be complete or blocked, got ' + JSON.stringify(outcome));
   }
-  assertBlocks('finish', blocks);
+  if ((outcome === 'blocked') !== (causes !== undefined)) {
+    throw new Error('finish: causes must be given exactly when outcome is blocked');
+  }
+  const messageBlocks = outcome === 'blocked' ? buildStopBlocks(causes).concat(blocks === undefined ? [] : blocks) : blocks;
+  assertBlocks('finish', messageBlocks);
   const finished = { needs_user: false, outcome: outcome };
   if (pr !== undefined) {
     assertPullRequest(pr);
     finished.pr = { url: pr.url, head_ref_oid: pr.head_ref_oid, created: pr.created };
   }
   finished.message = '';
-  finished.message = fitWholeMessage('finish', blocks, roomForMessage(finished));
+  finished.message = fitWholeMessage('finish', messageBlocks, roomForMessage(finished));
   return assertWithinBudget(finished);
 }
 
