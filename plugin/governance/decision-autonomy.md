@@ -59,6 +59,8 @@ The promotion gate TRIPS — forcing a surface to the user — when the RECOMMEN
 
 Otherwise the gate is CLEAN and the Tier-B decision is auto-taken per the 2x2. The gate is evaluated against the recommended action only, per the key rule in **The Autonomy 2x2**.
 
+A review call reads clauses 1 and 2 only, per **Review Calls** below.
+
 **Remediation plan acceptance (stated once; every other doc refers here).** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is a contained action with a clean gate, auto-taken per **Tier B**. Accepting the remediation plan cerebrate returns is a separate decision. It surfaces to the user ONLY when the plan's `remediation_gate` (per `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks ANY of:
 
 - the Promotion Gate above trips on accepting the plan, by any clause, as `remediation_gate.promotion_gate` records;
@@ -73,7 +75,7 @@ When any flag is set on the state machine, the overlord, by judgment, pauses its
 
 This rule is the one home for who decides a reviewer's question. The local reviewer's `user-input-required` or `high-severity-rejection` call is written by the reviewer: the options, a recommendation with an honest strength, and the reviewer's read of clauses 1 and 2 of the Promotion Gate above on the recommended option. This rule decides the call, never the reviewer. Recording a new threat model, when a reviewer raises it, is a review call under this rule.
 
-A review call is taken when the overlord agrees with the reviewer's recommendation and the recommended option is reversible and not architectural. On the script engine that agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`, resolved through `decide()`. No second agent judges the call. Clause 3 is not read for a review call, because the Destructive Fix Gate (**Tier A**) stops any fix in its categories, whoever took the call.
+A review call is taken when the overlord agrees with the reviewer's recommendation and the recommended option is reversible and not architectural. On the script engine that agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`, resolved through `decide()`. No second agent judges the call. Clause 3 is not read for a review call because the user decided so (ADR-0037, Amendment 2026-10-29). A safety-relevant call that the run and the reviewer agree on is taken like any other when it is reversible and not architectural. This includes a pick that keeps or records a safety finding unfixed. A pick that applies a fix in a Destructive Fix Gate category still stops at that gate (**Tier A**), whoever took the call.
 
 A taken call goes back to the reviewer as its answer. The reviewer records it at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Recorded Decisions and Repeat Findings`), naming the run as the one who decided. The run lists the call in its final message and in the PR body, so the user can veto it before merge.
 
