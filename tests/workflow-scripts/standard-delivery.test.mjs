@@ -300,6 +300,13 @@ function commitRelay(changes = {}) {
 }
 
 /**
+ * The relay of a head check that reports `head` with committed false.
+ */
+function headRelay(head) {
+  return commitRelay({ commit: head, committed: 'false' });
+}
+
+/**
  * The stdout of bump-type.sh with --version-file: MINOR_MATCH with
  * `changes`, a key set to undefined left out, counts as a block.
  */
@@ -2660,13 +2667,13 @@ const ROW_TESTS = {
       runGitIn(scratch, ['commit', '-q', '--amend', '--no-edit']);
       assert.deepEqual(checkVersion(), ['match', '1.2.3', '1.3.0']);
     });
-    test('a blocked version relay pauses naming its blocker line, and the reply runs validation again with the next count', async () => {
-      const results = versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'blocked', stderr: 'blocker: base ref does not resolve to a commit\n' } }, 'validate-1-2': validateWithVersion() });
+    test('a blocked version relay pauses naming its blocker line, and the reply runs the head check, then validation again with the next count', async () => {
+      const results = versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'blocked', stderr: 'blocker: base ref does not resolve to a commit\n' } }, 'head-1-1': headRelay(OTHER), 'validate-1-2': validateWithVersion() });
       const run = await runWorkflow(LAUNCH, results);
       assertStepStopPause(run, 'The version check of the validation step was blocked, so the delivery stopped before the pull request. Its blocker line says "base ref does not resolve to a commit".', 'validate-1-1');
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'The base is fixed.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['head-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
     });
     for (const [label, changes] of [
       ['no version_check line', { version_check: undefined }],
@@ -2897,13 +2904,13 @@ const ROW_TESTS = {
       assert.ok(run.result.message.includes('\n\n' + HELD_ALL + OTHER + '.'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-1').includes('- validation: not run, the project documents no validation commands, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
     });
-    test('blocked pauses at the validation step, and the reply runs validation again with the next count', async () => {
-      const results = happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' }, 'validate-1-2': VALIDATE_PASSED });
+    test('blocked pauses at the validation step, and the reply runs the head check, then validation again with the next count', async () => {
+      const results = happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' }, 'head-1-1': headRelay(OTHER), 'validate-1-2': VALIDATE_PASSED });
       const run = await runWorkflow(LAUNCH, results);
       assertStepStopPause(run, 'The validation step was blocked, so the delivery stopped before the pull request: it says "npm is not installed.".', 'validate-1-1');
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'npm is installed now.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed), [...labelsOf(run), 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.deepEqual(labelsOf(resumed), [...labelsOf(run), 'head-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       assert.ok(!labelsOf(resumed).includes('facts-2'));
     });
     for (const [label, result] of [['failed with no failures', { outcome: 'failed' }], ['an extra field', { outcome: 'passed', note: 'x' }]]) {
@@ -3003,14 +3010,14 @@ const ROW_TESTS = {
       }
       assertTailPause(run, [limitAsk(main.buildFixLimitBrief(OTHER))], 'fix-commit-1-' + main.maxFixRounds());
     });
-    test('a blocked fix round pauses after its commit, and the reply runs validation again with the next count', async () => {
-      const results = fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'The test needs a database.' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }), 'review-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
+    test('a blocked fix round pauses after its commit, and the reply runs the head check, then validation again with the next count', async () => {
+      const results = fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'The test needs a database.' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }), 'head-1-1': headRelay(OTHER), 'review-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
       assertStepStopPause(run, 'The validation fix round was blocked, so the delivery stopped: it says "The test needs a database.".\n\n', 'fix-commit-1-1');
       assert.ok(!run.result.message.includes(' was committed as '), run.result.message);
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'The database is up.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['head-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
     });
     test('a null fix result commits an empty file list and stops', async () => {
       const results = fixFlowResults({ 'fix-1-1': null, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
@@ -3050,7 +3057,7 @@ const ROW_TESTS = {
       const surfaced = await runWorkflow(LAUNCH, results, buildWithSurfaceKinds(['validation_remediation']));
       assertTailPause(surfaced, [surfacedAsk(main.buildValidationRemediationBrief(OTHER, 1))], 'validate-1-1');
     });
-    test('a version-only failure at the fix limit pauses through stopDelivery, and the reply resets the round count and runs validation again', async () => {
+    test('a version-only failure at the fix limit pauses through stopDelivery, and the reply resets the round count and runs the head check, then validation again', async () => {
       const results = versionResults({ 'validate-1-1': validateWithVersion(MINOR_MISMATCH) });
       const labels = ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'validate-1-1'];
       for (let round = 1; round <= main.maxFixRounds(); round += 1) {
@@ -3061,6 +3068,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), labels);
       assertStepStopPause(run, 'Validation still fails its version check on commit ' + OTHER + ' after 3 fix rounds, so the delivery stopped before the pull request. ' + VERSION_LINE, 'fix-commit-1-3');
       Object.assign(results, {
+        'head-1-1': headRelay(OTHER),
         'validate-1-2': validateWithVersion(MINOR_MISMATCH),
         'fix-1-4': { outcome: 'complete', files: ['VERSION'] },
         'fix-commit-1-4': commitRelay({ commit: THIRD }),
@@ -3069,7 +3077,8 @@ const ROW_TESTS = {
       });
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'I fixed the version script.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labels.length), ['validate-1-2', 'fix-1-4', 'fix-commit-1-4', 'validate-1-3', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.deepEqual(labelsOf(resumed).slice(labels.length), ['head-1-1', 'validate-1-2', 'fix-1-4', 'fix-commit-1-4', 'validate-1-3', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.ok(!labelsOf(resumed).includes('facts-2'));
     });
   },
   'SD-27': () => {
@@ -3146,7 +3155,7 @@ const ROW_TESTS = {
       assert.equal(labels.at(-1), 'pr-1');
       assert.equal(new Set(labels).size, labels.length);
       const names = [...moduleSource.matchAll(/gateLabel\('([a-z-]+)', run, /g)].map((match) => match[1]);
-      assert.deepEqual([...new Set(names)].sort(), ['fix', 'fix-commit', 'review', 'review-commit', 'validate']);
+      assert.deepEqual([...new Set(names)].sort(), ['fix', 'fix-commit', 'head', 'review', 'review-commit', 'validate']);
       assert.ok(!moduleSource.includes('validate-commit'), 'no validate-commit runner');
       assert.equal(main.gateLabel('validate', { pass: 2 }, 3), 'validate-2-3');
     });
@@ -3527,13 +3536,13 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(callOf(run, 'review-commit-1-1').prompt, 'inputs').files, []);
       assert.equal(run.failures, 0);
     });
-    test('an unusable review pauses after its commit, and the reply runs local review again with the next count', async () => {
-      const results = happyResults({ 'review-1-1': { ...REVIEW_CLEAN, finding_id: 'f1f1f1f1' }, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+    test('an unusable review pauses after its commit, and the reply runs the head check, then local review again with the next count', async () => {
+      const results = happyResults({ 'review-1-1': { ...REVIEW_CLEAN, finding_id: 'f1f1f1f1' }, 'head-1-1': headRelay(OTHER), 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
       assertStepStopPause(run, 'The local review step returned no usable result, so the delivery stopped before the pull request.\n\n', 'review-commit-1-1');
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Codex is back.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['head-1-1', 'review-1-2', 'review-commit-1-2', 'pr-1']);
     });
     test('a null review commit result names the agent failure and gives the run_again Next line', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-commit-1-1': null }));
@@ -3746,13 +3755,13 @@ const ROW_TESTS = {
         assert.equal(state.replans, 0);
       });
     }
-    test('a reply to a blocked review runs local review again with the next count, and the run goes on', async () => {
+    test('a reply to a blocked review runs the head check, then local review again with the next count, and the run goes on', async () => {
       const blocked = stopCases.find(([label]) => label === 'blocked')[1];
-      const results = happyResults({ 'review-1-1': blocked, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+      const results = happyResults({ 'review-1-1': blocked, 'head-1-1': headRelay(OTHER), 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
       const paused = await runWorkflow(LAUNCH, results);
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'review-1-2', 'review-commit-1-2', 'pr-1']);
     });
     test('the flagged text shows whole at its REVIEW_SCHEMA bound of 200 code points', async () => {
       const boundExcerpt = '\u{1F600}'.repeat(200);
@@ -4272,17 +4281,17 @@ const ROW_TESTS = {
         assert.equal(run.result.pr, undefined);
       }
     });
-    test('each reply to a pull request stop runs the PR step again under pr-P-N, N from 2, with the same inputs block', async () => {
+    test('each reply to a pull request stop runs the head check, then the PR step again under pr-P-N, N from 2, with the same inputs block', async () => {
       const blocked = { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' };
-      const results = happyResults({ 'pr-1': blocked, 'pr-1-2': blocked, 'pr-1-3': cannedPrRunner() });
+      const results = happyResults({ 'pr-1': blocked, 'head-1-1': headRelay(OTHER), 'pr-1-2': blocked, 'head-1-2': headRelay(OTHER), 'pr-1-3': cannedPrRunner() });
       const first = await runWorkflow(LAUNCH, results);
       const second = await runWorkflow(resumeWith(LAUNCH, first.result, 'Fixed.'), results);
       assert.equal(second.result.needs_user, true, second.result.message);
-      assert.deepEqual(labelsOf(second).slice(labelsOf(first).length), ['pr-1-2']);
+      assert.deepEqual(labelsOf(second).slice(labelsOf(first).length), ['head-1-1', 'pr-1-2']);
       assert.deepEqual(second.result.resume_args, { answers: { 'round-1': 'Fixed.' }, build: BUILD_ID });
       const third = await runWorkflow(resumeWith(LAUNCH, second.result, 'Fixed again.'), results);
       assert.equal(third.result.outcome, 'complete', third.result.message);
-      assert.deepEqual(labelsOf(third).slice(-3), ['pr-1', 'pr-1-2', 'pr-1-3']);
+      assert.deepEqual(labelsOf(third).slice(-5), ['pr-1', 'head-1-1', 'pr-1-2', 'head-1-2', 'pr-1-3']);
       for (const label of ['pr-1-2', 'pr-1-3']) {
         assert.deepEqual(readDataBlock(callOf(third, label).prompt, 'inputs'), readDataBlock(callOf(third, 'pr-1').prompt, 'inputs'), label);
         assert.equal(callOf(third, label).opts.phase, 'PR');
@@ -4598,11 +4607,11 @@ const ROW_TESTS = {
       });
     }
     test('a reply to a paused pull request step runs it again, and a good relay then completes the run', async () => {
-      const results = happyResults({ 'pr-1': { outcome: 'ran', stdout: good + 'remote: origin\n' }, 'pr-1-2': cannedPrRunner() });
+      const results = happyResults({ 'pr-1': { outcome: 'ran', stdout: good + 'remote: origin\n' }, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
       const paused = await runWorkflow(LAUNCH, results);
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['pr-1-2']);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'pr-1-2']);
       assert.ok(resumed.result.message.startsWith(openedLine(OTHER)), resumed.result.message);
     });
     test('a null relay, an agent failure, names it once and passes the run_again Next line through', async () => {
@@ -6095,16 +6104,17 @@ const ROW_TESTS = {
       assert.equal(main.buildWaveSubject([makeStep('S1!', ['src/a.js']), makeStep('S2', ['src/b.js'])], 2), 'S1!, S2: Step S1! is done.');
       assert.equal(main.buildWaveSubject([makeStep('S1', ['src/a.js']), makeStep('S2!', ['src/b.js'])], 2), 'complete wave 2 of the delivery plan');
     });
-    test('the fix round and review commits have fixed subjects, the wave has none, and no step is named bump', () => {
+    test('the fix round and review commits and the head check have fixed subjects, the wave has none, and no step is named bump', () => {
       assert.throws(() => main.commitStepTexts('bump'), /no texts for step "bump"/);
       assert.equal(main.commitStepTexts('fix').subject, 'fix the failed validation');
       assert.equal(main.commitStepTexts('review').subject, 'apply the local review fixes');
+      assert.equal(main.commitStepTexts('head').subject, 'read the branch head');
       assert.equal(main.commitStepTexts('wave').subject, undefined);
     });
     test('every key of the commit inputs block is an input of the molt SKILL.md', () => {
       const skillInputs = readMoltSkillInputs();
       assert.ok(skillInputs.includes('subject') && skillInputs.includes('trunk'), skillInputs.join(','));
-      for (const stepName of ['wave', 'fix', 'review']) {
+      for (const stepName of ['wave', 'fix', 'review', 'head']) {
         const subject = main.commitStepTexts(stepName).subject || 'Step S1 is done.';
         const inputs = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', stepName, subject), 'inputs');
         assert.deepEqual(Object.keys(inputs), ['files', 'commit_type', 'breaking', 'subject', 'trunk'], stepName);
@@ -6115,7 +6125,7 @@ const ROW_TESTS = {
       const scratch = makeScratchRepo();
       const multiStep = [makeStep('S1', ['src/a.js'], { outcome: longOutcome }), makeStep('S2', ['src/b.js'])];
       const subjects = [
-        ...['fix', 'review'].map((stepName) => main.commitStepTexts(stepName).subject),
+        ...['fix', 'review', 'head'].map((stepName) => main.commitStepTexts(stepName).subject),
         main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: longOutcome })], 1),
         main.buildWaveSubject(multiStep, 1),
         main.buildWaveSubject([makeStep('S'.repeat(64), ['src/a.js']), makeStep('T'.repeat(64), ['src/b.js'])], 1),
@@ -6605,9 +6615,9 @@ const ROW_TESTS = {
       assert.equal(state.replans, 0);
       assert.deepEqual(structuredClone(state.answerLog), [{ question: 'FIX_ZQ.\n\n' + lib.renderQuestions([stopAskOf(causes, true)]), settled: [], reply: STOP_REPLY }]);
     });
-    test('a reply with isReplan false gives {held: false}, so the stopped step runs again', () => {
+    test('a reply with isReplan false gives {rerun: true}, so the gate loop runs the head check, then the stopped step again', () => {
       const state = stopState({ answers: {}, reply: STOP_REPLY });
-      assert.deepEqual(structuredClone(main.stopDelivery([{ problem: 'FIX_ZQ.' }], state, ['END_ZQ'], false)), { held: false });
+      assert.deepEqual(structuredClone(main.stopDelivery([{ problem: 'FIX_ZQ.' }], state, ['END_ZQ'], false)), { rerun: true });
       assert.equal(state.answerLog.length, 1);
     });
     test('the built script calls finishDeliveryBlocked only in stopDelivery, finishOpenQuestions and the launch end of runDelivery', () => {
@@ -6695,6 +6705,96 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'commit-1-1': commitRelay({ commit: HEAD, committed: 'false' }), ...tailResults(1, HEAD) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.equal(commitsPartOf(run, 'pr-1'), 'This run made no commit.', prBodyOf(run, 'pr-1'));
+    });
+  },
+  'SD-73': () => {
+    const prBlocked = { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' };
+    const malformedLead = 'The commit step returned malformed routing lines, so the delivery stopped. Check the branch for a commit of ';
+    test('a malformed fix commit relay whose runner committed pauses, and the reply reads the head, holds validation on it and pushes it', async () => {
+      const launch = { ...LAUNCH, local_review: false };
+      const results = happyResults({
+        'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT },
+        'fix-1-1': { outcome: 'complete', files: ['src/cache.js'] },
+        'fix-commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' },
+        'head-1-1': headRelay(THIRD),
+        'validate-1-2': VALIDATE_PASSED
+      });
+      const paused = await runWorkflow(launch, results);
+      assertStepStopPause(paused, malformedLead + 'the fix round.', 'fix-commit-1-1');
+      const resumed = await runWorkflow(resumeWith(launch, paused.result, 'Fixed, go on.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'pr-1']);
+      assert.equal(readDataBlock(callOf(resumed, 'pr-1').prompt, 'inputs').expect_commit, THIRD);
+      assert.ok(resumed.result.message.startsWith(openedLine(THIRD)), resumed.result.message);
+      assert.ok(prBodyOf(resumed, 'pr-1').includes('Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD), prBodyOf(resumed, 'pr-1'));
+    });
+    test('the head check commits an empty file list with a fixed subject, and an unchanged head runs the stopped step again with the same inputs', async () => {
+      const results = happyResults({ 'pr-1': prBlocked, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const paused = await runWorkflow(LAUNCH, results);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'pr-1-2']);
+      const check = callOf(resumed, 'head-1-1');
+      assert.ok(check.prompt.startsWith('Invoke the hivemind:molt skill once, with each value of the inputs block below as the input of the same name, to commit nothing: the empty file list makes it report the head of the working branch after the user replied to a stop.\n'), check.prompt);
+      assert.deepEqual(readDataBlock(check.prompt, 'inputs'), { files: [], commit_type: 'feat', breaking: false, subject: 'read the branch head', trunk: 'main' });
+      assert.equal(check.opts.phase, 'Commit');
+      assert.deepEqual(readDataBlock(callOf(resumed, 'pr-1-2').prompt, 'inputs'), readDataBlock(callOf(resumed, 'pr-1').prompt, 'inputs'));
+    });
+    test('a pull request stop reply with a moved head reruns the gates through gate_rerun, and the pull request pushes the new head', async () => {
+      const results = happyResults({
+        'pr-1': prBlocked,
+        'head-1-1': headRelay(THIRD),
+        'validate-1-2': VALIDATE_PASSED,
+        'review-1-2': REVIEW_CLEAN,
+        'review-commit-1-2': headRelay(THIRD),
+        'pr-1-2': cannedPrRunner()
+      });
+      const paused = await runWorkflow(LAUNCH, results);
+      assertStepStopPause(paused, 'The pull request step was blocked,', 'pr-1');
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'I pushed a fix commit.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'review-1-2', 'review-commit-1-2', 'pr-1-2']);
+      assert.equal(readDataBlock(callOf(resumed, 'pr-1').prompt, 'inputs').expect_commit, OTHER);
+      assert.equal(readDataBlock(callOf(resumed, 'pr-1-2').prompt, 'inputs').expect_commit, THIRD);
+      assert.ok(resumed.result.message.includes('\n\n' + HELD_ALL + THIRD + '.'), resumed.result.message);
+      assert.ok(resumed.result.message.includes(main.buildGateRerunBrief(['validate', 'review'], THIRD, false).problem), resumed.result.message);
+      assert.ok(prBodyOf(resumed, 'pr-1-2').includes('Commits this run made:\n- ' + OTHER + '\n- ' + OTHER + '..' + THIRD), prBodyOf(resumed, 'pr-1-2'));
+    });
+    test('a malformed head check pauses, and its reply runs head-P-N with the next count', async () => {
+      const results = happyResults({ 'pr-1': prBlocked, 'head-1-1': { outcome: 'ran', stdout: 'nonsense\n' }, 'head-1-2': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const first = await runWorkflow(LAUNCH, results);
+      const second = await runWorkflow(resumeWith(LAUNCH, first.result, 'Fixed.'), results);
+      assertStepStopPause(second, malformedLead + 'the head check.', 'head-1-1');
+      const third = await runWorkflow(resumeWith(LAUNCH, second.result, 'Fixed again.'), results);
+      assert.equal(third.result.outcome, 'complete', third.result.message);
+      assert.deepEqual(labelsOf(third).slice(labelsOf(first).length), ['head-1-1', 'head-1-2', 'pr-1-2']);
+    });
+    test('a transient block of the head check runs it once more under head-P-N-retry', async () => {
+      const transientBlock = { outcome: 'blocked', stderr: 'fatal: unable to access the remote: Could not resolve host: github.com\nblocker: the commit failed\n' };
+      const results = happyResults({ 'pr-1': prBlocked, 'head-1-1': transientBlock, 'head-1-1-retry': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const paused = await runWorkflow(LAUNCH, results);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'head-1-1-retry', 'pr-1-2']);
+    });
+    test('a refused head check is a commit-script refusal and ends the run, naming the dirty paths', async () => {
+      const refused = { outcome: 'blocked', stderr: 'outside: "notes.txt"\nblocker: the working tree has dirty paths outside files\n' };
+      const results = happyResults({ 'pr-1': prBlocked, 'head-1-1': refused });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
+      assert.equal(run.result.outcome, 'blocked');
+      assert.equal(run.result.needs_user, false);
+      assert.equal(labelsOf(run).at(-1), 'head-1-1');
+      assert.ok(run.result.message.startsWith('The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files". Dirty paths outside the files of the head check:\n- "notes.txt"'), run.result.message);
+    });
+    test('a null head check result, an agent failure, ends the run', async () => {
+      const results = happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' }, 'head-1-1': null });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'npm is installed now.'), results);
+      assert.equal(run.result.outcome, 'blocked');
+      assert.equal(run.result.needs_user, false);
+      assert.equal(labelsOf(run).at(-1), 'head-1-1');
+      assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('run_again'));
     });
   }
 };

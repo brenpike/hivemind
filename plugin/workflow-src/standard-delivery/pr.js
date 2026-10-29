@@ -7,12 +7,14 @@
  *   run    the run state of main.js createRunState: head, commits, taken,
  *          reversibleEffects, notRunGates and draft.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
- *   gates  the gate loop state of runGates (gates.js): notes and rejected.
+ *   gates  the gate loop state of runGates (gates.js): notes, rejected and
+ *          runs.pr, the count of this step's runs in the pass.
  *   maxTitleLength() and maxPullRequestTextLength() from main.js.
  *
  * Outputs
  *   runPullRequestStep(run, plan, gates)  {result}: finishDeliveryComplete
- *          naming the pull request, a pause, or a blocked finish.
+ *          naming the pull request, a pause, or a blocked finish, or
+ *          {rerun: true} when the user replied to its stop.
  *   renderLiteralBlock(text)  the literal fenced block the pull request
  *          texts put external text in.
  *   The step, as meta.js names it:
@@ -28,8 +30,11 @@
  *           under pr-P-retry. A pull request text over its size limit and a
  *           head_ref_oid other than H are terminal stops. A blocked,
  *           malformed or other unusable relay pauses through stopDelivery
- *           (record.js), and the reply runs the step again under pr-P-N, N
- *           from 2. The body is the plan summary and the
+ *           (record.js). The step makes one runner call: the gate loop
+ *           runs the head check after a reply, then this step again under
+ *           pr-P-N, N from 2, or the gates first when the head moved, so
+ *           expect_commit is always a head the run read. The body is the
+ *           plan summary and the
  *           comment a fixed lead, each followed by the one run record
  *           buildRunRecordParts() returns, the same record the final
  *           message carries, with every taken decision and no reviewer
@@ -204,8 +209,8 @@ function checkPullRequestRelay(relay, head) {
   return { values: values };
 }
 
-function describePullRequestLabel(run, attempt) {
-  return 'pr-' + run.pass + (attempt === 1 ? '' : '-' + attempt);
+function describePullRequestLabel(run, count) {
+  return 'pr-' + run.pass + (count === 1 ? '' : '-' + count);
 }
 
 async function runPullRequestStep(run, plan, gates) {
@@ -214,15 +219,10 @@ async function runPullRequestStep(run, plan, gates) {
     return stopDelivery([{ problem: texts.problem, terminal: true }], run, [], false);
   }
   phase('PR');
-  for (let attempt = 1; ; attempt += 1) {
-    const relay = await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), describePullRequestLabel(run, attempt), 'PR');
-    const checked = checkPullRequestRelay(relay, run.head);
-    if (checked.problem === undefined) {
-      return { result: finishDeliveryComplete(run, plan, checked.values, gates) };
-    }
-    const stopped = stopDelivery([checked], run, [], false);
-    if (stopped.held !== false) {
-      return stopped;
-    }
+  const relay = await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), describePullRequestLabel(run, gates.runs.pr), 'PR');
+  const checked = checkPullRequestRelay(relay, run.head);
+  if (checked.problem === undefined) {
+    return { result: finishDeliveryComplete(run, plan, checked.values, gates) };
   }
+  return stopDelivery([checked], run, [], false);
 }

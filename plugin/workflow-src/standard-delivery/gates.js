@@ -11,18 +11,21 @@
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   facts  the checked facts of the pass, from runPlanWaves (waves.js):
  *          trunk_commit is the base of the version check.
- *   gates  the gate loop state runGates builds: held, notes, runs (validate,
- *          review and fix), failures, fixRounds, reruns, rejected and answer.
+ *   gates  the gate loop state runGates builds: held, notes, runs
+ *          (validate, review, fix, headCheck and pr), failures, fixRounds,
+ *          reruns, rejected and answer.
  *          failures maps a head to the kept failed validation on it:
  *          {status, failures, versionOnly, versionLine}.
  *   FIX_SCHEMA, VALIDATE_SCHEMA, VALIDATE_COMMANDS_SCHEMA and the limits of
  *   main.js.
  *
  * Outputs
- *   runGates(run, plan, facts)  what runPullRequestStep (pr.js) returns once
- *          every configured gate holds on the head, else {result} or {replan}.
+ *   runGates(run, plan, facts)  {result} or {replan}: the pull request step
+ *          (pr.js) runs inside the gate loop once every configured gate holds
+ *          on the head.
  *   A gate step returns {held} with a note when it held, {answer} when the user
- *   answered a review question, or a run end, {result} or {replan} (isRunEnd).
+ *   answered a review question, {rerun: true} when the user replied to its
+ *   stop, or a run end, {result} or {replan} (isRunEnd).
  *   The steps, as meta.js names them:
  *   Validate a gate, after the last wave. A drone runs validation as its
  *           whole task and edits nothing, and no commit runner follows it: a
@@ -57,8 +60,8 @@
  *                 round with no decide() call, counted toward
  *                 maxFixRounds(); at the limit it stops through
  *                 stopDelivery, and the reply resets the round count and
- *                 runs validation again. Any other failure keeps the fix
- *                 limit ask.
+ *                 runs the head check, then validation again. Any other
+ *                 failure keeps the fix limit ask.
  *   undetermined, unreadable  the run asks version_bump_indeterminable with
  *                 no decide() call (buildVersionQuestionBrief, briefs.js).
  *                 The reply becomes run.versionAnswer and runs one fix round
@@ -77,15 +80,22 @@
  *   mark on. The fix step reads its result before the commit and passes its
  *   cause, if any, to runCommitStep (relay.js), which stops with every
  *   cause through stopDelivery with isReplan false, so a commit stop never
- *   hides a step cause; a run end it returns is returned as is. A null fix
- *   result ends the run, and any other fix round stop pauses: the reply,
- *   {held: false}, drops the kept failure of the head, so the gate loop
- *   runs validation again with the next count. A blocked, malformed or
- *   unusable validation or version relay goes through stopDelivery
- *   (record.js) with isReplan false: an agent failure ends the run, and any
- *   other cause pauses, the reply running validation again with the next
- *   count. A user_answer fix prompt carries the reply in a data block and
- *   not the resume note.
+ *   hides a step cause; a stop it returns is returned as is. A null fix
+ *   result ends the run, and any other fix round stop pauses. A blocked,
+ *   malformed or unusable validation or version relay goes through
+ *   stopDelivery (record.js) with isReplan false: an agent failure ends the
+ *   run, and any other cause pauses. A user_answer fix prompt carries the
+ *   reply in a data block and not the resume note.
+ *   Every resume reads the head before a gate holds on it or the PR pushes
+ *   it (issue 457). A reply to a validation, fix round, local review or
+ *   pull request stop returns {rerun: true}, and the gate loop runs one head
+ *   check: runCommitStep (relay.js) with an empty file list and label
+ *   head-P-N, N counting gates.runs.headCheck, run again while it returns
+ *   {rerun: true}, and a run end it returns is returned as is. A refusal of
+ *   it is a commit-script refusal and ends the run. Then the kept failures
+ *   are cleared, so validation runs again with the next count, and a head
+ *   the check saw move goes through the gate rerun below; else the same
+ *   step runs again.
  *   A gate holds only for the commit its step ended on, read from the commit
  *   runner's routing line; validation, which has no commit runner, ends on the
  *   head it ran on. The configured gates run in gateIds() order, local review
@@ -95,7 +105,8 @@
  *   held on an earlier commit runs again. Each such going back resolves once
  *   through decide() kind gate_rerun, and after maxGateReruns() of them the run
  *   asks. The pull request step runs only when every configured gate holds on
- *   the head.
+ *   the head, as the last step of the gate loop, under label pr-P, then
+ *   pr-P-N with N counting gates.runs.pr.
  *   Tail asks: a question after the last wave pauses through pauseDelivery
  *   with a lead and its question: askTail(ask, run, lead) leads with the
  *   given lead string, as a local review question passes, else with
@@ -372,11 +383,8 @@ async function runFixRound(run, plan, fix, gates) {
   const edit = readGateEditOutcome(result, FIX_SCHEMA);
   const stepCauses = edit.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + edit.reason, nextAction: edit.nextAction, agentFailure: edit.agentFailure }] : [];
   const committed = await runCommitStep(run, plan, { files: edit.files, label: gateLabel('fix-commit', run, count), stepName: 'fix' }, stepCauses);
-  if (isRunEnd(committed)) {
+  if (committed.values === undefined) {
     return committed;
-  }
-  if (committed.held === false) {
-    delete gates.failures[run.head];
   }
   return { held: false };
 }
@@ -414,9 +422,8 @@ async function askVersionQuestion(run, plan, gates, validation) {
 function stopVersionFixLimit(run, gates, kept) {
   const cause = { problem: 'Validation still fails its version check on commit ' + run.head + ' after ' + maxFixRounds() + ' fix rounds, so ' + RUN_NAME + ' stopped before the pull request. ' + kept.versionLine };
   const stopped = stopDelivery([cause], run, [], false);
-  if (stopped.held === false) {
+  if (stopped.rerun === true) {
     gates.fixRounds = 0;
-    delete gates.failures[run.head];
   }
   return stopped;
 }
@@ -461,37 +468,55 @@ function resolveGateRerun(run, gates) {
   return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, false), run);
 }
 
-function runGateStep(gateId, run, plan, facts, gates) {
-  if (gateId === 'review') {
+function runGateStep(stepId, run, plan, facts, gates) {
+  if (stepId === 'pr') {
+    return runPullRequestStep(run, plan, gates);
+  }
+  if (stepId === 'review') {
     return runReviewGate(run, plan, gates);
   }
   return runValidateGate(run, plan, facts, gates);
 }
 
+async function runHeadCheck(run, plan, gates) {
+  let checked = { rerun: true };
+  while (checked.rerun === true) {
+    gates.runs.headCheck += 1;
+    checked = await runCommitStep(run, plan, { files: [], label: gateLabel('head', run, gates.runs.headCheck), stepName: 'head' }, []);
+  }
+  gates.failures = {};
+  return checked;
+}
+
+async function runResumedStep(stepId, run, plan, facts, gates) {
+  const ended = await runGateStep(stepId, run, plan, facts, gates);
+  return ended.rerun === true ? runHeadCheck(run, plan, gates) : ended;
+}
+
 async function runGates(run, plan, facts) {
   const gateList = configuredGateIds(run);
-  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
+  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0, headCheck: 0, pr: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
   if (!run.localReview) {
     listNotRunGate(run, notConfiguredReviewLine());
   }
   let checkedHead = run.head;
   let index = 0;
-  while (index < gateList.length) {
-    const gateId = gateList[index];
-    if (gates.held[gateId] === run.head) {
+  for (;;) {
+    const stepId = index < gateList.length ? gateList[index] : 'pr';
+    if (stepId !== 'pr' && gates.held[stepId] === run.head) {
       index += 1;
       continue;
     }
-    if (gateId !== 'validate' || !hasKeptFailure(run, gates)) {
-      gates.runs[gateId] += 1;
+    if (stepId !== 'validate' || !hasKeptFailure(run, gates)) {
+      gates.runs[stepId] += 1;
     }
-    const ended = await runGateStep(gateId, run, plan, facts, gates);
+    const ended = await runResumedStep(stepId, run, plan, facts, gates);
     if (isRunEnd(ended)) {
       return ended;
     }
     if (ended.held) {
-      gates.held[gateId] = run.head;
-      gates.notes[gateId] = ended.note;
+      gates.held[stepId] = run.head;
+      gates.notes[stepId] = ended.note;
     }
     if (ended.answer !== undefined) {
       gates.answer = ended.answer;
@@ -506,5 +531,4 @@ async function runGates(run, plan, facts) {
     }
     index = 0;
   }
-  return runPullRequestStep(run, plan, gates);
 }

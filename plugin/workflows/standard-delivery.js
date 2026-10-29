@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '63546df6dda315be';
+const BUILD_ID = 'eb05cec6ed6d01fc';
 
 function supportedSchemaKeywords(){
 return[
@@ -2409,7 +2409,7 @@ const then=isReplan?'the run plans again from fresh facts.':'the run takes the s
 return{
 id:'stop',
 kind:STEP_STOP_KIND,
-problem:(isRunAgain?'Nothing in the repo needs a fix: reply when you are ready to go on, and ':'Fix what stopped the run, then reply, and ')+then,
+problem:(isRunAgain?'Nothing in the repo needs a fix: reply when you are ready to go on, and ':'Fix what stopped the run, then reply with every change committed, and ')+then,
 criticality:{level:'medium',likelihood:'certain',blast_radius:'The working branch and the pull request it becomes.',if_ignored:unshownBriefText()},
 options:[
 {id:'A',summary:isReplan?'Go on: plan again from fresh facts.':'Go on: take the stopped step again.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true}
@@ -2701,11 +2701,8 @@ const result=await agent(prompt,droneOptions(gateLabel('fix',run,count),'Fix',FI
 const edit=readGateEditOutcome(result,FIX_SCHEMA);
 const stepCauses=edit.status==='blocked'?[{problem:'The validation fix round was blocked, so '+RUN_NAME+' stopped: '+edit.reason,nextAction:edit.nextAction,agentFailure:edit.agentFailure}]:[];
 const committed=await runCommitStep(run,plan,{files:edit.files,label:gateLabel('fix-commit',run,count),stepName:'fix'},stepCauses);
-if(isRunEnd(committed)){
+if(committed.values===undefined){
 return committed;
-}
-if(committed.held===false){
-delete gates.failures[run.head];
 }
 return{held:false};
 }
@@ -2738,9 +2735,8 @@ return runFixRound(run,plan,{failures:failures,versionLine:versionLine,userAnswe
 function stopVersionFixLimit(run,gates,kept){
 const cause={problem:'Validation still fails its version check on commit '+run.head+' after '+maxFixRounds()+' fix rounds, so '+RUN_NAME+' stopped before the pull request. '+kept.versionLine};
 const stopped=stopDelivery([cause],run,[],false);
-if(stopped.held===false){
+if(stopped.rerun===true){
 gates.fixRounds=0;
-delete gates.failures[run.head];
 }
 return stopped;
 }
@@ -2782,36 +2778,52 @@ return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds,run.head
 gates.reruns+=1;
 return resolveTailDecision(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head,false),run);
 }
-function runGateStep(gateId,run,plan,facts,gates){
-if(gateId==='review'){
+function runGateStep(stepId,run,plan,facts,gates){
+if(stepId==='pr'){
+return runPullRequestStep(run,plan,gates);
+}
+if(stepId==='review'){
 return runReviewGate(run,plan,gates);
 }
 return runValidateGate(run,plan,facts,gates);
 }
+async function runHeadCheck(run,plan,gates){
+let checked={rerun:true};
+while(checked.rerun===true){
+gates.runs.headCheck+=1;
+checked=await runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.headCheck),stepName:'head'},[]);
+}
+gates.failures={};
+return checked;
+}
+async function runResumedStep(stepId,run,plan,facts,gates){
+const ended=await runGateStep(stepId,run,plan,facts,gates);
+return ended.rerun===true?runHeadCheck(run,plan,gates):ended;
+}
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined};
+const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
 let checkedHead=run.head;
 let index=0;
-while(index<gateList.length){
-const gateId=gateList[index];
-if(gates.held[gateId]===run.head){
+for(;;){
+const stepId=index<gateList.length?gateList[index]:'pr';
+if(stepId!=='pr'&&gates.held[stepId]===run.head){
 index+=1;
 continue;
 }
-if(gateId!=='validate'||!hasKeptFailure(run,gates)){
-gates.runs[gateId]+=1;
+if(stepId!=='validate'||!hasKeptFailure(run,gates)){
+gates.runs[stepId]+=1;
 }
-const ended=await runGateStep(gateId,run,plan,facts,gates);
+const ended=await runResumedStep(stepId,run,plan,facts,gates);
 if(isRunEnd(ended)){
 return ended;
 }
 if(ended.held){
-gates.held[gateId]=run.head;
-gates.notes[gateId]=ended.note;
+gates.held[stepId]=run.head;
+gates.notes[stepId]=ended.note;
 }
 if(ended.answer!==undefined){
 gates.answer=ended.answer;
@@ -2826,7 +2838,6 @@ return rerun;
 }
 index=0;
 }
-return runPullRequestStep(run,plan,gates);
 }
 
 function omitSchemaDialect(schema){
@@ -3290,8 +3301,8 @@ return{problem:'The pull request step reported a head commit other than the comm
 }
 return{values:values};
 }
-function describePullRequestLabel(run,attempt){
-return'pr-'+run.pass+(attempt===1?'':'-'+attempt);
+function describePullRequestLabel(run,count){
+return'pr-'+run.pass+(count===1?'':'-'+count);
 }
 async function runPullRequestStep(run,plan,gates){
 const texts=buildPullRequestTexts(run,plan,gates);
@@ -3299,17 +3310,12 @@ if(texts.problem!==undefined){
 return stopDelivery([{problem:texts.problem,terminal:true}],run,[],false);
 }
 phase('PR');
-for(let attempt=1;;attempt+=1){
-const relay=await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),describePullRequestLabel(run,attempt),'PR');
+const relay=await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),describePullRequestLabel(run,gates.runs.pr),'PR');
 const checked=checkPullRequestRelay(relay,run.head);
 if(checked.problem===undefined){
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 }
-const stopped=stopDelivery([checked],run,[],false);
-if(stopped.held!==false){
-return stopped;
-}
-}
+return stopDelivery([checked],run,[],false);
 }
 
 function renderCommits(commits){
@@ -3435,7 +3441,7 @@ return asked;
 if(isReplan){
 return{replan:{reason:'The user replied to a stop the run paused at, so plan again from the fresh facts with the answers block.'}};
 }
-return{held:false};
+return{rerun:true};
 }
 
 function trunkFreshnessMap(){
@@ -3757,6 +3763,8 @@ case'fix':
 return{purpose:'the validation fix round that just ran',noun:'the fix round',subject:'fix the failed validation'};
 case'review':
 return{purpose:'the local review that just ran, with an empty file list',noun:'the local review',subject:'apply the local review fixes'};
+case'head':
+return{purpose:'nothing: the empty file list makes it report the head of the working branch after the user replied to a stop',noun:'the head check',subject:'read the branch head'};
 default:
 throw new Error('commitStepTexts: no texts for step '+JSON.stringify(stepName));
 }

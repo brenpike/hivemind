@@ -26,7 +26,8 @@
  *   pauseDelivery  the only run results; see the Outputs of main.js.
  *   stopDelivery(causes, run, endLines, isReplan)  {result}, the blocked end
  *           or the pause, or on a reply {replan: {reason}} when isReplan,
- *           a new pass outside maxReplans(), else {held: false}.
+ *           a new pass outside maxReplans(), else {rerun: true}: the gate
+ *           loop (gates.js) runs the head check, then the stopped step.
  *   observeHead(run, commit, committed, branch)  pushes commit onto
  *           run.commits when committed, else the range
  *           <run.head>..<commit> when run.head is defined and differs from
@@ -76,10 +77,12 @@
  *   One head writer (issue 457): observeHead is the only code that writes
  *   run.head, run.branch or run.commits, and its callers feed it only a
  *   commit read from a checked relay: runCommitStep (relay.js) the molt
- *   commit, and runDeliveryPass (main.js) the branch commit of each new
- *   pass before any wave. So a commit made during a pause, or by a commit
- *   runner whose relay could not be read, enters the run commits as a
- *   range once the run reads the head again.
+ *   commit, the head check after each reply to a gate or PR stop
+ *   (gates.js) included, and runDeliveryPass (main.js) the branch commit
+ *   of each new pass before any wave. So every resume reads the head
+ *   before a gate holds on it or the PR pushes it, and a commit made
+ *   during a pause, or by a commit runner whose relay could not be read,
+ *   enters the run commits as a range once the run reads the head again.
  *   One stop path (issue 457): a stop ends the run only on a terminal
  *   cause, an agent failure, a size limit (finishOpenQuestions) or the
  *   launch check. Every other stop pauses through stopDelivery, and a reply
@@ -242,5 +245,5 @@ function stopDelivery(causes, run, endLines, isReplan) {
   if (isReplan) {
     return { replan: { reason: 'The user replied to a stop the run paused at, so plan again from the fresh facts with the answers block.' } };
   }
-  return { held: false };
+  return { rerun: true };
 }

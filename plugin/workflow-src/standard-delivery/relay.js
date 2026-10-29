@@ -25,7 +25,8 @@
  *           stepCauses is empty, else what stopDelivery (record.js) returns
  *           over stepCauses, then the commit cause when the commit failed,
  *           or else the describeCommitEnd end line when it committed:
- *           {result}, {replan} for a wave, or {held: false} for a gate step.
+ *           {result}, {replan} for a wave, or {rerun: true} for a gate step
+ *           or the head check.
  *   runRunnerRelay(prompt, label, phaseTitle)  the relay of one runner
  *           call; a relay that fits RELAY_SCHEMA, is blocked and whose
  *           stderr isTransientFailure (lib/result.js) runs the same prompt
@@ -59,7 +60,8 @@
  *           resumed run replays its cached result.
  *   Branch  a runner invokes hivemind:create-working-branch.
  *   Commit  a runner invokes hivemind:molt after every wave and every gate
- *           step that can change files. Its checked commit goes to
+ *           step that can change files, and with an empty file list as the
+ *           head check of gates.js after a reply. Its checked commit goes to
  *           observeHead (record.js), as the branch commit does at each pass
  *           start (main.js): a commit it makes enters the run commits; when
  *           it commits nothing but reports a commit other than the previous
@@ -492,6 +494,8 @@ function commitStepTexts(stepName) {
       return { purpose: 'the validation fix round that just ran', noun: 'the fix round', subject: 'fix the failed validation' };
     case 'review':
       return { purpose: 'the local review that just ran, with an empty file list', noun: 'the local review', subject: 'apply the local review fixes' };
+    case 'head':
+      return { purpose: 'nothing: the empty file list makes it report the head of the working branch after the user replied to a stop', noun: 'the head check', subject: 'read the branch head' };
     default:
       throw new Error('commitStepTexts: no texts for step ' + JSON.stringify(stepName));
   }

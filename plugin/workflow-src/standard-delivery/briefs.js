@@ -34,7 +34,8 @@
  *   buildGateRerunBrief  the tail briefs gates.js resolves.
  *   buildStepStopBrief(causes, isReplan)  the step_stop brief stopDelivery
  *            (record.js) asks: one option, strength none. Its problem says
- *            to fix what stopped the run, then reply, or, when every cause
+ *            to fix what stopped the run, then reply with every change
+ *            committed, or, when every cause
  *            is run_again, that nothing in the repo needs a fix and to reply
  *            when ready, and whether the reply takes the stopped step again
  *            or plans again from fresh facts.
@@ -194,7 +195,7 @@ function buildStepStopBrief(causes, isReplan) {
   return {
     id: 'stop',
     kind: STEP_STOP_KIND,
-    problem: (isRunAgain ? 'Nothing in the repo needs a fix: reply when you are ready to go on, and ' : 'Fix what stopped the run, then reply, and ') + then,
+    problem: (isRunAgain ? 'Nothing in the repo needs a fix: reply when you are ready to go on, and ' : 'Fix what stopped the run, then reply with every change committed, and ') + then,
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
     options: [
       { id: 'A', summary: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true }
