@@ -2168,6 +2168,91 @@ const ROW_TESTS = {
         assert.equal(blocks[1], main.nextStepLine('run_again'), label);
       }
     });
+    const failureSentence = lib.describeNoResult(null);
+    const countFailureSentences = (message) => message.split(failureSentence).length - 1;
+    const compoundPlan = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
+    const compoundSites = [
+      {
+        label: 'commit-1-1',
+        noun: 'the wave',
+        head: HEAD,
+        buildResults: (step, commit) => happyResults({ 'work-1-STEP-001': step, 'commit-1-1': commit }),
+        nullCause: 'A worker did not finish its step, so the delivery stopped after its wave:\n- Step "STEP-001" was blocked: it returned no usable result. ' + failureSentence,
+        fixStep: { outcome: 'blocked', summary: 'Stopped.', blocker: 'Tests fail.', next_action: 'fix_cause' },
+        fixCause: 'A worker did not finish its step, so the delivery stopped after its wave:\n- Step "STEP-001" was blocked: it says "Tests fail.".'
+      },
+      {
+        label: 'bump-commit-1-1',
+        noun: 'the version bump',
+        head: OTHER,
+        buildResults: (step, commit) => happyResults({ 'plan-1': planResult(compoundPlan), 'bump-1-1': step, 'bump-commit-1-1': commit }),
+        nullCause: 'The bump step returned a result it could not use, so the delivery stopped before validation. ' + failureSentence,
+        fixStep: { outcome: 'blocked', blocker: 'No version.', next_action: 'fix_cause' },
+        fixCause: 'The bump step was blocked, so the delivery stopped before validation. It says "No version.".'
+      },
+      {
+        label: 'fix-commit-1-1',
+        noun: 'the fix round',
+        head: OTHER,
+        buildResults: (step, commit) => fixFlowResults({ 'fix-1-1': step, 'fix-commit-1-1': commit }),
+        nullCause: 'The validation fix round was blocked, so the delivery stopped: it returned no usable result. ' + failureSentence,
+        fixStep: { outcome: 'blocked', files: [], blocker: 'No database.', next_action: 'fix_cause' },
+        fixCause: 'The validation fix round was blocked, so the delivery stopped: it says "No database.".'
+      },
+      {
+        label: 'review-commit-1-1',
+        noun: 'the local review',
+        head: OTHER,
+        buildResults: (step, commit) => happyResults({ 'review-1-1': step, 'review-commit-1-1': commit }),
+        nullCause: 'The local review step returned no usable result, so the delivery stopped before the pull request. ' + failureSentence,
+        fixStep: { ...REVIEW_CLEAN, finding_id: 'f1f1f1f1' },
+        fixCause: 'The local review step returned no usable result, so the delivery stopped before the pull request.'
+      }
+    ];
+    const describeNullCommit = (noun) => 'The commit step returned a result it could not use, so the delivery stopped. Check the branch for a commit of ' + noun + '. ' + failureSentence;
+    const dirtyCommit = { outcome: 'blocked', stderr: 'outside: "notes.txt"\nblocker: the working tree has dirty paths outside files\n' };
+    const describeDirtyCommit = (noun) => 'The commit step was blocked, so the delivery stopped: its blocker line says "the working tree has dirty paths outside files". Dirty paths outside the files of ' + noun + ':\n- "notes.txt"';
+    const describeMalformedCommit = (noun) => 'The commit step returned malformed routing lines, so the delivery stopped. Check the branch for a commit of ' + noun + '.';
+    for (const site of compoundSites) {
+      test(`a null step result then a null commit at ${site.label} shows both agent failures, step first, with the run_again Next line`, async () => {
+        const run = await runWorkflow(LAUNCH, site.buildResults(null, null));
+        assert.equal(run.result.outcome, 'blocked');
+        assert.equal(labelsOf(run).at(-1), site.label);
+        assert.deepEqual(run.result.message.split('\n\n').slice(0, 3), [site.nullCause, main.nextStepLine('run_again'), describeNullCommit(site.noun)]);
+        assert.equal(countFailureSentences(run.result.message), 2, run.result.message);
+      });
+      test(`a null step result then a blocked or malformed commit at ${site.label} leads with the commit cause and the fix line, then the agent failure`, async () => {
+        for (const [commit, commitCause] of [[dirtyCommit, describeDirtyCommit(site.noun)], [commitRelay({ committed: 'yes' }), describeMalformedCommit(site.noun)]]) {
+          const run = await runWorkflow(LAUNCH, site.buildResults(null, commit));
+          assert.equal(run.result.outcome, 'blocked');
+          assert.equal(labelsOf(run).at(-1), site.label);
+          assert.deepEqual(run.result.message.split('\n\n').slice(0, 3), [commitCause, NEXT_STEP_LINE, site.nullCause]);
+          assert.equal(countFailureSentences(run.result.message), 1, run.result.message);
+        }
+      });
+      test(`a step cause with the fix line then a null commit at ${site.label} leads with the step cause, then the commit agent failure`, async () => {
+        const run = await runWorkflow(LAUNCH, site.buildResults(site.fixStep, null));
+        assert.equal(run.result.outcome, 'blocked');
+        assert.equal(labelsOf(run).at(-1), site.label);
+        assert.deepEqual(run.result.message.split('\n\n').slice(0, 3), [site.fixCause, NEXT_STEP_LINE, describeNullCommit(site.noun)]);
+        assert.equal(countFailureSentences(run.result.message), 1, run.result.message);
+      });
+      test(`a step cause then a commit with nothing to commit at ${site.label} adds no commit end line`, async () => {
+        const run = await runWorkflow(LAUNCH, site.buildResults(site.fixStep, commitRelay({ commit: site.head, committed: 'false' })));
+        assert.equal(run.result.outcome, 'blocked');
+        assert.deepEqual(run.result.message.split('\n\n').slice(0, 2), [site.fixCause, NEXT_STEP_LINE]);
+        assert.ok(!run.result.message.includes(' was committed as '), run.result.message);
+      });
+    }
+    for (const site of compoundSites.filter((candidate) => candidate.label !== 'review-commit-1-1')) {
+      test(`a step cause then a made commit at ${site.label} adds the commit end line right after the Next line`, async () => {
+        const run = await runWorkflow(LAUNCH, site.buildResults(site.fixStep, commitRelay({ commit: THIRD })));
+        assert.equal(run.result.outcome, 'blocked');
+        const noun = site.noun.charAt(0).toUpperCase() + site.noun.slice(1);
+        assert.deepEqual(run.result.message.split('\n\n').slice(0, 3), [site.fixCause, NEXT_STEP_LINE, noun + ' was committed as ' + THIRD + ', so that commit can hold partial edits.']);
+        assert.equal(run.result.message.split(' was committed as ').length, 2, run.result.message);
+      });
+    }
     test('a blocked commit shows at most 5 dirty paths, then a count of the rest', async () => {
       const stderr = Array.from({ length: 7 }, (_, index) => 'outside: "p' + index + '.txt"').join('\n') + '\nblocker: the working tree has dirty paths outside files\n';
       const run = await runWorkflow(LAUNCH, happyResults({ 'commit-1-1': { outcome: 'blocked', stderr: stderr } }));
@@ -2207,15 +2292,17 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'blocked');
       assert.deepEqual(labelsOf(run).slice(-2), ['work-1-STEP-001', 'commit-1-1']);
-      assert.ok(run.result.message.startsWith([
-        'A worker did not finish its step, so the delivery stopped after the commit of its wave: the wave was committed as ' + OTHER + ', so that commit can hold partial edits of the steps below.',
-        '- Step "STEP-001" was blocked: it says "Tests fail.".'
-      ].join('\n') + '\n\n'), run.result.message);
+      assert.deepEqual(run.result.message.split('\n\n').slice(0, 3), [
+        'A worker did not finish its step, so the delivery stopped after its wave:\n- Step "STEP-001" was blocked: it says "Tests fail.".',
+        NEXT_STEP_LINE,
+        'The wave was committed as ' + OTHER + ', so that commit can hold partial edits.'
+      ]);
     });
-    test('a blocked wave with nothing to commit names the branch head', async () => {
+    test('a blocked wave with nothing to commit shows no commit end line', async () => {
       const results = happyResults({ 'work-1-STEP-001': { outcome: 'blocked', summary: 'Stopped.', blocker: 'Tests fail.' }, 'commit-1-1': commitRelay({ committed: 'false', commit: HEAD }) });
       const run = await runWorkflow(LAUNCH, results);
-      assert.ok(run.result.message.startsWith('A worker did not finish its step, so the delivery stopped after the commit of its wave: the wave left nothing to commit, so the branch head stays ' + HEAD + '.\n- Step "STEP-001"'), run.result.message);
+      assert.deepEqual(run.result.message.split('\n\n').slice(0, 2), ['A worker did not finish its step, so the delivery stopped after its wave:\n- Step "STEP-001" was blocked: it says "Tests fail.".', NEXT_STEP_LINE]);
+      assert.ok(!run.result.message.includes(' was committed as '), run.result.message);
     });
     test('a blocked wave shows one lead line, at most 5 blocked steps, then a count of the rest', async () => {
       const ids = ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7'];
@@ -2223,7 +2310,7 @@ const ROW_TESTS = {
       const blockedResults = Object.fromEntries(ids.map((id) => ['work-1-' + id, { outcome: 'blocked', summary: 'Stopped.', blocker: 'Tests fail.' }]));
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan), ...blockedResults }));
       assert.deepEqual(run.result.message.split('\n\n')[0].split('\n'), [
-        'A worker did not finish its step, so the delivery stopped after the commit of its wave: the wave was committed as ' + OTHER + ', so that commit can hold partial edits of the steps below.',
+        'A worker did not finish its step, so the delivery stopped after its wave:',
         ...ids.slice(0, 5).map((id) => '- Step "' + id + '" was blocked: it says "Tests fail.".'),
         '- and 2 more.'
       ]);
@@ -2716,8 +2803,9 @@ const ROW_TESTS = {
         const run = await runWorkflow(LAUNCH, results);
         assert.equal(run.result.outcome, 'blocked');
         const blocks = run.result.message.split('\n\n');
-        assert.equal(blocks[0], reason + ' It left nothing to commit, so the branch head stays ' + OTHER + '.');
+        assert.equal(blocks[0], reason);
         assert.equal(blocks[1], result === null ? main.nextStepLine('run_again') : NEXT_STEP_LINE);
+        assert.ok(!run.result.message.includes(' was committed as '), run.result.message);
         assert.equal(labelsOf(run).at(-1), 'bump-commit-1-1');
       });
     }
@@ -2897,7 +2985,8 @@ const ROW_TESTS = {
     test('a blocked fix round stops the run after its commit', async () => {
       const run = await runWorkflow(LAUNCH, fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'The test needs a database.' }, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.equal(run.result.message.split('\n\n')[0], 'The validation fix round was blocked, so the delivery stopped after its commit: it says "The test needs a database.". It left nothing to commit, so the branch head stays ' + OTHER + '.');
+      assert.deepEqual(run.result.message.split('\n\n').slice(0, 2), ['The validation fix round was blocked, so the delivery stopped: it says "The test needs a database.".', NEXT_STEP_LINE]);
+      assert.ok(!run.result.message.includes(' was committed as '), run.result.message);
       assert.equal(labelsOf(run).at(-1), 'fix-commit-1-1');
     });
     test('a null fix result commits an empty file list and stops', async () => {
@@ -2905,7 +2994,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'blocked');
       assert.deepEqual(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'inputs').files, []);
-      assert.ok(run.result.message.startsWith('The validation fix round was blocked, so the delivery stopped after its commit: it returned no usable result. ' + lib.describeNoResult(null) + ' It left nothing to commit, so the branch head stays ' + OTHER + '.\n\n'), run.result.message);
+      assert.ok(run.result.message.startsWith('The validation fix round was blocked, so the delivery stopped: it returned no usable result. ' + lib.describeNoResult(null) + '\n\n'), run.result.message);
       assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('run_again'));
     });
   },
@@ -4433,30 +4522,23 @@ const ROW_TESTS = {
       const facts = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'blocked' } });
       assert.equal(facts.result.message.split('\n\n')[0], 'The facts step was blocked, so the delivery stopped before planning: it gave no reason.');
     });
-    test('describeUnusableResult gives run_again only for a null result and adds the describeNoResult sentence once', () => {
-      const sentence = lib.describeNoResult(null);
-      assert.deepEqual(structuredClone(main.describeUnusableResult('P.', null)), { problem: 'P. ' + sentence, nextAction: 'run_again' });
-      assert.deepEqual(structuredClone(main.describeUnusableResult('P. ' + sentence, null)), { problem: 'P. ' + sentence, nextAction: 'run_again' });
-      for (const result of [{}, undefined, 'x', { outcome: 'ran' }]) {
-        assert.deepEqual(structuredClone(main.describeUnusableResult('P.', result)), { problem: 'P.' });
-      }
-    });
     test('capItemLines keeps at most maxListedItems() item lines and counts the rest', () => {
       const items = ['- a', '- b', '- c', '- d', '- e', '- f', '- g'];
       assert.equal(main.maxListedItems(), 5);
       assert.deepEqual([...main.capItemLines(items)], ['- a', '- b', '- c', '- d', '- e', '- and 2 more.']);
       assert.deepEqual([...main.capItemLines(items.slice(0, 5))], items.slice(0, 5));
     });
-    test('a blocked gate step lead and a blocked bump lead are one line with the commit end', async () => {
+    test('a blocked gate step lead and a blocked bump lead are one line, and the commit end is its own block after the Next line', async () => {
       const versioned = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
       const committed = commitRelay({ commit: THIRD });
-      for (const results of [
-        fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'No database.' }, 'fix-commit-1-1': committed }),
-        happyResults({ 'plan-1': planResult(versioned), 'bump-1-1': { outcome: 'blocked', blocker: 'No version.' }, 'bump-commit-1-1': committed })
+      for (const [results, noun] of [
+        [fixFlowResults({ 'fix-1-1': { outcome: 'blocked', files: [], blocker: 'No database.' }, 'fix-commit-1-1': committed }), 'The fix round'],
+        [happyResults({ 'plan-1': planResult(versioned), 'bump-1-1': { outcome: 'blocked', blocker: 'No version.' }, 'bump-commit-1-1': committed }), 'The version bump']
       ]) {
         const run = await runWorkflow(LAUNCH, results);
-        const lead = run.result.message.split('\n\n')[0];
-        assert.ok(!lead.includes('\n') && lead.endsWith(' Its files were committed as ' + THIRD + ', so that commit can hold partial edits.'), lead);
+        const blocks = run.result.message.split('\n\n');
+        assert.ok(!blocks[0].includes('\n') && !blocks[0].includes(' was committed as '), blocks[0]);
+        assert.deepEqual(blocks.slice(1, 3), [NEXT_STEP_LINE, noun + ' was committed as ' + THIRD + ', so that commit can hold partial edits.']);
       }
     });
     test('the last blocker line wins over other stderr lines', () => {
@@ -4674,9 +4756,10 @@ const ROW_TESTS = {
       const paragraphs = run.result.message.split('\n\n');
       assert.ok(paragraphs[0].startsWith('A worker did not finish its step'), paragraphs[0]);
       assert.equal(paragraphs[1], NEXT_STEP_LINE);
-      assert.equal(paragraphs[2], branchLine(1, OTHER));
+      assert.equal(paragraphs[2], 'The wave was committed as ' + OTHER + ', so that commit can hold partial edits.');
+      assert.equal(paragraphs[3], branchLine(1, OTHER));
       assert.equal(paragraphs.at(-1), lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }]));
-      assert.equal(paragraphs.length, 4, run.result.message);
+      assert.equal(paragraphs.length, 5, run.result.message);
     });
     test('a blocked result before any commit shows no branch line', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': { outcome: 'blocked', blocker: 'No plan.', questions: [] } });
@@ -4733,16 +4816,16 @@ const ROW_TESTS = {
       const words = 'The planner could not plan the delivery: ' + ('\u0001'.repeat(9) + ' ').repeat(2000);
       const unbroken = 'The planner could not plan the delivery: ' + '\u0001'.repeat(20000);
       for (const [message, compactLength] of [[words, 1000], [unbroken, 40]]) {
-        assert.equal(Array.from(main.buildBlockedLead(message).compact).length, compactLength);
+        assert.equal(Array.from(main.buildStopBlocks([{ problem: message }])[0].compact).length, compactLength);
         for (const blockedRun of [undefined, run]) {
-          const result = main.finishDeliveryBlocked(message, blockedRun);
+          const result = main.finishDeliveryBlocked([{ problem: message }], blockedRun);
           const paragraphs = result.message.split('\n\n');
           assert.equal(paragraphs[paragraphs.findIndex((paragraph) => paragraph.startsWith('The planner could not plan')) + 1], NEXT_STEP_LINE);
           assert.equal(paragraphs.find((paragraph) => paragraph.startsWith('The planner could not plan')), lib.cutAtBoundary(message, main.maxBlockedLeadLength()));
           assert.ok(lib.noticeLength(result) <= lib.noticeBudget());
         }
       }
-      assert.deepEqual({ ...main.buildBlockedLead('Short.') }, { text: 'Short.' });
+      assert.deepEqual({ ...main.buildStopBlocks([{ problem: 'Short.' }])[0] }, { text: 'Short.' });
     });
     test('the complete result keeps its lead alone first, with no next-step line', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
@@ -5080,8 +5163,8 @@ const ROW_TESTS = {
   'SD-56': () => {
     const schemaProblem = 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.';
     const workerUnusable = 'Step "STEP-001" was blocked: it returned no usable result.';
-    const bumpUnusable = 'The bump step returned a result it could not use, so the delivery stopped before validation. It left nothing to commit, so the branch head stays ' + OTHER + '.';
-    const fixUnusable = 'The validation fix round was blocked, so the delivery stopped after its commit: it returned no usable result.';
+    const bumpUnusable = 'The bump step returned a result it could not use, so the delivery stopped before validation.';
+    const fixUnusable = 'The validation fix round was blocked, so the delivery stopped: it returned no usable result.';
     const validateUnusable = 'The validation step returned no usable result, so the delivery stopped before the pull request.';
     const reviewUnusable = 'The local review step returned no usable result, so the delivery stopped before the pull request.';
     const versioned = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
