@@ -38,10 +38,11 @@
  *     entry normalizes, deduplicated in order, at most maxReferences().
  *     Otherwise {problem}.
  *   readLaunchInputs(argsObject, runNoun, buildId)
- *     {trunk, references}, or the {problem} of the first bad arg: a
+ *     {trunk, references}, or the cause of the first bad arg: a
  *     resume_args key first, then the build, then trunk, then references.
  *     The build is checked only on a resume, when answers is a plain
- *     object: a build absent or not equal to buildId is a problem.
+ *     object: a build absent or not equal to buildId is a cause with
+ *     nextAction 'answer'. Every other cause is {problem} alone.
  *   roundKey(round)            'round-N', the answers key of round N.
  *   readStoredAnswers(argsObject)
  *     argsObject.answers when it is a plain object, else {}.
@@ -62,7 +63,9 @@
  *   the launch args already hold, and never a reply or an autonomy key.
  *   A resume whose build is not the running build stops before any agent
  *   call: the plugin changed while the run was paused, so the stored
- *   answers may not fit the new script. A fresh launch ignores a build.
+ *   answers may not fit the new script. Its cause has next action 'answer':
+ *   nothing needs a fix, the request runs again with the answers in it. A
+ *   fresh launch ignores a build.
  *   Args that hold a resume_args key are a problem before any other check:
  *   the resume rule puts the keys of resume_args at the top level of args,
  *   so a nested resume_args would drop the stored answers and ask the same
@@ -165,7 +168,7 @@ function readLaunchInputs(argsObject, runNoun, buildId) {
     return { problem: 'The args hold a resume_args key, but the keys of resume_args belong at the top level of args, so ' + describeRunNoun(runNoun) + ' did not start.' };
   }
   if (isPlainObject(argsObject.answers) && argsObject.build !== buildId) {
-    return { problem: 'The plugin changed while ' + describeRunNoun(runNoun) + ' was paused, so nothing ran. Run the request again with your answers in it.' };
+    return { problem: 'The plugin changed while ' + describeRunNoun(runNoun) + ' was paused, so nothing ran.', nextAction: 'answer' };
   }
   const trunkInput = readTrunk(argsObject, runNoun);
   if (trunkInput.problem !== undefined) {

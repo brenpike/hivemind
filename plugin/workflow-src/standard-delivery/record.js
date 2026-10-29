@@ -1,7 +1,7 @@
 /*
  * standard-delivery record.js: the run record and the run ends of the
- * standard-delivery workflow. It holds the run record parts, the finish
- * and pause functions and the open question Next line.
+ * standard-delivery workflow. It holds the run record parts and the
+ * finish and pause functions.
  *
  * Inputs
  *   run     the run state of main.js createRunState, or undefined when the
@@ -10,16 +10,15 @@
  *   gates   the gate loop state of runGates (gates.js), once the gates ran.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a blocked end, {problem, nextAction?} each.
- *   result.js finish, pauseForUser, buildStopBlocks and the fit helpers,
- *   and brief.js renderQuestions, renderOpenQuestions and
- *   renderDecisionsCompact.
+ *   result.js finish, which builds a blocked message from the causes,
+ *   pauseForUser and the fit helpers, and brief.js renderQuestions,
+ *   renderOpenQuestions and renderDecisionsCompact.
  *
  * Outputs
  *   finishDeliveryBlocked, finishDeliveryComplete, finishOpenQuestions and
  *   pauseDelivery  the only run results; see the Outputs of main.js.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
  *           request body and its comment carry, the commit list included.
- *   nextActionLine(run)  the Next line of an open question stop.
  *
  * Message shape (issue 460)
  *   Every chat message has one shape, built here:
@@ -27,17 +26,19 @@
  *           renderQuestions(resolution.asks), a whole block when an ask is
  *           exact. The reply line is the last line. No commit, gate line,
  *           taken decision or detail block.
- *   finishOpenQuestions  the fixed lead, its Next line as a whole block,
- *           the open questions, then the reversible effects and the taken
- *           decisions, one line each, as every final message lists them
+ *   finishOpenQuestions  finishDeliveryBlocked over one cause, the fixed
+ *           lead with next action answer, with the open questions as its
+ *           end line and the round's taken decisions added to the run's.
+ *   finishDeliveryBlocked(causes, run, endLines)  finish({outcome:
+ *           'blocked', causes, blocks}) (lib/result.js), which leads with
+ *           buildStopBlocks(causes): the lead, the Next line as a whole
+ *           block and one block per later cause. The blocks are one per end
+ *           line (the open questions, or the commit end runCommitStep
+ *           passes), one line naming the encoded branch, the commit count
+ *           and the head only when the run made commits, then the
+ *           reversible effects and the taken decisions, one line each
+ *           (renderDecisionsCompact), as every final message lists them
  *           (ADR-0037 decision 3).
- *   finishDeliveryBlocked(causes, run, endLines)  buildStopBlocks(causes)
- *           (lib/result.js): the lead, the Next line as a whole block and
- *           one block per later cause. Then one block per end line, the
- *           commit end runCommitStep passes, one line naming the encoded
- *           branch, the commit count and the head only when the run made
- *           commits, then the reversible effects and the taken decisions,
- *           one line each (renderDecisionsCompact).
  *   finishDeliveryComplete  one line naming the pull request opened or
  *           pushed to and its commit, one line naming the gates that held
  *           and any gate not configured, the warning line when there is
@@ -59,8 +60,9 @@
  *   complete (issue 434), only when the replies are too long to carry
  *   (reply_size) or an exact question cannot be shown whole
  *   (exact_text_size): it finishes blocked through finishOpenQuestions,
- *   lists the questions still open, names the next action with
- *   nextActionLine() and runs nothing further.
+ *   whose Next line is nextStepLine('answer'), lists the questions still
+ *   open and runs nothing further. With commits, the branch line names
+ *   the branch.
  *
  * Why
  *   Every message of the run is built here, so each one has the same short
@@ -105,14 +107,6 @@ function buildRunRecordParts(run, taken, gates) {
   return parts;
 }
 
-function nextActionLine(run) {
-  const again = 'Next: run the request again with the answers in it.';
-  if (run.commits.length === 0) {
-    return again;
-  }
-  return again + ' The new run plans what is left from the commits already on branch ' + encodeUntrustedText(run.branch) + '.';
-}
-
 function describeBranchLine(run) {
   return 'Branch ' + encodeUntrustedText(run.branch) + ' holds ' + describeCount(run.commits.length, 'commit') + ' this run made, with head ' + run.head + '.';
 }
@@ -129,14 +123,14 @@ function buildRecordTailBlocks(run, taken) {
 }
 
 function finishDeliveryBlocked(causes, run, endLines = []) {
-  const blocks = buildStopBlocks(causes).concat(endLines.map((line) => ({ text: line })));
+  const blocks = endLines.map((line) => ({ text: line }));
   if (run !== undefined && run.commits.length > 0) {
     blocks.push({ text: describeBranchLine(run) });
   }
   if (run !== undefined) {
     blocks.push(...buildRecordTailBlocks(run, run.taken));
   }
-  return finish({ outcome: 'blocked', blocks: blocks });
+  return finish({ outcome: 'blocked', causes: causes, blocks: blocks });
 }
 
 function describePullRequest(values) {
@@ -167,10 +161,8 @@ function finishDeliveryComplete(run, plan, prValues, gates) {
 }
 
 function finishOpenQuestions(resolution, stopReason, run) {
-  const lead = 'The delivery ran no further step, because questions are still open.';
-  const blocks = [{ text: lead }, { text: nextActionLine(run), whole: true }, { text: renderOpenQuestions(resolution.asks, stopReason) }];
-  blocks.push(...buildRecordTailBlocks(run, run.taken.concat(resolution.taken)));
-  return finish({ outcome: 'blocked', blocks: blocks });
+  const cause = { problem: 'The delivery ran no further step, because questions are still open.', nextAction: 'answer' };
+  return finishDeliveryBlocked([cause], { ...run, taken: run.taken.concat(resolution.taken) }, [renderOpenQuestions(resolution.asks, stopReason)]);
 }
 
 function pauseDelivery(resolution, run, lead) {

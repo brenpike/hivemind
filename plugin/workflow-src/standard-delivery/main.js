@@ -41,8 +41,9 @@
  *
  * Outputs
  *   pauseForUser({resumeArgs, blocks}) when a question needs the user,
- *   otherwise finish({outcome, blocks}), and finish({outcome, blocks, pr})
- *   once the pull request step ran; see result.js for these shapes.
+ *   otherwise finish({outcome: 'blocked', causes, blocks}), or
+ *   finish({outcome: 'complete', blocks, pr}) once the pull request step
+ *   ran; see result.js for these shapes.
  *   resume_args is {answers, build} alone: no run record (ADR-0037
  *   decision 2). build is BUILD_ID, the build id the build injects, and a
  *   resume whose build differs stops at the launch check (issue 472).
@@ -98,11 +99,11 @@
  *   Every blocked result carries one Next line as a whole block right
  *   after its first block, and no block carries shorten. A blocked run end
  *   takes a list of causes, {problem, nextAction?} each, never a message:
- *   finishDeliveryBlocked passes them to buildStopBlocks (lib/result.js),
- *   which builds the lead, the Next line nextStepLine(nextAction) and one
- *   block per later cause. An open question stop takes nextActionLine().
- *   Each Next line starts with 'Next:' and points at no cause its lead
- *   does not name. A worker, gate edit or validation result may carry
+ *   finishDeliveryBlocked passes them to finish (lib/result.js), which
+ *   builds the lead, the Next line nextStepLine(nextAction) and one block
+ *   per later cause through buildStopBlocks. Each Next line starts with
+ *   'Next:' and points at no cause its lead does not name. A worker, gate
+ *   edit or validation result may carry
  *   next_action with outcome blocked: run_again when the cause is outside
  *   the repo and passes with no change, fix_cause otherwise.
  *   One rule covers every step: a null result from any agent() call, an
@@ -122,12 +123,12 @@
  *   cuts mid-word, and the lead of an open question stop is fixed and
  *   short, so the fit keeps the lead and the Next line in every tier and
  *   finish never throws.
- *   nextActionLine() names the next action in one line: run the request
- *   again with the answers in it. When the run made commits, it names the
- *   encoded branch, which plan-schema.json bounds by maxLength 200 and the
- *   line shows whole, and says the new run plans what is left
- *   from the commits already on it (issue 434). It never offers a pull
- *   request from commits a gate did not hold on (issue 444).
+ *   An open question stop and a resume across builds are each one cause
+ *   with next action answer, so their Next line is nextStepLine('answer'):
+ *   run the request again with the answers in it. When the run made
+ *   commits, the branch line names the encoded branch, which
+ *   plan-schema.json bounds by maxLength 200 (issue 434). No Next line
+ *   offers a pull request from commits a gate did not hold on (issue 444).
  *   Only finishDeliveryComplete, with pr, ends complete, so complete
  *   always means a pull request exists.
  *   Every step- or script-written diagnostic or name a message shows goes
@@ -366,7 +367,7 @@ async function runDeliveryPass(run, replan) {
 async function runDelivery(rawArgs) {
   const launch = readDeliveryLaunch(rawArgs);
   if (launch.problem !== undefined) {
-    return finishDeliveryBlocked([{ problem: launch.problem }], undefined);
+    return finishDeliveryBlocked([launch], undefined);
   }
   const run = createRunState(launch);
   let replan;

@@ -17,7 +17,8 @@
  *          build is the BUILD_ID the pause wrote with answers. A resume
  *          whose build is absent or not this script's BUILD_ID stops before
  *          any agent call (lib/args.js): the plugin changed while it was
- *          paused. A fresh launch ignores build.
+ *          paused. That stop has the answer Next line. A fresh launch
+ *          ignores build.
  *          reply is the user's reply to that pause, per the result.js
  *          contract. It answers the first round with no stored answer, and
  *          only when answers is present, since that marks a pending pause.
@@ -42,8 +43,9 @@
  *
  * Outputs
  *   pauseForUser({resumeArgs, blocks}) when a question needs the user's
- *   answer, otherwise finish({outcome, blocks}). See result.js for both
- *   shapes and for how blocks are fitted to the completion notice.
+ *   answer, otherwise finish({outcome: 'blocked', causes}) or
+ *   finish({outcome: 'complete', blocks}). See result.js for the shapes and
+ *   for how blocks are fitted to the completion notice.
  *
  * Invariants
  *   Facts first: the first agent call is the facts step, a haiku drone that
@@ -141,7 +143,8 @@
  *   Each goes through describeUnusableResult (result.js), the one place
  *   that adds the describeNoResult sentence naming the agent failure and
  *   the run_again Next line, so the user does not look for a cause in the
- *   repo (issue 460). Any other blocked end gets the fix line.
+ *   repo (issue 460). The build-skew stop gets the answer line, any other
+ *   blocked end the fix line.
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
  *   quoted whole up to maxReasonLength() code points, 600, else cut by
@@ -176,9 +179,9 @@
  *   block as renderDecisionsCompact alone, one line per decision with no
  *   verbatim, then any open-questions block, then the report last, the only
  *   block that may be shortened. Every blocked end passes a list of causes
- *   {problem, nextAction?} to finishBlocked, and its message is
- *   buildStopBlocks (result.js) over them: a lead, the Next line kept
- *   whole, then any later causes.
+ *   {problem, nextAction?} to finishBlocked, and finish (result.js) builds
+ *   the message from them: a lead, the Next line kept whole, then any later
+ *   causes.
  *
  * Why
  *   analysis-only used to end blocked whenever the planner had open
@@ -368,7 +371,7 @@ function resolveQuestions(questions, level) {
 }
 
 function finishBlocked(causes) {
-  return finish({ outcome: 'blocked', blocks: buildStopBlocks(causes) });
+  return finish({ outcome: 'blocked', causes: causes });
 }
 
 function finishComplete(report, openQuestions, taken) {
@@ -406,7 +409,7 @@ async function runAnalysis(rawArgs) {
   }
   const launchInputs = readLaunchInputs(argsObject, RUN_NOUN, BUILD_ID);
   if (launchInputs.problem !== undefined) {
-    return finishBlocked([{ problem: launchInputs.problem }]);
+    return finishBlocked([launchInputs]);
   }
   const checked = await gatherCheckedFacts(launchInputs);
   if (checked.cause !== undefined) {
