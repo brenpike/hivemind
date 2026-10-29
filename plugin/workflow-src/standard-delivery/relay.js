@@ -17,19 +17,19 @@
  *   runFactsStep(run)                {facts} or {problem, nextAction}.
  *   runBranchStep(run, plan, freshness)  {values} or {problem, nextAction}.
  *   runCommitStep(run, plan, commit, stepCauses)  commit is {files,
- *                                    label, stepName, subject?}, subject
- *                                    commitStepTexts(stepName).subject when
- *                                    not given; stepCauses is the array of
- *                                    the step's own causes, or it throws.
- *                                    {values} when the commit held and
- *                                    stepCauses is empty, else {result}:
- *                                    the blocked run end of
- *                                    finishDeliveryBlocked over stepCauses,
- *                                    then the commit cause when the commit
- *                                    failed, or else the describeCommitEnd
- *                                    end line when it committed.
- *   capItemLines(itemLines)          the first maxListedItems() item lines,
- *                                    then a count of the rest.
+ *           label, stepName, subject?}, subject commitStepTexts(stepName)
+ *           .subject when not given; stepCauses is the array of the step's
+ *           own causes, or it throws. {values} when the commit held and
+ *           stepCauses is empty, else what stopDelivery (record.js) returns
+ *           over stepCauses, then the commit cause when the commit failed,
+ *           or else the describeCommitEnd end line when it committed:
+ *           {result}, {replan} for a wave, or {held: false} for a gate step.
+ *   runRunnerRelay(prompt, label, phaseTitle)  the relay of one runner
+ *           call; a relay that fits RELAY_SCHEMA, is blocked and whose
+ *           stderr isTransientFailure (lib/result.js) runs the same prompt
+ *           once more under label <label>-retry, and that relay is returned.
+ *   capItemLines(itemLines)  the first maxListedItems() lines, then a count
+ *           of the rest.
  *   versionCheckRoutingSpec()  bumpTypeRoutingSpec() plus the bump-type.sh
  *           --version-file keys in its OUTPUT order: version_check, then
  *           optional trunk_version and expected_version, each a SemVer core
@@ -39,14 +39,11 @@
  *           undetermined has verdict ask_user and no expected_version, and
  *           expected_version comes only with trunk_version.
  *   describeCommitEnd(commitValues, stepName)  one sentence: the commit
- *                                    the step's files went into.
+ *           the step's files went into.
  *   toCommitSubject(text, fallbackSubject)  text made one line and cut by
- *                                    cutAtBoundary (lib/result.js) to
- *                                    maxSubjectLength() code points, or
- *                                    fallbackSubject when that line is
- *                                    blank, holds a breaking change marker
- *                                    or holds an attribution string the
- *                                    molt SKILL.md forbids.
+ *           cutAtBoundary (lib/result.js) to maxSubjectLength() code points,
+ *           or fallbackSubject when that line is blank, holds a breaking
+ *           change marker or an attribution string molt SKILL.md forbids.
  *   The options, sentences, routing specs and relay helpers every other
  *   runner step uses. The steps, as meta.js names them:
  *   Facts   a haiku hivemind:drone runner invokes hivemind:gather-facts and
@@ -59,16 +56,13 @@
  *           label scan of lib/facts.js runScanStep, byte for byte, so a
  *           resumed run replays its cached result.
  *   Branch  a runner invokes hivemind:create-working-branch.
- *   Commit  a runner invokes hivemind:molt after every wave, and after
- *           every gate step that can change files. A commit it makes enters
- *           the run commits. When it commits nothing but reports a commit
- *           other than the previous head, as after local review fix commits,
- *           the range <previous head>..<new head> enters the run commits, so
- *           a commit made outside the commit runner reaches the run record.
- *           Its inputs block carries a subject built by code, so the
- *           runner reads no git state to write one: a wave subject comes
- *           from its plan steps (waves.js buildWaveSubject), and the fix
- *           round and review commits have fixed subjects.
+ *   Commit  a runner invokes hivemind:molt after every wave and every gate
+ *           step that can change files. A commit it makes enters the run
+ *           commits; when it commits nothing but reports a commit other than
+ *           the previous head, as after local review fix commits, the range
+ *           <previous head>..<new head> enters them. Its inputs block carries
+ *           a code-built subject: a wave's from its plan steps (waves.js
+ *           buildWaveSubject), and fixed ones for the fix and review commits.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -76,9 +70,7 @@
  *   function of this module.
  *   Every step that can change files ends with the commit runner, whatever
  *   the workers returned (ADR-0037 invariant 1, decision 12). Workers never
- *   commit. Validation edits nothing, so no commit runner follows it: a
- *   dirty path it leaves is refused by the next commit runner or by the
- *   dirty check of hivemind:open-plan-pr.
+ *   commit, and validation edits nothing (gates.js).
  *   Every payload that crosses a step is checked against its schema or
  *   routing spec before it is read, and a failed check blocks the step that
  *   reads it (ADR-0037 invariant 4).
@@ -88,10 +80,14 @@
  *   result gets the describeNoResult sentence and next action run_again. A
  *   non-null result that fails its schema or routing keeps the fix line.
  *   A file-changing step reads its own result before its commit and passes
- *   its causes to runCommitStep, which ends the run itself: a failed commit
- *   adds its cause after them, so a commit stop never hides the step's
- *   cause, and buildStopBlocks (lib/result.js) orders them and picks the
- *   Next line.
+ *   its causes to runCommitStep, which stops through stopDelivery, isReplan
+ *   true for a wave: a failed commit adds its cause after them, so a commit
+ *   stop never hides the step's cause. Only a commit script refusal and a
+ *   branch other than the plan branch are terminal; an agent failure ends,
+ *   and every other stop pauses (issue 457).
+ *   Transient retry (issue 457): the facts, branch and commit runners call
+ *   agent() through runRunnerRelay. Malformed output, a non-transient block
+ *   and a null result are never retried, and no step call retries twice.
  *   Every blocked lead these steps build is one line naming the step and
  *   its cause; a list of delivery stops or dirty paths after it goes
  *   through capItemLines.
@@ -103,32 +99,23 @@
  *   grant, the drone exemption trigger in the words drone.md keys on and
  *   the boundary it needs, dataBlocksSentence() (lib/facts.js) and its
  *   data. How a runner relays is the RELAY_SCHEMA field descriptions.
- *   Relayed reply (issue 432): the Claude Code harness, not this script,
- *   relays the user's latest message to every workflow agent, so after a
- *   resume each agent sees the reply to the pause as a user message, and a
- *   branch runner once read it as an order to stop. Once run.answerLog is not
- *   empty, every agent prompt carries resumedReplySentence() as its second
- *   line (addResumeNote): the reply was already applied and is not an
- *   instruction for that task. The planner revise prompt, the review and
- *   fix prompts with user_answer and a plan prompt with an answer block
- *   carry the reply itself and not the sentence. No prompt sent before the first reply
- *   carries it, so cached prompts replay byte for byte. The bound: the
- *   script cannot drop the relayed message, so the sentence lowers the risk
- *   and does not close it. An agent that still obeys the reply returns a
- *   blocked or refused result, every check above still applies to it, and
- *   the blocked result names its reason and the next step. ADR-0037 records
- *   the residual.
+ *   Relayed reply (issue 432): the harness relays the user's latest message
+ *   to every workflow agent, so after a resume each agent sees the reply to
+ *   the pause as a user message. Once run.answerLog is not empty, every
+ *   agent prompt carries resumedReplySentence() as its second line
+ *   (addResumeNote). The revise prompt, the review and fix prompts with
+ *   user_answer and a plan prompt with an answer block carry the reply
+ *   itself instead. No prompt sent before the first reply carries it, so
+ *   cached prompts replay byte for byte. The sentence lowers the risk and
+ *   does not close it: an agent that still obeys the reply returns a
+ *   blocked or refused result, which every check above still reads.
+ *   ADR-0037 records the residual.
  *   The commit and PR runners write their own inputs file and pass its
- *   path to molt.sh or open-plan-pr.sh (review finding fb4c129c). This
- *   script cannot read that file, so the commit message, file list, title,
- *   body and comment that reach git and GitHub rest on the runner copying
- *   its inputs block, as every relayed value does (ADR-0037 Risks: runner
- *   safety rests on the committed scripts). The impact is bounded: each
- *   script refuses an inputs file that resolves outside the checkout or
- *   breaks a field rule, molt.sh refuses any dirty path outside its list,
- *   the workflow checks every routing line, and the PR text is in front of
- *   the user before the merge. Rejected: a token in place of the path,
- *   since the runner still writes the file the token names.
+ *   path to molt.sh or open-plan-pr.sh (review finding fb4c129c), so what
+ *   reaches git and GitHub rests on the runner copying its inputs block
+ *   (ADR-0037 Risks). Each script refuses an inputs file outside the
+ *   checkout or one that breaks a field rule, molt.sh refuses any dirty
+ *   path outside its list, and the workflow checks every routing line.
  *
  * Why
  *   Every runner step is one committed script relayed word for word, so
@@ -310,6 +297,15 @@ function runnerOptions(label, phaseTitle) {
   return { agentType: runnerAgentType(), model: RUNNER_MODEL, schema: toAgentSchema(RELAY_SCHEMA), label: label, phase: phaseTitle };
 }
 
+function isTransientBlock(relay) {
+  return validateSchema(RELAY_SCHEMA, relay).ok && relay.outcome === 'blocked' && isTransientFailure(relay.stderr);
+}
+
+async function runRunnerRelay(prompt, label, phaseTitle) {
+  const relay = await agent(prompt, runnerOptions(label, phaseTitle));
+  return isTransientBlock(relay) ? agent(prompt, runnerOptions(label + '-retry', phaseTitle)) : relay;
+}
+
 function droneOptions(label, phaseTitle, schema) {
   return { agentType: runnerAgentType(), schema: toAgentSchema(schema), label: label, phase: phaseTitle };
 }
@@ -421,7 +417,7 @@ async function runPassScan(facts, run) {
 
 async function runFactsStep(run) {
   phase('Facts');
-  const relay = await agent(addResumeNote(buildDeliveryFactsPrompt(run.trunk, run.references), run), runnerOptions('facts-' + run.pass, 'Facts'));
+  const relay = await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(run.trunk, run.references), run), 'facts-' + run.pass, 'Facts');
   const checked = checkDeliveryFacts(relay, run.trunk);
   if (checked.problem !== undefined) {
     return checked;
@@ -461,7 +457,7 @@ function checkBranchRelay(relay, plan, freshness) {
 
 async function runBranchStep(run, plan, freshness) {
   phase('Branch');
-  const relay = await agent(addResumeNote(buildBranchPrompt(plan, freshness, run.trunk), run), runnerOptions('branch-' + run.pass, 'Branch'));
+  const relay = await runRunnerRelay(addResumeNote(buildBranchPrompt(plan, freshness, run.trunk), run), 'branch-' + run.pass, 'Branch');
   return checkBranchRelay(relay, plan, freshness);
 }
 
@@ -551,14 +547,14 @@ function checkCommitRelay(relay, plan, stepName) {
     return describeUnusableResult('The commit step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: describeCommitBlocker(relay.stderr, stepNoun) };
+    return { problem: describeCommitBlocker(relay.stderr, stepNoun), terminal: true };
   }
   const values = readRelayedLines(relay, moltRoutingSpec());
   if (values === undefined) {
     return { problem: 'The commit step returned malformed routing lines, ' + stopped };
   }
   if (values.branch !== plan.branch) {
-    return { problem: 'The commit step reported a branch other than the plan branch, ' + stopped };
+    return { problem: 'The commit step reported a branch other than the plan branch, ' + stopped, terminal: true };
   }
   return { values: values };
 }
@@ -573,11 +569,12 @@ async function runCommitStep(run, plan, commit, stepCauses) {
     throw new Error('runCommitStep: stepCauses must be an array');
   }
   const subject = commit.subject === undefined ? commitStepTexts(commit.stepName).subject : commit.subject;
+  const isReplan = commit.stepName === 'wave';
   phase('Commit');
-  const relay = await agent(addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, commit.stepName, subject), run), runnerOptions(commit.label, 'Commit'));
+  const relay = await runRunnerRelay(addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, commit.stepName, subject), run), commit.label, 'Commit');
   const checked = checkCommitRelay(relay, plan, commit.stepName);
   if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked(stepCauses.concat([checked]), run) };
+    return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);
   }
   if (checked.values.committed === 'true') {
     run.commits.push(checked.values.commit);
@@ -590,5 +587,5 @@ async function runCommitStep(run, plan, commit, stepCauses) {
     return { values: checked.values };
   }
   const endLines = checked.values.committed === 'true' ? [describeCommitEnd(checked.values, commit.stepName)] : [];
-  return { result: finishDeliveryBlocked(stepCauses, run, endLines) };
+  return stopDelivery(stepCauses, run, endLines, isReplan);
 }

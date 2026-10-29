@@ -73,10 +73,14 @@
  *   the build bundles this module into it, so a row can name a function of this
  *   module.
  *   A null gate result reads through describeUnusableResult (lib/result.js),
- *   next action run_again. The fix step reads its result before the commit
- *   and passes its cause, if any, to runCommitStep (relay.js), which ends
- *   the run with every cause, so a commit stop never hides a step cause;
- *   a run end it returns is returned as is. A blocked, malformed or
+ *   next action run_again, and readGateEditOutcome passes its agentFailure
+ *   mark on. The fix step reads its result before the commit and passes its
+ *   cause, if any, to runCommitStep (relay.js), which stops with every
+ *   cause through stopDelivery with isReplan false, so a commit stop never
+ *   hides a step cause; a run end it returns is returned as is. A null fix
+ *   result ends the run, and any other fix round stop pauses: the reply,
+ *   {held: false}, drops the kept failure of the head, so the gate loop
+ *   runs validation again with the next count. A blocked, malformed or
  *   unusable validation or version relay goes through stopDelivery
  *   (record.js) with isReplan false: an agent failure ends the run, and any
  *   other cause pauses, the reply running validation again with the next
@@ -237,7 +241,7 @@ function buildBumpTypeInputs(trunkCommit, versioning) {
 function readGateEditOutcome(result, schema) {
   if (!validateSchema(schema, result).ok) {
     const unusable = describeUnusableResult('it returned no usable result.', result);
-    return { status: 'blocked', reason: unusable.problem, files: [], nextAction: unusable.nextAction };
+    return { status: 'blocked', reason: unusable.problem, files: [], nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
   }
   if (result.outcome === 'blocked') {
     return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: result.next_action };
@@ -366,10 +370,13 @@ async function runFixRound(run, plan, fix, gates) {
   const prompt = fix.userAnswer === undefined ? addResumeNote(buildFixPrompt(fix, plan, run.trunk), run) : buildFixPrompt(fix, plan, run.trunk);
   const result = await agent(prompt, droneOptions(gateLabel('fix', run, count), 'Fix', FIX_SCHEMA));
   const edit = readGateEditOutcome(result, FIX_SCHEMA);
-  const stepCauses = edit.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + edit.reason, nextAction: edit.nextAction }] : [];
+  const stepCauses = edit.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + edit.reason, nextAction: edit.nextAction, agentFailure: edit.agentFailure }] : [];
   const committed = await runCommitStep(run, plan, { files: edit.files, label: gateLabel('fix-commit', run, count), stepName: 'fix' }, stepCauses);
-  if (committed.result !== undefined) {
+  if (isRunEnd(committed)) {
     return committed;
+  }
+  if (committed.held === false) {
+    delete gates.failures[run.head];
   }
   return { held: false };
 }

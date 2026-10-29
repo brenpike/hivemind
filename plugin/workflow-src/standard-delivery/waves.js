@@ -12,8 +12,9 @@
  *
  * Outputs
  *   runPlanWaves(run, plan, facts)  what runGates (gates.js) returns once
- *          every step is done, else {result}, a blocked finish, or
- *          {replan}, the reasons of a needs_replan wave.
+ *          every step is done, else a run end as is: {result}, a blocked
+ *          finish or a pause, or {replan}, the reasons of a needs_replan
+ *          wave or the reply to a stop.
  *   buildNextActionProperty()  the next_action property the worker, gate
  *          edit and validate schemas share.
  *   buildWaveSubject(waveSteps, waveNumber)  the commit subject of a wave:
@@ -31,13 +32,19 @@
  *   The loop reads every worker outcome before the commit, and a null
  *   worker result counts as blocked: its reason names the agent failure
  *   through describeUnusableResult (lib/result.js), with next action
- *   run_again. describeBlockedWave makes the one cause of a blocked wave:
- *   a lead line naming the stop, then one line per blocked step through
- *   capItemLines, with next action run_again only when every blocked worker
- *   says so. runCommitStep (relay.js) takes that cause as its step cause
- *   and ends the run with it, so a commit stop never hides it, and the loop
- *   returns that run end as is. needs_replan is handled only after a
- *   successful commit.
+ *   run_again, and readWorkerOutcome passes its agentFailure mark on.
+ *   describeBlockedWave makes the one cause of a blocked wave: a lead line
+ *   naming the stop, then one line per blocked step through capItemLines,
+ *   with next action run_again only when every blocked worker says so, and
+ *   agentFailure when any blocked worker had a null result. runCommitStep
+ *   (relay.js) takes that cause as its step cause and stops with it through
+ *   stopDelivery (record.js) as a replan, so a commit stop never hides it,
+ *   and the loop returns that run end as is. Stops (issue 457): a wave with
+ *   an agent failure ends the run; any other blocked wave, a plan that
+ *   cannot be scheduled mid-run and a needs_replan at maxReplans() pause
+ *   with one step_stop question, and the reply starts a new pass that does
+ *   not count against maxReplans(), the needs_replan one with the worker
+ *   reasons. needs_replan is handled only after a successful commit.
  *
  * Why
  *   A worker edits files and never commits, so the loop owns the commit
@@ -120,7 +127,7 @@ function createWorkerTask(step, waveSteps, plan, run) {
 function readWorkerOutcome(step, result) {
   if (!validateSchema(WORKER_SCHEMA, result).ok) {
     const unusable = describeUnusableResult('it returned no usable result.', result);
-    return { stepId: step.id, status: 'blocked', reason: unusable.problem, nextAction: unusable.nextAction };
+    return { stepId: step.id, status: 'blocked', reason: unusable.problem, nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
   }
   if (result.outcome === 'complete') {
     return { stepId: step.id, status: 'complete' };
@@ -132,7 +139,11 @@ function describeBlockedWave(blockedOutcomes) {
   const lead = 'A worker did not finish its step, so ' + RUN_NAME + ' stopped after its wave:';
   const stepLines = blockedOutcomes.map((outcome) => '- Step ' + encodeUntrustedText(outcome.stepId) + ' was blocked: ' + outcome.reason);
   const isRunAgain = blockedOutcomes.every((outcome) => outcome.nextAction === 'run_again');
-  return { problem: [lead, ...capItemLines(stepLines)].join('\n'), nextAction: isRunAgain ? 'run_again' : 'fix_cause' };
+  const cause = { problem: [lead, ...capItemLines(stepLines)].join('\n'), nextAction: isRunAgain ? 'run_again' : 'fix_cause' };
+  if (blockedOutcomes.some((outcome) => outcome.agentFailure === true)) {
+    cause.agentFailure = true;
+  }
+  return cause;
 }
 
 function describeReplanReasons(replanOutcomes) {
@@ -142,7 +153,9 @@ function describeReplanReasons(replanOutcomes) {
 function requestStepReplan(run, replanOutcomes) {
   const reasons = describeReplanReasons(replanOutcomes);
   if (run.replans >= maxReplans()) {
-    return { result: finishDeliveryBlocked([{ problem: 'A worker asked for a new plan after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.\n' + reasons }], run) };
+    const cause = { problem: 'A worker asked for a new plan after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.\n' + reasons };
+    const stopped = stopDelivery([cause], run, [], true);
+    return stopped.replan === undefined ? stopped : { replan: { reason: reasons } };
   }
   run.replans += 1;
   return { replan: { reason: reasons } };
@@ -153,7 +166,7 @@ async function runPlanWaves(run, plan, facts) {
   for (let waveNumber = 1; ; waveNumber += 1) {
     const wave = computeWave(plan.steps, doneIds);
     if (!wave.ok) {
-      return { result: finishDeliveryBlocked([{ problem: 'The plan steps cannot be scheduled, so ' + RUN_NAME + ' stopped: ' + toPrintableAscii(wave.problem) }], run) };
+      return stopDelivery([{ problem: 'The plan steps cannot be scheduled, so ' + RUN_NAME + ' stopped: ' + toPrintableAscii(wave.problem) }], run, [], true);
     }
     if (wave.all_done) {
       return runGates(run, plan, facts);
@@ -167,7 +180,7 @@ async function runPlanWaves(run, plan, facts) {
     const stepCauses = blockedOutcomes.length > 0 ? [describeBlockedWave(blockedOutcomes)] : [];
     const commit = { files: listStepFiles(waveSteps), label: 'commit-' + run.pass + '-' + waveNumber, stepName: 'wave', subject: buildWaveSubject(waveSteps, waveNumber) };
     const committed = await runCommitStep(run, plan, commit, stepCauses);
-    if (committed.result !== undefined) {
+    if (committed.values === undefined) {
       return committed;
     }
     const replanOutcomes = outcomes.filter((outcome) => outcome.status === 'needs_replan');

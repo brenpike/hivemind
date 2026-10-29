@@ -14,7 +14,9 @@
  *
  * Outputs
  *   runReviewGate(run, plan, gates)  {held, note}, {replan}, or {result}:
- *          the pause of a review question or a blocked finish.
+ *          the pause of a review question or a blocked finish, or {held:
+ *          false} when the user replied to a stop of its commit step, so
+ *          the gate loop runs local review again with the next count.
  *   The step, as meta.js names it:
  *   Review  a gate when configured. hivemind:local-reviewer runs its loop on
  *           the branch with base, working_branch, trunk, max_iterations and
@@ -63,10 +65,11 @@
  *           encoded excerpt. blocked gives the blocker, quoted with a limit
  *           equal to its maxLength, so a valid value is never cut. A review
  *           result that fails REVIEW_SCHEMA, gives option ids other than A,
- *           B, C and D in that order, or recommends no option stops the run
- *           blocked. describeReviewProblem reads the result before the
- *           commit runner, which takes that problem as its step cause, so a
- *           commit stop never hides it, and a null result, an agent failure,
+ *           B, C and D in that order, or recommends no option pauses with one
+ *           step_stop question. describeReviewProblem reads the result before
+ *           the commit runner, which takes that problem as its step cause, so
+ *           a commit stop never hides it, and a null result, an agent failure
+ *           that ends the run,
  *           gets the describeNoResult sentence and the run_again Next line
  *           through describeUnusableResult (lib/result.js). The
  *           script sets no zoom-out trigger: the
@@ -572,7 +575,7 @@ async function runReviewGate(run, plan, gates) {
   const review = await agent(prompt, reviewerOptions(gateLabel('review', run, count)));
   const unusable = describeReviewProblem(review);
   const committed = await runCommitStep(run, plan, { files: [], label: gateLabel('review-commit', run, count), stepName: 'review' }, unusable === undefined ? [] : [unusable]);
-  if (committed.result !== undefined) {
+  if (committed.values === undefined) {
     return committed;
   }
   const routed = routeLocalReview(review, run);

@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '03087814e212c0a0';
+const BUILD_ID = '94b69b3d39d17bb9';
 
 function supportedSchemaKeywords(){
 return[
@@ -2589,7 +2589,7 @@ return{base:trunkCommit,bump_trigger:versioning.bump_trigger,no_bump_match:versi
 function readGateEditOutcome(result,schema){
 if(!validateSchema(schema,result).ok){
 const unusable=describeUnusableResult('it returned no usable result.',result);
-return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction};
+return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 if(result.outcome==='blocked'){
 return{status:'blocked',reason:describeReason(result.blocker),files:result.files,nextAction:result.next_action};
@@ -2699,10 +2699,13 @@ const count=gates.runs.fix;
 const prompt=fix.userAnswer===undefined?addResumeNote(buildFixPrompt(fix,plan,run.trunk),run):buildFixPrompt(fix,plan,run.trunk);
 const result=await agent(prompt,droneOptions(gateLabel('fix',run,count),'Fix',FIX_SCHEMA));
 const edit=readGateEditOutcome(result,FIX_SCHEMA);
-const stepCauses=edit.status==='blocked'?[{problem:'The validation fix round was blocked, so '+RUN_NAME+' stopped: '+edit.reason,nextAction:edit.nextAction}]:[];
+const stepCauses=edit.status==='blocked'?[{problem:'The validation fix round was blocked, so '+RUN_NAME+' stopped: '+edit.reason,nextAction:edit.nextAction,agentFailure:edit.agentFailure}]:[];
 const committed=await runCommitStep(run,plan,{files:edit.files,label:gateLabel('fix-commit',run,count),stepName:'fix'},stepCauses);
-if(committed.result!==undefined){
+if(isRunEnd(committed)){
 return committed;
+}
+if(committed.held===false){
+delete gates.failures[run.head];
 }
 return{held:false};
 }
@@ -3566,6 +3569,13 @@ variants:{ran:{required:['stdout'],optional:[]},blocked:{required:[],optional:['
 function runnerOptions(label,phaseTitle){
 return{agentType:runnerAgentType(),model:RUNNER_MODEL,schema:toAgentSchema(RELAY_SCHEMA),label:label,phase:phaseTitle};
 }
+function isTransientBlock(relay){
+return validateSchema(RELAY_SCHEMA,relay).ok&&relay.outcome==='blocked'&&isTransientFailure(relay.stderr);
+}
+async function runRunnerRelay(prompt,label,phaseTitle){
+const relay=await agent(prompt,runnerOptions(label,phaseTitle));
+return isTransientBlock(relay)?agent(prompt,runnerOptions(label+'-retry',phaseTitle)):relay;
+}
 function droneOptions(label,phaseTitle,schema){
 return{agentType:runnerAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
 }
@@ -3665,7 +3675,7 @@ return problem===undefined?undefined:describeUnusableResult(problem,scan);
 }
 async function runFactsStep(run){
 phase('Facts');
-const relay=await agent(addResumeNote(buildDeliveryFactsPrompt(run.trunk,run.references),run),runnerOptions('facts-'+run.pass,'Facts'));
+const relay=await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(run.trunk,run.references),run),'facts-'+run.pass,'Facts');
 const checked=checkDeliveryFacts(relay,run.trunk);
 if(checked.problem!==undefined){
 return checked;
@@ -3702,7 +3712,7 @@ return{values:values};
 }
 async function runBranchStep(run,plan,freshness){
 phase('Branch');
-const relay=await agent(addResumeNote(buildBranchPrompt(plan,freshness,run.trunk),run),runnerOptions('branch-'+run.pass,'Branch'));
+const relay=await runRunnerRelay(addResumeNote(buildBranchPrompt(plan,freshness,run.trunk),run),'branch-'+run.pass,'Branch');
 return checkBranchRelay(relay,plan,freshness);
 }
 function needsBranchReplan(branchValues,facts,plan){
@@ -3781,14 +3791,14 @@ if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult('The commit step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
-return{problem:describeCommitBlocker(relay.stderr,stepNoun)};
+return{problem:describeCommitBlocker(relay.stderr,stepNoun),terminal:true};
 }
 const values=readRelayedLines(relay,moltRoutingSpec());
 if(values===undefined){
 return{problem:'The commit step returned malformed routing lines, '+stopped};
 }
 if(values.branch!==plan.branch){
-return{problem:'The commit step reported a branch other than the plan branch, '+stopped};
+return{problem:'The commit step reported a branch other than the plan branch, '+stopped,terminal:true};
 }
 return{values:values};
 }
@@ -3801,11 +3811,12 @@ if(!Array.isArray(stepCauses)){
 throw new Error('runCommitStep: stepCauses must be an array');
 }
 const subject=commit.subject===undefined?commitStepTexts(commit.stepName).subject:commit.subject;
+const isReplan=commit.stepName==='wave';
 phase('Commit');
-const relay=await agent(addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,commit.stepName,subject),run),runnerOptions(commit.label,'Commit'));
+const relay=await runRunnerRelay(addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,commit.stepName,subject),run),commit.label,'Commit');
 const checked=checkCommitRelay(relay,plan,commit.stepName);
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked(stepCauses.concat([checked]),run)};
+return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
 }
 if(checked.values.committed==='true'){
 run.commits.push(checked.values.commit);
@@ -3818,7 +3829,7 @@ if(stepCauses.length===0){
 return{values:checked.values};
 }
 const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.values,commit.stepName)]:[];
-return{result:finishDeliveryBlocked(stepCauses,run,endLines)};
+return stopDelivery(stepCauses,run,endLines,isReplan);
 }
 
 function localReviewRoutes(){
@@ -4198,7 +4209,7 @@ const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run.trunk),
 const review=await agent(prompt,reviewerOptions(gateLabel('review',run,count)));
 const unusable=describeReviewProblem(review);
 const committed=await runCommitStep(run,plan,{files:[],label:gateLabel('review-commit',run,count),stepName:'review'},unusable===undefined?[]:[unusable]);
-if(committed.result!==undefined){
+if(committed.values===undefined){
 return committed;
 }
 const routed=routeLocalReview(review,run);
@@ -4363,7 +4374,7 @@ return()=>agent(prompt,options);
 function readWorkerOutcome(step,result){
 if(!validateSchema(WORKER_SCHEMA,result).ok){
 const unusable=describeUnusableResult('it returned no usable result.',result);
-return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction};
+return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 if(result.outcome==='complete'){
 return{stepId:step.id,status:'complete'};
@@ -4374,7 +4385,11 @@ function describeBlockedWave(blockedOutcomes){
 const lead='A worker did not finish its step, so '+RUN_NAME+' stopped after its wave:';
 const stepLines=blockedOutcomes.map((outcome)=>'- Step '+encodeUntrustedText(outcome.stepId)+' was blocked: '+outcome.reason);
 const isRunAgain=blockedOutcomes.every((outcome)=>outcome.nextAction==='run_again');
-return{problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:isRunAgain?'run_again':'fix_cause'};
+const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:isRunAgain?'run_again':'fix_cause'};
+if(blockedOutcomes.some((outcome)=>outcome.agentFailure===true)){
+cause.agentFailure=true;
+}
+return cause;
 }
 function describeReplanReasons(replanOutcomes){
 return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)+' needs a new plan: '+outcome.reason).join('\n');
@@ -4382,7 +4397,9 @@ return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)
 function requestStepReplan(run,replanOutcomes){
 const reasons=describeReplanReasons(replanOutcomes);
 if(run.replans>=maxReplans()){
-return{result:finishDeliveryBlocked([{problem:'A worker asked for a new plan after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.\n'+reasons}],run)};
+const cause={problem:'A worker asked for a new plan after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.\n'+reasons};
+const stopped=stopDelivery([cause],run,[],true);
+return stopped.replan===undefined?stopped:{replan:{reason:reasons}};
 }
 run.replans+=1;
 return{replan:{reason:reasons}};
@@ -4392,7 +4409,7 @@ const doneIds=[];
 for(let waveNumber=1;;waveNumber+=1){
 const wave=computeWave(plan.steps,doneIds);
 if(!wave.ok){
-return{result:finishDeliveryBlocked([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem)}],run)};
+return stopDelivery([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem)}],run,[],true);
 }
 if(wave.all_done){
 return runGates(run,plan,facts);
@@ -4406,7 +4423,7 @@ const blockedOutcomes=outcomes.filter((outcome)=>outcome.status==='blocked');
 const stepCauses=blockedOutcomes.length>0?[describeBlockedWave(blockedOutcomes)]:[];
 const commit={files:listStepFiles(waveSteps),label:'commit-'+run.pass+'-'+waveNumber,stepName:'wave',subject:buildWaveSubject(waveSteps,waveNumber)};
 const committed=await runCommitStep(run,plan,commit,stepCauses);
-if(committed.result!==undefined){
+if(committed.values===undefined){
 return committed;
 }
 const replanOutcomes=outcomes.filter((outcome)=>outcome.status==='needs_replan');
