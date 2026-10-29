@@ -3536,13 +3536,13 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(callOf(run, 'review-commit-1-1').prompt, 'inputs').files, []);
       assert.equal(run.failures, 0);
     });
-    test('an unusable review pauses after its commit, and the reply runs the head check, then local review again with the next count', async () => {
-      const results = happyResults({ 'review-1-1': { ...REVIEW_CLEAN, finding_id: 'f1f1f1f1' }, 'head-1-1': headRelay(OTHER), 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+    test('an unusable review pauses after its commit, and the reply runs local review again with the next count, with no head check', async () => {
+      const results = happyResults({ 'review-1-1': { ...REVIEW_CLEAN, finding_id: 'f1f1f1f1' }, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
       assertStepStopPause(run, 'The local review step returned no usable result, so the delivery stopped before the pull request.\n\n', 'review-commit-1-1');
       const resumed = await runWorkflow(resumeWith(LAUNCH, run.result, 'Codex is back.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['head-1-1', 'review-1-2', 'review-commit-1-2', 'pr-1']);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
     });
     test('a null review commit result names the agent failure and gives the run_again Next line', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-commit-1-1': null }));
@@ -3750,13 +3750,13 @@ const ROW_TESTS = {
         assert.equal(state.replans, 0);
       });
     }
-    test('a reply to a blocked review runs the head check, then local review again with the next count, and the run goes on', async () => {
+    test('a reply to a blocked review runs local review again with the next count, with no head check, and the run goes on', async () => {
       const blocked = stopCases.find(([label]) => label === 'blocked')[1];
-      const results = happyResults({ 'review-1-1': blocked, 'head-1-1': headRelay(OTHER), 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+      const results = happyResults({ 'review-1-1': blocked, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
       const paused = await runWorkflow(LAUNCH, results);
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
-      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'review-1-2', 'review-commit-1-2', 'pr-1']);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
     });
     test('the flagged text shows whole at its REVIEW_SCHEMA bound of 200 code points', async () => {
       const boundExcerpt = '\u{1F600}'.repeat(200);
@@ -6670,10 +6670,10 @@ const ROW_TESTS = {
     });
   },
   'SD-72': () => {
-    test('the built script writes run.head and run.branch only inside observeHead, and no code names run.commits', () => {
+    test('the built script writes run.head, run.branch and run.headRound only inside observeHead, and no code names run.commits', () => {
       const code = stripCommentsAndStrings(builtSource.replace(/^export const meta\b/, 'const meta'));
-      const writes = [...code.matchAll(/\.(head|branch|commits)(?:\s*(?:\+=|=(?!=))|\.(?:push|unshift|splice)\()/g)];
-      assert.deepEqual(writes.map((write) => write[1]).sort(), ['branch', 'head']);
+      const writes = [...code.matchAll(/\.(headRound|head|branch|commits)(?:\s*(?:\+=|=(?!=))|\.(?:push|unshift|splice)\()/g)];
+      assert.deepEqual(writes.map((write) => write[1]).sort(), ['branch', 'head', 'headRound']);
       writes.forEach((write) => assert.equal(findEnclosingFunction(code, write.index), 'observeHead', code.slice(write.index - 40, write.index + 20)));
       assert.ok(!/\.commits\b/.test(code));
     });
@@ -6699,6 +6699,50 @@ const ROW_TESTS = {
   'SD-73': () => {
     const prBlocked = { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' };
     const malformedLead = 'The commit step returned malformed routing lines, so the delivery stopped. Check the branch for a commit of ';
+    const userInput = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'f4f4f4f4', user_question: USER_QUESTION };
+    const versionLimitResults = { 'validate-1-1': validateWithVersion(MINOR_MISMATCH), 'head-1-1': headRelay(THIRD), 'validate-1-2': validateWithVersion(), 'review-commit-1-1': headRelay(THIRD) };
+    for (let round = 1; round <= main.maxFixRounds(); round += 1) {
+      Object.assign(versionLimitResults, { ['fix-1-' + round]: { outcome: 'complete', files: ['VERSION'] }, ['fix-commit-1-' + round]: commitRelay({ commit: OTHER, committed: 'false' }) });
+    }
+    const headCheckedTail = ['head-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1'];
+    const replyRoutes = [
+      ['validation blocked', happyResults({ 'validate-1-1': { outcome: 'blocked', blocker: 'npm is not installed.' }, 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-commit-1-1': headRelay(THIRD) }), THIRD, headCheckedTail],
+      ['fix commit malformed', happyResults({ 'validate-1-1': { outcome: 'failed', failures: FAILURE_TEXT }, 'fix-1-1': { outcome: 'complete', files: ['src/cache.js'] }, 'fix-commit-1-1': { outcome: 'ran', stdout: 'nonsense\n' }, 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-commit-1-1': headRelay(THIRD) }), THIRD, headCheckedTail],
+      ['version-only fix limit', versionResults(versionLimitResults), THIRD, headCheckedTail],
+      ['version question', versionResults({ 'validate-1-1': validateWithVersion(ASK_UNDETERMINED), 'fix-1-1': { outcome: 'complete', files: ['VERSION'] }, 'fix-commit-1-1': commitRelay({ commit: FOURTH }), 'validate-1-2': validateWithVersion(MINOR_MISMATCH), 'review-commit-1-1': headRelay(FOURTH) }), FOURTH, ['fix-1-1', 'fix-commit-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']],
+      ['local review blocked', happyResults({ 'review-1-1': { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex is unavailable.', stage: 'invoke_review' }, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED }), THIRD, ['review-1-2', 'review-commit-1-2', 'validate-1-2', 'pr-1']],
+      ['local review question, head unmoved', happyResults({ 'review-1-1': userInput, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED }), THIRD, ['review-1-2', 'review-commit-1-2', 'validate-1-2', 'pr-1']],
+      ['local review question after review fix commits moved the head', happyResults({ 'review-1-1': { ...userInput, fix_commits_exist: true }, 'review-commit-1-1': headRelay(FOURTH), 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': headRelay(THIRD) }), THIRD, ['head-1-1', 'validate-1-2', 'review-1-2', 'review-commit-1-2', 'pr-1']],
+      ['pull request blocked', happyResults({ 'pr-1': prBlocked, 'head-1-1': headRelay(THIRD), 'validate-1-2': VALIDATE_PASSED, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': headRelay(THIRD), 'pr-1-2': cannedPrRunner() }), THIRD, ['head-1-1', 'validate-1-2', 'review-1-2', 'review-commit-1-2', 'pr-1-2']]
+    ];
+    const headCheckedRoutes = ['validation blocked', 'fix commit malformed', 'version-only fix limit', 'local review question after review fix commits moved the head', 'pull request blocked'];
+    for (const [route, results, head, resumedLabels] of replyRoutes) {
+      test(`a reply to ${route} reads the head before any gate holds on it or the pull request pushes it`, async () => {
+        const paused = await runWorkflow(LAUNCH, results);
+        assert.equal(paused.result.needs_user, true, paused.result.message);
+        const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'I committed THIRD.'), results);
+        assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+        const labels = labelsOf(resumed).slice(labelsOf(paused).length);
+        assert.deepEqual(labels, resumedLabels);
+        assert.equal(labels.some((label) => label.startsWith('head-')), headCheckedRoutes.includes(route), JSON.stringify(labels));
+        const lastPr = labels.filter((label) => label.startsWith('pr-')).at(-1);
+        assert.equal(readDataBlock(callOf(resumed, lastPr).prompt, 'inputs').expect_commit, head);
+        const gateLines = prBodyOf(resumed, lastPr).split('\n').filter((line) => line.startsWith('- validation: ') || line.startsWith('- local review: '));
+        assert.equal(gateLines.length, 2, prBodyOf(resumed, lastPr));
+        gateLines.forEach((line) => assert.ok(line.endsWith(', held on commit ' + head), line));
+      });
+    }
+    test('the built script writes run.headRound only inside observeHead, and records a hold only inside runGates on a read head', () => {
+      const code = stripCommentsAndStrings(builtSource.replace(/^export const meta\b/, 'const meta'));
+      const roundWrites = [...code.matchAll(/\.headRound\s*(?:\+=|-=|\+\+|--|=(?!=))/g)];
+      assert.equal(roundWrites.length, 1);
+      assert.equal(findEnclosingFunction(code, roundWrites[0].index), 'observeHead');
+      const holds = [...code.matchAll(/\bgates\.held\[[^\]]*\]\s*=(?!=)/g)];
+      assert.equal(holds.length, 1);
+      assert.equal(findEnclosingFunction(code, holds[0].index), 'runGates');
+      const guard = code.slice(0, holds[0].index).match(/if\s*\(([^{]*)\)\s*\{\s*$/);
+      assert.ok(guard !== null && guard[1].replace(/\s+/g, '').includes('run.headRound===run.answerLog.length'), code.slice(holds[0].index - 120, holds[0].index));
+    });
     test('a malformed fix commit relay whose runner committed pauses, and the reply reads the head, holds validation on it and pushes it', async () => {
       const launch = { ...LAUNCH, local_review: false };
       const results = happyResults({

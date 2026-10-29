@@ -6,8 +6,9 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
- *          head, trunk and localReview, and update answerLog, notRunGates
- *          and versionAnswer.
+ *          head, headRound, trunk and localReview, and update answerLog,
+ *          notRunGates and versionAnswer. headRound is the answerLog length
+ *          at the last head read (observeHead, record.js).
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   facts  the checked facts of the pass, from runPlanWaves (waves.js):
  *          trunk_commit is the base of the version check.
@@ -86,16 +87,19 @@
  *   stopDelivery (record.js) with isReplan false: an agent failure ends the
  *   run, and any other cause pauses. A user_answer fix prompt carries the
  *   reply in a data block and not the resume note.
- *   Every resume reads the head before a gate holds on it or the PR pushes
- *   it (issue 457). A reply to a validation, fix round, local review or
- *   pull request stop returns {rerun: true}, and the gate loop runs one head
- *   check: runCommitStep (relay.js) with an empty file list and label
- *   head-P-N, N counting gates.runs.headCheck, run again while it returns
- *   {rerun: true}, and a run end it returns is returned as is. A refusal of
- *   it is a commit-script refusal and ends the run. Then the kept failures
- *   are cleared, so validation runs again with the next count, and a head
- *   the check saw move goes through the gate rerun below; else the same
- *   step runs again.
+ *   The head read keys on the reply round (issue 457): the head is unread
+ *   exactly when run.headRound is behind run.answerLog.length, whatever
+ *   route the reply took. Before validation or the pull request step, an
+ *   unread head runs one head check: runCommitStep (relay.js) with an
+ *   empty file list and label head-P-N, N counting gates.runs.headCheck,
+ *   which clears the kept failures, so validation runs again with the next
+ *   count. A run end it returns is returned as is, a refusal of it is a
+ *   commit-script refusal and ends the run, and a reply to its own stop
+ *   leaves the head unread, so the loop reads again. Local review ends
+ *   with its own head read, its commit runner the same empty-list molt
+ *   run, so no head check precedes it. A gate holds only on a read head.
+ *   A head the check saw move goes through the gate rerun below; else the
+ *   same step runs again.
  *   A gate holds only for the commit its step ended on, read from the commit
  *   runner's routing line; validation, which has no commit runner, ends on the
  *   head it ran on. The configured gates run in gateIds() order, local review
@@ -479,18 +483,9 @@ function runGateStep(stepId, run, plan, facts, gates) {
 }
 
 async function runHeadCheck(run, plan, gates) {
-  let checked = { rerun: true };
-  while (checked.rerun === true) {
-    gates.runs.headCheck += 1;
-    checked = await runCommitStep(run, plan, { files: [], label: gateLabel('head', run, gates.runs.headCheck), stepName: 'head' }, []);
-  }
+  gates.runs.headCheck += 1;
   gates.failures = {};
-  return checked;
-}
-
-async function runResumedStep(stepId, run, plan, facts, gates) {
-  const ended = await runGateStep(stepId, run, plan, facts, gates);
-  return ended.rerun === true ? runHeadCheck(run, plan, gates) : ended;
+  return runCommitStep(run, plan, { files: [], label: gateLabel('head', run, gates.runs.headCheck), stepName: 'head' }, []);
 }
 
 async function runGates(run, plan, facts) {
@@ -502,33 +497,39 @@ async function runGates(run, plan, facts) {
   let checkedHead = run.head;
   let index = 0;
   for (;;) {
+    if (run.head !== checkedHead) {
+      checkedHead = run.head;
+      const rerun = resolveGateRerun(run, gates);
+      if (isRunEnd(rerun)) {
+        return rerun;
+      }
+      index = 0;
+    }
     const stepId = index < gateList.length ? gateList[index] : 'pr';
     if (stepId !== 'pr' && gates.held[stepId] === run.head) {
       index += 1;
       continue;
     }
+    if (stepId !== 'review' && run.headRound !== run.answerLog.length) {
+      const checked = await runHeadCheck(run, plan, gates);
+      if (isRunEnd(checked)) {
+        return checked;
+      }
+      continue;
+    }
     if (stepId !== 'validate' || !hasKeptFailure(run, gates)) {
       gates.runs[stepId] += 1;
     }
-    const ended = await runResumedStep(stepId, run, plan, facts, gates);
+    const ended = await runGateStep(stepId, run, plan, facts, gates);
     if (isRunEnd(ended)) {
       return ended;
     }
-    if (ended.held) {
+    if (ended.held && run.headRound === run.answerLog.length) {
       gates.held[stepId] = run.head;
       gates.notes[stepId] = ended.note;
     }
     if (ended.answer !== undefined) {
       gates.answer = ended.answer;
     }
-    if (run.head === checkedHead) {
-      continue;
-    }
-    checkedHead = run.head;
-    const rerun = resolveGateRerun(run, gates);
-    if (isRunEnd(rerun)) {
-      return rerun;
-    }
-    index = 0;
   }
 }

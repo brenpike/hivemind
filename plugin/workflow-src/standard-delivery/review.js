@@ -16,7 +16,7 @@
  *   runReviewGate(run, plan, gates)  {held, note}, {replan}, or {result}:
  *          a pause or a blocked finish, or {rerun: true} when the user
  *          replied to a stop of its commit step or to a blocked review, so
- *          the gate loop runs the head check, then local review again.
+ *          local review runs again, its commit runner reading the head.
  *   The step, as meta.js names it:
  *   Review  a gate when configured. hivemind:local-reviewer runs its loop on
  *           the branch with base, working_branch, trunk, max_iterations and

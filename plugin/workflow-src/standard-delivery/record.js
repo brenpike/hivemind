@@ -6,7 +6,7 @@
  * Inputs
  *   run     the run state of main.js createRunState, or undefined when the
  *           launch check failed: reversibleEffects, notRunGates, taken,
- *           branch, head, waveCount and answerLog.
+ *           branch, head, headRound, waveCount and answerLog.
  *   gates   the gate loop state of runGates (gates.js), once the gates ran.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a stop, {problem, nextAction?, terminal?,
@@ -26,9 +26,10 @@
  *   stopDelivery(causes, run, endLines, isReplan)  {result}, the blocked end
  *           or the pause, or on a reply {replan: {reason}} when isReplan,
  *           a new pass outside maxReplans(), else {rerun: true}: the gate
- *           loop (gates.js) runs the head check, then the stopped step.
- *   observeHead(run, commit, branch)  sets run.head to commit and
- *           run.branch to branch.
+ *           loop takes the stopped step again, reading the head first when
+ *           that step does not read it itself (gates.js).
+ *   observeHead(run, commit, branch)  sets run.head to commit, run.branch
+ *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
  *           request body and its comment carry, with no commit list.
  *
@@ -73,13 +74,15 @@
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
  *   One head writer (issue 457): observeHead is the only code that writes
- *   run.head or run.branch, and its callers feed it only a commit read
- *   from a checked relay: runCommitStep (relay.js) the molt commit, the
- *   head check after each reply to a gate or PR stop (gates.js)
- *   included, and runDeliveryPass (main.js) the branch commit of each new
- *   pass before any wave. So every resume reads the head before a gate
- *   holds on it or the PR pushes it. The run keeps no commit list, so no
- *   record of the run can drop a commit made during a pause.
+ *   run.head, run.branch or run.headRound, and its callers feed it only a
+ *   commit read from a checked relay: runCommitStep (relay.js) the molt
+ *   commit, the head check of the gate loop (gates.js) included, and
+ *   runDeliveryPass (main.js) the branch commit of each new pass before
+ *   any wave. One head read per reply: every reply adds one entry to
+ *   run.answerLog, its round, so the head is unread exactly when
+ *   run.headRound is behind run.answerLog.length, whatever route the reply
+ *   took. The run keeps no commit list, so no record of the run can drop
+ *   a commit made during a pause.
  *   One stop path (issue 457): a stop ends the run only on a terminal
  *   cause, an agent failure, a size limit (finishOpenQuestions) or the
  *   launch check. Every other stop pauses through stopDelivery, and a reply
@@ -120,6 +123,7 @@ function renderNotRunGates(lines) {
 function observeHead(run, commit, branch) {
   run.head = commit;
   run.branch = branch;
+  run.headRound = run.answerLog.length;
 }
 
 function buildRunRecordParts(run, taken, gates) {

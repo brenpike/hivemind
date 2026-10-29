@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'cc3874610bcb78f2';
+const BUILD_ID = '8cdcba33bc850bcd';
 
 function supportedSchemaKeywords(){
 return[
@@ -2788,17 +2788,9 @@ return runReviewGate(run,plan,gates);
 return runValidateGate(run,plan,facts,gates);
 }
 async function runHeadCheck(run,plan,gates){
-let checked={rerun:true};
-while(checked.rerun===true){
 gates.runs.headCheck+=1;
-checked=await runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.headCheck),stepName:'head'},[]);
-}
 gates.failures={};
-return checked;
-}
-async function runResumedStep(stepId,run,plan,facts,gates){
-const ended=await runGateStep(stepId,run,plan,facts,gates);
-return ended.rerun===true?runHeadCheck(run,plan,gates):ended;
+return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.headCheck),stepName:'head'},[]);
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
@@ -2809,34 +2801,40 @@ listNotRunGate(run,notConfiguredReviewLine());
 let checkedHead=run.head;
 let index=0;
 for(;;){
-const stepId=index<gateList.length?gateList[index]:'pr';
-if(stepId!=='pr'&&gates.held[stepId]===run.head){
-index+=1;
-continue;
-}
-if(stepId!=='validate'||!hasKeptFailure(run,gates)){
-gates.runs[stepId]+=1;
-}
-const ended=await runResumedStep(stepId,run,plan,facts,gates);
-if(isRunEnd(ended)){
-return ended;
-}
-if(ended.held){
-gates.held[stepId]=run.head;
-gates.notes[stepId]=ended.note;
-}
-if(ended.answer!==undefined){
-gates.answer=ended.answer;
-}
-if(run.head===checkedHead){
-continue;
-}
+if(run.head!==checkedHead){
 checkedHead=run.head;
 const rerun=resolveGateRerun(run,gates);
 if(isRunEnd(rerun)){
 return rerun;
 }
 index=0;
+}
+const stepId=index<gateList.length?gateList[index]:'pr';
+if(stepId!=='pr'&&gates.held[stepId]===run.head){
+index+=1;
+continue;
+}
+if(stepId!=='review'&&run.headRound!==run.answerLog.length){
+const checked=await runHeadCheck(run,plan,gates);
+if(isRunEnd(checked)){
+return checked;
+}
+continue;
+}
+if(stepId!=='validate'||!hasKeptFailure(run,gates)){
+gates.runs[stepId]+=1;
+}
+const ended=await runGateStep(stepId,run,plan,facts,gates);
+if(isRunEnd(ended)){
+return ended;
+}
+if(ended.held&&run.headRound===run.answerLog.length){
+gates.held[stepId]=run.head;
+gates.notes[stepId]=ended.note;
+}
+if(ended.answer!==undefined){
+gates.answer=ended.answer;
+}
 }
 }
 
@@ -3329,6 +3327,7 @@ return['Gates that did not run:',...lines.map((line)=>'- '+line)].join('\n');
 function observeHead(run,commit,branch){
 run.head=commit;
 run.branch=branch;
+run.headRound=run.answerLog.length;
 }
 function buildRunRecordParts(run,taken,gates){
 const parts=[];
@@ -4555,6 +4554,7 @@ taken:[],
 reversibleEffects:[],
 head:undefined,
 branch:undefined,
+headRound:undefined,
 notRunGates:[],
 waveCount:0,
 pass:0,

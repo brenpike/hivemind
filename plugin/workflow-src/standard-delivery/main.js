@@ -105,7 +105,8 @@
  *   (record.js), the one writer of run.head, before any wave: that commit
  *   equals the facts head by needsBranchReplan, so the pass starts from a
  *   commit made during a pause, or by a commit runner whose relay could
- *   not be read.
+ *   not be read. That read also stamps run.headRound after the last
+ *   planning reply.
  *   No version question plans again: its reply becomes run.versionAnswer
  *   and runs one fix round, and no later version check of the run fails
  *   or asks (gates.js).
@@ -359,6 +360,7 @@ function createRunState(launch) {
     reversibleEffects: [],
     head: undefined,
     branch: undefined,
+    headRound: undefined,
     notRunGates: [],
     waveCount: 0,
     pass: 0,
