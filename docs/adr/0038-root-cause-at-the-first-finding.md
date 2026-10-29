@@ -21,7 +21,7 @@ Each of the four root causes had the wrong key. Each decision below changes that
    - Introduced or inherited? Either way, a found root cause is fixed at its source in this PR, by the user's correction in comment 6390355323.
    - What is the root class, and which layer owns it?
    - Can the surface be removed instead of hardened?
-   - Is the attacker or failure the finding assumes inside the recorded threat model? If not, the finding is rejected by citing the record.
+   - Is the attacker or failure the finding assumes inside the recorded threat model? If not, the finding is rejected by citing the record. Amended 2026-10-29 (issue 462, Q2 A): when no threat model is recorded and a reviewer raises it, recording one is a review call, asked or taken per `plugin/governance/decision-autonomy.md` (`### Review Calls`), like any other review call (see ADR-0037, Amendment 2026-10-29: agreed review calls are taken (issue 462)).
 
    Severity no longer decides whether a finding gets this triage: every non-trivial finding does. Text: `## First-Finding Triage`, `## Severity as Sensitivity Modifier`.
 2. **A recorded residual is keyed on a ground, not on origin.** Before, "inherited" was one of three conditions for leaving a finding unfixed as a recorded residual. Now a residual is admissible only on one of two grounds: the finding falls outside the recorded threat model, or no fix on this engine can close the class and the user decided so. Origin is never a ground. Defer-with-Scope is narrowed to findings that are not a found root cause, such as the edge-case and wording tail after the diminishing-returns exit. Impact never defers a found root cause. Text: `### Recorded Residual`, `## Defer-with-Scope`, `## Bounded-Impact Gating`.
