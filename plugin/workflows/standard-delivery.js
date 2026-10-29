@@ -617,7 +617,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8a96e63f34fdc2a8';
+const BUILD_ID = 'da61883c35a4f53b';
 
 function supportedSchemaKeywords(){
 return[
@@ -1343,6 +1343,33 @@ if(result!==null){
 return'';
 }
 return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+function describeUnusableResult(problem,result){
+if(result!==null){
+return{problem:problem};
+}
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again'};
+}
+function nextStepLine(nextAction){
+if(nextAction==='run_again'){
+return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+}
+return'Next: fix what stopped the run, then run the request again.';
+}
+function maxBlockedLeadLength(){
+return 1000;
+}
+function buildStopBlocks(causes){
+if(!Array.isArray(causes)||causes.length===0){
+throw new Error('buildStopBlocks: causes must be a non-empty array');
+}
+const fixCauses=causes.filter((cause)=>cause.nextAction!=='run_again');
+const orderedCauses=fixCauses.concat(causes.filter((cause)=>cause.nextAction==='run_again'));
+const leadText=orderedCauses[0].problem;
+const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
+const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
+const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
+return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 function canCarry(resumeArgs){
 const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
@@ -2140,11 +2167,8 @@ return values.trunk===trunk
 &&(values.trunk_commit!=='none'||hasFactsStop(stops,'history_unavailable'))
 &&matchesFreshnessCounts(values.trunk_freshness,values.trunk_ahead,values.trunk_behind);
 }
-function malformedFactsMessage(runNoun,result){
-return appendSentence('The facts step returned malformed facts, so '+describeRunNoun(runNoun)+' stopped before planning.',describeNoResult(result));
-}
-function appendSentence(message,sentence){
-return sentence===''?message:message+' '+sentence;
+function malformedFactsMessage(runNoun){
+return'The facts step returned malformed facts, so '+describeRunNoun(runNoun)+' stopped before planning.';
 }
 function blockedFactsMessage(runNoun,blocker){
 const reason=isNonEmptyString(blocker)?blocker:'it gave no reason.';
@@ -2205,7 +2229,8 @@ async function runScanStep(facts,runNoun){
 if(Number(facts.external_texts)>0){
 phase('Scan');
 const scan=await agent(buildScanPrompt(facts),scanOptions());
-return describeScanProblem(scan,facts,runNoun);
+const problem=describeScanProblem(scan,facts,runNoun);
+return problem===undefined?undefined:describeUnusableResult(problem,scan);
 }
 return undefined;
 }
@@ -2235,7 +2260,7 @@ return true;
 function describeScanProblem(scan,facts,runNoun){
 const stopped='so '+describeRunNoun(runNoun)+' stopped before planning.';
 if(!validateSchema(scanStepSchema(),scan).ok){
-return appendSentence('The injection scan returned a result it could not use, '+stopped,describeNoResult(scan));
+return'The injection scan returned a result it could not use, '+stopped;
 }
 const suspects=scan.results.filter((result)=>result.verdict==='injection-suspect');
 if(suspects.length>0){
@@ -2579,9 +2604,6 @@ return{status:'blocked',reason:describeReason(result.blocker),files:result.files
 }
 return{status:'complete',files:result.files};
 }
-function describeBlockedGateStep(stepTitle,reason,commitValues){
-return stepTitle+' was blocked, so '+RUN_NAME+' stopped after its commit: '+reason+' '+describeCommitEnd(commitValues);
-}
 function runBumpStep(run,plan,facts,count){
 if(plan.versioning.artifact_files.length===0){
 return agent(addResumeNote(buildBumpTypePrompt(facts.trunk_commit,plan.versioning),run),runnerOptions(gateLabel('bump-type',run,count),'Bump'));
@@ -2592,12 +2614,10 @@ function describeBumpNote(values){
 return values.verdict==='bump_required'?values.bump_type+' bump':'no bump';
 }
 async function commitBumpEdit(run,plan,count,checked){
-const committed=await runCommitStep(run,plan,plan.versioning.artifact_files,gateLabel('bump-commit',run,count),'bump');
-if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run,committed.nextAction)};
-}
-if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked(checked.problem+' '+describeCommitEnd(committed.values),run,checked.nextAction)};
+const commit={files:plan.versioning.artifact_files,label:gateLabel('bump-commit',run,count),stepName:'bump'};
+const committed=await runCommitStep(run,plan,commit,checked.problem!==undefined?[checked]:[]);
+if(committed.result!==undefined){
+return committed;
 }
 return{held:true,note:describeBumpNote(checked.values),values:checked.values};
 }
@@ -2608,7 +2628,7 @@ phase('Bump');
 const result=await runBumpStep(run,plan,facts,count);
 const checked=checkBumpTypeRelay(result,hasFiles?BUMP_SCHEMA:RELAY_SCHEMA);
 if(checked.problem!==undefined){
-return hasFiles?commitBumpEdit(run,plan,count,checked):{result:finishDeliveryBlocked(checked.problem,run,checked.nextAction)};
+return hasFiles?commitBumpEdit(run,plan,count,checked):{result:finishDeliveryBlocked([checked],run)};
 }
 const verdict=resolveBumpVerdict(checked.values,plan,run);
 if(isRunEnd(verdict)){
@@ -2673,12 +2693,10 @@ async function runFixRound(run,plan,failures,round){
 phase('Fix');
 const result=await agent(addResumeNote(buildFixPrompt(failures,plan,run.trunk),run),droneOptions(gateLabel('fix',run,round),'Fix',FIX_SCHEMA));
 const fix=readGateEditOutcome(result,FIX_SCHEMA);
-const committed=await runCommitStep(run,plan,fix.files,gateLabel('fix-commit',run,round),'fix');
-if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run,committed.nextAction)};
-}
-if(fix.status==='blocked'){
-return{result:finishDeliveryBlocked(describeBlockedGateStep('The validation fix round',fix.reason,committed.values),run,fix.nextAction)};
+const stepCauses=fix.status==='blocked'?[{problem:'The validation fix round was blocked, so '+RUN_NAME+' stopped: '+fix.reason,nextAction:fix.nextAction}]:[];
+const committed=await runCommitStep(run,plan,{files:fix.files,label:gateLabel('fix-commit',run,round),stepName:'fix'},stepCauses);
+if(committed.result!==undefined){
+return committed;
 }
 return{held:false};
 }
@@ -2700,7 +2718,7 @@ return readValidateOutcome(result,schema);
 async function runValidateGate(run,plan,gates){
 const validation=hasKeptFailure(run,gates)?{status:'failed',failures:gates.failures[run.head]}:await runValidateStep(run,plan,gates);
 if(validation.problem!==undefined){
-return{result:finishDeliveryBlocked(validation.problem,run,validation.nextAction)};
+return{result:finishDeliveryBlocked([validation],run)};
 }
 if(validation.status==='not_run'){
 listNotRunGate(run,'validation: the project documents no validation commands.');
@@ -2912,7 +2930,7 @@ return'';
 }
 function describePlanProblem(planResult,resultSchema,facts,trunk){
 if(!isPlainObject(planResult)){
-return appendSentence('The planner returned no result, so '+RUN_NAME+' stopped.',describeNoResult(planResult));
+return'The planner returned no result, so '+RUN_NAME+' stopped.';
 }
 if(!validateSchema(resultSchema,planResult).ok){
 return'The planner returned a plan that does not fit the plan schema, so '+RUN_NAME+' stopped.';
@@ -2964,7 +2982,7 @@ return lead;
 }
 const shownPaths=outsidePaths.slice(0,maxListedItems()).map((file)=>encodeUntrustedText(file));
 const restCount=outsidePaths.length-shownPaths.length;
-return appendSentence(lead,'Outside the limits you set: '+joinNames(restCount>0?[...shownPaths,restCount+' more']:shownPaths,'and')+'.');
+return lead+' Outside the limits you set: '+joinNames(restCount>0?[...shownPaths,restCount+' more']:shownPaths,'and')+'.';
 }
 function unshownBriefText(){
 return'Not shown.';
@@ -3073,7 +3091,7 @@ for(;;){
 const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk);
 if(problem!==undefined){
 const unusable=describeUnusableResult(problem,planResult);
-return{result:finishDeliveryBlocked(unusable.problem,run,unusable.nextAction)};
+return{result:finishDeliveryBlocked([unusable],run)};
 }
 if(shownAsks.length>0){
 run.answerLog.push(buildAnswerEntry(shownEntry,planResult));
@@ -3083,7 +3101,7 @@ planResult=shownResult;
 }else{
 const rescoped=await runScopeStep(run,facts,run.answerLog.length);
 if(rescoped.problem!==undefined){
-return{result:finishDeliveryBlocked(rescoped.problem,run,rescoped.nextAction)};
+return{result:finishDeliveryBlocked([rescoped],run)};
 }
 scope=rescoped.scope;
 }
@@ -3095,7 +3113,7 @@ return{plan:planResult.plan,freshness:resolution.freshness};
 }
 const resettled=resolution.asks.find((ask)=>settledKinds.has(ask.kind)&&[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,TRUNK_STALE_KIND].includes(ask.kind));
 if(resettled!==undefined){
-return{result:finishDeliveryBlocked('Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',run)};
+return{result:finishDeliveryBlocked([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.'}],run)};
 }
 const isAcceptance=resolution.asks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
 const lead=describePlanLine(planResult.plan,isAcceptance?resolution.outsidePaths:[]);
@@ -3241,13 +3259,13 @@ return{values:values};
 async function runPullRequestStep(run,plan,gates){
 const texts=buildPullRequestTexts(run,plan,gates);
 if(texts.problem!==undefined){
-return{result:finishDeliveryBlocked(texts.problem,run)};
+return{result:finishDeliveryBlocked([{problem:texts.problem}],run)};
 }
 phase('PR');
 const relay=await agent(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),runnerOptions('pr-'+run.pass,'PR'));
 const checked=checkPullRequestRelay(relay,run.head);
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked(checked.problem,run,checked.nextAction)};
+return{result:finishDeliveryBlocked([checked],run)};
 }
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 }
@@ -3284,22 +3302,12 @@ parts.push({id:'decisions',text:renderDecisions(taken),compact:renderDecisionsCo
 }
 return parts;
 }
-function nextStepLine(nextAction){
-if(nextAction==='run_again'){
-return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
-}
-return'Next: fix what stopped the run, then run the request again.';
-}
 function nextActionLine(run){
 const again='Next: run the request again with the answers in it.';
 if(run.commits.length===0){
 return again;
 }
 return again+' The new run plans what is left from the commits already on branch '+encodeUntrustedText(run.branch)+'.';
-}
-function buildBlockedLead(message){
-const compact=cutAtBoundary(message,maxBlockedLeadLength());
-return compact===message?{text:message}:{text:message,compact:compact};
 }
 function describeBranchLine(run){
 return'Branch '+encodeUntrustedText(run.branch)+' holds '+describeCount(run.commits.length,'commit')+' this run made, with head '+run.head+'.';
@@ -3314,8 +3322,8 @@ blocks.push({text:renderDecisionsCompact(taken)});
 }
 return blocks;
 }
-function finishDeliveryBlocked(message,run,nextAction){
-const blocks=[buildBlockedLead(message),{text:nextStepLine(nextAction),whole:true}];
+function finishDeliveryBlocked(causes,run,endLines=[]){
+const blocks=buildStopBlocks(causes).concat(endLines.map((line)=>({text:line})));
 if(run!==undefined&&run.commits.length>0){
 blocks.push({text:describeBranchLine(run)});
 }
@@ -3562,20 +3570,13 @@ function capItemLines(itemLines){
 const restCount=itemLines.length-maxListedItems();
 return restCount>0?itemLines.slice(0,maxListedItems()).concat('- and '+restCount+' more.'):itemLines;
 }
-function describeUnusableResult(problem,result){
-if(result!==null){
-return{problem:problem};
-}
-const sentence=describeNoResult(result);
-return{problem:problem.endsWith(sentence)?problem:appendSentence(problem,sentence),nextAction:'run_again'};
-}
 function describeDeliveryStops(stops){
 const stopLines=stops.split(',').map((stop)=>'- '+deliveryStopLine(stop));
 return['The branch is not ready for delivery, so '+RUN_NAME+' stopped before planning:',...capItemLines(stopLines)].join('\n');
 }
 function checkDeliveryFacts(relay,trunk){
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
-return describeUnusableResult(malformedFactsMessage(RUN_NOUN,relay),relay);
+return describeUnusableResult(malformedFactsMessage(RUN_NOUN),relay);
 }
 if(relay.outcome==='blocked'){
 return{problem:blockedFactsMessage(RUN_NOUN,describeRelayBlocker(relay.stderr,false))};
@@ -3651,7 +3652,7 @@ return(branchValues.created==='false'&&!isOnPlanBranch)||branchValues.commit!==f
 }
 function requestBranchReplan(run){
 if(run.branchSwitches>0){
-return{result:finishDeliveryBlocked('The branch step switched branch or commit again after a replan, so '+RUN_NAME+' stopped before any wave.',run)};
+return{result:finishDeliveryBlocked([{problem:'The branch step switched branch or commit again after a replan, so '+RUN_NAME+' stopped before any wave.'}],run)};
 }
 run.branchSwitches+=1;
 return{replan:{reason:'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.'}};
@@ -3734,26 +3735,34 @@ return{problem:'The commit step reported a branch other than the plan branch, '+
 }
 return{values:values};
 }
-function describeCommitEnd(commitValues){
-const isCommitted=commitValues.committed==='true';
-return isCommitted?'Its files were committed as '+commitValues.commit+', so that commit can hold partial edits.':'It left nothing to commit, so the branch head stays '+commitValues.commit+'.';
+function describeCommitEnd(commitValues,stepName){
+const noun=commitStepTexts(stepName).noun;
+return noun.charAt(0).toUpperCase()+noun.slice(1)+' was committed as '+commitValues.commit+', so that commit can hold partial edits.';
 }
-async function runCommitStep(run,plan,files,label,stepName,subject=commitStepTexts(stepName).subject){
+async function runCommitStep(run,plan,commit,stepCauses){
+if(!Array.isArray(stepCauses)){
+throw new Error('runCommitStep: stepCauses must be an array');
+}
+const subject=commit.subject===undefined?commitStepTexts(commit.stepName).subject:commit.subject;
 phase('Commit');
-const relay=await agent(addResumeNote(buildCommitPrompt(files,plan,run.trunk,stepName,subject),run),runnerOptions(label,'Commit'));
-const checked=checkCommitRelay(relay,plan,stepName);
+const relay=await agent(addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,commit.stepName,subject),run),runnerOptions(commit.label,'Commit'));
+const checked=checkCommitRelay(relay,plan,commit.stepName);
 if(checked.problem!==undefined){
-return checked;
+return{result:finishDeliveryBlocked(stepCauses.concat([checked]),run)};
 }
 if(checked.values.committed==='true'){
 run.commits.push(checked.values.commit);
-run.runnerCommits[checked.values.commit]={files:files,commitType:commitTypeMap()[plan.classification],breaking:plan.breaking};
+run.runnerCommits[checked.values.commit]={files:commit.files,commitType:commitTypeMap()[plan.classification],breaking:plan.breaking};
 }else if(run.head!==undefined&&checked.values.commit!==run.head){
 run.commits.push(run.head+'..'+checked.values.commit);
 }
 run.head=checked.values.commit;
 run.branch=plan.branch;
-return checked;
+if(stepCauses.length===0){
+return{values:checked.values};
+}
+const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.values,commit.stepName)]:[];
+return{result:finishDeliveryBlocked(stepCauses,run,endLines)};
 }
 
 function localReviewRoutes(){
@@ -4056,7 +4065,7 @@ if(isRunEnd(decided)){
 return decided;
 }
 if(run.replans>=maxReplans()){
-return{result:finishDeliveryBlocked('Local review returned '+review.exit_reason+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.',run)};
+return{result:finishDeliveryBlocked([{problem:'Local review returned '+review.exit_reason+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.'}],run)};
 }
 run.replans+=1;
 const reason='Local review returned '+review.exit_reason+', so plan the remediation of what the review block reports, from the fresh facts.';
@@ -4073,7 +4082,7 @@ return requestReviewReplan(review,run);
 case'question':
 return askReviewQuestion(review,run);
 case'stop':
-return{result:finishDeliveryBlocked(describeReviewStop(review,run.head),run)};
+return{result:finishDeliveryBlocked([{problem:describeReviewStop(review,run.head)}],run)};
 default:
 throw new Error('routeLocalReview: no route for exit reason '+JSON.stringify(review.exit_reason));
 }
@@ -4085,13 +4094,10 @@ gates.answer=undefined;
 phase('Review');
 const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run.trunk),run):buildReviewPrompt(plan,run.trunk,answer);
 const review=await agent(prompt,reviewerOptions(gateLabel('review',run,count)));
-const committed=await runCommitStep(run,plan,[],gateLabel('review-commit',run,count),'review');
-if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run,committed.nextAction)};
-}
 const unusable=describeReviewProblem(review);
-if(unusable!==undefined){
-return{result:finishDeliveryBlocked(unusable.problem,run,unusable.nextAction)};
+const committed=await runCommitStep(run,plan,{files:[],label:gateLabel('review-commit',run,count),stepName:'review'},unusable===undefined?[]:[unusable]);
+if(committed.result!==undefined){
+return committed;
 }
 const routed=routeLocalReview(review,run);
 if(routed.held){
@@ -4262,13 +4268,11 @@ return{stepId:step.id,status:'complete'};
 }
 return{stepId:step.id,status:result.outcome,reason:describeReason(result.blocker),nextAction:result.next_action};
 }
-function describeBlockedWave(blockedOutcomes,commitValues){
-const stopped='A worker did not finish its step, so '+RUN_NAME+' stopped after the commit of its wave: ';
-const lead=commitValues.committed==='true'
-?stopped+'the wave was committed as '+commitValues.commit+', so that commit can hold partial edits of the steps below.'
-:stopped+'the wave left nothing to commit, so the branch head stays '+commitValues.commit+'.';
+function describeBlockedWave(blockedOutcomes){
+const lead='A worker did not finish its step, so '+RUN_NAME+' stopped after its wave:';
 const stepLines=blockedOutcomes.map((outcome)=>'- Step '+encodeUntrustedText(outcome.stepId)+' was blocked: '+outcome.reason);
-return[lead,...capItemLines(stepLines)].join('\n');
+const isRunAgain=blockedOutcomes.every((outcome)=>outcome.nextAction==='run_again');
+return{problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:isRunAgain?'run_again':'fix_cause'};
 }
 function describeReplanReasons(replanOutcomes){
 return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)+' needs a new plan: '+outcome.reason).join('\n');
@@ -4276,7 +4280,7 @@ return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)
 function requestStepReplan(run,replanOutcomes){
 const reasons=describeReplanReasons(replanOutcomes);
 if(run.replans>=maxReplans()){
-return{result:finishDeliveryBlocked('A worker asked for a new plan after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.\n'+reasons,run)};
+return{result:finishDeliveryBlocked([{problem:'A worker asked for a new plan after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.\n'+reasons}],run)};
 }
 run.replans+=1;
 return{replan:{reason:reasons}};
@@ -4286,7 +4290,7 @@ const doneIds=[];
 for(let waveNumber=1;;waveNumber+=1){
 const wave=computeWave(plan.steps,doneIds);
 if(!wave.ok){
-return{result:finishDeliveryBlocked('The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem),run)};
+return{result:finishDeliveryBlocked([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem)}],run)};
 }
 if(wave.all_done){
 return runGates(run,plan,facts);
@@ -4295,15 +4299,13 @@ const waveSteps=wave.wave.map((stepId)=>findPlanStep(plan,stepId));
 phase('Waves');
 const workerResults=await parallel(waveSteps.map((step)=>createWorkerTask(step,waveSteps,plan,run)));
 run.waveCount+=1;
-const committed=await runCommitStep(run,plan,listStepFiles(waveSteps),'commit-'+run.pass+'-'+waveNumber,'wave',buildWaveSubject(waveSteps,waveNumber));
-if(committed.problem!==undefined){
-return{result:finishDeliveryBlocked(committed.problem,run,committed.nextAction)};
-}
 const outcomes=waveSteps.map((step,index)=>readWorkerOutcome(step,workerResults[index]));
 const blockedOutcomes=outcomes.filter((outcome)=>outcome.status==='blocked');
-if(blockedOutcomes.length>0){
-const nextAction=blockedOutcomes.every((outcome)=>outcome.nextAction==='run_again')?'run_again':'fix_cause';
-return{result:finishDeliveryBlocked(describeBlockedWave(blockedOutcomes,committed.values),run,nextAction)};
+const stepCauses=blockedOutcomes.length>0?[describeBlockedWave(blockedOutcomes)]:[];
+const commit={files:listStepFiles(waveSteps),label:'commit-'+run.pass+'-'+waveNumber,stepName:'wave',subject:buildWaveSubject(waveSteps,waveNumber)};
+const committed=await runCommitStep(run,plan,commit,stepCauses);
+if(committed.result!==undefined){
+return committed;
 }
 const replanOutcomes=outcomes.filter((outcome)=>outcome.status==='needs_replan');
 if(replanOutcomes.length>0){
@@ -4352,9 +4354,6 @@ return 4;
 }
 function maxReviewIterations(){
 return 10;
-}
-function maxBlockedLeadLength(){
-return 1000;
 }
 function maxTitleLength(){
 return 72;
@@ -4430,11 +4429,11 @@ branchSwitches:0
 async function runDeliveryPass(run,replan){
 const checked=await runFactsStep(run);
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked(checked.problem,run,checked.nextAction)};
+return{result:finishDeliveryBlocked([checked],run)};
 }
 const scoped=await runScopeStep(run,checked.facts);
 if(scoped.problem!==undefined){
-return{result:finishDeliveryBlocked(scoped.problem,run,scoped.nextAction)};
+return{result:finishDeliveryBlocked([scoped],run)};
 }
 const planned=await runPlanningPass(run,checked.facts,scoped.scope,replan);
 if(planned.result!==undefined){
@@ -4442,7 +4441,7 @@ return planned;
 }
 const branched=await runBranchStep(run,planned.plan,planned.freshness);
 if(branched.problem!==undefined){
-return{result:finishDeliveryBlocked(branched.problem,run,branched.nextAction)};
+return{result:finishDeliveryBlocked([branched],run)};
 }
 if(needsBranchReplan(branched.values,checked.facts,planned.plan)){
 return requestBranchReplan(run);
@@ -4452,7 +4451,7 @@ return runPlanWaves(run,planned.plan,checked.facts);
 async function runDelivery(rawArgs){
 const launch=readDeliveryLaunch(rawArgs);
 if(launch.problem!==undefined){
-return finishDeliveryBlocked(launch.problem,undefined);
+return finishDeliveryBlocked([{problem:launch.problem}],undefined);
 }
 const run=createRunState(launch);
 let replan;

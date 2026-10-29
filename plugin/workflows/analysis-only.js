@@ -599,7 +599,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'a6c77ad9137f1b87';
+const BUILD_ID = '0c45d14c3c8b3ee6';
 
 function supportedSchemaKeywords(){
 return[
@@ -1325,6 +1325,33 @@ if(result!==null){
 return'';
 }
 return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+function describeUnusableResult(problem,result){
+if(result!==null){
+return{problem:problem};
+}
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again'};
+}
+function nextStepLine(nextAction){
+if(nextAction==='run_again'){
+return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+}
+return'Next: fix what stopped the run, then run the request again.';
+}
+function maxBlockedLeadLength(){
+return 1000;
+}
+function buildStopBlocks(causes){
+if(!Array.isArray(causes)||causes.length===0){
+throw new Error('buildStopBlocks: causes must be a non-empty array');
+}
+const fixCauses=causes.filter((cause)=>cause.nextAction!=='run_again');
+const orderedCauses=fixCauses.concat(causes.filter((cause)=>cause.nextAction==='run_again'));
+const leadText=orderedCauses[0].problem;
+const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
+const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
+const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
+return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 function canCarry(resumeArgs){
 const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
@@ -2122,11 +2149,8 @@ return values.trunk===trunk
 &&(values.trunk_commit!=='none'||hasFactsStop(stops,'history_unavailable'))
 &&matchesFreshnessCounts(values.trunk_freshness,values.trunk_ahead,values.trunk_behind);
 }
-function malformedFactsMessage(runNoun,result){
-return appendSentence('The facts step returned malformed facts, so '+describeRunNoun(runNoun)+' stopped before planning.',describeNoResult(result));
-}
-function appendSentence(message,sentence){
-return sentence===''?message:message+' '+sentence;
+function malformedFactsMessage(runNoun){
+return'The facts step returned malformed facts, so '+describeRunNoun(runNoun)+' stopped before planning.';
 }
 function blockedFactsMessage(runNoun,blocker){
 const reason=isNonEmptyString(blocker)?blocker:'it gave no reason.';
@@ -2187,7 +2211,8 @@ async function runScanStep(facts,runNoun){
 if(Number(facts.external_texts)>0){
 phase('Scan');
 const scan=await agent(buildScanPrompt(facts),scanOptions());
-return describeScanProblem(scan,facts,runNoun);
+const problem=describeScanProblem(scan,facts,runNoun);
+return problem===undefined?undefined:describeUnusableResult(problem,scan);
 }
 return undefined;
 }
@@ -2217,7 +2242,7 @@ return true;
 function describeScanProblem(scan,facts,runNoun){
 const stopped='so '+describeRunNoun(runNoun)+' stopped before planning.';
 if(!validateSchema(scanStepSchema(),scan).ok){
-return appendSentence('The injection scan returned a result it could not use, '+stopped,describeNoResult(scan));
+return'The injection scan returned a result it could not use, '+stopped;
 }
 const suspects=scan.results.filter((result)=>result.verdict==='injection-suspect');
 if(suspects.length>0){
@@ -2345,45 +2370,45 @@ return{agentType:runnerAgentType(),model:'haiku',schema:toAgentSchema(FACTS_STEP
 }
 function describeFactsProblem(facts){
 if(!validateSchema(FACTS_STEP_SCHEMA,facts).ok){
-return malformedFactsMessage(RUN_NOUN,facts);
+return describeUnusableResult(malformedFactsMessage(RUN_NOUN),facts);
 }
 if(facts.outcome==='blocked'){
-return blockedFactsMessage(RUN_NOUN,describeReason(facts.blocker));
+return{problem:blockedFactsMessage(RUN_NOUN,describeReason(facts.blocker))};
 }
 const isWellFormed=matchesFactsLine('facts_file',facts.facts_file)
 &&matchesFactsLine('facts_lines',facts.facts_lines)
 &&isCutList(facts.cut)
 &&isTextCount(facts.external_texts);
 if(!isWellFormed){
-return malformedFactsMessage(RUN_NOUN,facts);
+return{problem:malformedFactsMessage(RUN_NOUN)};
 }
 if(facts.cut!=='none'){
-return cutFactsMessage(RUN_NOUN,facts.cut);
+return{problem:cutFactsMessage(RUN_NOUN,facts.cut)};
 }
 return undefined;
 }
 async function gatherCheckedFacts(launchInputs){
 phase('Facts');
 const facts=await agent(buildFactsPrompt(launchInputs.trunk,launchInputs.references),factsOptions());
-const factsProblem=describeFactsProblem(facts);
-if(factsProblem!==undefined){
-return{problem:factsProblem};
+const factsCause=describeFactsProblem(facts);
+if(factsCause!==undefined){
+return{cause:factsCause};
 }
-const scanProblem=await runScanStep(facts,RUN_NOUN);
-if(scanProblem!==undefined){
-return{problem:scanProblem};
+const scanCause=await runScanStep(facts,RUN_NOUN);
+if(scanCause!==undefined){
+return{cause:scanCause};
 }
 return{facts:facts};
 }
 function describeReplyProblem(analysis,checkSchema){
 if(!isPlainObject(analysis)){
-return appendSentence('The planner returned no result, so the analysis stopped.',describeNoResult(analysis));
+return describeUnusableResult('The planner returned no result, so the analysis stopped.',analysis);
 }
 if(!validateSchema(checkSchema,analysis).ok){
-return'The planner returned a result that does not fit the analysis schema, so the analysis stopped.';
+return{problem:'The planner returned a result that does not fit the analysis schema, so the analysis stopped.'};
 }
 if(analysis.outcome==='blocked'){
-return'The planner could not do the analysis: '+describeReason(analysis.blocker);
+return{problem:'The planner could not do the analysis: '+describeReason(analysis.blocker)};
 }
 return undefined;
 }
@@ -2400,8 +2425,8 @@ asks.push({brief:brief,reason:decision.reason});
 }
 return{asks:asks,taken:taken};
 }
-function finishBlocked(message){
-return finish({outcome:'blocked',blocks:[{text:message,shorten:true}]});
+function finishBlocked(causes){
+return finish({outcome:'blocked',blocks:buildStopBlocks(causes)});
 }
 function finishComplete(report,openQuestions,taken){
 const blocks=[];
@@ -2431,15 +2456,15 @@ return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
 async function runAnalysis(rawArgs){
 const argsObject=readArgsObject(rawArgs);
 if(!isNonEmptyString(argsObject.request)){
-return finishBlocked('No request was given, so there is nothing to analyze.');
+return finishBlocked([{problem:'No request was given, so there is nothing to analyze.'}]);
 }
 const launchInputs=readLaunchInputs(argsObject,RUN_NOUN,BUILD_ID);
 if(launchInputs.problem!==undefined){
-return finishBlocked(launchInputs.problem);
+return finishBlocked([{problem:launchInputs.problem}]);
 }
 const checked=await gatherCheckedFacts(launchInputs);
-if(checked.problem!==undefined){
-return finishBlocked(checked.problem);
+if(checked.cause!==undefined){
+return finishBlocked([checked.cause]);
 }
 const facts=checked.facts;
 const level=resolveLevel(undefined,AUTONOMY_TABLE);
@@ -2451,9 +2476,9 @@ let shownRound;
 phase('Analyze');
 let analysis=await agent(buildAnalyzePrompt(argsObject.request,facts),plannerOptions('analyze','Analyze',ANALYSIS_SCHEMA));
 for(let round=1;;round+=1){
-const problem=describeReplyProblem(analysis,checkSchema);
-if(problem!==undefined){
-return finishBlocked(problem);
+const replyCause=describeReplyProblem(analysis,checkSchema);
+if(replyCause!==undefined){
+return finishBlocked([replyCause]);
 }
 if(shownRound!==undefined){
 answerLog.push(buildAnswerEntry(shownRound,analysis));
