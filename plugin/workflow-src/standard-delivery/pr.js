@@ -64,6 +64,9 @@ function reviewDecisionProblems() {
 }
 
 function toPullRequestDecision(entry) {
+  if (Object.values(reviewQuestionKinds()).includes(entry.kind)) {
+    return { brief: removeReviewerText(entry.brief) };
+  }
   const problem = reviewDecisionProblems()[entry.kind];
   return problem === undefined ? { brief: entry.brief } : { brief: Object.assign({}, entry.brief, { problem: problem }) };
 }

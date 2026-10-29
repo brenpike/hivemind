@@ -59,6 +59,8 @@ The promotion gate TRIPS — forcing a surface to the user — when the RECOMMEN
 
 Otherwise the gate is CLEAN and the Tier-B decision is auto-taken per the 2x2. The gate is evaluated against the recommended action only, per the key rule in **The Autonomy 2x2**.
 
+A review call reads clauses 1 and 2 only, per **Review Calls** below.
+
 **Remediation plan acceptance (stated once; every other doc refers here).** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is a contained action with a clean gate, auto-taken per **Tier B**. Accepting the remediation plan cerebrate returns is a separate decision. It surfaces to the user ONLY when the plan's `remediation_gate` (per `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks ANY of:
 
 - the Promotion Gate above trips on accepting the plan, by any clause, as `remediation_gate.promotion_gate` records;
@@ -68,6 +70,23 @@ Otherwise the gate is CLEAN and the Tier-B decision is auto-taken per the 2x2. T
 Any other remediation plan is auto-taken. On the workflow state machine the overlord journals it `did-now` and records the transition into the implement step. On the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it, and the run lists the decision in its final message and the PR body. The **Tier A** safety rails still hold for every step of an auto-taken plan.
 
 When any flag is set on the state machine, the overlord, by judgment, pauses its continuous-execution loop and surfaces the plan to the user before recording the transition that advances into implementation. This surface is the overlord's judgment-based obligation, the same trust model as every other surface in this doc (judgment + journal, ADR-0006 intent-based governance) — NOT a claim that the workflow definition enforces an approval gate: the workflow definition routes the plan-review outcome straight into the implement step with no `user_gate`.
+
+### Review Calls
+
+This rule is the one home for who decides a reviewer's question. The local reviewer's `user-input-required` or `high-severity-rejection` call is written by the reviewer: the options, a recommendation with an honest strength, and the reviewer's read of clauses 1 and 2 of the Promotion Gate above on the recommended option. This rule decides the call, never the reviewer. Recording a new threat model, when a reviewer raises it, is a review call under this rule.
+
+A review call is taken when the overlord agrees with the reviewer's recommendation and the recommended option is reversible and not architectural. On the script engine that agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`, resolved through `decide()`. No second agent judges the call. Clause 3 is not read for a review call because the user decided so (ADR-0037, Amendment 2026-10-29). A safety-relevant call that the run and the reviewer agree on is taken like any other when it is reversible and not architectural. This includes a pick that keeps or records a safety finding unfixed. A pick that applies a fix in a Destructive Fix Gate category still stops at that gate (**Tier A**), whoever took the call.
+
+A taken call goes back to the reviewer as its answer. The reviewer records it at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Recorded Decisions and Repeat Findings`), naming the run as the one who decided. The run lists the call in its final message and in the PR body, so the user can veto it before merge.
+
+These review calls are asked of the user:
+
+- an irreversible call;
+- an architectural call;
+- a call whose recommendation has strength none;
+- every call at an autonomy level whose table cell for its row is `surface`.
+
+The **Tier A** hard stops are unchanged. On the workflow state machine, the `question` user gate still asks every question.
 
 ## Disposition Vocabulary
 

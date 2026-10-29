@@ -97,6 +97,15 @@ describe('autonomy table', () => {
     assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface']);
     assert.ok(row.when.includes('plan.remediation_gate'), row.when);
   });
+  for (const kind of ['review_question', 'high_severity_rejection']) {
+    test(`${kind} takes at high and balanced, asks at low, and is resolved at a standard-delivery site`, () => {
+      const row = table.rows.find((entry) => entry.kind === kind);
+      assert.ok(row !== undefined, kind + ' is not a row');
+      assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface']);
+      assert.ok(row.resolved_at.includes('standard-delivery.local_review'), JSON.stringify(row.resolved_at));
+      assert.ok(row.resolved_at.some((site) => !site.startsWith('standard-delivery.')), 'its state-machine sites stay');
+    });
+  }
   test('row kinds and hard stop names are unique and disjoint', () => {
     const names = [...table.rows.map((row) => row.kind), ...table.hard_stops.map((stop) => stop.hard_stop)];
     assert.ok(names.every((name) => typeof name === 'string' && name !== ''));

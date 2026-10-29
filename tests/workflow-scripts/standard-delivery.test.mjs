@@ -818,7 +818,7 @@ function bumpAskOf() {
 const FOURTH = '5'.repeat(40);
 const ESCALATION = { ...REVIEW_CLEAN, exit_reason: 'planner-escalation', findings_open: 1, finding_id: 'f5f5f5f5', classification: 'architecture', file: 'src/cache.js', title: 'The cache layer skips the "auth" check.' };
 const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.' };
-const USER_QUESTION = { found: 'One cache serves every tenant, so a tenant can read the entries of another.', ask: 'Should the cache be keyed by tenant?', options: [{ id: 'A', summary: 'Key the cache by tenant.' }, { id: 'B', summary: 'Keep one shared cache.' }], recommendation: { option_id: 'A', strength: 'strong', why: 'Tenant data stays apart.' } };
+const USER_QUESTION = { found: 'One cache serves every tenant, so a tenant can read the entries of another.', ask: 'Should the cache be keyed by tenant?', options: [{ id: 'A', summary: 'Key the cache by tenant.' }, { id: 'B', summary: 'Keep one shared cache.' }], recommendation: { option_id: 'A', strength: 'strong', why: 'Tenant data stays apart.' }, gate: { irreversible: false, architectural: true } };
 const DIMINISHING = { ...REVIEW_CLEAN, exit_reason: 'diminishing-returns', findings_open: 2, signals_observed: ['severity-decay'], latest_severity_max: 'low', recommendation_text: 'Stop here; the rest is style.' };
 const ARCHITECTURAL_GATE = { promotion_gate: { irreversible: false, architectural: true, safety: false }, grows_surface: false, repeats_surface: false };
 const FULL_GATE = { promotion_gate: { irreversible: true, architectural: true, safety: true }, grows_surface: true, repeats_surface: true };
@@ -2669,7 +2669,7 @@ const ROW_TESTS = {
       assert.ok(moduleSource.includes('return { result: pauseDelivery({ asks: [ask], taken: [] }, run, leadText) };'));
       assert.ok(moduleSource.includes('  return replanFromTailAsk(resolution.asks[0], run);\n}'));
       assert.equal((moduleSource.match(/replanFromTailAsk\(buildUndecidedAsk\(/g) || []).length, 2);
-      assert.ok(moduleSource.includes('return askTail(resolution.asks[0], run, describeReviewQuestionLead(review, run.head));'));
+      assert.ok(moduleSource.includes('return askTail(Object.assign({}, resolution.asks[0], { brief: shown }), run, lead);'));
     });
     test('askTail logs a reply with settled [] and the lead plus questions, and returns the answer as {question, reply}', () => {
       const state = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
@@ -3089,7 +3089,7 @@ const ROW_TESTS = {
   'SD-29': () => {
     test('every decide() kind the workflow modules use is a hard stop or a table row resolved at a standard-delivery site', () => {
       const kinds = [...moduleSource.matchAll(/^const [A-Z_]+_KIND = '([a-z_]+)';$/gm)].map((match) => match[1]);
-      assert.deepEqual(kinds, ['planner_question', 'plan_acceptance', 'trunk_stale', 'external_effect', 'version_bump_type', 'version_bump_indeterminable', 'validation_remediation', 'gate_rerun', 'diminishing_returns_exit', 'planner_escalation_routing', 'root_cluster_routing', 'remediation_plan_acceptance']);
+      assert.deepEqual(kinds, ['planner_question', 'plan_acceptance', 'trunk_stale', 'external_effect', 'version_bump_type', 'version_bump_indeterminable', 'validation_remediation', 'gate_rerun', 'diminishing_returns_exit', 'planner_escalation_routing', 'root_cluster_routing', 'remediation_plan_acceptance', 'review_question', 'high_severity_rejection']);
       for (const kind of kinds) {
         const isHardStop = autonomyTable.hard_stops.some((stop) => stop.hard_stop === kind);
         const row = autonomyTable.rows.find((candidate) => candidate.kind === kind);
@@ -3257,8 +3257,12 @@ const ROW_TESTS = {
       const userQuestion = schema.properties.user_question;
       assert.equal(userQuestion.type, 'object');
       assert.equal(userQuestion.additionalProperties, false);
-      assert.deepEqual(userQuestion.required, ['found', 'ask', 'options', 'recommendation']);
+      assert.deepEqual(userQuestion.required, ['found', 'ask', 'options', 'recommendation', 'gate']);
       assert.deepEqual(Object.keys(userQuestion.properties), userQuestion.required);
+      const gateSchema = userQuestion.properties.gate;
+      assert.deepEqual([gateSchema.type, gateSchema.additionalProperties, gateSchema.required], ['object', false, ['irreversible', 'architectural']]);
+      assert.deepEqual(Object.values(gateSchema.properties).map((property) => property.type), ['boolean', 'boolean']);
+      assert.ok(reviewerText.includes('- `gate` is required and holds the booleans `irreversible` and `architectural`'));
       const optionSchema = userQuestion.properties.options;
       const recommendationSchema = userQuestion.properties.recommendation;
       assert.deepEqual([optionSchema.minItems, optionSchema.maxItems, optionSchema.items.additionalProperties], [2, 4, false]);
@@ -3307,6 +3311,10 @@ const ROW_TESTS = {
       assert.ok(!lib.validateSchema(schema, withQuestion({ recommendation: { ...USER_QUESTION.recommendation, strength: 'firm' } })).ok);
       assert.ok(!lib.validateSchema(schema, withQuestion({ recommendation: { ...USER_QUESTION.recommendation, option_id: 'E' } })).ok);
       assert.ok(!lib.validateSchema(schema, withQuestion({ note: 'x' })).ok, 'a user_question with another key');
+      assert.ok(!lib.validateSchema(schema, withQuestion({ gate: undefined })).ok, 'a user_question with no gate');
+      assert.ok(!lib.validateSchema(schema, withQuestion({ gate: { irreversible: false } })).ok, 'a gate with no architectural');
+      assert.ok(!lib.validateSchema(schema, withQuestion({ gate: { irreversible: false, architectural: false, safety: false } })).ok, 'a gate with another key');
+      assert.ok(!lib.validateSchema(schema, withQuestion({ gate: { irreversible: 'no', architectural: false } })).ok, 'a gate flag that is no boolean');
       assert.ok(!lib.validateSchema(schema, { ...question, user_question: undefined }).ok, 'a user-input-required result lacks user_question');
       assert.ok(!lib.validateSchema(schema, { ...question, question: 'Q?' }).ok, 'question is no review field');
       assert.ok(!lib.validateSchema(schema, { ...question, title: 'T.' }).ok, 'title belongs to planner-escalation');
@@ -3659,14 +3667,29 @@ const ROW_TESTS = {
       found: 'Two writers can race on the cache file, which the review rates high.',
       ask: 'Keep the rejection of this finding, or fix it?',
       options: [{ id: 'A', summary: 'Keep the rejection and record it at its source.' }, { id: 'B', summary: 'Fix the finding with a file lock.' }, { id: 'C', summary: 'Send it to the planner.' }],
-      recommendation: { option_id: 'B', strength: 'weak', why: 'A lock is cheap.' }
+      recommendation: { option_id: 'B', strength: 'weak', why: 'A lock is cheap.' },
+      gate: { irreversible: true, architectural: false }
     };
     const rejection = { ...REVIEW_CLEAN, exit_reason: 'high-severity-rejection', findings_open: 2, finding_id: 'f6f6f6f6', user_question: rejectionQuestion };
+    const AGREED_GATE = { irreversible: false, architectural: false };
+    const agreedId = 'c0ffee01' + 'b'.repeat(56);
+    const agreedQuestion = { ...USER_QUESTION, ask: 'AGREED_ASK_ZQ?', found: 'AGREED_FOUND_ZQ.', options: [{ id: 'A', summary: 'AGREED_PICK_ZQ.' }, { id: 'B', summary: 'AGREED_OTHER_ZQ.' }], recommendation: { option_id: 'A', strength: 'strong', why: 'AGREED_WHY_ZQ.' }, gate: AGREED_GATE };
+    const agreed = { ...userInput, finding_id: agreedId, user_question: agreedQuestion };
+    function decideReview(review) {
+      const shown = main.buildReviewQuestionBrief(review);
+      return structuredClone(lib.decide({ kind: shown.kind, level: undefined, brief: main.removeReviewerText(shown) }, autonomyTable, briefSchema));
+    }
+    function takenQuestionText(review) {
+      return main.describeReviewQuestionLead(review, OTHER) + '\n\n' + lib.renderQuestions([{ brief: main.buildReviewQuestionBrief(review) }]);
+    }
+    function takenResults(review, changes = {}) {
+      return happyResults({ 'review-1-1': review, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }), ...changes });
+    }
     for (const [label, review, lead] of [
       ['user-input-required', userInput, 'Local review on commit ' + OTHER + ', finding "f4f4f4f4": "One cache serves every tenant, so a tenant can read the entries of another."'],
       ['high-severity-rejection', rejection, 'Local review on commit ' + OTHER + ', finding "f6f6f6f6": "Two writers can race on the cache file, which the review rates high."']
     ]) {
-      test(`${label} pauses the run with one lead line, then the reviewer's question`, async () => {
+      test(`${label} with a gate that asks pauses the run with one lead line, then the reviewer's question`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
         const brief = main.buildReviewQuestionBrief(review);
         const question = review.user_question;
@@ -3674,8 +3697,8 @@ const ROW_TESTS = {
         assert.equal(brief.problem, JSON.stringify(question.ask));
         assert.deepEqual(brief.options.map((option) => [option.id, option.summary]), question.options.map((option) => [option.id, JSON.stringify(option.summary)]));
         assert.deepEqual({ ...brief.recommendation }, { option_id: question.recommendation.option_id, strength: question.recommendation.strength, why: JSON.stringify(question.recommendation.why) });
-        assert.ok(lib.validateSchema(briefSchema, brief).ok);
-        const decision = lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema);
+        assert.deepEqual({ ...brief.gate }, { ...question.gate, safety: false });
+        const decision = decideReview(review);
         assert.equal(decision.action, 'ask');
         assert.equal(run.result.needs_user, true, run.result.message);
         assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
@@ -3697,15 +3720,114 @@ const ROW_TESTS = {
       assert.ok(!moduleSource.includes('Only you can settle a question the review raises.'));
       assert.ok(!moduleSource.includes('Answer the finding:'));
     });
-    test('both review question kinds ask at every autonomy level', () => {
+    test('both review question kinds take at high and balanced and ask at low', () => {
       for (const kind of Object.values(main.reviewQuestionKinds())) {
         const row = autonomyTable.rows.find((candidate) => candidate.kind === kind);
-        assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface'], kind);
+        assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface'], kind);
+        const brief = main.removeReviewerText(main.buildReviewQuestionBrief({ ...agreed, exit_reason: row.exit_reason }));
+        for (const [level, action] of [['high', 'take'], ['balanced', 'take'], ['low', 'ask']]) {
+          assert.equal(lib.decide({ kind: kind, level: level, brief: brief }, autonomyTable, briefSchema).action, action, kind + ' at ' + level);
+        }
       }
+    });
+    test('decide() reads a code-built brief that always fits BRIEF_SCHEMA and holds the reviewer choices and gate', () => {
+      const worst = { found: 'f'.repeat(200), ask: '\u{1F600}'.repeat(200), options: ['A', 'B', 'C', 'D'].map((optionId) => ({ id: optionId, summary: '\u0007'.repeat(160) })), recommendation: { option_id: 'C', strength: 'weak', why: '\u0000'.repeat(200) }, gate: { irreversible: true, architectural: true } };
+      for (const exitReason of Object.keys(main.reviewQuestionKinds())) {
+        const brief = main.removeReviewerText(main.buildReviewQuestionBrief({ ...userInput, exit_reason: exitReason, user_question: worst }));
+        assert.ok(lib.validateSchema(briefSchema, brief).ok, exitReason);
+        assert.deepEqual(brief.options.map((option) => option.id), ['A', 'B', 'C', 'D']);
+        assert.deepEqual([brief.recommendation.option_id, brief.recommendation.strength], ['C', 'weak']);
+        assert.deepEqual({ ...brief.gate }, { irreversible: true, architectural: true, safety: false });
+        assert.deepEqual(brief.options.map((option) => option.reversible), [true, true, false, true]);
+        const texts = JSON.stringify(brief);
+        assert.ok(!texts.includes('\\u0007') && !texts.includes('ffff') && !texts.includes('\\ud83d'), texts);
+      }
+      assert.equal(main.buildReviewQuestionBrief(agreed).options.find((option) => option.id === 'A').reversible, true);
+    });
+    for (const [label, changes, reason] of [
+      ['an irreversible gate', { gate: { irreversible: true, architectural: false } }, 'gate_irreversible'],
+      ['an architectural gate', { gate: { irreversible: false, architectural: true } }, 'gate_architectural'],
+      ['strength none', { recommendation: { ...agreedQuestion.recommendation, strength: 'none' } }, 'no_recommendation']
+    ]) {
+      test(`a review call with ${label} asks with reason ${reason}`, async () => {
+        const review = { ...agreed, user_question: { ...agreedQuestion, ...changes } };
+        assert.deepEqual(decideReview(review), { action: 'ask', reason: reason });
+        const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
+        assert.equal(run.result.needs_user, true, run.result.message);
+        assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
+        assert.ok(run.result.message.startsWith(main.describeReviewQuestionLead(review, OTHER) + '\n\n**Q1. "AGREED_ASK_ZQ?"**'), run.result.message);
+      });
+    }
+    test('a review call asks when its table cell is surface', async () => {
+      const surfaced = buildWithSurfaceKinds(['review_question', 'high_severity_rejection']);
+      for (const review of [agreed, { ...agreed, exit_reason: 'high-severity-rejection' }]) {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }), surfaced);
+        assert.equal(run.result.needs_user, true, run.result.message);
+        assert.equal(run.result.message, main.describeReviewQuestionLead(review, OTHER) + '\n\n' + lib.renderQuestions([surfacedAsk(main.buildReviewQuestionBrief(review))]));
+      }
+    });
+    test('a review result whose user_question has no gate is unusable and stops the run blocked', async () => {
+      const { gate, ...noGate } = agreedQuestion;
+      assert.deepEqual(gate, AGREED_GATE);
+      const review = { ...agreed, user_question: noGate };
+      assert.notEqual(main.describeReviewProblem(review), undefined);
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
+      assert.equal(run.result.needs_user, false);
+      assert.equal(run.result.outcome, 'blocked');
+      assert.ok(run.result.message.startsWith('The local review step returned no usable result'), run.result.message);
+      assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
+    });
+    for (const exitReason of Object.keys(main.reviewQuestionKinds())) {
+      test(`an agreed reversible ${exitReason} call that is not architectural is taken: no pause, and the review gate reruns with decided_by run`, async () => {
+        const review = { ...agreed, exit_reason: exitReason };
+        assert.deepEqual(decideReview(review), { action: 'take', reason: 'auto' });
+        const run = await runWorkflow(LAUNCH, takenResults(review));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+        assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'pr-1']);
+        const prompt = callOf(run, 'review-1-2').prompt;
+        assert.deepEqual(readDataBlock(prompt, 'inputs').user_answer, { question: takenQuestionText(review), reply: 'A', decided_by: 'run' });
+        assert.equal(prompt.split('\n')[2], lib.dataBlocksSentence() + ' The reply in user_answer is the run\'s decision, not the user\'s.');
+        assert.ok(!prompt.includes('is the user\'s decision'), prompt);
+        assert.ok(!withoutDataBlock(prompt, 'inputs').includes('AGREED_'), prompt);
+        assert.ok(!run.result.message.includes(agreedId), run.result.message);
+        const listed = { ...main.buildReviewQuestionBrief(review), problem: 'Local review finding "c0ffee01": "AGREED_ASK_ZQ?"' };
+        assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildBumpTypeBrief(parsedBump()) }, { brief: listed }])), run.result.message);
+        assert.ok(run.result.message.includes('- D3. Local review finding "c0ffee01": "AGREED_ASK_ZQ?" Chose A: "AGREED_PICK_ZQ.".'), run.result.message);
+        const body = prBodyOf(run, 'pr-1');
+        const texts = main.reviewCallTexts();
+        assert.ok(body.includes('  D3. ' + texts.problem + '\n    Chose option A: ' + texts.summary + '\n    Why: ' + texts.why), body);
+        assert.ok(!body.includes('AGREED_') && !body.includes('c0ffee01'), body);
+        assert.ok(!JSON.stringify(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs')).includes('AGREED_'));
+      });
+    }
+    test('a take never touches run.answerLog and lists the call once per finding, and distinct findings stay distinct', () => {
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      state.head = OTHER;
+      const taken = main.askReviewQuestion(agreed, state);
+      assert.deepEqual(structuredClone(taken), { answer: { question: takenQuestionText(agreed), reply: 'A', decided_by: 'run' } });
+      main.askReviewQuestion(agreed, state);
+      main.askReviewQuestion({ ...agreed, finding_id: 'c0ffee02' }, state);
+      assert.deepEqual(structuredClone(state.answerLog), []);
+      assert.deepEqual(structuredClone(state.taken.map((entry) => [entry.kind, entry.brief.problem])), [['review_question', 'Local review finding "c0ffee01": "AGREED_ASK_ZQ?"'], ['review_question', 'Local review finding "c0ffee02": "AGREED_ASK_ZQ?"']]);
+      assert.equal(state.pendingReply, undefined);
+    });
+    test('a resume replays a taken review call the same way', async () => {
+      const results = takenResults(agreed, { 'review-1-2': userInput });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      assert.deepEqual(labelsOf(paused), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2']);
+      assert.equal(paused.result.message, main.describeReviewQuestionLead(userInput, OTHER) + '\n\n' + lib.renderQuestions([{ brief: main.buildReviewQuestionBrief(userInput) }]));
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), { ...results, 'review-1-3': REVIEW_CLEAN, 'review-commit-1-3': commitRelay({ commit: OTHER, committed: 'false' }) });
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      paused.calls.forEach((call, index) => assert.equal(run.calls[index].prompt, call.prompt, call.opts.label));
+      assert.deepEqual(readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs').user_answer, { question: takenQuestionText(agreed), reply: 'A', decided_by: 'run' });
+      assert.deepEqual(readDataBlock(callOf(run, 'review-1-3').prompt, 'inputs').user_answer, { question: takenQuestionText(userInput), reply: 'B' });
+      assert.ok(callOf(run, 'review-1-3').prompt.includes(lib.dataBlocksSentence('The reply in user_answer')));
+      assert.ok(run.result.message.includes('Local review finding "c0ffee01"'), run.result.message);
     });
     test('the lead names the finding by the first 8 code points of its finding_id, and each reviewer text is encoded', async () => {
       const longId = 'a1b2c3d4'.repeat(8);
-      const hostileQuestion = { found: 'Line\nbreak \u001b[2J', ask: 'Ask\u0007 me?', options: [{ id: 'A', summary: '@owner fix it' }, { id: 'B', summary: 'Keep\u2014it.' }], recommendation: { option_id: 'A', strength: 'weak', why: 'Because\u0000.' } };
+      const hostileQuestion = { found: 'Line\nbreak \u001b[2J', ask: 'Ask\u0007 me?', options: [{ id: 'A', summary: '@owner fix it' }, { id: 'B', summary: 'Keep\u2014it.' }], recommendation: { option_id: 'A', strength: 'weak', why: 'Because\u0000.' }, gate: { irreversible: false, architectural: true } };
       const review = { ...userInput, finding_id: longId, user_question: hostileQuestion };
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
       const message = run.result.message;
@@ -3722,7 +3844,7 @@ const ROW_TESTS = {
       state.head = OTHER;
       const asked = main.askReviewQuestion(userInput, state);
       const brief = main.buildReviewQuestionBrief(userInput);
-      const reason = lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema).reason;
+      const reason = decideReview(userInput).reason;
       assert.deepEqual(structuredClone(asked.answer), { question: main.describeReviewQuestionLead(userInput, OTHER) + '\n\n' + lib.renderQuestions([{ brief: brief, reason: reason }]), reply: 'A' });
     });
   },
@@ -4695,9 +4817,9 @@ const ROW_TESTS = {
       const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
       const reads = [...moduleCode.matchAll(/\breview\.(\w+)(?!\w|\.length\b)/g)].map((match) => match[1]);
       assert.ok(external.includes('blocker') && external.includes('field_excerpt') && reads.includes('exit_reason'));
-      assert.deepEqual(reads.filter((name) => external.includes(name)).sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'user_question', 'user_question', 'user_question']);
+      assert.deepEqual(reads.filter((name) => external.includes(name)).sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'finding_id', 'user_question', 'user_question', 'user_question']);
       const encodedReads = [...moduleCode.matchAll(/\b(?:quoteShortFindingId|encodeUntrustedText|quoteOrEmpty)\(review\.(\w+)(?!\w|\.)/g)].map((match) => match[1]);
-      assert.deepEqual(encodedReads.sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id']);
+      assert.deepEqual(encodedReads.sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'finding_id']);
       const schemaProperties = main.buildReviewSchema().properties;
       encodedReads.forEach((name) => assert.ok(Number.isInteger(schemaProperties[name].maxLength), name));
       assert.ok(moduleSource.includes('hasUnusableQuestion(review.user_question)'));
@@ -5444,7 +5566,7 @@ const ROW_TESTS = {
       arrays.forEach(([path, property]) => assert.ok(Number.isInteger(property.maxItems), path + ' has no maxItems'));
     });
     const REVIEW_BOUND = 6000;
-    const longQuestion = { found: 'f'.repeat(200), ask: 'a'.repeat(200), options: ['A', 'B', 'C', 'D'].map((optionId) => ({ id: optionId, summary: 's'.repeat(160) })), recommendation: { option_id: 'D', strength: 'weak', why: 'w'.repeat(200) } };
+    const longQuestion = { found: 'f'.repeat(200), ask: 'a'.repeat(200), options: ['A', 'B', 'C', 'D'].map((optionId) => ({ id: optionId, summary: 's'.repeat(160) })), recommendation: { option_id: 'D', strength: 'weak', why: 'w'.repeat(200) }, gate: { irreversible: false, architectural: true } };
     const maxFindingId = 'ab'.repeat(32);
     const unboundedList = (count) => Array.from({ length: count }, () => UNBOUNDED);
     const reviewCases = [
@@ -5505,13 +5627,16 @@ const ROW_TESTS = {
         assert.ok(brief.problem.split('\\ud83d').length - 1 <= 8, brief.problem);
       }
     });
-    test('a review question brief carries reviewer text, so an encoded worst case may break a brief bound, and decide() still asks it', () => {
-      const worstQuestion = { found: 'f'.repeat(200), ask: '\u{1F600}'.repeat(200), options: ['A', 'B', 'C', 'D'].map((optionId) => ({ id: optionId, summary: '\u0007'.repeat(160) })), recommendation: { option_id: 'C', strength: 'strong', why: 'w'.repeat(200) } };
+    test('a review question brief carries reviewer text, so an encoded worst case may break a brief bound, but decide() reads the code-built brief and never asks it as malformed_brief', () => {
+      const worstQuestion = { found: 'f'.repeat(200), ask: '\u{1F600}'.repeat(200), options: ['A', 'B', 'C', 'D'].map((optionId) => ({ id: optionId, summary: '\u0007'.repeat(160) })), recommendation: { option_id: 'C', strength: 'strong', why: 'w'.repeat(200) }, gate: { irreversible: false, architectural: false } };
       for (const exitReason of ['user-input-required', 'high-severity-rejection']) {
         const brief = main.buildReviewQuestionBrief({ ...REVIEW_CLEAN, exit_reason: exitReason, finding_id: 'f1f1f1f1', user_question: worstQuestion });
         assert.equal(lib.validateSchema(briefSchema, brief).ok, false);
-        assert.deepEqual(structuredClone(lib.decide({ kind: brief.kind, level: undefined, brief: brief }, autonomyTable, briefSchema)), { action: 'ask', reason: 'malformed_brief' });
-        assert.ok(lib.renderQuestions([{ brief: brief, reason: 'malformed_brief' }]).includes('- C: "' + '\\u0007'.repeat(160) + '" (recommended)'));
+        assert.ok(lib.validateSchema(briefSchema, main.removeReviewerText(brief)).ok);
+        assert.deepEqual(structuredClone(lib.decide({ kind: brief.kind, level: undefined, brief: main.removeReviewerText(brief) }, autonomyTable, briefSchema)), { action: 'take', reason: 'auto' });
+        const architectural = main.buildReviewQuestionBrief({ ...REVIEW_CLEAN, exit_reason: exitReason, finding_id: 'f1f1f1f1', user_question: { ...worstQuestion, gate: { irreversible: false, architectural: true } } });
+        assert.deepEqual(structuredClone(lib.decide({ kind: brief.kind, level: undefined, brief: main.removeReviewerText(architectural) }, autonomyTable, briefSchema)), { action: 'ask', reason: 'gate_architectural' });
+        assert.ok(lib.renderQuestions([{ brief: architectural, reason: 'gate_architectural' }]).includes('- C: "' + '\\u0007'.repeat(160) + '" (recommended)'));
       }
     });
   },

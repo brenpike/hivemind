@@ -1,0 +1,38 @@
+{
+  "rule": "Review Calls decision-autonomy section coupling",
+  "description": "`plugin/governance/decision-autonomy.md` `### Review Calls` is the single source for who decides a reviewer's question: whether a local reviewer's `user-input-required` or `high-severity-rejection` call is asked of the user or taken by the run. The source pin is the section heading. Three further pins in the same file carry the load-bearing claims. (1) The ownership sentence: this rule is the one home for who decides a reviewer's question; deleting it or moving the decision to another home turns the suite red. (2) The take condition and its outcome in one span: a review call is taken when the overlord agrees with the reviewer's recommendation and the recommended option is reversible and not architectural; dropping the agreement, the reversible clause or the not-architectural clause turns the suite red. (3) The asked list: an irreversible call, an architectural call, and a call whose recommendation has strength none are asked of the user; deleting any one of those three items turns the suite red. The consumers pin the POINTER only, never remedy prose, so honest rewording of the section body does not break them. `plugin/agents/local-reviewer.md` must still say, in step 5, that whether a question exit is asked or taken is decided per the section and never by the loop, and its Input Contract must still say that `decided_by: run` is present only when the run took the call per the section. `plugin/governance/remediation-doctrine.md` must still route question 4's unrecorded threat model to the section as a review call, and its `## Recorded Decisions and Repeat Findings` must still say that a call the run took under the section is recorded the same way. What this pin honestly guarantees is exactly that these word sequences exist in these three named files; it claims nothing about meaning. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible: surrounding prose that lets a second agent judge the call, or that lets the run take an irreversible call elsewhere, stays green; (2) the fourth asked-list item (every call at an autonomy level whose table cell is `surface`), the taken-call reporting paragraph, and the Tier A and question-gate sentence are deliberately unpinned, so deleting any of them alone stays green; (3) the pins say nothing about whether the script engine's `review_question` and `high_severity_rejection` table rows and `decide()` actually implement the take condition, which only the workflow-script tests can check; (4) the pin sees only the three files it names, and no fixture in this directory can detect a NEW reviewer or remediation actor that decides a reviewer's question itself without pointing at the section at all, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/decision-autonomy.md",
+    "pattern": "### Review Calls"
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "This rule is the one home for who decides a reviewer's question."
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "A review call is taken when the overlord agrees with the reviewer's recommendation and the recommended option is reversible and not architectural."
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "These review calls are asked of the user: - an irreversible call; - an architectural call; - a call whose recommendation has strength none;"
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "is decided per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`), never by this loop"
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "`decided_by: run` is present only when the run took the call per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`) instead of asking"
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`)"
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`) is recorded the same way"
+    }
+  ]
+}
