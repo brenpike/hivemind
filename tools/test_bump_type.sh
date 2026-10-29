@@ -8,6 +8,8 @@
 # PRINTS the versioning.md `## Bump Type Determination` routing decision:
 #     dominant_row / verdict / bump_type / rule_applied / counts{major,minor,patch,no_bump} /
 #     mapped_commits / dropped_reverts
+# With one or more optional `--version-file <path>` flags it appends version_check /
+# trunk_version / expected_version, read from each file at the base commit and at HEAD.
 # On any validation failure it prints `blocker: <reason>` on stderr, NOTHING on stdout, exit 1.
 #
 # ISOLATION: the REAL committed engine is run unmodified by absolute path (it self-locates its
@@ -37,6 +39,8 @@ ENGINE="$REPO_ROOT/plugin/skills/bump-type/scripts/bump-type.sh"
 
 command -v git >/dev/null 2>&1 \
     || { echo "FAIL: required dependency 'git' is not installed" >&2; exit 2; }
+command -v jq >/dev/null 2>&1 \
+    || { echo "FAIL: required dependency 'jq' is not installed" >&2; exit 2; }
 [[ -f "$ENGINE" ]] \
     || { echo "FAIL: required input missing: $ENGINE" >&2; exit 2; }
 
@@ -83,6 +87,40 @@ new_gitroot() {
     printf '%s' "$root"
 }
 
+# write_files <gitroot> <path> <content> [<path> <content>]... -> writes each file with exactly
+# <content> (printf '%s', no added newline) and stages everything.
+write_files() {
+    local gitroot="$1"
+    shift
+    while [[ $# -ge 2 ]]; do
+        mkdir -p "$(dirname "$gitroot/$1")"
+        printf '%s' "$2" >"$gitroot/$1"
+        shift 2
+    done
+    run_git "$gitroot" add -A
+}
+
+# new_versioned_gitroot <name> [<path> <content>]... -> like new_gitroot, but the base commit
+# holds the given files. Prints the checkout path.
+new_versioned_gitroot() {
+    local root="$WORKDIR/$1"
+    shift
+    mkdir -p "$root"
+    run_git "$root" init -q
+    write_files "$root" "$@"
+    run_git "$root" commit --allow-empty -q -m 'chore: base'
+    run_git "$root" tag base
+    printf '%s' "$root"
+}
+
+# commit_files <gitroot> <subject> [<path> <content>]... -> writes the files and commits them.
+commit_files() {
+    local gitroot="$1" subject="$2"
+    shift 2
+    write_files "$gitroot" "$@"
+    run_git "$gitroot" commit --allow-empty -q -m "$subject"
+}
+
 # make_commit <gitroot> <subject> [body] -> creates an empty commit and prints its full sha.
 make_commit() {
     local gitroot="$1" subject="$2"
@@ -113,6 +151,18 @@ expect_routing() {
     printf 'dominant_row: %s\nverdict: %s\nbump_type: %s\nrule_applied: %s\n' "$1" "$2" "$3" "$4"
     printf 'counts:\n  major: %s\n  minor: %s\n  patch: %s\n  no_bump: %s\n' "$5" "$6" "$7" "$8"
     printf 'mapped_commits: %s\ndropped_reverts: %s' "$mapped" "$9"
+}
+
+# expect_version <version_check> [trunk_version] [expected_version] -> prints the version lines
+# that follow dropped_reverts, each preceded by a newline (an empty argument omits its line).
+expect_version() {
+    printf '\nversion_check: %s' "$1"
+    if [[ -n "${2:-}" ]]; then
+        printf '\ntrunk_version: %s' "$2"
+    fi
+    if [[ -n "${3:-}" ]]; then
+        printf '\nexpected_version: %s' "$3"
+    fi
 }
 
 # assert_routing <name> <gitroot> <expected-block> <engine args...>
@@ -401,6 +451,158 @@ This reverts commit $(touch pwned_marker).' >/dev/null
     fi
 }
 
+# ── Version check (--version-file) ───────────────────────────────────────────
+
+# Plain format: the whole file is one version line. feat: with the trigger is a minor bump.
+test_version_plain() {
+    local root
+    root="$(new_versioned_gitroot version-plain-match VERSION $'1.2.3\n')"
+    commit_files "$root" 'feat: widget' VERSION $'1.3.0\n'
+    assert_routing version-plain-match "$root" \
+        "$(expect_routing MINOR bump_required minor 3 0 1 0 0 0)$(expect_version match 1.2.3 1.3.0)" \
+        base --bump-trigger yes --no-bump-match no --version-file VERSION
+
+    root="$(new_versioned_gitroot version-plain-mismatch VERSION $'1.2.3\n')"
+    commit_files "$root" 'feat: widget'
+    assert_routing version-plain-mismatch "$root" \
+        "$(expect_routing MINOR bump_required minor 3 0 1 0 0 0)$(expect_version mismatch 1.2.3 1.3.0)" \
+        base --bump-trigger yes --no-bump-match no --version-file VERSION
+}
+
+# JSON format: the top-level string `version`, read with jq. fix: with the trigger is a patch bump.
+test_version_json() {
+    local root
+    root="$(new_versioned_gitroot version-json-match plugin/plugin.json $'{"name": "demo", "version": "2.0.0"}\n')"
+    commit_files "$root" 'fix: parser' plugin/plugin.json $'{"name": "demo", "version": "2.0.1"}\n'
+    assert_routing version-json-match "$root" \
+        "$(expect_routing PATCH bump_required patch 3 0 0 1 0 0)$(expect_version match 2.0.0 2.0.1)" \
+        base --bump-trigger yes --no-bump-match no --version-file plugin/plugin.json
+
+    root="$(new_versioned_gitroot version-json-mismatch plugin/plugin.json $'{"name": "demo", "version": "2.0.0"}\n')"
+    commit_files "$root" 'fix: parser' plugin/plugin.json $'{"name": "demo", "version": "2.1.0"}\n'
+    assert_routing version-json-mismatch "$root" \
+        "$(expect_routing PATCH bump_required patch 3 0 0 1 0 0)$(expect_version mismatch 2.0.0 2.0.1)" \
+        base --bump-trigger yes --no-bump-match no --version-file plugin/plugin.json
+}
+
+# TOML format: the value of the only `version = "X.Y.Z"` line. feat!: is a major bump.
+test_version_toml() {
+    local root
+    root="$(new_versioned_gitroot version-toml-match Cargo.toml $'[package]\nname = "demo"\nversion = "0.4.9"\n')"
+    commit_files "$root" 'feat!: new api' Cargo.toml $'[package]\nname = "demo"\nversion = "1.0.0"\n'
+    assert_routing version-toml-match "$root" \
+        "$(expect_routing MAJOR bump_required major 2 1 0 0 0 0)$(expect_version match 0.4.9 1.0.0)" \
+        base --bump-trigger yes --no-bump-match no --version-file Cargo.toml
+
+    root="$(new_versioned_gitroot version-toml-mismatch Cargo.toml $'[package]\nname = "demo"\nversion = "0.4.9"\n')"
+    commit_files "$root" 'feat!: new api' Cargo.toml $'[package]\nname = "demo"\nversion = "0.5.0"\n'
+    assert_routing version-toml-mismatch "$root" \
+        "$(expect_routing MAJOR bump_required major 2 1 0 0 0 0)$(expect_version mismatch 0.4.9 1.0.0)" \
+        base --bump-trigger yes --no-bump-match no --version-file Cargo.toml
+}
+
+# Repeatable flag: every file must equal expected_version for a match; one stale file mismatches.
+test_version_several_files() {
+    local root
+    root="$(new_versioned_gitroot version-two-match VERSION $'1.2.3\n' plugin.json $'{"version": "1.2.3"}\n')"
+    commit_files "$root" 'fix: bug' VERSION $'1.2.4\n' plugin.json $'{"version": "1.2.4"}\n'
+    assert_routing version-two-files-match "$root" \
+        "$(expect_routing PATCH bump_required patch 3 0 0 1 0 0)$(expect_version match 1.2.3 1.2.4)" \
+        base --bump-trigger yes --no-bump-match no --version-file VERSION --version-file plugin.json
+
+    root="$(new_versioned_gitroot version-two-mismatch VERSION $'1.2.3\n' plugin.json $'{"version": "1.2.3"}\n')"
+    commit_files "$root" 'fix: bug' VERSION $'1.2.4\n'
+    assert_routing version-two-files-one-stale "$root" \
+        "$(expect_routing PATCH bump_required patch 3 0 0 1 0 0)$(expect_version mismatch 1.2.3 1.2.4)" \
+        base --bump-trigger yes --no-bump-match no --version-file VERSION --version-file plugin.json
+}
+
+# Every unreadable shape: no trunk_version unless every base version reads and all agree.
+test_version_unreadable() {
+    local root
+    root="$(new_versioned_gitroot version-wrong-format plugin.json $'{"version": 1}\n')"
+    commit_files "$root" 'feat: widget' plugin.json $'{"version": 2}\n'
+    assert_routing version-unreadable-wrong-format "$root" \
+        "$(expect_routing MINOR bump_required minor 3 0 1 0 0 0)$(expect_version unreadable)" \
+        base --bump-trigger yes --no-bump-match no --version-file plugin.json
+
+    root="$(new_versioned_gitroot version-two-toml-lines Cargo.toml $'[package]\nversion = "0.4.9"\n\n[dependencies.foo]\nversion = "1.0.0"\n')"
+    commit_files "$root" 'feat: widget'
+    assert_routing version-unreadable-two-toml-lines "$root" \
+        "$(expect_routing MINOR bump_required minor 3 0 1 0 0 0)$(expect_version unreadable)" \
+        base --bump-trigger yes --no-bump-match no --version-file Cargo.toml
+
+    root="$(new_versioned_gitroot version-prerelease VERSION $'1.2.3\n')"
+    commit_files "$root" 'feat: widget' VERSION $'1.3.0-rc.1\n'
+    assert_routing version-unreadable-prerelease "$root" \
+        "$(expect_routing MINOR bump_required minor 3 0 1 0 0 0)$(expect_version unreadable 1.2.3 1.3.0)" \
+        base --bump-trigger yes --no-bump-match no --version-file VERSION
+
+    root="$(new_versioned_gitroot version-missing-at-base)"
+    commit_files "$root" 'feat: widget' VERSION $'0.1.0\n'
+    assert_routing version-unreadable-missing-at-base "$root" \
+        "$(expect_routing MINOR bump_required minor 3 0 1 0 0 0)$(expect_version unreadable)" \
+        base --bump-trigger yes --no-bump-match no --version-file VERSION
+
+    root="$(new_versioned_gitroot version-bases-differ VERSION $'1.2.3\n' plugin.json $'{"version": "1.2.4"}\n')"
+    commit_files "$root" 'fix: bug' VERSION $'1.2.4\n' plugin.json $'{"version": "1.2.5"}\n'
+    assert_routing version-unreadable-bases-differ "$root" \
+        "$(expect_routing PATCH bump_required patch 3 0 0 1 0 0)$(expect_version unreadable)" \
+        base --bump-trigger yes --no-bump-match no --version-file VERSION --version-file plugin.json
+}
+
+# An ask_user verdict has no expected_version, so the check is undetermined.
+test_version_undetermined() {
+    local root
+    root="$(new_versioned_gitroot version-undetermined VERSION $'1.2.3\n')"
+    commit_files "$root" 'feat: widget' VERSION $'1.3.0\n'
+    assert_routing version-undetermined-ask-user "$root" \
+        "$(expect_routing MINOR ask_user none 4 0 1 0 0 0)$(expect_version undetermined 1.2.3)" \
+        base --bump-trigger no --no-bump-match no --version-file VERSION
+}
+
+# A no_bump verdict expects the trunk version itself; a raised version is a mismatch.
+test_version_no_bump() {
+    local root
+    root="$(new_versioned_gitroot version-no-bump-match VERSION $'1.2.3\n')"
+    commit_files "$root" 'docs: readme' README.md $'hello\n'
+    assert_routing version-no-bump-match "$root" \
+        "$(expect_routing NO_BUMP no_bump none 4 0 0 0 1 0)$(expect_version match 1.2.3 1.2.3)" \
+        base --bump-trigger no --no-bump-match yes --version-file VERSION
+
+    root="$(new_versioned_gitroot version-no-bump-raised VERSION $'1.2.3\n')"
+    commit_files "$root" 'docs: readme' VERSION $'1.2.4\n'
+    assert_routing version-no-bump-raised-mismatch "$root" \
+        "$(expect_routing NO_BUMP no_bump none 4 0 0 0 1 0)$(expect_version mismatch 1.2.3 1.2.3)" \
+        base --bump-trigger no --no-bump-match yes --version-file VERSION
+}
+
+# Without --version-file the output is exactly the routing block, even with version files present.
+test_version_no_flag_unchanged() {
+    local root
+    root="$(new_versioned_gitroot version-no-flag VERSION $'1.2.3\n')"
+    commit_files "$root" 'feat: widget' VERSION $'1.3.0\n'
+    assert_routing version-no-flag-unchanged "$root" \
+        "$(expect_routing MINOR bump_required minor 3 0 1 0 0 0)" \
+        base --bump-trigger yes --no-bump-match no
+}
+
+test_version_blockers() {
+    local root
+    root="$(new_versioned_gitroot version-blockers VERSION $'1.2.3\n')"
+    commit_files "$root" 'feat: widget' VERSION $'1.3.0\n'
+    assert_blocker blocker-version-file-traversal "$root" \
+        base --bump-trigger yes --no-bump-match no --version-file ../VERSION
+    assert_blocker blocker-version-file-leading-dash "$root" \
+        base --bump-trigger yes --no-bump-match no --version-file -VERSION
+    assert_blocker blocker-version-file-charset "$root" \
+        base --bump-trigger yes --no-bump-match no --version-file 'VERSION;id'
+    assert_blocker blocker-version-file-empty "$root" \
+        base --bump-trigger yes --no-bump-match no --version-file ''
+    assert_blocker blocker-version-file-missing-value "$root" \
+        base --bump-trigger yes --no-bump-match no --version-file
+}
+
 # ── Blockers ─────────────────────────────────────────────────────────────────
 
 test_blockers() {
@@ -454,6 +656,15 @@ test_no_bump_single_row
 test_no_bump_with_trigger_asks
 test_end_marker_body
 test_hostile_text_inert
+test_version_plain
+test_version_json
+test_version_toml
+test_version_several_files
+test_version_unreadable
+test_version_undetermined
+test_version_no_bump
+test_version_no_flag_unchanged
+test_version_blockers
 test_blockers
 
 echo

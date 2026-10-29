@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.4.1] - 2026-10-29
+
+### Changed
+
+- The bump gate is removed. A plan step sets the version files, validation checks them through `hivemind:bump-type --version-file`, and the ADR and README notes follow (#457).
+
+### Fixed
+
+- Stops pause instead of ending blocked, and a version that is already set no longer stops a run (#457).
+
 ## [7.4.0] - 2026-10-28
 
 ### Changed

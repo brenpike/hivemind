@@ -40,15 +40,19 @@ The caller resolves and passes these; the skill does not invent them.
   is rejected.
 - `bump_trigger`: `yes` or `no` — the Bump Trigger judgment above.
 - `no_bump_match`: `yes` or `no` — the "No bump is required by default" judgment above.
+- `version_files` (optional): a list of repository paths that hold a version. When given, the
+  engine also checks each file's version against the verdict. Omit it for the verdict alone.
 
 ## Procedure
 
 1. **Execute the script** with one Bash call:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh <base> --bump-trigger <yes|no> --no-bump-match <yes|no>
+   bash ${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh <base> --bump-trigger <yes|no> --no-bump-match <yes|no> [--version-file <path>]...
    ```
-   EXECUTE (do not Read) the script — it owns the deterministic read -> derive -> emit and the
-   argument and commit-framing guards. It reads the commit range and writes nothing.
+   Pass `--version-file <path>` once per entry of `version_files`, and not at all when
+   `version_files` is absent or empty. EXECUTE (do not Read) the script — it owns the
+   deterministic read -> derive -> emit and the argument and commit-framing guards. It reads the
+   commit range, and each version file at the base and at HEAD, and writes nothing.
 
 2. **Interpret the result.** Exit 0: the script printed YAML routing lines on stdout —
    ```yaml
@@ -63,6 +67,9 @@ The caller resolves and passes these; the skill does not invent them.
      no_bump: <N>
    mapped_commits: <N>
    dropped_reverts: <N>
+   version_check: match|mismatch|unreadable|undetermined   # only with --version-file
+   trunk_version: X.Y.Z                                     # only with --version-file
+   expected_version: X.Y.Z                                  # only with --version-file
    ```
    Route on `verdict`:
    - `bump_required` — a version bump is required; `bump_type` names the increment to assign.
@@ -74,8 +81,24 @@ The caller resolves and passes these; the skill does not invent them.
    `rule_applied`, `counts`, `mapped_commits`, and `dropped_reverts` are evidence for the
    caller's report, not additional routing inputs.
 
+   With `version_files`, three more keys follow:
+   - `version_check` — `match`: every file holds `expected_version` at HEAD. `mismatch`: at
+     least one does not. `unreadable`: a file has no version the engine can read at the base or
+     at HEAD, or the files' base versions differ. `undetermined`: the verdict is `ask_user`, so
+     no version is expected yet.
+   - `trunk_version` — the files' shared version at the base. Present only when every base
+     version reads and all agree.
+   - `expected_version` — the version each file should hold: `trunk_version` raised by
+     `bump_type` on `bump_required`, `trunk_version` itself on `no_bump`. Present only with
+     `trunk_version` and one of those two verdicts.
+
+   The engine reads a `*.json` file's top-level string `version`, the only `version = "X.Y.Z"`
+   line of a `*.toml` file, and any other file as one version line. A version must be a plain
+   `X.Y.Z`; a pre-release or any other form reads as no version.
+
    Exit 1: the script printed `blocker: <reason>` on stderr and nothing on stdout (for
-   example: an invalid or unresolvable base, a missing, repeated, or invalid flag, no git
+   example: an invalid or unresolvable base, a missing, repeated, or invalid flag, a version
+   file path that fails the identifier gate, a missing jq for a `*.json` version file, no git
    checkout, a missing shared library, a failed commit read, or a commit-framing violation) —
    surface it and stop.
 

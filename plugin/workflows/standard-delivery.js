@@ -135,6 +135,12 @@ const AUTONOMY_TABLE = {
 "low": "surface"
 },
 {
+"kind": "step_stop",
+"high": "surface",
+"balanced": "surface",
+"low": "surface"
+},
+{
 "kind": "trunk_stale",
 "high": "auto",
 "balanced": "surface",
@@ -617,7 +623,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '15982b2e59a50dfa';
+const BUILD_ID = 'd13d222ebaf9c7e8';
 
 function supportedSchemaKeywords(){
 return[
@@ -1348,7 +1354,22 @@ function describeUnusableResult(problem,result){
 if(result!==null){
 return{problem:problem};
 }
-return{problem:problem+' '+describeNoResult(result),nextAction:'run_again'};
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
+}
+function isTransientFailure(text){
+return typeof text==='string'&&transientFailurePatterns().some((pattern)=>pattern.test(text));
+}
+function transientFailurePatterns(){
+return[
+/\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
+/\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
+/\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
+/\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
+/\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
+/\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
+/\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
+/\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
+];
 }
 function nextStepLine(nextAction){
 if(nextAction==='run_again'){
@@ -1445,18 +1466,15 @@ throw new Error('finish: pr created must be a boolean');
 }
 }
 function noticeMarker(kind){
-const fullTextSentence=' The full text is in this run\'s per-agent results.';
-if(kind==='shortened'){
-return'Note: the text above was shortened to fit the completion notice.'+fullTextSentence;
-}
-if(kind==='compact'){
-return'Note: this text was shortened to fit the completion notice, so parts below are in compact form.'
-+fullTextSentence;
-}
-if(kind==='cut'){
-return'Note: the text above was shortened by a hard cut to fit the completion notice.'+fullTextSentence;
-}
+const leads={
+shortened:'Note: the text above was shortened to fit the completion notice.',
+compact:'Note: this text was shortened to fit the completion notice, so parts below are in compact form.',
+cut:'Note: the text above was shortened by a hard cut to fit the completion notice.'
+};
+if(!Object.hasOwn(leads,kind)){
 throw new Error('noticeMarker: unknown kind '+JSON.stringify(kind));
+}
+return leads[kind]+' The full text is in this run\'s per-agent results.';
 }
 function fitMessage(blocks,room){
 const plainText=joinParagraphs(blocks.map((block)=>block.text));
@@ -2382,6 +2400,22 @@ options:[
 {id:'B',summary:other===undefined?'Plan again: this run gives your reply to the planner before anything goes further.':other,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true}
 ],
 recommendation:{option_id:strength==='none'?'B':'A',strength:strength,why:why},
+assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
+gate:{irreversible:false,architectural:false,safety:false}
+};
+}
+function buildStepStopBrief(causes,isReplan){
+const isRunAgain=causes.every((cause)=>cause.nextAction==='run_again');
+const then=isReplan?'the run plans again from fresh facts.':'the run takes the stopped step again.';
+return{
+id:'stop',
+kind:STEP_STOP_KIND,
+problem:(isRunAgain?'Nothing in the repo needs a fix: reply when you are ready to go on, and ':'Fix what stopped the run, then reply, and ')+then,
+criticality:{level:'medium',likelihood:'certain',blast_radius:'The working branch and the pull request it becomes.',if_ignored:unshownBriefText()},
+options:[
+{id:'A',summary:isReplan?'Go on: plan again from fresh facts.':'Go on: take the stopped step again.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true}
+],
+recommendation:{option_id:'A',strength:'none',why:'Only you can tell when what stopped the run is out of the way.'},
 assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
 gate:{irreversible:false,architectural:false,safety:false}
 };
@@ -3372,11 +3406,29 @@ const questionsBlock={text:renderQuestions(resolution.asks)};
 if(resolution.asks.some((ask)=>ask.exact===true)){
 questionsBlock.whole=true;
 }
-const blocks=[{text:lead},questionsBlock];
+const compactLead=cutAtBoundary(lead,maxBlockedLeadLength());
+const blocks=[compactLead===lead?{text:lead}:{text:lead,compact:compactLead},questionsBlock];
 if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
 return finishOpenQuestions(resolution,'exact_text_size',run);
 }
 return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
+}
+function describeStopLead(causes,endLines){
+const causeTexts=buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text);
+return causeTexts.concat(endLines).join('\n');
+}
+function stopDelivery(causes,run,endLines,isReplan){
+if(causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
+return{result:finishDeliveryBlocked(causes,run,endLines)};
+}
+const asked=askTail(buildUndecidedAsk(buildStepStopBrief(causes,isReplan)),run,describeStopLead(causes,endLines));
+if(asked.answer===undefined){
+return asked;
+}
+if(isReplan){
+return{replan:{reason:'The user replied to a stop the run paused at, so plan again from the fresh facts with the answers block.'}};
+}
+return{held:false};
 }
 
 function trunkFreshnessMap(){
@@ -4382,6 +4434,7 @@ const ROOT_CLUSTER_ROUTING_KIND='root_cluster_routing';
 const REMEDIATION_PLAN_ACCEPTANCE_KIND='remediation_plan_acceptance';
 const REVIEW_QUESTION_KIND='review_question';
 const HIGH_SEVERITY_REJECTION_KIND='high_severity_rejection';
+const STEP_STOP_KIND='step_stop';
 const REVIEWER_AGENT='hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA=buildPlanResultSchema(PLAN_SCHEMA,BRIEF_SCHEMA);
 const RELAY_SCHEMA=buildRelaySchema();

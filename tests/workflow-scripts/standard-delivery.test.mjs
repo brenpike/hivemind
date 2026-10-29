@@ -3089,7 +3089,7 @@ const ROW_TESTS = {
   'SD-29': () => {
     test('every decide() kind the workflow modules use is a hard stop or a table row resolved at a standard-delivery site', () => {
       const kinds = [...moduleSource.matchAll(/^const [A-Z_]+_KIND = '([a-z_]+)';$/gm)].map((match) => match[1]);
-      assert.deepEqual(kinds, ['planner_question', 'plan_acceptance', 'trunk_stale', 'external_effect', 'version_bump_type', 'version_bump_indeterminable', 'validation_remediation', 'gate_rerun', 'diminishing_returns_exit', 'planner_escalation_routing', 'root_cluster_routing', 'remediation_plan_acceptance', 'review_question', 'high_severity_rejection']);
+      assert.deepEqual(kinds, ['planner_question', 'plan_acceptance', 'trunk_stale', 'external_effect', 'version_bump_type', 'version_bump_indeterminable', 'validation_remediation', 'gate_rerun', 'diminishing_returns_exit', 'planner_escalation_routing', 'root_cluster_routing', 'remediation_plan_acceptance', 'review_question', 'high_severity_rejection', 'step_stop']);
       for (const kind of kinds) {
         const isHardStop = autonomyTable.hard_stops.some((stop) => stop.hard_stop === kind);
         const row = autonomyTable.rows.find((candidate) => candidate.kind === kind);
@@ -3100,6 +3100,13 @@ const ROW_TESTS = {
       const kindArgs = [...moduleSource.matchAll(/\bresolve(?:Tail)?Decision\(([A-Za-z_]+),/g)].map((match) => match[1]);
       assert.ok(kindArgs.length > 0);
       kindArgs.filter((name) => name !== 'kind').forEach((name) => assert.ok(/^[A-Z_]+_KIND$/.test(name), name));
+    });
+    test('step_stop is asked with no decide() call, and its row surfaces at every level at standard-delivery.stop', () => {
+      const row = autonomyTable.rows.find((candidate) => candidate.kind === 'step_stop');
+      assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface']);
+      assert.deepEqual(row.resolved_at, ['standard-delivery.stop']);
+      assert.equal(main.buildStepStopBrief([{ problem: 'P.' }], false).kind, 'step_stop');
+      assert.ok(!/resolve(?:Tail)?Decision\(STEP_STOP_KIND/.test(moduleSource));
     });
   },
   'SD-30': () => {
@@ -5158,6 +5165,11 @@ const ROW_TESTS = {
         assert.ok(!line.includes('\n'), line);
       }
     });
+    test('agentFailure true is set only by describeUnusableResult, on a null result', () => {
+      assert.equal((builtSource.match(/agentFailure\s*:\s*true/g) || []).length, 1);
+      assert.equal(lib.describeUnusableResult('P.', null).agentFailure, true);
+      assert.equal(lib.describeUnusableResult('P.', {}).agentFailure, undefined);
+    });
     const failureSentence = lib.describeNoResult(null);
     const assertAgentFailureEnd = (run, label) => {
       assert.equal(run.result.outcome, 'blocked', label);
@@ -6406,6 +6418,80 @@ const ROW_TESTS = {
       const found = structuredClone(main.collectRepositoryPaths(marked, plan, '', []));
       assert.ok(found.some((entry) => entry.location === 'summary' && entry.value === 'docs/summary.md'), JSON.stringify(found));
       assert.ok(!main.listPlanPaths(plan).includes('docs/summary.md'));
+    });
+  },
+  'SD-70': () => {
+    const STOP_REPLY = 'Fixed, go on.';
+    function stopState(argsObject = {}) {
+      return main.createRunState({ argsObject: argsObject, request: REQUEST, trunk: 'main', references: [], localReview: true });
+    }
+    function stopAskOf(causes, isReplan) {
+      return limitAsk(main.buildStepStopBrief(causes, isReplan));
+    }
+    test('a terminal cause ends the run blocked through finishDeliveryBlocked and asks nothing', () => {
+      const state = stopState();
+      const stopped = structuredClone(main.stopDelivery([{ problem: 'TERMINAL_ZQ.', terminal: true }, { problem: 'OTHER_ZQ.' }], state, ['END_ZQ'], false));
+      assert.deepEqual(stopped, { result: { needs_user: false, outcome: 'blocked', message: ['TERMINAL_ZQ.', NEXT_STEP_LINE, 'OTHER_ZQ.', 'END_ZQ'].join('\n\n') } });
+      assert.deepEqual(structuredClone(state.answerLog), []);
+    });
+    test('an agent failure ends the run, mixed causes included, with its sentence once and the fix line led by the fix cause', () => {
+      const failure = lib.describeUnusableResult('The worker returned no result.', null);
+      for (const causes of [[failure], [{ problem: 'FIX_ZQ.' }, failure], [{ problem: 'SLOW_ZQ.', nextAction: 'run_again' }, failure]]) {
+        const stopped = structuredClone(main.stopDelivery(causes, stopState(), [], true));
+        assert.equal(stopped.result.needs_user, false);
+        assert.equal(stopped.result.outcome, 'blocked');
+        assert.equal(stopped.result.message.split(lib.describeNoResult(null)).length, 2, stopped.result.message);
+      }
+      const mixed = structuredClone(main.stopDelivery([failure, { problem: 'FIX_ZQ.' }], stopState(), [], false));
+      assert.ok(mixed.result.message.startsWith('FIX_ZQ.\n\n' + NEXT_STEP_LINE + '\n\n'), mixed.result.message);
+    });
+    test('a stop whose only causes are workers\' own run_again pauses with one step_stop question that says nothing needs a fix', () => {
+      const causes = [{ problem: 'SLOW_ONE_ZQ.', nextAction: 'run_again' }, { problem: 'SLOW_TWO_ZQ.', nextAction: 'run_again' }];
+      const stopped = structuredClone(main.stopDelivery(causes, stopState(), [], false));
+      assert.deepEqual(stopped, { result: { needs_user: true, resume_args: { answers: {}, build: BUILD_ID }, message: 'SLOW_ONE_ZQ.\nSLOW_TWO_ZQ.\n\n' + lib.renderQuestions([stopAskOf(causes, false)]) } });
+      assert.ok(main.buildStepStopBrief(causes, false).problem.startsWith('Nothing in the repo needs a fix: reply when you are ready to go on'));
+    });
+    test('the pause lead is the cause problems in buildStopBlocks order, then the end lines, one per line', () => {
+      const causes = [{ problem: 'LATER_ZQ.', nextAction: 'run_again' }, { problem: 'FIRST_ZQ.\nSTEP_LINE_ZQ' }, { problem: 'SECOND_ZQ.', nextAction: 'fix_cause' }];
+      const stopped = structuredClone(main.stopDelivery(causes, stopState(), ['END_ONE_ZQ', 'END_TWO_ZQ'], true));
+      const lead = ['FIRST_ZQ.\nSTEP_LINE_ZQ', 'SECOND_ZQ.', 'LATER_ZQ.', 'END_ONE_ZQ', 'END_TWO_ZQ'].join('\n');
+      assert.equal(stopped.result.message, lead + '\n\n' + lib.renderQuestions([stopAskOf(causes, true)]));
+    });
+    test('a lead longer than maxBlockedLeadLength() keeps its cutAtBoundary compact form, so a long cause list still fits a pause', () => {
+      const causes = Array.from({ length: 12 }, (unused, index) => ({ problem: 'Cause ' + index + ' says ' + '<&>\u0001 word'.repeat(120) + '.' }));
+      const stopped = structuredClone(main.stopDelivery(causes, stopState(), [], false));
+      assert.equal(stopped.result.needs_user, true);
+      assert.ok(stopped.result.message.endsWith(lib.renderQuestions([stopAskOf(causes, false)])), stopped.result.message.slice(-400));
+      const lead = causes.map((cause) => cause.problem).join('\n');
+      assert.ok(stopped.result.message.includes(lib.cutAtBoundary(lead, lib.maxBlockedLeadLength())), 'the compact lead shows');
+      assert.ok(lib.noticeLength(stopped.result) <= lib.noticeBudget());
+    });
+    test('the brief fits BRIEF_SCHEMA with one option and strength none, and names what the reply does', () => {
+      for (const isReplan of [false, true]) {
+        for (const causes of [[{ problem: 'P.' }], [{ problem: 'P.', nextAction: 'run_again' }]]) {
+          const brief = structuredClone(main.buildStepStopBrief(causes, isReplan));
+          assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
+          assert.equal(brief.kind, 'step_stop');
+          assert.equal(brief.options.length, 1);
+          assert.deepEqual([brief.recommendation.option_id, brief.recommendation.strength], ['A', 'none']);
+          assert.ok(brief.problem.endsWith(isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.'), brief.problem);
+        }
+      }
+      assert.ok(main.buildStepStopBrief([{ problem: 'P.' }, { problem: 'Q.', nextAction: 'run_again' }], false).problem.startsWith('Fix what stopped the run, then reply'));
+    });
+    test('a reply with isReplan true gives a new pass that does not count against maxReplans(), logged with settled []', () => {
+      const state = stopState({ answers: {}, reply: STOP_REPLY });
+      const causes = [{ problem: 'FIX_ZQ.' }];
+      const stopped = structuredClone(main.stopDelivery(causes, state, [], true));
+      assert.deepEqual(Object.keys(stopped), ['replan']);
+      assert.deepEqual(Object.keys(stopped.replan), ['reason']);
+      assert.equal(state.replans, 0);
+      assert.deepEqual(structuredClone(state.answerLog), [{ question: 'FIX_ZQ.\n\n' + lib.renderQuestions([stopAskOf(causes, true)]), settled: [], reply: STOP_REPLY }]);
+    });
+    test('a reply with isReplan false gives {held: false}, so the stopped step runs again', () => {
+      const state = stopState({ answers: {}, reply: STOP_REPLY });
+      assert.deepEqual(structuredClone(main.stopDelivery([{ problem: 'FIX_ZQ.' }], state, ['END_ZQ'], false)), { held: false });
+      assert.equal(state.answerLog.length, 1);
     });
   }
 };

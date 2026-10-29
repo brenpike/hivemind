@@ -32,6 +32,12 @@
  *   buildBumpTypeBrief, buildBumpIndeterminableBrief,
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs gates.js resolves.
+ *   buildStepStopBrief(causes, isReplan)  the step_stop brief stopDelivery
+ *            (record.js) asks: one option, strength none. Its problem says
+ *            to fix what stopped the run, then reply, or, when every cause
+ *            is run_again, that nothing in the repo needs a fix and to reply
+ *            when ready, and whether the reply takes the stopped step again
+ *            or plans again from fresh facts.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -170,6 +176,23 @@ function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
       { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
     ],
     recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
+    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    gate: { irreversible: false, architectural: false, safety: false }
+  };
+}
+
+function buildStepStopBrief(causes, isReplan) {
+  const isRunAgain = causes.every((cause) => cause.nextAction === 'run_again');
+  const then = isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.';
+  return {
+    id: 'stop',
+    kind: STEP_STOP_KIND,
+    problem: (isRunAgain ? 'Nothing in the repo needs a fix: reply when you are ready to go on, and ' : 'Fix what stopped the run, then reply, and ') + then,
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
+    options: [
+      { id: 'A', summary: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true }
+    ],
+    recommendation: { option_id: 'A', strength: 'none', why: 'Only you can tell when what stopped the run is out of the way.' },
     assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false }
   };

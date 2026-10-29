@@ -96,6 +96,10 @@
  *   characters by its schema pattern, so its short id, the first 8, is
  *   whole hex. A break-fix-break stop shows the count of conflicting
  *   findings and no entry, and a rejected finding shows its short id alone.
+ *   A stop ends the run only on a terminal cause, an agent failure, a size
+ *   limit (finishOpenQuestions) or the launch check (issue 457). Every other
+ *   stop pauses through stopDelivery (record.js) with one step_stop
+ *   question, and the reply takes the stopped step again or plans again.
  *   Every blocked result carries one Next line as a whole block right
  *   after its first block, and no block carries shorten. A blocked run end
  *   takes a list of causes, {problem, nextAction?} each, never a message:
@@ -247,6 +251,7 @@ const ROOT_CLUSTER_ROUTING_KIND = 'root_cluster_routing';
 const REMEDIATION_PLAN_ACCEPTANCE_KIND = 'remediation_plan_acceptance';
 const REVIEW_QUESTION_KIND = 'review_question';
 const HIGH_SEVERITY_REJECTION_KIND = 'high_severity_rejection';
+const STEP_STOP_KIND = 'step_stop';
 const REVIEWER_AGENT = 'hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA = buildPlanResultSchema(PLAN_SCHEMA, BRIEF_SCHEMA);
 const RELAY_SCHEMA = buildRelaySchema();

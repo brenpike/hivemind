@@ -202,7 +202,7 @@ plan:
     artifacts: []
     bump_trigger: "no"      # yes|no
     no_bump_match: "no"     # yes|no
-    artifact_files: []      # each path holding a version the bump step sets, per the versioning docs
+    artifact_files: []      # each path holding a version, set by a plan step, per plan-schema.json
   validation_commands: []   # each gate command line CLAUDE.md names
   steps:
     - id: STEP-001
