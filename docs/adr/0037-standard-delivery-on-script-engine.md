@@ -1133,15 +1133,15 @@ This amendment covers https://github.com/brenpike/hivemind/issues/457. A deliver
 **One stop path.** `stopDelivery(causes, run, endLines, isReplan)` in `plugin/workflow-src/standard-delivery/record.js` takes every stop. It ends the run through `finishDeliveryBlocked` when any cause is marked `terminal` or `agentFailure`. Otherwise it asks one undecided question of the new kind `step_stop` through `askTail`. Its lead is the cause problems, then the end lines. Its brief is built in code by `buildStepStopBrief`: fix what stopped the run, then reply, or reply when ready when nothing in the repo needs a fix. The `step_stop` row of `plugin/references/decision-autonomy-table.json` is `surface` at every level. A reply when the cause is still not fixed pauses again, with no cap, because each reply is a user action. Row SD-70.
 
 - A facts, scan, scope, plan, branch or wave stop plans again from fresh facts on the reply. That pass does not count against `maxReplans()`.
-- A validation, fix round or local review `blocked` stop, and a pull request stop, take the step again. A commit stop follows its step.
+- A validation, fix round or local review `blocked` stop, and a pull request stop, take the step again. A commit stop follows its step. Amended 2026-10-29 (PR 477 review): the step is taken again only after one head check (see the PR 477 review section below).
 - `max-iterations-reached` and `break-fix-break` plan again with the review carried.
 - The worker replan limit and the review replan limit ask a `step_stop` question, and the reply starts a new pass that is not counted.
-- A pull request rerun is labeled `pr-P-N`, with N from 2.
+- A pull request rerun is labeled `pr-P-N`, with N from 2. Amended 2026-10-29 (PR 477 review): each reply to a gate or pull request stop also runs a head check, labeled `head-P-N`, before the step is taken again.
 
 **What still ends the run.** This is the terminal allowlist:
 
 - the scan's injection suspect, and the local review's `injection-suspect`;
-- a commit script refusal, and a commit step that reports a branch other than the plan branch;
+- a commit script refusal, and a commit step that reports a branch other than the plan branch. Amended 2026-10-29 (PR 477 review): the head check is a commit step, so its refusal and its branch check end the run too;
 - a `create-working-branch` refusal, a branch step that reports a branch other than the plan branch, and a second branch switch after a replan;
 - a pull request text over its size limit, and a `head_ref_oid` other than the commit every gate held on;
 - the workflow-defect guard: a settled question that comes back;
@@ -1175,7 +1175,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/457. A deliver
 
 **Issue 447.** The bump-step relay case of https://github.com/brenpike/hivemind/issues/447 is gone with the bump gate. The `open-plan-pr` stdout leak stays with issue 447.
 
-**Surface account.** Removed: the bump gate and its agents, with `runBumpGate`, `runBumpStep`, `commitBumpEdit`, `buildBumpPrompt`, `buildBumpTypePrompt`, `checkBumpTypeRelay`, `resolveBumpVerdict`, `describeBumpNote`, `keepBumpHeld`, `isKeptRunnerCommit`, `isSingleRowBump`, `buildBumpSchema`, `buildBumpTypeBrief` and `buildBumpIndeterminableBrief`; `BUMP_SCHEMA`, `BUMP_MODEL` and `VERSION_BUMP_TYPE_KIND`; `run.runnerCommits` and the gate state `bumpMark`, `bumpValues` and `runs.bump`; the Bump phase; rows SD-24 and SD-65; the `standard-delivery.bump` sites of the autonomy table; and the choice at each call site between ending and asking. Added: `stopDelivery`, the `agentFailure` mark, the `step_stop` kind and row, `buildStepStopBrief`, `isTransientFailure`, `runRunnerRelay`, the bump-type `--version-file` option and its three keys, `versionCheckRoutingSpec`, `isConsistentVersionRelay`, `run.versionAnswer`, the version question brief, and rows SD-70 and SD-71. No new agent, state or workflow definition version is added.
+**Surface account.** Removed: the bump gate and its agents, with `runBumpGate`, `runBumpStep`, `commitBumpEdit`, `buildBumpPrompt`, `buildBumpTypePrompt`, `checkBumpTypeRelay`, `resolveBumpVerdict`, `describeBumpNote`, `keepBumpHeld`, `isKeptRunnerCommit`, `isSingleRowBump`, `buildBumpSchema`, `buildBumpTypeBrief` and `buildBumpIndeterminableBrief`; `BUMP_SCHEMA`, `BUMP_MODEL` and `VERSION_BUMP_TYPE_KIND`; `run.runnerCommits` and the gate state `bumpMark`, `bumpValues` and `runs.bump`; the Bump phase; rows SD-24 and SD-65; the `standard-delivery.bump` sites of the autonomy table; and the choice at each call site between ending and asking. Added: `stopDelivery`, the `agentFailure` mark, the `step_stop` kind and row, `buildStepStopBrief`, `isTransientFailure`, `runRunnerRelay`, the bump-type `--version-file` option and its three keys, `versionCheckRoutingSpec`, `isConsistentVersionRelay`, `run.versionAnswer`, the version question brief, and rows SD-70 and SD-71. No new agent, state or workflow definition version is added. Amended 2026-10-29 (PR 477 review): see the surface account of that section.
 
 **Measured lengths.** Each length is the JavaScript string length of the built script, measured with node, and each prose count is `countProseCharacters` in `tools/build_workflows.mjs`.
 
@@ -1185,6 +1185,8 @@ This amendment covers https://github.com/brenpike/hivemind/issues/457. A deliver
 | `analysis-only.js` | 73,661 | 74,539 | 18,900 | 19,000, unchanged |
 
 The prose margins are 820 and 100. `standard-delivery.js` stays 22,751 characters under the 190,000 budget of decision 18. Its prose budget rises by 800, a reviewed change within the margin `tests/workflow-scripts/build.test.mjs` enforces. `analysis-only.js` grows by the shared `plugin/workflow-src/lib/result.js` changes and its embedded autonomy table.
+
+Amended 2026-10-29 (PR 477 review): after the head fix, `standard-delivery.js` is 167,943 characters with 43,186 of prose, which is 22,057 under the 190,000 budget and 614 under the prose budget of 43,800. `analysis-only.js` is unchanged at 74,539 and 18,900. The prose budget is not raised.
 
 **Bounded residual.** Paused stop leads still use wording such as "... so the delivery stopped" while the run pauses. Bounded impact: the pause carries the reply line and the `step_stop` question, which say what a reply does.
 
@@ -1202,5 +1204,55 @@ It updates these places in place, each with a dated note:
 - Amendment 2026-10-28 on one message shape (issue 460): the list of every run end and its owner.
 
 The rest of ADR-0037 is unchanged.
+
+### Review of PR 477: every resume reads the head (2026-10-29)
+
+This section covers the Codex P1 finding on https://github.com/brenpike/hivemind/pull/477 (https://github.com/brenpike/hivemind/pull/477#discussion_r4413750725). After a fix-commit relay the run could not read, `run.head` stayed at the old commit. The kept validation failure was dropped, validation held on the old head, and with local review off the pull request step sent `expect_commit` set to the old head. `open-plan-pr.sh` refused it, the step paused, and every reply met the same refusal. The run could never finish.
+
+**First-finding triage, per ADR-0038.**
+
+- **Introduced or inherited.** Introduced by this branch. On main, a validation, fix round or pull request stop ended the run, so no reply could resume a gate. The commits that made those stops pause created the path.
+- **Root class.** `run.head` was a belief the run learned only from a valid commit relay. A paused stop hands control to the user, or follows a commit relay the run could not read, and the head can move during either. The reply then took a step that has no commit runner of its own, validation or the pull request, and that step held a gate on, or pushed, a head the run never read.
+- **Removed instead of hardened.** Nothing could be removed. Planning again on every gate or pull request reply fails because the plan schema needs at least one step, and nothing is left to plan after the last wave. It would also break the recorded decision that a version-only fix-limit reply never plans again. Making those stops terminal again would reverse the settled answer that malformed output pauses. So the fix adds one observation point at the resume, in place of a patch per stop site.
+- **Threat model.** In scope. The `step_stop` brief tells the user to fix what stopped the run and reply, so a commit made during a pause is expected use. The second trigger, a commit runner whose relay cannot be read, needs no user action.
+
+**Reply audit.** Every reply to a stop, and every other resume, was checked.
+
+- Unsafe before the fix: a validation or version relay problem, a version-only fix limit, a fix round step or commit relay problem, and a pull request stop. Each took its step again on the old `run.head`.
+- Safe before the fix: review stops that run the review again, because its commit runner reads the head, and every reply that plans again, because each new pass runs a wave that ends with the commit runner. One gap remained there. When that wave commit was `committed: true`, the run recorded only the new commit and assumed its parent was `run.head`, so a commit made by a runner whose relay was unreadable fell out of the commit list. The impact was display only, the "Commits this run made" list.
+
+**Decided by the user (2026-10-29).**
+
+- **Q1, option A.** Read the branch head after every reply to a gate or pull request stop, and at the start of each new pass. Accept the small growth of the surface. Option B, which reruns only a commit step whose result was unreadable, was ruled out because it leaves replies stuck after a commit made during a pause.
+- **Q2, option A.** The listed test rewrites are approved, and further rewrites of the same kind.
+
+**Eliminated class.** A step acts on a branch head the run did not read after a pause or an unreadable commit relay. It is now impossible for two reasons:
+
+- `run.head`, `run.branch` and `run.commits` have one writer, `observeHead` in `plugin/workflow-src/standard-delivery/record.js`. It is fed only the commit of a checked molt relay or a checked branch relay. A structural test on the built script pins that no other code writes them. Row SD-72.
+- The only two ways to resume each call it before any gate or push reads `run.head`. A new pass reads the head from its branch step in `runDeliveryPass`, after `needsBranchReplan` and before any wave. A step taken again reads it through `runHeadCheck` in `plugin/workflow-src/standard-delivery/gates.js`. Row SD-73.
+
+This changes where the head comes from. It adds no list of handled cases.
+
+**The head check.** `stopDelivery` returns `{rerun: true}` to the gate loop for a reply that does not plan again. This replaces `{held: false}` from `stopDelivery`, which had two meanings. `runHeadCheck` then runs `runCommitStep` with an empty file list, `stepName` `head` and the label `head-P-N`, so molt reports the head of the working branch with `committed: false`. It is run again while it returns `{rerun: true}`. Then every kept validation failure is cleared. When the head moved, the gates that held on the old head go through the gate rerun of SD-27. Otherwise the same step, a gate or the pull request, runs again. The pull request step is now one call inside the gate loop, with the label `pr-P-N` counted in `gates.runs.pr`, and its internal rerun loop is gone.
+
+**Deviation from the plan.** The head check counter is `gates.runs.headCheck`, not `gates.runs.head`. The SD-72 structural pin forbids any `.head =` or `.head +=` write outside `observeHead`, and a counter named `runs.head` would trip it.
+
+**Recorded decisions, each with its repeat scope.**
+
+- **One head check runner per reply to a gate or pull request stop.** The runner is a haiku molt run with an empty file list, the way local review already reads the head. `hivemind:gather-facts` was too heavy. The rule is the same for a reply to a local review stop, which costs one more runner than before, so that it stays uniform and closed. A run that never pauses at a gate or pull request stop gets no added agent call. Repeat scope: a finding that asks to skip the head check on some replies, or to read the head by another means for one stop.
+- **A refusal at the head check ends the run.** A dirty tree, trunk safety, and a branch other than the plan branch are commit script refusals, which stay on the terminal allowlist. Issue 457 lists commit script refusals as true blocks. To make a refusal unlikely, the `step_stop` brief says to reply with every change committed. Repeat scope: a finding that asks a head check refusal to pause.
+- **A reply clears every kept validation failure.** The user may have fixed whatever the failure was about, and a failure kept for an old head must not drive a fix decision on a new one. Repeat scope: a finding that asks a reply to keep a failure.
+- **A commit made during a pause enters the commit list as a range.** It is recorded as `<old>..<new>`, the way local review fix commits already are, through `observeHead`. Repeat scope: a finding that asks for its commits to be listed one by one. Bounded impact of the commit list: informational only, since the commit list of the pull request on GitHub is authoritative.
+- **`run.head` has one writer.** Repeat scope: a finding that asks another site to write `run.head`, `run.branch` or `run.commits`.
+
+**Surface account.** Added: `observeHead`, one call to it at the start of each pass, `runHeadCheck` and the `commitStepTexts` case `head`, the `{rerun: true}` reply marker, the counters `gates.runs.headCheck` and `gates.runs.pr`, one clause in the `step_stop` brief, and rows SD-72 and SD-73. Removed: the kept-failure delete in `runFixRound` and in `stopVersionFixLimit`, the pull request step's internal rerun loop, the two meanings of `{held: false}`, and the unbounded pause loop after a commit made during a pull request or validation pause. The net is a slight growth, mainly one runner kind and one counter. The user accepted it (Q1).
+
+**Measured lengths.** After this change `standard-delivery.js` is 167,943 characters with 43,186 of prose, under the budgets of 190,000 and 43,800. The budgets do not change. The table above has the full figures.
+
+**Bounded residual.** The head check is retried once on a transient block, like any commit runner. A malformed head check relay pauses, and its reply runs `head-P-(N+1)`. Bounded impact: the run never acts on a head it did not read, and each pause needs a user reply.
+
+It updates these places in place, each with a dated note: the bullet on validation, fix round and local review blocked stops and pull request stops; the `pr-P-N` bullet; the terminal allowlist's commit refusal line; the surface account; and the table of measured lengths.
+
+Links: https://github.com/brenpike/hivemind/pull/477#discussion_r4413750725, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
 
 Links: https://github.com/brenpike/hivemind/issues/457, https://github.com/brenpike/hivemind/issues/447, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).

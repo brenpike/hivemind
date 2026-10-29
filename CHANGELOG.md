@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Stops pause instead of ending blocked, and a version that is already set no longer stops a run (#457).
+- A reply to a validation, fix round, local review or pull request stop reads the branch head first, so the run never holds a gate on, or pushes, a head it did not read (#457, PR #477 review).
 
 ## [7.4.0] - 2026-10-28
 
