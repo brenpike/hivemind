@@ -69,7 +69,9 @@
  *   One stop path (issue 457): a stop ends the run only on a terminal
  *   cause, an agent failure, a size limit (finishOpenQuestions) or the
  *   launch check. Every other stop pauses through stopDelivery, and a reply
- *   when the cause is still not fixed pauses again, with no cap.
+ *   when the cause is still not fixed pauses again, with no cap. So
+ *   finishDeliveryBlocked has no caller but stopDelivery,
+ *   finishOpenQuestions and the launch end of runDelivery (main.js).
  *   Whether the run pauses or ends depends only on whether a question is
  *   open, never on where it came up or how many rounds ran (issue 453):
  *   every open question pauses through pauseDelivery while a pause can be

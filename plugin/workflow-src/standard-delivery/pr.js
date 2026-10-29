@@ -12,7 +12,7 @@
  *
  * Outputs
  *   runPullRequestStep(run, plan, gates)  {result}: finishDeliveryComplete
- *          naming the pull request, or a blocked finish.
+ *          naming the pull request, a pause, or a blocked finish.
  *   renderLiteralBlock(text)  the literal fenced block the pull request
  *          texts put external text in.
  *   The step, as meta.js names it:
@@ -23,7 +23,13 @@
  *           builds, and draft from the launch. This runner is the only push the workflow makes, so
  *           every push carries expect_commit. Its stdout parses with
  *           openPlanPrRoutingSpec(), head_ref_oid must equal H, and the run
- *           finishes complete with pr. The body is the plan summary and the
+ *           finishes complete with pr. The runner call goes through
+ *           runRunnerRelay (relay.js), so a transient block runs once more
+ *           under pr-P-retry. A pull request text over its size limit and a
+ *           head_ref_oid other than H are terminal stops. A blocked,
+ *           malformed or other unusable relay pauses through stopDelivery
+ *           (record.js), and the reply runs the step again under pr-P-N, N
+ *           from 2. The body is the plan summary and the
  *           comment a fixed lead, each followed by the one run record
  *           buildRunRecordParts() returns, the same record the final
  *           message carries, with every taken decision and no reviewer
@@ -46,9 +52,8 @@
  *   commit subject.
  *   The relay is read through describeUnusableResult (lib/result.js): a
  *   null result, an agent failure, adds the agent-failure sentence and
- *   next action run_again, which runPullRequestStep passes on in its
- *   cause to finishDeliveryBlocked, and any other unusable result keeps
- *   the fix line.
+ *   next action run_again, and stopDelivery ends the run on it; any other
+ *   unusable result keeps the fix line and pauses.
  *
  * Why
  *   The pull request is the one push of the run, so its texts and the
@@ -194,21 +199,30 @@ function checkPullRequestRelay(relay, head) {
     return { problem: 'The pull request step returned malformed routing lines, ' + stopped };
   }
   if (values.head_ref_oid !== head) {
-    return { problem: 'The pull request step reported a head commit other than the commit every gate held on, ' + stopped };
+    return { problem: 'The pull request step reported a head commit other than the commit every gate held on, ' + stopped, terminal: true };
   }
   return { values: values };
+}
+
+function describePullRequestLabel(run, attempt) {
+  return 'pr-' + run.pass + (attempt === 1 ? '' : '-' + attempt);
 }
 
 async function runPullRequestStep(run, plan, gates) {
   const texts = buildPullRequestTexts(run, plan, gates);
   if (texts.problem !== undefined) {
-    return { result: finishDeliveryBlocked([{ problem: texts.problem }], run) };
+    return stopDelivery([{ problem: texts.problem, terminal: true }], run, [], false);
   }
   phase('PR');
-  const relay = await agent(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), runnerOptions('pr-' + run.pass, 'PR'));
-  const checked = checkPullRequestRelay(relay, run.head);
-  if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked([checked], run) };
+  for (let attempt = 1; ; attempt += 1) {
+    const relay = await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), describePullRequestLabel(run, attempt), 'PR');
+    const checked = checkPullRequestRelay(relay, run.head);
+    if (checked.problem === undefined) {
+      return { result: finishDeliveryComplete(run, plan, checked.values, gates) };
+    }
+    const stopped = stopDelivery([checked], run, [], false);
+    if (stopped.held !== false) {
+      return stopped;
+    }
   }
-  return { result: finishDeliveryComplete(run, plan, checked.values, gates) };
 }

@@ -205,7 +205,10 @@
  *   step that switched branch or commit, after a taken local review
  *   escalation or root cluster, after a reply to a tail ask other than a
  *   local review question or a version question, or after a reply to a
- *   stop with isReplan true, and every pass starts with the facts step,
+ *   stop with isReplan true. A reply to a facts, scan, scope, plan or
+ *   branch stop keeps the review its pass planned from (keepReplanReview),
+ *   and a reply to a local review stop that plans again carries that
+ *   review (review.js). Every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
  *   invariant 3). Then the scope step (scope.js) runs once, after the facts
  *   step and the scan and before planning, and again after each reply round
@@ -361,22 +364,34 @@ function createRunState(launch) {
   };
 }
 
+/**
+ * Returns passEnd, or, when it is a reply to a stop before any wave of a
+ * pass whose replan data carries a review, the same replan with that
+ * review, so the next plan still sees the findings.
+ */
+function keepReplanReview(passEnd, replan) {
+  if (passEnd.replan === undefined || replan === undefined || replan.review === undefined) {
+    return passEnd;
+  }
+  return { replan: { reason: passEnd.replan.reason, review: replan.review } };
+}
+
 async function runDeliveryPass(run, replan) {
   const checked = await runFactsStep(run);
   if (checked.problem !== undefined) {
-    return stopDelivery([checked], run, [], true);
+    return keepReplanReview(stopDelivery([checked], run, [], true), replan);
   }
   const scoped = await runScopeStep(run, checked.facts);
   if (scoped.problem !== undefined) {
-    return stopDelivery([scoped], run, [], true);
+    return keepReplanReview(stopDelivery([scoped], run, [], true), replan);
   }
   const planned = await runPlanningPass(run, checked.facts, scoped.scope, replan);
   if (planned.plan === undefined) {
-    return planned;
+    return keepReplanReview(planned, replan);
   }
   const branched = await runBranchStep(run, planned.plan, planned.freshness);
   if (branched.problem !== undefined) {
-    return stopDelivery([branched], run, [], true);
+    return keepReplanReview(stopDelivery([branched], run, [], true), replan);
   }
   if (needsBranchReplan(branched.values, checked.facts, planned.plan)) {
     return requestBranchReplan(run);

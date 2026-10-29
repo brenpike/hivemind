@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'fff9747064484c8b';
+const BUILD_ID = 'd3f2d8c12c9e3113';
 
 function supportedSchemaKeywords(){
 return[
@@ -3286,22 +3286,30 @@ if(values===undefined||values.commented===values.created){
 return{problem:'The pull request step returned malformed routing lines, '+stopped};
 }
 if(values.head_ref_oid!==head){
-return{problem:'The pull request step reported a head commit other than the commit every gate held on, '+stopped};
+return{problem:'The pull request step reported a head commit other than the commit every gate held on, '+stopped,terminal:true};
 }
 return{values:values};
+}
+function describePullRequestLabel(run,attempt){
+return'pr-'+run.pass+(attempt===1?'':'-'+attempt);
 }
 async function runPullRequestStep(run,plan,gates){
 const texts=buildPullRequestTexts(run,plan,gates);
 if(texts.problem!==undefined){
-return{result:finishDeliveryBlocked([{problem:texts.problem}],run)};
+return stopDelivery([{problem:texts.problem,terminal:true}],run,[],false);
 }
 phase('PR');
-const relay=await agent(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),runnerOptions('pr-'+run.pass,'PR'));
+for(let attempt=1;;attempt+=1){
+const relay=await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),describePullRequestLabel(run,attempt),'PR');
 const checked=checkPullRequestRelay(relay,run.head);
-if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked([checked],run)};
-}
+if(checked.problem===undefined){
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
+}
+const stopped=stopDelivery([checked],run,[],false);
+if(stopped.held!==false){
+return stopped;
+}
+}
 }
 
 function renderCommits(commits){
@@ -3841,15 +3849,15 @@ return stopDelivery(stepCauses,run,endLines,isReplan);
 function localReviewRoutes(){
 return{
 clean:'hold',
-'max-iterations-reached':'stop',
-'break-fix-break':'stop',
+'max-iterations-reached':'stop_replan',
+'break-fix-break':'stop_replan',
 'root-cluster-suspected':'replan',
 'diminishing-returns':'diminishing',
 'injection-suspect':'stop',
 'user-input-required':'question',
 'planner-escalation':'replan',
 'high-severity-rejection':'question',
-blocked:'stop'
+blocked:'stop_rerun'
 };
 }
 function reviewExitFields(){
@@ -4184,11 +4192,15 @@ if(isRunEnd(decided)){
 return decided;
 }
 if(run.replans>=maxReplans()){
-return{result:finishDeliveryBlocked([{problem:'Local review returned '+review.exit_reason+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.'}],run)};
+return stopForReviewReplan({problem:'Local review returned '+review.exit_reason+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.'},review,run);
 }
 run.replans+=1;
 const reason='Local review returned '+review.exit_reason+', so plan the remediation of what the review block reports, from the fresh facts.';
 return{replan:{reason:reason,review:projectReplanReview(review)}};
+}
+function stopForReviewReplan(cause,review,run){
+const stopped=stopDelivery([cause],run,[],true);
+return stopped.replan===undefined?stopped:{replan:{reason:stopped.replan.reason,review:projectReplanReview(review)}};
 }
 function routeLocalReview(review,run){
 switch(localReviewRoutes()[review.exit_reason]){
@@ -4200,8 +4212,12 @@ case'replan':
 return requestReviewReplan(review,run);
 case'question':
 return askReviewQuestion(review,run);
+case'stop_replan':
+return stopForReviewReplan({problem:describeReviewStop(review,run.head)},review,run);
+case'stop_rerun':
+return stopDelivery([{problem:describeReviewStop(review,run.head)}],run,[],false);
 case'stop':
-return{result:finishDeliveryBlocked([{problem:describeReviewStop(review,run.head)}],run)};
+return stopDelivery([{problem:describeReviewStop(review,run.head),terminal:true}],run,[],false);
 default:
 throw new Error('routeLocalReview: no route for exit reason '+JSON.stringify(review.exit_reason));
 }
@@ -4551,22 +4567,28 @@ branchSwitches:0,
 versionAnswer:undefined
 };
 }
+function keepReplanReview(passEnd,replan){
+if(passEnd.replan===undefined||replan===undefined||replan.review===undefined){
+return passEnd;
+}
+return{replan:{reason:passEnd.replan.reason,review:replan.review}};
+}
 async function runDeliveryPass(run,replan){
 const checked=await runFactsStep(run);
 if(checked.problem!==undefined){
-return stopDelivery([checked],run,[],true);
+return keepReplanReview(stopDelivery([checked],run,[],true),replan);
 }
 const scoped=await runScopeStep(run,checked.facts);
 if(scoped.problem!==undefined){
-return stopDelivery([scoped],run,[],true);
+return keepReplanReview(stopDelivery([scoped],run,[],true),replan);
 }
 const planned=await runPlanningPass(run,checked.facts,scoped.scope,replan);
 if(planned.plan===undefined){
-return planned;
+return keepReplanReview(planned,replan);
 }
 const branched=await runBranchStep(run,planned.plan,planned.freshness);
 if(branched.problem!==undefined){
-return stopDelivery([branched],run,[],true);
+return keepReplanReview(stopDelivery([branched],run,[],true),replan);
 }
 if(needsBranchReplan(branched.values,checked.facts,planned.plan)){
 return requestBranchReplan(run);
