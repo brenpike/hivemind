@@ -2,9 +2,8 @@
  * standard-delivery main.js: the body of the standard-delivery
  * workflow script. It delivers a request on one working branch: branch
  * facts, a checked plan, questions decided or asked, the working branch,
- * each wave of plan steps with its commit, then the version bump,
- * validation and local review as gates (ADR-0037 invariant 2), then the
- * pull request. The run ends at the pull request: once every configured
+ * each wave of plan steps with its commit, then validation and local
+ * review as gates (ADR-0037 invariant 2), then the pull request. The run ends at the pull request: once every configured
  * gate held on one commit, it pushes that commit and opens or reuses the
  * pull request, and ends complete naming it. Watching the pull request is
  * the overlord's, not this script's (ADR-0037 decision 4).
@@ -81,7 +80,7 @@
  *   unbounded agent fields never reach a message: plan.summary reaches
  *   only the pull request title and body, a worker summary nothing, and
  *   validate failures only the fix prompt. The code-built brief of every
- *   plan, trunk, effect, bump, validation, gate rerun and review routing
+ *   plan, trunk, effect, validation, gate rerun and review routing
  *   decision fits BRIEF_SCHEMA with worst-case inputs, holds
  *   unshownBriefText() (plan.js) in each field no message shows, so the
  *   bundle carries no text the user never reads, and the diminishing
@@ -137,8 +136,8 @@
  *   always means a pull request exists.
  *   Every step- or script-written diagnostic or name a message shows goes
  *   through encodeUntrustedText (lib/result.js), so it shows as quoted JSON
- *   of printable ASCII. A blocked relay of the facts, branch, commit,
- *   bump-type or pull request step quotes the payload of its last
+ *   of printable ASCII. A blocked relay of the facts, branch, commit
+ *   or pull request step quotes the payload of its last
  *   'blocker: ' line that has one; with none it quotes the first two
  *   non-blank stderr lines, and only a blank or missing stderr says it
  *   gave no reason (describeRelayBlocker). A planner, worker, gate edit or
@@ -208,7 +207,7 @@
  *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
  *   from one table, which gives both its anyOf branches and its 'Only with'
  *   descriptions: the plan result and revise schemas, the relay, worker,
- *   bump, fix, both validate and review schemas. validateSchema checks the
+ *   fix, both validate and review schemas. validateSchema checks the
  *   full schema, so a result that carries a field of another outcome, or
  *   lacks a field its outcome requires, blocks the step that reads it with
  *   that step's malformed or schema message, and no consumer checks the tie
@@ -236,13 +235,10 @@ const RUN_NAME = describeRunNoun(RUN_NOUN);
 const PLANNER_AGENT = 'hivemind:cerebrate';
 const RUNNER_MODEL = 'haiku';
 const SCOPE_MODEL = 'sonnet';
-const BUMP_MODEL = 'sonnet';
 const PLANNER_QUESTION_KIND = 'planner_question';
 const PLAN_ACCEPTANCE_KIND = 'plan_acceptance';
 const TRUNK_STALE_KIND = 'trunk_stale';
 const EXTERNAL_EFFECT_KIND = 'external_effect';
-const VERSION_BUMP_TYPE_KIND = 'version_bump_type';
-const VERSION_BUMP_INDETERMINABLE_KIND = 'version_bump_indeterminable';
 const VALIDATION_REMEDIATION_KIND = 'validation_remediation';
 const GATE_RERUN_KIND = 'gate_rerun';
 const DIMINISHING_RETURNS_EXIT_KIND = 'diminishing_returns_exit';
@@ -256,7 +252,6 @@ const REVIEWER_AGENT = 'hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA = buildPlanResultSchema(PLAN_SCHEMA, BRIEF_SCHEMA);
 const RELAY_SCHEMA = buildRelaySchema();
 const WORKER_SCHEMA = buildWorkerSchema();
-const BUMP_SCHEMA = buildBumpSchema();
 const FIX_SCHEMA = buildGateEditSchema();
 const VALIDATE_SCHEMA = buildValidateSchema(false);
 const VALIDATE_COMMANDS_SCHEMA = buildValidateSchema(true);
@@ -345,7 +340,6 @@ function createRunState(launch) {
     taken: [],
     reversibleEffects: [],
     commits: [],
-    runnerCommits: {},
     head: undefined,
     branch: undefined,
     notRunGates: [],

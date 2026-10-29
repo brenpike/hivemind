@@ -6,9 +6,7 @@
  * Inputs
  *   run    the run state of main.js createRunState. The steps read trunk,
  *          references, pass, answerLog and head, and runCommitStep updates
- *          commits, runnerCommits, head and branch. runnerCommits maps each
- *          commit the runner made to its files, commit type and breaking
- *          flag.
+ *          commits, head and branch.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   relay  each runner result: {outcome, stdout, stderr} under
  *          RELAY_SCHEMA, its stdout read with lib/routing.js.
@@ -61,8 +59,8 @@
  *           a commit made outside the commit runner reaches the run record.
  *           Its inputs block carries a subject built by code, so the
  *           runner reads no git state to write one: a wave subject comes
- *           from its plan steps (waves.js buildWaveSubject), and the bump,
- *           fix round and review commits have fixed subjects.
+ *           from its plan steps (waves.js buildWaveSubject), and the fix
+ *           round and review commits have fixed subjects.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -453,8 +451,6 @@ function commitStepTexts(stepName) {
   switch (stepName) {
     case 'wave':
       return { purpose: 'the wave of plan steps that just ran', noun: 'the wave' };
-    case 'bump':
-      return { purpose: 'the version bump that just ran', noun: 'the version bump', subject: 'bump the version' };
     case 'fix':
       return { purpose: 'the validation fix round that just ran', noun: 'the fix round', subject: 'fix the failed validation' };
     case 'review':
@@ -554,7 +550,6 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   }
   if (checked.values.committed === 'true') {
     run.commits.push(checked.values.commit);
-    run.runnerCommits[checked.values.commit] = { files: commit.files, commitType: commitTypeMap()[plan.classification], breaking: plan.breaking };
   } else if (run.head !== undefined && checked.values.commit !== run.head) {
     run.commits.push(run.head + '..' + checked.values.commit);
   }

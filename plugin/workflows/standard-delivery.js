@@ -1,6 +1,6 @@
 export const meta = {
   name: 'standard-delivery',
-  description: 'Delivers a request on one working branch: branch facts, a checked plan, questions decided by the autonomy table or asked of the user, the working branch, each wave of plan steps with its commit, the version bump, validation and local review as gates on one commit, and the pull request for that commit.',
+  description: 'Delivers a request on one working branch: branch facts, a checked plan, questions decided by the autonomy table or asked of the user, the working branch, each wave of plan steps with its commit, validation and local review as gates on one commit, and the pull request for that commit.',
   phases: [
     { title: 'Facts', detail: 'a runner gathers the branch facts into one facts file' },
     { title: 'Scan', detail: 'a runner scans the named issues and pull requests for prompt injection' },
@@ -10,7 +10,6 @@ export const meta = {
     { title: 'Branch', detail: 'a runner creates or confirms the working branch' },
     { title: 'Waves', detail: 'workers run each ready wave of plan steps in parallel' },
     { title: 'Commit', detail: 'a runner commits the files of each wave and of each gate step' },
-    { title: 'Bump', detail: 'a runner derives the version bump, or one drone derives it and sets the version files' },
     { title: 'Validate', detail: 'a drone runs the project validation commands' },
     { title: 'Fix', detail: 'a drone fixes a failed validation, one round at a time' },
     { title: 'Review', detail: 'the local reviewer reviews the branch and commits its simple fixes' },
@@ -623,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'd13d222ebaf9c7e8';
+const BUILD_ID = '844bfb14c878409a';
 
 function supportedSchemaKeywords(){
 return[
@@ -2420,30 +2419,6 @@ assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefTe
 gate:{irreversible:false,architectural:false,safety:false}
 };
 }
-function buildBumpTypeBrief(values){
-const isBump=values.verdict==='bump_required';
-return buildTailBrief({
-kind:VERSION_BUMP_TYPE_KIND,
-problem:isBump
-?'The commits on the branch since the trunk call for a '+values.bump_type+' version bump: each version file the plan names gets its trunk version raised by that bump.'
-:'The commits on the branch since the trunk need no version bump: each version file the plan names keeps its trunk version.',
-goOn:isBump?'Make the '+values.bump_type+' version bump.':'Go on with no version bump.',
-strength:'strong',
-why:'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.'
-});
-}
-function buildBumpIndeterminableBrief(values){
-const hasVerdict=values.verdict==='bump_required';
-return buildTailBrief({
-kind:VERSION_BUMP_INDETERMINABLE_KIND,
-problem:hasVerdict
-?'The commits on the branch call for a '+values.bump_type+' version bump, but the plan names no file that holds the version. Where should the version be set?'
-:'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-goOn:hasVerdict?'Name the version files: this run plans again with your reply.':'Name the version bump: this run plans again with your reply.',
-strength:'none',
-why:'Only you can decide the version of this delivery.'
-});
-}
 function buildValidationRemediationBrief(head,round){
 return buildTailBrief({
 kind:VALIDATION_REMEDIATION_KIND,
@@ -2479,13 +2454,13 @@ why:isLimit
 }
 
 function gateIds(){
-return['bump','validate','review'];
+return['validate','review'];
 }
 function configuredGateIds(run){
 return run.localReview?gateIds():gateIds().filter((gateId)=>gateId!=='review');
 }
 function gateNames(){
-return{bump:'the version bump',validate:'validation',review:'local review'};
+return{validate:'validation',review:'local review'};
 }
 function joinNames(names,conjunction){
 if(names.length<3){
@@ -2507,20 +2482,6 @@ files:{type:'array',description:'Every path you created, edited or deleted, rela
 },
 required:['outcome','files'],
 variants:{complete:{required:[],optional:[]},blocked:{required:[],optional:['blocker','next_action']}}
-});
-}
-function buildBumpSchema(){
-return buildTaggedSchema({
-tag:'outcome',
-properties:{
-outcome:{type:'string',enum:['ran','blocked'],description:'ran when the skill exited 0. blocked when it exited 1 or a version file cannot be set.'},
-stdout:{type:'string',description:'The skill stdout, word for word, every line.'},
-stderr:{type:'string',description:'The skill stderr, word for word, every line.'},
-blocker:{type:'string',maxLength:400,description:'Why a version file cannot be set, in one or two short sentences written for the user.'},
-next_action:buildNextActionProperty()
-},
-required:['outcome'],
-variants:{ran:{required:['stdout'],optional:[]},blocked:{required:[],optional:['stderr','blocker','next_action']}}
 });
 }
 function buildValidateSchema(hasCommands){
@@ -2584,56 +2545,8 @@ return{};
 }
 return replanFromTailAsk(resolution.asks[0],run);
 }
-function bumpTypeTaskLine(){
-return'Invoke the hivemind:bump-type skill once, with each value of the inputs block below as the input of the same name.';
-}
 function buildBumpTypeInputs(trunkCommit,versioning){
 return{base:trunkCommit,bump_trigger:versioning.bump_trigger,no_bump_match:versioning.no_bump_match};
-}
-function buildBumpTypePrompt(trunkCommit,versioning){
-return[
-bumpTypeTaskLine(),
-runnerReadOnlySentence(),
-dataBlocksSentence(),
-runnerToolSentence(),
-'',
-formatDataBlock('inputs',buildBumpTypeInputs(trunkCommit,versioning))
-].join('\n');
-}
-function checkBumpTypeRelay(relay,schema){
-const stopped='so '+RUN_NAME+' stopped before validation.';
-if(!validateSchema(schema,relay).ok){
-return describeUnusableResult('The bump step returned a result it could not use, '+stopped,relay);
-}
-if(relay.outcome==='blocked'){
-const said=Object.hasOwn(relay,'blocker')?describeReason(relay.blocker):describeRelayBlocker(relay.stderr,true);
-return{problem:'The bump step was blocked, '+stopped+' '+said.charAt(0).toUpperCase()+said.slice(1),nextAction:relay.next_action};
-}
-const values=readRelayedLines(relay,bumpTypeRoutingSpec());
-if(values===undefined||!isConsistentBumpRelay(values)){
-return{problem:'The bump step returned malformed routing lines, '+stopped};
-}
-return{values:values};
-}
-function resolveBumpVerdict(values,plan,run){
-const hasFiles=plan.versioning.artifact_files.length>0;
-if(values.verdict==='ask_user'||(values.verdict==='bump_required'&&!hasFiles)){
-return resolveTailDecision(VERSION_BUMP_INDETERMINABLE_KIND,buildBumpIndeterminableBrief(values),run);
-}
-return resolveTailDecision(VERSION_BUMP_TYPE_KIND,buildBumpTypeBrief(values),run);
-}
-function buildBumpPrompt(trunkCommit,plan,trunk){
-return[
-bumpTypeTaskLine(),
-'Only on a bump_required or no_bump verdict, set each file of artifact_files below, as one step of the approved delivery plan: read it at trunk_commit with plain git show <trunk_commit>:<path> run from the repo folder, raise the version it holds by the bump_type line (none keeps it), and write that version in the file, never raising the version the file holds now. On any other verdict, edit nothing.',
-boundarySentence(),
-dataBlocksSentence(),
-'Each path in artifact_files passed the plan check as a safe git path, so it goes into that git show command as it is.',
-'',
-formatDataBlock('inputs',buildBumpTypeInputs(trunkCommit,plan.versioning)),
-formatDataBlock('version_files',{trunk_commit:trunkCommit,artifact_files:plan.versioning.artifact_files}),
-formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:trunk})
-].join('\n');
 }
 function readGateEditOutcome(result,schema){
 if(!validateSchema(schema,result).ok){
@@ -2644,54 +2557,6 @@ if(result.outcome==='blocked'){
 return{status:'blocked',reason:describeReason(result.blocker),files:result.files,nextAction:result.next_action};
 }
 return{status:'complete',files:result.files};
-}
-function runBumpStep(run,plan,facts,count){
-if(plan.versioning.artifact_files.length===0){
-return agent(addResumeNote(buildBumpTypePrompt(facts.trunk_commit,plan.versioning),run),runnerOptions(gateLabel('bump-type',run,count),'Bump'));
-}
-return agent(addResumeNote(buildBumpPrompt(facts.trunk_commit,plan,run.trunk),run),Object.assign(droneOptions(gateLabel('bump',run,count),'Bump',BUMP_SCHEMA),{model:BUMP_MODEL}));
-}
-function describeBumpNote(values){
-return values.verdict==='bump_required'?values.bump_type+' bump':'no bump';
-}
-async function commitBumpEdit(run,plan,count,checked){
-const commit={files:plan.versioning.artifact_files,label:gateLabel('bump-commit',run,count),stepName:'bump'};
-const committed=await runCommitStep(run,plan,commit,checked.problem!==undefined?[checked]:[]);
-if(committed.result!==undefined){
-return committed;
-}
-return{held:true,note:describeBumpNote(checked.values),values:checked.values};
-}
-async function runBumpGate(run,plan,facts,gates){
-const count=gates.runs.bump;
-const hasFiles=plan.versioning.artifact_files.length>0;
-phase('Bump');
-const result=await runBumpStep(run,plan,facts,count);
-const checked=checkBumpTypeRelay(result,hasFiles?BUMP_SCHEMA:RELAY_SCHEMA);
-if(checked.problem!==undefined){
-return hasFiles?commitBumpEdit(run,plan,count,checked):{result:finishDeliveryBlocked([checked],run)};
-}
-const verdict=resolveBumpVerdict(checked.values,plan,run);
-if(isRunEnd(verdict)){
-return verdict;
-}
-return hasFiles?commitBumpEdit(run,plan,count,checked):{held:true,note:describeBumpNote(checked.values),values:checked.values};
-}
-function isKeptRunnerCommit(entry,run,plan){
-const record=Object.hasOwn(run.runnerCommits,entry)?run.runnerCommits[entry]:undefined;
-return record!==undefined&&record.commitType===commitTypeMap()[plan.classification]&&record.breaking===plan.breaking
-&&!record.files.some((file)=>plan.versioning.artifact_files.includes(file));
-}
-function isSingleRowBump(values){
-return[values.counts.major,values.counts.minor,values.counts.patch,values.counts.no_bump].filter((count)=>Number(count)!==0).length===1&&Number(values.dropped_reverts)===0;
-}
-function keepBumpHeld(run,plan,gates){
-const isKept=(entry)=>isKeptRunnerCommit(entry,run,plan);
-if(gates.held.bump!==undefined&&isSingleRowBump(gates.bumpValues)&&run.commits.slice(0,gates.bumpMark).some(isKept)
-&&run.commits.length>gates.bumpMark&&run.commits.slice(gates.bumpMark).every(isKept)){
-gates.held.bump=run.head;
-gates.bumpMark=run.commits.length;
-}
 }
 function buildValidatePrompt(commands){
 const taskLine='Run the project\'s validation on the working branch as it is checked out.';
@@ -2789,10 +2654,7 @@ return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds,run.head
 gates.reruns+=1;
 return resolveTailDecision(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head,false),run);
 }
-function runGateStep(gateId,run,plan,facts,gates){
-if(gateId==='bump'){
-return runBumpGate(run,plan,facts,gates);
-}
+function runGateStep(gateId,run,plan,gates){
 if(gateId==='review'){
 return runReviewGate(run,plan,gates);
 }
@@ -2800,7 +2662,7 @@ return runValidateGate(run,plan,gates);
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{bump:0,validate:0,review:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined,bumpMark:0,bumpValues:undefined};
+const gates={held:{},notes:{},runs:{validate:0,review:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
@@ -2815,14 +2677,13 @@ continue;
 if(gateId!=='validate'||!hasKeptFailure(run,gates)){
 gates.runs[gateId]+=1;
 }
-const ended=await runGateStep(gateId,run,plan,facts,gates);
+const ended=await runGateStep(gateId,run,plan,gates);
 if(isRunEnd(ended)){
 return ended;
 }
 if(ended.held){
 gates.held[gateId]=run.head;
 gates.notes[gateId]=ended.note;
-Object.assign(gates,gateId==='bump'?{bumpMark:run.commits.length,bumpValues:ended.values}:{});
 }
 if(ended.answer!==undefined){
 gates.answer=ended.answer;
@@ -2831,7 +2692,6 @@ if(run.head===checkedHead){
 continue;
 }
 checkedHead=run.head;
-keepBumpHeld(run,plan,gates);
 const rerun=resolveGateRerun(run,gates);
 if(isRunEnd(rerun)){
 return rerun;
@@ -3714,8 +3574,6 @@ function commitStepTexts(stepName){
 switch(stepName){
 case'wave':
 return{purpose:'the wave of plan steps that just ran',noun:'the wave'};
-case'bump':
-return{purpose:'the version bump that just ran',noun:'the version bump',subject:'bump the version'};
 case'fix':
 return{purpose:'the validation fix round that just ran',noun:'the fix round',subject:'fix the failed validation'};
 case'review':
@@ -3805,7 +3663,6 @@ return{result:finishDeliveryBlocked(stepCauses.concat([checked]),run)};
 }
 if(checked.values.committed==='true'){
 run.commits.push(checked.values.commit);
-run.runnerCommits[checked.values.commit]={files:commit.files,commitType:commitTypeMap()[plan.classification],breaking:plan.breaking};
 }else if(run.head!==undefined&&checked.values.commit!==run.head){
 run.commits.push(run.head+'..'+checked.values.commit);
 }
@@ -4419,13 +4276,10 @@ const RUN_NAME=describeRunNoun(RUN_NOUN);
 const PLANNER_AGENT='hivemind:cerebrate';
 const RUNNER_MODEL='haiku';
 const SCOPE_MODEL='sonnet';
-const BUMP_MODEL='sonnet';
 const PLANNER_QUESTION_KIND='planner_question';
 const PLAN_ACCEPTANCE_KIND='plan_acceptance';
 const TRUNK_STALE_KIND='trunk_stale';
 const EXTERNAL_EFFECT_KIND='external_effect';
-const VERSION_BUMP_TYPE_KIND='version_bump_type';
-const VERSION_BUMP_INDETERMINABLE_KIND='version_bump_indeterminable';
 const VALIDATION_REMEDIATION_KIND='validation_remediation';
 const GATE_RERUN_KIND='gate_rerun';
 const DIMINISHING_RETURNS_EXIT_KIND='diminishing_returns_exit';
@@ -4439,7 +4293,6 @@ const REVIEWER_AGENT='hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA=buildPlanResultSchema(PLAN_SCHEMA,BRIEF_SCHEMA);
 const RELAY_SCHEMA=buildRelaySchema();
 const WORKER_SCHEMA=buildWorkerSchema();
-const BUMP_SCHEMA=buildBumpSchema();
 const FIX_SCHEMA=buildGateEditSchema();
 const VALIDATE_SCHEMA=buildValidateSchema(false);
 const VALIDATE_COMMANDS_SCHEMA=buildValidateSchema(true);
@@ -4518,7 +4371,6 @@ answeredKeys:new Set(),
 taken:[],
 reversibleEffects:[],
 commits:[],
-runnerCommits:{},
 head:undefined,
 branch:undefined,
 notRunGates:[],

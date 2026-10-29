@@ -843,7 +843,7 @@ function assertBuiltScript(id, output, parsed) {
  */
 export const PROSE_BUDGETS = Object.freeze({
   'analysis-only': 19000,
-  'standard-delivery': 44000
+  'standard-delivery': 41700
 });
 const PROSE_PIECE_KINDS = Object.freeze(['string', 'template']);
 const MIN_COPIED_SENTENCE_WORDS = 5;

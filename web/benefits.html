@@ -130,16 +130,15 @@ You → <span class="t-key">Overlord</span>
             <p>Without a built-in review step, code reaches the PR, or production, without being challenged. Adding an external review step is manual work that gets skipped under pressure.</p>
             <p class="kicker kicker--solution xs">Solution</p>
             <p>Two separate review layers. <strong>Local pre-PR review</strong> needs the optional codex companion: the <code>local-reviewer</code> runs an adversarial Codex loop on the branch diff, fixing simple findings and escalating complex ones, before any PR exists. <strong>The post-PR watch</strong> is the default and does not need codex: after opening the PR, the overlord runs <code>github-review-loop</code>, which fixes, pushes, replies to, and resolves actionable feedback from Codex, Copilot, or Claude reviewer bots until approval, merge, or close. Agents never merge.</p>
-            <p><strong>Gates hold on one commit.</strong> In a workflow-script run, the version bump, validation and local review are gates, and the PR step pushes only a commit every configured gate held on. A later commit, such as a validation fix round or a local-review fix, reruns every gate that ended on an earlier commit. The reruns are bounded, and the run asks you at the bound. A gate not configured for the run is listed on the PR.</p>
+            <p><strong>Gates hold on one commit.</strong> In a workflow-script run, validation (with its version check) and local review are gates, and the PR step pushes only a commit every configured gate held on. A later commit, such as a validation fix round or a local-review fix, reruns every gate that ended on an earlier commit. The reruns are bounded, and the run asks you at the bound. A gate not configured for the run is listed on the PR.</p>
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>A review gate built into the flow, not bolted on after the fact. The PR carries the commit the gates held on.</p>
             <p><span class="tag tag--cyan">hivemind:local-reviewer</span> <span class="tag tag--violet">hivemind:github-review-loop</span></p>
           </div>
-          <div class="code-panel diagram" id="ben-review-diagram" role="img" tabindex="0" aria-label="Review flow: after the build, the version bump, validation with bounded fix rounds, and the local-reviewer, which needs the codex companion, are gates on one commit; the local-reviewer runs a Codex review on the branch diff before the PR, fixing simple findings and escalating complex ones; the PR step pushes only the commit every configured gate held on; after the PR opens, github-review-loop watches it by default and fixes, pushes, replies to, and resolves reviewer-bot feedback until approval, merge, or close">
+          <div class="code-panel diagram" id="ben-review-diagram" role="img" tabindex="0" aria-label="Review flow: after the build, validation with its version check and bounded fix rounds, and the local-reviewer, which needs the codex companion, are gates on one commit; the local-reviewer runs a Codex review on the branch diff before the PR, fixing simple findings and escalating complex ones; the PR step pushes only the commit every configured gate held on; after the PR opens, github-review-loop watches it by default and fixes, pushes, replies to, and resolves reviewer-bot feedback until approval, merge, or close">
 <pre><code>Build complete
  └─▶ Gates on one commit
-      ├─▶ Version bump
-      ├─▶ Validation  (bounded fix rounds)
+      ├─▶ Validation  (version check, bounded fix rounds)
       └─▶ <span class="t-str">Local-Reviewer</span>  (pre-PR, needs codex)
            ├─▶ Codex review on branch diff
            ├─▶ Simple findings fixed

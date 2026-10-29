@@ -454,7 +454,7 @@ describe('runScanStep', () => {
   test('a null scan agent resolves to a cause that names the agent failure and asks to run again', async () => {
     lib.phase = () => {};
     lib.agent = async () => null;
-    assert.deepEqual({ ...(await lib.runScanStep(scanFacts(1), RUN_NOUN)) }, { problem: MALFORMED_SCAN + ' ' + AGENT_FAILED, nextAction: 'run_again' });
+    assert.deepEqual({ ...(await lib.runScanStep(scanFacts(1), RUN_NOUN)) }, { problem: MALFORMED_SCAN + ' ' + AGENT_FAILED, nextAction: 'run_again', agentFailure: true });
   });
 });
 

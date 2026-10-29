@@ -297,7 +297,7 @@
               </tr>
               <tr>
                 <td><code>hivemind:bump-type</code></td>
-                <td>Read-only engine for the overlord's <code>version_bump_decision</code> workflow state: derives the dominant Bump Type Determination row and bump verdict from the working-branch commits since the base. The Bump Trigger and No-bump judgments stay with the caller.</td>
+                <td>Read-only engine for the overlord's <code>version_bump_decision</code> workflow state, and for the version check in the validation step of the standard-delivery workflow script: derives the dominant Bump Type Determination row and bump verdict from the working-branch commits since the base. The Bump Trigger and No-bump judgments stay with the caller.</td>
               </tr>
               <tr>
                 <td><code>hivemind:push-branch</code></td>
@@ -419,12 +419,8 @@
               <p>Workers run each ready wave of plan steps in parallel, and a runner commits the wave's files after each wave (<code>hivemind:molt</code>).</p>
             </li>
             <li class="beat panel">
-              <h3 class="xg">Bump</h3>
-              <p>A runner derives the version bump (<code>hivemind:bump-type</code>), a drone sets the version files, and a runner commits them.</p>
-            </li>
-            <li class="beat panel">
               <h3 class="xg">Validate</h3>
-              <p>A drone runs the project's validation commands. A failure gets a bounded number of fix rounds, one at a time, each one committed; after the last round the run asks you.</p>
+              <p>A drone runs the project's validation commands, and checks the version read-only against the plan's version files with <code>hivemind:bump-type --version-file</code>. A failure gets a bounded number of fix rounds, one at a time, each one committed; after the last round the run asks you.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Review</h3>
@@ -432,7 +428,7 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">PR</h3>
-              <p>A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The bump, validation and local review gates each hold only for the commit they ended on, so a later commit reruns the gates it invalidates. Every decision the run took for you is listed in the final message and in the PR body. Agents never merge. You do.</p>
+              <p>A runner pushes the commit every gate held on and opens its pull request, or reuses the open one (<code>hivemind:open-plan-pr</code>). The validation (with its version check) and local review gates each hold only for the commit they ended on, so a later commit reruns the gates it invalidates. Every decision the run took for you is listed in the final message and in the PR body. Agents never merge. You do.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">State-machine fallback</h3>
@@ -440,7 +436,7 @@
             </li>
           </ol>
 
-          <div class="code-panel diagram" id="lifecycle-diagram-func" role="img" aria-label="Lifecycle flow: You to Overlord, which routes the request. When the Workflow tool is available, the standard-delivery workflow script runs: a runner gathers the branch facts and scans the named issue and PR text, the Cerebrate plans, a working branch is created or confirmed, Drone and Changeling build in waves with one molt per wave, the bump, validation and local review gates hold on one commit, and the PR is opened or reused. The overlord then watches the PR by default with github-review-loop on the state machine. When the launch is refused or the Workflow tool is absent, standard-delivery runs on its state machine instead." tabindex="0">
+          <div class="code-panel diagram" id="lifecycle-diagram-func" role="img" aria-label="Lifecycle flow: You to Overlord, which routes the request. When the Workflow tool is available, the standard-delivery workflow script runs: a runner gathers the branch facts and scans the named issue and PR text, the Cerebrate plans, a working branch is created or confirmed, Drone and Changeling build in waves with one molt per wave, the validation (with its version check) and local review gates hold on one commit, and the PR is opened or reused. The overlord then watches the PR by default with github-review-loop on the state machine. When the launch is refused or the Workflow tool is absent, standard-delivery runs on its state machine instead." tabindex="0">
             <pre><code>You
  └─▶ <span class="t-key">Overlord</span>  (route-workflow)
       ├─▶ <span class="t-str">Workflow script</span>  (standard-delivery)
@@ -448,7 +444,7 @@
       │    ├─▶ <span class="t-str">Cerebrate</span>  (plan, schema-checked)
       │    ├─▶ <span class="t-dim">Working branch</span>  (create or confirm)
       │    ├─▶ <span class="t-hot">Drone</span> / <span class="t-lit">Changeling</span>  (waves, one molt each)
-      │    ├─▶ <span class="t-dim">Gates on one commit</span>  (bump, validate, local review)
+      │    ├─▶ <span class="t-dim">Gates on one commit</span>  (validate with version check, local review)
       │    └─▶ <span class="t-hot">PR opened or reused</span>
       │         └─▶ <span class="t-str">github-review-loop</span>  (default watch, state machine)
       │

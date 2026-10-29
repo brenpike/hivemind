@@ -10,7 +10,6 @@
  *            runPlanningPass (plan.js).
  *   facts    the checked facts of the pass, from runFactsStep (relay.js).
  *   scope    the checked scope of the pass, from runScopeStep (scope.js).
- *   values   the parsed routing values of a bump step (gates.js).
  *   head, round, staleIds and isLimit  the commit, fix round, stale gate
  *            ids and limit flag of a gate decision (gates.js).
  *   The kind constants of main.js, unshownBriefText, isRepositoryPath,
@@ -29,7 +28,6 @@
  *            limits.
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
  *            shared shape of a tail brief, also used by review.js.
- *   buildBumpTypeBrief, buildBumpIndeterminableBrief,
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs gates.js resolves.
  *   buildStepStopBrief(causes, isReplan)  the step_stop brief stopDelivery
@@ -196,32 +194,6 @@ function buildStepStopBrief(causes, isReplan) {
     assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
     gate: { irreversible: false, architectural: false, safety: false }
   };
-}
-
-function buildBumpTypeBrief(values) {
-  const isBump = values.verdict === 'bump_required';
-  return buildTailBrief({
-    kind: VERSION_BUMP_TYPE_KIND,
-    problem: isBump
-      ? 'The commits on the branch since the trunk call for a ' + values.bump_type + ' version bump: each version file the plan names gets its trunk version raised by that bump.'
-      : 'The commits on the branch since the trunk need no version bump: each version file the plan names keeps its trunk version.',
-    goOn: isBump ? 'Make the ' + values.bump_type + ' version bump.' : 'Go on with no version bump.',
-    strength: 'strong',
-    why: 'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.'
-  });
-}
-
-function buildBumpIndeterminableBrief(values) {
-  const hasVerdict = values.verdict === 'bump_required';
-  return buildTailBrief({
-    kind: VERSION_BUMP_INDETERMINABLE_KIND,
-    problem: hasVerdict
-      ? 'The commits on the branch call for a ' + values.bump_type + ' version bump, but the plan names no file that holds the version. Where should the version be set?'
-      : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-    goOn: hasVerdict ? 'Name the version files: this run plans again with your reply.' : 'Name the version bump: this run plans again with your reply.',
-    strength: 'none',
-    why: 'Only you can decide the version of this delivery.'
-  });
 }
 
 function buildValidationRemediationBrief(head, round) {
