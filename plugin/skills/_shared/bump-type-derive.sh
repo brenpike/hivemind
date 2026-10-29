@@ -22,12 +22,19 @@
 # return code. There is NO git/file I/O and no `exit`; the IMPURE git reads, argument gating, and
 # record framing live in the entrypoint.
 #
+# VERSION HELPERS: the optional version check (`--version-file`) uses four more PURE helpers here:
+# the strict SemVer core predicate, raising a version by a bump type, and extracting the version
+# from a TOML text or a plain one-line text. The entrypoint reads each file with git (and a JSON
+# file with jq) and hands the text to these helpers; they do no I/O.
+#
 # UNTRUSTED-DATA POSTURE: commit subjects/bodies are attacker-influenceable DATA. Every match below
 # is a bash `[[ $text =~ $re ]]` whose pattern lives in an UNQUOTED shell variable (bash 3.2 treats
 # a quoted right operand as a literal string) and whose commit text is ONLY the left operand.
 # Commit text is never eval'd, never spliced into shell/jq/awk program source, never used as a
 # printf format, and never echoed back: every function emits only fixed vocabulary words or a
-# value that already passed a strict hex regex (the reverted-original SHA).
+# value that already passed a strict hex regex (the reverted-original SHA). Version file text is
+# untrusted DATA under the same rules: the version helpers emit only a value that already passed
+# the strict SemVer core regex in hivemind_bump_is_semver_core, or a version computed from one.
 #
 # PORTABILITY: bash 3.2 compatible (macOS /bin/bash): no associative arrays, no mapfile, no
 # namerefs, no ${var,,}; POSIX `[[:space:]]` in place of `\s`.
@@ -61,6 +68,13 @@
 #       subject cross-check (subjects are not unique — the reason the rule keys on the SHA marker);
 #       patch-id/content validation (needs git I/O in this pure core); ignoring unverifiable
 #       reverts (no revert is verifiable here, so it deletes the pre-pass).
+#   V1  A SemVer core component longer than 18 digits reads as no version, so raising a version
+#       never overflows bash 64-bit arithmetic.
+#   V2  A plain version file is read literally: a CR-terminated line (`1.2.3\r`) reads as no
+#       version. Trailing LF bytes are dropped by the caller's command substitution.
+#   V3  The TOML read counts every line of the form `version = "..."` (leading and trailing
+#       blanks allowed, double-quoted value only), in any table. Two such lines read as no
+#       version, even when one sits in a dependency table.
 
 set -u
 
@@ -259,5 +273,83 @@ hivemind_bump_derive_verdict() {
       ;;
     *) printf '%s\n' 'ask_user none' ;;
   esac
+  return 0
+}
+
+# ── hivemind_bump_is_semver_core ──────────────────────────────────────────────────
+# hivemind_bump_is_semver_core <value>
+#   -> return 0 iff <value> is exactly the strict SemVer core
+#      `(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)` with no component longer than 18
+#      digits (V1); 1 otherwise. A pre-release or build suffix fails. Emits nothing.
+hivemind_bump_is_semver_core() {
+  local value="$1"
+  local re_semver_core='^(0|[1-9][0-9]{0,17})\.(0|[1-9][0-9]{0,17})\.(0|[1-9][0-9]{0,17})$'
+  if [[ $value =~ $re_semver_core ]]; then
+    return 0
+  fi
+  return 1
+}
+
+# ── hivemind_bump_raise_version ───────────────────────────────────────────────────
+# hivemind_bump_raise_version <version> <bump_type:major|minor|patch|none>
+#   -> prints <version> raised by <bump_type> (major X+1.0.0, minor X.Y+1.0, patch X.Y.Z+1, none
+#      unchanged) and returns 0. Returns 1 (prints nothing) when <version> fails
+#      hivemind_bump_is_semver_core or <bump_type> is outside the vocabulary.
+hivemind_bump_raise_version() {
+  local version="$1"
+  local bump_type="$2"
+  hivemind_bump_is_semver_core "$version" || return 1
+  local major_part="${version%%.*}"
+  local after_major="${version#*.}"
+  local minor_part="${after_major%%.*}"
+  local patch_part="${after_major#*.}"
+  case "$bump_type" in
+    major) printf '%s.0.0\n' "$((major_part + 1))" ;;
+    minor) printf '%s.%s.0\n' "$major_part" "$((minor_part + 1))" ;;
+    patch) printf '%s.%s.%s\n' "$major_part" "$minor_part" "$((patch_part + 1))" ;;
+    none) printf '%s\n' "$version" ;;
+    *) return 1 ;;
+  esac
+  return 0
+}
+
+# ── hivemind_bump_extract_toml_version ────────────────────────────────────────────
+# hivemind_bump_extract_toml_version <text>
+#   -> prints the value of the ONLY line of <text> matching
+#      `^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]*)"[[:space:]]*$` and returns 0 when that
+#      value passes hivemind_bump_is_semver_core. Returns 1 (prints nothing) when zero lines or
+#      more than one line match (V3), or when the one value is not a SemVer core.
+hivemind_bump_extract_toml_version() {
+  local remaining_text="$1"
+  local newline=$'\n'
+  local re_version_line='^[[:space:]]*version[[:space:]]*=[[:space:]]*"([^"]*)"[[:space:]]*$'
+  local match_count=0
+  local version_value=''
+  local text_line
+  while :; do
+    text_line="${remaining_text%%"$newline"*}"
+    if [[ $text_line =~ $re_version_line ]]; then
+      match_count=$((match_count + 1))
+      version_value="${BASH_REMATCH[1]}"
+    fi
+    case "$remaining_text" in
+      *"$newline"*) remaining_text="${remaining_text#*"$newline"}" ;;
+      *) break ;;
+    esac
+  done
+  [ "$match_count" -eq 1 ] || return 1
+  hivemind_bump_is_semver_core "$version_value" || return 1
+  printf '%s\n' "$version_value"
+  return 0
+}
+
+# ── hivemind_bump_extract_plain_version ───────────────────────────────────────────
+# hivemind_bump_extract_plain_version <text>
+#   -> prints <text> and returns 0 when the whole <text> is one line holding a SemVer core
+#      (hivemind_bump_is_semver_core, V2). Returns 1 (prints nothing) otherwise.
+hivemind_bump_extract_plain_version() {
+  local file_text="$1"
+  hivemind_bump_is_semver_core "$file_text" || return 1
+  printf '%s\n' "$file_text"
   return 0
 }

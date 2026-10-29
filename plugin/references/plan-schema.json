@@ -137,7 +137,7 @@
         "no_bump_match",
         "artifact_files"
       ],
-      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The bump step passes the two answers to bump-type unchanged.",
+      "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The validate step passes the two answers and the version files to bump-type unchanged.",
       "properties": {
         "bump_trigger": {
           "type": "string",
@@ -157,7 +157,7 @@
         },
         "artifact_files": {
           "type": "array",
-          "description": "Each repository path holding a version the bump step sets, as the project's versioning docs name it. Empty when the project names none. The bump commit takes exactly these paths.",
+          "description": "Each repository path holding a version, as the project's versioning docs name it. Empty when they name none. A plan step lists each one in its files and sets it to its version at trunk raised by the bump type the plan's commits call for. That is the step that writes the change log when the plan has one, and its outcome names the version. Validation checks the version on each commit it runs on, and a fix round corrects it.",
           "items": {
             "type": "string",
             "maxLength": 400,

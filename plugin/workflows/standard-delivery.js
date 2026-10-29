@@ -1,6 +1,6 @@
 export const meta = {
   name: 'standard-delivery',
-  description: 'Delivers a request on one working branch: branch facts, a checked plan, questions decided by the autonomy table or asked of the user, the working branch, each wave of plan steps with its commit, the version bump, validation and local review as gates on one commit, and the pull request for that commit.',
+  description: 'Delivers a request on one working branch: branch facts, a checked plan, questions decided by the autonomy table or asked of the user, the working branch, each wave of plan steps with its commit, validation and local review as gates on one commit, and the pull request for that commit.',
   phases: [
     { title: 'Facts', detail: 'a runner gathers the branch facts into one facts file' },
     { title: 'Scan', detail: 'a runner scans the named issues and pull requests for prompt injection' },
@@ -10,7 +10,6 @@ export const meta = {
     { title: 'Branch', detail: 'a runner creates or confirms the working branch' },
     { title: 'Waves', detail: 'workers run each ready wave of plan steps in parallel' },
     { title: 'Commit', detail: 'a runner commits the files of each wave and of each gate step' },
-    { title: 'Bump', detail: 'a runner derives the version bump, or one drone derives it and sets the version files' },
     { title: 'Validate', detail: 'a drone runs the project validation commands' },
     { title: 'Fix', detail: 'a drone fixes a failed validation, one round at a time' },
     { title: 'Review', detail: 'the local reviewer reviews the branch and commits its simple fixes' },
@@ -130,6 +129,12 @@ const AUTONOMY_TABLE = {
 },
 {
 "kind": "version_bump_indeterminable",
+"high": "surface",
+"balanced": "surface",
+"low": "surface"
+},
+{
+"kind": "step_stop",
 "high": "surface",
 "balanced": "surface",
 "low": "surface"
@@ -617,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '15982b2e59a50dfa';
+const BUILD_ID = '8cdcba33bc850bcd';
 
 function supportedSchemaKeywords(){
 return[
@@ -1348,7 +1353,22 @@ function describeUnusableResult(problem,result){
 if(result!==null){
 return{problem:problem};
 }
-return{problem:problem+' '+describeNoResult(result),nextAction:'run_again'};
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
+}
+function isTransientFailure(text){
+return typeof text==='string'&&transientFailurePatterns().some((pattern)=>pattern.test(text));
+}
+function transientFailurePatterns(){
+return[
+/\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
+/\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
+/\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
+/\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
+/\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
+/\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
+/\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
+/\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
+];
 }
 function nextStepLine(nextAction){
 if(nextAction==='run_again'){
@@ -1445,18 +1465,15 @@ throw new Error('finish: pr created must be a boolean');
 }
 }
 function noticeMarker(kind){
-const fullTextSentence=' The full text is in this run\'s per-agent results.';
-if(kind==='shortened'){
-return'Note: the text above was shortened to fit the completion notice.'+fullTextSentence;
-}
-if(kind==='compact'){
-return'Note: this text was shortened to fit the completion notice, so parts below are in compact form.'
-+fullTextSentence;
-}
-if(kind==='cut'){
-return'Note: the text above was shortened by a hard cut to fit the completion notice.'+fullTextSentence;
-}
+const leads={
+shortened:'Note: the text above was shortened to fit the completion notice.',
+compact:'Note: this text was shortened to fit the completion notice, so parts below are in compact form.',
+cut:'Note: the text above was shortened by a hard cut to fit the completion notice.'
+};
+if(!Object.hasOwn(leads,kind)){
 throw new Error('noticeMarker: unknown kind '+JSON.stringify(kind));
+}
+return leads[kind]+' The full text is in this run\'s per-agent results.';
 }
 function fitMessage(blocks,room){
 const plainText=joinParagraphs(blocks.map((block)=>block.text));
@@ -2386,29 +2403,52 @@ assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefTe
 gate:{irreversible:false,architectural:false,safety:false}
 };
 }
-function buildBumpTypeBrief(values){
-const isBump=values.verdict==='bump_required';
-return buildTailBrief({
-kind:VERSION_BUMP_TYPE_KIND,
-problem:isBump
-?'The commits on the branch since the trunk call for a '+values.bump_type+' version bump: each version file the plan names gets its trunk version raised by that bump.'
-:'The commits on the branch since the trunk need no version bump: each version file the plan names keeps its trunk version.',
-goOn:isBump?'Make the '+values.bump_type+' version bump.':'Go on with no version bump.',
-strength:'strong',
-why:'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.'
-});
+function buildStepStopBrief(causes,isReplan){
+const isRunAgain=causes.every((cause)=>cause.nextAction==='run_again');
+const then=isReplan?'the run plans again from fresh facts.':'the run takes the stopped step again.';
+return{
+id:'stop',
+kind:STEP_STOP_KIND,
+problem:(isRunAgain?'Nothing in the repo needs a fix: reply when you are ready to go on, and ':'Fix what stopped the run, then reply with every change committed, and ')+then,
+criticality:{level:'medium',likelihood:'certain',blast_radius:'The working branch and the pull request it becomes.',if_ignored:unshownBriefText()},
+options:[
+{id:'A',summary:isReplan?'Go on: plan again from fresh facts.':'Go on: take the stopped step again.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true}
+],
+recommendation:{option_id:'A',strength:'none',why:'Only you can tell when what stopped the run is out of the way.'},
+assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
+gate:{irreversible:false,architectural:false,safety:false}
+};
 }
-function buildBumpIndeterminableBrief(values){
-const hasVerdict=values.verdict==='bump_required';
-return buildTailBrief({
+function raiseVersion(version,bumpType){
+const parts=version.split('.').map(Number);
+const raised={major:[parts[0]+1,0,0],minor:[parts[0],parts[1]+1,0],patch:[parts[0],parts[1],parts[2]+1]};
+return raised[bumpType].join('.');
+}
+function buildVersionOption(id,summary){
+return{id:id,summary:summary,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true};
+}
+function listVersionOptions(values){
+if(values.version_check==='unreadable'){
+return[buildVersionOption('A','Keep the version each file holds on the branch.'),buildVersionOption('B','Set the version your reply names in each file.')];
+}
+const trunk=values.trunk_version;
+const bumpOptions=[['A','major'],['B','minor'],['C','patch']].map(([id,bumpType])=>buildVersionOption(id,'Make a '+bumpType+' version bump'+(trunk===undefined?'.':', to version '+raiseVersion(trunk,bumpType)+'.')));
+return bumpOptions.concat(buildVersionOption('D','Make no version bump'+(trunk===undefined?'.':', keeping version '+trunk+'.')));
+}
+function buildVersionQuestionBrief(values){
+const isUnreadable=values.version_check==='unreadable';
+return{
+id:'version',
 kind:VERSION_BUMP_INDETERMINABLE_KIND,
-problem:hasVerdict
-?'The commits on the branch call for a '+values.bump_type+' version bump, but the plan names no file that holds the version. Where should the version be set?'
+problem:isUnreadable
+?'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
 :'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-goOn:hasVerdict?'Name the version files: this run plans again with your reply.':'Name the version bump: this run plans again with your reply.',
-strength:'none',
-why:'Only you can decide the version of this delivery.'
-});
+criticality:{level:'medium',likelihood:'certain',blast_radius:'The version files on the working branch and the pull request it becomes.',if_ignored:unshownBriefText()},
+options:listVersionOptions(values),
+recommendation:{option_id:'A',strength:'none',why:'Only you can decide the version of this delivery.'},
+assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
+gate:{irreversible:false,architectural:false,safety:false}
+};
 }
 function buildValidationRemediationBrief(head,round){
 return buildTailBrief({
@@ -2445,13 +2485,13 @@ why:isLimit
 }
 
 function gateIds(){
-return['bump','validate','review'];
+return['validate','review'];
 }
 function configuredGateIds(run){
 return run.localReview?gateIds():gateIds().filter((gateId)=>gateId!=='review');
 }
 function gateNames(){
-return{bump:'the version bump',validate:'validation',review:'local review'};
+return{validate:'validation',review:'local review'};
 }
 function joinNames(names,conjunction){
 if(names.length<3){
@@ -2475,21 +2515,7 @@ required:['outcome','files'],
 variants:{complete:{required:[],optional:[]},blocked:{required:[],optional:['blocker','next_action']}}
 });
 }
-function buildBumpSchema(){
-return buildTaggedSchema({
-tag:'outcome',
-properties:{
-outcome:{type:'string',enum:['ran','blocked'],description:'ran when the skill exited 0. blocked when it exited 1 or a version file cannot be set.'},
-stdout:{type:'string',description:'The skill stdout, word for word, every line.'},
-stderr:{type:'string',description:'The skill stderr, word for word, every line.'},
-blocker:{type:'string',maxLength:400,description:'Why a version file cannot be set, in one or two short sentences written for the user.'},
-next_action:buildNextActionProperty()
-},
-required:['outcome'],
-variants:{ran:{required:['stdout'],optional:[]},blocked:{required:[],optional:['stderr','blocker','next_action']}}
-});
-}
-function buildValidateSchema(hasCommands){
+function buildValidateSchema(hasCommands,hasVersion){
 const spec={
 tag:'outcome',
 properties:{
@@ -2514,7 +2540,14 @@ spec.properties.outcome.enum=['passed','failed','not_run','blocked'];
 spec.properties.outcome.description='passed when every validation command passes. failed when any fails. not_run when the project documents no validation commands. blocked when a command cannot run.';
 spec.variants.not_run={required:[],optional:[]};
 }
+if(hasVersion){
+spec.properties.version=Object.assign(buildRelaySchema(),{description:'The relay of the one hivemind:bump-type run.'});
+Object.keys(spec.variants).forEach((value)=>spec.variants[value][value==='blocked'?'optional':'required'].push('version'));
+}
 return buildTaggedSchema(spec);
+}
+function hasVersionFiles(plan){
+return plan.versioning.artifact_files.length>0;
 }
 function isRunEnd(outcome){
 return outcome.result!==undefined||outcome.replan!==undefined;
@@ -2550,130 +2583,38 @@ return{};
 }
 return replanFromTailAsk(resolution.asks[0],run);
 }
-function bumpTypeTaskLine(){
-return'Invoke the hivemind:bump-type skill once, with each value of the inputs block below as the input of the same name.';
-}
 function buildBumpTypeInputs(trunkCommit,versioning){
 return{base:trunkCommit,bump_trigger:versioning.bump_trigger,no_bump_match:versioning.no_bump_match};
-}
-function buildBumpTypePrompt(trunkCommit,versioning){
-return[
-bumpTypeTaskLine(),
-runnerReadOnlySentence(),
-dataBlocksSentence(),
-runnerToolSentence(),
-'',
-formatDataBlock('inputs',buildBumpTypeInputs(trunkCommit,versioning))
-].join('\n');
-}
-function checkBumpTypeRelay(relay,schema){
-const stopped='so '+RUN_NAME+' stopped before validation.';
-if(!validateSchema(schema,relay).ok){
-return describeUnusableResult('The bump step returned a result it could not use, '+stopped,relay);
-}
-if(relay.outcome==='blocked'){
-const said=Object.hasOwn(relay,'blocker')?describeReason(relay.blocker):describeRelayBlocker(relay.stderr,true);
-return{problem:'The bump step was blocked, '+stopped+' '+said.charAt(0).toUpperCase()+said.slice(1),nextAction:relay.next_action};
-}
-const values=readRelayedLines(relay,bumpTypeRoutingSpec());
-if(values===undefined||!isConsistentBumpRelay(values)){
-return{problem:'The bump step returned malformed routing lines, '+stopped};
-}
-return{values:values};
-}
-function resolveBumpVerdict(values,plan,run){
-const hasFiles=plan.versioning.artifact_files.length>0;
-if(values.verdict==='ask_user'||(values.verdict==='bump_required'&&!hasFiles)){
-return resolveTailDecision(VERSION_BUMP_INDETERMINABLE_KIND,buildBumpIndeterminableBrief(values),run);
-}
-return resolveTailDecision(VERSION_BUMP_TYPE_KIND,buildBumpTypeBrief(values),run);
-}
-function buildBumpPrompt(trunkCommit,plan,trunk){
-return[
-bumpTypeTaskLine(),
-'Only on a bump_required or no_bump verdict, set each file of artifact_files below, as one step of the approved delivery plan: read it at trunk_commit with plain git show <trunk_commit>:<path> run from the repo folder, raise the version it holds by the bump_type line (none keeps it), and write that version in the file, never raising the version the file holds now. On any other verdict, edit nothing.',
-boundarySentence(),
-dataBlocksSentence(),
-'Each path in artifact_files passed the plan check as a safe git path, so it goes into that git show command as it is.',
-'',
-formatDataBlock('inputs',buildBumpTypeInputs(trunkCommit,plan.versioning)),
-formatDataBlock('version_files',{trunk_commit:trunkCommit,artifact_files:plan.versioning.artifact_files}),
-formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:trunk})
-].join('\n');
 }
 function readGateEditOutcome(result,schema){
 if(!validateSchema(schema,result).ok){
 const unusable=describeUnusableResult('it returned no usable result.',result);
-return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction};
+return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 if(result.outcome==='blocked'){
 return{status:'blocked',reason:describeReason(result.blocker),files:result.files,nextAction:result.next_action};
 }
 return{status:'complete',files:result.files};
 }
-function runBumpStep(run,plan,facts,count){
-if(plan.versioning.artifact_files.length===0){
-return agent(addResumeNote(buildBumpTypePrompt(facts.trunk_commit,plan.versioning),run),runnerOptions(gateLabel('bump-type',run,count),'Bump'));
+function versionCheckSentence(){
+return'The hivemind:bump-type run is part of this validation task: invoke the hivemind:bump-type skill once, with each value of the version block below as the input of the same name, and relay that run in the version field.';
 }
-return agent(addResumeNote(buildBumpPrompt(facts.trunk_commit,plan,run.trunk),run),Object.assign(droneOptions(gateLabel('bump',run,count),'Bump',BUMP_SCHEMA),{model:BUMP_MODEL}));
+function buildValidatePrompt(plan,trunkCommit){
+const commands=plan.validation_commands;
+const lines=['Run the project\'s validation on the working branch as it is checked out.',commands.length===0?validationTaskSentence():validationCommandsSentence(),runnerReadOnlySentence()];
+const blocks=commands.length===0?[]:[formatDataBlock('inputs',{commands:commands})];
+if(hasVersionFiles(plan)){
+lines.push(versionCheckSentence());
+blocks.push(formatDataBlock('version',Object.assign(buildBumpTypeInputs(trunkCommit,plan.versioning),{version_files:plan.versioning.artifact_files})));
 }
-function describeBumpNote(values){
-return values.verdict==='bump_required'?values.bump_type+' bump':'no bump';
-}
-async function commitBumpEdit(run,plan,count,checked){
-const commit={files:plan.versioning.artifact_files,label:gateLabel('bump-commit',run,count),stepName:'bump'};
-const committed=await runCommitStep(run,plan,commit,checked.problem!==undefined?[checked]:[]);
-if(committed.result!==undefined){
-return committed;
-}
-return{held:true,note:describeBumpNote(checked.values),values:checked.values};
-}
-async function runBumpGate(run,plan,facts,gates){
-const count=gates.runs.bump;
-const hasFiles=plan.versioning.artifact_files.length>0;
-phase('Bump');
-const result=await runBumpStep(run,plan,facts,count);
-const checked=checkBumpTypeRelay(result,hasFiles?BUMP_SCHEMA:RELAY_SCHEMA);
-if(checked.problem!==undefined){
-return hasFiles?commitBumpEdit(run,plan,count,checked):{result:finishDeliveryBlocked([checked],run)};
-}
-const verdict=resolveBumpVerdict(checked.values,plan,run);
-if(isRunEnd(verdict)){
-return verdict;
-}
-return hasFiles?commitBumpEdit(run,plan,count,checked):{held:true,note:describeBumpNote(checked.values),values:checked.values};
-}
-function isKeptRunnerCommit(entry,run,plan){
-const record=Object.hasOwn(run.runnerCommits,entry)?run.runnerCommits[entry]:undefined;
-return record!==undefined&&record.commitType===commitTypeMap()[plan.classification]&&record.breaking===plan.breaking
-&&!record.files.some((file)=>plan.versioning.artifact_files.includes(file));
-}
-function isSingleRowBump(values){
-return[values.counts.major,values.counts.minor,values.counts.patch,values.counts.no_bump].filter((count)=>Number(count)!==0).length===1&&Number(values.dropped_reverts)===0;
-}
-function keepBumpHeld(run,plan,gates){
-const isKept=(entry)=>isKeptRunnerCommit(entry,run,plan);
-if(gates.held.bump!==undefined&&isSingleRowBump(gates.bumpValues)&&run.commits.slice(0,gates.bumpMark).some(isKept)
-&&run.commits.length>gates.bumpMark&&run.commits.slice(gates.bumpMark).every(isKept)){
-gates.held.bump=run.head;
-gates.bumpMark=run.commits.length;
-}
-}
-function buildValidatePrompt(commands){
-const taskLine='Run the project\'s validation on the working branch as it is checked out.';
-if(commands.length===0){
-return[taskLine,validationTaskSentence(),runnerReadOnlySentence()].join('\n');
-}
-return[
-taskLine,
-validationCommandsSentence(),
-runnerReadOnlySentence(),
-'',
-formatDataBlock('inputs',{commands:commands})
-].join('\n');
+return(blocks.length===0?lines:lines.concat('',blocks)).join('\n');
 }
 function selectValidateSchema(plan){
-return plan.validation_commands.length>0?VALIDATE_COMMANDS_SCHEMA:VALIDATE_SCHEMA;
+const hasCommands=plan.validation_commands.length>0;
+if(hasVersionFiles(plan)){
+return buildValidateSchema(hasCommands,true);
+}
+return hasCommands?VALIDATE_COMMANDS_SCHEMA:VALIDATE_SCHEMA;
 }
 function readValidateOutcome(result,schema){
 if(!validateSchema(schema,result).ok){
@@ -2682,27 +2623,85 @@ return describeUnusableResult('The validation step returned no usable result, so
 if(result.outcome==='blocked'){
 return{problem:'The validation step was blocked, so '+RUN_NAME+' stopped before the pull request: '+describeReason(result.blocker),nextAction:result.next_action};
 }
-return{status:result.outcome,failures:result.failures};
+const validation={status:result.outcome,failures:result.failures};
+if(Object.hasOwn(result,'version')){
+validation.versionRelay=result.version;
 }
-function buildFixPrompt(failures,plan,trunk){
-return[
+return validation;
+}
+function checkVersionRelay(relay){
+const stopped='so '+RUN_NAME+' stopped before the pull request.';
+if(relay.outcome==='blocked'){
+return{problem:'The version check of the validation step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true)};
+}
+const values=readRelayedLines(relay,versionCheckRoutingSpec());
+if(values===undefined||!isConsistentVersionRelay(values)){
+return{problem:'The version check of the validation step returned malformed routing lines, '+stopped};
+}
+return{values:values};
+}
+function describeVersionMismatch(values){
+const source=values.verdict==='bump_required'?'the trunk version '+values.trunk_version+' raised by a '+values.bump_type+' bump':'the trunk version, since the commits call for no version bump';
+return'Version check: each file of the version_files block must hold version '+values.expected_version+', '+source+'.';
+}
+function describeVersionQuestionLine(values){
+const cause=values.version_check==='unreadable'?'The check cannot read one version from the files of the version_files block.':'The commits since the trunk do not settle the version bump.';
+return'Version check: '+cause+' Set each file of the version_files block as the reply in the user_answer block says.';
+}
+function describeValidateNote(validation,plan,run){
+const note=validation.status==='passed'?'passed':'not run, the project documents no validation commands';
+if(!hasVersionFiles(plan)){
+return note;
+}
+return run.versionAnswer===undefined?note+', version '+validation.version.expected_version:note+', version as the user replied';
+}
+function applyVersionCheck(validation,run){
+if(validation.versionRelay===undefined||run.versionAnswer!==undefined){
+return validation;
+}
+const checked=checkVersionRelay(validation.versionRelay);
+if(checked.problem!==undefined){
+return checked;
+}
+const values=checked.values;
+if(values.version_check==='undetermined'||values.version_check==='unreadable'){
+return{question:values,status:validation.status,failures:validation.failures};
+}
+if(values.version_check==='match'){
+return Object.assign(validation,{version:values});
+}
+const versionLine=describeVersionMismatch(values);
+const isFailed=validation.status==='failed';
+return{status:'failed',failures:isFailed?validation.failures+'\n\n'+versionLine:versionLine,versionOnly:!isFailed,versionLine:versionLine};
+}
+function buildFixPrompt(fix,plan,trunk){
+const lines=[
 'Fix the failed validation of the delivery: the failures block below holds what the validation reported.',
 validationFixSentence(),
 boundarySentence(),
-dataBlocksSentence(),
+fix.userAnswer===undefined?dataBlocksSentence():dataBlocksSentence('The reply in user_answer'),
 '',
-formatDataBlock('failures',failures),
-formatDataBlock('plan_summary',plan.summary),
-formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:trunk})
-].join('\n');
+formatDataBlock('failures',fix.failures)
+];
+if(fix.versionLine!==undefined){
+lines.push(formatDataBlock('version_files',plan.versioning.artifact_files));
 }
-async function runFixRound(run,plan,failures,round){
+if(fix.userAnswer!==undefined){
+lines.push(formatDataBlock('user_answer',fix.userAnswer));
+}
+lines.push(formatDataBlock('plan_summary',plan.summary),formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:trunk}));
+return lines.join('\n');
+}
+async function runFixRound(run,plan,fix,gates){
 phase('Fix');
-const result=await agent(addResumeNote(buildFixPrompt(failures,plan,run.trunk),run),droneOptions(gateLabel('fix',run,round),'Fix',FIX_SCHEMA));
-const fix=readGateEditOutcome(result,FIX_SCHEMA);
-const stepCauses=fix.status==='blocked'?[{problem:'The validation fix round was blocked, so '+RUN_NAME+' stopped: '+fix.reason,nextAction:fix.nextAction}]:[];
-const committed=await runCommitStep(run,plan,{files:fix.files,label:gateLabel('fix-commit',run,round),stepName:'fix'},stepCauses);
-if(committed.result!==undefined){
+gates.runs.fix+=1;
+const count=gates.runs.fix;
+const prompt=fix.userAnswer===undefined?addResumeNote(buildFixPrompt(fix,plan,run.trunk),run):buildFixPrompt(fix,plan,run.trunk);
+const result=await agent(prompt,droneOptions(gateLabel('fix',run,count),'Fix',FIX_SCHEMA));
+const edit=readGateEditOutcome(result,FIX_SCHEMA);
+const stepCauses=edit.status==='blocked'?[{problem:'The validation fix round was blocked, so '+RUN_NAME+' stopped: '+edit.reason,nextAction:edit.nextAction,agentFailure:edit.agentFailure}]:[];
+const committed=await runCommitStep(run,plan,{files:edit.files,label:gateLabel('fix-commit',run,count),stepName:'fix'},stepCauses);
+if(committed.values===undefined){
 return committed;
 }
 return{held:false};
@@ -2715,34 +2714,58 @@ run.notRunGates.push(line);
 function hasKeptFailure(run,gates){
 return Object.hasOwn(gates.failures,run.head);
 }
-async function runValidateStep(run,plan,gates){
+async function runValidateStep(run,plan,facts,gates){
 phase('Validate');
 const schema=selectValidateSchema(plan);
-const prompt=addResumeNote(buildValidatePrompt(plan.validation_commands),run);
+const prompt=addResumeNote(buildValidatePrompt(plan,facts.trunk_commit),run);
 const result=await agent(prompt,droneOptions(gateLabel('validate',run,gates.runs.validate),'Validate',schema));
-return readValidateOutcome(result,schema);
+const validation=readValidateOutcome(result,schema);
+return validation.problem===undefined?applyVersionCheck(validation,run):validation;
 }
-async function runValidateGate(run,plan,gates){
-const validation=hasKeptFailure(run,gates)?{status:'failed',failures:gates.failures[run.head]}:await runValidateStep(run,plan,gates);
+async function askVersionQuestion(run,plan,gates,validation){
+const asked=askTail(buildUndecidedAsk(buildVersionQuestionBrief(validation.question)),run,undefined);
+if(asked.answer===undefined){
+return asked;
+}
+run.versionAnswer=asked.answer;
+const versionLine=describeVersionQuestionLine(validation.question);
+const failures=validation.status==='failed'?validation.failures+'\n\n'+versionLine:versionLine;
+return runFixRound(run,plan,{failures:failures,versionLine:versionLine,userAnswer:asked.answer},gates);
+}
+function stopVersionFixLimit(run,gates,kept){
+const cause={problem:'Validation still fails its version check on commit '+run.head+' after '+maxFixRounds()+' fix rounds, so '+RUN_NAME+' stopped before the pull request. '+kept.versionLine};
+const stopped=stopDelivery([cause],run,[],false);
+if(stopped.rerun===true){
+gates.fixRounds=0;
+}
+return stopped;
+}
+async function runValidateGate(run,plan,facts,gates){
+const validation=hasKeptFailure(run,gates)?gates.failures[run.head]:await runValidateStep(run,plan,facts,gates);
 if(validation.problem!==undefined){
-return{result:finishDeliveryBlocked([validation],run)};
+return stopDelivery([validation],run,[],false);
+}
+if(validation.question!==undefined){
+return askVersionQuestion(run,plan,gates,validation);
 }
 if(validation.status==='not_run'){
 listNotRunGate(run,'validation: the project documents no validation commands.');
 }
 if(validation.status!=='failed'){
-return{held:true,note:validation.status==='passed'?'passed':'not run, the project documents no validation commands'};
+return{held:true,note:describeValidateNote(validation,plan,run)};
 }
-gates.failures[run.head]=validation.failures;
+gates.failures[run.head]=validation;
 if(gates.fixRounds>=maxFixRounds()){
-return replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)),run);
+return validation.versionOnly===true?stopVersionFixLimit(run,gates,validation):replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)),run);
 }
+if(validation.versionOnly!==true){
 const decided=resolveTailDecision(VALIDATION_REMEDIATION_KIND,buildValidationRemediationBrief(run.head,gates.fixRounds+1),run);
 if(isRunEnd(decided)){
 return decided;
 }
+}
 gates.fixRounds+=1;
-return runFixRound(run,plan,validation.failures,gates.fixRounds);
+return runFixRound(run,plan,validation,gates);
 }
 function resolveGateRerun(run,gates){
 const staleIds=configuredGateIds(run).filter((gateId)=>gates.held[gateId]!==undefined&&gates.held[gateId]!==run.head);
@@ -2755,56 +2778,64 @@ return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds,run.head
 gates.reruns+=1;
 return resolveTailDecision(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head,false),run);
 }
-function runGateStep(gateId,run,plan,facts,gates){
-if(gateId==='bump'){
-return runBumpGate(run,plan,facts,gates);
+function runGateStep(stepId,run,plan,facts,gates){
+if(stepId==='pr'){
+return runPullRequestStep(run,plan,gates);
 }
-if(gateId==='review'){
+if(stepId==='review'){
 return runReviewGate(run,plan,gates);
 }
-return runValidateGate(run,plan,gates);
+return runValidateGate(run,plan,facts,gates);
+}
+async function runHeadCheck(run,plan,gates){
+gates.runs.headCheck+=1;
+gates.failures={};
+return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.headCheck),stepName:'head'},[]);
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{bump:0,validate:0,review:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined,bumpMark:0,bumpValues:undefined};
+const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
 let checkedHead=run.head;
 let index=0;
-while(index<gateList.length){
-const gateId=gateList[index];
-if(gates.held[gateId]===run.head){
-index+=1;
-continue;
-}
-if(gateId!=='validate'||!hasKeptFailure(run,gates)){
-gates.runs[gateId]+=1;
-}
-const ended=await runGateStep(gateId,run,plan,facts,gates);
-if(isRunEnd(ended)){
-return ended;
-}
-if(ended.held){
-gates.held[gateId]=run.head;
-gates.notes[gateId]=ended.note;
-Object.assign(gates,gateId==='bump'?{bumpMark:run.commits.length,bumpValues:ended.values}:{});
-}
-if(ended.answer!==undefined){
-gates.answer=ended.answer;
-}
-if(run.head===checkedHead){
-continue;
-}
+for(;;){
+if(run.head!==checkedHead){
 checkedHead=run.head;
-keepBumpHeld(run,plan,gates);
 const rerun=resolveGateRerun(run,gates);
 if(isRunEnd(rerun)){
 return rerun;
 }
 index=0;
 }
-return runPullRequestStep(run,plan,gates);
+const stepId=index<gateList.length?gateList[index]:'pr';
+if(stepId!=='pr'&&gates.held[stepId]===run.head){
+index+=1;
+continue;
+}
+if(stepId!=='review'&&run.headRound!==run.answerLog.length){
+const checked=await runHeadCheck(run,plan,gates);
+if(isRunEnd(checked)){
+return checked;
+}
+continue;
+}
+if(stepId!=='validate'||!hasKeptFailure(run,gates)){
+gates.runs[stepId]+=1;
+}
+const ended=await runGateStep(stepId,run,plan,facts,gates);
+if(isRunEnd(ended)){
+return ended;
+}
+if(ended.held&&run.headRound===run.answerLog.length){
+gates.held[stepId]=run.head;
+gates.notes[stepId]=ended.note;
+}
+if(ended.answer!==undefined){
+gates.answer=ended.answer;
+}
+}
 }
 
 function omitSchemaDialect(schema){
@@ -3097,8 +3128,10 @@ let planResult=await agent(planPrompt,plannerCallOptions('plan-'+run.pass,'Plan'
 for(;;){
 const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk);
 if(problem!==undefined){
-const unusable=describeUnusableResult(problem,planResult);
-return{result:finishDeliveryBlocked([unusable],run)};
+if(shownAsks.length>0){
+run.answerLog.push(buildAnswerEntry(shownEntry,undefined));
+}
+return stopDelivery([describeUnusableResult(problem,planResult)],run,[],true);
 }
 if(shownAsks.length>0){
 run.answerLog.push(buildAnswerEntry(shownEntry,planResult));
@@ -3108,7 +3141,7 @@ planResult=shownResult;
 }else{
 const rescoped=await runScopeStep(run,facts,run.answerLog.length);
 if(rescoped.problem!==undefined){
-return{result:finishDeliveryBlocked([rescoped],run)};
+return stopDelivery([rescoped],run,[],true);
 }
 scope=rescoped.scope;
 }
@@ -3120,7 +3153,7 @@ return{plan:planResult.plan,freshness:resolution.freshness};
 }
 const resettled=resolution.asks.find((ask)=>settledKinds.has(ask.kind)&&[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,TRUNK_STALE_KIND].includes(ask.kind));
 if(resettled!==undefined){
-return{result:finishDeliveryBlocked([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.'}],run)};
+return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true}],run,[],true);
 }
 const isAcceptance=resolution.asks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
 const lead=describePlanLine(planResult.plan,isAcceptance?resolution.outsidePaths:[]);
@@ -3262,30 +3295,27 @@ if(values===undefined||values.commented===values.created){
 return{problem:'The pull request step returned malformed routing lines, '+stopped};
 }
 if(values.head_ref_oid!==head){
-return{problem:'The pull request step reported a head commit other than the commit every gate held on, '+stopped};
+return{problem:'The pull request step reported a head commit other than the commit every gate held on, '+stopped,terminal:true};
 }
 return{values:values};
+}
+function describePullRequestLabel(run,count){
+return'pr-'+run.pass+(count===1?'':'-'+count);
 }
 async function runPullRequestStep(run,plan,gates){
 const texts=buildPullRequestTexts(run,plan,gates);
 if(texts.problem!==undefined){
-return{result:finishDeliveryBlocked([{problem:texts.problem}],run)};
+return stopDelivery([{problem:texts.problem,terminal:true}],run,[],false);
 }
 phase('PR');
-const relay=await agent(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),runnerOptions('pr-'+run.pass,'PR'));
+const relay=await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),describePullRequestLabel(run,gates.runs.pr),'PR');
 const checked=checkPullRequestRelay(relay,run.head);
-if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked([checked],run)};
-}
+if(checked.problem===undefined){
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
 }
+return stopDelivery([checked],run,[],false);
+}
 
-function renderCommits(commits){
-if(commits.length===0){
-return'This run made no commit.';
-}
-return['Commits this run made:',...commits.map((commit)=>'- '+commit)].join('\n');
-}
 function renderReversibleEffects(effects){
 const lines=['Effects outside the repo that the plan declares as reversible:'];
 effects.forEach((effect)=>lines.push('- step '+encodeUntrustedText(effect.stepId)+': '+encodeUntrustedText(effect.summary)));
@@ -3294,11 +3324,13 @@ return lines.join('\n');
 function renderNotRunGates(lines){
 return['Gates that did not run:',...lines.map((line)=>'- '+line)].join('\n');
 }
+function observeHead(run,commit,branch){
+run.head=commit;
+run.branch=branch;
+run.headRound=run.answerLog.length;
+}
 function buildRunRecordParts(run,taken,gates){
 const parts=[];
-if(run.waveCount>0){
-parts.push({id:'commits',text:renderCommits(run.commits),external:false});
-}
 if(run.reversibleEffects.length>0){
 parts.push({id:'reversible_effects',text:renderReversibleEffects(run.reversibleEffects),external:true});
 }
@@ -3313,7 +3345,7 @@ parts.push({id:'decisions',text:renderDecisions(taken),compact:renderDecisionsCo
 return parts;
 }
 function describeBranchLine(run){
-return'Branch '+encodeUntrustedText(run.branch)+' holds '+describeCount(run.commits.length,'commit')+' this run made, with head '+run.head+'.';
+return'Branch '+encodeUntrustedText(run.branch)+' is at commit '+run.head+'.';
 }
 function buildRecordTailBlocks(run,taken){
 const blocks=[];
@@ -3327,7 +3359,7 @@ return blocks;
 }
 function finishDeliveryBlocked(causes,run,endLines=[]){
 const blocks=endLines.map((line)=>({text:line}));
-if(run!==undefined&&run.commits.length>0){
+if(run!==undefined&&run.waveCount>0){
 blocks.push({text:describeBranchLine(run)});
 }
 if(run!==undefined){
@@ -3372,11 +3404,29 @@ const questionsBlock={text:renderQuestions(resolution.asks)};
 if(resolution.asks.some((ask)=>ask.exact===true)){
 questionsBlock.whole=true;
 }
-const blocks=[{text:lead},questionsBlock];
+const compactLead=cutAtBoundary(lead,maxBlockedLeadLength());
+const blocks=[compactLead===lead?{text:lead}:{text:lead,compact:compactLead},questionsBlock];
 if(!canShowWhole({resumeArgs:resumeArgs,blocks:blocks})){
 return finishOpenQuestions(resolution,'exact_text_size',run);
 }
 return pauseForUser({resumeArgs:resumeArgs,blocks:blocks});
+}
+function describeStopLead(causes,endLines){
+const causeTexts=buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text);
+return causeTexts.concat(endLines).join('\n');
+}
+function stopDelivery(causes,run,endLines,isReplan){
+if(causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
+return{result:finishDeliveryBlocked(causes,run,endLines)};
+}
+const asked=askTail(buildUndecidedAsk(buildStepStopBrief(causes,isReplan)),run,describeStopLead(causes,endLines));
+if(asked.answer===undefined){
+return asked;
+}
+if(isReplan){
+return{replan:{reason:'The user replied to a stop the run paused at, so plan again from the fresh facts with the answers block.'}};
+}
+return{rerun:true};
 }
 
 function trunkFreshnessMap(){
@@ -3456,11 +3506,32 @@ commented:{pattern:/^(?:true|false)$/,required:true},
 warning:{pattern:new RegExp('^(?:'+pullRequestWarningTexts().join('|')+')$'),required:false}
 };
 }
+function semverCorePattern(){
+return/^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
+}
+function versionCheckRoutingSpec(){
+return Object.assign(bumpTypeRoutingSpec(),{
+version_check:{pattern:/^(?:match|mismatch|unreadable|undetermined)$/,required:true},
+trunk_version:{pattern:semverCorePattern(),required:false},
+expected_version:{pattern:semverCorePattern(),required:false}
+});
+}
 function isConsistentBumpRelay(values){
 const counts=values.counts;
 const countSum=Number(counts.major)+Number(counts.minor)+Number(counts.patch)+Number(counts.no_bump);
 return(values.verdict==='bump_required')===(values.bump_type!=='none')
 &&countSum===Number(values.mapped_commits);
+}
+function isConsistentVersionRelay(values){
+const hasExpected=values.expected_version!==undefined;
+const hasTrunk=values.trunk_version!==undefined;
+if(!isConsistentBumpRelay(values)||(hasExpected&&!hasTrunk)){
+return false;
+}
+if(values.version_check==='match'||values.version_check==='mismatch'){
+return hasExpected&&values.verdict!=='ask_user';
+}
+return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
 }
 function gitScriptSentence(skill){
 return'This is a git-script task: the task\'s only change is one run of '+skill+', a hivemind git skill whose script checks the git state itself.';
@@ -3507,6 +3578,13 @@ variants:{ran:{required:['stdout'],optional:[]},blocked:{required:[],optional:['
 }
 function runnerOptions(label,phaseTitle){
 return{agentType:runnerAgentType(),model:RUNNER_MODEL,schema:toAgentSchema(RELAY_SCHEMA),label:label,phase:phaseTitle};
+}
+function isTransientBlock(relay){
+return validateSchema(RELAY_SCHEMA,relay).ok&&relay.outcome==='blocked'&&isTransientFailure(relay.stderr);
+}
+async function runRunnerRelay(prompt,label,phaseTitle){
+const relay=await agent(prompt,runnerOptions(label,phaseTitle));
+return isTransientBlock(relay)?agent(prompt,runnerOptions(label+'-retry',phaseTitle)):relay;
 }
 function droneOptions(label,phaseTitle,schema){
 return{agentType:runnerAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
@@ -3603,11 +3681,15 @@ const isFirstPass=run.pass===1;
 const prompt=isFirstPass?buildScanPrompt(facts):addResumeNote(buildScanPrompt(facts),run);
 const scan=await agent(prompt,isFirstPass?scanOptions():Object.assign(scanOptions(),{label:'scan-'+run.pass}));
 const problem=describeScanProblem(scan,facts,RUN_NOUN);
-return problem===undefined?undefined:describeUnusableResult(problem,scan);
+if(problem===undefined){
+return undefined;
+}
+const isSuspect=validateSchema(scanStepSchema(),scan).ok&&scan.results.some((result)=>result.verdict==='injection-suspect');
+return isSuspect?{problem:problem,terminal:true}:describeUnusableResult(problem,scan);
 }
 async function runFactsStep(run){
 phase('Facts');
-const relay=await agent(addResumeNote(buildDeliveryFactsPrompt(run.trunk,run.references),run),runnerOptions('facts-'+run.pass,'Facts'));
+const relay=await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(run.trunk,run.references),run),'facts-'+run.pass,'Facts');
 const checked=checkDeliveryFacts(relay,run.trunk);
 if(checked.problem!==undefined){
 return checked;
@@ -3631,20 +3713,20 @@ if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult('The branch step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
-return{problem:'The branch step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true)};
+return{problem:'The branch step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true),terminal:true};
 }
 const values=readRelayedLines(relay,createWorkingBranchRoutingSpec());
 if(values===undefined||values.warning!==branchWarningTexts()[freshness]){
 return{problem:'The branch step returned malformed routing lines, '+stopped};
 }
 if(values.branch!==plan.branch){
-return{problem:'The branch step reported a branch other than the plan branch, '+stopped};
+return{problem:'The branch step reported a branch other than the plan branch, '+stopped,terminal:true};
 }
 return{values:values};
 }
 async function runBranchStep(run,plan,freshness){
 phase('Branch');
-const relay=await agent(addResumeNote(buildBranchPrompt(plan,freshness,run.trunk),run),runnerOptions('branch-'+run.pass,'Branch'));
+const relay=await runRunnerRelay(addResumeNote(buildBranchPrompt(plan,freshness,run.trunk),run),'branch-'+run.pass,'Branch');
 return checkBranchRelay(relay,plan,freshness);
 }
 function needsBranchReplan(branchValues,facts,plan){
@@ -3653,7 +3735,7 @@ return(branchValues.created==='false'&&!isOnPlanBranch)||branchValues.commit!==f
 }
 function requestBranchReplan(run){
 if(run.branchSwitches>0){
-return{result:finishDeliveryBlocked([{problem:'The branch step switched branch or commit again after a replan, so '+RUN_NAME+' stopped before any wave.'}],run)};
+return stopDelivery([{problem:'The branch step switched branch or commit again after a replan, so '+RUN_NAME+' stopped before any wave.',terminal:true}],run,[],true);
 }
 run.branchSwitches+=1;
 return{replan:{reason:'The branch step switched onto a branch or commit other than the one the facts were taken on, so plan again from the new facts.'}};
@@ -3662,12 +3744,12 @@ function commitStepTexts(stepName){
 switch(stepName){
 case'wave':
 return{purpose:'the wave of plan steps that just ran',noun:'the wave'};
-case'bump':
-return{purpose:'the version bump that just ran',noun:'the version bump',subject:'bump the version'};
 case'fix':
 return{purpose:'the validation fix round that just ran',noun:'the fix round',subject:'fix the failed validation'};
 case'review':
 return{purpose:'the local review that just ran, with an empty file list',noun:'the local review',subject:'apply the local review fixes'};
+case'head':
+return{purpose:'nothing: the empty file list makes it report the head of the working branch after the user replied to a stop',noun:'the head check',subject:'read the branch head'};
 default:
 throw new Error('commitStepTexts: no texts for step '+JSON.stringify(stepName));
 }
@@ -3725,14 +3807,14 @@ if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult('The commit step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
-return{problem:describeCommitBlocker(relay.stderr,stepNoun)};
+return{problem:describeCommitBlocker(relay.stderr,stepNoun),terminal:true};
 }
 const values=readRelayedLines(relay,moltRoutingSpec());
 if(values===undefined){
 return{problem:'The commit step returned malformed routing lines, '+stopped};
 }
 if(values.branch!==plan.branch){
-return{problem:'The commit step reported a branch other than the plan branch, '+stopped};
+return{problem:'The commit step reported a branch other than the plan branch, '+stopped,terminal:true};
 }
 return{values:values};
 }
@@ -3745,39 +3827,33 @@ if(!Array.isArray(stepCauses)){
 throw new Error('runCommitStep: stepCauses must be an array');
 }
 const subject=commit.subject===undefined?commitStepTexts(commit.stepName).subject:commit.subject;
+const isReplan=commit.stepName==='wave';
 phase('Commit');
-const relay=await agent(addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,commit.stepName,subject),run),runnerOptions(commit.label,'Commit'));
+const relay=await runRunnerRelay(addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,commit.stepName,subject),run),commit.label,'Commit');
 const checked=checkCommitRelay(relay,plan,commit.stepName);
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked(stepCauses.concat([checked]),run)};
+return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
 }
-if(checked.values.committed==='true'){
-run.commits.push(checked.values.commit);
-run.runnerCommits[checked.values.commit]={files:commit.files,commitType:commitTypeMap()[plan.classification],breaking:plan.breaking};
-}else if(run.head!==undefined&&checked.values.commit!==run.head){
-run.commits.push(run.head+'..'+checked.values.commit);
-}
-run.head=checked.values.commit;
-run.branch=plan.branch;
+observeHead(run,checked.values.commit,plan.branch);
 if(stepCauses.length===0){
 return{values:checked.values};
 }
 const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.values,commit.stepName)]:[];
-return{result:finishDeliveryBlocked(stepCauses,run,endLines)};
+return stopDelivery(stepCauses,run,endLines,isReplan);
 }
 
 function localReviewRoutes(){
 return{
 clean:'hold',
-'max-iterations-reached':'stop',
-'break-fix-break':'stop',
+'max-iterations-reached':'stop_replan',
+'break-fix-break':'stop_replan',
 'root-cluster-suspected':'replan',
 'diminishing-returns':'diminishing',
 'injection-suspect':'stop',
 'user-input-required':'question',
 'planner-escalation':'replan',
 'high-severity-rejection':'question',
-blocked:'stop'
+blocked:'stop_rerun'
 };
 }
 function reviewExitFields(){
@@ -4112,11 +4188,15 @@ if(isRunEnd(decided)){
 return decided;
 }
 if(run.replans>=maxReplans()){
-return{result:finishDeliveryBlocked([{problem:'Local review returned '+review.exit_reason+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.'}],run)};
+return stopForReviewReplan({problem:'Local review returned '+review.exit_reason+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.'},review,run);
 }
 run.replans+=1;
 const reason='Local review returned '+review.exit_reason+', so plan the remediation of what the review block reports, from the fresh facts.';
 return{replan:{reason:reason,review:projectReplanReview(review)}};
+}
+function stopForReviewReplan(cause,review,run){
+const stopped=stopDelivery([cause],run,[],true);
+return stopped.replan===undefined?stopped:{replan:{reason:stopped.replan.reason,review:projectReplanReview(review)}};
 }
 function routeLocalReview(review,run){
 switch(localReviewRoutes()[review.exit_reason]){
@@ -4128,8 +4208,12 @@ case'replan':
 return requestReviewReplan(review,run);
 case'question':
 return askReviewQuestion(review,run);
+case'stop_replan':
+return stopForReviewReplan({problem:describeReviewStop(review,run.head)},review,run);
+case'stop_rerun':
+return stopDelivery([{problem:describeReviewStop(review,run.head)}],run,[],false);
 case'stop':
-return{result:finishDeliveryBlocked([{problem:describeReviewStop(review,run.head)}],run)};
+return stopDelivery([{problem:describeReviewStop(review,run.head),terminal:true}],run,[],false);
 default:
 throw new Error('routeLocalReview: no route for exit reason '+JSON.stringify(review.exit_reason));
 }
@@ -4143,7 +4227,7 @@ const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run.trunk),
 const review=await agent(prompt,reviewerOptions(gateLabel('review',run,count)));
 const unusable=describeReviewProblem(review);
 const committed=await runCommitStep(run,plan,{files:[],label:gateLabel('review-commit',run,count),stepName:'review'},unusable===undefined?[]:[unusable]);
-if(committed.result!==undefined){
+if(committed.values===undefined){
 return committed;
 }
 const routed=routeLocalReview(review,run);
@@ -4308,7 +4392,7 @@ return()=>agent(prompt,options);
 function readWorkerOutcome(step,result){
 if(!validateSchema(WORKER_SCHEMA,result).ok){
 const unusable=describeUnusableResult('it returned no usable result.',result);
-return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction};
+return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 if(result.outcome==='complete'){
 return{stepId:step.id,status:'complete'};
@@ -4319,7 +4403,11 @@ function describeBlockedWave(blockedOutcomes){
 const lead='A worker did not finish its step, so '+RUN_NAME+' stopped after its wave:';
 const stepLines=blockedOutcomes.map((outcome)=>'- Step '+encodeUntrustedText(outcome.stepId)+' was blocked: '+outcome.reason);
 const isRunAgain=blockedOutcomes.every((outcome)=>outcome.nextAction==='run_again');
-return{problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:isRunAgain?'run_again':'fix_cause'};
+const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:isRunAgain?'run_again':'fix_cause'};
+if(blockedOutcomes.some((outcome)=>outcome.agentFailure===true)){
+cause.agentFailure=true;
+}
+return cause;
 }
 function describeReplanReasons(replanOutcomes){
 return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)+' needs a new plan: '+outcome.reason).join('\n');
@@ -4327,7 +4415,9 @@ return replanOutcomes.map((outcome)=>'Step '+encodeUntrustedText(outcome.stepId)
 function requestStepReplan(run,replanOutcomes){
 const reasons=describeReplanReasons(replanOutcomes);
 if(run.replans>=maxReplans()){
-return{result:finishDeliveryBlocked([{problem:'A worker asked for a new plan after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.\n'+reasons}],run)};
+const cause={problem:'A worker asked for a new plan after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.\n'+reasons};
+const stopped=stopDelivery([cause],run,[],true);
+return stopped.replan===undefined?stopped:{replan:{reason:reasons}};
 }
 run.replans+=1;
 return{replan:{reason:reasons}};
@@ -4337,7 +4427,7 @@ const doneIds=[];
 for(let waveNumber=1;;waveNumber+=1){
 const wave=computeWave(plan.steps,doneIds);
 if(!wave.ok){
-return{result:finishDeliveryBlocked([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem)}],run)};
+return stopDelivery([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem)}],run,[],true);
 }
 if(wave.all_done){
 return runGates(run,plan,facts);
@@ -4351,7 +4441,7 @@ const blockedOutcomes=outcomes.filter((outcome)=>outcome.status==='blocked');
 const stepCauses=blockedOutcomes.length>0?[describeBlockedWave(blockedOutcomes)]:[];
 const commit={files:listStepFiles(waveSteps),label:'commit-'+run.pass+'-'+waveNumber,stepName:'wave',subject:buildWaveSubject(waveSteps,waveNumber)};
 const committed=await runCommitStep(run,plan,commit,stepCauses);
-if(committed.result!==undefined){
+if(committed.values===undefined){
 return committed;
 }
 const replanOutcomes=outcomes.filter((outcome)=>outcome.status==='needs_replan');
@@ -4367,26 +4457,24 @@ const RUN_NAME=describeRunNoun(RUN_NOUN);
 const PLANNER_AGENT='hivemind:cerebrate';
 const RUNNER_MODEL='haiku';
 const SCOPE_MODEL='sonnet';
-const BUMP_MODEL='sonnet';
 const PLANNER_QUESTION_KIND='planner_question';
 const PLAN_ACCEPTANCE_KIND='plan_acceptance';
 const TRUNK_STALE_KIND='trunk_stale';
 const EXTERNAL_EFFECT_KIND='external_effect';
-const VERSION_BUMP_TYPE_KIND='version_bump_type';
-const VERSION_BUMP_INDETERMINABLE_KIND='version_bump_indeterminable';
 const VALIDATION_REMEDIATION_KIND='validation_remediation';
 const GATE_RERUN_KIND='gate_rerun';
+const VERSION_BUMP_INDETERMINABLE_KIND='version_bump_indeterminable';
 const DIMINISHING_RETURNS_EXIT_KIND='diminishing_returns_exit';
 const PLANNER_ESCALATION_ROUTING_KIND='planner_escalation_routing';
 const ROOT_CLUSTER_ROUTING_KIND='root_cluster_routing';
 const REMEDIATION_PLAN_ACCEPTANCE_KIND='remediation_plan_acceptance';
 const REVIEW_QUESTION_KIND='review_question';
 const HIGH_SEVERITY_REJECTION_KIND='high_severity_rejection';
+const STEP_STOP_KIND='step_stop';
 const REVIEWER_AGENT='hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA=buildPlanResultSchema(PLAN_SCHEMA,BRIEF_SCHEMA);
 const RELAY_SCHEMA=buildRelaySchema();
 const WORKER_SCHEMA=buildWorkerSchema();
-const BUMP_SCHEMA=buildBumpSchema();
 const FIX_SCHEMA=buildGateEditSchema();
 const VALIDATE_SCHEMA=buildValidateSchema(false);
 const VALIDATE_COMMANDS_SCHEMA=buildValidateSchema(true);
@@ -4464,37 +4552,44 @@ answerLog:[],
 answeredKeys:new Set(),
 taken:[],
 reversibleEffects:[],
-commits:[],
-runnerCommits:{},
 head:undefined,
 branch:undefined,
+headRound:undefined,
 notRunGates:[],
 waveCount:0,
 pass:0,
 replans:0,
-branchSwitches:0
+branchSwitches:0,
+versionAnswer:undefined
 };
+}
+function keepReplanReview(passEnd,replan){
+if(passEnd.replan===undefined||replan===undefined||replan.review===undefined){
+return passEnd;
+}
+return{replan:{reason:passEnd.replan.reason,review:replan.review}};
 }
 async function runDeliveryPass(run,replan){
 const checked=await runFactsStep(run);
 if(checked.problem!==undefined){
-return{result:finishDeliveryBlocked([checked],run)};
+return keepReplanReview(stopDelivery([checked],run,[],true),replan);
 }
 const scoped=await runScopeStep(run,checked.facts);
 if(scoped.problem!==undefined){
-return{result:finishDeliveryBlocked([scoped],run)};
+return keepReplanReview(stopDelivery([scoped],run,[],true),replan);
 }
 const planned=await runPlanningPass(run,checked.facts,scoped.scope,replan);
-if(planned.result!==undefined){
-return planned;
+if(planned.plan===undefined){
+return keepReplanReview(planned,replan);
 }
 const branched=await runBranchStep(run,planned.plan,planned.freshness);
 if(branched.problem!==undefined){
-return{result:finishDeliveryBlocked([branched],run)};
+return keepReplanReview(stopDelivery([branched],run,[],true),replan);
 }
 if(needsBranchReplan(branched.values,checked.facts,planned.plan)){
 return requestBranchReplan(run);
 }
+observeHead(run,branched.values.commit,planned.plan.branch);
 return runPlanWaves(run,planned.plan,checked.facts);
 }
 async function runDelivery(rawArgs){

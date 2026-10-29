@@ -18,8 +18,8 @@
  *           plan acceptance and the shown result was restored, scopes again
  *           with runScopeStep(run, facts, round), label scope-P-R. That scope
  *           replaces the pass scope for the acceptance check and every later
- *           revise prompt of the pass, and its problem stops the run blocked
- *           as a pass-start scope problem does.
+ *           revise prompt of the pass, and its problem stops through
+ *           stopDelivery (record.js) as a pass-start scope problem does.
  *   replan  undefined at launch, else the replan data of the step that
  *           sent the run back to planning: its reason, and the review when
  *           it carries one.
@@ -28,8 +28,8 @@
  *
  * Outputs
  *   runPlanningPass(run, facts, scope, replan)  {plan, freshness} once every
- *           question of the pass is settled or taken, else {result}: the
- *           pause of an open question or a blocked finish.
+ *           question of the pass is settled or taken, else what stopDelivery
+ *           returns or {result}, the pause of an open question.
  *   takeNextReply(run, round)  the reply to a round, also read by the
  *           tail asks of gates.js.
  *   The steps it runs, as meta.js names them:
@@ -91,12 +91,18 @@
  *   change. The user rejected local review finding c2e0ada3, which asked for
  *   a check of fix round files members in the workflow, on this basis
  *   (ADR-0037, Amendment 2026-10-25). isGitIdentifier stays on
- *   artifact_files for the git show splice in the bump prompt, since the
- *   path rule allows spaces, shell characters and a leading '-'.
- *   A null plan, revise or rescope result, an agent failure, adds the
- *   agent-failure sentence to its problem through describeUnusableResult
- *   (lib/result.js), so it ends blocked with next action run_again; any
- *   other unusable result keeps the fix line.
+ *   artifact_files for the bump-type --version-file argument of the
+ *   validate step (gates.js), since the path rule allows spaces, shell
+ *   characters and a leading '-'.
+ *   Stops (issue 457): a plan, revise or rescope problem goes through
+ *   stopDelivery (record.js) with isReplan true, so the reply starts a new
+ *   pass outside maxReplans(). A null result, an agent failure, adds the
+ *   agent-failure sentence through describeUnusableResult (lib/result.js)
+ *   and ends the run with next action run_again; any other problem, a
+ *   planner's blocked outcome among them, pauses with the fix line, and
+ *   the reply reaches the next plan prompt's answers block. A revise that
+ *   fails the plan check logs its reply first, settled [], so the stop
+ *   asks the next round.
  *   Each validation_commands entry is one command line: describePlanProblem
  *   refuses a blank entry, or one that holds a line break or another
  *   control character, naming the reason, before the branch step.
@@ -105,7 +111,7 @@
  *   plan_acceptance or remediation_plan_acceptance restores the plan result
  *   that was shown, so its key holds and it is never asked again. When a
  *   pause round would still show one, that is a workflow defect: the run
- *   does not pause, and finishes blocked naming the question kind. An
+ *   does not pause, and a terminal stop ends it naming the question kind. An
  *   irreversible effect whose text changed, and a planner question that
  *   renders other text, are new questions and pause again.
  *   A planning pause leads with describePlanLine(plan, outsidePaths), one
@@ -134,8 +140,8 @@
  *   the plan and first revise prompts are the prompts of a run with no
  *   answers, so a resume replays them from cache.
  *   Outside-limit ask: the limit check and the pause lead read every plan
- *   path through the mark walk (listPlanPaths): the version files and step
- *   files the bump and wave commits take. When scope.limits is not empty, a
+ *   path through the mark walk (listPlanPaths): the version files and the
+ *   step files the wave commits take. When scope.limits is not empty, a
  *   plan path that neither equals a limit nor sits under limit + '/' makes
  *   the plan or remediation plan acceptance brief recommendation strength
  *   none, so decide() asks it no_recommendation at every level. Its problem
@@ -521,8 +527,10 @@ async function runPlanningPass(run, facts, passScope, replan) {
   for (;;) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk);
     if (problem !== undefined) {
-      const unusable = describeUnusableResult(problem, planResult);
-      return { result: finishDeliveryBlocked([unusable], run) };
+      if (shownAsks.length > 0) {
+        run.answerLog.push(buildAnswerEntry(shownEntry, undefined));
+      }
+      return stopDelivery([describeUnusableResult(problem, planResult)], run, [], true);
     }
     if (shownAsks.length > 0) {
       run.answerLog.push(buildAnswerEntry(shownEntry, planResult));
@@ -532,7 +540,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
       } else {
         const rescoped = await runScopeStep(run, facts, run.answerLog.length);
         if (rescoped.problem !== undefined) {
-          return { result: finishDeliveryBlocked([rescoped], run) };
+          return stopDelivery([rescoped], run, [], true);
         }
         scope = rescoped.scope;
       }
@@ -546,12 +554,12 @@ async function runPlanningPass(run, facts, passScope, replan) {
      * INVARIANT: a settled trunk question keeps its rendered text for the
      * whole run, and a settled plan acceptance restores the shown plan
      * result above, so its key holds again. One of these three kinds a
-     * reply settled coming back in its pass is a workflow defect, so the
-     * run ends blocked with no pause (issue 434).
+     * reply settled coming back in its pass is a workflow defect, so a
+     * terminal stop ends the run with no pause (issue 434).
      */
     const resettled = resolution.asks.find((ask) => settledKinds.has(ask.kind) && [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, TRUNK_STALE_KIND].includes(ask.kind));
     if (resettled !== undefined) {
-      return { result: finishDeliveryBlocked([{ problem: 'Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.' }], run) };
+      return stopDelivery([{ problem: 'Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', terminal: true }], run, [], true);
     }
     const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
     const lead = describePlanLine(planResult.plan, isAcceptance ? resolution.outsidePaths : []);

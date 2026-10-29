@@ -3,9 +3,8 @@
  *
  * Inputs
  *   pauseForUser({resumeArgs, blocks})
- *     resumeArgs  plain JSON object. The args to relaunch with, before the
- *                 reply is added. It has no replyField() key and
- *                 canCarry(resumeArgs) is true.
+ *     resumeArgs  plain JSON object, the args to relaunch with before the
+ *                 reply is added, with no replyField() key and canCarry true.
  *     blocks      the text the user reads, as below.
  *   finish({outcome, causes, blocks, pr})
  *     outcome     'complete' or 'blocked'.
@@ -22,30 +21,18 @@
  *                 its tail. Only the last block may have shorten. whole is
  *                 optional and only ever true: the block is never cut. A
  *                 whole block cannot have shorten.
- *   canShowWhole({resumeArgs, blocks})
- *     resumeArgs, blocks  as for pauseForUser.
- *   canPause(pausesSoFar)
- *     pausesSoFar non-negative integer. How many times this run has paused.
- *   canCarry(resumeArgs)
- *     resumeArgs  plain JSON object.
- *   noticeLength(value)
- *     value       any JSON value.
- *   toPrintableAscii(text)
- *     text        a string.
- *   cutAtBoundary(text, limit)
- *     text        a string.
- *     limit       positive integer, the most code points to keep.
- *   encodeUntrustedText(value)
- *     value       any value. A step- or script-written value to show.
- *   quoteDiagnostic(text, limit), describeReason(text)
- *     text        any value. A step- or script-written reason, blocker line,
- *                 stderr line or path, as a step returned it.
- *     limit       optional positive integer, the most code points to quote.
- *                 maxExcerptLength() when absent.
- *   describeNoResult(result)
- *     result      any value. What one agent() call of a step returned.
- *   describeUnusableResult(problem, result)
- *     problem     string. result as for describeNoResult.
+ *   canShowWhole({resumeArgs, blocks})  as for pauseForUser.
+ *   canPause(pausesSoFar)  a non-negative integer, the pauses so far.
+ *   canCarry(resumeArgs)  a plain JSON object. noticeLength(value) any JSON.
+ *   toPrintableAscii(text)  a string. encodeUntrustedText(value)  any value.
+ *   cutAtBoundary(text, limit)  limit the most code points to keep, > 0.
+ *   quoteDiagnostic(text, limit), describeReason(text)  text any value, a
+ *                 step- or script-written reason, blocker line, stderr line
+ *                 or path. limit optional, a positive integer of code
+ *                 points, maxExcerptLength() when absent.
+ *   describeNoResult(result)  result any value, what one agent() returned.
+ *   describeUnusableResult(problem, result)  problem a string.
+ *   isTransientFailure(text)  text any value, a runner's stderr or blocker.
  *   nextStepLine(nextAction)  'fix_cause', 'run_again', 'answer' or absent.
  *   buildStopBlocks(causes)  causes non-empty array of {problem, nextAction?}.
  *
@@ -91,7 +78,11 @@
  *                 error such as an expired login, a rate limit or a network
  *                 failure does. Otherwise the empty string.
  *   describeUnusableResult  {problem: problem + ' ' + describeNoResult(null),
- *                 nextAction: 'run_again'} for a null result, else {problem}.
+ *                 nextAction: 'run_again', agentFailure: true} for a null
+ *                 result, else {problem}. agentFailure is set only here.
+ *   isTransientFailure  true only when text is a string that names, by one
+ *                 fixed case-insensitive pattern, a root cause the Transient
+ *                 Failure definition of definitions.md lists, else false.
  *   nextStepLine  the Next line: run_again says nothing in the repo needs a
  *                 fix; answer says rerun with the answers; else the fix line.
  *   maxBlockedLeadLength  1000, the code points of a compact lead.
@@ -168,22 +159,17 @@
  *   any long text, such as the analysis-only report.
  *   A null result is an agent failure: agent() returns null on an agent API
  *   error, so describeNoResult names that failure and never the step's
- *   output, which does not exist (issue 460).
- *   One owner of a blocked stop: on both engines finish builds every
- *   blocked message from its causes, so no caller sets its lead or Next
- *   line (finding 49be981e). describeUnusableResult alone gives a null
- *   result that sentence and run_again.
+ *   output, which does not exist (issue 460). describeUnusableResult alone
+ *   gives it that sentence, run_again and the agentFailure mark, so a caller
+ *   can end the run on it (issue 457). finish builds every blocked message
+ *   from its causes, so no caller sets its lead or Next line (49be981e).
  *
  * Why
- *   A running workflow cannot take input mid-run, so asking means returning.
- *   One fixed shape lets the overlord relay and resume any workflow alike.
- *   Fitting in the workflow keeps the notice whole, so the overlord never
- *   needs the output file, and keeps a whole block, text the user must read
- *   in full to answer, by its key, not by a prompt rule. A null result sent
- *   the user to the repo for a cause; one sentence naming the agent failure
- *   says what happened (issue 460). Call-site stops could hide an agent
- *   failure behind a commit stop or drop or misstate the Next line, so
- *   finish takes causes (findings 3827ab1a, 58a21e45 and 49be981e).
+ *   A running workflow cannot take input mid-run, so asking means returning,
+ *   in one fixed shape the overlord relays and resumes alike. Fitting here
+ *   keeps the notice whole and a whole block whole by its key. Call-site
+ *   stops could hide an agent failure or misstate the Next line, so finish
+ *   takes causes (findings 3827ab1a, 58a21e45 and 49be981e).
  */
 
 function resultFields() {
@@ -320,7 +306,24 @@ function describeUnusableResult(problem, result) {
   if (result !== null) {
     return { problem: problem };
   }
-  return { problem: problem + ' ' + describeNoResult(result), nextAction: 'run_again' };
+  return { problem: problem + ' ' + describeNoResult(result), nextAction: 'run_again', agentFailure: true };
+}
+
+function isTransientFailure(text) {
+  return typeof text === 'string' && transientFailurePatterns().some((pattern) => pattern.test(text));
+}
+
+function transientFailurePatterns() {
+  return [
+    /\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
+    /\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
+    /\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
+    /\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
+    /\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
+    /\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
+    /\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
+    /\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
+  ];
 }
 
 function nextStepLine(nextAction) {
@@ -429,18 +432,15 @@ function assertPullRequest(pr) {
 }
 
 function noticeMarker(kind) {
-  const fullTextSentence = ' The full text is in this run\'s per-agent results.';
-  if (kind === 'shortened') {
-    return 'Note: the text above was shortened to fit the completion notice.' + fullTextSentence;
+  const leads = {
+    shortened: 'Note: the text above was shortened to fit the completion notice.',
+    compact: 'Note: this text was shortened to fit the completion notice, so parts below are in compact form.',
+    cut: 'Note: the text above was shortened by a hard cut to fit the completion notice.'
+  };
+  if (!Object.hasOwn(leads, kind)) {
+    throw new Error('noticeMarker: unknown kind ' + JSON.stringify(kind));
   }
-  if (kind === 'compact') {
-    return 'Note: this text was shortened to fit the completion notice, so parts below are in compact form.'
-      + fullTextSentence;
-  }
-  if (kind === 'cut') {
-    return 'Note: the text above was shortened by a hard cut to fit the completion notice.' + fullTextSentence;
-  }
-  throw new Error('noticeMarker: unknown kind ' + JSON.stringify(kind));
+  return leads[kind] + ' The full text is in this run\'s per-agent results.';
 }
 
 function fitMessage(blocks, room) {

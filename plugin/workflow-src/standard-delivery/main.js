@@ -2,11 +2,12 @@
  * standard-delivery main.js: the body of the standard-delivery
  * workflow script. It delivers a request on one working branch: branch
  * facts, a checked plan, questions decided or asked, the working branch,
- * each wave of plan steps with its commit, then the version bump,
- * validation and local review as gates (ADR-0037 invariant 2), then the
- * pull request. The run ends at the pull request: once every configured
- * gate held on one commit, it pushes that commit and opens or reuses the
- * pull request, and ends complete naming it. Watching the pull request is
+ * each wave of plan steps with its commit, then validation, with its
+ * version check when the plan names version files, and local review as
+ * gates (ADR-0037 invariant 2), then the pull request. The run ends at
+ * the pull request: once every configured gate held on one commit, it
+ * pushes that commit and opens or reuses the pull request, and ends
+ * complete naming it. Watching the pull request is
  * the overlord's, not this script's (ADR-0037 decision 4).
  *
  * The phase modules of this directory hold every other function, and the
@@ -54,16 +55,16 @@
  *   own lead (askTail, gates.js). A run end is its lead, then, when blocked,
  *   the Next line, any later causes and the commit end line, then only the
  *   records ADR-0037 decision 3 needs in chat:
- *   the branch, commit count and head when the run made commits, the
+ *   the branch and its head once a wave ran, the
  *   reversible effects and the taken decisions, one line each. A complete
  *   run names the pull request and its commit, the gates that held and any
  *   gate not configured, the warning when there is one and the rejected
- *   findings. No chat message shows a commit list, a criticality or ask
+ *   findings. No message shows a commit list, a criticality or ask
  *   reason line, and no pause shows a taken decision.
  *   The pull request body and comment each carry the one run record
- *   buildRunRecordParts() returns: the commits, the reversible effects, the
- *   gates and the taken decisions, in that order (ADR-0037 decision 3;
- *   review findings 1a75f008 and 6f87ce62), the decisions in full with
+ *   buildRunRecordParts() returns: the reversible effects, the gates and
+ *   the taken decisions, in that order, and no commit list (ADR-0037
+ *   decisions 2 and 3; review findings 1a75f008 and 6f87ce62), the decisions in full with
  *   their compact fallback (issue 445). Each decision is the same brief
  *   once however many passes took it.
  *   No question shows the plan summary or names this run's per-agent
@@ -81,7 +82,7 @@
  *   unbounded agent fields never reach a message: plan.summary reaches
  *   only the pull request title and body, a worker summary nothing, and
  *   validate failures only the fix prompt. The code-built brief of every
- *   plan, trunk, effect, bump, validation, gate rerun and review routing
+ *   plan, trunk, effect, validation, gate rerun, version and review routing
  *   decision fits BRIEF_SCHEMA with worst-case inputs, holds
  *   unshownBriefText() (plan.js) in each field no message shows, so the
  *   bundle carries no text the user never reads, and the diminishing
@@ -96,6 +97,19 @@
  *   characters by its schema pattern, so its short id, the first 8, is
  *   whole hex. A break-fix-break stop shows the count of conflicting
  *   findings and no entry, and a rejected finding shows its short id alone.
+ *   A stop ends the run only on a terminal cause, an agent failure, a size
+ *   limit (finishOpenQuestions) or the launch check (issue 457). Every other
+ *   stop pauses through stopDelivery (record.js) with one step_stop
+ *   question, and the reply takes the stopped step again or plans again.
+ *   Each new pass reads the head from its branch step through observeHead
+ *   (record.js), the one writer of run.head, before any wave: that commit
+ *   equals the facts head by needsBranchReplan, so the pass starts from a
+ *   commit made during a pause, or by a commit runner whose relay could
+ *   not be read. That read also stamps run.headRound after the last
+ *   planning reply.
+ *   No version question plans again: its reply becomes run.versionAnswer
+ *   and runs one fix round, and no later version check of the run fails
+ *   or asks (gates.js).
  *   Every blocked result carries one Next line as a whole block right
  *   after its first block, and no block carries shorten. A blocked run end
  *   takes a list of causes, {problem, nextAction?} each, never a message:
@@ -114,8 +128,11 @@
  *   run the request again later; fix_cause or no value gives the fix line.
  *   A blocked wave says run_again only when every blocked worker does.
  *   Compound rule: a file-changing step passes its own causes to
- *   runCommitStep (relay.js), which ends the run with them and a failed
- *   commit's cause after them, so no stop hides another. Causes that need
+ *   runCommitStep (relay.js), which stops through stopDelivery with them
+ *   and a failed commit's cause after them, so no stop hides another. A
+ *   facts, scan, scope, plan or branch stop goes through stopDelivery with
+ *   isReplan true, and its reply starts a new pass outside maxReplans();
+ *   the launch check alone ends in runDelivery. Causes that need
  *   a fix lead, with the fix line, then agent failures, each group in step
  *   order, so the Next line is run_again only when every cause is. A lead
  *   longer than maxBlockedLeadLength() code points has as its compact form
@@ -125,16 +142,16 @@
  *   finish never throws.
  *   An open question stop and a resume across builds are each one cause
  *   with next action answer, so their Next line is nextStepLine('answer'):
- *   run the request again with the answers in it. When the run made
- *   commits, the branch line names the encoded branch, which
+ *   run the request again with the answers in it. Once a wave ran, the
+ *   branch line names its head and the encoded branch, which
  *   plan-schema.json bounds by maxLength 200 (issue 434). No Next line
  *   offers a pull request from commits a gate did not hold on (issue 444).
  *   Only finishDeliveryComplete, with pr, ends complete, so complete
  *   always means a pull request exists.
  *   Every step- or script-written diagnostic or name a message shows goes
  *   through encodeUntrustedText (lib/result.js), so it shows as quoted JSON
- *   of printable ASCII. A blocked relay of the facts, branch, commit,
- *   bump-type or pull request step quotes the payload of its last
+ *   of printable ASCII. A blocked relay of the facts, branch, commit
+ *   or pull request step quotes the payload of its last
  *   'blocker: ' line that has one; with none it quotes the first two
  *   non-blank stderr lines, and only a blank or missing stderr says it
  *   gave no reason (describeRelayBlocker). A planner, worker, gate edit or
@@ -192,8 +209,12 @@
  *   result, or {replan}, the data the next pass plans from.
  *   A pass starts at launch, after a needs_replan wave, after a branch
  *   step that switched branch or commit, after a taken local review
- *   escalation or root cluster, or after a reply to a tail ask other than
- *   a local review question, and every pass starts with the facts step,
+ *   escalation or root cluster, after a reply to a tail ask other than a
+ *   local review question or a version question, or after a reply to a
+ *   stop with isReplan true. A reply to a facts, scan, scope, plan or
+ *   branch stop keeps the review its pass planned from (keepReplanReview),
+ *   and a reply to a local review stop that plans again carries that
+ *   review (review.js). Every pass starts with the facts step,
  *   so every planner call follows the facts of its own pass (ADR-0037
  *   invariant 3). Then the scope step (scope.js) runs once, after the facts
  *   step and the scan and before planning, and again after each reply round
@@ -204,7 +225,7 @@
  *   exit_reason for the review, is built by buildTaggedSchema (lib/schema.js)
  *   from one table, which gives both its anyOf branches and its 'Only with'
  *   descriptions: the plan result and revise schemas, the relay, worker,
- *   bump, fix, both validate and review schemas. validateSchema checks the
+ *   fix, both validate and review schemas. validateSchema checks the
  *   full schema, so a result that carries a field of another outcome, or
  *   lacks a field its outcome requires, blocks the step that reads it with
  *   that step's malformed or schema message, and no consumer checks the tie
@@ -232,26 +253,24 @@ const RUN_NAME = describeRunNoun(RUN_NOUN);
 const PLANNER_AGENT = 'hivemind:cerebrate';
 const RUNNER_MODEL = 'haiku';
 const SCOPE_MODEL = 'sonnet';
-const BUMP_MODEL = 'sonnet';
 const PLANNER_QUESTION_KIND = 'planner_question';
 const PLAN_ACCEPTANCE_KIND = 'plan_acceptance';
 const TRUNK_STALE_KIND = 'trunk_stale';
 const EXTERNAL_EFFECT_KIND = 'external_effect';
-const VERSION_BUMP_TYPE_KIND = 'version_bump_type';
-const VERSION_BUMP_INDETERMINABLE_KIND = 'version_bump_indeterminable';
 const VALIDATION_REMEDIATION_KIND = 'validation_remediation';
 const GATE_RERUN_KIND = 'gate_rerun';
+const VERSION_BUMP_INDETERMINABLE_KIND = 'version_bump_indeterminable';
 const DIMINISHING_RETURNS_EXIT_KIND = 'diminishing_returns_exit';
 const PLANNER_ESCALATION_ROUTING_KIND = 'planner_escalation_routing';
 const ROOT_CLUSTER_ROUTING_KIND = 'root_cluster_routing';
 const REMEDIATION_PLAN_ACCEPTANCE_KIND = 'remediation_plan_acceptance';
 const REVIEW_QUESTION_KIND = 'review_question';
 const HIGH_SEVERITY_REJECTION_KIND = 'high_severity_rejection';
+const STEP_STOP_KIND = 'step_stop';
 const REVIEWER_AGENT = 'hivemind:local-reviewer';
 const PLAN_RESULT_SCHEMA = buildPlanResultSchema(PLAN_SCHEMA, BRIEF_SCHEMA);
 const RELAY_SCHEMA = buildRelaySchema();
 const WORKER_SCHEMA = buildWorkerSchema();
-const BUMP_SCHEMA = buildBumpSchema();
 const FIX_SCHEMA = buildGateEditSchema();
 const VALIDATE_SCHEMA = buildValidateSchema(false);
 const VALIDATE_COMMANDS_SCHEMA = buildValidateSchema(true);
@@ -339,38 +358,51 @@ function createRunState(launch) {
     answeredKeys: new Set(),
     taken: [],
     reversibleEffects: [],
-    commits: [],
-    runnerCommits: {},
     head: undefined,
     branch: undefined,
+    headRound: undefined,
     notRunGates: [],
     waveCount: 0,
     pass: 0,
     replans: 0,
-    branchSwitches: 0
+    branchSwitches: 0,
+    versionAnswer: undefined
   };
+}
+
+/**
+ * Returns passEnd, or, when it is a reply to a stop before any wave of a
+ * pass whose replan data carries a review, the same replan with that
+ * review, so the next plan still sees the findings.
+ */
+function keepReplanReview(passEnd, replan) {
+  if (passEnd.replan === undefined || replan === undefined || replan.review === undefined) {
+    return passEnd;
+  }
+  return { replan: { reason: passEnd.replan.reason, review: replan.review } };
 }
 
 async function runDeliveryPass(run, replan) {
   const checked = await runFactsStep(run);
   if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked([checked], run) };
+    return keepReplanReview(stopDelivery([checked], run, [], true), replan);
   }
   const scoped = await runScopeStep(run, checked.facts);
   if (scoped.problem !== undefined) {
-    return { result: finishDeliveryBlocked([scoped], run) };
+    return keepReplanReview(stopDelivery([scoped], run, [], true), replan);
   }
   const planned = await runPlanningPass(run, checked.facts, scoped.scope, replan);
-  if (planned.result !== undefined) {
-    return planned;
+  if (planned.plan === undefined) {
+    return keepReplanReview(planned, replan);
   }
   const branched = await runBranchStep(run, planned.plan, planned.freshness);
   if (branched.problem !== undefined) {
-    return { result: finishDeliveryBlocked([branched], run) };
+    return keepReplanReview(stopDelivery([branched], run, [], true), replan);
   }
   if (needsBranchReplan(branched.values, checked.facts, planned.plan)) {
     return requestBranchReplan(run);
   }
+  observeHead(run, branched.values.commit, planned.plan.branch);
   return runPlanWaves(run, planned.plan, checked.facts);
 }
 

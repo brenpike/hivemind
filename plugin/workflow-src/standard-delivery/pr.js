@@ -4,15 +4,17 @@
  * runner prompt, the check of its relay and the step.
  *
  * Inputs
- *   run    the run state of main.js createRunState: head, commits, taken,
+ *   run    the run state of main.js createRunState: head, taken,
  *          reversibleEffects, notRunGates and draft.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
- *   gates  the gate loop state of runGates (gates.js): notes and rejected.
+ *   gates  the gate loop state of runGates (gates.js): notes, rejected and
+ *          runs.pr, the count of this step's runs in the pass.
  *   maxTitleLength() and maxPullRequestTextLength() from main.js.
  *
  * Outputs
  *   runPullRequestStep(run, plan, gates)  {result}: finishDeliveryComplete
- *          naming the pull request, or a blocked finish.
+ *          naming the pull request, a pause, or a blocked finish, or
+ *          {rerun: true} when the user replied to its stop.
  *   renderLiteralBlock(text)  the literal fenced block the pull request
  *          texts put external text in.
  *   The step, as meta.js names it:
@@ -23,7 +25,16 @@
  *           builds, and draft from the launch. This runner is the only push the workflow makes, so
  *           every push carries expect_commit. Its stdout parses with
  *           openPlanPrRoutingSpec(), head_ref_oid must equal H, and the run
- *           finishes complete with pr. The body is the plan summary and the
+ *           finishes complete with pr. The runner call goes through
+ *           runRunnerRelay (relay.js), so a transient block runs once more
+ *           under pr-P-retry. A pull request text over its size limit and a
+ *           head_ref_oid other than H are terminal stops. A blocked,
+ *           malformed or other unusable relay pauses through stopDelivery
+ *           (record.js). The step makes one runner call: the gate loop
+ *           runs the head check after a reply, then this step again under
+ *           pr-P-N, N from 2, or the gates first when the head moved, so
+ *           expect_commit is always a head the run read. The body is the
+ *           plan summary and the
  *           comment a fixed lead, each followed by the one run record
  *           buildRunRecordParts() returns, the same record the final
  *           message carries, with every taken decision and no reviewer
@@ -39,16 +50,15 @@
  *   and the external parts of that record, the reversible effects and the
  *   decisions, reach the pull request body and comment only through
  *   renderLiteralBlock(), so GitHub shows them as literal text and an
- *   at-mention, issue reference or HTML in them does nothing. The gates,
- *   the commits and the comment lead are code-built and stay plain. The
+ *   at-mention, issue reference or HTML in them does nothing. The
+ *   gates and the comment lead are code-built and stay plain. The
  *   title stays plain text: GitHub renders titles with code spans only and
  *   takes no mentions from them, and a wrapper would reach the squash
  *   commit subject.
  *   The relay is read through describeUnusableResult (lib/result.js): a
  *   null result, an agent failure, adds the agent-failure sentence and
- *   next action run_again, which runPullRequestStep passes on in its
- *   cause to finishDeliveryBlocked, and any other unusable result keeps
- *   the fix line.
+ *   next action run_again, and stopDelivery ends the run on it; any other
+ *   unusable result keeps the fix line and pauses.
  *
  * Why
  *   The pull request is the one push of the run, so its texts and the
@@ -194,21 +204,25 @@ function checkPullRequestRelay(relay, head) {
     return { problem: 'The pull request step returned malformed routing lines, ' + stopped };
   }
   if (values.head_ref_oid !== head) {
-    return { problem: 'The pull request step reported a head commit other than the commit every gate held on, ' + stopped };
+    return { problem: 'The pull request step reported a head commit other than the commit every gate held on, ' + stopped, terminal: true };
   }
   return { values: values };
+}
+
+function describePullRequestLabel(run, count) {
+  return 'pr-' + run.pass + (count === 1 ? '' : '-' + count);
 }
 
 async function runPullRequestStep(run, plan, gates) {
   const texts = buildPullRequestTexts(run, plan, gates);
   if (texts.problem !== undefined) {
-    return { result: finishDeliveryBlocked([{ problem: texts.problem }], run) };
+    return stopDelivery([{ problem: texts.problem, terminal: true }], run, [], false);
   }
   phase('PR');
-  const relay = await agent(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), runnerOptions('pr-' + run.pass, 'PR'));
+  const relay = await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), describePullRequestLabel(run, gates.runs.pr), 'PR');
   const checked = checkPullRequestRelay(relay, run.head);
-  if (checked.problem !== undefined) {
-    return { result: finishDeliveryBlocked([checked], run) };
+  if (checked.problem === undefined) {
+    return { result: finishDeliveryComplete(run, plan, checked.values, gates) };
   }
-  return { result: finishDeliveryComplete(run, plan, checked.values, gates) };
+  return stopDelivery([checked], run, [], false);
 }

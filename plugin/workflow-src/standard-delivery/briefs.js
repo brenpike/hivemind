@@ -10,9 +10,10 @@
  *            runPlanningPass (plan.js).
  *   facts    the checked facts of the pass, from runFactsStep (relay.js).
  *   scope    the checked scope of the pass, from runScopeStep (scope.js).
- *   values   the parsed routing values of a bump step (gates.js).
  *   head, round, staleIds and isLimit  the commit, fix round, stale gate
  *            ids and limit flag of a gate decision (gates.js).
+ *   values   the routing values of a version check whose version_check is
+ *            undetermined or unreadable (gates.js).
  *   The kind constants of main.js, unshownBriefText, isRepositoryPath,
  *   listPlanPaths and describeCount (plan.js), and gateNames, joinNames,
  *   maxFixRounds and maxGateReruns.
@@ -29,9 +30,22 @@
  *            limits.
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
  *            shared shape of a tail brief, also used by review.js.
- *   buildBumpTypeBrief, buildBumpIndeterminableBrief,
  *   buildValidationRemediationBrief, buildFixLimitBrief and
  *   buildGateRerunBrief  the tail briefs gates.js resolves.
+ *   buildStepStopBrief(causes, isReplan)  the step_stop brief stopDelivery
+ *            (record.js) asks: one option, strength none. Its problem says
+ *            to fix what stopped the run, then reply with every change
+ *            committed, or, when every cause
+ *            is run_again, that nothing in the repo needs a fix and to reply
+ *            when ready, and whether the reply takes the stopped step again
+ *            or plans again from fresh facts.
+ *   buildVersionQuestionBrief(values)  the version_bump_indeterminable
+ *            brief the validate gate asks with no decide() call, strength
+ *            none. For undetermined its options are a major, minor and
+ *            patch bump and no bump, each naming the version it gives
+ *            (raiseVersion) when trunk_version is known; for unreadable its
+ *            problem names the formats the check reads, and its options
+ *            keep the branch version or set the version the reply names.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -175,30 +189,56 @@ function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
   };
 }
 
-function buildBumpTypeBrief(values) {
-  const isBump = values.verdict === 'bump_required';
-  return buildTailBrief({
-    kind: VERSION_BUMP_TYPE_KIND,
-    problem: isBump
-      ? 'The commits on the branch since the trunk call for a ' + values.bump_type + ' version bump: each version file the plan names gets its trunk version raised by that bump.'
-      : 'The commits on the branch since the trunk need no version bump: each version file the plan names keeps its trunk version.',
-    goOn: isBump ? 'Make the ' + values.bump_type + ' version bump.' : 'Go on with no version bump.',
-    strength: 'strong',
-    why: 'The verdict comes by fixed rules from the commit types and the plan answers on versioning, and the version files stay on the branch until you merge.'
-  });
+function buildStepStopBrief(causes, isReplan) {
+  const isRunAgain = causes.every((cause) => cause.nextAction === 'run_again');
+  const then = isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.';
+  return {
+    id: 'stop',
+    kind: STEP_STOP_KIND,
+    problem: (isRunAgain ? 'Nothing in the repo needs a fix: reply when you are ready to go on, and ' : 'Fix what stopped the run, then reply with every change committed, and ') + then,
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
+    options: [
+      { id: 'A', summary: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true }
+    ],
+    recommendation: { option_id: 'A', strength: 'none', why: 'Only you can tell when what stopped the run is out of the way.' },
+    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    gate: { irreversible: false, architectural: false, safety: false }
+  };
 }
 
-function buildBumpIndeterminableBrief(values) {
-  const hasVerdict = values.verdict === 'bump_required';
-  return buildTailBrief({
+function raiseVersion(version, bumpType) {
+  const parts = version.split('.').map(Number);
+  const raised = { major: [parts[0] + 1, 0, 0], minor: [parts[0], parts[1] + 1, 0], patch: [parts[0], parts[1], parts[2] + 1] };
+  return raised[bumpType].join('.');
+}
+
+function buildVersionOption(id, summary) {
+  return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true };
+}
+
+function listVersionOptions(values) {
+  if (values.version_check === 'unreadable') {
+    return [buildVersionOption('A', 'Keep the version each file holds on the branch.'), buildVersionOption('B', 'Set the version your reply names in each file.')];
+  }
+  const trunk = values.trunk_version;
+  const bumpOptions = [['A', 'major'], ['B', 'minor'], ['C', 'patch']].map(([id, bumpType]) => buildVersionOption(id, 'Make a ' + bumpType + ' version bump' + (trunk === undefined ? '.' : ', to version ' + raiseVersion(trunk, bumpType) + '.')));
+  return bumpOptions.concat(buildVersionOption('D', 'Make no version bump' + (trunk === undefined ? '.' : ', keeping version ' + trunk + '.')));
+}
+
+function buildVersionQuestionBrief(values) {
+  const isUnreadable = values.version_check === 'unreadable';
+  return {
+    id: 'version',
     kind: VERSION_BUMP_INDETERMINABLE_KIND,
-    problem: hasVerdict
-      ? 'The commits on the branch call for a ' + values.bump_type + ' version bump, but the plan names no file that holds the version. Where should the version be set?'
+    problem: isUnreadable
+      ? 'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
       : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-    goOn: hasVerdict ? 'Name the version files: this run plans again with your reply.' : 'Name the version bump: this run plans again with your reply.',
-    strength: 'none',
-    why: 'Only you can decide the version of this delivery.'
-  });
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The version files on the working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
+    options: listVersionOptions(values),
+    recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide the version of this delivery.' },
+    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
+    gate: { irreversible: false, architectural: false, safety: false }
+  };
 }
 
 function buildValidationRemediationBrief(head, round) {

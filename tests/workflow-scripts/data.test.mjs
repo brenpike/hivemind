@@ -91,6 +91,17 @@ describe('autonomy table', () => {
     assert.deepEqual([row.high, row.balanced, row.low], ['auto', 'auto', 'surface']);
     assert.deepEqual(row.resolved_at, ['standard-delivery.gates']);
   });
+  test('step_stop asks at every level and is resolved at the standard-delivery stop', () => {
+    const row = table.rows.find((entry) => entry.kind === 'step_stop');
+    assert.ok(row !== undefined, 'step_stop is not a row');
+    assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface']);
+    assert.deepEqual(row.resolved_at, ['standard-delivery.stop']);
+    assert.ok(row.when.includes('terminal') && row.when.includes('agent failure'), row.when);
+    for (const level of table.levels) {
+      const verdict = structuredClone(lib.decide({ kind: 'step_stop', level, brief: null }, table, schema));
+      assert.equal(verdict.action, 'ask', 'step_stop at ' + level);
+    }
+  });
   test('remediation_plan_acceptance takes at high and balanced, asks at low, and its rule names plan.remediation_gate', () => {
     const row = table.rows.find((entry) => entry.kind === 'remediation_plan_acceptance');
     assert.ok(row !== undefined, 'remediation_plan_acceptance is not a row');

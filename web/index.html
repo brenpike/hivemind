@@ -139,8 +139,8 @@
             </li>
             <li class="beat panel">
               <h3 class="xg">Gate</h3>
-              <p class="xs">A runner derives the version bump (<code>hivemind:bump-type</code>), then a drone runs the project's validation commands. A failure gets a bounded number of fix rounds, each one committed; after the last round the run asks you.</p>
-              <p class="xs">The bump, validation and local review each hold only for the commit they ended on, and the PR step pushes only a commit every configured gate held on. A later commit reruns the gates it invalidates.</p>
+              <p class="xs">A drone runs the project's validation commands and checks the version read-only with <code>hivemind:bump-type --version-file</code>. A failure gets a bounded number of fix rounds, each one committed; after the last round the run asks you.</p>
+              <p class="xs">The validation (with its version check) and local review each hold only for the commit they ended on, and the PR step pushes only a commit every configured gate held on. A later commit reruns the gates it invalidates.</p>
             </li>
             <li class="beat panel">
               <h3 class="xg">Review</h3>

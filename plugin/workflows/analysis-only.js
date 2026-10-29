@@ -117,6 +117,12 @@ const AUTONOMY_TABLE = {
 "low": "surface"
 },
 {
+"kind": "step_stop",
+"high": "surface",
+"balanced": "surface",
+"low": "surface"
+},
+{
 "kind": "trunk_stale",
 "high": "auto",
 "balanced": "surface",
@@ -599,7 +605,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '85bf38967999217d';
+const BUILD_ID = '75681f02ea6e4a88';
 
 function supportedSchemaKeywords(){
 return[
@@ -1330,7 +1336,22 @@ function describeUnusableResult(problem,result){
 if(result!==null){
 return{problem:problem};
 }
-return{problem:problem+' '+describeNoResult(result),nextAction:'run_again'};
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
+}
+function isTransientFailure(text){
+return typeof text==='string'&&transientFailurePatterns().some((pattern)=>pattern.test(text));
+}
+function transientFailurePatterns(){
+return[
+/\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
+/\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
+/\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
+/\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
+/\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
+/\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
+/\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
+/\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
+];
 }
 function nextStepLine(nextAction){
 if(nextAction==='run_again'){
@@ -1427,18 +1448,15 @@ throw new Error('finish: pr created must be a boolean');
 }
 }
 function noticeMarker(kind){
-const fullTextSentence=' The full text is in this run\'s per-agent results.';
-if(kind==='shortened'){
-return'Note: the text above was shortened to fit the completion notice.'+fullTextSentence;
-}
-if(kind==='compact'){
-return'Note: this text was shortened to fit the completion notice, so parts below are in compact form.'
-+fullTextSentence;
-}
-if(kind==='cut'){
-return'Note: the text above was shortened by a hard cut to fit the completion notice.'+fullTextSentence;
-}
+const leads={
+shortened:'Note: the text above was shortened to fit the completion notice.',
+compact:'Note: this text was shortened to fit the completion notice, so parts below are in compact form.',
+cut:'Note: the text above was shortened by a hard cut to fit the completion notice.'
+};
+if(!Object.hasOwn(leads,kind)){
 throw new Error('noticeMarker: unknown kind '+JSON.stringify(kind));
+}
+return leads[kind]+' The full text is in this run\'s per-agent results.';
 }
 function fitMessage(blocks,room){
 const plainText=joinParagraphs(blocks.map((block)=>block.text));

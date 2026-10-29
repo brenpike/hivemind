@@ -672,14 +672,67 @@ describe('cutAtBoundary', () => {
 });
 
 describe('describeUnusableResult', () => {
-  test('a null result gets the describeNoResult sentence once and run_again', () => {
+  test('a null result gets the describeNoResult sentence once, run_again and the agentFailure mark', () => {
     const sentence = lib.describeNoResult(null);
-    assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', null)), { problem: 'P. ' + sentence, nextAction: 'run_again' });
+    assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', null)), { problem: 'P. ' + sentence, nextAction: 'run_again', agentFailure: true });
     assert.equal(lib.describeUnusableResult('P.', null).problem.split(sentence).length - 1, 1);
   });
   test('any other result gives the problem alone', () => {
     for (const result of [{}, undefined, 'x', 0]) {
       assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', result)), { problem: 'P.' }, JSON.stringify(result));
+    }
+  });
+});
+
+describe('isTransientFailure', () => {
+  test('each root cause of the Transient Failure definition is transient, in any case', () => {
+    const transientTexts = [
+      'remote: HTTP 503 from the server',
+      'error: RPC failed; HTTP 500 curl 22 The requested URL returned error: 500',
+      'HTTP/1.1 502 Bad Gateway',
+      'gh: HTTP 429: rate limited',
+      '429 Too Many Requests',
+      '504 Gateway Time-out',
+      'read tcp: connection reset by peer',
+      'connect: Connection refused',
+      'Software caused connection abort: connection aborted',
+      'Error: ECONNRESET',
+      'fatal: unable to access: Could not resolve host: github.com',
+      'Temporary failure in name resolution',
+      'getaddrinfo ENOTFOUND api.github.com',
+      'TLS handshake timeout',
+      'SSL handshake failed',
+      'the command exited with code 124',
+      'exit status 137',
+      'connect: Network is unreachable',
+      'ssh: connect to host github.com port 22: Connection timed out',
+      'fatal: early EOF',
+      'fatal: index-pack failed',
+      'error: rpc FAILED'
+    ];
+    for (const text of transientTexts) {
+      assert.equal(lib.isTransientFailure(text), true, text);
+    }
+  });
+  test('any other text, a non-string or an empty text is not transient', () => {
+    const otherTexts = [
+      '',
+      'fatal: not a git repository',
+      'HTTP 404 Not Found',
+      'HTTP 403 Forbidden',
+      'error: pathspec did not match any file',
+      'exit code 1',
+      'exit code 1240',
+      'the commit refused a dirty path',
+      'malformed routing lines',
+      'TLS handshake succeeded',
+      'blocker: the branch is not the plan branch'
+    ];
+    for (const text of otherTexts) {
+      assert.equal(lib.isTransientFailure(text), false, text);
+    }
+    for (const value of [undefined, null, 503, {}, ['HTTP 503']]) {
+      assert.equal(lib.isTransientFailure(value), false, JSON.stringify(value));
     }
   });
 });
