@@ -1342,7 +1342,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/467. Each runn
 - **Q2, option A.** Cross-script use is accepted and recorded as a residual below.
 - **Q3, option A.** The overlord never delegates to synapse. Only workflow scripts start it, and the roster in `plugin/governance/definitions.md` says so.
 - **Q4, option A.** The branch-name taxonomy check and the pull request attribution check lived only in skill bodies, which synapse never loads. Both move into engine code.
-- **Q5, option A.** A live smoke runs before merge, in manual and in auto mode, and its results go to ADR-0010 (Amendment 2026-10-29). Status: pending, not run yet.
+- **Q5, option A.** A live smoke runs before merge, in manual and in auto mode, and its results go to ADR-0010 (Amendment 2026-10-29). Status: run on Claude Code 2.1.314 with the plugin at 2dc91ec, and all four checks passed in default and in auto mode. The overlord's workflow started `hivemind:synapse` for facts, branch, commit and pull request, the prompts carried only `{plugin-root}`, the hook allowed the runner commands (12 allows, no classifier call in auto mode), and a lookalike `cat` of `molt.sh` was denied. Runner first-request input tokens were 4,312 to 4,428 for facts, 4,354 to 4,470 for branch, 4,520 to 4,640 for commit and 5,414 to 5,783 for the pull request, against about 26k for a drone. Both runs stopped at the pull request step with "cannot look up the open PRs for head" (local bare origin, no GitHub), before the push, so the push was not exercised live. No security finding.
 - **Q6, option A.** The listed test deletions and rewrites are approved.
 
 **First-finding triage, per ADR-0038.**
@@ -1393,7 +1393,7 @@ Second finding: agent frontmatter cannot scope Write. The hook closes it for syn
 
 **Risks.**
 
-- **Unverified: workflow agent types.** The docs do not say whether the overlord's `Agent(...)` tool list also limits the agent types a workflow can start. If it does, each synapse call returns a null result, an agent failure, and the run ends. The Q5 live smoke checks it.
+- **Unverified: workflow agent types.** The docs do not say whether the overlord's `Agent(...)` tool list also limits the agent types a workflow can start. If it does, each synapse call returns a null result, an agent failure, and the run ends. Settled by the Q5 live smoke: the workflow started `hivemind:synapse` in default and in auto mode, so the `Agent(...)` list does not limit it.
 - **Lookalike denials.** Reading the five script files through Bash, such as `git diff`, `grep`, `cat`, `sed`, `shellcheck` or `bash -n` on them, is denied for every agent. The deny reason gives the exact form and says to use Read.
 - **The taxonomy check is code.** A run on a user branch whose name is outside the taxonomy now pauses at the plan check. Before, a haiku drone's judgment blocked it at the branch step.
 - **Hook cost.** One hook process runs per Bash or Write call in every session where hivemind is enabled. It was not measured (U7).

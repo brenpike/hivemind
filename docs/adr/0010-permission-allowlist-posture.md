@@ -254,4 +254,22 @@ Not tested by the spike:
 
 | Check | Result |
 |---|---|
-| The workflow the overlord launches starts `hivemind:synapse` for its runner steps; the agent body carries the substituted plugin path; the hook allows each runner command (`reasonType: hook`); a lookalike command is denied | Pending: not run yet |
+| The workflow the overlord launches starts `hivemind:synapse` (haiku) for its runner steps: facts, branch, commit and pull request | PASS in default and in auto mode. This also answers the unverified question above: the overlord's `Agent(...)` tool list does not stop a workflow from starting `hivemind:synapse`. |
+| The agent body carries the substituted plugin path | PASS. Each synapse prompt held only `{plugin-root}`, and each synapse ran the absolute path. |
+| The hook allows each runner command with no prompt | PASS in default and in auto mode. 12 hook allows ("bypassing permission prompt"), including the Write and Bash calls of the commit and pull request runners. In auto mode no classifier call came before a synapse call. |
+| A lookalike command is denied | PASS. A `cat` of `molt.sh` by the plugin path, by a planted absolute path and by a planted relative path was denied by the hook, even with a `Bash(cat:*)` allow rule. |
+
+Smoke facts: Claude Code 2.1.314, plugin loaded with `--plugin-dir` at commit 2dc91ec of `feature/467-synapse-runner`.
+
+Runner first-request input tokens, measured in the smoke (a drone starts at about 26k):
+
+| Runner step | First-request input tokens |
+|---|---|
+| facts | 4,312 to 4,428 |
+| branch | 4,354 to 4,470 |
+| commit | 4,520 to 4,640 |
+| pull request | 5,414 to 5,783 |
+
+Smoke limits: both runs stopped at the pull request step with "cannot look up the open PRs for head", because the origin was a local bare repo and gh knew no GitHub host. That check runs before the push, so the push was not exercised live. The pull request runner's Write and Bash still got hook allows. No security finding: every hook allow was agent type `hivemind:synapse`, for an exact runner command or an inputs-file Write.
+
+Also seen, in the normal permission flow and not from the hook: in default mode, cerebrate and drone reads of the plugin's `references/` and `governance/` files outside the session working folder were denied. Those steps still finished.
