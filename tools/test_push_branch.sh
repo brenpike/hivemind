@@ -101,6 +101,7 @@ UPSTREAM_RECORD_REASON='pushed, but the upstream could not be recorded'
 EXPECT_FORMAT_REASON='expected commit is not a full object id'
 EXPECT_MISMATCH_REASON='HEAD is not the expected commit'
 UNREADABLE_BASE_REASON='cannot read base'
+COMPARE_BASE_REASON='cannot compare the current branch with base'
 REJECT_WARNING='push was rejected; the branch is not on its remote'
 DEFERRED_WARNING='no upstream and no origin remote; push deferred'
 
@@ -651,6 +652,54 @@ assert_success_on_main() {
     assert_remote_refs "$name-pushed" "$ORIGIN_DIR" "refs/heads/main $MAIN_SHA"
 }
 
+# install_git_stand_in <fail at> -> writes $WORLD_ROOT/git-stand-in/git, a `git` that runs the
+# real git for every call except the <fail at>-th bare `git remote` call, which exits 128 with no
+# output. It counts bare `git remote` calls in $WORLD_ROOT/git-remote.count. Sets STAND_IN_DIR to
+# the folder to put first on PATH.
+install_git_stand_in() {
+    local fail_at="$1" real_git stand_in_path
+    real_git="$(command -v git)"
+    STAND_IN_DIR="$WORLD_ROOT/git-stand-in"
+    stand_in_path="$STAND_IN_DIR/git"
+    mkdir -p "$STAND_IN_DIR"
+    printf '#!/bin/sh\nif [ "$#" -eq 1 ] && [ "$1" = remote ]; then\n  count_file='"'"'%s'"'"'\n  call_count=$(( $(cat "$count_file" 2>/dev/null || echo 0) + 1 ))\n  echo "$call_count" >"$count_file"\n  [ "$call_count" -ne %s ] || exit 128\nfi\nexec '"'"'%s'"'"' "$@"\n' \
+        "$WORLD_ROOT/git-remote.count" "$fail_at" "$real_git" >"$stand_in_path"
+    chmod +x "$stand_in_path"
+}
+
+# assert_blocker_with_stand_in <name> <reason> <engine args...> -> runs assert_blocker in `w` with
+# STAND_IN_DIR first on PATH, then restores PATH.
+assert_blocker_with_stand_in() {
+    local name="$1" reason="$2" saved_path="$PATH"
+    shift 2
+    PATH="$STAND_IN_DIR:$PATH"
+    assert_blocker "$name" "$WORK_TREE" "$reason" "$@"
+    PATH="$saved_path"
+}
+
+# A `git remote` read that fails leaves the current branch uncompared, so the engine stops with the
+# compare reason and nothing pushed. The base check reads `git remote` first and the remote default
+# check reads it second, so failing the first call reaches the base check's compare arm and
+# failing the second reaches the remote default check's compare arm. The count file proves which
+# call failed and that no later `git remote` read ran. A check that treats a failed compare as
+# passing pushes feat/x in each case here.
+test_remote_listing_unreadable() {
+    local fail_at case_name
+    for fail_at in 1 2; do
+        case_name="compare-fails-remote-call-$fail_at"
+        create_world "$case_name"
+        install_pre_push_hook
+        install_git_stand_in "$fail_at"
+        assert_blocker_with_stand_in "$case_name" "$COMPARE_BASE_REASON" \
+            --head "$BRANCH" --base main --remote origin
+        assert_equal "$case_name-failed-call" "$fail_at" "$(cat "$WORLD_ROOT/git-remote.count")" \
+            "git remote calls"
+        assert_equal "$case_name-no-push" 0 "$(count_push_attempts)" "push attempts"
+        assert_remote_refs "$case_name-origin-unchanged" "$ORIGIN_DIR" "$(trunk_only_listing)"
+        assert_remote_refs "$case_name-other-unchanged" "$OTHER_DIR" ''
+    done
+}
+
 # ── Expected commit (--expect-commit) ────────────────────────────────────────
 
 # The engine pushes only when HEAD is the commit the caller's gates held for. The value must be
@@ -1076,6 +1125,7 @@ test_base_remote_image_refused
 test_remote_default_refused
 test_remote_default_any_end
 test_remote_default_passes
+test_remote_listing_unreadable
 test_expect_commit
 test_explicit_sets_upstream
 test_explicit_non_ff_no_retry

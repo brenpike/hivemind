@@ -117,6 +117,7 @@ UNBORN_REASON='the current branch has no commit'
 BRANCH_NAME_REASON='the current branch name contains characters outside the safe allowlist'
 IS_TRUNK_REASON='the current branch is trunk'
 UNREADABLE_TRUNK_REASON='cannot read trunk'
+CANNOT_COMPARE_REASON='cannot compare the current branch with trunk'
 OUTSIDE_REASON='the working tree has dirty paths outside files'
 COMMIT_FAILED_REASON='the commit failed'
 STILL_DIRTY_REASON='a listed path is still dirty after the commit'
@@ -601,6 +602,70 @@ test_remote_default_branch() {
     assert_committed remote-default-other-branch-proceeds "$(printf 'M\tf.txt')" 'feat(core): add thing'
 }
 
+# write_remote_failing_git -> writes a `git` stand-in to $WORKDIR/git-shim. It counts each
+# `git remote` call (that one argument alone) in $MOLT_TEST_REMOTE_COUNT_FILE, exits 128 on call
+# number $MOLT_TEST_FAIL_REMOTE_AT (0 fails none), and hands every call to the real git. Sets
+# GIT_SHIM_DIR and exports the stand-in's settings.
+write_remote_failing_git() {
+    GIT_SHIM_DIR="$WORKDIR/git-shim"
+    mkdir -p "$GIT_SHIM_DIR"
+    export MOLT_TEST_REAL_GIT
+    MOLT_TEST_REAL_GIT="$(command -v git)"
+    export MOLT_TEST_REMOTE_COUNT_FILE="$WORKDIR/git-remote-count"
+    export MOLT_TEST_FAIL_REMOTE_AT=0
+    cat >"$GIT_SHIM_DIR/git" <<'EOF'
+#!/bin/sh
+if [ "$#" -eq 1 ] && [ "$1" = remote ]; then
+    remote_count=$(($(cat "$MOLT_TEST_REMOTE_COUNT_FILE") + 1))
+    printf '%s\n' "$remote_count" >"$MOLT_TEST_REMOTE_COUNT_FILE"
+    [ "$remote_count" -ne "$MOLT_TEST_FAIL_REMOTE_AT" ] || exit 128
+fi
+exec "$MOLT_TEST_REAL_GIT" "$@"
+EOF
+    chmod +x "$GIT_SHIM_DIR/git"
+}
+
+# with_failing_remote <fail at> <command...> -> resets the `git remote` count, then runs
+# <command...> with the stand-in first on PATH failing call number <fail at>. Restores PATH and
+# returns the command's status.
+with_failing_remote() {
+    local saved_path="$PATH" command_rc=0
+    printf '0\n' >"$MOLT_TEST_REMOTE_COUNT_FILE"
+    MOLT_TEST_FAIL_REMOTE_AT="$1"
+    shift
+    export PATH="$GIT_SHIM_DIR:$saved_path"
+    "$@" || command_rc=$?
+    export PATH="$saved_path"
+    return "$command_rc"
+}
+
+# A `git remote` read that fails stops the run with `cannot compare the current branch with
+# trunk` and nothing changed. The trunk ref walk makes the first read and the remote default
+# branch check the second; the count shows the run stopped at the read that failed. With no read
+# failing, the same world commits after exactly two reads, so the counts name those two checks.
+test_remote_listing_fails() {
+    local case_name fail_at
+    write_remote_failing_git
+    for fail_at in 1 2; do
+        case_name="remote-listing-fails-$fail_at"
+        create_world "$case_name"
+        run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
+        printf 'changed\n' >"$WORK_TREE/f.txt"
+        write_basic_inputs '["f.txt"]'
+        with_failing_remote "$fail_at" assert_refused_unchanged "$case_name" "$WORK_TREE" \
+            "$CANNOT_COMPARE_REASON" '' --trunk main --inputs "$INPUTS_REL"
+        assert_equal "$case_name-reads" "$fail_at" "$(cat "$MOLT_TEST_REMOTE_COUNT_FILE")" "git remote reads before the stop"
+    done
+
+    create_world remote-listing-control
+    run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    with_failing_remote 0 assert_commit_run remote-listing-control "$WORK_TREE" "$INPUTS_REL"
+    assert_committed remote-listing-control "$(printf 'M\tf.txt')" 'feat(core): add thing'
+    assert_equal remote-listing-control-reads 2 "$(cat "$MOLT_TEST_REMOTE_COUNT_FILE")" "git remote reads in a full run"
+}
+
 # ── Outside paths ───────────────────────────────────────────────────────────
 
 test_outside_paths() {
@@ -933,6 +998,7 @@ test_git_state_refusals
 test_trunk_refusals
 test_trunk_ref_identity
 test_remote_default_branch
+test_remote_listing_fails
 test_outside_paths
 test_nothing_to_commit
 test_commits

@@ -94,6 +94,7 @@ EQUALS_TRUNK_REASON='working_branch equals trunk'
 SYMBOLIC_BRANCH_REASON='working_branch is a symbolic ref'
 UNREADABLE_BRANCH_REASON='cannot read working_branch'
 UNREADABLE_TRUNK_REASON='cannot read trunk'
+COMPARE_TRUNK_REASON='cannot compare working_branch with trunk'
 NOT_A_CHECKOUT_REASON='not inside a git checkout'
 MERGE_REASON='a merge is in progress'
 REBASE_REASON='a rebase is in progress'
@@ -738,6 +739,51 @@ test_remote_default_branch() {
         --base develop --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
 }
 
+# write_failing_remote_git <dir> <fail at> -> writes <dir>/git, a stand-in that counts each bare
+# `git remote` call in <dir>/remote-calls, exits 128 on call number <fail at>, and otherwise runs
+# the real git with the same arguments.
+write_failing_remote_git() {
+    local stub_dir="$1" fail_at="$2" real_git
+    real_git="$(command -v git)"
+    mkdir -p "$stub_dir"
+    printf '0\n' >"$stub_dir/remote-calls"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'if [ "$#" -eq 1 ] && [ "$1" = remote ]; then\n'
+        printf '  remote_calls=$(( $(cat %q) + 1 ))\n' "$stub_dir/remote-calls"
+        printf '  printf %%s\\\\n "$remote_calls" >%q\n' "$stub_dir/remote-calls"
+        printf '  [ "$remote_calls" -ne %q ] || exit 128\n' "$fail_at"
+        printf 'fi\n'
+        printf 'exec %q "$@"\n' "$real_git"
+    } >"$stub_dir/git"
+    chmod +x "$stub_dir/git"
+}
+
+# Both trunk checks build the branch refs from `git remote`, and each maps a failed compare to
+# `cannot compare working_branch with trunk`. The trunk ref check reads `git remote` first and the
+# remote default check reads it second, so a stand-in git that fails call 1 stops the run at the
+# trunk ref check, and one that fails call 2 stops it at the remote default check. Each stops with
+# nothing changed and the branch not created.
+test_trunk_compare_failure() {
+    local case_name fail_at stub_dir
+    for fail_at in 1 2; do
+        case "$fail_at" in
+            1) case_name=compare-fail-trunk-ref ;;
+            *) case_name=compare-fail-remote-default ;;
+        esac
+        create_world "$case_name"
+        run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+        stub_dir="$WORLD_ROOT/stub-bin"
+        write_failing_remote_git "$stub_dir" "$fail_at"
+        PATH="$stub_dir:$PATH" assert_refused_unchanged "$case_name" "$WORK_TREE" "$COMPARE_TRUNK_REASON" \
+            --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
+        assert_equal "$case_name-remote-calls" "$fail_at" "$(cat "$stub_dir/remote-calls")" "git remote calls"
+        assert_equal "$case_name-no-branch" '' \
+            "$(run_git "$WORK_TREE" for-each-ref "refs/heads/$BRANCH")" "$BRANCH absent"
+        assert_equal "$case_name-head" refs/heads/main "$(read_head_ref)" "HEAD"
+    done
+}
+
 test_not_a_checkout() {
     local not_a_checkout="$WORKDIR/not-a-checkout"
     mkdir -p "$not_a_checkout"
@@ -1001,6 +1047,7 @@ test_trunk_any_spelling
 test_branch_differs_from_non_main_trunk
 test_trunk_ref_identity
 test_remote_default_branch
+test_trunk_compare_failure
 test_not_a_checkout
 test_merge_in_progress
 test_clean_merge_in_progress
