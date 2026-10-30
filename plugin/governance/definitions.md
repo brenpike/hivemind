@@ -4,7 +4,7 @@ Canonical terms used across agents. When any rule uses a term defined here, this
 
 ## Agents
 
-Allowed agents: `overlord`, `cerebrate`, `drone`, `changeling`, `local-reviewer`, `github-reviewer`. No other agent may be called, invented, or used as a fallback.
+Allowed agents: `overlord`, `cerebrate`, `drone`, `changeling`, `synapse`, `local-reviewer`, `github-reviewer`. Only workflow scripts start `synapse`. The overlord never delegates to it. No other agent may be called, invented, or used as a fallback.
 
 ## Unsafe Git State
 

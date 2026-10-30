@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8cdcba33bc850bcd';
+const BUILD_ID = 'd433327a6a0b69f1';
 
 function supportedSchemaKeywords(){
 return[
@@ -3004,6 +3004,9 @@ const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
 if(isOnOtherBranch&&plan.branch!==facts.branch){
 return'The run started on branch '+encodeUntrustedText(facts.branch)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+', so '+RUN_NAME+' stopped.';
 }
+if(!/^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)\/[a-z0-9]+(-[a-z0-9]+)*$/.test(plan.branch)){
+return'The plan names branch '+encodeUntrustedText(plan.branch)+', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so '+RUN_NAME+' stopped.';
+}
 return undefined;
 }
 function questionKey(kind,scope,ask){
@@ -3269,7 +3272,12 @@ const comment=fitPullRequestText((isCompact)=>buildPullRequestComment(run,gates,
 if(comment.text===undefined){
 return{problem:describePullRequestTextSize('comment',comment.size)};
 }
-return{title:buildPullRequestTitle(plan),body:body.text,comment:comment.text};
+const texts={title:buildPullRequestTitle(plan),body:body.text,comment:comment.text};
+const attributedNoun=Object.keys(texts).find((noun)=>forbiddenSubjectTexts().some((forbidden)=>texts[noun].toLowerCase().includes(forbidden)));
+if(attributedNoun!==undefined){
+return{problem:'The pull request '+attributedNoun+' would hold an attribution string, so '+RUN_NAME+' stopped before the pull request and pushed nothing.'};
+}
+return texts;
 }
 function buildPullRequestPrompt(plan,head,texts,draft){
 return[

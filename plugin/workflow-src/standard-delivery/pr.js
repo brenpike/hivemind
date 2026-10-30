@@ -55,6 +55,10 @@
  *   title stays plain text: GitHub renders titles with code spans only and
  *   takes no mentions from them, and a wrapper would reach the squash
  *   commit subject.
+ *   No title, body or comment holds a forbiddenSubjectTexts() string
+ *   (relay.js), in any case: code holds this check, not a skill body the
+ *   runner may never read, so buildPullRequestTexts makes one a terminal
+ *   stop before any push (issue 467).
  *   The relay is read through describeUnusableResult (lib/result.js): a
  *   null result, an agent failure, adds the agent-failure sentence and
  *   next action run_again, and stopDelivery ends the run on it; any other
@@ -176,7 +180,12 @@ function buildPullRequestTexts(run, plan, gates) {
   if (comment.text === undefined) {
     return { problem: describePullRequestTextSize('comment', comment.size) };
   }
-  return { title: buildPullRequestTitle(plan), body: body.text, comment: comment.text };
+  const texts = { title: buildPullRequestTitle(plan), body: body.text, comment: comment.text };
+  const attributedNoun = Object.keys(texts).find((noun) => forbiddenSubjectTexts().some((forbidden) => texts[noun].toLowerCase().includes(forbidden)));
+  if (attributedNoun !== undefined) {
+    return { problem: 'The pull request ' + attributedNoun + ' would hold an attribution string, so ' + RUN_NAME + ' stopped before the pull request and pushed nothing.' };
+  }
+  return texts;
 }
 
 function buildPullRequestPrompt(plan, head, texts, draft) {

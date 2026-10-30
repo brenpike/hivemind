@@ -139,6 +139,7 @@ This policy applies to:
   - overlord
   - `hivemind:drone`
   - `hivemind:changeling`
+  - `hivemind:synapse`
 - All review feedback classification steps
 
 ### Write-Capable Skill Containment
@@ -213,6 +214,36 @@ The causes below are DIAGNOSTIC ILLUSTRATION ONLY — they exist so an agent can
 Under `--dangerously-skip-permissions` no file-permission rule applies at all, so there is neither a prompt nor a deny evaluation; the outcome-keyed rule already covers that world, and it needs no cause of its own — and neither does any other harness, settings, or transport condition nobody has named yet. Adding a fourth cause here would not change the routing, because the causes do not route.
 
 An operator DECLINING a prompt carries TWO SEPARATE consequences; keep them separate. First, the Write did not succeed, so the rule above applies unchanged: the navigator stops and never improvises another transport. Second, the outcome is reported as a USER DECISION — an operator declined the transport — and NOT as a degradation defect, an unreachable transport, or a broken capability.
+
+### Synapse Runner Gate
+
+This subsection is the one canonical statement of the synapse runner gate. `hivemind:synapse` is the agent a workflow script starts to run one committed runner script. Its only tools are Bash and Write. Only workflow scripts start it. The overlord never delegates to it. The gate is a plugin PreToolUse hook, `${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh`, registered in `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` for the Bash and Write tools.
+
+The gate knows five runner scripts: `molt.sh`, `gather-facts.sh`, `create-working-branch.sh`, `bump-type.sh` and `open-plan-pr.sh`. Each lives at `skills/<name>/scripts/<name>.sh` under the plugin root. A command is in exact form when it is `bash`, then one of those script paths under `CLAUDE_PLUGIN_ROOT`, then only the flags that script takes, each value in its fixed class, with single spaces between them. The path may be bare. It may be double-quoted when the root needs quoting. Anything else is not exact: other quotes, a redirection, a pipe, a chained or appended command, a substitution, a control character, or a relative or copied path.
+
+The hook decides as follows:
+
+- Bash from `hivemind:synapse` in exact form: allow, with no prompt.
+- Bash from `hivemind:synapse` in any other form: deny.
+- Bash from any agent that names one of the five script file names as a path part, not in exact form: deny. The deny reason gives the exact form and says to read the file with Read.
+- Bash from any other agent in exact form: no decision. The normal permission flow and the skill grants apply.
+- Write from `hivemind:synapse`: allow only `.hivemind/molt-inputs-<token>.json` or `.hivemind/pr-inputs-<token>.json`, relative or under the session's working directory. The parent must resolve to that directory's `.hivemind`, and the target must not be a symlink. Deny every other synapse Write.
+- Write from any other agent: no decision.
+
+The hook fails open to the normal permission flow. When it cannot decide, it outputs nothing. That covers a missing `jq`, an empty `CLAUDE_PLUGIN_ROOT`, malformed input, a timeout, and hooks turned off by settings. It never fails toward an allow. It never exits 2, because exit 2 would block the call.
+
+An allow from the hook only skips the prompt. A `permissions.deny` or `permissions.ask` rule in settings still wins over it.
+
+Synapse's inputs files use the fixed-literal transport of the Inert Inputs-File Navigator Pattern above, with the same paths as `hivemind:molt` and `hivemind:open-plan-pr`. The two forms are written in `${CLAUDE_PLUGIN_ROOT}/agents/synapse.md` and in the hook. Synapse picks the token. A navigator's `Edit(<glob>)` entry only pre-approves. Here the hook denies every other synapse Write, so no prompt text can steer where the Write lands. The engine's read-guard still runs before it reads the file.
+
+Synapse commits or pushes only under the `delegated-implementer` grant in `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Commit Authority).
+
+What the gate does not guard:
+
+- A renamed or copied script. The deny matches the five file names only.
+- Another interpreter or launcher that runs a script without naming its file, or any command that does not name the five scripts.
+- A plugin root inside the repository, such as a checkout loaded as the plugin. There a branch edit to a runner script runs with no prompt. The skill grants have the same exposure.
+- Cross-script use. Synapse can run any of the five exact commands with no prompt, not only its own step's. Each script still refuses trunk, a dirty tree and bad names. This residual is recorded in ADR-0037.
 
 ### Enforcement Order
 

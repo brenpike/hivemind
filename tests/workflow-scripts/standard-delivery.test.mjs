@@ -1510,6 +1510,31 @@ const ROW_TESTS = {
         assert.equal(main.describePlanProblem(planResult(plan), resultSchema, parsedFacts(), 'main'), undefined, value);
       }
     });
+    const branchProblem = (branch) => 'The plan names branch ' + lib.encodeUntrustedText(branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so the delivery stopped.';
+    const taxonomyPrefixes = [...workflowRulesText.split('## Branch Taxonomy')[1].split('\n## ')[0].matchAll(/^\| `([a-z]+)\/` \|/gm)].map((match) => match[1]);
+    const refusedBranches = ['main', 'feat/cache', 'release/cache', 'cache', 'Feature/cache', 'feature/Cache', 'feature/my_cache', 'feature/a/b', 'feature/cache-', 'feature/-cache', 'feature/a--b', 'feature/cache.v2', 'feature/'];
+    test('the plan check takes each Branch Taxonomy prefix of workflow.md, with or without a ticket, and no other', () => {
+      assert.deepEqual(taxonomyPrefixes, ['feature', 'bugfix', 'hotfix', 'refactor', 'chore', 'docs', 'test', 'ci']);
+      const resultSchema = main.buildPlanResultSchema(planSchema, briefSchema);
+      for (const branch of [...taxonomyPrefixes.map((prefix) => prefix + '/cache'), 'bugfix/proj-123-fix-cache', 'feature/467-synapse-runner', 'ci/a1-b2']) {
+        assert.equal(main.describePlanProblem(planResult(makePlan({ branch: branch })), resultSchema, parsedFacts(), 'main'), undefined, branch);
+      }
+      for (const branch of refusedBranches) {
+        assert.equal(main.describePlanProblem(planResult(makePlan({ branch: branch })), resultSchema, parsedFacts(), 'main'), branchProblem(branch), branch);
+      }
+    });
+    for (const branch of ['feat/cache', 'feature/my_cache']) {
+      test(`a plan branch ${JSON.stringify(branch)} outside the branch taxonomy pauses before the branch step`, async () => {
+        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan({ branch: branch })) });
+        assertPassStopPause(run, branchProblem(branch), 'plan-1');
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+      });
+    }
+    test('a run started on a branch outside the taxonomy pauses at the plan check even when the plan names that branch', async () => {
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ branch: 'my-work' }), 'plan-1': planResult(makePlan({ branch: 'my-work' })) });
+      assertPassStopPause(run, branchProblem('my-work'), 'plan-1');
+      assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+    });
   },
   'SD-09': () => {
     test('taken planner questions and the plan acceptance are listed in the final message', async () => {
@@ -2028,15 +2053,16 @@ const ROW_TESTS = {
       const keys = [...output.matchAll(/^# {3}([a-z_]+): /gm)].map((match) => match[1]);
       assert.deepEqual(Object.keys(main.createWorkingBranchRoutingSpec()), keys);
     });
-    test('a trunk spelled refs/heads/main fails safe at the identity-keyed trunk refusal', async () => {
+    test('a trunk spelled refs/heads/feature/trunk fails safe at the identity-keyed trunk refusal', async () => {
       const scratch = makeScratchRepo();
       runGitIn(scratch, ['branch', 'develop']);
+      runGitIn(scratch, ['checkout', '-q', '-b', 'feature/trunk']);
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       const results = realResults(scratch, {
-        'facts-1': factsRelay({ trunk: 'refs/heads/main', head: head }),
-        'plan-1': planResult(makePlan({ branch: 'main', base: 'develop' }))
+        'facts-1': factsRelay({ trunk: 'refs/heads/feature/trunk', branch: 'feature/trunk', head: head }),
+        'plan-1': planResult(makePlan({ branch: 'feature/trunk', base: 'develop' }))
       });
-      const run = await runWorkflow({ request: REQUEST, trunk: 'refs/heads/main' }, results);
+      const run = await runWorkflow({ request: REQUEST, trunk: 'refs/heads/feature/trunk' }, results);
       assertBlockedBeforeWaves(run);
       assert.ok(run.result.message.startsWith('The branch step was blocked, so the delivery stopped before any wave. Its blocker line says "working_branch equals trunk".'), run.result.message);
     });
@@ -4538,6 +4564,38 @@ const ROW_TESTS = {
       const texts = main.buildPullRequestTexts(runWith(problem), plan, gates);
       assert.equal(texts.problem, 'The pull request comment would be 60001 characters even with the decisions in short form, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing.');
     });
+    const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped before the pull request and pushed nothing.';
+    test('a title, body or comment that holds a forbiddenSubjectTexts() string in any case names that text', () => {
+      assert.deepEqual([...main.forbiddenSubjectTexts()], ['co-authored-by:', 'authored-by:', 'generated with', 'created with claude', '\u{1f916} generated']);
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const runWith = (taken) => ({ localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], taken: taken });
+      assert.equal(main.buildPullRequestTexts(runWith([]), makePlan(), gates).problem, undefined);
+      for (const forbidden of main.forbiddenSubjectTexts()) {
+        for (const text of [forbidden, forbidden.toUpperCase()]) {
+          const titled = main.buildPullRequestTexts(runWith([]), makePlan({ summary: 'Add ' + text + ' cache.' }), gates);
+          assert.deepEqual({ ...titled }, { problem: attributionProblem('title') }, text);
+          const bodied = main.buildPullRequestTexts(runWith([]), makePlan({ summary: 'Add the cache.\n\n' + text + ' a tool.' }), gates);
+          assert.deepEqual({ ...bodied }, { problem: attributionProblem('body') }, text);
+          const decided = main.buildPullRequestTexts(runWith([{ brief: makeBrief({ problem: text + ' PROBLEM' }), kind: 'planner_question' }]), makePlan(), gates);
+          assert.deepEqual({ ...decided }, { problem: attributionProblem('body') }, text);
+        }
+      }
+    });
+    test('the comment is checked when neither the title nor the body holds the string', () => {
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const run = { localReview: false, head: 'Co-Authored-By: x', waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], taken: [] };
+      assert.deepEqual({ ...main.buildPullRequestTexts(run, makePlan(), gates) }, { problem: attributionProblem('comment') });
+    });
+    for (const [label, summary, noun] of [['title', 'Created With Claude the cache.', 'title'], ['body', 'Add the cache layer.\n\nGenerated with a tool.', 'body']]) {
+      test(`a pull request ${label} with an attribution string ends the run blocked before any PR call`, async () => {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ summary: summary })) }));
+        assert.equal(run.result.outcome, 'blocked');
+        assert.ok(run.result.message.startsWith(attributionProblem(noun)), run.result.message.slice(0, 300));
+        assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
+        assert.ok(!labelsOf(run).some((label) => label.startsWith('pr-')));
+        assert.equal(run.result.pr, undefined);
+      });
+    }
   },
   'SD-46': () => {
     test('the spec keys are the open-plan-pr.sh OUTPUT keys in order, and its warnings are the script fixed texts', () => {
