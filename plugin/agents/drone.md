@@ -40,7 +40,7 @@ Load and follow: no governance doc on dispatch. Read a governance section only w
 
 Stop and report blocked when:
 
-- delegation is missing required git context (branch, base, trunk) or git state is unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State), except for a read-only task: when the delegation says the task edits no tracked files and makes no git writes, it runs on any branch, trunk included, and needs no branch or base. A git-script task is also exempt: when the delegation says the task's only change is one run of a named hivemind git skill whose script checks the git state itself, the task runs on whatever branch is checked out or a detached HEAD, trunk included, and that script's refusals take the place of this check. Commit authority is unchanged: a commit still needs the delegation's explicit grant. A push needs the same explicit grant.
+- delegation is missing required git context (branch, base, trunk) or git state is unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State), except for a read-only task: when the delegation says the task edits no tracked files and makes no git writes, it runs on any branch, trunk included, and needs no branch or base. Commit authority is unchanged: a commit still needs the delegation's explicit grant. A push needs the same explicit grant.
 - another file outside assigned scope must be edited for the change to compile, build, pass type checks, or satisfy referenced contracts
 - the change would alter public API, compatibility surface, versioning, or a documented contract not explicitly assigned
 - an assigned version bump conflicts with the actual compatibility impact

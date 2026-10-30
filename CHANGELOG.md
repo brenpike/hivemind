@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `hivemind:synapse`, an agent that runs the engine's runner steps (#467).
-- The runner gate hook `plugin/hooks/synapse-gate.sh` and its suite `tools/test_synapse_gate.sh`. The hook allows the five runner scripts only in their exact form (#467).
+- The runner gate hook `plugin/hooks/synapse-gate.sh` and its suite `tools/test_synapse_gate.sh`. The hook allows the five runner scripts with no prompt only for synapse and only in their exact form (#467).
 - The policy fixtures `tests/policy/safety-synapse-gate.json` and `tests/policy/safety-synapse-tools.json` pin the hook and the synapse tool list (#467).
 
 ### Changed

@@ -33,9 +33,10 @@
  *          positive integer or a digit string, normalized to a digit string
  *          and deduplicated in order; more than 20, or any other shape,
  *          blocks. Both go into the gather-facts command unquoted, so the
- *          synapse gate hook's exact form and the gather-facts script's
- *          input gate are the charset check on both, and no second
- *          allowlist is kept here.
+ *          facts step checks each command word with describeRunnerWordProblem
+ *          (lib/facts.js), the value classes of the synapse gate hook, before
+ *          its agent call. A word outside its class blocks with no agent
+ *          call, naming its flag and never its value.
  *   AUTONOMY_TABLE, BRIEF_SCHEMA, BUILD_ID  constants copied in by the
  *   build.
  *   The launch args and pause rounds are read with lib/args.js. The facts
@@ -333,8 +334,17 @@ function describeFactsProblem(facts) {
   return undefined;
 }
 
+function describeFactsCommandStop(trunk, references) {
+  const problem = describeRunnerWordProblem(listGatherFactsWords(trunk, references));
+  return problem === undefined ? undefined : { problem: 'The facts step did not run its script, so ' + describeRunNoun(RUN_NOUN) + ' stopped before planning: ' + problem + '.' };
+}
+
 async function gatherCheckedFacts(launchInputs) {
   phase('Facts');
+  const commandStop = describeFactsCommandStop(launchInputs.trunk, launchInputs.references);
+  if (commandStop !== undefined) {
+    return { cause: commandStop };
+  }
   const facts = await agent(buildFactsPrompt(launchInputs.trunk, launchInputs.references), factsOptions());
   const factsCause = describeFactsProblem(facts);
   if (factsCause !== undefined) {

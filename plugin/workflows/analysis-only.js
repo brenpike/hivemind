@@ -605,7 +605,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '0bbd6a0c48bcb2cd';
+const BUILD_ID = '0feac4d8fb9c5534';
 
 function supportedSchemaKeywords(){
 return[
@@ -2450,8 +2450,16 @@ return{problem:cutFactsMessage(RUN_NOUN,facts.cut)};
 }
 return undefined;
 }
+function describeFactsCommandStop(trunk,references){
+const problem=describeRunnerWordProblem(listGatherFactsWords(trunk,references));
+return problem===undefined?undefined:{problem:'The facts step did not run its script, so '+describeRunNoun(RUN_NOUN)+' stopped before planning: '+problem+'.'};
+}
 async function gatherCheckedFacts(launchInputs){
 phase('Facts');
+const commandStop=describeFactsCommandStop(launchInputs.trunk,launchInputs.references);
+if(commandStop!==undefined){
+return{cause:commandStop};
+}
 const facts=await agent(buildFactsPrompt(launchInputs.trunk,launchInputs.references),factsOptions());
 const factsCause=describeFactsProblem(facts);
 if(factsCause!==undefined){

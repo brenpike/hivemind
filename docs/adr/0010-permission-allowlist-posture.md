@@ -164,7 +164,7 @@ This amendment records the posture now in force for file-tool entries (`Read`, `
 Documented facts. These come from the official docs at code.claude.com/docs/en/skills and code.claude.com/docs/en/permissions, read 2026-10-23. They are documented, not verified live in this repository, except where Verified 2026-10-23 below says so.
 
 - **A skill `allowed-tools` grant lasts for one turn.** It applies during the turn that invokes the skill and clears when the user sends the next message. Invoking the skill again applies it again for that turn (skills docs, "Pre-approve tools for a skill").
-- **`${CLAUDE_PLUGIN_ROOT}` is substituted in `allowed-tools` Bash rules only.** Claude Code substitutes it in two places: the skill's markdown content and Bash rules in `allowed-tools` (skills docs). So a `Read(...)` entry cannot follow `${CLAUDE_PLUGIN_ROOT}`, and the entry names the default plugin cache path instead.
+- **`${CLAUDE_PLUGIN_ROOT}` is substituted in `allowed-tools` Bash rules only.** Claude Code substitutes it in two places: the skill's markdown content and Bash rules in `allowed-tools` (skills docs). So a `Read(...)` entry cannot follow `${CLAUDE_PLUGIN_ROOT}`, and the entry names the default plugin cache path instead. Annotated 2026-10-29 (issue 467): "only" holds for the two places a skill offers. The plugins reference also substitutes it in agent and command content and in hook commands, and exports it to hook processes (see Amendment 2026-10-29). The conclusion stands: no `Read(...)` entry and no settings rule can follow it.
 - **`Read` rules apply best-effort to Grep and Glob.** Claude Code makes a best-effort attempt to apply `Read` rules to the other built-in tools that read files, such as Grep and Glob (permissions docs).
 - **`Write`, `NotebookEdit`, `Glob` and `MultiEdit` path rules never match.** Claude Code accepts such a rule but checks file permissions against `Edit(path)` and `Read(path)` rules only, and `Edit` rules apply to every built-in tool that edits files, Write included (permissions docs, "`Write(path)`, `NotebookEdit(path)`, and `Glob(path)` rules never match").
 - **Deny and ask rules override `allowed-tools`** (skills docs).
@@ -213,3 +213,45 @@ Decided 2026-10-23 (user call): what CHECK 16 guards.
 - **Considered and rejected: a second machine-readable copy of the navigator mapping.** It is one more same-repo input, and it does not change the trust root.
 - **Considered and rejected: matching the inputs-file path in the skill body.** The skill body is also a same-repo input, so it does not change the trust root either.
 - **The cache Read rule covers every installed version by design.** `Read(~/.claude/plugins/cache/brenpike/hivemind/**)` matches every installed version of the `brenpike`/`hivemind` plugin. Reason: a version-scoped rule would go stale each release (ADR-0037, decision 9). Local finding 47760930 is rejected on that basis.
+
+## Amendment 2026-10-29: plugin PreToolUse hook allow for workflow agents (issue 467)
+
+This amendment records engine facts verified on Claude Code 2.1.312 by the issue 467 spike (https://github.com/brenpike/hivemind/issues/467). Decisions 1 to 6 are unchanged: no settings rule and no seed rule is added, removed or widened. The change built on these facts, the `hivemind:synapse` runner agent behind a plugin PreToolUse hook, lives in ADR-0037 (`docs/adr/0037-standard-delivery-on-script-engine.md`, Amendment 2026-10-29: script runners are hivemind:synapse behind a plugin hook (issue 467)). The hook's rules live in `plugin/governance/security-policy.md` (Synapse Runner Gate).
+
+Evidence, outside this repository:
+
+- `~/code/hivemind-workflow-spikes/results-467.md`: the answers, the per-command tables and the method.
+- `~/code/hivemind-workflow-spikes/467/plugin/`: the spike plugin, named `probe`, with its hook `hooks/gate.py`.
+- `~/code/hivemind-workflow-spikes/467/logs/hook-D1.jsonl` and `hook-A1.jsonl`: every hook input.
+- `~/code/hivemind-workflow-spikes/467/logs/D1-agents.txt` and `A1-agents.txt`: each agent's tool list, first-request usage, calls and permission decisions. Transcript copies are under `467/logs/D1-session/` and `467/logs/A1-session/`.
+
+The spike ran 2026-10-29 UTC in a throwaway repo, with the test plugin loaded by `--plugin-dir` and haiku workflow agents. Run D1 used `claude -p --permission-mode default`, where a call that would prompt shows as a denial (the issue 428 method). Run A1 used `--permission-mode auto`. The only allow rule was a `Workflow(...)` rule on the command line. Each verdict is read from the `permissionDecision` on each tool result and from the hook log, not from what the model said. Each run was one try.
+
+These facts are tied to Claude Code 2.1.312. A later version may change them.
+
+- **U1: a plugin PreToolUse hook's allow works inside a workflow agent.** In default mode, the exact probe command from the agent the hook allows ran with `accept`, `source: hook`, `reasonType: hook`. The same command from a control agent was denied (`bashMiss:no-rule-match`).
+- **U2: in auto mode, the hook decides.** The allowed exact probe was `accept`, `source: hook`, `reasonType: hook`. Every other auto-mode Bash call was `reasonType: classifier`. The transcript shows that the hook made the decision. It cannot show whether the classifier was also called and overruled.
+- **U3: the hook input carries the namespaced agent type.** A workflow agent's `agent_type` arrived as `probe:lean-hook`, the `<plugin>:<agent>` form, equal to the agent type in its meta file. The input also carries `agent_id`, `permission_mode`, `cwd`, `session_id` and `transcript_path`. `CLAUDE_PLUGIN_ROOT` was exported to the hook process as the plugin's absolute path.
+- **U4: a preloaded skill's `allowed-tools` grants nothing.** An agent with `skills: [probe:grants]` got the skill's text injected. The skill's entry `Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/probe/scripts/probe.sh *)` did not approve the exact probe: `reject`, `bashMiss:no-rule-match`, the same as the control. A skill grant applies when the Skill tool invokes the skill (S11-a, in the 2026-10-20 amendment), not when frontmatter preloads it.
+- **U5: a `Bash(<pattern>)` entry in `tools:` approves nothing.** With the absolute script path, the best case, the agent got the whole Bash tool, and the exact probe was denied (`bashMiss:no-rule-match`). The S11-b bullet of the 2026-10-20 amendment showed that such an entry does not restrict. This shows it does not grant either.
+- **U6: a lean agent's first request is about 3.7k to 3.9k input tokens.** That is input plus cache creation plus cache read, with the tool list `Bash, StructuredOutput, advisor` and the user's other plugins switched off. A plugin SubagentStart hook adds to it in a real session. A haiku `hivemind:drone`, with the skill listing, starts at about 26k (issue 467).
+- **U7, the cost of one hook process per Bash call, was not measured.**
+
+**Auto-mode classifier finding.** In run A1, a probe command with `; touch x` appended ran both parts, and a planted copy run as `bash ./skills/probe/scripts/probe.sh` ran the copy. Each was `reasonType: classifier`, for the hook agent and for the preloaded-skill agent alike. The hook gave no decision for them. The classifier also ran the plain probe for the control agent, which had no grant. So this is existing auto-mode behavior, which neither route adds or removes. In auto mode, the exact-path grant of ADR-0037 decision 7 is not what stops a planted script or an appended command: the classifier is, and here it allowed both. In default mode, neither variant ran under either route. The hivemind hook now denies, for every agent, a Bash command that names one of the five runner script file names in any form other than the exact one. That closes the appended and planted forms for those five names. A renamed copy is a residual recorded in ADR-0037.
+
+**Substitution in agent content (documented).** The plugins reference, section "Where each variable resolves", fetched 2026-10-29 from https://code.claude.com/docs/en/plugins-reference, lists "Skill, command, and agent content" as a place where `${...}` resolves, anywhere in the Markdown body. It also says the variables are not present in the environment of commands Claude runs through the Bash tool, in the main session or in a subagent. The same table exports `CLAUDE_PLUGIN_ROOT` to hook processes, as U3 observed. The PR8 live smoke agrees: in the F2 bullet of the 2026-10-22 amendment, a workflow `hivemind:cerebrate` grepped the absolute path `/home/brenp/code/hivemind/plugin/governance`, and its agent file names governance docs only as `${CLAUDE_PLUGIN_ROOT}/governance/...`. `hivemind:synapse` relies on this substitution for the plugin root in its commands. Not yet observed for synapse itself: the live smoke below checks it.
+
+**Live observation, 2026-10-30 UTC.** After the user reloaded plugins from this checkout on branch `feature/467-synapse-runner`, the hook ran in the user's own session. It denied a `sed` command that named `gather-facts.sh`, and an overlord compound command `git status && bash .../molt.sh`. The same script run in its exact form ran. One session; its permission mode was not recorded. Consequence for this repository: with the plugin loaded from the checkout, every Bash call that names one of the five runner scripts must be the exact absolute form, and agents read those files with Read.
+
+Not tested by the spike:
+
+- An interactive session. `-p` uses the same rule matcher, hook path and classifier, but no screen was observed.
+- A `permissions.deny` or `permissions.ask` rule against a hook allow. The hooks docs say both still win.
+- A hook deny in auto mode. The hooks docs say a deny blocks the call. The live observation above saw denies once, in a session whose mode was not recorded.
+- Whether the overlord's `Agent(...)` tool list also limits the agent types a workflow can start. If it does, a synapse call fails with a null result and the run ends. The live smoke below checks it.
+
+**Live smoke before merge (user decision Q5, option A).** One manual-mode and one auto-mode standard-delivery run on a scratch repo, with the plugin loaded from branch `feature/467-synapse-runner`. Results are recorded here.
+
+| Check | Result |
+|---|---|
+| The workflow the overlord launches starts `hivemind:synapse` for its runner steps; the agent body carries the substituted plugin path; the hook allows each runner command (`reasonType: hook`); a lookalike command is denied | Pending: not run yet |
