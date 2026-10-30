@@ -476,7 +476,7 @@ Runtime reference docs in `plugin/references/`:
 | `github-pr-review-graphql.md` | GitHub operations for PR review remediation, reviewer filters, and approval detection |
 | `github-subissue-graphql.md` | GitHub operations for native sub-issues |
 | `facts-schema.json` | Shape of the branch facts file `hivemind:gather-facts` writes: branch state, history against trunk, the branch's PRs, and the external texts, each list saying whether it is complete |
-| `plan-schema.json` | The plan payload the cerebrate returns to the `standard-delivery` script: branch, classification, bump judgments, the validation commands the validate step runs, delivery, and steps with file scopes, dependencies and declared effects outside the repo |
+| `plan-schema.json` | The plan payload the cerebrate returns to the `standard-delivery` script: branch, the pull request title, classification, bump judgments, the validation commands the validate step runs, delivery, and steps with file scopes, dependencies and declared effects outside the repo |
 | `decision-autonomy-table.json` | The autonomy table workflow scripts decide by: hard stops, and per decision kind whether each autonomy level decides it or asks you |
 | `decision-brief-schema.json` | Shape of a decision brief, the question a script run shows you when it pauses |
 

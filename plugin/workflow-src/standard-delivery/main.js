@@ -80,7 +80,8 @@
  *   and effect summary of plan-schema.json, and the blocker of the plan
  *   result, worker, gate edit and validate schemas, 400 code points. The
  *   unbounded agent fields never reach a message: plan.summary reaches
- *   only the pull request title and body, a worker summary nothing, and
+ *   only the pull request body and plan.title only the pull request
+ *   title, a worker summary nothing, and
  *   validate failures only the fix prompt. The code-built brief of every
  *   plan, trunk, effect, validation, gate rerun, version and review routing
  *   decision fits BRIEF_SCHEMA with worst-case inputs, holds
@@ -294,7 +295,7 @@ function maxReviewIterations() {
 }
 
 function maxTitleLength() {
-  return 72;
+  return 256;
 }
 
 function maxPullRequestTextLength() {

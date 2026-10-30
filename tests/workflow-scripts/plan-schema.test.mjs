@@ -65,6 +65,7 @@ function parseCaseValues(scriptText, variableName) {
 function makePlan() {
   return {
     summary: 'Add the plan schema.',
+    title: 'Add the plan schema',
     digest: { problem: 'Plans have no schema the workflow can check.', change: 'Add the plan schema.' },
     remediation_gate: { promotion_gate: { irreversible: false, architectural: false, safety: false }, grows_surface: false, repeats_surface: false },
     branch: 'feature/409-plan-schema',
@@ -135,6 +136,7 @@ describe('plan schema', () => {
     }
     assert.deepEqual(labelled, [
       '$.summary',
+      '$.title',
       '$.digest.problem',
       '$.digest.change',
       '$.branch',
@@ -164,6 +166,11 @@ describe('plan schema', () => {
         assert.ok(node.description.startsWith(PATH_MARK), path + ' names a path but does not carry the mark');
       }
     }
+  });
+
+  test('the title description forbids naming a brood id, strain id or strain name unless the request asks', () => {
+    const description = planSchema.properties.title.description;
+    assert.ok(description.includes('It names no brood id, strain id or strain name unless the request asks for it.'), 'description: ' + description);
   });
 
   test('the top-level description defines the repository path mark and names molt.sh', () => {
@@ -228,6 +235,8 @@ describe('plan schema', () => {
   const invalidCases = [
     ['a plan without branch', (plan) => delete plan.branch, '$: required: missing branch'],
     ['a plan without base', (plan) => delete plan.base, '$: required: missing base'],
+    ['a plan without title', (plan) => delete plan.title, '$: required: missing title'],
+    ['a blank title', (plan) => { plan.title = ' \t '; }, '$.title: type string: blank'],
     ['a plan without versioning.artifact_files', (plan) => delete plan.versioning.artifact_files, '$.versioning: required: missing artifact_files'],
     ['a plan without validation_commands', (plan) => delete plan.validation_commands, '$: required: missing validation_commands'],
     ['a validation command that is not a string', (plan) => { plan.validation_commands = [5]; }, '$.validation_commands[0]: type string expected'],

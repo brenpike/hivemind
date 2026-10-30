@@ -382,6 +382,7 @@ const PLAN_SCHEMA = {
 "additionalProperties": false,
 "required": [
 "summary",
+"title",
 "digest",
 "remediation_gate",
 "branch",
@@ -396,6 +397,9 @@ const PLAN_SCHEMA = {
 ],
 "properties": {
 "summary": {
+"type": "string"
+},
+"title": {
 "type": "string"
 },
 "digest": {
@@ -605,7 +609,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '9cc609eaeb9df320';
+const BUILD_ID = '95bff83796f390b0';
 
 function supportedSchemaKeywords(){
 return[

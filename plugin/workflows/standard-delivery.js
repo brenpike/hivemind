@@ -399,6 +399,7 @@ const PLAN_SCHEMA = {
 "additionalProperties": false,
 "required": [
 "summary",
+"title",
 "digest",
 "remediation_gate",
 "branch",
@@ -413,6 +414,9 @@ const PLAN_SCHEMA = {
 ],
 "properties": {
 "summary": {
+"type": "string"
+},
+"title": {
 "type": "string"
 },
 "digest": {
@@ -622,7 +626,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '9c1dfce8746633cb';
+const BUILD_ID = 'ec8b91dc0739da21';
 
 function supportedSchemaKeywords(){
 return[
@@ -3040,6 +3044,13 @@ if(commandProblem!==''){
 return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+', so '+RUN_NAME+' stopped.';
 }
 }
+const typedTitle=new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\([^()]*\\))?!?:','i');
+if(typedTitle.test(cleanTitleText(plan.title))){
+return'The plan title starts with a commit type, which the workflow writes before it, so '+RUN_NAME+' stopped.';
+}
+if(buildTitleText(plan)===''){
+return'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so '+RUN_NAME+' stopped.';
+}
 const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
 if(isOnOtherBranch&&plan.branch!==facts.branch){
 return'The run started on branch '+encodeUntrustedText(facts.branch)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+', so '+RUN_NAME+' stopped.';
@@ -3244,10 +3255,35 @@ const longestRun=Array.from(text.matchAll(/`+/g)).reduce((longest,match)=>Math.m
 const fence='`'.repeat(Math.max(3,longestRun+1));
 return fence+'\n'+text+'\n'+fence;
 }
-function readFirstSentence(text){
-const end=/[.!?](?= |$)/.exec(text);
-const sentence=end===null?text:text.slice(0,end.index+1);
-return(sentence.endsWith('.')?sentence.slice(0,-1):sentence).trimEnd();
+function cleanTitleText(text){
+return cleanPullRequestText(text,false).replace(/\s+/gu,' ').trim();
+}
+function trimTitleEnd(text){
+return text.replace(/[\s,;:-]+$/u,'');
+}
+function findUnclosedOpeners(characters){
+const closers={'(':')','[':']','{':'}'};
+const openIndexes=[];
+characters.forEach((character,index)=>{
+if(closers[character]!==undefined){
+openIndexes.push(index);
+}else if(openIndexes.length>0&&closers[characters[openIndexes[openIndexes.length-1]]]===character){
+openIndexes.pop();
+}
+});
+return openIndexes;
+}
+function closeTitleBrackets(text){
+const characters=Array.from(text);
+const openIndexes=findUnclosedOpeners(characters);
+if(openIndexes.length===0){
+return text;
+}
+const beforeOpener=trimTitleEnd(characters.slice(0,openIndexes[0]).join(''));
+if(beforeOpener!==''){
+return beforeOpener;
+}
+return trimTitleEnd(characters.filter((character,index)=>!openIndexes.includes(index)).join('').trim());
 }
 function cutTitleText(text,room){
 const characters=Array.from(text);
@@ -3256,13 +3292,18 @@ return text;
 }
 const lastSpace=characters.slice(0,room+1).lastIndexOf(' ');
 const kept=characters.slice(0,lastSpace>0?lastSpace:room).join('');
-return kept.replace(/[\s,;:-]+$/u,'');
+return closeTitleBrackets(trimTitleEnd(kept));
+}
+function buildTitlePrefix(plan){
+return commitTypeMap()[plan.classification]+(plan.breaking?'!':'')+':';
+}
+function buildTitleText(plan){
+return cutTitleText(cleanTitleText(plan.title),maxTitleLength()-buildTitlePrefix(plan).length-1);
 }
 function buildPullRequestTitle(plan){
-const prefix=commitTypeMap()[plan.classification]+(plan.breaking?'!':'')+':';
-const text=cleanPullRequestText(plan.summary,false).replace(/\s+/gu,' ').trim();
-const sentence=cutTitleText(readFirstSentence(text),maxTitleLength()-prefix.length-1);
-return sentence===''?prefix:prefix+' '+sentence;
+const prefix=buildTitlePrefix(plan);
+const text=buildTitleText(plan);
+return text===''?prefix:prefix+' '+text;
 }
 function renderPullRequestGates(run,gates){
 const lines=['Gates:'];
@@ -4546,7 +4587,7 @@ function maxReviewIterations(){
 return 10;
 }
 function maxTitleLength(){
-return 72;
+return 256;
 }
 function maxPullRequestTextLength(){
 return 60000;

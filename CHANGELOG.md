@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.1] - 2026-10-30
+
+### Changed
+
+- `plugin/references/plan-schema.json` gains the required `title` field, and cerebrate's plan block carries it. The plan check refuses a title that starts with a commit type, in any letter case. `maxTitleLength()` is 256, and titles the planner writes stay within 72. No prose budget changed (#469).
+- Docs: the ADR-0037 amendment and the README row (#469).
+
+### Fixed
+
+- The PR title is built from the plan's `title` field, so a title the request or strain text sets is used, typed from the classification. A title names no brood or strain id unless asked. A cut title never ends inside an open bracket (#469).
+- The plan check refuses a title that leaves no text once cleaned and cut, such as one made only of opening brackets, so the PR title is never only its type (#469).
+
 ## [7.5.0] - 2026-10-29
 
 ### Added

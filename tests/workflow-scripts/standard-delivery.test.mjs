@@ -169,6 +169,7 @@ function makeStep(id, files, changes = {}) {
 function makePlan(changes = {}) {
   return {
     summary: 'Add the cache layer.',
+    title: 'Add the cache layer',
     digest: { problem: 'Reads hit the database every time.', change: 'Add a cache layer in front of the reads.' },
     remediation_gate: { promotion_gate: { irreversible: false, architectural: false, safety: false }, grows_surface: false, repeats_surface: false },
     branch: 'feature/cache',
@@ -1404,7 +1405,25 @@ const ROW_TESTS = {
       ]),
       ['a blank validation command', planResult(makePlan({ validation_commands: ['npm test', '  '] })), schemaProblem],
       ['a validation command with a line break', planResult(makePlan({ validation_commands: ['npm test', 'npm test\nrm -rf x'] })), 'The plan names a validation command at validation_commands[1] that holds a line break, so the delivery stopped.'],
-      ['a validation command with a control character', planResult(makePlan({ validation_commands: ['npm test\u001b[0m'] })), 'The plan names a validation command at validation_commands[0] that holds a control character, so the delivery stopped.']
+      ['a validation command with a control character', planResult(makePlan({ validation_commands: ['npm test\u001b[0m'] })), 'The plan names a validation command at validation_commands[0] that holds a control character, so the delivery stopped.'],
+      ...['fix: Add the cache layer', 'feat(cache)!: Add the cache layer', ' \tchore!: Add the cache layer', 'docs(): Add the cache layer', 'Feat: Add the cache layer', 'FIX(ui)!: Add the cache layer'].map((title) => [
+        'a title typed ' + JSON.stringify(title),
+        planResult(makePlan({ title: title })),
+        'The plan title starts with a commit type, which the workflow writes before it, so the delivery stopped.'
+      ]),
+      ...[
+        ['only (', '('.repeat(300)],
+        ['only [', '['.repeat(300)],
+        ['only {', '{'.repeat(300)],
+        ['nested and mixed openers', '([{'.repeat(100)],
+        ['openers with spaces between them', '( [ { '.repeat(60)],
+        ['punctuation then openers', '-,;: ' + '(['.repeat(150)],
+        ['only characters the cleaner strips', '\u0001\u0007\u0085\u009f\t\n']
+      ].map(([kind, title]) => [
+        'a title of ' + kind,
+        planResult(makePlan({ title: title })),
+        'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so the delivery stopped.'
+      ])
     ]) {
       test(`${label} ${result === null ? 'ends' : 'pauses'} before the branch step`, async () => {
         const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': result });
@@ -1421,6 +1440,12 @@ const ROW_TESTS = {
       assert.equal(failed.result.message.split('\n\n')[1], main.nextStepLine('run_again'));
       const unusable = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': 'Planned.' });
       assertPassStopPause(unusable, 'The planner returned no result, so the delivery stopped.', 'plan-1');
+    });
+    test('a title that only starts with a commit type word goes on', async () => {
+      for (const title of ['fix the cache layer: reads', 'fixes: the cache layer']) {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ title: title })) }));
+        assert.equal(run.result.outcome, 'complete', run.result.message);
+      }
     });
     test('a run started on another branch delivers on it: another plan branch pauses', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ branch: 'feature/old' }), 'plan-1': planResult() });
@@ -4354,57 +4379,89 @@ const ROW_TESTS = {
     });
   },
   'SD-44': () => {
+    const brood148 = { classification: 'bugfix', summary: 'Strain tank-layout of brood-6c0bad3e (issue #148; PRD C7, X5, new', title: 'the Home Tank buttons never cover the tank, and a toggle hides them (#148)' };
+    const title177 = 'hazard and rescue sounds: the warning ripple, the lullaby, hazards, tadpoles and shrimp, Dash pots and rescues (#166)';
     for (const [label, plan, title] of [
       ['a feature', makePlan(), 'feat: Add the cache layer'],
       ['a breaking bugfix', makePlan({ classification: 'bugfix', breaking: true }), 'fix!: Add the cache layer'],
-      ['a summary whose first line is blank', makePlan({ summary: '\n  \n  Cache the reads.  \nThen the writes.' }), 'feat: Cache the reads'],
-      ['a summary with a tab and control characters', makePlan({ summary: 'Cache\tthe\u0007reads\u0085now.\r\nMore.' }), 'feat: Cache the reads now'],
-      ['a blank summary', makePlan({ summary: '  ' }), 'feat:'],
-      ['a summary with an at-mention and a code span', makePlan({ summary: 'Ping @octocat about `x`.' }), 'feat: Ping @octocat about `x`'],
-      ['a summary of several sentences', makePlan({ summary: 'Cache the reads! Then the writes. Then more.' }), 'feat: Cache the reads!'],
-      ['a summary asking a question', makePlan({ summary: 'Why cache? Speed.' }), 'feat: Why cache?'],
-      ['a summary whose dotted tokens are not sentence ends', makePlan({ summary: 'Fix README.md for v1.2 and the \'...\' marker. Then more.' }), 'feat: Fix README.md for v1.2 and the \'...\' marker'],
-      ['a summary with no sentence end', makePlan({ summary: 'Cache the reads' }), 'feat: Cache the reads'],
-      ['a hard-wrapped first sentence', makePlan({ summary: 'Cache the reads\n  across every\nrequest. Then more.' }), 'feat: Cache the reads across every request']
+      ['a title with a tab and control characters', makePlan({ title: '\n  Cache\tthe\u0007reads\u0085now \r\n' }), 'feat: Cache the reads now'],
+      ['a blank title', makePlan({ title: '  ' }), 'feat:'],
+      ['a title with an at-mention and a code span', makePlan({ title: 'Ping @octocat about `x`' }), 'feat: Ping @octocat about `x`'],
+      ['a title of several sentences, kept whole', makePlan({ title: 'Cache the reads. Then the writes.' }), 'feat: Cache the reads. Then the writes.'],
+      ['a title that differs from the summary', makePlan({ summary: 'Issue #166 is slice 2 of epic #162 (PRD N7, S9 to S11).', title: 'Add the cache layer' }), 'feat: Add the cache layer'],
+      ['the issue 469 bugfix whose summary names the brood', makePlan(brood148), 'fix: the Home Tank buttons never cover the tank, and a toggle hides them (#148)'],
+      ['the 117-character issue 469 title', makePlan({ title: title177 }), 'feat: ' + title177]
     ]) {
       test(`${label} gives the title ${JSON.stringify(title)}`, () => {
         assert.equal(main.buildPullRequestTitle(plan), title);
       });
     }
-    test('maxTitleLength() is 72 code points', () => {
-      assert.equal(main.maxTitleLength(), 72);
+    test('the title never reads the summary', () => {
+      for (const summary of ['', 'Strain tank-layout of brood-6c0bad3e (issue #148; PRD C7, X5, new', 'x'.repeat(5000)]) {
+        assert.equal(main.buildPullRequestTitle(makePlan({ ...brood148, summary: summary })), 'fix: ' + brood148.title);
+      }
+      assert.equal(Array.from(title177).length, 117);
     });
-    test('a long first sentence is cut at the last word boundary, with no trailing punctuation and no ellipsis (F3)', () => {
-      const summary = 'Fix the spelling typo in README.md: line 3 reads \'...\'; the word recieve becomes receive, and the heading, the table and the footer keep their text. Nothing else changes.';
-      const title = main.buildPullRequestTitle(makePlan({ classification: 'docs', summary: summary }));
-      assert.ok(title.startsWith('docs: Fix the spelling typo in README.md'), title);
-      assert.ok(Array.from(title).length <= main.maxTitleLength(), title);
-      const words = title.slice('docs: '.length).split(' ');
-      assert.deepEqual(words, summary.split(' ').slice(0, words.length).map((word, position) => (position === words.length - 1 ? word.replace(/[,;:-]+$/, '') : word)));
-      assert.ok(!/[\s,;:-]$/.test(title) && !title.includes('…'), title);
+    test('maxTitleLength() is 256 code points', () => {
+      assert.equal(main.maxTitleLength(), 256);
+    });
+    test('a long title is cut at the last word boundary, with no trailing punctuation and no ellipsis', () => {
+      const title = main.buildPullRequestTitle(makePlan({ title: 'word, '.repeat(60) }));
+      assert.equal(title, 'feat: ' + 'word, '.repeat(40) + 'word');
+      assert.ok(Array.from(title).length <= main.maxTitleLength() && !title.includes('…'), title);
     });
     test('a cut never leaves trailing whitespace or a trailing , ; : or -', () => {
-      const title = main.buildPullRequestTitle(makePlan({ summary: 'a'.repeat(60) + ' bb, -; cc ' + 'd'.repeat(20) }));
-      assert.equal(title, 'feat: ' + 'a'.repeat(60) + ' bb');
+      const title = main.buildPullRequestTitle(makePlan({ title: 'a'.repeat(240) + ' bb, -; ' + 'c'.repeat(20) }));
+      assert.equal(title, 'feat: ' + 'a'.repeat(240) + ' bb');
+    });
+    for (const [label, head, tail, kept] of [
+      ['an unclosed parenthesis', 'Add the cache layer', ' (issue #148; PRD C7, X5, new ', 'Add the cache layer'],
+      ['an unclosed square bracket', 'Add the cache layer, then', ' [the reads and the writes ', 'Add the cache layer, then'],
+      ['an unclosed brace', 'Add the cache layer:', ' {reads, writes ', 'Add the cache layer'],
+      ['a nested opener inside a closed pair', 'Add (the cache [layer]) for reads', ' (and [writes ', 'Add (the cache [layer]) for reads'],
+      ['a closed inner bracket inside an unclosed outer one', 'Add the cache layer', ' (reads [and] writes ', 'Add the cache layer'],
+      ['a closer that does not match the inner opener', 'Add the cache', ' (reads [and) writes ', 'Add the cache']
+    ]) {
+      test(`a cut over the cap lands before ${label}`, () => {
+        const title = main.buildPullRequestTitle(makePlan({ title: head + tail + 'word '.repeat(60) }));
+        assert.equal(title, 'feat: ' + kept);
+      });
+    }
+    test('a cut title that sits wholly inside one bracket drops the opener', () => {
+      assert.equal(main.buildPullRequestTitle(makePlan({ title: '(' + 'word '.repeat(60) })), 'feat: ' + 'word '.repeat(49) + 'word');
+      assert.equal(main.buildPullRequestTitle(makePlan({ title: '- [' + 'word '.repeat(60) })), 'feat: - ' + 'word '.repeat(48) + 'word');
+    });
+    test('a title within its room is kept whole, an unclosed bracket included', () => {
+      assert.equal(main.buildPullRequestTitle(makePlan({ title: 'Add the cache layer (reads' })), 'feat: Add the cache layer (reads');
+      const room = 'x'.repeat(250);
+      assert.equal(main.buildPullRequestTitle(makePlan({ title: room })), 'feat: ' + room);
     });
     test('an unbroken token is cut to maxTitleLength() code points, never inside a character', () => {
-      const ascii = main.buildPullRequestTitle(makePlan({ summary: 'x'.repeat(400) }));
-      assert.equal(ascii, 'feat: ' + 'x'.repeat(66));
-      const astral = main.buildPullRequestTitle(makePlan({ summary: '\u{1F600}'.repeat(400) }));
-      assert.equal(Array.from(astral).length, 72);
-      assert.ok(astral.endsWith('\u{1F600}') && !astral.endsWith('\u{1F600}'.slice(0, 1)), astral);
-      assert.equal(astral, 'feat: ' + '\u{1F600}'.repeat(66));
+      const ascii = main.buildPullRequestTitle(makePlan({ title: 'x'.repeat(400) }));
+      assert.equal(ascii, 'feat: ' + 'x'.repeat(250));
+      const astral = main.buildPullRequestTitle(makePlan({ title: '\u{1F600}'.repeat(400) }));
+      assert.equal(Array.from(astral).length, 256);
+      assert.equal(astral, 'feat: ' + '\u{1F600}'.repeat(250));
     });
     test('every title is one line of PR text within maxTitleLength() code points', () => {
-      const summaries = ['', 'Cache.', 'x'.repeat(400), '\u{1F600}'.repeat(400), 'a\nb\r\nc d. e', 'Ping @octocat about `x`.', 'word '.repeat(40)];
-      for (const summary of summaries) {
-        const title = main.buildPullRequestTitle(makePlan({ classification: 'bugfix', breaking: true, summary: summary }));
-        assert.ok(isPullRequestText(title, false) && !title.includes('\n'), JSON.stringify(title));
-        assert.ok(Array.from(title).length <= main.maxTitleLength() && !title.includes('…'), JSON.stringify(title));
+      const titles = ['', 'Cache', 'x'.repeat(400), '\u{1F600}'.repeat(400), 'a\nb\r\nc d. e', 'Ping @octocat about `x`', 'word '.repeat(80), '(' + 'word '.repeat(80), 'a [b (c {d '.repeat(40)];
+      for (const title of titles) {
+        const built = main.buildPullRequestTitle(makePlan({ classification: 'bugfix', breaking: true, title: title }));
+        assert.ok(isPullRequestText(built, false) && !built.includes('\n'), JSON.stringify(built));
+        assert.ok(Array.from(built).length <= main.maxTitleLength() && !built.includes('…'), JSON.stringify(built));
       }
     });
-    test('the PR inputs carry the title built from the plan', async () => {
-      const plan = makePlan({ classification: 'refactor', breaking: true, summary: 'Split the cache.\nKeep the API.' });
+    test('the title is the prefix, a space and buildTitleText(plan), which is empty only for a title the plan check refuses', () => {
+      for (const title of ['Add the cache layer', '(' + 'word '.repeat(60), 'x'.repeat(400)]) {
+        const plan = makePlan({ classification: 'bugfix', breaking: true, title: title });
+        assert.equal(main.buildPullRequestTitle(plan), 'fix!: ' + main.buildTitleText(plan));
+      }
+      for (const title of ['('.repeat(300), '['.repeat(300), '{'.repeat(300), '([{'.repeat(100), '-,;: ' + '(['.repeat(150), '\u0001\u0007\u0085']) {
+        assert.equal(main.buildTitleText(makePlan({ title: title })), '', JSON.stringify(title));
+      }
+    });
+    test('the PR inputs carry the title built from plan.title', async () => {
+      const plan = makePlan({ classification: 'refactor', breaking: true, summary: 'Move the cache reads.\nKeep the API.', title: 'Split the cache' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
       assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).title, 'refactor!: Split the cache');
     });
@@ -4587,7 +4644,7 @@ const ROW_TESTS = {
       assert.equal(main.buildPullRequestTexts(runWith([]), makePlan(), gates).problem, undefined);
       for (const forbidden of main.forbiddenSubjectTexts()) {
         for (const text of [forbidden, forbidden.toUpperCase()]) {
-          const titled = main.buildPullRequestTexts(runWith([]), makePlan({ summary: 'Add ' + text + ' cache.' }), gates);
+          const titled = main.buildPullRequestTexts(runWith([]), makePlan({ title: 'Add ' + text + ' cache' }), gates);
           assert.deepEqual({ ...titled }, { problem: attributionProblem('title') }, text);
           const bodied = main.buildPullRequestTexts(runWith([]), makePlan({ summary: 'Add the cache.\n\n' + text + ' a tool.' }), gates);
           assert.deepEqual({ ...bodied }, { problem: attributionProblem('body') }, text);
@@ -4601,9 +4658,9 @@ const ROW_TESTS = {
       const run = { localReview: false, head: 'Co-Authored-By: x', waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], taken: [] };
       assert.deepEqual({ ...main.buildPullRequestTexts(run, makePlan(), gates) }, { problem: attributionProblem('comment') });
     });
-    for (const [label, summary, noun] of [['title', 'Created With Claude the cache.', 'title'], ['body', 'Add the cache layer.\n\nGenerated with a tool.', 'body']]) {
+    for (const [label, changes, noun] of [['title', { title: 'Created With Claude the cache' }, 'title'], ['body', { summary: 'Add the cache layer.\n\nGenerated with a tool.' }, 'body']]) {
       test(`a pull request ${label} with an attribution string ends the run blocked before any PR call`, async () => {
-        const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ summary: summary })) }));
+        const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(changes)) }));
         assert.equal(run.result.outcome, 'blocked');
         assert.ok(run.result.message.startsWith(attributionProblem(noun)), run.result.message.slice(0, 300));
         assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');

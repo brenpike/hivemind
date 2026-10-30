@@ -6,6 +6,7 @@
   "additionalProperties": false,
   "required": [
     "summary",
+    "title",
     "digest",
     "remediation_gate",
     "branch",
@@ -22,6 +23,10 @@
     "summary": {
       "type": "string",
       "description": "Can carry external content. What the plan delivers."
+    },
+    "title": {
+      "type": "string",
+      "description": "Can carry external content. The pull request title text after its type. The workflow writes the commit type of classification, the breaking marker and a colon before it, so this text never starts with a commit type. When the request sets a pull request title, this is that title's text after its type and colon, word for word, and classification and breaking match that type. Otherwise it is a short title the planner writes for the change, at most 72 code points with its type, and never a sentence of the summary. It names no brood id, strain id or strain name unless the request asks for it."
     },
     "digest": {
       "type": "object",

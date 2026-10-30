@@ -110,6 +110,12 @@
  *   Branch Taxonomy and Branch Naming of
  *   ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md, so a runner with no
  *   skill body never creates one (issue 467).
+ *   Title type: describePlanProblem refuses a plan whose cleaned
+ *   plan.title starts with a commitTypeMap() value in any letter case, an optional
+ *   parenthesized scope, an optional '!' and ':', with a fixed message that
+ *   names no title text, since the pull request step writes the type
+ *   before the title (issue 469). It refuses an empty buildTitleText(plan)
+ *   (pr.js) the same way, so the pull request title is never only its type.
  *   Settled question guard: within one pass, a trunk_stale question a
  *   reply settled renders the same text for the whole run, and a settled
  *   plan_acceptance or remediation_plan_acceptance restores the plan result
@@ -354,6 +360,13 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
     if (commandProblem !== '') {
       return 'The plan names a validation command at validation_commands[' + index + '] that ' + commandProblem + ', so ' + RUN_NAME + ' stopped.';
     }
+  }
+  const typedTitle = new RegExp('^(' + Object.values(commitTypeMap()).join('|') + ')(\\([^()]*\\))?!?:', 'i');
+  if (typedTitle.test(cleanTitleText(plan.title))) {
+    return 'The plan title starts with a commit type, which the workflow writes before it, so ' + RUN_NAME + ' stopped.';
+  }
+  if (buildTitleText(plan) === '') {
+    return 'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so ' + RUN_NAME + ' stopped.';
   }
   const isOnOtherBranch = facts.head_state === 'branch' && facts.branch !== trunk;
   if (isOnOtherBranch && plan.branch !== facts.branch) {
