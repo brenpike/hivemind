@@ -1450,8 +1450,54 @@ This section covers local review finding 6bc3a379 on issue 467. Claude Code past
 - **Root cause.** Claude Code pastes the plugin path into skill and agent text as it is, and no fixed shell quoting carries every byte. Inside double quotes `"`, `$` and the backtick are special; inside single quotes `'` is. So the double-quoted form cannot hold a path with those bytes, and text substitution cannot escape them.
 - **Bounded impact.** The five runner commands are denied for every agent, and other script commands fail in the shell. It fails closed: nothing runs that was not asked for, and there is never an allow. It needs a home or config folder whose path holds one of those bytes, which is unusual.
 - **Ground.** Unclosable with text substitution, and a user decision (Q2, option A, 2026-10-30). The rejected fix was the `updatedInput` rewrite described in the zoom-out.
-- **Unverified: Windows backslash paths.** The hook turns `\` into `/` before it matches, so a command with backslashes is denied and fails closed. This was not run on Windows.
+- **Unverified: Windows backslash paths.** The hook turns `\` into `/` before it matches, so a command with backslashes is denied and fails closed. This was not run on Windows. Update 2026-10-30: the hook no longer rewrites the root, and a backslash in the root is now a residual byte with no exact form; see "Local review finding 27d328fd" below.
 
 Links: https://github.com/brenpike/hivemind/issues/467, `~/code/hivemind-workflow-spikes/results-467-quote.md` (the quoted-grant spike), `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
+
+### Local review finding 27d328fd: the hook uses the plugin root byte for byte (2026-10-30)
+
+This section covers local review finding 27d328fd on issue 467. The hook rewrote `CLAUDE_PLUGIN_ROOT` before it trusted it: every `\` became `/` and trailing slashes were stripped. It then used the rewritten string for two things, the exact-form prefix it matches and the folder it sources `skills/_shared/allowlist.sh` from. On Linux and macOS a backslash is an ordinary filename byte, so a root `a\b` was rewritten to `a/b`. That pointed the match and the sourced code at a sibling folder, not the folder Claude Code named. The reviewer suggested that an `a\b` root stay allowed. This fix does not follow that suggestion (Q2).
+
+**First-finding triage, per ADR-0038.** This is the third finding on the plugin root flow (5dd80225, 6bc3a379, 27d328fd), so the approach was questioned.
+
+- **Introduced or inherited.** Introduced on this branch, by commit 620cccd, through the design line that turned backslashes into `/` and removed a trailing slash before matching.
+- **Root class.** The hook rewrites its root input before it trusts it (`plugin-root-identity-rewritten-before-trust`). The owning layer is the hook's root read.
+- **Removed instead of hardened.** The rewrite and the trailing-slash loop are deleted, and no check replaces them. The backslash joins the bytes that have no exact form. Inside double quotes bash reads only `$`, the backtick, `"`, `\` and newline specially, so with the backslash the byte set is complete under the bash grammar and cannot grow. This restores the original approved design, which named the backslash. The rewrite had made that rule dead code.
+- **Threat model.** The attack needs a sibling folder `a/b` with chosen content, which takes a same-user write next to the plugin cache. A program that can do that gains nothing it lacks, as with finding 149210d3. The defect is still a correctness root cause: the hook's root differs from Claude Code's, so the engine's real command is denied. It is fixed by removal, not by hardening.
+
+**Zoom-out.** The hook should learn the root as one string, taken unchanged from Claude Code. `hooks.json` launches the hook as `bash ${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh`, and Claude Code substitutes the same value into `synapse.md`, so synapse writes it into the command. The env value asks for no more trust than running the hook already does. Each layer copies the root verbatim: the engine emits only the `{plugin-root}` placeholder, synapse pastes the value only into the command and the inputs path (e0018d2), the command quotes it as one word (e5d56bd, b65540e, 5ed4028), and the hook now reads it unchanged.
+
+- **Env value, kept.** One source, no transform.
+- **BASH_SOURCE, rejected.** It would be a second source for the root that can disagree with the first: the bootstrap form in `tools/test_script_bootstrap.sh` uses `pwd -P`, which resolves symlinks and then no longer equals the substituted text. That contract also fails closed with a blocker message, while the hook fails open. And the suite could no longer point the real hook at test roots.
+- **Inlining the identifier check, rejected.** It would copy the shared check that all the scripts use (`allowlist.sh`, about 250 lines with its helpers), so the gate and the scripts could drift apart.
+- A project `.claude/settings.json` that overrides the env var is outside the threat model. A trusted project can already define its own hooks, so the override gains nothing.
+
+No normalization is needed. A backslash root is reachable only on native Windows, and even there the rewrite never produced an allow: synapse writes the raw `C:\...` root, and the rewritten `C:/...` prefix never matched it. Stripping a trailing slash guaranteed a mismatch whenever both values carried one.
+
+**The fix.**
+
+- `plugin/hooks/synapse-gate.sh`: `plugin_root` is `CLAUDE_PLUGIN_ROOT` byte for byte. The backslash rewrite and the trailing-slash loop are deleted. The absolute check accepts `/...`, or a drive letter and colon followed by `/` or `\`; anything else exits 0 with no output. `allowlist.sh` is still checked and sourced from `"$plugin_root/skills/_shared/allowlist.sh"`. The no-exact-form case adds the backslash. The header comments say the root is never rewritten.
+- `tools/test_synapse_gate.sh` (Q1, approved by the user 2026-10-30): the rows that pinned the rewrite are deleted, which are `root:backslash-normalized`, `root:backslash-command` and `BACKSLASH_ROOT`. `root:trailing-slash` and `root:trailing-slashes` now allow synapse's quoted command whose path is the root text followed by `/skills/...`. New rows: `root:trailing-slash:rewritten` gives deny; `plug\root` joins the unsafe-root loop with deny for both the quoted and the bare form; two-tree rows with a real root `bs/a\b` and a sibling `bs/a/b` prove the sibling is neither matched nor sourced, one with a copy of `allowlist.sh` and one whose `allowlist.sh` is `exit 2`.
+- `plugin/governance/security-policy.md` (Synapse Runner Gate): `<root>` is `CLAUDE_PLUGIN_ROOT` exactly as Claude Code sets it, and the residual byte list adds the backslash.
+
+**Acceptance test.** What becomes impossible: any finding where the folder the hook matches, the folder it sources from, or the file bash runs differs from the folder Claude Code named. The key changes: the root is an opaque byte string that the hook never interprets, with no separator, slash, case or symlink handling. The quoted form exists only when bash's reading of the word equals its text, and that byte set comes from the grammar, not from findings. With no transform left, nothing can map one folder to another. This is removal, not one more conjunct.
+
+**Surface account.**
+
+- Removed: the rewrite and the trailing-slash loop; `BACKSLASH_ROOT` and 2 test rows.
+- Changed: the absolute-root pattern, the no-exact-form byte set, 2 test rows, comments, 2 policy sentences.
+- Added: 5 test rows, this subsection and 1 changelog line.
+- Net: less mechanism, about 3 more regression rows.
+
+**Scope boundary.** Every site is fixed and nothing is deferred. The residual below is the only write beyond the fix.
+
+**Recorded residual extension: a plugin path holding a backslash (user decision Q2, option A, 2026-10-30).**
+
+- **Root cause.** The quoted form needs a root with none of the bytes bash reads specially inside double quotes, and the backslash is one of them. A backslash root has no exact form.
+- **Bounded impact.** On Linux or macOS it needs a plugin path that holds a backslash, which is very rare. The runner commands are then denied for every agent, so it fails closed and never allows. Windows behavior is unchanged: the gate stays on and runner commands are denied, as recorded above. It was never run on Windows.
+- **Ground.** User decision Q2, option A. The rejected option B allowed an `a\b` root when bash reads the path unchanged. It would also have opened no-prompt runner commands on Windows backslash paths, which have never been run.
+- **Residuals not touched.** 149210d3 and 793dbf65 are unaffected.
+
+Links: https://github.com/brenpike/hivemind/issues/467, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
 
 Links: https://github.com/brenpike/hivemind/issues/467, `~/code/hivemind-workflow-spikes/results-467.md` (the spike), `docs/adr/0010-permission-allowlist-posture.md` (Amendment 2026-10-29), `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).

@@ -19,9 +19,12 @@
 #
 # EXACT RUNNER COMMAND: `bash`, one space, the script path, then flag/value pairs, every part
 # separated by one space. The script path is "<root>/skills/<s>/scripts/<s>.sh", always one
-# double-quoted word, where <root> is CLAUDE_PLUGIN_ROOT with backslashes turned to `/` and
-# trailing slashes removed. A root that holds `"`, `$`, a backtick or a control byte has no exact
-# form, so every runner command under it is denied (a recorded residual). Flags come in any order; each appears once except the repeatable --ref and
+# double-quoted word, where <root> is CLAUDE_PLUGIN_ROOT byte for byte and is never rewritten. It
+# is the value Claude Code launches this hook from and substitutes into synapse's command, so the
+# path matched, the allowlist.sh sourced and the script bash runs all sit under one folder. A root
+# that holds `"`, `$`, a backtick, a backslash or a control byte, the bytes bash reads specially
+# inside double quotes, has no exact form, so every runner command under it is denied (a recorded
+# residual). Flags come in any order; each appears once except the repeatable --ref and
 # --version-file; required flags must be present; bump-type's positional base comes first. Values
 # pass their class: names hivemind_assert_identifier (skills/_shared/allowlist.sh), refs digits,
 # commit 40 or 64 lowercase hex, the enums the scripts define, inputs
@@ -31,13 +34,15 @@
 # LOOKALIKE: the command text names <s>.sh (ASCII case ignored) with no [A-Za-z0-9._-] byte
 # directly before or after it.
 #
-# FAIL OPEN, NEVER TOWARD AN ALLOW OF ITS OWN: missing jq, an empty or unusable CLAUDE_PLUGIN_ROOT,
+# FAIL OPEN, NEVER TOWARD AN ALLOW OF ITS OWN: missing jq, an empty or non-absolute CLAUDE_PLUGIN_ROOT,
 # a missing allowlist.sh, or malformed input prints nothing and exits 0, so the normal permission
 # flow applies. A settings allow rule that covers the call then applies with none of these checks;
 # the seeded inputs-file rules do so for synapse's Write (security-policy.md, Synapse Runner Gate). The EXIT trap turns any other non-zero exit into 1. This hook never exits 2, because
 # exit 2 blocks the tool call. A decision is printed only as the last step.
 #
-# Reads CLAUDE_PLUGIN_ROOT from the hook environment and never BASH_SOURCE. bash 3.2 compatible
+# Reads CLAUDE_PLUGIN_ROOT from the hook environment, unchanged, and never BASH_SOURCE. An absolute
+# root starts with `/`, or with a drive letter and colon followed by `/` or a backslash; it sources
+# allowlist.sh from "<root>/skills/_shared/allowlist.sh". bash 3.2 compatible
 # (no mapfile, associative arrays or ${var,,}).
 
 set -euo pipefail
@@ -354,13 +359,8 @@ emit_decision() {
 command -v jq >/dev/null 2>&1 || exit 0
 
 plugin_root="${CLAUDE_PLUGIN_ROOT:-}"
-plugin_root="${plugin_root//\\//}"
-while [ "${plugin_root%/}" != "$plugin_root" ]; do
-  plugin_root="${plugin_root%/}"
-done
-[ -n "$plugin_root" ] || exit 0
 case "$plugin_root" in
-  /* | [A-Za-z]:/*) ;;
+  /* | [A-Za-z]:/* | [A-Za-z]:\\*) ;;
   *) exit 0 ;;
 esac
 [ -f "$plugin_root/skills/_shared/allowlist.sh" ] || exit 0
@@ -368,7 +368,7 @@ esac
 
 quoted_path_allowed=yes
 case "$plugin_root" in
-  *'"'* | *'$'* | *'`'* | *[[:cntrl:]]*) quoted_path_allowed=no ;;
+  *'"'* | *'$'* | *'`'* | *'\'* | *[[:cntrl:]]*) quoted_path_allowed=no ;;
 esac
 
 input_fields_program='def text: if type == "string" then explode | map(if . == 0 then 1 else . end) | implode else error("not a string") end;

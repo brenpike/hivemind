@@ -317,12 +317,10 @@ expect_decision 'write:nul-path' deny "$PLUGIN_ROOT" \
 expect_decision 'bash:nul-command' deny "$PLUGIN_ROOT" \
   "$(jq -cn --arg command "$MOLT_EXACT" '{tool_name: "Bash", agent_type: "hivemind:synapse", tool_input: {command: ($command + "\u0000")}}')"
 
-# ── root normalization and path quoting ─────────────────────────────────────────
-BACKSLASH_ROOT="${PLUGIN_ROOT//\//\\}\\"
-expect_decision 'root:backslash-normalized' allow "$BACKSLASH_ROOT" "$(bash_input "$SYNAPSE" "$MOLT_EXACT")"
-expect_decision 'root:trailing-slash' allow "$PLUGIN_ROOT/" "$(bash_input "$SYNAPSE" "$MOLT_EXACT")"
-expect_decision 'root:trailing-slashes' allow "$PLUGIN_ROOT//" "$(bash_input "$SYNAPSE" "$MOLT_EXACT")"
-expect_decision 'root:backslash-command' deny "$BACKSLASH_ROOT" "$(bash_input "$SYNAPSE" "bash \"${MOLT//\//\\}\" $MOLT_ARGS")"
+# ── root used byte for byte and path quoting ────────────────────────────────────
+expect_decision 'root:trailing-slash' allow "$PLUGIN_ROOT/" "$(bash_input "$SYNAPSE" "bash \"$(script_path "$PLUGIN_ROOT/" molt)\" $MOLT_ARGS")"
+expect_decision 'root:trailing-slashes' allow "$PLUGIN_ROOT//" "$(bash_input "$SYNAPSE" "bash \"$(script_path "$PLUGIN_ROOT//" molt)\" $MOLT_ARGS")"
+expect_decision 'root:trailing-slash:rewritten' deny "$PLUGIN_ROOT/" "$(bash_input "$SYNAPSE" "$MOLT_EXACT")"
 
 # make_root <name>: create a fake plugin root holding allowlist.sh; print its path.
 make_root() {
@@ -338,12 +336,23 @@ expect_decision 'root:space:bare' deny "$SPACE_ROOT" "$(bash_input "$SYNAPSE" "b
 expect_decision 'root:space:quoted:drone' none "$SPACE_ROOT" "$(bash_input "$DRONE" "bash \"$SPACE_MOLT\" $MOLT_ARGS")"
 expect_decision 'root:space:bare:drone' deny "$SPACE_ROOT" "$(bash_input "$DRONE" "bash $SPACE_MOLT $MOLT_ARGS")"
 
-for unsafe_name in 'plug$root' 'plug"root' 'plug`root'; do
+for unsafe_name in 'plug$root' 'plug"root' 'plug`root' 'plug\root'; do
   UNSAFE_ROOT="$(make_root "$unsafe_name")"
   UNSAFE_MOLT="$(script_path "$UNSAFE_ROOT" molt)"
   expect_decision "root:unsafe:$unsafe_name:quoted" deny "$UNSAFE_ROOT" "$(bash_input "$SYNAPSE" "bash \"$UNSAFE_MOLT\" $MOLT_ARGS")"
   expect_decision "root:unsafe:$unsafe_name:bare" deny "$UNSAFE_ROOT" "$(bash_input "$SYNAPSE" "bash $UNSAFE_MOLT $MOLT_ARGS")"
 done
+
+BACKSLASH_ROOT="$(make_root 'bs/a\b')"
+SIBLING_ROOT="$(make_root 'bs/a/b')"
+SIBLING_COMMAND="bash \"$(script_path "$SIBLING_ROOT" molt)\" $MOLT_ARGS"
+expect_decision 'root:backslash:sibling-command' deny "$BACKSLASH_ROOT" "$(bash_input "$SYNAPSE" "$SIBLING_COMMAND")"
+
+EXIT2_BACKSLASH_ROOT="$(make_root 'bs-exit2/a\b')"
+mkdir -p "$WORK_ROOT/bs-exit2/a/b/skills/_shared"
+printf 'exit 2\n' >"$WORK_ROOT/bs-exit2/a/b/skills/_shared/allowlist.sh"
+EXIT2_SIBLING_COMMAND="bash \"$(script_path "$WORK_ROOT/bs-exit2/a/b" molt)\" $MOLT_ARGS"
+expect_decision 'root:backslash:sibling-never-sourced' deny "$EXIT2_BACKSLASH_ROOT" "$(bash_input "$SYNAPSE" "$EXIT2_SIBLING_COMMAND")"
 
 # ── fail open: no output, exit 0 ────────────────────────────────────────────────
 LOOKALIKE_INPUT="$(bash_input "$DRONE" "cat plugin/skills/molt/scripts/molt.sh")"

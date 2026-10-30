@@ -30,6 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The plugin script path is one double-quoted word in the engine's runner commands and in every skill grant and command, `plugin/agents/github-reviewer.md` and `plugin/governance/versioning.md`, so a plugin path with a space works. The hook keeps one exact form and denies the bare path, and policy check CHECK 17 refuses the unquoted form in plugin Markdown. A plugin path holding a double quote, a dollar sign, a backtick or a control character is a recorded residual and fails closed (#467, local review finding 6bc3a379).
+- The runner gate hook uses `CLAUDE_PLUGIN_ROOT` byte for byte. It no longer turns backslashes into slashes or strips trailing slashes, so the folder it matches and loads checks from is the folder Claude Code named. A plugin path holding a backslash now has no exact form and fails closed (#467, local review finding 27d328fd).
 - `hivemind:synapse` replaces `{plugin-root}` and `{token}` only in the command and in the inputs file path, never in the inputs file content (#467, local review finding 5dd80225).
 
 ### Removed
