@@ -1586,7 +1586,7 @@ First finding: the synapse agent refused a commit because the grant sat in the p
 
   Each trunk refusal compares the current branch with the trunk or base name the call passes, and the hook checks only that name's class. A call that passes another name gets no trunk refusal from the scripts or the hook, so when the hook allows the call, server-side branch protection is the remaining bound on a commit or push to trunk through these commands, as for the raw push of decision 6. Issue 480 widens only the molt and open-plan-pr commands to every synapse call: the other three need no commit or push grant, so their exposure, gather-facts' included, was already present since issue 467. Cross-script use is accepted, by the Q2 residual of the issue 467 amendment and the user's answer A on issue 480. The hook is the enforcing gate; when it cannot decide, the normal permission flow applies (recorded residual "A hook failure falls back to prompts"). Why binding each call to its step was rejected: it needs five agent types or a hook that reads the prompt, which adds surface, the same surface the Q2 residual rejected.
 
-  User decision 2026-10-30 (answer A): recorded as a known residual of this change and fixed next in https://github.com/brenpike/hivemind/issues/482, where the committing and pushing runner scripts derive trunk from the remote's default branch instead of the name the caller passes. Server-side bound today: the main-ruleset blocks deletion and non-fast-forward pushes and requires a pull request, but a RepositoryRole bypass exists and agents run as the repo owner.
+  User decision 2026-10-30 (answer A): (amended 2026-10-30, issue 482: fixed. Each committing and pushing runner script now also refuses the default branch of every remote `git remote` lists, whatever name the call passes. The issue 482 amendment records what is left.) Recorded as a known residual of this change and fixed next in https://github.com/brenpike/hivemind/issues/482, where the committing and pushing runner scripts derive trunk from the remote's default branch instead of the name the caller passes. Server-side bound today: the main-ruleset blocks deletion and non-fast-forward pushes and requires a pull request, but a RepositoryRole bypass exists and agents run as the repo owner.
 - **Haiku adherence.** Root cause: the harness label "no user authority" still reaches the agent. Bounded impact: the new wording lowers the misfire risk and does not remove it.
 
 **Local review findings 7bb98fa0, b19165c9, 5f0964b4 and c9a450ec.** The first two found that the cross-script residuals were bounded by a refusal list the runner scripts were said to share, and the list was false for `gather-facts.sh`. The first fix replaced the list with one clause per script. 5f0964b4 found those clauses narrower than the script headers. The fix removed the restatement: the cross-script residuals here, in the Q2 residual of the issue 467 amendment and in `plugin/governance/security-policy.md` (Synapse Runner Gate) cite each runner script's header as the only source of its surface. This is closed by construction: no copy is left to drift. c9a450ec found the synapse grant line, the silence paragraph and the gate's grant sentence calling the gate the grant's only bound, while the gate says the hook fails open; the fix states the bound once, in `plugin/governance/security-policy.md` (Synapse Runner Gate), and the others cite it.
@@ -1598,3 +1598,36 @@ First finding: the synapse agent refused a commit because the grant sat in the p
 **Prose budget.** The standard-delivery prose measured 43203 against a budget of 43800. The budget is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/480, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
+
+## Amendment 2026-10-30: the runner scripts refuse the remote's default branch (issue 482)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/482. It fixes the trunk-name residual of the issue 480 amendment.
+
+**Root cause.** The trunk name is chosen by the caller. `molt.sh`, `push-branch.sh` (which `open-plan-pr.sh` runs) and `create-working-branch.sh` took trunk from the `--trunk` or `--base` value the call passes. The hook checks only that the value is a valid name. So a call that passed some other name got no trunk refusal.
+
+**The change.**
+
+- `plugin/skills/_shared/git-refusals.sh` gains one function, `hivemind_branch_is_remote_default`. For each remote `git remote` lists, it reads the local `refs/remotes/<remote>/HEAD` symbolic ref. The branch that ref names is that remote's default branch. A remote name that holds `/` is used whole. A dangling HEAD ref still counts.
+- Each of the three scripts calls it in a new refusal, `refuse_remote_default_branch`. `molt.sh` and `push-branch.sh` check the current branch. `create-working-branch.sh` checks the target branch, so a run that starts on trunk still moves off it.
+- Each refusal reuses its script's existing blocker texts. No engine routing, SKILL.md text or hook changes.
+- The existing trunk-name refusals stay. A call that names trunk is still refused by them.
+
+**Q1, the source of the default branch: option A.** Decided by the autonomy table during the run (decision D1, the recommended answer). The default branch is read from each remote's local HEAD ref. A remote with no such ref passes. That gap is recorded below.
+
+**Surface account.**
+
+- Added: 1 shared function, 3 refusal calls and the fixture pins.
+- Removed: the trunk-name residual of the issue 480 amendment.
+- No hook, engine or `tools/validate.sh` change. `git-refusals.sh` already routes to every affected suite.
+
+**Fixtures.** `tests/policy/safety-no-trunk-commit.json` gains, for each script, one pin on the new refusal and one on its call site. The pinned `refuse_trunk_branch` span in `molt.sh` and the spans in `tests/policy/safety-working-branch-no-track.json` are unchanged. The pins do not prove what the shared function computes. The script suites assert that: `tools/test_molt.sh`, `tools/test_push_branch.sh`, `tools/test_open_plan_pr.sh` and `tools/test_create_working_branch.sh`.
+
+**Recorded residuals.**
+
+- **A listed remote with no local HEAD ref.** It passes, so its default branch is not refused. A HEAD ref that is not symbolic passes too. `git clone` writes the ref. The remedy is `git remote set-head <remote> --auto`.
+- **A push remote that `git remote` does not list.** It is not read. Such a remote is a local path, because every URL form fails the identifier gate.
+- **A stale local HEAD ref.** After a default branch rename on the remote, the local ref still names the old default until it is set again.
+- **Over-refusal.** The inherited case fold (R1 in `git-refusals.sh`) refuses case variants of a default branch. The default branch of any listed remote is refused, a fork's included. A consumer whose trunk is not the remote default, such as gitflow `develop` with `main` as the default, can no longer deliver on `main`. All of these fail safe.
+- **The raw push of decision 6.** A drone's raw `git push` is unchanged. It stays bounded by the server ruleset.
+
+Links: https://github.com/brenpike/hivemind/issues/482, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
