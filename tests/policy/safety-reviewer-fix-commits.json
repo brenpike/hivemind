@@ -41,6 +41,10 @@
       "pattern": "(Commit Authority)"
     },
     {
+      "file": "plugin/agents/synapse.md",
+      "pattern": "(Commit Authority)"
+    },
+    {
       "file": "plugin/agents/local-reviewer.md",
       "pattern": "EXPLICITLY forbids this agent from committing"
     },

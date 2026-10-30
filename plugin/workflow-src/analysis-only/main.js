@@ -32,8 +32,10 @@
  *          request numbers the request names: absent means none; each is a
  *          positive integer or a digit string, normalized to a digit string
  *          and deduplicated in order; more than 20, or any other shape,
- *          blocks. The facts skill's input gate is the charset check on
- *          both, so no second allowlist is kept here.
+ *          blocks. Both go into the gather-facts command unquoted, so the
+ *          synapse gate hook's exact form and the gather-facts script's
+ *          input gate are the charset check on both, and no second
+ *          allowlist is kept here.
  *   AUTONOMY_TABLE, BRIEF_SCHEMA, BUILD_ID  constants copied in by the
  *   build.
  *   The launch args and pause rounds are read with lib/args.js. The facts
@@ -48,8 +50,10 @@
  *   for how blocks are fitted to the completion notice.
  *
  * Invariants
- *   Facts first: the first agent call is the facts step, a haiku drone that
- *   invokes hivemind:gather-facts once. Its result is checked against its
+ *   Facts first: the first agent call is the facts step, a haiku
+ *   hivemind:synapse that runs the gather-facts command of
+ *   buildGatherFactsCommand (lib/facts.js) from its command block. Its
+ *   result is checked against its
  *   schema, the facts file path, the line count and external_texts against
  *   their patterns, and cut against the known cut fields, before anything
  *   reads it. external_texts must also be a safe integer. A failed check
@@ -85,8 +89,10 @@
  *   commits, pushes or opens a pull request. The facts script writes only
  *   its ignored facts file under .hivemind/facts and the remote-tracking
  *   trunk ref, with the fetched objects and FETCH_HEAD.
- *   Read-only: the planner, hivemind:cerebrate, has no write tool, and
- *   the facts and scan prompts carry the read-only trigger of drone.md.
+ *   Read-only: the planner, hivemind:cerebrate, has no write tool, the
+ *   scan prompt carries the read-only trigger of drone.md, and the facts
+ *   prompt carries no read-only or tool sentence: the synapse gate hook
+ *   lets synapse run only the exact runner commands.
  *   No prompt restates a rule its agent or skill owns
  *   (docs/engineering-principles.md P24): each is a task line, the
  *   triggers and the boundary it needs, one data line and its data.
@@ -202,7 +208,7 @@ const FACTS_STEP_SCHEMA = buildTaggedSchema({
     facts_lines: { type: 'string', description: 'The facts_lines routing line value, copied exactly.' },
     cut: { type: 'string', description: 'The cut routing line value, copied exactly.' },
     external_texts: { type: 'string', description: 'The external_texts routing line value, copied exactly.' },
-    blocker: { type: 'string', description: 'The blocker line the skill relayed.' }
+    blocker: { type: 'string', description: 'The blocker line the script printed.' }
   },
   required: ['outcome'],
   variants: {
@@ -264,12 +270,10 @@ function buildReviseSchemas(shownLabels) {
 
 function buildFactsPrompt(trunk, references) {
   return [
-    'Invoke the hivemind:gather-facts skill once, with the trunk and references in the inputs block below and no remote.',
-    runnerReadOnlySentence(),
+    'Gather the branch facts with the command below.',
     dataBlocksSentence(),
-    runnerToolSentence(),
     '',
-    formatDataBlock('inputs', { trunk: trunk, references: references })
+    formatCommandBlock(buildGatherFactsCommand(trunk, references))
   ].join('\n');
 }
 
@@ -306,7 +310,7 @@ function plannerOptions(label, phaseTitle, schema) {
 }
 
 function factsOptions() {
-  return { agentType: runnerAgentType(), model: 'haiku', schema: toAgentSchema(FACTS_STEP_SCHEMA), label: 'facts', phase: 'Facts' };
+  return { agentType: synapseAgentType(), model: 'haiku', schema: toAgentSchema(FACTS_STEP_SCHEMA), label: 'facts', phase: 'Facts' };
 }
 
 function describeFactsProblem(facts) {

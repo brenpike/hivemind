@@ -198,13 +198,15 @@ Hivemind coordinates specialized bioforms to plan, build, review, and ship code,
 |---|---|---|
 | :eye: **Overlord** | Orchestrator | The control plane and your main interface. Routes each request to a workflow, then launches its workflow script or runs the workflow state machine and its run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation; never writes code. |
 | :brain: **Cerebrate** | Strategist | Researches the codebase and returns the **directive**: `STEP-NNN` steps with exact file scopes, dependencies, risks, and a delivery shape (single, multi, or brood). Has no shell: its tools are Read, Glob, Grep, LSP, the web tools, and the claude-mem search tools. Takes branch state only from the facts file. Never writes files. |
-| :hammer: **Drone** | Builder | Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step. Inside workflow scripts, it also runs the facts and git steps. |
+| :hammer: **Drone** | Builder | Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step. |
 | :performing_arts: **Changeling** | Shaper | Presentational UI/UX: markup, styling, layout, design tokens, visual states, presentational accessibility, within its assigned file scope. |
 
 Two more agents handle review. They are composites rather than bioforms: each one classifies findings, fixes the simple ones itself, and hands everything else back to the overlord.
 
 - **Local-Reviewer** (pre-PR): runs an adversarial Codex review loop before the PR exists (needs the `codex` companion).
 - **GitHub-Reviewer** (post-PR): a stateless, one-shot worker that fetches and classifies GitHub review feedback, fixes, pushes, replies, and resolves threads. `hivemind:github-review-loop` dispatches it.
+
+One more agent, the **Synapse**, runs the committed runner scripts for the workflow scripts: the facts, commit, push and pull request steps. Only workflow scripts start it. The overlord never delegates to it.
 
 ### Two engines
 
@@ -225,6 +227,7 @@ How a script run behaves:
 - **No run ledger.** The working branch, its commits and the PR are the record. A paused run resumes in the same session. A new session plans what is left: the planner reads the branch's history from the facts file and the files as they are now.
 - **Questions.** Routine planner questions are decided by the autonomy table (`plugin/references/decision-autonomy-table.json`) and listed as decided for you. Only irreversible, architectural or safety-relevant questions, and hard stops, pause the run with a decision brief. A remediation plan is decided for you too, unless it trips the Promotion Gate (irreversible, architectural or safety-relevant), grows the surface, or repeats a surface whose earlier fix did not close it. Questions show short fields the agents write for you, such as what a plan addresses, what it changes and what it touches, never pasted agent text. Every open question pauses a delivery run, and your reply resumes the same run, with no pause limit: the agents that already finished replay from cache. A delivery run ends blocked, lists its open questions and names the next action only when the replies are too long to carry, or the exact text of a question is too long to show, so a completed delivery run always has a PR. An analysis-only run pauses at most 3 times, then completes and lists the questions still open.
 - **Stops pause.** A step that cannot go on pauses the run with one question, and your reply takes the stopped step again. After any reply, the run reads the branch head again before a gate holds or the pull request is pushed, so a commit you made while the run waited is seen. A stop before or during the waves, or a local review that ends without converging, plans again from fresh facts instead. A blocked runner whose failure is transient, such as a network error or an HTTP 5xx, runs once more before the run pauses. The run ends only on a stop no reply can clear: a prompt injection suspect, a git script refusal, a branch or pushed commit other than the planned one, a PR text over its size limit, a settled question that comes back, an agent call that returned no result, replies too long to carry, or a failed launch check.
+- **Runner steps.** The facts, commit, push and pull request steps run on `hivemind:synapse`, a haiku agent that runs one committed script and relays its output. A plugin `PreToolUse` hook (`plugin/hooks/`) allows synapse the five exact runner commands with no prompt, including the push and the PR. Any command that names one of those five scripts in another form is denied for every agent. To read those files, use Read.
 - **Stopping a run.** You can stop a launched run from any surface, Remote Control included, by asking the overlord. The stopped run keeps every completed agent result, and when you ask the overlord to go on, later in the same session, it resumes the run from there.
 - **Effects outside the repo.** A plan step that declares an irreversible effect outside the repo, such as a deploy, a publish, a migration or a write to an outside service, asks you before the first wave.
 - **Request options.** A delivery request can ask for a draft PR, or to skip local review. Local review is also skipped when the Codex plugin is not available in the session.
@@ -356,7 +359,8 @@ The theme is for fun. The framework works with or without it.
 plugin/                     # plugin root; everything Claude Code loads lives here
   .claude-plugin/
     plugin.json             # plugin manifest
-  agents/                   # agent definitions (overlord, cerebrate, drone, changeling, local-reviewer, github-reviewer)
+  agents/                   # agent definitions (overlord, cerebrate, drone, changeling, synapse, local-reviewer, github-reviewer)
+  hooks/                    # plugin hooks (hooks.json, synapse-gate.sh: the synapse runner gate)
   skills/                   # skill definitions (incl. _shared/ helpers)
   governance/               # runtime governance docs loaded via ${CLAUDE_PLUGIN_ROOT}/governance/
   workflows/                # JSON workflow definitions (state machines) and the generated .js workflow scripts
@@ -397,8 +401,9 @@ README.md
 |---|---|---|
 | `hivemind:overlord` | opus | Session default agent. Routes each request to a workflow, then launches its workflow script or runs the workflow state machine and run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation and never writes code. |
 | `hivemind:cerebrate` | opus | Research and implementation planning: returns `STEP-NNN` steps with exact file scopes, dependencies, risks, and a delivery shape. No shell (Read, Glob, Grep, LSP, web tools, claude-mem search) and no file writes; branch state comes from the facts file. |
-| `hivemind:drone` | opus | Implementation within explicitly assigned file scope; the default owner of every step. Inside workflow scripts it also runs the facts and git steps. |
+| `hivemind:drone` | opus | Implementation within explicitly assigned file scope; the default owner of every step. |
 | `hivemind:changeling` | sonnet | Presentational UI/UX work within explicitly assigned file scope. |
+| `hivemind:synapse` | haiku | Runs one committed runner script (facts, commit, push or pull request) and relays its output word for word. Started only by workflow scripts, never by the overlord or a user. Tools: Bash and Write. A plugin hook allows only the five exact runner commands. |
 | `hivemind:local-reviewer` | opus | Pre-PR adversarial Codex review loop (`max_iterations` 10). Fixes simple findings itself (2 files or fewer, no architecture or contract impact), escalates complex ones to the overlord, and stops on break-fix cycles. Needs the `codex` companion. |
 | `hivemind:github-reviewer` | opus | Stateless, one-shot post-PR worker: fetches and classifies review feedback, applies fixes, pushes, replies, and resolves threads. Dispatched by `hivemind:github-review-loop`, which does the monitoring. |
 

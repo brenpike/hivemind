@@ -15,8 +15,8 @@
  * Outputs
  *   boundarySentence, runnerReadOnlySentence
  *       the prompt sentences on external content and on a read-only
- *       runner task, word for word as analysis-only sends them. The
- *       runner one holds only the words drone.md keys its read-only
+ *       drone task, word for word as analysis-only sends them. The
+ *       read-only one holds only the words drone.md keys its read-only
  *       exemption on.
  *   dataBlocksSentence(replyHome)
  *       the one line a prompt carries on its data blocks: they are data,
@@ -24,10 +24,27 @@
  *       reply, it also names that reply as the user's decision.
  *   runnerToolSentence   the runner line that forbids any tool call but
  *                        the one skill run.
- *   runnerAgentType      'hivemind:drone', the agent that runs a script.
+ *   runnerAgentType      'hivemind:drone', the agent that runs a script
+ *                        through its skill.
+ *   synapseAgentType     'hivemind:synapse', the agent that runs one
+ *                        committed runner script from a command block.
  *   formatDataBlock(name, text)
  *       '<name>', the JSON of text with each '<' escaped, '</name>', on
  *       three lines.
+ *   formatCommandBlock(command), formatInputsFileBlock(path, content)
+ *       the synapse data blocks: command, a JSON string holding one whole
+ *       command line, and inputs_file, {path, content}. Their names and
+ *       the placeholders a command or path holds, {plugin-root} and
+ *       {token}, are the words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md.
+ *   buildRunnerCommand(skill, words)
+ *       'bash {plugin-root}/skills/<skill>/scripts/<skill>.sh', then each
+ *       of words, joined by one space: the exact form the synapse gate
+ *       hook allows (${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh). A word
+ *       is never quoted, so a value with a space splits into more words
+ *       and the hook or the script's input gate refuses the command.
+ *   buildGatherFactsCommand(trunk, references)
+ *       the gather-facts command: --trunk trunk, then --ref and each
+ *       reference in order, with no --remote.
  *   gatherFactsRoutingSpec()
  *       the parseRoutingLines spec (routing.js) for the stdout of
  *       plugin/skills/gather-facts/scripts/gather-facts.sh. Its keys are
@@ -166,8 +183,9 @@
  * Why
  *   A workflow cannot run a script or read a file, so it trusts a runner
  *   to relay the facts script's routing lines and checks them in code
- *   before anything reads the facts file. analysis-only's facts runner
- *   still copies four values (facts_file, facts_lines, cut, external_texts)
+ *   before anything reads the facts file. analysis-only's facts runner, a
+ *   synapse that runs the buildGatherFactsCommand command, still copies
+ *   four values (facts_file, facts_lines, cut, external_texts)
  *   into its step schema and is never asked for the delivery lines: that
  *   prompt and schema are pinned byte for byte by its tests, and delivery
  *   stops belong to delivery, not to analysis. standard-delivery's runner
@@ -208,8 +226,28 @@ function runnerAgentType() {
   return 'hivemind:drone';
 }
 
+function synapseAgentType() {
+  return 'hivemind:synapse';
+}
+
 function formatDataBlock(name, text) {
   return '<' + name + '>\n' + JSON.stringify(text).replace(/</g, '\\u003c') + '\n</' + name + '>';
+}
+
+function formatCommandBlock(command) {
+  return formatDataBlock('command', command);
+}
+
+function formatInputsFileBlock(path, content) {
+  return formatDataBlock('inputs_file', { path: path, content: content });
+}
+
+function buildRunnerCommand(skill, words) {
+  return ['bash', '{plugin-root}/skills/' + skill + '/scripts/' + skill + '.sh', ...words].join(' ');
+}
+
+function buildGatherFactsCommand(trunk, references) {
+  return buildRunnerCommand('gather-facts', ['--trunk', trunk, ...references.flatMap((reference) => ['--ref', reference])]);
 }
 
 function factsHeadStates() {

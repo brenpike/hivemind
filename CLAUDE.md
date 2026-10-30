@@ -16,7 +16,8 @@ Project engineering principles governing how prose, scripts, and skills are fact
 .claude-plugin/marketplace.json   # marketplace manifest at repo root → source: ./plugin
 plugin/                           # plugin root (resolves to ${CLAUDE_PLUGIN_ROOT})
   .claude-plugin/plugin.json      # plugin manifest (name, version)
-  agents/{overlord,cerebrate,drone,changeling,local-reviewer,github-reviewer}.md
+  agents/{overlord,cerebrate,drone,changeling,synapse,local-reviewer,github-reviewer}.md
+  hooks/                          # hooks.json + synapse-gate.sh (PreToolUse runner gate)
   skills/<skill-name>/SKILL.md
   skills/_shared/                 # cross-skill shared assets: reference docs (LANGUAGE.md, DEEPENING.md) plus shell libraries sourced by skill engine scripts
   governance/                     # *.md loaded by agents at runtime

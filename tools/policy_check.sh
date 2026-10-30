@@ -1076,6 +1076,7 @@ REQUIRED_FILES=(
     'plugin/agents/overlord.md'
     'plugin/agents/drone.md'
     'plugin/agents/changeling.md'
+    'plugin/agents/synapse.md'
 )
 
 check2_found=false
@@ -1102,7 +1103,7 @@ mark_time 'CHECK2'
 echo ''
 echo '=== CHECK 3: Skill names exist ==='
 
-AGENT_NAMES=('cerebrate' 'overlord' 'drone' 'changeling' 'local-reviewer' 'github-reviewer')
+AGENT_NAMES=('cerebrate' 'overlord' 'drone' 'changeling' 'local-reviewer' 'github-reviewer' 'synapse')
 
 check3_found=false
 

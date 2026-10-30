@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'd433327a6a0b69f1';
+const BUILD_ID = 'bf179b85792ee1e7';
 
 function supportedSchemaKeywords(){
 return[
@@ -2079,8 +2079,23 @@ return'Make no other tool call.';
 function runnerAgentType(){
 return'hivemind:drone';
 }
+function synapseAgentType(){
+return'hivemind:synapse';
+}
 function formatDataBlock(name,text){
 return'<'+name+'>\n'+JSON.stringify(text).replace(/</g,'\\u003c')+'\n</'+name+'>';
+}
+function formatCommandBlock(command){
+return formatDataBlock('command',command);
+}
+function formatInputsFileBlock(path,content){
+return formatDataBlock('inputs_file',{path:path,content:content});
+}
+function buildRunnerCommand(skill,words){
+return['bash','{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh',...words].join(' ');
+}
+function buildGatherFactsCommand(trunk,references){
+return buildRunnerCommand('gather-facts',['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])]);
 }
 function factsHeadStates(){
 return['branch','detached','unsafe_name'];

@@ -605,7 +605,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '75681f02ea6e4a88';
+const BUILD_ID = '680484e131a2098f';
 
 function supportedSchemaKeywords(){
 return[
@@ -2062,8 +2062,23 @@ return'Make no other tool call.';
 function runnerAgentType(){
 return'hivemind:drone';
 }
+function synapseAgentType(){
+return'hivemind:synapse';
+}
 function formatDataBlock(name,text){
 return'<'+name+'>\n'+JSON.stringify(text).replace(/</g,'\\u003c')+'\n</'+name+'>';
+}
+function formatCommandBlock(command){
+return formatDataBlock('command',command);
+}
+function formatInputsFileBlock(path,content){
+return formatDataBlock('inputs_file',{path:path,content:content});
+}
+function buildRunnerCommand(skill,words){
+return['bash','{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh',...words].join(' ');
+}
+function buildGatherFactsCommand(trunk,references){
+return buildRunnerCommand('gather-facts',['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])]);
 }
 function factsHeadStates(){
 return['branch','detached','unsafe_name'];
@@ -2296,7 +2311,7 @@ facts_file:{type:'string',description:'The facts_file routing line value, copied
 facts_lines:{type:'string',description:'The facts_lines routing line value, copied exactly.'},
 cut:{type:'string',description:'The cut routing line value, copied exactly.'},
 external_texts:{type:'string',description:'The external_texts routing line value, copied exactly.'},
-blocker:{type:'string',description:'The blocker line the skill relayed.'}
+blocker:{type:'string',description:'The blocker line the script printed.'}
 },
 required:['outcome'],
 variants:{
@@ -2353,12 +2368,10 @@ check:buildTaggedSchema(buildReviseSpec({},shownLabels))
 }
 function buildFactsPrompt(trunk,references){
 return[
-'Invoke the hivemind:gather-facts skill once, with the trunk and references in the inputs block below and no remote.',
-runnerReadOnlySentence(),
+'Gather the branch facts with the command below.',
 dataBlocksSentence(),
-runnerToolSentence(),
 '',
-formatDataBlock('inputs',{trunk:trunk,references:references})
+formatCommandBlock(buildGatherFactsCommand(trunk,references))
 ].join('\n');
 }
 function buildAnalyzePrompt(request,facts){
@@ -2391,7 +2404,7 @@ function plannerOptions(label,phaseTitle,schema){
 return{agentType:PLANNER_AGENT_TYPE,schema:toAgentSchema(schema),label:label,phase:phaseTitle};
 }
 function factsOptions(){
-return{agentType:runnerAgentType(),model:'haiku',schema:toAgentSchema(FACTS_STEP_SCHEMA),label:'facts',phase:'Facts'};
+return{agentType:synapseAgentType(),model:'haiku',schema:toAgentSchema(FACTS_STEP_SCHEMA),label:'facts',phase:'Facts'};
 }
 function describeFactsProblem(facts){
 if(!validateSchema(FACTS_STEP_SCHEMA,facts).ok){
