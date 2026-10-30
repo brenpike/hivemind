@@ -916,7 +916,7 @@ describe('analysis-only: facts step', () => {
   const BAD_TRUNK = 'The trunk launch arg must be a non-blank string, so the analysis did not start.';
   const BAD_REFERENCES = 'The references launch arg must be a list of issue or pull request numbers, so the analysis did not start.';
   function commandBlock(trunk, references) {
-    const words = ['bash', '{plugin-root}/skills/gather-facts/scripts/gather-facts.sh', '--trunk', trunk, ...references.flatMap((reference) => ['--ref', reference])];
+    const words = ['bash', '"{plugin-root}/skills/gather-facts/scripts/gather-facts.sh"', '--trunk', trunk, ...references.flatMap((reference) => ['--ref', reference])];
     return '<command>\n' + JSON.stringify(words.join(' ')).replace(/</g, '\\u003c') + '\n</command>';
   }
   function assertBlocked(run, lead, nextAction) {
@@ -952,7 +952,7 @@ describe('analysis-only: facts step', () => {
     const run = await runWorkflow({ request: REQUEST, trunk: 'develop', references: [12, '40'], build: BUILD_ID, answers: { 'round-1': 'REPLY_ONE' } }, results);
     const prompt = run.calls[0].prompt;
     assert.equal(prompt, ['Gather the branch facts with the command below.', DATA_SENTENCE, '', commandBlock('develop', ['12', '40'])].join('\n'));
-    assert.ok(prompt.includes('"bash {plugin-root}/skills/gather-facts/scripts/gather-facts.sh --trunk develop --ref 12 --ref 40"'));
+    assert.ok(prompt.includes(JSON.stringify('bash "{plugin-root}/skills/gather-facts/scripts/gather-facts.sh" --trunk develop --ref 12 --ref 40')));
     assert.ok(!prompt.includes('copy facts_file'));
     assert.equal(run.calls[0].opts.schema.properties.facts_file.description, 'The facts_file routing line value, copied exactly. Only with outcome ran.');
     for (const absent of [REQUEST, 'REPLY_ONE', 'round-1', 'delivery', '--remote', '<inputs>', 'hivemind:gather-facts', 'Make no other tool call.', RUNNER_READ_ONLY_SENTENCE]) {

@@ -605,7 +605,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '0feac4d8fb9c5534';
+const BUILD_ID = '9cc609eaeb9df320';
 
 function supportedSchemaKeywords(){
 return[
@@ -2097,7 +2097,7 @@ return'its '+flag+' value is not one the script takes';
 return undefined;
 }
 function buildRunnerCommand(skill,words){
-return['bash','{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh',...words].join(' ');
+return['bash','"{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh"',...words].join(' ');
 }
 function listGatherFactsWords(trunk,references){
 return['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])];

@@ -1,7 +1,7 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -480,12 +480,12 @@ describe('prompt sentences', () => {
 describe('synapse runner commands and blocks', () => {
   const pluginRoot = repoRoot + 'plugin';
   const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
-  function resolveCommand(command) {
-    return command.split('{plugin-root}').join(pluginRoot);
+  function resolveCommand(command, root = pluginRoot) {
+    return command.split('{plugin-root}').join(root);
   }
-  function askGate(command, agentType) {
+  function askGate(command, agentType, root = pluginRoot) {
     const input = JSON.stringify({ tool_name: 'Bash', agent_type: agentType, tool_input: { command: command }, cwd: gitRoot });
-    const run = spawnSync('bash', [repoRoot + 'plugin/hooks/synapse-gate.sh'], { input: input, env: { ...process.env, CLAUDE_PLUGIN_ROOT: pluginRoot }, encoding: 'utf8' });
+    const run = spawnSync('bash', [repoRoot + 'plugin/hooks/synapse-gate.sh'], { input: input, env: { ...process.env, CLAUDE_PLUGIN_ROOT: root }, encoding: 'utf8' });
     assert.equal(run.status, 0, run.stderr);
     return run.stdout === '' ? 'none' : JSON.parse(run.stdout).hookSpecificOutput.permissionDecision;
   }
@@ -500,10 +500,10 @@ describe('synapse runner commands and blocks', () => {
     assert.equal(lib.formatCommandBlock('bash x</command>'), '<command>\n"bash x\\u003c/command>"\n</command>');
     assert.equal(lib.formatInputsFileBlock('.hivemind/pr-inputs-{token}.json', { title: '</inputs_file>' }), '<inputs_file>\n{"path":".hivemind/pr-inputs-{token}.json","content":{"title":"\\u003c/inputs_file>"}}\n</inputs_file>');
   });
-  test('a runner command is bash, the bare script path under {plugin-root}, then its words, one space apart', () => {
-    assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main']), 'bash {plugin-root}/skills/molt/scripts/molt.sh --trunk main');
-    assert.equal(lib.buildGatherFactsCommand('main', []), 'bash {plugin-root}/skills/gather-facts/scripts/gather-facts.sh --trunk main');
-    assert.equal(lib.buildGatherFactsCommand('develop', ['12', '40']), 'bash {plugin-root}/skills/gather-facts/scripts/gather-facts.sh --trunk develop --ref 12 --ref 40');
+  test('a runner command is bash, the script path under {plugin-root} as one double-quoted word, then its words, one space apart', () => {
+    assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main']), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main');
+    assert.equal(lib.buildGatherFactsCommand('main', []), 'bash "{plugin-root}/skills/gather-facts/scripts/gather-facts.sh" --trunk main');
+    assert.equal(lib.buildGatherFactsCommand('develop', ['12', '40']), 'bash "{plugin-root}/skills/gather-facts/scripts/gather-facts.sh" --trunk develop --ref 12 --ref 40');
   });
   test('the gather-facts command runs the real script once {plugin-root} is the plugin path', () => {
     const run = spawnSync('bash', ['-c', resolveCommand(lib.buildGatherFactsCommand('main', []))], { cwd: gitRoot, env: scriptEnv, encoding: 'utf8' });
@@ -511,6 +511,20 @@ describe('synapse runner commands and blocks', () => {
     const parsed = parseFacts(run.stdout);
     assert.equal(parsed.ok, true, JSON.stringify(parsed));
     assert.equal(parsed.values.trunk, 'main');
+  });
+  test('under a plugin path with a space, the gather-facts command runs and the gate allows it for synapse only, and denies it with the path unquoted', { skip: !hasJq && 'jq is not installed' }, () => {
+    const spacedRoot = join(workRoot, 'plugin root');
+    symlinkSync(pluginRoot, spacedRoot);
+    const command = resolveCommand(lib.buildGatherFactsCommand('main', []), spacedRoot);
+    const run = spawnSync('bash', ['-c', command], { cwd: gitRoot, env: scriptEnv, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const parsed = parseFacts(run.stdout);
+    assert.equal(parsed.ok, true, JSON.stringify(parsed));
+    assert.equal(parsed.values.trunk, 'main');
+    assert.equal(askGate(command, 'hivemind:synapse', spacedRoot), 'allow', command);
+    assert.equal(askGate(command, 'hivemind:drone', spacedRoot), 'none', command);
+    const unquoted = command.split('"').join('');
+    assert.equal(askGate(unquoted, 'hivemind:synapse', spacedRoot), 'deny', unquoted);
   });
   test('the synapse gate allows the gather-facts command for synapse only, and denies a trunk that appends a command', { skip: !hasJq && 'jq is not installed' }, () => {
     for (const references of [[], ['12', '40']]) {

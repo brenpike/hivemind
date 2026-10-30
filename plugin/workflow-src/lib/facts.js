@@ -46,15 +46,17 @@
  *       undefined when words is flag and value pairs, each flag a
  *       runnerValuePatterns() key and each value a string its pattern
  *       matches. Otherwise one lower case clause naming the first flag
- *       that fails, never its value. A word is never quoted, and the hook
- *       forbids quoting, so a value with a space would split into more
- *       words that could still match an exact form: a step checks its
- *       words with this before it builds a command and stops on a
- *       problem.
+ *       that fails, never its value. A value word is never quoted, and
+ *       the hook forbids quoting it, so a value with a space would split
+ *       into more words that could still match an exact form: a step
+ *       checks its words with this before it builds a command and stops
+ *       on a problem.
  *   buildRunnerCommand(skill, words)
- *       'bash {plugin-root}/skills/<skill>/scripts/<skill>.sh', then each
- *       of words, joined by one space: the exact form the synapse gate
- *       hook allows. It checks nothing itself.
+ *       'bash "{plugin-root}/skills/<skill>/scripts/<skill>.sh"', then
+ *       each of words, joined by one space: the exact form the synapse
+ *       gate hook allows. The script path is the one double-quoted word,
+ *       so a plugin path with a space stays one word. It checks nothing
+ *       itself.
  *   listGatherFactsWords(trunk, references)
  *       the gather-facts words: --trunk trunk, then --ref and each
  *       reference in order, with no --remote.
@@ -281,7 +283,7 @@ function describeRunnerWordProblem(words) {
 }
 
 function buildRunnerCommand(skill, words) {
-  return ['bash', '{plugin-root}/skills/' + skill + '/scripts/' + skill + '.sh', ...words].join(' ');
+  return ['bash', '"{plugin-root}/skills/' + skill + '/scripts/' + skill + '.sh"', ...words].join(' ');
 }
 
 function listGatherFactsWords(trunk, references) {

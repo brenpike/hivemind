@@ -572,8 +572,8 @@ function runScriptIn(scratch, scriptPath, scriptArgs) {
  * Does what synapse.md says a runner does with a prompt: it puts the plugin
  * root for {plugin-root} and token for {token}, writes the inputs_file
  * content as JSON to its path when the block is there, then runs the
- * command split on single spaces with no shell, as the exact form the gate
- * hook allows has no quoting.
+ * filled command with bash -c, as the Bash tool does, so the double-quoted
+ * script path stays one word.
  */
 function runCommandBlock(scratch, prompt, token) {
   const fill = (text) => text.split('{plugin-root}').join(pluginRoot).split('{token}').join(token);
@@ -581,9 +581,10 @@ function runCommandBlock(scratch, prompt, token) {
     const inputsFile = readDataBlock(prompt, 'inputs_file');
     writeRepoFile(scratch, fill(inputsFile.path), JSON.stringify(inputsFile.content));
   }
-  const words = fill(readDataBlock(prompt, 'command')).split(' ');
-  assert.equal(words[0], 'bash');
-  return runScriptIn(scratch, words[1], words.slice(2));
+  const command = fill(readDataBlock(prompt, 'command'));
+  assert.ok(command.startsWith('bash '), command);
+  const run = spawnSync('bash', ['-c', command], { cwd: scratch.repo, env: scratch.env, encoding: 'utf8' });
+  return run.status === 0 ? { outcome: 'ran', stdout: run.stdout } : { outcome: 'blocked', stderr: run.stderr };
 }
 
 function realFactsRunner(scratch) {
@@ -1090,7 +1091,7 @@ const ROW_TESTS = {
     test('the facts runner is a synapse that runs the gather-facts command of its command block', async () => {
       const run = await runWorkflow({ request: REQUEST, references: [5] }, happyResults());
       const call = callOf(run, 'facts-1');
-      assert.deepEqual(call.prompt.split('\n'), ['Gather the branch facts with the command below.', lib.dataBlocksSentence(), '', '<command>', JSON.stringify('bash {plugin-root}/skills/gather-facts/scripts/gather-facts.sh --trunk main --ref 5'), '</command>']);
+      assert.deepEqual(call.prompt.split('\n'), ['Gather the branch facts with the command below.', lib.dataBlocksSentence(), '', '<command>', JSON.stringify('bash "{plugin-root}/skills/gather-facts/scripts/gather-facts.sh" --trunk main --ref 5'), '</command>']);
       assert.equal(readDataBlock(call.prompt, 'command'), lib.buildGatherFactsCommand('main', ['5']));
       assert.ok(!call.prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(!call.prompt.includes('set stdout'));
@@ -2004,7 +2005,7 @@ const ROW_TESTS = {
       const run = await runWorkflow({ request: REQUEST, trunk: 'trunk-zq' }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'branch-1');
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash {plugin-root}/skills/create-working-branch/scripts/create-working-branch.sh --base base-zq --branch feature/branch-zq --classification bugfix --trunk-freshness fresh --trunk trunk-zq');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "{plugin-root}/skills/create-working-branch/scripts/create-working-branch.sh" --base base-zq --branch feature/branch-zq --classification bugfix --trunk-freshness fresh --trunk trunk-zq');
       assert.deepEqual(readRunnerInputs(call.prompt), { base: 'base-zq', branch: 'feature/branch-zq', classification: 'bugfix', trunk_freshness: 'fresh', trunk: 'trunk-zq' });
       const outsideCommand = withoutDataBlock(call.prompt, 'command');
       for (const name of ['trunk-zq', 'branch-zq', 'base-zq', 'bugfix']) {
@@ -2239,7 +2240,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'commit-1-1');
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash {plugin-root}/skills/molt/scripts/molt.sh --trunk main --inputs .hivemind/molt-inputs-{token}.json');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main --inputs .hivemind/molt-inputs-{token}.json');
       assert.deepEqual(readDataBlock(call.prompt, 'inputs_file'), { path: '.hivemind/molt-inputs-{token}.json', content: { type: 'fix', breaking: true, subject: 'Step S1 is done.', files: ['src/a.js', 'src/b.js'] } });
       assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file').split('\n'), ['Run the command below to commit the wave of plan steps that just ran.', main.commitGrantSentence(), lib.dataBlocksSentence(), '']);
       assert.equal(call.opts.agentType, 'hivemind:synapse');
@@ -4281,7 +4282,7 @@ const ROW_TESTS = {
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'PR');
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'stdout', 'stderr']);
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash {plugin-root}/skills/open-plan-pr/scripts/open-plan-pr.sh --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-{token}.json');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "{plugin-root}/skills/open-plan-pr/scripts/open-plan-pr.sh" --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-{token}.json');
       const inputsFile = readDataBlock(call.prompt, 'inputs_file');
       assert.deepEqual(Object.keys(inputsFile), ['path', 'content']);
       assert.equal(inputsFile.path, '.hivemind/pr-inputs-{token}.json');
@@ -6925,7 +6926,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults());
       for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
-        assert.ok(readDataBlock(prompt, 'command').startsWith('bash {plugin-root}/skills/'), label);
+        assert.ok(readDataBlock(prompt, 'command').startsWith('bash "{plugin-root}/skills/'), label);
         assert.equal(hasDataBlock(prompt, 'inputs_file'), label !== 'facts-1' && label !== 'branch-1', label);
       }
       assert.ok(readDataBlock(callOf(run, 'commit-1-1').prompt, 'inputs_file').path.includes('{token}'));
