@@ -1549,4 +1549,6 @@ First finding: the pull request title ignores a title the request sets, and is b
 - **Titles over 256 code points are cut.** Bounded impact: only a request title longer than 256 code points is cut, at a word and never inside an open bracket.
 - **`hivemind:spawn-brood` is unchanged.** A strain description is the child's request, so the plan `title` field covers a title it sets. No brood-specific title path is added (ADR-0007).
 
+**Local review finding.** A title over the cut room made only of opening brackets, with or without trimmed punctuation, or only of characters the cleaner strips, built a type-only title such as `feat:`. Fixed at the plan check: `buildTitleText(plan)` in `pr.js` is the one source of the text after the type, and `describePlanProblem` refuses a plan whose text is empty with a fixed message that names no title text (SD-08, SD-44).
+
 Links: https://github.com/brenpike/hivemind/issues/469, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).

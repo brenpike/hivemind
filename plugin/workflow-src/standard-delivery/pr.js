@@ -42,7 +42,10 @@
  *           commit type of the plan classification, the breaking marker, a
  *           colon and plan.title, never the summary, cut at a word only when
  *           longer than maxTitleLength() code points, never inside a
- *           bracket the cut text opened (issue 469). The body is the
+ *           bracket the cut text opened (issue 469). buildTitleText(plan)
+ *           gives the text after the prefix; the plan check refuses a plan
+ *           whose text is empty, so the title is never only its type
+ *           (issue 469). The body is the
  *           plan summary and the
  *           comment a fixed lead, each followed by the one run record
  *           buildRunRecordParts() returns, the same record the final
@@ -161,9 +164,23 @@ function cutTitleText(text, room) {
   return closeTitleBrackets(trimTitleEnd(kept));
 }
 
+function buildTitlePrefix(plan) {
+  return commitTypeMap()[plan.classification] + (plan.breaking ? '!' : '') + ':';
+}
+
+/**
+ * Returns the pull request title text after its prefix: plan.title cleaned
+ * as pull request text and cut to the room maxTitleLength() leaves after
+ * the prefix and one space. describePlanProblem (plan.js) refuses a plan
+ * whose text is empty, so a checked plan never gets a type-only title.
+ */
+function buildTitleText(plan) {
+  return cutTitleText(cleanTitleText(plan.title), maxTitleLength() - buildTitlePrefix(plan).length - 1);
+}
+
 function buildPullRequestTitle(plan) {
-  const prefix = commitTypeMap()[plan.classification] + (plan.breaking ? '!' : '') + ':';
-  const text = cutTitleText(cleanTitleText(plan.title), maxTitleLength() - prefix.length - 1);
+  const prefix = buildTitlePrefix(plan);
+  const text = buildTitleText(plan);
   return text === '' ? prefix : prefix + ' ' + text;
 }
 

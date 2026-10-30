@@ -1410,6 +1410,19 @@ const ROW_TESTS = {
         'a title typed ' + JSON.stringify(title),
         planResult(makePlan({ title: title })),
         'The plan title starts with a commit type, which the workflow writes before it, so the delivery stopped.'
+      ]),
+      ...[
+        ['only (', '('.repeat(300)],
+        ['only [', '['.repeat(300)],
+        ['only {', '{'.repeat(300)],
+        ['nested and mixed openers', '([{'.repeat(100)],
+        ['openers with spaces between them', '( [ { '.repeat(60)],
+        ['punctuation then openers', '-,;: ' + '(['.repeat(150)],
+        ['only characters the cleaner strips', '\u0001\u0007\u0085\u009f\t\n']
+      ].map(([kind, title]) => [
+        'a title of ' + kind,
+        planResult(makePlan({ title: title })),
+        'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so the delivery stopped.'
       ])
     ]) {
       test(`${label} ${result === null ? 'ends' : 'pauses'} before the branch step`, async () => {
@@ -4436,6 +4449,15 @@ const ROW_TESTS = {
         const built = main.buildPullRequestTitle(makePlan({ classification: 'bugfix', breaking: true, title: title }));
         assert.ok(isPullRequestText(built, false) && !built.includes('\n'), JSON.stringify(built));
         assert.ok(Array.from(built).length <= main.maxTitleLength() && !built.includes('…'), JSON.stringify(built));
+      }
+    });
+    test('the title is the prefix, a space and buildTitleText(plan), which is empty only for a title the plan check refuses', () => {
+      for (const title of ['Add the cache layer', '(' + 'word '.repeat(60), 'x'.repeat(400)]) {
+        const plan = makePlan({ classification: 'bugfix', breaking: true, title: title });
+        assert.equal(main.buildPullRequestTitle(plan), 'fix!: ' + main.buildTitleText(plan));
+      }
+      for (const title of ['('.repeat(300), '['.repeat(300), '{'.repeat(300), '([{'.repeat(100), '-,;: ' + '(['.repeat(150), '\u0001\u0007\u0085']) {
+        assert.equal(main.buildTitleText(makePlan({ title: title })), '', JSON.stringify(title));
       }
     });
     test('the PR inputs carry the title built from plan.title', async () => {

@@ -626,7 +626,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '6a370d2d4ebf008f';
+const BUILD_ID = 'ec8b91dc0739da21';
 
 function supportedSchemaKeywords(){
 return[
@@ -3048,6 +3048,9 @@ const typedTitle=new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\(
 if(typedTitle.test(cleanTitleText(plan.title))){
 return'The plan title starts with a commit type, which the workflow writes before it, so '+RUN_NAME+' stopped.';
 }
+if(buildTitleText(plan)===''){
+return'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so '+RUN_NAME+' stopped.';
+}
 const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
 if(isOnOtherBranch&&plan.branch!==facts.branch){
 return'The run started on branch '+encodeUntrustedText(facts.branch)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+', so '+RUN_NAME+' stopped.';
@@ -3291,9 +3294,15 @@ const lastSpace=characters.slice(0,room+1).lastIndexOf(' ');
 const kept=characters.slice(0,lastSpace>0?lastSpace:room).join('');
 return closeTitleBrackets(trimTitleEnd(kept));
 }
+function buildTitlePrefix(plan){
+return commitTypeMap()[plan.classification]+(plan.breaking?'!':'')+':';
+}
+function buildTitleText(plan){
+return cutTitleText(cleanTitleText(plan.title),maxTitleLength()-buildTitlePrefix(plan).length-1);
+}
 function buildPullRequestTitle(plan){
-const prefix=commitTypeMap()[plan.classification]+(plan.breaking?'!':'')+':';
-const text=cutTitleText(cleanTitleText(plan.title),maxTitleLength()-prefix.length-1);
+const prefix=buildTitlePrefix(plan);
+const text=buildTitleText(plan);
 return text===''?prefix:prefix+' '+text;
 }
 function renderPullRequestGates(run,gates){
