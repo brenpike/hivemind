@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.2] - 2026-10-30
+
+### Changed
+
+- safety-rails Commit Authority gains a standing `COMMIT-GRANT synapse:` line bounded by the synapse runner gate, and synapse leaves delegated-implementer. The commit and PR runner prompts carry no grant sentence: `commitGrantSentence`, `pushGrantSentence` and row SD-43 are removed. The policy fixtures pin the grant set and synapse's standing-grant sentence. No prose budget changed (#480).
+- Docs: the ADR-0037 amendment (#480).
+
+### Fixed
+
+- The synapse runner no longer refuses the commit or PR step for want of a grant from the user or the prompt (#480).
+
 ## [7.5.1] - 2026-10-30
 
 ### Changed

@@ -1364,17 +1364,17 @@ Second finding: agent frontmatter cannot scope Write. The hook closes it for syn
 **The engine side.**
 
 - **Agent types.** The facts, branch, commit and pull request runners are `hivemind:synapse` on haiku (`synapseAgentType()`). The scan, validation and fix rounds stay `hivemind:drone` (`droneAgentType()`, renamed from `runnerAgentType`). The analysis-only facts step runs on synapse too.
-- **The prompt.** A task line; the commit or push grant sentence, for the commit and pull request runners only; `dataBlocksSentence()`; a `command` block holding the one command line `buildRunnerCommand` builds; and for the commit and pull request runners an `inputs_file` block `{path, content}`. The placeholders `{plugin-root}` and `{token}` are the words of `plugin/agents/synapse.md`. Synapse replaces `{plugin-root}` with the `${CLAUDE_PLUGIN_ROOT}` that Claude Code substitutes in agent content, and `{token}` with a token it makes. The engine cannot make the token: the workflow runtime throws on `Date.now()` and `Math.random()`, and a fixed token breaks the transient retry (SD-71), which sends the same prompt again to a file that already exists.
+- **The prompt.** (amended 2026-10-30, issue 480: the prompt carries no grant sentence now.) A task line; the commit or push grant sentence, for the commit and pull request runners only; `dataBlocksSentence()`; a `command` block holding the one command line `buildRunnerCommand` builds; and for the commit and pull request runners an `inputs_file` block `{path, content}`. The placeholders `{plugin-root}` and `{token}` are the words of `plugin/agents/synapse.md`. Synapse replaces `{plugin-root}` with the `${CLAUDE_PLUGIN_ROOT}` that Claude Code substitutes in agent content, and `{token}` with a token it makes. The engine cannot make the token: the workflow runtime throws on `Date.now()` and `Math.random()`, and a fixed token breaks the transient retry (SD-71), which sends the same prompt again to a file that already exists.
 - **The runner word check.** Before each runner call, the step checks every command word against the hook's value classes with `describeRunnerWordProblem` in `plugin/workflow-src/lib/facts.js`. A word outside its class is a terminal cause that names its flag and never its value, and no runner call is made. Without it, a word the hook refuses would reach synapse, be denied, and pause the run on a stop that no reply can fix. The standard-delivery runners and the analysis-only facts step both check.
 - **The branch taxonomy.** SD-08 refuses a plan branch outside `^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)/[a-z0-9]+(-[a-z0-9]+)*$`, the Branch Taxonomy and Branch Naming of `plugin/governance/workflow.md`. Like every plan problem, it pauses and plans again on the reply.
 - **Pull request attribution.** Under SD-45, a title, body or comment that holds a `forbiddenSubjectTexts()` string, in any case, is a terminal stop before any push.
-- **Rows.** SD-12, SD-15, SD-18, SD-42 and SD-43 are updated for the synapse prompts. SD-74 is added: the runner agent types, the prompt words, the word check, and that every command the engine builds is an exact form the hook allows for `hivemind:synapse`. A test runs each built command through the real hook, and another pins the prompt words in `plugin/agents/synapse.md`.
+- **Rows.** (amended 2026-10-30, issue 480: SD-43 is removed.) SD-12, SD-15, SD-18, SD-42 and SD-43 are updated for the synapse prompts. SD-74 is added: the runner agent types, the prompt words, the word check, and that every command the engine builds is an exact form the hook allows for `hivemind:synapse`. A test runs each built command through the real hook, and another pins the prompt words in `plugin/agents/synapse.md`.
 
 **Fixtures and checks.**
 
 - `tests/policy/safety-synapse-gate.json`: an equal-mode set check on the hook's `add_gate_member` lines, which are the agent type `hivemind:synapse` and the five scripts. It also pins the claim sentence of the Synapse Runner Gate subsection and its consumers in `plugin/agents/synapse.md` and `plugin/hooks/hooks.json`.
 - `tests/policy/safety-synapse-tools.json`: an equal-mode set check that the `tools:` list of `plugin/agents/synapse.md` is exactly Bash and Write, with Skill and Edit absent from its frontmatter.
-- `tests/policy/safety-reviewer-fix-commits.json`: gains the `(Commit Authority)` consumer in `plugin/agents/synapse.md`.
+- `tests/policy/safety-reviewer-fix-commits.json`: gains the `(Commit Authority)` consumer in `plugin/agents/synapse.md`. (amended 2026-10-30, issue 480: gains a synapse member and pins.)
 - `tools/policy_check.sh`: synapse joins `AGENT_NAMES` and `REQUIRED_FILES`.
 
 **Surface account.**
@@ -1385,7 +1385,7 @@ Second finding: agent frontmatter cannot scope Write. The hook closes it for syn
 
 **Recorded residuals.**
 
-- **Cross-script use (Q2).** Root cause: the hook keys on the agent type and the exact form, not on the step. Synapse can run any of the five exact commands with no prompt, not only its own step's, so a runner that obeyed injected text could run another of the five with safe arguments. Bounded impact: each value passes its class, every script refuses trunk, a dirty tree and bad names, and the pull request runner already holds the push grant. Why the obvious fix was rejected: binding each runner to its script needs five agent types, or a hook that reads the agent's prompt from an undocumented transcript layout. Both add surface.
+- **Cross-script use (Q2).** (amended 2026-10-30, issue 480: every synapse call holds the grant.) Root cause: the hook keys on the agent type and the exact form, not on the step. Synapse can run any of the five exact commands with no prompt, not only its own step's, so a runner that obeyed injected text could run another of the five with safe arguments. Bounded impact: each value passes its class, every script refuses trunk, a dirty tree and bad names, and the pull request runner already holds the push grant. Why the obvious fix was rejected: binding each runner to its script needs five agent types, or a hook that reads the agent's prompt from an undocumented transcript layout. Both add surface.
 - **Renamed copies are not caught.** Root cause: the deny matches the five file names. A renamed or copied script, another interpreter or launcher that runs a script without naming its file, or any command that does not name the five, gets no decision from the hook. The normal flow applies: a prompt in manual mode, and the classifier in auto mode, which ran a planted copy in the spike. Bounded impact: the hook's allow never covers them, so this is the auto-mode exposure decision 6 already records, and no worse than before this change. Why the obvious fix was rejected: a list of interpreters or launchers is a deny-list that grows with each miss.
 - **A hook failure falls back to prompts.** Root cause: when the hook cannot decide, it outputs nothing and never exits 2. That covers a missing `jq`, an empty `CLAUDE_PLUGIN_ROOT`, malformed input, a timeout, `disableAllHooks` or `allowManagedHooksOnly`, and a Windows host with no bash. Runner commands and Writes then go through the normal flow: a prompt in manual mode unless a settings rule covers the call, and the classifier in auto mode. Lookalike commands are not denied. Bounded impact: the hook itself fails toward a prompt, never toward an allow of its own. A settings allow rule that covers the call still applies, with none of the hook's checks; for synapse's inputs-file Write that is the seeded rules, recorded below (local review finding 793dbf65). Why the obvious fix was rejected: failing closed, with exit 2, would block every Bash call in every hivemind session whenever the hook breaks.
 - **Made-up inputs-file tokens, extended to synapse (smoke-603 N4).** Root cause: synapse makes the token for its commit and pull request runs, because the engine cannot. Bounded impact: a reused token makes the Write fail, since synapse has no Read and Write refuses to overwrite a file the agent has not read. The step returns blocked, the run pauses, and the reply runs the step again with a new token. The failure is visible and recoverable, never a silent overwrite. Why the obvious fix was rejected: the workflow runtime has no clock or random source, and a fixed token breaks the retry.
@@ -1529,7 +1529,7 @@ The second one names the brood, an internal detail, and is cut inside a parenthe
 
 - **Q1, title length: option A.** Decided by the autonomy table during the run and shown to the user. The code cap goes from 72 to 256 code points, so a title the request sets stays whole. A title the planner writes stays within 72 code points by the field rule.
 - **Q2, type source: option A.** Decided by the autonomy table during the run and shown to the user. The workflow writes the type from the plan's classification and breaking judgment, the same source as the commits and the branch. The `title` field holds only the text after the type, and the plan check refuses a title that starts with a commit type, in any letter case, so a title never carries two types.
-- **Light path.** The run's commit step was blocked by the synapse agent refusing the commit grant, so the user chose (2026-10-30, answer A) to finish #469 on the light path. That refusal is a separate bug, fixed next.
+- **Light path.** The run's commit step was blocked by the synapse agent refusing the commit grant, so the user chose (2026-10-30, answer A) to finish #469 on the light path. That refusal is a separate bug, fixed next. (amended 2026-10-30, issue 480: fixed by issue 480.)
 
 **First-finding triage, per ADR-0038.**
 
@@ -1552,3 +1552,41 @@ First finding: the pull request title ignores a title the request sets, and is b
 **Local review finding.** A title over the cut room made only of opening brackets, with or without trimmed punctuation, or only of characters the cleaner strips, built a type-only title such as `feat:`. Fixed at the plan check: `buildTitleText(plan)` in `pr.js` is the one source of the text after the type, and `describePlanProblem` refuses a plan whose text is empty with a fixed message that names no title text (SD-08, SD-44).
 
 Links: https://github.com/brenpike/hivemind/issues/469, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
+
+## Amendment 2026-10-30: synapse holds a standing commit and push grant (issue 480)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/480. Run wf_20505fbb-879 (#469, 7.5.0) stopped at its first commit. Synapse returned this (quoted as data): "Blocked, nothing run. The commit grant is not from the user. The user request is only \"Merged\". The commit authority text sits in the computed task, which the harness says carries no user authority."
+
+**The user's decision (2026-10-30, answer A).**
+
+- Synapse gets a standing commit and push grant. It is limited to the exact runner commands the hook allows. The hook stays the only gate.
+- The user also approved, with the same answer, deleting the SD-43 test and rewriting the SD-15, SD-34 and SD-42 assertions.
+
+**First-finding triage, per ADR-0038.**
+
+First finding: the synapse agent refused a commit because the grant sat in the prompt text.
+
+- **Introduced or inherited.** Introduced by issue 467 (7.5.0).
+- **Root class.** Commit and push authority carried as prompt text and judged by the agent.
+- **Removed instead of hardened.** Synapse leaves the delegated-implementer class. The per-prompt grant check in `plugin/agents/synapse.md` is removed. The engine functions `commitGrantSentence` and `pushGrantSentence` are removed. SD-43 is removed.
+
+**Surface account.**
+
+- Removed: 2 engine functions, 1 contract row and its test, 1 agent clause, 1 grantee.
+- Added: 1 grant line, 1 fixture set member, 3 fixture pins, 1 SD-74 test.
+- The runtime surface shrinks.
+
+**Rows.** SD-15, SD-42 and SD-74 are updated. SD-43 is removed.
+
+**Fixtures.** `tests/policy/safety-reviewer-fix-commits.json` gains the synapse member and its pins. `tests/policy/safety-synapse-gate.json` gains a `plugin/governance/safety-rails.md` consumer.
+
+**Recorded residuals.**
+
+- **Cross-script use is widened.** Root cause: no prompt narrows the grant, so every synapse call holds it. Bounded impact: the runner prompts carry no request text, each value passes its class, each script refuses trunk, a dirty tree and bad names. The hook was already the only hard gate, by user decision.
+- **Haiku adherence.** Root cause: the harness label "no user authority" still reaches the agent. Bounded impact: the new wording lowers the misfire risk and does not remove it.
+
+**Landing.** This landed on the light path. The first engine run after merge is the live check: an engine run must commit through synapse with no user grant in the session.
+
+**Prose budget.** The standard-delivery prose measured 43203 against a budget of 43800. The budget is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/480, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
