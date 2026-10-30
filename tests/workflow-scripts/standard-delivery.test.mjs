@@ -501,6 +501,15 @@ function withoutDataBlock(prompt, name) {
   return lines.slice(0, start).concat(lines.slice(start + 3)).join('\n');
 }
 
+/**
+ * The prompt text outside its command block and, when it has one, its
+ * inputs_file block.
+ */
+function readTextOutsideRunnerBlocks(prompt) {
+  const outside = withoutDataBlock(prompt, 'command');
+  return hasDataBlock(outside, 'inputs_file') ? withoutDataBlock(outside, 'inputs_file') : outside;
+}
+
 function resumeWith(launchArgs, pausedResult, reply) {
   return { ...launchArgs, ...pausedResult.resume_args, reply: reply };
 }
@@ -2259,7 +2268,7 @@ const ROW_TESTS = {
     });
   },
   'SD-15': () => {
-    test('the commit runner commits the wave files with the mapped type under a commit grant, from its command and inputs_file blocks', async () => {
+    test('the commit runner commits the wave files with the mapped type, from its command and inputs_file blocks', async () => {
       const plan = makePlan({ classification: 'bugfix', breaking: true, steps: [makeStep('S1', ['src/a.js', 'src/b.js']), makeStep('S2', ['src/c.js', 'src/b.js'])] });
       const results = happyResults({ 'plan-1': planResult(plan), 'work-1-S1': WORKER_DONE, 'work-1-S2': WORKER_DONE, 'commit-1-2': commitRelay({ commit: THIRD }), ...tailResults(1, THIRD) });
       const run = await runWorkflow(LAUNCH, results);
@@ -2267,7 +2276,7 @@ const ROW_TESTS = {
       const call = callOf(run, 'commit-1-1');
       assert.equal(readDataBlock(call.prompt, 'command'), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main --inputs .hivemind/molt-inputs-{token}.json');
       assert.deepEqual(readDataBlock(call.prompt, 'inputs_file'), { path: '.hivemind/molt-inputs-{token}.json', content: { type: 'fix', breaking: true, subject: 'Step S1 is done.', files: ['src/a.js', 'src/b.js'] } });
-      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file').split('\n'), ['Run the command below to commit the wave of plan steps that just ran.', main.commitGrantSentence(), lib.dataBlocksSentence(), '']);
+      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file').split('\n'), ['Run the command below to commit the wave of plan steps that just ran.', lib.dataBlocksSentence(), '']);
       assert.equal(call.opts.agentType, 'hivemind:synapse');
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'Commit');
@@ -2870,7 +2879,7 @@ const ROW_TESTS = {
         ].join('\n\n')
       });
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'validate-1-1']);
-      assert.ok(run.calls.every((call) => !/push/i.test(call.prompt.replace(/never push|no push|grants no push|, push/gi, ''))), 'no call pushes');
+      assert.ok(run.calls.every((call) => !/push/i.test(call.prompt.replace(/never push|no push|, push/gi, ''))), 'no call pushes');
     });
     test('every tail ask goes through askTail, and no tail ask ends the run', () => {
       assert.ok(!moduleSource.includes('finishTailAsk') && !moduleSource.includes('before_pr'));
@@ -3588,12 +3597,12 @@ const ROW_TESTS = {
     });
   },
   'SD-34': () => {
-    test('the commit runner commits an empty file list after the review under the commit grant', async () => {
+    test('the commit runner commits an empty file list after the review', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const commit = callOf(run, 'review-commit-1-1');
       assert.deepEqual(readRunnerInputs(commit.prompt), { files: [], type: 'feat', breaking: false, subject: 'apply the local review fixes', trunk: 'main' });
       assert.ok(commit.prompt.startsWith('Run the command below to commit the local review that just ran, with an empty file list.\n'), commit.prompt);
-      assert.ok(commit.prompt.includes(main.commitGrantSentence()));
+      assert.ok(!/grant/i.test(readTextOutsideRunnerBlocks(commit.prompt)), commit.prompt);
       assert.equal(commit.opts.agentType, 'hivemind:synapse');
       assert.equal(commit.opts.phase, 'Commit');
       assert.equal(commit.opts.model, 'haiku');
@@ -4299,10 +4308,10 @@ const ROW_TESTS = {
       assert.equal(run.phases.at(-1), 'PR');
       const call = callOf(run, 'pr-1');
       const outside = withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file');
-      assert.deepEqual(outside.split('\n'), ['Run the command below to push the working branch and open its pull request or reuse the open one.', main.pushGrantSentence(), lib.dataBlocksSentence(), '']);
+      assert.deepEqual(outside.split('\n'), ['Run the command below to push the working branch and open its pull request or reuse the open one.', lib.dataBlocksSentence(), '']);
       assert.ok(!call.prompt.includes('set stdout'));
       assert.ok(!call.prompt.includes(lib.runnerReadOnlySentence()));
-      assert.ok(!call.prompt.includes(main.commitGrantSentence()));
+      assert.ok(!/grant/i.test(outside), outside);
       assert.equal(call.opts.agentType, 'hivemind:synapse');
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'PR');
@@ -4357,25 +4366,6 @@ const ROW_TESTS = {
         assert.deepEqual(readRunnerInputs(callOf(third, label).prompt), readRunnerInputs(callOf(third, 'pr-1').prompt), label);
         assert.equal(callOf(third, label).opts.phase, 'PR');
       }
-    });
-  },
-  'SD-43': () => {
-    test('the push grant sentence matches the delegated-implementer grant of safety-rails.md', () => {
-      const grantLine = safetyRailsText.split('\n').find((line) => line.startsWith('- `COMMIT-GRANT delegated-implementer:`'));
-      assert.ok(grantLine !== undefined, 'safety-rails.md has the delegated-implementer grant line');
-      assert.ok(grantLine.includes('commit or push ONLY when their delegation explicitly authorizes it for that specific delegation'), grantLine);
-      assert.ok(grantLine.includes('A push runs only through `hivemind:open-plan-pr` or `hivemind:push-branch`, never against the resolved trunk branch.'), grantLine);
-      const sentence = main.pushGrantSentence();
-      assert.ok(sentence.startsWith('This delegation explicitly grants push authority for this one task: '), sentence);
-      assert.ok(sentence.includes('one push of the working branch and one pull request opened or reused, made only by the open-plan-pr script.'), sentence);
-      assert.ok(sentence.endsWith(' It grants no commit, and no push of the trunk.'), sentence);
-    });
-    test('only the PR prompt carries the push grant: wave workers and the commit runner never do', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults());
-      const granted = run.calls.filter((call) => call.prompt.includes(main.pushGrantSentence())).map((call) => call.opts.label);
-      assert.deepEqual(granted, ['pr-1']);
-      assert.ok(main.commitGrantSentence().endsWith('It grants no push.'));
-      assert.ok(!callOf(run, 'work-1-STEP-001').prompt.includes('push'));
     });
   },
   'SD-44': () => {
@@ -6971,6 +6961,28 @@ const ROW_TESTS = {
       assert.equal(lib.synapseAgentType(), 'hivemind:synapse');
       assert.equal(lib.droneAgentType(), 'hivemind:drone');
       assert.equal(lib.runnerAgentType, undefined);
+    });
+    test('no runner prompt carries a commit or push grant: synapse commits and pushes under its standing grant, bounded by the hook', async () => {
+      const happy = await runWorkflow(LAUNCH, happyResults());
+      const fixFlow = await runWorkflow(LAUNCH, fixFlowResults());
+      const runnerCalls = [happy, fixFlow].flatMap((run) => run.calls).filter((call) => call.opts.agentType === 'hivemind:synapse');
+      assert.ok(runnerCalls.some((call) => call.opts.label === 'fix-commit-1-1') && runnerCalls.some((call) => call.opts.label === 'pr-1'));
+      for (const call of runnerCalls) {
+        assert.ok(!/grant/i.test(readTextOutsideRunnerBlocks(call.prompt)), call.opts.label);
+      }
+      assert.equal(main.commitGrantSentence, undefined);
+      assert.equal(main.pushGrantSentence, undefined);
+      const synapseGrantLines = safetyRailsText.split('\n').filter((line) => line.startsWith('- `COMMIT-GRANT synapse:`'));
+      assert.equal(synapseGrantLines.length, 1);
+      assert.ok(synapseGrantLines[0].includes('(Synapse Runner Gate)'), synapseGrantLines[0]);
+      assert.ok(synapseGrantLines[0].includes('Its prompt neither grants nor revokes it'), synapseGrantLines[0]);
+      const implementerLine = safetyRailsText.split('\n').find((line) => line.startsWith('- `COMMIT-GRANT delegated-implementer:`'));
+      assert.ok(implementerLine.startsWith('- `COMMIT-GRANT delegated-implementer:` drone and changeling commit or push ONLY when'), implementerLine);
+      assert.ok(!implementerLine.includes('synapse'), implementerLine);
+      const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
+      assert.ok(synapseText.includes('It needs no grant in the prompt and no message from the user, so never report `blocked` for want of one.'));
+      assert.ok(!synapseText.includes('explicitly grant'));
+      assert.ok(!synapseText.includes('without the grant'));
     });
     test('the runner prompts use the block names and placeholders of synapse.md', async () => {
       const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
