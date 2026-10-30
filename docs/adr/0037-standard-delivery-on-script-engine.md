@@ -153,7 +153,7 @@ Claude Code 2.1.308, in manual mode and in auto mode, with the plugin loaded by 
 | A skill's `allowed-tools` entry `Edit(<glob>)`, with no bare `Write`, approves a Write to a matching path (main session and an untyped workflow agent; a control Write prompted) | PASS | Decision 9 |
 | F1: in 1 of 3 sessions whose result named a PR, the overlord went to the watch hand-off without first showing the workflow's `message` | FINDING | Deferred items |
 | F2: a workflow planner's Grep of the plugin's governance folder, outside the working folder, prompts (`reasonCode: workingDir`); an unattended auto run waited 1h54m on it | FINDING | Recorded residuals; issue 428. Amended 2026-10-23: bounded by the skill entry for marketplace installs (see Amendment 2026-10-23: skill allowed-tools file grants) |
-| F3: the PR title was 256 characters, cut mid-word, from a one-paragraph plan summary | FINDING, fixed in PR8: the title takes the summary's first sentence, and the whole title is at most 72 code points, cut at a word, with no ellipsis (SD-44) | Decision 3 |
+| F3: the PR title was 256 characters, cut mid-word, from a one-paragraph plan summary | FINDING, fixed in PR8: the title takes the summary's first sentence, and the whole title is at most 72 code points, cut at a word, with no ellipsis (SD-44). Amended 2026-10-30 (issue 469): the title now comes from the plan `title` field, not the summary, is cut only past 256 code points, and never ends inside an open bracket (see Amendment 2026-10-30: the pull request title is a plan field (issue 469)) | Decision 3 |
 | F4: the github-reviewer added an EYES reaction to a Codex summary with no findings | FINDING (watch path, current engine) | Deferred items |
 
 Smoke limits: the plugin loaded from a checkout, not from a marketplace install, so the Read rule check did not reach its target. The Codex plugin was not loaded in any session, so the local reviewer did not run. The `Edit(<glob>)` check used untyped workflow agents and only paths that match the glob. Each verdict comes from one to three sessions.
@@ -1515,3 +1515,37 @@ This section records a user decision on local review finding bd7cc0ef on issue 4
 Links: https://github.com/brenpike/hivemind/issues/467, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
 
 Links: https://github.com/brenpike/hivemind/issues/467, `~/code/hivemind-workflow-spikes/results-467.md` (the spike), `docs/adr/0010-permission-allowlist-posture.md` (Amendment 2026-10-29), `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
+
+## Amendment 2026-10-30: the pull request title is a plan field (issue 469)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/469. Two brood strains in a consumer repository set a pull request title in their strain text, and both pull requests ignored it. Main there now carries these squash titles, which cannot be fixed without rewriting main:
+
+- `feat: Issue #166 is slice 2 of epic #162 (PRD N7, S9 to S11) (#177)`
+- `feat: Strain tank-layout of brood-6c0bad3e (issue #148; PRD C7, X5, new (#178)`
+
+The second one names the brood, an internal detail, and is cut inside a parenthesis.
+
+**The user's decisions.**
+
+- **Q1, title length: option A (assumed).** The code cap goes from 72 to 256 code points, so a title the request sets stays whole. A title the planner writes stays within 72 code points by the field rule.
+- **Q2, type source.** The workflow writes the type from the plan's classification and breaking judgment, the same source as the commits and the branch. The `title` field holds only the text after the type, and the plan check refuses a title that starts with a commit type, so a title never carries two types.
+
+**First-finding triage, per ADR-0038.**
+
+First finding: the pull request title ignores a title the request sets, and is built from the planner's description of the work.
+
+- **Introduced or inherited.** Inherited from the PR8 fix for F3 (see PR8 live smoke), which took the title from the summary's first sentence. It is fixed at its source in this pull request.
+- **Root class.** A description field used as the title source. `buildPullRequestTitle` (SD-44) built the title from the commit type plus the first sentence of `plan.summary`. The summary describes the work for the pull request body, so a title the request or strain text sets never reached the title, the planner's wording ("Strain tank-layout of brood-...") became the title, and `cutTitleText` cut at a word with no bracket check.
+- **Removed instead of hardened.** `readFirstSentence`, and the summary as the title source. No prompt rule about how to word the summary was added. The title has one source: the required plan `title` field.
+- **The new rule.** The planner copies a title the request sets word for word, without its type. Otherwise it writes a short title of its own that names no brood id, strain id or strain name unless the request asks. `cutTitleText` never ends inside an open `(`, `[` or `{`. A title wholly inside a bracket over the cap drops its unclosed opener instead of cutting to nothing. A blank title already fails the schema.
+- **Surface account.** Added: the `title` field in `plugin/references/plan-schema.json` and one plan check clause that refuses a title starting with a commit type. Removed: `readFirstSentence`. Changed: the code cap in `maxTitleLength()` goes from 72 to 256 code points, and 72 stays as the field rule for titles the planner writes.
+- **Rows.** SD-44 (the title source, the cap and the bracket rule) and SD-08 (the plan check clause) are updated.
+
+**Recorded residuals.**
+
+- **Planner adherence.** Root cause: the brood and strain id rule, and matching the classification to the type of a title the request sets, are planner rules. Bounded impact: code has no ground truth for either, since the child session holds no brood ids, so a planner miss shows only in the title text. The type still comes from the classification, so a title never carries two types.
+- **Request title types outside the classifications.** Root cause: the type comes from the eight classifications. Bounded impact: a request title whose type is outside them (`perf:`, `build:`) or that carries a scope (`fix(ui):`) cannot be reproduced exactly; the text after the type is kept and the type is the classification's.
+- **Titles over 256 code points are cut.** Bounded impact: only a request title longer than 256 code points is cut, at a word and never inside an open bracket.
+- **`hivemind:spawn-brood` is unchanged.** A strain description is the child's request, so the plan `title` field covers a title it sets. No brood-specific title path is added (ADR-0007).
+
+Links: https://github.com/brenpike/hivemind/issues/469, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
