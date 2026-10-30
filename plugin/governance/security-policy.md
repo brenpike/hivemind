@@ -245,6 +245,7 @@ What the gate does not guard:
 - A plugin root inside the repository, such as a checkout loaded as the plugin. There a branch edit to a runner script runs with no prompt. The skill grants have the same exposure.
 - Cross-script use. Synapse can run any of the five exact commands with no prompt, not only its own step's. Each script still refuses trunk, a dirty tree and bad names. This residual is recorded in ADR-0037.
 - A plugin root whose path holds `"`, `$`, a backtick or a control character. No fixed shell quoting carries those bytes, so such a root has no exact form: the five runner commands are denied for every agent, and other plugin script commands fail in the shell. It fails closed, never toward an allow. A Windows path with backslashes is unverified; the hook turns `\` into `/` before matching, so a command written with backslashes is denied. This residual is recorded in ADR-0037.
+- A same-user program racing the inputs-file Write. The hook checks the path and then allows, and Claude Code opens the path again for the Write, so a program running as the same user in the checkout could swap the leaf or `.hivemind` for a symlink in between. Such a program can already write any file the user can, so it gains nothing. A symlink already there, committed or checked out, cannot race: the hook refuses it. This is outside the threat model by user decision (2026-10-30), recorded in ADR-0037 with local review finding 149210d3.
 
 ### Enforcement Order
 
