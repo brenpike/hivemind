@@ -166,6 +166,18 @@ advance_branch_elsewhere() {
     ELSEWHERE_SHA="$(run_git "$second_tree" rev-parse HEAD)"
 }
 
+# set_remote_head <remote> <end> -> points the local refs/remotes/<remote>/HEAD at <end> as a
+# symbolic ref, as `git clone` or `git remote set-head` would. <end> need not exist.
+set_remote_head() {
+    run_git "$WORK_TREE" symbolic-ref "refs/remotes/$1/HEAD" "$2"
+}
+
+# delete_remote_head <remote> -> removes the local refs/remotes/<remote>/HEAD itself (never its
+# end), so a case does not depend on whether this git version writes it. Absent is not an error.
+delete_remote_head() {
+    run_git "$WORK_TREE" update-ref --no-deref -d "refs/remotes/$1/HEAD"
+}
+
 # install_pre_push_hook [extra shell line] -> client pre-push hook in `w` that appends one line to
 # $WORLD_ROOT/pre-push.log per push attempt, then runs the optional extra line (the drift).
 install_pre_push_hook() {
@@ -485,6 +497,7 @@ assert_base_passes() {
 test_base_ref_identity_passes() {
     local sha out rc=0 expected
     create_world base-identity-codex-repro
+    delete_remote_head origin
     run_git "$WORK_TREE" checkout -q main
     run_git "$WORK_TREE" branch team/main
     run_git "$WORK_TREE" commit --allow-empty -q -m on-main
@@ -537,6 +550,105 @@ test_base_remote_image_refused() {
     assert_equal base-remote-image-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs base-remote-image-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
     assert_remote_refs base-remote-image-other-unchanged "$OTHER_DIR" ''
+}
+
+# ── Remote default branch ────────────────────────────────────────────────────
+
+# create_on_main_world <name> -> a world whose `w` is on main one commit ahead of origin main,
+# with no remote HEAD ref. Sets MAIN_SHA to that commit.
+create_on_main_world() {
+    create_world "$1"
+    delete_remote_head origin
+    delete_remote_head other
+    run_git "$WORK_TREE" checkout -q main
+    run_git "$WORK_TREE" branch team/main
+    run_git "$WORK_TREE" commit --allow-empty -q -m on-main
+    MAIN_SHA="$(head_sha)"
+}
+
+# A current branch that is the default branch of a remote `git remote` lists stops with nothing
+# pushed, whatever base names: the remote's local HEAD ref points at the branch, and a spoofed
+# base (team/main, develop) names another ref. The stop holds in explicit, upstream and origin
+# modes. A stop that trusts the base name pushes main in every case here.
+test_remote_default_refused() {
+    local base_spelling
+    create_on_main_world remote-default
+    set_remote_head origin refs/remotes/origin/main
+    install_pre_push_hook
+    for base_spelling in team/main develop; do
+        assert_blocker "remote-default-explicit-${base_spelling//\//-}" "$WORK_TREE" "$MISMATCH_REASON" \
+            --head main --base "$base_spelling" --remote origin
+        assert_blocker "remote-default-origin-mode-${base_spelling//\//-}" "$WORK_TREE" "$MISMATCH_REASON" \
+            --head main --base "$base_spelling" --no-upstream origin --on-reject warn
+    done
+    run_git "$WORK_TREE" config branch.main.remote origin
+    run_git "$WORK_TREE" config branch.main.merge refs/heads/main
+    for base_spelling in team/main develop; do
+        assert_blocker "remote-default-upstream-${base_spelling//\//-}" "$WORK_TREE" "$MISMATCH_REASON" \
+            --head main --base "$base_spelling" --on-reject warn
+    done
+    assert_equal remote-default-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+    assert_remote_refs remote-default-other-unchanged "$OTHER_DIR" ''
+}
+
+# The remote HEAD end is compared by ref identity after the ASCII case fold, dangling or not, on
+# every remote `git remote` lists, a remote name holding `/` used whole: a case-variant end, a
+# dangling end on the second remote, an end under refs/heads/, and a slash remote all stop. A
+# remote HEAD git cannot read stops with the read reason.
+test_remote_default_any_end() {
+    create_on_main_world remote-default-end
+    install_pre_push_hook
+    set_remote_head origin refs/remotes/Origin/MAIN
+    assert_blocker remote-default-end-case-variant "$WORK_TREE" "$MISMATCH_REASON" \
+        --head main --base develop --remote origin
+    delete_remote_head origin
+    set_remote_head other refs/remotes/other/main
+    assert_blocker remote-default-end-dangling-second-remote "$WORK_TREE" "$MISMATCH_REASON" \
+        --head main --base develop --remote origin
+    delete_remote_head other
+    set_remote_head origin refs/heads/main
+    assert_blocker remote-default-end-local-branch "$WORK_TREE" "$MISMATCH_REASON" \
+        --head main --base develop --remote origin
+    delete_remote_head origin
+    run_git "$WORK_TREE" remote add up/stream "$WORLD_ROOT/upstream.git"
+    set_remote_head up/stream refs/remotes/up/stream/main
+    assert_blocker remote-default-end-slash-remote "$WORK_TREE" "$MISMATCH_REASON" \
+        --head main --base develop --remote origin
+    delete_remote_head up/stream
+    mkdir -p "$WORK_TREE/.git/refs/remotes/origin"
+    printf 'ref: \n' >"$WORK_TREE/.git/refs/remotes/origin/HEAD"
+    assert_blocker remote-default-end-unreadable "$WORK_TREE" "$UNREADABLE_BASE_REASON" \
+        --head main --base develop --remote origin
+    rm -f "$WORK_TREE/.git/refs/remotes/origin/HEAD"
+    assert_equal remote-default-end-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-end-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+}
+
+# A remote HEAD ref that is absent, or not symbolic, gives no default, and a branch that is not
+# the default passes while the remote HEAD points elsewhere.
+test_remote_default_passes() {
+    create_on_main_world remote-default-absent
+    assert_success_on_main remote-default-absent
+    create_on_main_world remote-default-not-symbolic
+    run_git "$WORK_TREE" update-ref --no-deref refs/remotes/origin/HEAD "$TRUNK_SHA"
+    assert_success_on_main remote-default-not-symbolic
+
+    create_world remote-default-other-branch
+    set_remote_head origin refs/remotes/origin/main
+    assert_base_passes remote-default-other-branch main
+}
+
+# assert_success_on_main <name> -> in the current on-main world, asserts the engine pushes main at
+# MAIN_SHA with a spoofed base, and that origin then carries main at MAIN_SHA.
+assert_success_on_main() {
+    local name="$1" out rc=0 expected
+    printf -v expected 'branch: main\ncommit: %s\n' "$MAIN_SHA"
+    run_engine "$WORK_TREE" out "$WORKDIR/$name.err" \
+        --head main --base develop --remote origin || rc=$?
+    assert_equal "$name-exit" 0 "$rc" "exit code"
+    assert_equal "$name-passes" "$expected" "$out" "stdout"
+    assert_remote_refs "$name-pushed" "$ORIGIN_DIR" "refs/heads/main $MAIN_SHA"
 }
 
 # ── Expected commit (--expect-commit) ────────────────────────────────────────
@@ -961,6 +1073,9 @@ test_base_any_spelling
 test_base_names_other_refs
 test_base_ref_identity_passes
 test_base_remote_image_refused
+test_remote_default_refused
+test_remote_default_any_end
+test_remote_default_passes
 test_expect_commit
 test_explicit_sets_upstream
 test_explicit_non_ff_no_retry

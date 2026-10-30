@@ -10,7 +10,10 @@
 # branch, and an unreadable trunk. Trunk names the current branch only by ref identity: one of
 # git's six lookup candidates for it, or the end a candidate resolves to, is refs/heads/<b> or
 # refs/remotes/<remote>/<b> for a remote `git remote` lists, compared exactly after an ASCII case
-# fold. A trunk that only ends with `/<b>` does not. A dirty path outside `files` is printed as an
+# fold. A trunk that only ends with `/<b>` does not. Whatever --trunk says, the current branch is
+# also trunk when refs/remotes/<remote>/HEAD of a listed remote names it. No world here fetches,
+# so no remote HEAD exists unless a case writes one, and results do not depend on the git version.
+# A dirty path outside `files` is printed as an
 # `outside: <JSON string>` stderr line before the blocker. With nothing listed dirty it prints
 # `committed: false`; otherwise it stages exactly the dirty listed paths, commits them with the
 # message built from the inputs, verifies the commit, and prints
@@ -509,6 +512,95 @@ test_trunk_ref_identity() {
         --trunk "team/$BRANCH" --inputs "$INPUTS_REL"
 }
 
+# set_remote_head <remote> <end> -> adds <remote> to the current world's `git remote` list (a
+# path that does not exist; nothing is fetched) and points refs/remotes/<remote>/HEAD at <end>,
+# which need not exist.
+set_remote_head() {
+    run_git "$WORK_TREE" remote add "$1" "$WORLD_ROOT/$1.git"
+    run_git "$WORK_TREE" symbolic-ref "refs/remotes/$1/HEAD" "$2"
+}
+
+# create_main_world <name> -> create_world, then switches to main with a clean tree and an inputs
+# file that lists nothing, so a run that passes every refusal prints committed false on main.
+create_main_world() {
+    create_world "$1"
+    run_git "$WORK_TREE" checkout -q main
+    write_basic_inputs '[]'
+}
+
+# The current branch is also trunk when it is the default branch of a remote `git remote` lists,
+# read from refs/remotes/<remote>/HEAD, whatever --trunk says. A spoofed trunk on main stops with
+# nothing changed when origin's HEAD names main, as an existing, case-variant or dangling end, a
+# local branch end, through a remote whose name holds `/`, or through a second remote. A remote
+# HEAD that is absent or not symbolic passes, and an unreadable one stops the run.
+test_remote_default_branch() {
+    local trunk_spelling index=0
+    create_main_world remote-default
+    run_git "$WORK_TREE" update-ref refs/remotes/origin/main "$MAIN_SHA"
+    set_remote_head origin refs/remotes/origin/main
+    for trunk_spelling in develop release/main team/main; do
+        index=$((index + 1))
+        assert_refused_unchanged "remote-default-spoofed-$index" "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+            --trunk "$trunk_spelling" --inputs "$INPUTS_REL"
+    done
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_refused_unchanged remote-default-dirty "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-case
+    set_remote_head origin refs/remotes/origin/MAIN
+    assert_refused_unchanged remote-default-case "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-dangling
+    set_remote_head origin refs/remotes/origin/main
+    assert_refused_unchanged remote-default-dangling "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-local-end
+    set_remote_head origin refs/heads/main
+    assert_refused_unchanged remote-default-local-end "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-slash-name
+    set_remote_head team/up refs/remotes/team/up/main
+    assert_refused_unchanged remote-default-slash-name "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-second-remote
+    set_remote_head origin refs/remotes/origin/develop
+    set_remote_head upstream refs/remotes/upstream/main
+    assert_refused_unchanged remote-default-second-remote "$WORK_TREE" "$IS_TRUNK_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-unreadable
+    set_remote_head origin refs/remotes/origin/main
+    printf 'garbage\n' >"$WORK_TREE/.git/refs/remotes/origin/HEAD"
+    assert_refused_unchanged remote-default-unreadable "$WORK_TREE" "$UNREADABLE_TRUNK_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-absent
+    set_remote_head origin refs/remotes/origin/main
+    run_git "$WORK_TREE" symbolic-ref --delete refs/remotes/origin/HEAD
+    assert_success remote-default-absent-proceeds "$WORK_TREE" \
+        "$(printf 'branch: main\ncommit: %s\ncommitted: false' "$MAIN_SHA")" --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-not-symbolic
+    run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
+    run_git "$WORK_TREE" update-ref refs/remotes/origin/HEAD "$MAIN_SHA"
+    assert_success remote-default-not-symbolic-proceeds "$WORK_TREE" \
+        "$(printf 'branch: main\ncommit: %s\ncommitted: false' "$MAIN_SHA")" --trunk develop --inputs "$INPUTS_REL"
+
+    create_world remote-default-other-branch
+    run_git "$WORK_TREE" update-ref refs/remotes/origin/main "$MAIN_SHA"
+    set_remote_head origin refs/remotes/origin/main
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_commit_run remote-default-other-branch-proceeds "$WORK_TREE" "$INPUTS_REL"
+    assert_committed remote-default-other-branch-proceeds "$(printf 'M\tf.txt')" 'feat(core): add thing'
+}
+
 # ── Outside paths ───────────────────────────────────────────────────────────
 
 test_outside_paths() {
@@ -840,6 +932,7 @@ test_inputs_field_refusals
 test_git_state_refusals
 test_trunk_refusals
 test_trunk_ref_identity
+test_remote_default_branch
 test_outside_paths
 test_nothing_to_commit
 test_commits

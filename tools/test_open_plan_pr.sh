@@ -1012,7 +1012,7 @@ test_create_failures() {
 # ── Push outcomes through the real push-branch.sh ───────────────────────────
 
 test_push_outcomes() {
-    local hook_path
+    local hook_path spoofed_base index=0
     create_world push-rejected
     hook_path="$ORIGIN_DIR/hooks/pre-receive"
     printf '#!/bin/sh\necho denied >&2\nexit 1\n' >"$hook_path"
@@ -1071,6 +1071,19 @@ test_push_outcomes() {
     stub_create_ok
     assert_refused_unchanged base-is-branch "$WORK_TREE" "$PUSH_MISMATCH_REASON" \
         --head "$BRANCH" --base "$BRANCH" --inputs "$INPUTS_REL"
+
+    for spoofed_base in develop release/main; do
+        index=$((index + 1))
+        create_world "remote-default-$index"
+        run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+        run_git "$WORK_TREE" checkout -q main
+        stub_respond pr-list '' '[]'
+        stub_create_ok main "$TRUNK_SHA"
+        assert_refused_unchanged "remote-default-$index" "$WORK_TREE" "$PUSH_MISMATCH_REASON" \
+            --head main --base "$spoofed_base" --inputs "$INPUTS_REL"
+        assert_equal "remote-default-$index-origin" "refs/heads/main $TRUNK_SHA" "$(list_remote_refs)" \
+            "nothing pushed to origin"
+    done
 }
 
 # ── Strict parse of push-branch.sh output (fake child in a copied tree) ─────

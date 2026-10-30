@@ -19,7 +19,9 @@
 # and invalid enum values all give the fixed usage blocker):
 #   --head <branch>              REQUIRED. Expected current branch.
 #   --base <branch>              REQUIRED. Trunk; neither the base nor any ref it names may name
-#                                the current branch (see BASE below).
+#                                the current branch, and, whatever the base is, the current branch
+#                                may not be the default branch of any remote `git remote` lists
+#                                (see BASE and DEFAULT below).
 #   --remote <name>              OPTIONAL. Explicit push remote (explicit mode).
 #   --expect-commit <sha>        OPTIONAL. The commit HEAD must be. Checked in this process,
 #                                before any push, so the commit pushed is the one the caller's
@@ -53,6 +55,16 @@
 #        stops with `cannot read base`, and a failed compare with `cannot compare the current
 #        branch with base`. A base that names more than one ref does not stop the run: none of
 #        them is b. Base is read once and never again.
+#   DEFAULT then, whatever base is, the run stops with `current branch does not match head or
+#        equals base` when b is the default branch of a remote `git remote` lists
+#        (hivemind_branch_is_remote_default in _shared/git-refusals.sh): that remote's local
+#        refs/remotes/<remote>/HEAD is a symbolic ref whose end, dangling or not, is b's own ref
+#        or b's image on a listed remote, after the same ASCII case fold. A remote name that
+#        contains `/` is used whole. A remote HEAD git cannot read stops with `cannot read base`,
+#        and a failed compare with `cannot compare the current branch with base`. A listed remote
+#        with no HEAD ref, or a HEAD ref that is not symbolic, passes (`git clone` writes the ref;
+#        `git remote set-head <remote> --auto` restores it). A push remote that `git remote` does
+#        not list (an explicit --remote path) is not seen.
 #   MODE explicit: --remote given; push to it, then record the upstream.
 #        upstream: branch.<b>.remote or branch.<b>.merge non-empty. Both must then be non-empty,
 #                  merge must equal refs/heads/<b>, remote is gated. Push remote is
@@ -121,7 +133,8 @@
 #
 # The base stop compares refs exactly, by the rule in _shared/git-refusals.sh. It shares that
 # rule with create-working-branch and molt. A base that only ends with `/<b>`, such as
-# release/<b>, is another branch and does not stop the run.
+# release/<b>, is another branch and does not stop the run. The DEFAULT stop shares
+# hivemind_branch_is_remote_default with them the same way.
 #
 # RECORDED RESIDUAL R1 (implicit PR head): moved to plugin/skills/open-plan-pr/scripts/open-plan-pr.sh.
 #
@@ -358,6 +371,22 @@ refuse_base_names_branch() {
   esac
 }
 refuse_base_names_branch
+
+# refuse_remote_default_branch
+#   Blocks when the current branch is the default branch of a remote `git remote` lists, read with
+#   hivemind_branch_is_remote_default, whatever base names. Runs in the main shell so blocker
+#   exits it.
+refuse_remote_default_branch() {
+  local default_rc=0
+  hivemind_branch_is_remote_default "$current_branch" || default_rc=$?
+  case "$default_rc" in
+    0) ;;
+    1) blocker "$mismatch_reason" ;;
+    2) blocker "cannot read base" ;;
+    *) blocker "cannot compare the current branch with base" ;;
+  esac
+}
+refuse_remote_default_branch
 
 if [ "$expect_commit_seen" = true ]; then
   [ "$head_sha" = "$expect_commit" ] || blocker "HEAD is not the expected commit"
