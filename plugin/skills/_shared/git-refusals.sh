@@ -73,12 +73,32 @@
 #     HIVEMIND__NAME_CANDIDATES holds the last NAME LOOKUP list built. They are internal to the
 #     walk and carry no contract.
 #
+#   hivemind_branch_is_remote_default <branch>
+#     Tells whether <branch> is the default branch of a remote git lists. It reads `git remote`
+#     once and builds the same branch refs as hivemind_resolve_name_refs: refs/heads/<branch>,
+#     plus refs/remotes/<remote>/<branch> for each listed remote. Then, for each listed remote in
+#     `git remote` order, it reads `git symbolic-ref --quiet refs/remotes/<remote>/HEAD` once. A
+#     remote name may contain `/` and is used whole, never split. When the end that HEAD ref
+#     names (dangling or not) equals a branch ref, both ASCII case folded, <branch> is that
+#     remote's default branch. A remote with no HEAD ref, or a HEAD ref that is not symbolic,
+#     gives no default. No remote is assumed: with no listed remote, no branch is a default.
+#     Returns 0 no listed remote's default branch is <branch>, 1 <branch> is a listed remote's
+#     default branch, 2 cannot read a remote HEAD (a git error other than not symbolic or
+#     absent, or git prints no end), 3 cannot compare (an empty <branch>, `git remote` failed, or
+#     a case fold failed). Codes 1, 2 and 3 from the remote reads come from the first remote, in
+#     `git remote` order, that raises one.
+#
+#   HIVEMIND__REMOTE_LISTING and HIVEMIND__BRANCH_REFS hold the last `git remote` listing read
+#   and the last branch refs built, for both functions above. They are internal and carry no
+#   contract.
+#
 #   REMOTE IMAGE LAYOUT: the branch refs above assume each remote fetches with git's default
 #   layout, refs/remotes/<remote>/*. A remote whose fetch refspec maps its branches elsewhere
 #   is not seen as an image of the branch. Deferred:
 #   https://github.com/brenpike/hivemind/issues/409#issuecomment-6303470852
 #
-#   RECORDED RESIDUAL R1 (case fold): both name functions fold ASCII case before they compare.
+#   RECORDED RESIDUAL R1 (case fold): both name functions and hivemind_branch_is_remote_default
+#     fold ASCII case before they compare.
 #     Root cause:  a case-insensitive file system stores refs/heads/Main and refs/heads/main as
 #                  one file, so there the two spellings are one branch.
 #     Bounded impact: on a case-sensitive file system two case-variant branches (Main and main)
@@ -144,6 +164,27 @@ hivemind__matches_any_ref() {
     [ "$ref_text" != "$branch_ref" ] || return 0
   done
   return 1
+}
+
+# hivemind__set_branch_refs <branch>
+#   Reads `git remote` once into HIVEMIND__REMOTE_LISTING, as git prints it. Sets
+#   HIVEMIND__BRANCH_REFS to refs/heads/<branch> plus refs/remotes/<remote>/<branch> for each
+#   listed remote, all ASCII case folded. Returns 3 when `git remote` or a case fold fails, else 0.
+#   INTERNAL (double underscore): not a caller entry point.
+hivemind__set_branch_refs() {
+  local branch_text="$1"
+  local remote_folded remote_name branch_folded
+  HIVEMIND__REMOTE_LISTING="$(git remote 2>/dev/null)" || return 3
+  remote_folded="$(hivemind__fold_ascii_case "$HIVEMIND__REMOTE_LISTING")" || return 3
+  branch_folded="$(hivemind__fold_ascii_case "$branch_text")" || return 3
+  HIVEMIND__BRANCH_REFS=("refs/heads/$branch_folded")
+  while IFS= read -r remote_name; do
+    [ -n "$remote_name" ] || continue
+    HIVEMIND__BRANCH_REFS+=("refs/remotes/$remote_name/$branch_folded")
+  done <<EOF
+$remote_folded
+EOF
+  return 0
 }
 
 # hivemind_ref_names_branch <name text> <branch>
@@ -212,27 +253,16 @@ hivemind_resolve_name_refs() {
   local name_text="$1"
   local branch_text="$2"
   local candidate_name candidate_folded end_folded existing_end='' candidate_rc
-  local remote_listing remote_folded remote_name branch_folded
-  local -a branch_refs
   HIVEMIND_NAME_AMBIGUOUS=false
   HIVEMIND_NAME_REF=''
   if [ -n "$branch_text" ]; then
-    remote_listing="$(git remote 2>/dev/null)" || return 3
-    remote_folded="$(hivemind__fold_ascii_case "$remote_listing")" || return 3
-    branch_folded="$(hivemind__fold_ascii_case "$branch_text")" || return 3
-    branch_refs=("refs/heads/$branch_folded")
-    while IFS= read -r remote_name; do
-      [ -n "$remote_name" ] || continue
-      branch_refs+=("refs/remotes/$remote_name/$branch_folded")
-    done <<EOF
-$remote_folded
-EOF
+    hivemind__set_branch_refs "$branch_text" || return 3
   fi
   hivemind__set_name_candidates "$name_text"
   for candidate_name in "${HIVEMIND__NAME_CANDIDATES[@]}"; do
     if [ -n "$branch_text" ]; then
       candidate_folded="$(hivemind__fold_ascii_case "$candidate_name")" || return 3
-      if hivemind__matches_any_ref "$candidate_folded" "${branch_refs[@]}"; then
+      if hivemind__matches_any_ref "$candidate_folded" "${HIVEMIND__BRANCH_REFS[@]}"; then
         return 1
       fi
     fi
@@ -242,7 +272,7 @@ EOF
     [ -n "$HIVEMIND_CANDIDATE_END" ] || continue
     if [ -n "$branch_text" ]; then
       end_folded="$(hivemind__fold_ascii_case "$HIVEMIND_CANDIDATE_END")" || return 3
-      if hivemind__matches_any_ref "$end_folded" "${branch_refs[@]}"; then
+      if hivemind__matches_any_ref "$end_folded" "${HIVEMIND__BRANCH_REFS[@]}"; then
         return 1
       fi
     fi
@@ -253,6 +283,33 @@ EOF
     existing_end="$HIVEMIND_CANDIDATE_END"
   done
   [ "$HIVEMIND_NAME_AMBIGUOUS" = true ] || HIVEMIND_NAME_REF="$existing_end"
+  return 0
+}
+
+# hivemind_branch_is_remote_default <branch>
+#   See API above.
+hivemind_branch_is_remote_default() {
+  local branch_text="$1"
+  local remote_name head_end end_folded head_rc
+  [ -n "$branch_text" ] || return 3
+  hivemind__set_branch_refs "$branch_text" || return 3
+  while IFS= read -r remote_name; do
+    [ -n "$remote_name" ] || continue
+    head_rc=0
+    head_end="$(git symbolic-ref --quiet "refs/remotes/$remote_name/HEAD" 2>/dev/null)" || head_rc=$?
+    case "$head_rc" in
+      0) ;;
+      1) continue ;;
+      *) return 2 ;;
+    esac
+    [ -n "$head_end" ] || return 2
+    end_folded="$(hivemind__fold_ascii_case "$head_end")" || return 3
+    if hivemind__matches_any_ref "$end_folded" "${HIVEMIND__BRANCH_REFS[@]}"; then
+      return 1
+    fi
+  done <<EOF
+$HIVEMIND__REMOTE_LISTING
+EOF
   return 0
 }
 
