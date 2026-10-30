@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Docs: the ADR-0037 amendment (#480).
 - Docs: the cross-script residuals in ADR-0037 and the Synapse Runner Gate cite each runner script's header as its surface instead of restating it, in place of a false shared refusal list (#480).
 - Docs: the synapse grant's bound is stated once, in the Synapse Runner Gate, which says the hook enforces it and the normal permission flow applies when the hook cannot decide; the grant line, the silence paragraph and ADR-0037 cite it instead of calling the gate the only bound (#480).
+- Docs: the synapse grant line no longer limits the grant to workflow-script starts, and the Synapse Runner Gate records that nothing checks who starts synapse, a recorded residual in ADR-0037 (#480).
 
 ### Fixed
 

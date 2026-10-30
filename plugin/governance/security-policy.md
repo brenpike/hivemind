@@ -217,7 +217,7 @@ An operator DECLINING a prompt carries TWO SEPARATE consequences; keep them sepa
 
 ### Synapse Runner Gate
 
-This subsection is the one canonical statement of the synapse runner gate. `hivemind:synapse` is the agent a workflow script starts to run one committed runner script. Its only tools are Bash and Write. Only workflow scripts start it. The overlord never delegates to it. The gate is a plugin PreToolUse hook, `${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh`, registered in `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` for the Bash and Write tools.
+This subsection is the one canonical statement of the synapse runner gate. `hivemind:synapse` is the agent a workflow script starts to run one committed runner script. Its only tools are Bash and Write. Workflow scripts start it; the overlord never delegates to it. Nothing enforces who starts it, as the list below states. The gate is a plugin PreToolUse hook, `${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh`, registered in `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` for the Bash and Write tools.
 
 The gate knows five runner scripts: `molt.sh`, `gather-facts.sh`, `create-working-branch.sh`, `bump-type.sh` and `open-plan-pr.sh`. Each lives at `skills/<name>/scripts/<name>.sh` under the plugin root. A command is in exact form when it is `bash`, then one of those script paths under `CLAUDE_PLUGIN_ROOT`, then only the flags that script takes, each value in its fixed class, with single spaces between them. The script path is always one double-quoted word: `bash "<root>/skills/<name>/scripts/<name>.sh"`. A bare path is not exact. `<root>` is `CLAUDE_PLUGIN_ROOT` exactly as Claude Code sets it, never rewritten. So the path the hook matches is the one Claude Code substitutes into synapse's command and the one bash runs, and the hook's shared checks load from under that same root. Anything else is not exact: other quotes, a redirection, a pipe, a chained or appended command, a substitution, a control character, or a relative or copied path.
 
@@ -240,6 +240,7 @@ Synapse commits or pushes only under the `synapse` grant in `${CLAUDE_PLUGIN_ROO
 
 What the gate does not guard:
 
+- Who starts synapse. The hook checks only the agent type and the command, so nothing checks that a workflow script started the agent. The standing grant holds for any synapse call. Bounded impact: only the main session starts agents (ADR-0005), and the main session already holds the commit and push grant for the same scripts, so a synapse started some other way gains no new kind of git write. This is recorded in ADR-0037 by user decision (2026-10-30) with local review finding 10328811.
 - A renamed or copied script. The deny matches the five file names only.
 - Another interpreter or launcher that runs a script without naming its file, or any command that does not name the five scripts.
 - A plugin root inside the repository, such as a checkout loaded as the plugin. There a branch edit to a runner script runs with no prompt. The skill grants have the same exposure.
