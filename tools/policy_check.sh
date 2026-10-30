@@ -4074,6 +4074,8 @@ echo '=== CHECK 17: Plugin script paths in plugin Markdown are one word ==='
 # occurrence that is not directly wrapped in one of the three admitted forms.
 # The path runs from the prefix to the first ".sh" not followed by a name
 # character, within a run free of whitespace, backticks, quotes and parentheses.
+# An opening wrapper, or the "](" of a link, preceded by a backslash is
+# escaped, not structural, so it admits nothing.
 # The single quote arrives as the awk variable `squote`. POSIX awk only, so
 # gawk and mawk both run it.
 CHECK17_SCAN_AWK='
@@ -4092,10 +4094,12 @@ CHECK17_SCAN_AWK='
                 path_text = substr(token_text, 1, RSTART + 2)
                 before_char = (line_start > 1) ? substr($0, line_start - 1, 1) : ""
                 before_pair = (line_start > 2) ? substr($0, line_start - 2, 2) : ""
+                char_escapes_opener = (line_start > 2) ? (substr($0, line_start - 2, 1) == "\\") : 0
+                pair_escaped = (line_start > 3) ? (substr($0, line_start - 3, 1) == "\\") : 0
                 after_char = substr($0, line_start + length(path_text), 1)
-                is_code_span = (before_char == "`" && after_char == "`")
-                is_quoted_word = (before_char == "\"" && after_char == "\"")
-                is_link_target = (before_pair == "](" && after_char == ")")
+                is_code_span = (before_char == "`" && after_char == "`" && !char_escapes_opener)
+                is_quoted_word = (before_char == "\"" && after_char == "\"" && !char_escapes_opener)
+                is_link_target = (before_pair == "](" && after_char == ")" && !pair_escaped)
                 if (!is_code_span && !is_quoted_word && !is_link_target) {
                     print NR "\t" path_text
                 }
@@ -4181,6 +4185,10 @@ check17_expect_flagged 'bash "${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh --flag
 check17_expect_flagged 'The engine is ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh.'
 check17_expect_flagged 'See [x](${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh "title").'
 check17_expect_flagged 'bash "${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh" then ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/y.sh'
+check17_expect_flagged 'bash \"${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh" --flag value'
+check17_expect_flagged 'Run \`${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh` now.'
+check17_expect_flagged 'See [x]\(${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh).'
+check17_expect_flagged 'See [x\](${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh).'
 
 check17_expect_admitted 'See `${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh`.'
 check17_expect_admitted 'See [x](${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh).'
