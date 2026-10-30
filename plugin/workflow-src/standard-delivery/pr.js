@@ -6,7 +6,9 @@
  * Inputs
  *   run    the run state of main.js createRunState: head, taken,
  *          reversibleEffects, notRunGates and draft.
- *   plan   the accepted plan, from runPlanningPass (plan.js).
+ *   plan   the accepted plan, from runPlanningPass (plan.js). plan.title
+ *          reaches only the pull request title and plan.summary only the
+ *          body.
  *   gates  the gate loop state of runGates (gates.js): notes, rejected and
  *          runs.pr, the count of this step's runs in the pass.
  *   maxTitleLength() and maxPullRequestTextLength() from main.js.
@@ -36,7 +38,11 @@
  *           (record.js). The step makes one runner call: the gate loop
  *           runs the head check after a reply, then this step again under
  *           pr-P-N, N from 2, or the gates first when the head moved, so
- *           expect_commit is always a head the run read. The body is the
+ *           expect_commit is always a head the run read. The title is the
+ *           commit type of the plan classification, the breaking marker, a
+ *           colon and plan.title, never the summary, cut at a word only when
+ *           longer than maxTitleLength() code points, never inside a
+ *           bracket the cut text opened (issue 469). The body is the
  *           plan summary and the
  *           comment a fixed lead, each followed by the one run record
  *           buildRunRecordParts() returns, the same record the final
@@ -105,10 +111,44 @@ function renderLiteralBlock(text) {
   return fence + '\n' + text + '\n' + fence;
 }
 
-function readFirstSentence(text) {
-  const end = /[.!?](?= |$)/.exec(text);
-  const sentence = end === null ? text : text.slice(0, end.index + 1);
-  return (sentence.endsWith('.') ? sentence.slice(0, -1) : sentence).trimEnd();
+function cleanTitleText(text) {
+  return cleanPullRequestText(text, false).replace(/\s+/gu, ' ').trim();
+}
+
+function trimTitleEnd(text) {
+  return text.replace(/[\s,;:-]+$/u, '');
+}
+
+/**
+ * Returns the indexes, in order, of each (, [ or { in characters that no
+ * matching closer after it closes. A closer pops only the opener on top of
+ * the stack it matches, so every opener before the first returned index
+ * is closed before that index.
+ */
+function findUnclosedOpeners(characters) {
+  const closers = { '(': ')', '[': ']', '{': '}' };
+  const openIndexes = [];
+  characters.forEach((character, index) => {
+    if (closers[character] !== undefined) {
+      openIndexes.push(index);
+    } else if (openIndexes.length > 0 && closers[characters[openIndexes[openIndexes.length - 1]]] === character) {
+      openIndexes.pop();
+    }
+  });
+  return openIndexes;
+}
+
+function closeTitleBrackets(text) {
+  const characters = Array.from(text);
+  const openIndexes = findUnclosedOpeners(characters);
+  if (openIndexes.length === 0) {
+    return text;
+  }
+  const beforeOpener = trimTitleEnd(characters.slice(0, openIndexes[0]).join(''));
+  if (beforeOpener !== '') {
+    return beforeOpener;
+  }
+  return trimTitleEnd(characters.filter((character, index) => !openIndexes.includes(index)).join('').trim());
 }
 
 function cutTitleText(text, room) {
@@ -118,14 +158,13 @@ function cutTitleText(text, room) {
   }
   const lastSpace = characters.slice(0, room + 1).lastIndexOf(' ');
   const kept = characters.slice(0, lastSpace > 0 ? lastSpace : room).join('');
-  return kept.replace(/[\s,;:-]+$/u, '');
+  return closeTitleBrackets(trimTitleEnd(kept));
 }
 
 function buildPullRequestTitle(plan) {
   const prefix = commitTypeMap()[plan.classification] + (plan.breaking ? '!' : '') + ':';
-  const text = cleanPullRequestText(plan.summary, false).replace(/\s+/gu, ' ').trim();
-  const sentence = cutTitleText(readFirstSentence(text), maxTitleLength() - prefix.length - 1);
-  return sentence === '' ? prefix : prefix + ' ' + sentence;
+  const text = cutTitleText(cleanTitleText(plan.title), maxTitleLength() - prefix.length - 1);
+  return text === '' ? prefix : prefix + ' ' + text;
 }
 
 function renderPullRequestGates(run, gates) {
