@@ -111,7 +111,7 @@
  *   ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md, so a runner with no
  *   skill body never creates one (issue 467).
  *   Title type: describePlanProblem refuses a plan whose cleaned
- *   plan.title starts with a commitTypeMap() value, an optional
+ *   plan.title starts with a commitTypeMap() value in any letter case, an optional
  *   parenthesized scope, an optional '!' and ':', with a fixed message that
  *   names no title text, since the pull request step writes the type
  *   before the title (issue 469).
@@ -360,7 +360,7 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
       return 'The plan names a validation command at validation_commands[' + index + '] that ' + commandProblem + ', so ' + RUN_NAME + ' stopped.';
     }
   }
-  const typedTitle = new RegExp('^(' + Object.values(commitTypeMap()).join('|') + ')(\\([^()]*\\))?!?:');
+  const typedTitle = new RegExp('^(' + Object.values(commitTypeMap()).join('|') + ')(\\([^()]*\\))?!?:', 'i');
   if (typedTitle.test(cleanTitleText(plan.title))) {
     return 'The plan title starts with a commit type, which the workflow writes before it, so ' + RUN_NAME + ' stopped.';
   }

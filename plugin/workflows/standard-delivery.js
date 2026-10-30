@@ -626,7 +626,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '5e30ea630a05f5b8';
+const BUILD_ID = '6a370d2d4ebf008f';
 
 function supportedSchemaKeywords(){
 return[
@@ -3044,7 +3044,7 @@ if(commandProblem!==''){
 return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+', so '+RUN_NAME+' stopped.';
 }
 }
-const typedTitle=new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\([^()]*\\))?!?:');
+const typedTitle=new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\([^()]*\\))?!?:','i');
 if(typedTitle.test(cleanTitleText(plan.title))){
 return'The plan title starts with a commit type, which the workflow writes before it, so '+RUN_NAME+' stopped.';
 }

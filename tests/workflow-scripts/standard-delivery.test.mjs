@@ -1406,7 +1406,7 @@ const ROW_TESTS = {
       ['a blank validation command', planResult(makePlan({ validation_commands: ['npm test', '  '] })), schemaProblem],
       ['a validation command with a line break', planResult(makePlan({ validation_commands: ['npm test', 'npm test\nrm -rf x'] })), 'The plan names a validation command at validation_commands[1] that holds a line break, so the delivery stopped.'],
       ['a validation command with a control character', planResult(makePlan({ validation_commands: ['npm test\u001b[0m'] })), 'The plan names a validation command at validation_commands[0] that holds a control character, so the delivery stopped.'],
-      ...['fix: Add the cache layer', 'feat(cache)!: Add the cache layer', ' \tchore!: Add the cache layer', 'docs(): Add the cache layer'].map((title) => [
+      ...['fix: Add the cache layer', 'feat(cache)!: Add the cache layer', ' \tchore!: Add the cache layer', 'docs(): Add the cache layer', 'Feat: Add the cache layer', 'FIX(ui)!: Add the cache layer'].map((title) => [
         'a title typed ' + JSON.stringify(title),
         planResult(makePlan({ title: title })),
         'The plan title starts with a commit type, which the workflow writes before it, so the delivery stopped.'

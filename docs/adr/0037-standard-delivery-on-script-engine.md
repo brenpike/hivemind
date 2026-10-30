@@ -1527,8 +1527,9 @@ The second one names the brood, an internal detail, and is cut inside a parenthe
 
 **The user's decisions.**
 
-- **Q1, title length: option A (assumed).** The code cap goes from 72 to 256 code points, so a title the request sets stays whole. A title the planner writes stays within 72 code points by the field rule.
-- **Q2, type source.** The workflow writes the type from the plan's classification and breaking judgment, the same source as the commits and the branch. The `title` field holds only the text after the type, and the plan check refuses a title that starts with a commit type, so a title never carries two types.
+- **Q1, title length: option A.** Decided by the autonomy table during the run and shown to the user. The code cap goes from 72 to 256 code points, so a title the request sets stays whole. A title the planner writes stays within 72 code points by the field rule.
+- **Q2, type source: option A.** Decided by the autonomy table during the run and shown to the user. The workflow writes the type from the plan's classification and breaking judgment, the same source as the commits and the branch. The `title` field holds only the text after the type, and the plan check refuses a title that starts with a commit type, in any letter case, so a title never carries two types.
+- **Light path.** The run's commit step was blocked by the synapse agent refusing the commit grant, so the user chose (2026-10-30, answer A) to finish #469 on the light path. That refusal is a separate bug, fixed next.
 
 **First-finding triage, per ADR-0038.**
 
