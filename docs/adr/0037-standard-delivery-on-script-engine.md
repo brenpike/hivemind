@@ -1412,4 +1412,44 @@ It updates these places in place, each with a dated note: decision 7, decision 1
 
 The rest of ADR-0037 is unchanged.
 
+### Local review finding 6bc3a379: the plugin script path is one double-quoted word (2026-10-30)
+
+This section covers local review finding 6bc3a379 on issue 467. Claude Code pastes the plugin path into skill, agent and governance text as it is, and the engine's `buildRunnerCommand` wrote `bash {plugin-root}/skills/<s>/scripts/<s>.sh`, the script path as a bare shell word. When the plugin path holds a space, such as a home folder named `Jane Doe`, the shell splits the path in two and the runner fails. The hook allowed the bare form, so the engine form passed every test on a CI path with no space. The same bare path was in 17 skills and `plugin/agents/github-reviewer.md` and `plugin/governance/versioning.md`, which the reviewer did not list.
+
+**First-finding triage, per ADR-0038.**
+
+- **Introduced or inherited.** Both. Introduced on this branch: `buildRunnerCommand` and its test pins, and the hook accepting the bare path as an exact form. Inherited from main: the command lines and `Bash(...)` grants of 17 skills (the 5 runner skills among them), `plugin/agents/github-reviewer.md` and `plugin/governance/versioning.md` step 3. Both kinds are fixed in this pull request.
+- **Root class.** Shell command text pastes the plugin path as an unquoted word. The owner is every place that writes such text: the engine's one command builder, and the hand-written command and grant lines in skills, agents and governance. A grant is written in the same form as its command, because Claude Code matches a Bash rule against the command text as written.
+- **Removed instead of hardened.** The hook's second accepted form, the bare path, is removed. The hook keeps ONE exact form, `bash "<root>/skills/<s>/scripts/<s>.sh"`, and denies the bare form. The Synapse Runner Gate in `plugin/governance/security-policy.md` says the path is always one double-quoted word. This is done in this pull request, not left as a tail: the engine, the skills and the hook now agree, so a bare runner command is denied on every machine and not only on a path with a space.
+- **Threat model.** A robustness failure inside the recorded scope: normal users whose home or config path has a space. It is not an attack.
+
+**Zoom-out.** This is the second finding on the `{plugin-root}` surface. Commit e0018d2 (local review finding 5dd80225) limited where synapse replaces `{plugin-root}` to the `command` string and `inputs_file.path`. This finding is about how the replaced path lands in the command, so the repeat trips the zoom-out and the approach was questioned. One option takes the path out of command text: the hook would rewrite the command with `updatedInput` and escape the path. It fixes only the 5 runner scripts and leaves the skills as they are. It adds rewrite logic to a security gate, needs a live check that subagents honor `updatedInput`, and turns a hook failure from a prompt into a failed runner. It was considered and rejected (user decision, Q2). Quoting the path at every layer, with a positive lint, closes the class instead.
+
+**The fix.**
+
+- `plugin/workflow-src/lib/facts.js`: `buildRunnerCommand` returns `bash "{plugin-root}/skills/<skill>/scripts/<skill>.sh"`, then each word, one space apart. Its header comment and the one for `describeRunnerWordProblem` say the script path is the one double-quoted word and value words are never quoted. Both generated scripts follow (commit e5d56bd).
+- The tests: the command pins in `facts.test.mjs`, `analysis-only.test.mjs` and `standard-delivery.test.mjs` carry the quoted path, and `runCommandBlock` runs the filled command with `bash -c` and no longer splits it on spaces. A new `facts.test.mjs` test runs the built gather-facts command under a plugin root whose folder name holds a space: it exits 0 through bash, the real hook allows it for `hivemind:synapse` and gives no decision for `hivemind:drone`, and the same command with the path unquoted is denied.
+- 19 files (b65540e): the grant and the command line of each of the 17 skills, the 9 commands of `plugin/agents/github-reviewer.md`, and the command in `plugin/governance/versioning.md` write `bash "${CLAUDE_PLUGIN_ROOT}/skills/<s>/scripts/<s>.sh"`. The 7 pinned command patterns in `tests/policy/safety-git-identifier-out-of-band.json` and `tests/policy/safety-working-branch-no-track.json` match the new text.
+- CHECK 17 in `tools/policy_check.sh`, with a detection canary: in every plugin `*.md` file, each `${CLAUDE_PLUGIN_ROOT}/<path>.sh` must sit directly in one of three forms: a path-only code span, a Markdown link target, or one double-quoted word. Anything else is a finding that names the file and line. The check is a positive allowlist, so the next skill cannot bring the bare form back and still pass on a CI path with no space. CHECK 6's path regex excludes the closing quote, so a quoted path still resolves. `CLAUDE.md` gains the editing rule, enforced by CHECK 17.
+- The hook and its suite: one exact form, the quoted path; the bare form is denied; the deny reason prints the quoted form (`plugin/hooks/synapse-gate.sh`, `tools/test_synapse_gate.sh`).
+- A live spike (claude 2.1.314) ran before the skills were quoted: quoted skill grants and a quoted settings allow rule matched a quoted command, with no prompt, in default and in auto mode, and a path with a space stayed intact. Results: `~/code/hivemind-workflow-spikes/results-467-quote.md`. Not tested there: lookalike forms against a quoted grant, grants in subagents and workflow agents, other Claude Code versions.
+
+**Surface account.**
+
+- Added: CHECK 17 with its canary; one engine test; one `CLAUDE.md` rule; this subsection and the changelog entries.
+- Changed with no change in count: one engine string, the command and grant lines in 19 Markdown files, 7 policy pins, the engine test pins and one test helper, and the hook's accepted form.
+- Removed: the hook's bare form, with its charset test and bare prefix; the bare rows of its suite became deny rows.
+- Net: the surface grows by the lint and one test. The user chose it (Q3, option A), because without the lint the fix patches only the known files.
+
+**Scope boundary.** Every known site of the root cause is fixed in this pull request, and nothing is deferred. The synapse placeholder limit of e0018d2 and the quoted path are separate layers: the first decides where `{plugin-root}` is replaced, the second what the replaced text looks like.
+
+**Recorded residual: a plugin path holding a double quote, a dollar sign, a backtick or a control character.**
+
+- **Root cause.** Claude Code pastes the plugin path into skill and agent text as it is, and no fixed shell quoting carries every byte. Inside double quotes `"`, `$` and the backtick are special; inside single quotes `'` is. So the double-quoted form cannot hold a path with those bytes, and text substitution cannot escape them.
+- **Bounded impact.** The five runner commands are denied for every agent, and other script commands fail in the shell. It fails closed: nothing runs that was not asked for, and there is never an allow. It needs a home or config folder whose path holds one of those bytes, which is unusual.
+- **Ground.** Unclosable with text substitution, and a user decision (Q2, option A, 2026-10-30). The rejected fix was the `updatedInput` rewrite described in the zoom-out.
+- **Unverified: Windows backslash paths.** The hook turns `\` into `/` before it matches, so a command with backslashes is denied and fails closed. This was not run on Windows.
+
+Links: https://github.com/brenpike/hivemind/issues/467, `~/code/hivemind-workflow-spikes/results-467-quote.md` (the quoted-grant spike), `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
+
 Links: https://github.com/brenpike/hivemind/issues/467, `~/code/hivemind-workflow-spikes/results-467.md` (the spike), `docs/adr/0010-permission-allowlist-posture.md` (Amendment 2026-10-29), `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).

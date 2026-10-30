@@ -18,10 +18,10 @@
 #   anything else                                                   no decision
 #
 # EXACT RUNNER COMMAND: `bash`, one space, the script path, then flag/value pairs, every part
-# separated by one space. The script path is <root>/skills/<s>/scripts/<s>.sh, where <root> is
-# CLAUDE_PLUGIN_ROOT with backslashes turned to `/` and trailing slashes removed. The path is bare
-# when the root needs no shell quoting, or double-quoted when the root holds no `"`, `$` or
-# backtick. Flags come in any order; each appears once except the repeatable --ref and
+# separated by one space. The script path is "<root>/skills/<s>/scripts/<s>.sh", always one
+# double-quoted word, where <root> is CLAUDE_PLUGIN_ROOT with backslashes turned to `/` and
+# trailing slashes removed. A root that holds `"`, `$`, a backtick or a control byte has no exact
+# form, so every runner command under it is denied (a recorded residual). Flags come in any order; each appears once except the repeatable --ref and
 # --version-file; required flags must be present; bump-type's positional base comes first. Values
 # pass their class: names hivemind_assert_identifier (skills/_shared/allowlist.sh), refs digits,
 # commit 40 or 64 lowercase hex, the enums the scripts define, inputs
@@ -238,24 +238,19 @@ check_runner_arguments() {
 # match_exact_command <command>
 #   Succeeds when <command> is the exact form of one runner script.
 match_exact_command() {
-  local command_text="$1" script_name script_path command_prefix argument_text
+  local command_text="$1" script_name command_prefix argument_text
+  [ "$quoted_path_allowed" = yes ] || return 1
   case "$command_text" in
     *[[:cntrl:]]*) return 1 ;;
   esac
   for script_name in "${runner_scripts[@]}"; do
-    script_path="$plugin_root/skills/$script_name/scripts/$script_name.sh"
-    for command_prefix in "bash $script_path" "bash \"$script_path\""; do
-      case "$command_prefix" in
-        'bash "'*) [ "$quoted_path_allowed" = yes ] || continue ;;
-        *) [ "$bare_path_allowed" = yes ] || continue ;;
-      esac
-      case "$command_text" in
-        "$command_prefix") argument_text='' ;;
-        "$command_prefix "*) argument_text="${command_text#"$command_prefix "}" ;;
-        *) continue ;;
-      esac
-      check_runner_arguments "$script_name" "$argument_text" && return 0
-    done
+    command_prefix="bash \"$plugin_root/skills/$script_name/scripts/$script_name.sh\""
+    case "$command_text" in
+      "$command_prefix") argument_text='' ;;
+      "$command_prefix "*) argument_text="${command_text#"$command_prefix "}" ;;
+      *) continue ;;
+    esac
+    check_runner_arguments "$script_name" "$argument_text" && return 0
   done
   return 1
 }
@@ -370,10 +365,6 @@ esac
 [ -f "$plugin_root/skills/_shared/allowlist.sh" ] || exit 0
 . "$plugin_root/skills/_shared/allowlist.sh" || exit 0
 
-bare_path_allowed=yes
-case "$plugin_root" in
-  *[!A-Za-z0-9._/:@+,-]*) bare_path_allowed=no ;;
-esac
 quoted_path_allowed=yes
 case "$plugin_root" in
   *'"'* | *'$'* | *'`'* | *[[:cntrl:]]*) quoted_path_allowed=no ;;
@@ -402,7 +393,7 @@ case "$tool_name" in
     fi
     named_script=''
     if find_named_script "$first_value"; then
-      emit_decision deny "synapse-gate: a Bash command that names $named_script.sh runs only in its exact form: bash $plugin_root/skills/$named_script/scripts/$named_script.sh $(runner_usage_text "$named_script") (one space between parts, no quoting except around the script path, nothing appended). To read the file, use the Read tool."
+      emit_decision deny "synapse-gate: a Bash command that names $named_script.sh runs only in its exact form: bash \"$plugin_root/skills/$named_script/scripts/$named_script.sh\" $(runner_usage_text "$named_script") (one space between parts, the script path in double quotes, no other quoting, nothing appended). To read the file, use the Read tool."
       exit 0
     fi
     if [ "$agent_type" = "$gate_agent_type" ]; then

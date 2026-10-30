@@ -27,6 +27,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The engine checks branch names and refuses AI credit lines in PR text (#467).
 - A runner command value outside its safe character class stops the step (#467).
 
+### Fixed
+
+- The plugin script path is one double-quoted word in the engine's runner commands and in every skill grant and command, `plugin/agents/github-reviewer.md` and `plugin/governance/versioning.md`, so a plugin path with a space works. The hook keeps one exact form and denies the bare path, and policy check CHECK 17 refuses the unquoted form in plugin Markdown. A plugin path holding a double quote, a dollar sign, a backtick or a control character is a recorded residual and fails closed (#467, local review finding 6bc3a379).
+- `hivemind:synapse` replaces `{plugin-root}` and `{token}` only in the command and in the inputs file path, never in the inputs file content (#467, local review finding 5dd80225).
+
 ### Removed
 
 - The drone's git-script exemption (#467).

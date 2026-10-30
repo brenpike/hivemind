@@ -219,7 +219,7 @@ An operator DECLINING a prompt carries TWO SEPARATE consequences; keep them sepa
 
 This subsection is the one canonical statement of the synapse runner gate. `hivemind:synapse` is the agent a workflow script starts to run one committed runner script. Its only tools are Bash and Write. Only workflow scripts start it. The overlord never delegates to it. The gate is a plugin PreToolUse hook, `${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh`, registered in `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` for the Bash and Write tools.
 
-The gate knows five runner scripts: `molt.sh`, `gather-facts.sh`, `create-working-branch.sh`, `bump-type.sh` and `open-plan-pr.sh`. Each lives at `skills/<name>/scripts/<name>.sh` under the plugin root. A command is in exact form when it is `bash`, then one of those script paths under `CLAUDE_PLUGIN_ROOT`, then only the flags that script takes, each value in its fixed class, with single spaces between them. The path may be bare. It may be double-quoted when the root needs quoting. Anything else is not exact: other quotes, a redirection, a pipe, a chained or appended command, a substitution, a control character, or a relative or copied path.
+The gate knows five runner scripts: `molt.sh`, `gather-facts.sh`, `create-working-branch.sh`, `bump-type.sh` and `open-plan-pr.sh`. Each lives at `skills/<name>/scripts/<name>.sh` under the plugin root. A command is in exact form when it is `bash`, then one of those script paths under `CLAUDE_PLUGIN_ROOT`, then only the flags that script takes, each value in its fixed class, with single spaces between them. The script path is always one double-quoted word: `bash "<root>/skills/<name>/scripts/<name>.sh"`. A bare path is not exact. Anything else is not exact: other quotes, a redirection, a pipe, a chained or appended command, a substitution, a control character, or a relative or copied path.
 
 The hook decides as follows:
 
@@ -244,6 +244,7 @@ What the gate does not guard:
 - Another interpreter or launcher that runs a script without naming its file, or any command that does not name the five scripts.
 - A plugin root inside the repository, such as a checkout loaded as the plugin. There a branch edit to a runner script runs with no prompt. The skill grants have the same exposure.
 - Cross-script use. Synapse can run any of the five exact commands with no prompt, not only its own step's. Each script still refuses trunk, a dirty tree and bad names. This residual is recorded in ADR-0037.
+- A plugin root whose path holds `"`, `$`, a backtick or a control character. No fixed shell quoting carries those bytes, so such a root has no exact form: the five runner commands are denied for every agent, and other plugin script commands fail in the shell. It fails closed, never toward an allow. A Windows path with backslashes is unverified; the hook turns `\` into `/` before matching, so a command written with backslashes is denied. This residual is recorded in ADR-0037.
 
 ### Enforcement Order
 
