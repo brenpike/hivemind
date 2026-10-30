@@ -31,9 +31,10 @@
 # LOOKALIKE: the command text names <s>.sh (ASCII case ignored) with no [A-Za-z0-9._-] byte
 # directly before or after it.
 #
-# FAIL OPEN, NEVER TOWARD ALLOW: missing jq, an empty or unusable CLAUDE_PLUGIN_ROOT, a missing
-# allowlist.sh, or malformed input prints nothing and exits 0, so the normal permission flow
-# applies. The EXIT trap turns any other non-zero exit into 1. This hook never exits 2, because
+# FAIL OPEN, NEVER TOWARD AN ALLOW OF ITS OWN: missing jq, an empty or unusable CLAUDE_PLUGIN_ROOT,
+# a missing allowlist.sh, or malformed input prints nothing and exits 0, so the normal permission
+# flow applies. A settings allow rule that covers the call then applies with none of these checks;
+# the seeded inputs-file rules do so for synapse's Write (security-policy.md, Synapse Runner Gate). The EXIT trap turns any other non-zero exit into 1. This hook never exits 2, because
 # exit 2 blocks the tool call. A decision is printed only as the last step.
 #
 # Reads CLAUDE_PLUGIN_ROOT from the hook environment and never BASH_SOURCE. bash 3.2 compatible
