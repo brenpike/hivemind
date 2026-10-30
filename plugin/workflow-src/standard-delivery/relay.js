@@ -100,10 +100,10 @@
  *   Runner prompts carry no request text and put every branch and trunk
  *   name in their command block only. Every runner is a hivemind:synapse
  *   and the scan, validation and fix rounds drones (lib/facts.js). A
- *   runner prompt is one task line, the grant for the commit and PR
- *   runners, dataBlocksSentence(), a buildRunnerCommand command block and
- *   for commit and PR an inputs_file block, in the block names and
- *   placeholders of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md, which owns
+ *   runner prompt is one task line, dataBlocksSentence(), a
+ *   buildRunnerCommand command block and for commit and PR an inputs_file
+ *   block, in the block names and placeholders of
+ *   ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md, which owns
  *   how a runner uses them (docs/engineering-principles.md P24). Each step
  *   checks its words with describeRunnerWordProblem before the call. How
  *   a runner relays is the RELAY_SCHEMA field descriptions.
@@ -247,14 +247,6 @@ function isConsistentVersionRelay(values) {
     return hasExpected && values.verdict !== 'ask_user';
   }
   return values.version_check === 'unreadable' || (values.verdict === 'ask_user' && !hasExpected);
-}
-
-function pushGrantSentence() {
-  return 'This delegation explicitly grants push authority for this one task: one push of the working branch and one pull request opened or reused, made only by the open-plan-pr script. It grants no commit, and no push of the trunk.';
-}
-
-function commitGrantSentence() {
-  return 'This delegation explicitly grants commit authority for this one task: one commit, made only by the hivemind:molt script, of exactly the files in the inputs_file block. It grants no push.';
 }
 
 function validationTaskSentence() {
@@ -528,7 +520,7 @@ function listCommitWords(trunk) {
 function buildCommitPrompt(files, plan, trunk, stepName, subject) {
   const words = listCommitWords(trunk);
   const content = { type: commitTypeMap()[plan.classification], breaking: plan.breaking, subject: subject, files: files };
-  return ['Run the command below to commit ' + commitStepTexts(stepName).purpose + '.', commitGrantSentence(), dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', words)), formatInputsFileBlock(words[3], content)].join('\n');
+  return ['Run the command below to commit ' + commitStepTexts(stepName).purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', words)), formatInputsFileBlock(words[3], content)].join('\n');
 }
 
 function readOutsidePath(payload) {

@@ -626,7 +626,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'ec8b91dc0739da21';
+const BUILD_ID = 'f674df770a2dcb1d';
 
 function supportedSchemaKeywords(){
 return[
@@ -3367,7 +3367,6 @@ function buildPullRequestPrompt(plan,head,texts,draft){
 const words=listPullRequestWords(plan,head);
 return[
 'Run the command below to push the working branch and open its pull request or reuse the open one.',
-pushGrantSentence(),
 dataBlocksSentence(),
 '',
 formatCommandBlock(buildRunnerCommand('open-plan-pr',words)),
@@ -3629,12 +3628,6 @@ return hasExpected&&values.verdict!=='ask_user';
 }
 return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
 }
-function pushGrantSentence(){
-return'This delegation explicitly grants push authority for this one task: one push of the working branch and one pull request opened or reused, made only by the open-plan-pr script. It grants no commit, and no push of the trunk.';
-}
-function commitGrantSentence(){
-return'This delegation explicitly grants commit authority for this one task: one commit, made only by the hivemind:molt script, of exactly the files in the inputs_file block. It grants no push.';
-}
 function validationTaskSentence(){
 return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
 }
@@ -3871,7 +3864,7 @@ return['--trunk',trunk,'--inputs','.hivemind/molt-inputs-{token}.json'];
 function buildCommitPrompt(files,plan,trunk,stepName,subject){
 const words=listCommitWords(trunk);
 const content={type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,files:files};
-return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',commitGrantSentence(),dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',words)),formatInputsFileBlock(words[3],content)].join('\n');
+return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',words)),formatInputsFileBlock(words[3],content)].join('\n');
 }
 function readOutsidePath(payload){
 try{

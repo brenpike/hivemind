@@ -21,8 +21,8 @@
  *          texts put external text in.
  *   The step, as meta.js names it:
  *   PR      once every configured gate held on one commit H, a haiku
- *           synapse runner runs the open-plan-pr command once under the
- *           push grant. The command carries only --head, --base,
+ *           synapse runner runs the open-plan-pr command once. The
+ *           command carries only --head, --base,
  *           --expect-commit H and the inputs path, and the inputs_file
  *           block only the title, body and comment the code builds and
  *           draft from the launch. This runner is the only push the
@@ -255,7 +255,6 @@ function buildPullRequestPrompt(plan, head, texts, draft) {
   const words = listPullRequestWords(plan, head);
   return [
     'Run the command below to push the working branch and open its pull request or reuse the open one.',
-    pushGrantSentence(),
     dataBlocksSentence(),
     '',
     formatCommandBlock(buildRunnerCommand('open-plan-pr', words)),
