@@ -2,7 +2,7 @@
 name: create-working-branch
 description: Creates or confirms the compliant working branch for the current approved plan. Use when starting implementation on an approved plan and the working branch needs to be created or verified.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh" *)
   - Bash(printf *)
 shell: bash
 ---
@@ -56,7 +56,7 @@ Validate `trunk` against the same gate; on failure, exit 1 with `blocker: trunk 
 3. **Final Bash tool call.** Run the branch script, where each `<allowlist-validated-...>` placeholder is the value that passed the input gate or the checks in steps 1 and 2:
 
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh --base <allowlist-validated-base> --branch <allowlist-validated-working-branch> --classification <allowlist-validated-classification> --trunk-freshness <allowlist-validated-trunk-freshness> --trunk <allowlist-validated-trunk>
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh" --base <allowlist-validated-base> --branch <allowlist-validated-working-branch> --classification <allowlist-validated-classification> --trunk-freshness <allowlist-validated-trunk-freshness> --trunk <allowlist-validated-trunk>
    ```
 
    The script header defines the tree refusals, the refusal of a `working_branch` equal to `trunk`, base resolution, branch creation and switching, upstream handling, and output; this skill does not restate them. Exit 0: stdout `branch: <working_branch>` is the routing data, followed by `commit:`, `created:`, and, for stale or skipped trunk freshness, a `warning:` line. Exit 1: blocked; relay the script's `blocker:` line from stderr.

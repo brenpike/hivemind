@@ -1,0 +1,34 @@
+{
+  "rule": "Synapse tool list, read from its '  - <name>' lines, is exactly Bash and Write, and its frontmatter contains no Skill or Edit",
+  "description": "plugin/agents/synapse.md is the runner agent that workflow scripts start to run one committed runner script. Its frontmatter tools: list is what grants it tools, so this fixture pins that list. The set_check captures every line of the form '  - <name>' (two spaces, a dash, a space, then the name up to the first whitespace) and requires, in equal mode with expected_counts, exactly Bash and Write, each once. An added tool fails as an extra, a duplicated tool fails its count, and a deleted tool fails as missing. set_check is used because an added grant is the threat, and a presence pin can only notice deletion. The two frontmatter-absent consumers require that the substrings Skill and Edit appear nowhere in the frontmatter, so a skill or edit grant fails even when it is written outside the '  - <name>' form. The source pin sits on the body sentence that limits synapse to the one Write and the one Bash call; deleting it is loud. What this fixture does not check: (a) what Bash and Write can do; the synapse runner gate hook bounds them, pinned by safety-synapse-gate.json, and the pin claims names, never capability or meaning; (b) a tool written outside the '  - <name>' form, such as an inline list, a different indent or a second tools key, unless its text contains Skill or Edit; (c) body prose: absent is scoped to frontmatter; the extract regex is line-scoped and not limited to the frontmatter, so a body line in the '  - <name>' form would be captured and fail equal mode as an extra (the body has no such line); (d) grants from any other file, such as settings files or the workflow scripts that start synapse; files is a literal list that names only synapse.md.",
+  "source": {
+    "file": "plugin/agents/synapse.md",
+    "pattern": "Call no tool besides that Write and that Bash."
+  },
+  "consumers": [
+    {
+      "file": "plugin/agents/synapse.md",
+      "pattern": "Skill",
+      "absent": true
+    },
+    {
+      "file": "plugin/agents/synapse.md",
+      "pattern": "Edit",
+      "absent": true
+    }
+  ],
+  "set_check": {
+    "extract_regex": "^  - ([^[:space:]]+)",
+    "expected_set": [
+      "Bash",
+      "Write"
+    ],
+    "expected_counts": {
+      "Bash": 1,
+      "Write": 1
+    },
+    "files": [
+      { "path": "plugin/agents/synapse.md", "mode": "equal" }
+    ]
+  }
+}

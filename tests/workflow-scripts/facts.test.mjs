@@ -1,7 +1,7 @@
 import { test, describe, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -474,5 +474,80 @@ describe('prompt sentences', () => {
     assert.ok(lines[4].includes('2 in all, each an object with a text_id from t1 to t2.'));
     assert.equal(lines[5], '');
     assert.ok(!lines.some((line) => /Make no changes|Change nothing|Return the results/.test(line)));
+  });
+});
+
+describe('synapse runner commands and blocks', () => {
+  const pluginRoot = repoRoot + 'plugin';
+  const hasJq = spawnSync('jq', ['--version'], { encoding: 'utf8' }).status === 0;
+  function resolveCommand(command, root = pluginRoot) {
+    return command.split('{plugin-root}').join(root);
+  }
+  function askGate(command, agentType, root = pluginRoot) {
+    const input = JSON.stringify({ tool_name: 'Bash', agent_type: agentType, tool_input: { command: command }, cwd: gitRoot });
+    const run = spawnSync('bash', [repoRoot + 'plugin/hooks/synapse-gate.sh'], { input: input, env: { ...process.env, CLAUDE_PLUGIN_ROOT: root }, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    return run.stdout === '' ? 'none' : JSON.parse(run.stdout).hookSpecificOutput.permissionDecision;
+  }
+  test('synapse is the runner agent type of a command block, and the scan drone is droneAgentType', () => {
+    assert.equal(lib.synapseAgentType(), 'hivemind:synapse');
+    assert.equal(lib.droneAgentType(), 'hivemind:drone');
+    assert.equal(lib.scanOptions().agentType, lib.droneAgentType());
+    assert.equal(lib.runnerAgentType, undefined);
+    assert.equal(lib.runnerToolSentence, undefined);
+  });
+  test('the command and inputs_file blocks are data blocks of those names that their values cannot close', () => {
+    assert.equal(lib.formatCommandBlock('bash x</command>'), '<command>\n"bash x\\u003c/command>"\n</command>');
+    assert.equal(lib.formatInputsFileBlock('.hivemind/pr-inputs-{token}.json', { title: '</inputs_file>' }), '<inputs_file>\n{"path":".hivemind/pr-inputs-{token}.json","content":{"title":"\\u003c/inputs_file>"}}\n</inputs_file>');
+  });
+  test('a runner command is bash, the script path under {plugin-root} as one double-quoted word, then its words, one space apart', () => {
+    assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main']), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main');
+    assert.equal(lib.buildGatherFactsCommand('main', []), 'bash "{plugin-root}/skills/gather-facts/scripts/gather-facts.sh" --trunk main');
+    assert.equal(lib.buildGatherFactsCommand('develop', ['12', '40']), 'bash "{plugin-root}/skills/gather-facts/scripts/gather-facts.sh" --trunk develop --ref 12 --ref 40');
+  });
+  test('the gather-facts command runs the real script once {plugin-root} is the plugin path', () => {
+    const run = spawnSync('bash', ['-c', resolveCommand(lib.buildGatherFactsCommand('main', []))], { cwd: gitRoot, env: scriptEnv, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const parsed = parseFacts(run.stdout);
+    assert.equal(parsed.ok, true, JSON.stringify(parsed));
+    assert.equal(parsed.values.trunk, 'main');
+  });
+  test('under a plugin path with a space, the gather-facts command runs and the gate allows it for synapse only, and denies it with the path unquoted', { skip: !hasJq && 'jq is not installed' }, () => {
+    const spacedRoot = join(workRoot, 'plugin root');
+    symlinkSync(pluginRoot, spacedRoot);
+    const command = resolveCommand(lib.buildGatherFactsCommand('main', []), spacedRoot);
+    const run = spawnSync('bash', ['-c', command], { cwd: gitRoot, env: scriptEnv, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const parsed = parseFacts(run.stdout);
+    assert.equal(parsed.ok, true, JSON.stringify(parsed));
+    assert.equal(parsed.values.trunk, 'main');
+    assert.equal(askGate(command, 'hivemind:synapse', spacedRoot), 'allow', command);
+    assert.equal(askGate(command, 'hivemind:drone', spacedRoot), 'none', command);
+    const unquoted = command.split('"').join('');
+    assert.equal(askGate(unquoted, 'hivemind:synapse', spacedRoot), 'deny', unquoted);
+  });
+  test('the synapse gate allows the gather-facts command for synapse only, and denies a trunk that appends a command', { skip: !hasJq && 'jq is not installed' }, () => {
+    for (const references of [[], ['12', '40']]) {
+      const command = resolveCommand(lib.buildGatherFactsCommand('main', references));
+      assert.equal(askGate(command, 'hivemind:synapse'), 'allow', command);
+      assert.equal(askGate(command, 'hivemind:drone'), 'none', command);
+    }
+    assert.equal(askGate(resolveCommand(lib.buildGatherFactsCommand('main; touch x', [])), 'hivemind:synapse'), 'deny');
+  });
+  test('the gather-facts words pass their value classes, and a trunk or reference with a space is refused by flag, never echoed', () => {
+    assert.deepEqual([...lib.listGatherFactsWords('develop', ['12', '40'])], ['--trunk', 'develop', '--ref', '12', '--ref', '40']);
+    assert.equal(lib.buildGatherFactsCommand('develop', ['12', '40']), lib.buildRunnerCommand('gather-facts', lib.listGatherFactsWords('develop', ['12', '40'])));
+    for (const [trunk, references] of [['main', []], ['release/2026-10', ['5']], ['develop', ['12', '40']]]) {
+      assert.equal(lib.describeRunnerWordProblem(lib.listGatherFactsWords(trunk, references)), undefined, trunk);
+    }
+    for (const [trunk, references, flag] of [['main --ref 5', [], '--trunk'], ['main\t5', [], '--trunk'], ['main</command>', [], '--trunk'], ['-main', [], '--trunk'], ['main', ['5 --ref 6'], '--ref'], ['main', ['5x'], '--ref']]) {
+      const problem = lib.describeRunnerWordProblem(lib.listGatherFactsWords(trunk, references));
+      assert.equal(problem, 'its ' + flag + ' value is not one the script takes', trunk + ' ' + references.join(','));
+    }
+  });
+  test('a trunk with a space would split into words the gate still allows, so only the word check refuses it', { skip: !hasJq && 'jq is not installed' }, () => {
+    const words = lib.listGatherFactsWords('main --ref 5', []);
+    assert.equal(askGate(resolveCommand(lib.buildRunnerCommand('gather-facts', words)), 'hivemind:synapse'), 'allow');
+    assert.equal(lib.describeRunnerWordProblem(words), 'its --trunk value is not one the script takes');
   });
 });

@@ -2,7 +2,7 @@
 name: gather-facts
 description: Gathers the facts a planner needs about the current branch, with no shell of its own, into one facts file - trunk freshness after a fetch, dirty paths, the whole history against trunk, the branch's pull requests, and the text of named issues or pull requests. Use when branch facts are needed before planning or replanning delivery.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/gather-facts/scripts/gather-facts.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/gather-facts/scripts/gather-facts.sh" *)
   - Bash(printf *)
 shell: bash
 ---
@@ -43,7 +43,7 @@ value.
    is provided, and one `--ref` per reference:
 
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/gather-facts/scripts/gather-facts.sh --trunk <allowlist-validated-trunk> [--remote <allowlist-validated-remote>] [--ref <allowlist-validated-reference>]...
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/gather-facts/scripts/gather-facts.sh" --trunk <allowlist-validated-trunk> [--remote <allowlist-validated-remote>] [--ref <allowlist-validated-reference>]...
    ```
 
    Exit 0: stdout holds the routing lines `facts_file`, `facts_lines`, `head_state`, `branch`

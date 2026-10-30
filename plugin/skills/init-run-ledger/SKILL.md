@@ -2,7 +2,7 @@
 name: init-run-ledger
 description: Creates the run ledger for the current overlord instance, writing .hivemind/runs/<run-id>/state.json. Use when starting or initializing a new run.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/init-run-ledger/scripts/init-run-ledger.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/init-run-ledger/scripts/init-run-ledger.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Edit(.hivemind/runs/.init-inputs-*.json)
 shell: bash
@@ -139,7 +139,7 @@ canonical value); else a safe `suggested_run_id` verbatim; else derived
 
 3. **Execute the script** with one Bash call, passing the inputs file path:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/init-run-ledger/scripts/init-run-ledger.sh .hivemind/runs/.init-inputs-<token>.json
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/init-run-ledger/scripts/init-run-ledger.sh" .hivemind/runs/.init-inputs-<token>.json
    ```
    EXECUTE (do not Read) the script — it owns dependency check, input validation,
    packaged-definition validation, run-id derivation, directory creation, and the atomic

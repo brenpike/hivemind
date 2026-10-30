@@ -5,11 +5,11 @@ allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Monitor
   - Agent(hivemind:github-reviewer)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/preflight.sh *)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh *)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh *)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh *)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/preflight.sh" *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh" *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh" *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/exit-precedence.sh" *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" *)
   - Bash(date +%s)
 shell: bash
 ---
@@ -33,7 +33,7 @@ Monitor is a main-session cross-turn primitive — a subagent dispatch orphans a
 | `base` | (required) | PR base/target branch. |
 | `reviewer_filter` | `automated` | Actionable reviewer identities (`automated` \| `codex-only` \| `all` \| `<author>`). |
 | `max_watch_duration` | `3600` | Idle-window seconds per Monitor arm (1h). |
-| `max_remediation_cycles` | `$(bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor)` | Max real remediation rounds (findings_resolved ≥ 1). |
+| `max_remediation_cycles` | `$(bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" floor)` | Max real remediation rounds (findings_resolved ≥ 1). |
 | `poll_interval` | `60` | Seconds between polls. |
 | `user_answer` | (none) | Optional `{candidate_url, question, reply}`: the user's answer to a question the reviewer asked, per `${CLAUDE_PLUGIN_ROOT}/agents/github-reviewer.md` (Fix Mode Input). Passed to the cycle-0 reviewer dispatch only. |
 
@@ -55,7 +55,7 @@ argument, never the full value, and leaves the deadline unchanged.
 `max_remediation_cycles` is a FLOOR. The floor value is DECLARED and ENFORCED by
 `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, and no
 literal is restated here — query it with
-`bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh floor`,
+`bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" floor`,
 which prints a BARE integer and no `KEY=` label. That is why the default above is a
 command SUBSTITUTION: the published value goes straight into any argv expecting the
 number — including `cycle-decision`'s `<max_cycles>` — with nothing to strip.
@@ -63,7 +63,7 @@ A caller that invokes this loop with a lower value is REJECTED.
 
 ## Lifecycle
 
-**1. Preflight.** Run `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/preflight.sh`
+**1. Preflight.** Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/preflight.sh"`
 with `pr`, `working_branch`, `base` as positional args. Any `PREFLIGHT_ERROR=`
 line or non-zero exit → terminal `blocked`. Confirm git state is not unsafe per
 `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State).
@@ -72,7 +72,7 @@ line or non-zero exit → terminal `blocked`. Confirm git state is not unsafe pe
 baseline seed:
 
 ```
-bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh --snapshot initial <OWNER> <REPO> <PR_NUMBER> <max_watch_duration> <poll_interval> <reviewer_filter> <SELF_LOGIN>
+bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh" --snapshot initial <OWNER> <REPO> <PR_NUMBER> <max_watch_duration> <poll_interval> <reviewer_filter> <SELF_LOGIN>
 ```
 
 `--snapshot` FIRST, then the ARM KIND (`initial` here — see Arm kind below), then
@@ -98,7 +98,7 @@ report for how this skill hands control back to its caller.
 **4. Arm Monitor.** Arm a Monitor in the main session on:
 
 ```
-bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh <OWNER> <REPO> <PR_NUMBER> <max_watch_duration> <poll_interval> <reviewer_filter> <SELF_LOGIN> "<BASELINE_SEED>"
+bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh" <OWNER> <REPO> <PR_NUMBER> <max_watch_duration> <poll_interval> <reviewer_filter> <SELF_LOGIN> "<BASELINE_SEED>"
 ```
 
 Resolved preflight values / skill inputs as positional args in that order, with the
@@ -153,7 +153,7 @@ ceiling turns out to be — assume no specific figure. The watch never silently
 dies at an arm boundary.
 
 **5. Per event.** `CHANGED` → run
-`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`:
+`bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/prefilter.sh" <OWNER> <REPO> <PR_NUMBER> <reviewer_filter> <SELF_LOGIN>`:
 `PREFILTER_SKIP` → keep Monitor armed, no dispatch, no cycle/`Routed` increment.
 `PREFILTER_DISPATCH` or `PREFILTER_ERROR=<reason>` → dispatch reviewer fix mode
 (no `target`); `PREFILTER_ERROR` is fail-open. Handle return per Reviewer-return
@@ -176,7 +176,7 @@ no-poll-running rules. `STATE=MERGED` → `pr-merged`. `STATE=CLOSED` →
 `pr-closed`. `WATCH_TIMEOUT` → `watch-window-elapsed`, EXCEPT a timeout from an arm a
 productive return supersedes, which step 6 discards. `POLL_ERROR` → stop Monitor;
 `blocked`. For the last four, use
-`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh token-map <signal>`.
+`bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" token-map <signal>`.
 
 PRE-DISPATCH SEED. BEFORE spawning the reviewer for ANY dispatch in this step —
 the `PREFILTER_DISPATCH` / `PREFILTER_ERROR` fix pass AND the `REVIEWER_APPROVED`
@@ -204,7 +204,7 @@ propagates only). `merge-advised` → HARD-STOP; ONE `merge-advised` terminal wi
 `advisory_reason` + `structural_home` + `recommendation_text`; ADVISORY ONLY — loop NEVER merges
 (classification-free). Pass EVERY reviewer return (including the escalation
 terminals above) through
-`${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh cycle-decision <current_count> <max_cycles> <findings_resolved> <exit_reason>`
+`bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh" cycle-decision <current_count> <max_cycles> <findings_resolved> <exit_reason>`
 for cycle increments, ceiling, `same-finding-repeat`, and terminal-vs-cycle: it
 counts a completed remediation round (`findings_resolved ≥ 1`) even on an
 escalation hard-stop — a mixed fix+escalate pass IS a cycle — while keeping
@@ -258,7 +258,7 @@ QUIET-EXIT CHECK. Before the loop ends `clean` after an approval, or keeps
 watching with no poll running, compare the PR once against the pending seed:
 
 ```
-bash ${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh --check <OWNER> <REPO> <PR_NUMBER> <max_watch_duration> <poll_interval> <reviewer_filter> <SELF_LOGIN> "<PENDING_SEED>"
+bash "${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/pr-change-detect-poll.sh" --check <OWNER> <REPO> <PR_NUMBER> <max_watch_duration> <poll_interval> <reviewer_filter> <SELF_LOGIN> "<PENDING_SEED>"
 ```
 
 `--check` FIRST, then the SAME 7 positional args the step-4 arm uses, with the

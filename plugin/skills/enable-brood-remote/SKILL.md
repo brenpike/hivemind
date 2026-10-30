@@ -2,8 +2,8 @@
 name: enable-brood-remote
 description: Enables remote control over every strain of a brood by fanning the `/rc <strain-name>` slash command out to each strain's live session. Fires ONLY on an EXPLICIT user request to turn on remote control for a brood — e.g. "enable RC for all strains". This is a user-initiated action, NOT an autonomous coordination step the coordinator takes on its own.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/enable-brood-remote/scripts/rc-brood.sh *)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-discover.sh)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/enable-brood-remote/scripts/rc-brood.sh" *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-discover.sh")
 shell: bash
 ---
 
@@ -19,7 +19,7 @@ This skill is **agent-invocable on purpose**, but it fires ONLY on an EXPLICIT u
 
 1. **Resolve the target broodId.** Discover the broods under the current checkout:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-discover.sh
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-discover.sh"
    ```
    It emits one absolute manifest path per line (`…/.hivemind/broods/<broodId>/manifest.json`), in sorted brood-id order. The `<broodId>` is the directory segment immediately above `manifest.json`.
    - **Exit 1 with a `blocker: …` line on stderr** → discovery refused to list the broods (for example, the checkout's `.hivemind/broods` is a symlink or not a real directory, or the checkout root cannot be resolved). Relay the blocker line verbatim and stop. Do not report `No broods found.` and do not run the engine.
@@ -29,7 +29,7 @@ This skill is **agent-invocable on purpose**, but it fires ONLY on an EXPLICIT u
 
 2. **Execute the engine** (run it — do NOT `Read` it) with the resolved broodId:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/enable-brood-remote/scripts/rc-brood.sh <broodId>
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/enable-brood-remote/scripts/rc-brood.sh" <broodId>
    ```
    The committed engine owns the whole deterministic fan-out: brood-id validation, manifest read (as DATA), per-strain name sanitization, session-liveness guard, and the keystroke delivery. Its stdout is per-strain disposition lines (`applied: …` / `skipped: …` / `failed: …`) followed by one `summary: …` line. Exit 0 means the fan-out completed (even with strains skipped or failed); exit 1 with a `blocker: …` line on stderr means a pre-flight blocker stopped it before any keystroke was delivered — in that case, relay the blocker and stop.
 

@@ -139,6 +139,7 @@ This policy applies to:
   - overlord
   - `hivemind:drone`
   - `hivemind:changeling`
+  - `hivemind:synapse`
 - All review feedback classification steps
 
 ### Write-Capable Skill Containment
@@ -213,6 +214,39 @@ The causes below are DIAGNOSTIC ILLUSTRATION ONLY — they exist so an agent can
 Under `--dangerously-skip-permissions` no file-permission rule applies at all, so there is neither a prompt nor a deny evaluation; the outcome-keyed rule already covers that world, and it needs no cause of its own — and neither does any other harness, settings, or transport condition nobody has named yet. Adding a fourth cause here would not change the routing, because the causes do not route.
 
 An operator DECLINING a prompt carries TWO SEPARATE consequences; keep them separate. First, the Write did not succeed, so the rule above applies unchanged: the navigator stops and never improvises another transport. Second, the outcome is reported as a USER DECISION — an operator declined the transport — and NOT as a degradation defect, an unreachable transport, or a broken capability.
+
+### Synapse Runner Gate
+
+This subsection is the one canonical statement of the synapse runner gate. `hivemind:synapse` is the agent a workflow script starts to run one committed runner script. Its only tools are Bash and Write. Only workflow scripts start it. The overlord never delegates to it. The gate is a plugin PreToolUse hook, `${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh`, registered in `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` for the Bash and Write tools.
+
+The gate knows five runner scripts: `molt.sh`, `gather-facts.sh`, `create-working-branch.sh`, `bump-type.sh` and `open-plan-pr.sh`. Each lives at `skills/<name>/scripts/<name>.sh` under the plugin root. A command is in exact form when it is `bash`, then one of those script paths under `CLAUDE_PLUGIN_ROOT`, then only the flags that script takes, each value in its fixed class, with single spaces between them. The script path is always one double-quoted word: `bash "<root>/skills/<name>/scripts/<name>.sh"`. A bare path is not exact. `<root>` is `CLAUDE_PLUGIN_ROOT` exactly as Claude Code sets it, never rewritten. So the path the hook matches is the one Claude Code substitutes into synapse's command and the one bash runs, and the hook's shared checks load from under that same root. Anything else is not exact: other quotes, a redirection, a pipe, a chained or appended command, a substitution, a control character, or a relative or copied path.
+
+The hook decides as follows:
+
+- Bash from `hivemind:synapse` in exact form: allow, with no prompt.
+- Bash from `hivemind:synapse` in any other form: deny.
+- Bash from any agent that names one of the five script file names as a path part, not in exact form: deny. The deny reason gives the exact form and says to read the file with Read.
+- Bash from any other agent in exact form: no decision. The normal permission flow and the skill grants apply.
+- Write from `hivemind:synapse`: allow only `.hivemind/molt-inputs-<token>.json` or `.hivemind/pr-inputs-<token>.json`, relative or under the session's working directory. The parent must resolve to that directory's `.hivemind`, and the target must not be a symlink. Deny every other synapse Write.
+- Write from any other agent: no decision.
+
+The hook fails open to the normal permission flow. When it cannot decide, it outputs nothing. That covers a missing `jq`, an empty `CLAUDE_PLUGIN_ROOT`, malformed input, a timeout, and hooks turned off by settings. The hook itself never fails toward an allow: when it cannot decide, it allows nothing. A settings allow rule that covers the call still applies then, with none of the hook's checks; for synapse's inputs-file Write that is the seeded rules, listed below. It never exits 2, because exit 2 would block the call.
+
+An allow from the hook only skips the prompt. A `permissions.deny` or `permissions.ask` rule in settings still wins over it.
+
+Synapse's inputs files use the fixed-literal transport of the Inert Inputs-File Navigator Pattern above, with the same paths as `hivemind:molt` and `hivemind:open-plan-pr`. The two forms are written in `${CLAUDE_PLUGIN_ROOT}/agents/synapse.md` and in the hook. Synapse picks the token. A navigator's `Edit(<glob>)` entry only pre-approves. Here the hook denies every other synapse Write, so no prompt text can steer where the Write lands. The engine's read-guard still runs before it reads the file.
+
+Synapse commits or pushes only under the `delegated-implementer` grant in `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Commit Authority).
+
+What the gate does not guard:
+
+- A renamed or copied script. The deny matches the five file names only.
+- Another interpreter or launcher that runs a script without naming its file, or any command that does not name the five scripts.
+- A plugin root inside the repository, such as a checkout loaded as the plugin. There a branch edit to a runner script runs with no prompt. The skill grants have the same exposure.
+- Cross-script use. Synapse can run any of the five exact commands with no prompt, not only its own step's. Each script still refuses trunk, a dirty tree and bad names. This residual is recorded in ADR-0037.
+- A plugin root whose path holds `"`, `$`, a backtick, a backslash or a control character. These are the bytes bash reads specially inside double quotes. No fixed shell quoting carries those bytes, so such a root has no exact form: the hook denies the five runner commands for every agent and never gives them an allow. The hook does not gate other plugin script commands, and bash reads those bytes in them too, so a `$(...)` or a backtick in the path runs its text when such a command runs. That is inside the trust boundary: the plugin path is trusted input, because whoever names the plugin folder (the user, their config, or the plugin's own marketplace and version names) can already run code as the user. Main has the same exposure. A Windows path with backslashes falls under this residual: its runner commands are denied. It was not run on Windows. This residual and the trusted plugin path are recorded in ADR-0037, the trusted path by user decision (2026-10-30) with local review finding bd7cc0ef.
+- A same-user program racing the inputs-file Write. The hook checks the path and then allows, and Claude Code opens the path again for the Write, so a program running as the same user in the checkout could swap the leaf or `.hivemind` for a symlink in between. Such a program can already write any file the user can, so it gains nothing. While the hook runs, a symlink already there, committed or checked out, cannot race: the hook refuses it. When the hook cannot decide, see the next entry. This is outside the threat model by user decision (2026-10-30), recorded in ADR-0037 with local review finding 149210d3.
+- A broken hook and the seeded inputs-file rules. When the hook cannot decide, the `Edit(.hivemind/molt-inputs-*.json)` and `Edit(.hivemind/pr-inputs-*.json)` rules that seed-hive adds to settings still approve synapse's Write to those paths with no prompt, and the hook's checks on `.hivemind` and the leaf do not run. A symlink committed at the leaf or at `.hivemind` could then send the Write outside the checkout. It needs both a broken hook and a committed symlink. Write refuses to overwrite an existing file the agent has not read, and the script's containment check still refuses to read the escaped file. Main has the same exposure: its runner Writes used the same seeded rules with no symlink check. This is outside the threat model by user decision (2026-10-30), recorded in ADR-0037 with local review finding 793dbf65.
 
 ### Enforcement Order
 

@@ -605,7 +605,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '75681f02ea6e4a88';
+const BUILD_ID = '9cc609eaeb9df320';
 
 function supportedSchemaKeywords(){
 return[
@@ -2056,14 +2056,54 @@ return replyHome===undefined?sentence:sentence+' '+replyHome+' is the user\'s de
 function runnerReadOnlySentence(){
 return'This task is read-only: it edits no tracked files and makes no git writes.';
 }
-function runnerToolSentence(){
-return'Make no other tool call.';
-}
-function runnerAgentType(){
+function droneAgentType(){
 return'hivemind:drone';
+}
+function synapseAgentType(){
+return'hivemind:synapse';
 }
 function formatDataBlock(name,text){
 return'<'+name+'>\n'+JSON.stringify(text).replace(/</g,'\\u003c')+'\n</'+name+'>';
+}
+function formatCommandBlock(command){
+return formatDataBlock('command',command);
+}
+function formatInputsFileBlock(path,content){
+return formatDataBlock('inputs_file',{path:path,content:content});
+}
+function runnerValuePatterns(){
+const name=gitIdentifierPattern();
+return{
+'--trunk':name,
+'--base':name,
+'--branch':name,
+'--head':name,
+'--ref':/^[0-9]+$/,
+'--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
+'--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
+'--trunk-freshness':/^(?:fresh|stale|skipped)$/,
+'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-\{token\}\.json$/
+};
+}
+function describeRunnerWordProblem(words){
+const patterns=runnerValuePatterns();
+for(let index=0;index<words.length;index+=2){
+const flag=String(words[index]);
+const value=words[index+1];
+if(!Object.prototype.hasOwnProperty.call(patterns,flag)||typeof value!=='string'||!patterns[flag].test(value)){
+return'its '+flag+' value is not one the script takes';
+}
+}
+return undefined;
+}
+function buildRunnerCommand(skill,words){
+return['bash','"{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh"',...words].join(' ');
+}
+function listGatherFactsWords(trunk,references){
+return['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])];
+}
+function buildGatherFactsCommand(trunk,references){
+return buildRunnerCommand('gather-facts',listGatherFactsWords(trunk,references));
 }
 function factsHeadStates(){
 return['branch','detached','unsafe_name'];
@@ -2230,7 +2270,7 @@ buildFactsBlock(facts)
 ].join('\n');
 }
 function scanOptions(){
-return{agentType:runnerAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
+return{agentType:droneAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
 }
 async function runScanStep(facts,runNoun){
 if(Number(facts.external_texts)>0){
@@ -2296,7 +2336,7 @@ facts_file:{type:'string',description:'The facts_file routing line value, copied
 facts_lines:{type:'string',description:'The facts_lines routing line value, copied exactly.'},
 cut:{type:'string',description:'The cut routing line value, copied exactly.'},
 external_texts:{type:'string',description:'The external_texts routing line value, copied exactly.'},
-blocker:{type:'string',description:'The blocker line the skill relayed.'}
+blocker:{type:'string',description:'The blocker line the script printed.'}
 },
 required:['outcome'],
 variants:{
@@ -2353,12 +2393,10 @@ check:buildTaggedSchema(buildReviseSpec({},shownLabels))
 }
 function buildFactsPrompt(trunk,references){
 return[
-'Invoke the hivemind:gather-facts skill once, with the trunk and references in the inputs block below and no remote.',
-runnerReadOnlySentence(),
+'Gather the branch facts with the command below.',
 dataBlocksSentence(),
-runnerToolSentence(),
 '',
-formatDataBlock('inputs',{trunk:trunk,references:references})
+formatCommandBlock(buildGatherFactsCommand(trunk,references))
 ].join('\n');
 }
 function buildAnalyzePrompt(request,facts){
@@ -2391,7 +2429,7 @@ function plannerOptions(label,phaseTitle,schema){
 return{agentType:PLANNER_AGENT_TYPE,schema:toAgentSchema(schema),label:label,phase:phaseTitle};
 }
 function factsOptions(){
-return{agentType:runnerAgentType(),model:'haiku',schema:toAgentSchema(FACTS_STEP_SCHEMA),label:'facts',phase:'Facts'};
+return{agentType:synapseAgentType(),model:'haiku',schema:toAgentSchema(FACTS_STEP_SCHEMA),label:'facts',phase:'Facts'};
 }
 function describeFactsProblem(facts){
 if(!validateSchema(FACTS_STEP_SCHEMA,facts).ok){
@@ -2412,8 +2450,16 @@ return{problem:cutFactsMessage(RUN_NOUN,facts.cut)};
 }
 return undefined;
 }
+function describeFactsCommandStop(trunk,references){
+const problem=describeRunnerWordProblem(listGatherFactsWords(trunk,references));
+return problem===undefined?undefined:{problem:'The facts step did not run its script, so '+describeRunNoun(RUN_NOUN)+' stopped before planning: '+problem+'.'};
+}
 async function gatherCheckedFacts(launchInputs){
 phase('Facts');
+const commandStop=describeFactsCommandStop(launchInputs.trunk,launchInputs.references);
+if(commandStop!==undefined){
+return{cause:commandStop};
+}
 const facts=await agent(buildFactsPrompt(launchInputs.trunk,launchInputs.references),factsOptions());
 const factsCause=describeFactsProblem(facts);
 if(factsCause!==undefined){

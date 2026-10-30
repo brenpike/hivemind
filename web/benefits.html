@@ -229,10 +229,11 @@ PR opened  (watched by default)
             <p class="kicker kicker--benefit xs">Benefit</p>
             <p>Adopt incrementally. Start with the core pipeline; layer in companions when you need them.</p>
           </div>
-          <div class="code-panel diagram" id="ben-companions-diagram" role="img" tabindex="0" aria-label="Companion plugins are all optional layers on top of the core framework of six agents: claude-mem adds memory, codex adds local pre-PR review, caveman adds compression; removing any has no effect on the others">
+          <div class="code-panel diagram" id="ben-companions-diagram" role="img" tabindex="0" aria-label="Companion plugins are all optional layers on top of the core framework of seven agents: claude-mem adds memory, codex adds local pre-PR review, caveman adds compression; removing any has no effect on the others">
 <pre><code><span class="t-dim">Core framework  ──────────────── always on</span>
  ├─ overlord / cerebrate / drone / changeling
- └─ local-reviewer / github-reviewer
+ ├─ local-reviewer / github-reviewer
+ └─ synapse
 
 <span class="t-str">+ claude-mem</span>    <span class="t-dim">─── optional (memory)</span>
 <span class="t-key">+ codex</span>         <span class="t-dim">─── optional (pre-PR review)</span>

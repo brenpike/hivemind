@@ -16,7 +16,8 @@ Project engineering principles governing how prose, scripts, and skills are fact
 .claude-plugin/marketplace.json   # marketplace manifest at repo root → source: ./plugin
 plugin/                           # plugin root (resolves to ${CLAUDE_PLUGIN_ROOT})
   .claude-plugin/plugin.json      # plugin manifest (name, version)
-  agents/{overlord,cerebrate,drone,changeling,local-reviewer,github-reviewer}.md
+  agents/{overlord,cerebrate,drone,changeling,synapse,local-reviewer,github-reviewer}.md
+  hooks/                          # hooks.json + synapse-gate.sh (PreToolUse runner gate)
   skills/<skill-name>/SKILL.md
   skills/_shared/                 # cross-skill shared assets: reference docs (LANGUAGE.md, DEEPENING.md) plus shell libraries sourced by skill engine scripts
   governance/                     # *.md loaded by agents at runtime
@@ -34,6 +35,7 @@ Anything the runtime loads must live under `plugin/`.
 
 - **Path refs across plugin files MUST use `${CLAUDE_PLUGIN_ROOT}/...`.** Bare `governance/foo.md` or `agents/foo.md` paths break when consumers install the plugin. Grep for bare paths before merging.
 - **Agent frontmatter limits:** Claude Code plugin system does not honor `mcpServers` or `permissionMode` in agent frontmatter. Read-only enforcement on cerebrate is its `tools:` list, not `permissionMode`. That list holds no Bash, Write or Edit. A `Bash(...)` entry grants the whole Bash tool (ADR-0010, amendment 2026-10-20), so never add one. `tests/policy/safety-planner-no-write.json` pins the list. Don't re-add these fields.
+- **A plugin script path in a command or `Bash(...)` grant is one double-quoted word:** `bash "${CLAUDE_PLUGIN_ROOT}/skills/<s>/scripts/<s>.sh" <args>`, and the grant `Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/<s>/scripts/<s>.sh" *)`. A bare path splits when the plugin path holds a space. In prose the path may also be a path-only code span or a `](...)` link target. `tools/policy_check.sh` CHECK 17 flags every other form in plugin Markdown.
 - **Skills are namespaced as `hivemind:<skill>`** when consumed. Internal cross-references in skill/agent bodies should use the namespaced form so docs match runtime behavior.
 - **Governance docs are load-bearing.** Renaming a section header inside `plugin/governance/*.md` may break agent rules that reference that header by name (e.g. `(Required Git Preflight)`, `(Definitions → Trivial change)`). Search for header references before renaming.
 

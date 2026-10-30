@@ -30,6 +30,10 @@ A modifying agent — shapeshifter that owns presentational markup, styling, and
 _Alias_: designer
 _Avoid_: UI agent, stylist
 
+**Synapse**:
+The runner agent — a haiku relay that runs one committed hivemind script (facts, commit, push or pull request) and reports its output word for word. Only workflow scripts start it; the overlord never delegates to it. A plugin `PreToolUse` hook allows it the five exact runner commands with no prompt and denies any other command that names one of those scripts, for every agent. Not a bioform.
+_Avoid_: runner, shell agent
+
 **Local-Reviewer**:
 The agent that runs pre-PR Codex review in a loop, classifies findings, and reports terminal results to the overlord before the PR is opened.
 _Avoid_: linter, pre-check

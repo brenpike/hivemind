@@ -19,11 +19,14 @@
  *          texts put external text in.
  *   The step, as meta.js names it:
  *   PR      once every configured gate held on one commit H, a haiku
- *           runner invokes hivemind:open-plan-pr once under the push grant
- *           and the git-script sentence. Its inputs block holds only head,
- *           base, expect_commit H, the title, body and comment the code
- *           builds, and draft from the launch. This runner is the only push the workflow makes, so
- *           every push carries expect_commit. Its stdout parses with
+ *           synapse runner runs the open-plan-pr command once under the
+ *           push grant. The command carries only --head, --base,
+ *           --expect-commit H and the inputs path, and the inputs_file
+ *           block only the title, body and comment the code builds and
+ *           draft from the launch. This runner is the only push the
+ *           workflow makes, so every push carries --expect-commit. A
+ *           command value outside its class (describeCommandStop,
+ *           relay.js) is a terminal stop before the call. Its stdout parses with
  *           openPlanPrRoutingSpec(), head_ref_oid must equal H, and the run
  *           finishes complete with pr. The runner call goes through
  *           runRunnerRelay (relay.js), so a transient block runs once more
@@ -55,6 +58,10 @@
  *   title stays plain text: GitHub renders titles with code spans only and
  *   takes no mentions from them, and a wrapper would reach the squash
  *   commit subject.
+ *   No title, body or comment holds a forbiddenSubjectTexts() string
+ *   (relay.js), in any case: code holds this check, not a skill body the
+ *   runner may never read, so buildPullRequestTexts makes one a terminal
+ *   stop before any push (issue 467).
  *   The relay is read through describeUnusableResult (lib/result.js): a
  *   null result, an agent failure, adds the agent-failure sentence and
  *   next action run_again, and stopDelivery ends the run on it; any other
@@ -176,18 +183,27 @@ function buildPullRequestTexts(run, plan, gates) {
   if (comment.text === undefined) {
     return { problem: describePullRequestTextSize('comment', comment.size) };
   }
-  return { title: buildPullRequestTitle(plan), body: body.text, comment: comment.text };
+  const texts = { title: buildPullRequestTitle(plan), body: body.text, comment: comment.text };
+  const attributedNoun = Object.keys(texts).find((noun) => forbiddenSubjectTexts().some((forbidden) => texts[noun].toLowerCase().includes(forbidden)));
+  if (attributedNoun !== undefined) {
+    return { problem: 'The pull request ' + attributedNoun + ' would hold an attribution string, so ' + RUN_NAME + ' stopped before the pull request and pushed nothing.' };
+  }
+  return texts;
+}
+
+function listPullRequestWords(plan, head) {
+  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', head, '--inputs', '.hivemind/pr-inputs-{token}.json'];
 }
 
 function buildPullRequestPrompt(plan, head, texts, draft) {
+  const words = listPullRequestWords(plan, head);
   return [
-    'Invoke the hivemind:open-plan-pr skill once, with each value of the inputs block below, word for word, as the input of the same name, to push the working branch and open its pull request or reuse the open one.',
+    'Run the command below to push the working branch and open its pull request or reuse the open one.',
     pushGrantSentence(),
-    gitScriptSentence('hivemind:open-plan-pr'),
     dataBlocksSentence(),
-    skillRunOnlySentence(),
     '',
-    formatDataBlock('inputs', { head: plan.branch, base: plan.base, expect_commit: head, title: texts.title, body: texts.body, comment: texts.comment, draft: draft })
+    formatCommandBlock(buildRunnerCommand('open-plan-pr', words)),
+    formatInputsFileBlock(words[7], { title: texts.title, body: texts.body, comment: texts.comment, draft: draft })
   ].join('\n');
 }
 
@@ -219,6 +235,10 @@ async function runPullRequestStep(run, plan, gates) {
     return stopDelivery([{ problem: texts.problem, terminal: true }], run, [], false);
   }
   phase('PR');
+  const commandStop = describeCommandStop('pull request', listPullRequestWords(plan, run.head));
+  if (commandStop !== undefined) {
+    return stopDelivery([commandStop], run, [], false);
+  }
   const relay = await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), describePullRequestLabel(run, gates.runs.pr), 'PR');
   const checked = checkPullRequestRelay(relay, run.head);
   if (checked.problem === undefined) {

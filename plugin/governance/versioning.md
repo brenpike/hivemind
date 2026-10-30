@@ -89,7 +89,7 @@ To compute the dominant row, the overlord makes two judgments and then runs the 
 
 1. Decide whether the change satisfies any bullet in Bump Trigger above; pass the answer as `--bump-trigger yes|no`.
 2. Decide whether the change matches one or more bullets in the "No bump is required by default" list above; pass the answer as `--no-bump-match yes|no`.
-3. Run `bash ${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh <base> --bump-trigger <yes|no> --no-bump-match <yes|no>`, where `<base>` is the resolved base branch from `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Framework Defaults).
+3. Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh" <base> --bump-trigger <yes|no> --no-bump-match <yes|no>`, where `<base>` is the resolved base branch from `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Framework Defaults).
 
 Act on the engine's `verdict`:
 

@@ -8,7 +8,7 @@
     {
       "name": "hivemind",
       "source": "./plugin",
-      "description": "Claude Code plugin providing a structured multi-agent framework with overlord, cerebrate, drone, changeling, local-reviewer, and github-reviewer agents plus workflow skills for git branching, commits, PRs, and code review remediation."
+      "description": "Claude Code plugin providing a structured multi-agent framework with overlord, cerebrate, drone, changeling, synapse, local-reviewer, and github-reviewer agents plus workflow skills for git branching, commits, PRs, and code review remediation."
     }
   ]
 }

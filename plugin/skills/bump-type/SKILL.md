@@ -2,7 +2,7 @@
 name: bump-type
 description: Derives the dominant Bump Type Determination row and bump verdict for the working-branch commits since the base, emitting a routing decision the caller acts on. Use when deciding whether a version bump is required and which bump type applies.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash
 ---
@@ -47,7 +47,7 @@ The caller resolves and passes these; the skill does not invent them.
 
 1. **Execute the script** with one Bash call:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh <base> --bump-trigger <yes|no> --no-bump-match <yes|no> [--version-file <path>]...
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh" <base> --bump-trigger <yes|no> --no-bump-match <yes|no> [--version-file <path>]...
    ```
    Pass `--version-file <path>` once per entry of `version_files`, and not at all when
    `version_files` is absent or empty. EXECUTE (do not Read) the script — it owns the

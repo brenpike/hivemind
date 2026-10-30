@@ -2,7 +2,7 @@
 name: next-wave
 description: Computes the ready wave of independent plan steps for the intra-run parallel-wave implement loop, reading the run ledger and emitting the step ids to dispatch this iteration. Use when computing the next wave or ready-set of plan steps.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/next-wave/scripts/next-wave.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/next-wave/scripts/next-wave.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash
 ---
@@ -57,7 +57,7 @@ done set covers every step.
 
 1. **Execute the script** with one Bash call, passing the run_id:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/next-wave/scripts/next-wave.sh <run_id>
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/next-wave/scripts/next-wave.sh" <run_id>
    ```
    EXECUTE (do not Read) the script — it owns the deterministic read -> derive -> emit and the
    ledger containment/coherence guards. It reads the ledger and writes nothing.

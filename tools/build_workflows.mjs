@@ -842,7 +842,7 @@ function assertBuiltScript(id, output, parsed) {
  * make the build pass.
  */
 export const PROSE_BUDGETS = Object.freeze({
-  'analysis-only': 19000,
+  'analysis-only': 19200,
   'standard-delivery': 43800
 });
 const PROSE_PIECE_KINDS = Object.freeze(['string', 'template']);

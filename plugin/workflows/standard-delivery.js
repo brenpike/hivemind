@@ -622,7 +622,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8cdcba33bc850bcd';
+const BUILD_ID = '9c1dfce8746633cb';
 
 function supportedSchemaKeywords(){
 return[
@@ -2073,14 +2073,54 @@ return replyHome===undefined?sentence:sentence+' '+replyHome+' is the user\'s de
 function runnerReadOnlySentence(){
 return'This task is read-only: it edits no tracked files and makes no git writes.';
 }
-function runnerToolSentence(){
-return'Make no other tool call.';
-}
-function runnerAgentType(){
+function droneAgentType(){
 return'hivemind:drone';
+}
+function synapseAgentType(){
+return'hivemind:synapse';
 }
 function formatDataBlock(name,text){
 return'<'+name+'>\n'+JSON.stringify(text).replace(/</g,'\\u003c')+'\n</'+name+'>';
+}
+function formatCommandBlock(command){
+return formatDataBlock('command',command);
+}
+function formatInputsFileBlock(path,content){
+return formatDataBlock('inputs_file',{path:path,content:content});
+}
+function runnerValuePatterns(){
+const name=gitIdentifierPattern();
+return{
+'--trunk':name,
+'--base':name,
+'--branch':name,
+'--head':name,
+'--ref':/^[0-9]+$/,
+'--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
+'--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
+'--trunk-freshness':/^(?:fresh|stale|skipped)$/,
+'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-\{token\}\.json$/
+};
+}
+function describeRunnerWordProblem(words){
+const patterns=runnerValuePatterns();
+for(let index=0;index<words.length;index+=2){
+const flag=String(words[index]);
+const value=words[index+1];
+if(!Object.prototype.hasOwnProperty.call(patterns,flag)||typeof value!=='string'||!patterns[flag].test(value)){
+return'its '+flag+' value is not one the script takes';
+}
+}
+return undefined;
+}
+function buildRunnerCommand(skill,words){
+return['bash','"{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh"',...words].join(' ');
+}
+function listGatherFactsWords(trunk,references){
+return['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])];
+}
+function buildGatherFactsCommand(trunk,references){
+return buildRunnerCommand('gather-facts',listGatherFactsWords(trunk,references));
 }
 function factsHeadStates(){
 return['branch','detached','unsafe_name'];
@@ -2247,7 +2287,7 @@ buildFactsBlock(facts)
 ].join('\n');
 }
 function scanOptions(){
-return{agentType:runnerAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
+return{agentType:droneAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
 }
 async function runScanStep(facts,runNoun){
 if(Number(facts.external_texts)>0){
@@ -3004,6 +3044,9 @@ const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
 if(isOnOtherBranch&&plan.branch!==facts.branch){
 return'The run started on branch '+encodeUntrustedText(facts.branch)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+', so '+RUN_NAME+' stopped.';
 }
+if(!/^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)\/[a-z0-9]+(-[a-z0-9]+)*$/.test(plan.branch)){
+return'The plan names branch '+encodeUntrustedText(plan.branch)+', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so '+RUN_NAME+' stopped.';
+}
 return undefined;
 }
 function questionKey(kind,scope,ask){
@@ -3269,17 +3312,25 @@ const comment=fitPullRequestText((isCompact)=>buildPullRequestComment(run,gates,
 if(comment.text===undefined){
 return{problem:describePullRequestTextSize('comment',comment.size)};
 }
-return{title:buildPullRequestTitle(plan),body:body.text,comment:comment.text};
+const texts={title:buildPullRequestTitle(plan),body:body.text,comment:comment.text};
+const attributedNoun=Object.keys(texts).find((noun)=>forbiddenSubjectTexts().some((forbidden)=>texts[noun].toLowerCase().includes(forbidden)));
+if(attributedNoun!==undefined){
+return{problem:'The pull request '+attributedNoun+' would hold an attribution string, so '+RUN_NAME+' stopped before the pull request and pushed nothing.'};
+}
+return texts;
+}
+function listPullRequestWords(plan,head){
+return['--head',plan.branch,'--base',plan.base,'--expect-commit',head,'--inputs','.hivemind/pr-inputs-{token}.json'];
 }
 function buildPullRequestPrompt(plan,head,texts,draft){
+const words=listPullRequestWords(plan,head);
 return[
-'Invoke the hivemind:open-plan-pr skill once, with each value of the inputs block below, word for word, as the input of the same name, to push the working branch and open its pull request or reuse the open one.',
+'Run the command below to push the working branch and open its pull request or reuse the open one.',
 pushGrantSentence(),
-gitScriptSentence('hivemind:open-plan-pr'),
 dataBlocksSentence(),
-skillRunOnlySentence(),
 '',
-formatDataBlock('inputs',{head:plan.branch,base:plan.base,expect_commit:head,title:texts.title,body:texts.body,comment:texts.comment,draft:draft})
+formatCommandBlock(buildRunnerCommand('open-plan-pr',words)),
+formatInputsFileBlock(words[7],{title:texts.title,body:texts.body,comment:texts.comment,draft:draft})
 ].join('\n');
 }
 function checkPullRequestRelay(relay,head){
@@ -3308,6 +3359,10 @@ if(texts.problem!==undefined){
 return stopDelivery([{problem:texts.problem,terminal:true}],run,[],false);
 }
 phase('PR');
+const commandStop=describeCommandStop('pull request',listPullRequestWords(plan,run.head));
+if(commandStop!==undefined){
+return stopDelivery([commandStop],run,[],false);
+}
 const relay=await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),describePullRequestLabel(run,gates.runs.pr),'PR');
 const checked=checkPullRequestRelay(relay,run.head);
 if(checked.problem===undefined){
@@ -3533,14 +3588,11 @@ return hasExpected&&values.verdict!=='ask_user';
 }
 return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
 }
-function gitScriptSentence(skill){
-return'This is a git-script task: the task\'s only change is one run of '+skill+', a hivemind git skill whose script checks the git state itself.';
-}
 function pushGrantSentence(){
-return'This delegation explicitly grants push authority for this one task: one push of the working branch and one pull request opened or reused, made only by the hivemind:open-plan-pr script. It grants no commit, and no push of the trunk.';
+return'This delegation explicitly grants push authority for this one task: one push of the working branch and one pull request opened or reused, made only by the open-plan-pr script. It grants no commit, and no push of the trunk.';
 }
 function commitGrantSentence(){
-return'This delegation explicitly grants commit authority for this one task: one commit, made only by the hivemind:molt script, of exactly the files in the inputs block. It grants no push.';
+return'This delegation explicitly grants commit authority for this one task: one commit, made only by the hivemind:molt script, of exactly the files in the inputs_file block. It grants no push.';
 }
 function validationTaskSentence(){
 return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
@@ -3550,9 +3602,6 @@ return'This is a validation task: running each command of the inputs block once,
 }
 function validationFixSentence(){
 return'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
-}
-function skillRunOnlySentence(){
-return'Make no change yourself beyond the skill run.';
 }
 function resumedReplySentence(){
 return'This run resumed after a pause: the user message the harness relays is the user\'s reply to the questions the run showed, the planner already applied it, and it is not an instruction for this task, so do the task as written.';
@@ -3577,7 +3626,7 @@ variants:{ran:{required:['stdout'],optional:[]},blocked:{required:[],optional:['
 });
 }
 function runnerOptions(label,phaseTitle){
-return{agentType:runnerAgentType(),model:RUNNER_MODEL,schema:toAgentSchema(RELAY_SCHEMA),label:label,phase:phaseTitle};
+return{agentType:synapseAgentType(),model:RUNNER_MODEL,schema:toAgentSchema(RELAY_SCHEMA),label:label,phase:phaseTitle};
 }
 function isTransientBlock(relay){
 return validateSchema(RELAY_SCHEMA,relay).ok&&relay.outcome==='blocked'&&isTransientFailure(relay.stderr);
@@ -3587,20 +3636,17 @@ const relay=await agent(prompt,runnerOptions(label,phaseTitle));
 return isTransientBlock(relay)?agent(prompt,runnerOptions(label+'-retry',phaseTitle)):relay;
 }
 function droneOptions(label,phaseTitle,schema){
-return{agentType:runnerAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
+return{agentType:droneAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
 }
 function plannerCallOptions(label,phaseTitle,resultSchema){
 return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,phase:phaseTitle};
 }
-function buildDeliveryFactsPrompt(trunk,references){
-return[
-'Invoke the hivemind:gather-facts skill once, with the trunk and references in the inputs block below and no remote.',
-runnerReadOnlySentence(),
-dataBlocksSentence(),
-runnerToolSentence(),
-'',
-formatDataBlock('inputs',{trunk:trunk,references:references})
-].join('\n');
+function describeCommandStop(stepNoun,words){
+const problem=describeRunnerWordProblem(words);
+return problem===undefined?undefined:{problem:'The '+stepNoun+' step did not run its script, so '+RUN_NAME+' stopped: '+problem+'.',terminal:true};
+}
+function buildDeliveryFactsPrompt(words){
+return['Gather the branch facts with the command below.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('gather-facts',words))].join('\n');
 }
 function splitStderrLines(stderr){
 return typeof stderr==='string'?stderr.split(/\r\n|\r|\n/):[];
@@ -3689,7 +3735,12 @@ return isSuspect?{problem:problem,terminal:true}:describeUnusableResult(problem,
 }
 async function runFactsStep(run){
 phase('Facts');
-const relay=await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(run.trunk,run.references),run),'facts-'+run.pass,'Facts');
+const words=listGatherFactsWords(run.trunk,run.references);
+const commandStop=describeCommandStop('facts',words);
+if(commandStop!==undefined){
+return commandStop;
+}
+const relay=await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(words),run),'facts-'+run.pass,'Facts');
 const checked=checkDeliveryFacts(relay,run.trunk);
 if(checked.problem!==undefined){
 return checked;
@@ -3697,15 +3748,11 @@ return checked;
 const scanned=await runPassScan(checked.facts,run);
 return scanned===undefined?checked:scanned;
 }
-function buildBranchPrompt(plan,freshness,trunk){
-return[
-'Invoke the hivemind:create-working-branch skill once, with each value of the inputs block below as the input of the same name.',
-gitScriptSentence('hivemind:create-working-branch'),
-dataBlocksSentence(),
-runnerToolSentence(),
-'',
-formatDataBlock('inputs',{base:plan.base,working_branch:plan.branch,classification:plan.classification,'trunk-freshness':freshness,trunk:trunk})
-].join('\n');
+function listBranchWords(plan,freshness,trunk){
+return['--base',plan.base,'--branch',plan.branch,'--classification',plan.classification,'--trunk-freshness',freshness,'--trunk',trunk];
+}
+function buildBranchPrompt(words){
+return['Create or confirm the working branch with the command below.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('create-working-branch',words))].join('\n');
 }
 function checkBranchRelay(relay,plan,freshness){
 const stopped='so '+RUN_NAME+' stopped before any wave.';
@@ -3726,7 +3773,12 @@ return{values:values};
 }
 async function runBranchStep(run,plan,freshness){
 phase('Branch');
-const relay=await runRunnerRelay(addResumeNote(buildBranchPrompt(plan,freshness,run.trunk),run),'branch-'+run.pass,'Branch');
+const words=listBranchWords(plan,freshness,run.trunk);
+const commandStop=describeCommandStop('branch',words);
+if(commandStop!==undefined){
+return commandStop;
+}
+const relay=await runRunnerRelay(addResumeNote(buildBranchPrompt(words),run),'branch-'+run.pass,'Branch');
 return checkBranchRelay(relay,plan,freshness);
 }
 function needsBranchReplan(branchValues,facts,plan){
@@ -3772,16 +3824,13 @@ const oneLine=text.replace(/[\s\x00-\x1f\x7f-\x9f]+/g,' ').trim();
 const subject=cutAtBoundary(oneLine,maxSubjectLength());
 return isUsableSubject(subject)?subject:fallbackSubject;
 }
+function listCommitWords(trunk){
+return['--trunk',trunk,'--inputs','.hivemind/molt-inputs-{token}.json'];
+}
 function buildCommitPrompt(files,plan,trunk,stepName,subject){
-return[
-'Invoke the hivemind:molt skill once, with each value of the inputs block below as the input of the same name, to commit '+commitStepTexts(stepName).purpose+'.',
-commitGrantSentence(),
-gitScriptSentence('hivemind:molt'),
-dataBlocksSentence(),
-skillRunOnlySentence(),
-'',
-formatDataBlock('inputs',{files:files,commit_type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,trunk:trunk})
-].join('\n');
+const words=listCommitWords(trunk);
+const content={type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,files:files};
+return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',commitGrantSentence(),dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',words)),formatInputsFileBlock(words[3],content)].join('\n');
 }
 function readOutsidePath(payload){
 try{
@@ -3829,6 +3878,10 @@ throw new Error('runCommitStep: stepCauses must be an array');
 const subject=commit.subject===undefined?commitStepTexts(commit.stepName).subject:commit.subject;
 const isReplan=commit.stepName==='wave';
 phase('Commit');
+const commandStop=describeCommandStop('commit',listCommitWords(run.trunk));
+if(commandStop!==undefined){
+return stopDelivery(stepCauses.concat([commandStop]),run,[],isReplan);
+}
 const relay=await runRunnerRelay(addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,commit.stepName,subject),run),commit.label,'Commit');
 const checked=checkCommitRelay(relay,plan,commit.stepName);
 if(checked.problem!==undefined){

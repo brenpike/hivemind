@@ -2,7 +2,7 @@
 name: molt
 description: Creates a checkpoint commit for the current approved plan. Use when completing a phase, milestone, version bump, or review-remediation item.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh" *)
   - Bash(git status *)
   - Bash(git diff *)
   - Bash(git rev-parse *)
@@ -86,7 +86,7 @@ Every commit runs through `${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh`. T
 5. **Final Bash tool call.** Run the commit script, where `<allowlist-validated-trunk>` is the value that passed the input gate and `<token>` is the token from requirement 4:
 
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh --trunk <allowlist-validated-trunk> --inputs .hivemind/molt-inputs-<token>.json
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh" --trunk <allowlist-validated-trunk> --inputs .hivemind/molt-inputs-<token>.json
    ```
 
    The script header defines the field rules, the refusals, staging, the commit, the result checks, and the output; this skill does not restate them. Exit 0: stdout `branch: <branch>` is the routing data, followed by `commit: <full sha>` and `committed: true|false`. `committed: false` means no listed path was dirty, so the script made no commit. Exit 1: blocked; relay the script's stderr: one `outside:` line for each dirty path that is not in the list, as a JSON string, then the `blocker:` line.

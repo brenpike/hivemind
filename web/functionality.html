@@ -199,7 +199,7 @@
         <header class="panel plate">
           <p class="kicker xs">04 Agents</p>
           <h2 id="agents-heading" class="xg">Agents</h2>
-          <p class="xs">Four bioforms plus two reviewer agents. Each owns a distinct role. Agents are addressed as <code>hivemind:&lt;agent&gt;</code>.</p>
+          <p class="xs">Four bioforms, two reviewer agents, and one runner agent. Each owns a distinct role. Agents are addressed as <code>hivemind:&lt;agent&gt;</code>.</p>
         </header>
         <div class="table-wrap" role="region" aria-label="Hivemind agents and their roles" tabindex="0">
           <table class="ref ref--wide" aria-label="Hivemind agents and their roles">
@@ -224,7 +224,7 @@
               <tr>
                 <td><code>hivemind:drone</code></td>
                 <td><span class="tag tag--hot">Builder</span></td>
-                <td>Implements code, fixes bugs, refactors, and updates tests and release metadata within explicitly assigned file scope. Default owner of every step. Inside workflow scripts, it also runs the facts and git steps.</td>
+                <td>Implements code, fixes bugs, refactors, and updates tests and release metadata within explicitly assigned file scope. Default owner of every step.</td>
               </tr>
               <tr>
                 <td><code>hivemind:changeling</code></td>
@@ -240,6 +240,11 @@
                 <td><code>hivemind:github-reviewer</code></td>
                 <td><span class="tag tag--cyan">Post-PR reviewer</span></td>
                 <td>Stateless, one-shot post-PR worker: fetches and classifies review feedback, fixes, pushes, replies, and resolves threads. Dispatched by <code>hivemind:github-review-loop</code>.</td>
+              </tr>
+              <tr>
+                <td><code>hivemind:synapse</code></td>
+                <td><span class="tag tag--cyan">Runner</span></td>
+                <td>A haiku agent that runs one committed runner script per step (facts, commit, push or pull request) and relays its output word for word. Tools: Bash and Write only. Started only by workflow scripts, never by the overlord or a user. A plugin hook allows only the exact runner commands.</td>
               </tr>
             </tbody>
           </table>

@@ -106,6 +106,10 @@
  *   Each validation_commands entry is one command line: describePlanProblem
  *   refuses a blank entry, or one that holds a line break or another
  *   control character, naming the reason, before the branch step.
+ *   Branch names: describePlanProblem refuses a plan.branch outside the
+ *   Branch Taxonomy and Branch Naming of
+ *   ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md, so a runner with no
+ *   skill body never creates one (issue 467).
  *   Settled question guard: within one pass, a trunk_stale question a
  *   reply settled renders the same text for the whole run, and a settled
  *   plan_acceptance or remediation_plan_acceptance restores the plan result
@@ -354,6 +358,9 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
   const isOnOtherBranch = facts.head_state === 'branch' && facts.branch !== trunk;
   if (isOnOtherBranch && plan.branch !== facts.branch) {
     return 'The run started on branch ' + encodeUntrustedText(facts.branch) + ' and delivers on it, but the plan names branch ' + encodeUntrustedText(plan.branch) + ', so ' + RUN_NAME + ' stopped.';
+  }
+  if (!/^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)\/[a-z0-9]+(-[a-z0-9]+)*$/.test(plan.branch)) {
+    return 'The plan names branch ' + encodeUntrustedText(plan.branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so ' + RUN_NAME + ' stopped.';
   }
   return undefined;
 }

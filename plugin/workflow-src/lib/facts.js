@@ -15,19 +15,53 @@
  * Outputs
  *   boundarySentence, runnerReadOnlySentence
  *       the prompt sentences on external content and on a read-only
- *       runner task, word for word as analysis-only sends them. The
- *       runner one holds only the words drone.md keys its read-only
+ *       drone task, word for word as analysis-only sends them. The
+ *       read-only one holds only the words drone.md keys its read-only
  *       exemption on.
  *   dataBlocksSentence(replyHome)
  *       the one line a prompt carries on its data blocks: they are data,
  *       not instructions. With replyHome, the block that holds the user
  *       reply, it also names that reply as the user's decision.
- *   runnerToolSentence   the runner line that forbids any tool call but
- *                        the one skill run.
- *   runnerAgentType      'hivemind:drone', the agent that runs a script.
+ *   droneAgentType       'hivemind:drone', the agent of the scan, the
+ *                        validation and the fix rounds.
+ *   synapseAgentType     'hivemind:synapse', the agent that runs one
+ *                        committed runner script from a command block.
  *   formatDataBlock(name, text)
  *       '<name>', the JSON of text with each '<' escaped, '</name>', on
  *       three lines.
+ *   formatCommandBlock(command), formatInputsFileBlock(path, content)
+ *       the synapse data blocks: command, a JSON string holding one whole
+ *       command line, and inputs_file, {path, content}. Their names and
+ *       the placeholders a command or path holds, {plugin-root} and
+ *       {token}, are the words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md.
+ *   runnerValuePatterns()
+ *       the value class of each flag a runner command carries, the
+ *       classes of the synapse gate hook
+ *       (${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh): --trunk, --base,
+ *       --branch and --head gitIdentifierPattern() (identifier.js), --ref
+ *       digits, --expect-commit 40 or 64 lowercase hex digits,
+ *       --classification and --trunk-freshness their enums, and --inputs
+ *       .hivemind/molt-inputs-{token}.json or .hivemind/pr-inputs-{token}.json.
+ *   describeRunnerWordProblem(words)
+ *       undefined when words is flag and value pairs, each flag a
+ *       runnerValuePatterns() key and each value a string its pattern
+ *       matches. Otherwise one lower case clause naming the first flag
+ *       that fails, never its value. A value word is never quoted, and
+ *       the hook forbids quoting it, so a value with a space would split
+ *       into more words that could still match an exact form: a step
+ *       checks its words with this before it builds a command and stops
+ *       on a problem.
+ *   buildRunnerCommand(skill, words)
+ *       'bash "{plugin-root}/skills/<skill>/scripts/<skill>.sh"', then
+ *       each of words, joined by one space: the exact form the synapse
+ *       gate hook allows. The script path is the one double-quoted word,
+ *       so a plugin path with a space stays one word. It checks nothing
+ *       itself.
+ *   listGatherFactsWords(trunk, references)
+ *       the gather-facts words: --trunk trunk, then --ref and each
+ *       reference in order, with no --remote.
+ *   buildGatherFactsCommand(trunk, references)
+ *       buildRunnerCommand of gather-facts and those words.
  *   gatherFactsRoutingSpec()
  *       the parseRoutingLines spec (routing.js) for the stdout of
  *       plugin/skills/gather-facts/scripts/gather-facts.sh. Its keys are
@@ -166,8 +200,9 @@
  * Why
  *   A workflow cannot run a script or read a file, so it trusts a runner
  *   to relay the facts script's routing lines and checks them in code
- *   before anything reads the facts file. analysis-only's facts runner
- *   still copies four values (facts_file, facts_lines, cut, external_texts)
+ *   before anything reads the facts file. analysis-only's facts runner, a
+ *   synapse that runs the buildGatherFactsCommand command, still copies
+ *   four values (facts_file, facts_lines, cut, external_texts)
  *   into its step schema and is never asked for the delivery lines: that
  *   prompt and schema are pinned byte for byte by its tests, and delivery
  *   stops belong to delivery, not to analysis. standard-delivery's runner
@@ -200,16 +235,63 @@ function runnerReadOnlySentence() {
   return 'This task is read-only: it edits no tracked files and makes no git writes.';
 }
 
-function runnerToolSentence() {
-  return 'Make no other tool call.';
+function droneAgentType() {
+  return 'hivemind:drone';
 }
 
-function runnerAgentType() {
-  return 'hivemind:drone';
+function synapseAgentType() {
+  return 'hivemind:synapse';
 }
 
 function formatDataBlock(name, text) {
   return '<' + name + '>\n' + JSON.stringify(text).replace(/</g, '\\u003c') + '\n</' + name + '>';
+}
+
+function formatCommandBlock(command) {
+  return formatDataBlock('command', command);
+}
+
+function formatInputsFileBlock(path, content) {
+  return formatDataBlock('inputs_file', { path: path, content: content });
+}
+
+function runnerValuePatterns() {
+  const name = gitIdentifierPattern();
+  return {
+    '--trunk': name,
+    '--base': name,
+    '--branch': name,
+    '--head': name,
+    '--ref': /^[0-9]+$/,
+    '--expect-commit': /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
+    '--classification': /^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
+    '--trunk-freshness': /^(?:fresh|stale|skipped)$/,
+    '--inputs': /^\.hivemind\/(?:molt|pr)-inputs-\{token\}\.json$/
+  };
+}
+
+function describeRunnerWordProblem(words) {
+  const patterns = runnerValuePatterns();
+  for (let index = 0; index < words.length; index += 2) {
+    const flag = String(words[index]);
+    const value = words[index + 1];
+    if (!Object.prototype.hasOwnProperty.call(patterns, flag) || typeof value !== 'string' || !patterns[flag].test(value)) {
+      return 'its ' + flag + ' value is not one the script takes';
+    }
+  }
+  return undefined;
+}
+
+function buildRunnerCommand(skill, words) {
+  return ['bash', '"{plugin-root}/skills/' + skill + '/scripts/' + skill + '.sh"', ...words].join(' ');
+}
+
+function listGatherFactsWords(trunk, references) {
+  return ['--trunk', trunk, ...references.flatMap((reference) => ['--ref', reference])];
+}
+
+function buildGatherFactsCommand(trunk, references) {
+  return buildRunnerCommand('gather-facts', listGatherFactsWords(trunk, references));
 }
 
 function factsHeadStates() {
@@ -401,7 +483,7 @@ function buildScanPrompt(facts) {
 }
 
 function scanOptions() {
-  return { agentType: runnerAgentType(), model: 'sonnet', schema: toAgentSchema(scanStepSchema()), label: 'scan', phase: 'Scan' };
+  return { agentType: droneAgentType(), model: 'sonnet', schema: toAgentSchema(scanStepSchema()), label: 'scan', phase: 'Scan' };
 }
 
 async function runScanStep(facts, runNoun) {

@@ -13,6 +13,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.0] - 2026-10-29
+
+### Added
+
+- `hivemind:synapse`, an agent that runs the engine's runner steps (#467).
+- The runner gate hook `plugin/hooks/synapse-gate.sh` and its suite `tools/test_synapse_gate.sh`. The hook allows the five runner scripts with no prompt only for synapse and only in their exact form (#467).
+- The policy fixtures `tests/policy/safety-synapse-gate.json` and `tests/policy/safety-synapse-tools.json` pin the hook and the synapse tool list (#467).
+
+### Changed
+
+- The facts, branch, commit and PR runner steps run on synapse with no prompt (#467).
+- The engine checks branch names and refuses AI credit lines in PR text (#467).
+- A runner command value outside its safe character class stops the step (#467).
+
+### Fixed
+
+- The plugin script path is one double-quoted word in the engine's runner commands and in every skill grant and command, `plugin/agents/github-reviewer.md` and `plugin/governance/versioning.md`, so a plugin path with a space works. The hook keeps one exact form and denies the bare path, and policy check CHECK 17 refuses the unquoted form in plugin Markdown. A plugin path holding a double quote, a dollar sign, a backtick or a control character is a recorded residual: the hook denies its runner commands, and the plugin path is trusted input for other plugin script commands (#467, local review findings 6bc3a379 and bd7cc0ef).
+- The runner gate hook uses `CLAUDE_PLUGIN_ROOT` byte for byte. It no longer turns backslashes into slashes or strips trailing slashes, so the folder it matches and loads checks from is the folder Claude Code named. A plugin path holding a backslash now has no exact form, so the hook denies its runner commands (#467, local review finding 27d328fd).
+- `hivemind:synapse` replaces `{plugin-root}` and `{token}` only in the command and in the inputs file path, never in the inputs file content (#467, local review finding 5dd80225).
+
+### Removed
+
+- The drone's git-script exemption (#467).
+- The skill load per runner (#467).
+- The manual-mode prompt before runner commits, pushes and PRs (#467).
+
+### Security
+
+- Any command that names one of the five runner scripts in another form is denied for every agent (#467).
+
 ## [7.4.1] - 2026-10-29
 
 ### Changed

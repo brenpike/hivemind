@@ -39,7 +39,7 @@ cleanup_suites_scratch() {
 
 # ── Suite invocations (CI parity — see .github/workflows/policy-check.yml) ────────
 # Each constant is the exact command CI runs, in CI order. --all replays them verbatim.
-SUITE_JSON_MANIFESTS='json-manifests'   # special: three python3 json.load parses
+SUITE_JSON_MANIFESTS='json-manifests'   # special: four python3 json.load parses
 SUITE_POLICY_CHECK='policy_check.sh --strict'
 SUITE_VALIDATE_REPORTS='validate_reports.sh --batch tests/reports/'
 SUITE_WORKFLOWS_STRICT='validate_workflows.sh --strict'
@@ -69,6 +69,7 @@ SUITE_TEST_VALIDATE_SUITES='test_validate_suites.sh'
 SUITE_TEST_CHANGE_DETECT_POLL='test_change_detect_poll.sh'
 SUITE_TEST_SCRIPT_BOOTSTRAP='test_script_bootstrap.sh'
 SUITE_TEST_PREFILTER='test_prefilter.sh'
+SUITE_TEST_SYNAPSE_GATE='test_synapse_gate.sh'
 SUITE_TEST_WORKFLOW_SCRIPTS='test_workflow_scripts.sh'
 
 # Full suite, in CI order. Used by --all and by every FAIL-CLOSED escalation.
@@ -103,6 +104,7 @@ ALL_SUITES=(
   "$SUITE_TEST_CHANGE_DETECT_POLL"
   "$SUITE_TEST_SCRIPT_BOOTSTRAP"
   "$SUITE_TEST_PREFILTER"
+  "$SUITE_TEST_SYNAPSE_GATE"
   "$SUITE_TEST_WORKFLOW_SCRIPTS"
 )
 
@@ -138,6 +140,7 @@ KNOWN_SUITES=(
   test_change_detect_poll.sh
   test_script_bootstrap.sh
   test_prefilter.sh
+  test_synapse_gate.sh
   test_workflow_scripts.sh
 )
 
@@ -155,14 +158,16 @@ run_suite() {
     "$SUITE_JSON_MANIFESTS")
       # Every committed JSON file the runtime MUST be able to load. The two plugin manifests
       # are consumed by the plugin/marketplace loaders; .claude/settings.json is consumed by
-      # Claude Code itself at session start. A syntax error anywhere in one of them is fatal to
-      # its consumer, and no other suite parses them: policy_check's fixtures match RAW TEXT
-      # (extract_regex / substring), so a settings file that drops a comma but keeps the
-      # expected permission strings passes every text fixture while Claude Code cannot load it.
-      # This leg is that parse gate.
+      # Claude Code itself at session start; plugin/hooks/hooks.json is consumed by the plugin
+      # loader, which registers the synapse runner gate hook from it. A syntax error anywhere in
+      # one of them is fatal to its consumer, and no other suite parses them all:
+      # policy_check's fixtures match RAW TEXT (extract_regex / substring), so a settings file
+      # that drops a comma but keeps the expected permission strings passes every text fixture
+      # while Claude Code cannot load it. This leg is that parse gate.
       python3 -c "import json; json.load(open('plugin/.claude-plugin/plugin.json'))" \
         && python3 -c "import json; json.load(open('.claude-plugin/marketplace.json'))" \
-        && python3 -c "import json; json.load(open('.claude/settings.json'))"
+        && python3 -c "import json; json.load(open('.claude/settings.json'))" \
+        && python3 -c "import json; json.load(open('plugin/hooks/hooks.json'))"
       ;;
     *)
       # shellcheck disable=SC2086 # word-splitting of "script.sh --flag arg" is intentional
@@ -356,6 +361,9 @@ run_suites() {
 #     plugin/skills/_shared/{allowlist,containment,git-refusals}.sh
 #                                      -> test_open_plan_pr (push-branch runs as a real child; it
 #                                         keeps its test_push_branch route by union)
+#   plugin/hooks/*, plugin/skills/_shared/allowlist.sh
+#                                      -> test_synapse_gate (hooks.json ALSO -> json-manifests;
+#                                         synapse-gate.sh ALSO -> test_workflow_scripts)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
 #   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json, plugin/agents/overlord.md,
 #     plugin/skills/route-workflow/SKILL.md,
@@ -366,7 +374,10 @@ run_suites() {
 #     plugin/skills/_shared/{containment,ledger-engine-io}.sh,
 #     plugin/skills/create-working-branch/scripts/create-working-branch.sh,
 #     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**,
-#     plugin/agents/drone.md (standard-delivery.test.mjs reads its git-script task clause),
+#     plugin/agents/drone.md (standard-delivery.test.mjs reads its read-only and validation fix
+#       task clauses),
+#     plugin/agents/synapse.md (standard-delivery.test.mjs pins the runner prompt words to it),
+#     plugin/hooks/synapse-gate.sh (standard-delivery.test.mjs runs it on every runner command),
 #     plugin/agents/cerebrate.md (cerebrate-plan.test.mjs reads its plan block),
 #     plugin/skills/molt/scripts/molt.sh (standard-delivery.test.mjs runs it),
 #     plugin/skills/_shared/allowlist.sh (identifier.test.mjs parity; also sourced by the
@@ -388,7 +399,8 @@ run_suites() {
 #   tests/workflow-defs/**                              -> validate_workflows
 #   plugin/**, .claude-plugin/**, tests/policy/**, tests/plugin/**, tests/workflows/**, *.md under plugin
 #                                      -> policy_check
-#   plugin/.claude-plugin/plugin.json or .claude-plugin/marketplace.json -> json-manifests parse
+#   plugin/.claude-plugin/plugin.json, .claude-plugin/marketplace.json or plugin/hooks/hooks.json
+#                                      -> json-manifests parse
 #   .claude/settings.json              -> json-manifests parse + policy_check (fixture asserts
 #                                         its rule set as raw text; only the parse leg proves
 #                                         Claude Code can still LOAD the file)
@@ -467,7 +479,9 @@ map_path() {
   fi
 
   # JSON manifests.
-  if [[ "$p" == "plugin/.claude-plugin/plugin.json" || "$p" == ".claude-plugin/marketplace.json" ]]; then
+  if [[ "$p" == "plugin/.claude-plugin/plugin.json" \
+     || "$p" == ".claude-plugin/marketplace.json" \
+     || "$p" == "plugin/hooks/hooks.json" ]]; then
     add_selected "$SUITE_JSON_MANIFESTS" "$p (JSON manifest)"
     matched=1
   fi
@@ -670,38 +684,53 @@ map_path() {
     matched=1
   fi
 
+  # test_synapse_gate: the plugin hooks (plugin/hooks/synapse-gate.sh, the PreToolUse runner gate,
+  # and plugin/hooks/hooks.json, its exec-form registration) and the shared allowlist lib the hook
+  # sources for its per-flag value classes (_shared/allowlist.sh). All are ALSO plugin/* files
+  # (policy_check prose-lints them via the wholesale rule below), but policy_check NEVER EXECUTES
+  # bash, so without this rule a hook edit would only be prose-linted, never behaviorally exercised.
+  # hooks.json keeps its json-manifests route, synapse-gate.sh its test_workflow_scripts route and
+  # allowlist.sh its other routes, by union. (tools/test_synapse_gate.sh itself is covered by the
+  # tools/** full-suite leg.)
+  if [[ "$p" == plugin/hooks/* \
+     || "$p" == plugin/skills/_shared/allowlist.sh ]]; then
+    add_selected "$SUITE_TEST_SYNAPSE_GATE" "$p (synapse runner gate hook/shared lib)"
+    matched=1
+  fi
+
   # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
   # build, the two data files the build copies in, the facts and plan contracts the node tests
-  # validate, the overlord agent whose launch contract the node tests pin, the gather-facts
-  # entrypoint whose facts-file path pattern analysis-only.test.mjs cross-checks and the jq
-  # assembly program facts-schema.test.mjs checks against the facts contract (the other
-  # gather-facts files route only to test_gather_facts), the create-working-branch.sh and
-  # bump-type.sh enums plan-schema.test.mjs pins, the next-wave.sh engine waves.test.mjs runs as
-  # its parity oracle together with the two _shared libs that engine sources (containment.sh,
-  # ledger-engine-io.sh) and the tests/next-wave/* fixtures it replays, the route-workflow skill
-  # and the plugin/workflows/*.json definitions whose catalog parity route-catalog.test.mjs pins,
-  # the drone agent whose git-script task clause standard-delivery.test.mjs matches against the
-  # runner sentence, the cerebrate agent whose plan block cerebrate-plan.test.mjs checks names the
-  # plan-schema fields, the molt.sh entrypoint standard-delivery.test.mjs runs in scratch repos,
-  # the _shared/allowlist.sh whose identifier rules identifier.test.mjs pins by parity, the
-  # _shared libs the scripts those tests run source (allowlist.sh by gather-facts.sh,
-  # create-working-branch.sh and molt.sh; git-refusals.sh by create-working-branch.sh and molt.sh;
-  # graphql-response.sh by gather-facts.sh; bump-type-derive.sh by bump-type.sh), the
-  # open-plan-pr.sh and push-branch.sh entrypoints standard-delivery.test.mjs runs, the
-  # local-reviewer agent whose exit_reason enum is pinned against the review route table, the
-  # safety-rails and definitions governance docs whose grant and Validation Procedure clauses the
-  # runner sentences are pinned against, and the node tests themselves. Every path here except
-  # the node tests keeps its other routes by union (for example *.json keeps validate_workflows,
+  # validate, the overlord agent whose launch contract the node tests pin, the gather-facts entrypoint
+  # whose facts-file path pattern analysis-only.test.mjs cross-checks and the jq assembly program
+  # facts-schema.test.mjs checks against the facts contract (the other gather-facts files route only
+  # to test_gather_facts), the create-working-branch.sh and bump-type.sh enums plan-schema.test.mjs
+  # pins, the next-wave.sh engine waves.test.mjs runs as its parity oracle together with the two
+  # _shared libs that engine sources (containment.sh, ledger-engine-io.sh) and the tests/next-wave/*
+  # fixtures it replays, the route-workflow skill and the plugin/workflows/*.json definitions whose
+  # catalog parity route-catalog.test.mjs pins, the drone agent whose read-only and validation fix
+  # task clauses standard-delivery.test.mjs matches against the runner sentences, the synapse agent
+  # whose prompt words standard-delivery.test.mjs pins the runner prompts against, the synapse-gate
+  # hook that must allow every runner command the engine builds, the cerebrate agent whose plan block
+  # cerebrate-plan.test.mjs checks names the plan-schema fields, the molt.sh entrypoint
+  # standard-delivery.test.mjs runs in scratch repos, the _shared/allowlist.sh whose identifier rules
+  # identifier.test.mjs pins by parity, the _shared libs the scripts those tests run source
+  # (allowlist.sh by gather-facts.sh, create-working-branch.sh and molt.sh; git-refusals.sh by
+  # create-working-branch.sh and molt.sh; graphql-response.sh by gather-facts.sh; bump-type-derive.sh
+  # by bump-type.sh), the open-plan-pr.sh and push-branch.sh entrypoints standard-delivery.test.mjs
+  # runs, the local-reviewer agent whose exit_reason enum is pinned against the review route table,
+  # the safety-rails and definitions governance docs whose grant and Validation Procedure clauses the
+  # runner sentences are pinned against, and the node tests themselves. Every path here except the
+  # node tests keeps its other routes by union (for example *.json keeps validate_workflows,
   # next-wave.sh and its fixtures keep test_next_wave, cerebrate.md and local-reviewer.md keep
-  # validate_workflows, molt.sh keeps test_molt, open-plan-pr.sh keeps test_open_plan_pr,
-  # push-branch.sh keeps test_push_branch and test_open_plan_pr, bump-type-derive.sh keeps
-  # test_bump_type, the governance docs keep policy_check, the _shared libs keep test_engine,
-  # test_push_branch, test_create_working_branch, test_molt, test_gather_facts and the rest).
-  # Every one of these except
-  # tests/workflow-scripts/* and tests/next-wave/* is ALSO a plugin/* file (policy_check
-  # prose-lints it via the wholesale rule below), but policy_check NEVER RUNS node, so without
-  # this rule a source edit that leaves the generated script stale, or a data/agent/script edit
-  # that breaks a node test, would only be caught on push-to-main.
+  # validate_workflows, synapse-gate.sh keeps test_synapse_gate, molt.sh keeps test_molt,
+  # open-plan-pr.sh keeps test_open_plan_pr, push-branch.sh keeps test_push_branch and
+  # test_open_plan_pr, bump-type-derive.sh keeps test_bump_type, the governance docs keep
+  # policy_check, the _shared libs keep test_engine, test_push_branch, test_create_working_branch,
+  # test_molt, test_gather_facts and the rest). Every one of these except tests/workflow-scripts/* and
+  # tests/next-wave/* is ALSO a plugin/* file (policy_check prose-lints it via the wholesale rule
+  # below), but policy_check NEVER RUNS node, so without this rule a source edit that leaves the
+  # generated script stale, or a data/agent/script edit that breaks a node test, would only be caught
+  # on push-to-main.
   # (tools/test_workflow_scripts.sh and tools/build_workflows.mjs are covered by the tools/** leg.)
   if [[ "$p" == plugin/workflow-src/* \
      || "$p" == plugin/workflows/*.js \
@@ -721,6 +750,8 @@ map_path() {
      || "$p" == plugin/skills/bump-type/scripts/bump-type.sh \
      || "$p" == plugin/agents/overlord.md \
      || "$p" == plugin/agents/drone.md \
+     || "$p" == plugin/agents/synapse.md \
+     || "$p" == plugin/hooks/synapse-gate.sh \
      || "$p" == plugin/agents/cerebrate.md \
      || "$p" == plugin/skills/molt/scripts/molt.sh \
      || "$p" == plugin/skills/_shared/allowlist.sh \
@@ -1228,6 +1259,7 @@ self_test() {
     ["test_change_detect_poll.sh"]="tests/change-detect-poll/README.md"
     ["test_script_bootstrap.sh"]="plugin/skills/_shared/claude-mem-path.sh"
     ["test_prefilter.sh"]="plugin/skills/github-review-loop/scripts/prefilter.sh"
+    ["test_synapse_gate.sh"]="plugin/hooks/synapse-gate.sh"
     ["test_workflow_scripts.sh"]="plugin/workflow-src/lib/decide.js"
   )
   local script_name expected_suite suite_path probe_path hit
@@ -1407,11 +1439,11 @@ self_test() {
 
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
-  #    the generated-script, data-file, agent (overlord, drone, cerebrate, local-reviewer),
-  #    governance doc (safety-rails, definitions), route-workflow skill, workflow-definition,
-  #    node-test-read or node-test-run script/fixture (open-plan-pr.sh, push-branch.sh), or
-  #    sourced _shared lib (bump-type-derive.sh) selector were dropped. Probe each directly so
-  #    removing any one selector FAILS here.
+  #    the generated-script, data-file, agent (overlord, drone, synapse, cerebrate,
+  #    local-reviewer), governance doc (safety-rails, definitions), route-workflow skill,
+  #    workflow-definition, node-test-read or node-test-run script/fixture (open-plan-pr.sh,
+  #    push-branch.sh, synapse-gate.sh), or sourced _shared lib (bump-type-derive.sh) selector were
+  #    dropped. Probe each directly so removing any one selector FAILS here.
   local workflow_input
   for workflow_input in \
     "plugin/references/decision-autonomy-table.json" \
@@ -1429,6 +1461,8 @@ self_test() {
     "plugin/workflows/analysis-only.js" \
     "plugin/agents/overlord.md" \
     "plugin/agents/drone.md" \
+    "plugin/agents/synapse.md" \
+    "plugin/hooks/synapse-gate.sh" \
     "plugin/agents/cerebrate.md" \
     "plugin/skills/molt/scripts/molt.sh" \
     "plugin/skills/_shared/allowlist.sh" \
@@ -1456,12 +1490,13 @@ self_test() {
     fi
   done
 
-  # 10. Each consumer leg of the gather-facts, create-working-branch, push-branch, molt and
-  #     open-plan-pr suites, and each brood-state.sh leg (test_engine, test_brood_compat,
-  #     test_rc_brood), that the KNOWN_SUITES probe (#1) does not reach must route to its
-  #     suite. #1 probes each entrypoint script, so it would stay green if the schema-chain,
-  #     shared-lib, harness or push-branch child selector were dropped. Probe each <path>|<suite>
-  #     pair directly so removing any one selector FAILS here.
+  # 10. Each consumer leg of the gather-facts, create-working-branch, push-branch, molt,
+  #     open-plan-pr and synapse-gate suites, each brood-state.sh leg (test_engine,
+  #     test_brood_compat, test_rc_brood), and the hooks.json json-manifests parse leg, that the
+  #     KNOWN_SUITES probe (#1) does not reach must route to its suite. #1 probes each entrypoint
+  #     script, so it would stay green if the schema-chain, shared-lib, harness, push-branch child
+  #     or parse-gate selector were dropped. Probe each <path>|<suite> pair directly so removing
+  #     any one selector FAILS here.
   local consumer_pair consumer_path consumer_suite
   for consumer_pair in \
     "plugin/references/facts-schema.json|$SUITE_TEST_GATHER_FACTS" \
@@ -1484,6 +1519,8 @@ self_test() {
     "plugin/skills/_shared/git-refusals.sh|$SUITE_TEST_OPEN_PLAN_PR" \
     "plugin/skills/push-branch/scripts/push-branch.sh|$SUITE_TEST_OPEN_PLAN_PR" \
     "plugin/skills/open-plan-pr/SKILL.md|$SUITE_TEST_OPEN_PLAN_PR" \
+    "plugin/skills/_shared/allowlist.sh|$SUITE_TEST_SYNAPSE_GATE" \
+    "plugin/hooks/hooks.json|$SUITE_JSON_MANIFESTS" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_RC_BROOD" \
     "plugin/skills/_shared/brood-state.sh|$SUITE_TEST_ENGINE"; do
