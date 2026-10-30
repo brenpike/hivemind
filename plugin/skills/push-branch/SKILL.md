@@ -3,7 +3,7 @@ name: push-branch
 description: Pushes the current working branch to its remote without creating a PR. Use when resuming a review loop by pushing remediation commits to the remote.
 allowed-tools:
   - Bash(git status *)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh" *)
   - Bash(printf *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash
@@ -45,7 +45,7 @@ Every push runs through `${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-b
 2. **Final Bash tool call.** Run the push script, where each `<allowlist-validated-...>` placeholder is the input value that passed the input gate. Pass `--remote` only when `push_remote` is provided:
 
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject block --no-upstream block
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject block --no-upstream block
    ```
 
    The script header defines the branch checks, push modes, force-with-lease retry, failure classification, and output; this skill does not restate them. Exit 0: stdout `branch` + `commit` are the routing data. Exit 1: blocked; relay the script's `blocker:` line from stderr.

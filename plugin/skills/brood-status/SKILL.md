@@ -2,7 +2,7 @@
 name: brood-status
 description: Renders a read-only hatchery dashboard showing each strain's tmux session state, branch existence, and PR status for all broods under the current checkout. Use when checking brood status or hatchery progress.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-status-collect.sh)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-status-collect.sh")
 shell: bash
 ---
 
@@ -20,7 +20,7 @@ The entire deterministic collection loop — multi-brood discovery, per-strain e
 
 1. **Collect.** Run the committed entrypoint ONCE and capture its stdout as the status JSON:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-status-collect.sh
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-status-collect.sh"
    ```
    The entrypoint owns discovery, probing, projection, status derivation, and aggregation. Its stdout is one JSON document, schema `brood-status-collect/1`:
    ```json

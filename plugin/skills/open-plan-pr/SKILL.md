@@ -2,7 +2,7 @@
 name: open-plan-pr
 description: Opens a pull request for a successfully completed approved plan after final verification. Use when validation and versioning gates have passed and the plan is ready for PR.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh" *)
   - Bash(git status *)
   - Bash(git branch *)
   - Bash(git log *)
@@ -81,7 +81,7 @@ When `expect_commit` is provided, validate it as a commit SHA against the identi
 6. **Final Bash tool call.** Run the PR script, where each `<allowlist-validated-...>` placeholder is the input value that passed its gate above and `<token>` is the token from step 5. Pass `--remote` only when `push_remote` is provided, and `--expect-commit` only when `expect_commit` is provided:
 
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] [--expect-commit <allowlist-validated-commit>] --inputs .hivemind/pr-inputs-<token>.json
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] [--expect-commit <allowlist-validated-commit>] --inputs .hivemind/pr-inputs-<token>.json
    ```
 
    The script pushes through the push-branch script, as a child process, before it opens or reuses the PR. Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). The script header defines the refusals, the push, the reuse of an open PR, the create call, the PR check, and the output; this skill does not restate them. The script never passes `--head` to `gh pr create`; see recorded residuals R1 and R3 in `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`.

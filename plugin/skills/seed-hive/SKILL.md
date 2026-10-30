@@ -2,7 +2,7 @@
 name: seed-hive
 description: Applies required .claude/settings.json keys to make the overlord the session default agent and gitignores .hivemind/ and .claude/worktrees/. Use when adopting the plugin in a new project or repairing plugin setup.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh" *)
   - Bash(git rev-parse *)   # navigator resolves the project root (git rev-parse --show-toplevel) before calling detect/apply — Procedure step 1
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Edit(.hivemind/seed-inputs-*.json)
@@ -102,7 +102,7 @@ For each companion input left at `detect` (`caveman@caveman`, `claude-mem@thedot
 them. An explicit `yes`/`no` input needs no detection for that companion.
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh detect <project_root>
+bash "${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh" detect <project_root>
 ```
 
 `detect` is READ-ONLY (it mutates nothing) and emits one JSON object on stdout:
@@ -221,7 +221,7 @@ detection) is reported `not-checked`.
    Transport Degradation Is a Hard Stop).
 5. **Apply.** Run the `apply` phase once:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh apply .hivemind/seed-inputs-<token>.json
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh" apply .hivemind/seed-inputs-<token>.json
    ```
    EXECUTE (do not Read) the script. It composes the four libs to merge settings, guard the
    `.gitignore`/`.envrc`/hook/`## Validation` files, provision claude-mem's `CLAUDE_CODE_PATH`,

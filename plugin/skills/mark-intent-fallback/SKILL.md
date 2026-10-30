@@ -2,7 +2,7 @@
 name: mark-intent-fallback
 description: Records a version-skew intent-fallback event into the run ledger and optionally closes a stale run. Use when handling version skew on resume or closing out a stale run.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/mark-intent-fallback/scripts/mark-intent-fallback.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/mark-intent-fallback/scripts/mark-intent-fallback.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Edit(.hivemind/runs/.markfb-inputs-*.json)
 shell: bash
@@ -162,7 +162,7 @@ ledger is byte-unchanged.
 
 3. **Execute the script** with one Bash call, passing the inputs file path:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/mark-intent-fallback/scripts/mark-intent-fallback.sh .hivemind/runs/.markfb-inputs-<token>.json
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/mark-intent-fallback/scripts/mark-intent-fallback.sh" .hivemind/runs/.markfb-inputs-<token>.json
    ```
    EXECUTE (do not Read) the script — it owns the deterministic read -> validate -> mutate
    -> atomic-write and deliberately bypasses transition/binding validation.

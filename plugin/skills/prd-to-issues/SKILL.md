@@ -13,7 +13,7 @@ allowed-tools:
   - Bash(gh issue create *)
   - Bash(gh issue list *)
   - Bash(gh issue view *)
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh" *)
 shell: bash
 ---
 
@@ -177,7 +177,7 @@ Do NOT enumerate the slices in the parent body — the native sub-issues list is
 Before publishing any child issue, call `ensure-parent` to create-or-find the parent epic:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh \
+bash "${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh" \
   ensure-parent \
   --title "<Initiative name>" \
   --body-file - \
@@ -200,7 +200,7 @@ When `--existing-number` is supplied the known epic is resolved directly (status
 After each child issue is created, attach it to the parent epic:
 
 ```bash
-bash ${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh \
+bash "${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh" \
   attach-subissue \
   --parent-id <PARENT_NODE_ID> \
   --child-id <CHILD_NODE_ID>
@@ -230,7 +230,7 @@ Each slice is published in two steps: (1) `gh issue create` creates the child is
 2. **Discover candidates for each planned slice via `find-by-title`.** For every approved slice title, call:
 
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh \
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh" \
      find-by-title \
      --title "<exact slice title>" \
      [--repo <owner/repo>]

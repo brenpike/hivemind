@@ -1298,7 +1298,7 @@ for md_file in "${check6_md_files[@]}"; do
                         "Path does not resolve: \${CLAUDE_PLUGIN_ROOT}/$ref_rel_path"
                 fi
             fi
-        done < <(echo "$textline" | grep -oP '\$\{CLAUDE_PLUGIN_ROOT\}/\K[^\s`\)]+' || true)
+        done < <(echo "$textline" | grep -oP '\$\{CLAUDE_PLUGIN_ROOT\}/\K[^\s`\)"]+' || true)
     done <<< "$candidates"
 done
 
@@ -4048,6 +4048,156 @@ else
 fi
 
 mark_time 'CHECK16'
+
+# ── CHECK 17: Plugin script paths in plugin Markdown are one word ──────────
+#
+# Claude Code pastes the plugin path into skill, agent and governance text
+# verbatim, so a ${CLAUDE_PLUGIN_ROOT}/<path>.sh path written as a bare shell
+# word splits in two when the plugin path holds a space, and a Bash(...) grant
+# written that way stops matching the quoted command. This is a positive
+# allowlist: in every plugin *.md file, each ${CLAUDE_PLUGIN_ROOT}/<path>.sh
+# occurrence must sit directly between one of three wrappers, and anything
+# else is a finding naming the file and line:
+#   * a path-only code span:   `${CLAUDE_PLUGIN_ROOT}/x.sh`
+#   * a Markdown link target:  ](${CLAUDE_PLUGIN_ROOT}/x.sh)
+#   * one double-quoted word:  "${CLAUDE_PLUGIN_ROOT}/x.sh"
+# Commands and grants take the third form, so a code-span command reads
+# `bash "${CLAUDE_PLUGIN_ROOT}/x.sh" args` and passes. Every line is scanned,
+# frontmatter and fenced code included, because grants live in frontmatter and
+# commands live in fences.
+
+echo ''
+echo '=== CHECK 17: Plugin script paths in plugin Markdown are one word ==='
+
+# CHECK17_SCAN_AWK
+# Prints "line_num<TAB>script_path" for every ${CLAUDE_PLUGIN_ROOT}/<path>.sh
+# occurrence that is not directly wrapped in one of the three admitted forms.
+# The path runs from the prefix to the first ".sh" not followed by a name
+# character, within a run free of whitespace, backticks, quotes and parentheses.
+# The single quote arrives as the awk variable `squote`. POSIX awk only, so
+# gawk and mawk both run it.
+CHECK17_SCAN_AWK='
+    BEGIN {
+        prefix_text = "${CLAUDE_PLUGIN_ROOT}/"
+        token_regex = "^[^ \t\r`\"" squote "()]*"
+    }
+    {
+        rest_text = $0
+        consumed_total = 0
+        while ((prefix_start = index(rest_text, prefix_text)) > 0) {
+            line_start = consumed_total + prefix_start
+            match(substr(rest_text, prefix_start), token_regex)
+            token_text = substr(rest_text, prefix_start, RLENGTH)
+            if (match(token_text, /\.sh([^A-Za-z0-9_-]|$)/)) {
+                path_text = substr(token_text, 1, RSTART + 2)
+                before_char = (line_start > 1) ? substr($0, line_start - 1, 1) : ""
+                before_pair = (line_start > 2) ? substr($0, line_start - 2, 2) : ""
+                after_char = substr($0, line_start + length(path_text), 1)
+                is_code_span = (before_char == "`" && after_char == "`")
+                is_quoted_word = (before_char == "\"" && after_char == "\"")
+                is_link_target = (before_pair == "](" && after_char == ")")
+                if (!is_code_span && !is_quoted_word && !is_link_target) {
+                    print NR "\t" path_text
+                }
+            }
+            consumed_total += prefix_start + length(prefix_text) - 1
+            rest_text = substr(rest_text, prefix_start + length(prefix_text))
+        }
+    }
+'
+
+# check17_scan_file FILE
+# Prints CHECK17_SCAN_AWK's unadmitted occurrences for FILE and returns awk's
+# exit status, so an unreadable file is a failure the caller reports.
+check17_scan_file() {
+    awk -v squote="'" "$CHECK17_SCAN_AWK" "$1"
+}
+
+CHECK17_POLICY_TEXT='write a plugin script path as one double-quoted word in a command or Bash(...) grant -- bash "${CLAUDE_PLUGIN_ROOT}/skills/<s>/scripts/<s>.sh" -- or as a path-only code span or a ](...) link target in prose, so a plugin path holding a space stays one shell word'
+
+check17_found=false
+check17_md_count=0
+declare -a check17_md_files=()
+discover_checked_paths 'CHECK17' check17_md_files files 'plugin Markdown files' "$PLUGIN_ROOT" -- -name '*.md' || check17_found=true
+for md_file in "${check17_md_files[@]}"; do
+    check17_md_count=$((check17_md_count + 1))
+    check17_scan_rc=0
+    check17_hits="$(check17_scan_file "$md_file")" || check17_scan_rc=$?
+    if [[ "$check17_scan_rc" -ne 0 ]]; then
+        check17_found=true
+        add_finding 'CHECK17' "$md_file" 0 \
+            "the script-path scan exited ${check17_scan_rc} on this file, so its script paths are unchecked -- make the file readable text"
+        continue
+    fi
+    [[ -z "$check17_hits" ]] && continue
+    while IFS=$'\t' read -r line_num script_path; do
+        check17_found=true
+        add_finding 'CHECK17' "$md_file" "$line_num" \
+            "plugin script path '${script_path}' is not a path-only code span, a ](...) link target or one double-quoted word -- ${CHECK17_POLICY_TEXT}"
+    done <<< "$check17_hits"
+done
+
+# ── CHECK 17 DETECTION CANARY ──────────────────────────────────────────────
+# The scan over fixed lines, in BOTH directions. A widened wrapper test, a scan
+# that stops at the first occurrence on a line, a dropped line number, or a
+# narrowed path match turns this run red while every plugin file still passes.
+# Canary text uses the placeholder script x.sh, never a real runner script name.
+
+check17_canary_finding() {
+    check17_found=true
+    add_finding 'CHECK17' 'tools/policy_check.sh' 0 "detection canary: $1"
+    return 0
+}
+
+# check17_expect_flagged LINE
+# Scans an admitted line followed by LINE and requires exactly one finding,
+# reported on line 2.
+check17_expect_flagged() {
+    local canary_output
+    canary_output="$(check17_scan_file <(printf '%s\n' 'See `${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh`.' "$1"))"
+    if [[ "$canary_output" != $'2\t'*'.sh' || "$canary_output" == *$'\n'* ]]; then
+        check17_canary_finding "line \"$1\" produced [${canary_output//$'\n'/ | }], expected exactly one finding on line 2 -- the scan admits a form it must flag, misses an occurrence, or drops the line number"
+    fi
+    return 0
+}
+
+# check17_expect_admitted LINE
+check17_expect_admitted() {
+    local canary_output
+    canary_output="$(check17_scan_file <(printf '%s\n' "$1"))"
+    if [[ -n "$canary_output" ]]; then
+        check17_canary_finding "line \"$1\" produced [${canary_output//$'\n'/ | }], expected no finding -- an admitted form is now flagged"
+    fi
+    return 0
+}
+
+check17_expect_flagged 'bash ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh --flag value'
+check17_expect_flagged '  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh *)'
+check17_expect_flagged '${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh --flag value'
+check17_expect_flagged 'Run `${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh --flag value`.'
+check17_expect_flagged 'Run `bash ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh`.'
+check17_expect_flagged "bash '\${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh' --flag"
+check17_expect_flagged 'bash "${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh --flag"'
+check17_expect_flagged 'The engine is ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh.'
+check17_expect_flagged 'See [x](${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh "title").'
+check17_expect_flagged 'bash "${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh" then ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/y.sh'
+
+check17_expect_admitted 'See `${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh`.'
+check17_expect_admitted 'See [x](${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh).'
+check17_expect_admitted 'bash "${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh" --flag value'
+check17_expect_admitted '  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh" *)'
+check17_expect_admitted '"${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh" --flag value'
+check17_expect_admitted 'Run `bash "${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.sh" --flag value`.'
+check17_expect_admitted 'Read ${CLAUDE_PLUGIN_ROOT}/governance/x.md and ${CLAUDE_PLUGIN_ROOT}/skills/x/scripts/x.shim first.'
+
+if [[ "$check17_found" == false ]]; then
+    echo "[PASS] Check 17: Every plugin script path in all $check17_md_count plugin Markdown files is a path-only code span, a link target or one double-quoted word"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'CHECK17'
 
 # ── SAFETY REGRESSION TESTS ────────────────────────────────────────────────
 

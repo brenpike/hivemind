@@ -2,7 +2,7 @@
 name: record-state-result
 description: Records a workflow state outcome into the run ledger, validates the transition against the workflow definition, and advances state.current to the legal next state. Use when advancing a run after a state completes.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/record-state-result/scripts/record-state-result.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/record-state-result/scripts/record-state-result.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Edit(.hivemind/runs/.record-inputs-*.json)
 shell: bash
@@ -210,7 +210,7 @@ validation failure the on-disk ledger is byte-unchanged.
 
 3. **Execute the script** with one Bash call, passing the inputs file path:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/record-state-result/scripts/record-state-result.sh .hivemind/runs/.record-inputs-<token>.json
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/record-state-result/scripts/record-state-result.sh" .hivemind/runs/.record-inputs-<token>.json
    ```
    EXECUTE (do not Read) the script — it owns the deterministic read -> validate -> mutate
    -> atomic-write and reads the allowed-result set directly from the definition.

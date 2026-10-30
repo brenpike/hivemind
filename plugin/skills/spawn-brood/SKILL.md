@@ -2,7 +2,7 @@
 name: spawn-brood
 description: Dispatches parallel overlord sessions as a brood, spawning N Claude Code instances in separate git worktrees via tmux and writing the brood manifest. Use when spawning a brood or running parallel strains.
 allowed-tools:
-  - Bash(bash ${CLAUDE_PLUGIN_ROOT}/skills/spawn-brood/scripts/spawn-brood.sh *)
+  - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/spawn-brood/scripts/spawn-brood.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Edit(.hivemind/spawn-inputs.*.json)
 shell: bash
@@ -187,7 +187,7 @@ The caller resolves and passes these; the skill does not resolve them.
 
 3. **Execute the script** with one Bash call, passing the staging path as `$1`:
    ```bash
-   bash ${CLAUDE_PLUGIN_ROOT}/skills/spawn-brood/scripts/spawn-brood.sh <staging-path>
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/spawn-brood/scripts/spawn-brood.sh" <staging-path>
    ```
    EXECUTE (do not Read) the script — it owns every deterministic step: dependency
    checks, input validation, pre-flight collision/exclude/base checks, brood-id

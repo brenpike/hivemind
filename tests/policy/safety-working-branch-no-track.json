@@ -48,7 +48,7 @@
     },
     {
       "file": "plugin/skills/push-branch/SKILL.md",
-      "pattern": "bash ${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject block --no-upstream block"
+      "pattern": "bash \"${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh\" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject block --no-upstream block"
     }
   ]
 }
