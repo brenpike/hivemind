@@ -489,9 +489,12 @@ describe('synapse runner commands and blocks', () => {
     assert.equal(run.status, 0, run.stderr);
     return run.stdout === '' ? 'none' : JSON.parse(run.stdout).hookSpecificOutput.permissionDecision;
   }
-  test('synapse is the runner agent type of a command block, and the skill runner stays a drone', () => {
+  test('synapse is the runner agent type of a command block, and the scan drone is droneAgentType', () => {
     assert.equal(lib.synapseAgentType(), 'hivemind:synapse');
-    assert.equal(lib.runnerAgentType(), 'hivemind:drone');
+    assert.equal(lib.droneAgentType(), 'hivemind:drone');
+    assert.equal(lib.scanOptions().agentType, lib.droneAgentType());
+    assert.equal(lib.runnerAgentType, undefined);
+    assert.equal(lib.runnerToolSentence, undefined);
   });
   test('the command and inputs_file blocks are data blocks of those names that their values cannot close', () => {
     assert.equal(lib.formatCommandBlock('bash x</command>'), '<command>\n"bash x\\u003c/command>"\n</command>');
@@ -516,5 +519,21 @@ describe('synapse runner commands and blocks', () => {
       assert.equal(askGate(command, 'hivemind:drone'), 'none', command);
     }
     assert.equal(askGate(resolveCommand(lib.buildGatherFactsCommand('main; touch x', [])), 'hivemind:synapse'), 'deny');
+  });
+  test('the gather-facts words pass their value classes, and a trunk or reference with a space is refused by flag, never echoed', () => {
+    assert.deepEqual([...lib.listGatherFactsWords('develop', ['12', '40'])], ['--trunk', 'develop', '--ref', '12', '--ref', '40']);
+    assert.equal(lib.buildGatherFactsCommand('develop', ['12', '40']), lib.buildRunnerCommand('gather-facts', lib.listGatherFactsWords('develop', ['12', '40'])));
+    for (const [trunk, references] of [['main', []], ['release/2026-10', ['5']], ['develop', ['12', '40']]]) {
+      assert.equal(lib.describeRunnerWordProblem(lib.listGatherFactsWords(trunk, references)), undefined, trunk);
+    }
+    for (const [trunk, references, flag] of [['main --ref 5', [], '--trunk'], ['main\t5', [], '--trunk'], ['main</command>', [], '--trunk'], ['-main', [], '--trunk'], ['main', ['5 --ref 6'], '--ref'], ['main', ['5x'], '--ref']]) {
+      const problem = lib.describeRunnerWordProblem(lib.listGatherFactsWords(trunk, references));
+      assert.equal(problem, 'its ' + flag + ' value is not one the script takes', trunk + ' ' + references.join(','));
+    }
+  });
+  test('a trunk with a space would split into words the gate still allows, so only the word check refuses it', { skip: !hasJq && 'jq is not installed' }, () => {
+    const words = lib.listGatherFactsWords('main --ref 5', []);
+    assert.equal(askGate(resolveCommand(lib.buildRunnerCommand('gather-facts', words)), 'hivemind:synapse'), 'allow');
+    assert.equal(lib.describeRunnerWordProblem(words), 'its --trunk value is not one the script takes');
   });
 });

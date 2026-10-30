@@ -13,6 +13,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.0] - 2026-10-29
+
+### Added
+
+- `hivemind:synapse`, an agent that runs the engine's runner steps (#467).
+- The runner gate hook `plugin/hooks/synapse-gate.sh` and its suite `tools/test_synapse_gate.sh`. The hook allows the five runner scripts only in their exact form (#467).
+- The policy fixtures `tests/policy/safety-synapse-gate.json` and `tests/policy/safety-synapse-tools.json` pin the hook and the synapse tool list (#467).
+
+### Changed
+
+- The facts, branch, commit and PR runner steps run on synapse with no prompt (#467).
+- The engine checks branch names and refuses AI credit lines in PR text (#467).
+- A runner command value outside its safe character class stops the step (#467).
+
+### Removed
+
+- The drone's git-script exemption (#467).
+- The skill load per runner (#467).
+- The manual-mode prompt before runner commits, pushes and PRs (#467).
+
+### Security
+
+- Any command that names one of the five runner scripts in another form is denied for every agent (#467).
+
 ## [7.4.1] - 2026-10-29
 
 ### Changed

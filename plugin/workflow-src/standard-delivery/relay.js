@@ -15,9 +15,9 @@
  *
  * Outputs
  *   runFactsStep(run)  {facts}, else a cause for stopDelivery (record.js),
- *           terminal only when a scan that fits its schema flags a suspect.
+ *           terminal only for a command stop and a scan suspect.
  *   runBranchStep(run, plan, freshness)  {values}, else a cause, terminal
- *           for a blocked relay and a branch other than the plan branch.
+ *           for a command stop, a blocked relay and another branch.
  *   runCommitStep(run, plan, commit, stepCauses)  commit is {files,
  *           label, stepName, subject?}, subject commitStepTexts(stepName)
  *           .subject when not given; stepCauses is the array of the step's
@@ -49,8 +49,8 @@
  *           change marker or an attribution string molt SKILL.md forbids.
  *   The options, sentences, routing specs and relay helpers every other
  *   runner step uses. The steps, as meta.js names them:
- *   Facts   a haiku hivemind:drone runner invokes hivemind:gather-facts and
- *           relays its stdout word for word; the workflow parses it with
+ *   Facts   a haiku hivemind:synapse runner runs the gather-facts command
+ *           and relays its stdout word for word; the workflow parses it with
  *           gatherFactsRoutingSpec() and checks it with
  *           isConsistentFactsRelay (lib/facts.js).
  *   Scan    the shared scan step, when the facts count external texts.
@@ -58,12 +58,12 @@
  *           its cause or undefined; on pass 1 with the prompt, options and
  *           label scan of lib/facts.js runScanStep, byte for byte, so a
  *           resumed run replays its cached result.
- *   Branch  a runner invokes hivemind:create-working-branch.
- *   Commit  a runner invokes hivemind:molt after every wave and every gate
+ *   Branch  a runner runs the create-working-branch command.
+ *   Commit  a runner runs the molt command after every wave and every gate
  *           step that can change files, and with an empty file list as the
  *           head check of gates.js after a reply. Its checked commit goes to
  *           observeHead (record.js), as the branch commit does at each pass
- *           start (main.js). Its inputs block
+ *           start (main.js). Its inputs_file block
  *           carries a code-built subject: a wave's from its plan steps
  *           (waves.js buildWaveSubject), and fixed ones for the fix and
  *           review commits.
@@ -87,8 +87,9 @@
  *   its causes to runCommitStep, which stops through stopDelivery, isReplan
  *   true for a wave: a failed commit adds its cause after them, so a commit
  *   stop never hides the step's cause. Only a commit or branch script
- *   refusal, a branch other than the plan branch, a scan injection suspect
- *   and a second branch switch (requestBranchReplan) are terminal; an agent
+ *   refusal, a branch other than the plan branch, a scan injection suspect,
+ *   a runner command value outside its class (describeCommandStop) and a
+ *   second branch switch (requestBranchReplan) are terminal; an agent
  *   failure ends, and every other stop pauses (issue 457).
  *   Transient retry (issue 457): the facts, branch and commit runners call
  *   agent() through runRunnerRelay. Malformed output, a non-transient block
@@ -96,14 +97,16 @@
  *   Every blocked lead these steps build is one line naming the step and
  *   its cause; a list of delivery stops or dirty paths after it goes
  *   through capItemLines.
- *   Runner prompts carry no request text, use plain git only (never with
- *   -C, ADR-0037 decision 25), and put every branch and trunk name in their
- *   JSON inputs block only.
- *   No prompt restates a rule its agent or skill owns
- *   (docs/engineering-principles.md P24). A prompt is one task line, the
- *   grant, the drone exemption trigger in the words drone.md keys on and
- *   the boundary it needs, dataBlocksSentence() (lib/facts.js) and its
- *   data. How a runner relays is the RELAY_SCHEMA field descriptions.
+ *   Runner prompts carry no request text and put every branch and trunk
+ *   name in their command block only. Every runner is a hivemind:synapse
+ *   and the scan, validation and fix rounds drones (lib/facts.js). A
+ *   runner prompt is one task line, the grant for the commit and PR
+ *   runners, dataBlocksSentence(), a buildRunnerCommand command block and
+ *   for commit and PR an inputs_file block, in the block names and
+ *   placeholders of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md, which owns
+ *   how a runner uses them (docs/engineering-principles.md P24). Each step
+ *   checks its words with describeRunnerWordProblem before the call. How
+ *   a runner relays is the RELAY_SCHEMA field descriptions.
  *   Relayed reply (issue 432): the harness relays the user's latest message
  *   to every workflow agent, so after a resume each agent sees the reply to
  *   the pause as a user message. Once run.answerLog is not empty, every
@@ -116,8 +119,9 @@
  *   blocked or refused result, which every check above still reads.
  *   ADR-0037 records the residual.
  *   The commit and PR runners write their own inputs file and pass its
- *   path to molt.sh or open-plan-pr.sh (review finding fb4c129c), so what
- *   reaches git and GitHub rests on the runner copying its inputs block
+ *   path to molt.sh or open-plan-pr.sh (review finding fb4c129c), each path
+ *   a fixed literal with a {token} the runner picks, so what
+ *   reaches git and GitHub rests on the runner copying its inputs_file block
  *   (ADR-0037 Risks). Each script refuses an inputs file outside the
  *   checkout or one that breaks a field rule, molt.sh refuses any dirty
  *   path outside its list, and the workflow checks every routing line.
@@ -245,16 +249,12 @@ function isConsistentVersionRelay(values) {
   return values.version_check === 'unreadable' || (values.verdict === 'ask_user' && !hasExpected);
 }
 
-function gitScriptSentence(skill) {
-  return 'This is a git-script task: the task\'s only change is one run of ' + skill + ', a hivemind git skill whose script checks the git state itself.';
-}
-
 function pushGrantSentence() {
-  return 'This delegation explicitly grants push authority for this one task: one push of the working branch and one pull request opened or reused, made only by the hivemind:open-plan-pr script. It grants no commit, and no push of the trunk.';
+  return 'This delegation explicitly grants push authority for this one task: one push of the working branch and one pull request opened or reused, made only by the open-plan-pr script. It grants no commit, and no push of the trunk.';
 }
 
 function commitGrantSentence() {
-  return 'This delegation explicitly grants commit authority for this one task: one commit, made only by the hivemind:molt script, of exactly the files in the inputs block. It grants no push.';
+  return 'This delegation explicitly grants commit authority for this one task: one commit, made only by the hivemind:molt script, of exactly the files in the inputs_file block. It grants no push.';
 }
 
 function validationTaskSentence() {
@@ -267,10 +267,6 @@ function validationCommandsSentence() {
 
 function validationFixSentence() {
   return 'This is a validation fix task: the task is one fix round for the run\'s failed validation.';
-}
-
-function skillRunOnlySentence() {
-  return 'Make no change yourself beyond the skill run.';
 }
 
 function resumedReplySentence() {
@@ -299,7 +295,7 @@ function buildRelaySchema() {
 }
 
 function runnerOptions(label, phaseTitle) {
-  return { agentType: runnerAgentType(), model: RUNNER_MODEL, schema: toAgentSchema(RELAY_SCHEMA), label: label, phase: phaseTitle };
+  return { agentType: synapseAgentType(), model: RUNNER_MODEL, schema: toAgentSchema(RELAY_SCHEMA), label: label, phase: phaseTitle };
 }
 
 function isTransientBlock(relay) {
@@ -312,22 +308,20 @@ async function runRunnerRelay(prompt, label, phaseTitle) {
 }
 
 function droneOptions(label, phaseTitle, schema) {
-  return { agentType: runnerAgentType(), schema: toAgentSchema(schema), label: label, phase: phaseTitle };
+  return { agentType: droneAgentType(), schema: toAgentSchema(schema), label: label, phase: phaseTitle };
 }
 
 function plannerCallOptions(label, phaseTitle, resultSchema) {
   return { agentType: PLANNER_AGENT, schema: toAgentSchema(resultSchema), label: label, phase: phaseTitle };
 }
 
-function buildDeliveryFactsPrompt(trunk, references) {
-  return [
-    'Invoke the hivemind:gather-facts skill once, with the trunk and references in the inputs block below and no remote.',
-    runnerReadOnlySentence(),
-    dataBlocksSentence(),
-    runnerToolSentence(),
-    '',
-    formatDataBlock('inputs', { trunk: trunk, references: references })
-  ].join('\n');
+function describeCommandStop(stepNoun, words) {
+  const problem = describeRunnerWordProblem(words);
+  return problem === undefined ? undefined : { problem: 'The ' + stepNoun + ' step did not run its script, so ' + RUN_NAME + ' stopped: ' + problem + '.', terminal: true };
+}
+
+function buildDeliveryFactsPrompt(words) {
+  return ['Gather the branch facts with the command below.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('gather-facts', words))].join('\n');
 }
 
 function splitStderrLines(stderr) {
@@ -426,7 +420,12 @@ async function runPassScan(facts, run) {
 
 async function runFactsStep(run) {
   phase('Facts');
-  const relay = await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(run.trunk, run.references), run), 'facts-' + run.pass, 'Facts');
+  const words = listGatherFactsWords(run.trunk, run.references);
+  const commandStop = describeCommandStop('facts', words);
+  if (commandStop !== undefined) {
+    return commandStop;
+  }
+  const relay = await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(words), run), 'facts-' + run.pass, 'Facts');
   const checked = checkDeliveryFacts(relay, run.trunk);
   if (checked.problem !== undefined) {
     return checked;
@@ -435,15 +434,12 @@ async function runFactsStep(run) {
   return scanned === undefined ? checked : scanned;
 }
 
-function buildBranchPrompt(plan, freshness, trunk) {
-  return [
-    'Invoke the hivemind:create-working-branch skill once, with each value of the inputs block below as the input of the same name.',
-    gitScriptSentence('hivemind:create-working-branch'),
-    dataBlocksSentence(),
-    runnerToolSentence(),
-    '',
-    formatDataBlock('inputs', { base: plan.base, working_branch: plan.branch, classification: plan.classification, 'trunk-freshness': freshness, trunk: trunk })
-  ].join('\n');
+function listBranchWords(plan, freshness, trunk) {
+  return ['--base', plan.base, '--branch', plan.branch, '--classification', plan.classification, '--trunk-freshness', freshness, '--trunk', trunk];
+}
+
+function buildBranchPrompt(words) {
+  return ['Create or confirm the working branch with the command below.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('create-working-branch', words))].join('\n');
 }
 
 function checkBranchRelay(relay, plan, freshness) {
@@ -466,7 +462,12 @@ function checkBranchRelay(relay, plan, freshness) {
 
 async function runBranchStep(run, plan, freshness) {
   phase('Branch');
-  const relay = await runRunnerRelay(addResumeNote(buildBranchPrompt(plan, freshness, run.trunk), run), 'branch-' + run.pass, 'Branch');
+  const words = listBranchWords(plan, freshness, run.trunk);
+  const commandStop = describeCommandStop('branch', words);
+  if (commandStop !== undefined) {
+    return commandStop;
+  }
+  const relay = await runRunnerRelay(addResumeNote(buildBranchPrompt(words), run), 'branch-' + run.pass, 'Branch');
   return checkBranchRelay(relay, plan, freshness);
 }
 
@@ -520,16 +521,14 @@ function toCommitSubject(text, fallbackSubject) {
   return isUsableSubject(subject) ? subject : fallbackSubject;
 }
 
+function listCommitWords(trunk) {
+  return ['--trunk', trunk, '--inputs', '.hivemind/molt-inputs-{token}.json'];
+}
+
 function buildCommitPrompt(files, plan, trunk, stepName, subject) {
-  return [
-    'Invoke the hivemind:molt skill once, with each value of the inputs block below as the input of the same name, to commit ' + commitStepTexts(stepName).purpose + '.',
-    commitGrantSentence(),
-    gitScriptSentence('hivemind:molt'),
-    dataBlocksSentence(),
-    skillRunOnlySentence(),
-    '',
-    formatDataBlock('inputs', { files: files, commit_type: commitTypeMap()[plan.classification], breaking: plan.breaking, subject: subject, trunk: trunk })
-  ].join('\n');
+  const words = listCommitWords(trunk);
+  const content = { type: commitTypeMap()[plan.classification], breaking: plan.breaking, subject: subject, files: files };
+  return ['Run the command below to commit ' + commitStepTexts(stepName).purpose + '.', commitGrantSentence(), dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', words)), formatInputsFileBlock(words[3], content)].join('\n');
 }
 
 function readOutsidePath(payload) {
@@ -582,6 +581,10 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   const subject = commit.subject === undefined ? commitStepTexts(commit.stepName).subject : commit.subject;
   const isReplan = commit.stepName === 'wave';
   phase('Commit');
+  const commandStop = describeCommandStop('commit', listCommitWords(run.trunk));
+  if (commandStop !== undefined) {
+    return stopDelivery(stepCauses.concat([commandStop]), run, [], isReplan);
+  }
   const relay = await runRunnerRelay(addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, commit.stepName, subject), run), commit.label, 'Commit');
   const checked = checkCommitRelay(relay, plan, commit.stepName);
   if (checked.problem !== undefined) {

@@ -28,7 +28,7 @@ const briefSchema = readJson('plugin/references/decision-brief-schema.json');
 const agentPlanSchema = readDataConstant(repoRoot, 'PLAN_SCHEMA');
 const agentBriefSchema = readDataConstant(repoRoot, 'BRIEF_SCHEMA');
 const droneText = readText(join(repoRoot, 'plugin/agents/drone.md'));
-const gatherFactsPath = join(repoRoot, 'plugin/skills/gather-facts/scripts/gather-facts.sh');
+const pluginRoot = join(repoRoot, 'plugin');
 const createBranchPath = join(repoRoot, 'plugin/skills/create-working-branch/scripts/create-working-branch.sh');
 const moltPath = join(repoRoot, 'plugin/skills/molt/scripts/molt.sh');
 const bumpTypePath = join(repoRoot, 'plugin/skills/bump-type/scripts/bump-type.sh');
@@ -270,13 +270,12 @@ function moltSubjectLine(scratch, subject, breaking, index) {
 }
 
 /**
- * The input names the molt SKILL.md lists under its Required Inputs and
- * Optional Inputs headings.
+ * The inputs file fields molt.sh takes: its known_keys jq list.
  */
-function readMoltSkillInputs() {
-  const skillText = readText(join(repoRoot, 'plugin/skills/molt/SKILL.md'));
-  const inputsText = skillText.slice(skillText.indexOf('## Required Inputs'), skillText.indexOf('## Requirements'));
-  return [...inputsText.matchAll(/^- `([a-z_]+)`: /gm)].map((match) => match[1]);
+function readMoltInputFields() {
+  const match = /^def known_keys: \[([^\]]+)\];$/m.exec(readText(moltPath));
+  assert.ok(match !== null, 'molt.sh lists its known_keys');
+  return JSON.parse('[' + match[1] + ']');
 }
 
 function effectPlan(summary, reversible) {
@@ -288,7 +287,7 @@ function replacementPlan() {
 }
 
 function prBodyOf(run, label) {
-  return readDataBlock(callOf(run, label).prompt, 'inputs').body;
+  return readRunnerInputs(callOf(run, label).prompt).body;
 }
 
 function routingStdout(values) {
@@ -354,10 +353,10 @@ function prRelay(changes = {}) {
 
 /**
  * A pull request runner stand-in for the create path: it reports the
- * expect_commit of its inputs block as the PR head.
+ * --expect-commit of its command block as the PR head.
  */
 function cannedPrRunner(changes = {}) {
-  return (prompt) => prRelay({ head_ref_oid: readDataBlock(prompt, 'inputs').expect_commit, ...changes });
+  return (prompt) => prRelay({ head_ref_oid: readRunnerInputs(prompt).expect_commit, ...changes });
 }
 
 function openedLine(head) {
@@ -470,6 +469,30 @@ function readDataBlock(prompt, name) {
   return JSON.parse(lines[start + 1]);
 }
 
+function hasDataBlock(prompt, name) {
+  return prompt.split('\n').includes('<' + name + '>');
+}
+
+/**
+ * Reads the command and inputs_file blocks of a synapse runner prompt into
+ * one object: each flag value of the command under the flag name, dashes
+ * made underscores and every --ref value in one ref list, then the
+ * inputs_file content fields. The --inputs path is left out.
+ */
+function readRunnerInputs(prompt) {
+  const words = readDataBlock(prompt, 'command').split(' ');
+  const inputs = {};
+  for (let index = 2; index < words.length; index += 2) {
+    const key = words[index].replace(/^--/, '').replace(/-/g, '_');
+    if (key === 'ref') {
+      inputs.ref = [...(inputs.ref ?? []), words[index + 1]];
+    } else if (key !== 'inputs') {
+      inputs[key] = words[index + 1];
+    }
+  }
+  return hasDataBlock(prompt, 'inputs_file') ? { ...inputs, ...readDataBlock(prompt, 'inputs_file').content } : inputs;
+}
+
 function withoutDataBlock(prompt, name) {
   const lines = prompt.split('\n');
   const start = lines.indexOf('<' + name + '>');
@@ -545,31 +568,37 @@ function runScriptIn(scratch, scriptPath, scriptArgs) {
   return run.status === 0 ? { outcome: 'ran', stdout: run.stdout } : { outcome: 'blocked', stderr: run.stderr };
 }
 
+/**
+ * Does what synapse.md says a runner does with a prompt: it puts the plugin
+ * root for {plugin-root} and token for {token}, writes the inputs_file
+ * content as JSON to its path when the block is there, then runs the
+ * command split on single spaces with no shell, as the exact form the gate
+ * hook allows has no quoting.
+ */
+function runCommandBlock(scratch, prompt, token) {
+  const fill = (text) => text.split('{plugin-root}').join(pluginRoot).split('{token}').join(token);
+  if (hasDataBlock(prompt, 'inputs_file')) {
+    const inputsFile = readDataBlock(prompt, 'inputs_file');
+    writeRepoFile(scratch, fill(inputsFile.path), JSON.stringify(inputsFile.content));
+  }
+  const words = fill(readDataBlock(prompt, 'command')).split(' ');
+  assert.equal(words[0], 'bash');
+  return runScriptIn(scratch, words[1], words.slice(2));
+}
+
 function realFactsRunner(scratch) {
-  return (prompt) => {
-    const inputs = readDataBlock(prompt, 'inputs');
-    const refArgs = inputs.references.flatMap((reference) => ['--ref', reference]);
-    return runScriptIn(scratch, gatherFactsPath, ['--trunk', inputs.trunk, ...refArgs]);
-  };
+  return (prompt) => runCommandBlock(scratch, prompt, 'test');
 }
 
 function realBranchRunner(scratch) {
-  return (prompt) => {
-    const inputs = readDataBlock(prompt, 'inputs');
-    const flags = ['--base', inputs.base, '--branch', inputs.working_branch, '--classification', inputs.classification];
-    return runScriptIn(scratch, createBranchPath, [...flags, '--trunk-freshness', inputs['trunk-freshness'], '--trunk', inputs.trunk]);
-  };
+  return (prompt) => runCommandBlock(scratch, prompt, 'test');
 }
 
 function realCommitRunner(scratch) {
   let inputsCount = 0;
   return (prompt) => {
-    const inputs = readDataBlock(prompt, 'inputs');
     inputsCount += 1;
-    const inputsPath = '.hivemind/molt-inputs-test-' + inputsCount + '.json';
-    mkdirSync(join(scratch.repo, '.hivemind'), { recursive: true });
-    writeFileSync(join(scratch.repo, inputsPath), JSON.stringify({ type: inputs.commit_type, breaking: inputs.breaking, subject: inputs.subject, files: inputs.files }));
-    return runScriptIn(scratch, moltPath, ['--trunk', inputs.trunk, '--inputs', inputsPath]);
+    return runCommandBlock(scratch, prompt, 'test-' + inputsCount);
   };
 }
 
@@ -653,16 +682,10 @@ function writeCreatePathGh(scratch, origin) {
 
 /**
  * A PR runner stand-in that does what the PR prompt asks: it writes the
- * inputs file from the inputs block and runs the real open-plan-pr.sh.
+ * inputs file from the inputs_file block and runs the real open-plan-pr.sh.
  */
 function realPrRunner(scratch) {
-  return (prompt) => {
-    const inputs = readDataBlock(prompt, 'inputs');
-    const inputsPath = '.hivemind/pr-inputs-test.json';
-    mkdirSync(join(scratch.repo, '.hivemind'), { recursive: true });
-    writeFileSync(join(scratch.repo, inputsPath), JSON.stringify({ title: inputs.title, body: inputs.body, comment: inputs.comment, draft: inputs.draft }));
-    return runScriptIn(scratch, openPlanPrPath, ['--head', inputs.head, '--base', inputs.base, '--expect-commit', inputs.expect_commit, '--inputs', inputsPath]);
-  };
+  return (prompt) => runCommandBlock(scratch, prompt, 'test');
 }
 
 function readOutputKeys(scriptText) {
@@ -1043,12 +1066,12 @@ const ROW_TESTS = {
     });
     test('a string launch takes the default trunk and no references', async () => {
       const run = await runWorkflow(REQUEST, happyResults());
-      assert.deepEqual(readDataBlock(callOf(run, 'facts-1').prompt, 'inputs'), { trunk: 'main', references: [] });
+      assert.deepEqual(readRunnerInputs(callOf(run, 'facts-1').prompt), { trunk: 'main' });
       assert.equal(run.result.outcome, 'complete');
     });
     test('trunk and references reach the facts inputs normalized', async () => {
       const run = await runWorkflow({ request: REQUEST, trunk: 'develop', references: [12, '7', 12] }, { 'facts-1': factsRelay() });
-      assert.deepEqual(readDataBlock(callOf(run, 'facts-1').prompt, 'inputs'), { trunk: 'develop', references: ['12', '7'] });
+      assert.deepEqual(readRunnerInputs(callOf(run, 'facts-1').prompt), { trunk: 'develop', ref: ['12', '7'] });
       assertPassStopPause(run, MALFORMED_FACTS, 'facts-1');
     });
   },
@@ -1061,19 +1084,19 @@ const ROW_TESTS = {
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       assert.equal(runGitIn(scratch, ['symbolic-ref', '--short', 'HEAD']), 'feature/cache');
       assert.equal(runGitIn(scratch, ['log', '-1', '--format=%s']), 'feat: Step STEP-001 is done.');
-      assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').expect_commit, head);
-      assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'skipped');
+      assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).expect_commit, head);
+      assert.equal(readRunnerInputs(callOf(run, 'branch-1').prompt).trunk_freshness, 'skipped');
     });
-    test('the facts runner invokes gather-facts with a JSON inputs block under the runner read-only sentence', async () => {
+    test('the facts runner is a synapse that runs the gather-facts command of its command block', async () => {
       const run = await runWorkflow({ request: REQUEST, references: [5] }, happyResults());
       const call = callOf(run, 'facts-1');
-      assert.ok(call.prompt.startsWith('Invoke the hivemind:gather-facts skill once, with the trunk and references in the inputs block below and no remote.\n'));
-      assert.ok(call.prompt.includes(lib.runnerReadOnlySentence()));
-      assert.ok(call.prompt.includes(lib.dataBlocksSentence()));
+      assert.deepEqual(call.prompt.split('\n'), ['Gather the branch facts with the command below.', lib.dataBlocksSentence(), '', '<command>', JSON.stringify('bash {plugin-root}/skills/gather-facts/scripts/gather-facts.sh --trunk main --ref 5'), '</command>']);
+      assert.equal(readDataBlock(call.prompt, 'command'), lib.buildGatherFactsCommand('main', ['5']));
+      assert.ok(!call.prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(!call.prompt.includes('set stdout'));
       assert.ok(call.opts.schema.properties.stdout.description.startsWith('The script stdout, word for word, every line.'));
-      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { trunk: 'main', references: ['5'] });
-      assert.equal(call.opts.agentType, 'hivemind:drone');
+      assert.deepEqual(readRunnerInputs(call.prompt), { trunk: 'main', ref: ['5'] });
+      assert.equal(call.opts.agentType, 'hivemind:synapse');
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'Facts');
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'stdout', 'stderr']);
@@ -1718,7 +1741,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(resumeWith(LAUNCH, second.result, 'Accept the plan.'), results, surfaced);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
-      assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'stale');
+      assert.equal(readRunnerInputs(callOf(run, 'branch-1').prompt).trunk_freshness, 'stale');
     });
     test('the revise call schema is the plan result schema with a required settled enum of the shown labels', async () => {
       const plan = effectPlan('Publish to the registry.', false);
@@ -1824,7 +1847,7 @@ const ROW_TESTS = {
     });
     test('fresh gives fresh and no_remote gives skipped', async () => {
       const fresh = await runWorkflow(LAUNCH, happyResults());
-      assert.equal(readDataBlock(callOf(fresh, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'fresh');
+      assert.equal(readRunnerInputs(callOf(fresh, 'branch-1').prompt).trunk_freshness, 'fresh');
       const results = happyResults({
         'facts-1': factsRelay({ trunk_freshness: 'no_remote' }),
         'plan-1': planResult(makePlan({ trunk_freshness: 'no_remote' })),
@@ -1832,7 +1855,7 @@ const ROW_TESTS = {
       });
       const skipped = await runWorkflow(LAUNCH, results);
       assert.equal(skipped.result.outcome, 'complete', skipped.result.message);
-      assert.equal(readDataBlock(callOf(skipped, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'skipped');
+      assert.equal(readRunnerInputs(callOf(skipped, 'branch-1').prompt).trunk_freshness, 'skipped');
     });
     for (const [freshness, ahead, behind] of [['behind', '0', '2'], ['ahead', '1', '0'], ['diverged', '1', '3'], ['fetch_failed', '0', '0'], ['no_local_trunk', '0', '0']]) {
       test(`${freshness} goes through trunk_stale: a take gives stale and is listed`, async () => {
@@ -1843,7 +1866,7 @@ const ROW_TESTS = {
         });
         const run = await runWorkflow(LAUNCH, results);
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'stale');
+        assert.equal(readRunnerInputs(callOf(run, 'branch-1').prompt).trunk_freshness, 'stale');
         assert.ok(run.result.message.includes('The trunk may not be up to date: its freshness is ' + freshness), run.result.message);
       });
     }
@@ -1866,7 +1889,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go on.'), results, surfaced);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'stale');
+      assert.equal(readRunnerInputs(callOf(run, 'branch-1').prompt).trunk_freshness, 'stale');
     });
     test('a real stale trunk passes stale to create-working-branch.sh and its warning parses', async () => {
       const scratch = makeScratchRepo();
@@ -1877,7 +1900,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.equal(readDataBlock(callOf(run, 'branch-1').prompt, 'inputs')['trunk-freshness'], 'stale');
+      assert.equal(readRunnerInputs(callOf(run, 'branch-1').prompt).trunk_freshness, 'stale');
     });
   },
   'SD-11': () => {
@@ -1970,7 +1993,7 @@ const ROW_TESTS = {
     });
   },
   'SD-12': () => {
-    test('branch, base and trunk appear only in the JSON inputs block, under the git-script sentence', async () => {
+    test('branch, base and trunk appear only in the command block of a synapse runner', async () => {
       const results = happyResults({
         'facts-1': factsRelay({ trunk: 'trunk-zq', branch: 'trunk-zq' }),
         'plan-1': planResult(makePlan({ branch: 'feature/branch-zq', base: 'base-zq', classification: 'bugfix' })),
@@ -1981,14 +2004,14 @@ const ROW_TESTS = {
       const run = await runWorkflow({ request: REQUEST, trunk: 'trunk-zq' }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'branch-1');
-      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { base: 'base-zq', working_branch: 'feature/branch-zq', classification: 'bugfix', 'trunk-freshness': 'fresh', trunk: 'trunk-zq' });
-      const outsideInputs = withoutDataBlock(call.prompt, 'inputs');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash {plugin-root}/skills/create-working-branch/scripts/create-working-branch.sh --base base-zq --branch feature/branch-zq --classification bugfix --trunk-freshness fresh --trunk trunk-zq');
+      assert.deepEqual(readRunnerInputs(call.prompt), { base: 'base-zq', branch: 'feature/branch-zq', classification: 'bugfix', trunk_freshness: 'fresh', trunk: 'trunk-zq' });
+      const outsideCommand = withoutDataBlock(call.prompt, 'command');
       for (const name of ['trunk-zq', 'branch-zq', 'base-zq', 'bugfix']) {
-        assert.ok(!outsideInputs.includes(name), name);
+        assert.ok(!outsideCommand.includes(name), name);
       }
-      assert.ok(call.prompt.startsWith('Invoke the hivemind:create-working-branch skill once'));
-      assert.ok(call.prompt.includes(main.gitScriptSentence('hivemind:create-working-branch')));
-      assert.equal(call.opts.agentType, 'hivemind:drone');
+      assert.deepEqual(outsideCommand.split('\n'), ['Create or confirm the working branch with the command below.', lib.dataBlocksSentence(), '']);
+      assert.equal(call.opts.agentType, 'hivemind:synapse');
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'Branch');
     });
@@ -2210,20 +2233,19 @@ const ROW_TESTS = {
     });
   },
   'SD-15': () => {
-    test('the commit runner commits the wave files with the mapped type under a commit grant and the git-script sentence', async () => {
+    test('the commit runner commits the wave files with the mapped type under a commit grant, from its command and inputs_file blocks', async () => {
       const plan = makePlan({ classification: 'bugfix', breaking: true, steps: [makeStep('S1', ['src/a.js', 'src/b.js']), makeStep('S2', ['src/c.js', 'src/b.js'])] });
       const results = happyResults({ 'plan-1': planResult(plan), 'work-1-S1': WORKER_DONE, 'work-1-S2': WORKER_DONE, 'commit-1-2': commitRelay({ commit: THIRD }), ...tailResults(1, THIRD) });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'commit-1-1');
-      assert.deepEqual(readDataBlock(call.prompt, 'inputs'), { files: ['src/a.js', 'src/b.js'], commit_type: 'fix', breaking: true, subject: 'Step S1 is done.', trunk: 'main' });
-      assert.ok(call.prompt.startsWith('Invoke the hivemind:molt skill once'));
-      assert.ok(call.prompt.includes(main.commitGrantSentence()));
-      assert.ok(call.prompt.includes(main.gitScriptSentence('hivemind:molt')));
-      assert.equal(call.opts.agentType, 'hivemind:drone');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash {plugin-root}/skills/molt/scripts/molt.sh --trunk main --inputs .hivemind/molt-inputs-{token}.json');
+      assert.deepEqual(readDataBlock(call.prompt, 'inputs_file'), { path: '.hivemind/molt-inputs-{token}.json', content: { type: 'fix', breaking: true, subject: 'Step S1 is done.', files: ['src/a.js', 'src/b.js'] } });
+      assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file').split('\n'), ['Run the command below to commit the wave of plan steps that just ran.', main.commitGrantSentence(), lib.dataBlocksSentence(), '']);
+      assert.equal(call.opts.agentType, 'hivemind:synapse');
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'Commit');
-      assert.deepEqual(readDataBlock(callOf(run, 'commit-1-2').prompt, 'inputs').files, ['src/c.js', 'src/b.js']);
+      assert.deepEqual(readRunnerInputs(callOf(run, 'commit-1-2').prompt).files, ['src/c.js', 'src/b.js']);
     });
     test('the commit type map covers the plan classifications and names only molt types', () => {
       const moltText = readText(moltPath);
@@ -2494,28 +2516,21 @@ const ROW_TESTS = {
       }
       assert.ok(callOf(run, 'plan-1').prompt.includes('REQUEST_MARKER_ZQ'));
     });
-    test('read-only runners carry the runner read-only sentence and git-script runners the git-script sentence', async () => {
+    test('the scan and validation drones carry the runner read-only sentence, and no runner prompt carries an exemption, a skill or a tool sentence', async () => {
       const run = await runWorkflow(LAUNCH, results);
-      assert.ok(callOf(run, 'facts-1').prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(callOf(run, 'scan').prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(callOf(run, 'validate-1-1').prompt.includes(lib.runnerReadOnlySentence()));
-      for (const [label, skill] of [['branch-1', 'hivemind:create-working-branch'], ['commit-1-1', 'hivemind:molt'], ['review-commit-1-1', 'hivemind:molt'], ['pr-1', 'hivemind:open-plan-pr']]) {
+      for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
-        assert.ok(prompt.includes(main.gitScriptSentence(skill)), label);
-        assert.ok(!prompt.includes(lib.runnerReadOnlySentence()), label);
+        const outside = withoutDataBlock(hasDataBlock(prompt, 'inputs_file') ? withoutDataBlock(prompt, 'inputs_file') : prompt, 'command');
+        for (const text of [lib.runnerReadOnlySentence(), 'git-script', 'skill', 'tool call', 'Make no']) {
+          assert.ok(!outside.includes(text), label + ' ' + text);
+        }
       }
       assert.ok(!callOf(run, 'branch-1').prompt.includes('commit authority'));
-    });
-    test('the git-script sentence is the git-script task trigger of drone.md and nothing more', () => {
-      const clause = readDroneClause('A git-script task is also exempt: when the delegation says ', 'take the place of this check.');
-      const condition = clause.match(/when the delegation says (.+?), the task runs on (.+?), and that script's refusals take the place of this check\.$/);
-      assert.ok(condition, clause);
-      for (const skill of ['hivemind:create-working-branch', 'hivemind:molt', 'hivemind:open-plan-pr']) {
-        const sentence = main.gitScriptSentence(skill);
-        assert.equal(sentence, 'This is a git-script task: ' + condition[1].replace('a named hivemind git skill whose script', skill + ', a hivemind git skill whose script') + '.');
-      }
-      assert.ok(droneText.includes('Commit authority is unchanged: a commit still needs the delegation\'s explicit grant.'));
-      assert.ok(main.commitGrantSentence().startsWith('This delegation explicitly grants commit authority'));
+      assert.equal(main.gitScriptSentence, undefined);
+      assert.equal(main.skillRunOnlySentence, undefined);
+      assert.equal(lib.runnerToolSentence, undefined);
     });
     test('the runner read-only sentence is the read-only task trigger of drone.md and nothing more', () => {
       const clause = readDroneClause('except for a read-only task: when the delegation says ', 'needs no branch or base.');
@@ -2980,7 +2995,7 @@ const ROW_TESTS = {
       assert.equal(readDataBlock(call.prompt, 'plan_summary'), makePlan().summary);
       assert.deepEqual(readDataBlock(call.prompt, 'git'), { branch: 'feature/cache', base: 'main', trunk: 'main' });
       assert.ok(!withoutDataBlock(call.prompt, 'failures').includes(FAILURE_TEXT));
-      assert.deepEqual(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'inputs'), { files: ['src/cache.js'], commit_type: 'feat', breaking: false, subject: 'fix the failed validation', trunk: 'main' });
+      assert.deepEqual(readRunnerInputs(callOf(run, 'fix-commit-1-1').prompt), { files: ['src/cache.js'], type: 'feat', breaking: false, subject: 'fix the failed validation', trunk: 'main' });
       const remediation = { brief: main.buildValidationRemediationBrief(OTHER, 1) };
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, remediation])), run.result.message);
       assert.ok(!run.result.message.includes('landed after'), run.result.message);
@@ -3049,7 +3064,7 @@ const ROW_TESTS = {
       const results = fixFlowResults({ 'fix-1-1': null, 'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }) });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'blocked');
-      assert.deepEqual(readDataBlock(callOf(run, 'fix-commit-1-1').prompt, 'inputs').files, []);
+      assert.deepEqual(readRunnerInputs(callOf(run, 'fix-commit-1-1').prompt).files, []);
       assert.ok(run.result.message.startsWith('The validation fix round was blocked, so the delivery stopped: it returned no usable result. ' + lib.describeNoResult(null) + '\n\n'), run.result.message);
       assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('run_again'));
     });
@@ -3246,10 +3261,10 @@ const ROW_TESTS = {
       });
     }
     for (const [label, args, draft] of [['an absent draft', LAUNCH, false], ['a string launch', REQUEST, false], ['draft false', { ...LAUNCH, draft: false }, false], ['draft true', { ...LAUNCH, draft: true }, true]]) {
-      test(`${label} puts draft ${draft} in the PR inputs block`, async () => {
+      test(`${label} puts draft ${draft} in the PR inputs_file block`, async () => {
         const run = await runWorkflow(args, happyResults());
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').draft, draft);
+        assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).draft, draft);
       });
     }
     test('the launch check is readDraft, after readLocalReview', () => {
@@ -3547,19 +3562,20 @@ const ROW_TESTS = {
     });
   },
   'SD-34': () => {
-    test('the commit runner commits an empty file list after the review under the git-script sentence', async () => {
+    test('the commit runner commits an empty file list after the review under the commit grant', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const commit = callOf(run, 'review-commit-1-1');
-      assert.deepEqual(readDataBlock(commit.prompt, 'inputs'), { files: [], commit_type: 'feat', breaking: false, subject: 'apply the local review fixes', trunk: 'main' });
-      assert.ok(commit.prompt.startsWith('Invoke the hivemind:molt skill once, with each value of the inputs block below as the input of the same name, to commit the local review that just ran, with an empty file list.'), commit.prompt);
-      assert.ok(commit.prompt.includes(main.gitScriptSentence('hivemind:molt')));
+      assert.deepEqual(readRunnerInputs(commit.prompt), { files: [], type: 'feat', breaking: false, subject: 'apply the local review fixes', trunk: 'main' });
+      assert.ok(commit.prompt.startsWith('Run the command below to commit the local review that just ran, with an empty file list.\n'), commit.prompt);
+      assert.ok(commit.prompt.includes(main.commitGrantSentence()));
+      assert.equal(commit.opts.agentType, 'hivemind:synapse');
       assert.equal(commit.opts.phase, 'Commit');
       assert.equal(commit.opts.model, 'haiku');
     });
     test('a null review result still gets the empty-list commit before the run stops', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': null }));
       assert.equal(run.result.outcome, 'blocked');
-      assert.deepEqual(readDataBlock(callOf(run, 'review-commit-1-1').prompt, 'inputs').files, []);
+      assert.deepEqual(readRunnerInputs(callOf(run, 'review-commit-1-1').prompt).files, []);
       assert.equal(run.failures, 0);
     });
     test('an unusable review pauses after its commit, and the reply runs local review again with the next count, with no head check', async () => {
@@ -3623,7 +3639,7 @@ const ROW_TESTS = {
       });
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gatesPart = inputs.body.split('\n\n').find((part) => part.startsWith('Gates:'));
       assert.ok(gatesPart.includes('- local review: ') && gatesPart.split('\n').slice(1).every((line) => line.endsWith(', held on commit ' + THIRD)), inputs.body);
       assert.ok(!listsCommits(inputs.body), inputs.body);
@@ -3936,7 +3952,7 @@ const ROW_TESTS = {
         const texts = main.reviewCallTexts();
         assert.ok(body.includes('  D2. ' + texts.problem + '\n    Chose option A: ' + texts.summary + '\n    Why: ' + texts.why), body);
         assert.ok(!body.includes('AGREED_') && !body.includes('c0ffee01'), body);
-        assert.ok(!JSON.stringify(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs')).includes('AGREED_'));
+        assert.ok(!JSON.stringify(readRunnerInputs(callOf(run, 'pr-1').prompt)).includes('AGREED_'));
       });
     }
     test('a take never touches run.answerLog and lists the call once per finding, and distinct findings stay distinct', () => {
@@ -4256,21 +4272,20 @@ const ROW_TESTS = {
       assert.equal(labelsOf(run).at(-1), 'pr-1');
       assert.equal(run.phases.at(-1), 'PR');
       const call = callOf(run, 'pr-1');
-      assert.ok(call.prompt.startsWith('Invoke the hivemind:open-plan-pr skill once, with each value of the inputs block below, word for word, as the input of the same name, to push the working branch and open its pull request or reuse the open one.\n'));
-      assert.ok(call.prompt.includes(main.pushGrantSentence()));
-      assert.ok(call.prompt.includes(main.gitScriptSentence('hivemind:open-plan-pr')));
-      assert.ok(call.prompt.includes(lib.dataBlocksSentence()));
+      const outside = withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file');
+      assert.deepEqual(outside.split('\n'), ['Run the command below to push the working branch and open its pull request or reuse the open one.', main.pushGrantSentence(), lib.dataBlocksSentence(), '']);
       assert.ok(!call.prompt.includes('set stdout'));
       assert.ok(!call.prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(!call.prompt.includes(main.commitGrantSentence()));
-      assert.equal(call.opts.agentType, 'hivemind:drone');
+      assert.equal(call.opts.agentType, 'hivemind:synapse');
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'PR');
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'stdout', 'stderr']);
-      const inputs = readDataBlock(call.prompt, 'inputs');
-      assert.deepEqual(Object.keys(inputs), ['head', 'base', 'expect_commit', 'title', 'body', 'comment', 'draft']);
-      assert.deepEqual({ head: inputs.head, base: inputs.base, expect_commit: inputs.expect_commit }, { head: 'feature/cache', base: 'main', expect_commit: OTHER });
-      const outside = withoutDataBlock(call.prompt, 'inputs');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash {plugin-root}/skills/open-plan-pr/scripts/open-plan-pr.sh --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-{token}.json');
+      const inputsFile = readDataBlock(call.prompt, 'inputs_file');
+      assert.deepEqual(Object.keys(inputsFile), ['path', 'content']);
+      assert.equal(inputsFile.path, '.hivemind/pr-inputs-{token}.json');
+      assert.deepEqual(Object.keys(inputsFile.content), ['title', 'body', 'comment', 'draft']);
       assert.ok(!outside.includes('feature/cache') && !outside.includes(OTHER), outside);
     });
     for (const [label, results, head, args = LAUNCH] of [
@@ -4282,10 +4297,10 @@ const ROW_TESTS = {
       test(`${label}: the PR prompt is the only push prompt, once, and its expect_commit is the commit every gate held on`, async () => {
         const run = await runWorkflow(args, results);
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        const pushCalls = run.calls.filter((call) => /hivemind:(open-plan-pr|push-branch)/.test(call.prompt));
+        const pushCalls = run.calls.filter((call) => /open-plan-pr|push-branch/.test(call.prompt));
         assert.deepEqual(pushCalls.map((call) => call.opts.label), [labelsOf(run).at(-1)]);
         assert.ok(/^pr-[1-9]$/.test(labelsOf(run).at(-1)));
-        assert.equal(readDataBlock(pushCalls[0].prompt, 'inputs').expect_commit, head);
+        assert.equal(readRunnerInputs(pushCalls[0].prompt).expect_commit, head);
         assert.equal(run.result.pr.head_ref_oid, head);
         assert.ok(run.result.message.includes('\n\n' + HELD_ALL + head + '.'), run.result.message);
       });
@@ -4297,11 +4312,11 @@ const ROW_TESTS = {
       assert.equal(asked.result.needs_user, true);
       for (const run of [stopped, asked]) {
         assert.ok(labelsOf(run).every((label) => !label.startsWith('pr-')), JSON.stringify(labelsOf(run)));
-        assert.ok(run.calls.every((call) => !call.prompt.includes('hivemind:open-plan-pr')));
+        assert.ok(run.calls.every((call) => !call.prompt.includes('open-plan-pr')));
         assert.equal(run.result.pr, undefined);
       }
     });
-    test('each reply to a pull request stop runs the head check, then the PR step again under pr-P-N, N from 2, with the same inputs block', async () => {
+    test('each reply to a pull request stop runs the head check, then the PR step again under pr-P-N, N from 2, with the same command and inputs_file blocks', async () => {
       const blocked = { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' };
       const results = happyResults({ 'pr-1': blocked, 'head-1-1': headRelay(OTHER), 'pr-1-2': blocked, 'head-1-2': headRelay(OTHER), 'pr-1-3': cannedPrRunner() });
       const first = await runWorkflow(LAUNCH, results);
@@ -4313,21 +4328,20 @@ const ROW_TESTS = {
       assert.equal(third.result.outcome, 'complete', third.result.message);
       assert.deepEqual(labelsOf(third).slice(-5), ['pr-1', 'head-1-1', 'pr-1-2', 'head-1-2', 'pr-1-3']);
       for (const label of ['pr-1-2', 'pr-1-3']) {
-        assert.deepEqual(readDataBlock(callOf(third, label).prompt, 'inputs'), readDataBlock(callOf(third, 'pr-1').prompt, 'inputs'), label);
+        assert.deepEqual(readRunnerInputs(callOf(third, label).prompt), readRunnerInputs(callOf(third, 'pr-1').prompt), label);
         assert.equal(callOf(third, label).opts.phase, 'PR');
       }
     });
   },
   'SD-43': () => {
-    test('the push grant sentence matches the delegated-implementer grant of safety-rails.md and the push sentence of drone.md', () => {
+    test('the push grant sentence matches the delegated-implementer grant of safety-rails.md', () => {
       const grantLine = safetyRailsText.split('\n').find((line) => line.startsWith('- `COMMIT-GRANT delegated-implementer:`'));
       assert.ok(grantLine !== undefined, 'safety-rails.md has the delegated-implementer grant line');
       assert.ok(grantLine.includes('commit or push ONLY when their delegation explicitly authorizes it for that specific delegation'), grantLine);
       assert.ok(grantLine.includes('A push runs only through `hivemind:open-plan-pr` or `hivemind:push-branch`, never against the resolved trunk branch.'), grantLine);
-      assert.ok(droneText.includes('A push needs the same explicit grant.'));
       const sentence = main.pushGrantSentence();
       assert.ok(sentence.startsWith('This delegation explicitly grants push authority for this one task: '), sentence);
-      assert.ok(sentence.includes('one push of the working branch and one pull request opened or reused, made only by the hivemind:open-plan-pr script.'), sentence);
+      assert.ok(sentence.includes('one push of the working branch and one pull request opened or reused, made only by the open-plan-pr script.'), sentence);
       assert.ok(sentence.endsWith(' It grants no commit, and no push of the trunk.'), sentence);
     });
     test('only the PR prompt carries the push grant: wave workers and the commit runner never do', async () => {
@@ -4391,7 +4405,7 @@ const ROW_TESTS = {
     test('the PR inputs carry the title built from the plan', async () => {
       const plan = makePlan({ classification: 'refactor', breaking: true, summary: 'Split the cache.\nKeep the API.' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
-      assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').title, 'refactor!: Split the cache');
+      assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).title, 'refactor!: Split the cache');
     });
   },
   'SD-45': () => {
@@ -4399,7 +4413,7 @@ const ROW_TESTS = {
       const plan = effectPlan('Post a preview link.', true);
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
-      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
       const decisions = lib.renderDecisions([{ brief: strong }, { brief: main.buildPlanAcceptanceBrief(plan) }]);
       const record = ['```\nEffects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."\n```', gates, '```\n' + decisions + '\n```'];
@@ -4469,7 +4483,7 @@ const ROW_TESTS = {
       const question = makeBrief({ problem: 'Ask @octocat for a key.', options: options, recommendation: { option_id: 'A', strength: 'strong', why: 'As @octocat said.' } });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [question]) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gateLines = ['Gates:', '- validation: passed, held on commit ' + OTHER, '- local review: clean, held on commit ' + OTHER];
       for (const text of [inputs.body, inputs.comment]) {
         const fenced = readFencedText(text);
@@ -4488,7 +4502,7 @@ const ROW_TESTS = {
       const results = happyResults({ 'plan-1': planResult(plan), 'validate-1-1': { outcome: 'not_run' } });
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gates = gatesBlock(['validation: not run, the project documents no validation commands, held on commit ' + OTHER, 'local review: not configured for this run']);
       assert.ok(inputs.body.includes('\n\n' + gates + '\n\n'), inputs.body);
       assert.ok(inputs.comment.includes('\n\n' + gates), inputs.comment);
@@ -4496,7 +4510,7 @@ const ROW_TESTS = {
     test('a taken diminishing returns exit shows a fixed problem, the open finding count and no reviewer text', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': DIMINISHING }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const fixed = main.reviewDecisionProblems().diminishing_returns_exit;
       for (const text of [inputs.body, inputs.comment]) {
         assert.ok(text.includes('- local review: diminishing returns, 2 findings still open, held on commit ' + OTHER), text);
@@ -4512,7 +4526,7 @@ const ROW_TESTS = {
       test(`a taken ${kind} shows a fixed problem and no reviewer text`, async () => {
         const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(review));
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        const inputs = readDataBlock(callOf(run, 'pr-2').prompt, 'inputs');
+        const inputs = readRunnerInputs(callOf(run, 'pr-2').prompt);
         for (const text of [inputs.body, inputs.comment]) {
           assert.ok(text.includes(main.reviewDecisionProblems()[kind]), text);
           reviewerTexts.forEach((reviewerText) => assert.ok(!text.includes(reviewerText), reviewerText));
@@ -4523,7 +4537,7 @@ const ROW_TESTS = {
       const plan = makePlan({ summary: 'Cache\u0007 the\treads.\r\nThen\u0000 the\u009b writes.\u007f' });
       const question = makeBrief({ problem: 'Pick\u0001 a key.\u001b[31m' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [question]) }));
-      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       for (const text of [inputs.body, inputs.comment]) {
         assert.ok(isPullRequestText(text, true), JSON.stringify(text));
       }
@@ -4535,7 +4549,7 @@ const ROW_TESTS = {
       const question = makeBrief({ problem: 'LONG_VERBATIM_PROBLEM', verbatim: 'S'.repeat(61000) });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [question]) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const compact = lib.renderDecisionsCompact([{ brief: question }, { brief: main.buildPlanAcceptanceBrief(makePlan()) }]);
       for (const text of [inputs.body, inputs.comment]) {
         assert.ok(text.endsWith('\n\n```\n' + compact + '\n```'), text.slice(-400));
@@ -4681,11 +4695,11 @@ const ROW_TESTS = {
       const head = runGitIn(scratch, ['rev-parse', 'HEAD']);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: head, created: true });
       assert.equal(runGitIn(scratch, ['ls-remote', origin, 'refs/heads/feature/cache']).split('\t')[0], head);
-      assert.equal(readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').expect_commit, head);
+      assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).expect_commit, head);
       const createArgs = readFileSync(join(logDir, 'create.args'), 'utf8').split('\n');
       assert.ok(createArgs.includes('--base') && createArgs.includes('main') && createArgs.includes('--title=feat: Add the cache layer'), JSON.stringify(createArgs));
       assert.ok(!createArgs.includes('--head'));
-      assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').body);
+      assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), readRunnerInputs(callOf(run, 'pr-1').prompt).body);
       assert.ok(!prRelays[0].stdout.includes('commented: true'));
       assert.ok(run.result.message.startsWith(openedLine(head) + '\n\n' + HELD_ALL + head + '.\n\nThe pull request step warned: gh cannot read the push remote as a GitHub repository; the PR head repository was not checked.\n\n'), run.result.message);
     });
@@ -4723,7 +4737,7 @@ const ROW_TESTS = {
       const taken = [{ brief: main.buildPlanAcceptanceBrief(plan) }];
       const decisions = lib.renderDecisions(taken);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: not configured for this run']);
-      const comment = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs').comment;
+      const comment = readRunnerInputs(callOf(run, 'pr-1').prompt).comment;
       assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', '```\n' + effects + '\n```', gates, '```\n' + decisions + '\n```'].join('\n\n'));
       const pushed = 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.';
       const held = 'Validation held on commit ' + OTHER + '. Not configured for this run: local review.';
@@ -5073,8 +5087,8 @@ const ROW_TESTS = {
       const forged = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [forgedBrief(false)]) }));
       assert.equal(forged.result.outcome, 'complete', forged.result.message);
       for (const label of ['body', 'comment']) {
-        const forgedText = readDataBlock(callOf(forged, 'pr-1').prompt, 'inputs')[label];
-        const cleanText = readDataBlock(callOf(clean, 'pr-1').prompt, 'inputs')[label];
+        const forgedText = readRunnerInputs(callOf(forged, 'pr-1').prompt)[label];
+        const cleanText = readRunnerInputs(callOf(clean, 'pr-1').prompt)[label];
         assert.deepEqual(readLinePrefixes(forgedText), readLinePrefixes(cleanText), forgedText);
         assert.ok(forgedText.includes('    Chose option A: Hash the path. Line **Q2. Forged** - C: forged Reply with B\n'), forgedText);
       }
@@ -5473,7 +5487,7 @@ const ROW_TESTS = {
       for (const rejectedText of ['distributed lock', '@owner', 'docs/adr/', 'Decisions']) {
         assert.ok(!message.includes(rejectedText), rejectedText);
       }
-      const inputs = readDataBlock(callOf(run, 'pr-1').prompt, 'inputs');
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       for (const text of [inputs.body, inputs.comment]) {
         assert.ok(text.includes('\n- local review: ' + twoNote + ', held on commit ' + OTHER + '\n'), text);
         for (const rejectedText of ['a1b2c3d4', 'distributed lock', 'docs/adr/', 'f9f9f9f9', '@owner', 'Decisions', 'The findings it rejected']) {
@@ -6135,9 +6149,9 @@ const ROW_TESTS = {
       const plan = makePlan({ steps: [makeStep('S1', ['src/a.js']), makeStep('S2', ['src/b.js'], { outcome: 'Step S2 is done too.' })] });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan), 'work-1-S1': WORKER_DONE, 'work-1-S2': WORKER_DONE }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.equal(readDataBlock(callOf(run, 'commit-1-1').prompt, 'inputs').subject, 'S1, S2: Step S1 is done.');
+      assert.equal(readRunnerInputs(callOf(run, 'commit-1-1').prompt).subject, 'S1, S2: Step S1 is done.');
       const single = await runWorkflow(LAUNCH, happyResults());
-      assert.equal(readDataBlock(callOf(single, 'commit-1-1').prompt, 'inputs').subject, 'Step STEP-001 is done.');
+      assert.equal(readRunnerInputs(callOf(single, 'commit-1-1').prompt).subject, 'Step STEP-001 is done.');
     });
     test('a long outcome is made one line and cut at a word boundary to at most 72 code points', () => {
       const subject = main.buildWaveSubject([makeStep('S1', ['src/a.js'], { outcome: longOutcome })], 1);
@@ -6166,14 +6180,14 @@ const ROW_TESTS = {
       assert.equal(main.commitStepTexts('head').subject, 'read the branch head');
       assert.equal(main.commitStepTexts('wave').subject, undefined);
     });
-    test('every key of the commit inputs block is an input of the molt SKILL.md', () => {
-      const skillInputs = readMoltSkillInputs();
-      assert.ok(skillInputs.includes('subject') && skillInputs.includes('trunk'), skillInputs.join(','));
+    test('every key of the commit inputs_file content is a field molt.sh takes', () => {
+      const moltFields = readMoltInputFields();
+      assert.ok(moltFields.includes('subject') && moltFields.includes('files'), moltFields.join(','));
       for (const stepName of ['wave', 'fix', 'review', 'head']) {
         const subject = main.commitStepTexts(stepName).subject || 'Step S1 is done.';
-        const inputs = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', stepName, subject), 'inputs');
-        assert.deepEqual(Object.keys(inputs), ['files', 'commit_type', 'breaking', 'subject', 'trunk'], stepName);
-        Object.keys(inputs).forEach((key) => assert.ok(skillInputs.includes(key), stepName + ' ' + key));
+        const content = readDataBlock(main.buildCommitPrompt(['src/a.js'], makePlan(), 'main', stepName, subject), 'inputs_file').content;
+        assert.deepEqual(Object.keys(content), ['type', 'breaking', 'subject', 'files'], stepName);
+        Object.keys(content).forEach((key) => assert.ok(moltFields.includes(key), stepName + ' ' + key));
       }
     });
     test('real molt.sh: every subject passes its subject rules, and the raw fallback outcomes do not all', () => {
@@ -6589,7 +6603,7 @@ const ROW_TESTS = {
       assert.deepEqual([...planPaths].sort(), ['VERSION', 'src/cache.js']);
       const commitLabels = labelsOf(run).filter((label) => /^commit-1-\d+$/.test(label));
       assert.deepEqual(commitLabels, ['commit-1-1']);
-      const committedPaths = commitLabels.flatMap((label) => readDataBlock(callOf(run, label).prompt, 'inputs').files);
+      const committedPaths = commitLabels.flatMap((label) => readRunnerInputs(callOf(run, label).prompt).files);
       committedPaths.forEach((path) => assert.ok(planPaths.includes(path), path));
       assert.deepEqual([...new Set(committedPaths)].sort(), [...planPaths].sort());
     });
@@ -6784,7 +6798,7 @@ const ROW_TESTS = {
         assert.deepEqual(labels, resumedLabels);
         assert.equal(labels.some((label) => label.startsWith('head-')), headCheckedRoutes.includes(route), JSON.stringify(labels));
         const lastPr = labels.filter((label) => label.startsWith('pr-')).at(-1);
-        assert.equal(readDataBlock(callOf(resumed, lastPr).prompt, 'inputs').expect_commit, head);
+        assert.equal(readRunnerInputs(callOf(resumed, lastPr).prompt).expect_commit, head);
         const gateLines = prBodyOf(resumed, lastPr).split('\n').filter((line) => line.startsWith('- validation: ') || line.startsWith('- local review: '));
         assert.equal(gateLines.length, 2, prBodyOf(resumed, lastPr));
         gateLines.forEach((line) => assert.ok(line.endsWith(', held on commit ' + head), line));
@@ -6815,7 +6829,7 @@ const ROW_TESTS = {
       const resumed = await runWorkflow(resumeWith(launch, paused.result, 'Fixed, go on.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'pr-1']);
-      assert.equal(readDataBlock(callOf(resumed, 'pr-1').prompt, 'inputs').expect_commit, THIRD);
+      assert.equal(readRunnerInputs(callOf(resumed, 'pr-1').prompt).expect_commit, THIRD);
       assert.ok(resumed.result.message.startsWith(openedLine(THIRD)), resumed.result.message);
     });
     test('the head check commits an empty file list with a fixed subject, and an unchanged head runs the stopped step again with the same inputs', async () => {
@@ -6825,10 +6839,10 @@ const ROW_TESTS = {
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'pr-1-2']);
       const check = callOf(resumed, 'head-1-1');
-      assert.ok(check.prompt.startsWith('Invoke the hivemind:molt skill once, with each value of the inputs block below as the input of the same name, to commit nothing: the empty file list makes it report the head of the working branch after the user replied to a stop.\n'), check.prompt);
-      assert.deepEqual(readDataBlock(check.prompt, 'inputs'), { files: [], commit_type: 'feat', breaking: false, subject: 'read the branch head', trunk: 'main' });
+      assert.ok(check.prompt.startsWith('Run the command below to commit nothing: the empty file list makes it report the head of the working branch after the user replied to a stop.\n'), check.prompt);
+      assert.deepEqual(readRunnerInputs(check.prompt), { files: [], type: 'feat', breaking: false, subject: 'read the branch head', trunk: 'main' });
       assert.equal(check.opts.phase, 'Commit');
-      assert.deepEqual(readDataBlock(callOf(resumed, 'pr-1-2').prompt, 'inputs'), readDataBlock(callOf(resumed, 'pr-1').prompt, 'inputs'));
+      assert.deepEqual(readRunnerInputs(callOf(resumed, 'pr-1-2').prompt), readRunnerInputs(callOf(resumed, 'pr-1').prompt));
     });
     test('a pull request stop reply with a moved head reruns the gates through gate_rerun, and the pull request pushes the new head', async () => {
       const results = happyResults({
@@ -6844,8 +6858,8 @@ const ROW_TESTS = {
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'I pushed a fix commit.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'review-1-2', 'review-commit-1-2', 'pr-1-2']);
-      assert.equal(readDataBlock(callOf(resumed, 'pr-1').prompt, 'inputs').expect_commit, OTHER);
-      assert.equal(readDataBlock(callOf(resumed, 'pr-1-2').prompt, 'inputs').expect_commit, THIRD);
+      assert.equal(readRunnerInputs(callOf(resumed, 'pr-1').prompt).expect_commit, OTHER);
+      assert.equal(readRunnerInputs(callOf(resumed, 'pr-1-2').prompt).expect_commit, THIRD);
       assert.ok(resumed.result.message.includes('\n\n' + HELD_ALL + THIRD + '.'), resumed.result.message);
       assert.ok(resumed.result.message.includes(main.buildGateRerunBrief(['validate', 'review'], THIRD, false).problem), resumed.result.message);
     });
@@ -6885,8 +6899,137 @@ const ROW_TESTS = {
       assert.equal(labelsOf(run).at(-1), 'head-1-1');
       assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('run_again'));
     });
+  },
+  'SD-74': () => {
+    test('the facts, branch, commit and PR runners are haiku synapses, and the scan, validation and fix rounds are drones', async () => {
+      const run = await runWorkflow({ request: REQUEST, references: [5] }, fixFlowResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'clean' }] } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'fix-commit-1-1', 'review-commit-1-1', 'pr-1']) {
+        assert.deepEqual([callOf(run, label).opts.agentType, callOf(run, label).opts.model], ['hivemind:synapse', 'haiku'], label);
+      }
+      for (const label of ['scan', 'validate-1-1', 'fix-1-1']) {
+        assert.equal(callOf(run, label).opts.agentType, 'hivemind:drone', label);
+      }
+      assert.equal(lib.synapseAgentType(), 'hivemind:synapse');
+      assert.equal(lib.droneAgentType(), 'hivemind:drone');
+      assert.equal(lib.runnerAgentType, undefined);
+    });
+    test('the runner prompts use the block names and placeholders of synapse.md', async () => {
+      const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
+      for (const word of ['`command`', '`inputs_file`', '`{plugin-root}`', '`{token}`', '{path, content}']) {
+        assert.ok(synapseText.includes(word), word);
+      }
+      const run = await runWorkflow(LAUNCH, happyResults());
+      for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'review-commit-1-1', 'pr-1']) {
+        const prompt = callOf(run, label).prompt;
+        assert.ok(readDataBlock(prompt, 'command').startsWith('bash {plugin-root}/skills/'), label);
+        assert.equal(hasDataBlock(prompt, 'inputs_file'), label !== 'facts-1' && label !== 'branch-1', label);
+      }
+      assert.ok(readDataBlock(callOf(run, 'commit-1-1').prompt, 'inputs_file').path.includes('{token}'));
+    });
+    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs file Write an allow', async () => {
+      const scratch = makeScratchRepo();
+      mkdirSync(join(scratch.repo, '.hivemind'));
+      const fresh = await runWorkflow({ request: REQUEST, references: [5, 12] }, fixFlowResults());
+      const stale = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ trunk_freshness: 'behind', trunk_behind: '1' }) }));
+      const blocked = { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' };
+      const results = happyResults({ 'pr-1': blocked, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const paused = await runWorkflow(LAUNCH, results);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
+      const runnerCalls = [fresh, stale, resumed].flatMap((run) => run.calls).filter((call) => call.opts.agentType === 'hivemind:synapse');
+      assert.deepEqual([...new Set(runnerCalls.map((call) => readDataBlock(call.prompt, 'command').split('/')[2]))].sort(), ['create-working-branch', 'gather-facts', 'molt', 'open-plan-pr']);
+      assert.ok(runnerCalls.some((call) => call.opts.label === 'head-1-1') && runnerCalls.some((call) => call.opts.label === 'fix-commit-1-1'));
+      for (const call of runnerCalls) {
+        const command = readDataBlock(call.prompt, 'command').split('{plugin-root}').join(pluginRoot).split('{token}').join('tok-1');
+        assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:synapse', tool_input: { command: command } }), 'allow', call.opts.label + ': ' + command);
+        assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:drone', tool_input: { command: command } }), 'none', call.opts.label);
+        if (hasDataBlock(call.prompt, 'inputs_file')) {
+          const filePath = readDataBlock(call.prompt, 'inputs_file').path.split('{token}').join('tok-1');
+          assert.equal(readGateDecision(scratch, { tool_name: 'Write', agent_type: 'hivemind:synapse', cwd: scratch.repo, tool_input: { file_path: filePath, content: '{}' } }), 'allow', call.opts.label + ': ' + filePath);
+        }
+      }
+    });
+    test('describeRunnerWordProblem refuses a word outside its value class, naming the flag and never the value', () => {
+      const good = [['--trunk', 'release/2026-10'], ['--base', 'main'], ['--branch', 'feature/cache'], ['--head', 'feature/cache'], ['--ref', '12'], ['--expect-commit', HEAD], ['--expect-commit', 'a'.repeat(64)], ['--classification', 'hotfix'], ['--trunk-freshness', 'skipped'], ['--inputs', '.hivemind/molt-inputs-{token}.json'], ['--inputs', '.hivemind/pr-inputs-{token}.json']];
+      for (const words of good) {
+        assert.equal(lib.describeRunnerWordProblem(words), undefined, words.join(' '));
+      }
+      const bad = [['--trunk', 'main --ref 5'], ['--trunk', 'main\tx'], ['--trunk', '-main'], ['--trunk', 'a..b'], ['--trunk', ''], ['--base', 'main;x'], ['--branch', 'feature/a b'], ['--head', '"x"'], ['--ref', '5 --ref 6'], ['--ref', '-1'], ['--expect-commit', 'A'.repeat(40)], ['--expect-commit', '1234567'], ['--classification', 'feat'], ['--trunk-freshness', 'behind'], ['--inputs', '.hivemind/molt-inputs-x.json'], ['--inputs', '../molt-inputs-{token}.json'], ['--remote', 'origin'], ['--trunk'], ['--trunk', 5]];
+      for (const words of bad) {
+        const problem = lib.describeRunnerWordProblem(words);
+        assert.equal(problem, 'its ' + words[0] + ' value is not one the script takes', JSON.stringify(words));
+      }
+      assert.equal(lib.describeRunnerWordProblem(['--trunk', 'main', '--ref', '5 x']), 'its --ref value is not one the script takes');
+      assert.deepEqual([...lib.listGatherFactsWords('main', ['5', '12'])], ['--trunk', 'main', '--ref', '5', '--ref', '12']);
+    });
+    for (const [stepNoun, flag, callStep] of [
+      ['facts', '--trunk', (run) => main.runFactsStep({ ...run, trunk: 'main --ref 5SECRETZQ' })],
+      ['facts', '--ref', (run) => main.runFactsStep({ ...run, references: ['5 --ref SECRETZQ'] })],
+      ['branch', '--base', (run) => main.runBranchStep(run, makePlan({ base: 'main --branch SECRETZQ' }), 'fresh')],
+      ['branch', '--trunk-freshness', (run) => main.runBranchStep(run, makePlan(), 'SECRETZQ')],
+      ['commit', '--trunk', (run) => main.runCommitStep({ ...run, trunk: 'main --inputs SECRETZQ' }, makePlan(), { files: [], label: 'commit-1-1', stepName: 'wave', subject: 'Step S1 is done.' }, [])],
+      ['pull request', '--expect-commit', (run) => main.runPullRequestStep({ ...run, head: 'SECRETZQ --base main' }, makePlan(), heldGates(run))],
+      ['pull request', '--head', (run) => main.runPullRequestStep({ ...run, head: OTHER }, makePlan({ branch: 'feature/cache --head SECRETZQ' }), heldGates(run))]
+    ]) {
+      test(`a ${stepNoun} command value outside its class for ${flag} is a terminal stop before the runner call, naming the flag and not the value`, async () => {
+        const stepped = await runStepWithStubAgent(callStep);
+        assert.deepEqual(stepped.labels, []);
+        const lead = 'The ' + stepNoun + ' step did not run its script, so the delivery stopped: its ' + flag + ' value is not one the script takes.';
+        const result = stepped.result.result === undefined ? stepped.result : stepped.result.result;
+        if (result.problem !== undefined) {
+          assert.deepEqual(result, { problem: lead, terminal: true });
+        } else {
+          assert.equal(result.outcome, 'blocked');
+          assert.equal(result.needs_user, false);
+          assert.equal(result.message.split('\n\n')[0], lead);
+        }
+        assert.ok(!JSON.stringify(result).includes('SECRETZQ'), JSON.stringify(result));
+      });
+    }
   }
 };
+
+/**
+ * Runs the real synapse gate hook on a PreToolUse input and returns its
+ * permissionDecision, or none when it prints nothing.
+ */
+function readGateDecision(scratch, input) {
+  const hookPath = join(pluginRoot, 'hooks/synapse-gate.sh');
+  const run = spawnSync('bash', [hookPath], { cwd: scratch.repo, env: { ...scratch.env, CLAUDE_PLUGIN_ROOT: pluginRoot }, input: JSON.stringify(input), encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  return run.stdout.trim() === '' ? 'none' : JSON.parse(run.stdout).hookSpecificOutput.permissionDecision;
+}
+
+/**
+ * The gate loop state of a pass whose configured gates all held on run.head.
+ */
+function heldGates(run) {
+  const held = Object.fromEntries(main.configuredGateIds(run).map((gateId) => [gateId, OTHER]));
+  const notes = Object.fromEntries(main.configuredGateIds(run).map((gateId) => [gateId, 'passed']));
+  return { held: held, notes: notes, runs: { validate: 1, review: 1, fix: 0, headCheck: 0, pr: 1 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
+}
+
+/**
+ * Calls one step of the built script, callStep(run) with a fresh pass 1 run
+ * state, with phase() and agent() stubs that record each agent label, and
+ * returns {result, labels}.
+ */
+async function runStepWithStubAgent(callStep) {
+  const labels = [];
+  main.phase = () => undefined;
+  main.agent = async (prompt, opts) => {
+    labels.push(opts.label);
+    return null;
+  };
+  try {
+    const run = main.createRunState(main.readDeliveryLaunch({ request: REQUEST }));
+    run.pass = 1;
+    return { result: structuredClone(await callStep(run)), labels: labels };
+  } finally {
+    delete main.phase;
+    delete main.agent;
+  }
+}
 
 describe('standard-delivery contract table', () => {
   test('the row ids in contract.js equal the tested row ids', () => {

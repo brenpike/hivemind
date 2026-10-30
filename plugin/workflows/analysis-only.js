@@ -605,7 +605,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '680484e131a2098f';
+const BUILD_ID = '0bbd6a0c48bcb2cd';
 
 function supportedSchemaKeywords(){
 return[
@@ -2056,10 +2056,7 @@ return replyHome===undefined?sentence:sentence+' '+replyHome+' is the user\'s de
 function runnerReadOnlySentence(){
 return'This task is read-only: it edits no tracked files and makes no git writes.';
 }
-function runnerToolSentence(){
-return'Make no other tool call.';
-}
-function runnerAgentType(){
+function droneAgentType(){
 return'hivemind:drone';
 }
 function synapseAgentType(){
@@ -2074,11 +2071,39 @@ return formatDataBlock('command',command);
 function formatInputsFileBlock(path,content){
 return formatDataBlock('inputs_file',{path:path,content:content});
 }
+function runnerValuePatterns(){
+const name=gitIdentifierPattern();
+return{
+'--trunk':name,
+'--base':name,
+'--branch':name,
+'--head':name,
+'--ref':/^[0-9]+$/,
+'--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
+'--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
+'--trunk-freshness':/^(?:fresh|stale|skipped)$/,
+'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-\{token\}\.json$/
+};
+}
+function describeRunnerWordProblem(words){
+const patterns=runnerValuePatterns();
+for(let index=0;index<words.length;index+=2){
+const flag=String(words[index]);
+const value=words[index+1];
+if(!Object.prototype.hasOwnProperty.call(patterns,flag)||typeof value!=='string'||!patterns[flag].test(value)){
+return'its '+flag+' value is not one the script takes';
+}
+}
+return undefined;
+}
 function buildRunnerCommand(skill,words){
 return['bash','{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh',...words].join(' ');
 }
+function listGatherFactsWords(trunk,references){
+return['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])];
+}
 function buildGatherFactsCommand(trunk,references){
-return buildRunnerCommand('gather-facts',['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])]);
+return buildRunnerCommand('gather-facts',listGatherFactsWords(trunk,references));
 }
 function factsHeadStates(){
 return['branch','detached','unsafe_name'];
@@ -2245,7 +2270,7 @@ buildFactsBlock(facts)
 ].join('\n');
 }
 function scanOptions(){
-return{agentType:runnerAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
+return{agentType:droneAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
 }
 async function runScanStep(facts,runNoun){
 if(Number(facts.external_texts)>0){
