@@ -6919,6 +6919,9 @@ const ROW_TESTS = {
       for (const word of ['`command`', '`inputs_file`', '`{plugin-root}`', '`{token}`', '{path, content}']) {
         assert.ok(synapseText.includes(word), word);
       }
+      assert.ok(synapseText.includes('only in the `command` string and in `inputs_file.path`'));
+      assert.ok(synapseText.includes('Never replace anything in `inputs_file.content`.'));
+      assert.ok(!synapseText.includes('wherever they appear'));
       const run = await runWorkflow(LAUNCH, happyResults());
       for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
