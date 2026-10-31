@@ -626,7 +626,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '90d00bd6f51e73f1';
+const BUILD_ID = 'd694a9b07342e7c9';
 
 function supportedSchemaKeywords(){
 return[
@@ -1817,7 +1817,6 @@ return routingLineProblem(blockProblem,lineNumber);
 }
 continue;
 }
-openBlock=null;
 const topMatch=/^\S/.test(line)?matchRoutingLine(line,compiledSpec):null;
 if(topMatch===null||Object.prototype.hasOwnProperty.call(values,topMatch.key)){
 continue;
@@ -1826,9 +1825,7 @@ const topProblem=readFirstRoutingLine(topMatch,values);
 if(topProblem!==null){
 return routingLineProblem(topProblem,lineNumber);
 }
-if(topMatch.entry.block!==null){
-openBlock={entries:topMatch.entry.block,values:values[topMatch.key]};
-}
+openBlock=topMatch.entry.block===null?null:{entries:topMatch.entry.block,values:values[topMatch.key]};
 }
 const missingKey=findMissingRoutingKey(compiledSpec,values);
 if(missingKey!==null){

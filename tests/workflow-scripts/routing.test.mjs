@@ -292,15 +292,23 @@ describe('leading whitespace and blocks', () => {
     });
   }
   for (const [label, line] of [['one space', ' major: 0'], ['three spaces', '   major: 0'], ['a tab', '\tmajor: 0'], ['two spaces then a tab', '  \tmajor: 0'], ['only spaces', '    ']]) {
-    test(`a block line led by ${label} is not read and closes the block`, () => {
+    test(`a block line led by ${label} is not read`, () => {
       assert.deepEqual(parse(joinLines(replaceLine(bumpLines, 5, line)), bumpTypeSpec()), { ok: false, problem: 'missing', key: 'counts.major' });
     });
   }
-  test('a line that is not a block routing line closes the block, so later block lines are not read', () => {
+  test('a line that is not read inside the block closes no block, so later block lines are read', () => {
     for (const line of ['', 'The counts follow.', '  revert: 1', '  Major: 1']) {
       const text = joinLines(bumpLines.slice(0, 6).concat([line], bumpLines.slice(6)));
-      assert.deepEqual(parse(text, bumpTypeSpec()), { ok: false, problem: 'missing', key: 'counts.minor' }, JSON.stringify(line));
+      assert.deepEqual(parse(text, bumpTypeSpec()), { ok: true, values: bumpValues }, JSON.stringify(line));
     }
+  });
+  test('a repeated top-level key line inside the block is not read and closes no block', () => {
+    const text = joinLines(bumpLines.slice(0, 6).concat(['verdict: no_bump'], bumpLines.slice(6)));
+    assert.deepEqual(parse(text, bumpTypeSpec()), { ok: true, values: bumpValues });
+  });
+  test('the first line of another top-level key read inside the block closes it, so later block lines are not read', () => {
+    const lines = bumpLines.slice(0, 6).concat(['mapped_commits: 7'], bumpLines.slice(6));
+    assert.deepEqual(parse(joinLines(lines), bumpTypeSpec()), { ok: false, problem: 'missing', key: 'counts.minor' });
   });
   test('an indented line after a value line is not read', () => {
     const text = joinLines(bumpLines.slice(0, 4).concat(['  major: 9'], bumpLines.slice(4)));
@@ -526,6 +534,25 @@ describe('lines a relay may add are not read', () => {
   test('prose between top-level lines', () => {
     const lines = ['The script printed:', 'branch: feature/1-x', 'Then the commit:', 'commit: ' + HEAD_SHA, 'And it committed.', 'committed: true', 'Done.'];
     assert.deepEqual(parse(joinLines(lines), moltSpec()), { ok: true, values: moltValues });
+  });
+  test('a never-read line inserted at any position gives the same result as the text without it', () => {
+    const neverReadLines = ['', 'The counts follow.', '```', '  revert: 1', '  Major: 1', ' major: 0', '   major: 0', '\tmajor: 0', 'remote: origin'];
+    const cases = [
+      ['bump-type', bumpTypeLines(), bumpTypeSpec()],
+      ['molt', moltLines, moltSpec()],
+      ['open-plan-pr', ['url: https://github.com/brenpike/hivemind/pull/423', 'head_ref_oid: ' + HEAD_SHA, 'created: true'], openPlanPrSpec()],
+      ['gather-facts', gatherFactsLines(), gatherFactsSpec()]
+    ];
+    for (const [label, lines, spec] of cases) {
+      const expected = parse(joinLines(lines), spec);
+      assert.equal(expected.ok, true, label);
+      for (const neverRead of neverReadLines) {
+        for (let position = 0; position <= lines.length; position++) {
+          const text = joinLines(lines.slice(0, position).concat([neverRead], lines.slice(position)));
+          assert.deepEqual(parse(text, spec), expected, label + ' ' + JSON.stringify(neverRead) + ' at ' + position);
+        }
+      }
+    }
   });
 });
 

@@ -26,12 +26,13 @@
  *   A block opens at the first routing line of its block key. While it is
  *   open, a line of exactly two spaces then a non-space, in the same form,
  *   whose key is an own key of the block spec, is a routing line of the
- *   block. The block closes at the next line that is not such a line.
+ *   block. The block closes at the next top-level routing line that is
+ *   read. A line that is not read closes no block.
  *   The first routing line of each key at its level is read. No other line
  *   is read: blank lines, prose, code fences, lines whose key is not in the
- *   spec, indented lines with no open block, and every later line of a key
- *   already read. A repeated block key opens no block, so its indented
- *   lines are not read either.
+ *   spec, lines with the wrong indent, indented lines with no open block,
+ *   and every later line of a key already read, top-level or in the block.
+ *   A repeated block key opens no block and closes none.
  *
  * Outputs
  *   parseRoutingLines  {ok: true, values} when every line read is well
@@ -59,6 +60,8 @@
  *   number only.
  *   Only the first routing line of each key is read, and no other line
  *   causes a problem.
+ *   A line that is not read changes nothing: the text without it gives the
+ *   same result, apart from the line number of a problem.
  *   Lines are read top to bottom and the first line problem is returned.
  *   Missing keys are checked only when every line read is clean, top-level
  *   keys in spec order first, then the required keys of each block read.
@@ -105,7 +108,6 @@ function parseRoutingLines(text, spec) {
       }
       continue;
     }
-    openBlock = null;
     const topMatch = /^\S/.test(line) ? matchRoutingLine(line, compiledSpec) : null;
     if (topMatch === null || Object.prototype.hasOwnProperty.call(values, topMatch.key)) {
       continue;
@@ -114,9 +116,7 @@ function parseRoutingLines(text, spec) {
     if (topProblem !== null) {
       return routingLineProblem(topProblem, lineNumber);
     }
-    if (topMatch.entry.block !== null) {
-      openBlock = { entries: topMatch.entry.block, values: values[topMatch.key] };
-    }
+    openBlock = topMatch.entry.block === null ? null : { entries: topMatch.entry.block, values: values[topMatch.key] };
   }
   const missingKey = findMissingRoutingKey(compiledSpec, values);
   if (missingKey !== null) {
