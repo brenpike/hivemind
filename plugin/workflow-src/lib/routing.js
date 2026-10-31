@@ -4,7 +4,8 @@
  *
  * Inputs
  *   parseRoutingLines(text, spec)
- *     text  string. The script's stdout, word for word.
+ *     text  string. The relayed stdout of the script, which may hold other
+ *           lines too.
  *     spec  plain object, a positive allowlist. Each own key is a routing
  *           key and maps to an entry:
  *             {pattern, required}  a value line. pattern is a RegExp the
@@ -20,31 +21,32 @@
  * Grammar
  *   Lines end in LF. The text may end in one LF, or in none. The empty text
  *   has no lines.
- *   No CR anywhere, no blank line, no leading whitespace on a top-level line.
- *   A line is `key: value`, split at the first `: `, or `key:` for a block
- *   key, which has no inline value.
- *   A block line is a top-level `key:` line. The lines right after it that
- *   start with exactly two spaces then a non-space are its lines, in the
- *   same `key: value` form. An indented line anywhere else is malformed.
- *   Keys match routingKeyPattern().
+ *   A top-level routing line has no leading whitespace and is `key: value`,
+ *   split at the first `: `, or `key:`, where key is an own key of the spec.
+ *   A block opens at the first routing line of its block key. While it is
+ *   open, a line of exactly two spaces then a non-space, in the same form,
+ *   whose key is an own key of the block spec, is a routing line of the
+ *   block. The block closes at the next line that is not such a line.
+ *   The first routing line of each key at its level is read. No other line
+ *   is read: blank lines, prose, code fences, lines whose key is not in the
+ *   spec, indented lines with no open block, and every later line of a key
+ *   already read. A repeated block key opens no block, so its indented
+ *   lines are not read either.
  *
  * Outputs
- *   parseRoutingLines  {ok: true, values} when the text holds every
- *                      required key and nothing else is wrong. values maps
- *                      each key present to its value string, and each block
- *                      key present to an object of its own values.
+ *   parseRoutingLines  {ok: true, values} when every line read is well
+ *                      formed and every required key was read. values maps
+ *                      each key read to its value string, and each block
+ *                      key read to an object of its own values.
  *                      Otherwise {ok: false, problem, key} or
  *                      {ok: false, problem, line}:
- *                        missing    key: a required key is absent. A
- *                                   required key inside a block is named
- *                                   `block.key`.
- *                        malformed  line: the line breaks the grammar, or
- *                                   its value fails its pattern, or a block
- *                                   key has an inline value, or a value key
- *                                   has none.
- *                        unknown    line: the key is not in the spec.
- *                        duplicate  line: the key was already given, at
- *                                   the same level of the same block.
+ *                        missing    key: a required key has no routing
+ *                                   line. A required key inside a block is
+ *                                   named `block.key`.
+ *                        malformed  line: the first routing line of a key
+ *                                   holds a CR, or its value fails its
+ *                                   pattern, or a block key has an inline
+ *                                   value, or a value key has none.
  *                      line is the 1-based line number.
  *   routingProblems    every problem code, in no particular order.
  *   routingKeyPattern  the RegExp every key matches.
@@ -53,25 +55,31 @@
  *   Pure: no clock, no randomness, no I/O.
  *   A pattern is always checked as a full match of the value, even when the
  *   spec RegExp has no anchors. Its g, y and m flags are dropped.
- *   A problem never echoes a value or an unknown key. It names a spec key or
- *   a line number only.
- *   Lines are checked top to bottom and the first line problem is returned.
- *   Missing keys are checked only when every line is clean, top-level keys
- *   in spec order first, then the required keys of each block given.
- *   A spec key is looked up as an own property, so a key such as
- *   constructor is unknown unless the spec names it.
+ *   A problem never echoes a value or a line. It names a spec key or a line
+ *   number only.
+ *   Only the first routing line of each key is read, and no other line
+ *   causes a problem.
+ *   Lines are read top to bottom and the first line problem is returned.
+ *   Missing keys are checked only when every line read is clean, top-level
+ *   keys in spec order first, then the required keys of each block read.
+ *   A spec key is looked up as an own property, so a line keyed constructor
+ *   is not read unless the spec names it.
  *   An invalid spec, or text that is not a string, throws.
  *
  * Why
  *   A workflow cannot run a script itself. A runner runs it and relays its
- *   stdout, and the workflow must block when that relay lost, added or bent
- *   a line. One generic parser checks every script's lines the same way.
- *   Each script's header stays the home of its own output contract, and the
- *   spec for it lands with the step that reads it.
+ *   stdout, and the workflow must block when that relay lost or bent a
+ *   routing line. But a runner's relay can hold lines the script never
+ *   printed on stdout, such as the stderr of a command the script ran, and
+ *   an agent may add its own: notes, code fences, blank lines and repeats.
+ *   So only routing lines are read (issue 447). One generic parser checks
+ *   every script's lines the same way. Each script's header stays the home
+ *   of its own output contract, and the spec for it lands with the step
+ *   that reads it.
  */
 
 function routingProblems() {
-  return ['missing', 'malformed', 'unknown', 'duplicate'];
+  return ['missing', 'malformed'];
 }
 
 function routingKeyPattern() {
@@ -85,29 +93,30 @@ function parseRoutingLines(text, spec) {
   const compiledSpec = compileRoutingSpec(spec, 'spec', true);
   const lines = splitRoutingText(text);
   const values = {};
-  const seenKeys = new Set();
   let openBlock = null;
   for (let index = 0; index < lines.length; index++) {
     const lineNumber = index + 1;
     const line = lines[index];
-    if (line === '' || line.includes('\r')) {
-      return routingLineProblem('malformed', lineNumber);
-    }
-    if (/^\s/.test(line)) {
-      if (openBlock === null || !/^ {2}\S/.test(line)) {
-        return routingLineProblem('malformed', lineNumber);
-      }
-      const blockProblem = readRoutingEntry(line.slice(2), openBlock.entries, openBlock.seenKeys, openBlock.values);
+    const blockMatch = openBlock === null || !/^ {2}\S/.test(line) ? null : matchRoutingLine(line.slice(2), openBlock.entries);
+    if (blockMatch !== null) {
+      const blockProblem = Object.prototype.hasOwnProperty.call(openBlock.values, blockMatch.key) ? null : readFirstRoutingLine(blockMatch, openBlock.values);
       if (blockProblem !== null) {
         return routingLineProblem(blockProblem, lineNumber);
       }
       continue;
     }
-    const topProblem = readRoutingEntry(line, compiledSpec, seenKeys, values);
+    openBlock = null;
+    const topMatch = /^\S/.test(line) ? matchRoutingLine(line, compiledSpec) : null;
+    if (topMatch === null || Object.prototype.hasOwnProperty.call(values, topMatch.key)) {
+      continue;
+    }
+    const topProblem = readFirstRoutingLine(topMatch, values);
     if (topProblem !== null) {
       return routingLineProblem(topProblem, lineNumber);
     }
-    openBlock = openRoutingBlock(line, compiledSpec, values);
+    if (topMatch.entry.block !== null) {
+      openBlock = { entries: topMatch.entry.block, values: values[topMatch.key] };
+    }
   }
   const missingKey = findMissingRoutingKey(compiledSpec, values);
   if (missingKey !== null) {
@@ -124,31 +133,12 @@ function splitRoutingText(text) {
   return body.split('\n');
 }
 
-function readRoutingEntry(line, entries, seenKeys, values) {
-  const parsed = splitRoutingLine(line);
-  if (parsed === null || !routingKeyPattern().test(parsed.key)) {
-    return 'malformed';
-  }
-  if (!entries.has(parsed.key)) {
-    return 'unknown';
-  }
-  if (seenKeys.has(parsed.key)) {
-    return 'duplicate';
-  }
-  seenKeys.add(parsed.key);
-  const entry = entries.get(parsed.key);
-  if (entry.block !== null) {
-    if (parsed.value !== null) {
-      return 'malformed';
-    }
-    values[parsed.key] = {};
+function matchRoutingLine(body, entries) {
+  const parsed = splitRoutingLine(body);
+  if (parsed === null || !entries.has(parsed.key)) {
     return null;
   }
-  if (parsed.value === null || !entry.pattern.test(parsed.value)) {
-    return 'malformed';
-  }
-  values[parsed.key] = parsed.value;
-  return null;
+  return { key: parsed.key, value: parsed.value, entry: entries.get(parsed.key) };
 }
 
 function splitRoutingLine(line) {
@@ -162,13 +152,19 @@ function splitRoutingLine(line) {
   return null;
 }
 
-function openRoutingBlock(line, compiledSpec, values) {
-  const key = splitRoutingLine(line).key;
-  const entry = compiledSpec.get(key);
-  if (entry.block === null) {
+function readFirstRoutingLine(match, values) {
+  if (match.entry.block !== null) {
+    if (match.value !== null) {
+      return 'malformed';
+    }
+    values[match.key] = {};
     return null;
   }
-  return { entries: entry.block, seenKeys: new Set(), values: values[key] };
+  if (match.value === null || match.value.includes('\r') || !match.entry.pattern.test(match.value)) {
+    return 'malformed';
+  }
+  values[match.key] = match.value;
+  return null;
 }
 
 function findMissingRoutingKey(compiledSpec, values) {

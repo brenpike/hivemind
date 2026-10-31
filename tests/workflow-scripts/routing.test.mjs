@@ -253,17 +253,19 @@ describe('header-derived samples parse', () => {
 
 describe('line endings', () => {
   const lines = ['branch: feature/1-x', 'commit: ' + HEAD_SHA, 'committed: true'];
+  const values = { branch: 'feature/1-x', commit: HEAD_SHA, committed: 'true' };
   test('no trailing LF is accepted', () => {
     assert.equal(parse(lines.join('\n'), moltSpec()).ok, true);
   });
-  test('a second trailing LF is a blank line', () => {
-    assertLineProblem(parse(lines.join('\n') + '\n\n', moltSpec()), 'malformed', 4);
+  test('a second trailing LF is a blank line, which is not read', () => {
+    assert.deepEqual(parse(lines.join('\n') + '\n\n', moltSpec()), { ok: true, values: values });
   });
-  test('a lone LF is a blank line', () => {
-    assertLineProblem(parse('\n', moltSpec()), 'malformed', 1);
+  test('a lone LF is a blank line, which is not read', () => {
+    assert.deepEqual(parse('\n', moltSpec()), { ok: false, problem: 'missing', key: 'branch' });
+    assert.deepEqual(parse('\n', { note: { pattern: /.*/, required: false } }), { ok: true, values: {} });
   });
-  test('a blank line in the middle is malformed', () => {
-    assertLineProblem(parse('branch: feature/1-x\n\ncommit: ' + HEAD_SHA + '\ncommitted: true\n', moltSpec()), 'malformed', 2);
+  test('a blank line in the middle is not read', () => {
+    assert.deepEqual(parse('branch: feature/1-x\n\ncommit: ' + HEAD_SHA + '\ncommitted: true\n', moltSpec()), { ok: true, values: values });
   });
   test('CRLF line endings are malformed', () => {
     assertLineProblem(parse(lines.join('\r\n') + '\r\n', moltSpec()), 'malformed', 1);
@@ -283,26 +285,33 @@ describe('line endings', () => {
 
 describe('leading whitespace and blocks', () => {
   const bumpLines = bumpTypeLines();
+  const bumpValues = parse(joinLines(bumpLines), bumpTypeSpec()).values;
   for (const [label, line] of [['one space', ' dominant_row: MINOR'], ['two spaces', '  dominant_row: MINOR'], ['a tab', '\tdominant_row: MINOR']]) {
-    test(`a top-level line led by ${label} is malformed`, () => {
-      assertLineProblem(parse(joinLines(replaceLine(bumpLines, 0, line)), bumpTypeSpec()), 'malformed', 1);
+    test(`a top-level line led by ${label} is not read`, () => {
+      assert.deepEqual(parse(joinLines(replaceLine(bumpLines, 0, line)), bumpTypeSpec()), { ok: false, problem: 'missing', key: 'dominant_row' });
     });
   }
   for (const [label, line] of [['one space', ' major: 0'], ['three spaces', '   major: 0'], ['a tab', '\tmajor: 0'], ['two spaces then a tab', '  \tmajor: 0'], ['only spaces', '    ']]) {
-    test(`a block line led by ${label} is malformed`, () => {
-      assertLineProblem(parse(joinLines(replaceLine(bumpLines, 5, line)), bumpTypeSpec()), 'malformed', 6);
+    test(`a block line led by ${label} is not read and closes the block`, () => {
+      assert.deepEqual(parse(joinLines(replaceLine(bumpLines, 5, line)), bumpTypeSpec()), { ok: false, problem: 'missing', key: 'counts.major' });
     });
   }
-  test('an indented line after a value line is malformed', () => {
-    const text = joinLines(bumpLines.slice(0, 4).concat(['  major: 0'], bumpLines.slice(4)));
-    assertLineProblem(parse(text, bumpTypeSpec()), 'malformed', 5);
+  test('a line that is not a block routing line closes the block, so later block lines are not read', () => {
+    for (const line of ['', 'The counts follow.', '  revert: 1', '  Major: 1']) {
+      const text = joinLines(bumpLines.slice(0, 6).concat([line], bumpLines.slice(6)));
+      assert.deepEqual(parse(text, bumpTypeSpec()), { ok: false, problem: 'missing', key: 'counts.minor' }, JSON.stringify(line));
+    }
   });
-  test('an indented line after the block is closed is malformed', () => {
-    const text = joinLines(bumpLines.slice(0, 10).concat(['  extra: 1'], bumpLines.slice(10)));
-    assertLineProblem(parse(text, bumpTypeSpec()), 'malformed', 11);
+  test('an indented line after a value line is not read', () => {
+    const text = joinLines(bumpLines.slice(0, 4).concat(['  major: 9'], bumpLines.slice(4)));
+    assert.deepEqual(parse(text, bumpTypeSpec()), { ok: true, values: bumpValues });
   });
-  test('an indented first line is malformed', () => {
-    assertLineProblem(parse('  major: 0\n', bumpTypeSpec()), 'malformed', 1);
+  test('an indented line after the block is closed is not read', () => {
+    const text = joinLines(bumpLines.slice(0, 10).concat(['  major: 9', '  extra: 1'], bumpLines.slice(10)));
+    assert.deepEqual(parse(text, bumpTypeSpec()), { ok: true, values: bumpValues });
+  });
+  test('an indented first line is not read', () => {
+    assert.deepEqual(parse('  major: 0\n', bumpTypeSpec()), { ok: false, problem: 'missing', key: 'dominant_row' });
   });
   test('a block key with an inline value is malformed', () => {
     assertLineProblem(parse(joinLines(replaceLine(bumpLines, 4, 'counts: 7')), bumpTypeSpec()), 'malformed', 5);
@@ -332,6 +341,7 @@ describe('leading whitespace and blocks', () => {
 
 describe('keys and the value split', () => {
   const spec = moltSpec();
+  const lines = ['branch: feature/1-x', 'commit: ' + HEAD_SHA, 'committed: true'];
   for (const [label, line] of [
     ['an uppercase key', 'Branch: feature/1-x'],
     ['a key led by a digit', '1branch: feature/1-x'],
@@ -344,8 +354,9 @@ describe('keys and the value split', () => {
     ['a key with a colon', 'bra:nch: feature/1-x'],
     ['a key named __proto__', '__proto__: x']
   ]) {
-    test(`${label} is malformed`, () => {
-      assertLineProblem(parse(joinLines(replaceLine(['branch: feature/1-x', 'commit: ' + HEAD_SHA, 'committed: true'], 0, line)), spec), 'malformed', 1);
+    test(`${label} is not a routing line, so it is not read`, () => {
+      assert.deepEqual(parse(joinLines(replaceLine(lines, 0, line)), spec), { ok: false, problem: 'missing', key: 'branch' });
+      assert.deepEqual(parse(joinLines([line].concat(lines)), spec), { ok: true, values: { branch: 'feature/1-x', commit: HEAD_SHA, committed: 'true' } });
     });
   }
   test('the value is split at the first colon space', () => {
@@ -394,34 +405,47 @@ describe('patterns are full matches', () => {
   });
 });
 
-describe('unknown, duplicate and missing', () => {
-  test('a key not in the spec is unknown', () => {
-    const text = joinLines(['branch: feature/1-x', 'commit: ' + HEAD_SHA, 'committed: true', 'remote: origin']);
-    assertLineProblem(parse(text, moltSpec()), 'unknown', 4);
+describe('lines outside the spec, repeats and missing', () => {
+  const moltLines = ['branch: feature/1-x', 'commit: ' + HEAD_SHA, 'committed: true'];
+  const moltValues = { branch: 'feature/1-x', commit: HEAD_SHA, committed: 'true' };
+  const bumpValues = parse(joinLines(bumpTypeLines()), bumpTypeSpec()).values;
+  test('a line whose key is not in the spec is not read', () => {
+    assert.deepEqual(parse(joinLines(moltLines.concat(['remote: origin'])), moltSpec()), { ok: true, values: moltValues });
   });
-  test('a key not in a block spec is unknown', () => {
+  test('a line whose key is not in the block spec is not read', () => {
     const text = joinLines(bumpTypeLines().slice(0, 9).concat(['  revert: 1'], bumpTypeLines().slice(9)));
-    assertLineProblem(parse(text, bumpTypeSpec()), 'unknown', 10);
+    assert.deepEqual(parse(text, bumpTypeSpec()), { ok: true, values: bumpValues });
   });
-  test('a block key used at top level inside the block spec only is unknown at top level', () => {
-    assertLineProblem(parse('major: 1\n', bumpTypeSpec()), 'unknown', 1);
+  test('the problem codes are missing and malformed only', () => {
+    assert.deepEqual([...lib.routingProblems()].sort(), ['malformed', 'missing']);
   });
-  test('an Object.prototype name is unknown unless the spec names it', () => {
-    assertLineProblem(parse('constructor: x\n', moltSpec()), 'unknown', 1);
-    assertLineProblem(parse('tostring: x\nhasownproperty: y\n', {}), 'unknown', 1);
+  test('a key of the block spec only is not read at top level', () => {
+    assert.deepEqual(parse('major: 1\n', bumpTypeSpec()), { ok: false, problem: 'missing', key: 'dominant_row' });
+  });
+  test('an Object.prototype name is not read unless the spec names it', () => {
+    assert.deepEqual(parse('constructor: x\n', moltSpec()), { ok: false, problem: 'missing', key: 'branch' });
+    assert.deepEqual(parse('tostring: x\nhasownproperty: y\n', {}), { ok: true, values: {} });
     assert.deepEqual(parse('constructor: x\n', { constructor: { pattern: /x/, required: true } }), { ok: true, values: { constructor: 'x' } });
   });
-  test('a repeated top-level key is a duplicate at its second line', () => {
-    const text = joinLines(['branch: feature/1-x', 'commit: ' + HEAD_SHA, 'branch: feature/1-x', 'committed: true']);
-    assertLineProblem(parse(text, moltSpec()), 'duplicate', 3);
+  test('a later conflicting line of a top-level key is not read, so the first line wins', () => {
+    const text = joinLines(['branch: feature/1-x', 'commit: ' + HEAD_SHA, 'branch: feature/2-y', 'committed: true', 'committed: false']);
+    assert.deepEqual(parse(text, moltSpec()), { ok: true, values: moltValues });
   });
-  test('a repeated block key is a duplicate', () => {
-    const text = joinLines(bumpTypeLines().concat(['counts:']));
-    assertLineProblem(parse(text, bumpTypeSpec()), 'duplicate', 12);
+  test('a later line of a key already read is not read even when off its pattern', () => {
+    const text = joinLines(moltLines.concat(['committed: maybe', 'commit: not-a-sha', 'branch:']));
+    assert.deepEqual(parse(text, moltSpec()), { ok: true, values: moltValues });
   });
-  test('a repeated key inside a block is a duplicate', () => {
-    const text = joinLines(replaceLine(bumpTypeLines(), 6, '  major: 1'));
-    assertLineProblem(parse(text, bumpTypeSpec()), 'duplicate', 7);
+  test('a repeated block key opens no block', () => {
+    assert.deepEqual(parse(joinLines(bumpTypeLines().concat(['counts:'])), bumpTypeSpec()), { ok: true, values: bumpValues });
+    assert.deepEqual(parse(joinLines(bumpTypeLines().concat(['counts: 7', '  major: x'])), bumpTypeSpec()), { ok: true, values: bumpValues });
+  });
+  test('a repeated block cannot give a key its first block lacks', () => {
+    const lines = bumpTypeLines().filter((line) => line !== '  patch: 1').concat(['counts:', '  patch: 1']);
+    assert.deepEqual(parse(joinLines(lines), bumpTypeSpec()), { ok: false, problem: 'missing', key: 'counts.patch' });
+  });
+  test('a later line of a key inside a block is not read and keeps the block open', () => {
+    const text = joinLines(bumpTypeLines().slice(0, 6).concat(['  major: 9'], bumpTypeLines().slice(6)));
+    assert.deepEqual(parse(text, bumpTypeSpec()), { ok: true, values: bumpValues });
   });
   test('a required top-level key that is absent is missing by name', () => {
     const text = joinLines(['branch: feature/1-x', 'committed: true']);
@@ -449,21 +473,70 @@ describe('unknown, duplicate and missing', () => {
     assert.equal(parse(text, spec).ok, true);
   });
   test('a line problem wins over a missing key', () => {
-    assertLineProblem(parse('branch: feature/1-x\nbogus: 1\n', moltSpec()), 'unknown', 2);
+    assertLineProblem(parse('branch: feature/1-x\ncommitted: yes\n', moltSpec()), 'malformed', 2);
   });
   test('the first line problem wins', () => {
-    assertLineProblem(parse('bogus: 1\nBranch: x\n', moltSpec()), 'unknown', 1);
+    assertLineProblem(parse('bogus: 1\ncommitted: yes\nbranch: \n', moltSpec()), 'malformed', 2);
+  });
+});
+
+describe('lines a relay may add are not read', () => {
+  const moltLines = ['branch: feature/1-x', 'commit: ' + HEAD_SHA, 'committed: true'];
+  const moltValues = { branch: 'feature/1-x', commit: HEAD_SHA, committed: 'true' };
+  test('open-plan-pr with git push remote hint lines before its routing lines, the issue 445 shape', () => {
+    const lines = [
+      'remote: ',
+      'remote: Create a pull request for \'bugfix/1-x\' on GitHub by visiting:',
+      'remote:      https://github.com/brenpike/hivemind/pull/new/bugfix/1-x',
+      'remote:',
+      'To github.com:brenpike/hivemind.git',
+      ' * [new branch]      bugfix/1-x -> bugfix/1-x',
+      'url: https://github.com/brenpike/hivemind/pull/423',
+      'head_ref_oid: ' + HEAD_SHA,
+      'created: true'
+    ];
+    assert.deepEqual(parse(joinLines(lines), openPlanPrSpec()), {
+      ok: true,
+      values: { url: 'https://github.com/brenpike/hivemind/pull/423', head_ref_oid: HEAD_SHA, created: 'true' }
+    });
+  });
+  test('an added line that is the first line of a spec key is read, and pauses when off its pattern', () => {
+    const lines = ['remote: Create a pull request for \'bugfix/1-x\' on GitHub by visiting:', 'branch: feature/1-x', 'commit: ' + HEAD_SHA, 'remote: origin'];
+    assertLineProblem(parse(joinLines(lines), pushBranchSpec()), 'malformed', 1);
+  });
+  test('bump-type with a prose line after its routing lines, the issue 464 shape', () => {
+    const lines = bumpTypeLines().concat(['', 'Verdict: bump_required, so the version moves to 7.5.4.']);
+    assert.deepEqual(parse(joinLines(lines), bumpTypeSpec()), parse(joinLines(bumpTypeLines()), bumpTypeSpec()));
+    assert.equal(parse(joinLines(lines), bumpTypeSpec()).ok, true);
+  });
+  test('code fences around the routing lines', () => {
+    for (const fence of ['```', '```text']) {
+      assert.deepEqual(parse(joinLines([fence].concat(moltLines, ['```'])), moltSpec()), { ok: true, values: moltValues });
+    }
+    const fenced = ['```yaml'].concat(bumpTypeLines(), ['```']);
+    assert.deepEqual(parse(joinLines(fenced), bumpTypeSpec()), parse(joinLines(bumpTypeLines()), bumpTypeSpec()));
+  });
+  test('a whole repeated routing block', () => {
+    assert.deepEqual(parse(joinLines(moltLines.concat(moltLines)), moltSpec()), { ok: true, values: moltValues });
+    const factsResult = parse(joinLines(gatherFactsLines().concat(gatherFactsLines())), gatherFactsSpec());
+    assert.deepEqual(factsResult, parse(joinLines(gatherFactsLines()), gatherFactsSpec()));
+    const bumpResult = parse(joinLines(bumpTypeLines().concat(replaceLine(bumpTypeLines(), 5, '  major: 9'))), bumpTypeSpec());
+    assert.deepEqual(bumpResult, parse(joinLines(bumpTypeLines()), bumpTypeSpec()));
+  });
+  test('prose between top-level lines', () => {
+    const lines = ['The script printed:', 'branch: feature/1-x', 'Then the commit:', 'commit: ' + HEAD_SHA, 'And it committed.', 'committed: true', 'Done.'];
+    assert.deepEqual(parse(joinLines(lines), moltSpec()), { ok: true, values: moltValues });
   });
 });
 
 describe('a problem never echoes a value', () => {
   const secret = 'leak_marker_value';
   const cases = [
-    ['unknown key', 'leak_marker_value: x\n', moltSpec()],
-    ['unknown key value', 'remote: ' + secret + '\n', moltSpec()],
+    ['a key not in the spec', 'leak_marker_value: x\n', moltSpec()],
+    ['a value on a line not in the spec', 'remote: ' + secret + '\n', moltSpec()],
     ['malformed value', 'committed: ' + secret + '\n', moltSpec()],
     ['malformed key', 'Leak_marker_value: 1\n', moltSpec()],
-    ['duplicate', 'branch: a\nbranch: ' + secret + '\n', moltSpec()],
+    ['a later line of a key', 'branch: a\nbranch: ' + secret + '\n', moltSpec()],
     ['blank line', 'branch: ' + secret + '\n\n', moltSpec()],
     ['missing', 'branch: ' + secret + '\n', moltSpec()],
     ['missing in block', 'counts:\n  major: ' + secret + '\n', { counts: { block: { major: { pattern: /.+/, required: true }, minor: { pattern: /.+/, required: true } }, required: true } }]

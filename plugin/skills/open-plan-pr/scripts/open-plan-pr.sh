@@ -61,8 +61,8 @@
 #                object with a string id (`cannot look up the open PRs for head`).
 # push-branch.sh then makes its own refusals before its push: the current branch, the base, the
 # default branch of every remote `git remote` lists (read from its local refs/remotes/<remote>/HEAD,
-# whatever base is), the expected commit, and the upstream. Its stderr is relayed, and its
-# `blocker:` line ends the run.
+# whatever base is), the expected commit, and the upstream. Its stderr is relayed only when the
+# run blocks, and its `blocker:` line ends the run.
 #
 # PUSH: one child call, `bash <plugin root>/skills/push-branch/scripts/push-branch.sh --head <head>
 # --base <base> --report-remote yes [--remote <remote>] --on-reject warn --no-upstream origin
@@ -95,15 +95,15 @@
 # commit stops the run.
 #   When the inputs carry comment, the script then posts it on the reused PR: `gh pr comment <n>
 # --body-file=<private file>`, where <n> is the number at the end of the reused PR URL and passes
-# the identifier gate. The comment text never reaches gh as an argument. gh's stderr is relayed,
-# and a failed post stops the run with `the PR comment could not be posted`. Each run that reuses
+# the identifier gate. The comment text never reaches gh as an argument. gh's stderr is relayed
+# only when the run blocks, and a failed post stops the run with `the PR comment could not be posted`. Each run that reuses
 # a PR posts its own comment, by design: a rerun that reuses the PR posts the comment again
 # (see R4). CREATE never posts the comment.
 #
 # CREATE: when no open PR carries the pushed commit, `gh pr create --base <base> --title=<title>
 # --body-file=<private file> [--draft]`. It never passes `--head` (see R1). Its stdout must be one
 # line, a PR URL that passes the identifier gate (^https://[A-Za-z0-9._/-]+$) and ends in
-# `/pull/<n>`. gh's stderr is relayed.
+# `/pull/<n>`. gh's stderr is relayed only when the run blocks.
 #
 # VERIFY: `gh pr view <n> --json headRefName,headRefOid,headRepository`. headRepository must be
 # null or an object with a string id. headRefName must equal head, then headRefOid must equal the
@@ -124,10 +124,10 @@
 #                       checked`)
 # Without comment in the inputs, there is no `commented:` line and the output is as above.
 # EXIT CONTRACT:
-#   0  routing lines on stdout
-#   1  NOTHING on stdout. stderr carries any relayed push-branch.sh or gh stderr, then
-#      `blocker: <fixed reason>` as the LAST line. Blocker text never echoes a caller-supplied,
-#      repository, or GitHub value. A blocker after PUSH means the branch may be on its remote;
+#   0  routing lines on stdout, NOTHING on stderr
+#   1  NOTHING on stdout. stderr carries any relayed push-branch.sh or gh stderr, in call
+#      order, then `blocker: <fixed reason>` as the LAST line. Blocker text never echoes a
+#      caller-supplied, repository, or GitHub value. A blocker after PUSH means the branch may be on its remote;
 #      HEAD REPOSITORY, REUSE and VERIFY above name the blockers this script adds after the push.
 #      After `the PR comment could not be posted`, the reused PR is open on the pushed commit and
 #      the comment may be missing from it.
@@ -253,7 +253,20 @@
 set -euo pipefail
 trap ':' EXIT
 
-blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
+# relay_child_stderr
+#   Writes the kept stderr of the child calls (push-branch.sh, then gh pr comment or gh pr
+#   create) to this script's stderr, in call order. Runs only on the way to exit 1, so a run that
+#   exits 0 writes nothing to stderr. A file not yet named or left empty is skipped.
+relay_child_stderr() {
+  local err_file
+  for err_file in "${push_err_file:-}" "${comment_err_file:-}" "${create_err_file:-}"; do
+    [ -n "$err_file" ] && [ -s "$err_file" ] || continue
+    cat -- "$err_file" >&2
+  done
+  return 0
+}
+
+blocker() { relay_child_stderr; printf 'blocker: %s\n' "$1" >&2; exit 1; }
 
 # layout plugin/skills/open-plan-pr/scripts/ => ../../.. is the plugin root.
 # cd && pwd -P is portable (no realpath/readlink). NO ${CLAUDE_PLUGIN_ROOT} inside an engine
@@ -532,12 +545,14 @@ push_rc=0
 push_output="$(bash "$push_script" "${push_args[@]}" 2>"$push_err_file")" || push_rc=$?
 push_err_last=''
 if [ -s "$push_err_file" ]; then
-  cat -- "$push_err_file" >&2
   push_err_last="$(tail -n 1 -- "$push_err_file")"
 fi
 if [ "$push_rc" -ne 0 ]; then
   case "$push_rc:$push_err_last" in
-    '1:blocker: '?*) exit 1 ;;
+    '1:blocker: '?*)
+      relay_child_stderr
+      exit 1
+      ;;
   esac
   blocker "the push script failed"
 fi
@@ -663,7 +678,6 @@ if [ "$carrying_count" -eq 1 ]; then
     hivemind_assert_identifier "$comment_number" || blocker "PR number contains characters outside the safe allowlist"
     comment_rc=0
     gh pr comment "$comment_number" --body-file="$comment_file" </dev/null >/dev/null 2>"$comment_err_file" || comment_rc=$?
-    [ ! -s "$comment_err_file" ] || cat -- "$comment_err_file" >&2
     [ "$comment_rc" -eq 0 ] || blocker "the PR comment could not be posted"
     commented_value=true
   fi
@@ -675,7 +689,6 @@ else
   else
     create_output="$(gh pr create --base "$base_name" --title="$title_text" --body-file="$body_file" </dev/null 2>"$create_err_file")" || create_rc=$?
   fi
-  [ ! -s "$create_err_file" ] || cat -- "$create_err_file" >&2
   [ "$create_rc" -eq 0 ] || blocker "the PR could not be created"
   is_pr_url "$create_output" || blocker "PR URL contains characters outside the safe allowlist"
   pr_url="$create_output"

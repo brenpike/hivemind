@@ -28,7 +28,8 @@
 # GIT_CEILING_DIRECTORIES stops discovery from escaping WORKDIR. The strict parse of the child's
 # output runs against a COPY of the skills tree whose push-branch.sh is a scripted fake.
 #
-# Every success case asserts exit 0 and the FULL stdout block (exact equality). Every blocker case
+# Every success case asserts exit 0, the FULL stdout block (exact equality) and EMPTY stderr, so
+# child stderr (push-branch.sh, gh) is relayed only on a blocker. Every blocker case
 # asserts exit 1, EMPTY stdout, exactly one `blocker:` line and it last. Refusal cases also assert
 # that the remote refs and the local repository are unchanged and that gh created no PR.
 #
@@ -199,6 +200,9 @@ REJECT_WARNING='push was rejected; the branch is not on its remote'
 DEFERRED_WARNING='no upstream and no origin remote; push deferred'
 LIST_ARGS="$(printf 'pr\nlist\n--head\n%s\n--base\nmain\n--state\nopen\n--limit\n100\n--json\nnumber,url,headRefName,headRefOid,baseRefName,headRepository' "$BRANCH")"
 ORIGIN_URL='git@github.com:o/r.git'
+# The hint GitHub prints on a push of a new branch (issue #445), as push-branch.sh relays it on
+# its stderr.
+PUSH_HINT_LINES="$(printf 'remote: \nremote: Create a pull request for %s on GitHub by visiting:\nremote:      https://github.com/o/r/pull/new/%s\nremote: ' "'$BRANCH'" "$BRANCH")"
 
 # ── World helpers ───────────────────────────────────────────────────────────
 
@@ -360,8 +364,8 @@ expected_comment_block() {
 }
 
 # assert_success <name> <cwd> <expected stdout> <engine args...>
-# Runs the engine, asserts exit 0, no blocker line on stderr, and stdout exactly <expected stdout>
-# plus its trailing newline.
+# Runs the engine, asserts exit 0, EMPTY stderr, and stdout exactly <expected stdout> plus its
+# trailing newline.
 assert_success() {
     local name="$1" run_cwd="$2" expected="$3"$'\n'
     shift 3
@@ -371,8 +375,8 @@ assert_success() {
         failed "$name" "expected exit 0, got $rc (stderr: $(tail -n 3 "$errfile" | tr '\n' '|'))"
         return 0
     fi
-    if grep -q '^blocker: ' "$errfile"; then
-        failed "$name" "expected no blocker line, got: $(tr '\n' '|' <"$errfile")"
+    if [[ -s "$errfile" ]]; then
+        failed "$name" "expected empty stderr on exit 0, got: $(tr '\n' '|' <"$errfile")"
         return 0
     fi
     assert_equal "$name" "$expected" "$out" "stdout block"
@@ -669,6 +673,13 @@ test_create() {
     assert_success create-empty-body "$WORK_TREE" "$(expected_block true)" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
     assert_equal create-empty-body-file 'x' "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'x')" "empty body file"
+
+    create_world create-gh-stderr
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    stub_respond pr-create '' "$PR_URL"$'\n' 0 'Warning: 1 uncommitted change'
+    assert_success create-gh-stderr "$WORK_TREE" "$(expected_block true)" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
 }
 
 test_title_not_expanded() {
@@ -760,6 +771,13 @@ test_comment() {
     assert_success comment-rerun-2 "$WORK_TREE" "$(expected_comment_block false true)" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
     assert_equal comment-rerun-calls 2 "$(call_count pr-comment)" "each run that reuses the PR posts its own comment"
+
+    create_world comment-gh-stderr
+    stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
+    stub_respond pr-comment '' '' 0 'Warning: comment posted with a notice'
+    write_inputs '{"title":"t","body":"b","comment":"c"}'
+    assert_success comment-gh-stderr "$WORK_TREE" "$(expected_comment_block false true)" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
 
     create_world comment-create
     stub_respond pr-list '' '[]'
@@ -1110,6 +1128,24 @@ EOF
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
         assert_success fake-push-ok "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
 
+    create_world fake-push-hint
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
+        FAKE_PUSH_ERR="$PUSH_HINT_LINES" \
+        assert_success fake-push-hint "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+
+    create_world fake-push-hint-then-blocker
+    stub_respond pr-list '' '[]'
+    stub_respond pr-create '' '' 1 'GraphQL: something went wrong'
+    FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
+        FAKE_PUSH_ERR="$PUSH_HINT_LINES" \
+        assert_blocker fake-push-hint-then-blocker "$WORK_TREE" "$CREATE_FAILED_REASON" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal fake-push-hint-then-blocker-order \
+        "$(printf '%s\nGraphQL: something went wrong\nblocker: %s' "$PUSH_HINT_LINES" "$CREATE_FAILED_REASON")" \
+        "$(cat "$WORKDIR/fake-push-hint-then-blocker.err")" "push stderr, then gh stderr, then the blocker last"
+
     for fake_out in \
         '' \
         "branch: $BRANCH" \
@@ -1227,6 +1263,15 @@ EOF
     stub_respond pr-list '' '[]'
     FAKE_PUSH_OUT='' FAKE_PUSH_RC=1 FAKE_PUSH_ERR='blocker: push was rejected' assert_blocker fake-push-blocker \
         "$WORK_TREE" 'push was rejected' --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+
+    create_world fake-push-hint-blocker
+    stub_respond pr-list '' '[]'
+    FAKE_PUSH_OUT='' FAKE_PUSH_RC=1 FAKE_PUSH_ERR="$PUSH_HINT_LINES"$'\nblocker: push was rejected' \
+        assert_blocker fake-push-hint-blocker "$WORK_TREE" 'push was rejected' \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal fake-push-hint-blocker-relayed "$PUSH_HINT_LINES"$'\nblocker: push was rejected' \
+        "$(cat "$WORKDIR/fake-push-hint-blocker.err")" "push stderr relayed, ending with its blocker line"
+    assert_equal fake-push-hint-blocker-no-create 0 "$(call_count pr-create)" "no gh pr create"
 
     create_world fake-push-crash
     stub_respond pr-list '' '[]'

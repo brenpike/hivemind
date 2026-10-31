@@ -626,7 +626,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'f674df770a2dcb1d';
+const BUILD_ID = '90d00bd6f51e73f1';
 
 function supportedSchemaKeywords(){
 return[
@@ -1793,7 +1793,7 @@ return steps.some((other)=>other.id!==stepId
 }
 
 function routingProblems(){
-return['missing','malformed','unknown','duplicate'];
+return['missing','malformed'];
 }
 function routingKeyPattern(){
 return/^[a-z][a-z0-9_]*$/;
@@ -1805,29 +1805,30 @@ throw new Error('parseRoutingLines: text must be a string');
 const compiledSpec=compileRoutingSpec(spec,'spec',true);
 const lines=splitRoutingText(text);
 const values={};
-const seenKeys=new Set();
 let openBlock=null;
 for(let index=0;index<lines.length;index++){
 const lineNumber=index+1;
 const line=lines[index];
-if(line===''||line.includes('\r')){
-return routingLineProblem('malformed',lineNumber);
-}
-if(/^\s/.test(line)){
-if(openBlock===null||!/^ {2}\S/.test(line)){
-return routingLineProblem('malformed',lineNumber);
-}
-const blockProblem=readRoutingEntry(line.slice(2),openBlock.entries,openBlock.seenKeys,openBlock.values);
+const blockMatch=openBlock===null||!/^ {2}\S/.test(line)?null:matchRoutingLine(line.slice(2),openBlock.entries);
+if(blockMatch!==null){
+const blockProblem=Object.prototype.hasOwnProperty.call(openBlock.values,blockMatch.key)?null:readFirstRoutingLine(blockMatch,openBlock.values);
 if(blockProblem!==null){
 return routingLineProblem(blockProblem,lineNumber);
 }
 continue;
 }
-const topProblem=readRoutingEntry(line,compiledSpec,seenKeys,values);
+openBlock=null;
+const topMatch=/^\S/.test(line)?matchRoutingLine(line,compiledSpec):null;
+if(topMatch===null||Object.prototype.hasOwnProperty.call(values,topMatch.key)){
+continue;
+}
+const topProblem=readFirstRoutingLine(topMatch,values);
 if(topProblem!==null){
 return routingLineProblem(topProblem,lineNumber);
 }
-openBlock=openRoutingBlock(line,compiledSpec,values);
+if(topMatch.entry.block!==null){
+openBlock={entries:topMatch.entry.block,values:values[topMatch.key]};
+}
 }
 const missingKey=findMissingRoutingKey(compiledSpec,values);
 if(missingKey!==null){
@@ -1842,31 +1843,12 @@ return[];
 const body=text.endsWith('\n')?text.slice(0,-1):text;
 return body.split('\n');
 }
-function readRoutingEntry(line,entries,seenKeys,values){
-const parsed=splitRoutingLine(line);
-if(parsed===null||!routingKeyPattern().test(parsed.key)){
-return'malformed';
-}
-if(!entries.has(parsed.key)){
-return'unknown';
-}
-if(seenKeys.has(parsed.key)){
-return'duplicate';
-}
-seenKeys.add(parsed.key);
-const entry=entries.get(parsed.key);
-if(entry.block!==null){
-if(parsed.value!==null){
-return'malformed';
-}
-values[parsed.key]={};
+function matchRoutingLine(body,entries){
+const parsed=splitRoutingLine(body);
+if(parsed===null||!entries.has(parsed.key)){
 return null;
 }
-if(parsed.value===null||!entry.pattern.test(parsed.value)){
-return'malformed';
-}
-values[parsed.key]=parsed.value;
-return null;
+return{key:parsed.key,value:parsed.value,entry:entries.get(parsed.key)};
 }
 function splitRoutingLine(line){
 const separatorIndex=line.indexOf(': ');
@@ -1878,13 +1860,19 @@ return{key:line.slice(0,-1),value:null};
 }
 return null;
 }
-function openRoutingBlock(line,compiledSpec,values){
-const key=splitRoutingLine(line).key;
-const entry=compiledSpec.get(key);
-if(entry.block===null){
+function readFirstRoutingLine(match,values){
+if(match.entry.block!==null){
+if(match.value!==null){
+return'malformed';
+}
+values[match.key]={};
 return null;
 }
-return{entries:entry.block,seenKeys:new Set(),values:values[key]};
+if(match.value===null||match.value.includes('\r')||!match.entry.pattern.test(match.value)){
+return'malformed';
+}
+values[match.key]=match.value;
+return null;
 }
 function findMissingRoutingKey(compiledSpec,values){
 for(const[key,entry]of compiledSpec){
