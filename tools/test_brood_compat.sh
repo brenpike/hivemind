@@ -116,8 +116,10 @@ reap_brood_sessions() { tmux kill-session -t brood-api 2>/dev/null || true; retu
 # claude, WITHOUT ever installing globally — the stub dir is only ever prepended to PATH inside
 # the spawn-invocation subshell of each case (STEP-003), never exported suite-wide.
 #
-# The shim does NO real work. On invocation it: records a launch (CWD via `pwd -P`, argv, and
-# which config surfaces are present relative to CWD) to a per-case launch-marker file passed via
+# The shim does NO real work. On invocation it: records a launch (CWD via `pwd -P`, argv, which
+# config surfaces are present relative to CWD, and the `--settings` argument with whether it
+# resolves to a regular file from CWD plus that file's .permissions.allow and whole compact
+# content) to a per-case launch-marker file passed via
 # the HIVEMIND_STUB_MARKER env var; prints the readiness line spawn-brood polls for
 # (`hivemind:overlord` — READY_SUBSTRING) so the positive case's Pass-2 capture-pane match
 # succeeds; writes its boot file; then keeps the pane alive until the case's exit file for its
@@ -164,6 +166,22 @@ if [ -n "$marker" ]; then
         printf 'argv=%s\n' "$*"
         if [ -f .hivemind/brood/task.md ]; then printf 'task_md=present\n'; else printf 'task_md=absent\n'; fi
         if [ -f .claude/settings.local.json ]; then printf 'settings_local=present\n'; else printf 'settings_local=absent\n'; fi
+        settings_arg=""
+        previous_arg=""
+        for launch_arg in "$@"; do
+            [ "$previous_arg" = "--settings" ] && settings_arg="$launch_arg"
+            previous_arg="$launch_arg"
+        done
+        printf 'settings_arg=%s\n' "$settings_arg"
+        if [ -z "$settings_arg" ]; then
+            printf 'settings_file=none\n'
+        elif [ -f "$settings_arg" ]; then
+            printf 'settings_file=regular\n'
+            printf 'settings_allow=%s\n' "$(jq -c '.permissions.allow' "$settings_arg" 2>/dev/null)"
+            printf 'settings_json=%s\n' "$(jq -cS '.' "$settings_arg" 2>/dev/null)"
+        else
+            printf 'settings_file=unresolved\n'
+        fi
     } >> "$marker" 2>/dev/null || true
 fi
 # Emit the readiness chrome spawn-brood's capture-pane poll greps for (READY_SUBSTRING).
@@ -1276,6 +1294,237 @@ assert_spawn_brood_child_leaf_regular_ok() {
         pass "$name" "regular-file task.md leaf NOT rejected (stub launched into strain worktree $launched_cwd in auto mode; detached at base, no strain/ branch)"
     else
         failed "$name" "expected no leaf-guard rejection + auto-mode stub launch into a detached strain worktree; rc=$rc leaf_guard_rejected=$leaf_guard_rejected stub_launched_ok=$stub_launched_ok argv_ok=$argv_ok boot=$boot launched_argv=[${launched_argv:-}] launched_cwd=[${launched_cwd:-}] stderr: $(cat "$stderr_out")"
+    fi
+}
+
+# ── Assertion 9a: STRAIN-SETTINGS (plugin read rule, #455) ───────────────────────
+# A strain worktree lies outside the plugin folder, so spawn-brood writes one per-brood
+# .hivemind/broods/<brood-id>/strain-settings.json holding only permissions.allow, one read-only
+# `Read(/<root>/**)` rule per spelling of the plugin root that passes the charset gate
+# [A-Za-z0-9 ._/@+()-], and launches each strain with
+# `--settings ../../../../.hivemind/broods/<brood-id>/strain-settings.json`. The stub records the
+# --settings argument, whether it resolves to a regular file from the strain cwd, and that file's
+# content. Four cases share the run and check helpers below:
+#   POSITIVE      — the canonical script path: one rule for the canonical plugin dir.
+#   SYMLINKED     — a symlinked plugin path: the canonical rule, then the logical rule.
+#   LOGICAL-GATED — a symlinked plugin path holding `[`: the logical rule dropped with a
+#                   `warning:` line, the canonical rule kept.
+#   ALL-GATED     — a plugin copy whose every spelling holds `[`: a `warning:` line, no
+#                   strain-settings.json and no --settings in argv; the launch is otherwise unchanged.
+# Every case also asserts the launch stays in auto mode with none of the forbidden flags, and that
+# the coordinator settings.local.json still reaches the strain worktree byte-identical.
+#
+# DEPENDENCY GATING: gated on tmux+jq (claude via the stub). SKIP cleanly when any is absent.
+STRAIN_SETTINGS_COORD_MARKER='{"marker":"COORD-SETTINGS-LOCAL-455"}'
+
+# run_strain_settings_spawn <spawn-script>: build a one-strain coordinator checkout at
+# $WORKDIR/brood-git with a regular-file .claude/settings.local.json, then run <spawn-script> on it
+# with the stub claude. Leaves stdout and stderr in $WORKDIR/spawn-stdout.txt and
+# $WORKDIR/spawn-stderr.txt, the exit code in $WORKDIR/spawn-rc and the stub launch record in
+# $WORKDIR/launch-marker.txt.
+#
+# INVARIANT: the caller sets the global WORKDIR first; this reads it and must be called as a bare
+# statement, never inside `$( ... )`.
+run_strain_settings_spawn() {
+    local spawn_script="$1"
+    local gitroot="$WORKDIR/brood-git"
+    init_spawn_repo "$gitroot"
+    printf '%s\n' "$STRAIN_SETTINGS_COORD_MARKER" > "$gitroot/.claude/settings.local.json"
+    local inputs="$gitroot/brood-inputs.json"
+    write_one_strain_inputs "$inputs" "main" "strain settings plugin read rule test strain"
+    local rc=0
+    reap_brood_sessions
+    ( cd "$gitroot" && PATH="$STUB_BIN:$PATH" HIVEMIND_STUB_MARKER="$WORKDIR/launch-marker.txt" \
+        HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" \
+        STARTED_EVIDENCE_TIMEOUT=1 bash "$spawn_script" "$inputs" ) \
+        >"$WORKDIR/spawn-stdout.txt" 2>"$WORKDIR/spawn-stderr.txt" || rc=$?
+    tmux kill-server 2>/dev/null || true
+    printf '%s\n' "$rc" > "$WORKDIR/spawn-rc"
+}
+
+# read_launch_field <field>: print the first value the stub recorded for <field> in
+# $WORKDIR/launch-marker.txt; prints nothing when the field or the marker is absent.
+read_launch_field() {
+    sed -n "s/^$1=//p" "$WORKDIR/launch-marker.txt" 2>/dev/null | head -1
+}
+
+# check_strain_launch_common: print `yes` when the stub launched once into the `api` strain
+# worktree in auto mode with none of the forbidden flags, and the coordinator settings.local.json
+# reached that worktree byte-identical; otherwise print the reason it did not.
+check_strain_launch_common() {
+    local gitroot="$WORKDIR/brood-git" canon_gitroot launched_cwd launched_argv wt
+    canon_gitroot="$(cd "$gitroot" 2>/dev/null && pwd -P)"
+    [ -s "$WORKDIR/launch-marker.txt" ] || { printf 'no-stub-launch'; return 0; }
+    launched_cwd="$(read_launch_field cwd)"
+    case "$launched_cwd" in
+        "$canon_gitroot/.claude/worktrees/"*/api) : ;;
+        *) printf 'launch-cwd-not-strain-worktree:%s' "$launched_cwd"; return 0 ;;
+    esac
+    launched_argv="$(read_launch_field argv)"
+    case "$launched_argv" in
+        *"--permission-mode auto"*) : ;;
+        *) printf 'no-auto-mode:%s' "$launched_argv"; return 0 ;;
+    esac
+    case "$launched_argv" in
+        *"--dangerously-skip-permissions"* | *"skipDangerousModePermissionPrompt"* | *"--disallowedTools"* \
+            | *"--allowedTools"* | *"--add-dir"*)
+            printf 'forbidden-flag:%s' "$launched_argv"; return 0 ;;
+    esac
+    [ "$(read_launch_field settings_local)" = "present" ] || { printf 'settings-local-not-in-worktree'; return 0; }
+    wt="$(find_strain_worktree "$gitroot")"
+    cmp -s "$gitroot/.claude/settings.local.json" "$wt/.claude/settings.local.json" \
+        || { printf 'settings-local-copy-differs'; return 0; }
+    printf 'yes'
+}
+
+# check_strain_settings_launch <rule...>: print `yes` when the launch passes
+# check_strain_launch_common, argv carries `--settings
+# ../../../../.hivemind/broods/<brood-id>/strain-settings.json` for this brood, that path resolves
+# to a regular file from the strain cwd, and the file is exactly
+# {"permissions":{"allow":[<rule...>]}}; otherwise print the reason it does not.
+check_strain_settings_launch() {
+    local gitroot="$WORKDIR/brood-git" common manifest brood_id expected_arg settings_file
+    local expected_json recorded_json
+    common="$(check_strain_launch_common)"
+    [ "$common" = "yes" ] || { printf '%s' "$common"; return 0; }
+    manifest="$(find_brood_manifest "$gitroot")"
+    [ -n "$manifest" ] || { printf 'no-manifest'; return 0; }
+    brood_id="$(basename "$(dirname "$manifest")")"
+    expected_arg="../../../../.hivemind/broods/$brood_id/strain-settings.json"
+    case " $(read_launch_field argv) " in
+        *" --settings $expected_arg "*) : ;;
+        *) printf 'argv-lacks-settings-path:%s' "$(read_launch_field argv)"; return 0 ;;
+    esac
+    [ "$(read_launch_field settings_arg)" = "$expected_arg" ] \
+        || { printf 'settings-arg=%s' "$(read_launch_field settings_arg)"; return 0; }
+    settings_file="$(read_launch_field settings_file)"
+    [ "$settings_file" = "regular" ] || { printf 'settings-file=%s' "$settings_file"; return 0; }
+    [ -f "$gitroot/.hivemind/broods/$brood_id/strain-settings.json" ] \
+        || { printf 'strain-settings-not-at-brood-dir'; return 0; }
+    expected_json="$(jq -cnS '{permissions: {allow: $ARGS.positional}}' --args "$@")"
+    recorded_json="$(read_launch_field settings_json)"
+    [ "$recorded_json" = "$expected_json" ] \
+        || { printf 'settings-json=%s expected=%s' "$recorded_json" "$expected_json"; return 0; }
+    [ "$(read_launch_field settings_allow)" = "$(printf '%s' "$expected_json" | jq -c '.permissions.allow')" ] \
+        || { printf 'settings-allow=%s' "$(read_launch_field settings_allow)"; return 0; }
+    printf 'yes'
+}
+
+# canonical_plugin_read_rule: print the `Read(/<root>/**)` rule for the canonical plugin dir of this
+# checkout, or nothing when that spelling fails the charset gate (the case then SKIPs).
+canonical_plugin_read_rule() {
+    local canon_plugin
+    canon_plugin="$(cd "$REPO_ROOT/plugin" 2>/dev/null && pwd -P)"
+    case "$canon_plugin" in
+        '' | [!/]* | *[!A-Za-z0-9\ ._/@+\(\)-]*) return 0 ;;
+    esac
+    printf 'Read(/%s/**)' "$canon_plugin"
+}
+
+assert_spawn_brood_strain_settings_canonical() {
+    local name="STRAIN-SETTINGS:canonical-plugin-read-rule-only"
+    local missing="" canon_rule
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes the strain settings; skipping (missing: $missing)"
+        return
+    }
+    canon_rule="$(canonical_plugin_read_rule)"
+    [ -n "$canon_rule" ] || { skip "$name" "canonical plugin dir fails the charset gate on this host; skipping"; return; }
+
+    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    run_strain_settings_spawn "$SPAWN_SCRIPT"
+    local verdict
+    verdict="$(check_strain_settings_launch "$canon_rule")"
+    if [ "$verdict" = "yes" ]; then
+        pass "$name" "auto-mode launch carries --settings; file resolves from the strain cwd and holds only [$canon_rule]; coordinator settings.local.json copied unchanged"
+    else
+        failed "$name" "$verdict rc=$(cat "$WORKDIR/spawn-rc") stderr: $(cat "$WORKDIR/spawn-stderr.txt" 2>/dev/null)"
+    fi
+}
+
+assert_spawn_brood_strain_settings_symlinked_plugin() {
+    local name="STRAIN-SETTINGS:symlinked-plugin-path-writes-canonical-and-logical-rules"
+    local missing="" canon_rule
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes the strain settings; skipping (missing: $missing)"
+        return
+    }
+    canon_rule="$(canonical_plugin_read_rule)"
+    [ -n "$canon_rule" ] || { skip "$name" "canonical plugin dir fails the charset gate on this host; skipping"; return; }
+
+    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    local linked_plugin="$WORKDIR/linked-plugin"
+    ln -s "$REPO_ROOT/plugin" "$linked_plugin"
+    run_strain_settings_spawn "$linked_plugin/skills/spawn-brood/scripts/spawn-brood.sh"
+    local verdict logical_rule="Read(/$linked_plugin/**)"
+    verdict="$(check_strain_settings_launch "$canon_rule" "$logical_rule")"
+    if [ "$verdict" = "yes" ]; then
+        pass "$name" "symlinked plugin path: strain settings hold [$canon_rule, $logical_rule]"
+    else
+        failed "$name" "$verdict rc=$(cat "$WORKDIR/spawn-rc") stderr: $(cat "$WORKDIR/spawn-stderr.txt" 2>/dev/null)"
+    fi
+}
+
+assert_spawn_brood_strain_settings_logical_gated() {
+    local name="STRAIN-SETTINGS:logical-spelling-outside-charset-dropped-with-warning"
+    local missing="" canon_rule
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes the strain settings; skipping (missing: $missing)"
+        return
+    }
+    canon_rule="$(canonical_plugin_read_rule)"
+    [ -n "$canon_rule" ] || { skip "$name" "canonical plugin dir fails the charset gate on this host; skipping"; return; }
+
+    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    local linked_plugin="$WORKDIR/linked[plugin"
+    ln -s "$REPO_ROOT/plugin" "$linked_plugin"
+    run_strain_settings_spawn "$linked_plugin/skills/spawn-brood/scripts/spawn-brood.sh"
+    local verdict warning_line=no
+    verdict="$(check_strain_settings_launch "$canon_rule")"
+    grep -qF -- "warning: plugin root $linked_plugin is not absolute or holds a byte outside" \
+        "$WORKDIR/spawn-stderr.txt" 2>/dev/null && warning_line=yes
+    if [[ "$verdict" == "yes" && "$warning_line" == "yes" ]]; then
+        pass "$name" "logical spelling with [ dropped with a warning: line; strain settings hold only [$canon_rule]"
+    else
+        failed "$name" "verdict=$verdict warning_line=$warning_line rc=$(cat "$WORKDIR/spawn-rc") stderr: $(cat "$WORKDIR/spawn-stderr.txt" 2>/dev/null)"
+    fi
+}
+
+assert_spawn_brood_strain_settings_all_gated() {
+    local name="STRAIN-SETTINGS:every-spelling-outside-charset-no-settings-file-no-flag"
+    local missing=""
+    missing="$(spawn_deps_satisfied)" || {
+        skip "$name" "spawn-brood dep check precedes the strain settings; skipping (missing: $missing)"
+        return
+    }
+
+    WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-test.XXXXXX")"
+    local gated_plugin="$WORKDIR/gated[root/plugin"
+    mkdir -p "$gated_plugin/skills"
+    cp -R "$REPO_ROOT/plugin/skills/spawn-brood" "$REPO_ROOT/plugin/skills/_shared" \
+        "$REPO_ROOT/plugin/skills/enable-brood-remote" "$gated_plugin/skills/"
+    run_strain_settings_spawn "$gated_plugin/skills/spawn-brood/scripts/spawn-brood.sh"
+
+    local common rc manifest="" settings_files="" warning_line=no flag_absent=no
+    local -a settings_paths=()
+    common="$(check_strain_launch_common)"
+    rc="$(cat "$WORKDIR/spawn-rc")"
+    manifest="$(find_brood_manifest "$WORKDIR/brood-git")"
+    shopt -s nullglob
+    settings_paths=("$WORKDIR"/brood-git/.hivemind/broods/*/strain-settings.json)
+    shopt -u nullglob
+    settings_files="${settings_paths[*]:-}"
+    grep -qF -- 'gated[root/plugin is not absolute or holds a byte outside' \
+        "$WORKDIR/spawn-stderr.txt" 2>/dev/null && warning_line=yes
+    case " $(read_launch_field argv) " in
+        *"--settings"*) : ;;
+        *) [ "$(read_launch_field settings_file)" = "none" ] && flag_absent=yes ;;
+    esac
+    if [[ "$rc" -eq 0 && "$common" == "yes" && -n "$manifest" && -z "$settings_files" \
+          && "$warning_line" == "yes" && "$flag_absent" == "yes" ]]; then
+        pass "$name" "every plugin-root spelling gated: warning: line, no strain-settings.json, launch stays claude --permission-mode auto"
+    else
+        failed "$name" "rc=$rc common=$common manifest=[$manifest] settings_files=[$settings_files] warning_line=$warning_line flag_absent=$flag_absent argv=[$(read_launch_field argv)] stderr: $(cat "$WORKDIR/spawn-stderr.txt" 2>/dev/null)"
     fi
 }
 
@@ -4248,6 +4497,10 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked
 assert_spawn_brood_child_leaf_task_escape_blocked
 assert_spawn_brood_child_leaf_settings_escape_blocked
 assert_spawn_brood_child_leaf_regular_ok
+assert_spawn_brood_strain_settings_canonical
+assert_spawn_brood_strain_settings_symlinked_plugin
+assert_spawn_brood_strain_settings_logical_gated
+assert_spawn_brood_strain_settings_all_gated
 assert_spawn_brood_facts_base_matching_refused
 assert_spawn_brood_facts_base_nonmatching_refused
 assert_spawn_brood_task_identity_not_cross_wired
