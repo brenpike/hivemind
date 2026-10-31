@@ -236,7 +236,7 @@ The hook fails open to the normal permission flow. When it cannot decide, it out
 
 An allow from the hook only skips the prompt. A `permissions.deny` or `permissions.ask` rule in settings still wins over it.
 
-Synapse's inputs files use the fixed-literal transport of the Inert Inputs-File Navigator Pattern above, with the same paths as `hivemind:molt` and `hivemind:open-plan-pr`. The two forms are written in `${CLAUDE_PLUGIN_ROOT}/agents/synapse.md` and in the hook. Synapse picks the token. A navigator's `Edit(<glob>)` entry only pre-approves. Here the hook denies every other synapse Write, so no prompt text can steer where the Write lands. The engine's read-guard still runs before it reads the file.
+Synapse's inputs files use the fixed-literal transport of the Inert Inputs-File Navigator Pattern above, with the same paths as `hivemind:molt` and `hivemind:open-plan-pr`. The two forms are written in `${CLAUDE_PLUGIN_ROOT}/agents/synapse.md` and in the hook. The workflow builds each path whole: the token is the pass's facts file name between `facts-` and `.json`, then the agent call label, so synapse fills in no token. A navigator's `Edit(<glob>)` entry only pre-approves. Here the hook denies every other synapse Write, so no prompt text can steer where the Write lands. The engine's read-guard still runs before it reads the file.
 
 Synapse commits or pushes only under the `synapse` grant in `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Commit Authority). That grant is standing and needs no grant in synapse's prompt. This subsection is the one statement of its bound: the hook enforces the exact-form bound above, and when the hook cannot decide, the normal permission flow applies, as the fail-open paragraph above states.
 
