@@ -33,7 +33,8 @@
  *           once more under label <label>-retry with buildPrompt of that
  *           label, and that relay is returned.
  *   buildInputsPath(run, kind, label)  .hivemind/<kind>-inputs-<stem>-<label>
- *           .json, stem run.factsStem, else undefined: a --inputs command stop.
+ *           .json, stem run.factsStem, unique per run given a faithful facts
+ *           relay (ADR-0037), else undefined: a --inputs command stop.
  *   capItemLines(itemLines)  the first maxListedItems() lines, then a count
  *           of the rest.
  *   versionCheckRoutingSpec()  bumpTypeRoutingSpec() plus the bump-type.sh
@@ -66,10 +67,9 @@
  *           step that can change files, and with an empty file list as the
  *           head check of gates.js after a reply. Its checked commit goes to
  *           observeHead (record.js), as the branch commit does at each pass
- *           start (main.js). Its inputs_file block
- *           carries a code-built subject: a wave's from its plan steps
- *           (waves.js buildWaveSubject), and fixed ones for the fix and
- *           review commits.
+ *           start (main.js). Its inputs_file block carries a code-built
+ *           subject: a wave's from its plan steps (waves.js buildWaveSubject),
+ *           and fixed ones for the fix and review commits.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of

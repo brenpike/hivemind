@@ -1725,7 +1725,7 @@ First finding: the runner model picks the inputs-file key, so a key that an earl
 **The change.**
 
 - The workflow builds each inputs path whole: `.hivemind/<molt|pr>-inputs-<stem>-<label>.json`.
-- `<stem>` is the pass's checked `facts_file` name between `facts-` and `.json`. `gather-facts.sh` names that file from the UTC second and 6 bytes of `/dev/urandom`, so the stem is unique per run.
+- `<stem>` is the pass's checked `facts_file` name between `facts-` and `.json`. `gather-facts.sh` names that file from the UTC second and 6 bytes of `/dev/urandom`, so the stem is unique per run, given a faithful facts relay (see the recorded residual "A facts relay that names another run's facts file" below).
 - `<label>` is the `agent()` call label, unique per run (SD-28).
 - `runFactsStep` sets the new `run.factsStem` from each checked facts relay. One path helper builds the path from `run.factsStem` and the label. A pass with no stem has no path, and its `--inputs` word is a terminal command stop (SD-74).
 - `runRunnerRelay` builds the retry prompt for the label `<label>-retry`, so a transient retry writes its own file (SD-71). The facts and branch prompts are the same for both labels, since they carry no inputs file.
@@ -1747,7 +1747,7 @@ First finding: the runner model picks the inputs-file key, so a key that an earl
 - Removed: the recorded residual "Made-up inputs-file tokens, extended to synapse (smoke-603 N4)" on the script engine. It is closed. The current-engine residual "Made-up inputs-file tokens (smoke-603 N4)" stays until slice 5.
 - Replaced by: the path the engine builds, `run.factsStem`, the path helper, and the rewritten rows below with their tests in `tests/workflow-scripts/`.
 
-**The user's decision in this run.** Q1, decided by the user on 2026-10-31: option A. Change only the key. Deleting inputs files after use is split to https://github.com/brenpike/hivemind/issues/488.
+**The user's decision in this run.** Q1, decided by the user on 2026-10-31: option A. Change only the key. Deleting inputs files after use is split to https://github.com/brenpike/hivemind/issues/488. The local review question on finding 14d90a08, decided by the user on 2026-10-31: option A. Keep the relayed facts file name as the stem source, and record the trust in the relay as a threat model (see the recorded residual "A facts relay that names another run's facts file" below).
 
 **Options ruled out.**
 
@@ -1762,7 +1762,7 @@ First finding: the runner model picks the inputs-file key, so a key that an earl
 **Surface account.**
 
 - Removed: the `{token}` placeholder, the same-prompt retry for the commit and pull request runners, and the script-engine residual N4.
-- Added: `run.factsStem`, 1 path helper, the tests, the residual below, and this text.
+- Added: `run.factsStem`, 1 path helper, the tests, the residuals below, and this text.
 - No hook or schema change.
 
 **Rows.** SD-15, SD-42, SD-71 and SD-74 are rewritten. None is added.
@@ -1770,6 +1770,7 @@ First finding: the runner model picks the inputs-file key, so a key that an earl
 **Recorded residuals.** Each bullet states what is not covered, its bounded impact and its ground, per `plugin/governance/remediation-doctrine.md` "Recorded Residual".
 
 - **A runner call rerun after it wrote its inputs file.** Not covered: the runtime runs a commit or pull request runner call again after the call wrote its inputs file but never completed, such as after a crash or an interrupt. The rerun has the same prompt and path, and Write refuses the existing file that synapse has not read. Bounded impact: the runner stops before the script runs, so no git write is made, and the blocked relay stops the run at that step. A new run gets a new stem, so its paths are new. Ground: a workflow script cannot read or delete a file, and the user split deleting inputs files to #488 (Q1, option A). #488 closes this residual.
+- **A facts relay that names another run's facts file.** Not covered: the stem comes from the `facts_file` name the facts runner relays. The workflow checks the form of that name, not that this pass's `gather-facts` call made it, so a relay that names another run's valid facts file gives this run that run's stem, and both runs then build the same inputs paths for the same labels. Threat model: the facts runner's relay is trusted as the stem source. A runner that forges its relay can already write any commit the committed scripts allow, since it writes the commit's inputs file, so a forged stem gives it nothing more. Bounded impact: Write refuses an inputs file that already exists and that synapse has not read, so a name clash stops the runner before the script runs. No git write is made, and the blocked relay stops the run at that step (SD-15). Ground: outside the threat model, per `plugin/governance/remediation-doctrine.md` "Recorded Decisions and Repeat Findings". The user decided so on 2026-10-31 with option A on the local review question for finding 14d90a08. A later finding that a relayed `facts_file` can pick the stem, or that two runs can then share an inputs path, is a repeat of this record.
 
 It updates these places in place, each with a dated note: the recorded residual "Made-up inputs-file tokens (smoke-603 N4)", the prompt bullet of the issue 467 amendment, and that amendment's residual "Made-up inputs-file tokens, extended to synapse (smoke-603 N4)".
 
