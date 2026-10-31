@@ -1754,6 +1754,7 @@ c7e="$WORKDIR/c7e/checkout"
 c7e_hm="$c7e/.hivemind"
 c7e_link="$WORKDIR/c7e/checkout-link"
 mkdir -p "$c7e_hm/sub" "$c7e/.hivemind-x" "$WORKDIR/c7e/external"
+git init -q "$c7e"
 ln -s "$c7e" "$c7e_link"
 c7e_token64="$(printf '%64s' '' | tr ' ' a)"
 c7e_token65="${c7e_token64}b"
@@ -1865,10 +1866,40 @@ fi
 check_remove_inputs "c7e:missing-leaf" 1 absent "$c7e_hm/molt-inputs-missing.json" \
   "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-missing.json" molt
 
+# Kept, return 1: git lists the leaf in the index (staged, committed, or committed and then
+# modified), or git cannot answer because the root is not a checkout.
+printf '{}\n' > "$c7e_hm/molt-inputs-staged.json"
+git -C "$c7e" add -f -- .hivemind/molt-inputs-staged.json
+check_remove_inputs "c7e:staged-leaf" 1 present "$c7e_hm/molt-inputs-staged.json" \
+  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-staged.json" molt
+printf '{}\n' > "$c7e_hm/pr-inputs-committed.json"
+git -C "$c7e" add -f -- .hivemind/pr-inputs-committed.json
+git -C "$c7e" -c user.name=t -c user.email=t@example.invalid commit -q -m tracked -- \
+  .hivemind/molt-inputs-staged.json .hivemind/pr-inputs-committed.json
+check_remove_inputs "c7e:committed-leaf" 1 present "$c7e_hm/pr-inputs-committed.json" \
+  "$c7e" "$c7e" ".hivemind/pr-inputs-committed.json" pr
+assert_eq "c7e:committed-leaf-clean" "" "$(git -C "$c7e" status --porcelain -- .hivemind/pr-inputs-committed.json)" \
+  "remove: a committed leaf stays unmodified"
+printf 'not json\n' > "$c7e_hm/molt-inputs-staged.json"
+check_remove_inputs "c7e:committed-modified-leaf" 1 present "$c7e_hm/molt-inputs-staged.json" \
+  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-staged.json" molt
+# Deleted: an ignored leaf in the same checkout is untracked.
+printf '.hivemind/\n' > "$c7e/.gitignore"
+: > "$c7e_hm/molt-inputs-ignored.json"
+check_remove_inputs "c7e:ignored-leaf" 0 absent "$c7e_hm/molt-inputs-ignored.json" \
+  "$WORKDIR" "$c7e" "$c7e_hm/molt-inputs-ignored.json" molt
+c7e_nogit="$WORKDIR/c7e-nogit/checkout"
+mkdir -p "$c7e_nogit/.hivemind"
+: > "$c7e_nogit/.hivemind/molt-inputs-nogit.json"
+# The ceiling stops git from finding a checkout above the temp folder.
+GIT_CEILING_DIRECTORIES="$(cd "$WORKDIR/c7e-nogit" && pwd -P)" check_remove_inputs "c7e:not-a-checkout" 1 present "$c7e_nogit/.hivemind/molt-inputs-nogit.json" \
+  "$WORKDIR" "$c7e_nogit" "$c7e_nogit/.hivemind/molt-inputs-nogit.json" molt
+
 # Kept, return 2: the delete itself fails (a read-only .hivemind; skipped as root, which ignores it).
 if [ "$(id -u)" -ne 0 ]; then
   c7e_ro="$WORKDIR/c7e-ro/checkout"
   mkdir -p "$c7e_ro/.hivemind"
+  git init -q "$c7e_ro"
   : > "$c7e_ro/.hivemind/molt-inputs-ro.json"
   chmod a-w "$c7e_ro/.hivemind"
   check_remove_inputs "c7e:delete-fails" 2 present "$c7e_ro/.hivemind/molt-inputs-ro.json" \

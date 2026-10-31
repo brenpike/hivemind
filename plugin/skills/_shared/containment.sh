@@ -68,7 +68,11 @@
 #       (2) <canonical root>/.hivemind is a real folder, not a symlink;
 #       (3) the leaf's folder, canonicalized with cd && pwd -P, is exactly
 #           <canonical root>/.hivemind;
-#       (4) the leaf is not a symlink ([ -L ] first) and is a regular file.
+#       (4) the leaf is not a symlink ([ -L ] first) and is a regular file;
+#       (5) git, run in <canonical root>, lists no index entry for .hivemind/<leaf>. A tracked
+#           or staged leaf is checkout content, not a scratch inputs file, so it is kept. When
+#           git cannot answer, the leaf is kept too. The leaf's charset holds no pathspec magic
+#           or glob character, so the plain pathspec is literal.
 #     The delete runs from inside that folder: in a subshell, cd -P, re-check pwd -P, then
 #     rm -f -- ./<leaf>. A symlink or a swapped ancestor that is already in place when the
 #     checks run is refused, so the delete never follows it.
@@ -111,8 +115,9 @@
 #   substitution yields an EMPTY string; every canonicalization below is empty-tested and
 #   rejected rather than allowed to proceed with an empty path.
 #
-# DEPENDENCY-FREE: pure bash / POSIX test builtins (cd, pwd, [ -L ], case), plus rm for
-#   hivemind_remove_inputs_file's delete. No jq, no realpath, no external canonicalizer.
+# DEPENDENCY-FREE: pure bash / POSIX test builtins (cd, pwd, [ -L ], case), plus git ls-files
+#   and rm for hivemind_remove_inputs_file's tracked check and delete. No jq, no realpath, no
+#   external canonicalizer.
 
 # hivemind_canon_root <raw_repo_root>
 # Echo the canonical checkout root (cd && pwd -P), or echo nothing and return 1 on failure.
@@ -406,7 +411,7 @@ hivemind_assert_inputs_contained() {
 }
 
 # hivemind_remove_inputs_file <raw_repo_root> <inputs_file_path> <kind>
-# Deletes an engine's own inputs file after the engine has read it: a regular-file leaf named
+# Deletes an engine's own inputs file after the engine has read it: an untracked regular-file leaf named
 # <kind>-inputs-<token>.json directly under a real <canonical root>/.hivemind folder, removed
 # from inside that folder so no symlink is followed. See the header CONTRACT for the rules.
 # Returns 0 when it deleted the file, 1 when the path is not one it deletes (left untouched),
@@ -474,6 +479,17 @@ hivemind_remove_inputs_file() {
   fi
   if [ -L "$canon_hivemind/$inputs_leaf" ] || [ ! -f "$canon_hivemind/$inputs_leaf" ]; then
     printf 'refusing to delete %s: not a regular file\n' "$inputs_file_path" >&2
+    return 1
+  fi
+  # A tracked or staged leaf is checkout content, never a scratch inputs file: keep it. The leaf
+  # passed the [A-Za-z0-9-] token rule above, so this plain pathspec is literal.
+  local tracked_entry
+  if ! tracked_entry="$(git -C "$canon_root" ls-files --cached -- ".hivemind/$inputs_leaf" 2>/dev/null)"; then
+    printf 'refusing to delete %s: git could not tell whether it is tracked\n' "$inputs_file_path" >&2
+    return 1
+  fi
+  if [ -n "$tracked_entry" ]; then
+    printf 'refusing to delete %s: it is tracked by git\n' "$inputs_file_path" >&2
     return 1
   fi
 
