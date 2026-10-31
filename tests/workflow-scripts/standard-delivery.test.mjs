@@ -7100,6 +7100,19 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
     });
+    test('a version relay with a blank line and a prose line between its counts lines passes the validate gate', async () => {
+      const stdout = bumpStdout().replace('  minor: 1\n', '  minor: 1\n\nThe patch count follows.\n');
+      assert.ok(stdout.includes('  minor: 1\n\nThe patch count follows.\n  patch: 0\n'));
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'ran', stdout: stdout } } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
+    });
+    test('a version relay with one counts line removed still pauses as malformed routing lines', async () => {
+      const stdout = bumpStdout().replace('  patch: 0\n', '');
+      assert.ok(!stdout.includes('patch:'));
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'ran', stdout: stdout } } }));
+      assertStepStopPause(run, 'The version check of the validation step returned malformed routing lines, so the delivery stopped before the pull request.', 'validate-1-1');
+    });
     test('a facts relay holding only prose, or with CR line ends, still pauses as malformed facts', async () => {
       for (const stdout of ['The script ran and printed its facts.\n', factsStdout().replace(/\n/g, '\r\n')]) {
         const run = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'ran', stdout: stdout } });
