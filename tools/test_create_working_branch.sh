@@ -14,7 +14,11 @@
 # than one ref, and a branch checked out in another worktree. Trunk names the branch when a lookup
 # candidate, or the end a candidate resolves to, is refs/heads/<branch> or
 # refs/remotes/<remote>/<branch> for a remote `git remote` lists, compared exactly after an ASCII
-# case fold. A trunk that only ends with `/<branch>` does not. It reads trunk's ref once, before any
+# case fold. A trunk that only ends with `/<branch>` does not. Whatever trunk names, it also refuses
+# a branch that is the default branch of a remote `git remote` lists, the end of that remote's
+# symbolic refs/remotes/<remote>/HEAD, dangling or not, compared after the same case fold; a listed
+# remote with no such HEAD ref, or one that is not symbolic, stops with the default branch record
+# blocker, and a remote HEAD git cannot read stops with `cannot read trunk`. It reads trunk's ref once, before any
 # change, in git's lookup order, following symbolic refs to their end even when the end does not
 # exist yet, and makes every refusal before any change. It resolves the base once (local branch,
 # then any commit name, then a fetch from origin), switches to an existing branch (removing an
@@ -90,6 +94,8 @@ EQUALS_TRUNK_REASON='working_branch equals trunk'
 SYMBOLIC_BRANCH_REASON='working_branch is a symbolic ref'
 UNREADABLE_BRANCH_REASON='cannot read working_branch'
 UNREADABLE_TRUNK_REASON='cannot read trunk'
+COMPARE_TRUNK_REASON='cannot compare working_branch with trunk'
+NO_DEFAULT_RECORD_REASON='a remote has no default branch record: run git remote set-head <remote> --auto'
 NOT_A_CHECKOUT_REASON='not inside a git checkout'
 MERGE_REASON='a merge is in progress'
 REBASE_REASON='a rebase is in progress'
@@ -127,7 +133,9 @@ commit_file() {
 
 # create_world <name> -> builds $WORKDIR/<name>/{origin.git,w} and sets WORLD_ROOT, WORK_TREE,
 # ORIGIN_DIR, TRUNK_SHA. `w` is on main at TRUNK_SHA (f.txt, sub/keep.txt, and a .gitignore that
-# ignores *.log), with remote origin carrying main and refs/remotes/origin/main fetched.
+# ignores *.log), with remote origin carrying main, refs/remotes/origin/main fetched, and
+# refs/remotes/origin/HEAD on refs/remotes/origin/main as `git clone` writes it, whatever the git
+# version's fetch wrote.
 create_world() {
     WORLD_ROOT="$WORKDIR/$1"
     WORK_TREE="$WORLD_ROOT/w"
@@ -145,6 +153,7 @@ create_world() {
     run_git "$WORK_TREE" remote add origin "$ORIGIN_DIR"
     run_git "$WORK_TREE" push -q origin refs/heads/main:refs/heads/main
     run_git "$WORK_TREE" fetch -q origin
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
     TRUNK_SHA="$(run_git "$WORK_TREE" rev-parse refs/heads/main)"
 }
 
@@ -168,6 +177,13 @@ create_conflict_branches() {
     run_git "$WORK_TREE" checkout -q -b c1 main
     commit_file "$WORK_TREE" f.txt one c1a
     commit_file "$WORK_TREE" f.txt three c1b
+}
+
+# delete_remote_head <remote> -> deletes refs/remotes/<remote>/HEAD in `w` itself, symbolic or
+# not, and succeeds when it is absent, so a world does not depend on whether the git version's
+# fetch wrote it.
+delete_remote_head() {
+    run_git "$WORK_TREE" update-ref --no-deref -d "refs/remotes/$1/HEAD"
 }
 
 # set_upstream <remote> <merge> -> writes branch.feature/x.remote and branch.feature/x.merge.
@@ -584,6 +600,7 @@ test_trunk_any_spelling() {
 
 test_branch_differs_from_non_main_trunk() {
     create_world trunk-develop
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
     run_git "$WORK_TREE" checkout -q -b develop
     assert_success trunk-develop-switch-to-main "$WORK_TREE" "$(expected_block main "$TRUNK_SHA" false)" \
         --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
@@ -614,6 +631,7 @@ test_trunk_ref_identity() {
         case_name="trunk-identity-${case_names[$index]}"
         trunk_spelling="${trunk_spellings[$index]}"
         create_world "$case_name"
+        run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
         run_git "$WORK_TREE" checkout -q -b scratch
         case "$trunk_spelling" in
             gone/main) run_git "$WORK_TREE" update-ref refs/remotes/gone/main "$TRUNK_SHA" ;;
@@ -645,6 +663,129 @@ test_trunk_ref_identity() {
     run_git "$WORK_TREE" remote add team "$WORLD_ROOT/team.git"
     assert_refused_unchanged trunk-identity-remote-image "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
         --base scratch --branch main --classification feature --trunk-freshness fresh --trunk team/main
+}
+
+# The caller chooses the trunk name, so the trunk stop also refuses the default branch of every
+# remote `git remote` lists, read from the end of its symbolic refs/remotes/<remote>/HEAD, whatever
+# trunk names. A spoofed trunk (develop, team/main), a case-variant end, a dangling end, a second
+# remote and a remote whose name holds `/` all stop with nothing changed. A remote HEAD that is
+# absent or not symbolic is no default branch record, so the run stops with nothing changed and
+# the remedy in the blocker. A remote HEAD git cannot read stops with `cannot read trunk`. Only the target branch is compared, so a run that starts on the
+# default branch still moves off it.
+test_remote_default_branch() {
+    local index trunk_spelling
+    local -a spoof_names=(develop team-main)
+    local -a trunk_spellings=(develop team/main)
+    create_world remote-default-spoof
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+    run_git "$WORK_TREE" checkout -q -b develop
+    for index in "${!trunk_spellings[@]}"; do
+        trunk_spelling="${trunk_spellings[$index]}"
+        assert_refused_unchanged "remote-default-spoof-${spoof_names[$index]}" "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+            --base develop --branch main --classification feature --trunk-freshness fresh --trunk "$trunk_spelling"
+    done
+
+    create_world remote-default-start-on-trunk
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+    assert_success remote-default-start-on-trunk "$WORK_TREE" "$(expected_block "$BRANCH" "$TRUNK_SHA" true)" \
+        --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
+    assert_on_branch_without_upstream remote-default-start-on-trunk "$TRUNK_SHA"
+
+    create_world remote-default-case
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/MAIN
+    run_git "$WORK_TREE" checkout -q -b develop
+    assert_refused_unchanged remote-default-case "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
+
+    create_world remote-default-dangling
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/release
+    assert_refused_unchanged remote-default-dangling "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base main --branch release --classification feature --trunk-freshness fresh --trunk develop
+    assert_equal remote-default-dangling-no-branch '' \
+        "$(run_git "$WORK_TREE" for-each-ref refs/heads/release refs/remotes/origin/release)" "release absent"
+
+    create_world remote-default-second-remote
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
+    run_git "$WORK_TREE" remote add upstream "$WORLD_ROOT/upstream.git"
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/upstream/HEAD refs/remotes/upstream/main
+    run_git "$WORK_TREE" checkout -q -b develop
+    assert_refused_unchanged remote-default-second-remote "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
+
+    create_world remote-default-slash-remote
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
+    run_git "$WORK_TREE" remote add team/fork "$WORLD_ROOT/fork.git"
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/team/fork/HEAD refs/remotes/team/fork/main
+    run_git "$WORK_TREE" checkout -q -b develop
+    assert_refused_unchanged remote-default-slash-remote "$WORK_TREE" "$EQUALS_TRUNK_REASON" \
+        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
+
+    create_world remote-default-absent
+    delete_remote_head origin
+    run_git "$WORK_TREE" checkout -q -b develop
+    assert_refused_unchanged remote-default-absent "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
+    assert_equal remote-default-absent-head refs/heads/develop "$(read_head_ref)" "HEAD"
+
+    create_world remote-default-not-symbolic
+    delete_remote_head origin
+    run_git "$WORK_TREE" update-ref refs/remotes/origin/HEAD "$TRUNK_SHA"
+    run_git "$WORK_TREE" checkout -q -b develop
+    assert_refused_unchanged remote-default-not-symbolic "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+        --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
+    assert_equal remote-default-not-symbolic-head refs/heads/develop "$(read_head_ref)" "HEAD"
+
+    create_world remote-default-unreadable
+    delete_remote_head origin
+    run_git "$WORK_TREE" checkout -q -b develop
+    printf 'ref: refs/remotes/origin/ma..in\n' >"$WORK_TREE/.git/refs/remotes/origin/HEAD"
+    assert_refused_unchanged remote-default-unreadable "$WORK_TREE" "$UNREADABLE_TRUNK_REASON" \
+        --base develop --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk develop
+}
+
+# write_failing_remote_git <dir> <fail at> -> writes <dir>/git, a stand-in that counts each bare
+# `git remote` call in <dir>/remote-calls, exits 128 on call number <fail at>, and otherwise runs
+# the real git with the same arguments.
+write_failing_remote_git() {
+    local stub_dir="$1" fail_at="$2" real_git
+    real_git="$(command -v git)"
+    mkdir -p "$stub_dir"
+    printf '0\n' >"$stub_dir/remote-calls"
+    {
+        printf '#!/usr/bin/env bash\n'
+        printf 'if [ "$#" -eq 1 ] && [ "$1" = remote ]; then\n'
+        printf '  remote_calls=$(( $(cat %q) + 1 ))\n' "$stub_dir/remote-calls"
+        printf '  printf %%s\\\\n "$remote_calls" >%q\n' "$stub_dir/remote-calls"
+        printf '  [ "$remote_calls" -ne %q ] || exit 128\n' "$fail_at"
+        printf 'fi\n'
+        printf 'exec %q "$@"\n' "$real_git"
+    } >"$stub_dir/git"
+    chmod +x "$stub_dir/git"
+}
+
+# Both trunk checks build the branch refs from `git remote`, and each maps a failed compare to
+# `cannot compare working_branch with trunk`. The trunk ref check reads `git remote` first and the
+# remote default check reads it second, so a stand-in git that fails call 1 stops the run at the
+# trunk ref check, and one that fails call 2 stops it at the remote default check. Each stops with
+# nothing changed and the branch not created.
+test_trunk_compare_failure() {
+    local case_name fail_at stub_dir
+    for fail_at in 1 2; do
+        case "$fail_at" in
+            1) case_name=compare-fail-trunk-ref ;;
+            *) case_name=compare-fail-remote-default ;;
+        esac
+        create_world "$case_name"
+        run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+        stub_dir="$WORLD_ROOT/stub-bin"
+        write_failing_remote_git "$stub_dir" "$fail_at"
+        PATH="$stub_dir:$PATH" assert_refused_unchanged "$case_name" "$WORK_TREE" "$COMPARE_TRUNK_REASON" \
+            --base main --branch "$BRANCH" --classification feature --trunk-freshness fresh --trunk main
+        assert_equal "$case_name-remote-calls" "$fail_at" "$(cat "$stub_dir/remote-calls")" "git remote calls"
+        assert_equal "$case_name-no-branch" '' \
+            "$(run_git "$WORK_TREE" for-each-ref "refs/heads/$BRANCH")" "$BRANCH absent"
+        assert_equal "$case_name-head" refs/heads/main "$(read_head_ref)" "HEAD"
+    done
 }
 
 test_not_a_checkout() {
@@ -909,6 +1050,8 @@ test_trunk_alias
 test_trunk_any_spelling
 test_branch_differs_from_non_main_trunk
 test_trunk_ref_identity
+test_remote_default_branch
+test_trunk_compare_failure
 test_not_a_checkout
 test_merge_in_progress
 test_clean_merge_in_progress

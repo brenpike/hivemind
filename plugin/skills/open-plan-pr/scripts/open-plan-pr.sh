@@ -60,7 +60,9 @@
 #                than a JSON array of PR objects, each with a headRepository that is null or an
 #                object with a string id (`cannot look up the open PRs for head`).
 # push-branch.sh then makes its own refusals before its push: the current branch, the base, the
-# expected commit, and the upstream. Its stderr is relayed, and its `blocker:` line ends the run.
+# default branch of every remote `git remote` lists (read from its local refs/remotes/<remote>/HEAD,
+# whatever base is), the expected commit, and the upstream. Its stderr is relayed, and its
+# `blocker:` line ends the run.
 #
 # PUSH: one child call, `bash <plugin root>/skills/push-branch/scripts/push-branch.sh --head <head>
 # --base <base> --report-remote yes [--remote <remote>] --on-reject warn --no-upstream origin

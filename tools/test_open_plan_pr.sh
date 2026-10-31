@@ -210,7 +210,8 @@ run_git() {
 }
 
 # create_world <name> -> builds $WORKDIR/<name>/{github/o/r.git,w,gh}. origin carries main; `w`
-# has remote origin at ORIGIN_URL (served by the fake ssh transport), no upstream, and HEAD on
+# has remote origin at ORIGIN_URL (served by the fake ssh transport) with its local HEAD ref on
+# main as `git clone` writes it, no upstream, and HEAD on
 # feat/x one commit ahead of main (unpushed). main has a .gitignore that ignores .hivemind/. Sets
 # WORLD_ROOT, WORK_TREE, ORIGIN_DIR, INPUTS_PATH, GH_STUB_DIR and FAKE_SSH_ROOT (exported),
 # TRUNK_SHA and HEAD_SHA, writes a valid inputs file, and scripts `gh repo view` to print R_o.
@@ -233,6 +234,7 @@ create_world() {
     run_git "$WORK_TREE" add .gitignore sub/keep.txt f.txt
     run_git "$WORK_TREE" commit -q -m init
     run_git "$WORK_TREE" remote add origin "$ORIGIN_URL"
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
     run_git "$WORK_TREE" push -q origin refs/heads/main:refs/heads/main
     TRUNK_SHA="$(run_git "$WORK_TREE" rev-parse refs/heads/main)"
     run_git "$WORK_TREE" checkout -q -b "$BRANCH"
@@ -954,6 +956,7 @@ test_head_repository() {
     mkdir -p "$FAKE_SSH_ROOT/f"
     run_git "$FAKE_SSH_ROOT/f" init -q --bare r.git
     run_git "$WORK_TREE" remote add fork 'git@github.com:f/r.git'
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/fork/HEAD refs/remotes/fork/main
     run_git "$WORK_TREE" push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
     run_git "$WORK_TREE" config "branch.$BRANCH.remote" origin
     run_git "$WORK_TREE" config "branch.$BRANCH.merge" "refs/heads/$BRANCH"
@@ -1012,7 +1015,7 @@ test_create_failures() {
 # ── Push outcomes through the real push-branch.sh ───────────────────────────
 
 test_push_outcomes() {
-    local hook_path
+    local hook_path spoofed_base index=0
     create_world push-rejected
     hook_path="$ORIGIN_DIR/hooks/pre-receive"
     printf '#!/bin/sh\necho denied >&2\nexit 1\n' >"$hook_path"
@@ -1071,6 +1074,19 @@ test_push_outcomes() {
     stub_create_ok
     assert_refused_unchanged base-is-branch "$WORK_TREE" "$PUSH_MISMATCH_REASON" \
         --head "$BRANCH" --base "$BRANCH" --inputs "$INPUTS_REL"
+
+    for spoofed_base in develop release/main; do
+        index=$((index + 1))
+        create_world "remote-default-$index"
+        run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
+        run_git "$WORK_TREE" checkout -q main
+        stub_respond pr-list '' '[]'
+        stub_create_ok main "$TRUNK_SHA"
+        assert_refused_unchanged "remote-default-$index" "$WORK_TREE" "$PUSH_MISMATCH_REASON" \
+            --head main --base "$spoofed_base" --inputs "$INPUTS_REL"
+        assert_equal "remote-default-$index-origin" "refs/heads/main $TRUNK_SHA" "$(list_remote_refs)" \
+            "nothing pushed to origin"
+    done
 }
 
 # ── Strict parse of push-branch.sh output (fake child in a copied tree) ─────
