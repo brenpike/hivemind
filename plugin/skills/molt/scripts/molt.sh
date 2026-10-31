@@ -41,6 +41,20 @@
 # followed by a blank line and the body when there is one. The rule that the message carries no
 # attribution string is the caller's judgment (the molt SKILL.md), not checked here.
 #
+# INPUTS FILE LIFETIME: the script deletes the inputs file once it has read it, right after the
+# jq read into the private copy, whether or not that read succeeded, and before the `inputs file
+# is not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
+# _shared/containment.sh; ADR-0037). Only a leaf named `molt-inputs-<token>.json`, <token> 1 to 64
+# characters of [A-Za-z0-9-], directly under a real `.hivemind` folder at the top of the work tree
+# is deleted, from inside that folder and never through a symlink. Any other inputs path is read
+# and kept. A failed delete leaves the file and does not stop the run: its result and output are
+# discarded, so stdout, stderr and the exit contract are unchanged. A refusal before the read
+# (usage, the trunk gate, a missing tool, not a checkout, `inputs file not found`, `inputs file
+# resolves outside the checkout`) leaves the file. A rerun must write the file again. Deleting
+# this caller's scratch file is not a change in the REFUSALS sense, so a refusal after the read
+# still makes no change. Because the delete comes before the status read, a deleted inputs file
+# is never a dirty path outside files, even when `.hivemind/` is not ignored; a kept one still is.
+#
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
 #   inputs       the inputs file is missing (`inputs file not found`), resolves outside the
 #                checkout through a symlinked leaf or folder (`inputs file resolves outside the
@@ -188,10 +202,9 @@
 # jq decodes status paths as UTF-8, so a path with bytes that are not UTF-8 shows with
 # replacement characters on its outside line and can never be listed. A listed path that is an
 # untracked ignored file is not dirty, so it is not committed. A submodule path is a directory,
-# so it cannot be listed, and its changes are dirty paths outside files. When `.hivemind/` is not
-# ignored, the inputs file itself is a dirty path outside files and the run stops there. The
-# trunk lookup order is mirrored from git, not asked of git, and git 2.25 shows only the end of
-# a symbolic-ref chain, with the same residuals as create-working-branch.sh. A local remote HEAD
+# so it cannot be listed, and its changes are dirty paths outside files. The trunk lookup order
+# is mirrored from git, not asked of git, and git 2.25 shows only the end of a symbolic-ref chain,
+# with the same residuals as create-working-branch.sh. A local remote HEAD
 # that went stale after a default branch rename still names the old default, and a remote that
 # `git remote` does not list is not read. The private work
 # folder (mktemp -d under TMPDIR) holds the inputs copy, the status listing, the index entry
@@ -200,10 +213,9 @@
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
 # compatible (no mapfile / associative arrays / ${var,,}). The identifier gate comes from
-# _shared/allowlist.sh, the inputs read-guard from _shared/containment.sh, and the name rule,
-# the in-progress and unmerged checks, the trunk ref walk and the remote default branch read from
-# _shared/git-refusals.sh; this
-# script maps their results to its own blockers.
+# _shared/allowlist.sh, the inputs read-guard and delete from _shared/containment.sh, and the
+# name rule, the in-progress and unmerged checks, the trunk ref walk and the remote default branch
+# read from _shared/git-refusals.sh; this script maps their results to its own blockers.
 
 set -euo pipefail
 trap ':' EXIT
@@ -289,8 +301,11 @@ commit_error_file="$work_dir/commit-error.txt"
 
 [ -f "$INPUTS_FILE" ] || blocker "inputs file not found"
 hivemind_assert_inputs_contained "$work_tree_top" "$INPUTS_FILE" >/dev/null 2>&1 || blocker "inputs file resolves outside the checkout"
+inputs_read_rc=0
 jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
-  || blocker "inputs file is not valid JSON"
+  || inputs_read_rc=$?
+hivemind_remove_inputs_file "$work_tree_top" "$INPUTS_FILE" molt >/dev/null 2>&1 || :
+[ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
 
 # The field rules from the header, in order. Prints the fixed reason of the first rule the
 # inputs break, or an empty line when every rule holds.

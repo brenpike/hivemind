@@ -40,6 +40,21 @@
 # rule that the PR content carries no attribution string is the caller's judgment (the
 # open-plan-pr SKILL.md), not checked here.
 #
+# INPUTS FILE LIFETIME: the script deletes the inputs file once it has read it, right after the
+# jq read into the private copy, whether or not that read succeeded, and before the `inputs file
+# is not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
+# _shared/containment.sh; ADR-0037). Only a leaf named `pr-inputs-<token>.json`, <token> 1 to 64
+# characters of [A-Za-z0-9-], directly under a real `.hivemind` folder at the top of the work tree
+# is deleted, from inside that folder and never through a symlink. Any other inputs path is read
+# and kept. A failed delete leaves the file and does not stop the run: its result and output are
+# discarded, so stdout, stderr and the exit contract are unchanged. A refusal before the read
+# (usage, the identifier gates, the expect-commit format, the delay, a missing tool, not a
+# checkout, `inputs file not found`, `inputs file resolves outside the checkout`) leaves the
+# file. A rerun must write the file again. Deleting this caller's scratch file is not a change in
+# the REFUSALS sense, so a refusal after the read still makes no change. Because the delete comes
+# before the dirty check, a deleted inputs file is never an untracked file there, even when
+# `.hivemind/` is not ignored; any other untracked file still is.
+#
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
 #   delay        HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY, when set, is not a whole number of seconds.
 #   tools        git, jq, or gh is not on PATH (`gh not found on PATH`).
@@ -238,17 +253,16 @@
 # which changes nothing, and then reuses or creates the PR. REUSE keys on the head repository
 # id, so an open PR from another repository, such as a fork with the same branch name and the
 # same commit, is never reused. The push URL behind that id is read again from git config after
-# the push, and git config is trusted. When `.hivemind/` is not ignored, the
-# inputs file itself is an untracked file and the run stops there. The private work folder
+# the push, and git config is trusted. The private work folder
 # (mktemp -d under TMPDIR) holds the inputs copy, the body file, the comment file, and the gh
 # and push-branch.sh output, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
 # guaranteed-zero `:`, self-location via `cd && pwd -P`, NO `realpath`/`readlink`; bash 3.2
 # compatible (no mapfile / associative arrays / ${var,,}). The identifier gate comes from
-# _shared/allowlist.sh, the inputs read-guard from _shared/containment.sh, and the in-progress,
-# unmerged and dirty checks from _shared/git-refusals.sh; this script maps their results to its
-# own blockers.
+# _shared/allowlist.sh, the inputs read-guard and delete from _shared/containment.sh, and the
+# in-progress, unmerged and dirty checks from _shared/git-refusals.sh; this script maps their
+# results to its own blockers.
 
 set -euo pipefail
 trap ':' EXIT
@@ -400,8 +414,11 @@ repo_file="$work_dir/repo.json"
 
 [ -f "$INPUTS_FILE" ] || blocker "inputs file not found"
 hivemind_assert_inputs_contained "$work_tree_top" "$INPUTS_FILE" >/dev/null 2>&1 || blocker "inputs file resolves outside the checkout"
+inputs_read_rc=0
 jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
-  || blocker "inputs file is not valid JSON"
+  || inputs_read_rc=$?
+hivemind_remove_inputs_file "$work_tree_top" "$INPUTS_FILE" pr >/dev/null 2>&1 || :
+[ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
 
 # The field rules from the header, in order. Prints the fixed reason of the first rule the
 # inputs break, or an empty line when every rule holds.
