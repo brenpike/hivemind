@@ -1622,12 +1622,24 @@ This amendment covers https://github.com/brenpike/hivemind/issues/482. It fixes 
 
 **Fixtures.** `tests/policy/safety-no-trunk-commit.json` gains, for each script, one pin on the new refusal and one on its call site. The pinned `refuse_trunk_branch` span in `molt.sh` and the spans in `tests/policy/safety-working-branch-no-track.json` are unchanged. The pins do not prove what the shared function computes. The script suites assert that: `tools/test_molt.sh`, `tools/test_push_branch.sh`, `tools/test_open_plan_pr.sh` and `tools/test_create_working_branch.sh`.
 
-**Recorded residuals.**
+**Recorded residuals.** Each bullet states what is not covered, its bounded impact and its ground, per `plugin/governance/remediation-doctrine.md` "Recorded Residual". What each script checks is in its header: `plugin/skills/molt/scripts/molt.sh`, `plugin/skills/push-branch/scripts/push-branch.sh`, `plugin/skills/create-working-branch/scripts/create-working-branch.sh`, and `hivemind_branch_is_remote_default` and R1 in `plugin/skills/_shared/git-refusals.sh`.
 
-- **A listed remote with no local HEAD ref.** It passes, so its default branch is not refused. A HEAD ref that is not symbolic passes too. `git clone` writes the ref. The remedy is `git remote set-head <remote> --auto`.
-- **A push remote that `git remote` does not list.** It is not read. Such a remote is a local path, because every URL form fails the identifier gate.
-- **A stale local HEAD ref.** After a default branch rename on the remote, the local ref still names the old default until it is set again.
-- **Over-refusal.** The inherited case fold (R1 in `git-refusals.sh`) refuses case variants of a default branch. The default branch of any listed remote is refused, a fork's included. A consumer whose trunk is not the remote default, such as gitflow `develop` with `main` as the default, can no longer deliver on `main`. All of these fail safe.
-- **The raw push of decision 6.** A drone's raw `git push` is unchanged. It stays bounded by the server ruleset.
+Gaps. These three bullets let a remote's default branch through. Their ground is decision D1 (Q1, option A, 2026-10-30), taken by the autonomy table as the recommended answer. D1 reads only the local HEAD ref of each listed remote, and these gaps follow from that. They share one bound. The name-based trunk refusals still stop a call that passes the real trunk name. Only a call that passes another name reaches a gap. A commit made there stays on the local trunk until a push. A push to a server then meets that server's branch protection. In this repository that is the main ruleset: it blocks deletion and non-fast-forward pushes and requires a pull request. The exception is the one the issue 480 amendment records: a RepositoryRole bypass exists, and agents run as the repo owner. A consumer repository with no branch protection has no server bound.
+
+- **A listed remote with no local HEAD ref.** Not covered: that remote's default branch. A HEAD ref that is not symbolic passes too. `git clone` writes the ref, and `git remote set-head <remote> --auto` restores it. Bounded impact: the shared bound above. Ground: D1.
+- **A push remote that `git remote` does not list.** Not covered: that remote's default branch, because its HEAD ref is not read. Such a remote can only be a local path, because every URL form fails the identifier gate (see the `push-branch.sh` header). Bounded impact: the name-based trunk refusals still apply, and the push lands in a local repository, not on a server. Ground: D1.
+- **A stale local HEAD ref.** Not covered: a remote's new default branch after the remote renames its default. The local ref names the old default until `git remote set-head <remote> --auto` sets it again. The old name is still refused. Bounded impact: the shared bound above. Ground: D1.
+
+Over-refusals. These three bullets refuse a branch that may be a valid working branch. All three fail safe: each one only refuses, and none lets a branch through.
+
+- **Case variants of a default branch.** `Main` is refused when a listed remote's default is `main`. Bounded impact: a refusal only, and only on a case-sensitive file system, where the two are distinct branches. Ground: recorded residual R1 in `git-refusals.sh`, which the new function shares.
+- **A fork's default branch.** The default branch of every listed remote is refused, a fork parent's included. Bounded impact: a refusal only, of a branch with that default's name. Ground: D1, which reads every listed remote.
+- **A trunk that is not the remote default.** A consumer whose trunk is not the remote default, such as gitflow `develop` with `main` as the default, can no longer deliver on `main`. Bounded impact: a refusal only. Ground: D1.
+
+Unchanged by this amendment.
+
+- **The raw push of decision 6.** Not covered: a drone's raw `git push`, which runs no script. Bounded impact: server-side branch protection only, with the RepositoryRole bypass exception above. Ground: decision 6 and its recorded residual "Raw push to trunk (decision 6)".
+
+**Local review finding d5a5ff74.** Its main claim: a missing, non-symbolic or stale remote HEAD ref passes, so that default branch is not refused. That claim repeats decision D1, which chose the local HEAD ref as the source and recorded the gaps above. It is rejected by that record, per `plugin/governance/remediation-doctrine.md` "Recorded Decisions and Repeat Findings". Its write-up gap was valid: the residual bullets lacked a bounded impact and a ground, and "All of these fail safe" read as covering every bullet. That gap is fixed here. The fix applied the "Recorded Residual" template to every bullet in one pass, not one bullet at a time.
 
 Links: https://github.com/brenpike/hivemind/issues/482, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
