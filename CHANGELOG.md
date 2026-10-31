@@ -13,6 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.4] - 2026-10-30
+
+### Changed
+
+- Docs: the ADR-0037 amendment (#447).
+
+### Fixed
+
+- Lines in a runner relay that are not routing lines no longer stop a delivery run. Examples are git push `remote:` hints at the pull request step, agent notes after the version check's routing lines, and a blank line inside its counts block. The engine reads only the first line of each routing key, and a line it does not read changes nothing (#447).
+- open-plan-pr writes its push and gh stderr only when it blocks, so a successful run prints routing lines only (#447).
+
 ## [7.5.3] - 2026-10-30
 
 ### Changed

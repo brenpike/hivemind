@@ -148,13 +148,13 @@ describe('gatherFactsRoutingSpec against real gather-facts.sh stdout', () => {
     const text = trunkLines.filter((line) => !line.startsWith('branch: ')).join('\n') + '\n';
     assert.equal(parseFacts(text).ok, true);
   });
-  test('an unknown line is unknown', () => {
+  test('a line of no spec key is not read', () => {
     const text = [...trunkLines.slice(0, 3), 'remote: origin', ...trunkLines.slice(3)].join('\n') + '\n';
-    assert.deepEqual(parseFacts(text), { ok: false, problem: 'unknown', line: 4 });
+    assert.deepEqual(parseFacts(text), parseFacts(trunkStdout));
   });
-  test('a duplicate line is a duplicate', () => {
-    const text = [...trunkLines, 'cut: none'].join('\n') + '\n';
-    assert.deepEqual(parseFacts(text), { ok: false, problem: 'duplicate', line: trunkLines.length + 1 });
+  test('a later line of a key already read is not read, so the first line wins', () => {
+    const text = [...trunkLines, 'cut: maybe', 'delivery: stop'].join('\n') + '\n';
+    assert.deepEqual(parseFacts(text), parseFacts(trunkStdout));
   });
   test('a value that fails its pattern is malformed', () => {
     const text = trunkLines.map((line) => (line.startsWith('delivery: ') ? 'delivery: maybe' : line)).join('\n') + '\n';

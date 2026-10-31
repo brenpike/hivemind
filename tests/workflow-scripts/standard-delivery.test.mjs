@@ -1126,8 +1126,6 @@ const ROW_TESTS = {
       ['an unknown outcome', { outcome: 'done', stdout: goodStdout }],
       ['ran with no stdout', { outcome: 'ran' }],
       ['a missing line', { outcome: 'ran', stdout: goodStdout.replace('cut: none\n', '') }],
-      ['an unknown line', { outcome: 'ran', stdout: goodStdout + 'remote: origin\n' }],
-      ['a duplicate line', { outcome: 'ran', stdout: goodStdout + 'cut: none\n' }],
       ['a value off its pattern', { outcome: 'ran', stdout: goodStdout.replace('delivery: ready', 'delivery: maybe') }],
       ['CR line ends', { outcome: 'ran', stdout: goodStdout.replace(/\n/g, '\r\n') }],
       ['an extra field', { outcome: 'ran', stdout: goodStdout, note: 'x' }]
@@ -4700,8 +4698,6 @@ const ROW_TESTS = {
       ['an unknown warning', prRelay({ head_ref_oid: OTHER, warning: 'all good' }), malformed],
       ['an http url', prRelay({ head_ref_oid: OTHER, url: 'http://github.com/o/r/pull/7' }), malformed],
       ['a url that is not a pull request', prRelay({ head_ref_oid: OTHER, url: 'https://github.com/o/r/issues/7' }), malformed],
-      ['an unknown line', { outcome: 'ran', stdout: good + 'remote: origin\n' }, malformed],
-      ['a duplicate line', { outcome: 'ran', stdout: good + 'created: true\n' }, malformed],
       ['CR line ends', { outcome: 'ran', stdout: good.replace(/\n/g, '\r\n') }, malformed],
       ['a blocked relay', { outcome: 'blocked', stderr: 'blocker: working tree has uncommitted changes\n' }, 'The pull request step was blocked, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it. Its blocker line says "working tree has uncommitted changes".']
     ]) {
@@ -4719,7 +4715,7 @@ const ROW_TESTS = {
       });
     }
     test('a reply to a paused pull request step runs it again, and a good relay then completes the run', async () => {
-      const results = happyResults({ 'pr-1': { outcome: 'ran', stdout: good + 'remote: origin\n' }, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const results = happyResults({ 'pr-1': prRelay({ head_ref_oid: OTHER, commented: undefined }), 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
       const paused = await runWorkflow(LAUNCH, results);
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
@@ -7060,6 +7056,76 @@ const ROW_TESTS = {
         assert.ok(!JSON.stringify(result).includes('SECRETZQ'), JSON.stringify(result));
       });
     }
+  },
+  'SD-75': () => {
+    const malformedPr = 'The pull request step returned malformed routing lines, so the delivery stopped. The branch may be on its remote, and a pull request may be open for it.';
+    const pushHint = 'remote: \nremote: Create a pull request for \'feature/cache\' on GitHub by visiting:\nremote:      https://github.com/o/r/pull/new/feature/cache\nremote: \n';
+    test('a facts relay with prose before and after its routing lines goes on with no pause', async () => {
+      const relay = { outcome: 'ran', stdout: 'The script printed:\n\n' + factsStdout() + '\nThat is every line.\n' };
+      const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': relay }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), labelsOf(await runWorkflow(LAUNCH, happyResults())));
+    });
+    test('a branch relay and a wave commit relay with trailing prose go on with no pause', async () => {
+      const results = happyResults({ 'branch-1': { outcome: 'ran', stdout: branchRelay().stdout + 'The branch is ready.\n' }, 'commit-1-1': { outcome: 'ran', stdout: commitRelay().stdout + '\nCommitted the step.\n' } });
+      const run = await runWorkflow(LAUNCH, results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.equal(readRunnerInputs(callOf(run, 'pr-1').prompt).expect_commit, OTHER);
+    });
+    test('a head check relay inside a code fence goes on with no pause', async () => {
+      const fenced = { outcome: 'ran', stdout: '```\n' + headRelay(OTHER).stdout + '```\n' };
+      const results = happyResults({ 'pr-1': { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' }, 'head-1-1': fenced, 'pr-1-2': cannedPrRunner() });
+      const paused = await runWorkflow(LAUNCH, results);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'pr-1-2']);
+    });
+    test('the issue 445 pull request relay, with GitHub remote hint lines before url, completes with its pr', async () => {
+      const relay = (prompt) => ({ outcome: 'ran', stdout: pushHint + prRelay({ head_ref_oid: readRunnerInputs(prompt).expect_commit }).stdout });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': relay }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: true });
+      assert.ok(run.result.message.startsWith(openedLine(OTHER)), run.result.message);
+    });
+    test('a pull request relay with trailing prose completes with its pr', async () => {
+      const relay = (prompt) => ({ outcome: 'ran', stdout: prRelay({ head_ref_oid: readRunnerInputs(prompt).expect_commit }).stdout + '\nOpened the pull request.\n' });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': relay }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: true });
+    });
+    test('the issue 464 version relay, with a prose line after dropped_reverts, passes the validate gate', async () => {
+      const stdout = bumpStdout().replace('dropped_reverts: 0\n', 'dropped_reverts: 0\nNo reverts were dropped.\n');
+      assert.ok(stdout.includes('dropped_reverts: 0\nNo reverts were dropped.\n'));
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'ran', stdout: stdout } } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
+    });
+    test('a version relay with a blank line and a prose line between its counts lines passes the validate gate', async () => {
+      const stdout = bumpStdout().replace('  minor: 1\n', '  minor: 1\n\nThe patch count follows.\n');
+      assert.ok(stdout.includes('  minor: 1\n\nThe patch count follows.\n  patch: 0\n'));
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'ran', stdout: stdout } } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
+    });
+    test('a version relay with one counts line removed still pauses as malformed routing lines', async () => {
+      const stdout = bumpStdout().replace('  patch: 0\n', '');
+      assert.ok(!stdout.includes('patch:'));
+      const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': { ...VALIDATE_PASSED, version: { outcome: 'ran', stdout: stdout } } }));
+      assertStepStopPause(run, 'The version check of the validation step returned malformed routing lines, so the delivery stopped before the pull request.', 'validate-1-1');
+    });
+    test('a facts relay holding only prose, or with CR line ends, still pauses as malformed facts', async () => {
+      for (const stdout of ['The script ran and printed its facts.\n', factsStdout().replace(/\n/g, '\r\n')]) {
+        const run = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'ran', stdout: stdout } });
+        assertPassStopPause(run, MALFORMED_FACTS, 'facts-1');
+      }
+    });
+    test('a pull request relay holding only prose, or with CR line ends, still pauses as malformed routing lines', async () => {
+      for (const stdout of ['Opened the pull request.\n', prRelay({ head_ref_oid: OTHER }).stdout.replace(/\n/g, '\r\n')]) {
+        const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': { outcome: 'ran', stdout: stdout } }));
+        assert.equal(run.result.pr, undefined);
+        assertStepStopPause(run, malformedPr + '\n\n', 'pr-1');
+      }
+    });
   }
 };
 
