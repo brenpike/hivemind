@@ -23,7 +23,8 @@
  *   PR      once every configured gate held on one commit H, a haiku
  *           synapse runner runs the open-plan-pr command once. The
  *           command carries only --head, --base,
- *           --expect-commit H and the inputs path, and the inputs_file
+ *           --expect-commit H and the inputs path buildInputsPath
+ *           (relay.js) builds for the call label, and the inputs_file
  *           block only the title, body and comment the code builds and
  *           draft from the launch. This runner is the only push the
  *           workflow makes, so every push carries --expect-commit. A
@@ -32,7 +33,9 @@
  *           openPlanPrRoutingSpec(), head_ref_oid must equal H, and the run
  *           finishes complete with pr. The runner call goes through
  *           runRunnerRelay (relay.js), so a transient block runs once more
- *           under pr-P-retry. A pull request text over its size limit and a
+ *           under pr-P-retry with the inputs path of that label, and the
+ *           step checks the words of both labels before the call. A pull
+ *           request text over its size limit and a
  *           head_ref_oid other than H are terminal stops. A blocked,
  *           malformed or other unusable relay pauses through stopDelivery
  *           (record.js). The step makes one runner call: the gate loop
@@ -247,18 +250,17 @@ function buildPullRequestTexts(run, plan, gates) {
   return texts;
 }
 
-function listPullRequestWords(plan, head) {
-  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', head, '--inputs', '.hivemind/pr-inputs-{token}.json'];
+function listPullRequestWords(plan, head, inputsPath) {
+  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', head, '--inputs', inputsPath];
 }
 
-function buildPullRequestPrompt(plan, head, texts, draft) {
-  const words = listPullRequestWords(plan, head);
+function buildPullRequestPrompt(plan, head, inputsPath, texts, draft) {
   return [
     'Run the command below to push the working branch and open its pull request or reuse the open one.',
     dataBlocksSentence(),
     '',
-    formatCommandBlock(buildRunnerCommand('open-plan-pr', words)),
-    formatInputsFileBlock(words[7], { title: texts.title, body: texts.body, comment: texts.comment, draft: draft })
+    formatCommandBlock(buildRunnerCommand('open-plan-pr', listPullRequestWords(plan, head, inputsPath))),
+    formatInputsFileBlock(inputsPath, { title: texts.title, body: texts.body, comment: texts.comment, draft: draft })
   ].join('\n');
 }
 
@@ -290,11 +292,14 @@ async function runPullRequestStep(run, plan, gates) {
     return stopDelivery([{ problem: texts.problem, terminal: true }], run, [], false);
   }
   phase('PR');
-  const commandStop = describeCommandStop('pull request', listPullRequestWords(plan, run.head));
+  const label = describePullRequestLabel(run, gates.runs.pr);
+  const listWords = (callLabel) => listPullRequestWords(plan, run.head, buildInputsPath(run, 'pr', callLabel));
+  const commandStop = describeCommandStop('pull request', listWords(label), listWords(label + '-retry'));
   if (commandStop !== undefined) {
     return stopDelivery([commandStop], run, [], false);
   }
-  const relay = await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan, run.head, texts, run.draft), run), describePullRequestLabel(run, gates.runs.pr), 'PR');
+  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(plan, run.head, listWords(callLabel)[7], texts, run.draft), run);
+  const relay = await runRunnerRelay(buildPrompt, label, 'PR');
   const checked = checkPullRequestRelay(relay, run.head);
   if (checked.problem === undefined) {
     return { result: finishDeliveryComplete(run, plan, checked.values, gates) };

@@ -5,8 +5,8 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The steps read trunk,
- *          references, pass, answerLog and head, and runCommitStep passes its
- *          checked commit to observeHead (record.js), their one writer.
+ *          references, pass, answerLog, head and factsStem, and runCommitStep
+ *          passes its checked commit to observeHead (record.js), which writes head.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   relay  each runner result: {outcome, stdout, stderr} under
  *          RELAY_SCHEMA, its stdout read with lib/routing.js.
@@ -27,10 +27,14 @@
  *           or else the describeCommitEnd end line when it committed:
  *           {result}, {replan} for a wave, or {rerun: true} for a gate step
  *           or the head check.
- *   runRunnerRelay(prompt, label, phaseTitle)  the relay of one runner
- *           call; a relay that fits RELAY_SCHEMA, is blocked and whose
- *           stderr isTransientFailure (lib/result.js) runs the same prompt
- *           once more under label <label>-retry, and that relay is returned.
+ *   runRunnerRelay(buildPrompt, label, phaseTitle)  the relay of one runner
+ *           call of buildPrompt(label); a relay that fits RELAY_SCHEMA, is
+ *           blocked and whose stderr isTransientFailure (lib/result.js) runs
+ *           once more under label <label>-retry with buildPrompt of that
+ *           label, and that relay is returned.
+ *   buildInputsPath(run, kind, label)  .hivemind/<kind>-inputs-<stem>-<label>
+ *           .json, stem run.factsStem, unique per run given a faithful facts
+ *           relay (ADR-0037), else undefined: a --inputs command stop.
  *   capItemLines(itemLines)  the first maxListedItems() lines, then a count
  *           of the rest.
  *   versionCheckRoutingSpec()  bumpTypeRoutingSpec() plus the bump-type.sh
@@ -51,8 +55,8 @@
  *   runner step uses. The steps, as meta.js names them:
  *   Facts   a haiku hivemind:synapse runner runs the gather-facts command
  *           and relays its stdout word for word; the workflow parses it with
- *           gatherFactsRoutingSpec() and checks it with
- *           isConsistentFactsRelay (lib/facts.js).
+ *           gatherFactsRoutingSpec(), checks it with isConsistentFactsRelay
+ *           (lib/facts.js) and sets run.factsStem from it before the scan.
  *   Scan    the shared scan step, when the facts count external texts.
  *           runPassScan calls agent() itself on every pass and returns
  *           its cause or undefined; on pass 1 with the prompt, options and
@@ -63,10 +67,9 @@
  *           step that can change files, and with an empty file list as the
  *           head check of gates.js after a reply. Its checked commit goes to
  *           observeHead (record.js), as the branch commit does at each pass
- *           start (main.js). Its inputs_file block
- *           carries a code-built subject: a wave's from its plan steps
- *           (waves.js buildWaveSubject), and fixed ones for the fix and
- *           review commits.
+ *           start (main.js). Its inputs_file block carries a code-built
+ *           subject: a wave's from its plan steps (waves.js buildWaveSubject),
+ *           and fixed ones for the fix and review commits.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -118,13 +121,13 @@
  *   does not close it: an agent that still obeys the reply returns a
  *   blocked or refused result, which every check above still reads.
  *   ADR-0037 records the residual.
- *   The commit and PR runners write their own inputs file and pass its
- *   path to molt.sh or open-plan-pr.sh (review finding fb4c129c), each path
- *   a fixed literal with a {token} the runner picks, so what
- *   reaches git and GitHub rests on the runner copying its inputs_file block
- *   (ADR-0037 Risks). Each script refuses an inputs file outside the
- *   checkout or one that breaks a field rule, molt.sh refuses any dirty
- *   path outside its list, and the workflow checks every routing line.
+ *   The commit and PR runners write their own inputs file and pass its path to
+ *   molt.sh or open-plan-pr.sh (review finding fb4c129c), the path
+ *   buildInputsPath builds (issue 487), unique per call and run given a faithful
+ *   facts relay. What reaches git and GitHub rests on the runner copying its
+ *   inputs_file block (ADR-0037 Risks). Each script refuses an inputs file
+ *   outside the checkout or one that breaks a field rule, molt.sh refuses any
+ *   dirty path outside its list, and the workflow checks every routing line.
  *
  * Why
  *   Every runner step is one committed script relayed word for word, so
@@ -294,9 +297,14 @@ function isTransientBlock(relay) {
   return validateSchema(RELAY_SCHEMA, relay).ok && relay.outcome === 'blocked' && isTransientFailure(relay.stderr);
 }
 
-async function runRunnerRelay(prompt, label, phaseTitle) {
-  const relay = await agent(prompt, runnerOptions(label, phaseTitle));
-  return isTransientBlock(relay) ? agent(prompt, runnerOptions(label + '-retry', phaseTitle)) : relay;
+async function runRunnerRelay(buildPrompt, label, phaseTitle) {
+  const retryLabel = label + '-retry';
+  const relay = await agent(buildPrompt(label), runnerOptions(label, phaseTitle));
+  return isTransientBlock(relay) ? agent(buildPrompt(retryLabel), runnerOptions(retryLabel, phaseTitle)) : relay;
+}
+
+function buildInputsPath(run, kind, label) {
+  return typeof run.factsStem === 'string' ? '.hivemind/' + kind + '-inputs-' + run.factsStem + '-' + label + '.json' : undefined;
 }
 
 function droneOptions(label, phaseTitle, schema) {
@@ -307,8 +315,8 @@ function plannerCallOptions(label, phaseTitle, resultSchema) {
   return { agentType: PLANNER_AGENT, schema: toAgentSchema(resultSchema), label: label, phase: phaseTitle };
 }
 
-function describeCommandStop(stepNoun, words) {
-  const problem = describeRunnerWordProblem(words);
+function describeCommandStop(stepNoun, words, retryWords = []) {
+  const problem = describeRunnerWordProblem(words.concat(retryWords));
   return problem === undefined ? undefined : { problem: 'The ' + stepNoun + ' step did not run its script, so ' + RUN_NAME + ' stopped: ' + problem + '.', terminal: true };
 }
 
@@ -417,11 +425,12 @@ async function runFactsStep(run) {
   if (commandStop !== undefined) {
     return commandStop;
   }
-  const relay = await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(words), run), 'facts-' + run.pass, 'Facts');
+  const relay = await runRunnerRelay(() => addResumeNote(buildDeliveryFactsPrompt(words), run), 'facts-' + run.pass, 'Facts');
   const checked = checkDeliveryFacts(relay, run.trunk);
   if (checked.problem !== undefined) {
     return checked;
   }
+  run.factsStem = /facts-([^/]+)\.json$/.exec(checked.facts.facts_file)[1];
   const scanned = await runPassScan(checked.facts, run);
   return scanned === undefined ? checked : scanned;
 }
@@ -459,7 +468,7 @@ async function runBranchStep(run, plan, freshness) {
   if (commandStop !== undefined) {
     return commandStop;
   }
-  const relay = await runRunnerRelay(addResumeNote(buildBranchPrompt(words), run), 'branch-' + run.pass, 'Branch');
+  const relay = await runRunnerRelay(() => addResumeNote(buildBranchPrompt(words), run), 'branch-' + run.pass, 'Branch');
   return checkBranchRelay(relay, plan, freshness);
 }
 
@@ -513,14 +522,13 @@ function toCommitSubject(text, fallbackSubject) {
   return isUsableSubject(subject) ? subject : fallbackSubject;
 }
 
-function listCommitWords(trunk) {
-  return ['--trunk', trunk, '--inputs', '.hivemind/molt-inputs-{token}.json'];
+function listCommitWords(trunk, inputsPath) {
+  return ['--trunk', trunk, '--inputs', inputsPath];
 }
 
-function buildCommitPrompt(files, plan, trunk, stepName, subject) {
-  const words = listCommitWords(trunk);
+function buildCommitPrompt(files, plan, trunk, inputsPath, stepName, subject) {
   const content = { type: commitTypeMap()[plan.classification], breaking: plan.breaking, subject: subject, files: files };
-  return ['Run the command below to commit ' + commitStepTexts(stepName).purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', words)), formatInputsFileBlock(words[3], content)].join('\n');
+  return ['Run the command below to commit ' + commitStepTexts(stepName).purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', listCommitWords(trunk, inputsPath))), formatInputsFileBlock(inputsPath, content)].join('\n');
 }
 
 function readOutsidePath(payload) {
@@ -573,11 +581,12 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   const subject = commit.subject === undefined ? commitStepTexts(commit.stepName).subject : commit.subject;
   const isReplan = commit.stepName === 'wave';
   phase('Commit');
-  const commandStop = describeCommandStop('commit', listCommitWords(run.trunk));
+  const listWords = (label) => listCommitWords(run.trunk, buildInputsPath(run, 'molt', label));
+  const commandStop = describeCommandStop('commit', listWords(commit.label), listWords(commit.label + '-retry'));
   if (commandStop !== undefined) {
     return stopDelivery(stepCauses.concat([commandStop]), run, [], isReplan);
   }
-  const relay = await runRunnerRelay(addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, commit.stepName, subject), run), commit.label, 'Commit');
+  const relay = await runRunnerRelay((label) => addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, listWords(label)[3], commit.stepName, subject), run), commit.label, 'Commit');
   const checked = checkCommitRelay(relay, plan, commit.stepName);
   if (checked.problem !== undefined) {
     return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);
