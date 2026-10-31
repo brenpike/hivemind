@@ -71,7 +71,9 @@
 #                below). A branch that is one stops with `working_branch equals trunk`, a remote
 #                HEAD git cannot read stops with `cannot read trunk`, and a failed compare stops
 #                with `cannot compare working_branch with trunk`. A listed remote with no such
-#                HEAD ref, or one that is not symbolic, passes.
+#                HEAD ref, or one that is not symbolic, has no default branch record, so the
+#                branch cannot be cleared against it: the run stops with `a remote has no
+#                default branch record: run git remote set-head <remote> --auto`.
 #   worktree    the branch is checked out in another worktree.
 #   base         the base does not resolve to a commit (see BASE below).
 #
@@ -156,10 +158,8 @@
 # caller named that branch, and the trunk stop, which keys on every ref trunk names, still keeps
 # trunk off. Comparing the base's canonical ref would add a stop, and the stops here are not to
 # grow, so this is a recorded residual. The remote default refusal reads only the local
-# refs/remotes/<remote>/HEAD of each remote `git remote` lists. A listed remote with no such ref,
-# or one that is not symbolic, passes; git clone writes the ref, and `git remote set-head <remote>
-# --auto` restores it. A local HEAD ref left stale by a default branch rename on the remote is
-# trusted as it stands. The refusal covers the default branch of any listed remote, a fork's
+# refs/remotes/<remote>/HEAD of each remote `git remote` lists. A local HEAD ref left stale by a
+# default branch rename on the remote is trusted as it stands. The refusal covers the default branch of any listed remote, a fork's
 # included, and folds ASCII case, so it can refuse a branch that is not trunk; it fails safe.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
@@ -364,7 +364,8 @@ refuse_trunk_ref() {
 # refuse_remote_default_branch
 #   Reads, once, whether the branch is the default branch of a remote `git remote` lists, with
 #   hivemind_branch_is_remote_default, whatever trunk names. Blocks when it is, when git cannot
-#   read a remote HEAD, or when the compare fails. Runs in the main shell so blocker exits it.
+#   read a remote HEAD, when a listed remote has no default branch record, or when the compare
+#   fails. Runs in the main shell so blocker exits it.
 refuse_remote_default_branch() {
   local default_rc=0
   hivemind_branch_is_remote_default "$branch_name" || default_rc=$?
@@ -372,6 +373,7 @@ refuse_remote_default_branch() {
     0) ;;
     1) blocker "working_branch equals trunk" ;;
     3) blocker "cannot compare working_branch with trunk" ;;
+    4) blocker "a remote has no default branch record: run git remote set-head <remote> --auto" ;;
     *) blocker "cannot read trunk" ;;
   esac
 }

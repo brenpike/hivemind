@@ -81,11 +81,14 @@
 #     remote name may contain `/` and is used whole, never split. When the end that HEAD ref
 #     names (dangling or not) equals a branch ref, both ASCII case folded, <branch> is that
 #     remote's default branch. A remote with no HEAD ref, or a HEAD ref that is not symbolic,
-#     gives no default. No remote is assumed: with no listed remote, no branch is a default.
+#     has no default branch record, so the branch cannot be cleared against it: that gives 4.
+#     `git remote set-head <remote> --auto` writes the record. No remote is assumed: with no
+#     listed remote, no branch is a default.
 #     Returns 0 no listed remote's default branch is <branch>, 1 <branch> is a listed remote's
 #     default branch, 2 cannot read a remote HEAD (a git error other than not symbolic or
 #     absent, or git prints no end), 3 cannot compare (an empty <branch>, `git remote` failed, or
-#     a case fold failed). Codes 1, 2 and 3 from the remote reads come from the first remote, in
+#     a case fold failed), 4 a listed remote has no default branch record (its HEAD ref is absent
+#     or not symbolic). Codes 1, 2, 3 and 4 from the remote reads come from the first remote, in
 #     `git remote` order, that raises one.
 #
 #   HIVEMIND__REMOTE_LISTING and HIVEMIND__BRANCH_REFS hold the last `git remote` listing read
@@ -299,7 +302,7 @@ hivemind_branch_is_remote_default() {
     head_end="$(git symbolic-ref --quiet "refs/remotes/$remote_name/HEAD" 2>/dev/null)" || head_rc=$?
     case "$head_rc" in
       0) ;;
-      1) continue ;;
+      1) return 4 ;;
       *) return 2 ;;
     esac
     [ -n "$head_end" ] || return 2

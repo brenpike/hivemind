@@ -102,6 +102,7 @@ EXPECT_FORMAT_REASON='expected commit is not a full object id'
 EXPECT_MISMATCH_REASON='HEAD is not the expected commit'
 UNREADABLE_BASE_REASON='cannot read base'
 COMPARE_BASE_REASON='cannot compare the current branch with base'
+NO_DEFAULT_RECORD_REASON='a remote has no default branch record: run git remote set-head <remote> --auto'
 REJECT_WARNING='push was rejected; the branch is not on its remote'
 DEFERRED_WARNING='no upstream and no origin remote; push deferred'
 
@@ -120,7 +121,8 @@ run_git() {
 
 # create_world <name> -> builds $WORKDIR/<name>/{origin.git,other.git,w} and sets WORLD_ROOT,
 # WORK_TREE, ORIGIN_DIR, OTHER_DIR, TRUNK_SHA. origin carries refs/heads/main (TRUNK_SHA); `w` has
-# remotes origin and other, no upstream, and HEAD on feat/x one commit ahead of main (unpushed).
+# remotes origin and other, each with its local HEAD ref on main as `git clone` writes it, no
+# upstream, and HEAD on feat/x one commit ahead of main (unpushed).
 create_world() {
     WORLD_ROOT="$WORKDIR/$1"
     WORK_TREE="$WORLD_ROOT/w"
@@ -136,6 +138,8 @@ create_world() {
     run_git "$WORK_TREE" commit --allow-empty -q -m init
     run_git "$WORK_TREE" remote add origin "$ORIGIN_DIR"
     run_git "$WORK_TREE" remote add other "$OTHER_DIR"
+    set_remote_head origin refs/remotes/origin/main
+    set_remote_head other refs/remotes/other/main
     run_git "$WORK_TREE" push -q origin refs/heads/main:refs/heads/main
     run_git "$WORK_TREE" checkout -q -b "$BRANCH"
     run_git "$WORK_TREE" commit --allow-empty -q -m one
@@ -498,7 +502,8 @@ assert_base_passes() {
 test_base_ref_identity_passes() {
     local sha out rc=0 expected
     create_world base-identity-codex-repro
-    delete_remote_head origin
+    set_remote_head origin refs/remotes/origin/develop
+    set_remote_head other refs/remotes/other/develop
     run_git "$WORK_TREE" checkout -q main
     run_git "$WORK_TREE" branch team/main
     run_git "$WORK_TREE" commit --allow-empty -q -m on-main
@@ -556,11 +561,12 @@ test_base_remote_image_refused() {
 # ── Remote default branch ────────────────────────────────────────────────────
 
 # create_on_main_world <name> -> a world whose `w` is on main one commit ahead of origin main,
-# with no remote HEAD ref. Sets MAIN_SHA to that commit.
+# with each remote HEAD ref on develop, so main is no remote's default. Sets MAIN_SHA to that
+# commit.
 create_on_main_world() {
     create_world "$1"
-    delete_remote_head origin
-    delete_remote_head other
+    set_remote_head origin refs/remotes/origin/develop
+    set_remote_head other refs/remotes/other/develop
     run_git "$WORK_TREE" checkout -q main
     run_git "$WORK_TREE" branch team/main
     run_git "$WORK_TREE" commit --allow-empty -q -m on-main
@@ -603,20 +609,20 @@ test_remote_default_any_end() {
     set_remote_head origin refs/remotes/Origin/MAIN
     assert_blocker remote-default-end-case-variant "$WORK_TREE" "$MISMATCH_REASON" \
         --head main --base develop --remote origin
-    delete_remote_head origin
+    set_remote_head origin refs/remotes/origin/develop
     set_remote_head other refs/remotes/other/main
     assert_blocker remote-default-end-dangling-second-remote "$WORK_TREE" "$MISMATCH_REASON" \
         --head main --base develop --remote origin
-    delete_remote_head other
+    set_remote_head other refs/remotes/other/develop
     set_remote_head origin refs/heads/main
     assert_blocker remote-default-end-local-branch "$WORK_TREE" "$MISMATCH_REASON" \
         --head main --base develop --remote origin
-    delete_remote_head origin
+    set_remote_head origin refs/remotes/origin/develop
     run_git "$WORK_TREE" remote add up/stream "$WORLD_ROOT/upstream.git"
     set_remote_head up/stream refs/remotes/up/stream/main
     assert_blocker remote-default-end-slash-remote "$WORK_TREE" "$MISMATCH_REASON" \
         --head main --base develop --remote origin
-    delete_remote_head up/stream
+    set_remote_head up/stream refs/remotes/up/stream/develop
     mkdir -p "$WORK_TREE/.git/refs/remotes/origin"
     printf 'ref: \n' >"$WORK_TREE/.git/refs/remotes/origin/HEAD"
     assert_blocker remote-default-end-unreadable "$WORK_TREE" "$UNREADABLE_BASE_REASON" \
@@ -626,14 +632,26 @@ test_remote_default_any_end() {
     assert_remote_refs remote-default-end-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
-# A remote HEAD ref that is absent, or not symbolic, gives no default, and a branch that is not
-# the default passes while the remote HEAD points elsewhere.
+# A remote HEAD ref that is absent, or not symbolic, is no default branch record, so the branch
+# cannot be cleared against that remote: the engine stops with the record reason and pushes
+# nothing. A branch that is not the default passes while the remote HEAD points elsewhere.
 test_remote_default_passes() {
     create_on_main_world remote-default-absent
-    assert_success_on_main remote-default-absent
+    install_pre_push_hook
+    delete_remote_head origin
+    assert_blocker remote-default-absent "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+        --head main --base develop --remote origin
+    assert_equal remote-default-absent-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-absent-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
     create_on_main_world remote-default-not-symbolic
+    install_pre_push_hook
     run_git "$WORK_TREE" update-ref --no-deref refs/remotes/origin/HEAD "$TRUNK_SHA"
-    assert_success_on_main remote-default-not-symbolic
+    assert_blocker remote-default-not-symbolic "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
+        --head main --base develop --remote origin
+    assert_equal remote-default-not-symbolic-no-push 0 "$(count_push_attempts)" "push attempts"
+    assert_remote_refs remote-default-not-symbolic-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
+    create_on_main_world remote-default-elsewhere
+    assert_success_on_main remote-default-elsewhere
 
     create_world remote-default-other-branch
     set_remote_head origin refs/remotes/origin/main

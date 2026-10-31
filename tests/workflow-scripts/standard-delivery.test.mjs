@@ -662,6 +662,7 @@ function addBareOrigin(scratch) {
   const origin = join(dirname(scratch.repo), 'origin.git');
   runGitIn(scratch, ['init', '-q', '--bare', origin]);
   runGitIn(scratch, ['remote', 'add', 'origin', origin]);
+  runGitIn(scratch, ['symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main']);
   runGitIn(scratch, ['push', '-q', 'origin', 'main']);
   return origin;
 }

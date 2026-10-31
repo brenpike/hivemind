@@ -71,7 +71,10 @@
 #                remote, ignoring ASCII case, the run stops with `the current branch is trunk`
 #                (hivemind_branch_is_remote_default in _shared/git-refusals.sh). When git cannot
 #                read a remote HEAD, or prints no end for it, the run stops with `cannot read
-#                trunk`. A listed remote with no such ref, or one that is not symbolic, passes.
+#                trunk`. A listed remote with no such ref, or one that is not symbolic, has no
+#                default branch record, so the branch cannot be cleared against it: the run
+#                stops with `a remote has no default branch record: run git remote set-head
+#                <remote> --auto`.
 #   outside     `git status --porcelain=v1 -z --untracked-files=all --no-renames` reports a
 #                dirty path that is not in files. Each such path is printed to stderr as an
 #                `outside: <JSON string>` line, in status order, then the blocker `the working
@@ -188,11 +191,9 @@
 # so it cannot be listed, and its changes are dirty paths outside files. When `.hivemind/` is not
 # ignored, the inputs file itself is a dirty path outside files and the run stops there. The
 # trunk lookup order is mirrored from git, not asked of git, and git 2.25 shows only the end of
-# a symbolic-ref chain, with the same residuals as create-working-branch.sh. A listed remote with
-# no refs/remotes/<remote>/HEAD passes, so its default branch is not refused (git clone writes
-# that ref, and `git remote set-head <remote> --auto` restores it). A local remote HEAD that went
-# stale after a default branch rename still names the old default, and a remote that `git remote`
-# does not list is not read. The private work
+# a symbolic-ref chain, with the same residuals as create-working-branch.sh. A local remote HEAD
+# that went stale after a default branch rename still names the old default, and a remote that
+# `git remote` does not list is not read. The private work
 # folder (mktemp -d under TMPDIR) holds the inputs copy, the status listing, the index entry
 # records from before and after `git add`, the commit's error text and the commit's path listing, and is removed by the EXIT trap.
 #
@@ -389,8 +390,9 @@ refuse_trunk_branch() {
 
 # refuse_remote_default_branch
 #   Blocks when the current branch is the default branch of a remote `git remote` lists, read
-#   from its refs/remotes/<remote>/HEAD, whatever trunk names, and when git cannot read a remote
-#   HEAD. Runs in the main shell so blocker exits it.
+#   from its refs/remotes/<remote>/HEAD, whatever trunk names, when git cannot read a remote
+#   HEAD, and when a listed remote has no default branch record. Runs in the main shell so
+#   blocker exits it.
 refuse_remote_default_branch() {
   local default_rc=0
   hivemind_branch_is_remote_default "$branch_name" || default_rc=$?
@@ -398,6 +400,7 @@ refuse_remote_default_branch() {
     0) ;;
     1) blocker "the current branch is trunk" ;;
     2) blocker "cannot read trunk" ;;
+    4) blocker "a remote has no default branch record: run git remote set-head <remote> --auto" ;;
     *) blocker "cannot compare the current branch with trunk" ;;
   esac
 }

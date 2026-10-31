@@ -17,8 +17,8 @@
 # case fold. A trunk that only ends with `/<branch>` does not. Whatever trunk names, it also refuses
 # a branch that is the default branch of a remote `git remote` lists, the end of that remote's
 # symbolic refs/remotes/<remote>/HEAD, dangling or not, compared after the same case fold; a listed
-# remote with no such HEAD ref, or one that is not symbolic, passes, and a remote HEAD git cannot
-# read stops with `cannot read trunk`. It reads trunk's ref once, before any
+# remote with no such HEAD ref, or one that is not symbolic, stops with the default branch record
+# blocker, and a remote HEAD git cannot read stops with `cannot read trunk`. It reads trunk's ref once, before any
 # change, in git's lookup order, following symbolic refs to their end even when the end does not
 # exist yet, and makes every refusal before any change. It resolves the base once (local branch,
 # then any commit name, then a fetch from origin), switches to an existing branch (removing an
@@ -95,6 +95,7 @@ SYMBOLIC_BRANCH_REASON='working_branch is a symbolic ref'
 UNREADABLE_BRANCH_REASON='cannot read working_branch'
 UNREADABLE_TRUNK_REASON='cannot read trunk'
 COMPARE_TRUNK_REASON='cannot compare working_branch with trunk'
+NO_DEFAULT_RECORD_REASON='a remote has no default branch record: run git remote set-head <remote> --auto'
 NOT_A_CHECKOUT_REASON='not inside a git checkout'
 MERGE_REASON='a merge is in progress'
 REBASE_REASON='a rebase is in progress'
@@ -132,7 +133,9 @@ commit_file() {
 
 # create_world <name> -> builds $WORKDIR/<name>/{origin.git,w} and sets WORLD_ROOT, WORK_TREE,
 # ORIGIN_DIR, TRUNK_SHA. `w` is on main at TRUNK_SHA (f.txt, sub/keep.txt, and a .gitignore that
-# ignores *.log), with remote origin carrying main and refs/remotes/origin/main fetched.
+# ignores *.log), with remote origin carrying main, refs/remotes/origin/main fetched, and
+# refs/remotes/origin/HEAD on refs/remotes/origin/main as `git clone` writes it, whatever the git
+# version's fetch wrote.
 create_world() {
     WORLD_ROOT="$WORKDIR/$1"
     WORK_TREE="$WORLD_ROOT/w"
@@ -150,6 +153,7 @@ create_world() {
     run_git "$WORK_TREE" remote add origin "$ORIGIN_DIR"
     run_git "$WORK_TREE" push -q origin refs/heads/main:refs/heads/main
     run_git "$WORK_TREE" fetch -q origin
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
     TRUNK_SHA="$(run_git "$WORK_TREE" rev-parse refs/heads/main)"
 }
 
@@ -596,7 +600,7 @@ test_trunk_any_spelling() {
 
 test_branch_differs_from_non_main_trunk() {
     create_world trunk-develop
-    delete_remote_head origin
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
     run_git "$WORK_TREE" checkout -q -b develop
     assert_success trunk-develop-switch-to-main "$WORK_TREE" "$(expected_block main "$TRUNK_SHA" false)" \
         --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
@@ -627,7 +631,7 @@ test_trunk_ref_identity() {
         case_name="trunk-identity-${case_names[$index]}"
         trunk_spelling="${trunk_spellings[$index]}"
         create_world "$case_name"
-        delete_remote_head origin
+        run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
         run_git "$WORK_TREE" checkout -q -b scratch
         case "$trunk_spelling" in
             gone/main) run_git "$WORK_TREE" update-ref refs/remotes/gone/main "$TRUNK_SHA" ;;
@@ -665,8 +669,8 @@ test_trunk_ref_identity() {
 # remote `git remote` lists, read from the end of its symbolic refs/remotes/<remote>/HEAD, whatever
 # trunk names. A spoofed trunk (develop, team/main), a case-variant end, a dangling end, a second
 # remote and a remote whose name holds `/` all stop with nothing changed. A remote HEAD that is
-# absent or not symbolic gives no default, so the run proceeds. A remote HEAD git cannot read stops
-# with `cannot read trunk`. Only the target branch is compared, so a run that starts on the
+# absent or not symbolic is no default branch record, so the run stops with nothing changed and
+# the remedy in the blocker. A remote HEAD git cannot read stops with `cannot read trunk`. Only the target branch is compared, so a run that starts on the
 # default branch still moves off it.
 test_remote_default_branch() {
     local index trunk_spelling
@@ -701,7 +705,7 @@ test_remote_default_branch() {
         "$(run_git "$WORK_TREE" for-each-ref refs/heads/release refs/remotes/origin/release)" "release absent"
 
     create_world remote-default-second-remote
-    delete_remote_head origin
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
     run_git "$WORK_TREE" remote add upstream "$WORLD_ROOT/upstream.git"
     run_git "$WORK_TREE" symbolic-ref refs/remotes/upstream/HEAD refs/remotes/upstream/main
     run_git "$WORK_TREE" checkout -q -b develop
@@ -709,7 +713,7 @@ test_remote_default_branch() {
         --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
 
     create_world remote-default-slash-remote
-    delete_remote_head origin
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/develop
     run_git "$WORK_TREE" remote add team/fork "$WORLD_ROOT/fork.git"
     run_git "$WORK_TREE" symbolic-ref refs/remotes/team/fork/HEAD refs/remotes/team/fork/main
     run_git "$WORK_TREE" checkout -q -b develop
@@ -719,17 +723,17 @@ test_remote_default_branch() {
     create_world remote-default-absent
     delete_remote_head origin
     run_git "$WORK_TREE" checkout -q -b develop
-    assert_success remote-default-absent "$WORK_TREE" "$(expected_block main "$TRUNK_SHA" false)" \
+    assert_refused_unchanged remote-default-absent "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
         --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
-    assert_equal remote-default-absent-head refs/heads/main "$(read_head_ref)" "HEAD"
+    assert_equal remote-default-absent-head refs/heads/develop "$(read_head_ref)" "HEAD"
 
     create_world remote-default-not-symbolic
     delete_remote_head origin
     run_git "$WORK_TREE" update-ref refs/remotes/origin/HEAD "$TRUNK_SHA"
     run_git "$WORK_TREE" checkout -q -b develop
-    assert_success remote-default-not-symbolic "$WORK_TREE" "$(expected_block main "$TRUNK_SHA" false)" \
+    assert_refused_unchanged remote-default-not-symbolic "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
         --base develop --branch main --classification feature --trunk-freshness fresh --trunk develop
-    assert_equal remote-default-not-symbolic-head refs/heads/main "$(read_head_ref)" "HEAD"
+    assert_equal remote-default-not-symbolic-head refs/heads/develop "$(read_head_ref)" "HEAD"
 
     create_world remote-default-unreadable
     delete_remote_head origin

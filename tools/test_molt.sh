@@ -118,6 +118,7 @@ BRANCH_NAME_REASON='the current branch name contains characters outside the safe
 IS_TRUNK_REASON='the current branch is trunk'
 UNREADABLE_TRUNK_REASON='cannot read trunk'
 CANNOT_COMPARE_REASON='cannot compare the current branch with trunk'
+NO_DEFAULT_RECORD_REASON='a remote has no default branch record: run git remote set-head <remote> --auto'
 OUTSIDE_REASON='the working tree has dirty paths outside files'
 COMMIT_FAILED_REASON='the commit failed'
 STILL_DIRTY_REASON='a listed path is still dirty after the commit'
@@ -533,7 +534,9 @@ create_main_world() {
 # read from refs/remotes/<remote>/HEAD, whatever --trunk says. A spoofed trunk on main stops with
 # nothing changed when origin's HEAD names main, as an existing, case-variant or dangling end, a
 # local branch end, through a remote whose name holds `/`, or through a second remote. A remote
-# HEAD that is absent or not symbolic passes, and an unreadable one stops the run.
+# HEAD that is absent or not symbolic is no default branch record and stops the run with nothing
+# changed, an unreadable one stops the run, and main proceeds when the remote HEAD names another
+# branch.
 test_remote_default_branch() {
     local trunk_spelling index=0
     create_main_world remote-default
@@ -584,13 +587,18 @@ test_remote_default_branch() {
     create_main_world remote-default-absent
     set_remote_head origin refs/remotes/origin/main
     run_git "$WORK_TREE" symbolic-ref --delete refs/remotes/origin/HEAD
-    assert_success remote-default-absent-proceeds "$WORK_TREE" \
-        "$(printf 'branch: main\ncommit: %s\ncommitted: false' "$MAIN_SHA")" --trunk develop --inputs "$INPUTS_REL"
+    assert_refused_unchanged remote-default-absent "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
 
     create_main_world remote-default-not-symbolic
     run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
     run_git "$WORK_TREE" update-ref refs/remotes/origin/HEAD "$MAIN_SHA"
-    assert_success remote-default-not-symbolic-proceeds "$WORK_TREE" \
+    assert_refused_unchanged remote-default-not-symbolic "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" '' \
+        --trunk develop --inputs "$INPUTS_REL"
+
+    create_main_world remote-default-elsewhere
+    set_remote_head origin refs/remotes/origin/develop
+    assert_success remote-default-elsewhere-proceeds "$WORK_TREE" \
         "$(printf 'branch: main\ncommit: %s\ncommitted: false' "$MAIN_SHA")" --trunk develop --inputs "$INPUTS_REL"
 
     create_world remote-default-other-branch
@@ -658,7 +666,7 @@ test_remote_listing_fails() {
     done
 
     create_world remote-listing-control
-    run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
+    set_remote_head origin refs/remotes/origin/main
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     with_failing_remote 0 assert_commit_run remote-listing-control "$WORK_TREE" "$INPUTS_REL"

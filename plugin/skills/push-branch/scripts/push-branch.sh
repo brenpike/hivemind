@@ -62,9 +62,11 @@
 #        or b's image on a listed remote, after the same ASCII case fold. A remote name that
 #        contains `/` is used whole. A remote HEAD git cannot read stops with `cannot read base`,
 #        and a failed compare with `cannot compare the current branch with base`. A listed remote
-#        with no HEAD ref, or a HEAD ref that is not symbolic, passes (`git clone` writes the ref;
-#        `git remote set-head <remote> --auto` restores it). A push remote that `git remote` does
-#        not list (an explicit --remote path) is not seen.
+#        with no HEAD ref, or a HEAD ref that is not symbolic, has no default branch record, so b
+#        cannot be cleared against it: the run stops with `a remote has no default branch record:
+#        run git remote set-head <remote> --auto` (`git clone` writes the ref, and that command
+#        writes it again). A push remote that `git remote` does not list (an explicit --remote
+#        path) is not seen.
 #   MODE explicit: --remote given; push to it, then record the upstream.
 #        upstream: branch.<b>.remote or branch.<b>.merge non-empty. Both must then be non-empty,
 #                  merge must equal refs/heads/<b>, remote is gated. Push remote is
@@ -374,8 +376,8 @@ refuse_base_names_branch
 
 # refuse_remote_default_branch
 #   Blocks when the current branch is the default branch of a remote `git remote` lists, read with
-#   hivemind_branch_is_remote_default, whatever base names. Runs in the main shell so blocker
-#   exits it.
+#   hivemind_branch_is_remote_default, whatever base names, and when a listed remote has no default
+#   branch record. Runs in the main shell so blocker exits it.
 refuse_remote_default_branch() {
   local default_rc=0
   hivemind_branch_is_remote_default "$current_branch" || default_rc=$?
@@ -383,6 +385,7 @@ refuse_remote_default_branch() {
     0) ;;
     1) blocker "$mismatch_reason" ;;
     2) blocker "cannot read base" ;;
+    4) blocker "a remote has no default branch record: run git remote set-head <remote> --auto" ;;
     *) blocker "cannot compare the current branch with base" ;;
   esac
 }

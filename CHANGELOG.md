@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The committing and pushing runner scripts (molt, push-branch run by open-plan-pr, and create-working-branch) refuse the default branch of every remote git lists, read from its local HEAD ref, whatever trunk or base name the call passes (#482).
+- The committing and pushing runner scripts (molt, push-branch run by open-plan-pr, and create-working-branch) refuse the default branch of every remote git lists, read from its local HEAD ref, whatever trunk or base name the call passes. A listed remote with no default branch record is refused too, with the blocker `a remote has no default branch record: run git remote set-head <remote> --auto` (#482).
 
 ## [7.5.2] - 2026-10-30
 

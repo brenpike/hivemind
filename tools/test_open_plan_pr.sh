@@ -210,7 +210,8 @@ run_git() {
 }
 
 # create_world <name> -> builds $WORKDIR/<name>/{github/o/r.git,w,gh}. origin carries main; `w`
-# has remote origin at ORIGIN_URL (served by the fake ssh transport), no upstream, and HEAD on
+# has remote origin at ORIGIN_URL (served by the fake ssh transport) with its local HEAD ref on
+# main as `git clone` writes it, no upstream, and HEAD on
 # feat/x one commit ahead of main (unpushed). main has a .gitignore that ignores .hivemind/. Sets
 # WORLD_ROOT, WORK_TREE, ORIGIN_DIR, INPUTS_PATH, GH_STUB_DIR and FAKE_SSH_ROOT (exported),
 # TRUNK_SHA and HEAD_SHA, writes a valid inputs file, and scripts `gh repo view` to print R_o.
@@ -233,6 +234,7 @@ create_world() {
     run_git "$WORK_TREE" add .gitignore sub/keep.txt f.txt
     run_git "$WORK_TREE" commit -q -m init
     run_git "$WORK_TREE" remote add origin "$ORIGIN_URL"
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD refs/remotes/origin/main
     run_git "$WORK_TREE" push -q origin refs/heads/main:refs/heads/main
     TRUNK_SHA="$(run_git "$WORK_TREE" rev-parse refs/heads/main)"
     run_git "$WORK_TREE" checkout -q -b "$BRANCH"
@@ -954,6 +956,7 @@ test_head_repository() {
     mkdir -p "$FAKE_SSH_ROOT/f"
     run_git "$FAKE_SSH_ROOT/f" init -q --bare r.git
     run_git "$WORK_TREE" remote add fork 'git@github.com:f/r.git'
+    run_git "$WORK_TREE" symbolic-ref refs/remotes/fork/HEAD refs/remotes/fork/main
     run_git "$WORK_TREE" push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
     run_git "$WORK_TREE" config "branch.$BRANCH.remote" origin
     run_git "$WORK_TREE" config "branch.$BRANCH.merge" "refs/heads/$BRANCH"
