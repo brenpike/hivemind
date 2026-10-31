@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.5] - 2026-10-31
+
+### Changed
+
+- Docs: the ADR-0010, ADR-0017 and ADR-0037 amendments (#455).
+
+### Fixed
+
+- Brood strains read the plugin's files (governance, references, skills) without a permission prompt, because spawn-brood starts each strain with `--settings` carrying a read-only rule for the plugin folder (#455).
+
 ## [7.5.4] - 2026-10-30
 
 ### Changed

@@ -4,14 +4,16 @@
 #
 # Spawns N overlord sessions ("strains") as a brood: one git worktree per strain,
 # one detached tmux session per strain running claude in auto mode
-# (`claude --permission-mode auto`), a per-strain task.md, and a per-brood manifest. After
+# (`claude --permission-mode auto`, plus `--settings` naming the per-brood strain-settings.json
+# when that file holds a plugin read rule), a per-strain task.md, and a per-brood manifest. After
 # the manifest is written it turns on remote control (`/rc <short>`) for every strain that
 # started. This script OWNS every deterministic shell step; the skill body is a navigator
 # that authors the inputs file and calls this script once.
 #
 # STATE LAYOUT (per-brood namespacing): each spawn generates its OWN brood-id
 # INTERNALLY (brood-<uuidv4>) and writes its state to a DISJOINT, per-brood directory —
-# .hivemind/broods/<brood-id>/{inputs.json,manifest.json} — anchored to the checkout root.
+# .hivemind/broods/<brood-id>/{inputs.json,manifest.json} — anchored to the checkout root —
+# plus strain-settings.json when at least one plugin read rule was written.
 # Worktrees and tmux sessions are likewise namespaced by brood-id (see below), so two concurrent
 # same-checkout spawns get DISJOINT worktrees+sessions+manifests and cannot collide. This
 # isolation REPLACES the old singleton manifest + tmux-liveness guard: there is no shared
@@ -68,6 +70,14 @@
 #   - Writes per-strain task.md files under each worktree's gitignored .hivemind/, and copies the
 #     coordinator .claude/settings.local.json (refused up front when it is a symlink or not a
 #     regular file) into each worktree.
+#   - Writes .hivemind/broods/<brood-id>/strain-settings.json (JSON) when at least one spelling
+#     of the plugin root (canonical pwd -P, logical pwd -L) passes the charset gate: it holds
+#     exactly {"permissions":{"allow":["Read(/<root>/**)", ...]}}, one read-only rule per
+#     spelling, and no other key. Every strain then launches with
+#     `--settings ../../../../.hivemind/broods/<brood-id>/strain-settings.json`, so its reads of
+#     plugin files outside its worktree do not prompt. A spelling that fails the gate gets no
+#     rule and one `warning:` line on stderr; with no rule the file is not written and the
+#     launch stays `claude --permission-mode auto`.
 #   - Writes the brood manifest to .hivemind/broods/<brood-id>/manifest.json (JSON,
 #     manifest_version: 4) in the coordinator checkout (anchored to the checkout root).
 #   - Reads no brood state itself. Every brood-state read (a child run ledger, a child's
@@ -609,6 +619,57 @@ printf '%s\n' "$inputs_snapshot" > "$STATE/inputs.json" \
 rm -f "$INPUTS_FILE" \
   || blocker "failed to remove staging inputs file $INPUTS_FILE after recording it into $STATE/inputs.json; no worktree or session created"
 
+# ── Strain plugin read rule (pre-flight, before Pass 1) ─────────────────────────
+# A strain runs in its own worktree and the plugin folder lies outside it, so each Read or Grep
+# of a plugin governance, reference or skill file would prompt and an unattended strain would
+# wait. Write one per-brood settings file holding only permissions.allow, with one read-only
+# `Read(/<root>/**)` rule per spelling of the plugin root: the canonical one (plugin_root,
+# pwd -P) and the logical one (the invoked path, cd -L + pwd -L), a duplicate dropped. A spelling
+# that is not absolute or holds a byte outside [A-Za-z0-9 ._/@+()-] gets no rule and one
+# `warning:` line, so strains prompt on its files as before. Every rule reaches jq only as an
+# --arg binding. Each strain launches with a `--settings` path relative to its worktree
+# (.claude/worktrees/<brood-id>/<short>, four levels below the checkout root), so the tmux
+# command string holds only fixed literals and the asserted brood id. With no rule no file is
+# written and the launch command stays `claude --permission-mode auto`. No Edit rule, no
+# --add-dir and no --allowedTools are added.
+strain_settings_rel=".hivemind/broods/$brood_id/strain-settings.json"
+strain_settings="$repo_root/$strain_settings_rel"
+logical_plugin_root="$(__d="$(dirname -- "${BASH_SOURCE[0]}" 2>/dev/null)" && [ -n "$__d" ] && CDPATH= cd -L -- "$__d/../../.." 2>/dev/null && pwd -L 2>/dev/null)" \
+  || logical_plugin_root=""
+
+# build_plugin_read_rule <root-spelling>: echo the `Read(/<root>/**)` rule for one plugin-root
+# spelling and return 0, or print one `warning:` line to stderr and return 1 when the spelling
+# is not absolute or holds a byte outside [A-Za-z0-9 ._/@+()-].
+build_plugin_read_rule() {
+  local root_spelling="$1"
+  local root_shown
+  case "$root_spelling" in
+    '' | [!/]* | *[!A-Za-z0-9\ ._/@+\(\)-]*)
+      root_shown="$(printf '%s' "$root_spelling" | tr -d '\000-\037\177')"
+      printf 'warning: plugin root %s is not absolute or holds a byte outside [A-Za-z0-9 ._/@+()-]; strains get no read rule for it and prompt on its files\n' "$root_shown" >&2
+      return 1 ;;
+  esac
+  printf 'Read(/%s/**)' "$root_spelling"
+  return 0
+}
+
+canon_read_rule="$(build_plugin_read_rule "$plugin_root")" || canon_read_rule=""
+logical_read_rule=""
+if [ "$logical_plugin_root" != "$plugin_root" ]; then
+  logical_read_rule="$(build_plugin_read_rule "$logical_plugin_root")" || logical_read_rule=""
+fi
+
+strain_launch_cmd="claude --permission-mode auto"
+if [ -n "$canon_read_rule" ] || [ -n "$logical_read_rule" ]; then
+  hivemind_assert_file_contained "$repo_root" "$strain_settings_rel" >/dev/null \
+    || blocker "refusing to write the strain settings: $strain_settings is a symlink or not a regular file, or an ancestor resolves outside the checkout; no worktree or session created"
+  jq -n --arg canon_rule "$canon_read_rule" --arg logical_rule "$logical_read_rule" \
+    '{permissions: {allow: ([$canon_rule, $logical_rule] | map(select(. != "")))}}' \
+    > "$strain_settings" 2>/dev/null \
+    || blocker "failed to write the strain settings $strain_settings; no worktree or session created"
+  strain_launch_cmd="claude --permission-mode auto --settings ../../../../$strain_settings_rel"
+fi
+
 # ── Per-strain failure helpers ──────────────────────────────────────────────────
 # HARD failure: worktree add / new-session failed BEFORE launch. Clean up ONLY
 # resources THIS invocation confirmed it created (TOCTOU-guarded by per-resource
@@ -859,13 +920,18 @@ for idx in $(seq 0 $((strain_count - 1))); do
 
   # 3d: launch a DETACHED tmux session running claude in auto mode (tmux supplies the pty the
   # Bash context lacks). In auto mode the classifier launches the child's workflow with no
-  # prompt (ADR-0037 PR8 smoke record), so the child runs on the script engine.
+  # prompt (ADR-0037 PR8 smoke record), so the child runs on the script engine. When the
+  # pre-flight wrote strain-settings.json, the command adds
+  # `--settings ../../../../.hivemind/broods/<brood-id>/strain-settings.json` (relative to this
+  # worktree) so the child's reads of plugin files outside the worktree match a read-only allow
+  # rule and do not prompt; otherwise it is `claude --permission-mode auto`. Either way the
+  # string holds only fixed literals and the asserted brood id.
   # MARK-BEFORE-MUTATE: set cur_session IMMEDIATELY BEFORE new-session so an interrupt
   # that fires as the command completes reports the possibly-live session rather than
   # omitting it (a live auto-mode child must never go unreported).
   cur_session="$tmux_session"
   if ! tmux new-session -d -s "$tmux_session" -c "$wt" \
-        "claude --permission-mode auto" 2>/dev/null; then
+        "$strain_launch_cmd" 2>/dev/null; then
     printf 'warning: tmux new-session failed for strain %s\n' "${S_NAME[$idx]}" >&2
     mark_failed "$idx"
     # HARD cleanup: remove ONLY what this invocation created (the worktree

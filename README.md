@@ -317,7 +317,7 @@ You --> Overlord --> Cerebrate (decompose)
 ```
 
 - **Approval gate.** The overlord shows you the normalized strain tasks and dispatches nothing until you approve.
-- **One worktree and one detached tmux session per strain.** Each strain runs its own overlord in `.claude/worktrees/<brood-id>/<short>`, started in auto mode, so it launches the workflow scripts with no approval prompt.
+- **One worktree and one detached tmux session per strain.** Each strain runs its own overlord in `.claude/worktrees/<brood-id>/<short>`, started in auto mode, so it launches the workflow scripts with no approval prompt. Strains read the plugin's files with no prompt through a read-only rule in a per-brood settings file that spawn passes to each strain.
 - **Manifest.** `hivemind:spawn-brood` writes `.hivemind/broods/<brood-id>/manifest.json`.
 - **Children are brood-unaware.** Each child starts on a detached HEAD at the base, plans and names its own working branch, runs the full lifecycle, and opens its own PR.
 - **Remote control.** Once a strain has started, spawn turns on remote control for it (`/rc <short>`), so you can watch and answer it from claude.ai or the Claude app. Monitoring the brood is your job. Remote control needs a claude.ai subscription login. A strain that had not started when spawn ended gets no remote control until you ask for `hivemind:enable-brood-remote`.
