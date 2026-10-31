@@ -39,9 +39,17 @@ After:
 - [ ] Each strain has a worktree created DETACHED at the resolved `base` commit
       (no `strain/<brood-id>/<short>` branch is created; the child's own planner
       names and creates its working branch), a detached tmux session
-      `<brood-id>-<short>` running `claude --permission-mode auto`, and its
-      injected `task.md`. In auto mode the classifier launches the child's workflow
-      with no prompt, so the child runs on the script engine. `task.md` emits the
+      `<brood-id>-<short>` running
+      `claude --permission-mode auto --settings ../../../../.hivemind/broods/<brood-id>/strain-settings.json`,
+      and its injected `task.md`. In auto mode the classifier launches the child's workflow
+      with no prompt, so the child runs on the script engine. The per-brood
+      `strain-settings.json`, written in pre-flight, holds only `permissions.allow`
+      with one read-only `Read(/<root>/**)` rule per spelling of the plugin root
+      (the canonical `pwd -P` spelling and the logical `${CLAUDE_PLUGIN_ROOT}`
+      spelling) and no other key, so a strain reads the plugin's files with no
+      prompt. A spelling that fails the charset gate gets no rule and the script
+      prints a `warning:` line naming the skip; that strain prompts on plugin reads
+      as before. `task.md` emits the
       data-boundary preamble FIRST, THEN a data-only YAML block: `parent.kind`,
       `parent.brood_id`, `strain.id`, `strain.name`, `run.suggested_id`,
       `run.workflow_hint` (a non-binding hint, passed through AS-IS),
