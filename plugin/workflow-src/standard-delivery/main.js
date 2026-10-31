@@ -242,7 +242,8 @@
  *   unique and a resume replays every earlier prompt byte for byte and gets
  *   every earlier result, side effects included, from cache. A commit or
  *   pull request inputs path is the pass's facts file stem, run.factsStem,
- *   and the call label (relay.js buildInputsPath), so it is unique too.
+ *   and the call label (relay.js buildInputsPath), so it is unique too,
+ *   given a faithful facts relay.
  *
  * Why
  *   Delivery transitions cost no model turn when they are code. The git

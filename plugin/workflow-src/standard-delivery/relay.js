@@ -121,13 +121,13 @@
  *   does not close it: an agent that still obeys the reply returns a
  *   blocked or refused result, which every check above still reads.
  *   ADR-0037 records the residual.
- *   The commit and PR runners write their own inputs file and pass its
- *   path to molt.sh or open-plan-pr.sh (review finding fb4c129c), the path
- *   buildInputsPath builds (issue 487), unique per call and run. What
- *   reaches git and GitHub rests on the runner copying its inputs_file block
- *   (ADR-0037 Risks). Each script refuses an inputs file outside the
- *   checkout or one that breaks a field rule, molt.sh refuses any dirty
- *   path outside its list, and the workflow checks every routing line.
+ *   The commit and PR runners write their own inputs file and pass its path to
+ *   molt.sh or open-plan-pr.sh (review finding fb4c129c), the path
+ *   buildInputsPath builds (issue 487), unique per call and run given a faithful
+ *   facts relay. What reaches git and GitHub rests on the runner copying its
+ *   inputs_file block (ADR-0037 Risks). Each script refuses an inputs file
+ *   outside the checkout or one that breaks a field rule, molt.sh refuses any
+ *   dirty path outside its list, and the workflow checks every routing line.
  *
  * Why
  *   Every runner step is one committed script relayed word for word, so

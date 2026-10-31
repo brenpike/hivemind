@@ -21,7 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Standard delivery now names each commit and pull request inputs file from the pass's facts file name and the agent call label. A runner no longer makes up the token, a new run never reuses an earlier run's file, and a transient retry writes its own file (#487).
+- Standard delivery now names each commit and pull request inputs file from the pass's facts file name and the agent call label. A runner no longer makes up the token, a new run does not reuse an earlier run's file (given a faithful facts relay), and a transient retry writes its own file (#487).
 
 ## [7.5.5] - 2026-10-31
 
