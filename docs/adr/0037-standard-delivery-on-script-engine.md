@@ -35,7 +35,7 @@ The post-PR watch and pr-feedback-remediation stay on the current engine until s
 8. PR: a runner pushes through `push-branch.sh` and opens the PR or reuses an open one.
 9. The overlord relays the message, applies the ADR-0029 watch rule, and hands the watch to pr-feedback-remediation on the current engine.
 
-A workflow script cannot run a shell, so it sees only what agents report. The hard stops sit in the committed scripts, and the workflow reads their routing lines from a schema field and blocks when a line is missing or malformed.
+A workflow script cannot run a shell, so it sees only what agents report. The hard stops sit in the committed scripts, and the workflow reads their routing lines from a schema field and blocks when a line is missing or malformed. Amended 2026-10-30 (issue 447): only routing lines are read, the first line of each key the script's spec names, and every other line of the relay is ignored (see Amendment 2026-10-30: a relay is read for its routing lines only (issue 447)).
 
 ## Step invariants
 
@@ -1644,3 +1644,65 @@ Unchanged by this amendment.
 **Local review finding d5a5ff74.** Its main claim: a missing, non-symbolic or stale remote HEAD ref passes, so that default branch is not refused. The user decision (option B, 2026-10-30) fixes the main claim for a missing or non-symbolic ref. Such a remote is now refused, so the gap is closed by construction. The stale-ref part stays a recorded residual, with its ground above. Its write-up gap was also valid: the residual bullets lacked a bounded impact and a ground, and "All of these fail safe" read as covering every bullet. That gap is fixed here. The fix applied the "Recorded Residual" template to every bullet in one pass, not one bullet at a time.
 
 Links: https://github.com/brenpike/hivemind/issues/482, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
+
+## Amendment 2026-10-30: a relay is read for its routing lines only (issue 447)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/447 and its comment https://github.com/brenpike/hivemind/issues/447#issuecomment-6458911202. On the #445 run (2026-10-24), `open-plan-pr.sh` pushed the branch, opened PR #446 and exited 0, but the run stopped blocked with "The pull request step returned malformed routing lines". GitHub's `remote:` hint for a new branch sat ahead of the routing lines in the relay. The run never returned `pr`, so the post-PR watch never started. The comment adds the same class at the bump step of run wf_398dc0ff-c29 (#464, installed 7.2.1): the bump runner relayed correct routing lines, then added a line of its own prose, and the run ended blocked before validation.
+
+**First-finding triage, per ADR-0038.**
+
+First finding: a relay that holds lines the script did not print on stdout stops a run whose script succeeded.
+
+- **Introduced or inherited.** Inherited from main. Both owning layers were on main before this branch.
+- **Root class.** Two layers own it.
+  - The parser, `parseRoutingLines` in `plugin/workflow-src/lib/routing.js`. It rejected every line that was not a spec line, with the codes `unknown` (a key not in the spec), `malformed` (a blank or off-grammar line) and `duplicate` (a repeated key). But a relay is an agent's copy of what its Bash call showed. Lines the script never printed on stdout are to be expected there: the stderr of a command the script ran, agent notes, code fences, blank lines and repeats.
+  - The pull request script, `plugin/skills/open-plan-pr/scripts/open-plan-pr.sh`. It wrote the stderr of `push-branch.sh` (git push output, GitHub's `remote:` hints included) and of `gh pr create` and `gh pr comment` to its own stderr, even on exit 0. `RELAY_SCHEMA` allows no stderr on a ran relay, so that text had no valid home. In the relay's stdout it gave malformed routing lines, as in the #445 run. In a stderr field it gave an unusable result.
+- **Removed instead of hardened.** The line rejections and the success-path stderr are removed. No prompt rule about how to copy a relay was added.
+
+**Why the issue's first fix was already in place.** The issue proposed sending the push output to stderr, so that stdout carries only routing lines. It already went there. `push-branch.sh` passes git's stderr through to its own stderr, and `open-plan-pr.sh` parses the stdout of `push-branch.sh` strictly, so it would have blocked on a `remote:` line there. The hint lines reached the runner through the stderr of `open-plan-pr.sh`, and the runner put them in its stdout relay. Moving the push output to stderr again would change nothing.
+
+**Leak recheck of each runner step.** Each relay was checked for the two sources of extra lines: script stderr on exit 0, and lines the agent adds.
+
+- Facts (`gather-facts.sh`), branch (`create-working-branch.sh`), and commit and head check (`molt.sh`): no stderr on exit 0. These relays are exposed only to lines the agent adds.
+- Pull request (`open-plan-pr.sh`): exposed to both, script stderr and lines the agent adds.
+- Version check: the bump step is gone since #477 (issue 457), and its relay moved into the validate drone's version check. `bump-type.sh` writes nothing to stderr, but the drone can add prose after the routing lines, as in the #464 case.
+- analysis-only's facts runner: it copies four named fields and parses no lines, so it is not exposed.
+
+**The change.**
+
+- The parser reads only the first line of each spec key, at its level, and ignores every other line: blank lines, prose, code fences, lines whose key is not in the spec, indented lines with no open block, and every later line of a key already read. A repeated block key opens no block. A missing required key, or a first line off its pattern, a CR in it included, still pauses as malformed routing lines.
+- `open-plan-pr.sh` relays child stderr only when it blocks. One helper, `relay_child_stderr`, writes the kept stderr of `push-branch.sh`, `gh pr comment` and `gh pr create`, in call order, before the `blocker:` line. On exit 0 the script's stderr is empty.
+- The version moves to 7.5.4.
+
+**Removed surfaces and what replaces them.**
+
+- Removed: the `unknown` and `duplicate` problem codes. `routingProblems()` now returns `missing` and `malformed` only.
+- Removed: the line rejections. A blank line, a line with leading whitespace outside a block, an off-grammar line, a repeated key, and a CR in a line that is not read no longer stop the run.
+- Removed: the success-path stderr of `open-plan-pr.sh`, its three relays of child stderr that ran whatever the exit code.
+- Replaced by: the first-line rule above, and contract row SD-75 with its test in `tests/workflow-scripts/standard-delivery.test.mjs`. SD-75 pins that the stdout of every runner relay (facts, branch, commit and head check, and pull request) and of the validation version relay is read through `readRelayedLines` with `parseRoutingLines`, so a line the script did not print on stdout never stops the run, and that a missing required key, or a first line off its pattern, still pauses as malformed routing lines. Its test replays the #445 and #464 shapes. `tests/workflow-scripts/routing.test.mjs` covers the parser, and `tools/test_open_plan_pr.sh` asserts empty stderr on every success case.
+
+**The user's decision in this run.** Q1, how the relay is read: option A, answered by the user. The parser reads only the first line of each known routing key and ignores all other lines. The tests that expected an extra line to stop the run are rewritten to expect the run to go on, and the user approved those rewrites with the same answer.
+
+**Options ruled out.**
+
+- **A routing file the script writes.** The comment's second candidate. A workflow script cannot read a file, so an agent would still copy the file's text, and that copy is the relay this amendment already reads.
+- **A stronger prompt rule.** It hardens the runner prompt instead of removing the surface. A model that copies script output can still add a line, as the comment found.
+- **Stderr allowed on a ran relay.** It grows `RELAY_SCHEMA` and adds a field for the workflow to read and route that no step needs.
+- **Option B.** Read the first line of each key, but stop the run when a later line of a known key conflicts with it. A repeat or a miscopy by the agent can still stop a run whose script succeeded, so the class stays open.
+- **Option C.** Keep the strict check. Every line an agent adds, the #464 case included, could still stop the run.
+
+**Surface account.**
+
+- Removed: 2 problem codes, the parser's line rejections, and 3 success-path stderr relays in `open-plan-pr.sh`.
+- Added: 1 helper in `open-plan-pr.sh`, 1 contract row (SD-75) and its tests, the rewritten parser tests, and this text.
+- No schema, hook or agent change. The runtime surface shrinks.
+
+**Rows.** SD-75 is added.
+
+**Recorded residuals.** Each bullet states what is not covered, its bounded impact and its ground, per `plugin/governance/remediation-doctrine.md` "Recorded Residual".
+
+- **A first spec-key line an agent adds.** Not covered: a line an agent adds is read when it is the first line of a spec key, either before the script's own line of that key or for an optional key the script did not print. Bounded impact: off its pattern it pauses as malformed routing lines. On its pattern it is taken, as a forged relay already is (see Risks, and the recorded residual "Scan coverage relies on the facts runner's count"). Git writes still go only through the committed scripts, whose refusals never read the relay (decision 5), and the code checks on relayed values, such as the facts consistency check in `plugin/workflow-src/lib/facts.js`, still apply. Ground: unclosable on this engine. A workflow script cannot run a shell or read a file, so it sees only what agents report, and no check on the relay text can tell a script's line from an agent's line with the same key and a valid value. The user decided so with option A on Q1.
+- **Drift between script keys and spec keys.** Not covered: a routing key a script starts to print, and that its spec in the workflow lacks, is no longer caught at run time. The line is ignored like any other. Bounded impact: the per-script OUTPUT-header key tests catch it before merge. They compare the keys in each script's `# OUTPUT on success` header with its spec, for `gather-facts.sh`, `create-working-branch.sh`, `molt.sh`, `bump-type.sh` and `open-plan-pr.sh`, so the drift reaches a run only when a script prints a key its header does not list. A required key the spec has and the script drops still pauses as missing. Ground: unclosable on this engine. In a relay, an unknown key from the script and one an agent adds look the same, so rejecting it is the strict check the user turned down (option C). The user decided so with option A on Q1.
+- **A non-routing line inside a block.** Not covered: a line that is not a routing line of the open block closes it, so the block's later lines are not read. Today the only block is `counts` in the `bump-type.sh` spec. Bounded impact: the run pauses on a missing block key, as malformed routing lines, and the step's stop is shown to the user. It never routes on a wrong value. Ground: unclosable on this engine. A relay marks no block end, so reading block lines past a foreign line would read lines that may belong to the agent's text, such as a repeated block. The user decided so with option A on Q1, which reads only routing lines.
+
+Links: https://github.com/brenpike/hivemind/issues/447, https://github.com/brenpike/hivemind/issues/447#issuecomment-6458911202, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
