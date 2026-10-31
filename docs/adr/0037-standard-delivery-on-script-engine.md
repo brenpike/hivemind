@@ -1784,11 +1784,11 @@ This amendment covers https://github.com/brenpike/hivemind/issues/488. `molt.sh`
 
 **The change.**
 
-- `plugin/skills/_shared/containment.sh` gains one function, `hivemind_remove_inputs_file`. It deletes only a leaf named `<kind>-inputs-<token>.json`, where `<kind>` is `molt` or `pr` and `<token>` is 1 to 64 characters of `[A-Za-z0-9-]`, the hook's class. The leaf must sit directly under a real `<top>/.hivemind` folder, where `<top>` is the checkout's top, so a linked worktree uses its own top. It never deletes a symlink or a file that is not a regular file. It deletes from inside the canonical folder, so a swapped ancestor cannot redirect the delete. The function adds no top-level statement, and the existing functions are unchanged.
+- `plugin/skills/_shared/containment.sh` gains one function, `hivemind_remove_inputs_file`. It deletes only a leaf named `<kind>-inputs-<token>.json`, where `<kind>` is `molt` or `pr` and `<token>` is 1 to 64 characters of `[A-Za-z0-9-]`, the hook's class. The leaf must sit directly under a real `<top>/.hivemind` folder, where `<top>` is the checkout's top, so a linked worktree uses its own top. It refuses a symlink or a file that is not a regular file. It deletes from inside the canonical folder, so a symlink or a swapped ancestor already in place when it checks cannot redirect the delete. A same-user race during the delete is outside the threat model (see the recorded decision below). The function adds no top-level statement, and the existing functions are unchanged.
 - Each script calls it on the exact leaf it read, right after its `jq` read into the private copy, whether or not that read succeeded, and before any later check. A file that holds invalid JSON is still deleted.
 - The delete is best effort. A failed delete leaves the file and is not a stop, under the stop-calibration rule.
 - A refusal before the read keeps the file: a usage error, a bad identifier, a delay, a missing `gh`, a file not found, and a file outside the checkout.
-- No other file is touched. Another run's inputs file, an older sibling file and every other file under `.hivemind` stay as they are.
+- No other file is touched, outside the same-user race recorded below. Another run's inputs file, an older sibling file and every other file under `.hivemind` stay as they are.
 - The version moves to 7.5.7.
 
 **The stop it removes.** The delete runs before the dirty checks. So when `.hivemind/` is not ignored, the inputs file no longer trips the outside-path refusal of `molt.sh` or the untracked refusal of `open-plan-pr.sh`.
@@ -1809,12 +1809,16 @@ This amendment covers https://github.com/brenpike/hivemind/issues/488. `molt.sh`
 
 **Options ruled out.**
 
-- **A sweep of old sibling files.** A script that deletes other inputs files could delete the file of a concurrent run before that run's script reads it. Each script deletes only the leaf it read.
+- **A sweep of old sibling files.** A script that deletes other inputs files could delete the file of a concurrent run before that run's script reads it. Each script deletes only the leaf it read, by name.
 - **An EXIT-trap delete.** It moves the delete to the end of the script, after the dirty checks, so the not-ignored stop stays. A trap also runs on paths that never read the file.
 - **A new stop on a failed delete.** A run whose script succeeded would stop over a file it no longer needs. The stop-calibration rule rules it out.
 - **A committed cleanup script under `tools/`.** The Q1 decision (option A) makes the cleanup a one-time overlord action instead.
 
-**The user's decisions in this run.** Q1, how the leftover files are cleaned up: option A, answered by the user. The overlord deletes them once, after merge, with no committed script.
+**Recorded decision.**
+
+- **A same-user program racing the inputs-file delete is outside the threat model (local review finding d9bfac93).** The finding, severity high, titled "Deletion is not bound to the file the caller read", said the helper checks the inputs path and later runs `rm` on it by name, after the script's `jq` read. A program that swaps the leaf, or renames and recreates `.hivemind`, between those checks and the `rm` can get a different file of the same name deleted, so the claim that only the exact inputs file is touched does not hold. It recommended renaming the leaf to a unique quarantine name inside `.hivemind` before the read, reading and deleting only that name, and adding race tests. Root cause: the read, the checks and the `rm` each go by pathname, and bash has no portable way to bind them to one open file. Bounded impact: the race needs a program running as the same user in the checkout at the moment of the delete. Such a program can already delete any file the user can, so the race gives it nothing it lacks. A symlink or a swapped `.hivemind` that is already in place, committed on the branch or checked out by git, cannot race: the helper refuses it at check time. Ground: the same attacker and threat model as the recorded decision "A same-user program racing the inputs-file Write is outside the threat model (local review finding 149210d3)" of the issue 467 amendment, and the build's (local review finding 916ad92b). The quarantine rename was rejected: it adds a rename step and race tests to both scripts and still goes by pathname, so it cannot stop a same-user program either (`plugin/governance/remediation-doctrine.md` "## Surface-Growth Escalation"). Decided 2026-10-31 by the run, not the user, under `plugin/governance/decision-autonomy.md` "### Review Calls": option A, the reviewer's strong recommendation. Keep the code, record the race as outside the threat model here and in the helper header, and soften the "only the exact file" wording. The user can veto this call before merge. This is a recorded decision under `plugin/governance/remediation-doctrine.md` "## Recorded Decisions and Repeat Findings". A later finding that the inputs-file delete can be raced by a same-user program between its checks and its `rm` is a repeat of this record.
+
+**The user's decisions in this run.** Q1, how the leftover files are cleaned up: option A, answered by the user. The overlord deletes them once, after merge, with no committed script. The local review question on finding d9bfac93 was taken by the run, as recorded above.
 
 It updates these places in place, each with a dated note: the recorded residual "Made-up inputs-file tokens (smoke-603 N4)", and the issue 487 amendment's residual "A runner call rerun after it wrote its inputs file".
 

@@ -70,7 +70,14 @@
 #           <canonical root>/.hivemind;
 #       (4) the leaf is not a symlink ([ -L ] first) and is a regular file.
 #     The delete runs from inside that folder: in a subshell, cd -P, re-check pwd -P, then
-#     rm -f -- ./<leaf>. It never follows a symlink, and a swapped ancestor cannot redirect it.
+#     rm -f -- ./<leaf>. A symlink or a swapped ancestor that is already in place when the
+#     checks run is refused, so the delete never follows it.
+#     THREAT MODEL: the checks and the rm each go by pathname, so they are not bound to the
+#     file the engine read. A program running as the same user that swaps the leaf or
+#     .hivemind between the checks and the rm can get a different file of the same name
+#     deleted. That race is outside the threat model: such a program can
+#     already delete any file the user can, so it gains nothing. Recorded in ADR-0037,
+#     Amendment 2026-10-31 (issue 488), local review finding d9bfac93.
 #     Returns 0 when it deleted the file, 1 when the path is not one it deletes (the path is
 #     left untouched), and 2 when the delete failed. Reasons go to stderr only, never stdout.
 #     Never exits.
