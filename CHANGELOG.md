@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.7] - 2026-10-31
+
+### Changed
+
+- Docs: the ADR-0037 amendment and the security-policy inputs-file bullets (#488).
+
+### Fixed
+
+- The commit and pull request scripts now delete their own inputs file once they have read it. Only the exact `.hivemind/<molt|pr>-inputs-<token>.json` file is deleted, never through a symlink. Old inputs files no longer pile up, and a rerun or a reused token no longer meets a leftover file (#488).
+
 ## [7.5.6] - 2026-10-31
 
 ### Changed

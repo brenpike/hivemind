@@ -57,6 +57,24 @@
 #     PRECONDITION: the leaf must be a file target. A chain whose leaf is "." or ".." is
 #       OUT OF CONTRACT (no special handling); callers must not pass such chains.
 #
+#   hivemind_remove_inputs_file <raw_repo_root> <inputs_file_path> <kind>
+#     <raw_repo_root>    the git checkout root (e.g. `git rev-parse --show-toplevel`).
+#     <inputs_file_path> the inputs file the engine just read, absolute or relative to the
+#                        caller's working directory.
+#     <kind>             molt or pr.
+#     Deletes the path only when ALL of these hold:
+#       (1) the leaf name is <kind>-inputs-<token>.json, <token> 1 to 64 characters of
+#           [A-Za-z0-9-] (the same rule as check_inputs_leaf in plugin/hooks/synapse-gate.sh);
+#       (2) <canonical root>/.hivemind is a real folder, not a symlink;
+#       (3) the leaf's folder, canonicalized with cd && pwd -P, is exactly
+#           <canonical root>/.hivemind;
+#       (4) the leaf is not a symlink ([ -L ] first) and is a regular file.
+#     The delete runs from inside that folder: in a subshell, cd -P, re-check pwd -P, then
+#     rm -f -- ./<leaf>. It never follows a symlink, and a swapped ancestor cannot redirect it.
+#     Returns 0 when it deleted the file, 1 when the path is not one it deletes (the path is
+#     left untouched), and 2 when the delete failed. Reasons go to stderr only, never stdout.
+#     Never exits.
+#
 # WHY A SEPARATE FILE-TARGET VARIANT (hivemind_assert_contained CANNOT take a file chain):
 #   hivemind_assert_contained's final containment step does `cd "$canon_root/$deepest_existing"
 #   && pwd -P`. When the deepest-existing component is a REGULAR FILE, that `cd` FAILS (you
@@ -86,8 +104,8 @@
 #   substitution yields an EMPTY string; every canonicalization below is empty-tested and
 #   rejected rather than allowed to proceed with an empty path.
 #
-# DEPENDENCY-FREE: pure bash / POSIX test builtins (cd, pwd, [ -L ], case). No jq, no
-#   realpath, no external canonicalizer.
+# DEPENDENCY-FREE: pure bash / POSIX test builtins (cd, pwd, [ -L ], case), plus rm for
+#   hivemind_remove_inputs_file's delete. No jq, no realpath, no external canonicalizer.
 
 # hivemind_canon_root <raw_repo_root>
 # Echo the canonical checkout root (cd && pwd -P), or echo nothing and return 1 on failure.
@@ -378,4 +396,96 @@ hivemind_assert_inputs_contained() {
 
   printf '%s' "$canon_root"
   return 0
+}
+
+# hivemind_remove_inputs_file <raw_repo_root> <inputs_file_path> <kind>
+# Deletes an engine's own inputs file after the engine has read it: a regular-file leaf named
+# <kind>-inputs-<token>.json directly under a real <canonical root>/.hivemind folder, removed
+# from inside that folder so no symlink is followed. See the header CONTRACT for the rules.
+# Returns 0 when it deleted the file, 1 when the path is not one it deletes (left untouched),
+# 2 when the delete failed. Prints reasons on stderr only. Never exits.
+hivemind_remove_inputs_file() {
+  local raw_root="$1"
+  local inputs_file_path="$2"
+  local inputs_kind="$3"
+
+  case "$inputs_kind" in
+    molt | pr) ;;
+    *)
+      printf 'refusing to delete %s: unknown inputs kind %s\n' "$inputs_file_path" "$inputs_kind" >&2
+      return 1
+      ;;
+  esac
+
+  local inputs_leaf inputs_dir
+  case "$inputs_file_path" in
+    */*)
+      inputs_leaf="${inputs_file_path##*/}"
+      inputs_dir="${inputs_file_path%/*}"
+      [ -n "$inputs_dir" ] || inputs_dir="/"
+      ;;
+    *)
+      inputs_leaf="$inputs_file_path"
+      inputs_dir="."
+      ;;
+  esac
+
+  local inputs_token=""
+  case "$inputs_leaf" in
+    "$inputs_kind-inputs-"*.json)
+      inputs_token="${inputs_leaf#"$inputs_kind-inputs-"}"
+      inputs_token="${inputs_token%.json}"
+      ;;
+  esac
+  case "$inputs_token" in
+    '' | *[!A-Za-z0-9-]*)
+      printf 'refusing to delete %s: leaf is not %s-inputs-<token>.json\n' "$inputs_file_path" "$inputs_kind" >&2
+      return 1
+      ;;
+  esac
+  if [ "${#inputs_token}" -gt 64 ]; then
+    printf 'refusing to delete %s: token is longer than 64 characters\n' "$inputs_file_path" >&2
+    return 1
+  fi
+
+  local canon_root
+  if ! canon_root="$(hivemind_canon_root "$raw_root")"; then
+    printf 'refusing to delete %s: failed to canonicalize repo root %s\n' "$inputs_file_path" "$raw_root" >&2
+    return 1
+  fi
+  local canon_hivemind="$canon_root/.hivemind"
+  if [ -L "$canon_hivemind" ] || [ ! -d "$canon_hivemind" ]; then
+    printf 'refusing to delete %s: %s is not a real folder\n' "$inputs_file_path" "$canon_hivemind" >&2
+    return 1
+  fi
+
+  local canon_inputs_dir
+  canon_inputs_dir="$(CDPATH='' cd -- "$inputs_dir" 2>/dev/null && pwd -P)"
+  if [ "$canon_inputs_dir" != "$canon_hivemind" ]; then
+    printf 'refusing to delete %s: its folder is not %s\n' "$inputs_file_path" "$canon_hivemind" >&2
+    return 1
+  fi
+  if [ -L "$canon_hivemind/$inputs_leaf" ] || [ ! -f "$canon_hivemind/$inputs_leaf" ]; then
+    printf 'refusing to delete %s: not a regular file\n' "$inputs_file_path" >&2
+    return 1
+  fi
+
+  local delete_status=0
+  (
+    CDPATH='' cd -P -- "$canon_hivemind" 2>/dev/null || exit 2
+    [ "$(pwd -P)" = "$canon_hivemind" ] || exit 1
+    if [ -L "./$inputs_leaf" ] || [ ! -f "./$inputs_leaf" ]; then exit 1; fi
+    rm -f -- "./$inputs_leaf" || exit 2
+  ) || delete_status=$?
+  case "$delete_status" in
+    0) return 0 ;;
+    1)
+      printf 'refusing to delete %s: %s changed before the delete\n' "$inputs_file_path" "$canon_hivemind" >&2
+      return 1
+      ;;
+    *)
+      printf 'failed to delete %s\n' "$inputs_file_path" >&2
+      return 2
+      ;;
+  esac
 }
