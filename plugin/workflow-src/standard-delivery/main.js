@@ -240,7 +240,9 @@
  *   Labels come only from the pass, the round, the step id, the wave
  *   number, and the gate step with its run count (gateLabel), so each is
  *   unique and a resume replays every earlier prompt byte for byte and gets
- *   every earlier result, side effects included, from cache.
+ *   every earlier result, side effects included, from cache. A commit or
+ *   pull request inputs path is the pass's facts file stem, run.factsStem,
+ *   and the call label (relay.js buildInputsPath), so it is unique too.
  *
  * Why
  *   Delivery transitions cost no model turn when they are code. The git
@@ -367,7 +369,8 @@ function createRunState(launch) {
     pass: 0,
     replans: 0,
     branchSwitches: 0,
-    versionAnswer: undefined
+    versionAnswer: undefined,
+    factsStem: undefined
   };
 }
 

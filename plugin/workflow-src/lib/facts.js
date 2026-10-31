@@ -32,8 +32,9 @@
  *   formatCommandBlock(command), formatInputsFileBlock(path, content)
  *       the synapse data blocks: command, a JSON string holding one whole
  *       command line, and inputs_file, {path, content}. Their names and
- *       the placeholders a command or path holds, {plugin-root} and
- *       {token}, are the words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md.
+ *       the one placeholder a command holds, {plugin-root}, are the words
+ *       of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md. An inputs path holds
+ *       no placeholder: the workflow builds it whole.
  *   runnerValuePatterns()
  *       the value class of each flag a runner command carries, the
  *       classes of the synapse gate hook
@@ -41,7 +42,8 @@
  *       --branch and --head gitIdentifierPattern() (identifier.js), --ref
  *       digits, --expect-commit 40 or 64 lowercase hex digits,
  *       --classification and --trunk-freshness their enums, and --inputs
- *       .hivemind/molt-inputs-{token}.json or .hivemind/pr-inputs-{token}.json.
+ *       .hivemind/molt-inputs-<token>.json or .hivemind/pr-inputs-<token>.json,
+ *       <token> 1 to 64 characters of A-Z, a-z, 0-9 and dash.
  *   describeRunnerWordProblem(words)
  *       undefined when words is flag and value pairs, each flag a
  *       runnerValuePatterns() key and each value a string its pattern
@@ -266,7 +268,7 @@ function runnerValuePatterns() {
     '--expect-commit': /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
     '--classification': /^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
     '--trunk-freshness': /^(?:fresh|stale|skipped)$/,
-    '--inputs': /^\.hivemind\/(?:molt|pr)-inputs-\{token\}\.json$/
+    '--inputs': /^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/
   };
 }
 

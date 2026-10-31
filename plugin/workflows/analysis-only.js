@@ -609,7 +609,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'cd3b93e0032f02ca';
+const BUILD_ID = '49b4c84ba909f4aa';
 
 function supportedSchemaKeywords(){
 return[
@@ -2071,7 +2071,7 @@ return{
 '--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
-'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-\{token\}\.json$/
+'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/
 };
 }
 function describeRunnerWordProblem(words){

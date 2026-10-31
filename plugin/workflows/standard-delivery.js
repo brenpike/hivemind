@@ -626,7 +626,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'd694a9b07342e7c9';
+const BUILD_ID = '8d87aabd5e656922';
 
 function supportedSchemaKeywords(){
 return[
@@ -2088,7 +2088,7 @@ return{
 '--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
-'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-\{token\}\.json$/
+'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/
 };
 }
 function describeRunnerWordProblem(words){
@@ -3345,17 +3345,16 @@ return{problem:'The pull request '+attributedNoun+' would hold an attribution st
 }
 return texts;
 }
-function listPullRequestWords(plan,head){
-return['--head',plan.branch,'--base',plan.base,'--expect-commit',head,'--inputs','.hivemind/pr-inputs-{token}.json'];
+function listPullRequestWords(plan,head,inputsPath){
+return['--head',plan.branch,'--base',plan.base,'--expect-commit',head,'--inputs',inputsPath];
 }
-function buildPullRequestPrompt(plan,head,texts,draft){
-const words=listPullRequestWords(plan,head);
+function buildPullRequestPrompt(plan,head,inputsPath,texts,draft){
 return[
 'Run the command below to push the working branch and open its pull request or reuse the open one.',
 dataBlocksSentence(),
 '',
-formatCommandBlock(buildRunnerCommand('open-plan-pr',words)),
-formatInputsFileBlock(words[7],{title:texts.title,body:texts.body,comment:texts.comment,draft:draft})
+formatCommandBlock(buildRunnerCommand('open-plan-pr',listPullRequestWords(plan,head,inputsPath))),
+formatInputsFileBlock(inputsPath,{title:texts.title,body:texts.body,comment:texts.comment,draft:draft})
 ].join('\n');
 }
 function checkPullRequestRelay(relay,head){
@@ -3384,11 +3383,14 @@ if(texts.problem!==undefined){
 return stopDelivery([{problem:texts.problem,terminal:true}],run,[],false);
 }
 phase('PR');
-const commandStop=describeCommandStop('pull request',listPullRequestWords(plan,run.head));
+const label=describePullRequestLabel(run,gates.runs.pr);
+const listWords=(callLabel)=>listPullRequestWords(plan,run.head,buildInputsPath(run,'pr',callLabel));
+const commandStop=describeCommandStop('pull request',listWords(label),listWords(label+'-retry'));
 if(commandStop!==undefined){
 return stopDelivery([commandStop],run,[],false);
 }
-const relay=await runRunnerRelay(addResumeNote(buildPullRequestPrompt(plan,run.head,texts,run.draft),run),describePullRequestLabel(run,gates.runs.pr),'PR');
+const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(plan,run.head,listWords(callLabel)[7],texts,run.draft),run);
+const relay=await runRunnerRelay(buildPrompt,label,'PR');
 const checked=checkPullRequestRelay(relay,run.head);
 if(checked.problem===undefined){
 return{result:finishDeliveryComplete(run,plan,checked.values,gates)};
@@ -3650,9 +3652,13 @@ return{agentType:synapseAgentType(),model:RUNNER_MODEL,schema:toAgentSchema(RELA
 function isTransientBlock(relay){
 return validateSchema(RELAY_SCHEMA,relay).ok&&relay.outcome==='blocked'&&isTransientFailure(relay.stderr);
 }
-async function runRunnerRelay(prompt,label,phaseTitle){
-const relay=await agent(prompt,runnerOptions(label,phaseTitle));
-return isTransientBlock(relay)?agent(prompt,runnerOptions(label+'-retry',phaseTitle)):relay;
+async function runRunnerRelay(buildPrompt,label,phaseTitle){
+const retryLabel=label+'-retry';
+const relay=await agent(buildPrompt(label),runnerOptions(label,phaseTitle));
+return isTransientBlock(relay)?agent(buildPrompt(retryLabel),runnerOptions(retryLabel,phaseTitle)):relay;
+}
+function buildInputsPath(run,kind,label){
+return typeof run.factsStem==='string'?'.hivemind/'+kind+'-inputs-'+run.factsStem+'-'+label+'.json':undefined;
 }
 function droneOptions(label,phaseTitle,schema){
 return{agentType:droneAgentType(),schema:toAgentSchema(schema),label:label,phase:phaseTitle};
@@ -3660,8 +3666,8 @@ return{agentType:droneAgentType(),schema:toAgentSchema(schema),label:label,phase
 function plannerCallOptions(label,phaseTitle,resultSchema){
 return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,phase:phaseTitle};
 }
-function describeCommandStop(stepNoun,words){
-const problem=describeRunnerWordProblem(words);
+function describeCommandStop(stepNoun,words,retryWords=[]){
+const problem=describeRunnerWordProblem(words.concat(retryWords));
 return problem===undefined?undefined:{problem:'The '+stepNoun+' step did not run its script, so '+RUN_NAME+' stopped: '+problem+'.',terminal:true};
 }
 function buildDeliveryFactsPrompt(words){
@@ -3759,11 +3765,12 @@ const commandStop=describeCommandStop('facts',words);
 if(commandStop!==undefined){
 return commandStop;
 }
-const relay=await runRunnerRelay(addResumeNote(buildDeliveryFactsPrompt(words),run),'facts-'+run.pass,'Facts');
+const relay=await runRunnerRelay(()=>addResumeNote(buildDeliveryFactsPrompt(words),run),'facts-'+run.pass,'Facts');
 const checked=checkDeliveryFacts(relay,run.trunk);
 if(checked.problem!==undefined){
 return checked;
 }
+run.factsStem=/facts-([^/]+)\.json$/.exec(checked.facts.facts_file)[1];
 const scanned=await runPassScan(checked.facts,run);
 return scanned===undefined?checked:scanned;
 }
@@ -3797,7 +3804,7 @@ const commandStop=describeCommandStop('branch',words);
 if(commandStop!==undefined){
 return commandStop;
 }
-const relay=await runRunnerRelay(addResumeNote(buildBranchPrompt(words),run),'branch-'+run.pass,'Branch');
+const relay=await runRunnerRelay(()=>addResumeNote(buildBranchPrompt(words),run),'branch-'+run.pass,'Branch');
 return checkBranchRelay(relay,plan,freshness);
 }
 function needsBranchReplan(branchValues,facts,plan){
@@ -3843,13 +3850,12 @@ const oneLine=text.replace(/[\s\x00-\x1f\x7f-\x9f]+/g,' ').trim();
 const subject=cutAtBoundary(oneLine,maxSubjectLength());
 return isUsableSubject(subject)?subject:fallbackSubject;
 }
-function listCommitWords(trunk){
-return['--trunk',trunk,'--inputs','.hivemind/molt-inputs-{token}.json'];
+function listCommitWords(trunk,inputsPath){
+return['--trunk',trunk,'--inputs',inputsPath];
 }
-function buildCommitPrompt(files,plan,trunk,stepName,subject){
-const words=listCommitWords(trunk);
+function buildCommitPrompt(files,plan,trunk,inputsPath,stepName,subject){
 const content={type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,files:files};
-return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',words)),formatInputsFileBlock(words[3],content)].join('\n');
+return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',listCommitWords(trunk,inputsPath))),formatInputsFileBlock(inputsPath,content)].join('\n');
 }
 function readOutsidePath(payload){
 try{
@@ -3897,11 +3903,12 @@ throw new Error('runCommitStep: stepCauses must be an array');
 const subject=commit.subject===undefined?commitStepTexts(commit.stepName).subject:commit.subject;
 const isReplan=commit.stepName==='wave';
 phase('Commit');
-const commandStop=describeCommandStop('commit',listCommitWords(run.trunk));
+const listWords=(label)=>listCommitWords(run.trunk,buildInputsPath(run,'molt',label));
+const commandStop=describeCommandStop('commit',listWords(commit.label),listWords(commit.label+'-retry'));
 if(commandStop!==undefined){
 return stopDelivery(stepCauses.concat([commandStop]),run,[],isReplan);
 }
-const relay=await runRunnerRelay(addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,commit.stepName,subject),run),commit.label,'Commit');
+const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,listWords(label)[3],commit.stepName,subject),run),commit.label,'Commit');
 const checked=checkCommitRelay(relay,plan,commit.stepName);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
@@ -4632,7 +4639,8 @@ waveCount:0,
 pass:0,
 replans:0,
 branchSwitches:0,
-versionAnswer:undefined
+versionAnswer:undefined,
+factsStem:undefined
 };
 }
 function keepReplanReview(passEnd,replan){
