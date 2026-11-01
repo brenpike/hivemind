@@ -26,6 +26,7 @@ const SUBSET_KEYWORDS = [
   'minItems',
   'maxLength'
 ];
+const OPTIONAL_PROPERTIES = { $: ['closes'] };
 
 function validate(value) {
   return structuredClone(lib.validateSchema(planSchema, value));
@@ -112,15 +113,37 @@ describe('plan schema', () => {
     assert.doesNotThrow(() => lib.validateSchema(planSchema, makePlan()));
   });
 
-  test('every object has additionalProperties false and requires every declared property', () => {
+  test('every object has additionalProperties false and requires every declared property but the optional ones', () => {
     for (const { node, path } of collectNodes(planSchema)) {
       if (node.type !== 'object') {
         continue;
       }
       assert.equal(node.additionalProperties, false, path + ' must set additionalProperties false');
       assert.ok(node.properties !== undefined, path + ' must declare properties');
-      assert.deepEqual([...node.required].sort(), Object.keys(node.properties).sort(), path + ' must require exactly its properties');
+      const optional = OPTIONAL_PROPERTIES[path] ?? [];
+      const expected = Object.keys(node.properties).filter((name) => !optional.includes(name));
+      assert.deepEqual([...node.required].sort(), expected.sort(), path + ' must require exactly its properties but ' + JSON.stringify(optional));
     }
+  });
+
+  test('each optional property says so first in its description', () => {
+    for (const [path, names] of Object.entries(OPTIONAL_PROPERTIES)) {
+      const node = collectNodes(planSchema).find((entry) => entry.path === path).node;
+      for (const name of names) {
+        assert.ok(node.properties[name].description.startsWith('Optional.'), path + '.' + name);
+      }
+    }
+  });
+
+  test('closes is an optional list of issue numbers, and a plan with it is valid', () => {
+    const closes = planSchema.properties.closes;
+    assert.equal(closes.type, 'array');
+    assert.equal(closes.items.type, 'integer');
+    const plan = makePlan();
+    plan.closes = [491, 488];
+    assert.deepEqual(validate(plan), { ok: true, errors: [] });
+    plan.closes = [];
+    assert.deepEqual(validate(plan), { ok: true, errors: [] });
   });
 
   test('the external content label is on every string without an enum and on no other node', () => {
@@ -260,7 +283,10 @@ describe('plan schema', () => {
     ['a step file path over 400 code points', (plan) => { plan.steps[0].files[0] = 'f'.repeat(401); }, '$.steps[0].files[0]: maxLength: more than 400 characters'],
     ['an artifact file path over 400 code points', (plan) => { plan.versioning.artifact_files[0] = '\u{1F600}'.repeat(401); }, '$.versioning.artifact_files[0]: maxLength: more than 400 characters'],
     ['a step id over 64 code points', (plan) => { plan.steps[0].id = 'S'.repeat(65); }, '$.steps[0].id: maxLength: more than 64 characters'],
-    ['an effect summary over 300 code points', (plan) => { plan.steps[1].external_effects[0].summary = 'e'.repeat(301); }, '$.steps[1].external_effects[0].summary: maxLength: more than 300 characters']
+    ['an effect summary over 300 code points', (plan) => { plan.steps[1].external_effects[0].summary = 'e'.repeat(301); }, '$.steps[1].external_effects[0].summary: maxLength: more than 300 characters'],
+    ['a closes that is not a list', (plan) => { plan.closes = 491; }, '$.closes: type array expected'],
+    ['a closes number written as a string', (plan) => { plan.closes = ['491']; }, '$.closes[0]: type integer expected'],
+    ['a negative closes number', (plan) => { plan.closes = [-1]; }, '$.closes[0]: type integer: negative']
   ];
 
   for (const [name, mutate, expectedError] of invalidCases) {

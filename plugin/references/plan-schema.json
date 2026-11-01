@@ -28,6 +28,14 @@
       "type": "string",
       "description": "Can carry external content. The pull request title text after its type. The workflow writes the commit type of classification, the breaking marker and a colon before it, so this text never starts with a commit type. When the request sets a pull request title, this is that title's text after its type and colon, word for word, and classification and breaking match that type. Otherwise it is a short title the planner writes for the change, at most 72 code points with its type, and never a sentence of the summary. It names no brood id, strain id or strain name unless the request asks for it."
     },
+    "closes": {
+      "type": "array",
+      "description": "Optional. The number of each issue in the facts references that this plan fixes, so that merging its pull request closes that issue. List only an issue the run fixes: leave out a reference the request names for context, a pull request, and an issue the plan only touches. Empty or absent when the plan fixes none of them. The plan check refuses a number that is not one of the references the run started with. The pull request body then opens with one plain closing line per number, outside the fenced summary.",
+      "items": {
+        "type": "integer",
+        "description": "One issue number, copied from the number of a facts references entry."
+      }
+    },
     "digest": {
       "type": "object",
       "additionalProperties": false,

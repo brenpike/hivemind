@@ -7234,6 +7234,71 @@ const ROW_TESTS = {
         assertStepStopPause(run, malformedPr + '\n\n', 'pr-1');
       }
     });
+  },
+  'SD-76': () => {
+    const fixLaunch = { request: REQUEST, references: [488, '12'] };
+    const closesProblem = (index) => 'The plan names an issue at closes[' + index + '] that is not one of the references the run started with, so the delivery stopped.';
+    const prInputsOf = async (launch, plan) => {
+      const run = await runWorkflow(launch, happyResults({ 'plan-1': planResult(plan) }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      return readRunnerInputs(callOf(run, 'pr-1').prompt);
+    };
+    test('a listed launch reference gives a plain Closes line ahead of the fenced summary, outside any fence', async () => {
+      const summary = 'Fix the cache reads. Closes #99 here stays literal.';
+      const bare = await prInputsOf(fixLaunch, makePlan({ summary: summary }));
+      const closing = await prInputsOf(fixLaunch, makePlan({ summary: summary, closes: [488] }));
+      assert.equal(closing.body, 'Closes #488\n\n' + bare.body);
+      assert.ok(closing.body.startsWith('Closes #488\n\n```\n' + summary + '\n```\n\n'), closing.body);
+      assert.equal(closing.body.split('\n').filter((line) => line.startsWith('Closes #')).length, 1);
+    });
+    test('each distinct listed number gets one line, in plan order', async () => {
+      const inputs = await prInputsOf(fixLaunch, makePlan({ closes: [12, 488, 12] }));
+      assert.ok(inputs.body.startsWith('Closes #12\nCloses #488\n\n```\n'), inputs.body);
+      assert.deepEqual([...main.renderClosingLines(makePlan({ closes: [12, 488, 12] }))], ['Closes #12', 'Closes #488']);
+    });
+    test('an absent or empty closes adds no Closes line and leaves the body as it was', async () => {
+      const absent = await prInputsOf(fixLaunch, makePlan({ summary: 'Fix #488.' }));
+      const empty = await prInputsOf(fixLaunch, makePlan({ summary: 'Fix #488.', closes: [] }));
+      assert.equal(empty.body, absent.body);
+      assert.ok(absent.body.startsWith('```\nFix #488.\n```\n\n'), absent.body);
+      assert.ok(!/^Closes #/m.test(absent.body), absent.body);
+      assert.deepEqual([...main.renderClosingLines(makePlan())], []);
+    });
+    test('the pull request comment carries no Closes line', async () => {
+      const bare = await prInputsOf(fixLaunch, makePlan());
+      const closing = await prInputsOf(fixLaunch, makePlan({ closes: [488, 12] }));
+      assert.equal(closing.comment, bare.comment);
+      assert.ok(!closing.comment.includes('Closes'), closing.comment);
+    });
+    for (const [label, launch, closes, index] of [
+      ['a number outside the launch references', fixLaunch, [488, 7], 1],
+      ['any number when the launch names no reference', LAUNCH, [488], 0],
+      ['a zero', fixLaunch, [0], 0]
+    ]) {
+      test(`${label} pauses before the branch step`, async () => {
+        const run = await runWorkflow(launch, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan({ closes: closes })) });
+        assertPassStopPause(run, closesProblem(index), 'plan-1');
+        assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
+      });
+    }
+    test('the check is membership only: a launch number in another digit form passes, and a non-integer fails the schema', () => {
+      const resultSchema = main.buildPlanResultSchema(planSchema, briefSchema);
+      assert.equal(main.describePlanProblem(planResult(makePlan({ closes: [7] })), resultSchema, parsedFacts(), 'main', ['007']), undefined);
+      assert.equal(main.describePlanProblem(planResult(makePlan({ closes: [7] })), resultSchema, parsedFacts(), 'main', ['8']), closesProblem(0));
+      for (const closes of [['488'], [4.5], [-1], 488]) {
+        assert.equal(main.describePlanProblem(planResult(makePlan({ closes: closes })), resultSchema, parsedFacts(), 'main', ['488']), 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.', JSON.stringify(closes));
+      }
+    });
+    test('the check compares decimal text, so a reference past the safe integer range matches only its own digits and zero matches nothing', () => {
+      const resultSchema = main.buildPlanResultSchema(planSchema, briefSchema);
+      const problemOf = (closes, references) => main.describePlanProblem(planResult(makePlan({ closes: closes })), resultSchema, parsedFacts(), 'main', references);
+      assert.equal(problemOf([9007199254740992], ['9007199254740993']), closesProblem(0));
+      assert.equal(problemOf([9007199254740992], ['9007199254740992']), undefined);
+      assert.equal(problemOf([9007199254740991], ['9007199254740991']), undefined);
+      assert.equal(problemOf([1e30], ['1' + '0'.repeat(30)]), closesProblem(0));
+      assert.equal(problemOf([0], ['0', '00']), closesProblem(0));
+      assert.equal(problemOf([488, 0], ['488', '0']), closesProblem(1));
+    });
   }
 };
 
