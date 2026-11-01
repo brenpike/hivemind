@@ -4,8 +4,9 @@
 # libraries plugin/skills/_shared/allowlist.sh, containment.sh and git-refusals.sh).
 #
 # The engine takes REQUIRED `--trunk <branch> --inputs <path>`. It gates trunk as an identifier,
-# moves to the top of the work tree, reads the inputs file once (after the containment read-guard)
-# and checks its fields, then refuses an in-progress operation, unmerged paths, a detached or
+# moves to the top of the work tree, reads the inputs file once (after the containment read-guard),
+# deletes it when it is a .hivemind/molt-inputs-<token>.json leaf directly under a real .hivemind
+# folder (read or not as JSON), and checks its fields, then refuses an in-progress operation, unmerged paths, a detached or
 # unborn HEAD, a branch name that fails the identifier gate, a trunk that names the current
 # branch, and an unreadable trunk. Trunk names the current branch only by ref identity: one of
 # git's six lookup candidates for it, or the end a candidate resolves to, is refs/heads/<b> or
@@ -168,14 +169,27 @@ write_basic_inputs() {
 }
 
 # repo_snapshot -> prints HEAD, every ref, the index and the tree status (ignored files included)
-# of the current world, for before/after equality.
+# of the current world, for before/after equality. The status line of the inputs file at
+# INPUTS_REL is left out: the engine deletes that file once it has read it, and that delete is
+# not a change.
 repo_snapshot() {
     run_git "$WORK_TREE" symbolic-ref -q HEAD || printf 'detached'
     printf '\n'
     run_git "$WORK_TREE" rev-parse -q --verify HEAD || printf 'unborn\n'
     run_git "$WORK_TREE" for-each-ref --format='%(refname) %(objectname)'
     run_git "$WORK_TREE" ls-files -s
-    run_git "$WORK_TREE" status --porcelain=v1 --untracked-files=all --ignored
+    run_git "$WORK_TREE" status --porcelain=v1 --untracked-files=all --ignored \
+        | awk -v inputs_rel="$INPUTS_REL" 'substr($0, 4) != inputs_rel'
+}
+
+# assert_path_kept <name> <path> -> asserts <path> still exists (a symlink counts, dangling or not).
+assert_path_kept() {
+    assert_equal "$1" yes "$([[ -e "$2" || -L "$2" ]] && echo yes || echo no)" "$2 kept"
+}
+
+# assert_path_gone <name> <path> -> asserts nothing exists at <path>.
+assert_path_gone() {
+    assert_equal "$1" yes "$([[ -e "$2" || -L "$2" ]] && echo no || echo yes)" "$2 deleted"
 }
 
 # ── Engine helpers ───────────────────────────────────────────────────────────
@@ -298,6 +312,7 @@ test_usage_errors() {
     assert_refused_unchanged usage-valueless-inputs "$WORK_TREE" "$USAGE_REASON" '' --trunk main --inputs
     assert_refused_unchanged usage-empty-inputs "$WORK_TREE" "$USAGE_REASON" '' --trunk main --inputs ''
     assert_refused_unchanged usage-positional "$WORK_TREE" "$USAGE_REASON" '' main "$INPUTS_REL"
+    assert_path_kept usage-inputs-kept "$INPUTS_PATH"
 }
 
 test_trunk_gate() {
@@ -310,6 +325,7 @@ test_trunk_gate() {
             --trunk "$bad_trunk" --inputs "$INPUTS_REL"
     done
     assert_equal trunk-gate-no-expansion '' "$(ls "$WORK_TREE" | grep -x pwned || true)" "no command ran"
+    assert_path_kept trunk-gate-inputs-kept "$INPUTS_PATH"
 }
 
 test_not_a_checkout() {
@@ -401,6 +417,92 @@ test_inputs_field_refusals() {
     assert_input_refused field-files-directory '{"type":"feat","subject":"s","files":["f.txt","sub"]}' "$DIRECTORY_REASON"
 }
 
+# ── Inputs file lifetime ────────────────────────────────────────────────────
+
+# assert_read_and_kept <name> <inputs rel> -> writes a valid inputs file that lists nothing at
+# <inputs rel> in the current world, asserts the run reads it and prints committed false, and
+# asserts the file is still there.
+assert_read_and_kept() {
+    local name="$1" kept_path="$WORK_TREE/$2"
+    mkdir -p "$(dirname "$kept_path")"
+    printf '%s\n' '{"type":"feat","subject":"s","files":[]}' >"$kept_path"
+    assert_success "$name" "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" --trunk main --inputs "$2"
+    assert_path_kept "$name-kept" "$kept_path"
+}
+
+# The engine deletes its own inputs file once it has read it: after committed true, committed
+# false, a field refusal and invalid JSON. A symlinked inputs leaf is refused before the read and
+# neither the link nor its target is deleted. A file with another name, in another folder, or
+# under a .hivemind that is a symlink is read and kept. With .hivemind/ not ignored, the deleted
+# inputs file is no dirty path outside files. A rerun on the same path, the file written again
+# first, succeeds.
+test_inputs_file_lifetime() {
+    local outside_dir
+    create_world lifetime-committed
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_commit_run lifetime-committed "$WORK_TREE" "$INPUTS_REL"
+    assert_committed lifetime-committed "$(printf 'M\tf.txt')" 'feat(core): add thing'
+    assert_path_gone lifetime-committed-deleted "$INPUTS_PATH"
+
+    create_world lifetime-not-committed
+    write_basic_inputs '[]'
+    assert_success lifetime-not-committed "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" \
+        --trunk main --inputs "$INPUTS_REL"
+    assert_path_gone lifetime-not-committed-deleted "$INPUTS_PATH"
+
+    create_world lifetime-refused
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    assert_input_refused lifetime-field-refusal '{"type":"feature","subject":"s","files":["f.txt"]}' "$TYPE_REASON"
+    assert_path_gone lifetime-field-refusal-deleted "$INPUTS_PATH"
+    assert_input_refused lifetime-invalid-json '{"type":' "$INPUTS_JSON_REASON"
+    assert_path_gone lifetime-invalid-json-deleted "$INPUTS_PATH"
+
+    create_world lifetime-symlink-leaf
+    outside_dir="$WORLD_ROOT/outside"
+    mkdir -p "$outside_dir"
+    printf '{"type":"feat","subject":"s","files":[]}\n' >"$outside_dir/in.json"
+    ln -s "$outside_dir/in.json" "$WORK_TREE/.hivemind/molt-inputs-s.json"
+    assert_refused_unchanged lifetime-symlink-leaf "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" '' \
+        --trunk main --inputs .hivemind/molt-inputs-s.json
+    assert_path_kept lifetime-symlink-leaf-link "$WORK_TREE/.hivemind/molt-inputs-s.json"
+    assert_path_kept lifetime-symlink-leaf-target "$outside_dir/in.json"
+
+    create_world lifetime-kept
+    printf '/molt-inputs-t.json\n' >>"$WORK_TREE/.git/info/exclude"
+    assert_read_and_kept lifetime-kept-other-kind .hivemind/pr-inputs-t.json
+    assert_read_and_kept lifetime-kept-other-name .hivemind/in.json
+    assert_read_and_kept lifetime-kept-subfolder .hivemind/sub/molt-inputs-t.json
+    assert_read_and_kept lifetime-kept-top-level molt-inputs-t.json
+
+    create_world lifetime-linked-hivemind
+    rm -rf "$WORK_TREE/.hivemind"
+    mkdir -p "$WORK_TREE/hivemind-real"
+    ln -s hivemind-real "$WORK_TREE/.hivemind"
+    printf '/.hivemind\n/hivemind-real/\n' >>"$WORK_TREE/.git/info/exclude"
+    assert_read_and_kept lifetime-linked-hivemind "$INPUTS_REL"
+
+    create_world lifetime-not-ignored
+    printf '*.log\n' >"$WORK_TREE/.gitignore"
+    run_git "$WORK_TREE" commit -q -am 'track .hivemind'
+    HEAD_SHA="$(run_git "$WORK_TREE" rev-parse HEAD)"
+    write_basic_inputs '[]'
+    assert_success lifetime-not-ignored "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" \
+        --trunk main --inputs "$INPUTS_REL"
+    assert_path_gone lifetime-not-ignored-deleted "$INPUTS_PATH"
+
+    create_world lifetime-rerun
+    printf 'changed\n' >"$WORK_TREE/f.txt"
+    write_basic_inputs '["f.txt"]'
+    assert_commit_run lifetime-rerun-first "$WORK_TREE" "$INPUTS_REL"
+    assert_committed lifetime-rerun-first "$(printf 'M\tf.txt')" 'feat(core): add thing'
+    assert_path_gone lifetime-rerun-first-deleted "$INPUTS_PATH"
+    write_basic_inputs '["f.txt"]'
+    assert_success lifetime-rerun-second "$WORK_TREE" "$(expected_block "$HEAD_SHA" false)" \
+        --trunk main --inputs "$INPUTS_REL"
+    assert_path_gone lifetime-rerun-second-deleted "$INPUTS_PATH"
+}
+
 # ── Git state refusals ──────────────────────────────────────────────────────
 
 test_git_state_refusals() {
@@ -450,9 +552,9 @@ test_trunk_refusals() {
     run_git "$WORK_TREE" remote add origin "$WORLD_ROOT/origin.git"
     run_git "$WORK_TREE" checkout -q main
     printf 'changed\n' >"$WORK_TREE/f.txt"
-    write_basic_inputs '["f.txt"]'
     for trunk_spelling in main MAIN refs/heads/main heads/main origin/main; do
         index=$((index + 1))
+        write_basic_inputs '["f.txt"]'
         assert_refused_unchanged "on-trunk-$index" "$WORK_TREE" "$IS_TRUNK_REASON" '' \
             --trunk "$trunk_spelling" --inputs "$INPUTS_REL"
     done
@@ -510,6 +612,7 @@ test_trunk_ref_identity() {
     assert_refused_unchanged trunk-identity-remote-origin "$WORK_TREE" "$IS_TRUNK_REASON" '' \
         --trunk "origin/$BRANCH" --inputs "$INPUTS_REL"
     run_git "$WORK_TREE" remote add team "$WORLD_ROOT/team.git"
+    write_basic_inputs '["f.txt"]'
     assert_refused_unchanged trunk-identity-remote-team "$WORK_TREE" "$IS_TRUNK_REASON" '' \
         --trunk "team/$BRANCH" --inputs "$INPUTS_REL"
 }
@@ -544,6 +647,7 @@ test_remote_default_branch() {
     set_remote_head origin refs/remotes/origin/main
     for trunk_spelling in develop release/main team/main; do
         index=$((index + 1))
+        write_basic_inputs '[]'
         assert_refused_unchanged "remote-default-spoofed-$index" "$WORK_TREE" "$IS_TRUNK_REASON" '' \
             --trunk "$trunk_spelling" --inputs "$INPUTS_REL"
     done
@@ -828,12 +932,14 @@ test_subfolder_invocation() {
     write_basic_inputs '["sub/keep.txt","f.txt"]'
     assert_commit_run subfolder "$WORK_TREE/sub" "../$INPUTS_REL"
     assert_committed subfolder "$(printf 'M\tf.txt\nM\tsub/keep.txt')" 'feat(core): add thing'
+    assert_path_gone subfolder-inputs-deleted "$INPUTS_PATH"
 
     create_world subfolder-relative-missing
     printf 'changed\n' >"$WORK_TREE/f.txt"
     write_basic_inputs '["f.txt"]'
     assert_refused_unchanged subfolder-relative-to-start "$WORK_TREE/sub" "$INPUTS_MISSING_REASON" '' \
         --trunk main --inputs "$INPUTS_REL"
+    assert_path_kept subfolder-relative-to-start-inputs-kept "$INPUTS_PATH"
 }
 
 test_hooks() {
@@ -1002,6 +1108,7 @@ test_trunk_gate
 test_not_a_checkout
 test_inputs_file_refusals
 test_inputs_field_refusals
+test_inputs_file_lifetime
 test_git_state_refusals
 test_trunk_refusals
 test_trunk_ref_identity

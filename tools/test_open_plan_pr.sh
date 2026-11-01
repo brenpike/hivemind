@@ -6,7 +6,8 @@
 #
 # The engine takes REQUIRED `--head <branch> --base <branch> --inputs <path>` plus optional
 # `--remote <name>` and `--expect-commit <sha>`. It gates the identifiers, reads the inputs file
-# once (after the containment read-guard) and checks its fields, refuses gh missing, an
+# once (after the containment read-guard), deletes it right after that read when it is a
+# .hivemind/pr-inputs-<token>.json leaf, and checks its fields, refuses gh missing, an
 # in-progress operation, unmerged paths, a dirty tree and a failed open-PR lookup, then pushes
 # through push-branch.sh, reuses the open PR on the pushed commit (re-reading to absorb head SHA
 # lag) or creates one, and verifies the created PR. On success it prints
@@ -418,10 +419,22 @@ assert_refused_unchanged() {
     assert_equal "$name-no-create" 0 "$(call_count pr-create)" "no gh pr create"
 }
 
-# assert_input_refused <name> <inputs json> <reason> -> writes the inputs and asserts the refusal.
+# assert_input_refused <name> <inputs json> <reason> -> writes the inputs, asserts the refusal, and
+# asserts the inputs file was deleted (the refusal comes after the read).
 assert_input_refused() {
     write_inputs "$2"
     assert_refused_unchanged "$1" "$WORK_TREE" "$3" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present "$1-deleted" "$INPUTS_PATH" no
+}
+
+# assert_inputs_present <name> <path> <yes|no> -> asserts the inputs file at <path> is still there
+# (yes) or is gone (no). A symlink counts as there, even when its target is missing.
+assert_inputs_present() {
+    local present_text=no
+    if [[ -e "$2" || -L "$2" ]]; then
+        present_text=yes
+    fi
+    assert_equal "$1" "$3" "$present_text" "inputs file present: $3"
 }
 
 # assert_branch_pushed <name> -> origin carries feat/x at HEAD_SHA beside main.
@@ -445,6 +458,7 @@ test_usage_errors() {
     assert_refused_unchanged usage-valueless "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main --inputs
     assert_refused_unchanged usage-empty-inputs "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main --inputs ''
     assert_equal usage-no-gh 0 "$(call_count pr-list)" "no gh call"
+    assert_inputs_present usage-inputs-kept "$INPUTS_PATH" yes
 }
 
 test_identifier_gates() {
@@ -459,11 +473,13 @@ test_identifier_gates() {
         assert_refused_unchanged "gate-remote-$index" "$WORK_TREE" "$IDENTIFIER_REASON" \
             --head "$BRANCH" --base main --remote "$bad_value" --inputs "$INPUTS_REL"
     done
+    assert_inputs_present gate-identifier-inputs-kept "$INPUTS_PATH" yes
     for bad_value in 'abc' "$(printf 'A%.0s' $(seq 1 40))" "${HEAD_SHA:0:39}" "${HEAD_SHA}0" ''; do
         index=$((index + 1))
         assert_refused_unchanged "gate-expect-$index" "$WORK_TREE" "$EXPECT_FORMAT_REASON" \
             --head "$BRANCH" --base main --expect-commit "$bad_value" --inputs "$INPUTS_REL"
     done
+    assert_inputs_present gate-expect-inputs-kept "$INPUTS_PATH" yes
     assert_equal gate-no-expansion '' "$(find "$WORKDIR" -name pwned)" "no command ran"
     assert_equal gate-no-gh 0 "$(call_count pr-list)" "no gh call"
 }
@@ -476,6 +492,7 @@ test_delay_gate() {
         HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY="$bad_delay" assert_refused_unchanged "delay-$index" \
             "$WORK_TREE" "$DELAY_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
     done
+    assert_inputs_present delay-inputs-kept "$INPUTS_PATH" yes
 }
 
 # ── Tools and checkout ──────────────────────────────────────────────────────
@@ -486,6 +503,7 @@ test_gh_missing() {
     assert_refused_unchanged gh-missing "$WORK_TREE" "$GH_MISSING_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
     RUN_PATH="$PATH"
+    assert_inputs_present gh-missing-inputs-kept "$INPUTS_PATH" yes
 }
 
 test_not_a_checkout() {
@@ -508,6 +526,7 @@ test_inputs_file_refusals() {
     : >"$INPUTS_PATH"
     assert_refused_unchanged inputs-empty-file "$WORK_TREE" "$INPUTS_JSON_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present inputs-empty-file-deleted "$INPUTS_PATH" no
 
     outside_dir="$WORKDIR/outside-target"
     mkdir -p "$outside_dir"
@@ -515,12 +534,38 @@ test_inputs_file_refusals() {
     ln -s "$outside_dir/in.json" "$WORK_TREE/.hivemind/leaf.json"
     assert_refused_unchanged inputs-symlink-leaf "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" \
         --head "$BRANCH" --base main --inputs .hivemind/leaf.json
+    ln -s "$outside_dir/in.json" "$WORK_TREE/.hivemind/pr-inputs-s.json"
+    assert_refused_unchanged inputs-symlink-named-leaf "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" \
+        --head "$BRANCH" --base main --inputs .hivemind/pr-inputs-s.json
+    assert_equal inputs-symlink-named-leaf-link-kept yes \
+        "$([[ -L "$WORK_TREE/.hivemind/pr-inputs-s.json" ]] && printf yes || printf no)" "symlink leaf kept"
+    assert_equal inputs-symlink-named-leaf-target-kept '{"title":"t","body":"b"}' \
+        "$(cat "$outside_dir/in.json")" "symlink target kept unchanged"
     ln -s "$outside_dir" "$WORK_TREE/.hivemind/linked"
     assert_refused_unchanged inputs-symlink-folder "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" \
         --head "$BRANCH" --base main --inputs .hivemind/linked/in.json
     assert_refused_unchanged inputs-absolute-outside "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" \
         --head "$BRANCH" --base main --inputs "$outside_dir/in.json"
     assert_equal inputs-no-gh 0 "$(call_count pr-list)" "no gh call"
+}
+
+test_inputs_kept_paths() {
+    create_world inputs-molt-name
+    cp "$INPUTS_PATH" "$WORK_TREE/.hivemind/molt-inputs-t.json"
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success inputs-molt-name "$WORK_TREE" "$(expected_block true)" \
+        --head "$BRANCH" --base main --inputs .hivemind/molt-inputs-t.json
+    assert_inputs_present inputs-molt-name-kept "$WORK_TREE/.hivemind/molt-inputs-t.json" yes
+
+    create_world inputs-subfolder
+    mkdir -p "$WORK_TREE/.hivemind/sub"
+    cp "$INPUTS_PATH" "$WORK_TREE/.hivemind/sub/pr-inputs-t.json"
+    stub_respond pr-list '' '[]'
+    stub_create_ok
+    assert_success inputs-subfolder "$WORK_TREE" "$(expected_block true)" \
+        --head "$BRANCH" --base main --inputs .hivemind/sub/pr-inputs-t.json
+    assert_inputs_present inputs-subfolder-kept "$WORK_TREE/.hivemind/sub/pr-inputs-t.json" yes
 }
 
 test_inputs_field_refusals() {
@@ -560,6 +605,7 @@ test_git_state_refusals() {
     run_git "$WORK_TREE" merge -q other >/dev/null 2>&1 || true
     assert_refused_unchanged merge-in-progress "$WORK_TREE" "$MERGE_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present merge-in-progress-inputs-deleted "$INPUTS_PATH" no
 
     create_world unmerged
     blob="$(run_git "$WORK_TREE" hash-object -w f.txt)"
@@ -568,28 +614,46 @@ test_git_state_refusals() {
         | run_git "$WORK_TREE" update-index --index-info
     assert_refused_unchanged unmerged-paths "$WORK_TREE" "$UNMERGED_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present unmerged-paths-inputs-deleted "$INPUTS_PATH" no
 
     create_world staged
     printf 'staged\n' >"$WORK_TREE/f.txt"
     run_git "$WORK_TREE" add f.txt
     assert_refused_unchanged dirty-staged "$WORK_TREE" "$STAGED_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present dirty-staged-inputs-deleted "$INPUTS_PATH" no
 
     create_world unstaged
     printf 'unstaged\n' >"$WORK_TREE/f.txt"
     assert_refused_unchanged dirty-unstaged "$WORK_TREE" "$UNSTAGED_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present dirty-unstaged-inputs-deleted "$INPUTS_PATH" no
 
     create_world untracked
     printf 'new\n' >"$WORK_TREE/new.txt"
     assert_refused_unchanged dirty-untracked "$WORK_TREE" "$UNTRACKED_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present dirty-untracked-inputs-deleted "$INPUTS_PATH" no
 
     create_world inputs-not-ignored
     printf 'other\n' >"$WORK_TREE/.gitignore"
     run_git "$WORK_TREE" commit -q -am 'stop ignoring .hivemind'
-    assert_refused_unchanged inputs-not-ignored "$WORK_TREE" "$UNTRACKED_REASON" \
+    stub_respond pr-list '' '' 1 'HTTP 401: Bad credentials'
+    assert_blocker inputs-not-ignored "$WORK_TREE" "$LOOKUP_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present inputs-not-ignored-deleted "$INPUTS_PATH" no
+    assert_equal inputs-not-ignored-clean '' "$(run_git "$WORK_TREE" status --porcelain=v1 --untracked-files=all)" \
+        "the deleted inputs file left no untracked file"
+    assert_equal inputs-not-ignored-no-create 0 "$(call_count pr-create)" "no gh pr create"
+
+    create_world inputs-not-ignored-other
+    printf 'other\n' >"$WORK_TREE/.gitignore"
+    run_git "$WORK_TREE" commit -q -am 'stop ignoring .hivemind'
+    printf 'x\n' >"$WORK_TREE/.hivemind/other.txt"
+    assert_blocker inputs-not-ignored-other "$WORK_TREE" "$UNTRACKED_REASON" \
+        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_inputs_present inputs-not-ignored-other-deleted "$INPUTS_PATH" no
+    assert_inputs_present inputs-not-ignored-other-kept "$WORK_TREE/.hivemind/other.txt" yes
     assert_equal git-state-no-gh 0 "$(call_count pr-list)" "no gh call"
 }
 
@@ -601,6 +665,7 @@ test_lookup_refusals() {
     assert_refused_unchanged lookup-gh-fails "$WORK_TREE" "$LOOKUP_REASON" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
     assert_equal lookup-gh-fails-args "$LIST_ARGS" "$(cat "$GH_STUB_DIR/pr-list.1.args")" "gh pr list argv"
+    assert_inputs_present lookup-gh-fails-inputs-deleted "$INPUTS_PATH" no
 
     create_world lookup-not-json
     stub_respond pr-list '' 'not json'
@@ -652,6 +717,7 @@ test_create() {
         "$(cat "$GH_STUB_DIR/repo-view.1.args")" "gh repo view argv"
     assert_equal create-repo-view-calls 1 "$(call_count repo-view)" "one gh repo view"
     assert_equal create-work-dir-removed '' "$(ls "$TMPDIR")" "private work folder removed"
+    assert_inputs_present create-inputs-deleted "$INPUTS_PATH" no
 
     create_world create-expect
     stub_respond pr-list '' '[]'
@@ -768,6 +834,7 @@ test_comment() {
     write_inputs '{"title":"t","body":"b","comment":"again"}'
     assert_success comment-rerun-1 "$WORK_TREE" "$(expected_comment_block false true)" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    write_inputs '{"title":"t","body":"b","comment":"again"}'
     assert_success comment-rerun-2 "$WORK_TREE" "$(expected_comment_block false true)" \
         --head "$BRANCH" --base main --inputs "$INPUTS_REL"
     assert_equal comment-rerun-calls 2 "$(call_count pr-comment)" "each run that reuses the PR posts its own comment"
@@ -821,6 +888,7 @@ test_reuse() {
     assert_equal reuse-no-create 0 "$(call_count pr-create)" "no gh pr create"
     assert_equal reuse-no-view 0 "$(call_count pr-view)" "no gh pr view"
     assert_equal reuse-reads 2 "$(call_count pr-list)" "no re-read when the PR carries the commit"
+    assert_inputs_present reuse-inputs-deleted "$INPUTS_PATH" no
 
     create_world reuse-lag
     other_sha="$TRUNK_SHA"
@@ -1303,6 +1371,7 @@ test_subfolder_invocation() {
     assert_success subfolder "$WORK_TREE/sub" "$(expected_block true)" \
         --head "$BRANCH" --base main --inputs "../$INPUTS_REL"
     assert_branch_pushed subfolder-pushed
+    assert_inputs_present subfolder-inputs-deleted "$INPUTS_PATH" no
 
     create_world subfolder-relative
     assert_refused_unchanged subfolder-relative-to-start "$WORK_TREE/sub" "$INPUTS_MISSING_REASON" \
@@ -1317,6 +1386,7 @@ test_delay_gate
 test_gh_missing
 test_not_a_checkout
 test_inputs_file_refusals
+test_inputs_kept_paths
 test_inputs_field_refusals
 test_git_state_refusals
 test_lookup_refusals
