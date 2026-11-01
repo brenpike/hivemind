@@ -1825,3 +1825,32 @@ It updates these places in place, each with a dated note: the recorded residual 
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/488, `docs/adr/0038-root-cause-at-the-first-finding.md` (triage).
+
+## Amendment 2026-11-01: the pull request closes the issues the run fixes (issue 491)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/491. PR 490, the run for issue 488, merged and left issue 488 open: GitHub listed no closing issue for it. `buildPullRequestBody` (`pr.js`) puts `plan.summary` in a literal fenced block on purpose, so external text in it stays inert, and the only issue reference sat in that block. GitHub ignores closing keywords inside a code block.
+
+**The user's decision.** Q1, option B (2026-11-01): "The planner names which listed issues the run fixes, the code checks those are in the list, and the PR body gets a plain `Closes #n` line for each one, outside the code block."
+
+**The change.**
+
+- `plugin/references/plan-schema.json` gains an optional field, `closes`: a list of issue numbers. Empty or absent means none. The planner lists only a reference the run fixes, never one the request names for context.
+- `describePlanProblem` (`plan.js`) refuses a plan whose `closes` holds a number that is not the number of one of the launch `references` (`run.references`), with a fixed message naming its index. It goes through `stopDelivery` with isReplan true, as every other plan problem does.
+- `buildPullRequestBody` opens with one code-built plain line `Closes #<n>` per distinct number, in plan order, outside any fence and ahead of the fenced summary. The fence around planner text is unchanged. The pull request comment gets no closing line.
+- Row SD-76 is added, and SD-08 and SD-45 name the new clause.
+
+**Why the check is membership only.** The planner judges which reference the run fixes; code has no ground truth for that. Code could check that a number names an issue rather than a pull request only by reading the facts file, which the engine never reads: it reads the facts relay lines only. A `Closes #<n>` line that names a pull request closes nothing on GitHub, so that miss is harmless. The check therefore keeps the one property code can prove: every closing line names a number the launch gave, so the planner cannot close an issue the user did not name.
+
+**Options ruled out.**
+
+- **A closing line for every launch reference (the issue's first direction).** A reference the request names only for context would be closed on merge.
+- **An issue-vs-pull-request check in code.** It needs the facts file in the engine, which widens the facts step for a miss that closes nothing.
+
+**Recorded residuals.**
+
+- **Planner adherence.** Root cause: which reference the run fixes is the planner's judgment. Bounded impact: a miss closes or leaves open only an issue the user named at launch, and the pull request body shows the line before merge.
+- **A launch reference in another digit form.** The check compares numbers, so a launch reference `007` admits `closes` 7, and the line reads `Closes #7`.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/491.

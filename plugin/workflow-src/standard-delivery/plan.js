@@ -8,9 +8,9 @@
  *
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
- *           request, trunk, level, pass, storedAnswers and pendingReply,
- *           and updates answerLog, answeredKeys, taken and
- *           reversibleEffects.
+ *           request, trunk, references, level, pass, storedAnswers and
+ *           pendingReply, and updates answerLog, answeredKeys, taken and
+ *           reversibleEffects. references reach describeClosesProblem (pr.js).
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
  *           Once the revise result of a reply round passes the plan check,
@@ -327,7 +327,7 @@ function describeValidationCommandProblem(command) {
   return '';
 }
 
-function describePlanProblem(planResult, resultSchema, facts, trunk) {
+function describePlanProblem(planResult, resultSchema, facts, trunk, references) {
   if (!isPlainObject(planResult)) {
     return 'The planner returned no result, so ' + RUN_NAME + ' stopped.';
   }
@@ -375,7 +375,7 @@ function describePlanProblem(planResult, resultSchema, facts, trunk) {
   if (!/^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)\/[a-z0-9]+(-[a-z0-9]+)*$/.test(plan.branch)) {
     return 'The plan names branch ' + encodeUntrustedText(plan.branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so ' + RUN_NAME + ' stopped.';
   }
-  return undefined;
+  return describeClosesProblem(plan, references);
 }
 
 /**
@@ -545,7 +545,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
   const planPrompt = buildPlanPrompt(run.request, facts, scope, replan, run.answerLog);
   let planResult = await agent(planPrompt, plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
   for (;;) {
-    const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk);
+    const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk, run.references);
     if (problem !== undefined) {
       if (shownAsks.length > 0) {
         run.answerLog.push(buildAnswerEntry(shownEntry, undefined));

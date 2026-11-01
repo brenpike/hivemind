@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Pull requests the standard-delivery engine opens now close the issues the run fixes. The planner lists them in a new optional plan field, `closes`, and the plan check refuses a number that is not one of the launch references. The pull request body opens with one plain `Closes #<n>` line per number, outside the fenced summary, which stays fenced. The pull request comment carries no such line (#491).
+
 ## [7.5.7] - 2026-10-31
 
 ### Changed

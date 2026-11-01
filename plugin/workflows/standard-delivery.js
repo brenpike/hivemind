@@ -419,6 +419,12 @@ const PLAN_SCHEMA = {
 "title": {
 "type": "string"
 },
+"closes": {
+"type": "array",
+"items": {
+"type": "integer"
+}
+},
 "digest": {
 "type": "object",
 "additionalProperties": false,
@@ -626,7 +632,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '8d87aabd5e656922';
+const BUILD_ID = 'b842bbd4991ff9d5';
 
 function supportedSchemaKeywords(){
 return[
@@ -2995,7 +3001,7 @@ return'holds a control character';
 }
 return'';
 }
-function describePlanProblem(planResult,resultSchema,facts,trunk){
+function describePlanProblem(planResult,resultSchema,facts,trunk,references){
 if(!isPlainObject(planResult)){
 return'The planner returned no result, so '+RUN_NAME+' stopped.';
 }
@@ -3043,7 +3049,7 @@ return'The run started on branch '+encodeUntrustedText(facts.branch)+' and deliv
 if(!/^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)\/[a-z0-9]+(-[a-z0-9]+)*$/.test(plan.branch)){
 return'The plan names branch '+encodeUntrustedText(plan.branch)+', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so '+RUN_NAME+' stopped.';
 }
-return undefined;
+return describeClosesProblem(plan,references);
 }
 function questionKey(kind,scope,ask){
 return JSON.stringify([kind,scope,renderQuestions([ask])]);
@@ -3165,7 +3171,7 @@ const settledKinds=new Set();
 const planPrompt=buildPlanPrompt(run.request,facts,scope,replan,run.answerLog);
 let planResult=await agent(planPrompt,plannerCallOptions('plan-'+run.pass,'Plan',resultSchema));
 for(;;){
-const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk);
+const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk,run.references);
 if(problem!==undefined){
 if(shownAsks.length>0){
 run.answerLog.push(buildAnswerEntry(shownEntry,undefined));
@@ -3309,8 +3315,22 @@ return part.external?renderLiteralBlock(text):text;
 function renderPullRequestRecord(run,gates,isCompact){
 return buildRunRecordParts(run,run.taken.map(toPullRequestDecision),gates).map((part)=>renderPullRequestPart(part,isCompact));
 }
+function listCloses(plan){
+return plan.closes===undefined?[]:plan.closes;
+}
+function describeClosesProblem(plan,references){
+const index=listCloses(plan).findIndex((number)=>!references.some((reference)=>Number(reference)===number));
+return index===-1?undefined:'The plan names an issue at closes['+index+'] that is not one of the references the run started with, so '+RUN_NAME+' stopped.';
+}
+function renderClosingLines(plan){
+return[...new Set(listCloses(plan))].map((number)=>'Closes #'+number);
+}
 function buildPullRequestBody(run,plan,gates,isCompact){
-const parts=plan.summary.trim()===''?[]:[renderLiteralBlock(plan.summary)];
+const closingLines=renderClosingLines(plan);
+const parts=closingLines.length===0?[]:[closingLines.join('\n')];
+if(plan.summary.trim()!==''){
+parts.push(renderLiteralBlock(plan.summary));
+}
 parts.push(...renderPullRequestRecord(run,gates,isCompact));
 return cleanPullRequestText(parts.join('\n\n'),true);
 }

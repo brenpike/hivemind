@@ -7,8 +7,8 @@
  *   run    the run state of main.js createRunState: head, taken,
  *          reversibleEffects, notRunGates and draft.
  *   plan   the accepted plan, from runPlanningPass (plan.js). plan.title
- *          reaches only the pull request title and plan.summary only the
- *          body.
+ *          reaches only the pull request title, and plan.summary and the
+ *          optional plan.closes only the body.
  *   gates  the gate loop state of runGates (gates.js): notes, rejected and
  *          runs.pr, the count of this step's runs in the pass.
  *   maxTitleLength() and maxPullRequestTextLength() from main.js.
@@ -19,6 +19,10 @@
  *          {rerun: true} when the user replied to its stop.
  *   renderLiteralBlock(text)  the literal fenced block the pull request
  *          texts put external text in.
+ *   describeClosesProblem(plan, references)  the last check of
+ *          describePlanProblem (plan.js): the problem of a plan.closes
+ *          number that is not the number of one of references, the launch
+ *          references of run.references, naming its index, else undefined.
  *   The step, as meta.js names it:
  *   PR      once every configured gate held on one commit H, a haiku
  *           synapse runner runs the open-plan-pr command once. The
@@ -48,9 +52,11 @@
  *           bracket the cut text opened (issue 469). buildTitleText(plan)
  *           gives the text after the prefix; the plan check refuses a plan
  *           whose text is empty, so the title is never only its type
- *           (issue 469). The body is the
- *           plan summary and the
- *           comment a fixed lead, each followed by the one run record
+ *           (issue 469). The body is the closing lines of
+ *           renderClosingLines(plan), one Closes line per plan.closes
+ *           number, then the plan summary, and the
+ *           comment a fixed lead with no closing line, each followed by the
+ *           one run record
  *           buildRunRecordParts() returns, the same record the final
  *           message carries, with every taken decision and no reviewer
  *           text. The plan text that can carry external content sits in
@@ -66,7 +72,15 @@
  *   decisions, reach the pull request body and comment only through
  *   renderLiteralBlock(), so GitHub shows them as literal text and an
  *   at-mention, issue reference or HTML in them does nothing. The
- *   gates and the comment lead are code-built and stay plain. The
+ *   gates and the comment lead are code-built and stay plain. So are the
+ *   closing lines, which sit ahead of the fenced summary and outside any
+ *   fence, so GitHub links each issue they name as closed by the pull
+ *   request (issue 491): each is the fixed text and an integer the plan
+ *   check found among the launch references, never planner text.
+ *   The closes check is membership only: which reference the run fixes is
+ *   the planner's judgment, and the engine never reads the facts file, so
+ *   code does not check that a number names an issue rather than a pull
+ *   request; a Closes line naming a pull request closes nothing. The
  *   title stays plain text: GitHub renders titles with code spans only and
  *   takes no mentions from them, and a wrapper would reach the squash
  *   commit subject.
@@ -209,8 +223,36 @@ function renderPullRequestRecord(run, gates, isCompact) {
   return buildRunRecordParts(run, run.taken.map(toPullRequestDecision), gates).map((part) => renderPullRequestPart(part, isCompact));
 }
 
+function listCloses(plan) {
+  return plan.closes === undefined ? [] : plan.closes;
+}
+
+/**
+ * Returns the plan problem of the first plan.closes number that is not the
+ * number of one of references, the launch digit strings, naming its index,
+ * or undefined when every number is one of them. describePlanProblem
+ * (plan.js) returns it as its last check.
+ */
+function describeClosesProblem(plan, references) {
+  const index = listCloses(plan).findIndex((number) => !references.some((reference) => Number(reference) === number));
+  return index === -1 ? undefined : 'The plan names an issue at closes[' + index + '] that is not one of the references the run started with, so ' + RUN_NAME + ' stopped.';
+}
+
+/**
+ * Returns one plain line Closes #N for each distinct plan.closes number, in
+ * plan order. describeClosesProblem refuses a number that is not a launch
+ * reference, so each line names a number the launch gave.
+ */
+function renderClosingLines(plan) {
+  return [...new Set(listCloses(plan))].map((number) => 'Closes #' + number);
+}
+
 function buildPullRequestBody(run, plan, gates, isCompact) {
-  const parts = plan.summary.trim() === '' ? [] : [renderLiteralBlock(plan.summary)];
+  const closingLines = renderClosingLines(plan);
+  const parts = closingLines.length === 0 ? [] : [closingLines.join('\n')];
+  if (plan.summary.trim() !== '') {
+    parts.push(renderLiteralBlock(plan.summary));
+  }
   parts.push(...renderPullRequestRecord(run, gates, isCompact));
   return cleanPullRequestText(parts.join('\n\n'), true);
 }

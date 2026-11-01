@@ -402,6 +402,12 @@ const PLAN_SCHEMA = {
 "title": {
 "type": "string"
 },
+"closes": {
+"type": "array",
+"items": {
+"type": "integer"
+}
+},
 "digest": {
 "type": "object",
 "additionalProperties": false,
@@ -609,7 +615,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '49b4c84ba909f4aa';
+const BUILD_ID = '17993690066dde5d';
 
 function supportedSchemaKeywords(){
 return[
