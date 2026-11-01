@@ -2425,6 +2425,237 @@ hivemind_check_json_id "$WORKDIR/jsonid-missing.json" '["run_id"]' || jsonid_rc=
 assert_eq "engineio:json-id-unreadable-file" "5" "$jsonid_rc"
 unset jsonid_file jsonid_rows jsonid_row jsonid_literal jsonid_expected jsonid_label jsonid_rc
 
+# ── 11e. hivemind_is_safe_id 255 cap (#424) ──
+safecap_64="$(printf '%*s' 64 '' | tr ' ' a)"
+safecap_255="$(printf '%*s' 255 '' | tr ' ' a)"
+safecap_256="$(printf '%*s' 256 '' | tr ' ' a)"
+safecap_5000="$(printf '%*s' 5000 '' | tr ' ' a)"
+for safecap_row in "safe|64|$safecap_64" "safe|255|$safecap_255" "unsafe|256|$safecap_256" "unsafe|5000|$safecap_5000"; do
+  IFS='|' read -r safecap_expected safecap_label safecap_value <<<"$safecap_row"
+  safecap_verdict=unsafe
+  hivemind_is_safe_id "$safecap_value" && safecap_verdict=safe
+  assert_eq "engineio:safe-id-cap-$safecap_label" "$safecap_expected" "$safecap_verdict"
+done
+unset safecap_64 safecap_255 safecap_256 safecap_5000 safecap_row safecap_expected safecap_label \
+  safecap_value safecap_verdict
+
+# ── 11f. hivemind_check_json — whole-file contract check on the intact JSON values (#424) ──
+# Every hostile string value carries the marker "zqx" (or a run of "q"), which no position or
+# problem word holds, so a message that echoed a value would contain the marker.
+cj_file="$WORKDIR/check-json.json"
+CJ_STEP='not a step id (1 to 64 of A-Z a-z 0-9 . _ -)'
+CJ_NAME='not a name (1 to 255 of A-Z a-z 0-9 . _ -, not . or ..)'
+CJ_BROOD='not a brood id (1 to 255 of A-Z a-z 0-9 . _ : -)'
+CJ_COUNT='not a whole number of 0 or more'
+
+# cj_doc <json text> — writes <json text> to $cj_file as is.
+cj_doc() { printf '%s' "$1" > "$cj_file"; }
+
+# cj_q_literal <count> — prints a JSON string literal of <count> "q" characters.
+cj_q_literal() { printf '"%s"' "$(printf '%*s' "$1" '' | tr ' ' q)"; }
+
+# cj_expect <case> <contract> <expected rc> <expected stdout> [<field>]
+# Runs hivemind_check_json on $cj_file. One PASS needs the exact rc and stdout, a stdout of at
+# most 200 bytes, and no value marker in stdout or stderr.
+cj_expect() {
+  local case_name="$1" contract_name="$2" expected_rc="$3" expected_out="$4"
+  shift 4
+  local actual_out actual_err actual_rc=0 out_bytes err_file="$WORKDIR/check-json.err"
+  actual_out="$(hivemind_check_json "$cj_file" "$contract_name" "$@" 2>"$err_file")" || actual_rc=$?
+  actual_err="$(cat "$err_file")"
+  out_bytes="$(printf '%s' "$actual_out" | LC_ALL=C wc -c | tr -d ' ')"
+  if [ "$actual_rc|$actual_out" != "$expected_rc|$expected_out" ]; then
+    failed "engineio:check-json-$case_name" "expected rc=$expected_rc out='$expected_out'; got rc=$actual_rc out='$actual_out'"
+  elif [ "$out_bytes" -gt 200 ]; then
+    failed "engineio:check-json-$case_name" "message is $out_bytes bytes, over 200"
+  elif [[ "$actual_out$actual_err" == *zqx* || "$actual_out$actual_err" == *qqq* ]]; then
+    failed "engineio:check-json-$case_name" "a message contains the value"
+  else
+    pass "engineio:check-json-$case_name" "rc=$actual_rc out='$actual_out'"
+  fi
+}
+
+# Kind matrix. Each value runs against one field of each kind; the verdict row lists, in value
+# order, ok (passes), miss (missing), bad (the kind's problem) or empty.
+cj_value_labels=(trailing-lf two-lf nul embedded-lf cr non-ascii dot dotdot len64 len65 len255 len256
+  len5000 number null empty)
+cj_value_literals=('"zqx\n"' '"zqx\n\n"' '"zq\u0000x"' '"zqx\nzqx"' '"zqx\r"' '"zqxé"' '"."' '".."'
+  "$(cj_q_literal 64)" "$(cj_q_literal 65)" "$(cj_q_literal 255)" "$(cj_q_literal 256)"
+  "$(cj_q_literal 5000)" '5' 'null' '""')
+cj_kind_rows=(
+  "step-id|wave-ledger|plan.steps[0].id|$CJ_STEP|bad bad bad bad bad bad ok ok ok bad bad bad bad bad miss bad"
+  "name|record-ledger|run.id|$CJ_NAME|bad bad bad bad bad bad bad bad ok ok ok bad bad bad miss bad"
+  "brood-id|init-brood-parent|parent.brood_id|$CJ_BROOD|bad bad bad bad bad bad ok ok ok ok ok bad bad bad miss bad"
+  "enum|intent-inputs|close_status|not one of cancelled, complete|bad bad bad bad bad bad bad bad bad bad bad bad bad bad ok bad"
+  "count|record-ledger|run.workflow_version|$CJ_COUNT|bad bad bad bad bad bad bad bad bad bad bad bad bad ok miss bad"
+  "text|init-brood-parent|parent.manifest|not a string|ok ok ok ok ok ok ok ok ok ok ok ok ok bad miss empty"
+  "object|intent-inputs|outputs|not an object|bad bad bad bad bad bad bad bad bad bad bad bad bad bad ok bad"
+  "array|record-inputs|outputs.completed_steps|not an array|bad bad bad bad bad bad bad bad bad bad bad bad bad bad ok bad"
+)
+cj_kind_templates=(
+  '{plan: {steps: [{id: $v}]}}'
+  '{run: {id: $v, workflow: "w", workflow_version: 1}, state: {current: "plan"}}'
+  '{parent: {run_id: "r", brood_id: $v, strain_id: "s", manifest: "m"}}'
+  '{run_id: "r", state: "s", summary: "x", close_status: $v}'
+  '{run: {id: "r", workflow: "w", workflow_version: $v}, state: {current: "plan"}}'
+  '{parent: {run_id: "r", brood_id: "b", strain_id: "s", manifest: $v}}'
+  '{run_id: "r", state: "s", summary: "x", outputs: $v}'
+  '{run_id: "r", state: "s", result: "ready", summary: "x", outputs: {completed_steps: $v}}'
+)
+for cj_kind_index in "${!cj_kind_rows[@]}"; do
+  IFS='|' read -r cj_kind cj_contract cj_position cj_problem cj_verdict_text <<<"${cj_kind_rows[$cj_kind_index]}"
+  read -r -a cj_verdicts <<<"$cj_verdict_text"
+  for cj_value_index in "${!cj_value_labels[@]}"; do
+    jq -n --argjson v "${cj_value_literals[$cj_value_index]}" "${cj_kind_templates[$cj_kind_index]}" > "$cj_file"
+    case "${cj_verdicts[$cj_value_index]}" in
+      ok) cj_rc=0; cj_out='' ;;
+      miss) cj_rc=1; cj_out="$cj_position: missing" ;;
+      empty) cj_rc=1; cj_out="$cj_position: empty" ;;
+      *) cj_rc=1; cj_out="$cj_position: $cj_problem" ;;
+    esac
+    cj_expect "$cj_kind-${cj_value_labels[$cj_value_index]}" "$cj_contract" "$cj_rc" "$cj_out"
+  done
+done
+
+# Kind controls: values each kind accepts or refuses beyond the matrix.
+cj_doc '{"plan":{"steps":[{"id":"STEP-001","depends_on":[]},{"id":"STEP-002","depends_on":["STEP-001"]}]}}'
+cj_expect step-id-control wave-ledger 0 ''
+cj_doc '{"parent":{"run_id":"r","brood_id":"2026-05-31T17:30:00Z","strain_id":"s","manifest":"m"}}'
+cj_expect brood-id-colon init-brood-parent 0 ''
+cj_doc '{"run_id":"r","state":"s","summary":"x","close_status":"complete"}'
+cj_expect enum-control intent-inputs 0 ''
+cj_doc '{"run_id":"r","state":"s","summary":"x","close_status":["complete"]}'
+cj_expect enum-array intent-inputs 1 'close_status: not one of cancelled, complete'
+for cj_count_row in '0|0|zero' '7|0|seven' '2.0|0|two-point-zero' '-1|1|negative' '1.5|1|fraction' '"5"|1|string' 'true|1|boolean'; do
+  IFS='|' read -r cj_count_literal cj_rc cj_label <<<"$cj_count_row"
+  jq -n --argjson v "$cj_count_literal" \
+    '{run: {id: "r", workflow: "w", workflow_version: $v}, state: {current: "plan"}}' > "$cj_file"
+  cj_out=''
+  [ "$cj_rc" = 1 ] && cj_out="run.workflow_version: $CJ_COUNT"
+  cj_expect "count-$cj_label" record-ledger "$cj_rc" "$cj_out"
+done
+cj_doc '{"run":{"workflow":"w","workflow_version":1},"state":{"current":"plan"}}'
+cj_expect name-key-missing record-ledger 1 'run.id: missing'
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","suggested_run_id":""}'
+cj_expect optional-name-empty-is-present init-inputs 1 "suggested_run_id: $CJ_NAME"
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","suggested_run_id":"zqx\n"}'
+cj_expect suggested-run-id-trailing-lf init-inputs 1 "suggested_run_id: $CJ_NAME"
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_path":""}'
+cj_expect optional-text-empty-passes init-inputs 0 ''
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A","depends_on":[null]}]}'
+cj_expect array-element-null-is-not-absent init-inputs 1 "plan_steps[0].depends_on[0]: $CJ_STEP"
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[null]}'
+cj_expect step-row-null-is-not-absent init-inputs 1 'plan_steps[0]: not an object'
+
+# Positions and row order.
+cj_doc '{"workflow":"w","workflow_version":3,"start_state":"plan","user_request":"do x\n","normalized":"x","parent":{"kind":"brood","run_id":"r","brood_id":"2026-05-31T17:30:00Z","strain_id":"s1","manifest":"/m"},"suggested_run_id":"2026-11-01T00-00-00Z--x","plan_steps":[{"id":"STEP-001"},{"id":"STEP-002","depends_on":["STEP-001"]}],"plan_path":"p.md"}'
+cj_expect init-inputs-full init-inputs 0 ''
+cj_expect field-count init-inputs 0 '3' workflow_version
+cj_expect field-enum init-inputs 0 'brood' parent.kind
+cj_expect field-brood-id init-inputs 0 '2026-05-31T17:30:00Z' parent.brood_id
+cj_expect field-name init-inputs 0 '2026-11-01T00-00-00Z--x' suggested_run_id
+cj_expect field-text-refused init-inputs 2 '' user_request
+cj_expect field-object-refused init-inputs 2 '' parent
+cj_expect field-array-refused init-inputs 2 '' plan_steps
+cj_expect field-element-refused init-inputs 2 '' plan_steps.id
+cj_expect field-element-path-refused init-inputs 2 '' 'plan_steps[].id'
+cj_expect field-unknown-refused init-inputs 2 '' no_such_field
+cj_expect field-empty-refused init-inputs 2 '' ''
+cj_expect unknown-contract no-such-contract 2 ''
+cj_expect field-unknown-contract no-such-contract 2 '' workflow
+cj_doc '{"workflow":"zqx\n"}'
+cj_expect first-row-wins init-inputs 1 "workflow: $CJ_NAME"
+cj_expect field-form-checks-whole-file init-inputs 1 "workflow: $CJ_NAME" workflow
+cj_doc '{"workflow":"w","normalized":"zqx\n"}'
+cj_expect missing-before-later-rows init-inputs 1 'user_request: missing'
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A","depends_on":["zqx\n"]},{"id":"zqx\n"}]}'
+cj_expect rows-before-indexes init-inputs 1 "plan_steps[1].id: $CJ_STEP"
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A"},{"id":"zqx\n"},{"id":"zqx\r"}]}'
+cj_expect ascending-index init-inputs 1 "plan_steps[1].id: $CJ_STEP"
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A","depends_on":["B","zqx\n"]},{"id":"B","depends_on":["zqx\r"]}]}'
+cj_expect nested-row-major init-inputs 1 "plan_steps[0].depends_on[1]: $CJ_STEP"
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":{"id":"A"}}'
+cj_expect step-root-not-array init-inputs 1 'plan_steps: not an array'
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","plan_steps":[{"id":"A","depends_on":"A"}]}'
+cj_expect depends-on-not-array init-inputs 1 'plan_steps[0].depends_on: not an array'
+cj_doc '{"workflow":"w","user_request":"x","normalized":"y","parent":"zqx","plan_steps":"zqx"}'
+cj_expect parent-row-before-children init-inputs 1 'parent: not an object'
+cj_doc '{"parent":"zqx"}'
+cj_expect parent-not-object-without-row init-brood-parent 1 'parent: not an object'
+cj_doc '{}'
+cj_expect parent-absent-children-missing init-brood-parent 1 'parent.run_id: missing'
+cj_expect wave-steps-missing wave-ledger 1 'plan.steps: missing'
+cj_expect record-ledger-run-missing record-ledger 1 'run.id: missing'
+cj_doc '{"plan":{"steps":[]}}'
+cj_expect wave-steps-empty wave-ledger 0 ''
+cj_doc '{"run":"zqx"}'
+cj_expect record-ledger-run-not-object record-ledger 1 'run: not an object'
+cj_doc '{"run_id":"r","state":"zqx\n","result":"zqx\n","summary":"x"}'
+cj_expect record-state-before-result record-inputs 1 "state: $CJ_NAME"
+cj_doc '{"run_id":"r","state":"s","result":"ready","summary":"x","outputs":"zqx"}'
+cj_expect record-outputs-not-object record-inputs 1 'outputs: not an object'
+cj_doc '{"run_id":"r","state":"s","result":"ready","summary":"x","outputs":{"completed_steps":["STEP-001"]},"plan_steps":[{"id":"STEP-001"}],"plan_path":"p.md"}'
+cj_expect record-inputs-full record-inputs 0 ''
+cj_expect field-record-run-id record-inputs 0 'r' run_id
+cj_doc '{"run_id":"r","state":"zqx\n","summary":""}'
+cj_expect intent-state-is-text intent-inputs 1 'summary: empty'
+cj_doc '{"run_id":"r","state":"s","summary":"x"}'
+cj_expect field-absent-prints-nothing intent-inputs 0 '' close_status
+cj_doc '{"run":{"id":"r","workflow":"w","workflow_version":2.0},"state":{"current":"plan"}}'
+cj_expect field-count-whole record-ledger 0 '2' run.workflow_version
+
+# Files that are not exactly one JSON object: rc 2, nothing on stdout.
+for cj_shape_row in 'two-documents|{}{}' 'array|[{}]' 'string|"zqx"' 'empty-file|' 'invalid|{"a":'; do
+  IFS='|' read -r cj_label cj_text <<<"$cj_shape_row"
+  cj_doc "$cj_text"
+  cj_expect "not-one-object-$cj_label" record-inputs 2 ''
+done
+cj_err="$(hivemind_check_json "$WORKDIR/check-json-absent.json" record-inputs 2>&1 >/dev/null)"; cj_rc=$?
+assert_eq "engineio:check-json-unreadable-file" "2|hivemind_check_json: jq failed" "$cj_rc|$cj_err"
+cj_doc '{}{}'
+cj_err="$(hivemind_check_json "$cj_file" record-inputs 2>&1 >/dev/null)"; cj_rc=$?
+assert_eq "engineio:check-json-two-documents-reason" "2|hivemind_check_json: not exactly one JSON object" "$cj_rc|$cj_err"
+cj_doc '{}'
+cj_err="$(hivemind_check_json "$cj_file" init-inputs user_request 2>&1 >/dev/null)"; cj_rc=$?
+assert_eq "engineio:check-json-text-field-reason" "2|hivemind_check_json: field is not a token kind" "$cj_rc|$cj_err"
+cj_err="$(hivemind_check_json "$cj_file" init-inputs no_such_field 2>&1 >/dev/null)"; cj_rc=$?
+assert_eq "engineio:check-json-unknown-field-reason" "2|hivemind_check_json: unknown field" "$cj_rc|$cj_err"
+cj_err="$(hivemind_check_json "$cj_file" no-such-contract 2>&1 >/dev/null)"; cj_rc=$?
+assert_eq "engineio:check-json-unknown-contract-reason" "2|hivemind_check_json: unknown contract" "$cj_rc|$cj_err"
+
+# The contract name and the field enter jq only as --arg data: program text in either is an
+# unknown contract or field, never code.
+cj_expect contract-is-data '"init-inputs"' 2 ''
+cj_expect field-is-data init-inputs 2 '' '"workflow") | halt_error(1) | ('
+
+unset -f cj_doc cj_q_literal cj_expect
+unset cj_file CJ_STEP CJ_NAME CJ_BROOD CJ_COUNT cj_value_labels cj_value_literals cj_kind_rows \
+  cj_kind_templates cj_kind_index cj_kind cj_contract cj_position cj_problem cj_verdict_text cj_verdicts \
+  cj_value_index cj_rc cj_out cj_count_row cj_count_literal cj_label cj_shape_row cj_text cj_err
+
+# ── 11g. both readers accept only exactly one JSON object (#424) ──
+for onejson_row in 'two-documents|{}{}' 'array|[{}]' 'string|"x"' 'null|null' 'empty-file|'; do
+  IFS='|' read -r onejson_label onejson_text <<<"$onejson_row"
+  printf '%s' "$onejson_text" > "$ENGINEIO_SCRATCH/onejson-inputs.json"
+  onejson_rc=0
+  hivemind_read_inputs_file "$ENGINEIO_SCRATCH/onejson-inputs.json" "run-ledger" 2>/dev/null || onejson_rc=$?
+  assert_eq "engineio:rif-not-one-object-$onejson_label" "5" "$onejson_rc"
+done
+onejson_root="$WORKDIR/onejson/checkout"
+onejson_run_id="2026-01-01T00-00-00Z--onejson"
+mkdir -p "$onejson_root/.hivemind/runs/$onejson_run_id"
+onejson_ledger="$onejson_root/.hivemind/runs/$onejson_run_id/state.json"
+for onejson_row in 'two-documents|{"run":{"id":"%s"}}{"run":{"id":"%s"}}' 'array|[{"run":{"id":"%s"}}]'; do
+  IFS='|' read -r onejson_label onejson_text <<<"$onejson_row"
+  # shellcheck disable=SC2059
+  printf "$onejson_text" "$onejson_run_id" "$onejson_run_id" > "$onejson_ledger"
+  onejson_rc=0
+  onejson_out="$(hivemind_open_ledger "$onejson_root" "$onejson_run_id" 2>/dev/null)" || onejson_rc=$?
+  assert_eq "engineio:ol-not-one-object-$onejson_label" \
+    "1|ledger file is not exactly one JSON object: $onejson_ledger" "$onejson_rc|$onejson_out"
+done
+unset onejson_row onejson_label onejson_text onejson_rc onejson_root onejson_run_id onejson_ledger onejson_out
+
 # ── Section 12: settings-merge.sh ───────────────────────────────────────────────
 echo ''
 echo '=== settings-merge.sh: frozen template + required-key merge core ==='
