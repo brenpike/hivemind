@@ -2374,6 +2374,26 @@ else
   failed "engineio:ol-symlinked-leaf-reject" "symlinked state.json leaf must be rejected; got 0"
 fi
 
+# ── 11c. hivemind_is_safe_id / hivemind_safe_id_jq_pattern — whole-string safe id (#424) ──
+# Each row: <expected verdict>|<label>; the value comes from the parallel array. The shell check
+# and the jq pattern must give the SAME verdict for every value. The shell check runs under a
+# UTF-8 locale, where an unpinned `[A-Za-z]` admits letters such as "é"; a missing locale only
+# warns, and the braces send that warning to /dev/null.
+safeid_values=('STEP-001' 'engine-case.v_1' '.' '..' $'STEP-001\n' $'ok\n../x' $'\nSTEP-001' '' 'a b' 'a]' 'a/b' $'\xc3\xa9')
+safeid_rows=('safe|plain' 'safe|every-class' 'safe|dot' 'safe|dotdot' 'unsafe|trailing-lf' 'unsafe|embedded-lf'
+  'unsafe|leading-lf' 'unsafe|empty' 'unsafe|space' 'unsafe|bracket' 'unsafe|slash' 'unsafe|non-ascii-letter')
+for safeid_index in "${!safeid_values[@]}"; do
+  IFS='|' read -r safeid_expected safeid_label <<<"${safeid_rows[$safeid_index]}"
+  safeid_value="${safeid_values[$safeid_index]}"
+  safeid_shell=unsafe
+  { LC_ALL=en_US.UTF-8 hivemind_is_safe_id "$safeid_value"; } 2>/dev/null && safeid_shell=safe
+  assert_eq "engineio:safe-id-shell-$safeid_label" "$safeid_expected" "$safeid_shell"
+  safeid_jq="$(jq -rn --arg value "$safeid_value" --arg re "$(hivemind_safe_id_jq_pattern)" \
+    'if ($value | test($re)) then "safe" else "unsafe" end')"
+  assert_eq "engineio:safe-id-jq-$safeid_label" "$safeid_expected" "$safeid_jq"
+done
+unset safeid_values safeid_rows safeid_index safeid_expected safeid_label safeid_value safeid_shell safeid_jq
+
 # ── Section 12: settings-merge.sh ───────────────────────────────────────────────
 echo ''
 echo '=== settings-merge.sh: frozen template + required-key merge core ==='

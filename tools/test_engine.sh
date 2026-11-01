@@ -155,6 +155,12 @@
 #                           the def's .states[next_state], for a non-terminal and a terminal target.
 #   YY. record-undeclared-target-unchanged -> a transition whose target the def does not declare:
 #                           blocker before mktemp, ledger byte-unchanged, no temp file.
+#   NA-NF. whole-string safe-id check (issue #424) -> a run_id with an embedded or trailing line
+#                           feed is refused by record and mark-intent-fallback (a trailing one is
+#                           stripped when the engine reads run_id); a plan step id or
+#                           depends_on entry ending in a line feed is refused by record (ledger
+#                           byte-unchanged) and init (no run dir); init ignores a suggested_run_id
+#                           with an embedded line feed and derives its own id; safe ids still pass.
 #
 # Prints PASS/FAIL per assertion. Exits non-zero if ANY assertion FAILs.
 #
@@ -3315,6 +3321,158 @@ assert_record_undeclared_target_unchanged() {
     fi
 }
 
+# ── NA-NF. the safe-id check covers the WHOLE string (issue #424) ────────────
+# jq's Oniguruma `$` also matches before one final line feed, and grep is line-based, so the old
+# `^[A-Za-z0-9._-]+$` checks accepted "STEP-001<LF>" (jq) and "ok<LF>../x" (grep).
+
+# run_engine_stderr <engine> <gitroot> <inputs> <err-file> -> runs <engine> from <gitroot> with
+# stdout discarded and stderr in <err-file>; returns the engine's exit code.
+run_engine_stderr() {
+    local engine="$1" gitroot="$2" inputs="$3" errfile="$4" rc=0
+    ( cd "$gitroot" && bash "$engine" "$inputs" ) >/dev/null 2>"$errfile" || rc=$?
+    return "$rc"
+}
+
+assert_record_run_id_line_feed_rejected() {
+    local name="NA:record-run-id-line-feed-rejected"
+    # A run_id with an embedded line feed (a safe line, then a traversal or a second safe line)
+    # must be refused by the safe-id check itself, before any ledger path. A trailing line feed
+    # cannot reach the check: the engine reads run_id with "$(jq -r ...)", which strips it.
+    local gitroot inputs errfile run_id rc
+    gitroot="$(new_gitroot na-git)"
+    errfile="$gitroot/na.err"
+    for run_id in $'engine-case-na\n../x' $'engine-case-na\nx'; do
+        inputs="$gitroot/na-inputs.json"
+        jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+            --arg summary "engine test run_id line feed" \
+            '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+        rc=0
+        run_engine_stderr "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" || rc=$?
+        if [[ "$rc" -eq 0 ]] || ! grep -q '^blocker: run_id is not a safe path component: ' "$errfile"; then
+            failed "$name" "run_id $(printf '%q' "$run_id") not refused by the safe-id check; rc=$rc stderr=$(tr '\n' '|' < "$errfile")"
+            return
+        fi
+    done
+    pass "$name" "run_ids with an embedded line feed refused by the safe-id check"
+}
+
+assert_record_plan_steps_line_feed_rejected() {
+    local name="NB:record-plan-steps-line-feed-rejected"
+    # A plan_steps .id, then a depends_on entry, ending in a line feed must each be refused at
+    # the write boundary. Ledger at `plan` so the charset guard is the only failing gate.
+    local gitroot run_id ledger inputs before after rc plan_steps
+    gitroot="$(new_gitroot nb-git)"
+    run_id="engine-case-nb"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nb-inputs.json"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    for plan_steps in '[{"id":"STEP-001\n","status":"pending"}]' \
+                      '[{"id":"STEP-002","depends_on":["STEP-001\n"],"status":"pending"}]'; do
+        jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+            --arg summary "engine test plan step line feed" --argjson plan_steps "$plan_steps" \
+            '{run_id: $run_id, state: $state, result: $result, summary: $summary, plan_steps: $plan_steps}' \
+            > "$inputs"
+        rc=0
+        ( cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" ) >/dev/null 2>&1 || rc=$?
+        after="$(sha256sum "$ledger" | awk '{print $1}')"
+        if [[ "$rc" -eq 0 || "$before" != "$after" ]]; then
+            failed "$name" "plan_steps $plan_steps accepted; rc=$rc changed=$([[ "$before" != "$after" ]] && echo yes || echo no)"
+            return
+        fi
+    done
+    pass "$name" "line-feed-ending step id and depends_on entry rejected; ledger byte-unchanged"
+}
+
+assert_record_safe_plan_steps_accepted() {
+    local name="NC:record-safe-plan-steps-accepted"
+    # Safe ids that use every charset class (letters, digits, `.`, `_`, `-`) still pass.
+    local gitroot run_id ledger inputs rc=0 got
+    gitroot="$(new_gitroot nc-git)"
+    run_id="engine-case-nc.v_1"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nc-inputs.json"
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test safe plan step ids" \
+        --argjson plan_steps '[{"id":"STEP-001.a_b","status":"pending"},{"id":"STEP-002","depends_on":["STEP-001.a_b"],"status":"pending"}]' \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary, plan_steps: $plan_steps}' \
+        > "$inputs"
+    ( cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" ) >/dev/null 2>&1 || rc=$?
+    got="$(jq -c '[.plan.steps[].id]' "$ledger")"
+    if [[ "$rc" -eq 0 && "$got" == '["STEP-001.a_b","STEP-002"]' ]]; then
+        pass "$name" "safe run_id and plan step ids accepted (plan.steps ids=$got)"
+    else
+        failed "$name" "expected exit 0 and ids [STEP-001.a_b,STEP-002]; rc=$rc ids=$got"
+    fi
+}
+
+assert_init_plan_steps_line_feed_rejected() {
+    local name="ND:init-plan-steps-line-feed-rejected"
+    # Mirrors NB at the init seed path: no run dir or ledger may be created.
+    local gitroot inputs rc=0 wrote_any=no
+    gitroot="$(new_gitroot nd-git)"
+    inputs="$gitroot/nd-inputs.json"
+    jq -n --arg workflow engine-fixture --argjson workflow_version 1 --arg start_state plan \
+        --arg user_request "engine test init step id line feed" \
+        --arg normalized "engine test init step id line feed" \
+        --argjson plan_steps '[{"id":"STEP-001\n","status":"pending"}]' \
+        '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized, plan_steps: $plan_steps}' \
+        > "$inputs"
+    ( cd "$gitroot" && bash "$FAKE_INIT_ENGINE" "$inputs" ) >/dev/null 2>&1 || rc=$?
+    if [[ -d "$gitroot/.hivemind/runs" ]] && find "$gitroot/.hivemind/runs" -name state.json -print 2>/dev/null | grep -q .; then
+        wrote_any=yes
+    fi
+    if [[ "$rc" -ne 0 && "$wrote_any" == "no" ]]; then
+        pass "$name" "line-feed-ending plan step id rejected (exit $rc); no run dir/ledger created"
+    else
+        failed "$name" "expected non-zero exit + no ledger written; rc=$rc, wrote_any=$wrote_any"
+    fi
+}
+
+assert_init_suggested_run_id_line_feed_not_used() {
+    local name="NE:init-suggested-run-id-line-feed-not-used"
+    # A suggested_run_id with an embedded line feed is not safe, so init derives its own id
+    # instead: exit 0, and no run dir name or ledger run.id carries a line feed.
+    local gitroot inputs out rc=0 ledger run_id lf_dirs
+    gitroot="$(new_gitroot ne-git)"
+    inputs="$gitroot/ne-inputs.json"
+    jq -n --arg workflow engine-fixture --argjson workflow_version 1 --arg start_state plan \
+        --arg user_request "engine test init suggested run id line feed" \
+        --arg normalized "engine test init suggested run id line feed" \
+        --arg suggested_run_id $'engine-case-ne\nx' \
+        '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized, suggested_run_id: $suggested_run_id}' \
+        > "$inputs"
+    out="$(cd "$gitroot" && bash "$FAKE_INIT_ENGINE" "$inputs" 2>&1)" || rc=$?
+    ledger="$(printf '%s\n' "$out" | sed -n 's/^ledger: //p')"
+    run_id="$(jq -r '.run.id' "$ledger" 2>/dev/null || true)"
+    lf_dirs="$(find "$gitroot/.hivemind/runs" -mindepth 1 -maxdepth 1 -name $'*\n*' 2>/dev/null | wc -l | tr -d ' ')"
+    if [[ "$rc" -eq 0 && -f "$ledger" && "$run_id" != engine-case-ne* && "$run_id" != *$'\n'* && "$lf_dirs" == "0" ]]; then
+        pass "$name" "unsafe suggested_run_id ignored; derived run id $run_id used, no line-feed run dir"
+    else
+        failed "$name" "expected exit 0 with a derived run id and no line-feed run dir; rc=$rc run_id=$(printf '%q' "$run_id") lf_dirs=$lf_dirs out=$(printf '%s' "$out" | tr '\n' '|')"
+    fi
+}
+
+assert_intent_fallback_run_id_line_feed_rejected() {
+    local name="NF:intent-fallback-run-id-line-feed-rejected"
+    # Mirrors NA for mark-intent-fallback (run_id is read the same way).
+    local gitroot inputs errfile run_id rc
+    gitroot="$(new_gitroot nf-git)"
+    errfile="$gitroot/nf.err"
+    for run_id in $'engine-case-nf\n../x' $'engine-case-nf\nx'; do
+        inputs="$gitroot/nf-inputs.json"
+        jq -n --arg run_id "$run_id" --arg state plan \
+            --arg summary "engine test intent fallback run_id line feed" \
+            '{run_id: $run_id, state: $state, summary: $summary}' > "$inputs"
+        rc=0
+        run_engine_stderr "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" || rc=$?
+        if [[ "$rc" -eq 0 ]] || ! grep -q '^blocker: run_id is not a safe path component: ' "$errfile"; then
+            failed "$name" "run_id $(printf '%q' "$run_id") not refused by the safe-id check; rc=$rc stderr=$(tr '\n' '|' < "$errfile")"
+            return
+        fi
+    done
+    pass "$name" "run_ids with an embedded line feed refused by the safe-id check"
+}
+
 # ── Drive all assertions ────────────────────────────────────────────────────
 
 echo '=== Engine behavior tests: derive-only engines against tests/engine/ fixtures (dual-root) ==='
@@ -3379,6 +3537,12 @@ assert_init_start_mismatch_blocks_with_derived_version
 assert_init_undeclared_start_state_blocks
 assert_record_prints_state_definition
 assert_record_undeclared_target_unchanged
+assert_record_run_id_line_feed_rejected
+assert_record_plan_steps_line_feed_rejected
+assert_record_safe_plan_steps_accepted
+assert_init_plan_steps_line_feed_rejected
+assert_init_suggested_run_id_line_feed_not_used
+assert_intent_fallback_run_id_line_feed_rejected
 
 echo ''
 echo '=== Summary ==='

@@ -16,7 +16,7 @@
 #       is used DELIBERATELY: the sole input is a charset-constrained identity token, so the
 #       inert Write-tool inputs-file transport (which exists to carry UNTRUSTED free-form text
 #       injection-safely, e.g. record-state-result's summary/outputs) buys nothing here. run_id
-#       never enters generated shell/jq SOURCE — it is validated by SAFE_ID_RE + reserved-
+#       never enters generated shell/jq SOURCE — it is validated by hivemind_is_safe_id + reserved-
 #       component reject and referenced only as "$run_id". This keeps the caller surface minimal
 #       while holding the family's containment posture: NO caller-supplied PATH is ever accepted.
 #
@@ -95,7 +95,8 @@
 #   - a step missing an id
 #   - duplicate step ids
 #   - a depends_on referencing an unknown step id
-#   - a step `id` or any `depends_on` entry that fails SAFE_ID_RE (reader-side charset belt,
+#   - a step `id` or any `depends_on` entry that fails the whole-string safe-id check
+#     (hivemind_safe_id_jq_pattern; reader-side charset belt,
 #     symmetric to the `files` grammar projection and to the write-boundary guards in
 #     record-state-result / init-run-ledger; a PRE-EXISTING seeded/resume ledger predating those
 #     write guards could still carry a malformed id). The earlier shape gate now guarantees this
@@ -127,13 +128,6 @@ set -euo pipefail
 
 blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 
-# SAFE_ID charset for the run_id identity component (mirrors the sibling engines). The reserved
-# components "." and ".." pass this class but are rejected explicitly (path traversal). The SAME
-# constant is REUSED reader-side (validation (f)) to charset-validate every plan step `id` and
-# every `depends_on` entry before the wave emit — a belt symmetric to the `files` grammar
-# projection and to the write-boundary guards in record-state-result / init-run-ledger.
-SAFE_ID_RE='^[A-Za-z0-9._-]+$'
-
 # ── Script self-location (portable; independent of ${CLAUDE_PLUGIN_ROOT} and the caller) ──
 # Resolve the plugin root from THIS script's own location, never from a caller value.
 # `cd ... && pwd -P` is portable (no GNU-only readlink -f); BASH_SOURCE is set under
@@ -153,7 +147,12 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 # hivemind_open_ledger (the depth-complete ledger-read/containment/coherence chain). This engine
 # READS an existing ledger, so it uses hivemind_open_ledger (NOT hivemind_read_inputs_file, which
 # is for the inputs-file navigators). The helper ORCHESTRATES the containment.sh helpers above,
-# so this MUST follow that source.
+# so this MUST follow that source. It also provides the whole-string safe-id check shared with
+# the sibling engines: hivemind_is_safe_id for the run_id identity component (the reserved
+# components "." and ".." pass the charset and are rejected explicitly below) and
+# hivemind_safe_id_jq_pattern, REUSED reader-side (validation (f)) to charset-validate every plan
+# step `id` and every `depends_on` entry before the wave emit — a belt symmetric to the `files`
+# grammar projection and to the write-boundary guards in record-state-result / init-run-ledger.
 [ -f "$plugin_root/skills/_shared/ledger-engine-io.sh" ] || blocker "required shared library missing: skills/_shared/ledger-engine-io.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/ledger-engine-io.sh" || blocker "failed to source skills/_shared/ledger-engine-io.sh (unparseable); refusing to proceed"
 
@@ -165,9 +164,9 @@ command -v jq >/dev/null 2>&1 \
 run_id="${1:-}"
 [ -n "$run_id" ] || blocker "missing required argument: run_id (\$1)"
 
-# run_id must be a single safe path component (SAFE_ID_RE + reserved-component reject). This is
-# the ONLY identity the caller supplies; every path below is derived from it.
-printf '%s' "$run_id" | grep -Eq "$SAFE_ID_RE" \
+# run_id must be a single safe path component (hivemind_is_safe_id + reserved-component reject).
+# This is the ONLY identity the caller supplies; every path below is derived from it.
+hivemind_is_safe_id "$run_id" \
   || blocker "run_id is not a safe path component: $run_id"
 case "$run_id" in
   .|..) blocker "run_id is a reserved path component: $run_id" ;;
@@ -252,15 +251,17 @@ steps_len="$(jq '(.plan.steps // []) | length' "$ledger")"
 missing_id="$(jq '[.plan.steps[] | select((.id // "") == "")] | length' "$ledger")"
 [ "$missing_id" = "0" ] || blocker "a plan step is missing an id"
 
-# (c) no duplicate step ids (report the first offender).
-dup_id="$(jq -r '[.plan.steps[].id] | (group_by(.) | map(select(length > 1) | .[0]))[0] // empty' "$ledger")"
+# (c) no duplicate step ids (report the first offender). The safe-id check (f) runs later, so
+# the offender is JSON-encoded (`@json`, as waves.js does) to keep the blocker one line.
+dup_id="$(jq -r '[.plan.steps[].id] | (group_by(.) | map(select(length > 1) | .[0]))[0] // empty | @json' "$ledger")"
 [ -z "$dup_id" ] || blocker "duplicate plan step id: $dup_id"
 
-# (d) every depends_on references a known step id (report the first offender).
+# (d) every depends_on references a known step id (report the first offender, JSON-encoded as
+# in (c)).
 unknown_dep="$(jq -r '
   [.plan.steps[].id] as $ids
   | [ .plan.steps[] | (.depends_on // [])[] as $d | select(($ids | index($d)) == null) | $d ]
-  | .[0] // empty' "$ledger")"
+  | .[0] // empty | @json' "$ledger")"
 [ -z "$unknown_dep" ] || blocker "depends_on references unknown step id: $unknown_dep"
 
 # (e) no dependency cycle. Kahn-style peel: each pass removes every node whose deps are all
@@ -278,7 +279,8 @@ cycle_residue="$(jq '
   | length' "$ledger")"
 [ "$cycle_residue" = "0" ] || blocker "dependency cycle detected among plan steps"
 
-# (f) every step `id` and every `depends_on` entry is a safe id (SAFE_ID_RE charset). READER-SIDE
+# (f) every step `id` and every `depends_on` entry is a safe id (hivemind_safe_id_jq_pattern: the
+# safe-id charset over the WHOLE string, so a trailing line feed is refused). READER-SIDE
 # belt: the write-boundary guards in record-state-result / init-run-ledger stop NEW bad ids, but a
 # PRE-EXISTING seeded/resume ledger predating those guards could still carry a malformed id — and a
 # malformed id must NEVER reach the `wave: [...]` join emit. Symmetric to the `files` grammar
@@ -289,7 +291,7 @@ cycle_residue="$(jq '
 # `type == "string"` FIRST (jq `or` is lazy) so `test` never runs against a non-string. Offenders
 # are emitted via `@json` so an empty-string offender stays a non-empty ("") token and cannot be
 # misread as "no offense".
-bad_id="$(jq -r --arg re "$SAFE_ID_RE" '
+bad_id="$(jq -r --arg re "$(hivemind_safe_id_jq_pattern)" '
   [ .plan.steps[]
     | if (type != "object") then "non-object step"
       else

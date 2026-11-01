@@ -87,7 +87,7 @@
 # path on the command line is $1, the inputs-file authored by the trusted skill via Write.
 #   - The ledger is DERIVED: repo_root="$(git rev-parse --show-toplevel)" then
 #     "$repo_root/.hivemind/runs/<run_id>/state.json". <run_id> comes from the inputs file,
-#     SAFE_ID_RE-validated and ./.. -rejected.
+#     safe-id-validated (hivemind_is_safe_id) and ./.. -rejected.
 #   - A COHERENCE CHECK requires the on-disk ledger.run.id to equal the passed run_id.
 #   - The workflow DEFINITION is DERIVED from the (trusted) ledger's run.workflow against the
 #     script's OWN packaged workflows dir (self-located via BASH_SOURCE + pwd -P, independent
@@ -157,10 +157,6 @@
 set -u
 
 blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
-
-# SAFE_ID charset for identity components (mirrors init-run-ledger.sh). The reserved
-# components "." and ".." pass this class but must be rejected explicitly (path traversal).
-SAFE_ID_RE='^[A-Za-z0-9._-]+$'
 
 # ── Script self-location (portable; independent of ${CLAUDE_PLUGIN_ROOT} and the caller) ──
 # Resolve the packaged workflows dir from THIS script's own location, never from a caller
@@ -268,9 +264,10 @@ fi
 [ -n "$result" ]  || blocker "inputs file is missing required result"
 [ -n "$summary" ] || blocker "inputs file is missing required summary"
 
-# run_id must be a single safe path component (SAFE_ID_RE + reserved-component reject). This
+# run_id must be a single safe path component (hivemind_is_safe_id, the whole-string safe-id
+# check in ledger-engine-io.sh, + reserved-component reject: "." and ".." pass the charset). This
 # is the ONLY identity the caller supplies; every path below is derived from it.
-printf '%s' "$run_id" | grep -Eq "$SAFE_ID_RE" \
+hivemind_is_safe_id "$run_id" \
   || blocker "run_id is not a safe path component: $run_id"
 case "$run_id" in
   .|..) blocker "run_id is a reserved path component: $run_id" ;;
@@ -333,10 +330,11 @@ esac
 # ── DERIVE the workflow definition from the (trusted) ledger's run.workflow ────
 # The definition is resolved against the self-located PACKAGED workflows dir, never a caller
 # path — so a forged definition cannot bypass the transition gate or the plan-write auth.
-# Defense in depth: SAFE_ID_RE + ./.. reject on run.workflow even though the ledger is trusted.
+# Defense in depth: hivemind_is_safe_id + ./.. reject on run.workflow even though the ledger is
+# trusted.
 run_workflow="$(jq -r '.run.workflow // ""' "$ledger")"
 [ -n "$run_workflow" ] || blocker "ledger run.workflow is empty; cannot derive workflow definition"
-printf '%s' "$run_workflow" | grep -Eq "$SAFE_ID_RE" \
+hivemind_is_safe_id "$run_workflow" \
   || blocker "ledger run.workflow is not a safe path component: $run_workflow"
 case "$run_workflow" in
   .|..) blocker "ledger run.workflow is a reserved path component: $run_workflow" ;;
@@ -364,24 +362,24 @@ if [ "$have_plan_steps" = true ]; then
   # STEP-ID CHARSET GUARD (write-boundary): plan step ids flow through to next-wave's routing
   # YAML (`wave: [...]`) — a YAML delimiter / bracket / comma / newline in an id from an
   # untrusted seeded/resume ledger could forge routing the overlord parses. Guard here so an
-  # unsafe id never persists. UNTRUSTED plan_steps enters jq ONLY as stdin INPUT; the engine
-  # constant SAFE_ID_RE enters via --arg — the untrusted text never touches the jq program
-  # SOURCE. Charset-only + non-empty is the guard (ids never become path components, so `.`/
+  # unsafe id never persists. UNTRUSTED plan_steps enters jq ONLY as stdin INPUT; the shared
+  # constant pattern (hivemind_safe_id_jq_pattern, whole-string `\A...\z`) enters via --arg —
+  # the untrusted text never touches the jq program SOURCE. Charset-only + non-empty is the guard (ids never become path components, so `.`/
   # `..` are NOT rejected). Type-check precedes every field access (fail-closed, mirroring the
   # ordered-`or`/`and` short-circuit posture used elsewhere); messages carry no untrusted text.
   #   (a) every entry is an OBJECT (before any .id / .depends_on access).
   printf '%s' "$plan_steps" | jq -e 'all(.[]; type == "object")' >/dev/null 2>&1 \
     || blocker "each plan step must be a JSON object"
-  #   (b) every .id is a NON-EMPTY STRING matching SAFE_ID_RE.
-  printf '%s' "$plan_steps" | jq -e --arg re "$SAFE_ID_RE" \
+  #   (b) every .id is a NON-EMPTY STRING matching the safe-id pattern.
+  printf '%s' "$plan_steps" | jq -e --arg re "$(hivemind_safe_id_jq_pattern)" \
     'all(.[]; (.id | type == "string") and (.id != "") and (.id | test($re)))' >/dev/null 2>&1 \
     || blocker "plan step id must match SAFE_ID_RE"
   #   (c) every .depends_on (when present and non-null) is an ARRAY (before entry iteration).
   printf '%s' "$plan_steps" | jq -e \
     'all(.[]; ((has("depends_on") and .depends_on != null) | not) or (.depends_on | type == "array"))' >/dev/null 2>&1 \
     || blocker "plan step depends_on must be a JSON array"
-  #   (d) every depends_on entry is a NON-EMPTY STRING matching SAFE_ID_RE.
-  printf '%s' "$plan_steps" | jq -e --arg re "$SAFE_ID_RE" \
+  #   (d) every depends_on entry is a NON-EMPTY STRING matching the safe-id pattern.
+  printf '%s' "$plan_steps" | jq -e --arg re "$(hivemind_safe_id_jq_pattern)" \
     'all(.[]; (.depends_on // []) | all(.[]; (type == "string") and (. != "") and test($re)))' >/dev/null 2>&1 \
     || blocker "depends_on entry must match SAFE_ID_RE"
 fi

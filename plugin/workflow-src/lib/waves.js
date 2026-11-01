@@ -32,12 +32,9 @@
  *   of the same class, which is its text before any value it names. A
  *   change to the rule lands
  *   in next-wave.sh and here together.
- *   Only two things differ from next-wave.sh:
+ *   Only one thing differs from next-wave.sh:
  *     The input is a list of done ids, not a run ledger. Deriving that list
  *     (epoch scope, event projection) is the caller's job.
- *     The safe-id check is strict at the end of the string. jq's `$` also
- *     matches before a final line feed, so next-wave.sh accepts an id such as
- *     "STEP-001" followed by a line feed. computeWave rejects it.
  *
  * Why
  *   Both engines must dispatch the same waves from the same plan. The rule

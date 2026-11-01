@@ -54,6 +54,10 @@
 #              blocker: exit 1, stderr blocker, ledger byte-unchanged. Proves the READER-SIDE
 #              charset belt (a pre-existing seeded/resume ledger predating the write-boundary
 #              guards) stops a malformed id BEFORE it can reach the `wave: [...]` routing emit.
+#   line-feed — the safe-id check covers the WHOLE string (issue #424): a step id or depends_on
+#              entry ending in a line feed is a blocker, a run_id with an embedded or trailing
+#              line feed is refused before any ledger read, and the duplicate-id / unknown-dep
+#              blockers JSON-encode the id they name so it stays on one line.
 #   shape    — the POSITIVE SHAPE-VALIDATION GATE that runs before checks (a)-(f): a non-object
 #              plan.steps entry, a non-array depends_on, a non-array plan.steps, and a
 #              missing/non-string .id are each a clean blocker (exit 1, stderr blocker, empty
@@ -208,6 +212,25 @@ assert_blocker() {
         pass "$name" "exit 1, blocker on stderr, stdout empty, ledger byte-unchanged"
     else
         failed "$name" "expected exit1/empty-stdout/blocker/unchanged; rc=$rc stdout='$out' blocker=$has_blocker changed=$([[ "$before" != "$after" ]] && echo yes || echo no)"
+    fi
+}
+
+# assert_blocker_text <name> <gitroot> <run_id> <expected_stderr>
+# Runs the engine, asserts exit 1, stdout EMPTY, and stderr EXACTLY <expected_stderr> plus one
+# final newline, so a value the blocker names cannot add or split a line unnoticed.
+assert_blocker_text() {
+    local name="$1" gitroot="$2" run_id="$3" expected="$4"
+    local out rc=0 got
+    local errfile="$WORKDIR/$name.err"
+
+    run_engine "$gitroot" "$run_id" out "$errfile" || rc=$?
+
+    got="$(cat "$errfile"; printf x)"
+    got="${got%x}"
+    if [[ "$rc" -eq 1 && -z "$out" && "$got" == "$expected"$'\n' ]]; then
+        pass "$name" "exit 1, stdout empty, stderr matches the expected blocker"
+    else
+        failed "$name" "expected exit1/empty-stdout/stderr=$(printf '%q' "$expected"$'\n'); rc=$rc stdout='$out' stderr=$(printf '%q' "$got")"
     fi
 }
 
@@ -382,6 +405,63 @@ test_bad_step_id() {
     assert_blocker "$name" "$gitroot" "$run_id" "$ledger"
 }
 
+# ── line-feed: the safe-id check covers the WHOLE string (issue #424) ────────
+# jq's Oniguruma `$` also matches before one final line feed, and grep is line-based, so the old
+# `^[A-Za-z0-9._-]+$` checks accepted "STEP-001<LF>" (jq) and "ok<LF>../x" (grep).
+
+test_trailing_lf_step_id() {
+    local gitroot run_id ledger tmp
+    gitroot="$(new_gitroot trailing-lf-step-id)"
+    run_id="nw-trailing-lf-step-id"
+    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
+    tmp="$ledger.seed"
+    jq '.plan.steps[0].id = "STEP-001\n" | .plan.steps[1].depends_on = ["STEP-001\n"]' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+    assert_blocker "line-feed:trailing-lf-step-id" "$gitroot" "$run_id" "$ledger"
+    assert_blocker_text "line-feed:trailing-lf-step-id-text" "$gitroot" "$run_id" \
+        'blocker: plan step id or depends_on entry fails the safe-id charset: "STEP-001\n"'
+}
+
+test_trailing_lf_depends_on() {
+    local gitroot run_id ledger tmp
+    gitroot="$(new_gitroot trailing-lf-depends-on)"
+    run_id="nw-trailing-lf-depends-on"
+    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
+    # Both STEP-001 and "STEP-001<LF>" exist, so the dependency is known and the cycle check
+    # passes: only the safe-id check can refuse the trailing line feed.
+    tmp="$ledger.seed"
+    jq '.plan.steps += [{"id": "STEP-001\n", "files": ["src/lf.ts"]}] | .plan.steps[1].depends_on = ["STEP-001\n"]' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+    assert_blocker_text "line-feed:trailing-lf-depends-on" "$gitroot" "$run_id" \
+        'blocker: plan step id or depends_on entry fails the safe-id charset: "STEP-001\n"'
+}
+
+test_embedded_lf_run_id() {
+    local gitroot
+    gitroot="$(new_gitroot embedded-lf-run-id)"
+    assert_blocker_text "line-feed:embedded-lf-run-id" "$gitroot" $'ok\n../x' \
+        $'blocker: run_id is not a safe path component: ok\n../x'
+    assert_blocker_text "line-feed:trailing-lf-run-id" "$gitroot" $'nw-ok\n' \
+        $'blocker: run_id is not a safe path component: nw-ok\n'
+}
+
+test_duplicate_and_unknown_id_encoded() {
+    local gitroot run_id ledger tmp
+    gitroot="$(new_gitroot encoded-dup-id)"
+    run_id="nw-encoded-dup-id"
+    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
+    tmp="$ledger.seed"
+    jq '.plan.steps[0].id = "A\nforged: x" | .plan.steps[1].id = "A\nforged: x"' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+    assert_blocker_text "line-feed:duplicate-id-encoded" "$gitroot" "$run_id" \
+        'blocker: duplicate plan step id: "A\nforged: x"'
+
+    gitroot="$(new_gitroot encoded-unknown-dep)"
+    run_id="nw-encoded-unknown-dep"
+    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
+    tmp="$ledger.seed"
+    jq '.plan.steps[1].depends_on = ["Z\nforged: x"]' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+    assert_blocker_text "line-feed:unknown-dep-encoded" "$gitroot" "$run_id" \
+        'blocker: depends_on references unknown step id: "Z\nforged: x"'
+}
+
 # ── shape: the positive shape-validation gate rejects malformed plan shapes ──
 
 test_shape_non_object_step() {
@@ -466,6 +546,10 @@ test_cycle
 test_empty
 test_replan_epoch
 test_bad_step_id
+test_trailing_lf_step_id
+test_trailing_lf_depends_on
+test_embedded_lf_run_id
+test_duplicate_and_unknown_id_encoded
 test_shape_non_object_step
 test_shape_non_array_depends_on
 test_shape_non_array_steps

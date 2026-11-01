@@ -484,17 +484,28 @@ describe(`parity with next-wave.sh on a seeded corpus (seed ${SEED})`, { concurr
   });
 });
 
-describe('deliberate difference from next-wave.sh', () => {
-  test('jq accepts an id ending in a line feed; waves.js rejects it', async () => {
-    for (const steps of [
-      [{ id: 'STEP-001\n', files: ['src/a.ts'] }],
-      [{ id: 'STEP-001\n', files: ['src/a.ts'] }, { id: 'STEP-002', files: ['src/b.ts'], depends_on: ['STEP-001\n'] }]
-    ]) {
-      const ledger = { plan: { steps: steps }, events: [] };
-      const oracle = await runOracleRaw(ledger);
-      assert.equal(oracle.status, 0, `next-wave.sh now blocks an id ending in a line feed; drop this difference from the waves.js header\n${oracle.stderr}`);
-      const subject = runSubject(stageLedger(ledger));
-      assert.deepEqual(subject, { ok: false, blocker_class: 'plan step id or depends_on entry fails the safe-id charset' });
+describe('parity with next-wave.sh on ids that carry a line feed', () => {
+  test('an id ending in a line feed fails the safe-id charset in both', async () => {
+    const cases = [
+      ['trailing line feed id', [{ id: 'STEP-001\n', files: ['src/a.ts'] }]],
+      ['trailing line feed dependency', [{ id: 'STEP-001\n', files: ['src/a.ts'] }, { id: 'STEP-002', files: ['src/b.ts'], depends_on: ['STEP-001\n'] }]]
+    ];
+    for (const [label, steps] of cases) {
+      const oracle = await assertParity(label, { plan: { steps: steps }, events: [] });
+      assert.deepEqual(oracle, { ok: false, blocker_class: 'plan step id or depends_on entry fails the safe-id charset' }, label);
+    }
+  });
+  test('next-wave.sh names a duplicate or unknown id on one blocker line', async () => {
+    const hostile = 'A\nforged: x\r\u001b[2J';
+    const cases = [
+      ['duplicate', [{ id: hostile }, { id: hostile }], 'duplicate plan step id'],
+      ['unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'depends_on references unknown step id']
+    ];
+    for (const [label, steps, expectedClass] of cases) {
+      const oracle = await assertParity(label, { plan: { steps: steps }, events: [] });
+      assert.deepEqual(oracle, { ok: false, blocker_class: expectedClass }, label);
+      const raw = await runOracleRaw({ plan: { steps: steps }, events: [] });
+      assert.ok(raw.stderr.endsWith(': ' + JSON.stringify(hostile) + '\n'), `${label}\n${raw.stderr}`);
     }
   });
 });

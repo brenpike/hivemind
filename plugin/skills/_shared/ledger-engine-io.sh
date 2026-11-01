@@ -1,8 +1,8 @@
 # shellcheck shell=bash
 #
 # ledger-engine-io.sh — shared run-ledger READ + BOOTSTRAP machinery for the three
-# committed hivemind ledger engines. Defines exactly two functions extracted VERBATIM
-# (pure code-move, behavior byte-preserving) from the engine monoliths:
+# committed hivemind ledger engines and the next-wave reader. Defines two functions extracted
+# VERBATIM (pure code-move, behavior byte-preserving) from the engine monoliths:
 #   hivemind_read_inputs_file — the inputs-file arg/existence/read-guard/JSON-validity
 #     bootstrap, shared by ALL THREE engines (init-run-ledger, record-state-result,
 #     mark-intent-fallback).
@@ -10,6 +10,9 @@
 #     containment + ledger-read + coherence + post-existence canonical confirmation,
 #     shared by record-state-result + mark-intent-fallback (NOT init, which CREATES a
 #     ledger rather than opening an existing one).
+# and the ONE whole-string safe-id check every engine applies (issue #424):
+#   hivemind_is_safe_id — the shell-side check for one value (run_id, run.workflow, ...).
+#   hivemind_safe_id_jq_pattern — the same check as a pattern for a jq `test`.
 #
 # THIS FILE IS SOURCED, NOT EXECUTED. No shebang: each engine sources it by absolute
 # path derived from its OWN script_dir (`. "$plugin_root/skills/_shared/ledger-engine-io.sh"`).
@@ -24,17 +27,45 @@
 # definitions); each ENGINE owns its own `set -u`, EXIT trap, and error routing.
 # Allowlisted under CHECK13 as a P18 documented exception.
 #
-# VARIABLE CONTRACT: both functions run in the SOURCING (engine) shell under `set -u`.
+# VARIABLE CONTRACT: every function runs in the SOURCING (engine) shell under `set -u`.
 # Every variable they touch is `local` or a passed argument — they read NO caller-shell
-# globals. Neither function calls `exit`; each returns non-zero with a message on stderr,
-# and the engine maps that non-zero return to its OWN blocker()/exit contract (mirroring
-# the never-exit contract of the containment.sh helpers these functions orchestrate).
+# globals. No function calls `exit`; each returns non-zero on failure (the two IO functions
+# with a message on stderr or stdout, per their contracts below), and the engine maps that
+# non-zero return to its OWN blocker()/exit contract (mirroring the never-exit contract of the
+# containment.sh helpers these functions orchestrate).
 #
-# DEPENDENCY CONTRACT: these functions ORCHESTRATE the containment.sh helpers
+# DEPENDENCY CONTRACT: the two IO functions ORCHESTRATE the containment.sh helpers
 # (hivemind_assert_inputs_contained, hivemind_assert_contained, hivemind_assert_ledger_contained)
 # at CALL time — this library does NOT source containment.sh. The ENGINE MUST have sourced
-# containment.sh BEFORE calling either function. These functions also require `jq` and `git`
-# on PATH (the engine's own up-front `command -v jq` dependency check covers jq).
+# containment.sh BEFORE calling either IO function. They also require `jq` and `git`
+# on PATH (the engine's own up-front `command -v jq` dependency check covers jq). The two
+# safe-id functions need neither.
+
+# hivemind_is_safe_id <value>
+#
+# Returns 0 iff the WHOLE <value> is one or more bytes of the safe-id charset [A-Za-z0-9._-],
+# else 1. Pure: no output, never exits. The reserved components "." and ".." pass this check;
+# a caller that uses the value as a path component rejects them itself.
+#
+# WHY NOT `printf '%s' "$v" | grep -Eq '^[A-Za-z0-9._-]+$'` (the form this replaces): grep is
+# line-based, so a value with an embedded line feed passes when ANY one of its lines is safe
+# (e.g. "ok<LF>../x"). The bash `=~` match anchors `^`/`$` to the whole string, and a line feed
+# is outside the class. LC_ALL=C pins the ranges to ASCII: under a UTF-8 locale such as
+# en_US.UTF-8, `[A-Za-z]` also admits letters such as "é".
+hivemind_is_safe_id() {
+  local LC_ALL=C
+  [[ $1 =~ ^[A-Za-z0-9._-]+$ ]]
+}
+
+# hivemind_safe_id_jq_pattern
+#
+# Prints the safe-id check as a pattern for a jq `test`, with no trailing newline. Pass it as
+# data (`jq --arg re "$(hivemind_safe_id_jq_pattern)" '... test($re) ...'`), never as program
+# text. `\A` and `\z` anchor the whole string: jq's Oniguruma `$` also matches before one final
+# line feed, so `^[A-Za-z0-9._-]+$` accepts "STEP-001<LF>". Same charset as hivemind_is_safe_id.
+hivemind_safe_id_jq_pattern() {
+  printf '%s' '\A[A-Za-z0-9._-]+\z'
+}
 
 # hivemind_read_inputs_file <inputs_file_path> <label>
 #
@@ -107,7 +138,7 @@ hivemind_read_inputs_file() {
 # VERBATIM ledger-open machinery shared by record-state-result + mark-intent-fallback (NOT
 # init, which CREATES a ledger). The caller passes the already-derived <repo_root>
 # (git rev-parse --show-toplevel, already non-empty-checked by the engine) and the
-# already-validated <run_id> (SAFE_ID_RE + reserved-component reject already applied by the
+# already-validated <run_id> (hivemind_is_safe_id + reserved-component reject already applied by the
 # engine). This function then performs, IN THIS EXACT ORDER (a reordering silently breaks
 # engine determinism):
 #   1. derive ledger = "$repo_root/.hivemind/runs/$run_id/state.json",

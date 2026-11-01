@@ -85,10 +85,13 @@ fi
 V1_STATE_TYPES='["decision","agent","skill","user_gate","terminal"]'
 
 # Safe id pattern for start, state names, transition results and transition
-# targets. Same literal as SAFE_ID_RE in init-run-ledger.sh, record-state-result.sh,
-# mark-intent-fallback.sh and next-wave.sh, which print state ids raw in their
-# stdout routing lines.
-SAFE_ID_RE='^[A-Za-z0-9._-]+$'
+# targets. Same pattern as hivemind_safe_id_jq_pattern in
+# plugin/skills/_shared/ledger-engine-io.sh, the whole-string safe-id check that
+# init-run-ledger.sh, record-state-result.sh, mark-intent-fallback.sh and
+# next-wave.sh apply; they print state ids raw in their stdout routing lines.
+# Kept as a copy so this validator does not source a plugin runtime library.
+# \A and \z anchor the whole string: jq's `$` also matches before a final newline.
+SAFE_ID_RE='\A[A-Za-z0-9._-]+\z'
 
 # ── Producer-to-workflow contract vocabularies ──────────────────────────────────
 #
@@ -237,12 +240,12 @@ validate_workflow_definition() {
         || fail "$label" "transition target(s) point to undeclared states: $dangling_targets"
 
     # Rule: start, state keys, transition result keys and transition targets are
-    # safe ids. The whole check stays inside jq: jq 1.6 `$` matches before a
-    # trailing newline, so `safe` also rejects a trailing "\n", and every offender
-    # is printed via tojson so the FAIL line stays one line.
+    # safe ids. The whole check stays inside jq: SAFE_ID_RE anchors the whole
+    # string, so `safe` rejects a trailing "\n", and every offender is printed via
+    # tojson so the FAIL line stays one line.
     local unsafe_ids
     unsafe_ids="$(jq -r --arg re "$SAFE_ID_RE" '
-        def safe: type == "string" and test($re) and (endswith("\n") | not);
+        def safe: type == "string" and test($re);
         [ (if has("start") and (.start | safe | not) then "start=\(.start | tojson)" else empty end),
           (.states | to_entries[]
            | .key as $from
@@ -255,7 +258,7 @@ validate_workflow_definition() {
         | join(", ")
     ' "$def_file")"
     [[ -z "$unsafe_ids" ]] \
-        || fail "$label" "id(s) not matching $SAFE_ID_RE over the whole string: $unsafe_ids"
+        || fail "$label" "id(s) not matching ^[A-Za-z0-9._-]+$ over the whole string: $unsafe_ids"
 
     # Rule: every declared terminal exists in .states with type "terminal".
     # (.terminal is optional structurally, but when present each name must resolve.)

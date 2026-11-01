@@ -143,9 +143,6 @@ blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 CLAIMED_DIR=""
 trap 'if [ -n "${CLAIMED_DIR:-}" ] && [ ! -f "${ledger_path:-}" ]; then rm -rf "$CLAIMED_DIR" 2>/dev/null; fi; :' EXIT
 
-# SAFE_ID charset for run-id components and suggested run ids.
-SAFE_ID_RE='^[A-Za-z0-9._-]+$'
-
 # ── Script self-location (portable; independent of ${CLAUDE_PLUGIN_ROOT} and the caller) ──
 # Resolve the packaged workflows dir from THIS script's own location, never from a caller
 # value. `cd ... && pwd -P` is portable (no GNU-only readlink -f); BASH_SOURCE is set under
@@ -256,15 +253,16 @@ printf '%s' "$plan_steps" | jq -e 'type=="array"' >/dev/null 2>&1 \
 # Step-id charset guard. A seeded step id / depends_on id flows into .plan.steps, which
 # next-wave routes into a `wave: [...]` YAML program the overlord parses; a step id bearing
 # a YAML delimiter/bracket/comma/newline could forge routing. Require every step entry to be
-# an OBJECT whose .id is a NON-EMPTY STRING matching SAFE_ID_RE, and every .depends_on entry
+# an OBJECT whose .id is a NON-EMPTY STRING matching the whole-string safe-id pattern
+# (hivemind_safe_id_jq_pattern, from ledger-engine-io.sh), and every .depends_on entry
 # (when present; depends_on must be an ARRAY) likewise. Fail-closed on non-object step /
 # non-array depends_on (type-check gates every field access; jq's short-circuiting `and`
 # never touches .id / has / .depends_on on the wrong type). Do NOT reject ./.. (charset +
 # non-empty only, symmetric to the record-state-result seed guard). UNTRUSTED plan_steps
-# enters jq ONLY as stdin INPUT and SAFE_ID_RE ONLY as the --arg binding — never program
+# enters jq ONLY as stdin INPUT and the safe-id pattern ONLY as the --arg binding — never program
 # SOURCE. This sits with the plan_steps validation, BEFORE any run-dir/ledger creation, so a
 # violation leaves NO orphan dir or ledger.
-printf '%s' "$plan_steps" | jq -e --arg re "$SAFE_ID_RE" '
+printf '%s' "$plan_steps" | jq -e --arg re "$(hivemind_safe_id_jq_pattern)" '
   all(.[];
     type == "object"
     and (.id | type == "string" and length > 0 and test($re))
@@ -274,7 +272,7 @@ printf '%s' "$plan_steps" | jq -e --arg re "$SAFE_ID_RE" '
                and all(.[]; type == "string" and length > 0 and test($re)))
          else true end))
 ' >/dev/null 2>&1 \
-  || blocker "plan_steps: every entry must be an object whose .id is a non-empty string matching ${SAFE_ID_RE}, and every .depends_on (when present) must be an array of such strings"
+  || blocker "plan_steps: every entry must be an object whose .id is a non-empty string matching ^[A-Za-z0-9._-]+$, and every .depends_on (when present) must be an array of such strings"
 
 # ── Run-id derivation ─────────────────────────────────────────────────────────
 run_id=""
@@ -303,7 +301,7 @@ if [ "$parent_kind" = "brood" ]; then
   # (<brood-id>--<short>).
   parent_brood_id_safe="$(printf '%s' "$parent_brood_id" | tr ':' '-')"
   run_id="${parent_brood_id_safe}--${parent_strain_id}"
-elif [ -n "$suggested_run_id" ] && printf '%s' "$suggested_run_id" | grep -Eq "$SAFE_ID_RE"; then
+elif [ -n "$suggested_run_id" ] && hivemind_is_safe_id "$suggested_run_id"; then
   run_id="$suggested_run_id"
 else
   # Derived form <utc-timestamp>-<workflow-id>. Map colons to dashes for a safe dir name.
@@ -314,7 +312,7 @@ else
 fi
 
 # Final defensive check: the resolved run_id must be a safe single path component.
-printf '%s' "$run_id" | grep -Eq "$SAFE_ID_RE" \
+hivemind_is_safe_id "$run_id" \
   || blocker "resolved run id is not a safe path component: $run_id"
 case "$run_id" in
   .|..) blocker "resolved run id is a reserved path component: $run_id" ;;
@@ -364,7 +362,7 @@ ledger_path="$run_dir/state.json"
 # transitions, and the caller never supplies its path. An absent workflow_version or
 # start_state takes the definition's value, and the start state's definition is read for the
 # success output.
-printf '%s' "$workflow" | grep -Eq "$SAFE_ID_RE" \
+hivemind_is_safe_id "$workflow" \
   || blocker "workflow is not a safe path component: $workflow"
 case "$workflow" in
   .|..) blocker "workflow is a reserved path component: $workflow" ;;

@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.9] - 2026-11-01
+
+### Fixed
+
+- The run-ledger engines and next-wave now check a safe id over the whole string. jq's `$` also matched before a final line feed, and the `grep` check passed any value with one safe line, so a step id such as `STEP-001` plus a line feed, or a run id with an embedded line feed, got through. `init-run-ledger` could then create a run folder whose name held a line feed and print it across two routing lines. One shared check in `ledger-engine-io.sh` now serves all four engines, and next-wave's duplicate-id and unknown-dependency blockers JSON-encode the id they name (#424).
+
 ## [7.5.8] - 2026-11-01
 
 ### Changed
