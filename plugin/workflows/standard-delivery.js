@@ -632,7 +632,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'b842bbd4991ff9d5';
+const BUILD_ID = '3a9dbee7305f5db7';
 
 function supportedSchemaKeywords(){
 return[
@@ -3319,7 +3319,7 @@ function listCloses(plan){
 return plan.closes===undefined?[]:plan.closes;
 }
 function describeClosesProblem(plan,references){
-const index=listCloses(plan).findIndex((number)=>!references.some((reference)=>Number(reference)===number));
+const index=listCloses(plan).findIndex((number)=>!references.some((reference)=>reference.replace(/^0+/,'')===String(number)));
 return index===-1?undefined:'The plan names an issue at closes['+index+'] that is not one of the references the run started with, so '+RUN_NAME+' stopped.';
 }
 function renderClosingLines(plan){

@@ -231,10 +231,13 @@ function listCloses(plan) {
  * Returns the plan problem of the first plan.closes number that is not the
  * number of one of references, the launch digit strings, naming its index,
  * or undefined when every number is one of them. describePlanProblem
- * (plan.js) returns it as its last check.
+ * (plan.js) returns it as its last check. It compares decimal text, never
+ * a Number of a reference: the number's String against each reference with
+ * its leading zeros cut, so a reference past the safe integer range matches
+ * only its own digits, and a reference of zeros alone matches no number.
  */
 function describeClosesProblem(plan, references) {
-  const index = listCloses(plan).findIndex((number) => !references.some((reference) => Number(reference) === number));
+  const index = listCloses(plan).findIndex((number) => !references.some((reference) => reference.replace(/^0+/, '') === String(number)));
   return index === -1 ? undefined : 'The plan names an issue at closes[' + index + '] that is not one of the references the run started with, so ' + RUN_NAME + ' stopped.';
 }
 

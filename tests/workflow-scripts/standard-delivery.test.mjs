@@ -7289,6 +7289,16 @@ const ROW_TESTS = {
         assert.equal(main.describePlanProblem(planResult(makePlan({ closes: closes })), resultSchema, parsedFacts(), 'main', ['488']), 'The planner returned a plan that does not fit the plan schema, so the delivery stopped.', JSON.stringify(closes));
       }
     });
+    test('the check compares decimal text, so a reference past the safe integer range matches only its own digits and zero matches nothing', () => {
+      const resultSchema = main.buildPlanResultSchema(planSchema, briefSchema);
+      const problemOf = (closes, references) => main.describePlanProblem(planResult(makePlan({ closes: closes })), resultSchema, parsedFacts(), 'main', references);
+      assert.equal(problemOf([9007199254740992], ['9007199254740993']), closesProblem(0));
+      assert.equal(problemOf([9007199254740992], ['9007199254740992']), undefined);
+      assert.equal(problemOf([9007199254740991], ['9007199254740991']), undefined);
+      assert.equal(problemOf([1e30], ['1' + '0'.repeat(30)]), closesProblem(0));
+      assert.equal(problemOf([0], ['0', '00']), closesProblem(0));
+      assert.equal(problemOf([488, 0], ['488', '0']), closesProblem(1));
+    });
   }
 };
 

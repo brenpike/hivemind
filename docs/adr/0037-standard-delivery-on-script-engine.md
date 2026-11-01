@@ -1849,7 +1849,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/491. PR 490, t
 **Recorded residuals.**
 
 - **Planner adherence.** Root cause: which reference the run fixes is the planner's judgment. Bounded impact: a miss closes or leaves open only an issue the user named at launch, and the pull request body shows the line before merge.
-- **A launch reference in another digit form.** The check compares numbers, so a launch reference `007` admits `closes` 7, and the line reads `Closes #7`.
+- **A launch reference in another digit form.** The check compares decimal text: the number as written against each launch reference with its leading zeros cut. So a launch reference `007` admits `closes` 7, and the line reads `Closes #7`. It never turns a reference into a JavaScript number, so a reference past the safe integer range matches only its own digits, and a reference of zeros alone matches no number.
 
 The rest of ADR-0037 is unchanged.
 
