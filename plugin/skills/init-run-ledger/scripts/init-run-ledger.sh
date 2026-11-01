@@ -215,6 +215,23 @@ esac
 # --argjson number);
 # plan_steps is read as a JSON array via `jq '.plan_steps // []'` (preserving its JSON
 # type for the --argjson serialization). parent.kind defaults to "none" when absent.
+# The four ids that become path components (workflow, suggested_run_id, and the parent
+# brood_id / strain_id that build a child run_id) are checked by hivemind_check_json_id on the
+# intact JSON value FIRST: the `jq -r` reads below drop trailing line feeds and cut at a NUL, so
+# a check on the shell variable alone would pass "safe<LF>" as "safe". parent.brood_id keeps its
+# wider [A-Za-z0-9._:-] charset (the retired timestamp form, see the run-id derivation below).
+# Each status is mapped to its blockers where the value is used.
+workflow_status=0
+hivemind_check_json_id "$INPUTS_FILE" '["workflow"]' || workflow_status=$?
+suggested_run_id_status=0
+hivemind_check_json_id "$INPUTS_FILE" '["suggested_run_id"]' || suggested_run_id_status=$?
+parent_brood_id_status=0
+hivemind_check_json_id "$INPUTS_FILE" '["parent","brood_id"]' '\A[A-Za-z0-9._:-]+\z' || parent_brood_id_status=$?
+parent_strain_id_status=0
+hivemind_check_json_id "$INPUTS_FILE" '["parent","strain_id"]' || parent_strain_id_status=$?
+for id_status in "$workflow_status" "$suggested_run_id_status" "$parent_brood_id_status" "$parent_strain_id_status"; do
+  [ "$id_status" -ne 5 ] || blocker "run-ledger: hivemind_check_json_id could not read an id field of the inputs file; no run dir created"
+done
 workflow="$(jq -r '.workflow // ""' "$INPUTS_FILE")"
 workflow_version="$(jq -r '.workflow_version // ""' "$INPUTS_FILE")"
 start_state="$(jq -r '.start_state // ""' "$INPUTS_FILE")"
@@ -230,7 +247,7 @@ plan_steps="$(jq -c '.plan_steps // []' "$INPUTS_FILE")"
 plan_path="$(jq -r '.plan_path // ""' "$INPUTS_FILE")"
 
 # ── Required-input validation ─────────────────────────────────────────────────
-[ -n "$workflow" ]         || blocker "inputs file is missing required workflow"
+[ "$workflow_status" -ne 2 ] || blocker "inputs file is missing required workflow"
 [ -n "$user_request" ]     || blocker "inputs file is missing required user_request"
 [ -n "$normalized" ]       || blocker "inputs file is missing required normalized"
 
@@ -278,8 +295,8 @@ printf '%s' "$plan_steps" | jq -e --arg re "$(hivemind_safe_id_jq_pattern)" '
 run_id=""
 if [ "$parent_kind" = "brood" ]; then
   # Child form <brood-id>--<strain-id>; both components required and safe.
-  [ -n "$parent_brood_id" ]  || blocker "parent.kind=brood requires parent.brood_id"
-  [ -n "$parent_strain_id" ] || blocker "parent.kind=brood requires parent.strain_id"
+  [ "$parent_brood_id_status" -ne 2 ]  || blocker "parent.kind=brood requires parent.brood_id"
+  [ "$parent_strain_id_status" -ne 2 ] || blocker "parent.kind=brood requires parent.strain_id"
   # parent.run_id and parent.manifest identify the hatchery relationship (run-ledger-schema
   # brood variant). A child that omits either while translating its injected metadata would
   # otherwise write a brood ledger with null ancestry fields, silently breaking the
@@ -288,12 +305,14 @@ if [ "$parent_kind" = "brood" ]; then
   [ -n "$parent_manifest" ]  || blocker "parent.kind=brood requires parent.manifest"
   # parent.brood_id is spawn-brood's generated GUID brood-<uuidv4> (asserted
   # ^brood-[0-9a-f-]+$ at generation, ADR-0021), carrying no colons. The charset gate below
+  # (hivemind_check_json_id status 3, checked on the intact JSON value above; "." and ".." pass,
+  # status 4, as the joined run_id is never a bare reserved component)
   # still ADMITS ':' — deliberate residual tolerance for the retired timestamp-shaped id,
   # harmless because it keeps rejecting path separators, control bytes, and shell
   # metacharacters. It is persisted VERBATIM into .parent.brood_id so the child ledger
   # reconciles with the manifest's canonical brood_id.
-  case "$parent_brood_id"  in *[!A-Za-z0-9._:-]*) blocker "parent.brood_id contains characters outside [A-Za-z0-9._:-]: $parent_brood_id" ;; esac
-  case "$parent_strain_id" in *[!A-Za-z0-9._-]*) blocker "parent.strain_id contains characters outside [A-Za-z0-9._-]: $parent_strain_id" ;; esac
+  [ "$parent_brood_id_status" -ne 3 ]  || blocker "parent.brood_id contains characters outside [A-Za-z0-9._:-]: $parent_brood_id"
+  [ "$parent_strain_id_status" -ne 3 ] || blocker "parent.strain_id contains characters outside [A-Za-z0-9._-]: $parent_strain_id"
   # The colons->dashes pass is ONLY for the filesystem run-id component and is a NO-OP on the
   # GUID (spawn-brood's brood_id_safe is likewise an identity pass); it is retained as
   # defensive tolerance for the retired timestamp form. parent_brood_id stays canonical for
@@ -301,13 +320,15 @@ if [ "$parent_kind" = "brood" ]; then
   # (<brood-id>--<short>).
   parent_brood_id_safe="$(printf '%s' "$parent_brood_id" | tr ':' '-')"
   run_id="${parent_brood_id_safe}--${parent_strain_id}"
-elif [ -n "$suggested_run_id" ] && hivemind_is_safe_id "$suggested_run_id"; then
+elif [ "$suggested_run_id_status" -eq 0 ] || [ "$suggested_run_id_status" -eq 4 ]; then
+  # A safe suggested_run_id is used; a reserved "." / ".." is used too and refused by the final
+  # check below. An absent or unsafe one falls back to the derived form.
   run_id="$suggested_run_id"
 else
   # Derived form <utc-timestamp>-<workflow-id>. Map colons to dashes for a safe dir name.
   utc_ts="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
   # Reject a workflow id that would make an unsafe directory component.
-  case "$workflow" in *[!A-Za-z0-9._-]*) blocker "workflow contains characters outside [A-Za-z0-9._-]; cannot derive a safe run id: $workflow" ;; esac
+  [ "$workflow_status" -ne 3 ] || blocker "workflow contains characters outside [A-Za-z0-9._-]; cannot derive a safe run id: $workflow"
   run_id="${utc_ts}-${workflow}"
 fi
 
@@ -362,10 +383,11 @@ ledger_path="$run_dir/state.json"
 # transitions, and the caller never supplies its path. An absent workflow_version or
 # start_state takes the definition's value, and the start state's definition is read for the
 # success output.
-hivemind_is_safe_id "$workflow" \
-  || blocker "workflow is not a safe path component: $workflow"
-case "$workflow" in
-  .|..) blocker "workflow is a reserved path component: $workflow" ;;
+case "$workflow_status" in
+  0) : ;;
+  3) blocker "workflow is not a safe path component: $workflow" ;;
+  4) blocker "workflow is a reserved path component: $workflow" ;;
+  *) blocker "run-ledger: hivemind_check_json_id returned an unmapped status for workflow ($workflow_status); no run dir created" ;;
 esac
 def="$workflows_dir/$workflow.json"
 [ -f "$def" ] || blocker "packaged workflow definition does not exist: $def"

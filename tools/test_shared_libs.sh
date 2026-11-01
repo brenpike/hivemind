@@ -2394,6 +2394,37 @@ for safeid_index in "${!safeid_values[@]}"; do
 done
 unset safeid_values safeid_rows safeid_index safeid_expected safeid_label safeid_value safeid_shell safeid_jq
 
+# ── 11d. hivemind_check_json_id — the safe-id check on the intact JSON value (#424) ──
+# Each row: <JSON value literal>|<expected return code>|<label>. A `jq -r` read drops trailing
+# line feeds and bash drops a NUL, so the first three values would reach a shell-side check as
+# "safe"; the check runs inside jq on the JSON value and must refuse them.
+jsonid_file="$WORKDIR/jsonid.json"
+jsonid_rows=('"safe"|0|plain' '"engine-case.v_1"|0|every-class' '"safe\n"|3|trailing-lf' '"safe\n\n"|3|two-trailing-lf'
+  '"sa\u0000fe"|3|embedded-nul' '"safe\n../x"|3|embedded-lf' '"safe\r"|3|cr' '"safé"|3|non-ascii'
+  '"."|4|dot' '".."|4|dotdot' '""|2|empty' 'null|2|null' 'false|2|false' '5|3|number' '["safe"]|3|array')
+for jsonid_row in "${jsonid_rows[@]}"; do
+  IFS='|' read -r jsonid_literal jsonid_expected jsonid_label <<<"$jsonid_row"
+  printf '{"run":{"workflow":%s}}' "$jsonid_literal" > "$jsonid_file"
+  jsonid_rc=0
+  hivemind_check_json_id "$jsonid_file" '["run","workflow"]' || jsonid_rc=$?
+  assert_eq "engineio:json-id-$jsonid_label" "$jsonid_expected" "$jsonid_rc"
+done
+printf '{"run":"not-an-object"}' > "$jsonid_file"
+jsonid_rc=0
+hivemind_check_json_id "$jsonid_file" '["run","workflow"]' || jsonid_rc=$?
+assert_eq "engineio:json-id-unindexable-path-is-absent" "2" "$jsonid_rc"
+printf '{"brood_id":"2026-05-31T17:30:00Z"}' > "$jsonid_file"
+jsonid_rc=0
+hivemind_check_json_id "$jsonid_file" '["brood_id"]' '\A[A-Za-z0-9._:-]+\z' || jsonid_rc=$?
+assert_eq "engineio:json-id-caller-pattern" "0" "$jsonid_rc"
+jsonid_rc=0
+hivemind_check_json_id "$jsonid_file" '["brood_id"]' || jsonid_rc=$?
+assert_eq "engineio:json-id-default-pattern-refuses-colon" "3" "$jsonid_rc"
+jsonid_rc=0
+hivemind_check_json_id "$WORKDIR/jsonid-missing.json" '["run_id"]' || jsonid_rc=$?
+assert_eq "engineio:json-id-unreadable-file" "5" "$jsonid_rc"
+unset jsonid_file jsonid_rows jsonid_row jsonid_literal jsonid_expected jsonid_label jsonid_rc
+
 # ── Section 12: settings-merge.sh ───────────────────────────────────────────────
 echo ''
 echo '=== settings-merge.sh: frozen template + required-key merge core ==='

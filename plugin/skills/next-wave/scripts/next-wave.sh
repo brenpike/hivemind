@@ -81,7 +81,9 @@
 # ORDER: a POSITIVE SHAPE GATE runs FIRST (before (a)-(f)), so no later check ever indexes or
 # iterates an untrusted plan field of the WRONG TYPE and crashes raw jq (exit 5) under
 # `set -euo pipefail` BEFORE the intended clean blocker is reached. Full ordering is:
-# shape gate -> (a) non-empty -> (b)-(f).
+# shape gate -> (a) non-empty -> (b) missing id -> (f) safe-id -> (c) duplicate -> (d) unknown
+# dependency -> (e) cycle. (f) runs BEFORE (c)/(d) so the duplicate and unknown-dependency
+# blockers only ever name an id that already passed the safe-id check.
 #   - SHAPE GATE (closes the whole raw-jq crash class):
 #       * `.plan.steps` is not an array — a non-array string like "BAD" formerly PASSED (a) via
 #         `"BAD" // [] | length` (== 3) then crashed (b) at the `.id` index.
@@ -93,8 +95,6 @@
 #     blocker for these shapes.
 #   - empty / absent plan.steps
 #   - a step missing an id
-#   - duplicate step ids
-#   - a depends_on referencing an unknown step id
 #   - a step `id` or any `depends_on` entry that fails the whole-string safe-id check
 #     (hivemind_safe_id_jq_pattern; reader-side charset belt,
 #     symmetric to the `files` grammar projection and to the write-boundary guards in
@@ -102,6 +102,8 @@
 #     write guards could still carry a malformed id). The earlier shape gate now guarantees this
 #     check runs on known-strings; its non-object/non-array arms are kept as defense-in-depth.
 #     Guarantees a malformed id can NEVER reach the wave: [...] join emit.
+#   - duplicate step ids
+#   - a depends_on referencing an unknown step id
 #   - a dependency cycle
 #   - remaining > 0 but wave empty with no cycle (defensive; a cycle-free acyclic notdone
 #     subgraph always has a ready minimal element, so this cannot occur without a cycle)
@@ -251,8 +253,36 @@ steps_len="$(jq '(.plan.steps // []) | length' "$ledger")"
 missing_id="$(jq '[.plan.steps[] | select((.id // "") == "")] | length' "$ledger")"
 [ "$missing_id" = "0" ] || blocker "a plan step is missing an id"
 
-# (c) no duplicate step ids (report the first offender). The safe-id check (f) runs later, so
-# the offender is JSON-encoded (`@json`, as waves.js does) to keep the blocker one line.
+# (f) every step `id` and every `depends_on` entry is a safe id (hivemind_safe_id_jq_pattern: the
+# safe-id charset over the WHOLE string, so a trailing line feed is refused). Runs BEFORE (c)
+# and (d) so their blockers never name an unsafe id (ADR-0037 SD-58). READER-SIDE
+# belt: the write-boundary guards in record-state-result / init-run-ledger stop NEW bad ids, but a
+# PRE-EXISTING seeded/resume ledger predating those guards could still carry a malformed id — and a
+# malformed id must NEVER reach the `wave: [...]` join emit. Symmetric to the `files` grammar
+# projection in the wave jq below. The earlier SHAPE-VALIDATION GATE now guarantees this check runs
+# on KNOWN-STRINGS (every step is an object, every id/dep is a string) and delivers the advertised
+# clean-blocker contract for those shapes; its non-object-step and non-array-depends_on arms below
+# are RETAINED as defense-in-depth belt. FAIL-CLOSED: the charset check still gates on
+# `type == "string"` FIRST (jq `or` is lazy) so `test` never runs against a non-string. Offenders
+# are emitted via `@json` so an empty-string offender stays a non-empty ("") token and cannot be
+# misread as "no offense".
+bad_id="$(jq -r --arg re "$(hivemind_safe_id_jq_pattern)" '
+  [ .plan.steps[]
+    | if (type != "object") then "non-object step"
+      else
+        ( if ((.id | type) != "string") or ((.id | test($re)) | not)
+          then (.id | @json) else empty end ),
+        ( if (.depends_on != null) and ((.depends_on | type) != "array")
+          then "non-array depends_on"
+          else ( (.depends_on // [])[]
+                 | if (type != "string") or ((test($re)) | not) then @json else empty end )
+          end )
+      end
+  ] | .[0] // empty' "$ledger")"
+[ -z "$bad_id" ] || blocker "plan step id or depends_on entry fails the safe-id charset: $bad_id"
+
+# (c) no duplicate step ids (report the first offender). The safe-id check (f) already ran, so
+# the offender is a safe id; it stays JSON-encoded (`@json`, as waves.js does).
 dup_id="$(jq -r '[.plan.steps[].id] | (group_by(.) | map(select(length > 1) | .[0]))[0] // empty | @json' "$ledger")"
 [ -z "$dup_id" ] || blocker "duplicate plan step id: $dup_id"
 
@@ -278,33 +308,6 @@ cycle_residue="$(jq '
     )
   | length' "$ledger")"
 [ "$cycle_residue" = "0" ] || blocker "dependency cycle detected among plan steps"
-
-# (f) every step `id` and every `depends_on` entry is a safe id (hivemind_safe_id_jq_pattern: the
-# safe-id charset over the WHOLE string, so a trailing line feed is refused). READER-SIDE
-# belt: the write-boundary guards in record-state-result / init-run-ledger stop NEW bad ids, but a
-# PRE-EXISTING seeded/resume ledger predating those guards could still carry a malformed id — and a
-# malformed id must NEVER reach the `wave: [...]` join emit. Symmetric to the `files` grammar
-# projection in the wave jq below. The earlier SHAPE-VALIDATION GATE now guarantees this check runs
-# on KNOWN-STRINGS (every step is an object, every id/dep is a string) and delivers the advertised
-# clean-blocker contract for those shapes; its non-object-step and non-array-depends_on arms below
-# are RETAINED as defense-in-depth belt. FAIL-CLOSED: the charset check still gates on
-# `type == "string"` FIRST (jq `or` is lazy) so `test` never runs against a non-string. Offenders
-# are emitted via `@json` so an empty-string offender stays a non-empty ("") token and cannot be
-# misread as "no offense".
-bad_id="$(jq -r --arg re "$(hivemind_safe_id_jq_pattern)" '
-  [ .plan.steps[]
-    | if (type != "object") then "non-object step"
-      else
-        ( if ((.id | type) != "string") or ((.id | test($re)) | not)
-          then (.id | @json) else empty end ),
-        ( if (.depends_on != null) and ((.depends_on | type) != "array")
-          then "non-array depends_on"
-          else ( (.depends_on // [])[]
-                 | if (type != "string") or ((test($re)) | not) then @json else empty end )
-          end )
-      end
-  ] | .[0] // empty' "$ledger")"
-[ -z "$bad_id" ] || blocker "plan step id or depends_on entry fails the safe-id charset: $bad_id"
 
 # ── Wave computation (single jq program; emits tab-separated routing facts) ────
 # Emits: <remaining>\t<all_done>\t<wave_count>\t<wave_display>

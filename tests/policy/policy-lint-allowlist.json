@@ -132,7 +132,7 @@
   {
     "rule": "CHECK13",
     "path": "plugin/skills/_shared/ledger-engine-io.sh",
-    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Inputs-bootstrap + ledger-read/containment-orchestration functions (hivemind_read_inputs_file + hivemind_open_ledger) plus the whole-string safe-id predicate and its jq pattern (hivemind_is_safe_id + hivemind_safe_id_jq_pattern); functions return non-zero with stderr message on failure and NEVER call exit; callers own set -u and error routing."
+    "reason": "P18 documented exception (ADR-0020): SOURCED library. set -e/pipefail and EXIT trap deliberately omitted — a sourced file mutates the SOURCING shell's option state and would corrupt every caller; carries no top-level set at all. Inputs-bootstrap + ledger-read/containment-orchestration functions (hivemind_read_inputs_file + hivemind_open_ledger) plus the whole-string safe-id predicate, its jq pattern and its in-jq JSON-value check (hivemind_is_safe_id + hivemind_safe_id_jq_pattern + hivemind_check_json_id); functions return non-zero with stderr message on failure and NEVER call exit; callers own set -u and error routing."
   },
   {
     "rule": "CHECK13",

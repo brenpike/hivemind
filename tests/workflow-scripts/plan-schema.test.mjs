@@ -283,6 +283,7 @@ describe('plan schema', () => {
     ['a step file path over 400 code points', (plan) => { plan.steps[0].files[0] = 'f'.repeat(401); }, '$.steps[0].files[0]: maxLength: more than 400 characters'],
     ['an artifact file path over 400 code points', (plan) => { plan.versioning.artifact_files[0] = '\u{1F600}'.repeat(401); }, '$.versioning.artifact_files[0]: maxLength: more than 400 characters'],
     ['a step id over 64 code points', (plan) => { plan.steps[0].id = 'S'.repeat(65); }, '$.steps[0].id: maxLength: more than 64 characters'],
+    ['a depends_on entry over 64 code points', (plan) => { plan.steps[1].depends_on[0] = 'S'.repeat(65); }, '$.steps[1].depends_on[0]: maxLength: more than 64 characters'],
     ['an effect summary over 300 code points', (plan) => { plan.steps[1].external_effects[0].summary = 'e'.repeat(301); }, '$.steps[1].external_effects[0].summary: maxLength: more than 300 characters'],
     ['a closes that is not a list', (plan) => { plan.closes = 491; }, '$.closes: type array expected'],
     ['a closes number written as a string', (plan) => { plan.closes = ['491']; }, '$.closes[0]: type integer expected'],

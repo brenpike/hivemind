@@ -26,8 +26,9 @@
  *   The rule's home and parity oracle is
  *   plugin/skills/next-wave/scripts/next-wave.sh: COMPUTATION items 3 to 5,
  *   its VALIDATION in the same order (shape gate, empty, missing id,
- *   duplicate id, unknown dependency, cycle, safe-id charset) and its
- *   defensive stall check. tests/workflow-scripts/waves.test.mjs runs both on
+ *   safe-id charset, duplicate id, unknown dependency, cycle) and its
+ *   defensive stall check. The safe-id check runs before the duplicate
+ *   and unknown dependency checks, so those problems only name a safe id. tests/workflow-scripts/waves.test.mjs runs both on
  *   the same plans and requires the same outcome: the same wave, or a problem
  *   of the same class, which is its text before any value it names. A
  *   change to the rule lands
@@ -74,6 +75,10 @@ function findWavePlanProblem(steps) {
   if (steps.some((step) => step.id === '')) {
     return 'a plan step is missing an id';
   }
+  const unsafeId = findUnsafeStepId(steps);
+  if (unsafeId !== null) {
+    return 'plan step id or depends_on entry fails the safe-id charset: ' + JSON.stringify(unsafeId);
+  }
   const duplicateId = findDuplicateStepId(steps);
   if (duplicateId !== null) {
     return 'duplicate plan step id: ' + JSON.stringify(duplicateId);
@@ -84,10 +89,6 @@ function findWavePlanProblem(steps) {
   }
   if (hasDependencyCycle(steps)) {
     return 'dependency cycle detected among plan steps';
-  }
-  const unsafeId = findUnsafeStepId(steps);
-  if (unsafeId !== null) {
-    return 'plan step id or depends_on entry fails the safe-id charset: ' + JSON.stringify(unsafeId);
   }
   return '';
 }

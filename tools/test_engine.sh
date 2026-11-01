@@ -161,6 +161,12 @@
 #                           depends_on entry ending in a line feed is refused by record (ledger
 #                           byte-unchanged) and init (no run dir); init ignores a suggested_run_id
 #                           with an embedded line feed and derives its own id; safe ids still pass.
+#   NG-NM. ids checked on the intact JSON value (issue #424 review) -> a trailing LF, two
+#                           trailing LFs, an embedded NUL or LF, a CR, a non-ASCII letter, "." and
+#                           ".." are refused for record run_id, ledger run.workflow and the ledger
+#                           run.id coherence check, mark-intent-fallback run_id, and init workflow,
+#                           parent.brood_id and parent.strain_id (no run dir); init never names a
+#                           run by a hostile suggested_run_id.
 #
 # Prints PASS/FAIL per assertion. Exits non-zero if ANY assertion FAILs.
 #
@@ -3336,8 +3342,8 @@ run_engine_stderr() {
 assert_record_run_id_line_feed_rejected() {
     local name="NA:record-run-id-line-feed-rejected"
     # A run_id with an embedded line feed (a safe line, then a traversal or a second safe line)
-    # must be refused by the safe-id check itself, before any ledger path. A trailing line feed
-    # cannot reach the check: the engine reads run_id with "$(jq -r ...)", which strips it.
+    # must be refused by the safe-id check itself, before any ledger path. A trailing line feed,
+    # which a "$(jq -r ...)" read strips, is covered by NG (the check runs on the JSON value).
     local gitroot inputs errfile run_id rc
     gitroot="$(new_gitroot na-git)"
     errfile="$gitroot/na.err"
@@ -3473,6 +3479,242 @@ assert_intent_fallback_run_id_line_feed_rejected() {
     pass "$name" "run_ids with an embedded line feed refused by the safe-id check"
 }
 
+# ── NG-NM. ids are checked on the intact JSON value (issue #424 review) ─────
+# A "$(jq -r ...)" read drops every trailing line feed and bash drops a NUL, so "<id><LF>",
+# "<id><LF><LF>" and "<id-head><NUL><id-tail>" reached the old shell-side check as "<id>" and
+# acted on that id. Each engine now checks the JSON value inside jq before any jq -r read.
+
+# hostile_id_rows <safe-id> -> prints one "<JSON string literal>|<unsafe|reserved>" row per
+# hostile value: trailing LF, two trailing LFs, embedded NUL, embedded LF, CR, non-ASCII, ".", "..".
+# The first three collapse to <safe-id> after a jq -r read.
+hostile_id_rows() {
+    jq -nr --arg id "$1" '
+      [($id + "\n"), ($id + "\n\n"), ($id[:6] + "\u0000" + $id[6:]), ($id + "\n../x"),
+       ($id + "\r"), ($id + "é"), ".", ".."][]
+      | [tojson, (if . == "." or . == ".." then "reserved" else "unsafe" end)] | join("|")'
+}
+
+# check_hostile_id_refused <name> <engine> <gitroot> <inputs> <errfile> <unsafe-text>
+#   <reserved-text> <class> <ledger-or-empty> <ledger-sha-or-empty> -> 0 when the engine exits
+# non-zero, stderr carries the blocker text for <class>, and the ledger (if given) is unchanged.
+check_hostile_id_refused() {
+    local name="$1" engine="$2" gitroot="$3" inputs="$4" errfile="$5"
+    local unsafe_text="$6" reserved_text="$7" id_class="$8" ledger="$9" before="${10}"
+    local expected_text="$unsafe_text" rc=0
+    [[ "$id_class" == reserved ]] && expected_text="$reserved_text"
+    run_engine_stderr "$engine" "$gitroot" "$inputs" "$errfile" || rc=$?
+    if [[ "$rc" -eq 0 ]] || ! grep -qF "blocker: $expected_text" "$errfile"; then
+        failed "$name" "expected refusal '$expected_text'; rc=$rc stderr=$(tr '\n' '|' < "$errfile")"
+        return 1
+    fi
+    if [[ -n "$ledger" && "$(sha256sum "$ledger" | awk '{print $1}')" != "$before" ]]; then
+        failed "$name" "ledger changed on a refused id"
+        return 1
+    fi
+    return 0
+}
+
+assert_record_run_id_checked_on_json_value() {
+    local name="NG:record-run-id-checked-on-json-value"
+    local gitroot run_id ledger inputs errfile before literal id_class rc=0
+    gitroot="$(new_gitroot ng-git)"
+    run_id="engine-case-ng"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/ng-inputs.json"
+    errfile="$gitroot/ng.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    while IFS='|' read -r literal id_class; do
+        jq -n --argjson run_id "$literal" --arg state plan --arg result ready \
+            --arg summary "engine test run_id json value" \
+            '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+        check_hostile_id_refused "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "run_id is not a safe path component: " "run_id is a reserved path component: " \
+            "$id_class" "$ledger" "$before" || return
+    done < <(hostile_id_rows "$run_id")
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test run_id json value" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+    run_engine_stderr "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        failed "$name" "control: the safe run_id $run_id was refused; rc=$rc stderr=$(tr '\n' '|' < "$errfile")"
+        return
+    fi
+    pass "$name" "trailing/embedded LF, NUL, CR, non-ASCII, . and .. run_ids refused; ledger unchanged; safe control accepted"
+}
+
+assert_record_run_workflow_checked_on_json_value() {
+    local name="NH:record-run-workflow-checked-on-json-value"
+    local gitroot run_id ledger inputs errfile before literal id_class
+    gitroot="$(new_gitroot nh-git)"
+    run_id="engine-case-nh"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nh-inputs.json"
+    errfile="$gitroot/nh.err"
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test run.workflow json value" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+    while IFS='|' read -r literal id_class; do
+        jq --argjson wf "$literal" '.run.workflow = $wf' "$LEDGER_AT_PLAN" \
+            | jq --arg id "$run_id" '.run.id = $id' > "$ledger"
+        before="$(sha256sum "$ledger" | awk '{print $1}')"
+        check_hostile_id_refused "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "ledger run.workflow is not a safe path component: " \
+            "ledger run.workflow is a reserved path component: " \
+            "$id_class" "$ledger" "$before" || return
+    done < <(hostile_id_rows engine-fixture)
+    pass "$name" "hostile ledger run.workflow values refused before any definition path; ledger unchanged"
+}
+
+assert_record_coherence_checked_on_json_value() {
+    local name="NI:record-coherence-checked-on-json-value"
+    # The ledger sits at runs/<run_id>/ but its .run.id is "<run_id><LF>" (or NUL-split): a
+    # jq -r read made the two compare equal. The coherence check now compares inside jq.
+    local gitroot run_id ledger inputs errfile before forged
+    gitroot="$(new_gitroot ni-git)"
+    run_id="engine-case-ni"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/ni-inputs.json"
+    errfile="$gitroot/ni.err"
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test coherence json value" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+    for forged in '"engine-case-ni\n"' '"engine-case-ni\n\n"' '"engine\u0000-case-ni"'; do
+        jq --argjson forged "$forged" '.run.id = $forged' "$LEDGER_AT_PLAN" > "$ledger"
+        before="$(sha256sum "$ledger" | awk '{print $1}')"
+        check_hostile_id_refused "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "ledger run.id '" "ledger run.id '" unsafe "$ledger" "$before" || return
+        if ! grep -qF "does not match run_id 'engine-case-ni'" "$errfile"; then
+            failed "$name" "ledger run.id $forged not refused by the coherence check; stderr=$(tr '\n' '|' < "$errfile")"
+            return
+        fi
+    done
+    pass "$name" "ledger run.id with a trailing LF or NUL refused by the coherence check; ledger unchanged"
+}
+
+assert_intent_fallback_run_id_checked_on_json_value() {
+    local name="NJ:intent-fallback-run-id-checked-on-json-value"
+    local gitroot run_id ledger inputs errfile before literal id_class rc=0
+    gitroot="$(new_gitroot nj-git)"
+    run_id="engine-case-nj"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nj-inputs.json"
+    errfile="$gitroot/nj.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    while IFS='|' read -r literal id_class; do
+        jq -n --argjson run_id "$literal" --arg state plan \
+            --arg summary "engine test intent fallback run_id json value" \
+            '{run_id: $run_id, state: $state, summary: $summary}' > "$inputs"
+        check_hostile_id_refused "$name" "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "run_id is not a safe path component: " "run_id is a reserved path component: " \
+            "$id_class" "$ledger" "$before" || return
+    done < <(hostile_id_rows "$run_id")
+    jq -n --arg run_id "$run_id" --arg state plan \
+        --arg summary "engine test intent fallback run_id json value" \
+        '{run_id: $run_id, state: $state, summary: $summary}' > "$inputs"
+    run_engine_stderr "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        failed "$name" "control: the safe run_id $run_id was refused; rc=$rc stderr=$(tr '\n' '|' < "$errfile")"
+        return
+    fi
+    pass "$name" "trailing/embedded LF, NUL, CR, non-ASCII, . and .. run_ids refused; ledger unchanged; safe control accepted"
+}
+
+# init_ledger_count <gitroot> -> prints the number of state.json files under the runs dir.
+init_ledger_count() {
+    find "$1/.hivemind/runs" -name state.json 2>/dev/null | wc -l | tr -d ' '
+}
+
+assert_init_workflow_checked_on_json_value() {
+    local name="NK:init-workflow-checked-on-json-value"
+    # No suggested_run_id, so the derived-id branch runs; "." and ".." pass its charset gate and
+    # are refused by the packaged-definition reserved check. No run dir or ledger may be created.
+    local gitroot inputs errfile literal id_class
+    while IFS='|' read -r literal id_class; do
+        gitroot="$(new_gitroot "nk-git-$RANDOM$RANDOM")"
+        inputs="$gitroot/nk-inputs.json"
+        errfile="$gitroot/nk.err"
+        jq -n --argjson workflow "$literal" --argjson workflow_version 1 --arg start_state plan \
+            --arg user_request "engine test init workflow json value" \
+            --arg normalized "engine test init workflow json value" \
+            '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized}' \
+            > "$inputs"
+        check_hostile_id_refused "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "workflow contains characters outside [A-Za-z0-9._-]; cannot derive a safe run id: " \
+            "workflow is a reserved path component: " "$id_class" "" "" || return
+        if [[ "$(init_ledger_count "$gitroot")" != "0" ]]; then
+            failed "$name" "workflow $literal refused but a ledger was written"
+            return
+        fi
+    done < <(hostile_id_rows engine-fixture)
+    pass "$name" "hostile workflow values refused; no run dir or ledger created"
+}
+
+assert_init_suggested_run_id_checked_on_json_value() {
+    local name="NL:init-suggested-run-id-checked-on-json-value"
+    # An unsafe suggested_run_id is not used: init derives its own id (exit 0), so the collapsed
+    # "engine-case-nl" never names the run. "." and ".." are used and refused by the final check.
+    local gitroot inputs errfile out rc literal id_class run_id
+    while IFS='|' read -r literal id_class; do
+        gitroot="$(new_gitroot "nl-git-$RANDOM$RANDOM")"
+        inputs="$gitroot/nl-inputs.json"
+        errfile="$gitroot/nl.err"
+        jq -n --arg workflow engine-fixture --argjson workflow_version 1 --arg start_state plan \
+            --arg user_request "engine test init suggested run id json value" \
+            --arg normalized "engine test init suggested run id json value" \
+            --argjson suggested_run_id "$literal" \
+            '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized, suggested_run_id: $suggested_run_id}' \
+            > "$inputs"
+        if [[ "$id_class" == reserved ]]; then
+            check_hostile_id_refused "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+                "resolved run id is a reserved path component: " \
+                "resolved run id is a reserved path component: " "$id_class" "" "" || return
+            continue
+        fi
+        rc=0
+        out="$(cd "$gitroot" && bash "$FAKE_INIT_ENGINE" "$inputs" 2>"$errfile")" || rc=$?
+        run_id="$(printf '%s\n' "$out" | sed -n 's/^run_id: //p')"
+        if [[ "$rc" -ne 0 || "$run_id" == engine* || ! -d "$gitroot/.hivemind/runs/$run_id" ]]; then
+            failed "$name" "suggested_run_id $literal: expected exit 0 with a derived run id; rc=$rc run_id=$(printf '%q' "$run_id") stderr=$(tr '\n' '|' < "$errfile")"
+            return
+        fi
+    done < <(hostile_id_rows engine-case-nl)
+    pass "$name" "hostile suggested_run_id values never name the run (derived id used; . and .. refused)"
+}
+
+assert_init_brood_ids_checked_on_json_value() {
+    local name="NM:init-brood-ids-checked-on-json-value"
+    # parent.brood_id and parent.strain_id build <brood-id>--<strain-id>. "." and ".." are not
+    # rows here: the joined run_id is never a bare reserved component, so they stay accepted.
+    local gitroot inputs errfile literal id_class field brood_lit strain_lit
+    for field in brood_id strain_id; do
+        while IFS='|' read -r literal id_class; do
+            [[ "$id_class" == reserved ]] && continue
+            gitroot="$(new_gitroot "nm-git-$RANDOM$RANDOM")"
+            inputs="$gitroot/nm-inputs.json"
+            errfile="$gitroot/nm.err"
+            brood_lit='"brood-0f0e0d0c"'
+            strain_lit='"strain-nm"'
+            if [[ "$field" == brood_id ]]; then brood_lit="$literal"; else strain_lit="$literal"; fi
+            jq -n --arg workflow engine-fixture --argjson workflow_version 1 --arg start_state plan \
+                --arg user_request "engine test init brood id json value" \
+                --arg normalized "engine test init brood id json value" \
+                --argjson brood_id "$brood_lit" --argjson strain_id "$strain_lit" \
+                --arg manifest "$gitroot/.hivemind/brood/manifest.json" \
+                '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized,
+                  parent: {kind: "brood", brood_id: $brood_id, strain_id: $strain_id, run_id: "brood-hatchery", manifest: $manifest}}' \
+                > "$inputs"
+            check_hostile_id_refused "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+                "parent.$field contains characters outside " "parent.$field contains characters outside " \
+                "$id_class" "" "" || return
+            if [[ "$(init_ledger_count "$gitroot")" != "0" ]]; then
+                failed "$name" "parent.$field $literal refused but a ledger was written"
+                return
+            fi
+        done < <(hostile_id_rows "${field%_id}-0f0e0d0c")
+    done
+    pass "$name" "hostile parent.brood_id / parent.strain_id values refused; no run dir or ledger created"
+}
+
 # ── Drive all assertions ────────────────────────────────────────────────────
 
 echo '=== Engine behavior tests: derive-only engines against tests/engine/ fixtures (dual-root) ==='
@@ -3543,6 +3785,13 @@ assert_record_safe_plan_steps_accepted
 assert_init_plan_steps_line_feed_rejected
 assert_init_suggested_run_id_line_feed_not_used
 assert_intent_fallback_run_id_line_feed_rejected
+assert_record_run_id_checked_on_json_value
+assert_record_run_workflow_checked_on_json_value
+assert_record_coherence_checked_on_json_value
+assert_intent_fallback_run_id_checked_on_json_value
+assert_init_workflow_checked_on_json_value
+assert_init_suggested_run_id_checked_on_json_value
+assert_init_brood_ids_checked_on_json_value
 
 echo ''
 echo '=== Summary ==='

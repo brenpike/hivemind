@@ -87,7 +87,7 @@
 # path on the command line is $1, the inputs-file authored by the trusted skill via Write.
 #   - The ledger is DERIVED: repo_root="$(git rev-parse --show-toplevel)" then
 #     "$repo_root/.hivemind/runs/<run_id>/state.json". <run_id> comes from the inputs file,
-#     safe-id-validated (hivemind_is_safe_id) and ./.. -rejected.
+#     safe-id-validated and ./.. -rejected on the intact JSON value (hivemind_check_json_id).
 #   - A COHERENCE CHECK requires the on-disk ledger.run.id to equal the passed run_id.
 #   - The workflow DEFINITION is DERIVED from the (trusted) ledger's run.workflow against the
 #     script's OWN packaged workflows dir (self-located via BASH_SOURCE + pwd -P, independent
@@ -223,6 +223,11 @@ esac
 # the inputs object: a MISSING key OR a present-but-null value is ABSENT; a present non-null
 # value is SUPPLIED. This preserves EXACTLY the prior flag semantics — absent outputs defaults
 # to {}, absent plan_steps/plan_path leaves .plan.* UNTOUCHED (never clobbered to []).
+# run_id is checked by hivemind_check_json_id on the intact JSON value FIRST: the `jq -r` read
+# below drops trailing line feeds and cuts at a NUL, so a check on $run_id alone would pass
+# "safe<LF>" as "safe". The status is mapped to its blockers in the validation below.
+run_id_status=0
+hivemind_check_json_id "$INPUTS_FILE" '["run_id"]' || run_id_status=$?
 run_id="$(jq -r '.run_id // ""' "$INPUTS_FILE")"
 state="$(jq -r '.state // ""' "$INPUTS_FILE")"
 result="$(jq -r '.result // ""' "$INPUTS_FILE")"
@@ -259,18 +264,19 @@ else
 fi
 
 # ── Required-input validation ─────────────────────────────────────────────────
-[ -n "$run_id" ]  || blocker "inputs file is missing required run_id"
+[ "$run_id_status" -ne 2 ] || blocker "inputs file is missing required run_id"
 [ -n "$state" ]   || blocker "inputs file is missing required state"
 [ -n "$result" ]  || blocker "inputs file is missing required result"
 [ -n "$summary" ] || blocker "inputs file is missing required summary"
 
-# run_id must be a single safe path component (hivemind_is_safe_id, the whole-string safe-id
-# check in ledger-engine-io.sh, + reserved-component reject: "." and ".." pass the charset). This
+# run_id must be a single safe path component (hivemind_check_json_id, the whole-string safe-id
+# check in ledger-engine-io.sh run on the intact JSON value, + reserved-component reject). This
 # is the ONLY identity the caller supplies; every path below is derived from it.
-hivemind_is_safe_id "$run_id" \
-  || blocker "run_id is not a safe path component: $run_id"
-case "$run_id" in
-  .|..) blocker "run_id is a reserved path component: $run_id" ;;
+case "$run_id_status" in
+  0) : ;;
+  3) blocker "run_id is not a safe path component: $run_id" ;;
+  4) blocker "run_id is a reserved path component: $run_id" ;;
+  *) blocker "record-state-result: hivemind_check_json_id failed on run_id (status $run_id_status); ledger/inputs unchanged" ;;
 esac
 
 # ── DERIVE the ledger path from git-root + run_id (NO caller path) ─────────────
@@ -330,14 +336,17 @@ esac
 # ── DERIVE the workflow definition from the (trusted) ledger's run.workflow ────
 # The definition is resolved against the self-located PACKAGED workflows dir, never a caller
 # path — so a forged definition cannot bypass the transition gate or the plan-write auth.
-# Defense in depth: hivemind_is_safe_id + ./.. reject on run.workflow even though the ledger is
-# trusted.
+# Defense in depth: hivemind_check_json_id (safe-id + ./.. reject on the intact JSON value,
+# BEFORE the lossy `jq -r` read) on run.workflow even though the ledger is trusted.
+run_workflow_status=0
+hivemind_check_json_id "$ledger" '["run","workflow"]' || run_workflow_status=$?
 run_workflow="$(jq -r '.run.workflow // ""' "$ledger")"
-[ -n "$run_workflow" ] || blocker "ledger run.workflow is empty; cannot derive workflow definition"
-hivemind_is_safe_id "$run_workflow" \
-  || blocker "ledger run.workflow is not a safe path component: $run_workflow"
-case "$run_workflow" in
-  .|..) blocker "ledger run.workflow is a reserved path component: $run_workflow" ;;
+case "$run_workflow_status" in
+  0) : ;;
+  2) blocker "ledger run.workflow is empty; cannot derive workflow definition" ;;
+  3) blocker "ledger run.workflow is not a safe path component: $run_workflow" ;;
+  4) blocker "ledger run.workflow is a reserved path component: $run_workflow" ;;
+  *) blocker "record-state-result: hivemind_check_json_id failed on ledger run.workflow (status $run_workflow_status); ledger unchanged" ;;
 esac
 workflow="$workflows_dir/$run_workflow.json"
 [ -f "$workflow" ] || blocker "packaged workflow definition does not exist: $workflow"

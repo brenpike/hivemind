@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The run-ledger engines and next-wave now check a safe id over the whole string. jq's `$` also matched before a final line feed, and the `grep` check passed any value with one safe line, so a step id such as `STEP-001` plus a line feed, or a run id with an embedded line feed, got through. `init-run-ledger` could then create a run folder whose name held a line feed and print it across two routing lines. One shared check in `ledger-engine-io.sh` now serves all four engines, and next-wave's duplicate-id and unknown-dependency blockers JSON-encode the id they name (#424).
+- The run-ledger engines now check an id read from a JSON file on the JSON value itself, inside jq, before reading it into the shell. A `$(jq -r ...)` read drops every trailing line feed and bash drops a NUL, so a `run_id` such as `safe` plus a line feed, or `sa` NUL `fe`, reached the check as `safe` and acted on that run. The new `hivemind_check_json_id` in `ledger-engine-io.sh` covers `run_id` in `record-state-result` and `mark-intent-fallback`, the ledger `run.workflow`, and `workflow`, `suggested_run_id`, `parent.brood_id` and `parent.strain_id` in `init-run-ledger`. The ledger `run.id` coherence check now compares inside jq too (#424).
+- next-wave and the script engine's wave check now run the safe-id check before the duplicate-id and unknown-dependency checks, so those blockers only name a safe id. The plan schema now bounds each `depends_on` entry at 64 characters, like the step id, so no unbounded dependency id reaches a stop message (#424).
 
 ## [7.5.8] - 2026-11-01
 

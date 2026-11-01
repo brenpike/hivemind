@@ -28,7 +28,8 @@
 # WHAT IT REUSES IDENTICALLY from record-state-result.sh (security posture is unchanged):
 #   - Identity derivation: run_id is the ONLY identity the caller supplies; the ledger path
 #     is DERIVED as <git-root>/.hivemind/runs/<run_id>/state.json. NO path is accepted.
-#   - hivemind_is_safe_id + ./.. reject on run_id; coherence check (ledger.run.id == run_id).
+#   - hivemind_check_json_id (safe-id + ./.. reject on the intact JSON run_id); coherence check
+#     (ledger.run.id == run_id).
 #   - Inputs-file READ-guard + depth-complete write-chain containment (shared helper).
 #   - Atomicity: every write is temp-write + atomic mv on the CANONICAL contained path; on
 #     ANY validation failure the on-disk ledger is byte-unchanged (all validation runs
@@ -160,6 +161,11 @@ esac
 # the inputs object: a MISSING key OR a present-but-null value is ABSENT; a present non-null
 # value is SUPPLIED. Absent outputs defaults to {}; absent close_status leaves run.status
 # untouched (run stays running).
+# run_id is checked by hivemind_check_json_id on the intact JSON value FIRST: the `jq -r` read
+# below drops trailing line feeds and cuts at a NUL, so a check on $run_id alone would pass
+# "safe<LF>" as "safe". The status is mapped to its blockers in the validation below.
+run_id_status=0
+hivemind_check_json_id "$INPUTS_FILE" '["run_id"]' || run_id_status=$?
 run_id="$(jq -r '.run_id // ""' "$INPUTS_FILE")"
 state="$(jq -r '.state // ""' "$INPUTS_FILE")"
 summary="$(jq -r '.summary // ""' "$INPUTS_FILE")"
@@ -185,17 +191,18 @@ else
 fi
 
 # ── Required-input validation ─────────────────────────────────────────────────
-[ -n "$run_id" ]  || blocker "inputs file is missing required run_id"
+[ "$run_id_status" -ne 2 ] || blocker "inputs file is missing required run_id"
 [ -n "$state" ]   || blocker "inputs file is missing required state"
 [ -n "$summary" ] || blocker "inputs file is missing required summary"
 
-# run_id must be a single safe path component (hivemind_is_safe_id, the whole-string safe-id
-# check in ledger-engine-io.sh, + reserved-component reject: "." and ".." pass the charset). This
+# run_id must be a single safe path component (hivemind_check_json_id, the whole-string safe-id
+# check in ledger-engine-io.sh run on the intact JSON value, + reserved-component reject). This
 # is the ONLY identity the caller supplies; every path below is derived from it.
-hivemind_is_safe_id "$run_id" \
-  || blocker "run_id is not a safe path component: $run_id"
-case "$run_id" in
-  .|..) blocker "run_id is a reserved path component: $run_id" ;;
+case "$run_id_status" in
+  0) : ;;
+  3) blocker "run_id is not a safe path component: $run_id" ;;
+  4) blocker "run_id is a reserved path component: $run_id" ;;
+  *) blocker "mark-intent-fallback: hivemind_check_json_id failed on run_id (status $run_id_status); ledger/inputs unchanged" ;;
 esac
 
 # ── DERIVE the ledger path from git-root + run_id (NO caller path) ─────────────

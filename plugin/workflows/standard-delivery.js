@@ -603,7 +603,8 @@ const PLAN_SCHEMA = {
 "depends_on": {
 "type": "array",
 "items": {
-"type": "string"
+"type": "string",
+"maxLength": 64
 }
 },
 "external_effects": {
@@ -632,7 +633,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '3a9dbee7305f5db7';
+const BUILD_ID = '5597bf4cba6dcb3c';
 
 function supportedSchemaKeywords(){
 return[
@@ -1658,6 +1659,10 @@ return'plan.steps is empty or absent; nothing to schedule';
 if(steps.some((step)=>step.id==='')){
 return'a plan step is missing an id';
 }
+const unsafeId=findUnsafeStepId(steps);
+if(unsafeId!==null){
+return'plan step id or depends_on entry fails the safe-id charset: '+JSON.stringify(unsafeId);
+}
 const duplicateId=findDuplicateStepId(steps);
 if(duplicateId!==null){
 return'duplicate plan step id: '+JSON.stringify(duplicateId);
@@ -1668,10 +1673,6 @@ return'depends_on references unknown step id: '+JSON.stringify(unknownDependency
 }
 if(hasDependencyCycle(steps)){
 return'dependency cycle detected among plan steps';
-}
-const unsafeId=findUnsafeStepId(steps);
-if(unsafeId!==null){
-return'plan step id or depends_on entry fails the safe-id charset: '+JSON.stringify(unsafeId);
 }
 return'';
 }

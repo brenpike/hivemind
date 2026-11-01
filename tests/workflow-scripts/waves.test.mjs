@@ -392,9 +392,12 @@ describe('computeWave rules', () => {
       ['shape before empty check', [7], 'a plan step is not an object'],
       ['empty', [], 'plan.steps is empty or absent'],
       ['empty id', [{ id: '', files: ['a'] }], 'a plan step is missing an id'],
+      ['missing id before charset', [{ id: 'A]' }, { id: '' }], 'a plan step is missing an id'],
+      ['charset before duplicate', [{ id: 'A' }, { id: 'A' }, { id: 'B]' }], 'plan step id or depends_on entry fails the safe-id charset'],
+      ['charset before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'B', depends_on: ['Y]'] }], 'plan step id or depends_on entry fails the safe-id charset'],
+      ['charset before cycle', [{ id: 'A]', depends_on: ['A]'] }], 'plan step id or depends_on entry fails the safe-id charset'],
       ['duplicate before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'A' }], 'duplicate plan step id'],
       ['unknown before cycle', [{ id: 'A', depends_on: ['A', 'Z'] }], 'depends_on references unknown step id'],
-      ['cycle before charset', [{ id: 'A]', depends_on: ['A]'] }], 'dependency cycle detected among plan steps'],
       ['charset', [{ id: 'A]' }], 'plan step id or depends_on entry fails the safe-id charset']
     ];
     for (const [label, steps, expectedClass] of cases) {
@@ -411,8 +414,10 @@ describe('computeWave rules', () => {
       ['id not a string', [{ id: { text: hostile } }], 'a plan step id is not a string', null],
       ['depends_on not an array', [{ id: 'A', depends_on: { text: hostile } }], 'a plan step depends_on is not an array', null],
       ['depends_on entry not a string', [{ id: 'A', depends_on: [[hostile]] }], 'a plan step depends_on entry is not a string', null],
-      ['duplicate', [{ id: hostile }, { id: hostile }], 'duplicate plan step id', hostile],
-      ['unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'depends_on references unknown step id', hostile],
+      ['duplicate', [{ id: 'A' }, { id: 'A' }], 'duplicate plan step id', 'A'],
+      ['unknown dependency', [{ id: 'A', depends_on: ['Z'] }], 'depends_on references unknown step id', 'Z'],
+      ['unsafe duplicate', [{ id: hostile }, { id: hostile }], 'plan step id or depends_on entry fails the safe-id charset', hostile],
+      ['unsafe unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'plan step id or depends_on entry fails the safe-id charset', hostile],
       ['charset', [{ id: hostile }], 'plan step id or depends_on entry fails the safe-id charset', hostile]
     ];
     for (const [label, steps, expectedClass, named] of cases) {
@@ -484,7 +489,7 @@ describe(`parity with next-wave.sh on a seeded corpus (seed ${SEED})`, { concurr
   });
 });
 
-describe('parity with next-wave.sh on ids that carry a line feed', () => {
+describe('parity with next-wave.sh on ids that carry a line feed, are unsafe or are oversized', () => {
   test('an id ending in a line feed fails the safe-id charset in both', async () => {
     const cases = [
       ['trailing line feed id', [{ id: 'STEP-001\n', files: ['src/a.ts'] }]],
@@ -495,18 +500,28 @@ describe('parity with next-wave.sh on ids that carry a line feed', () => {
       assert.deepEqual(oracle, { ok: false, blocker_class: 'plan step id or depends_on entry fails the safe-id charset' }, label);
     }
   });
-  test('next-wave.sh names a duplicate or unknown id on one blocker line', async () => {
+  test('an unsafe duplicate or unknown id gets the safe-id blocker in both, on one line', async () => {
     const hostile = 'A\nforged: x\r\u001b[2J';
+    const oversized = 'S'.repeat(5000) + ']';
+    const charsetClass = 'plan step id or depends_on entry fails the safe-id charset';
     const cases = [
-      ['duplicate', [{ id: hostile }, { id: hostile }], 'duplicate plan step id'],
-      ['unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'depends_on references unknown step id']
+      ['unsafe duplicate', [{ id: hostile }, { id: hostile }], hostile],
+      ['unsafe unknown dependency', [{ id: 'A', depends_on: [hostile] }], hostile],
+      ['oversized unsafe duplicate', [{ id: oversized }, { id: oversized }], oversized],
+      ['oversized unsafe unknown dependency', [{ id: 'A', depends_on: [oversized] }], oversized]
     ];
-    for (const [label, steps, expectedClass] of cases) {
+    for (const [label, steps, named] of cases) {
       const oracle = await assertParity(label, { plan: { steps: steps }, events: [] });
-      assert.deepEqual(oracle, { ok: false, blocker_class: expectedClass }, label);
+      assert.deepEqual(oracle, { ok: false, blocker_class: charsetClass }, label);
       const raw = await runOracleRaw({ plan: { steps: steps }, events: [] });
-      assert.ok(raw.stderr.endsWith(': ' + JSON.stringify(hostile) + '\n'), `${label}\n${raw.stderr}`);
+      assert.ok(raw.stderr.startsWith('blocker: ' + charsetClass + ': '), `${label}\n${raw.stderr.slice(0, 200)}`);
+      assert.ok(raw.stderr.endsWith(': ' + JSON.stringify(named) + '\n'), `${label}\n${raw.stderr.slice(0, 200)}`);
     }
+  });
+  test('an oversized safe unknown dependency is the unknown-dependency problem in both', async () => {
+    const steps = [{ id: 'A', depends_on: ['Z'.repeat(65)] }];
+    const oracle = await assertParity('oversized safe unknown dependency', { plan: { steps: steps }, events: [] });
+    assert.deepEqual(oracle, { ok: false, blocker_class: 'depends_on references unknown step id' });
   });
 });
 

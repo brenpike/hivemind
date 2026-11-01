@@ -56,8 +56,10 @@
 #              guards) stops a malformed id BEFORE it can reach the `wave: [...]` routing emit.
 #   line-feed — the safe-id check covers the WHOLE string (issue #424): a step id or depends_on
 #              entry ending in a line feed is a blocker, a run_id with an embedded or trailing
-#              line feed is refused before any ledger read, and the duplicate-id / unknown-dep
-#              blockers JSON-encode the id they name so it stays on one line.
+#              line feed is refused before any ledger read, and an unsafe duplicate or unknown
+#              dependency id (a line feed, or 5000 bytes ending in `]`) gets the safe-id blocker,
+#              which runs before the duplicate-id / unknown-dep checks; a safe duplicate or unknown
+#              id still gets its own blocker, the id JSON-encoded.
 #   shape    — the POSITIVE SHAPE-VALIDATION GATE that runs before checks (a)-(f): a non-object
 #              plan.steps entry, a non-array depends_on, a non-array plan.steps, and a
 #              missing/non-string .id are each a clean blocker (exit 1, stderr blocker, empty
@@ -443,23 +445,50 @@ test_embedded_lf_run_id() {
         $'blocker: run_id is not a safe path component: nw-ok\n'
 }
 
-test_duplicate_and_unknown_id_encoded() {
-    local gitroot run_id ledger tmp
-    gitroot="$(new_gitroot encoded-dup-id)"
-    run_id="nw-encoded-dup-id"
-    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
+# stage_mutated_ledger <label> <run-id> <jq-filter> -> stages LEDGER_LINEAR under a new gitroot,
+# applies <jq-filter> to it, and prints the gitroot.
+stage_mutated_ledger() {
+    local gitroot ledger tmp
+    gitroot="$(new_gitroot "$1")"
+    ledger="$(stage_ledger "$gitroot" "$2" "$LEDGER_LINEAR")"
     tmp="$ledger.seed"
-    jq '.plan.steps[0].id = "A\nforged: x" | .plan.steps[1].id = "A\nforged: x"' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
-    assert_blocker_text "line-feed:duplicate-id-encoded" "$gitroot" "$run_id" \
-        'blocker: duplicate plan step id: "A\nforged: x"'
+    jq "$3" "$ledger" > "$tmp" && mv "$tmp" "$ledger"
+    printf '%s' "$gitroot"
+}
 
-    gitroot="$(new_gitroot encoded-unknown-dep)"
-    run_id="nw-encoded-unknown-dep"
-    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
-    tmp="$ledger.seed"
-    jq '.plan.steps[1].depends_on = ["Z\nforged: x"]' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
-    assert_blocker_text "line-feed:unknown-dep-encoded" "$gitroot" "$run_id" \
-        'blocker: depends_on references unknown step id: "Z\nforged: x"'
+test_unsafe_duplicate_and_unknown_id_get_charset_blocker() {
+    local gitroot oversized
+    oversized="$(printf 'S%.0s' $(seq 1 5000))]"
+    gitroot="$(stage_mutated_ledger encoded-dup-id nw-encoded-dup-id \
+        '.plan.steps[0].id = "A\nforged: x" | .plan.steps[1].id = "A\nforged: x"')"
+    assert_blocker_text "line-feed:unsafe-duplicate-id-charset" "$gitroot" nw-encoded-dup-id \
+        'blocker: plan step id or depends_on entry fails the safe-id charset: "A\nforged: x"'
+
+    gitroot="$(stage_mutated_ledger encoded-unknown-dep nw-encoded-unknown-dep \
+        '.plan.steps[1].depends_on = ["Z\nforged: x"]')"
+    assert_blocker_text "line-feed:unsafe-unknown-dep-charset" "$gitroot" nw-encoded-unknown-dep \
+        'blocker: plan step id or depends_on entry fails the safe-id charset: "Z\nforged: x"'
+
+    gitroot="$(stage_mutated_ledger oversized-dup-id nw-oversized-dup-id \
+        ".plan.steps[0].id = \"$oversized\" | .plan.steps[1].id = \"$oversized\"")"
+    assert_blocker_text "line-feed:oversized-unsafe-duplicate-id-charset" "$gitroot" nw-oversized-dup-id \
+        "blocker: plan step id or depends_on entry fails the safe-id charset: \"$oversized\""
+
+    gitroot="$(stage_mutated_ledger oversized-unknown-dep nw-oversized-unknown-dep \
+        ".plan.steps[1].depends_on = [\"$oversized\"]")"
+    assert_blocker_text "line-feed:oversized-unsafe-unknown-dep-charset" "$gitroot" nw-oversized-unknown-dep \
+        "blocker: plan step id or depends_on entry fails the safe-id charset: \"$oversized\""
+}
+
+test_safe_duplicate_and_unknown_id_encoded() {
+    local gitroot
+    gitroot="$(stage_mutated_ledger safe-dup-id nw-safe-dup-id '.plan.steps[1].id = .plan.steps[0].id')"
+    assert_blocker_text "line-feed:safe-duplicate-id-encoded" "$gitroot" nw-safe-dup-id \
+        "blocker: duplicate plan step id: $(jq -c '.plan.steps[0].id' "$LEDGER_LINEAR")"
+
+    gitroot="$(stage_mutated_ledger safe-unknown-dep nw-safe-unknown-dep '.plan.steps[1].depends_on = ["STEP-099"]')"
+    assert_blocker_text "line-feed:safe-unknown-dep-encoded" "$gitroot" nw-safe-unknown-dep \
+        'blocker: depends_on references unknown step id: "STEP-099"'
 }
 
 # ── shape: the positive shape-validation gate rejects malformed plan shapes ──
@@ -549,7 +578,8 @@ test_bad_step_id
 test_trailing_lf_step_id
 test_trailing_lf_depends_on
 test_embedded_lf_run_id
-test_duplicate_and_unknown_id_encoded
+test_unsafe_duplicate_and_unknown_id_get_charset_blocker
+test_safe_duplicate_and_unknown_id_encoded
 test_shape_non_object_step
 test_shape_non_array_depends_on
 test_shape_non_array_steps
