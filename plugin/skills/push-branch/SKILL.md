@@ -14,7 +14,7 @@ shell: bash
 Rules: `GIT-01` (no trunk commits/push)
 
 Before:
-- [ ] `head`, `base`, and `push_remote` (when given) pass the input gate
+- [ ] `head`, `base`, `expect_commit`, and `push_remote` (when given) pass the input gate
 - [ ] Git state not unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State)
 
 After:
@@ -33,19 +33,20 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 
 - `base`: resolved trunk branch — used only as a guard (current branch must not equal it).
 - `head`: working branch (current branch).
+- `expect_commit`: the full SHA of the commit to push. That is the commit the caller's gates held for, or, when no gate runs after the caller's last commit, the commit the caller just made (the `commit:` line of that commit's output). The script stops before the push when HEAD is another commit.
 - `push_remote`: optional explicit remote name. Omit unless the user named one.
 
 ## Requirements
 
 Every push runs through `${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh`, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline).
 
-**Input gate.** Before any Bash call, validate `head`, `base`, and, when provided, `push_remote` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: head, base, or push_remote contains characters outside the safe allowlist`.
+**Input gate.** Before any Bash call, validate `head`, `base`, and, when provided, `push_remote` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: head, base, or push_remote contains characters outside the safe allowlist`. Validate `expect_commit` as a commit SHA against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before any Bash call; on failure, exit 1 with `blocker: expected commit is not a full object id`, which echoes no value.
 
 1. Confirm git state is not unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State). On unsafe state, exit 1 with blocker.
 2. **Final Bash tool call.** Run the push script, where each `<allowlist-validated-...>` placeholder is the input value that passed the input gate. Pass `--remote` only when `push_remote` is provided:
 
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject block --no-upstream block
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --on-reject block --no-upstream block --expect-commit <allowlist-validated-commit>
    ```
 
    The script header defines the branch checks, push modes, force-with-lease retry, failure classification, and output; this skill does not restate them. Exit 0: stdout `branch` + `commit` are the routing data. Exit 1: blocked; relay the script's `blocker:` line from stderr.

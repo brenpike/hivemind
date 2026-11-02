@@ -84,7 +84,7 @@ runner_usage_text() {
     gather-facts) printf '%s' '--trunk <branch> [--remote <remote>] [--ref <number>]...' ;;
     create-working-branch) printf '%s' '--base <branch> --branch <branch> --classification feature|bugfix|hotfix|refactor|chore|docs|test|ci --trunk-freshness fresh|stale|skipped --trunk <branch>' ;;
     bump-type) printf '%s' '<base> --bump-trigger yes|no --no-bump-match yes|no [--version-file <path>]...' ;;
-    open-plan-pr) printf '%s' '--head <branch> --base <branch> [--remote <remote>] [--expect-commit <commit>] --inputs .hivemind/pr-inputs-<token>.json' ;;
+    open-plan-pr) printf '%s' '--head <branch> --base <branch> [--remote <remote>] --expect-commit <commit> --inputs .hivemind/pr-inputs-<token>.json' ;;
     *) return 1 ;;
   esac
 }
@@ -97,7 +97,7 @@ runner_required_flags() {
     gather-facts) printf '%s' '--trunk' ;;
     create-working-branch) printf '%s' '--base --branch --classification --trunk-freshness --trunk' ;;
     bump-type) printf '%s' '--bump-trigger --no-bump-match' ;;
-    open-plan-pr) printf '%s' '--head --base --inputs' ;;
+    open-plan-pr) printf '%s' '--head --base --expect-commit --inputs' ;;
     *) return 1 ;;
   esac
 }

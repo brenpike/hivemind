@@ -3,11 +3,11 @@
 # Behavior test runner for the push-branch engine
 # (plugin/skills/push-branch/scripts/push-branch.sh, gate library plugin/skills/_shared/allowlist.sh).
 #
-# The engine takes REQUIRED `--head <branch> --base <branch>` plus optional `--remote <name>`,
-# `--on-reject block|warn`, `--no-upstream block|origin`, `--expect-commit <sha>`, and
+# The engine takes REQUIRED `--head <branch> --base <branch> --expect-commit <sha>` plus optional
+# `--remote <name>`, `--on-reject block|warn`, `--no-upstream block|origin`, and
 # `--report-remote yes|no`. It refuses
-# when the base text or any ref the base names names the current branch, and, with
-# --expect-commit, when HEAD is another commit, before any push. It reads the current branch, HEAD,
+# when the base text or any ref the base names names the current branch, and when HEAD is not
+# the --expect-commit commit, before any push. It reads the current branch, HEAD,
 # the upstream config, and the push remote ONCE, gates every value, then pushes the explicit
 # refspec <sha>^{commit}:refs/heads/<b> (the captured commit by object id, never `-u`) and
 # (upstream mode only) retries a non-fast-forward once with --force-with-lease on the SAME captured
@@ -85,7 +85,7 @@ failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 # ── Contracted strings (restated from the engine header; a change here is a contract change) ──
 
 BRANCH='feat/x'
-USAGE_REASON='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] [--expect-commit <sha>] [--report-remote yes|no]'
+USAGE_REASON='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] --expect-commit <sha> [--report-remote yes|no]'
 IDENTIFIER_REASON='head, base, or remote contains characters outside the safe allowlist'
 DETACHED_REASON='HEAD is detached'
 CURRENT_BRANCH_REASON='current branch contains characters outside the safe allowlist'
@@ -341,25 +341,29 @@ branch_and_trunk_listing() {
 
 test_usage_errors() {
     create_world usage
+    install_pre_push_hook
     assert_blocker usage-no-args "$WORK_TREE" "$USAGE_REASON"
     assert_blocker usage-unknown-flag "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --force yes
+        --head "$BRANCH" --base main --force yes --expect-commit "$(head_sha)"
     assert_blocker usage-duplicate-head "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --head "$BRANCH" --base main
+        --head "$BRANCH" --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_blocker usage-duplicate-remote "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --remote origin --remote origin
+        --head "$BRANCH" --base main --remote origin --remote origin --expect-commit "$(head_sha)"
     assert_blocker usage-missing-value "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base
+        --expect-commit "$(head_sha)" --head "$BRANCH" --base
     assert_blocker usage-missing-head "$WORK_TREE" "$USAGE_REASON" \
-        --base main
+        --base main --expect-commit "$(head_sha)"
     assert_blocker usage-missing-base "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH"
+        --head "$BRANCH" --expect-commit "$(head_sha)"
     assert_blocker usage-positional "$WORK_TREE" "$USAGE_REASON" \
-        "$BRANCH" main
+        --expect-commit "$(head_sha)" "$BRANCH" main
     assert_blocker usage-bad-on-reject "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --on-reject maybe
+        --head "$BRANCH" --base main --on-reject maybe --expect-commit "$(head_sha)"
     assert_blocker usage-bad-no-upstream "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --no-upstream yes
+        --head "$BRANCH" --base main --no-upstream yes --expect-commit "$(head_sha)"
+    assert_blocker usage-missing-expect-commit "$WORK_TREE" "$USAGE_REASON" \
+        --head "$BRANCH" --base main --remote origin
+    assert_equal usage-missing-expect-commit-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs usage-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
@@ -375,11 +379,11 @@ test_identifier_gate() {
         value_name="${value_names[$index]}"
         bad_value="${bad_values[$index]}"
         assert_blocker "gate-head-$value_name" "$WORK_TREE" "$IDENTIFIER_REASON" \
-            --head "$bad_value" --base main
+            --head "$bad_value" --base main --expect-commit "$(head_sha)"
         assert_blocker "gate-base-$value_name" "$WORK_TREE" "$IDENTIFIER_REASON" \
-            --head "$BRANCH" --base "$bad_value"
+            --head "$BRANCH" --base "$bad_value" --expect-commit "$(head_sha)"
         assert_blocker "gate-remote-$value_name" "$WORK_TREE" "$IDENTIFIER_REASON" \
-            --head "$BRANCH" --base main --remote "$bad_value"
+            --head "$BRANCH" --base main --remote "$bad_value" --expect-commit "$(head_sha)"
     done
     if [[ -e "$marker" ]]; then
         failed gate-no-side-effect "a gated value was expanded: $marker exists"
@@ -394,23 +398,23 @@ test_identifier_gate() {
 test_branch_state() {
     local not_a_checkout="$WORKDIR/not-a-checkout"
     mkdir -p "$not_a_checkout"
-    assert_blocker not-a-checkout "$not_a_checkout" "$NOT_A_CHECKOUT_REASON" \
-        --head "$BRANCH" --base main
-
     create_world branch-state
+    assert_blocker not-a-checkout "$not_a_checkout" "$NOT_A_CHECKOUT_REASON" \
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
+
     assert_blocker head-mismatch "$WORK_TREE" "$MISMATCH_REASON" \
-        --head feat/y --base main
+        --head feat/y --base main --expect-commit "$(head_sha)"
     assert_blocker head-equals-base "$WORK_TREE" "$MISMATCH_REASON" \
-        --head "$BRANCH" --base "$BRANCH"
+        --head "$BRANCH" --base "$BRANCH" --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" checkout -q main
     assert_blocker on-trunk "$WORK_TREE" "$MISMATCH_REASON" \
-        --head main --base main --remote origin
+        --head main --base main --remote origin --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" checkout -q --detach "$BRANCH"
     assert_blocker detached-head "$WORK_TREE" "$DETACHED_REASON" \
-        --head "$BRANCH" --base main --remote origin
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" checkout -q -b 'feat/a$b'
     assert_blocker current-branch-outside-allowlist "$WORK_TREE" "$CURRENT_BRANCH_REASON" \
-        --head "$BRANCH" --base main --remote origin
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
     assert_remote_refs branch-state-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
@@ -434,22 +438,22 @@ test_base_any_spelling() {
         spelling_name="${spelling_names[$index]}"
         base_spelling="${base_spellings[$index]}"
         assert_blocker "base-spelling-$spelling_name" "$WORK_TREE" "$MISMATCH_REASON" \
-            --head "$BRANCH" --base "$base_spelling" --remote origin
+            --head "$BRANCH" --base "$base_spelling" --remote origin --expect-commit "$(head_sha)"
     done
     run_git "$WORK_TREE" symbolic-ref refs/heads/release "refs/heads/$BRANCH"
     assert_blocker base-symbolic-alias "$WORK_TREE" "$MISMATCH_REASON" \
-        --head "$BRANCH" --base release --remote origin
+        --head "$BRANCH" --base release --remote origin --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" symbolic-ref refs/heads/legacy refs/heads/release
     assert_blocker base-symbolic-chain "$WORK_TREE" "$MISMATCH_REASON" \
-        --head "$BRANCH" --base legacy --remote origin
+        --head "$BRANCH" --base legacy --remote origin --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" symbolic-ref refs/heads/upper refs/heads/FEAT/X
     assert_blocker base-symbolic-alias-dangling-case "$WORK_TREE" "$MISMATCH_REASON" \
-        --head "$BRANCH" --base upper --remote origin
+        --head "$BRANCH" --base upper --remote origin --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" symbolic-ref refs/remotes/origin/HEAD "refs/remotes/origin/$BRANCH"
     assert_blocker base-remote-head-alias "$WORK_TREE" "$MISMATCH_REASON" \
-        --head "$BRANCH" --base origin --remote origin
+        --head "$BRANCH" --base origin --remote origin --expect-commit "$(head_sha)"
     assert_blocker base-unreadable "$WORK_TREE" "$UNREADABLE_BASE_REASON" \
-        --head "$BRANCH" --base main.lock --remote origin
+        --head "$BRANCH" --base main.lock --remote origin --expect-commit "$(head_sha)"
     assert_equal base-refusals-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs base-refusals-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
@@ -463,7 +467,7 @@ test_base_names_other_refs() {
     sha="$(head_sha)"
     printf -v expected 'branch: feat/main\ncommit: %s\n' "$sha"
     run_engine "$WORK_TREE" out "$WORKDIR/base-trunk-suffix.err" \
-        --head feat/main --base main --remote origin || rc=$?
+        --head feat/main --base main --remote origin --expect-commit "$(head_sha)" || rc=$?
     assert_equal base-trunk-suffix-exit 0 "$rc" "exit code"
     assert_equal base-trunk-suffix-passes "$expected" "$out" "stdout"
     assert_remote_refs base-trunk-suffix-pushed "$ORIGIN_DIR" \
@@ -473,14 +477,14 @@ test_base_names_other_refs() {
     sha="$(head_sha)"
     run_git "$WORK_TREE" tag main refs/heads/main
     assert_success base-ambiguous-passes "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main --remote origin
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
     assert_remote_refs base-ambiguous-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 
     create_world base-alias-elsewhere
     sha="$(head_sha)"
     run_git "$WORK_TREE" symbolic-ref refs/heads/trunk-alias refs/heads/main
     assert_success base-alias-elsewhere-passes "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base trunk-alias --remote origin
+        --head "$BRANCH" --base trunk-alias --remote origin --expect-commit "$(head_sha)"
     assert_remote_refs base-alias-elsewhere-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
 
@@ -490,7 +494,7 @@ assert_base_passes() {
     local name="$1" base_spelling="$2" sha
     sha="$(head_sha)"
     assert_success "$name-passes" "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base "$base_spelling" --remote origin
+        --head "$BRANCH" --base "$base_spelling" --remote origin --expect-commit "$(head_sha)"
     assert_remote_refs "$name-pushed" "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
 
@@ -510,7 +514,7 @@ test_base_ref_identity_passes() {
     sha="$(head_sha)"
     printf -v expected 'branch: main\ncommit: %s\n' "$sha"
     run_engine "$WORK_TREE" out "$WORKDIR/base-identity-codex-repro.err" \
-        --head main --base team/main --remote origin || rc=$?
+        --head main --base team/main --remote origin --expect-commit "$(head_sha)" || rc=$?
     assert_equal base-identity-codex-repro-exit 0 "$rc" "exit code"
     assert_equal base-identity-codex-repro-passes "$expected" "$out" "stdout"
     assert_remote_refs base-identity-codex-repro-pushed "$ORIGIN_DIR" "refs/heads/main $sha"
@@ -545,14 +549,14 @@ test_base_remote_image_refused() {
         spelling_name="${spelling_names[$index]}"
         base_spelling="${base_spellings[$index]}"
         assert_blocker "base-remote-image-$spelling_name" "$WORK_TREE" "$MISMATCH_REASON" \
-            --head "$BRANCH" --base "$base_spelling" --remote origin
+            --head "$BRANCH" --base "$base_spelling" --remote origin --expect-commit "$(head_sha)"
     done
     run_git "$WORK_TREE" remote add team "$WORLD_ROOT/team.git"
     assert_blocker base-remote-image-added-remote "$WORK_TREE" "$MISMATCH_REASON" \
-        --head "$BRANCH" --base "team/$BRANCH" --remote origin
+        --head "$BRANCH" --base "team/$BRANCH" --remote origin --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" remote add up/stream "$WORLD_ROOT/upstream.git"
     assert_blocker base-remote-image-slash-remote "$WORK_TREE" "$MISMATCH_REASON" \
-        --head "$BRANCH" --base "up/stream/$BRANCH" --remote origin
+        --head "$BRANCH" --base "up/stream/$BRANCH" --remote origin --expect-commit "$(head_sha)"
     assert_equal base-remote-image-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs base-remote-image-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
     assert_remote_refs base-remote-image-other-unchanged "$OTHER_DIR" ''
@@ -584,15 +588,15 @@ test_remote_default_refused() {
     install_pre_push_hook
     for base_spelling in team/main develop; do
         assert_blocker "remote-default-explicit-${base_spelling//\//-}" "$WORK_TREE" "$MISMATCH_REASON" \
-            --head main --base "$base_spelling" --remote origin
+            --head main --base "$base_spelling" --remote origin --expect-commit "$(head_sha)"
         assert_blocker "remote-default-origin-mode-${base_spelling//\//-}" "$WORK_TREE" "$MISMATCH_REASON" \
-            --head main --base "$base_spelling" --no-upstream origin --on-reject warn
+            --head main --base "$base_spelling" --no-upstream origin --on-reject warn --expect-commit "$(head_sha)"
     done
     run_git "$WORK_TREE" config branch.main.remote origin
     run_git "$WORK_TREE" config branch.main.merge refs/heads/main
     for base_spelling in team/main develop; do
         assert_blocker "remote-default-upstream-${base_spelling//\//-}" "$WORK_TREE" "$MISMATCH_REASON" \
-            --head main --base "$base_spelling" --on-reject warn
+            --head main --base "$base_spelling" --on-reject warn --expect-commit "$(head_sha)"
     done
     assert_equal remote-default-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs remote-default-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
@@ -608,25 +612,25 @@ test_remote_default_any_end() {
     install_pre_push_hook
     set_remote_head origin refs/remotes/Origin/MAIN
     assert_blocker remote-default-end-case-variant "$WORK_TREE" "$MISMATCH_REASON" \
-        --head main --base develop --remote origin
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
     set_remote_head origin refs/remotes/origin/develop
     set_remote_head other refs/remotes/other/main
     assert_blocker remote-default-end-dangling-second-remote "$WORK_TREE" "$MISMATCH_REASON" \
-        --head main --base develop --remote origin
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
     set_remote_head other refs/remotes/other/develop
     set_remote_head origin refs/heads/main
     assert_blocker remote-default-end-local-branch "$WORK_TREE" "$MISMATCH_REASON" \
-        --head main --base develop --remote origin
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
     set_remote_head origin refs/remotes/origin/develop
     run_git "$WORK_TREE" remote add up/stream "$WORLD_ROOT/upstream.git"
     set_remote_head up/stream refs/remotes/up/stream/main
     assert_blocker remote-default-end-slash-remote "$WORK_TREE" "$MISMATCH_REASON" \
-        --head main --base develop --remote origin
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
     set_remote_head up/stream refs/remotes/up/stream/develop
     mkdir -p "$WORK_TREE/.git/refs/remotes/origin"
     printf 'ref: \n' >"$WORK_TREE/.git/refs/remotes/origin/HEAD"
     assert_blocker remote-default-end-unreadable "$WORK_TREE" "$UNREADABLE_BASE_REASON" \
-        --head main --base develop --remote origin
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
     rm -f "$WORK_TREE/.git/refs/remotes/origin/HEAD"
     assert_equal remote-default-end-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs remote-default-end-origin-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
@@ -640,14 +644,14 @@ test_remote_default_passes() {
     install_pre_push_hook
     delete_remote_head origin
     assert_blocker remote-default-absent "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
-        --head main --base develop --remote origin
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
     assert_equal remote-default-absent-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs remote-default-absent-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
     create_on_main_world remote-default-not-symbolic
     install_pre_push_hook
     run_git "$WORK_TREE" update-ref --no-deref refs/remotes/origin/HEAD "$TRUNK_SHA"
     assert_blocker remote-default-not-symbolic "$WORK_TREE" "$NO_DEFAULT_RECORD_REASON" \
-        --head main --base develop --remote origin
+        --head main --base develop --remote origin --expect-commit "$(head_sha)"
     assert_equal remote-default-not-symbolic-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs remote-default-not-symbolic-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
     create_on_main_world remote-default-elsewhere
@@ -664,7 +668,7 @@ assert_success_on_main() {
     local name="$1" out rc=0 expected
     printf -v expected 'branch: main\ncommit: %s\n' "$MAIN_SHA"
     run_engine "$WORK_TREE" out "$WORKDIR/$name.err" \
-        --head main --base develop --remote origin || rc=$?
+        --head main --base develop --remote origin --expect-commit "$(head_sha)" || rc=$?
     assert_equal "$name-exit" 0 "$rc" "exit code"
     assert_equal "$name-passes" "$expected" "$out" "stdout"
     assert_remote_refs "$name-pushed" "$ORIGIN_DIR" "refs/heads/main $MAIN_SHA"
@@ -709,7 +713,7 @@ test_remote_listing_unreadable() {
         install_pre_push_hook
         install_git_stand_in "$fail_at"
         assert_blocker_with_stand_in "$case_name" "$COMPARE_BASE_REASON" \
-            --head "$BRANCH" --base main --remote origin
+            --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
         assert_equal "$case_name-failed-call" "$fail_at" "$(cat "$WORLD_ROOT/git-remote.count")" \
             "git remote calls"
         assert_equal "$case_name-no-push" 0 "$(count_push_attempts)" "push attempts"
@@ -761,7 +765,7 @@ test_explicit_sets_upstream() {
     create_world explicit-first
     sha="$(head_sha)"
     assert_success explicit-sets-upstream "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main --remote origin
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
     assert_remote_refs explicit-writes-own-name "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
     assert_equal explicit-upstream-remote origin "$(read_branch_config remote)" "branch.$BRANCH.remote"
     assert_equal explicit-upstream-merge "refs/heads/$BRANCH" "$(read_branch_config merge)" "branch.$BRANCH.merge"
@@ -775,7 +779,7 @@ test_explicit_non_ff_no_retry() {
     run_git "$WORK_TREE" commit --amend --allow-empty -q -m one-amended
     install_pre_push_hook
     assert_blocker explicit-non-ff-blocks "$WORK_TREE" "$REJECTED_REASON" \
-        --head "$BRANCH" --base main --remote origin
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
     assert_equal explicit-non-ff-no-retry 1 "$(count_push_attempts)" "push attempts"
     assert_remote_refs explicit-non-ff-remote-unchanged "$ORIGIN_DIR" "$(branch_and_trunk_listing "$published_sha")"
 }
@@ -784,13 +788,13 @@ test_explicit_rejections() {
     create_world explicit-reject
     install_reject_hook "$ORIGIN_DIR"
     assert_blocker explicit-reject-blocks "$WORK_TREE" "$REJECTED_REASON" \
-        --head "$BRANCH" --base main --remote origin
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
     assert_blocker explicit-reject-warn-still-blocks "$WORK_TREE" "$REJECTED_REASON" \
-        --head "$BRANCH" --base main --remote origin --on-reject warn
+        --head "$BRANCH" --base main --remote origin --on-reject warn --expect-commit "$(head_sha)"
     assert_blocker explicit-unknown-remote "$WORK_TREE" "$REJECTED_REASON" \
-        --head "$BRANCH" --base main --remote nosuch
+        --head "$BRANCH" --base main --remote nosuch --expect-commit "$(head_sha)"
     assert_blocker explicit-dot-remote "$WORK_TREE" "$LOCAL_REMOTE_REASON" \
-        --head "$BRANCH" --base main --remote .
+        --head "$BRANCH" --base main --remote . --expect-commit "$(head_sha)"
     assert_remote_refs explicit-reject-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
     assert_equal explicit-reject-no-upstream-written '' "$(read_branch_config remote)" "branch.$BRANCH.remote"
 }
@@ -804,7 +808,7 @@ test_upstream_own_name() {
     run_git "$WORK_TREE" commit --allow-empty -q -m two
     sha="$(head_sha)"
     assert_success upstream-push "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_remote_refs upstream-push-writes-own-name "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
 
@@ -816,7 +820,7 @@ test_upstream_non_ff_lease_succeeds() {
     sha="$(head_sha)"
     install_pre_push_hook
     assert_success upstream-non-ff-lease-succeeds "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_equal upstream-non-ff-retried 2 "$(count_push_attempts)" "push attempts"
     assert_remote_refs upstream-non-ff-remote-updated "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
@@ -828,10 +832,10 @@ test_upstream_fetch_first_lease_blocks() {
     run_git "$WORK_TREE" commit --allow-empty -q -m local-only
     install_pre_push_hook
     assert_blocker upstream-fetch-first-lease-blocks "$WORK_TREE" "$LEASE_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_equal upstream-fetch-first-retried 2 "$(count_push_attempts)" "push attempts"
     assert_blocker upstream-fetch-first-warn-still-blocks "$WORK_TREE" "$LEASE_REASON" \
-        --head "$BRANCH" --base main --on-reject warn
+        --head "$BRANCH" --base main --on-reject warn --expect-commit "$(head_sha)"
     assert_equal upstream-fetch-first-warn-retried 4 "$(count_push_attempts)" "push attempts"
     assert_remote_refs upstream-fetch-first-remote-unchanged "$ORIGIN_DIR" "$(branch_and_trunk_listing "$ELSEWHERE_SHA")"
 }
@@ -841,31 +845,31 @@ test_upstream_mismatch() {
     set_upstream origin refs/heads/main
     install_pre_push_hook
     assert_blocker upstream-merge-is-trunk "$WORK_TREE" "$UPSTREAM_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_equal upstream-merge-is-trunk-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs upstream-merge-is-trunk-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
 
     run_git "$WORK_TREE" config --unset "branch.$BRANCH.merge"
     assert_blocker upstream-half-set-remote-only "$WORK_TREE" "$UPSTREAM_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" config --unset "branch.$BRANCH.remote"
     run_git "$WORK_TREE" config "branch.$BRANCH.merge" "refs/heads/$BRANCH"
     assert_blocker upstream-half-set-merge-only "$WORK_TREE" "$UPSTREAM_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     set_upstream https://example.invalid/repo.git "refs/heads/$BRANCH"
     assert_blocker upstream-url-remote "$WORK_TREE" "$UPSTREAM_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     set_upstream . "refs/heads/$BRANCH"
     assert_blocker upstream-dot-remote "$WORK_TREE" "$LOCAL_REMOTE_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     set_upstream origin "refs/heads/$BRANCH"
     run_git "$WORK_TREE" config "branch.$BRANCH.pushRemote" -evil
     assert_blocker upstream-push-remote-gate "$WORK_TREE" "$PUSH_REMOTE_GATE_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     run_git "$WORK_TREE" config --unset "branch.$BRANCH.pushRemote"
     run_git "$WORK_TREE" config remote.pushDefault 'a..b'
     assert_blocker upstream-push-default-gate "$WORK_TREE" "$PUSH_REMOTE_GATE_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_equal upstream-gates-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs upstream-gates-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
@@ -877,7 +881,7 @@ test_triangular_push_remote() {
     run_git "$WORK_TREE" config "branch.$BRANCH.pushRemote" other
     sha="$(head_sha)"
     assert_success triangular-push-remote "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_remote_refs triangular-push-remote-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
     assert_remote_refs triangular-push-remote-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
@@ -889,7 +893,7 @@ test_triangular_push_default() {
     run_git "$WORK_TREE" config remote.pushDefault other
     sha="$(head_sha)"
     assert_success triangular-push-default "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_remote_refs triangular-push-default-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
     assert_remote_refs triangular-push-default-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
@@ -907,7 +911,7 @@ run_drift_case() {
     sha="$(head_sha)"
     install_pre_push_hook "$drift_line"
     assert_success "$name" "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_equal "$name-retried" 2 "$(count_push_attempts)" "push attempts (first push + lease retry)"
     assert_remote_refs "$name-trunk-untouched" "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
@@ -938,7 +942,7 @@ test_source_shadow_ref() {
     sha="$(head_sha)"
     run_git "$WORK_TREE" update-ref "refs/tags/$sha" "$TRUNK_SHA"
     assert_success source-shadow-ref "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main --remote origin
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
     assert_remote_refs source-shadow-ref-writes-commit "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
 
@@ -946,7 +950,7 @@ test_origin_head_repoint_upstream() {
     create_world origin-head-repoint-upstream
     install_pre_push_hook 'git symbolic-ref HEAD refs/heads/main'
     assert_success origin-head-repoint-upstream "$WORK_TREE" "$(head_sha)" '' \
-        --head "$BRANCH" --base main --no-upstream origin
+        --head "$BRANCH" --base main --no-upstream origin --expect-commit "$(head_sha)"
     assert_equal origin-head-repoint-upstream-remote origin "$(read_branch_config remote)" "branch.$BRANCH.remote"
     assert_equal origin-head-repoint-upstream-merge "refs/heads/$BRANCH" "$(read_branch_config merge)" "branch.$BRANCH.merge"
     assert_equal origin-head-repoint-upstream-trunk-untouched '' \
@@ -959,7 +963,7 @@ test_explicit_upstream_record_fails() {
     sha="$(head_sha)"
     install_pre_push_hook "touch '$WORK_TREE/.git/config.lock'"
     assert_blocker explicit-upstream-record-fails-blocks "$WORK_TREE" "$UPSTREAM_RECORD_REASON" \
-        --head "$BRANCH" --base main --remote origin
+        --head "$BRANCH" --base main --remote origin --expect-commit "$(head_sha)"
     assert_remote_refs explicit-upstream-record-fails-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
     assert_equal explicit-upstream-record-fails-unrecorded '' "$(read_branch_config remote)" "branch.$BRANCH.remote"
 }
@@ -971,11 +975,11 @@ test_upstream_rejection() {
     set_upstream origin "refs/heads/$BRANCH"
     install_reject_hook "$ORIGIN_DIR"
     assert_blocker upstream-reject-blocks "$WORK_TREE" "$REJECTED_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_blocker upstream-reject-block-explicit "$WORK_TREE" "$REJECTED_REASON" \
-        --head "$BRANCH" --base main --on-reject block
+        --head "$BRANCH" --base main --on-reject block --expect-commit "$(head_sha)"
     assert_success upstream-reject-warn "$WORK_TREE" "$(head_sha)" "$REJECT_WARNING" \
-        --head "$BRANCH" --base main --on-reject warn
+        --head "$BRANCH" --base main --on-reject warn --expect-commit "$(head_sha)"
     assert_remote_refs upstream-reject-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
@@ -983,9 +987,9 @@ test_origin_rejection() {
     create_world origin-reject
     install_reject_hook "$ORIGIN_DIR"
     assert_blocker origin-reject-blocks "$WORK_TREE" "$REJECTED_REASON" \
-        --head "$BRANCH" --base main --no-upstream origin
+        --head "$BRANCH" --base main --no-upstream origin --expect-commit "$(head_sha)"
     assert_success origin-reject-warn "$WORK_TREE" "$(head_sha)" "$REJECT_WARNING" \
-        --head "$BRANCH" --base main --no-upstream origin --on-reject warn
+        --head "$BRANCH" --base main --no-upstream origin --on-reject warn --expect-commit "$(head_sha)"
     assert_remote_refs origin-reject-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
     assert_equal origin-reject-no-upstream-written '' "$(read_branch_config remote)" "branch.$BRANCH.remote"
 }
@@ -995,9 +999,9 @@ test_origin_rejection() {
 test_no_upstream_block() {
     create_world no-upstream-block
     assert_blocker no-upstream-default-blocks "$WORK_TREE" "$NO_UPSTREAM_REASON" \
-        --head "$BRANCH" --base main
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)"
     assert_blocker no-upstream-block "$WORK_TREE" "$NO_UPSTREAM_REASON" \
-        --head "$BRANCH" --base main --no-upstream block
+        --head "$BRANCH" --base main --no-upstream block --expect-commit "$(head_sha)"
     assert_remote_refs no-upstream-block-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
@@ -1006,7 +1010,7 @@ test_no_upstream_origin() {
     create_world no-upstream-origin
     sha="$(head_sha)"
     assert_success no-upstream-origin "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main --no-upstream origin
+        --head "$BRANCH" --base main --no-upstream origin --expect-commit "$(head_sha)"
     assert_remote_refs no-upstream-origin-writes-own-name "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
     assert_equal no-upstream-origin-upstream-remote origin "$(read_branch_config remote)" "branch.$BRANCH.remote"
     assert_equal no-upstream-origin-upstream-merge "refs/heads/$BRANCH" "$(read_branch_config merge)" "branch.$BRANCH.merge"
@@ -1017,7 +1021,7 @@ test_no_upstream_origin_absent() {
     run_git "$WORK_TREE" remote remove origin
     install_pre_push_hook
     assert_success no-upstream-origin-deferred "$WORK_TREE" "$(head_sha)" "$DEFERRED_WARNING" \
-        --head "$BRANCH" --base main --no-upstream origin
+        --head "$BRANCH" --base main --no-upstream origin --expect-commit "$(head_sha)"
     assert_equal no-upstream-origin-deferred-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs no-upstream-origin-deferred-other-untouched "$OTHER_DIR" ''
 }
@@ -1033,13 +1037,13 @@ test_report_remote_usage() {
     create_world report-remote-usage
     install_pre_push_hook
     assert_blocker report-remote-bad-value "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --remote origin --report-remote maybe
+        --head "$BRANCH" --base main --remote origin --report-remote maybe --expect-commit "$(head_sha)"
     assert_blocker report-remote-bad-value-case "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --remote origin --report-remote YES
+        --head "$BRANCH" --base main --remote origin --report-remote YES --expect-commit "$(head_sha)"
     assert_blocker report-remote-duplicate "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --remote origin --report-remote yes --report-remote yes
+        --head "$BRANCH" --base main --remote origin --report-remote yes --report-remote yes --expect-commit "$(head_sha)"
     assert_blocker report-remote-missing-value "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --remote origin --report-remote
+        --expect-commit "$(head_sha)" --head "$BRANCH" --base main --remote origin --report-remote
     assert_equal report-remote-usage-no-push 0 "$(count_push_attempts)" "push attempts"
     assert_remote_refs report-remote-usage-nothing-pushed "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
@@ -1051,7 +1055,7 @@ test_report_remote_upstream() {
     run_git "$WORK_TREE" commit --allow-empty -q -m two
     sha="$(head_sha)"
     assert_success_with_remote report-remote-upstream "$WORK_TREE" "$sha" origin '' \
-        --head "$BRANCH" --base main --report-remote yes
+        --head "$BRANCH" --base main --report-remote yes --expect-commit "$(head_sha)"
     assert_remote_refs report-remote-upstream-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
 
@@ -1062,7 +1066,7 @@ test_report_remote_push_remote() {
     run_git "$WORK_TREE" config "branch.$BRANCH.pushRemote" other
     sha="$(head_sha)"
     assert_success_with_remote report-remote-push-remote "$WORK_TREE" "$sha" other '' \
-        --head "$BRANCH" --base main --report-remote yes
+        --head "$BRANCH" --base main --report-remote yes --expect-commit "$(head_sha)"
     assert_remote_refs report-remote-push-remote-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
     assert_remote_refs report-remote-push-remote-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
@@ -1074,7 +1078,7 @@ test_report_remote_push_default() {
     run_git "$WORK_TREE" config remote.pushDefault other
     sha="$(head_sha)"
     assert_success_with_remote report-remote-push-default "$WORK_TREE" "$sha" other '' \
-        --head "$BRANCH" --base main --report-remote yes
+        --head "$BRANCH" --base main --report-remote yes --expect-commit "$(head_sha)"
     assert_remote_refs report-remote-push-default-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
     assert_remote_refs report-remote-push-default-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
@@ -1084,7 +1088,7 @@ test_report_remote_explicit() {
     create_world report-remote-explicit
     sha="$(head_sha)"
     assert_success_with_remote report-remote-explicit "$WORK_TREE" "$sha" other '' \
-        --head "$BRANCH" --base main --remote other --report-remote yes
+        --head "$BRANCH" --base main --remote other --report-remote yes --expect-commit "$(head_sha)"
     assert_remote_refs report-remote-explicit-writes-other "$OTHER_DIR" "refs/heads/$BRANCH $sha"
     assert_remote_refs report-remote-explicit-origin-untouched "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
@@ -1094,7 +1098,7 @@ test_report_remote_origin_mode() {
     create_world report-remote-origin-mode
     sha="$(head_sha)"
     assert_success_with_remote report-remote-origin-mode "$WORK_TREE" "$sha" origin '' \
-        --head "$BRANCH" --base main --no-upstream origin --report-remote yes
+        --head "$BRANCH" --base main --no-upstream origin --report-remote yes --expect-commit "$(head_sha)"
     assert_remote_refs report-remote-origin-mode-pushed "$ORIGIN_DIR" "$(branch_and_trunk_listing "$sha")"
 }
 
@@ -1103,7 +1107,7 @@ test_report_remote_reject_warn() {
     set_upstream origin "refs/heads/$BRANCH"
     install_reject_hook "$ORIGIN_DIR"
     assert_success_with_remote report-remote-reject-warn "$WORK_TREE" "$(head_sha)" origin "$REJECT_WARNING" \
-        --head "$BRANCH" --base main --on-reject warn --report-remote yes
+        --head "$BRANCH" --base main --on-reject warn --report-remote yes --expect-commit "$(head_sha)"
     assert_remote_refs report-remote-reject-warn-remote-unchanged "$ORIGIN_DIR" "$(trunk_only_listing)"
 }
 
@@ -1112,7 +1116,7 @@ test_report_remote_deferred() {
     run_git "$WORK_TREE" remote remove origin
     install_pre_push_hook
     assert_success report-remote-deferred "$WORK_TREE" "$(head_sha)" "$DEFERRED_WARNING" \
-        --head "$BRANCH" --base main --no-upstream origin --report-remote yes
+        --head "$BRANCH" --base main --no-upstream origin --report-remote yes --expect-commit "$(head_sha)"
     assert_equal report-remote-deferred-no-push 0 "$(count_push_attempts)" "push attempts"
 }
 
@@ -1121,11 +1125,11 @@ test_report_remote_no_equals_default() {
     create_world report-remote-no
     sha="$(head_sha)"
     assert_success report-remote-no "$WORK_TREE" "$sha" '' \
-        --head "$BRANCH" --base main --remote origin --report-remote no
+        --head "$BRANCH" --base main --remote origin --report-remote no --expect-commit "$(head_sha)"
     run_engine "$WORK_TREE" no_out "$WORKDIR/report-remote-no-repeat.err" \
-        --head "$BRANCH" --base main --report-remote no || no_rc=$?
+        --head "$BRANCH" --base main --report-remote no --expect-commit "$(head_sha)" || no_rc=$?
     run_engine "$WORK_TREE" default_out "$WORKDIR/report-remote-default-repeat.err" \
-        --head "$BRANCH" --base main || default_rc=$?
+        --head "$BRANCH" --base main --expect-commit "$(head_sha)" || default_rc=$?
     assert_equal report-remote-no-exit 0 "$no_rc" "exit code with --report-remote no"
     assert_equal report-remote-default-exit 0 "$default_rc" "exit code without --report-remote"
     assert_equal report-remote-no-equals-default "$default_out" "$no_out" "stdout with --report-remote no"

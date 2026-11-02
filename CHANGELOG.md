@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.10] - 2026-11-01
+
+### Changed
+
+- The policy fixtures pin the required expected-commit forms (#494).
+- Docs: the ADR-0037 amendment and the push-branch README and site rows (#494).
+
+### Fixed
+
+- `push-branch.sh` and `open-plan-pr.sh` require `--expect-commit <sha>` and stop with the usage blocker without it, so no caller can push a commit no gate named (#494).
+- The synapse gate hook requires the flag in the `open-plan-pr` exact form (#494).
+- Both skills take `expect_commit` as a required input. The overlord passes the gated commit, and the GitHub reviewer passes the fix commit it just made (#494).
+
 ## [7.5.9] - 2026-11-01
 
 ### Fixed

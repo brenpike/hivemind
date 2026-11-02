@@ -137,7 +137,7 @@ QUOTED_PR="\"$PR\""
 
 expect_bash 'exact:flags-any-order' "$SYNAPSE" allow "bash $QUOTED_MOLT --inputs .hivemind/molt-inputs-z.json --trunk main"
 expect_bash 'exact:facts-trunk-only' "$SYNAPSE" allow "bash $QUOTED_FACTS --trunk main"
-expect_bash 'exact:pr-minimal' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --inputs .hivemind/pr-inputs-a.json"
+expect_bash 'exact:pr-minimal' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json"
 expect_bash 'exact:pr-commit-40' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json"
 expect_bash 'exact:bump-no-version-file' "$SYNAPSE" allow "bash $QUOTED_BUMP main --bump-trigger no --no-bump-match yes"
 expect_bash 'exact:token-64' "$SYNAPSE" allow "bash $QUOTED_MOLT --trunk main --inputs .hivemind/molt-inputs-$TOKEN64.json"
@@ -210,8 +210,9 @@ NOT_EXACT_CASES=(
   "bump-version-file-dotdot|bash $QUOTED_BUMP main --bump-trigger yes --no-bump-match no --version-file ../x.json"
   "pr-commit-uppercase|bash $QUOTED_PR --head f/x --base main --expect-commit 0123456789ABCDEF0123456789ABCDEF01234567 --inputs .hivemind/pr-inputs-a.json"
   "pr-commit-39|bash $QUOTED_PR --head f/x --base main --expect-commit ${SHA40%7} --inputs .hivemind/pr-inputs-a.json"
-  "pr-molt-inputs|bash $QUOTED_PR --head f/x --base main --inputs .hivemind/molt-inputs-a.json"
-  "pr-missing-inputs|bash $QUOTED_PR --head f/x --base main"
+  "pr-molt-inputs|bash $QUOTED_PR --head f/x --base main --expect-commit $SHA40 --inputs .hivemind/molt-inputs-a.json"
+  "pr-missing-inputs|bash $QUOTED_PR --head f/x --base main --expect-commit $SHA40"
+  "pr-missing-expect-commit|bash $QUOTED_PR --head f/x --base main --inputs .hivemind/pr-inputs-a.json"
 )
 for case_row in "${NOT_EXACT_CASES[@]}"; do
   case_id="${case_row%%|*}"

@@ -39,18 +39,18 @@ The orchestrator resolves and passes these. The skill does not resolve them on i
 - `base`: resolved trunk branch (PR target).
 - `head`: working branch (current branch).
 - `push_remote`: optional explicit remote name. Omit unless the user named one.
+- `expect_commit`: the full SHA of the commit the PR must carry, the commit every gate held for. The script stops before the push when HEAD is another commit.
 
 ## Optional Inputs
 
 The caller may pass these. When one is absent, the script works as it does without it.
 
-- `expect_commit`: the full SHA of the commit the PR must carry, such as the commit every gate held for. The script stops before the push when HEAD is another commit. When it is absent, the script pushes the commit HEAD is on.
 - `title`: the PR title. When it is given, step 5 writes it verbatim as the `title` field.
 - `body`: the PR body. When it is given, step 5 writes it verbatim as the `body` field.
 - `comment`: text for the open PR the script reuses. When it is given, step 5 writes it verbatim as the `comment` field. The script posts it only on a reused PR; a created PR gets no comment.
 - `draft`: `true` or `false`, the caller's choice of a draft PR. When it is given, step 5 writes it as the `draft` field, in place of judging whether the user asked for a draft PR.
 
-When `expect_commit` is given, the caller has already checked validation, version metadata and local review on that commit, so steps 3 and 4 and the local review gate take the caller's check.
+The caller passes as `expect_commit` the commit on which it checked validation, version metadata and local review, so steps 3 and 4 and the local review gate take the caller's check on that commit.
 
 ## Requirements
 
@@ -58,7 +58,7 @@ Every push and every PR open runs through `${CLAUDE_PLUGIN_ROOT}/skills/open-pla
 
 **Input gate.** Before any Bash call, validate `head`, `base` and, when provided, `push_remote` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: head, base or push_remote contains characters outside the safe allowlist`, which echoes no value.
 
-When `expect_commit` is provided, validate it as a commit SHA against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before any Bash call; on failure, exit 1 with `blocker: expected commit is not a full object id`, which echoes no value.
+Validate `expect_commit` as a commit SHA against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before any Bash call; on failure, exit 1 with `blocker: expected commit is not a full object id`, which echoes no value.
 
 1. Confirm current branch matches `head` and is not `base`. The step 6 script makes this check in the same process as the push, so the check and the push act on one reading of the branch; no separate Bash call compares them here. On mismatch or trunk match, the script exits 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
 2. Confirm no unexpected unstaged changes. The script refuses a dirty tree before any change.
@@ -78,10 +78,10 @@ When `expect_commit` is provided, validate it as a commit SHA against the identi
 
    When `draft` is given, write it as the `draft` field. Otherwise set `draft` to `true` only when the user asked for a draft PR, and leave it out when they did not. Add a `"comment": "<comment>"` field only when `comment` is given. The script header lists the rule for each field. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
    Transport Degradation Is a Hard Stop).
-6. **Final Bash tool call.** Run the PR script, where each `<allowlist-validated-...>` placeholder is the input value that passed its gate above and `<token>` is the token from step 5. Pass `--remote` only when `push_remote` is provided, and `--expect-commit` only when `expect_commit` is provided:
+6. **Final Bash tool call.** Run the PR script, where each `<allowlist-validated-...>` placeholder is the input value that passed its gate above and `<token>` is the token from step 5. Pass `--remote` only when `push_remote` is provided:
 
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] [--expect-commit <allowlist-validated-commit>] --inputs .hivemind/pr-inputs-<token>.json
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --expect-commit <allowlist-validated-commit> --inputs .hivemind/pr-inputs-<token>.json
    ```
 
    The script pushes through the push-branch script, as a child process, before it opens or reuses the PR. Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). The script header defines the refusals, the push, the reuse of an open PR, the create call, the PR check, and the output; this skill does not restate them. The script never passes `--head` to `gh pr create`; see recorded residuals R1 and R3 in `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`.
