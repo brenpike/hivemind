@@ -2329,6 +2329,10 @@ if [ "$ol2_rc" -ne 0 ]; then
 else
   failed "engineio:ol-coherence-mismatch-rc" "coherence mismatch must return non-zero; got 0"
 fi
+# The coherence reason names no ledger value: only the caller's already-checked run_id.
+ol2_out="$(hivemind_open_ledger "$ol2_root" "$ol2_run_id" 2>/dev/null)"
+assert_eq "engineio:ol-coherence-mismatch-reason" \
+  "ledger run.id does not match run_id '$ol2_run_id'; ledger unchanged" "$ol2_out"
 
 # 11b-3: valid ledger — coherent .run.id, contained leaf → returns 0 with EMPTY stdout (new
 # contract: the lib no longer echoes the canonical ledger path / run dir; the consumer derives
@@ -2374,11 +2378,10 @@ else
   failed "engineio:ol-symlinked-leaf-reject" "symlinked state.json leaf must be rejected; got 0"
 fi
 
-# ── 11c. hivemind_is_safe_id / hivemind_safe_id_jq_pattern — whole-string safe id (#424) ──
-# Each row: <expected verdict>|<label>; the value comes from the parallel array. The shell check
-# and the jq pattern must give the SAME verdict for every value. The shell check runs under a
-# UTF-8 locale, where an unpinned `[A-Za-z]` admits letters such as "é"; a missing locale only
-# warns, and the braces send that warning to /dev/null.
+# ── 11c. hivemind_is_safe_id — whole-string safe id (#424) ──
+# Each row: <expected verdict>|<label>; the value comes from the parallel array. The check runs
+# under a UTF-8 locale, where an unpinned `[A-Za-z]` admits letters such as "é"; a missing locale
+# only warns, and the braces send that warning to /dev/null.
 safeid_values=('STEP-001' 'engine-case.v_1' '.' '..' $'STEP-001\n' $'ok\n../x' $'\nSTEP-001' '' 'a b' 'a]' 'a/b' $'\xc3\xa9')
 safeid_rows=('safe|plain' 'safe|every-class' 'safe|dot' 'safe|dotdot' 'unsafe|trailing-lf' 'unsafe|embedded-lf'
   'unsafe|leading-lf' 'unsafe|empty' 'unsafe|space' 'unsafe|bracket' 'unsafe|slash' 'unsafe|non-ascii-letter')
@@ -2388,44 +2391,10 @@ for safeid_index in "${!safeid_values[@]}"; do
   safeid_shell=unsafe
   { LC_ALL=en_US.UTF-8 hivemind_is_safe_id "$safeid_value"; } 2>/dev/null && safeid_shell=safe
   assert_eq "engineio:safe-id-shell-$safeid_label" "$safeid_expected" "$safeid_shell"
-  safeid_jq="$(jq -rn --arg value "$safeid_value" --arg re "$(hivemind_safe_id_jq_pattern)" \
-    'if ($value | test($re)) then "safe" else "unsafe" end')"
-  assert_eq "engineio:safe-id-jq-$safeid_label" "$safeid_expected" "$safeid_jq"
 done
-unset safeid_values safeid_rows safeid_index safeid_expected safeid_label safeid_value safeid_shell safeid_jq
+unset safeid_values safeid_rows safeid_index safeid_expected safeid_label safeid_value safeid_shell
 
-# ── 11d. hivemind_check_json_id — the safe-id check on the intact JSON value (#424) ──
-# Each row: <JSON value literal>|<expected return code>|<label>. A `jq -r` read drops trailing
-# line feeds and bash drops a NUL, so the first three values would reach a shell-side check as
-# "safe"; the check runs inside jq on the JSON value and must refuse them.
-jsonid_file="$WORKDIR/jsonid.json"
-jsonid_rows=('"safe"|0|plain' '"engine-case.v_1"|0|every-class' '"safe\n"|3|trailing-lf' '"safe\n\n"|3|two-trailing-lf'
-  '"sa\u0000fe"|3|embedded-nul' '"safe\n../x"|3|embedded-lf' '"safe\r"|3|cr' '"safé"|3|non-ascii'
-  '"."|4|dot' '".."|4|dotdot' '""|2|empty' 'null|2|null' 'false|2|false' '5|3|number' '["safe"]|3|array')
-for jsonid_row in "${jsonid_rows[@]}"; do
-  IFS='|' read -r jsonid_literal jsonid_expected jsonid_label <<<"$jsonid_row"
-  printf '{"run":{"workflow":%s}}' "$jsonid_literal" > "$jsonid_file"
-  jsonid_rc=0
-  hivemind_check_json_id "$jsonid_file" '["run","workflow"]' || jsonid_rc=$?
-  assert_eq "engineio:json-id-$jsonid_label" "$jsonid_expected" "$jsonid_rc"
-done
-printf '{"run":"not-an-object"}' > "$jsonid_file"
-jsonid_rc=0
-hivemind_check_json_id "$jsonid_file" '["run","workflow"]' || jsonid_rc=$?
-assert_eq "engineio:json-id-unindexable-path-is-absent" "2" "$jsonid_rc"
-printf '{"brood_id":"2026-05-31T17:30:00Z"}' > "$jsonid_file"
-jsonid_rc=0
-hivemind_check_json_id "$jsonid_file" '["brood_id"]' '\A[A-Za-z0-9._:-]+\z' || jsonid_rc=$?
-assert_eq "engineio:json-id-caller-pattern" "0" "$jsonid_rc"
-jsonid_rc=0
-hivemind_check_json_id "$jsonid_file" '["brood_id"]' || jsonid_rc=$?
-assert_eq "engineio:json-id-default-pattern-refuses-colon" "3" "$jsonid_rc"
-jsonid_rc=0
-hivemind_check_json_id "$WORKDIR/jsonid-missing.json" '["run_id"]' || jsonid_rc=$?
-assert_eq "engineio:json-id-unreadable-file" "5" "$jsonid_rc"
-unset jsonid_file jsonid_rows jsonid_row jsonid_literal jsonid_expected jsonid_label jsonid_rc
-
-# ── 11e. hivemind_is_safe_id 255 cap (#424) ──
+# ── 11d. hivemind_is_safe_id 255 cap (#424) ──
 safecap_64="$(printf '%*s' 64 '' | tr ' ' a)"
 safecap_255="$(printf '%*s' 255 '' | tr ' ' a)"
 safecap_256="$(printf '%*s' 256 '' | tr ' ' a)"
@@ -2439,7 +2408,7 @@ done
 unset safecap_64 safecap_255 safecap_256 safecap_5000 safecap_row safecap_expected safecap_label \
   safecap_value safecap_verdict
 
-# ── 11f. hivemind_check_json — whole-file contract check on the intact JSON values (#424) ──
+# ── 11e. hivemind_check_json — whole-file contract check on the intact JSON values (#424) ──
 # Every hostile string value carries the marker "zqx" (or a run of "q"), which no position or
 # problem word holds, so a message that echoed a value would contain the marker.
 cj_file="$WORKDIR/check-json.json"
@@ -2633,7 +2602,7 @@ unset cj_file CJ_STEP CJ_NAME CJ_BROOD CJ_COUNT cj_value_labels cj_value_literal
   cj_kind_templates cj_kind_index cj_kind cj_contract cj_position cj_problem cj_verdict_text cj_verdicts \
   cj_value_index cj_rc cj_out cj_count_row cj_count_literal cj_label cj_shape_row cj_text cj_err
 
-# ── 11g. both readers accept only exactly one JSON object (#424) ──
+# ── 11f. both readers accept only exactly one JSON object (#424) ──
 for onejson_row in 'two-documents|{}{}' 'array|[{}]' 'string|"x"' 'null|null' 'empty-file|'; do
   IFS='|' read -r onejson_label onejson_text <<<"$onejson_row"
   printf '%s' "$onejson_text" > "$ENGINEIO_SCRATCH/onejson-inputs.json"

@@ -201,11 +201,11 @@ fi
 # caller path is structurally impossible.
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
 [ -n "$repo_root" ] || blocker "not inside a git repository"
-# Raw textual ledger path (matches the prior inline derivation). The reads below
-# (close_status footgun guard, coherence already done by the helper) reference this raw path;
-# the containment guards inside hivemind_open_ledger proved that the raw path and its canonical
-# form resolve to the same in-checkout file. The atomic-write block below re-points $ledger at
-# the CANONICAL path before any mktemp/mv.
+# Raw textual ledger path (matches the prior inline derivation), used only to derive the
+# canonical path and in blocker text; the containment guards inside hivemind_open_ledger proved
+# that the raw path and its canonical form resolve to the same in-checkout file. Every ledger
+# read below (the close_status footgun guard) opens the CANONICAL $canon_ledger, and the
+# atomic-write block below re-points $ledger at it before any mktemp/mv.
 ledger="$repo_root/.hivemind/runs/$run_id/state.json"
 
 # ── Ledger-open machinery (shared helper) — BEFORE any ledger read ─────────────
@@ -256,7 +256,7 @@ esac
 # This runs BEFORE any mktemp/temp-write, so a reject leaves the ledger byte-unchanged. The
 # bare mode-flip path (no close_status) is intentionally NOT gated and may run on a skew ledger.
 if [ "$have_close_status" = true ]; then
-  jq -e '.run.status == "running"' "$ledger" >/dev/null 2>&1 \
+  jq -e '.run.status == "running"' "$canon_ledger" >/dev/null 2>&1 \
     || blocker "close_status closeout requires a running run; run.status is not running; ledger unchanged"
 fi
 

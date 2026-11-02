@@ -25,8 +25,8 @@ Rules: ADR-0018 §A (ledger is JSON); §C (engine is the committed script).
 The caller resolves and passes these; the skill does not invent them.
 
 - `workflow`: the selected workflow id (for example `standard-delivery`).
-- `user_request`: the raw user request — UNTRUSTED data, serialized only.
-- `normalized`: the caller's normalized summary of the request.
+- `user_request`: the raw user request — UNTRUSTED data, stored exactly.
+- `normalized`: the caller's normalized summary of the request, stored exactly.
 
 The caller does not supply `workflow_version` or `start_state` and reads no workflow
 definition file. The script derives both from the packaged definition and prints the start
@@ -41,15 +41,18 @@ Optional (brood child / id control):
   VERBATIM into `.parent.brood_id` so the child ledger reconciles with the manifest. The
   internal colon->dash sanitization is retained only as defensive tolerance for the retired
   timestamp-shaped brood id and is a no-op on the GUID form, which is already
-  filesystem-safe. `parent_strain_id` must match `[A-Za-z0-9._-]`.
-- `suggested_run_id`: caller-suggested run id, used verbatim only if it matches
-  `[A-Za-z0-9._-]`, else a derived id is used.
+  filesystem-safe. `parent_strain_id` must be a name (1 to 255 of `A-Z a-z 0-9 . _ -`, not `.`
+  or `..`). The contract admits `:` in `parent_brood_id` as well (1 to 255 of
+  `A-Z a-z 0-9 . _ : -`), only as tolerance for the retired timestamp form.
+- `suggested_run_id`: caller-suggested run id, used verbatim. It must be a name (1 to 255 of
+  `A-Z a-z 0-9 . _ -`, not `.` or `..`). An unsafe value is a blocker — there is no silent
+  fallback to a derived id. Absent gives the derived id.
 - `plan_steps`: cerebrate's plan `steps` reformatted to a JSON array — child/resume SEED for
-  `ledger.plan.steps` (NOT the primary live writer; see §A). UNTRUSTED, serialized only. Default `[]`.
-  Every entry MUST be an object whose `.id` is a non-empty string matching `[A-Za-z0-9._-]`
-  (SAFE_ID_RE), and every `.depends_on` entry (when present; `.depends_on` must be an array)
-  likewise — the seeded ids flow into `next-wave`'s routing YAML, so an unsafe id fails closed
-  with a blocker and no run dir is created.
+  `ledger.plan.steps` (NOT the primary live writer; see §A). UNTRUSTED, stored as data. Default `[]`.
+  Every entry MUST be an object whose `.id` is a step id (1 to 64 of `A-Z a-z 0-9 . _ -`), and
+  every `.depends_on` entry (when present; `.depends_on` must be an array) likewise — the seeded
+  ids flow into `next-wave`'s routing YAML, so an unsafe id fails closed with a blocker and no
+  run dir is created.
 - `plan_path`: path to the cerebrate directive — child/resume seed for `ledger.plan.path`. Default `null`.
 
 ### The §A Plan-Steps Seam
@@ -67,9 +70,10 @@ child/resume run that already has the steps in hand; absent the field it default
 
 The script owns deterministic create-and-write; the navigator authors a single JSON
 inputs file and passes its path as the one positional argument. Every value crosses the
-transport as data only — the script reads each field with `jq` into a shell variable and
-never interpolates it into shell source or the jq program source. What the script does with
-a field after that read is the field's own contract. Shape:
+transport as data only — never interpolated into shell source or the jq program source. The
+script FIRST checks the whole inputs file against its contract (one JSON object; the field
+rules below), on the intact JSON values; nothing else is read or created until that passes.
+Shape:
 
 ```json
 {
@@ -83,32 +87,45 @@ a field after that read is the field's own contract. Shape:
     "strain_id": "<required when kind=brood> strain id",
     "manifest": "<required when kind=brood> manifest path"
   },
-  "suggested_run_id": "<optional> caller-suggested run id; verbatim only if it matches [A-Za-z0-9._-]",
+  "suggested_run_id": "<optional> caller-suggested run id; used verbatim; a name (1 to 255 of A-Z a-z 0-9 . _ -, not . or ..), else blocker",
   "plan_steps": [],
   "plan_path": "<optional> path to the cerebrate directive (seeds plan.path)"
 }
 ```
 
-Field rules:
-- `workflow`, `user_request`, `normalized` are required non-empty strings.
+Field rules (all checked by the one whole-file contract check, in this order):
+- ABSENT: a key that is missing or `null` is absent. `""` is present.
+- `workflow` is a required name: 1 to 255 of `A-Z a-z 0-9 . _ -`, not `.` or `..`.
+- `user_request`, `normalized` are required strings, not empty. Stored exactly: no byte is
+  lost, including a trailing line feed.
 - `workflow_version` and `start_state` are not caller fields: the script takes them from the
   packaged definition's `version` and `start`. An inputs file that still carries them (a
   legacy caller) is checked against the definition, and a mismatch is a blocker.
-- `parent` is optional; `parent.kind` defaults to `none` when the block is absent.
-  When `parent.kind` is `brood`, `parent.run_id`, `parent.brood_id`, `parent.strain_id`,
-  and `parent.manifest` are all required.
+  `workflow_version`, when supplied, is a whole number of 0 or more (a JSON number, never a
+  string); `start_state`, when supplied, is a name.
+- `parent` is optional (an object); `parent.kind` is `none` or `brood` and defaults to `none`
+  when absent. `parent.run_id` and `parent.manifest` are strings; `parent.brood_id` is 1 to
+  255 of `A-Z a-z 0-9 . _ : -`; `parent.strain_id` is a name. When `parent.kind` is `brood`,
+  `parent.run_id`, `parent.brood_id`, `parent.strain_id`, and `parent.manifest` are all
+  required (the brood-parent contract, checked after the first).
+- `suggested_run_id` is optional; when present it is a name. An unsafe one is a blocker.
 - `plan_steps` is an optional JSON array (the child/resume SEED for `plan.steps`; see §A);
-  defaults to `[]` when omitted. Every entry must be an object whose `.id` is a non-empty
-  string matching `[A-Za-z0-9._-]` (SAFE_ID_RE); every `.depends_on` entry (when present;
-  `.depends_on` must be an array) must likewise be a non-empty SAFE_ID_RE string. Any unsafe
-  id is a blocker and no run dir is created.
-- `plan_path` is optional; defaults to `null` when omitted.
+  defaults to `[]` when absent. Every entry must be an object whose `.id` is a required step
+  id (1 to 64 of `A-Z a-z 0-9 . _ -`); every `.depends_on` entry (when present; `.depends_on`
+  must be an array) must likewise be a step id. A `null` entry fails. Any unsafe id is a
+  blocker and no run dir is created.
+- `plan_path` is an optional string; defaults to `null` when absent. Stored exactly.
+- A failure is one blocker `run-ledger inputs file breaks its contract: <position>: <problem>`.
+  The position is the dotted path with `[N]` indexes (for example `plan_steps[2].id`); the
+  problem is a fixed phrase. A blocker never names the value.
 - Every value is data. None is interpolated into generated shell command source.
 
 Run-id derivation: `brood` -> `<brood-id>--<strain-id>` (the GUID is already
 filesystem-safe, so the retained colon->dash pass is a no-op; `.parent.brood_id` keeps the
-canonical value); else a safe `suggested_run_id` verbatim; else derived
-`<utc-timestamp>-<workflow-id>`.
+canonical value); else `suggested_run_id` verbatim when present (it was checked above; an
+unsafe one never reaches here); else, when absent, derived `<utc-timestamp>-<workflow-id>`.
+The composed id must still be 1 to 255 of `A-Z a-z 0-9 . _ -` and not `.` or `..`; a joined
+brood id can exceed 255, which is a blocker that names no value.
 
 ## Procedure
 
@@ -131,8 +148,9 @@ canonical value); else a safe `suggested_run_id` verbatim; else derived
    a heredoc reintroduces the very delimiter-injection class the inert Write-tool-file pattern
    exists to avoid (ADR-0017). Cleanup is not required: this is transient gitignored state and
    `.hivemind/` is ephemeral. Write performs no shell parsing of the values, and the engine
-   reads each field with `jq` into a shell variable, so `user_request` / `normalized` /
-   `plan_steps` text is never interpolated into shell or jq program source.
+   keeps `user_request` / `normalized` / `plan_steps` / `plan_path` text out of shell
+   variables and out of shell and jq program source: it reads them from the inputs file as
+   data, so each is stored exactly.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
    Transport Degradation Is a Hard Stop).
@@ -141,7 +159,8 @@ canonical value); else a safe `suggested_run_id` verbatim; else derived
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/skills/init-run-ledger/scripts/init-run-ledger.sh" .hivemind/runs/.init-inputs-<token>.json
    ```
-   EXECUTE (do not Read) the script — it owns dependency check, input validation,
+   EXECUTE (do not Read) the script — it owns dependency check, the whole-file inputs
+   contract check (first, before any other read),
    packaged-definition validation, run-id derivation, directory creation, and the atomic
    temp-write + rename of `state.json`. BEFORE creating the run dir, the script locates the
    packaged workflow definition in its self-located `workflows/` dir (`workflows/<workflow>.json`

@@ -10,11 +10,9 @@
 #     containment + ledger-read + coherence + post-existence canonical confirmation,
 #     shared by record-state-result + mark-intent-fallback (NOT init, which CREATES a
 #     ledger rather than opening an existing one).
-# and the ONE whole-string safe-id check every engine applies (issue #424):
-#   hivemind_is_safe_id — the shell-side check for one argv value (1 to 255 bytes).
-#   hivemind_safe_id_jq_pattern — the same charset as a pattern for a jq `test`.
-#   hivemind_check_json_id — the same check on an id read from a JSON file, run inside jq
-#     on the intact JSON value BEFORE any `jq -r` extraction.
+# and the ONE whole-string safe-id check for an argv value (issue #424):
+#   hivemind_is_safe_id — the shell-side check for one argv value (1 to 255 bytes). An id read
+#     from a JSON file is checked by hivemind_check_json instead, on the intact JSON value.
 # and the ONE contract check for an untrusted JSON file (issue #424):
 #   hivemind_check_json — checks a whole JSON file against a fixed contract table, inside one
 #     constant jq program, on the intact JSON values, and prints a failure as one fixed line
@@ -47,8 +45,7 @@
 # at CALL time — this library does NOT source containment.sh. The ENGINE MUST have sourced
 # containment.sh BEFORE calling either IO function. They also require `jq` and `git`
 # on PATH (the engine's own up-front `command -v jq` dependency check covers jq).
-# hivemind_is_safe_id and hivemind_safe_id_jq_pattern need neither; hivemind_check_json_id
-# and hivemind_check_json need jq.
+# hivemind_is_safe_id needs neither; hivemind_check_json needs jq.
 
 # hivemind_is_safe_id <value>
 #
@@ -65,58 +62,6 @@
 hivemind_is_safe_id() {
   local LC_ALL=C
   [[ $1 =~ ^[A-Za-z0-9._-]{1,255}$ ]]
-}
-
-# hivemind_safe_id_jq_pattern
-#
-# Prints the safe-id check as a pattern for a jq `test`, with no trailing newline. Pass it as
-# data (`jq --arg re "$(hivemind_safe_id_jq_pattern)" '... test($re) ...'`), never as program
-# text. `\A` and `\z` anchor the whole string: jq's Oniguruma `$` also matches before one final
-# line feed, so `^[A-Za-z0-9._-]+$` accepts "STEP-001<LF>". Same charset as hivemind_is_safe_id.
-# The pattern sets no length cap: a run id such as brood-<uuid>--<strain> can exceed 64 bytes.
-# Where an id's length must be bounded (a plan step id or depends_on entry), the plan schema's
-# maxLength bounds it, not this pattern.
-hivemind_safe_id_jq_pattern() {
-  printf '%s' '\A[A-Za-z0-9._-]+\z'
-}
-
-# hivemind_check_json_id <json_file> <field_path_json> [<jq_pattern>]
-#
-# Checks the id at <field_path_json> (a jq path as a JSON array, e.g. '["run_id"]' or
-# '["run","workflow"]') in <json_file> on the INTACT JSON value, inside jq, so the check cannot
-# run after a lossy step. WHY: `x="$(jq -r .field)"` drops every trailing line feed (command
-# substitution) and cuts the value at a NUL, so a JSON value "safe<LF>" or "sa<NUL>fe" reaches a
-# shell-side check as "safe". Call this BEFORE the `jq -r` extraction of the same field; a value
-# that returns 0 is all safe-id bytes, so its later `jq -r` extraction is lossless. The value
-# must be a string whose WHOLE text matches <jq_pattern> (default hivemind_safe_id_jq_pattern),
-# then must not be "." or "..". The path and the pattern enter jq as data (--argjson / --arg),
-# never as program text. A path that cannot be indexed (e.g. .run is not an object) reads as
-# absent, matching the `// ""` read it precedes. Prints nothing. NEVER exits.
-#   Return codes (the engine maps each to its own blocker text):
-#     0 a safe id
-#     2 absent, null, false or "" (the `// ""` default the engine treats as missing)
-#     3 not a string, or the whole string does not match <jq_pattern>
-#     4 the reserved path component "." or ".."
-#     5 jq failed (unreadable file or a malformed <field_path_json>)
-hivemind_check_json_id() {
-  local json_file="$1"
-  local field_path_json="$2"
-  local id_pattern="${3:-$(hivemind_safe_id_jq_pattern)}"
-  local id_verdict
-  id_verdict="$(jq -r --argjson p "$field_path_json" --arg re "$id_pattern" '
-    (try getpath($p) catch null) as $v
-    | if ($v // "") == "" then "missing"
-      elif ($v | type) != "string" then "unsafe"
-      elif ($v | test($re) | not) then "unsafe"
-      elif $v == "." or $v == ".." then "reserved"
-      else "safe" end' "$json_file" 2>/dev/null)" || return 5
-  case "$id_verdict" in
-    safe) return 0 ;;
-    missing) return 2 ;;
-    unsafe) return 3 ;;
-    reserved) return 4 ;;
-    *) return 5 ;;
-  esac
 }
 
 # hivemind_check_json <json_file> <contract> [<field>]
@@ -461,7 +406,7 @@ hivemind_read_inputs_file() {
 #   trailing-slash case-guard which has NO inner helper, `[ -f ]` missing, not exactly one JSON object,
 #   coherence `.run.id` mismatch, post-existence canon-dir / basename asserts). Pre-extraction
 #   these were SINGLE-LINE `blocker:` lines with no preceding detail line. Some interpolate
-#   values computed only INSIDE this function ($ledger_run_id, $canon_ledger, $canon_ledger_dir),
+#   values computed only INSIDE this function ($canon_ledger, $canon_ledger_dir),
 #   so this function PRINTS the exact reason text (UNPREFIXED, no `blocker: `) to STDOUT and
 #   returns 1; the engine captures that stdout and re-emits it through blocker() (adding the
 #   `blocker: ` prefix + exit 1). One printed line in, one `blocker:` line out — matching the
@@ -536,11 +481,10 @@ hivemind_open_ledger() {
 
   # ── COHERENCE CHECK: the on-disk ledger must self-identify with the passed run_id ──
   # Compared inside jq on the intact JSON value: a `jq -r` read drops trailing line feeds, so a
-  # ledger run.id "<run_id><LF>" would compare equal in the shell.
-  local ledger_run_id
+  # ledger run.id "<run_id><LF>" would compare equal in the shell. The blocker names no ledger
+  # value; it prints only the caller's already-checked run_id.
   if ! jq -e --arg id "$run_id" '(.run.id // "") == $id' "$ledger" >/dev/null 2>&1; then
-    ledger_run_id="$(jq -r '.run.id // ""' "$ledger")"
-    printf "ledger run.id '%s' does not match run_id '%s'; ledger unchanged\n" "$ledger_run_id" "$run_id"
+    printf "ledger run.id does not match run_id '%s'; ledger unchanged\n" "$run_id"
     return 1
   fi
 

@@ -85,13 +85,13 @@ fi
 V1_STATE_TYPES='["decision","agent","skill","user_gate","terminal"]'
 
 # Safe id pattern for start, state names, transition results and transition
-# targets. Same pattern as hivemind_safe_id_jq_pattern in
-# plugin/skills/_shared/ledger-engine-io.sh, the whole-string safe-id check that
+# targets. Same charset and 255 cap as the `name` rule of hivemind_check_json in
+# plugin/skills/_shared/ledger-engine-io.sh, the whole-value contract check that
 # init-run-ledger.sh, record-state-result.sh, mark-intent-fallback.sh and
 # next-wave.sh apply; they print state ids raw in their stdout routing lines.
 # Kept as a copy so this validator does not source a plugin runtime library.
 # \A and \z anchor the whole string: jq's `$` also matches before a final newline.
-SAFE_ID_RE='\A[A-Za-z0-9._-]+\z'
+SAFE_ID_RE='\A[A-Za-z0-9._-]{1,255}\z'
 
 # ── Producer-to-workflow contract vocabularies ──────────────────────────────────
 #

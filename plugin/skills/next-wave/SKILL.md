@@ -29,8 +29,12 @@ The caller resolves and passes this; the skill does not invent it.
 
 ## How the wave is derived
 
-The engine reads the run ledger (schema: `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md`)
-and computes:
+The engine reads the run ledger (schema: `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md`),
+first checking `plan.steps` against the ONE step contract shared with both write boundaries
+(`init-run-ledger` `plan_steps`, `record-state-result` `plan_steps`): an array; each step an
+object; `id` a required step id; `depends_on` an optional array of step ids (missing or `null`
+is absent). A step id is 1 to 64 bytes of `A-Z a-z 0-9 . _ -`. The `run_id` is 1 to 255 bytes of
+the same set, and not `.` or `..`. It then computes:
 
 - **DONE SET** — the union of every `events[].outputs.completed_steps[]` (a flat list of
   step-id strings). Done-ness lives in the EVENT log, never in `plan.steps[].status` (which
@@ -70,9 +74,9 @@ done set covers every step.
    ```
    Dispatch exactly the step ids in `wave` this iteration; when `all_done: true` the wave is
    `[]` and every step is done. Exit 1: the script printed `blocker: <reason>` on stderr and
-   read-only-failed (empty/cyclic/invalid plan, a step `id` or `depends_on` entry that fails the
-   safe-id charset — a reader-side belt over pre-existing seeded/resume ledgers — missing/invalid
-   ledger, or a containment rejection) — surface it and stop.
+   read-only-failed (empty/cyclic/invalid plan, missing/invalid ledger, or a containment
+   rejection) — surface it and stop. A plan blocker names a position, never a value
+   (e.g. `plan.steps[N].id: duplicate step id`, `plan.steps[N].depends_on[M]: unknown step id`).
 
 ## Pointers
 
