@@ -107,6 +107,9 @@ hivemind_is_safe_id() {
 #   intent-inputs      run_id required name; state required text; summary required text;
 #                      outputs optional object; close_status optional enum cancelled, complete.
 #   wave-ledger        step rows at plan.steps (required).
+# The six contracts cover the inputs files and two ledgers: record-state-result checks its ledger
+# against record-ledger and next-wave against wave-ledger. mark-intent-fallback has NO ledger
+# contract, by design (see its header).
 #
 # ORDER: rows run in table order; within a [] row, positions run in ascending index (row-major
 # for nested []). The FIRST failure is the only one printed.

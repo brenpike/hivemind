@@ -39,6 +39,14 @@
 # NO LEDGER CONTRACT: the skewed ledger is NOT checked against any contract. Beyond the
 # containment guards, the coherence check and the reader's exactly-one-JSON-object rule, the
 # skew door gains no hard-fail on the ledger's shape.
+#   Deliberate: this engine records a fallback on a version-skewed or otherwise off-contract
+#   ledger, and a strict ledger contract would refuse the very fallback it records. Safety
+#   rests on: no ledger value is read outside jq (the closeout probe and the rewrite run inside
+#   jq on the contained canonical path); the blockers name no ledger value; a malformed ledger
+#   makes the jq rewrite fail with a fixed message and the ledger unchanged; and the coherence
+#   compare in hivemind_open_ledger runs inside jq against the already-checked run_id. Recorded
+#   residual (bounded): an absent or null .events becomes an array. record-state-result checks
+#   its ledger against record-ledger and next-wave against wave-ledger; this engine does not.
 #   - Atomicity: every write is temp-write + atomic mv on the CANONICAL contained path; on
 #     ANY validation failure the on-disk ledger is byte-unchanged (all validation runs
 #     BEFORE the temp file is created).
