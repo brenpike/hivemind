@@ -267,7 +267,7 @@ PR3 and PR4 touch disjoint files and can proceed in parallel, and so can PR4 and
 | The local reviewer's contract does not say whether a fix that fails validation is undone or left in the tree. Under invariant 1 a leftover edit stops the run at the commit script after local review, which names the paths | 3 |
 | Post-PR remediation on the engine, reviewer briefs, autonomy level as plugin `userConfig`. Amended 2026-10-25 (issue 453): the state-machine watch now has a reply path. A reviewer or planner question goes to the `question` user gate, and the answer goes back to the state that asked, in the same run. Post-PR remediation on the engine and reviewer briefs stay slice 3 (see Amendment 2026-10-25: open questions pause on both engines, and a run can be stopped (issue 453)) | 3 |
 | Questions in the delivery tail end the run with the question open, until reviewer briefs bring a reply path. They are the bound on validation fix rounds or gate reruns, a bump type that cannot be determined, and a reviewer question or high-severity rejection. Each asks in plain words. Amended 2026-10-23: each such stop ends the run blocked, not complete, and names the next action (see Amendment 2026-10-23: question keys, blocked stops and the question template). Amended 2026-10-24 (issue 441): a reviewer question or high-severity rejection names its finding by a short id and lists every finding still open, from the reviewer's `open_findings`, in its detail block (see Amendment 2026-10-24: short run messages). The reply path is still slice 3. Settled 2026-10-25 by issue 453: every tail question pauses the run, and the reply resumes it. An answer to a local review question goes back to the local reviewer on the same commit, and any other answer starts a new planning pass with an answer block (see Amendment 2026-10-25: open questions pause on both engines, and a run can be stopped (issue 453)) | Settled (issue 453) |
-| `--expect-commit` stays optional in `push-branch.sh` and `open-plan-pr.sh` for current-engine callers. standard-delivery passes it on every push (its contract table). It becomes required at script level when the post-PR watch moves to the engine | 3 |
+| Settled 2026-11-01 by issue 494: required at script level in both scripts. Before: `--expect-commit` stayed optional in `push-branch.sh` and `open-plan-pr.sh` for current-engine callers, standard-delivery passed it on every push (its contract table), and it was to become required at script level when the post-PR watch moved to the engine. Every current-engine caller now passes it too (see Amendment 2026-11-01: the push and PR scripts require the expected commit (issue 494)) | Settled (issue 494) |
 | Brood on the new engine, `--permission-mode auto` for brood children, spike S8. Closed 2026-10-24 by slice 4: children launch the script in auto mode, and S8 is not needed (see Amendment 2026-10-24: brood children on the script engine (slice 4)) | 4 (closed) |
 | State-machine gates: a commit made after a gate does not rerun the earlier gates, so the pull request can open on a commit some gate did not end on. Closed when brood children run on the script engine and the state machine runs only on a refused launch, where it stops before the pull request and asks the user (see Amendment 2026-10-23: local review holds the pull request on every path, "Recorded residual: state-machine gates"). Tracked on https://github.com/brenpike/hivemind/issues/409. Closed 2026-10-24 by slice 4: the `pr_confirm` user gate, definition version 5 (see Amendment 2026-10-24: brood children on the script engine (slice 4)) | 4 (closed) |
 | Retire the JSON engine and the fallback, slim the overlord | 5 |
@@ -1854,3 +1854,35 @@ This amendment covers https://github.com/brenpike/hivemind/issues/491. PR 490, t
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/491.
+
+## Amendment 2026-11-01: the push and PR scripts require the expected commit (issue 494)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/494. `push-branch.sh` and `open-plan-pr.sh` took `--expect-commit <sha>` as an optional flag. standard-delivery passed it on every push, but a current-engine call without it pushed whatever HEAD was, so the push was not bound to the commit the caller's gates held for. The Deferred items row kept it optional until the post-PR watch moved to the engine.
+
+**The change.**
+
+- Both scripts require `--expect-commit <sha>`. A call without it stops with each script's existing usage blocker, before any git command, the same way both scripts already treat a missing required flag.
+- The format check stays at a full 40- or 64-digit lowercase hex object id. The issue names 40 hex, but the commit SHA classes of the identifier gate in `plugin/governance/security-policy.md` (Shell Identifier Discipline) allow SHA-256, so narrowing to 40 would refuse every push in a SHA-256 repository.
+- Both scripts run the format check and the HEAD-equality check on every call, not only when the flag is given. `open-plan-pr.sh` always passes the flag to `push-branch.sh` and always requires the commit that `push-branch.sh` reports to equal it.
+- The origin-mode deferred push, with no upstream and no origin remote, still checks the commit before it reports the push as deferred. A refusal before the inputs read of `open-plan-pr.sh` keeps the inputs file, as the issue 488 amendment records.
+- The synapse gate hook, `plugin/hooks/synapse-gate.sh`, adds `--expect-commit` to the required flags of the open-plan-pr exact form, so the hook's grammar keeps matching the script's.
+- `hivemind:push-branch` and `hivemind:open-plan-pr` take `expect_commit` as a required input, checked as a commit SHA against the identifier gate before any Bash call.
+- The overlord passes the commit on every current-engine push: at `open_pr`, the branch head the `pr_confirm` gate showed the user; in the Reflex tail, the checkpoint molt commit that validation ran on; at `push_remediation`, the last checkpoint molt commit before validation passed.
+- The github-reviewer passes the fix commit it just made, checked as a commit SHA. That commit is also its `$FIX_SHA`.
+- The standard-delivery engine already passes the flag on every push (`plugin/workflow-src/standard-delivery/pr.js`), so no workflow source or build changes.
+- The version moves to 7.5.10.
+
+**Surface account.**
+
+- Added: 1 required flag in each script, 1 required flag in the hook's open-plan-pr form, 1 required skill input in each of the two skills, the overlord's commit rule, the github-reviewer's commit value, and this text.
+- Removed: the optional form of `--expect-commit` in both scripts, the hook and both skills, and the conditionals around its two checks.
+- Changed: the tests of both scripts and the hook pass the flag on every call, and the three policy fixtures whose pins covered the removed conditionals pin the unconditional checks.
+- No workflow source, generated workflow script, schema or contract row change.
+
+**Recorded residuals.** Each bullet states what is not covered, its bounded impact and its ground, per `plugin/governance/remediation-doctrine.md` "Recorded Residual".
+
+- **Which commit the caller names, on the current engine.** Not covered: the scripts check that HEAD is the commit the call names, not that it is the commit the caller's gates held for. On the current engine, which commit is passed is the caller's judgment: the overlord and the github-reviewer read it from a gate or a commit output, and a caller that re-reads HEAD after a gate passes a commit no gate held for. Bounded impact: the script binds the push to the commit named, so a push never lands a commit other than the one the call names, and a HEAD that moved after the call was built is refused. Ground: on the current engine the caller is a model, and no code holds the gated commit between the gate and the call. On the script engine the workflow passes the commit from its own gate result.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/494.

@@ -23,7 +23,7 @@
 #                                may not be the default branch of any remote `git remote` lists
 #                                (see BASE and DEFAULT below).
 #   --remote <name>              OPTIONAL. Explicit push remote (explicit mode).
-#   --expect-commit <sha>        OPTIONAL. The commit HEAD must be. Checked in this process,
+#   --expect-commit <sha>        REQUIRED. The commit HEAD must be. Checked in this process,
 #                                before any push, so the commit pushed is the one the caller's
 #                                gates held for (ADR-0037 invariant 2).
 #   --on-reject block|warn       OPTIONAL, default block. Upstream and origin modes only: a
@@ -42,9 +42,9 @@
 # READ ONCE:
 #   b    `git symbolic-ref --quiet --short HEAD`, gated; must equal head, and base must not name
 #        it (see BASE below).
-#   sha  `git rev-parse --verify --quiet 'HEAD^{commit}'`, must be a full hex object id. With
-#        --expect-commit, it must equal that value, or the run stops with `HEAD is not the
-#        expected commit`.
+#   sha  `git rev-parse --verify --quiet 'HEAD^{commit}'`, must be a full hex object id. It must
+#        equal the --expect-commit value, or the run stops with `HEAD is not the expected
+#        commit`.
 #   BASE keys on ref identity, not on spelling, through _shared/git-refusals.sh (see its NAME
 #        LOOKUP paragraph for the lookup order and the match rule). The run stops with `current
 #        branch does not match head or equals base` when the base text is a spelling of b that
@@ -162,7 +162,7 @@ shared_dir="$(CDPATH= cd -- "$script_dir/../../_shared" 2>/dev/null && pwd -P 2>
 export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
 
-usage_reason='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] [--expect-commit <sha>] [--report-remote yes|no]'
+usage_reason='invalid arguments; usage: push-branch.sh --head <branch> --base <branch> [--remote <name>] [--on-reject block|warn] [--no-upstream block|origin] --expect-commit <sha> [--report-remote yes|no]'
 
 head_name=''
 head_seen=false
@@ -223,7 +223,7 @@ while [ "$#" -gt 0 ]; do
   shift 2
 done
 
-[ "$head_seen" = true ] && [ "$base_seen" = true ] || blocker "$usage_reason"
+[ "$head_seen" = true ] && [ "$base_seen" = true ] && [ "$expect_commit_seen" = true ] || blocker "$usage_reason"
 case "$on_reject" in
   block|warn) ;;
   *) blocker "$usage_reason" ;;
@@ -254,9 +254,7 @@ is_full_object_id() {
   [ "${#object_id}" -eq 40 ] || [ "${#object_id}" -eq 64 ]
 }
 
-if [ "$expect_commit_seen" = true ]; then
-  is_full_object_id "$expect_commit" || blocker "expected commit is not a full object id"
-fi
+is_full_object_id "$expect_commit" || blocker "expected commit is not a full object id"
 
 # read_config_value <key>
 #   Sets config_value to the value of <key> (empty when the key is unset). Any git config failure
@@ -391,9 +389,7 @@ refuse_remote_default_branch() {
 }
 refuse_remote_default_branch
 
-if [ "$expect_commit_seen" = true ]; then
-  [ "$head_sha" = "$expect_commit" ] || blocker "HEAD is not the expected commit"
-fi
+[ "$head_sha" = "$expect_commit" ] || blocker "HEAD is not the expected commit"
 
 push_mode=''
 push_remote=''

@@ -12,7 +12,7 @@
 #   --head <branch>          REQUIRED. Expected current branch.
 #   --base <branch>          REQUIRED. Trunk, the PR target.
 #   --remote <name>          OPTIONAL. Explicit push remote, passed on to push-branch.sh.
-#   --expect-commit <sha>    OPTIONAL. The commit HEAD must be, passed on to push-branch.sh, which
+#   --expect-commit <sha>    REQUIRED. The commit HEAD must be, passed on to push-branch.sh, which
 #                            checks it in the same process as the push (ADR-0037 invariant 2).
 #   --inputs <path>          REQUIRED. The inputs file, a JSON object the caller wrote with the
 #                            Write tool (`.hivemind/pr-inputs-<token>.json`). A relative path is
@@ -81,8 +81,8 @@
 #
 # PUSH: one child call, `bash <plugin root>/skills/push-branch/scripts/push-branch.sh --head <head>
 # --base <base> --report-remote yes [--remote <remote>] --on-reject warn --no-upstream origin
-# [--expect-commit <sha>]`. Its stdout must be exactly `branch: <head>`, then `commit: <full
-# object id>` (equal to --expect-commit when given), then one of two endings. When a push ran:
+# --expect-commit <sha>`. Its stdout must be exactly `branch: <head>`, then `commit: <full
+# object id>` (equal to --expect-commit), then one of two endings. When a push ran:
 # `remote: <name>`, then at most `warning: <rejected warning>`. When the push was deferred:
 # `warning: <deferred warning>` and no remote line. The remote name must pass the identifier gate
 # and equal --remote when given. The two warnings are push-branch.sh's fixed texts. Anything else
@@ -299,7 +299,7 @@ export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
 export GH_PROMPT_DISABLED=1
 
-usage_reason='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] [--expect-commit <sha>] --inputs <path>'
+usage_reason='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] --expect-commit <sha> --inputs <path>'
 reject_warning='push was rejected; the branch is not on its remote'
 deferred_warning='no upstream and no origin remote; push deferred'
 reread_limit=5
@@ -349,7 +349,7 @@ while [ "$#" -gt 0 ]; do
   shift 2
 done
 
-[ "$head_seen" = true ] && [ "$base_seen" = true ] && [ "$inputs_seen" = true ] || blocker "$usage_reason"
+[ "$head_seen" = true ] && [ "$base_seen" = true ] && [ "$expect_commit_seen" = true ] && [ "$inputs_seen" = true ] || blocker "$usage_reason"
 [ -n "$inputs_arg" ] || blocker "$usage_reason"
 
 identifier_reason='head, base or push_remote contains characters outside the safe allowlist'
@@ -369,9 +369,7 @@ is_full_object_id() {
   [ "${#object_id}" -eq 40 ] || [ "${#object_id}" -eq 64 ]
 }
 
-if [ "$expect_commit_seen" = true ]; then
-  is_full_object_id "$expect_commit" || blocker "expected commit is not a full object id"
-fi
+is_full_object_id "$expect_commit" || blocker "expected commit is not a full object id"
 
 reread_delay="${HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY:-2}"
 case "$reread_delay" in
@@ -553,11 +551,7 @@ push_args=(--head "$head_name" --base "$base_name" --report-remote yes)
 if [ "$remote_seen" = true ]; then
   push_args+=(--remote "$remote_name")
 fi
-push_args+=(--on-reject warn --no-upstream origin)
-if [ "$expect_commit_seen" = true ]; then
-  push_args+=(--expect-commit "$expect_commit")
-fi
-
+push_args+=(--on-reject warn --no-upstream origin --expect-commit "$expect_commit")
 push_rc=0
 push_output="$(bash "$push_script" "${push_args[@]}" 2>"$push_err_file")" || push_rc=$?
 push_err_last=''
@@ -616,9 +610,7 @@ $push_output
 EOF
   [ "$line_index" -ge 2 ] || blocker "$unexpected_reason"
   is_full_object_id "$pushed_commit" || blocker "$unexpected_reason"
-  if [ "$expect_commit_seen" = true ]; then
-    [ "$pushed_commit" = "$expect_commit" ] || blocker "$unexpected_reason"
-  fi
+  [ "$pushed_commit" = "$expect_commit" ] || blocker "$unexpected_reason"
   [ "$line_index" -ge 3 ] || blocker "$unexpected_reason"
   if [ "$remote_line_seen" = true ]; then
     hivemind_assert_identifier "$pushed_remote" || blocker "$unexpected_reason"
