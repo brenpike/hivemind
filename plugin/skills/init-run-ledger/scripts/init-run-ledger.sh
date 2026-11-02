@@ -30,22 +30,29 @@
 # start state's own definition (.states[start], compact JSON) is read before any mkdir; a
 # start state missing from the definition is a blocker and leaves no run dir.
 #
-# INJECTION POSTURE: every ledger field is serialized with `jq -n` using --arg
-# (strings) / --argjson (pre-validated JSON), NEVER string-interpolated into the jq
-# program or any shell command source. The untrusted fields request.raw,
-# request.normalized, and every parent-block text value enter the jq program only as
-# named --arg bindings, so untrusted bytes never become program/command SOURCE.
+# INPUTS CONTRACT (issue #424): right after the inputs-file bootstrap, ONE
+# hivemind_check_json init-inputs call checks the WHOLE inputs file on its intact JSON values
+# (ledger-engine-io.sh), plus init-brood-parent when parent.kind is brood. A failure is the
+# fixed blocker `run-ledger inputs file breaks its contract: <position>: <problem>`, which names
+# no value from the file, and no run dir is created. The contract is the only input check:
+# required fields, types, the parent.kind enum, the id charsets, and every plan step row.
+#
+# INJECTION POSTURE: no `jq -r` reads the inputs file. The tokens workflow, workflow_version,
+# start_state, parent.kind, parent.brood_id, parent.strain_id and suggested_run_id are read ONLY
+# through the hivemind_check_json field form, so each shell value is a whole checked token with
+# no line feed or NUL to lose. The untrusted text fields user_request, normalized,
+# parent.run_id, parent.manifest and plan_path, and the plan_steps array, never pass through a
+# shell variable: the write program reads them from the inputs file itself (--slurpfile). Every
+# other ledger field enters `jq -n` as a named --arg / --argjson binding, NEVER
+# string-interpolated into the jq program or any shell command source. Blocker messages name
+# only contract-checked tokens, never a text field.
 # The ledger is written to a temp file and atomically renamed into place so a
 # concurrent reader (the hatchery reading a child ledger) never sees a torn file.
 #
 # INPUT (single positional argument):
 #   $1  Absolute or repo-relative path to a JSON inputs file authored by the agent
-#       via the Write tool. The agent writes structured data; this script parses it
-#       with jq into shell VARIABLES. Untrusted bytes in the JSON are read into
-#       variables and referenced only as "$var" — bash does not re-evaluate command
-#       substitution from variable contents, so the command-substitution injection
-#       class is structurally absent (the values never enter generated command
-#       SOURCE). Mirrors spawn-brood.sh; rationale: docs/adr/0017-brood-spawn-mechanism.md.
+#       via the Write tool. The path is the ONLY value passed on the command line.
+#       Mirrors spawn-brood.sh; rationale: docs/adr/0017-brood-spawn-mechanism.md.
 #
 #   Inputs JSON shape (authoritative schema in SKILL.md § Inputs JSON):
 #     {
@@ -67,8 +74,9 @@
 #         "strain_id": "<required when kind=brood> strain id",
 #         "manifest":  "<required when kind=brood> manifest path"
 #       },
-#       "suggested_run_id": "<optional> caller-suggested run id; used verbatim only if it
-#                            matches ^[A-Za-z0-9._-]+$, else a derived id is used.",
+#       "suggested_run_id": "<optional> caller-suggested run id; used verbatim. It must be a
+#                            name (1 to 255 of [A-Za-z0-9._-], not . or ..), else blocker.
+#                            Absent gives a derived id.",
 #       "plan_steps": [ ... ],   // optional; cerebrate's plan steps as a JSON array — the
 #                                // child/resume SEED path for plan.steps (NOT the primary
 #                                // live writer; record-state-result --plan-steps at the
@@ -83,9 +91,12 @@
 #     generated GUID brood-<uuidv4> (already filesystem-safe); it is persisted verbatim into
 #     .parent.brood_id and still run through the colons->dashes transform, which is a no-op on
 #     the GUID and is retained only for the retired timestamp form. strain id: safe charset.
-#   - else if suggested_run_id is safe (^[A-Za-z0-9._-]+$): use it verbatim.
+#   - else if suggested_run_id is present (the contract has already refused an unsafe one):
+#     use it verbatim.
 #   - else derived: <utc-timestamp>-<workflow-id> (timestamp colons mapped to dashes so
 #     the id is a safe directory name).
+#   The composed run id must still pass hivemind_is_safe_id (it may exceed 255 bytes) and must
+#   not be "." or ".."; that blocker names no value.
 #
 # OUTPUT:
 #   - On success: creates <checkout-root>/.hivemind/runs/<run-id>/ and its evidence/ subdir,
@@ -98,15 +109,16 @@
 #
 # EXIT CONTRACT:
 #   0  ledger initialized
-#   1  pre-flight blocker (missing/invalid inputs, unsafe ids, fs failure)
+#   1  pre-flight blocker (inputs file not a single JSON object, inputs contract broken,
+#      packaged-definition mismatch, unsafe composed run id, fs failure)
 #
 # set -u: an unset variable is a programming error here (every value is parsed
 # explicitly from the inputs file). We do NOT use `set -e`: failures are routed through
 # the blocker() helper with a verbose reason rather than a bubbled raw tool error.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
-# are DELIBERATELY omitted. The full floor would change behavior: grep -Eq charset gates and
-# `[ -e ] && blocker` value-tests legitimately return non-zero in normal flow, and the EXIT
+# are DELIBERATELY omitted. The full floor would change behavior: the hivemind_check_json status
+# probes and `[ -e ] && blocker` value-tests legitimately return non-zero in normal flow, and the EXIT
 # trap performs invocation-owned cleanup — `set -e` would abort before blocker() runs.
 
 set -u
@@ -143,9 +155,6 @@ blocker() { printf 'blocker: %s\n' "$1" >&2; exit 1; }
 CLAIMED_DIR=""
 trap 'if [ -n "${CLAIMED_DIR:-}" ] && [ ! -f "${ledger_path:-}" ]; then rm -rf "$CLAIMED_DIR" 2>/dev/null; fi; :' EXIT
 
-# SAFE_ID charset for run-id components and suggested run ids.
-SAFE_ID_RE='^[A-Za-z0-9._-]+$'
-
 # ── Script self-location (portable; independent of ${CLAUDE_PLUGIN_ROOT} and the caller) ──
 # Resolve the packaged workflows dir from THIS script's own location, never from a caller
 # value. `cd ... && pwd -P` is portable (no GNU-only readlink -f); BASH_SOURCE is set under
@@ -167,9 +176,9 @@ workflows_dir="$plugin_root/workflows"
 . "$plugin_root/skills/_shared/containment.sh" || blocker "failed to source skills/_shared/containment.sh (unparseable); refusing to proceed"
 
 # Source the shared ledger engine-IO helper by the SAME self-located absolute path. It
-# provides hivemind_read_inputs_file (the inputs-file bootstrap). init CREATES a ledger
-# rather than opening an existing one, so it uses ONLY hivemind_read_inputs_file and NOT
-# hivemind_open_ledger. The helper ORCHESTRATES the containment.sh helper sourced above, so
+# provides hivemind_read_inputs_file (the inputs-file bootstrap), hivemind_check_json (the
+# inputs contract check) and hivemind_is_safe_id (the composed run-id check). init CREATES a
+# ledger rather than opening an existing one, so it does NOT use hivemind_open_ledger. The helper ORCHESTRATES the containment.sh helper sourced above, so
 # this MUST follow that source.
 [ -f "$plugin_root/skills/_shared/ledger-engine-io.sh" ] || blocker "required shared library missing: skills/_shared/ledger-engine-io.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/ledger-engine-io.sh" || blocker "failed to source skills/_shared/ledger-engine-io.sh (unparseable); refusing to proceed"
@@ -180,122 +189,91 @@ command -v jq >/dev/null 2>&1 \
 
 # ── Inputs file ───────────────────────────────────────────────────────────────
 # Single positional argument: the path to a JSON inputs file the agent authored via
-# the Write tool. The path is the ONLY value passed on the command line; every field
-# (including the untrusted ones) is read with jq into inert variables below — never
-# interpolated into bash source or the jq program SOURCE.
+# the Write tool. The path is the ONLY value passed on the command line; no field is read
+# with `jq -r`, and no field is interpolated into bash source or the jq program SOURCE.
 INPUTS_FILE="${1:-}"
 
 # ── Inputs-file bootstrap (shared helper) ──────────────────────────────────────
 # hivemind_read_inputs_file performs, IN ORDER: the non-empty-arg check, the `[ -f ]`
 # existence check, the hivemind_assert_inputs_contained defense-in-depth read-guard (run
-# BEFORE the jq validity probe — `jq -e` on an attacker path is itself a JSON-validity read
-# oracle), and the `jq -e .` JSON-validity probe. The "run-ledger" label reproduces this
-# engine's EXACT current blocker strings (the inputs-guard string carries no label and is
-# already byte-identical across engines). This guards the READ source; the later
-# hivemind_assert_contained call guards the WRITE chain — both are needed. The helper never
-# exits and emits NO stderr of its own: it signals WHICH failure occurred via a distinct return
-# code (2 missing arg, 3 missing file, 4 containment reject, 5 invalid JSON) and we map each to
-# its fixed blocker text below. For the containment reject (4) the inner
-# hivemind_assert_inputs_contained helper's own UNPREFIXED detail line flows to fd2 UNCAPTURED
-# (we do NOT redirect the call's stderr), so the two-line shape — detail line ABOVE our
-# `blocker:` line — is byte-preserved exactly as before extraction. The non-containment cases
-# (2/3/5) had no detail line pre-extraction and stay single-line. Empty git root (not inside a
-# checkout) is tolerated by the helper's own canonical guard; the write-chain repo_root check
-# below remains the authoritative not-in-a-repo gate.
+# BEFORE the jq probe — `jq` on an attacker path is itself a JSON-validity read oracle), and
+# the one-object probe (exactly one JSON document, an object). This guards the READ source;
+# the later hivemind_assert_contained call guards the WRITE chain — both are needed. The helper
+# never exits and emits NO stderr of its own: it signals WHICH failure occurred via a distinct
+# return code (2 missing arg, 3 missing file, 4 containment reject, 5 not exactly one JSON
+# object) and we map each to its fixed blocker text below. For the containment reject (4) the
+# inner hivemind_assert_inputs_contained helper's own UNPREFIXED detail line flows to fd2
+# UNCAPTURED (we do NOT redirect the call's stderr), so the two-line shape — detail line ABOVE
+# our `blocker:` line — is preserved. The non-containment cases (2/3/5) stay single-line. Empty
+# git root (not inside a checkout) is tolerated by the helper's own canonical guard; the
+# write-chain repo_root check below remains the authoritative not-in-a-repo gate.
 hivemind_read_inputs_file "$INPUTS_FILE" "run-ledger"
 case $? in
   0) : ;;
   2) blocker "missing required argument: path to run-ledger inputs JSON file (\$1)" ;;
   3) blocker "run-ledger inputs file $INPUTS_FILE does not exist" ;;
   4) blocker "refusing to read the inputs file: $INPUTS_FILE resolves outside the checkout (symlinked ancestor)" ;;
-  5) blocker "run-ledger inputs file $INPUTS_FILE is not valid JSON" ;;
+  5) blocker "run-ledger inputs file $INPUTS_FILE is not a single JSON object" ;;
   *) blocker "run-ledger: hivemind_read_inputs_file returned an unmapped status (shared library unavailable or contract drift); ledger/inputs unchanged" ;;
 esac
 
-# Parse every field into the SAME inert variables the downstream logic already uses.
-# Strings via `jq -r '.field // ""'`; the workflow_version stays a JSON number (read as
-# its string form here, empty when absent, then integer-guarded below before becoming an
-# --argjson number);
-# plan_steps is read as a JSON array via `jq '.plan_steps // []'` (preserving its JSON
-# type for the --argjson serialization). parent.kind defaults to "none" when absent.
-workflow="$(jq -r '.workflow // ""' "$INPUTS_FILE")"
-workflow_version="$(jq -r '.workflow_version // ""' "$INPUTS_FILE")"
-start_state="$(jq -r '.start_state // ""' "$INPUTS_FILE")"
-user_request="$(jq -r '.user_request // ""' "$INPUTS_FILE")"
-normalized="$(jq -r '.normalized // ""' "$INPUTS_FILE")"
-parent_kind="$(jq -r '.parent.kind // "none"' "$INPUTS_FILE")"
-parent_run_id="$(jq -r '.parent.run_id // ""' "$INPUTS_FILE")"
-parent_brood_id="$(jq -r '.parent.brood_id // ""' "$INPUTS_FILE")"
-parent_strain_id="$(jq -r '.parent.strain_id // ""' "$INPUTS_FILE")"
-parent_manifest="$(jq -r '.parent.manifest // ""' "$INPUTS_FILE")"
-suggested_run_id="$(jq -r '.suggested_run_id // ""' "$INPUTS_FILE")"
-plan_steps="$(jq -c '.plan_steps // []' "$INPUTS_FILE")"
-plan_path="$(jq -r '.plan_path // ""' "$INPUTS_FILE")"
+# block_on_contract_failure <status> <problem_line>
+#
+# Maps one hivemind_check_json whole-file status to its blocker. Status 1 carries the
+# `<position>: <problem>` line, which names no value from the file. Any other non-zero status is
+# a caller or tool error whose reason hivemind_check_json already printed on stderr.
+block_on_contract_failure() {
+  case "$1" in
+    0) : ;;
+    1) blocker "run-ledger inputs file breaks its contract: $2; no run dir created" ;;
+    *) blocker "run-ledger: hivemind_check_json could not check the inputs file; no run dir created" ;;
+  esac
+}
 
-# ── Required-input validation ─────────────────────────────────────────────────
-[ -n "$workflow" ]         || blocker "inputs file is missing required workflow"
-[ -n "$user_request" ]     || blocker "inputs file is missing required user_request"
-[ -n "$normalized" ]       || blocker "inputs file is missing required normalized"
+# read_input_token <field>
+#
+# Prints the init-inputs token at <field> through the hivemind_check_json field form, or
+# nothing when it is absent. Run inside a command substitution: on failure blocker() exits that
+# subshell, so the caller adds `|| exit 1`.
+read_input_token() {
+  hivemind_check_json "$INPUTS_FILE" init-inputs "$1" \
+    || blocker "run-ledger: hivemind_check_json could not read $1 from the inputs file; no run dir created"
+}
+
+# ── Inputs contract (shared helper; issue #424) ───────────────────────────────
+# One whole-file check on the intact JSON values: required user_request / normalized /
+# workflow, the parent.kind enum, every id charset (workflow, start_state, suggested_run_id,
+# parent.brood_id, parent.strain_id) and every plan step row. A brood parent must also carry
+# all four ancestry fields (init-brood-parent): a child that omits one would otherwise write a
+# brood ledger with null ancestry fields, silently breaking the reconciliation trail.
+contract_problem="$(hivemind_check_json "$INPUTS_FILE" init-inputs)"
+block_on_contract_failure "$?" "$contract_problem"
+workflow="$(read_input_token workflow)" || exit 1
+workflow_version="$(read_input_token workflow_version)" || exit 1
+start_state="$(read_input_token start_state)" || exit 1
+parent_kind="$(read_input_token parent.kind)" || exit 1
+[ -n "$parent_kind" ] || parent_kind="none"
+parent_brood_id="$(read_input_token parent.brood_id)" || exit 1
+parent_strain_id="$(read_input_token parent.strain_id)" || exit 1
+suggested_run_id="$(read_input_token suggested_run_id)" || exit 1
+if [ "$parent_kind" = "brood" ]; then
+  brood_parent_problem="$(hivemind_check_json "$INPUTS_FILE" init-brood-parent)"
+  block_on_contract_failure "$?" "$brood_parent_problem"
+fi
 
 # workflow_version and start_state are optional: an absent value is derived from the packaged
 # definition below (Packaged-definition validation), where the integer guard on the final
 # workflow_version also runs, still before any mkdir.
 
-# parent.kind selects the parent variant.
-case "$parent_kind" in
-  none|brood) : ;;
-  *) blocker "parent.kind must be none|brood, got: $parent_kind" ;;
-esac
-
-# plan_steps (default []) must be a JSON array. Validated up front for a clear blocker
-# rather than a downstream --argjson parse error. UNTRUSTED step text never enters the jq
-# program SOURCE — only as the named --argjson binding below.
-printf '%s' "$plan_steps" | jq -e 'type=="array"' >/dev/null 2>&1 \
-  || blocker "plan_steps must be a JSON array"
-
-# Step-id charset guard. A seeded step id / depends_on id flows into .plan.steps, which
-# next-wave routes into a `wave: [...]` YAML program the overlord parses; a step id bearing
-# a YAML delimiter/bracket/comma/newline could forge routing. Require every step entry to be
-# an OBJECT whose .id is a NON-EMPTY STRING matching SAFE_ID_RE, and every .depends_on entry
-# (when present; depends_on must be an ARRAY) likewise. Fail-closed on non-object step /
-# non-array depends_on (type-check gates every field access; jq's short-circuiting `and`
-# never touches .id / has / .depends_on on the wrong type). Do NOT reject ./.. (charset +
-# non-empty only, symmetric to the record-state-result seed guard). UNTRUSTED plan_steps
-# enters jq ONLY as stdin INPUT and SAFE_ID_RE ONLY as the --arg binding — never program
-# SOURCE. This sits with the plan_steps validation, BEFORE any run-dir/ledger creation, so a
-# violation leaves NO orphan dir or ledger.
-printf '%s' "$plan_steps" | jq -e --arg re "$SAFE_ID_RE" '
-  all(.[];
-    type == "object"
-    and (.id | type == "string" and length > 0 and test($re))
-    and (if has("depends_on")
-         then (.depends_on
-               | type == "array"
-               and all(.[]; type == "string" and length > 0 and test($re)))
-         else true end))
-' >/dev/null 2>&1 \
-  || blocker "plan_steps: every entry must be an object whose .id is a non-empty string matching ${SAFE_ID_RE}, and every .depends_on (when present) must be an array of such strings"
-
 # ── Run-id derivation ─────────────────────────────────────────────────────────
 run_id=""
 if [ "$parent_kind" = "brood" ]; then
-  # Child form <brood-id>--<strain-id>; both components required and safe.
-  [ -n "$parent_brood_id" ]  || blocker "parent.kind=brood requires parent.brood_id"
-  [ -n "$parent_strain_id" ] || blocker "parent.kind=brood requires parent.strain_id"
-  # parent.run_id and parent.manifest identify the hatchery relationship (run-ledger-schema
-  # brood variant). A child that omits either while translating its injected metadata would
-  # otherwise write a brood ledger with null ancestry fields, silently breaking the
-  # reconciliation trail — so require both non-empty before creating the ledger.
-  [ -n "$parent_run_id" ]    || blocker "parent.kind=brood requires parent.run_id"
-  [ -n "$parent_manifest" ]  || blocker "parent.kind=brood requires parent.manifest"
-  # parent.brood_id is spawn-brood's generated GUID brood-<uuidv4> (asserted
-  # ^brood-[0-9a-f-]+$ at generation, ADR-0021), carrying no colons. The charset gate below
-  # still ADMITS ':' — deliberate residual tolerance for the retired timestamp-shaped id,
-  # harmless because it keeps rejecting path separators, control bytes, and shell
-  # metacharacters. It is persisted VERBATIM into .parent.brood_id so the child ledger
-  # reconciles with the manifest's canonical brood_id.
-  case "$parent_brood_id"  in *[!A-Za-z0-9._:-]*) blocker "parent.brood_id contains characters outside [A-Za-z0-9._:-]: $parent_brood_id" ;; esac
-  case "$parent_strain_id" in *[!A-Za-z0-9._-]*) blocker "parent.strain_id contains characters outside [A-Za-z0-9._-]: $parent_strain_id" ;; esac
+  # Child form <brood-id>--<strain-id>. parent.brood_id is spawn-brood's generated GUID
+  # brood-<uuidv4> (asserted ^brood-[0-9a-f-]+$ at generation, ADR-0021), carrying no colons.
+  # Its contract kind (brood-id) still ADMITS ':' — deliberate residual tolerance for the
+  # retired timestamp-shaped id, harmless because it keeps rejecting path separators, control
+  # bytes, and shell metacharacters. It is persisted VERBATIM into .parent.brood_id so the child
+  # ledger reconciles with the manifest's canonical brood_id.
   # The colons->dashes pass is ONLY for the filesystem run-id component and is a NO-OP on the
   # GUID (spawn-brood's brood_id_safe is likewise an identity pass); it is retained as
   # defensive tolerance for the retired timestamp form. parent_brood_id stays canonical for
@@ -303,21 +281,20 @@ if [ "$parent_kind" = "brood" ]; then
   # (<brood-id>--<short>).
   parent_brood_id_safe="$(printf '%s' "$parent_brood_id" | tr ':' '-')"
   run_id="${parent_brood_id_safe}--${parent_strain_id}"
-elif [ -n "$suggested_run_id" ] && printf '%s' "$suggested_run_id" | grep -Eq "$SAFE_ID_RE"; then
+elif [ -n "$suggested_run_id" ]; then
   run_id="$suggested_run_id"
 else
   # Derived form <utc-timestamp>-<workflow-id>. Map colons to dashes for a safe dir name.
   utc_ts="$(date -u +%Y-%m-%dT%H-%M-%SZ)"
-  # Reject a workflow id that would make an unsafe directory component.
-  case "$workflow" in *[!A-Za-z0-9._-]*) blocker "workflow contains characters outside [A-Za-z0-9._-]; cannot derive a safe run id: $workflow" ;; esac
   run_id="${utc_ts}-${workflow}"
 fi
 
-# Final defensive check: the resolved run_id must be a safe single path component.
-printf '%s' "$run_id" | grep -Eq "$SAFE_ID_RE" \
-  || blocker "resolved run id is not a safe path component: $run_id"
+# Final defensive check: the composed run_id must be a safe single path component (a joined
+# id can exceed 255 bytes). The messages name no value.
+hivemind_is_safe_id "$run_id" \
+  || blocker "resolved run id is not a safe path component"
 case "$run_id" in
-  .|..) blocker "resolved run id is a reserved path component: $run_id" ;;
+  .|..) blocker "resolved run id is a reserved path component" ;;
 esac
 
 # ── Directory creation ────────────────────────────────────────────────────────
@@ -357,18 +334,13 @@ ledger_path="$run_dir/state.json"
 
 # ── Packaged-definition validation ─────────────────────────────────────
 # Validate the supplied workflow id against the script's OWN packaged definition BEFORE
-# creating any directory (fail early, leave no orphan run dir). The workflow id must be a
-# safe single path component (the suggested-run-id / brood branches may not have guarded it)
-# before it becomes a path; reject ./.. explicitly. The definition is read ONLY to confirm
+# creating any directory (fail early, leave no orphan run dir). The workflow id is already a
+# safe single path component, not . or .. (the init-inputs contract's `name` kind), before it
+# becomes a path. The definition is read ONLY to confirm
 # it exists and that its version/start match the supplied values — it does not drive
 # transitions, and the caller never supplies its path. An absent workflow_version or
 # start_state takes the definition's value, and the start state's definition is read for the
 # success output.
-printf '%s' "$workflow" | grep -Eq "$SAFE_ID_RE" \
-  || blocker "workflow is not a safe path component: $workflow"
-case "$workflow" in
-  .|..) blocker "workflow is a reserved path component: $workflow" ;;
-esac
 def="$workflows_dir/$workflow.json"
 [ -f "$def" ] || blocker "packaged workflow definition does not exist: $def"
 def_version="$(jq -r '.version // ""' "$def")"
@@ -420,9 +392,10 @@ CLAIMED_DIR="$run_dir"
 mkdir -p "$run_dir/evidence" \
   || blocker "failed to create evidence dir under $run_dir"
 
-# ── Parent block (argjson assembled from --arg bindings) ──────────────────────
-# Build the parent object inside jq from named --arg bindings so untrusted parent
-# text never enters the jq program SOURCE. null-out the brood-only fields when kind=none.
+# ── Parent block (assembled inside the write program) ─────────────────────────
+# The parent object is built inside jq: the checked tokens kind / brood_id / strain_id from
+# named --arg bindings, the untrusted run_id / manifest text from the inputs file itself, so
+# untrusted parent text never enters the jq program SOURCE. An absent or "" field is null.
 now_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
 # ── Atomic write: temp file in the run dir, then mv into place ─────────────────
@@ -431,9 +404,13 @@ now_ts="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 tmp_ledger="$(mktemp "$run_dir/.state.json.XXXXXX")" \
   || blocker "failed to create temp ledger file under $run_dir"
 
-# Every field flows through --arg/--argjson. Untrusted: user_request, normalized,
-# and all parent-* text values. Pre-validated numbers via --argjson.
+# The untrusted text fields (user_request, normalized, parent.run_id, parent.manifest,
+# plan_path) and the plan_steps array reach the ledger from the inputs file itself
+# (--slurpfile, the contract-checked single object), never through a shell variable, so no
+# byte is lost or reshaped on the way. Every other field is a checked token or a value this
+# script derived, bound with --arg / --argjson.
 jq -n \
+  --slurpfile inputs "$INPUTS_FILE" \
   --argjson schema_version 1 \
   --arg run_id "$run_id" \
   --arg workflow "$workflow" \
@@ -441,18 +418,13 @@ jq -n \
   --arg created_at "$now_ts" \
   --arg updated_at "$now_ts" \
   --arg parent_kind "$parent_kind" \
-  --arg parent_run_id "$parent_run_id" \
   --arg parent_brood_id "$parent_brood_id" \
   --arg parent_strain_id "$parent_strain_id" \
-  --arg parent_manifest "$parent_manifest" \
-  --arg request_raw "$user_request" \
-  --arg request_normalized "$normalized" \
   --arg start_state "$start_state" \
-  --argjson plan_steps "$plan_steps" \
-  --arg plan_path "$plan_path" \
   '
   def nz(s): if s == "" then null else s end;
-  {
+  $inputs[0] as $in
+  | {
     schema_version: $schema_version,
     run: {
       id: $run_id,
@@ -465,14 +437,14 @@ jq -n \
     },
     parent: {
       kind: $parent_kind,
-      run_id: nz($parent_run_id),
+      run_id: nz($in.parent.run_id // ""),
       brood_id: nz($parent_brood_id),
       strain_id: nz($parent_strain_id),
-      manifest: nz($parent_manifest)
+      manifest: nz($in.parent.manifest // "")
     },
     request: {
-      raw: $request_raw,
-      normalized: $request_normalized
+      raw: $in.user_request,
+      normalized: $in.normalized
     },
     state: {
       current: $start_state,
@@ -485,9 +457,9 @@ jq -n \
       pr: null
     },
     plan: {
-      path: nz($plan_path),
+      path: nz($in.plan_path // ""),
       current_step: null,
-      steps: $plan_steps
+      steps: ($in.plan_steps // [])
     },
     artifacts: {},
     events: [],

@@ -37,12 +37,12 @@ The caller resolves and passes these; the skill does not invent them.
   derived from ground truth, so a caller can never point the engine at an arbitrary file.
 - `state`: the state the run is currently in (MUST equal `ledger.state.current`).
 - `result`: the named outcome to record (MUST be a legal transition key under that state).
-- `summary`: human-readable summary of the outcome — UNTRUSTED, serialized only.
-- `outputs` (optional): a JSON object of named outputs — UNTRUSTED, serialized only.
+- `summary`: human-readable summary of the outcome — UNTRUSTED, stored exactly.
+- `outputs` (optional): a JSON object of named outputs — UNTRUSTED, stored as data.
 - `plan_steps` (optional): cerebrate's plan `steps` reformatted to a JSON array — UNTRUSTED,
-  serialized only. Pass this when recording any cerebrate planning state result (`plan` /
+  stored as data. Pass this when recording any cerebrate planning state result (`plan` /
   `review_remediation_plan` / `review_remediation_plan_postpr` / `brood_plan`; see §A below).
-- `plan_path` (optional): path to the cerebrate directive — UNTRUSTED, serialized only.
+- `plan_path` (optional): path to the cerebrate directive — UNTRUSTED, stored exactly.
 
 ## The §A Plan-Steps Seam
 
@@ -72,92 +72,102 @@ engine-maintained, with no inputs-file field to set it.
 
 The script owns deterministic read -> validate -> mutate -> atomic-write; the navigator
 authors a single JSON inputs file and passes its path as the one positional argument. Every
-value crosses the transport as data only — the script reads each field with `jq` into a shell
-variable and never interpolates it into shell source or the jq program source. What the script
-does with a field after that read is the field's own contract. Shape:
+value crosses the transport as data only — never interpolated into shell source or the jq
+program source. The script FIRST checks the whole inputs file against its contract (one JSON
+object; the field rules below), on the intact JSON values, before it reads any field or opens
+the ledger. Shape:
 
 ```json
 {
   "run_id": "<required> run identifier; the engine DERIVES the ledger as <git-root>/.hivemind/runs/<run_id>/state.json and the workflow definition from the ledger's run.workflow against the self-located packaged workflows dir. NO path is accepted.",
   "state": "<required> state the run is currently in (must match ledger.state.current)",
   "result": "<required> named outcome to record (must be a legal transition key)",
-  "summary": "<required> human-readable summary (UNTRUSTED, serialized only)",
+  "summary": "<required> human-readable summary (UNTRUSTED, stored exactly)",
   "outputs": {},
   "plan_steps": [],
   "plan_path": "<optional> path to the cerebrate directive (sets plan.path)"
 }
 ```
 
-Field rules:
-- `run_id`, `state`, `result`, `summary` are required non-empty strings. `run_id` must be a
-  single safe path component (`^[A-Za-z0-9._-]+$`; `.`/`..` rejected) — it is the ONLY
-  identity the caller supplies, and every path the engine touches is DERIVED from it.
+Field rules (all checked by the one whole-file contract check, in this order):
+- ABSENT: a key that is missing or `null` is absent. `""` is present.
+- `run_id`, `state`, `result` are required names: 1 to 255 of `A-Z a-z 0-9 . _ -`, not `.` or
+  `..`. `run_id` is a single safe path component — it is the ONLY identity the caller
+  supplies, and every path the engine touches is DERIVED from it.
+- `summary` is a required string, not empty. Stored exactly: no byte is lost, including a
+  trailing line feed.
 - `outputs` is optional. KEY-PRESENCE semantics: a MISSING key OR a present-but-null value
   is ABSENT (the event's `outputs` defaults to `{}`); a present non-null value MUST be a JSON
-  object and is recorded verbatim. UNTRUSTED — serialized only via `--argjson`. When `outputs`
+  object and is recorded verbatim. UNTRUSTED — stored as data. When `outputs`
   carries a `completed_steps` key (present and non-null), it is honored ONLY when the recording
   state is a WAVE-PRODUCING agent state (`states.<state>.type == "agent"` AND
   `states.<state>` declares `allowed_agents` AND `"hivemind:cerebrate"` is not in that
   `allowed_agents` set, derived from the packaged workflow definition) — symmetric to the
-  plan-write authorization below (§11); at any other recording state the record is REJECTED
-  (blocker, ledger byte-unchanged).
+  plan-write authorization below (§10); at any other recording state the record is REJECTED
+  (blocker, ledger byte-unchanged). `outputs.completed_steps`, when present, must be an array.
 - `plan_steps` is optional (cerebrate plan steps as a JSON array; sets `.plan.steps`).
   KEY-PRESENCE semantics: a MISSING key OR a present-but-null value is ABSENT -> `.plan.*`
   left UNTOUCHED (never clobbered to `[]`); a present non-null value MUST be a JSON array.
-  UNTRUSTED — serialized only via `--argjson`.
+  Every entry must be an object whose `id` is a required step id (1 to 64 of `A-Z a-z 0-9 . _ -`),
+  and every `depends_on` (when present; it must be an array) entry likewise a step id — a
+  write-boundary charset guard so an unsafe id (YAML delimiter/bracket/comma/newline) can never
+  persist and forge next-wave's routing YAML. A `null` entry fails. `.`/`..` are NOT rejected
+  (step ids never become path components). UNTRUSTED — stored as data.
 - `plan_path` is optional (sets `.plan.path`). KEY-PRESENCE semantics: a MISSING key OR a
   present-but-null value is ABSENT -> `.plan.path` left UNTOUCHED; a present non-null value
-  is the (nullable) text. UNTRUSTED — serialized only via `--arg`.
+  is a string, stored exactly. UNTRUSTED.
+- A failure is one blocker `record-state-result inputs file: <position>: <problem>`. The
+  position is the dotted path with `[N]` indexes (for example `plan_steps[2].depends_on[0]`);
+  the problem is a fixed phrase. A blocker never names the value.
 - Every value is data. None is interpolated into generated shell command source.
 
 The script validates, in order, ALL before any write:
 
-1. `run_id` SAFE_ID_RE validation — `run_id` must match `^[A-Za-z0-9._-]+$`; `.`/`..` are
-   rejected (path traversal). This is the ONLY identity the caller supplies.
+1. WHOLE INPUTS CONTRACT — the whole inputs file (one JSON object) is checked first, on the
+   intact JSON values, against the field rules above: `run_id`/`state`/`result` names (`.`/`..`
+   rejected, so path traversal is closed), `summary` a non-empty string, `outputs` (if present
+   and non-null) an object, `plan_steps` (if present and non-null) an array of step rows,
+   `plan_path` a string. `run_id` is the ONLY identity the caller supplies. A break is a
+   blocker naming a position and a problem, never the value; the ledger is byte-unchanged.
 2. LEDGER DERIVATION + existence — the ledger path is DERIVED as
    `<git-root>/.hivemind/runs/<run_id>/state.json` (`git rev-parse --show-toplevel`; not
-   inside a git checkout → blocker). The file must exist and be valid JSON. No caller path
-   is ever accepted, so an arbitrary-file overwrite via a supplied ledger path is impossible.
+   inside a git checkout → blocker). The file must exist and be exactly one JSON object. No
+   caller path is ever accepted, so an arbitrary-file overwrite via a supplied ledger path is
+   impossible.
 3. COHERENCE CHECK — `ledger.run.id == run_id` (the on-disk ledger must self-identify with
    the passed run_id; mismatch → blocker, ledger unchanged).
-4. DEFINITION DERIVATION — the workflow definition is DERIVED from the (trusted) ledger's
-   `run.workflow` (SAFE_ID_RE + `.`/`..` rejected even though the ledger is trusted) against
-   the script's SELF-LOCATED packaged `workflows/` dir (`BASH_SOURCE` + `pwd -P`, independent
-   of `${CLAUDE_PLUGIN_ROOT}` and of any caller value). The caller supplies NO definition
-   path, so a forged definition can never be injected.
-5. `outputs` (if present and non-null) must be a JSON object; `plan_steps` (if present and
-   non-null) must be a JSON array — both validated up front for a clear blocker before any temp-write.
-   When `plan_steps` is present, every entry must additionally be a JSON OBJECT whose `id` is a
-   NON-EMPTY STRING matching `SAFE_ID_RE` (`^[A-Za-z0-9._-]+$`), and every `depends_on` (when
-   present and non-null) must be an ARRAY of NON-EMPTY STRINGS each matching `SAFE_ID_RE` — a
-   write-boundary charset guard so an unsafe id (YAML delimiter/bracket/comma/newline) can never
-   persist and forge next-wave's routing YAML. `.`/`..` are NOT rejected (ids never become path
-   components; charset-only + non-empty is the guard). UNTRUSTED `plan_steps` enters `jq` as stdin
-   INPUT only; the violation blocker carries no untrusted text and the ledger is byte-unchanged.
-6. `definition.id == ledger.run.workflow` — BINDING GUARD (engine hard-reject; ledger
+4. LEDGER CONTRACT + DEFINITION DERIVATION — the whole canonical ledger is checked against its
+   contract first: `run.id`, `run.workflow`, `state.current` required names and
+   `run.workflow_version` a required whole number (blocker
+   `record-state-result ledger: <position>: <problem>`). Then the workflow definition is
+   DERIVED from the (trusted) ledger's `run.workflow` against the script's SELF-LOCATED
+   packaged `workflows/` dir (`BASH_SOURCE` + `pwd -P`, independent of
+   `${CLAUDE_PLUGIN_ROOT}` and of any caller value). The caller supplies NO definition path,
+   so a forged definition can never be injected.
+5. `definition.id == ledger.run.workflow` — BINDING GUARD (engine hard-reject; ledger
    unchanged). Now compares the trusted ledger against the self-derived PACKAGED definition,
    not a caller-supplied path.
-7. `definition.version == ledger.run.workflow_version` — BINDING GUARD. The engine HARD-REJECTS
+6. `definition.version == ledger.run.workflow_version` — BINDING GUARD. The engine HARD-REJECTS
    an id/version mismatch and exposes NO rebind; the overlord resume-on-start gate owns the
    TWO version-skew DOORS (start fresh / proceed intent-driven). There is NO deterministic-resume
    door. The engine never reconciles skew — it rejects a non-binding definition outright.
-8. `ledger.state.current == state`.
-9. `state` exists in `definition.states` (state-existence — a renamed/removed state never
+7. `ledger.state.current == state`.
+8. `state` exists in `definition.states` (state-existence — a renamed/removed state never
    guesses; this is NOT version-skew).
-10. `result` is a key under `states.<state>.transitions`; resolves `next_state`, which must be
+9. `result` is a key under `states.<state>.transitions`; resolves `next_state`, which must be
    declared in `definition.states`.
-11. PLAN-WRITE AUTHORIZATION — if `plan_steps` or `plan_path` was supplied (present and
+10. PLAN-WRITE AUTHORIZATION — if `plan_steps` or `plan_path` was supplied (present and
    non-null), the recording state MUST be a cerebrate planning state
    (`states.<state>.agent == "hivemind:cerebrate"`, i.e. `plan` / `review_remediation_plan` /
    `review_remediation_plan_postpr` / `brood_plan`); otherwise the engine rejects (exit 1,
    ledger byte-unchanged). Key presence alone does NOT authorize a plan write — only a cerebrate
    agent state may persist `plan.steps` / `plan.path`.
-12. PRODUCER AUTHORIZATION — if `outputs` carries a `completed_steps` key (present and
+11. PRODUCER AUTHORIZATION — if `outputs` carries a `completed_steps` key (present and
    non-null), the recording state MUST be a WAVE-PRODUCING agent state
    (`states.<state>.type == "agent"` AND `states.<state>` has `allowed_agents` AND
    `"hivemind:cerebrate"` is not in that `allowed_agents` set, derived from the packaged
    workflow definition — ground-truth, no hardcoded state names); otherwise the engine rejects
-   (exit 1, ledger byte-unchanged). This is symmetric to §11: key presence alone does NOT
+   (exit 1, ledger byte-unchanged). This is symmetric to §10: key presence alone does NOT
    authorize a `completed_steps` credit — only a wave-producing agent state may persist it.
 
 Then it appends the event; updates `state.previous`/`state.current`/`state.status`,
@@ -202,8 +212,9 @@ validation failure the on-disk ledger is byte-unchanged.
    stdin/heredoc: a heredoc reintroduces the very delimiter-injection class the inert Write-tool-file
    pattern exists to avoid (ADR-0017). Cleanup is not required: this is transient gitignored state and
    `.hivemind/` is ephemeral. Write performs no shell parsing of the values, and the engine
-   reads each field with `jq` into a shell variable, so `summary` / `outputs` / `plan_steps` /
-   `plan_path` text is never interpolated into shell or jq program source.
+   keeps `summary` / `plan_path` text out of shell variables and out of shell and jq program
+   source (it reads them from the inputs file as data, so each is stored exactly), and
+   `outputs` / `plan_steps` enter the write as data only.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
    Transport Degradation Is a Hard Stop).

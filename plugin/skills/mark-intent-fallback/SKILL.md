@@ -38,8 +38,9 @@ The caller resolves and passes these; the skill does not invent them.
   file.
 - `state`: the state string recorded VERBATIM in the appended fallback event. It is NOT
   validated against any workflow definition (this is the whole point — the run is skewed).
-- `summary`: human-readable summary of the outcome — UNTRUSTED, serialized only.
-- `outputs` (optional): a JSON object of named outputs — UNTRUSTED, serialized only. Recorded
+  Stored exactly.
+- `summary`: human-readable summary of the outcome — UNTRUSTED, stored exactly.
+- `outputs` (optional): a JSON object of named outputs — UNTRUSTED, stored as data. Recorded
   verbatim EXCEPT `completed_steps`, which is STRIPPED at write time: a fallback event is an
   observability log and never credits wave steps.
 - `close_status` (optional): exactly `cancelled` or `complete`. Closes out a stale run by
@@ -51,46 +52,56 @@ The caller resolves and passes these; the skill does not invent them.
 
 The script owns deterministic read -> validate -> mutate -> atomic-write; the navigator
 authors a single JSON inputs file and passes its path as the one positional argument. Every
-value crosses the transport as data only — the script reads each field with `jq` into a shell
-variable and never interpolates it into shell source or the jq program source. What the script
-does with a field after that read is the field's own contract. Shape:
+value crosses the transport as data only — never interpolated into shell source or the jq
+program source. The script FIRST checks the whole inputs file against its contract (one JSON
+object; the field rules below), on the intact JSON values, before it reads any field or opens
+the ledger. Shape:
 
 ```json
 {
   "run_id": "<required> run identifier; the engine DERIVES the ledger as <git-root>/.hivemind/runs/<run_id>/state.json. NO path is accepted.",
-  "state": "<required> state string recorded verbatim in the appended fallback event (UNTRUSTED, NOT validated against any definition)",
-  "summary": "<required> human-readable summary (UNTRUSTED, serialized only)",
+  "state": "<required> state string recorded verbatim in the appended fallback event (UNTRUSTED, stored exactly, NOT validated against any definition)",
+  "summary": "<required> human-readable summary (UNTRUSTED, stored exactly)",
   "outputs": {},
   "close_status": "cancelled"
 }
 ```
 
-Field rules:
-- `run_id`, `state`, `summary` are required non-empty strings. `run_id` must be a single safe
-  path component (`^[A-Za-z0-9._-]+$`; `.`/`..` rejected) — it is the ONLY identity the caller
-  supplies, and every path the engine touches is DERIVED from it.
-- `state` is recorded verbatim and is NOT checked against any definition. UNTRUSTED —
-  serialized only via `--arg`.
+Field rules (all checked by the one whole-file contract check, in this order):
+- ABSENT: a key that is missing or `null` is absent. `""` is present.
+- `run_id` is a required name: 1 to 255 of `A-Z a-z 0-9 . _ -`, not `.` or `..`. It is a
+  single safe path component and the ONLY identity the caller supplies; every path the engine
+  touches is DERIVED from it.
+- `state`, `summary` are required strings, not empty. Stored exactly: no byte is lost,
+  including a trailing line feed.
+- `state` is recorded verbatim and is NOT checked against any definition. UNTRUSTED.
 - `outputs` is optional. KEY-PRESENCE semantics: a MISSING key OR a present-but-null value
   is ABSENT (the event's `outputs` defaults to `{}`); a present non-null value MUST be a JSON
   object and is recorded verbatim EXCEPT `completed_steps`, which is STRIPPED from the event's
   outputs at write time (a fallback event is an observability log and never credits wave
   steps; closed-by-construction — the written event cannot carry the key regardless of the
-  caller). All other keys pass through verbatim. UNTRUSTED — serialized only via `--argjson`.
+  caller). All other keys pass through verbatim. UNTRUSTED — stored as data.
 - `close_status` is optional. KEY-PRESENCE semantics: a MISSING key OR a present-but-null
   value is ABSENT -> `run.status` left untouched (run stays `running`); a present non-null
   value MUST be exactly `cancelled` or `complete` (anything else, notably `abandoned`, is
-  REJECTED). UNTRUSTED — serialized only via `--arg`. When `close_status` is SUPPLIED
+  REJECTED). When `close_status` is SUPPLIED
   (closeout path), the engine ADDITIONALLY requires the on-disk `run.status` to be `running`
   and REJECTS an already-terminal run (closing out a non-running run is meaningless; ledger
   byte-unchanged). The bare mode-flip path (no `close_status`) stays PERMISSIVE on a
   non-running skew ledger.
+- A failure is one blocker `mark-intent-fallback inputs file: <position>: <problem>`. The
+  position is the dotted path (for example `close_status`); the problem is a fixed phrase. A
+  blocker never names the value.
 - Every value is data. None is interpolated into generated shell command source.
 
 The script validates, in order, ALL before any write:
 
-1. `run_id` SAFE_ID_RE validation — `run_id` must match `^[A-Za-z0-9._-]+$`; `.`/`..` are
-   rejected (path traversal). This is the ONLY identity the caller supplies.
+1. WHOLE INPUTS CONTRACT — the whole inputs file (one JSON object) is checked first, on the
+   intact JSON values, against the field rules above: `run_id` a name (`.`/`..` rejected, so
+   path traversal is closed), `state` and `summary` non-empty strings, `outputs` (if present
+   and non-null) an object, `close_status` (if present and non-null) exactly `cancelled` or
+   `complete`. `run_id` is the ONLY identity the caller supplies. A break is a blocker naming
+   a position and a problem, never the value; the ledger is byte-unchanged.
 2. LEDGER DERIVATION + existence — the ledger path is DERIVED as
    `<git-root>/.hivemind/runs/<run_id>/state.json` (`git rev-parse --show-toplevel`; not
    inside a git checkout → blocker). The file must exist and be valid JSON. No caller path
@@ -101,10 +112,7 @@ The script validates, in order, ALL before any write:
    (including the `<run_id>` leaf) and rejects any symlink component at any depth, then
    verifies the canonical ledger lives at `<canon-runs>/<run_id>/state.json` — BEFORE any
    temp-write, so a rejection never creates a temp file and the on-disk ledger is unchanged.
-5. `outputs` (if present and non-null) must be a JSON object; `close_status` (if present and
-   non-null) must be exactly `cancelled` or `complete` — both validated up front for a clear
-   blocker before any temp-write.
-6. CLOSEOUT PRECONDITION — when `close_status` is SUPPLIED, the on-disk `run.status` must be
+5. CLOSEOUT PRECONDITION — when `close_status` is SUPPLIED, the on-disk `run.status` must be
    `running`; an already-terminal run is REJECTED (closing out a non-running run is
    meaningless; ledger byte-unchanged). When `close_status` is ABSENT, this check is SKIPPED —
    the bare mode-flip path stays PERMISSIVE on a non-running skew ledger.
@@ -116,6 +124,8 @@ The script DELIBERATELY SKIPS (this is the whole point of this sanctioned bypass
   precondition here, not a failure.
 - NO state-existence check — the recorded `state` is NOT validated against any definition.
 - NO transition/result validation, NO `next_state` resolution, NO terminal mapping.
+- NO ledger contract check — the skewed ledger's shape is not checked beyond containment,
+  coherence and being exactly one JSON object.
 
 Then it mutates: sets `run.mode = "intent_fallback"`; appends an event
 `{ at, state, result: "intent_fallback", next_state: null, summary, outputs }` where the
@@ -153,9 +163,10 @@ ledger is byte-unchanged.
    gitignored. Do NOT pass the inputs via stdin/heredoc: a heredoc reintroduces the very
    delimiter-injection class the inert Write-tool-file pattern exists to avoid (ADR-0017).
    Cleanup is not required: this is transient gitignored state and `.hivemind/` is ephemeral.
-   Write performs no shell parsing of the values, and the engine reads each field with `jq`
-   into a shell variable, so `state` / `summary` / `outputs` text is never interpolated into
-   shell or jq program source.
+   Write performs no shell parsing of the values, and the engine keeps `state` /
+   `summary` text out of shell variables and out of shell and jq program source (it reads them
+   from the inputs file as data, so each is stored exactly), and `outputs` enters the write as
+   data only.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
    Transport Degradation Is a Hard Stop).

@@ -16,28 +16,30 @@
  *                             only when all_done is true.
  *                  all_done   true when remaining is 0.
  *                {ok: false, problem} when the plan is not valid, or when
- *                steps remain but none can run. problem is one plain line.
- *                Every plan value it names is JSON-encoded, so a line feed
- *                or control character in a model-written id cannot break
- *                the line.
+ *                steps remain but none can run. problem is one fixed line
+ *                that names positions only (e.g. plan.steps[2].id), never
+ *                a plan value, so a model-written id cannot add a line, a
+ *                control character or bulk to it.
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. Inputs are never changed.
  *   The rule's home and parity oracle is
  *   plugin/skills/next-wave/scripts/next-wave.sh: COMPUTATION items 3 to 5,
- *   its VALIDATION in the same order (shape gate, empty, missing id,
- *   duplicate id, unknown dependency, cycle, safe-id charset) and its
- *   defensive stall check. tests/workflow-scripts/waves.test.mjs runs both on
- *   the same plans and requires the same outcome: the same wave, or a problem
- *   of the same class, which is its text before any value it names. A
- *   change to the rule lands
- *   in next-wave.sh and here together.
- *   Only two things differ from next-wave.sh:
+ *   its VALIDATION in the same order with the same texts, and its defensive
+ *   stall check. The first check mirrors the step rows of the wave-ledger
+ *   contract of hivemind_check_json: plan.steps a required array, each step
+ *   an object, each id a required step id, each depends_on an optional
+ *   array of step ids. Absent means undefined or null; an array element is
+ *   never absent. Rows run in table order and positions in ascending index
+ *   (row-major); the first failure is the problem. A step id is 1 to 64 of
+ *   A-Z a-z 0-9 . _ -, all ASCII, so JS and jq count its length alike. Then
+ *   come the empty, duplicate id, unknown dependency and cycle checks.
+ *   tests/workflow-scripts/waves.test.mjs runs both on the same plans and
+ *   requires the same outcome: the same wave, or the same problem text. A
+ *   change to the rule lands in next-wave.sh and here together.
+ *   Only one thing differs from next-wave.sh:
  *     The input is a list of done ids, not a run ledger. Deriving that list
  *     (epoch scope, event projection) is the caller's job.
- *     The safe-id check is strict at the end of the string. jq's `$` also
- *     matches before a final line feed, so next-wave.sh accepts an id such as
- *     "STEP-001" followed by a line feed. computeWave rejects it.
  *
  * Why
  *   Both engines must dispatch the same waves from the same plan. The rule
@@ -64,68 +66,81 @@ function computeWave(steps, doneIds) {
 }
 
 function findWavePlanProblem(steps) {
-  if (!Array.isArray(steps)) {
-    return 'plan.steps is not an array';
-  }
-  const shapeProblem = findStepShapeProblem(steps);
-  if (shapeProblem !== '') {
-    return shapeProblem;
+  const contractProblem = findStepContractProblem(steps);
+  if (contractProblem !== '') {
+    return contractProblem;
   }
   if (steps.length === 0) {
-    return 'plan.steps is empty or absent; nothing to schedule';
+    return 'plan.steps: empty, nothing to schedule';
   }
-  if (steps.some((step) => step.id === '')) {
-    return 'a plan step is missing an id';
+  const duplicateIndex = findDuplicateStepIndex(steps);
+  if (duplicateIndex !== -1) {
+    return 'plan.steps[' + duplicateIndex + '].id: duplicate step id';
   }
-  const duplicateId = findDuplicateStepId(steps);
-  if (duplicateId !== null) {
-    return 'duplicate plan step id: ' + JSON.stringify(duplicateId);
-  }
-  const unknownDependency = findUnknownDependency(steps);
-  if (unknownDependency !== null) {
-    return 'depends_on references unknown step id: ' + JSON.stringify(unknownDependency);
+  const unknownPosition = findUnknownDependencyPosition(steps);
+  if (unknownPosition !== '') {
+    return unknownPosition + ': unknown step id';
   }
   if (hasDependencyCycle(steps)) {
     return 'dependency cycle detected among plan steps';
   }
-  const unsafeId = findUnsafeStepId(steps);
-  if (unsafeId !== null) {
-    return 'plan step id or depends_on entry fails the safe-id charset: ' + JSON.stringify(unsafeId);
-  }
   return '';
 }
 
-function findStepShapeProblem(steps) {
-  for (const step of steps) {
-    const stepProblem = describeStepShapeProblem(step);
-    if (stepProblem !== '') {
-      return stepProblem;
+function findStepContractProblem(steps) {
+  if (steps === undefined || steps === null) {
+    return 'plan.steps: missing';
+  }
+  if (!Array.isArray(steps)) {
+    return 'plan.steps: not an array';
+  }
+  const objectIndex = steps.findIndex((step) => !isWaveStepRecord(step));
+  if (objectIndex !== -1) {
+    return 'plan.steps[' + objectIndex + ']: not an object';
+  }
+  const idProblem = findStepIdProblem(steps);
+  if (idProblem !== '') {
+    return idProblem;
+  }
+  const arrayIndex = steps.findIndex((step) => !isAbsentValue(step.depends_on) && !Array.isArray(step.depends_on));
+  if (arrayIndex !== -1) {
+    return 'plan.steps[' + arrayIndex + '].depends_on: not an array';
+  }
+  return findDependencyEntryProblem(steps);
+}
+
+function findStepIdProblem(steps) {
+  for (let index = 0; index < steps.length; index += 1) {
+    if (isAbsentValue(steps[index].id)) {
+      return 'plan.steps[' + index + '].id: missing';
+    }
+    if (!isStepId(steps[index].id)) {
+      return 'plan.steps[' + index + '].id: ' + describeStepIdProblem();
     }
   }
   return '';
 }
 
-function describeStepShapeProblem(step) {
-  if (!isWaveStepRecord(step)) {
-    return 'a plan step is not an object: ' + JSON.stringify(step);
-  }
-  if (!Object.prototype.hasOwnProperty.call(step, 'id')) {
-    return 'a plan step is missing an id';
-  }
-  if (typeof step.id !== 'string') {
-    return 'a plan step id is not a string: ' + JSON.stringify(step.id);
-  }
-  if (step.depends_on === undefined || step.depends_on === null) {
-    return '';
-  }
-  if (!Array.isArray(step.depends_on)) {
-    return 'a plan step depends_on is not an array: ' + JSON.stringify(step.depends_on);
-  }
-  const badIndex = step.depends_on.findIndex((dependency) => typeof dependency !== 'string');
-  if (badIndex !== -1) {
-    return 'a plan step depends_on entry is not a string: ' + JSON.stringify(step.depends_on[badIndex]);
+function findDependencyEntryProblem(steps) {
+  for (let index = 0; index < steps.length; index += 1) {
+    const badEntry = readStepDependencies(steps[index]).findIndex((dependency) => !isStepId(dependency));
+    if (badEntry !== -1) {
+      return 'plan.steps[' + index + '].depends_on[' + badEntry + ']: ' + describeStepIdProblem();
+    }
   }
   return '';
+}
+
+function describeStepIdProblem() {
+  return 'not a step id (1 to 64 of A-Z a-z 0-9 . _ -)';
+}
+
+function isStepId(value) {
+  return typeof value === 'string' && /^[A-Za-z0-9._-]{1,64}$/.test(value);
+}
+
+function isAbsentValue(value) {
+  return value === undefined || value === null;
 }
 
 function isWaveStepRecord(value) {
@@ -136,26 +151,26 @@ function readStepDependencies(step) {
   return Array.isArray(step.depends_on) ? step.depends_on : [];
 }
 
-function findDuplicateStepId(steps) {
+function findDuplicateStepIndex(steps) {
   const seenIds = new Set();
-  for (const step of steps) {
-    if (seenIds.has(step.id)) {
-      return step.id;
+  for (let index = 0; index < steps.length; index += 1) {
+    if (seenIds.has(steps[index].id)) {
+      return index;
     }
-    seenIds.add(step.id);
+    seenIds.add(steps[index].id);
   }
-  return null;
+  return -1;
 }
 
-function findUnknownDependency(steps) {
+function findUnknownDependencyPosition(steps) {
   const stepIds = new Set(steps.map((step) => step.id));
-  for (const step of steps) {
-    const unknown = readStepDependencies(step).find((dependency) => !stepIds.has(dependency));
-    if (unknown !== undefined) {
-      return unknown;
+  for (let index = 0; index < steps.length; index += 1) {
+    const unknownEntry = readStepDependencies(steps[index]).findIndex((dependency) => !stepIds.has(dependency));
+    if (unknownEntry !== -1) {
+      return 'plan.steps[' + index + '].depends_on[' + unknownEntry + ']';
     }
   }
-  return null;
+  return '';
 }
 
 function hasDependencyCycle(steps) {
@@ -166,21 +181,6 @@ function hasDependencyCycle(steps) {
     remainingIds = remainingIds.filter((stepId) => dependenciesById.get(stepId).some((dependency) => remainingSet.has(dependency)));
   }
   return remainingIds.length > 0;
-}
-
-function findUnsafeStepId(steps) {
-  for (const step of steps) {
-    const candidates = [step.id].concat(readStepDependencies(step));
-    const unsafe = candidates.find((candidate) => !isSafeStepId(candidate));
-    if (unsafe !== undefined) {
-      return unsafe;
-    }
-  }
-  return null;
-}
-
-function isSafeStepId(value) {
-  return typeof value === 'string' && /^[A-Za-z0-9._-]+$/.test(value);
 }
 
 function pickGreedyWave(ready, steps) {

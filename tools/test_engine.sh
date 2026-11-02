@@ -155,6 +155,32 @@
 #                           the def's .states[next_state], for a non-terminal and a terminal target.
 #   YY. record-undeclared-target-unchanged -> a transition whose target the def does not declare:
 #                           blocker before mktemp, ledger byte-unchanged, no temp file.
+#   NA-NF. whole-string safe-id check (issue #424) -> a run_id with an embedded line feed is
+#                           refused by the record and mark-intent-fallback inputs contracts; a
+#                           plan step id or depends_on entry ending in a line feed is refused by
+#                           record (ledger byte-unchanged) and init (no run dir); an unsafe
+#                           suggested_run_id is a blocker for init (no derived id, no run dir);
+#                           safe ids still pass.
+#   NG-NM. ids checked on the intact JSON value (issue #424 review) -> a trailing LF, two
+#                           trailing LFs, an embedded NUL or LF, a CR, a non-ASCII letter, "." and
+#                           ".." are refused for record run_id, ledger run.workflow and the ledger
+#                           run.id coherence check, mark-intent-fallback run_id, and init workflow,
+#                           suggested_run_id ("" too) and parent.strain_id; parent.brood_id refuses
+#                           all but "." and "..". Init creates no run dir on any of them.
+#   OA-OK. every input checked whole against its contract (issue #424) -> a trailing LF, a NUL or
+#                           5000 chars in record state/result, init parent.kind/start_state and
+#                           mark-intent-fallback close_status, a string init workflow_version, a
+#                           ledger state.current with a trailing LF and a string ledger
+#                           run.workflow_version, and 65- or 5000-char step ids and depends_on
+#                           entries at init and record, are all refused; multi-document inputs
+#                           files and ledgers are refused; a null depends_on is accepted by init
+#                           and record; user_request, normalized, summary and the intent-fallback
+#                           state with a trailing LF or NUL round-trip exactly; a static guard
+#                           finds no `jq -r` read of the inputs file in init, record or
+#                           mark-intent-fallback, nor of the ledger in record or mark.
+#                           Every contract refusal's stderr is exactly one fixed blocker line of at
+#                           most 300 bytes holding no copy of the hostile value, and leaves the run
+#                           dirs and ledgers unchanged.
 #
 # Prints PASS/FAIL per assertion. Exits non-zero if ANY assertion FAILs.
 #
@@ -3315,6 +3341,812 @@ assert_record_undeclared_target_unchanged() {
     fi
 }
 
+# ── NA-NF. the safe-id check covers the WHOLE string (issue #424) ────────────
+# jq's Oniguruma `$` also matches before one final line feed, and grep is line-based, so the old
+# `^[A-Za-z0-9._-]+$` checks accepted "STEP-001<LF>" (jq) and "ok<LF>../x" (grep). Each engine
+# now checks its whole inputs file (and record/mark their ledger) against a fixed contract
+# (hivemind_check_json) and its blocker names the position and the problem, never the value.
+
+# The fixed problem words of the hivemind_check_json contract kinds.
+NAME_PROBLEM='not a name (1 to 255 of A-Z a-z 0-9 . _ -, not . or ..)'
+STEP_ID_PROBLEM='not a step id (1 to 64 of A-Z a-z 0-9 . _ -)'
+BROOD_ID_PROBLEM='not a brood id (1 to 255 of A-Z a-z 0-9 . _ : -)'
+COUNT_PROBLEM='not a whole number of 0 or more'
+# Every 65- and 5000-char hostile value below is cut from "hostile-" repeated, so a refusal's
+# stderr holding a copy of one would hold this marker.
+LONG_MARKER='hostile-hostile-'
+
+# format_contract_blocker <record-inputs|record-ledger|init-inputs|intent-inputs> <position: problem>
+# -> prints the engine's fixed contract blocker text (without the `blocker: ` prefix).
+format_contract_blocker() {
+    case "$1" in
+        record-inputs) printf 'record-state-result inputs file: %s; ledger unchanged' "$2" ;;
+        record-ledger) printf 'record-state-result ledger: %s; ledger unchanged' "$2" ;;
+        init-inputs) printf 'run-ledger inputs file breaks its contract: %s; no run dir created' "$2" ;;
+        intent-inputs) printf 'mark-intent-fallback inputs file: %s; ledger unchanged' "$2" ;;
+        *) printf 'format_contract_blocker: unknown contract %s' "$1" ;;
+    esac
+}
+
+# run_engine_stderr <engine> <gitroot> <inputs> <err-file> -> runs <engine> from <gitroot> with
+# stdout discarded and stderr in <err-file>; returns the engine's exit code.
+run_engine_stderr() {
+    local engine="$1" gitroot="$2" inputs="$3" errfile="$4" rc=0
+    ( cd "$gitroot" && bash "$engine" "$inputs" ) >/dev/null 2>"$errfile" || rc=$?
+    return "$rc"
+}
+
+# check_refusal <name> <engine> <gitroot> <inputs> <errfile> <expected> <marker> <ledger-or-empty>
+#   <ledger-sha-or-empty> -> 0 when the engine exits non-zero and its whole stderr is the one line
+# "blocker: <expected>", at most 300 bytes, holding no copy of <marker> (skipped when empty).
+# With a ledger: the ledger is byte-unchanged and its run dir holds only state.json. Without one
+# (init): no run dir exists under <gitroot>. Otherwise prints one FAIL and returns 1.
+check_refusal() {
+    local name="$1" engine="$2" gitroot="$3" inputs="$4" errfile="$5" expected="$6"
+    local marker="$7" ledger="$8" before="$9" rc=0 err_bytes run_entries
+    run_engine_stderr "$engine" "$gitroot" "$inputs" "$errfile" || rc=$?
+    if [[ "$rc" -eq 0 ]] || ! cmp -s "$errfile" <(printf 'blocker: %s\n' "$expected"); then
+        failed "$name" "expected a non-zero exit and stderr 'blocker: $expected'; rc=$rc stderr=$(head -c 400 "$errfile" | tr '\n\0' '|@')"
+        return 1
+    fi
+    err_bytes="$(wc -c < "$errfile" | tr -d ' ')"
+    if [[ "$err_bytes" -gt 300 ]]; then
+        failed "$name" "refusal stderr is $err_bytes bytes (limit 300)"
+        return 1
+    fi
+    if [[ -n "$marker" ]] && grep -qF -- "$marker" "$errfile"; then
+        failed "$name" "refusal stderr holds a copy of the hostile value ($marker)"
+        return 1
+    fi
+    if [[ -z "$ledger" ]]; then
+        if [[ "$(run_dir_count "$gitroot")" != "0" ]]; then
+            failed "$name" "refused, but a run dir was created under $gitroot/.hivemind/runs"
+            return 1
+        fi
+        return 0
+    fi
+    if [[ "$(sha256sum "$ledger" | awk '{print $1}')" != "$before" ]]; then
+        failed "$name" "ledger changed on a refusal"
+        return 1
+    fi
+    run_entries="$(find "$(dirname "$ledger")" -mindepth 1 -maxdepth 1 | wc -l | tr -d ' ')"
+    if [[ "$run_entries" != "1" ]]; then
+        failed "$name" "run dir holds $run_entries entries after a refusal (expected only state.json)"
+        return 1
+    fi
+    return 0
+}
+
+assert_record_run_id_line_feed_rejected() {
+    local name="NA:record-run-id-line-feed-rejected"
+    # A run_id with an embedded line feed (a safe line, then a traversal or a second safe line)
+    # is refused by the record-inputs contract before any ledger path. A trailing line feed,
+    # which a "$(jq -r ...)" read strips, is covered by NG.
+    local gitroot ledger inputs errfile before run_id
+    gitroot="$(new_gitroot na-git)"
+    ledger="$(stage_record_ledger "$gitroot" engine-case-na "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/na-inputs.json"
+    errfile="$gitroot/na.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    for run_id in $'engine-case-na\n../x' $'engine-case-na\nx'; do
+        jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+            --arg summary "engine test run_id line feed" \
+            '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+        check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker record-inputs "run_id: $NAME_PROBLEM")" engine-case-na \
+            "$ledger" "$before" || return 0
+    done
+    pass "$name" "run_ids with an embedded line feed refused by the record-inputs contract; ledger unchanged"
+}
+
+assert_record_plan_steps_line_feed_rejected() {
+    local name="NB:record-plan-steps-line-feed-rejected"
+    # A plan_steps .id, then a depends_on entry, ending in a line feed must each be refused at
+    # the write boundary. Ledger at `plan` so the charset guard is the only failing gate.
+    local gitroot run_id ledger inputs before after rc plan_steps
+    gitroot="$(new_gitroot nb-git)"
+    run_id="engine-case-nb"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nb-inputs.json"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    for plan_steps in '[{"id":"STEP-001\n","status":"pending"}]' \
+                      '[{"id":"STEP-002","depends_on":["STEP-001\n"],"status":"pending"}]'; do
+        jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+            --arg summary "engine test plan step line feed" --argjson plan_steps "$plan_steps" \
+            '{run_id: $run_id, state: $state, result: $result, summary: $summary, plan_steps: $plan_steps}' \
+            > "$inputs"
+        rc=0
+        ( cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" ) >/dev/null 2>&1 || rc=$?
+        after="$(sha256sum "$ledger" | awk '{print $1}')"
+        if [[ "$rc" -eq 0 || "$before" != "$after" ]]; then
+            failed "$name" "plan_steps $plan_steps accepted; rc=$rc changed=$([[ "$before" != "$after" ]] && echo yes || echo no)"
+            return
+        fi
+    done
+    pass "$name" "line-feed-ending step id and depends_on entry rejected; ledger byte-unchanged"
+}
+
+assert_record_safe_plan_steps_accepted() {
+    local name="NC:record-safe-plan-steps-accepted"
+    # Safe ids that use every charset class (letters, digits, `.`, `_`, `-`) still pass.
+    local gitroot run_id ledger inputs rc=0 got
+    gitroot="$(new_gitroot nc-git)"
+    run_id="engine-case-nc.v_1"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nc-inputs.json"
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test safe plan step ids" \
+        --argjson plan_steps '[{"id":"STEP-001.a_b","status":"pending"},{"id":"STEP-002","depends_on":["STEP-001.a_b"],"status":"pending"}]' \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary, plan_steps: $plan_steps}' \
+        > "$inputs"
+    ( cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" ) >/dev/null 2>&1 || rc=$?
+    got="$(jq -c '[.plan.steps[].id]' "$ledger")"
+    if [[ "$rc" -eq 0 && "$got" == '["STEP-001.a_b","STEP-002"]' ]]; then
+        pass "$name" "safe run_id and plan step ids accepted (plan.steps ids=$got)"
+    else
+        failed "$name" "expected exit 0 and ids [STEP-001.a_b,STEP-002]; rc=$rc ids=$got"
+    fi
+}
+
+assert_init_plan_steps_line_feed_rejected() {
+    local name="ND:init-plan-steps-line-feed-rejected"
+    # Mirrors NB at the init seed path: no run dir or ledger may be created.
+    local gitroot inputs rc=0 wrote_any=no
+    gitroot="$(new_gitroot nd-git)"
+    inputs="$gitroot/nd-inputs.json"
+    jq -n --arg workflow engine-fixture --argjson workflow_version 1 --arg start_state plan \
+        --arg user_request "engine test init step id line feed" \
+        --arg normalized "engine test init step id line feed" \
+        --argjson plan_steps '[{"id":"STEP-001\n","status":"pending"}]' \
+        '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized, plan_steps: $plan_steps}' \
+        > "$inputs"
+    ( cd "$gitroot" && bash "$FAKE_INIT_ENGINE" "$inputs" ) >/dev/null 2>&1 || rc=$?
+    if [[ -d "$gitroot/.hivemind/runs" ]] && find "$gitroot/.hivemind/runs" -name state.json -print 2>/dev/null | grep -q .; then
+        wrote_any=yes
+    fi
+    if [[ "$rc" -ne 0 && "$wrote_any" == "no" ]]; then
+        pass "$name" "line-feed-ending plan step id rejected (exit $rc); no run dir/ledger created"
+    else
+        failed "$name" "expected non-zero exit + no ledger written; rc=$rc, wrote_any=$wrote_any"
+    fi
+}
+
+assert_init_suggested_run_id_line_feed_refused() {
+    local name="NE:init-suggested-run-id-line-feed-refused"
+    # An unsafe suggested_run_id is a blocker (issue #424): init exits non-zero, derives no id
+    # of its own, and creates no run dir. The run dir check goes through run_dir_count, which
+    # tolerates an absent .hivemind/runs.
+    local gitroot inputs errfile
+    gitroot="$(new_gitroot ne-git)"
+    inputs="$gitroot/ne-inputs.json"
+    errfile="$gitroot/ne.err"
+    jq -n --arg workflow engine-fixture --argjson workflow_version 1 --arg start_state plan \
+        --arg user_request "engine test init suggested run id line feed" \
+        --arg normalized "engine test init suggested run id line feed" \
+        --arg suggested_run_id $'engine-case-ne\nx' \
+        '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized, suggested_run_id: $suggested_run_id}' \
+        > "$inputs"
+    check_refusal "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+        "$(format_contract_blocker init-inputs "suggested_run_id: $NAME_PROBLEM")" engine-case-ne \
+        "" "" || return 0
+    pass "$name" "suggested_run_id with an embedded line feed refused; no derived id, no run dir created"
+}
+
+assert_intent_fallback_run_id_line_feed_rejected() {
+    local name="NF:intent-fallback-run-id-line-feed-rejected"
+    # Mirrors NA for mark-intent-fallback (intent-inputs contract).
+    local gitroot ledger inputs errfile before run_id
+    gitroot="$(new_gitroot nf-git)"
+    ledger="$(stage_record_ledger "$gitroot" engine-case-nf "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nf-inputs.json"
+    errfile="$gitroot/nf.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    for run_id in $'engine-case-nf\n../x' $'engine-case-nf\nx'; do
+        jq -n --arg run_id "$run_id" --arg state plan \
+            --arg summary "engine test intent fallback run_id line feed" \
+            '{run_id: $run_id, state: $state, summary: $summary}' > "$inputs"
+        check_refusal "$name" "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker intent-inputs "run_id: $NAME_PROBLEM")" engine-case-nf \
+            "$ledger" "$before" || return 0
+    done
+    pass "$name" "run_ids with an embedded line feed refused by the intent-inputs contract; ledger unchanged"
+}
+
+# ── NG-NM. ids are checked on the intact JSON value (issue #424 review) ─────
+# A "$(jq -r ...)" read drops every trailing line feed and bash drops a NUL, so "<id><LF>",
+# "<id><LF><LF>" and "<id-head><NUL><id-tail>" reached the old shell-side check as "<id>" and
+# acted on that id. Each engine now checks the JSON value inside jq before any read.
+
+# hostile_id_rows <safe-id> -> prints one "<JSON string literal>|<unsafe|reserved>" row per
+# hostile value: trailing LF, two trailing LFs, embedded NUL, embedded LF, CR, non-ASCII, ".", "..".
+# The first three collapse to <safe-id> after a jq -r read.
+hostile_id_rows() {
+    jq -nr --arg id "$1" '
+      [($id + "\n"), ($id + "\n\n"), ($id[:6] + "\u0000" + $id[6:]), ($id + "\n../x"),
+       ($id + "\r"), ($id + "é"), ".", ".."][]
+      | [tojson, (if . == "." or . == ".." then "reserved" else "unsafe" end)] | join("|")'
+}
+
+assert_record_run_id_checked_on_json_value() {
+    local name="NG:record-run-id-checked-on-json-value"
+    local gitroot run_id ledger inputs errfile before literal rc=0
+    gitroot="$(new_gitroot ng-git)"
+    run_id="engine-case-ng"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/ng-inputs.json"
+    errfile="$gitroot/ng.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    while IFS='|' read -r literal _; do
+        jq -n --argjson run_id "$literal" --arg state plan --arg result ready \
+            --arg summary "engine test run_id json value" \
+            '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+        check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker record-inputs "run_id: $NAME_PROBLEM")" "$run_id" \
+            "$ledger" "$before" || return 0
+    done < <(hostile_id_rows "$run_id")
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test run_id json value" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+    run_engine_stderr "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        failed "$name" "control: the safe run_id $run_id was refused; rc=$rc stderr=$(tr '\n' '|' < "$errfile")"
+        return
+    fi
+    pass "$name" "trailing/embedded LF, NUL, CR, non-ASCII, . and .. run_ids refused; ledger unchanged; safe control accepted"
+}
+
+assert_record_run_workflow_checked_on_json_value() {
+    local name="NH:record-run-workflow-checked-on-json-value"
+    local gitroot run_id ledger inputs errfile before literal
+    gitroot="$(new_gitroot nh-git)"
+    run_id="engine-case-nh"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nh-inputs.json"
+    errfile="$gitroot/nh.err"
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test run.workflow json value" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+    while IFS='|' read -r literal _; do
+        jq --argjson wf "$literal" '.run.workflow = $wf' "$LEDGER_AT_PLAN" \
+            | jq --arg id "$run_id" '.run.id = $id' > "$ledger"
+        before="$(sha256sum "$ledger" | awk '{print $1}')"
+        check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker record-ledger "run.workflow: $NAME_PROBLEM")" engine-fixture \
+            "$ledger" "$before" || return 0
+    done < <(hostile_id_rows engine-fixture)
+    pass "$name" "hostile ledger run.workflow values refused by the record-ledger contract; ledger unchanged"
+}
+
+assert_record_coherence_checked_on_json_value() {
+    local name="NI:record-coherence-checked-on-json-value"
+    # The ledger sits at runs/<run_id>/ but its .run.id is "<run_id><LF>" (or NUL-split): a
+    # jq -r read made the two compare equal. The coherence check now compares inside jq, and its
+    # blocker prints only the caller's checked run_id.
+    local gitroot run_id ledger inputs errfile before forged
+    gitroot="$(new_gitroot ni-git)"
+    run_id="engine-case-ni"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/ni-inputs.json"
+    errfile="$gitroot/ni.err"
+    jq -n --arg run_id "$run_id" --arg state plan --arg result ready \
+        --arg summary "engine test coherence json value" \
+        '{run_id: $run_id, state: $state, result: $result, summary: $summary}' > "$inputs"
+    for forged in '"engine-case-ni\n"' '"engine-case-ni\n\n"' '"engine\u0000-case-ni"'; do
+        jq --argjson forged "$forged" '.run.id = $forged' "$LEDGER_AT_PLAN" > "$ledger"
+        before="$(sha256sum "$ledger" | awk '{print $1}')"
+        check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "ledger run.id does not match run_id '$run_id'; ledger unchanged" "" \
+            "$ledger" "$before" || return 0
+    done
+    pass "$name" "ledger run.id with a trailing LF or NUL refused by the coherence check; ledger unchanged"
+}
+
+assert_intent_fallback_run_id_checked_on_json_value() {
+    local name="NJ:intent-fallback-run-id-checked-on-json-value"
+    local gitroot run_id ledger inputs errfile before literal rc=0
+    gitroot="$(new_gitroot nj-git)"
+    run_id="engine-case-nj"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nj-inputs.json"
+    errfile="$gitroot/nj.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    while IFS='|' read -r literal _; do
+        jq -n --argjson run_id "$literal" --arg state plan \
+            --arg summary "engine test intent fallback run_id json value" \
+            '{run_id: $run_id, state: $state, summary: $summary}' > "$inputs"
+        check_refusal "$name" "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker intent-inputs "run_id: $NAME_PROBLEM")" "$run_id" \
+            "$ledger" "$before" || return 0
+    done < <(hostile_id_rows "$run_id")
+    jq -n --arg run_id "$run_id" --arg state plan \
+        --arg summary "engine test intent fallback run_id json value" \
+        '{run_id: $run_id, state: $state, summary: $summary}' > "$inputs"
+    run_engine_stderr "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" || rc=$?
+    if [[ "$rc" -ne 0 ]]; then
+        failed "$name" "control: the safe run_id $run_id was refused; rc=$rc stderr=$(tr '\n' '|' < "$errfile")"
+        return
+    fi
+    pass "$name" "trailing/embedded LF, NUL, CR, non-ASCII, . and .. run_ids refused; ledger unchanged; safe control accepted"
+}
+
+# init_ledger_count <gitroot> -> prints the number of state.json files under the runs dir (0
+# when the runs dir is absent).
+init_ledger_count() {
+    if [[ -d "$1/.hivemind/runs" ]]; then
+        find "$1/.hivemind/runs" -name state.json | wc -l | tr -d ' '
+    else
+        printf '0'
+    fi
+}
+
+assert_init_workflow_checked_on_json_value() {
+    local name="NK:init-workflow-checked-on-json-value"
+    # Every hostile workflow, "." and ".." included, is refused by the init-inputs contract
+    # before any run-id derivation. No run dir or ledger may be created.
+    local gitroot inputs errfile literal
+    gitroot="$(new_gitroot nk-git)"
+    inputs="$gitroot/nk-inputs.json"
+    errfile="$gitroot/nk.err"
+    while IFS='|' read -r literal _; do
+        jq -n --argjson workflow "$literal" --argjson workflow_version 1 --arg start_state plan \
+            --arg user_request "engine test init workflow json value" \
+            --arg normalized "engine test init workflow json value" \
+            '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized}' \
+            > "$inputs"
+        check_refusal "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker init-inputs "workflow: $NAME_PROBLEM")" engine-fixture \
+            "" "" || return 0
+    done < <(hostile_id_rows engine-fixture)
+    pass "$name" "hostile workflow values refused; no run dir or ledger created"
+}
+
+assert_init_suggested_run_id_checked_on_json_value() {
+    local name="NL:init-suggested-run-id-checked-on-json-value"
+    # An unsafe suggested_run_id ("", "." and ".." included) is a blocker: init derives no id of
+    # its own, so the collapsed "engine-case-nl" never names a run, and no run dir is created.
+    local gitroot inputs errfile literal
+    gitroot="$(new_gitroot nl-git)"
+    inputs="$gitroot/nl-inputs.json"
+    errfile="$gitroot/nl.err"
+    while IFS='|' read -r literal _; do
+        jq -n --arg workflow engine-fixture --argjson workflow_version 1 --arg start_state plan \
+            --arg user_request "engine test init suggested run id json value" \
+            --arg normalized "engine test init suggested run id json value" \
+            --argjson suggested_run_id "$literal" \
+            '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized, suggested_run_id: $suggested_run_id}' \
+            > "$inputs"
+        check_refusal "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker init-inputs "suggested_run_id: $NAME_PROBLEM")" engine-case-nl \
+            "" "" || return 0
+    done < <(hostile_id_rows engine-case-nl; printf '""|unsafe\n')
+    pass "$name" "hostile, empty, . and .. suggested_run_id values refused; no derived id, no run dir created"
+}
+
+assert_init_brood_ids_checked_on_json_value() {
+    local name="NM:init-brood-ids-checked-on-json-value"
+    # parent.brood_id and parent.strain_id build <brood-id>--<strain-id>. strain_id is a name, so
+    # "." and ".." are refused too; brood_id is a brood id, whose kind admits "." and ".." (the
+    # joined run_id is never a bare reserved component), so those two rows are skipped for it.
+    local gitroot inputs errfile literal id_class field brood_lit strain_lit problem
+    gitroot="$(new_gitroot nm-git)"
+    inputs="$gitroot/nm-inputs.json"
+    errfile="$gitroot/nm.err"
+    for field in brood_id strain_id; do
+        problem="$NAME_PROBLEM"
+        [[ "$field" == brood_id ]] && problem="$BROOD_ID_PROBLEM"
+        while IFS='|' read -r literal id_class; do
+            [[ "$field" == brood_id && "$id_class" == reserved ]] && continue
+            brood_lit='"brood-0f0e0d0c"'
+            strain_lit='"strain-nm"'
+            if [[ "$field" == brood_id ]]; then brood_lit="$literal"; else strain_lit="$literal"; fi
+            jq -n --arg workflow engine-fixture --argjson workflow_version 1 --arg start_state plan \
+                --arg user_request "engine test init brood id json value" \
+                --arg normalized "engine test init brood id json value" \
+                --argjson brood_id "$brood_lit" --argjson strain_id "$strain_lit" \
+                --arg manifest "$gitroot/.hivemind/brood/manifest.json" \
+                '{workflow: $workflow, workflow_version: $workflow_version, start_state: $start_state, user_request: $user_request, normalized: $normalized,
+                  parent: {kind: "brood", brood_id: $brood_id, strain_id: $strain_id, run_id: "brood-hatchery", manifest: $manifest}}' \
+                > "$inputs"
+            check_refusal "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+                "$(format_contract_blocker init-inputs "parent.$field: $problem")" "${field%_id}-0f0e0d0c" \
+                "" "" || return 0
+        done < <(hostile_id_rows "${field%_id}-0f0e0d0c")
+    done
+    pass "$name" "hostile parent.brood_id and parent.strain_id (incl. . and ..) values refused; no run dir or ledger created"
+}
+
+# ── OA-OK. every input checked whole against its contract (issue #424) ──────
+
+# hostile_token_rows <base> -> prints one JSON string literal per line: <base> with a trailing LF,
+# <base> with a NUL after its second byte, and a 5000-char value cut from "hostile-" repeated.
+# The first two collapse to <base> after a jq -r read.
+hostile_token_rows() {
+    jq -nr --arg base "$1" '[($base + "\n"), ($base[:2] + "\u0000" + $base[2:]), ("hostile-" * 625)][] | tojson'
+}
+
+# long_id_literal <length> -> prints a JSON string literal of <length> chars cut from "hostile-"
+# repeated (at most 5000).
+long_id_literal() {
+    jq -nr --argjson n "$1" '("hostile-" * 625)[:$n] | tojson'
+}
+
+assert_record_tokens_checked_whole() {
+    local name="OA:record-state-result-tokens-checked-whole"
+    # state and result with a trailing LF, an embedded NUL or 5000 chars are refused by the
+    # record-inputs contract; the ledger is byte-unchanged.
+    local gitroot run_id ledger inputs errfile before field base literal
+    gitroot="$(new_gitroot nn-git)"
+    run_id="engine-case-nn"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nn-inputs.json"
+    errfile="$gitroot/nn.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    for field in state result; do
+        base=plan
+        [[ "$field" == result ]] && base=ready
+        while IFS= read -r literal; do
+            jq -n --arg run_id "$run_id" --arg field "$field" --argjson hostile "$literal" \
+                '{run_id: $run_id, state: "plan", result: "ready", summary: "engine test record tokens"} | .[$field] = $hostile' \
+                > "$inputs"
+            check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+                "$(format_contract_blocker record-inputs "$field: $NAME_PROBLEM")" "$LONG_MARKER" \
+                "$ledger" "$before" || return 0
+        done < <(hostile_token_rows "$base")
+    done
+    pass "$name" "state and result with a trailing LF, a NUL or 5000 chars refused; ledger unchanged"
+}
+
+assert_init_tokens_checked_whole() {
+    local name="OB:init-tokens-checked-whole"
+    # parent.kind and start_state with a trailing LF, an embedded NUL or 5000 chars, and a
+    # string workflow_version, are refused by the init-inputs contract; no run dir is created.
+    local gitroot inputs errfile path_json base problem position literal
+    gitroot="$(new_gitroot no-git)"
+    inputs="$gitroot/no-inputs.json"
+    errfile="$gitroot/no.err"
+    while IFS='|' read -r path_json base problem; do
+        position="$(jq -nr --argjson p "$path_json" '$p | join(".")')"
+        while IFS= read -r literal; do
+            jq -n --argjson p "$path_json" --argjson hostile "$literal" \
+                '{workflow: "engine-fixture", workflow_version: 1, start_state: "plan",
+                  user_request: "engine test init tokens", normalized: "engine test init tokens"}
+                 | setpath($p; $hostile)' > "$inputs"
+            check_refusal "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+                "$(format_contract_blocker init-inputs "$position: $problem")" "$LONG_MARKER" \
+                "" "" || return 0
+        done < <(hostile_token_rows "$base")
+    done <<EOF
+["parent","kind"]|brood|not one of none, brood
+["start_state"]|plan|$NAME_PROBLEM
+EOF
+    jq -n '{workflow: "engine-fixture", workflow_version: "1", start_state: "plan",
+            user_request: "engine test init tokens", normalized: "engine test init tokens"}' > "$inputs"
+    check_refusal "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+        "$(format_contract_blocker init-inputs "workflow_version: $COUNT_PROBLEM")" "" \
+        "" "" || return 0
+    pass "$name" "parent.kind and start_state with a trailing LF, a NUL or 5000 chars, and a string workflow_version, refused; no run dir created"
+}
+
+assert_intent_fallback_close_status_checked_whole() {
+    local name="OC:intent-fallback-close-status-checked-whole"
+    # close_status with a trailing LF, an embedded NUL or 5000 chars is refused by the
+    # intent-inputs contract; the ledger is byte-unchanged.
+    local gitroot run_id ledger inputs errfile before literal
+    gitroot="$(new_gitroot np-git)"
+    run_id="engine-case-np"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/np-inputs.json"
+    errfile="$gitroot/np.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    while IFS= read -r literal; do
+        jq -n --arg run_id "$run_id" --argjson close_status "$literal" \
+            '{run_id: $run_id, state: "plan", summary: "engine test close_status", close_status: $close_status}' \
+            > "$inputs"
+        check_refusal "$name" "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker intent-inputs "close_status: not one of cancelled, complete")" \
+            "$LONG_MARKER" "$ledger" "$before" || return 0
+    done < <(hostile_token_rows cancelled)
+    pass "$name" "close_status with a trailing LF, a NUL or 5000 chars refused; ledger unchanged"
+}
+
+assert_record_ledger_tokens_checked_whole() {
+    local name="OD:record-ledger-tokens-checked-whole"
+    # A ledger state.current with a trailing LF, an embedded NUL or 5000 chars, and a string
+    # run.workflow_version, are refused by the record-ledger contract; the ledger is unchanged.
+    local gitroot run_id ledger base_ledger inputs errfile before literal
+    gitroot="$(new_gitroot nq-git)"
+    run_id="engine-case-nq"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    base_ledger="$gitroot/nq-base-ledger.json"
+    cp "$ledger" "$base_ledger"
+    inputs="$gitroot/nq-inputs.json"
+    errfile="$gitroot/nq.err"
+    jq -n --arg run_id "$run_id" \
+        '{run_id: $run_id, state: "plan", result: "ready", summary: "engine test ledger tokens"}' > "$inputs"
+    while IFS= read -r literal; do
+        jq --argjson current "$literal" '.state.current = $current' "$base_ledger" > "$ledger"
+        before="$(sha256sum "$ledger" | awk '{print $1}')"
+        check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker record-ledger "state.current: $NAME_PROBLEM")" "$LONG_MARKER" \
+            "$ledger" "$before" || return 0
+    done < <(hostile_token_rows plan)
+    jq '.run.workflow_version = "1"' "$base_ledger" > "$ledger"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+        "$(format_contract_blocker record-ledger "run.workflow_version: $COUNT_PROBLEM")" "" \
+        "$ledger" "$before" || return 0
+    pass "$name" "ledger state.current with a trailing LF, a NUL or 5000 chars, and a string run.workflow_version, refused; ledger unchanged"
+}
+
+# long_plan_steps_rows -> prints one "<plan_steps JSON>|<position>" row per over-long step id: a
+# 65- and a 5000-char .id, then the same two lengths as a depends_on entry.
+long_plan_steps_rows() {
+    local length literal
+    for length in 65 5000; do
+        literal="$(long_id_literal "$length")"
+        printf '[{"id":%s,"status":"pending"}]|plan_steps[0].id\n' "$literal"
+        printf '[{"id":"STEP-001","status":"pending"},{"id":"STEP-002","depends_on":[%s],"status":"pending"}]|plan_steps[1].depends_on[0]\n' "$literal"
+    done
+}
+
+assert_record_plan_steps_long_ids_rejected() {
+    local name="OE:record-plan-steps-long-ids-rejected"
+    # Step ids are 1 to 64 chars: a 65- or 5000-char .id or depends_on entry is refused by the
+    # record-inputs contract, ledger byte-unchanged. A 64-char id still passes (control).
+    local gitroot run_id ledger inputs errfile before plan_steps position rc=0 control_id
+    gitroot="$(new_gitroot nr-git)"
+    run_id="engine-case-nr"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nr-inputs.json"
+    errfile="$gitroot/nr.err"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    while IFS='|' read -r plan_steps position; do
+        jq -n --arg run_id "$run_id" --argjson plan_steps "$plan_steps" \
+            '{run_id: $run_id, state: "plan", result: "ready", summary: "engine test long step ids", plan_steps: $plan_steps}' \
+            > "$inputs"
+        check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker record-inputs "$position: $STEP_ID_PROBLEM")" "$LONG_MARKER" \
+            "$ledger" "$before" || return 0
+    done < <(long_plan_steps_rows)
+    control_id="$(long_id_literal 64)"
+    jq -n --arg run_id "$run_id" --argjson id "$control_id" \
+        '{run_id: $run_id, state: "plan", result: "ready", summary: "engine test long step ids", plan_steps: [{id: $id, status: "pending"}]}' \
+        > "$inputs"
+    run_engine_stderr "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" || rc=$?
+    if [[ "$rc" -ne 0 ]] || ! jq -e --argjson id "$control_id" '.plan.steps[0].id == $id' "$ledger" >/dev/null 2>&1; then
+        failed "$name" "control: a 64-char step id was not accepted; rc=$rc stderr=$(tr '\n' '|' < "$errfile")"
+        return
+    fi
+    pass "$name" "65- and 5000-char step ids and depends_on entries refused; ledger unchanged; 64-char control accepted"
+}
+
+assert_init_plan_steps_long_ids_rejected() {
+    local name="OF:init-plan-steps-long-ids-rejected"
+    # Mirrors OE at the init seed path: no run dir or ledger may be created.
+    local gitroot inputs errfile plan_steps position
+    gitroot="$(new_gitroot ns-git)"
+    inputs="$gitroot/ns-inputs.json"
+    errfile="$gitroot/ns.err"
+    while IFS='|' read -r plan_steps position; do
+        jq -n --argjson plan_steps "$plan_steps" \
+            '{workflow: "engine-fixture", workflow_version: 1, start_state: "plan",
+              user_request: "engine test init long step ids", normalized: "engine test init long step ids",
+              plan_steps: $plan_steps}' > "$inputs"
+        check_refusal "$name" "$FAKE_INIT_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "$(format_contract_blocker init-inputs "$position: $STEP_ID_PROBLEM")" "$LONG_MARKER" \
+            "" "" || return 0
+    done < <(long_plan_steps_rows)
+    pass "$name" "65- and 5000-char step ids and depends_on entries refused; no run dir created"
+}
+
+assert_multi_document_inputs_rejected() {
+    local name="OG:multi-document-inputs-rejected"
+    # An inputs file holding a valid object followed by a second JSON document is refused by
+    # each engine's inputs reader (not a single JSON object): init creates no run dir and the
+    # ledger staged for record and mark-intent-fallback is byte-unchanged.
+    local init_gitroot gitroot ledger before inputs errfile second
+    init_gitroot="$(new_gitroot nt-init-git)"
+    gitroot="$(new_gitroot nt-git)"
+    ledger="$(stage_record_ledger "$gitroot" engine-case-nt "$LEDGER_AT_PLAN")"
+    before="$(sha256sum "$ledger" | awk '{print $1}')"
+    errfile="$gitroot/nt.err"
+    for second in '{}' '1'; do
+        inputs="$init_gitroot/nt-inputs.json"
+        { jq -n '{workflow: "engine-fixture", workflow_version: 1, start_state: "plan",
+                  user_request: "engine test multi document", normalized: "engine test multi document"}'
+          printf '%s\n' "$second"; } > "$inputs"
+        check_refusal "$name" "$FAKE_INIT_ENGINE" "$init_gitroot" "$inputs" "$errfile" \
+            "run-ledger inputs file $inputs is not a single JSON object" "" "" "" || return 0
+        inputs="$gitroot/nt-inputs.json"
+        { jq -n '{run_id: "engine-case-nt", state: "plan", result: "ready", summary: "engine test multi document"}'
+          printf '%s\n' "$second"; } > "$inputs"
+        check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "record-state-result inputs file $inputs is not a single JSON object" "" \
+            "$ledger" "$before" || return 0
+        { jq -n '{run_id: "engine-case-nt", state: "plan", summary: "engine test multi document"}'
+          printf '%s\n' "$second"; } > "$inputs"
+        check_refusal "$name" "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "mark-intent-fallback inputs file $inputs is not a single JSON object" "" \
+            "$ledger" "$before" || return 0
+    done
+    pass "$name" "multi-document inputs files refused by init, record and mark-intent-fallback; nothing written"
+}
+
+assert_multi_document_ledger_rejected() {
+    local name="OH:multi-document-ledger-rejected"
+    # A ledger holding a valid object followed by a second JSON document is refused by record and
+    # mark-intent-fallback when they open it; the ledger is byte-unchanged.
+    local gitroot run_id ledger before inputs errfile toplevel second
+    gitroot="$(new_gitroot nu-git)"
+    run_id="engine-case-nu"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    toplevel="$(git -C "$gitroot" rev-parse --show-toplevel)"
+    inputs="$gitroot/nu-inputs.json"
+    errfile="$gitroot/nu.err"
+    for second in '{}' '1'; do
+        stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN" >/dev/null
+        printf '%s\n' "$second" >> "$ledger"
+        before="$(sha256sum "$ledger" | awk '{print $1}')"
+        jq -n --arg run_id "$run_id" \
+            '{run_id: $run_id, state: "plan", result: "ready", summary: "engine test multi document ledger"}' > "$inputs"
+        check_refusal "$name" "$FAKE_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "ledger file is not exactly one JSON object: $toplevel/.hivemind/runs/$run_id/state.json" "" \
+            "$ledger" "$before" || return 0
+        jq -n --arg run_id "$run_id" \
+            '{run_id: $run_id, state: "plan", summary: "engine test multi document ledger"}' > "$inputs"
+        check_refusal "$name" "$FAKE_INTENT_FALLBACK_ENGINE" "$gitroot" "$inputs" "$errfile" \
+            "ledger file is not exactly one JSON object: $toplevel/.hivemind/runs/$run_id/state.json" "" \
+            "$ledger" "$before" || return 0
+    done
+    pass "$name" "multi-document ledgers refused by record and mark-intent-fallback; ledger unchanged"
+}
+
+assert_depends_on_null_accepted() {
+    local name="OI:depends-on-null-accepted"
+    # depends_on is optional, and null means absent: init and record both accept a step whose
+    # depends_on is null and write plan.steps exactly as given.
+    local steps='[{"id":"STEP-001","status":"pending"},{"id":"STEP-002","depends_on":null,"status":"pending"}]'
+    local gitroot inputs out rc=0 ledger run_id
+    gitroot="$(new_gitroot nv-init-git)"
+    inputs="$gitroot/nv-inputs.json"
+    jq -n --argjson plan_steps "$steps" \
+        '{workflow: "engine-fixture", workflow_version: 1, start_state: "plan",
+          user_request: "engine test depends_on null", normalized: "engine test depends_on null",
+          plan_steps: $plan_steps}' > "$inputs"
+    out="$(cd "$gitroot" && bash "$FAKE_INIT_ENGINE" "$inputs" 2>&1)" || rc=$?
+    ledger="$(printf '%s\n' "$out" | sed -n 's/^ledger: //p')"
+    if [[ "$rc" -ne 0 || ! -f "$ledger" ]] || ! jq -e --argjson want "$steps" '.plan.steps == $want' "$ledger" >/dev/null 2>&1; then
+        failed "$name" "init: expected exit 0 and plan.steps as given; rc=$rc out=$(printf '%s' "$out" | tr '\n' '|')"
+        return
+    fi
+    gitroot="$(new_gitroot nv-record-git)"
+    run_id="engine-case-nv"
+    ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+    inputs="$gitroot/nv-inputs.json"
+    jq -n --arg run_id "$run_id" --argjson plan_steps "$steps" \
+        '{run_id: $run_id, state: "plan", result: "ready", summary: "engine test depends_on null", plan_steps: $plan_steps}' \
+        > "$inputs"
+    rc=0
+    out="$(cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" 2>&1)" || rc=$?
+    if [[ "$rc" -ne 0 ]] || ! jq -e --argjson want "$steps" '.plan.steps == $want' "$ledger" >/dev/null 2>&1; then
+        failed "$name" "record: expected exit 0 and plan.steps as given; rc=$rc out=$(printf '%s' "$out" | tr '\n' '|')"
+        return
+    fi
+    pass "$name" "a null depends_on accepted by init and record; plan.steps written as given"
+}
+
+assert_text_fields_round_trip_exactly() {
+    local name="OJ:text-fields-round-trip-exactly"
+    # Free text never passes through a shell variable: init user_request and normalized, the
+    # record summary and the mark-intent-fallback state, each with a trailing LF or a NUL, land in
+    # the ledger as the exact JSON value given.
+    local literal gitroot inputs out rc ledger run_id label=0
+    for literal in '"engine test text\n"' '"engine test\u0000text"'; do
+        label=$((label + 1))
+        gitroot="$(new_gitroot "nw-init-git-$label")"
+        inputs="$gitroot/nw-inputs.json"
+        jq -n --argjson text "$literal" \
+            '{workflow: "engine-fixture", workflow_version: 1, start_state: "plan", user_request: $text, normalized: $text}' \
+            > "$inputs"
+        rc=0
+        out="$(cd "$gitroot" && bash "$FAKE_INIT_ENGINE" "$inputs" 2>&1)" || rc=$?
+        ledger="$(printf '%s\n' "$out" | sed -n 's/^ledger: //p')"
+        if [[ "$rc" -ne 0 || ! -f "$ledger" ]] \
+            || ! jq -e --argjson want "$literal" '.request.raw == $want and .request.normalized == $want' "$ledger" >/dev/null 2>&1; then
+            failed "$name" "init: user_request/normalized $literal did not round-trip; rc=$rc out=$(printf '%s' "$out" | tr '\n' '|')"
+            return
+        fi
+        gitroot="$(new_gitroot "nw-record-git-$label")"
+        run_id="engine-case-nw-$label"
+        ledger="$(stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN")"
+        inputs="$gitroot/nw-inputs.json"
+        jq -n --arg run_id "$run_id" --argjson text "$literal" \
+            '{run_id: $run_id, state: "plan", result: "ready", summary: $text}' > "$inputs"
+        rc=0
+        out="$(cd "$gitroot" && bash "$FAKE_ENGINE" "$inputs" 2>&1)" || rc=$?
+        if [[ "$rc" -ne 0 ]] || ! jq -e --argjson want "$literal" '.events[-1].summary == $want' "$ledger" >/dev/null 2>&1; then
+            failed "$name" "record: summary $literal did not round-trip; rc=$rc out=$(printf '%s' "$out" | tr '\n' '|')"
+            return
+        fi
+        stage_record_ledger "$gitroot" "$run_id" "$LEDGER_AT_PLAN" >/dev/null
+        jq -n --arg run_id "$run_id" --argjson text "$literal" \
+            '{run_id: $run_id, state: $text, summary: "engine test intent fallback text"}' > "$inputs"
+        rc=0
+        out="$(cd "$gitroot" && bash "$FAKE_INTENT_FALLBACK_ENGINE" "$inputs" 2>&1)" || rc=$?
+        if [[ "$rc" -ne 0 ]] || ! jq -e --argjson want "$literal" '.events[-1].state == $want' "$ledger" >/dev/null 2>&1; then
+            failed "$name" "mark-intent-fallback: state $literal did not round-trip; rc=$rc out=$(printf '%s' "$out" | tr '\n' '|')"
+            return
+        fi
+    done
+    pass "$name" "user_request, normalized, summary and the intent-fallback state with a trailing LF or NUL round-trip exactly"
+}
+
+# JQ_RAW_READ_DETECTOR — a perl program run over an engine's source on stdin. It drops
+# full-line comments, then walks every jq command that sits in command position (line start,
+# after `$(`, `|`, `;`, `&`, `!`, `if`, `then`, `do`), taking its arguments up to an unquoted
+# newline, `)`, `|`, `;` or `&`, with quoted spans and backslash continuations kept whole. For
+# each command that passes a raw-output flag (-r, -j or a bundle holding one, --raw-output,
+# --join-output) and names one of the double-quoted "$<var>" arguments listed in $GUARD_VARS,
+# it prints the command on one line. Its last line is always `jq_commands=<n>`.
+JQ_RAW_READ_DETECTOR='
+my $src = do { local $/; <STDIN> };
+$src =~ s/^[ \t]*#[^\n]*//mg;
+my @vars = split / /, $ENV{GUARD_VARS};
+my $seen = 0;
+while ($src =~ /(?:^|\$\(|[|;&!]|\bif|\bthen|\bdo)[ \t]*jq(?![\w-])((?:[^\x27"\n)|;&\\]|\\.|\x27[^\x27]*\x27|"(?:[^"\\]|\\.)*")*)/msg) {
+    my $args = $1;
+    $seen++;
+    (my $flags = $args) =~ s/\x27[^\x27]*\x27//g;
+    next unless $flags =~ /(?:^|\s)(?:-[a-zA-Z]*[rj][a-zA-Z]*|--raw-output|--join-output)(?=\s|$)/;
+    for my $var (@vars) {
+        if (index($args, "\"\$$var\"") >= 0) {
+            (my $one = "jq$args") =~ s/\s+/ /g;
+            print "$one\n";
+            last;
+        }
+    }
+}
+print "jq_commands=$seen\n";
+'
+
+assert_engines_never_raw_read_inputs_or_ledger() {
+    local name="OK:engines-never-raw-read-inputs-or-ledger"
+    # Static guard: no `jq -r` reads "$INPUTS_FILE" in the three inputs engines, and none reads
+    # "$ledger" (or "$canon_ledger") in record and mark-intent-fallback. A canary proves the
+    # detector flags a one-line, a continued and a multi-line raw read and skips a -c read.
+    local canary found row engine guard_vars
+    if ! command -v perl >/dev/null 2>&1; then
+        failed "$name" "perl is required for the static raw-read guard and was not found on PATH"
+        return
+    fi
+    read -r -d '' canary <<'CANARY' || true
+token="$(jq -r '.run_id' "$INPUTS_FILE")"
+other="$(jq -er --arg a b \
+  '.x' "$ledger")"
+multi="$(jq -r --arg s "$s" '
+  .a
+  ' "$canon_ledger")"
+kept="$(jq -c '.outputs' "$INPUTS_FILE")"
+CANARY
+    found="$(printf '%s\n' "$canary" | GUARD_VARS='INPUTS_FILE ledger canon_ledger' perl -e "$JQ_RAW_READ_DETECTOR")"
+    if [[ "$(printf '%s\n' "$found" | grep -c '^jq ')" != "3" || "$(printf '%s\n' "$found" | tail -1)" != "jq_commands=4" ]]; then
+        failed "$name" "canary: expected 3 flagged raw reads of 4 jq commands; got $(printf '%s' "$found" | tr '\n' '|')"
+        return
+    fi
+    for row in "$INIT_ENGINE|INPUTS_FILE" \
+               "$ENGINE|INPUTS_FILE ledger canon_ledger" \
+               "$INTENT_FALLBACK_ENGINE|INPUTS_FILE ledger canon_ledger"; do
+        engine="${row%%|*}"
+        guard_vars="${row#*|}"
+        found="$(GUARD_VARS="$guard_vars" perl -e "$JQ_RAW_READ_DETECTOR" < "$engine")"
+        if [[ ! "$found" =~ ^jq_commands=[1-9][0-9]*$ ]]; then
+            failed "$name" "$(basename "$engine"): raw read of ${guard_vars// /, } found or no jq command seen: $(printf '%s' "$found" | tr '\n' '|')"
+            return
+        fi
+    done
+    pass "$name" "no jq -r reads the inputs file in init, record or mark-intent-fallback, nor the ledger in record or mark-intent-fallback"
+}
+
 # ── Drive all assertions ────────────────────────────────────────────────────
 
 echo '=== Engine behavior tests: derive-only engines against tests/engine/ fixtures (dual-root) ==='
@@ -3379,6 +4211,30 @@ assert_init_start_mismatch_blocks_with_derived_version
 assert_init_undeclared_start_state_blocks
 assert_record_prints_state_definition
 assert_record_undeclared_target_unchanged
+assert_record_run_id_line_feed_rejected
+assert_record_plan_steps_line_feed_rejected
+assert_record_safe_plan_steps_accepted
+assert_init_plan_steps_line_feed_rejected
+assert_init_suggested_run_id_line_feed_refused
+assert_intent_fallback_run_id_line_feed_rejected
+assert_record_run_id_checked_on_json_value
+assert_record_run_workflow_checked_on_json_value
+assert_record_coherence_checked_on_json_value
+assert_intent_fallback_run_id_checked_on_json_value
+assert_init_workflow_checked_on_json_value
+assert_init_suggested_run_id_checked_on_json_value
+assert_init_brood_ids_checked_on_json_value
+assert_record_tokens_checked_whole
+assert_init_tokens_checked_whole
+assert_intent_fallback_close_status_checked_whole
+assert_record_ledger_tokens_checked_whole
+assert_record_plan_steps_long_ids_rejected
+assert_init_plan_steps_long_ids_rejected
+assert_multi_document_inputs_rejected
+assert_multi_document_ledger_rejected
+assert_depends_on_null_accepted
+assert_text_fields_round_trip_exactly
+assert_engines_never_raw_read_inputs_or_ledger
 
 echo ''
 echo '=== Summary ==='

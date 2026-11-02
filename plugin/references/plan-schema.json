@@ -244,6 +244,7 @@
             "description": "The steps that must finish before this one starts. Empty means none.",
             "items": {
               "type": "string",
+              "maxLength": 64,
               "description": "Can carry external content. The id of a step in this plan."
             }
           },

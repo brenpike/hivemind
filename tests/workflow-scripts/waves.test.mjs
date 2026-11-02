@@ -21,20 +21,7 @@ const DEFAULT_SEED = 20261021;
 const seedText = process.env.WAVES_PARITY_SEED;
 const SEED = seedText === undefined || seedText === '' ? DEFAULT_SEED : Number(seedText);
 
-const BLOCKER_CLASSES = [
-  'plan.steps is not an array',
-  'a plan step is not an object',
-  'a plan step is missing an id',
-  'a plan step id is not a string',
-  'a plan step depends_on is not an array',
-  'a plan step depends_on entry is not a string',
-  'plan.steps is empty or absent',
-  'duplicate plan step id',
-  'depends_on references unknown step id',
-  'dependency cycle detected among plan steps',
-  'plan step id or depends_on entry fails the safe-id charset',
-  'remaining steps exist but no step is ready'
-];
+const STEP_ID_PROBLEM = 'not a step id (1 to 64 of A-Z a-z 0-9 . _ -)';
 
 const workRoot = realpathSync(mkdtempSync(join(tmpdir(), 'hivemind-waves-parity-')));
 const gitRoot = join(workRoot, 'checkout');
@@ -46,11 +33,6 @@ after(() => {
   rmSync(workRoot, { recursive: true, force: true });
   assert.equal(existsSync(workRoot), false, `temp folder ${workRoot} was not removed`);
 });
-
-function classifyBlocker(message) {
-  const match = BLOCKER_CLASSES.find((prefix) => message.startsWith(prefix));
-  return match === undefined ? 'unrecognized: ' + message : match;
-}
 
 function runOracleRaw(ledger) {
   oracleRunCount += 1;
@@ -77,7 +59,7 @@ async function runOracle(ledger) {
   }
   const blocker = /^blocker: (.*)\n$/.exec(result.stderr);
   if (result.status === 1 && result.stdout === '' && blocker !== null) {
-    return { ok: false, blocker_class: classifyBlocker(blocker[1]) };
+    return { ok: false, problem: blocker[1] };
   }
   return { ok: 'crash', status: result.status, stdout: result.stdout, stderr: result.stderr };
 }
@@ -121,11 +103,7 @@ function deriveDoneIds(ledger) {
 
 function runSubject(ledger) {
   const steps = isJqObject(ledger.plan) ? ledger.plan.steps : undefined;
-  const outcome = structuredClone(lib.computeWave(steps, deriveDoneIds(ledger)));
-  if (outcome.ok) {
-    return outcome;
-  }
-  return { ok: false, blocker_class: classifyBlocker(outcome.problem) };
+  return structuredClone(lib.computeWave(steps, deriveDoneIds(ledger)));
 }
 
 function stageLedger(ledger) {
@@ -386,43 +364,56 @@ describe('computeWave rules', () => {
     assert.equal(outcome.ok, false);
     assert.match(outcome.problem, /done ids is not an array/);
   });
-  test('validation runs in next-wave order', async () => {
+  test('validation runs in next-wave order, with the same text in both', async () => {
     const cases = [
-      ['not an array', 'BAD', 'plan.steps is not an array'],
-      ['shape before empty check', [7], 'a plan step is not an object'],
-      ['empty', [], 'plan.steps is empty or absent'],
-      ['empty id', [{ id: '', files: ['a'] }], 'a plan step is missing an id'],
-      ['duplicate before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'A' }], 'duplicate plan step id'],
-      ['unknown before cycle', [{ id: 'A', depends_on: ['A', 'Z'] }], 'depends_on references unknown step id'],
-      ['cycle before charset', [{ id: 'A]', depends_on: ['A]'] }], 'dependency cycle detected among plan steps'],
-      ['charset', [{ id: 'A]' }], 'plan step id or depends_on entry fails the safe-id charset']
+      ['missing', undefined, 'plan.steps: missing'],
+      ['null', null, 'plan.steps: missing'],
+      ['not an array', 'BAD', 'plan.steps: not an array'],
+      ['shape before empty check', [7], 'plan.steps[0]: not an object'],
+      ['null step', [null], 'plan.steps[0]: not an object'],
+      ['every step an object before any id', [{ id: 'A]' }, 7], 'plan.steps[1]: not an object'],
+      ['empty', [], 'plan.steps: empty, nothing to schedule'],
+      ['empty id', [{ id: '', files: ['a'] }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['missing id', [{ id: 'A' }, { files: ['a'] }], 'plan.steps[1].id: missing'],
+      ['null id', [{ id: null }], 'plan.steps[0].id: missing'],
+      ['non-string id', [{ id: 123 }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['ids in ascending index', [{ id: 'A]' }, { id: '' }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['every id before any depends_on', [{ id: 'A', depends_on: 'x' }, { id: 'B]' }], 'plan.steps[1].id: ' + STEP_ID_PROBLEM],
+      ['every depends_on an array before any entry', [{ id: 'A', depends_on: ['B]'] }, { id: 'B', depends_on: 'x' }], 'plan.steps[1].depends_on: not an array'],
+      ['depends_on false is present', [{ id: 'A', depends_on: false }], 'plan.steps[0].depends_on: not an array'],
+      ['null depends_on entry', [{ id: 'A', depends_on: [null] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM],
+      ['entries in row-major order', [{ id: 'A', depends_on: ['B', 'C]'] }, { id: 'B', depends_on: ['D]'] }], 'plan.steps[0].depends_on[1]: ' + STEP_ID_PROBLEM],
+      ['step id before duplicate', [{ id: 'A' }, { id: 'A' }, { id: 'B]' }], 'plan.steps[2].id: ' + STEP_ID_PROBLEM],
+      ['step id before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'B', depends_on: ['Y]'] }], 'plan.steps[1].depends_on[0]: ' + STEP_ID_PROBLEM],
+      ['step id before cycle', [{ id: 'A]', depends_on: ['A]'] }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['first repeat of an earlier id', [{ id: 'A' }, { id: 'B' }, { id: 'B' }, { id: 'A' }], 'plan.steps[2].id: duplicate step id'],
+      ['duplicate before unknown', [{ id: 'A', depends_on: ['Z'] }, { id: 'A' }], 'plan.steps[1].id: duplicate step id'],
+      ['first unknown in plan order', [{ id: 'A', depends_on: ['A', 'Z'] }, { id: 'B', depends_on: ['Y'] }], 'plan.steps[0].depends_on[1]: unknown step id'],
+      ['cycle', [{ id: 'A', depends_on: ['B'] }, { id: 'B', depends_on: ['A'] }], 'dependency cycle detected among plan steps']
     ];
-    for (const [label, steps, expectedClass] of cases) {
-      const outcome = structuredClone(lib.computeWave(steps, []));
-      assert.equal(outcome.ok, false, label);
-      assert.equal(classifyBlocker(outcome.problem), expectedClass, label);
-      await assertParity(label, { plan: { steps: steps }, events: [] });
+    for (const [label, steps, expectedProblem] of cases) {
+      assert.deepEqual(structuredClone(lib.computeWave(steps, [])), { ok: false, problem: expectedProblem }, label);
+      const plan = steps === undefined ? {} : { steps: steps };
+      await assertParity(label, { plan: plan, events: [] });
     }
   });
-  test('a problem stays one line whatever a model-written value holds', () => {
+  test('a problem names positions only, never a model-written value', () => {
     const hostile = 'A\nforged: x\r\u001b[2J';
     const cases = [
-      ['not an object', [[hostile]], 'a plan step is not an object', null],
-      ['id not a string', [{ id: { text: hostile } }], 'a plan step id is not a string', null],
-      ['depends_on not an array', [{ id: 'A', depends_on: { text: hostile } }], 'a plan step depends_on is not an array', null],
-      ['depends_on entry not a string', [{ id: 'A', depends_on: [[hostile]] }], 'a plan step depends_on entry is not a string', null],
-      ['duplicate', [{ id: hostile }, { id: hostile }], 'duplicate plan step id', hostile],
-      ['unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'depends_on references unknown step id', hostile],
-      ['charset', [{ id: hostile }], 'plan step id or depends_on entry fails the safe-id charset', hostile]
+      ['not an object', [[hostile]], 'plan.steps[0]: not an object'],
+      ['id not a string', [{ id: { text: hostile } }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['depends_on not an array', [{ id: 'A', depends_on: { text: hostile } }], 'plan.steps[0].depends_on: not an array'],
+      ['depends_on entry not a string', [{ id: 'A', depends_on: [[hostile]] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM],
+      ['duplicate', [{ id: 'A' }, { id: 'A' }], 'plan.steps[1].id: duplicate step id'],
+      ['unknown dependency', [{ id: 'A', depends_on: ['Z'] }], 'plan.steps[0].depends_on[0]: unknown step id'],
+      ['unsafe duplicate', [{ id: hostile }, { id: hostile }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['unsafe unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM]
     ];
-    for (const [label, steps, expectedClass, named] of cases) {
+    for (const [label, steps, expectedProblem] of cases) {
       const outcome = structuredClone(lib.computeWave(steps, []));
-      assert.equal(outcome.ok, false, label);
-      assert.equal(classifyBlocker(outcome.problem), expectedClass, label);
+      assert.deepEqual(outcome, { ok: false, problem: expectedProblem }, label);
       assert.doesNotMatch(outcome.problem, /[\u0000-\u001f]/, label);
-      if (named !== null) {
-        assert.ok(outcome.problem.endsWith(': ' + JSON.stringify(named)), label);
-      }
+      assert.ok(!outcome.problem.includes('forged'), label);
     }
   });
   test('inputs are not changed', () => {
@@ -484,18 +475,48 @@ describe(`parity with next-wave.sh on a seeded corpus (seed ${SEED})`, { concurr
   });
 });
 
-describe('deliberate difference from next-wave.sh', () => {
-  test('jq accepts an id ending in a line feed; waves.js rejects it', async () => {
-    for (const steps of [
-      [{ id: 'STEP-001\n', files: ['src/a.ts'] }],
-      [{ id: 'STEP-001\n', files: ['src/a.ts'] }, { id: 'STEP-002', files: ['src/b.ts'], depends_on: ['STEP-001\n'] }]
-    ]) {
-      const ledger = { plan: { steps: steps }, events: [] };
-      const oracle = await runOracleRaw(ledger);
-      assert.equal(oracle.status, 0, `next-wave.sh now blocks an id ending in a line feed; drop this difference from the waves.js header\n${oracle.stderr}`);
-      const subject = runSubject(stageLedger(ledger));
-      assert.deepEqual(subject, { ok: false, blocker_class: 'plan step id or depends_on entry fails the safe-id charset' });
+describe('parity with next-wave.sh on ids that carry a line feed, are unsafe or are oversized', () => {
+  test('an id ending in a line feed is not a step id in both', async () => {
+    const cases = [
+      ['trailing line feed id', [{ id: 'STEP-001\n', files: ['src/a.ts'] }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['trailing line feed dependency', [{ id: 'STEP-001', files: ['src/a.ts'] }, { id: 'STEP-002', files: ['src/b.ts'], depends_on: ['STEP-001\n'] }], 'plan.steps[1].depends_on[0]: ' + STEP_ID_PROBLEM]
+    ];
+    for (const [label, steps, expectedProblem] of cases) {
+      const oracle = await assertParity(label, { plan: { steps: steps }, events: [] });
+      assert.deepEqual(oracle, { ok: false, problem: expectedProblem }, label);
     }
+  });
+  test('an unsafe duplicate or unknown id is not a step id in both, on one line', async () => {
+    const hostile = 'A\nforged: x\r\u001b[2J';
+    const cases = [
+      ['unsafe duplicate', [{ id: hostile }, { id: hostile }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['unsafe unknown dependency', [{ id: 'A', depends_on: [hostile] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM]
+    ];
+    for (const [label, steps, expectedProblem] of cases) {
+      const oracle = await assertParity(label, { plan: { steps: steps }, events: [] });
+      assert.deepEqual(oracle, { ok: false, problem: expectedProblem }, label);
+    }
+  });
+  test('a 65-char and a 5000-char id give the same bounded problem in both', async () => {
+    for (const [where, buildSteps, expectedProblem] of [
+      ['id', (longId) => [{ id: longId }, { id: longId }], 'plan.steps[0].id: ' + STEP_ID_PROBLEM],
+      ['dependency', (longId) => [{ id: 'A', depends_on: [longId] }], 'plan.steps[0].depends_on[0]: ' + STEP_ID_PROBLEM]
+    ]) {
+      for (const longId of ['Z'.repeat(65), 'S'.repeat(5000)]) {
+        const label = `${longId.length}-char ${where}`;
+        const ledger = { plan: { steps: buildSteps(longId) }, events: [] };
+        const oracle = await assertParity(label, ledger);
+        assert.deepEqual(oracle, { ok: false, problem: expectedProblem }, label);
+        const raw = await runOracleRaw(ledger);
+        assert.equal(raw.stderr, 'blocker: ' + expectedProblem + '\n', label);
+        assert.ok(Buffer.byteLength(raw.stderr) <= 200, `${label}: ${Buffer.byteLength(raw.stderr)} bytes`);
+      }
+    }
+  });
+  test('a 64-char id is a step id in both', async () => {
+    const steps = [{ id: 'Z'.repeat(64), files: ['src/a.ts'] }];
+    const oracle = await assertParity('64-char id', { plan: { steps: steps }, events: [] });
+    assert.deepEqual(oracle, { ok: true, all_done: false, wave: ['Z'.repeat(64)], remaining: 1 });
   });
 });
 
