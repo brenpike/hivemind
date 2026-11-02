@@ -365,7 +365,7 @@ run_suites() {
 #                                      -> test_synapse_gate (hooks.json ALSO -> json-manifests;
 #                                         synapse-gate.sh ALSO -> test_workflow_scripts)
 #   plugin/**/*.sh                     -> test_script_bootstrap (engine bootstrap/self-location contract)
-#   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json, plugin/agents/overlord.md,
+#   plugin/workflow-src/**, plugin/workflows/*.js, plugin/workflows/*.json,
 #     plugin/skills/route-workflow/SKILL.md,
 #     plugin/references/decision-autonomy-table.json, plugin/references/decision-brief-schema.json,
 #     plugin/references/facts-schema.json, plugin/references/plan-schema.json,
@@ -374,11 +374,14 @@ run_suites() {
 #     plugin/skills/_shared/{containment,ledger-engine-io}.sh,
 #     plugin/skills/create-working-branch/scripts/create-working-branch.sh,
 #     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**,
-#     plugin/agents/drone.md (standard-delivery.test.mjs reads its read-only and validation fix
-#       task clauses),
-#     plugin/agents/synapse.md (standard-delivery.test.mjs pins the runner prompt words to it),
+#     plugin/agents/*.md (the load-line test reads every agent's Load lines; the node tests also pin
+#       the overlord launch contract, the drone read-only and validation fix task clauses, the
+#       synapse runner prompt words, the cerebrate plan block and the local-reviewer exit_reason
+#       enum, and agent-loads.test.mjs reads changeling.md),
+#     plugin/governance/*.md (the load-line test checks every section a Load line names; the
+#       runner sentences are pinned against the safety-rails grant and the definitions Validation
+#       Procedure clauses),
 #     plugin/hooks/synapse-gate.sh (standard-delivery.test.mjs runs it on every runner command),
-#     plugin/agents/cerebrate.md (cerebrate-plan.test.mjs reads its plan block),
 #     plugin/skills/molt/scripts/molt.sh (standard-delivery.test.mjs runs it),
 #     plugin/skills/_shared/allowlist.sh (identifier.test.mjs parity; also sourced by the
 #       gather-facts.sh, create-working-branch.sh and molt.sh the node tests run),
@@ -386,10 +389,7 @@ run_suites() {
 #     plugin/skills/_shared/graphql-response.sh (sourced by gather-facts.sh),
 #     plugin/skills/open-plan-pr/scripts/open-plan-pr.sh and
 #       plugin/skills/push-branch/scripts/push-branch.sh (standard-delivery.test.mjs runs them),
-#     plugin/skills/_shared/bump-type-derive.sh (sourced by the bump-type.sh the node tests run),
-#     plugin/agents/local-reviewer.md (its exit_reason enum is pinned against the review route table),
-#     plugin/governance/{safety-rails,definitions}.md (runner sentences are pinned against their
-#       grant and Validation Procedure clauses)
+#     plugin/skills/_shared/bump-type-derive.sh (sourced by the bump-type.sh the node tests run)
 #                                      -> test_workflow_scripts (build drift check + node tests;
 #                                         every path except tests/workflow-scripts/** keeps its
 #                                         other routes by union)
@@ -405,10 +405,14 @@ run_suites() {
 #                                         its rule set as raw text; only the parse leg proves
 #                                         Claude Code can still LOAD the file)
 #   docs/adr/**, web/**, CLAUDE.md     -> policy_check (fixtures pin their content as raw text)
+#   docs/skill-authoring.md            -> policy_check (CHECK 14 and CHECK 16 read its Covered
+#                                         Navigators section; a fixture pins its Skill File-Tool
+#                                         Grants heading)
 #   tools/**                           -> FULL suite (validator bootstrap)
 #   .github/**                         -> FULL suite (CI bootstrap — the gate harness itself)
 #   outside plugin|.claude-plugin|tools|tests|.github and not fixture-pinned above
-#     (docs/** other than docs/adr/**)  -> no code suites
+#     (docs/** other than docs/adr/** and docs/skill-authoring.md)
+#                                      -> no code suites
 #   anything matching no rule          -> FULL suite
 
 SELECTED=()      # lines of "suite<TAB>reason"
@@ -700,7 +704,10 @@ map_path() {
 
   # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
   # build, the two data files the build copies in, the facts and plan contracts the node tests
-  # validate, the overlord agent whose launch contract the node tests pin, the gather-facts entrypoint
+  # validate, every plugin/agents/*.md and plugin/governance/*.md (the load-line test reads each
+  # agent's Load lines and checks that every governance section a Load line names exists; the node
+  # tests also pin the overlord launch contract, agent-loads.test.mjs reads changeling.md, and the
+  # agent and governance clauses listed below), the gather-facts entrypoint
   # whose facts-file path pattern analysis-only.test.mjs cross-checks and the jq assembly program
   # facts-schema.test.mjs checks against the facts contract (the other gather-facts files route only
   # to test_gather_facts), the create-working-branch.sh and bump-type.sh enums plan-schema.test.mjs
@@ -719,7 +726,8 @@ map_path() {
   # by bump-type.sh), the open-plan-pr.sh and push-branch.sh entrypoints standard-delivery.test.mjs
   # runs, the local-reviewer agent whose exit_reason enum is pinned against the review route table,
   # the safety-rails and definitions governance docs whose grant and Validation Procedure clauses the
-  # runner sentences are pinned against, and the node tests themselves. Every path here except the
+  # runner sentences are pinned against (these agent and governance files route by the two globs),
+  # and the node tests themselves. Every path here except the
   # node tests keeps its other routes by union (for example *.json keeps validate_workflows,
   # next-wave.sh and its fixtures keep test_next_wave, cerebrate.md and local-reviewer.md keep
   # validate_workflows, synapse-gate.sh keeps test_synapse_gate, molt.sh keeps test_molt,
@@ -748,11 +756,9 @@ map_path() {
      || "$p" == plugin/skills/_shared/ledger-engine-io.sh \
      || "$p" == plugin/skills/create-working-branch/scripts/create-working-branch.sh \
      || "$p" == plugin/skills/bump-type/scripts/bump-type.sh \
-     || "$p" == plugin/agents/overlord.md \
-     || "$p" == plugin/agents/drone.md \
-     || "$p" == plugin/agents/synapse.md \
+     || "$p" == plugin/agents/*.md \
+     || "$p" == plugin/governance/*.md \
      || "$p" == plugin/hooks/synapse-gate.sh \
-     || "$p" == plugin/agents/cerebrate.md \
      || "$p" == plugin/skills/molt/scripts/molt.sh \
      || "$p" == plugin/skills/_shared/allowlist.sh \
      || "$p" == plugin/skills/_shared/git-refusals.sh \
@@ -760,9 +766,6 @@ map_path() {
      || "$p" == plugin/skills/_shared/bump-type-derive.sh \
      || "$p" == plugin/skills/open-plan-pr/scripts/open-plan-pr.sh \
      || "$p" == plugin/skills/push-branch/scripts/push-branch.sh \
-     || "$p" == plugin/agents/local-reviewer.md \
-     || "$p" == plugin/governance/safety-rails.md \
-     || "$p" == plugin/governance/definitions.md \
      || "$p" == tests/workflow-scripts/* ]]; then
     add_selected "$SUITE_TEST_WORKFLOW_SCRIPTS" "$p (workflow-script source/build/data/test)"
     matched=1
@@ -1069,6 +1072,17 @@ map_path() {
   # coverage that does not exist.
   if [[ "$p" == "CLAUDE.md" ]]; then
     add_selected "$SUITE_POLICY_CHECK" "$p (CLAUDE.md content pinned by policy_check fixture)"
+    matched=1
+  fi
+
+  # policy_check: docs/skill-authoring.md. Although it lives outside every code tree (docs-only by
+  # location), policy_check CHECK 14 and CHECK 16 read its Covered Navigators section, and a
+  # fixture pins its Skill File-Tool Grants heading. A docs-only edit to it would otherwise select
+  # no suite and merge with PR CI green, leaving a broken navigator list or heading pin to fire only
+  # on the push-to-main full run. Literal path, matching the CLAUDE.md leg above: the rest of docs/
+  # stays unrouted because no check reads it.
+  if [[ "$p" == "docs/skill-authoring.md" ]]; then
+    add_selected "$SUITE_POLICY_CHECK" "$p (Covered Navigators read by policy_check CHECK 14 and CHECK 16)"
     matched=1
   fi
 
@@ -1403,6 +1417,22 @@ self_test() {
     fails=$((fails + 1))
   fi
 
+  # 6e. docs/skill-authoring.md must route through policy_check (CHECK 14 and CHECK 16 read its
+  #     Covered Navigators section; a fixture pins its Skill File-Tool Grants heading), NOT
+  #     classify as docs-only/no-suite like the rest of docs/.
+  SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
+  map_path "docs/skill-authoring.md" >/dev/null
+  hit=0
+  for entry in "${SELECTED[@]:-}"; do
+    [[ "${entry%%$'\t'*}" == "$SUITE_POLICY_CHECK" ]] && hit=1 && break
+  done
+  if [[ "$hit" -eq 1 ]]; then
+    echo "PASS: docs/skill-authoring.md -> policy_check (CHECK 14 / CHECK 16 navigator source)"
+  else
+    echo "FAIL: docs/skill-authoring.md did NOT route through policy_check (selected ${#SELECTED[@]} suites, full=$FORCE_FULL)"
+    fails=$((fails + 1))
+  fi
+
   # 7. The CI workflow that runs this dispatcher must FAIL-CLOSED to full suite, never
   #    docs-only — otherwise a workflow-only edit could green a --changed run with no suites.
   SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
@@ -1439,8 +1469,9 @@ self_test() {
 
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
-  #    the generated-script, data-file, agent (overlord, drone, synapse, cerebrate,
-  #    local-reviewer), governance doc (safety-rails, definitions), route-workflow skill,
+  #    the generated-script, data-file, agent glob (overlord, drone, synapse, cerebrate,
+  #    local-reviewer, github-reviewer, changeling), governance doc glob (safety-rails,
+  #    definitions, security-policy, workflow, decision-autonomy, report-format), route-workflow skill,
   #    workflow-definition, node-test-read or node-test-run script/fixture (open-plan-pr.sh,
   #    push-branch.sh, synapse-gate.sh), or sourced _shared lib (bump-type-derive.sh) selector were
   #    dropped. Probe each directly so removing any one selector FAILS here.
@@ -1472,8 +1503,14 @@ self_test() {
     "plugin/skills/open-plan-pr/scripts/open-plan-pr.sh" \
     "plugin/skills/push-branch/scripts/push-branch.sh" \
     "plugin/agents/local-reviewer.md" \
+    "plugin/agents/github-reviewer.md" \
+    "plugin/agents/changeling.md" \
     "plugin/governance/safety-rails.md" \
     "plugin/governance/definitions.md" \
+    "plugin/governance/security-policy.md" \
+    "plugin/governance/workflow.md" \
+    "plugin/governance/decision-autonomy.md" \
+    "plugin/governance/report-format.md" \
     "plugin/skills/route-workflow/SKILL.md" \
     "plugin/workflows/analysis-only.json"; do
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''
