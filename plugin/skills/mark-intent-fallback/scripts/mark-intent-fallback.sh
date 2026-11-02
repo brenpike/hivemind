@@ -28,9 +28,17 @@
 # WHAT IT REUSES IDENTICALLY from record-state-result.sh (security posture is unchanged):
 #   - Identity derivation: run_id is the ONLY identity the caller supplies; the ledger path
 #     is DERIVED as <git-root>/.hivemind/runs/<run_id>/state.json. NO path is accepted.
-#   - hivemind_check_json_id (safe-id + ./.. reject on the intact JSON run_id); coherence check
-#     (ledger.run.id == run_id).
-#   - Inputs-file READ-guard + depth-complete write-chain containment (shared helper).
+#   - The coherence check (ledger.run.id == run_id) inside hivemind_open_ledger.
+#   - Inputs-file READ-guard (exactly one JSON object) + depth-complete write-chain
+#     containment (shared helper).
+#   - The whole-file input contract check (hivemind_check_json, contract intent-inputs), run
+#     FIRST on the intact JSON values: run_id a safe name (not . or ..), state and summary
+#     non-empty strings, outputs an optional object, close_status optional and exactly
+#     "cancelled" or "complete". A failure prints one fixed, value-free problem line.
+#
+# NO LEDGER CONTRACT: the skewed ledger is NOT checked against any contract. Beyond the
+# containment guards, the coherence check and the reader's exactly-one-JSON-object rule, the
+# skew door gains no hard-fail on the ledger's shape.
 #   - Atomicity: every write is temp-write + atomic mv on the CANONICAL contained path; on
 #     ANY validation failure the on-disk ledger is byte-unchanged (all validation runs
 #     BEFORE the temp file is created).
@@ -38,18 +46,20 @@
 # PRODUCER-AUTHORIZATION DISCIPLINE (completed_steps STRIP): this is the SECOND of two ledger
 # event appenders (record-state-result.sh is the first). A fallback event is an OBSERVABILITY
 # LOG — it must NEVER credit wave steps. So the mutation STRIPS completed_steps from the
-# event's outputs at write time (`del(.completed_steps)` on the engine-controlled --argjson
-# $outputs binding): the written event structurally CANNOT carry the key, regardless of what
-# the caller supplied. Closed-by-construction, not a caller-trust check. STRIP not REJECT —
+# event's outputs at write time (`del(.completed_steps)` on the outputs value the mutate
+# program reads from the inputs file): the written event structurally CANNOT carry the key,
+# regardless of what the caller supplied. Closed-by-construction, not a caller-trust check. STRIP not REJECT —
 # intent-fallback is the last-resort skew-resume door and must never gain a new hard-fail mode
 # (universal-fallback doctrine). Both appenders enforce producer-authorization discipline:
 # record-state-result.sh GUARDS (rejects unauthorized step credits), this one STRIPS. All
 # other outputs keys (summary/note/decisions[]/recurrence_origin/pr/etc.) pass through verbatim.
 #
-# INJECTION POSTURE: the untrusted fields state, summary, and outputs are read from the
-# inputs file with jq into inert shell variables and serialized via jq --arg / --argjson
-# ONLY; they never enter the jq program or any shell command source. The ONLY value passed on
-# the command line is the trusted inputs-file path ($1).
+# INJECTION POSTURE: the untrusted fields state, summary, and outputs NEVER enter the shell:
+# the mutate program reads them from the inputs file as data (jq --slurpfile), so they never
+# enter the jq program or any shell command source. The only values the shell reads from the
+# inputs file are the checked tokens run_id and close_status (hivemind_check_json field form;
+# each printed line is the whole value). No `jq -r` reads the inputs file or the ledger. The
+# ONLY value passed on the command line is the trusted inputs-file path ($1).
 #
 # INPUT (single positional argument):
 #   $1  Absolute or repo-relative path to a JSON inputs file authored by the navigator skill
@@ -69,8 +79,8 @@
 #       "close_status": "cancelled" | "complete"
 #                                  // OPTIONAL. When present MUST be exactly "cancelled" or
 #                                  // "complete" (anything else, notably "abandoned", is
-#                                  // REJECTED). When absent, run.status is left untouched
-#                                  // (the run stays running).
+#                                  // REJECTED). Missing or null is absent: run.status is
+#                                  // left untouched (the run stays running).
 #     }
 #
 # OUTPUT:
@@ -86,13 +96,14 @@
 #   0  intent-fallback event recorded (and run optionally closed)
 #   1  validation failure (ledger UNCHANGED)
 #
-# set -u: an unset variable is a programming error (every value is parsed from the inputs
-# file). No `set -e`: failures route through blocker() with a verbose reason.
+# set -u: an unset variable is a programming error. No `set -e`: failures route through
+# blocker() with a verbose reason.
 #
 # P18 FLOOR EXCEPTION (ADR-0020 / CHECK13 allowlisted): `set -u` only — `set -e`/`pipefail`
-# are DELIBERATELY omitted. The full floor would change behavior: `jq -e has(...)`
-# key-presence probes legitimately return non-zero in the normal absent-key flow, and
-# grep -Eq / `[ ]` gates feed blocker() — `set -e` would abort instead of blocking cleanly.
+# are DELIBERATELY omitted. The full floor would change behavior: the shared helpers'
+# non-zero return codes (hivemind_check_json rc 1, the reader and ledger-open codes) are read
+# by `case $?` maps, and `jq -e` / `[ ]` gates feed blocker() — `set -e` would abort instead
+# of blocking cleanly.
 
 set -u
 
@@ -128,8 +139,7 @@ command -v jq >/dev/null 2>&1 \
 
 # ── Inputs file ───────────────────────────────────────────────────────────────
 # Single positional argument: the path to a JSON inputs file the agent authored via the
-# Write tool. The path is the ONLY value passed on the command line; every field (including
-# the untrusted state/summary/outputs) is read with jq into inert variables below — never
+# Write tool. The path is the ONLY value passed on the command line; no field from it is ever
 # interpolated into bash source or the jq program SOURCE.
 INPUTS_FILE="${1:-}"
 
@@ -137,11 +147,11 @@ INPUTS_FILE="${1:-}"
 # hivemind_read_inputs_file performs, IN ORDER: the non-empty-arg check, the `[ -f ]`
 # existence check, the hivemind_assert_inputs_contained defense-in-depth read-guard (run
 # BEFORE the jq validity probe — `jq -e` on an attacker path is itself a JSON-validity read
-# oracle), and the `jq -e .` JSON-validity probe. The "mark-intent-fallback" label reproduces
-# this engine's EXACT current blocker strings. The helper never exits and emits NO stderr of
+# oracle), and the one-object probe (exactly one JSON document, an object). The
+# "mark-intent-fallback" label reproduces this engine's EXACT current blocker strings. The helper never exits and emits NO stderr of
 # its own: it signals WHICH failure occurred via a distinct return code (2 missing arg, 3
-# missing file, 4 containment reject, 5 invalid JSON) and we map each to its fixed blocker text
-# below. For the containment reject (4) the inner hivemind_assert_inputs_contained helper's own
+# missing file, 4 containment reject, 5 not exactly one JSON object) and we map each to its
+# fixed blocker text below. For the containment reject (4) the inner hivemind_assert_inputs_contained helper's own
 # UNPREFIXED detail line flows to fd2 UNCAPTURED (we do NOT redirect the call's stderr), so the
 # two-line shape — detail line ABOVE our `blocker:` line — is byte-preserved exactly as before
 # extraction. The non-containment cases (2/3/5) had no detail line pre-extraction and stay
@@ -152,58 +162,38 @@ case $? in
   2) blocker "missing required argument: path to mark-intent-fallback inputs JSON file (\$1)" ;;
   3) blocker "mark-intent-fallback inputs file $INPUTS_FILE does not exist" ;;
   4) blocker "refusing to read the inputs file: $INPUTS_FILE resolves outside the checkout (symlinked ancestor)" ;;
-  5) blocker "mark-intent-fallback inputs file $INPUTS_FILE is not valid JSON" ;;
+  5) blocker "mark-intent-fallback inputs file $INPUTS_FILE is not a single JSON object" ;;
   *) blocker "mark-intent-fallback: hivemind_read_inputs_file returned an unmapped status (shared library unavailable or contract drift); ledger/inputs unchanged" ;;
 esac
 
-# ── Parse fields into inert variables ─────────────────────────────────────────
-# Required strings via `jq -r '.field // ""'`. The presence bools derive from KEY-PRESENCE on
-# the inputs object: a MISSING key OR a present-but-null value is ABSENT; a present non-null
-# value is SUPPLIED. Absent outputs defaults to {}; absent close_status leaves run.status
-# untouched (run stays running).
-# run_id is checked by hivemind_check_json_id on the intact JSON value FIRST: the `jq -r` read
-# below drops trailing line feeds and cuts at a NUL, so a check on $run_id alone would pass
-# "safe<LF>" as "safe". The status is mapped to its blockers in the validation below.
-run_id_status=0
-hivemind_check_json_id "$INPUTS_FILE" '["run_id"]' || run_id_status=$?
-run_id="$(jq -r '.run_id // ""' "$INPUTS_FILE")"
-state="$(jq -r '.state // ""' "$INPUTS_FILE")"
-summary="$(jq -r '.summary // ""' "$INPUTS_FILE")"
+# ── Input contract (shared helper) — BEFORE any other read of the inputs file ──
+# hivemind_check_json checks the WHOLE inputs file against the intent-inputs contract
+# (run_id required name; state, summary required text; outputs optional object; close_status
+# optional enum cancelled, complete) inside one constant jq program, on the intact JSON values.
+# A failure is one value-free `<position>: <problem>` line on stdout (rc 1), re-emitted behind
+# a fixed prefix. rc 2 is a caller/tool error whose reason line flows to fd2 uncaptured.
+contract_problem="$(hivemind_check_json "$INPUTS_FILE" intent-inputs)"
+case $? in
+  0) : ;;
+  1) blocker "mark-intent-fallback inputs file: $contract_problem; ledger unchanged" ;;
+  *) blocker "mark-intent-fallback: hivemind_check_json failed on the inputs file; ledger/inputs unchanged" ;;
+esac
 
-# have_outputs: outputs key present AND non-null. When supplied, read the raw JSON value
-# (preserving its type for the up-front object check and the --argjson serialization).
-if jq -e 'has("outputs") and .outputs != null' "$INPUTS_FILE" >/dev/null 2>&1; then
-  have_outputs=true
-  outputs="$(jq -c '.outputs' "$INPUTS_FILE")"
-else
-  have_outputs=false
-  outputs=""
-fi
-
-# have_close_status: close_status key present AND non-null (-> run.status + state.status set
-# to the validated value). Absent -> run.status left untouched (run stays running).
-if jq -e 'has("close_status") and .close_status != null' "$INPUTS_FILE" >/dev/null 2>&1; then
+# ── Token fields via the field form (checked tokens; the printed line is the whole value) ──
+# run_id is a checked name (safe path component, not . or ..): the ONLY identity the caller
+# supplies; every path below is derived from it. close_status is empty when absent (the run
+# stays running) and otherwise exactly "cancelled" or "complete". The untrusted text fields
+# (state, summary) and the outputs object are NEVER read into the shell: the mutate program
+# reads them from the inputs file itself (--slurpfile).
+run_id="$(hivemind_check_json "$INPUTS_FILE" intent-inputs run_id)" \
+  || blocker "mark-intent-fallback: hivemind_check_json failed reading run_id; ledger/inputs unchanged"
+close_status="$(hivemind_check_json "$INPUTS_FILE" intent-inputs close_status)" \
+  || blocker "mark-intent-fallback: hivemind_check_json failed reading close_status; ledger/inputs unchanged"
+if [ -n "$close_status" ]; then
   have_close_status=true
-  close_status="$(jq -r '.close_status' "$INPUTS_FILE")"
 else
   have_close_status=false
-  close_status=""
 fi
-
-# ── Required-input validation ─────────────────────────────────────────────────
-[ "$run_id_status" -ne 2 ] || blocker "inputs file is missing required run_id"
-[ -n "$state" ]   || blocker "inputs file is missing required state"
-[ -n "$summary" ] || blocker "inputs file is missing required summary"
-
-# run_id must be a single safe path component (hivemind_check_json_id, the whole-string safe-id
-# check in ledger-engine-io.sh run on the intact JSON value, + reserved-component reject). This
-# is the ONLY identity the caller supplies; every path below is derived from it.
-case "$run_id_status" in
-  0) : ;;
-  3) blocker "run_id is not a safe path component: $run_id" ;;
-  4) blocker "run_id is a reserved path component: $run_id" ;;
-  *) blocker "mark-intent-fallback: hivemind_check_json_id failed on run_id (status $run_id_status); ledger/inputs unchanged" ;;
-esac
 
 # ── DERIVE the ledger path from git-root + run_id (NO caller path) ─────────────
 # repo_root anchors the ledger to the checkout root. Empty = not inside a git checkout =
@@ -259,33 +249,15 @@ case $ledger_open_rc in
   *) blocker "$ledger_open_out" ;;
 esac
 
-# If outputs was supplied, it must be a valid JSON object (--argjson rejects non-JSON, but
-# validate up front for a clear blocker rather than a jq parse error).
-if [ "$have_outputs" = true ]; then
-  printf '%s' "$outputs" | jq -e 'type == "object"' >/dev/null 2>&1 \
-    || blocker "outputs must be a JSON object"
-else
-  outputs='{}'
-fi
-
-# ── close_status validation (the ONLY permitted close values) ──────────────────
-# When supplied, close_status MUST be exactly "cancelled" or "complete". This EXPLICITLY
-# rejects "abandoned" (and anything else). When absent, run.status is left untouched.
+# ── Closeout footgun guard (close_status path ONLY) ───────────────────────────
+# You cannot close out an already-terminal run. The on-disk run.status (identity/coherence/
+# containment all proven above) must be exactly "running"; the comparison runs inside jq and
+# the message carries no ledger value. Empty/missing status -> not running -> reject (correct).
+# This runs BEFORE any mktemp/temp-write, so a reject leaves the ledger byte-unchanged. The
+# bare mode-flip path (no close_status) is intentionally NOT gated and may run on a skew ledger.
 if [ "$have_close_status" = true ]; then
-  case "$close_status" in
-    cancelled|complete) : ;;
-    *) blocker "close_status must be cancelled or complete, got: $close_status; ledger unchanged" ;;
-  esac
-
-  # ── Closeout footgun guard (close_status path ONLY) ─────────────────────────
-  # You cannot close out an already-terminal run. Read the on-disk run.status from the
-  # validated ledger (identity/coherence/containment all proven above) and reject unless it is
-  # exactly "running". Empty/missing status -> not running -> reject (correct). This runs
-  # BEFORE any mktemp/temp-write, so a reject leaves the ledger byte-unchanged. The bare
-  # mode-flip path (no close_status) is intentionally NOT gated and may run on a skew ledger.
-  ledger_status="$(jq -r '.run.status // ""' "$ledger")"
-  [ "$ledger_status" = "running" ] \
-    || blocker "close_status closeout requires a running run; run.status is '$ledger_status'; ledger unchanged"
+  jq -e '.run.status == "running"' "$ledger" >/dev/null 2>&1 \
+    || blocker "close_status closeout requires a running run; run.status is not running; ledger unchanged"
 fi
 
 # Resulting run.status reported on stdout: the validated close_status if supplied, else the
@@ -306,12 +278,14 @@ ledger="$canon_ledger"
 tmp_ledger="$(mktemp "$ledger_dir/.state.json.XXXXXX")" \
   || blocker "failed to create temp ledger file under $ledger_dir"
 
-# Mutate via a single jq program. Untrusted --state / --summary / --outputs enter ONLY as
-# --arg / --argjson bindings. The close clause is appended to the program ONLY when
-# close_status is present — clause PRESENCE (an inert bool), never the untrusted VALUE,
-# decides whether the clause runs; the value itself still arrives solely through --arg. When
-# absent, run.status / state.status are left untouched. INVARIANT: the input ledger is the
-# file itself; on a jq failure the temp file is removed and the on-disk ledger is untouched.
+# Mutate via a single jq program. The untrusted state / summary / outputs enter ONLY as data
+# read by jq from the inputs file (--slurpfile; the reader proved it holds exactly one object,
+# and the contract check proved their types). Absent outputs (missing or null) becomes {}. The
+# close clause is appended to the program ONLY when close_status is present — clause PRESENCE
+# (an inert bool), never the VALUE, decides whether the clause runs; the checked token itself
+# arrives solely through --arg. When absent, run.status / state.status are left untouched.
+# INVARIANT: the input ledger is the file itself; on a jq failure the temp file is removed and
+# the on-disk ledger is untouched.
 close_program=""
 if [ "$have_close_status" = true ]; then
   close_program="
@@ -321,19 +295,18 @@ fi
 
 jq \
   --arg at "$now_ts" \
-  --arg state "$state" \
-  --arg summary "$summary" \
-  --argjson outputs "$outputs" \
+  --slurpfile inputs "$INPUTS_FILE" \
   --arg close_status "$close_status" \
   '
-  .run.mode = "intent_fallback"
+  $inputs[0] as $in
+  | .run.mode = "intent_fallback"
   | .events += [{
     at: $at,
-    state: $state,
+    state: $in.state,
     result: "intent_fallback",
     next_state: null,
-    summary: $summary,
-    outputs: ($outputs | del(.completed_steps))
+    summary: $in.summary,
+    outputs: (($in.outputs // {}) | del(.completed_steps))
   }]
   | .run.updated_at = $at'"$close_program"'
   ' "$ledger" > "$tmp_ledger" \

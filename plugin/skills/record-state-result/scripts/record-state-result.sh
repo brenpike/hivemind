@@ -74,11 +74,22 @@
 # failure the on-disk ledger is byte-unchanged — no partial write ever occurs (all
 # validation runs BEFORE the temp file is created).
 #
-# INJECTION POSTURE: the untrusted fields summary, outputs, plan_steps, and plan_path are
-# read from the inputs file with jq into inert shell variables and serialized via jq
-# --arg / --argjson ONLY; they never enter the jq program or any shell command source.
-# plan_steps reaches jq solely as an --argjson binding; plan_path solely as an --arg
-# binding. The ONLY value passed on the command line is the trusted inputs-file path.
+# CONTRACT CHECKS (issue #424): before any field is read, hivemind_check_json checks the WHOLE
+# inputs file against the record-inputs contract, and, once hivemind_open_ledger returns 0, the
+# whole canonical ledger against the record-ledger contract (ledger-engine-io.sh). Both run
+# inside one constant jq program on the intact JSON values, so no check ever runs on a value a
+# lossy `jq -r` read has changed. A failure blocks with a fixed prefix plus the one
+# `<position>: <problem>` line, which never holds a value from the file; the ledger is
+# unchanged. Every value then read into the shell (inputs run_id, state, result; ledger
+# run.workflow, run.workflow_version, state.current) comes through the field form, a checked
+# token printed whole. No `jq -r` reads the inputs file or the ledger, and a blocker names
+# only checked tokens.
+#
+# INJECTION POSTURE: the untrusted fields summary, outputs, plan_steps, and plan_path never
+# enter the jq program or any shell command source. outputs and plan_steps reach the mutate
+# program solely as --argjson bindings of their compact JSON; summary and plan_path are read by
+# the mutate program itself from the inputs file (--slurpfile) and never pass through the
+# shell. The ONLY value passed on the command line is the trusted inputs-file path.
 #
 # PATH POSTURE — the engine NEVER accepts a path as input. It DERIVES every path from
 # identity, dissolving two trust-boundary P0s (a caller-supplied ledger path enabled an
@@ -86,8 +97,8 @@
 # definition that bypassed the transition gate AND the plan-write authorization). The ONLY
 # path on the command line is $1, the inputs-file authored by the trusted skill via Write.
 #   - The ledger is DERIVED: repo_root="$(git rev-parse --show-toplevel)" then
-#     "$repo_root/.hivemind/runs/<run_id>/state.json". <run_id> comes from the inputs file,
-#     safe-id-validated and ./.. -rejected on the intact JSON value (hivemind_check_json_id).
+#     "$repo_root/.hivemind/runs/<run_id>/state.json". <run_id> comes from the inputs file, a
+#     name under the record-inputs contract (safe charset, 1 to 255 bytes, not "." or "..").
 #   - A COHERENCE CHECK requires the on-disk ledger.run.id to equal the passed run_id.
 #   - The workflow DEFINITION is DERIVED from the (trusted) ledger's run.workflow against the
 #     script's OWN packaged workflows dir (self-located via BASH_SOURCE + pwd -P, independent
@@ -97,8 +108,9 @@
 #
 # INPUT (single positional argument):
 #   $1  Absolute or repo-relative path to a JSON inputs file authored by the agent via the
-#       Write tool. The agent writes structured data; this script parses it with jq into
-#       shell VARIABLES. Untrusted bytes in the JSON are read into variables and referenced
+#       Write tool. The agent writes structured data; this script checks it against the
+#       record-inputs contract, then reads only checked tokens into shell VARIABLES (the
+#       untrusted text stays in jq). Values read into variables are referenced
 #       only as "$var" — bash does not re-evaluate command substitution from variable
 #       contents, so the command-substitution injection class is structurally absent (the
 #       values never enter generated command SOURCE). Mirrors spawn-brood.sh and
@@ -108,9 +120,10 @@
 #     {
 #       "run_id":     "<required> identity of the run; the ledger path is DERIVED from it as
 #                      <git-root>/.hivemind/runs/<run_id>/state.json. NO path is accepted.",
-#       "state":      "<required> state the run is currently in (must match ledger)",
-#       "result":     "<required> named outcome to record (must be a legal transition)",
-#       "summary":    "<required> human-readable summary — UNTRUSTED, serialized only",
+#       "state":      "<required name> state the run is currently in (must match ledger)",
+#       "result":     "<required name> named outcome to record (must be a legal transition)",
+#       "summary":    "<required, non-empty> human-readable summary — UNTRUSTED, serialized
+#                      only, read by the mutate program from this file",
 #       "outputs":    { ... },   // optional JSON object of named outputs — UNTRUSTED,
 #                                // serialized only. KEY-PRESENCE semantics: a MISSING key OR
 #                                // a present-but-null value is ABSENT (-> defaults to {}); a
@@ -122,11 +135,12 @@
 #                                // null value is ABSENT (-> .plan.* left UNTOUCHED, never
 #                                // clobbered to []); a present non-null value is SUPPLIED ->
 #                                // .plan.steps = the array. UNTRUSTED step text — enters jq
-#                                // ONLY via --argjson (pre-validated JSON).
+#                                // ONLY via --argjson (contract-checked JSON: step objects
+#                                // with step-id ids and depends_on entries).
 #       "plan_path":  "<optional> path to the cerebrate directive. KEY-PRESENCE semantics: a
 #                      MISSING key OR null value is ABSENT (-> .plan.path UNTOUCHED); a present
 #                      non-null value is SUPPLIED -> .plan.path = the (nullable) text.
-#                      UNTRUSTED — enters jq ONLY via --arg."
+#                      UNTRUSTED — read by the mutate program from this file."
 #     }
 #
 # OUTPUT:
@@ -191,19 +205,20 @@ command -v jq >/dev/null 2>&1 \
 # ── Inputs file ───────────────────────────────────────────────────────────────
 # Single positional argument: the path to a JSON inputs file the agent authored via the
 # Write tool. The path is the ONLY value passed on the command line; every field (including
-# the untrusted summary/outputs/plan_steps/plan_path) is read with jq into inert variables
-# below — never interpolated into bash source or the jq program SOURCE.
+# the untrusted summary/outputs/plan_steps/plan_path) is checked by the contract below and
+# never interpolated into bash source or the jq program SOURCE.
 INPUTS_FILE="${1:-}"
 
 # ── Inputs-file bootstrap (shared helper) ──────────────────────────────────────
 # hivemind_read_inputs_file performs, IN ORDER: the non-empty-arg check, the `[ -f ]`
 # existence check, the hivemind_assert_inputs_contained defense-in-depth read-guard (run
 # BEFORE the jq validity probe — `jq -e` on an attacker path is itself a JSON-validity read
-# oracle), and the `jq -e .` JSON-validity probe. The "record-state-result" label reproduces
+# oracle), and the one-object probe (exactly one JSON document, an object). The
+# "record-state-result" label reproduces
 # this engine's EXACT current blocker strings. The helper never exits and emits NO stderr of
 # its own: it signals WHICH failure occurred via a distinct return code (2 missing arg, 3
-# missing file, 4 containment reject, 5 invalid JSON) and we map each to its fixed blocker text
-# below. For the containment reject (4) the inner hivemind_assert_inputs_contained helper's own
+# missing file, 4 containment reject, 5 not a single JSON object) and we map each to its fixed
+# blocker text below. For the containment reject (4) the inner hivemind_assert_inputs_contained helper's own
 # UNPREFIXED detail line flows to fd2 UNCAPTURED (we do NOT redirect the call's stderr), so the
 # two-line shape — detail line ABOVE our `blocker:` line — is byte-preserved exactly as before
 # extraction. The non-containment cases (2/3/5) had no detail line pre-extraction and stay
@@ -214,33 +229,55 @@ case $? in
   2) blocker "missing required argument: path to record-state-result inputs JSON file (\$1)" ;;
   3) blocker "record-state-result inputs file $INPUTS_FILE does not exist" ;;
   4) blocker "refusing to read the inputs file: $INPUTS_FILE resolves outside the checkout (symlinked ancestor)" ;;
-  5) blocker "record-state-result inputs file $INPUTS_FILE is not valid JSON" ;;
+  5) blocker "record-state-result inputs file $INPUTS_FILE is not a single JSON object" ;;
   *) blocker "record-state-result: hivemind_read_inputs_file returned an unmapped status (shared library unavailable or contract drift); ledger/inputs unchanged" ;;
 esac
 
-# ── Parse fields into inert variables ─────────────────────────────────────────
-# Required strings via `jq -r '.field // ""'`. The presence bools derive from KEY-PRESENCE on
-# the inputs object: a MISSING key OR a present-but-null value is ABSENT; a present non-null
-# value is SUPPLIED. This preserves EXACTLY the prior flag semantics — absent outputs defaults
-# to {}, absent plan_steps/plan_path leaves .plan.* UNTOUCHED (never clobbered to []).
-# run_id is checked by hivemind_check_json_id on the intact JSON value FIRST: the `jq -r` read
-# below drops trailing line feeds and cuts at a NUL, so a check on $run_id alone would pass
-# "safe<LF>" as "safe". The status is mapped to its blockers in the validation below.
-run_id_status=0
-hivemind_check_json_id "$INPUTS_FILE" '["run_id"]' || run_id_status=$?
-run_id="$(jq -r '.run_id // ""' "$INPUTS_FILE")"
-state="$(jq -r '.state // ""' "$INPUTS_FILE")"
-result="$(jq -r '.result // ""' "$INPUTS_FILE")"
-summary="$(jq -r '.summary // ""' "$INPUTS_FILE")"
+# read_contract_field <var_name> <json_file> <contract> <field>
+#
+# Sets <var_name> to the value hivemind_check_json prints for <field> of <contract> (empty when
+# the field is absent). Every field it reads is a checked token kind, so the printed line is the
+# whole value. The whole-file check has already passed before any call, so a non-zero status is
+# a tool failure: blocker (the helper's own reason line is already on stderr).
+read_contract_field() {
+  local var_name="$1" json_file="$2" contract_name="$3" field_name="$4" field_value
+  field_value="$(hivemind_check_json "$json_file" "$contract_name" "$field_name")" \
+    || blocker "record-state-result: hivemind_check_json could not read $field_name under the $contract_name contract; ledger unchanged"
+  printf -v "$var_name" '%s' "$field_value"
+}
 
-# have_outputs: outputs key present AND non-null. When supplied, read the raw JSON value
-# (preserving its type for the up-front object check and the --argjson serialization).
+# ── Inputs contract check (BEFORE any field is read) ──────────────────────────
+# hivemind_check_json checks the WHOLE inputs file against the record-inputs contract inside
+# one constant jq program, on the intact JSON values: run_id / state / result are names,
+# summary is non-empty text, outputs (when present) is an object and outputs.completed_steps an
+# array, plan_steps (when present) is a list of step objects with step-id ids and depends_on
+# entries, plan_path is text. A failure prints one `<position>: <problem>` line that never holds
+# a value from the file; only that stdout is captured, so a rc-2 reason line stays on stderr.
+inputs_check_line="$(hivemind_check_json "$INPUTS_FILE" record-inputs)"
+case $? in
+  0) : ;;
+  1) blocker "record-state-result inputs file: $inputs_check_line; ledger unchanged" ;;
+  *) blocker "record-state-result: hivemind_check_json could not check the inputs file; ledger unchanged" ;;
+esac
+
+# ── Parse fields into inert variables ─────────────────────────────────────────
+# run_id / state / result are read through the record-inputs field form: each is a checked
+# name, so the printed line is the whole value and nothing is lost to a `jq -r` read. summary
+# and plan_path are never read into the shell: the mutate program takes them from the inputs
+# file itself (--slurpfile). The presence bools derive from KEY-PRESENCE on the inputs object:
+# a MISSING key OR a present-but-null value is ABSENT; a present non-null value is SUPPLIED.
+# Absent outputs defaults to {}; absent plan_steps/plan_path leaves .plan.* UNTOUCHED (never
+# clobbered to []).
+read_contract_field run_id "$INPUTS_FILE" record-inputs run_id
+read_contract_field state "$INPUTS_FILE" record-inputs state
+read_contract_field result "$INPUTS_FILE" record-inputs result
+
+# outputs: key present AND non-null -> the compact JSON value (an object, by the contract) for
+# the --argjson serialization; absent -> {}.
 if jq -e 'has("outputs") and .outputs != null' "$INPUTS_FILE" >/dev/null 2>&1; then
-  have_outputs=true
   outputs="$(jq -c '.outputs' "$INPUTS_FILE")"
 else
-  have_outputs=false
-  outputs=""
+  outputs='{}'
 fi
 
 # have_plan_steps: plan_steps key present AND non-null (-> .plan.steps written). Absent ->
@@ -254,30 +291,12 @@ else
 fi
 
 # have_plan_path: plan_path key present AND non-null (-> .plan.path written). Absent ->
-# .plan.path left untouched. UNTRUSTED — reaches jq ONLY via --arg below.
+# .plan.path left untouched. UNTRUSTED — the mutate program reads it from the inputs file.
 if jq -e 'has("plan_path") and .plan_path != null' "$INPUTS_FILE" >/dev/null 2>&1; then
   have_plan_path=true
-  plan_path="$(jq -r '.plan_path' "$INPUTS_FILE")"
 else
   have_plan_path=false
-  plan_path=""
 fi
-
-# ── Required-input validation ─────────────────────────────────────────────────
-[ "$run_id_status" -ne 2 ] || blocker "inputs file is missing required run_id"
-[ -n "$state" ]   || blocker "inputs file is missing required state"
-[ -n "$result" ]  || blocker "inputs file is missing required result"
-[ -n "$summary" ] || blocker "inputs file is missing required summary"
-
-# run_id must be a single safe path component (hivemind_check_json_id, the whole-string safe-id
-# check in ledger-engine-io.sh run on the intact JSON value, + reserved-component reject). This
-# is the ONLY identity the caller supplies; every path below is derived from it.
-case "$run_id_status" in
-  0) : ;;
-  3) blocker "run_id is not a safe path component: $run_id" ;;
-  4) blocker "run_id is a reserved path component: $run_id" ;;
-  *) blocker "record-state-result: hivemind_check_json_id failed on run_id (status $run_id_status); ledger/inputs unchanged" ;;
-esac
 
 # ── DERIVE the ledger path from git-root + run_id (NO caller path) ─────────────
 # repo_root anchors the ledger to the checkout root, mirroring init-run-ledger.sh. Empty =
@@ -285,11 +304,11 @@ esac
 # arbitrary-file overwrite via a caller path is structurally impossible.
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null)"
 [ -n "$repo_root" ] || blocker "not inside a git repository"
-# Raw textual ledger path (matches the prior inline derivation). The reads below
-# (workflow-derive, coherence already done by the helper, state.current / binding-guard
-# validation) all reference this raw path; the containment guards inside hivemind_open_ledger
-# proved that the raw path and its canonical form resolve to the same in-checkout file. The
-# atomic-write block below re-points $ledger at the CANONICAL path before any mktemp/mv.
+# Raw textual ledger path (matches the prior inline derivation), used to derive the canonical
+# ledger dir and in the open-failure blockers. The contract check and every ledger field read
+# below use the CANONICAL path; the containment guards inside hivemind_open_ledger proved that
+# the raw path and its canonical form resolve to the same in-checkout file. The atomic-write
+# block below re-points $ledger at the CANONICAL path before any mktemp/mv.
 ledger="$repo_root/.hivemind/runs/$run_id/state.json"
 
 # ── Ledger-open machinery (shared helper) — BEFORE any ledger read ─────────────
@@ -333,69 +352,31 @@ case $ledger_open_rc in
   *) blocker "$ledger_open_out" ;;
 esac
 
+# ── Ledger contract check (on the CANONICAL ledger, BEFORE any field is read) ──
+# hivemind_check_json checks the whole ledger against the record-ledger contract: run.id,
+# run.workflow and state.current are names, run.workflow_version is a whole number of 0 or
+# more. The ledger is trusted; this is defense in depth, and it means every ledger value this
+# engine reads below is a checked token read losslessly through the field form.
+ledger_check_line="$(hivemind_check_json "$canon_ledger" record-ledger)"
+case $? in
+  0) : ;;
+  1) blocker "record-state-result ledger: $ledger_check_line; ledger unchanged" ;;
+  *) blocker "record-state-result: hivemind_check_json could not check the ledger; ledger unchanged" ;;
+esac
+read_contract_field run_workflow "$canon_ledger" record-ledger run.workflow
+read_contract_field ledger_wf_version "$canon_ledger" record-ledger run.workflow_version
+read_contract_field ledger_current "$canon_ledger" record-ledger state.current
+
 # ── DERIVE the workflow definition from the (trusted) ledger's run.workflow ────
 # The definition is resolved against the self-located PACKAGED workflows dir, never a caller
 # path — so a forged definition cannot bypass the transition gate or the plan-write auth.
-# Defense in depth: hivemind_check_json_id (safe-id + ./.. reject on the intact JSON value,
-# BEFORE the lossy `jq -r` read) on run.workflow even though the ledger is trusted.
-run_workflow_status=0
-hivemind_check_json_id "$ledger" '["run","workflow"]' || run_workflow_status=$?
-run_workflow="$(jq -r '.run.workflow // ""' "$ledger")"
-case "$run_workflow_status" in
-  0) : ;;
-  2) blocker "ledger run.workflow is empty; cannot derive workflow definition" ;;
-  3) blocker "ledger run.workflow is not a safe path component: $run_workflow" ;;
-  4) blocker "ledger run.workflow is a reserved path component: $run_workflow" ;;
-  *) blocker "record-state-result: hivemind_check_json_id failed on ledger run.workflow (status $run_workflow_status); ledger unchanged" ;;
-esac
+# run.workflow is a checked name (not "." or ".."), so it is one safe path component.
 workflow="$workflows_dir/$run_workflow.json"
 [ -f "$workflow" ] || blocker "packaged workflow definition does not exist: $workflow"
 jq -e . "$workflow" >/dev/null 2>&1 || blocker "workflow definition is not valid JSON: $workflow"
 
-# If --outputs was supplied, it must be a valid JSON object (--argjson rejects
-# non-JSON, but validate up front for a clear blocker rather than a jq parse error).
-if [ "$have_outputs" = true ]; then
-  printf '%s' "$outputs" | jq -e 'type == "object"' >/dev/null 2>&1 \
-    || blocker "--outputs must be a JSON object"
-else
-  outputs='{}'
-fi
-
-# If --plan-steps was supplied, it must be a valid JSON array (validated up front for a
-# clear blocker — same posture as --outputs). UNTRUSTED step text never enters the jq
-# program SOURCE; it flows ONLY through the --argjson binding in the mutate program below.
-# When ABSENT, .plan.steps is left untouched (never clobbered to []).
-if [ "$have_plan_steps" = true ]; then
-  printf '%s' "$plan_steps" | jq -e 'type == "array"' >/dev/null 2>&1 \
-    || blocker "--plan-steps must be a JSON array"
-  # STEP-ID CHARSET GUARD (write-boundary): plan step ids flow through to next-wave's routing
-  # YAML (`wave: [...]`) — a YAML delimiter / bracket / comma / newline in an id from an
-  # untrusted seeded/resume ledger could forge routing the overlord parses. Guard here so an
-  # unsafe id never persists. UNTRUSTED plan_steps enters jq ONLY as stdin INPUT; the shared
-  # constant pattern (hivemind_safe_id_jq_pattern, whole-string `\A...\z`) enters via --arg —
-  # the untrusted text never touches the jq program SOURCE. Charset-only + non-empty is the guard (ids never become path components, so `.`/
-  # `..` are NOT rejected). Type-check precedes every field access (fail-closed, mirroring the
-  # ordered-`or`/`and` short-circuit posture used elsewhere); messages carry no untrusted text.
-  #   (a) every entry is an OBJECT (before any .id / .depends_on access).
-  printf '%s' "$plan_steps" | jq -e 'all(.[]; type == "object")' >/dev/null 2>&1 \
-    || blocker "each plan step must be a JSON object"
-  #   (b) every .id is a NON-EMPTY STRING matching the safe-id pattern.
-  printf '%s' "$plan_steps" | jq -e --arg re "$(hivemind_safe_id_jq_pattern)" \
-    'all(.[]; (.id | type == "string") and (.id != "") and (.id | test($re)))' >/dev/null 2>&1 \
-    || blocker "plan step id must match SAFE_ID_RE"
-  #   (c) every .depends_on (when present and non-null) is an ARRAY (before entry iteration).
-  printf '%s' "$plan_steps" | jq -e \
-    'all(.[]; ((has("depends_on") and .depends_on != null) | not) or (.depends_on | type == "array"))' >/dev/null 2>&1 \
-    || blocker "plan step depends_on must be a JSON array"
-  #   (d) every depends_on entry is a NON-EMPTY STRING matching the safe-id pattern.
-  printf '%s' "$plan_steps" | jq -e --arg re "$(hivemind_safe_id_jq_pattern)" \
-    'all(.[]; (.depends_on // []) | all(.[]; (type == "string") and (. != "") and test($re)))' >/dev/null 2>&1 \
-    || blocker "depends_on entry must match SAFE_ID_RE"
-fi
-
 # ── Deterministic validation (ALL before any write) ───────────────────────────
 # (1) ledger.state.current must equal --state.
-ledger_current="$(jq -r '.state.current // ""' "$ledger")"
 [ "$ledger_current" = "$state" ] \
   || blocker "ledger state.current '$ledger_current' does not match --state '$state'; ledger unchanged"
 
@@ -410,12 +391,10 @@ workflow_id="$(jq -r '.id // ""' "$workflow")"
 # These checks run BEFORE the state-existence check and BEFORE any temp-file creation, so a
 # binding failure never mutates a byte of the on-disk ledger.
 #   (2a) definition.id == ledger.run.workflow.
-ledger_workflow="$(jq -r '.run.workflow // ""' "$ledger")"
-[ "$workflow_id" = "$ledger_workflow" ] \
-  || blocker "workflow definition id '$workflow_id' does not match ledger run.workflow '$ledger_workflow'; ledger unchanged"
+[ "$workflow_id" = "$run_workflow" ] \
+  || blocker "workflow definition id '$workflow_id' does not match ledger run.workflow '$run_workflow'; ledger unchanged"
 #   (2b) definition.version == ledger.run.workflow_version (engine hard-reject half of the
 #   §I policy; the overlord resume gate owns the two version-skew doors).
-ledger_wf_version="$(jq -r '.run.workflow_version // empty' "$ledger")"
 def_version="$(jq -r '.version // empty' "$workflow")"
 [ "$def_version" = "$ledger_wf_version" ] \
   || blocker "workflow definition version '$def_version' does not match ledger run.workflow_version '$ledger_wf_version'; ledger unchanged (resume gate owns version-skew doors)"
@@ -492,10 +471,6 @@ if printf '%s' "$outputs" | jq -e 'has("completed_steps") and .completed_steps !
     and (.states[$s].allowed_agents | index("hivemind:cerebrate") | not)' "$workflow")"
   [ "$producer_authorized" = "true" ] \
     || blocker "outputs.completed_steps may only be recorded from a wave-producing agent state (one declaring allowed_agents without hivemind:cerebrate); state '$state' is not authorized; ledger unchanged"
-  # Authorized producer: completed_steps must be a JSON array (mirror the plan_steps up-front
-  # array validation — a clear blocker rather than a downstream reader mis-parse).
-  printf '%s' "$outputs" | jq -e '.completed_steps | type == "array"' >/dev/null 2>&1 \
-    || blocker "outputs.completed_steps must be a JSON array"
 fi
 
 # (10 pre-compute) determine whether next_state is a declared terminal and map its
@@ -529,12 +504,13 @@ ledger="$canon_ledger"
 tmp_ledger="$(mktemp "$ledger_dir/.state.json.XXXXXX")" \
   || blocker "failed to create temp ledger file under $ledger_dir"
 
-# Mutate via a single jq program. Untrusted --summary / --outputs / --plan-steps /
-# --plan-path enter ONLY as --arg / --argjson bindings; the structural values (state,
+# Mutate via a single jq program. Untrusted outputs / plan_steps enter ONLY as --argjson
+# bindings; untrusted summary / plan_path are read by the program itself from the inputs file
+# (--slurpfile, the intact JSON values, never through the shell); the structural values (state,
 # result, next_state, statuses, timestamp) are engine-validated. The plan.* clauses are
 # appended to the program ONLY when their flags are present — flag PRESENCE (an inert
 # bool), never the untrusted VALUE, decides which clauses run; the values themselves still
-# arrive solely through --argjson/--arg. When a flag is absent the corresponding plan.*
+# arrive solely as jq data. When a flag is absent the corresponding plan.*
 # field is left untouched (NOT clobbered). The engine-owned .plan.epoch is bumped (and
 # .plan.epoch set) ONLY inside the have_plan_steps clause; every appended event is stamped
 # with the resolved $epoch regardless. have_plan_steps is passed as an ENGINE-DERIVED inert
@@ -548,7 +524,7 @@ if [ "$have_plan_steps" = true ]; then
 fi
 if [ "$have_plan_path" = true ]; then
   plan_program="$plan_program
-  | .plan.path = (if \$plan_path == \"\" then null else \$plan_path end)"
+  | .plan.path = (if \$inputs_doc[0].plan_path == \"\" then null else \$inputs_doc[0].plan_path end)"
 fi
 
 jq \
@@ -556,12 +532,11 @@ jq \
   --arg state "$state" \
   --arg result "$result" \
   --arg next_state "$next_state" \
-  --arg summary "$summary" \
+  --slurpfile inputs_doc "$INPUTS_FILE" \
   --argjson outputs "$outputs" \
   --arg run_status "$run_status" \
   --arg state_status "$state_status" \
   --argjson plan_steps "${plan_steps:-[]}" \
-  --arg plan_path "$plan_path" \
   --argjson have_plan_steps "$have_plan_steps" \
   '
   (.plan.epoch // 0) as $cur_epoch
@@ -571,7 +546,7 @@ jq \
     state: $state,
     result: $result,
     next_state: $next_state,
-    summary: $summary,
+    summary: $inputs_doc[0].summary,
     outputs: $outputs,
     plan_epoch: $epoch
   }]

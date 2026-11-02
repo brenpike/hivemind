@@ -50,22 +50,23 @@
 #              IGNORED (1 != current 2), so STEP-001 is re-dispatched this generation; and a
 #              SAME-epoch (plan_epoch=2) credit for STEP-001 DOES count, excluding it from the wave.
 #              Proves next-wave's done-set is scoped to the current plan.epoch.
-#   bad-id   — a plan.steps entry whose .id fails the SAFE_ID_RE charset (a stray `]`) is a
-#              blocker: exit 1, stderr blocker, ledger byte-unchanged. Proves the READER-SIDE
-#              charset belt (a pre-existing seeded/resume ledger predating the write-boundary
-#              guards) stops a malformed id BEFORE it can reach the `wave: [...]` routing emit.
-#   line-feed — the safe-id check covers the WHOLE string (issue #424): a step id or depends_on
-#              entry ending in a line feed is a blocker, a run_id with an embedded or trailing
-#              line feed is refused before any ledger read, and an unsafe duplicate or unknown
-#              dependency id (a line feed, or 5000 bytes ending in `]`) gets the safe-id blocker,
-#              which runs before the duplicate-id / unknown-dep checks; a safe duplicate or unknown
-#              id still gets its own blocker, the id JSON-encoded.
-#   shape    — the POSITIVE SHAPE-VALIDATION GATE that runs before checks (a)-(f): a non-object
-#              plan.steps entry, a non-array depends_on, a non-array plan.steps, and a
-#              missing/non-string .id are each a clean blocker (exit 1, stderr blocker, empty
-#              stdout, ledger byte-unchanged) rather than an uncaught raw-jq crash. A further
-#              assert_wave case proves the DONE-SET read is type-projected: a malformed
-#              (non-object) .events[] element is SKIPPED, not crashed, while a valid
+#   bad-id   — a plan.steps entry whose .id is not a step id (a stray `]`) is a blocker: exit 1,
+#              stderr blocker, ledger byte-unchanged. Proves the READER-SIDE wave-ledger contract
+#              check (a pre-existing seeded/resume ledger predating the write-boundary guards)
+#              stops a malformed id BEFORE it can reach the `wave: [...]` routing emit.
+#   line-feed — the id checks cover the WHOLE string (issue #424): a step id or depends_on entry
+#              ending in a line feed is a blocker, a run_id with an embedded or trailing line feed
+#              (or over 255 bytes, or reserved) is refused before any ledger read, and an unsafe
+#              duplicate or unknown dependency id (a line feed, or 65 or 5000 bytes) gets the
+#              contract blocker, which runs before the duplicate-id / unknown-dep checks; a safe
+#              duplicate or unknown id still gets its own blocker. Every blocker names a position,
+#              never a value, so its text is exact and bounded whatever the id holds.
+#   shape    — the wave-ledger contract check that runs before every other plan check: a missing
+#              or non-array plan.steps, a non-object plan.steps entry, a missing or non-string
+#              .id, and a non-array depends_on are each a clean blocker (exit 1, stderr blocker,
+#              empty stdout, ledger byte-unchanged, exact position text) rather than an uncaught
+#              raw-jq crash. A further assert_wave case proves the DONE-SET read is type-projected:
+#              a malformed (non-object) .events[] element is SKIPPED, not crashed, while a valid
 #              completed_steps event alongside it still credits normally.
 #
 # Every success case ALSO asserts the staged ledger is BYTE-UNCHANGED after the engine runs
@@ -350,6 +351,8 @@ test_cycle() {
     run_id="nw-cycle"
     ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_CYCLE")"
     assert_blocker "cycle:blocker-exit1" "$gitroot" "$run_id" "$ledger"
+    assert_blocker_text "cycle:blocker-text" "$gitroot" "$run_id" \
+        'blocker: dependency cycle detected among plan steps'
 }
 
 # ── empty: empty plan.steps is a blocker ─────────────────────────────────────
@@ -360,6 +363,8 @@ test_empty() {
     run_id="nw-empty"
     ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_EMPTY")"
     assert_blocker "empty:blocker-exit1" "$gitroot" "$run_id" "$ledger"
+    assert_blocker_text "empty:blocker-text" "$gitroot" "$run_id" \
+        'blocker: plan.steps: empty, nothing to schedule'
 }
 
 # ── epoch: cross-generation done-set scoping (replan collision closed) ───────
@@ -388,7 +393,10 @@ test_replan_epoch() {
         "false" "[STEP-002]" "1"
 }
 
-# ── bad-id: a plan.steps entry with a SAFE_ID_RE-violating .id is a blocker ──
+# ── bad-id: a plan.steps entry whose .id is not a step id is a blocker ───────
+
+# The fixed problem text hivemind_check_json prints for a value that is not a step id.
+STEP_ID_PROBLEM='not a step id (1 to 64 of A-Z a-z 0-9 . _ -)'
 
 test_bad_step_id() {
     local name="bad-id:blocker-exit1"
@@ -405,9 +413,11 @@ test_bad_step_id() {
     tmp="$ledger.seed"
     jq '.plan.steps[0].id = "STEP-001]"' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
     assert_blocker "$name" "$gitroot" "$run_id" "$ledger"
+    assert_blocker_text "bad-id:blocker-text" "$gitroot" "$run_id" \
+        "blocker: plan.steps[0].id: $STEP_ID_PROBLEM"
 }
 
-# ── line-feed: the safe-id check covers the WHOLE string (issue #424) ────────
+# ── line-feed: the id checks cover the WHOLE string (issue #424) ─────────────
 # jq's Oniguruma `$` also matches before one final line feed, and grep is line-based, so the old
 # `^[A-Za-z0-9._-]+$` checks accepted "STEP-001<LF>" (jq) and "ok<LF>../x" (grep).
 
@@ -420,29 +430,27 @@ test_trailing_lf_step_id() {
     jq '.plan.steps[0].id = "STEP-001\n" | .plan.steps[1].depends_on = ["STEP-001\n"]' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
     assert_blocker "line-feed:trailing-lf-step-id" "$gitroot" "$run_id" "$ledger"
     assert_blocker_text "line-feed:trailing-lf-step-id-text" "$gitroot" "$run_id" \
-        'blocker: plan step id or depends_on entry fails the safe-id charset: "STEP-001\n"'
+        "blocker: plan.steps[0].id: $STEP_ID_PROBLEM"
 }
 
 test_trailing_lf_depends_on() {
-    local gitroot run_id ledger tmp
-    gitroot="$(new_gitroot trailing-lf-depends-on)"
-    run_id="nw-trailing-lf-depends-on"
-    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
-    # Both STEP-001 and "STEP-001<LF>" exist, so the dependency is known and the cycle check
-    # passes: only the safe-id check can refuse the trailing line feed.
-    tmp="$ledger.seed"
-    jq '.plan.steps += [{"id": "STEP-001\n", "files": ["src/lf.ts"]}] | .plan.steps[1].depends_on = ["STEP-001\n"]' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
-    assert_blocker_text "line-feed:trailing-lf-depends-on" "$gitroot" "$run_id" \
-        'blocker: plan step id or depends_on entry fails the safe-id charset: "STEP-001\n"'
+    local gitroot
+    # Every step id is safe, so only the depends_on entry check can refuse the trailing line feed.
+    gitroot="$(stage_mutated_ledger trailing-lf-depends-on nw-trailing-lf-depends-on \
+        '.plan.steps[1].depends_on = ["STEP-001\n"]')"
+    assert_blocker_text "line-feed:trailing-lf-depends-on" "$gitroot" nw-trailing-lf-depends-on \
+        "blocker: plan.steps[1].depends_on[0]: $STEP_ID_PROBLEM"
 }
 
-test_embedded_lf_run_id() {
-    local gitroot
-    gitroot="$(new_gitroot embedded-lf-run-id)"
-    assert_blocker_text "line-feed:embedded-lf-run-id" "$gitroot" $'ok\n../x' \
-        $'blocker: run_id is not a safe path component: ok\n../x'
-    assert_blocker_text "line-feed:trailing-lf-run-id" "$gitroot" $'nw-ok\n' \
-        $'blocker: run_id is not a safe path component: nw-ok\n'
+test_unsafe_run_id_names_no_value() {
+    local gitroot unsafe_text
+    gitroot="$(new_gitroot unsafe-run-id)"
+    unsafe_text='blocker: run_id is not a safe path component (1 to 255 of A-Z a-z 0-9 . _ -)'
+    assert_blocker_text "line-feed:embedded-lf-run-id" "$gitroot" $'ok\n../x' "$unsafe_text"
+    assert_blocker_text "line-feed:trailing-lf-run-id" "$gitroot" $'nw-ok\n' "$unsafe_text"
+    assert_blocker_text "line-feed:oversized-run-id" "$gitroot" "$(printf 'r%.0s' $(seq 1 256))" "$unsafe_text"
+    assert_blocker_text "line-feed:reserved-run-id" "$gitroot" '..' \
+        'blocker: run_id is a reserved path component (. or ..)'
 }
 
 # stage_mutated_ledger <label> <run-id> <jq-filter> -> stages LEDGER_LINEAR under a new gitroot,
@@ -456,94 +464,89 @@ stage_mutated_ledger() {
     printf '%s' "$gitroot"
 }
 
-test_unsafe_duplicate_and_unknown_id_get_charset_blocker() {
-    local gitroot oversized
+# assert_bounded_blocker_text <name> <gitroot> <run_id> <expected_stderr>
+# assert_blocker_text, plus the stderr is at most 200 bytes: a 5000-byte id is never echoed.
+assert_bounded_blocker_text() {
+    local errfile="$WORKDIR/$1.err" err_bytes
+    assert_blocker_text "$@"
+    err_bytes="$(wc -c < "$errfile")"
+    if [[ "$err_bytes" -le 200 ]]; then
+        pass "$1:bounded" "stderr is $err_bytes bytes (at most 200)"
+    else
+        failed "$1:bounded" "stderr is $err_bytes bytes (expected at most 200)"
+    fi
+}
+
+test_unsafe_duplicate_and_unknown_id_get_contract_blocker() {
+    local gitroot long_id oversized id_value
+    long_id="$(printf 'S%.0s' $(seq 1 65))"
     oversized="$(printf 'S%.0s' $(seq 1 5000))]"
     gitroot="$(stage_mutated_ledger encoded-dup-id nw-encoded-dup-id \
         '.plan.steps[0].id = "A\nforged: x" | .plan.steps[1].id = "A\nforged: x"')"
-    assert_blocker_text "line-feed:unsafe-duplicate-id-charset" "$gitroot" nw-encoded-dup-id \
-        'blocker: plan step id or depends_on entry fails the safe-id charset: "A\nforged: x"'
+    assert_blocker_text "line-feed:unsafe-duplicate-id-contract" "$gitroot" nw-encoded-dup-id \
+        "blocker: plan.steps[0].id: $STEP_ID_PROBLEM"
 
     gitroot="$(stage_mutated_ledger encoded-unknown-dep nw-encoded-unknown-dep \
         '.plan.steps[1].depends_on = ["Z\nforged: x"]')"
-    assert_blocker_text "line-feed:unsafe-unknown-dep-charset" "$gitroot" nw-encoded-unknown-dep \
-        'blocker: plan step id or depends_on entry fails the safe-id charset: "Z\nforged: x"'
+    assert_blocker_text "line-feed:unsafe-unknown-dep-contract" "$gitroot" nw-encoded-unknown-dep \
+        "blocker: plan.steps[1].depends_on[0]: $STEP_ID_PROBLEM"
 
-    gitroot="$(stage_mutated_ledger oversized-dup-id nw-oversized-dup-id \
-        ".plan.steps[0].id = \"$oversized\" | .plan.steps[1].id = \"$oversized\"")"
-    assert_blocker_text "line-feed:oversized-unsafe-duplicate-id-charset" "$gitroot" nw-oversized-dup-id \
-        "blocker: plan step id or depends_on entry fails the safe-id charset: \"$oversized\""
+    for id_value in "$long_id" "$oversized"; do
+        gitroot="$(stage_mutated_ledger "oversized-dup-id-${#id_value}" "nw-oversized-dup-id-${#id_value}" \
+            ".plan.steps[0].id = \"$id_value\" | .plan.steps[1].id = \"$id_value\"")"
+        assert_bounded_blocker_text "line-feed:oversized-duplicate-id-${#id_value}" "$gitroot" "nw-oversized-dup-id-${#id_value}" \
+            "blocker: plan.steps[0].id: $STEP_ID_PROBLEM"
 
-    gitroot="$(stage_mutated_ledger oversized-unknown-dep nw-oversized-unknown-dep \
-        ".plan.steps[1].depends_on = [\"$oversized\"]")"
-    assert_blocker_text "line-feed:oversized-unsafe-unknown-dep-charset" "$gitroot" nw-oversized-unknown-dep \
-        "blocker: plan step id or depends_on entry fails the safe-id charset: \"$oversized\""
+        gitroot="$(stage_mutated_ledger "oversized-unknown-dep-${#id_value}" "nw-oversized-unknown-dep-${#id_value}" \
+            ".plan.steps[1].depends_on = [\"$id_value\"]")"
+        assert_bounded_blocker_text "line-feed:oversized-unknown-dep-${#id_value}" "$gitroot" "nw-oversized-unknown-dep-${#id_value}" \
+            "blocker: plan.steps[1].depends_on[0]: $STEP_ID_PROBLEM"
+    done
 }
 
-test_safe_duplicate_and_unknown_id_encoded() {
+test_safe_duplicate_and_unknown_id_name_position() {
     local gitroot
-    gitroot="$(stage_mutated_ledger safe-dup-id nw-safe-dup-id '.plan.steps[1].id = .plan.steps[0].id')"
-    assert_blocker_text "line-feed:safe-duplicate-id-encoded" "$gitroot" nw-safe-dup-id \
-        "blocker: duplicate plan step id: $(jq -c '.plan.steps[0].id' "$LEDGER_LINEAR")"
+    gitroot="$(stage_mutated_ledger safe-dup-id nw-safe-dup-id '.plan.steps[2].id = .plan.steps[0].id')"
+    assert_blocker_text "line-feed:safe-duplicate-id-position" "$gitroot" nw-safe-dup-id \
+        'blocker: plan.steps[2].id: duplicate step id'
 
-    gitroot="$(stage_mutated_ledger safe-unknown-dep nw-safe-unknown-dep '.plan.steps[1].depends_on = ["STEP-099"]')"
-    assert_blocker_text "line-feed:safe-unknown-dep-encoded" "$gitroot" nw-safe-unknown-dep \
-        'blocker: depends_on references unknown step id: "STEP-099"'
+    gitroot="$(stage_mutated_ledger safe-unknown-dep nw-safe-unknown-dep '.plan.steps[2].depends_on = ["STEP-002", "STEP-099"]')"
+    assert_blocker_text "line-feed:safe-unknown-dep-position" "$gitroot" nw-safe-unknown-dep \
+        'blocker: plan.steps[2].depends_on[1]: unknown step id'
 }
 
-# ── shape: the positive shape-validation gate rejects malformed plan shapes ──
+# ── shape: the wave-ledger contract check rejects malformed plan shapes ──────
 
-test_shape_non_object_step() {
-    local name="shape:non-object-step"
-    local gitroot run_id ledger tmp
-    gitroot="$(new_gitroot shape-non-object-step)"
-    run_id="nw-shape-non-object-step"
-    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
-    # Corrupt STEP-001 itself into a non-object (an array) — formerly crashed raw jq at the
-    # `.id` index; the shape gate now catches it as a clean blocker BEFORE (a)-(f) ever runs.
-    tmp="$ledger.seed"
-    jq '.plan.steps[0] = ["x"]' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
-    assert_blocker "$name" "$gitroot" "$run_id" "$ledger"
+# assert_shape_blocker <name> <run-id> <jq-filter> <expected_stderr> -> stages LEDGER_LINEAR
+# mutated by <jq-filter>, then asserts the clean blocker contract and its exact text.
+assert_shape_blocker() {
+    local gitroot
+    gitroot="$(stage_mutated_ledger "$2" "$2" "$3")"
+    assert_blocker "$1" "$gitroot" "$2" "$gitroot/.hivemind/runs/$2/state.json"
+    assert_blocker_text "$1-text" "$gitroot" "$2" "$4"
 }
 
-test_shape_non_array_depends_on() {
-    local name="shape:non-array-depends_on"
-    local gitroot run_id ledger tmp
-    gitroot="$(new_gitroot shape-non-array-depends-on)"
-    run_id="nw-shape-non-array-depends-on"
-    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
-    # Corrupt STEP-002's depends_on into a non-array string — formerly crashed raw jq on
-    # iterate; the shape gate now catches it as a clean blocker.
-    tmp="$ledger.seed"
-    jq '.plan.steps[1].depends_on = "BAD]"' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
-    assert_blocker "$name" "$gitroot" "$run_id" "$ledger"
-}
-
-test_shape_non_array_steps() {
-    local name="shape:non-array-plan-steps"
-    local gitroot run_id ledger tmp
-    gitroot="$(new_gitroot shape-non-array-steps)"
-    run_id="nw-shape-non-array-steps"
-    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
-    # Corrupt .plan.steps into a non-array string — formerly PASSED the old (a) non-empty check
-    # via `"BAD" // [] | length` (== 3) then crashed at the `.id` index; the shape gate now
-    # catches it FIRST, before any later map/iteration ever touches it.
-    tmp="$ledger.seed"
-    jq '.plan.steps = "BAD"' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
-    assert_blocker "$name" "$gitroot" "$run_id" "$ledger"
-}
-
-test_shape_non_string_id() {
-    local name="shape:non-string-id"
-    local gitroot run_id ledger tmp
-    gitroot="$(new_gitroot shape-non-string-id)"
-    run_id="nw-shape-non-string-id"
-    ledger="$(stage_ledger "$gitroot" "$run_id" "$LEDGER_LINEAR")"
-    # Corrupt STEP-001's id into a number — the shape gate rejects a missing-or-non-string id
-    # before it ever reaches the SAFE_ID_RE charset check.
-    tmp="$ledger.seed"
-    jq '.plan.steps[0].id = 123' "$ledger" > "$tmp" && mv "$tmp" "$ledger"
-    assert_blocker "$name" "$gitroot" "$run_id" "$ledger"
+test_shape_contract_blockers() {
+    # A non-object step formerly crashed raw jq at the `.id` index.
+    assert_shape_blocker "shape:non-object-step" nw-shape-non-object-step \
+        '.plan.steps[0] = ["x"]' 'blocker: plan.steps[0]: not an object'
+    # Every step is checked to be an object before any id is checked (row-major order).
+    assert_shape_blocker "shape:objects-before-ids" nw-shape-objects-before-ids \
+        '.plan.steps[0].id = "A]" | .plan.steps[2] = null' 'blocker: plan.steps[2]: not an object'
+    # A non-array depends_on formerly crashed raw jq on iterate.
+    assert_shape_blocker "shape:non-array-depends_on" nw-shape-non-array-depends-on \
+        '.plan.steps[1].depends_on = "BAD]"' 'blocker: plan.steps[1].depends_on: not an array'
+    # A non-array plan.steps formerly PASSED the old non-empty check via `"BAD" // [] | length`.
+    assert_shape_blocker "shape:non-array-plan-steps" nw-shape-non-array-steps \
+        '.plan.steps = "BAD"' 'blocker: plan.steps: not an array'
+    assert_shape_blocker "shape:missing-plan-steps" nw-shape-missing-steps \
+        'del(.plan.steps)' 'blocker: plan.steps: missing'
+    assert_shape_blocker "shape:non-string-id" nw-shape-non-string-id \
+        '.plan.steps[0].id = 123' "blocker: plan.steps[0].id: $STEP_ID_PROBLEM"
+    assert_shape_blocker "shape:missing-id" nw-shape-missing-id \
+        'del(.plan.steps[1].id)' 'blocker: plan.steps[1].id: missing'
+    assert_shape_blocker "shape:null-depends-on-entry" nw-shape-null-dep \
+        '.plan.steps[1].depends_on = [null]' "blocker: plan.steps[1].depends_on[0]: $STEP_ID_PROBLEM"
 }
 
 # ── shape: done-set read is type-projected — a malformed event element is skipped, not crashed ──
@@ -577,13 +580,10 @@ test_replan_epoch
 test_bad_step_id
 test_trailing_lf_step_id
 test_trailing_lf_depends_on
-test_embedded_lf_run_id
-test_unsafe_duplicate_and_unknown_id_get_charset_blocker
-test_safe_duplicate_and_unknown_id_encoded
-test_shape_non_object_step
-test_shape_non_array_depends_on
-test_shape_non_array_steps
-test_shape_non_string_id
+test_unsafe_run_id_names_no_value
+test_unsafe_duplicate_and_unknown_id_get_contract_blocker
+test_safe_duplicate_and_unknown_id_name_position
+test_shape_contract_blockers
 test_shape_tolerant_malformed_event
 
 echo

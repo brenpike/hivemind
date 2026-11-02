@@ -78,37 +78,31 @@
 #                    drainable plan (same conservative lane the glob case already used).
 #
 # VALIDATION (all fail-closed -> `blocker: <reason>` on stderr, exit 1, nothing on stdout).
-# ORDER: a POSITIVE SHAPE GATE runs FIRST (before (a)-(f)), so no later check ever indexes or
-# iterates an untrusted plan field of the WRONG TYPE and crashes raw jq (exit 5) under
-# `set -euo pipefail` BEFORE the intended clean blocker is reached. Full ordering is:
-# shape gate -> (a) non-empty -> (b) missing id -> (f) safe-id -> (c) duplicate -> (d) unknown
-# dependency -> (e) cycle. (f) runs BEFORE (c)/(d) so the duplicate and unknown-dependency
-# blockers only ever name an id that already passed the safe-id check.
-#   - SHAPE GATE (closes the whole raw-jq crash class):
-#       * `.plan.steps` is not an array — a non-array string like "BAD" formerly PASSED (a) via
-#         `"BAD" // [] | length` (== 3) then crashed (b) at the `.id` index.
-#       * a plan step is not an object — formerly crashed (b) at the `.id` index.
-#       * a step `id` is missing or not a string.
-#       * a `depends_on` is present/non-null but not an array — formerly crashed (d) on iterate.
-#       * a `depends_on` entry is not a string.
-#     Every (a)-(f) check below then runs on SHAPE-VALID data and reaches its advertised clean
-#     blocker for these shapes.
-#   - empty / absent plan.steps
-#   - a step missing an id
-#   - a step `id` or any `depends_on` entry that fails the whole-string safe-id check
-#     (hivemind_safe_id_jq_pattern; reader-side charset belt,
-#     symmetric to the `files` grammar projection and to the write-boundary guards in
-#     record-state-result / init-run-ledger; a PRE-EXISTING seeded/resume ledger predating those
-#     write guards could still carry a malformed id). The earlier shape gate now guarantees this
-#     check runs on known-strings; its non-object/non-array arms are kept as defense-in-depth.
-#     Guarantees a malformed id can NEVER reach the wave: [...] join emit.
-#   - duplicate step ids
-#   - a depends_on referencing an unknown step id
-#   - a dependency cycle
-#   - remaining > 0 but wave empty with no cycle (defensive; a cycle-free acyclic notdone
-#     subgraph always has a ready minimal element, so this cannot occur without a cycle)
-#   - ledger missing / not valid JSON / not inside a git checkout / containment rejection
-#     (delegated to the shared hivemind_open_ledger guard)
+# No blocker names a value from argv or from the ledger: a plan problem names its position only,
+# so a model-written id cannot add a line, a control character or bulk to the blocker. In order:
+#   - run_id missing, not 1 to 255 bytes of [A-Za-z0-9._-] over the WHOLE string
+#     (hivemind_is_safe_id), or the reserved component "." / "..". Checked before any read.
+#   - ledger missing / not exactly one JSON object / not inside a git checkout / containment or
+#     coherence rejection (delegated to the shared hivemind_open_ledger guard).
+#   - CONTRACT: ONE hivemind_check_json `wave-ledger` call checks the whole ledger inside one jq
+#     program, on the intact JSON values, before any other read of plan content. Its rows:
+#     plan.steps required array; plan.steps[] object; plan.steps[].id required step id
+#     (\A[A-Za-z0-9._-]{1,64}\z); plan.steps[].depends_on optional array;
+#     plan.steps[].depends_on[] step id. Absent means missing or null; an array element is never
+#     absent, so a null element fails its kind. Rows run in table order and positions in
+#     ascending index (row-major), and the FIRST failure is the blocker, verbatim, as
+#     `<position>: <problem>` (e.g. `plan.steps[2].depends_on[0]: not a step id (1 to 64 of
+#     A-Z a-z 0-9 . _ -)`). Every later check therefore runs on shape-valid, safe-id data, so no
+#     jq read below can crash on a wrong type.
+#   - `plan.steps: empty, nothing to schedule`
+#   - `plan.steps[N].id: duplicate step id` (N = the first index that repeats an earlier id)
+#   - `plan.steps[N].depends_on[M]: unknown step id` (the first in plan order)
+#   - `dependency cycle detected among plan steps`
+#   - `remaining steps exist but no step is ready (unsatisfiable dependencies)` (defensive; a
+#     cycle-free acyclic notdone subgraph always has a ready minimal element, so this cannot
+#     occur without a cycle)
+#   plugin/workflow-src/lib/waves.js mirrors the contract rows, their order and every text above;
+#   tests/workflow-scripts/waves.test.mjs requires the same text from both engines.
 #
 # OUTPUT on success (exit 0), YAML routing lines on stdout (mirrors the sibling engines'
 # YAML routing style):
@@ -121,10 +115,10 @@
 #   0  wave computed; routing YAML on stdout
 #   1  validation failure / containment rejection (nothing on stdout)
 #
-# SHELL FLOOR: full P18 `set -euo pipefail`. The one nonzero-returning helper this engine must
-# INSPECT (hivemind_open_ledger returns 0/1/2/6) is called as an `if` condition, which suppresses
-# errexit throughout the function body — so its documented return codes stay inspectable while the
-# floor still guards this engine's own top-level statements.
+# SHELL FLOOR: full P18 `set -euo pipefail`. The two nonzero-returning helpers this engine must
+# INSPECT (hivemind_open_ledger returns 0/1/2/6, hivemind_check_json returns 0/1/2) are called as
+# `if` conditions, which suppress errexit throughout the function body — so their documented
+# return codes stay inspectable while the floor still guards this engine's own top-level statements.
 
 set -euo pipefail
 
@@ -150,11 +144,11 @@ plugin_root="$(CDPATH= cd -- "$script_dir/../../.." 2>/dev/null && pwd -P 2>/dev
 # READS an existing ledger, so it uses hivemind_open_ledger (NOT hivemind_read_inputs_file, which
 # is for the inputs-file navigators). The helper ORCHESTRATES the containment.sh helpers above,
 # so this MUST follow that source. It also provides the whole-string safe-id check shared with
-# the sibling engines: hivemind_is_safe_id for the run_id identity component (the reserved
-# components "." and ".." pass the charset and are rejected explicitly below) and
-# hivemind_safe_id_jq_pattern, REUSED reader-side (validation (f)) to charset-validate every plan
-# step `id` and every `depends_on` entry before the wave emit — a belt symmetric to the `files`
-# grammar projection and to the write-boundary guards in record-state-result / init-run-ledger.
+# the sibling engines, hivemind_is_safe_id, for the run_id identity component (the reserved
+# components "." and ".." pass the charset and are rejected explicitly below), and
+# hivemind_check_json, whose `wave-ledger` contract checks every plan step `id` and every
+# `depends_on` entry reader-side before the wave emit — a belt symmetric to the `files` grammar
+# projection and to the write-boundary guards in record-state-result / init-run-ledger.
 [ -f "$plugin_root/skills/_shared/ledger-engine-io.sh" ] || blocker "required shared library missing: skills/_shared/ledger-engine-io.sh; refusing to proceed"
 . "$plugin_root/skills/_shared/ledger-engine-io.sh" || blocker "failed to source skills/_shared/ledger-engine-io.sh (unparseable); refusing to proceed"
 
@@ -169,9 +163,9 @@ run_id="${1:-}"
 # run_id must be a single safe path component (hivemind_is_safe_id + reserved-component reject).
 # This is the ONLY identity the caller supplies; every path below is derived from it.
 hivemind_is_safe_id "$run_id" \
-  || blocker "run_id is not a safe path component: $run_id"
+  || blocker "run_id is not a safe path component (1 to 255 of A-Z a-z 0-9 . _ -)"
 case "$run_id" in
-  .|..) blocker "run_id is a reserved path component: $run_id" ;;
+  .|..) blocker "run_id is a reserved path component (. or ..)" ;;
 esac
 
 # ── DERIVE the ledger path from git-root + run_id (NO caller path) ─────────────
@@ -213,88 +207,46 @@ case $ledger_open_rc in
 esac
 
 # ── Validation (all before the wave computation) ──────────────────────────────
-# SHAPE-VALIDATION GATE — runs FIRST, before checks (a)-(f). The (a)-(f) checks index/iterate
-# untrusted plan.steps fields; several malformed SHAPES (non-array steps, non-object step,
-# non-array depends_on) otherwise crash raw jq (exit 5) under `set -euo pipefail` BEFORE the
-# intended clean blocker is reached. This POSITIVE shape grammar, validated FIRST, closes the whole
-# raw-crash class so every check below runs on SHAPE-VALID data and its clean-blocker contract is
-# reachable. Ledger untouched (read-only) on any violation, matching the rest of validation.
+# CONTRACT GATE — runs FIRST, before any other read of plan content. One hivemind_check_json
+# `wave-ledger` call checks plan.steps, every step's shape, every step `id` and every
+# `depends_on` entry on the intact JSON values (see VALIDATION in the header). Its failure line
+# names a position, never a value, and is the blocker verbatim. Every check below then runs on
+# shape-valid, safe-id data, so none of them can crash raw jq (exit 5) under `set -euo pipefail`.
+# Ledger untouched (read-only) on any violation, matching the rest of validation.
+if contract_problem="$(hivemind_check_json "$ledger" wave-ledger)"; then
+  contract_rc=0
+else
+  contract_rc=$?
+fi
+case $contract_rc in
+  0) ;;
+  1) blocker "$contract_problem" ;;
+  *) blocker "failed to check the ledger against the wave-ledger contract" ;;
+esac
 
-# `.plan.steps` MUST be an array. A non-array (e.g. the string "BAD") formerly passed the (a)
-# non-empty check via `"BAD" // [] | length` (== 3) and then crashed (b) at the `.id` index.
-# Checked FIRST so no later map/iteration ever touches a non-array `.plan.steps`.
-steps_is_array="$(jq '(.plan.steps | type) == "array"' "$ledger")"
-[ "$steps_is_array" = "true" ] || blocker "plan.steps is not an array"
+steps_len="$(jq '.plan.steps | length' "$ledger")"
+[ "$steps_len" -gt 0 ] || blocker "plan.steps: empty, nothing to schedule"
 
-# Per-step shape pass (single jq, type-first lazy-`or` via an `if/elif` chain, FIRST offender only):
-# every step IS an object; `.id` is present and a string; `.depends_on` (if present/non-null) IS an
-# array; every `.depends_on` entry IS a string. The `if/elif` chain short-circuits on the failing
-# type gate so no field of the offending step is indexed/iterated raw. Offenders are emitted via
-# `@json` (as guard (f) does) so an empty / whitespace / null offender stays a visible token.
-bad_shape="$(jq -r '
-  [ .plan.steps[]
-    | if (type != "object") then "a plan step is not an object: " + (. | @json)
-      elif (has("id") | not) then "a plan step is missing an id"
-      elif ((.id | type) != "string") then "a plan step id is not a string: " + (.id | @json)
-      elif (.depends_on != null) and ((.depends_on | type) != "array")
-        then "a plan step depends_on is not an array: " + (.depends_on | @json)
-      elif (.depends_on != null) and (.depends_on | any((type) != "string"))
-        then "a plan step depends_on entry is not a string: "
-             + (.depends_on | map(select((type) != "string")) | .[0] | @json)
-      else empty end
-  ] | .[0] // empty' "$ledger")"
-[ -z "$bad_shape" ] || blocker "$bad_shape"
-
-# (a) plan.steps present and non-empty.
-steps_len="$(jq '(.plan.steps // []) | length' "$ledger")"
-[ "$steps_len" -gt 0 ] || blocker "plan.steps is empty or absent; nothing to schedule"
-
-# (b) every step carries a non-empty id.
-missing_id="$(jq '[.plan.steps[] | select((.id // "") == "")] | length' "$ledger")"
-[ "$missing_id" = "0" ] || blocker "a plan step is missing an id"
-
-# (f) every step `id` and every `depends_on` entry is a safe id (hivemind_safe_id_jq_pattern: the
-# safe-id charset over the WHOLE string, so a trailing line feed is refused). Runs BEFORE (c)
-# and (d) so their blockers never name an unsafe id (ADR-0037 SD-58). READER-SIDE
-# belt: the write-boundary guards in record-state-result / init-run-ledger stop NEW bad ids, but a
-# PRE-EXISTING seeded/resume ledger predating those guards could still carry a malformed id — and a
-# malformed id must NEVER reach the `wave: [...]` join emit. Symmetric to the `files` grammar
-# projection in the wave jq below. The earlier SHAPE-VALIDATION GATE now guarantees this check runs
-# on KNOWN-STRINGS (every step is an object, every id/dep is a string) and delivers the advertised
-# clean-blocker contract for those shapes; its non-object-step and non-array-depends_on arms below
-# are RETAINED as defense-in-depth belt. FAIL-CLOSED: the charset check still gates on
-# `type == "string"` FIRST (jq `or` is lazy) so `test` never runs against a non-string. Offenders
-# are emitted via `@json` so an empty-string offender stays a non-empty ("") token and cannot be
-# misread as "no offense".
-bad_id="$(jq -r --arg re "$(hivemind_safe_id_jq_pattern)" '
-  [ .plan.steps[]
-    | if (type != "object") then "non-object step"
-      else
-        ( if ((.id | type) != "string") or ((.id | test($re)) | not)
-          then (.id | @json) else empty end ),
-        ( if (.depends_on != null) and ((.depends_on | type) != "array")
-          then "non-array depends_on"
-          else ( (.depends_on // [])[]
-                 | if (type != "string") or ((test($re)) | not) then @json else empty end )
-          end )
-      end
-  ] | .[0] // empty' "$ledger")"
-[ -z "$bad_id" ] || blocker "plan step id or depends_on entry fails the safe-id charset: $bad_id"
-
-# (c) no duplicate step ids (report the first offender). The safe-id check (f) already ran, so
-# the offender is a safe id; it stays JSON-encoded (`@json`, as waves.js does).
-dup_id="$(jq -r '[.plan.steps[].id] | (group_by(.) | map(select(length > 1) | .[0]))[0] // empty | @json' "$ledger")"
-[ -z "$dup_id" ] || blocker "duplicate plan step id: $dup_id"
-
-# (d) every depends_on references a known step id (report the first offender, JSON-encoded as
-# in (c)).
-unknown_dep="$(jq -r '
+# The first index whose id repeats an id at an earlier index.
+dup_position="$(jq -r '
   [.plan.steps[].id] as $ids
-  | [ .plan.steps[] | (.depends_on // [])[] as $d | select(($ids | index($d)) == null) | $d ]
-  | .[0] // empty | @json' "$ledger")"
-[ -z "$unknown_dep" ] || blocker "depends_on references unknown step id: $unknown_dep"
+  | first(range(1; $ids | length) as $i
+      | select(any($ids[0:$i][]; . == $ids[$i]))
+      | "plan.steps[\($i)].id") // empty' "$ledger")"
+[ -z "$dup_position" ] || blocker "$dup_position: duplicate step id"
 
-# (e) no dependency cycle. Kahn-style peel: each pass removes every node whose deps are all
+# The first depends_on entry, in plan order, that names no step id.
+unknown_position="$(jq -r '
+  .plan.steps as $steps
+  | [$steps[].id] as $ids
+  | first(range(0; $steps | length) as $i
+      | ($steps[$i].depends_on // []) as $deps
+      | range(0; $deps | length) as $j
+      | select(any($ids[]; . == $deps[$j]) | not)
+      | "plan.steps[\($i)].depends_on[\($j)]") // empty' "$ledger")"
+[ -z "$unknown_position" ] || blocker "$unknown_position: unknown step id"
+
+# No dependency cycle. Kahn-style peel: each pass removes every node whose deps are all
 # already removed; after N passes an acyclic graph is fully drained. Any residue is a cycle
 # (self-dependency included — a node depending on itself never drains).
 cycle_residue="$(jq '
@@ -379,7 +331,7 @@ IFS=$'\t' read -r remaining all_done wave_count wave_display <<< "$main"
 # non-empty remainder with an empty wave is unreachable without a cycle (already rejected).
 # Guard it anyway — fail closed rather than emit a stalled, actionless wave.
 if [ "$remaining" -gt 0 ] && [ "$wave_count" -eq 0 ]; then
-  blocker "remaining steps exist but no step is ready (unsatisfiable dependencies); ledger unchanged"
+  blocker "remaining steps exist but no step is ready (unsatisfiable dependencies)"
 fi
 
 # ── Success routing ───────────────────────────────────────────────────────────

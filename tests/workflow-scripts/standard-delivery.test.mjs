@@ -1402,7 +1402,7 @@ const ROW_TESTS = {
       ['a plan with an unknown field', planResult({ ...makePlan(), extra: 1 }), schemaProblem],
       ['a plan with a bad classification', planResult(makePlan({ classification: 'feat' })), schemaProblem],
       ['questions that are not briefs', planResult(makePlan(), [{ id: 'Q1' }]), schemaProblem],
-      ['an unknown dependency', planResult(makePlan({ steps: [makeStep('STEP-001', ['a.js'], { depends_on: ['STEP-009'] })] })), 'The plan steps cannot be scheduled, so the delivery stopped: depends_on references unknown step id: "STEP-009"'],
+      ['an unknown dependency', planResult(makePlan({ steps: [makeStep('STEP-001', ['a.js'], { depends_on: ['STEP-009'] })] })), 'The plan steps cannot be scheduled, so the delivery stopped: plan.steps[0].depends_on[0]: unknown step id'],
       ['a dependency cycle', planResult(makePlan({ steps: [makeStep('A', ['a.js'], { depends_on: ['B'] }), makeStep('B', ['b.js'], { depends_on: ['A'] })] })), 'The plan steps cannot be scheduled, so the delivery stopped: dependency cycle detected among plan steps'],
       ['a trunk freshness other than the facts', planResult(makePlan({ trunk_freshness: 'behind' })), 'The plan copies a trunk freshness other than the facts, so the delivery stopped.'],
       ['an unsafe branch', planResult(makePlan({ branch: 'feature/..x' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
