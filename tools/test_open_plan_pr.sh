@@ -4,8 +4,8 @@
 # with its child plugin/skills/push-branch/scripts/push-branch.sh and the shared libraries
 # plugin/skills/_shared/allowlist.sh, containment.sh and git-refusals.sh).
 #
-# The engine takes REQUIRED `--head <branch> --base <branch> --inputs <path>` plus optional
-# `--remote <name>` and `--expect-commit <sha>`. It gates the identifiers, reads the inputs file
+# The engine takes REQUIRED `--head <branch> --base <branch> --expect-commit <sha> --inputs <path>`
+# plus optional `--remote <name>`. It gates the identifiers, reads the inputs file
 # once (after the containment read-guard), deletes it right after that read when it is a
 # .hivemind/pr-inputs-<token>.json leaf, and checks its fields, refuses gh missing, an
 # in-progress operation, unmerged paths, a dirty tree and a failed open-PR lookup, then pushes
@@ -161,7 +161,7 @@ failed() { echo "FAIL [$1] $2"; FAIL_COUNT=$((FAIL_COUNT + 1)); }
 BRANCH='feat/x'
 INPUTS_REL='.hivemind/pr-inputs-t.json'
 PR_URL='https://github.com/o/r/pull/7'
-USAGE_REASON='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] [--expect-commit <sha>] --inputs <path>'
+USAGE_REASON='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] --expect-commit <sha> --inputs <path>'
 IDENTIFIER_REASON='head, base or push_remote contains characters outside the safe allowlist'
 EXPECT_FORMAT_REASON='expected commit is not a full object id'
 DELAY_REASON='HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY must be a whole number of seconds'
@@ -423,7 +423,7 @@ assert_refused_unchanged() {
 # asserts the inputs file was deleted (the refusal comes after the read).
 assert_input_refused() {
     write_inputs "$2"
-    assert_refused_unchanged "$1" "$WORK_TREE" "$3" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_refused_unchanged "$1" "$WORK_TREE" "$3" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present "$1-deleted" "$INPUTS_PATH" no
 }
 
@@ -449,14 +449,17 @@ test_usage_errors() {
     create_world usage
     assert_refused_unchanged usage-no-args "$WORK_TREE" "$USAGE_REASON"
     assert_refused_unchanged usage-unknown-flag "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL" --draft yes
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL" --draft yes
     assert_refused_unchanged usage-duplicate-head "$WORK_TREE" "$USAGE_REASON" \
-        --head "$BRANCH" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
-    assert_refused_unchanged usage-missing-inputs "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main
-    assert_refused_unchanged usage-missing-head "$WORK_TREE" "$USAGE_REASON" --base main --inputs "$INPUTS_REL"
-    assert_refused_unchanged usage-missing-base "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --inputs "$INPUTS_REL"
-    assert_refused_unchanged usage-valueless "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main --inputs
-    assert_refused_unchanged usage-empty-inputs "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main --inputs ''
+        --head "$BRANCH" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
+    assert_refused_unchanged usage-missing-inputs "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA"
+    assert_refused_unchanged usage-missing-head "$WORK_TREE" "$USAGE_REASON" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
+    assert_refused_unchanged usage-missing-base "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
+    assert_refused_unchanged usage-missing-expect-commit "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_equal usage-missing-expect-commit-no-gh 0 "$(call_count pr-list)" "no gh call"
+    assert_inputs_present usage-missing-expect-commit-inputs-kept "$INPUTS_PATH" yes
+    assert_refused_unchanged usage-valueless "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs
+    assert_refused_unchanged usage-empty-inputs "$WORK_TREE" "$USAGE_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs ''
     assert_equal usage-no-gh 0 "$(call_count pr-list)" "no gh call"
     assert_inputs_present usage-inputs-kept "$INPUTS_PATH" yes
 }
@@ -467,11 +470,11 @@ test_identifier_gates() {
     for bad_value in '$(touch pwned)' '`touch pwned`' '-main' 'a..b' 'ma in' ''; do
         index=$((index + 1))
         assert_refused_unchanged "gate-head-$index" "$WORK_TREE" "$IDENTIFIER_REASON" \
-            --head "$bad_value" --base main --inputs "$INPUTS_REL"
+            --head "$bad_value" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
         assert_refused_unchanged "gate-base-$index" "$WORK_TREE" "$IDENTIFIER_REASON" \
-            --head "$BRANCH" --base "$bad_value" --inputs "$INPUTS_REL"
+            --head "$BRANCH" --base "$bad_value" --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
         assert_refused_unchanged "gate-remote-$index" "$WORK_TREE" "$IDENTIFIER_REASON" \
-            --head "$BRANCH" --base main --remote "$bad_value" --inputs "$INPUTS_REL"
+            --head "$BRANCH" --base main --remote "$bad_value" --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     done
     assert_inputs_present gate-identifier-inputs-kept "$INPUTS_PATH" yes
     for bad_value in 'abc' "$(printf 'A%.0s' $(seq 1 40))" "${HEAD_SHA:0:39}" "${HEAD_SHA}0" ''; do
@@ -490,7 +493,7 @@ test_delay_gate() {
     for bad_delay in 'x' '-1' '1.5' ' 2'; do
         index=$((index + 1))
         HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY="$bad_delay" assert_refused_unchanged "delay-$index" \
-            "$WORK_TREE" "$DELAY_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+            "$WORK_TREE" "$DELAY_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     done
     assert_inputs_present delay-inputs-kept "$INPUTS_PATH" yes
 }
@@ -501,7 +504,7 @@ test_gh_missing() {
     create_world gh-missing
     RUN_PATH="$NO_GH_PATH"
     assert_refused_unchanged gh-missing "$WORK_TREE" "$GH_MISSING_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     RUN_PATH="$PATH"
     assert_inputs_present gh-missing-inputs-kept "$INPUTS_PATH" yes
 }
@@ -510,7 +513,7 @@ test_not_a_checkout() {
     mkdir -p "$WORKDIR/nogit"
     printf '{}\n' >"$WORKDIR/nogit/in.json"
     local errfile="$WORKDIR/not-a-checkout.err" out rc=0
-    run_engine "$WORKDIR/nogit" out "$errfile" --head "$BRANCH" --base main --inputs in.json || rc=$?
+    run_engine "$WORKDIR/nogit" out "$errfile" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs in.json || rc=$?
     assert_equal not-a-checkout "1|blocker: $NOT_A_CHECKOUT_REASON" "$rc|$(cat "$errfile")" "exit and stderr"
 }
 
@@ -520,12 +523,12 @@ test_inputs_file_refusals() {
     local outside_dir
     create_world inputs-file
     assert_refused_unchanged inputs-missing "$WORK_TREE" "$INPUTS_MISSING_REASON" \
-        --head "$BRANCH" --base main --inputs .hivemind/none.json
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs .hivemind/none.json
     assert_input_refused inputs-invalid-json '{"title":' "$INPUTS_JSON_REASON"
     assert_input_refused inputs-two-values '{"title":"a","body":""} {"title":"b","body":""}' "$INPUTS_JSON_REASON"
     : >"$INPUTS_PATH"
     assert_refused_unchanged inputs-empty-file "$WORK_TREE" "$INPUTS_JSON_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present inputs-empty-file-deleted "$INPUTS_PATH" no
 
     outside_dir="$WORKDIR/outside-target"
@@ -533,19 +536,19 @@ test_inputs_file_refusals() {
     printf '{"title":"t","body":"b"}\n' >"$outside_dir/in.json"
     ln -s "$outside_dir/in.json" "$WORK_TREE/.hivemind/leaf.json"
     assert_refused_unchanged inputs-symlink-leaf "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" \
-        --head "$BRANCH" --base main --inputs .hivemind/leaf.json
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs .hivemind/leaf.json
     ln -s "$outside_dir/in.json" "$WORK_TREE/.hivemind/pr-inputs-s.json"
     assert_refused_unchanged inputs-symlink-named-leaf "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" \
-        --head "$BRANCH" --base main --inputs .hivemind/pr-inputs-s.json
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs .hivemind/pr-inputs-s.json
     assert_equal inputs-symlink-named-leaf-link-kept yes \
         "$([[ -L "$WORK_TREE/.hivemind/pr-inputs-s.json" ]] && printf yes || printf no)" "symlink leaf kept"
     assert_equal inputs-symlink-named-leaf-target-kept '{"title":"t","body":"b"}' \
         "$(cat "$outside_dir/in.json")" "symlink target kept unchanged"
     ln -s "$outside_dir" "$WORK_TREE/.hivemind/linked"
     assert_refused_unchanged inputs-symlink-folder "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" \
-        --head "$BRANCH" --base main --inputs .hivemind/linked/in.json
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs .hivemind/linked/in.json
     assert_refused_unchanged inputs-absolute-outside "$WORK_TREE" "$INPUTS_OUTSIDE_REASON" \
-        --head "$BRANCH" --base main --inputs "$outside_dir/in.json"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$outside_dir/in.json"
     assert_equal inputs-no-gh 0 "$(call_count pr-list)" "no gh call"
 }
 
@@ -555,7 +558,7 @@ test_inputs_kept_paths() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success inputs-molt-name "$WORK_TREE" "$(expected_block true)" \
-        --head "$BRANCH" --base main --inputs .hivemind/molt-inputs-t.json
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs .hivemind/molt-inputs-t.json
     assert_inputs_present inputs-molt-name-kept "$WORK_TREE/.hivemind/molt-inputs-t.json" yes
 
     create_world inputs-subfolder
@@ -564,7 +567,7 @@ test_inputs_kept_paths() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success inputs-subfolder "$WORK_TREE" "$(expected_block true)" \
-        --head "$BRANCH" --base main --inputs .hivemind/sub/pr-inputs-t.json
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs .hivemind/sub/pr-inputs-t.json
     assert_inputs_present inputs-subfolder-kept "$WORK_TREE/.hivemind/sub/pr-inputs-t.json" yes
 }
 
@@ -604,7 +607,7 @@ test_git_state_refusals() {
     run_git "$WORK_TREE" commit -q -am mine
     run_git "$WORK_TREE" merge -q other >/dev/null 2>&1 || true
     assert_refused_unchanged merge-in-progress "$WORK_TREE" "$MERGE_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present merge-in-progress-inputs-deleted "$INPUTS_PATH" no
 
     create_world unmerged
@@ -613,26 +616,26 @@ test_git_state_refusals() {
         "0000000000000000000000000000000000000000" "$blob" "$blob" "$blob" \
         | run_git "$WORK_TREE" update-index --index-info
     assert_refused_unchanged unmerged-paths "$WORK_TREE" "$UNMERGED_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present unmerged-paths-inputs-deleted "$INPUTS_PATH" no
 
     create_world staged
     printf 'staged\n' >"$WORK_TREE/f.txt"
     run_git "$WORK_TREE" add f.txt
     assert_refused_unchanged dirty-staged "$WORK_TREE" "$STAGED_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present dirty-staged-inputs-deleted "$INPUTS_PATH" no
 
     create_world unstaged
     printf 'unstaged\n' >"$WORK_TREE/f.txt"
     assert_refused_unchanged dirty-unstaged "$WORK_TREE" "$UNSTAGED_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present dirty-unstaged-inputs-deleted "$INPUTS_PATH" no
 
     create_world untracked
     printf 'new\n' >"$WORK_TREE/new.txt"
     assert_refused_unchanged dirty-untracked "$WORK_TREE" "$UNTRACKED_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present dirty-untracked-inputs-deleted "$INPUTS_PATH" no
 
     create_world inputs-not-ignored
@@ -640,7 +643,7 @@ test_git_state_refusals() {
     run_git "$WORK_TREE" commit -q -am 'stop ignoring .hivemind'
     stub_respond pr-list '' '' 1 'HTTP 401: Bad credentials'
     assert_blocker inputs-not-ignored "$WORK_TREE" "$LOOKUP_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present inputs-not-ignored-deleted "$INPUTS_PATH" no
     assert_equal inputs-not-ignored-clean '' "$(run_git "$WORK_TREE" status --porcelain=v1 --untracked-files=all)" \
         "the deleted inputs file left no untracked file"
@@ -651,7 +654,7 @@ test_git_state_refusals() {
     run_git "$WORK_TREE" commit -q -am 'stop ignoring .hivemind'
     printf 'x\n' >"$WORK_TREE/.hivemind/other.txt"
     assert_blocker inputs-not-ignored-other "$WORK_TREE" "$UNTRACKED_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_inputs_present inputs-not-ignored-other-deleted "$INPUTS_PATH" no
     assert_inputs_present inputs-not-ignored-other-kept "$WORK_TREE/.hivemind/other.txt" yes
     assert_equal git-state-no-gh 0 "$(call_count pr-list)" "no gh call"
@@ -663,29 +666,29 @@ test_lookup_refusals() {
     create_world lookup-fails
     stub_respond pr-list '' '' 1 'HTTP 401: Bad credentials'
     assert_refused_unchanged lookup-gh-fails "$WORK_TREE" "$LOOKUP_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal lookup-gh-fails-args "$LIST_ARGS" "$(cat "$GH_STUB_DIR/pr-list.1.args")" "gh pr list argv"
     assert_inputs_present lookup-gh-fails-inputs-deleted "$INPUTS_PATH" no
 
     create_world lookup-not-json
     stub_respond pr-list '' 'not json'
     assert_refused_unchanged lookup-not-json "$WORK_TREE" "$LOOKUP_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world lookup-not-array
     stub_respond pr-list '' '{"number":1}'
     assert_refused_unchanged lookup-not-array "$WORK_TREE" "$LOOKUP_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world lookup-bad-entry
     stub_respond pr-list '' '[{"number":"7","url":"u","headRefName":"feat/x","headRefOid":"x","baseRefName":"main"}]'
     assert_refused_unchanged lookup-bad-entry "$WORK_TREE" "$LOOKUP_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world lookup-scalar-entry
     stub_respond pr-list '' '["x"]'
     assert_refused_unchanged lookup-scalar-entry "$WORK_TREE" "$LOOKUP_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 }
 
 # ── Create path ─────────────────────────────────────────────────────────────
@@ -696,7 +699,7 @@ test_create() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success create "$WORK_TREE" "$(expected_block true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_branch_pushed create-pushed
     assert_equal create-upstream "origin|refs/heads/$BRANCH" \
         "$(run_git "$WORK_TREE" config --get "branch.$BRANCH.remote")|$(run_git "$WORK_TREE" config --get "branch.$BRANCH.merge")" \
@@ -729,7 +732,7 @@ test_create() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success create-remote "$WORK_TREE" "$(expected_block true)" \
-        --head "$BRANCH" --base main --remote origin --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --remote origin --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_branch_pushed create-remote-pushed
 
     create_world create-empty-body
@@ -737,7 +740,7 @@ test_create() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success create-empty-body "$WORK_TREE" "$(expected_block true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal create-empty-body-file 'x' "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'x')" "empty body file"
 
     create_world create-gh-stderr
@@ -745,7 +748,7 @@ test_create() {
     stub_create_ok
     stub_respond pr-create '' "$PR_URL"$'\n' 0 'Warning: 1 uncommitted change'
     assert_success create-gh-stderr "$WORK_TREE" "$(expected_block true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 }
 
 test_title_not_expanded() {
@@ -756,7 +759,7 @@ test_title_not_expanded() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success hostile "$WORK_TREE" "$(expected_block true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     create_args="$(cat "$GH_STUB_DIR/pr-create.1.args")"
     assert_equal hostile-title "--title=$hostile_title" "$(printf '%s\n' "$create_args" | sed -n '5p')" "title passed as one literal argument"
     assert_equal hostile-body "\$(touch pwned3)"$'\n'"\`touch pwned4\`" "$(cat "$GH_STUB_DIR/pr-create.1.body")" "body passed verbatim"
@@ -767,7 +770,7 @@ test_title_not_expanded() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success dash-title "$WORK_TREE" "$(expected_block true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal dash-title-arg '--title=--draft' "$(sed -n '5p' "$GH_STUB_DIR/pr-create.1.args")" "dash title bound to --title"
 }
 
@@ -776,14 +779,14 @@ test_draft() {
     write_inputs '{"title":"t","body":"b","draft":true}'
     stub_respond pr-list '' '[]'
     stub_create_ok
-    assert_success draft "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success draft "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal draft-flag '--draft' "$(sed -n '7p' "$GH_STUB_DIR/pr-create.1.args")" "--draft passed"
 
     create_world draft-false
     write_inputs '{"title":"t","body":"b","draft":false}'
     stub_respond pr-list '' '[]'
     stub_create_ok
-    assert_success draft-false "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success draft-false "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal draft-false-flag 6 "$(wc -l <"$GH_STUB_DIR/pr-create.1.args" | tr -d ' ')" "no --draft"
 }
 
@@ -815,7 +818,7 @@ test_comment() {
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
     write_inputs "$(jq -cn --arg comment "$comment_text" '{title: "t", body: "b", comment: $comment}')"
     assert_success comment-reuse "$WORK_TREE" "$(expected_comment_block false true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal comment-reuse-calls 1 "$(call_count pr-comment)" "one gh pr comment"
     comment_args="$(cat "$GH_STUB_DIR/pr-comment.1.args")"
     assert_equal comment-reuse-args "$(printf 'pr\ncomment\n7')" \
@@ -833,10 +836,10 @@ test_comment() {
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
     write_inputs '{"title":"t","body":"b","comment":"again"}'
     assert_success comment-rerun-1 "$WORK_TREE" "$(expected_comment_block false true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     write_inputs '{"title":"t","body":"b","comment":"again"}'
     assert_success comment-rerun-2 "$WORK_TREE" "$(expected_comment_block false true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal comment-rerun-calls 2 "$(call_count pr-comment)" "each run that reuses the PR posts its own comment"
 
     create_world comment-gh-stderr
@@ -844,14 +847,14 @@ test_comment() {
     stub_respond pr-comment '' '' 0 'Warning: comment posted with a notice'
     write_inputs '{"title":"t","body":"b","comment":"c"}'
     assert_success comment-gh-stderr "$WORK_TREE" "$(expected_comment_block false true)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world comment-create
     stub_respond pr-list '' '[]'
     stub_create_ok
     write_inputs '{"title":"t","body":"b","comment":"c"}'
     assert_success comment-create "$WORK_TREE" "$(expected_comment_block true false)" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal comment-create-no-comment 0 "$(call_count pr-comment)" "no gh pr comment on a created PR"
     assert_equal comment-create-body 'bx' "$(cat "$GH_STUB_DIR/pr-create.1.body"; printf 'x')" "body unchanged by the comment"
 
@@ -861,7 +864,7 @@ test_comment() {
     stub_create_ok
     write_inputs '{"title":"t","body":"b","comment":"c"}'
     assert_success comment-create-warning "$WORK_TREE" "$(expected_comment_block true false "$REPO_UNKNOWN_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal comment-create-warning-no-comment 0 "$(call_count pr-comment)" "no gh pr comment on a created PR"
 
     create_world comment-post-fails
@@ -869,7 +872,7 @@ test_comment() {
     stub_respond pr-comment '' '' 1 'HTTP 403: Resource not accessible'
     write_inputs '{"title":"t","body":"b","comment":"c"}'
     assert_blocker comment-post-fails "$WORK_TREE" "$COMMENT_POST_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal comment-post-fails-gh-stderr 1 "$(grep -c 'HTTP 403: Resource not accessible' "$WORKDIR/comment-post-fails.err")" "gh stderr relayed"
     assert_equal comment-post-fails-calls 1 "$(call_count pr-comment)" "one gh pr comment, no retry"
     assert_equal comment-post-fails-no-create 0 "$(call_count pr-create)" "no gh pr create"
@@ -884,7 +887,7 @@ test_reuse() {
     run_git "$WORK_TREE" push -q origin "refs/heads/$BRANCH:refs/heads/$BRANCH"
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
     write_inputs '{"title":"t","body":"b","draft":true}'
-    assert_success reuse "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success reuse "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal reuse-no-create 0 "$(call_count pr-create)" "no gh pr create"
     assert_equal reuse-no-view 0 "$(call_count pr-view)" "no gh pr view"
     assert_equal reuse-reads 2 "$(call_count pr-list)" "no re-read when the PR carries the commit"
@@ -896,7 +899,7 @@ test_reuse() {
     stub_respond pr-list 2 "[$(pr_entry 7 "$BRANCH" main "$other_sha")]"
     stub_respond pr-list 3 "[$(pr_entry 7 "$BRANCH" main "$other_sha")]"
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
-    assert_success reuse-lag "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success reuse-lag "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal reuse-lag-reads 4 "$(call_count pr-list)" "re-read until the head SHA caught up"
     assert_equal reuse-lag-no-create 0 "$(call_count pr-create)" "no gh pr create"
     assert_branch_pushed reuse-lag-pushed
@@ -904,36 +907,36 @@ test_reuse() {
     create_world reuse-lag-exhausted
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$TRUNK_SHA")]"
     stub_respond pr-create '' '' 1 'a pull request for branch already exists'
-    assert_blocker reuse-lag-exhausted "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker reuse-lag-exhausted "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal reuse-lag-exhausted-reads 6 "$(call_count pr-list)" "one lookup and five reads after the push"
     assert_equal reuse-lag-exhausted-gh-stderr 1 "$(grep -c 'a pull request for branch already exists' "$WORKDIR/reuse-lag-exhausted.err")" "gh stderr relayed"
 
     create_world reuse-fork-name
     stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$TRUNK_SHA")]"
     stub_create_ok
-    assert_success reuse-fork-name "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success reuse-fork-name "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal reuse-fork-name-reads 6 "$(call_count pr-list)" "a same-name PR on another SHA is never reused"
 
     create_world reuse-other-base
     stub_respond pr-list '' "[$(pr_entry 8 "$BRANCH" release "$HEAD_SHA"),$(pr_entry 9 other main "$HEAD_SHA")]"
     stub_create_ok
-    assert_success reuse-other-base "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success reuse-other-base "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal reuse-other-base-reads 2 "$(call_count pr-list)" "PRs with another head or base are ignored"
 
     create_world reuse-many
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA"),$(pr_entry 8 "$BRANCH" main "$HEAD_SHA")]"
-    assert_blocker reuse-many "$WORK_TREE" "$MANY_CARRYING_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker reuse-many "$WORK_TREE" "$MANY_CARRYING_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal reuse-many-no-create 0 "$(call_count pr-create)" "no gh pr create"
 
     create_world reuse-bad-url
     stub_respond pr-list '' "[{\"number\":7,\"url\":\"https://github.com/o/r/pull/7\$(x)\",\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"baseRefName\":\"main\",\"headRepository\":{\"id\":\"R_o\"}}]"
-    assert_blocker reuse-bad-url "$WORK_TREE" "$URL_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker reuse-bad-url "$WORK_TREE" "$URL_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal reuse-bad-url-no-create 0 "$(call_count pr-create)" "no gh pr create"
 
     create_world reread-fails
     stub_respond pr-list 1 '[]'
     stub_respond pr-list '' '' 1
-    assert_blocker reread-fails "$WORK_TREE" "$REREAD_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker reread-fails "$WORK_TREE" "$REREAD_FAILED_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_branch_pushed reread-fails-pushed
     assert_equal reread-fails-no-create 0 "$(call_count pr-create)" "no gh pr create"
 }
@@ -945,19 +948,19 @@ test_head_repository() {
     create_world repo-fork-same-commit
     stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$HEAD_SHA" R_f)]"
     stub_create_ok
-    assert_success repo-fork-same-commit "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success repo-fork-same-commit "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal repo-fork-same-commit-reads 2 "$(call_count pr-list)" "a fork PR causes no re-read"
     assert_equal repo-fork-same-commit-create 1 "$(call_count pr-create)" "a fork PR on the pushed commit is not reused"
 
     create_world repo-fork-and-own
     stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$HEAD_SHA" R_f),$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
-    assert_success repo-fork-and-own "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success repo-fork-and-own "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal repo-fork-and-own-no-create 0 "$(call_count pr-create)" "own PR reused beside a fork PR"
 
     create_world repo-deleted-fork
     stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$HEAD_SHA" null)]"
     stub_create_ok
-    assert_success repo-deleted-fork "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success repo-deleted-fork "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal repo-deleted-fork-reads 2 "$(call_count pr-list)" "a null head repository is not reused"
 
     for bad_entry in '"R_o"' '{"id":5}' '{"name":"r"}' '[]' 'true'; do
@@ -965,38 +968,38 @@ test_head_repository() {
         create_world "repo-lookup-bad-$index"
         stub_respond pr-list '' "[{\"number\":7,\"url\":\"$PR_URL\",\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"baseRefName\":\"main\",\"headRepository\":$bad_entry}]"
         assert_refused_unchanged "repo-lookup-bad-$index" "$WORK_TREE" "$LOOKUP_REASON" \
-            --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+            --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     done
 
     create_world repo-view-mismatch
     stub_respond pr-list '' '[]'
     stub_create_ok "$BRANCH" "$HEAD_SHA" R_x
-    assert_blocker repo-view-mismatch "$WORK_TREE" "$REPO_MISMATCH_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker repo-view-mismatch "$WORK_TREE" "$REPO_MISMATCH_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world repo-view-null
     stub_respond pr-list '' '[]'
     stub_create_ok "$BRANCH" "$HEAD_SHA" null
-    assert_blocker repo-view-null "$WORK_TREE" "$REPO_MISMATCH_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker repo-view-null "$WORK_TREE" "$REPO_MISMATCH_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world repo-view-bad-type
     stub_respond pr-list '' '[]'
     stub_respond pr-create '' "$PR_URL"$'\n'
     stub_respond pr-view '' "{\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"headRepository\":\"R_o\"}"
-    assert_blocker repo-view-bad-type "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker repo-view-bad-type "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world repo-view-bad-type-unknown
     stub_respond pr-list '' '[]'
     stub_respond repo-view '' '' 1
     stub_respond pr-create '' "$PR_URL"$'\n'
     stub_respond pr-view '' "{\"headRefName\":\"$BRANCH\",\"headRefOid\":\"$HEAD_SHA\",\"headRepository\":\"R_o\"}"
-    assert_blocker repo-view-bad-type-unknown "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker repo-view-bad-type-unknown "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world repo-gh-fails
     stub_respond pr-list '' '[]'
     stub_respond repo-view '' '' 1 'GraphQL: Could not resolve to a Repository'
     stub_create_ok "$BRANCH" "$HEAD_SHA" R_x
     assert_success repo-gh-fails "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal repo-gh-fails-reads 1 "$(call_count pr-list)" "no read after the push when the id is unknown"
     assert_branch_pushed repo-gh-fails-pushed
 
@@ -1004,7 +1007,7 @@ test_head_repository() {
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
     stub_respond repo-view '' '' 1
     stub_respond pr-create '' '' 1 "a pull request for branch \"$BRANCH\" into branch \"main\" already exists"
-    assert_blocker repo-gh-fails-own-pr "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker repo-gh-fails-own-pr "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal repo-gh-fails-own-pr-reads 1 "$(call_count pr-list)" "no text-keyed reuse when the id is unknown"
     assert_equal repo-gh-fails-own-pr-create 1 "$(call_count pr-create)" "create ran"
 
@@ -1013,7 +1016,7 @@ test_head_repository() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success repo-local-path "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal repo-local-path-no-repo-view 0 "$(call_count repo-view)" "a local path is never passed to gh"
     assert_branch_pushed repo-local-path-pushed
 
@@ -1021,7 +1024,7 @@ test_head_repository() {
     run_git "$WORK_TREE" remote set-url origin 'ssh://git@github.com/o/r.git'
     stub_respond pr-list '' '[]'
     stub_create_ok
-    assert_success repo-ssh-scheme "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success repo-ssh-scheme "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal repo-ssh-scheme-args "$(printf 'repo\nview\n--json\nid\n--\nssh://git@github.com/o/r.git')" \
         "$(cat "$GH_STUB_DIR/repo-view.1.args")" "gh repo view reads the ssh:// URL"
 
@@ -1033,7 +1036,7 @@ test_head_repository() {
         stub_respond pr-list '' '[]'
         stub_respond repo-view '' "$bad_view"
         stub_create_ok
-        assert_blocker "repo-view-bad-$index" "$WORK_TREE" "$REPO_VIEW_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        assert_blocker "repo-view-bad-$index" "$WORK_TREE" "$REPO_VIEW_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
         assert_branch_pushed "repo-view-bad-$index-pushed"
         assert_equal "repo-view-bad-$index-no-create" 0 "$(call_count pr-create)" "no gh pr create"
     done
@@ -1049,7 +1052,7 @@ test_head_repository() {
     run_git "$WORK_TREE" config "branch.$BRANCH.pushRemote" fork
     stub_respond repo-view '' '{"id":"R_f"}'$'\n'
     stub_respond pr-list '' "[$(pr_entry 9 "$BRANCH" main "$HEAD_SHA"),$(pr_entry 7 "$BRANCH" main "$HEAD_SHA" R_f)]"
-    assert_success repo-triangular "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_success repo-triangular "$WORK_TREE" "$(expected_block false)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal repo-triangular-args "$(printf 'repo\nview\n--json\nid\n--\ngit@github.com:f/r.git')" \
         "$(cat "$GH_STUB_DIR/repo-view.1.args")" "gh repo view reads the push remote URL"
     assert_equal repo-triangular-fork-ref "$HEAD_SHA" \
@@ -1062,7 +1065,7 @@ test_create_failures() {
     create_world create-gh-fails
     stub_respond pr-list '' '[]'
     stub_respond pr-create '' '' 1 'GraphQL: something went wrong'
-    assert_blocker create-gh-fails "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker create-gh-fails "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal create-gh-fails-no-view 0 "$(call_count pr-view)" "no gh pr view"
 
     local bad_output index=0
@@ -1072,30 +1075,30 @@ test_create_failures() {
         create_world "create-bad-url-$index"
         stub_respond pr-list '' '[]'
         stub_respond pr-create '' "$bad_output"$'\n'
-        assert_blocker "create-bad-url-$index" "$WORK_TREE" "$URL_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        assert_blocker "create-bad-url-$index" "$WORK_TREE" "$URL_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     done
 
     create_world view-fails
     stub_respond pr-list '' '[]'
     stub_respond pr-create '' "$PR_URL"$'\n'
     stub_respond pr-view '' '' 1
-    assert_blocker view-fails "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker view-fails "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world view-bad-json
     stub_respond pr-list '' '[]'
     stub_respond pr-create '' "$PR_URL"$'\n'
     stub_respond pr-view '' '{"headRefName":"feat/x"}'
-    assert_blocker view-bad-json "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker view-bad-json "$WORK_TREE" "$VIEW_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world view-head-mismatch
     stub_respond pr-list '' '[]'
     stub_create_ok main
-    assert_blocker view-head-mismatch "$WORK_TREE" "$HEAD_MISMATCH_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker view-head-mismatch "$WORK_TREE" "$HEAD_MISMATCH_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world view-oid-mismatch
     stub_respond pr-list '' '[]'
     stub_create_ok "$BRANCH" "$TRUNK_SHA"
-    assert_blocker view-oid-mismatch "$WORK_TREE" "$OID_MISMATCH_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker view-oid-mismatch "$WORK_TREE" "$OID_MISMATCH_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 }
 
 # ── Push outcomes through the real push-branch.sh ───────────────────────────
@@ -1109,7 +1112,7 @@ test_push_outcomes() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success push-rejected-warn "$WORK_TREE" "$(expected_block true "$REJECT_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal push-rejected-remote "refs/heads/main $TRUNK_SHA" "$(list_remote_refs)" "branch not on its remote"
 
     create_world push-rejected-gh-aborts
@@ -1119,7 +1122,7 @@ test_push_outcomes() {
     stub_respond pr-list '' '[]'
     stub_respond pr-create '' '' 1 'aborted: you must first push the current branch to a remote'
     assert_blocker push-rejected-gh-aborts "$WORK_TREE" "$CREATE_FAILED_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world push-rejected-explicit
     hook_path="$ORIGIN_DIR/hooks/pre-receive"
@@ -1127,21 +1130,21 @@ test_push_outcomes() {
     chmod +x "$hook_path"
     stub_respond pr-list '' '[]'
     assert_blocker push-rejected-explicit "$WORK_TREE" 'push was rejected' \
-        --head "$BRANCH" --base main --remote origin --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --remote origin --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal push-rejected-explicit-no-create 0 "$(call_count pr-create)" "no gh pr create"
 
     create_world no-origin
     run_git "$WORK_TREE" remote remove origin
     stub_respond pr-list '' '[]'
     stub_respond pr-create '' '' 1 'aborted: you must first push the current branch to a remote'
-    assert_blocker no-origin "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+    assert_blocker no-origin "$WORK_TREE" "$CREATE_FAILED_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world no-origin-reuse
     run_git "$WORK_TREE" remote remove origin
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
     stub_respond pr-create '' '' 1 "a pull request for branch \"$BRANCH\" into branch \"main\" already exists"
     assert_blocker no-origin-reuse "$WORK_TREE" "$CREATE_FAILED_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world expect-mismatch
     stub_respond pr-list '' '[]'
@@ -1153,13 +1156,13 @@ test_push_outcomes() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_refused_unchanged head-mismatch "$WORK_TREE" "$PUSH_MISMATCH_REASON" \
-        --head other --base main --inputs "$INPUTS_REL"
+        --head other --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world base-is-branch
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_refused_unchanged base-is-branch "$WORK_TREE" "$PUSH_MISMATCH_REASON" \
-        --head "$BRANCH" --base "$BRANCH" --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base "$BRANCH" --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     for spoofed_base in develop release/main; do
         index=$((index + 1))
@@ -1169,7 +1172,7 @@ test_push_outcomes() {
         stub_respond pr-list '' '[]'
         stub_create_ok main "$TRUNK_SHA"
         assert_refused_unchanged "remote-default-$index" "$WORK_TREE" "$PUSH_MISMATCH_REASON" \
-            --head main --base "$spoofed_base" --inputs "$INPUTS_REL"
+            --head main --base "$spoofed_base" --expect-commit "$TRUNK_SHA" --inputs "$INPUTS_REL"
         assert_equal "remote-default-$index-origin" "refs/heads/main $TRUNK_SHA" "$(list_remote_refs)" \
             "nothing pushed to origin"
     done
@@ -1194,14 +1197,14 @@ EOF
     stub_respond pr-list '' '[]'
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
-        assert_success fake-push-ok "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        assert_success fake-push-ok "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world fake-push-hint
     stub_respond pr-list '' '[]'
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
         FAKE_PUSH_ERR="$PUSH_HINT_LINES" \
-        assert_success fake-push-hint "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        assert_success fake-push-hint "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world fake-push-hint-then-blocker
     stub_respond pr-list '' '[]'
@@ -1209,7 +1212,7 @@ EOF
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
         FAKE_PUSH_ERR="$PUSH_HINT_LINES" \
         assert_blocker fake-push-hint-then-blocker "$WORK_TREE" "$CREATE_FAILED_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal fake-push-hint-then-blocker-order \
         "$(printf '%s\nGraphQL: something went wrong\nblocker: %s' "$PUSH_HINT_LINES" "$CREATE_FAILED_REASON")" \
         "$(cat "$WORKDIR/fake-push-hint-then-blocker.err")" "push stderr, then gh stderr, then the blocker last"
@@ -1228,7 +1231,7 @@ EOF
         stub_respond pr-list '' '[]'
         stub_create_ok
         FAKE_PUSH_OUT="$fake_out" assert_blocker "fake-push-bad-$index" "$WORK_TREE" "$UNEXPECTED_PUSH_REASON" \
-            --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+            --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
         assert_equal "fake-push-bad-$index-no-create" 0 "$(call_count pr-create)" "no gh pr create"
     done
 
@@ -1258,7 +1261,7 @@ EOF
         stub_respond pr-list '' '[]'
         stub_create_ok
         FAKE_PUSH_OUT="$fake_out" assert_blocker "fake-push-remote-bad-$index" "$WORK_TREE" "$UNEXPECTED_PUSH_REASON" \
-            --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+            --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
         assert_equal "fake-push-remote-bad-$index-no-create" 0 "$(call_count pr-create)" "no gh pr create"
     done
 
@@ -1266,20 +1269,20 @@ EOF
     stub_respond pr-list '' '[]'
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: other\n' "$BRANCH" "$HEAD_SHA")" assert_blocker fake-push-remote-other \
-        "$WORK_TREE" "$UNEXPECTED_PUSH_REASON" --head "$BRANCH" --base main --remote origin --inputs "$INPUTS_REL"
+        "$WORK_TREE" "$UNEXPECTED_PUSH_REASON" --head "$BRANCH" --base main --remote origin --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world fake-push-remote-explicit
     stub_respond pr-list '' '[]'
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" assert_success fake-push-remote-explicit \
-        "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --remote origin --inputs "$INPUTS_REL"
+        "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --remote origin --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world fake-push-rejected
     stub_respond pr-list '' "[$(pr_entry 7 "$BRANCH" main "$HEAD_SHA")]"
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\nwarning: %s\n' "$BRANCH" "$HEAD_SHA" "$REJECT_WARNING")" \
         assert_success fake-push-rejected "$WORK_TREE" "$(expected_block true "$REJECT_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal fake-push-rejected-no-repo-view 0 "$(call_count repo-view)" "no gh repo view after a rejected push"
     assert_equal fake-push-rejected-reads 1 "$(call_count pr-list)" "no reuse after a rejected push"
 
@@ -1288,7 +1291,7 @@ EOF
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nwarning: %s\n' "$BRANCH" "$HEAD_SHA" "$DEFERRED_WARNING")" \
         assert_success fake-push-deferred "$WORK_TREE" "$(expected_block true "$DEFERRED_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal fake-push-deferred-no-repo-view 0 "$(call_count repo-view)" "no gh repo view after a deferred push"
 
     create_world fake-push-two-urls
@@ -1298,7 +1301,7 @@ EOF
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
         assert_success fake-push-two-urls "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal fake-push-two-urls-no-repo-view 0 "$(call_count repo-view)" "two push URLs are never passed to gh"
 
     create_world fake-push-https-userinfo
@@ -1307,7 +1310,7 @@ EOF
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
         assert_success fake-push-https-userinfo "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal fake-push-https-userinfo-no-repo-view 0 "$(call_count repo-view)" "an https URL with @ is never passed to gh"
 
     create_world fake-push-https
@@ -1315,7 +1318,7 @@ EOF
     stub_respond pr-list '' '[]'
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: origin\n' "$BRANCH" "$HEAD_SHA")" \
-        assert_success fake-push-https "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        assert_success fake-push-https "$WORK_TREE" "$(expected_block true)" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal fake-push-https-args "$(printf 'repo\nview\n--json\nid\n--\nhttps://github.com/o/r.git')" \
         "$(cat "$GH_STUB_DIR/repo-view.1.args")" "gh repo view reads the push URL"
 
@@ -1324,19 +1327,19 @@ EOF
     stub_create_ok
     FAKE_PUSH_OUT="$(printf 'branch: %s\ncommit: %s\nremote: gone\n' "$BRANCH" "$HEAD_SHA")" \
         assert_success fake-push-unknown-remote "$WORK_TREE" "$(expected_block true "$REPO_UNKNOWN_WARNING")" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal fake-push-unknown-remote-no-repo-view 0 "$(call_count repo-view)" "a remote with no URL is never passed to gh"
 
     create_world fake-push-blocker
     stub_respond pr-list '' '[]'
     FAKE_PUSH_OUT='' FAKE_PUSH_RC=1 FAKE_PUSH_ERR='blocker: push was rejected' assert_blocker fake-push-blocker \
-        "$WORK_TREE" 'push was rejected' --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        "$WORK_TREE" 'push was rejected' --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world fake-push-hint-blocker
     stub_respond pr-list '' '[]'
     FAKE_PUSH_OUT='' FAKE_PUSH_RC=1 FAKE_PUSH_ERR="$PUSH_HINT_LINES"$'\nblocker: push was rejected' \
         assert_blocker fake-push-hint-blocker "$WORK_TREE" 'push was rejected' \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal fake-push-hint-blocker-relayed "$PUSH_HINT_LINES"$'\nblocker: push was rejected' \
         "$(cat "$WORKDIR/fake-push-hint-blocker.err")" "push stderr relayed, ending with its blocker line"
     assert_equal fake-push-hint-blocker-no-create 0 "$(call_count pr-create)" "no gh pr create"
@@ -1344,19 +1347,19 @@ EOF
     create_world fake-push-crash
     stub_respond pr-list '' '[]'
     FAKE_PUSH_OUT='' FAKE_PUSH_RC=2 FAKE_PUSH_ERR='boom' assert_blocker fake-push-crash \
-        "$WORK_TREE" "$PUSH_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        "$WORK_TREE" "$PUSH_FAILED_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     create_world fake-push-silent
     stub_respond pr-list '' '[]'
     FAKE_PUSH_OUT='' FAKE_PUSH_RC=1 assert_blocker fake-push-silent \
-        "$WORK_TREE" "$PUSH_FAILED_REASON" --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        "$WORK_TREE" "$PUSH_FAILED_REASON" --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 
     rm -f "$copy_root/skills/push-branch/scripts/push-branch.sh"
     create_world push-script-missing
     stub_respond pr-list '' '[]'
     assert_refused_unchanged push-script-missing "$WORK_TREE" \
         'required script missing: skills/push-branch/scripts/push-branch.sh; refusing to proceed' \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
     assert_equal push-script-missing-no-gh 0 "$(call_count pr-list)" "no gh call"
 
     ENGINE_UNDER_TEST="$ENGINE"
@@ -1369,13 +1372,13 @@ test_subfolder_invocation() {
     stub_respond pr-list '' '[]'
     stub_create_ok
     assert_success subfolder "$WORK_TREE/sub" "$(expected_block true)" \
-        --head "$BRANCH" --base main --inputs "../$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "../$INPUTS_REL"
     assert_branch_pushed subfolder-pushed
     assert_inputs_present subfolder-inputs-deleted "$INPUTS_PATH" no
 
     create_world subfolder-relative
     assert_refused_unchanged subfolder-relative-to-start "$WORK_TREE/sub" "$INPUTS_MISSING_REASON" \
-        --head "$BRANCH" --base main --inputs "$INPUTS_REL"
+        --head "$BRANCH" --base main --expect-commit "$HEAD_SHA" --inputs "$INPUTS_REL"
 }
 
 # ── Run ──────────────────────────────────────────────────────────────────────
