@@ -105,7 +105,7 @@ Bytes are `wc -c` of each file's git blob (LF) on `main` and on the branch head.
 |---|---|---|---|---|
 | `plugin/agents/github-reviewer.md` | 28,406 | 21,510 | −6,896 | −1.7k |
 | `plugin/agents/local-reviewer.md` | 26,737 | 23,340 | −3,397 | −0.8k |
-| `plugin/agents/cerebrate.md` | 23,564 | 21,507 | −2,057 | −0.5k |
+| `plugin/agents/cerebrate.md` | 23,564 | 21,763 | −1,801 | −0.45k |
 | `plugin/governance/remediation-doctrine.md` | 31,212 | 32,770 | +1,558 | +0.4k |
 | `plugin/skills/github-review-loop/scripts/reply-resolve.sh` | 31,864 | 31,614 | −250 | −0.06k |
 
@@ -115,8 +115,8 @@ Saving per dispatch:
 
 - **github-reviewer**: 6,896 body bytes saved, minus 1,558 for Review Loop Common, is 5,338 bytes (~1.3k tokens) on load. It also no longer reads the `fetch-normalize.sh` contract header, lines 27 to 151 (§2–§4), which is 7,646 bytes (~1.9k tokens). Together that is 12,984 bytes (~3.2k tokens).
 - **local-reviewer**: 3,397 body bytes saved, minus 1,558 for Review Loop Common, is 1,839 bytes (~0.5k tokens).
-- **cerebrate planning**: 2,057 bytes (~0.5k tokens). Planning does not load the doctrine.
-- **Whole-doctrine loads**: the overlord's load and cerebrate zoom-out's load each grow by 1,558 bytes (~0.4k tokens). For a cerebrate zoom-out dispatch the net saving is 2,057 − 1,558 = 499 bytes (~0.1k tokens).
+- **cerebrate planning**: 1,801 bytes (~0.45k tokens). Planning does not load the doctrine.
+- **Whole-doctrine loads**: the overlord's load and cerebrate zoom-out's load each grow by 1,558 bytes (~0.4k tokens). For a cerebrate zoom-out dispatch the net saving is 1,801 − 1,558 = 243 bytes (~0.06k tokens).
 
 Cerebrate's YAML plan skeleton was kept. It carries fields that `plan-schema.json` lacks: the delivery object (`mode`, `overlap_risk`, `overlap_details`, `strains`), versioning `impact`, `likely_bump` and `artifacts`, `id`, and `steps[].status`. Only its comments that copied the schema were trimmed.
 
