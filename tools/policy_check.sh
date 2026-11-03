@@ -2248,7 +2248,7 @@ mark_time 'CHECK13'
 # DISCOVERY KEY (no hand-kept list): every navigator's `allowed-tools` carries
 # a scoped Edit entry for its own inputs file, an entry that begins with the
 # fixed string `- Edit(.hivemind/` whatever comment trails it (see
-# security-policy.md "Inert Inputs-File Navigator Pattern"). The key is the
+# docs/skill-authoring.md "Covered Navigators"). The key is the
 # runtime pre-approval itself: that entry is what lets the navigator's
 # inputs-file Write run without a prompt while the skill runs, so a navigator
 # cannot drop the key without its own Write starting to prompt. Executor skills
@@ -2274,26 +2274,27 @@ mark_time 'CHECK13'
 #       enrolled by CHECK 9 and therefore does NOT satisfy (a) — that is the point,
 #       not a false positive: an unenrolled navigator has no guard-ordering
 #       enforcement.
-#   (b) the literal `hivemind:<name>` appears inside the Inert Inputs-File
-#       Navigator Pattern section of plugin/governance/security-policy.md, i.e.
-#       the navigator is in the policy's enumerated covered set.
+#   (b) the literal `hivemind:<name>` appears inside the Covered Navigators
+#       section of docs/skill-authoring.md, i.e. the navigator is in the
+#       enumerated covered set.
 echo ''
 echo '=== CHECK 14: Inert inputs-file navigator obligations ==='
 
 CHECK14_EDIT_ENTRY_PREFIX='- Edit(.hivemind/'
-CHECK14_POLICY_DOC="$PLUGIN_ROOT/governance/security-policy.md"
-CHECK14_SECTION_HEADING='### Inert Inputs-File Navigator Pattern'
+CHECK14_POLICY_DOC="$REPO_ROOT/docs/skill-authoring.md"
+CHECK14_SECTION_HEADING='### Covered Navigators'
 
 # Body of the covered-set section: the heading's lines up to (not including) the
-# next `### ` heading. Obligation (b) is asserted against this span alone, so a
+# next heading of level 1 to 3 (`# `, `## ` or `### `), because Covered Navigators
+# ends the file and a later higher-level heading must also close it. Obligation (b) is asserted against this span alone, so a
 # `hivemind:<name>` mention elsewhere in the policy doc cannot satisfy it.
-# A trailing CR is stripped before the heading comparison: governance docs in this
-# repo are stored CRLF, and an exact match against a CR-terminated line would
+# A trailing CR is stripped before the heading comparison: governance and docs files
+# in this repo are stored CRLF, and an exact match against a CR-terminated line would
 # silently yield an EMPTY section and fail every navigator.
 check14_section="$(awk -v heading="$CHECK14_SECTION_HEADING" '
     { sub(/\r$/, "") }
     $0 == heading { in_section = 1; next }
-    in_section && /^### / { exit }
+    in_section && /^(#|##|###) / { exit }
     in_section { print }
 ' "$CHECK14_POLICY_DOC")"
 
@@ -2383,7 +2384,7 @@ for skill_file in "${check14_skill_files[@]}"; do
     if [[ "$check14_section" != *"hivemind:${skill_name}"* ]]; then
         check14_found=true
         add_finding 'CHECK14' "$skill_file" "$entry_line" \
-            "Inert inputs-file navigator hivemind:${skill_name} fails obligation (b): literal 'hivemind:${skill_name}' is absent from the '${CHECK14_SECTION_HEADING}' section of plugin/governance/security-policy.md -- add it to the covered-set enumeration"
+            "Inert inputs-file navigator hivemind:${skill_name} fails obligation (b): literal 'hivemind:${skill_name}' is absent from the '${CHECK14_SECTION_HEADING}' section of docs/skill-authoring.md -- add it to the covered-set enumeration"
     fi
 done
 
@@ -2397,7 +2398,7 @@ if [[ "$check14_navigator_count" -eq 0 ]]; then
 fi
 
 if [[ "$check14_found" == false ]]; then
-    echo "[PASS] Check 14: All $check14_navigator_count inert inputs-file navigators source containment.sh and are enumerated in the security policy's covered set"
+    echo "[PASS] Check 14: All $check14_navigator_count inert inputs-file navigators source containment.sh and are enumerated in the Covered Navigators section of docs/skill-authoring.md"
     CHECKS_PASSED=$((CHECKS_PASSED + 1))
 else
     CHECKS_FAILED=$((CHECKS_FAILED + 1))
@@ -3119,7 +3120,7 @@ mark_time 'CHECK15'
 #
 # WHAT IT GUARANTEES. A skill `allowed-tools` entry is a live permission rule
 # for the rest of the turn that loads the skill, workflow agents included, and
-# a bare file-tool entry matches every path (security-policy.md "Skill
+# a bare file-tool entry matches every path (docs/skill-authoring.md "Skill
 # File-Tool Grants"). CHECK 16 is a POSITIVE ALLOWLIST over every
 # plugin/skills/*/SKILL.md: an entry whose tool is Read, Write, Edit, MultiEdit,
 # NotebookEdit, Glob or Grep, bare or with parentheses, passes only as
@@ -3127,7 +3128,7 @@ mark_time 'CHECK15'
 #     <marketplace> is .name of .claude-plugin/marketplace.json and <plugin> is
 #     the name of its single plugins[] entry whose source is ./plugin; or
 #   * exactly `Edit(<glob>)`, where <glob> is the `Edit` glob that the
-#     "Inert Inputs-File Navigator Pattern" section of security-policy.md lists
+#     "Covered Navigators" section of docs/skill-authoring.md lists
 #     on THIS skill's own `hivemind:<name>` covered-set line. The doc is the
 #     ground truth: a skill not listed there may carry no Edit entry, and a
 #     listed skill only its own glob, never another navigator's. Each listed
@@ -3190,7 +3191,7 @@ mark_time 'CHECK15'
 # EXEMPTIONS. Exempt means "pinned to its current entries", not "unchecked".
 # The executor skills listed in CHECK16_EXEMPT_SKILLS keep their bare entries
 # until the executor-skill grant decision (issue 428 tail), and
-# security-policy.md "Skill File-Tool Grants" states the threat model those bare
+# docs/skill-authoring.md "Skill File-Tool Grants" states the threat model those bare
 # entries carry. An exempt skill goes through the same collector, parse-error
 # findings and entry grammar as every other skill. Instead of the allowlist
 # classifier, its file-tool entries (Read, Write, Edit, MultiEdit, NotebookEdit,
@@ -3207,7 +3208,7 @@ mark_time 'CHECK15'
 # FAIL-CLOSED. An unreadable or malformed marketplace manifest, a missing or
 # non-identifier marketplace name, no single ./plugin entry with an identifier
 # name, zero discovered skills, or zero navigator globs read from
-# security-policy.md is a finding, never a pass.
+# docs/skill-authoring.md is a finding, never a pass.
 #
 # RESIDUALS. A file tool reached through an MCP server or a future built-in
 # with another name is not a file tool here. A navigator whose covered-set line
@@ -3233,7 +3234,7 @@ echo ''
 echo '=== CHECK 16: Skill allowed-tools file-tool entries are scoped ==='
 
 CHECK16_MARKETPLACE_MANIFEST="$REPO_ROOT/.claude-plugin/marketplace.json"
-CHECK16_POLICY_CITATION='security-policy.md "Skill File-Tool Grants"'
+CHECK16_POLICY_CITATION='docs/skill-authoring.md "Skill File-Tool Grants"'
 CHECK16_ASCII_ALNUM='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789'
 CHECK16_IDENTIFIER_REGEX="^[${CHECK16_ASCII_ALNUM}][${CHECK16_ASCII_ALNUM}._-]*\$"
 CHECK16_ENTRY_GRAMMAR_REGEX="^[${CHECK16_ASCII_ALNUM}_-]+([(][^(),]*[)])?\$"
@@ -3336,7 +3337,7 @@ check16_entry_is_unrecognized() {
 # The single entry classifier: returns 0 when RAW, once normalized, names a
 # file tool (bare or with parentheses) in any form other than the cache Read
 # rule or `Edit(ALLOWED_GLOB)`, else 1. ALLOWED_GLOB is the skill's own
-# navigator glob from security-policy.md, or empty when the skill has none, in
+# navigator glob from docs/skill-authoring.md, or empty when the skill has none, in
 # which case no Edit form is allowed. With no resolved cache Read rule, no Read
 # form is allowed.
 check16_entry_is_violation() {
@@ -3358,8 +3359,8 @@ check16_entry_is_violation() {
 
 # check16_resolve_navigator_globs
 # Fills CHECK16_NAVIGATOR_GLOBS (skill name -> glob) from the `(`Edit` glob
-# `...`)` text on each `hivemind:<name>` line of the covered-set section of
-# security-policy.md. A listed glob that fails check16_is_safe_inputs_glob, or
+# `...`)` text on each `hivemind:<name>` line of the Covered Navigators section of
+# docs/skill-authoring.md. A listed glob that fails check16_is_safe_inputs_glob, or
 # a navigator listed twice, is a finding and admits nothing. Returns 1 after a
 # finding when the section is missing or lists no glob at all.
 check16_resolve_navigator_globs() {
@@ -3367,13 +3368,13 @@ check16_resolve_navigator_globs() {
     local -A seen_names=()
     if [[ ! -f "$CHECK14_POLICY_DOC" || ! -r "$CHECK14_POLICY_DOC" ]]; then
         add_finding 'CHECK16' "$CHECK14_POLICY_DOC" 0 \
-            "security-policy.md is missing or unreadable, so no navigator inputs-file glob can be read and no Edit entry is allowed -- see ${CHECK16_POLICY_CITATION}"
+            "docs/skill-authoring.md is missing or unreadable, so no navigator inputs-file glob can be read and no Edit entry is allowed -- see ${CHECK16_POLICY_CITATION}"
         return 1
     fi
     section_text="$(awk -v heading="$CHECK14_SECTION_HEADING" '
         { sub(/\r$/, "") }
         $0 == heading { in_section = 1; next }
-        in_section && /^### / { exit }
+        in_section && /^(#|##|###) / { exit }
         in_section { print }
     ' "$CHECK14_POLICY_DOC")"
     while IFS= read -r section_line; do
@@ -3702,9 +3703,9 @@ check16_evaluate_skill() {
         check16_add_problem "${CHECK16_PARSE_ERROR_LINES[$entry_index]}" "${CHECK16_PARSE_ERROR_TEXTS[$entry_index]}"
     done
     if [[ -n "$allowed_glob" ]]; then
-        allowed_edit_text="'Edit(${allowed_glob})', this skill's own inputs-file glob in security-policy.md"
+        allowed_edit_text="'Edit(${allowed_glob})', this skill's own inputs-file glob in docs/skill-authoring.md"
     else
-        allowed_edit_text="no Edit entry, because security-policy.md lists no inputs-file glob for this skill"
+        allowed_edit_text="no Edit entry, because docs/skill-authoring.md lists no inputs-file glob for this skill"
     fi
     for ((entry_index = 0; entry_index < ${#CHECK16_ENTRY_TEXTS[@]}; entry_index++)); do
         if check16_entry_is_unrecognized "${CHECK16_ENTRY_TEXTS[$entry_index]}"; then

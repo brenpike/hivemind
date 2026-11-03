@@ -1886,3 +1886,18 @@ This amendment covers https://github.com/brenpike/hivemind/issues/494. `push-bra
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/494.
+
+## Amendment 2026-11-02: the skill file-tool grant rule moves to the authoring doc
+
+The issue 428 amendment above names the Skill File-Tool Grants section of `plugin/governance/security-policy.md` as the canonical rule for skill `allowed-tools` file grants. That rule is authoring material: only skill authors and CI read it, and no agent applies it at run time. It now lives in `docs/skill-authoring.md`, a file no agent loads, so agents that load `plugin/governance/security-policy.md` no longer read it.
+
+**The change.**
+
+- The canonical rule for skill `allowed-tools` file grants is the Skill File-Tool Grants section of `docs/skill-authoring.md`.
+- CHECK 16 in `tools/policy_check.sh` cites that section, and reads the navigator `Edit(...)` globs from the Covered Navigators section of `docs/skill-authoring.md`.
+- `tools/validate.sh` routes `docs/skill-authoring.md` to the policy suite, so an edit to it runs CHECK 14 and CHECK 16.
+- ADR-0010 still records the posture. The decision of the issue 428 amendment, its allowlist and its exemptions are unchanged. Only the place the rule is written moves.
+
+The issue 428 amendment's text is unchanged. Its pointer to `plugin/governance/security-policy.md` is read through this amendment.
+
+The rest of ADR-0037 is unchanged. Status remains accepted.
