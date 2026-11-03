@@ -1,0 +1,26 @@
+{
+  "rule": "Review Loop Common doctrine section coupling",
+  "description": "P3 coupling. `## Review Loop Common` in remediation-doctrine.md holds the three rules both fix-loop reviewers share, stated once. Three canonical clauses are pinned, one entry each, because each carries a rule's claim: (a) the skill-result rule, pinned as one span covering that a skill's Output Contract and stop or return language bind that skill and never the reviewer's turn, that the reviewer continues its own procedure, and that only the reviewer's own Output Contract ends its turn -- rewriting any of these lets a skill result end the reviewer's turn; (b) the detector-order rule that `merge_advisory` and `diminishing_returns` are read only from a second, fresh detector call over the post-fix state and never from the pre-fix verdict -- rewriting it lets a stale pre-fix advisory reach the merge decision; (c) the Gate-B timing rule that the youth call is in hand before any post-fix reroute decision -- rewriting it lets a reroute be decided without the youth judgment. Each consumer, github-reviewer.md and local-reviewer.md, is pinned on its POINTER to the canonical section (`remediation-doctrine.md` (Review Loop Common)), not on the rule prose, so the prose stays free to improve at the canonical file while severing a reviewer from it is loud. What this fixture guarantees is exactly that these word sequences exist in these three named files; it claims nothing about meaning or runtime behavior. Residuals: (1) a meaning inversion or rewrite-around that leaves the pinned bytes intact stays green; (2) each consumer pin needs only one pointer in its file, so deleting one of several pointers in a reviewer stays green; (3) a new reviewer or other consumer that never cites the section is an absence defect no presence pin can see.",
+  "source": {
+    "file": "plugin/governance/remediation-doctrine.md",
+    "pattern": "Its Output Contract and any silence, stop, or return language bind THAT SKILL, never the reviewer's turn. The reviewer consumes the result and CONTINUES to the next step of its own procedure. Only the reviewer's OWN Output Contract ends its turn."
+  },
+  "consumers": [
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "`merge_advisory` and `diminishing_returns` are stateful on finding open/actionable status and go stale once fixes resolve findings, so they are read ONLY from a SECOND, FRESH detector call over the POST-fix state, NEVER from the pre-fix verdict."
+    },
+    {
+      "file": "plugin/governance/remediation-doctrine.md",
+      "pattern": "That youth call MUST be in hand BEFORE any POST-fix reroute decision"
+    },
+    {
+      "file": "plugin/agents/github-reviewer.md",
+      "pattern": "remediation-doctrine.md` (Review Loop Common)"
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "remediation-doctrine.md` (Review Loop Common)"
+    }
+  ]
+}
