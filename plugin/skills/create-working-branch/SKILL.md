@@ -26,7 +26,7 @@ After:
 
 Create or confirm the working branch for the current approved plan.
 
-Follow `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md`.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Branch Taxonomy, Branch Naming, Trunk Freshness).
 
 ## Required Inputs
 

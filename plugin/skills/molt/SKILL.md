@@ -28,7 +28,7 @@ After:
 
 Create a checkpoint commit for the current approved plan.
 
-Follow `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md`.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (Commit Messages).
 
 ## Required Inputs
 
@@ -81,8 +81,7 @@ Every commit runs through `${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh`. T
    }
    ```
 
-   Leave out `scope` and `body` when there is none. The script header lists the rule for each field. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
-   Transport Degradation Is a Hard Stop).
+   Leave out `scope` and `body` when there is none. The script header lists the rule for each field. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 5. **Final Bash tool call.** Run the commit script, where `<allowlist-validated-trunk>` is the value that passed the input gate and `<token>` is the token from requirement 4:
 
    ```bash

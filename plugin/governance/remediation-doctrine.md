@@ -25,7 +25,7 @@ At the FIRST non-trivial finding, before any fix is planned or applied, answer t
 1. **Introduced or inherited.** Was the behavior introduced by this branch or inherited from trunk? Either way, a found root cause is fixed at its source in the PR that found it, even when that source lies outside the reviewed diff. Origin never licenses a deferral or a residual.
 2. **Root class and owning layer.** What is the root class, and which layer owns it? The fix lands in that layer, not at the symptom.
 3. **Remove before harden.** Can the surface be removed or retired instead of hardened? Removal is preferred: a removed surface emits no further findings.
-4. **Threat model.** Is the attacker or failure the finding assumes inside the recorded threat model? When a recorded threat model puts it outside, reject the finding at the source by citing the record, and do not harden. When no threat model is recorded, recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`), when a reviewer raises it, and a call for the user otherwise.
+4. **Threat model.** Is the attacker or failure the finding assumes inside the recorded threat model? When a recorded threat model puts it outside, reject the finding at the source by citing the record, and do not harden. When no threat model is recorded, recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls), when a reviewer raises it, and a call for the user otherwise.
 
 The answers feed **Closed-by-Construction Preference** and **Surface-Growth Escalation**. A finding rejected under question 4 is handled per **Recorded Decisions and Repeat Findings**.
 
@@ -113,7 +113,7 @@ A later finding that contests a recorded decision is a REPEAT. The reviewer reje
 
 When the user rejects a finding, the rejection is recorded at its source before the next review reads it, so that review reads the record instead of asking again. The reviewer that asked records it when the user's answer comes back to it in the same run: the local reviewer in a delivery run, the GitHub reviewer in a PR watch. Otherwise the next plan records it as a plan step.
 
-A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`) is recorded the same way, by the reviewer that asked, naming the run as the one who decided.
+A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls) is recorded the same way, by the reviewer that asked, naming the run as the one who decided.
 
 ## Stop-and-Merge
 

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Plan",
-  "description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under the External Content Boundary in ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md. It reaches a shell command only as one argument that first passes the identifier gate there (Shell Identifier Discipline), or through an inputs file the script reads as data (Inert Inputs-File Navigator Pattern), and is never spliced into command text. A field whose description starts with \"Can carry external content. Repository path.\" holds one path relative to the top of the repository. The plan check refuses the plan, before the branch step and any later agent call, when such a path is empty, starts with /, has an empty, ., .. or .git (any case) part, or holds a control character, as the files rule of ${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh does.",
+  "description": "The plan the planner returns. It carries every input a later step needs that takes judgment. The planner returns the plan whole, so no field is cut and none carries complete or total. A field whose description starts with \"Can carry external content.\" may hold text taken from external content. Such a field goes to an agent only under ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (External Content Boundary). It reaches a shell command only as one argument that first passes the identifier gate of ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Shell Identifier Discipline), or through an inputs file the script reads as data, per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Inert Inputs-File Navigator Pattern), and is never spliced into command text. A field whose description starts with \"Can carry external content. Repository path.\" holds one path relative to the top of the repository. The plan check refuses the plan, before the branch step and any later agent call, when such a path is empty, starts with /, has an empty, ., .. or .git (any case) part, or holds a control character, as the files rule of ${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh does.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -75,19 +75,19 @@
             "architectural",
             "safety"
           ],
-          "description": "The whole Promotion Gate of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md, read against accepting the remediation plan. Its keys, required list and types are those of the gate of a decision brief in ${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json.",
+          "description": "The whole of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate), read against accepting the remediation plan. Its keys, required list and types are those of the gate of a decision brief in ${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json.",
           "properties": {
             "irreversible": {
               "type": "boolean",
-              "description": "True when accepting the remediation plan is irreversible, clause 1 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+              "description": "True when accepting the remediation plan is irreversible, clause 1 of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate)."
             },
             "architectural": {
               "type": "boolean",
-              "description": "True when accepting the remediation plan has architectural blast radius, clause 2 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md."
+              "description": "True when accepting the remediation plan has architectural blast radius, clause 2 of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate)."
             },
             "safety": {
               "type": "boolean",
-              "description": "True when accepting the remediation plan is safety-relevant, clause 3 of the Promotion Gate in ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md, which names the categories by reference to the Destructive Fix Gate."
+              "description": "True when accepting the remediation plan is safety-relevant, clause 3 of ${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md (Promotion Gate), which names the categories by reference to ${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md (Destructive Fix Gate)."
             }
           }
         },
@@ -97,7 +97,7 @@
         },
         "repeats_surface": {
           "type": "boolean",
-          "description": "True when the remediation follows a fix on the same surface that did not close its class, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Forced zoom-out after the first non-closing structural fix)."
+          "description": "True when the remediation follows a fix on the same surface that did not close its class, per ${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry)."
         }
       }
     },
@@ -181,7 +181,7 @@
     },
     "validation_commands": {
       "type": "array",
-      "description": "Each entry is one gate command line the project's CLAUDE.md names. The validate step runs each entry once, in order, and the list never holds two forms of the same suites, such as a fuller and a narrower run of them. Empty when the planner can name no command: the validate step then runs the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md, which runs the gate command CLAUDE.md names, once, so validation is never skipped.",
+      "description": "Each entry is one gate command line the project's CLAUDE.md names. The validate step runs each entry once, in order, and the list never holds two forms of the same suites, such as a fuller and a narrower run of them. Empty when the planner can name no command: the validate step then runs ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md (Validation Procedure), which runs the gate command CLAUDE.md names, once, so validation is never skipped.",
       "items": {
         "type": "string",
         "description": "Can carry external content. One gate command line, copied from the project's CLAUDE.md. The plan check refuses the plan, before the branch step, when an entry is blank or holds a control character or a line break."

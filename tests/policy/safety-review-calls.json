@@ -20,19 +20,19 @@
     },
     {
       "file": "plugin/agents/local-reviewer.md",
-      "pattern": "is decided per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`), never by this loop"
+      "pattern": "is decided per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls), never by this loop"
     },
     {
       "file": "plugin/agents/local-reviewer.md",
-      "pattern": "`decided_by: run` is present only when the run took the call per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`) instead of asking"
+      "pattern": "`decided_by: run` is present only when the run took the call per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls) instead of asking"
     },
     {
       "file": "plugin/governance/remediation-doctrine.md",
-      "pattern": "recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`)"
+      "pattern": "recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls)"
     },
     {
       "file": "plugin/governance/remediation-doctrine.md",
-      "pattern": "A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (`### Review Calls`) is recorded the same way"
+      "pattern": "A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls) is recorded the same way"
     }
   ]
 }

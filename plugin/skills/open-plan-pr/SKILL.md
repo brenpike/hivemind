@@ -30,7 +30,7 @@ After:
 
 Open a pull request for the completed approved plan.
 
-Follow `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` and `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md`.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements) and `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Trigger, Bump Execution).
 
 ## Required Inputs
 
@@ -76,8 +76,7 @@ Validate `expect_commit` as a commit SHA against the identifier gate in `${CLAUD
    }
    ```
 
-   When `draft` is given, write it as the `draft` field. Otherwise set `draft` to `true` only when the user asked for a draft PR, and leave it out when they did not. Add a `"comment": "<comment>"` field only when `comment` is given. The script header lists the rule for each field. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
-   Transport Degradation Is a Hard Stop).
+   When `draft` is given, write it as the `draft` field. Otherwise set `draft` to `true` only when the user asked for a draft PR, and leave it out when they did not. Add a `"comment": "<comment>"` field only when `comment` is given. The script header lists the rule for each field. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 6. **Final Bash tool call.** Run the PR script, where each `<allowlist-validated-...>` placeholder is the input value that passed its gate above and `<token>` is the token from step 5. Pass `--remote` only when `push_remote` is provided:
 
    ```bash
@@ -105,7 +104,7 @@ as a workflow state or as one step inside a longer procedure:
 
 - open PR for a partial plan unless one of: the user explicitly requested a draft PR, OR the planner's `Delivery: Shape` field equals `multi-plan`
 - open PR if the Validation procedure returned the Worker Report — Blocked (`stage: validation`) or any declared validation command failed. `Validated: Not run (no validation commands defined)` is a valid terminal state per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) and does not block PR opening.
-- open PR if required version/release metadata is missing per `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md`
+- open PR if required version/release metadata is missing per `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Trigger, Bump Execution)
 - open PR when local review ran on the branch and did not hold the local review gate per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements)
 - continue past step 6 with an unverified push state
 - invent missing validation

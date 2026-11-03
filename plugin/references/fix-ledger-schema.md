@@ -51,7 +51,7 @@ The hypothesized shared-root category that a cluster of findings maps to. Assign
 
 ### `iterations[].findings[].rejection_record` (string|null, optional, default null)
 
-The path and section of the recorded decision a finding with `status: rejected` contests, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Recorded Decisions and Repeat Findings`). Set only with `status: rejected`, and null for every other status. A `rejected` finding is disposed, never open. Absent and null are treated identically.
+The path and section of the recorded decision a finding with `status: rejected` contests, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). Set only with `status: rejected`, and null for every other status. A `rejected` finding is disposed, never open. Absent and null are treated identically.
 
 ### `iterations[].review_base_ref` (string|null, optional, default null)
 

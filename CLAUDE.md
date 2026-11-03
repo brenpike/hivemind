@@ -37,7 +37,7 @@ Anything the runtime loads must live under `plugin/`.
 - **Agent frontmatter limits:** Claude Code plugin system does not honor `mcpServers` or `permissionMode` in agent frontmatter. Read-only enforcement on cerebrate is its `tools:` list, not `permissionMode`. That list holds no Bash, Write or Edit. A `Bash(...)` entry grants the whole Bash tool (ADR-0010, amendment 2026-10-20), so never add one. `tests/policy/safety-planner-no-write.json` pins the list. Don't re-add these fields.
 - **A plugin script path in a command or `Bash(...)` grant is one double-quoted word:** `bash "${CLAUDE_PLUGIN_ROOT}/skills/<s>/scripts/<s>.sh" <args>`, and the grant `Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/<s>/scripts/<s>.sh" *)`. A bare path splits when the plugin path holds a space. In prose the path may also be a path-only code span or a `](...)` link target. `tools/policy_check.sh` CHECK 17 flags every other form in plugin Markdown.
 - **Skills are namespaced as `hivemind:<skill>`** when consumed. Internal cross-references in skill/agent bodies should use the namespaced form so docs match runtime behavior.
-- **Governance docs are load-bearing.** Renaming a section header inside `plugin/governance/*.md` may break agent rules that reference that header by name (e.g. `(Required Git Preflight)`, `(Definitions → Trivial change)`). Search for header references before renaming.
+- **Governance docs are load-bearing.** Renaming a section header inside `plugin/governance/*.md` may break agent rules that reference that header by name. Search for header references before renaming. A governance citation has one form: `${CLAUDE_PLUGIN_ROOT}/governance/<doc>.md` (Heading, Heading), e.g. `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State, Worker Self-Check), or `${CLAUDE_PLUGIN_ROOT}/governance/<doc>.md` whole. Each name is a heading's exact text, with no `#` marks. A heading whose text holds a parenthesis or comma is cited by its parent section. `tests/workflow-scripts/governance-section-refs.test.mjs` fails any other form, and any name that is not exactly one heading of its doc, in plugin Markdown and JSON.
 
 ## Versioning
 
@@ -112,7 +112,7 @@ CI runs via `.github/workflows/policy-check.yml` (job: `policy-check`), enforced
 - Putting plugin content at repo root instead of under `plugin/` — `${CLAUDE_PLUGIN_ROOT}` will not resolve where authors expect.
 - Adding/renaming a load-bearing governance section with named consumers (or editing a `tests/policy/safety-*.json`) without adding the consumer-assertion fixture → unprotected coupling (P3).
 - Authoring a `tests/policy/safety-*.json` fixture without reading the pin-authoring contract in `tests/policy/README.md` → overclaimed or wrong-clause pins that leave the suite green through a real regression.
-- Adding a bare or never-matching file-tool entry (`Read`, `Write`, `Edit`, `Glob`, `Grep`) to a non-executor skill's `allowed-tools` → fails CHECK 16. Use `Read(~/.claude/plugins/cache/brenpike/hivemind/**)` or the navigator's own `Edit(.hivemind/...)` inputs-file entry (`plugin/governance/security-policy.md` "Skill File-Tool Grants").
+- Adding a bare or never-matching file-tool entry (`Read`, `Write`, `Edit`, `Glob`, `Grep`) to a non-executor skill's `allowed-tools` → fails CHECK 16. Use `Read(~/.claude/plugins/cache/brenpike/hivemind/**)` or the navigator's own `Edit(.hivemind/...)` inputs-file entry (`docs/skill-authoring.md` "Skill File-Tool Grants").
 
 ## Companion plugins referenced
 

@@ -16,7 +16,7 @@
     },
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "when `user_answer` matches a candidate, its reply routes that candidate. A reply that keeps a high-severity rejection: record that decision at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Recorded Decisions and Repeat Findings`), commit and push the record with the cycle's fixes at step 7, and reply citing the record, so the candidate counts as addressed."
+      "pattern": "when `user_answer` matches a candidate, its reply routes that candidate. A reply that keeps a high-severity rejection: record that decision at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), commit and push the record with the cycle's fixes at step 7, and reply citing the record, so the candidate counts as addressed."
     },
     {
       "file": "plugin/skills/github-review-loop/SKILL.md",

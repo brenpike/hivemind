@@ -7,7 +7,7 @@ they are NOT test fixtures and NOT an exhaustive taxonomy. Each shows: the findi
 the closed-by-construction structural fix that made the next same-framing finding impossible.
 
 These ground the doctrine's vocabulary in lived experience. For the binding definitions, read
-`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md`.
+`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` whole.
 
 ## Contents
 
@@ -119,8 +119,8 @@ be one more containment check on the same untrusted path.
 stop trusting the manifest path — prefer **ground-truth derivation over validating untrusted
 input**. With the manifest path no longer the anchor, containment findings on it cannot exist.
 
-**Lesson:** a found root cause is fixed at its source in the PR that found it, per the
-doctrine's `## First-Finding Triage`, and is never deferred. The reviewer routes the cluster to
+**Lesson:** a found root cause is fixed at its source in the PR that found it, per
+`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (First-Finding Triage), and is never deferred. The reviewer routes the cluster to
 this structural fix in the same PR — never to N more per-finding containment patches, and never
 to a deferral.
 
@@ -163,8 +163,8 @@ shared primitive is what binds the distinct findings.
 - `fix_framing`: `null` (framings differ across iterations; this axis does not need a shared one)
 - `root_class`: `wrong-primitive-for-existence-check`
 
-**Signal fired:** root-cluster via the cross-iteration same-surface recurrence axis (doctrine
-`## Cross-Iteration Same-Surface Recurrence`). Gate A holds — three distinct iterations re-emit on
+**Signal fired:** root-cluster via the cross-iteration same-surface recurrence axis per
+`${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Cross-Iteration Same-Surface Recurrence). Gate A holds — three distinct iterations re-emit on
 the same surface, framing- and line-independent. Gate B holds — the surface is young
 (introduced this initiative), so it escalates to zoom-out rather than to a bounded-tail
 merge-advisory. The threshold on this axis is **N=2**;
@@ -173,7 +173,8 @@ quiet — which is exactly why this orthogonal axis exists.
 
 **Closed-by-construction fix:** zoom out and CHANGE THE PRIMITIVE — replace the fuzzy/approximate
 search with a ground-truth exact-key lookup (an indexed unique key or a direct keyed fetch) that
-cannot return an approximate match. Per the `### Closed-by-Construction Acceptance Test`, this
+cannot return an approximate match. Per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md`
+(Closed-by-Construction Acceptance Test), this
 NAMES AN ELIMINATED CLASS: with the search no longer the existence oracle, fuzzy/boundary/case-fold
 matching findings cannot exist, so the cluster CLOSES. Contrast the complete-the-known-set non-fix:
 adding a case-fold normalization (or one more pagination guard) to the existing fuzzy search only
