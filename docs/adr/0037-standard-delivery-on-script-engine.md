@@ -1930,6 +1930,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/509. In run `w
 
 - A plugin path with a space stays one double-quoted word, as now.
 - A root holding a byte with no exact form reports `none`. The gate already denies every runner command in that case (the residuals of findings 6bc3a379 and 27d328fd).
+- A root ending in a space reports `none`, so its later runner commands keep `{plugin-root}`, as before this change. This is the user's decision of 2026-11-03 on local review finding 96a6a97b, option B: the facts script reports `none`, and the consumer's `plugin_root` pattern and its tests stay unchanged. Loosening the consumer pattern to accept a trailing space (option A) was rejected.
 - A relay that changes `plugin_root` fails as malformed facts or as a gate deny at the branch step, both before any wave (the faithful-relay residual of the issue 447 amendment).
 - A resumed run gets `run.pluginRoot` from each pass's own facts relay.
 - Analysis-only parses only four facts values, so the new line does not affect it, and its prompts stay byte-identical.
