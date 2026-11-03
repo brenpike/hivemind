@@ -928,7 +928,7 @@ function workflowHoldingExits() {
 function readWorkflowHoldingSentence() {
   const sectionStart = workflowRulesText.indexOf('\n## PR Requirements\n');
   const section = workflowRulesText.slice(sectionStart, workflowRulesText.indexOf('\n## ', sectionStart + 1));
-  const sentenceStart = section.indexOf('The exit reasons that hold the gate are ');
+  const sentenceStart = section.indexOf('Gate-holding exits: ');
   assert.ok(sentenceStart >= 0, 'workflow.md (PR Requirements) names the exit reasons that hold the gate');
   return section.slice(sentenceStart, section.indexOf('.', sentenceStart));
 }
