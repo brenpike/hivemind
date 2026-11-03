@@ -2,7 +2,7 @@
   "rule": "react-marker.sh non-zero for non-thread candidate must fail closed to blocked marker-write-failed",
   "source": {
     "file": "plugin/agents/github-reviewer.md",
-    "pattern": "if `react-marker.sh` exits NON-ZERO for a `toplevel` or `review` candidate"
+    "pattern": "if `react-marker.sh` exits non-zero for a `toplevel` or `review` candidate"
   },
   "consumers": [
     {
@@ -11,7 +11,7 @@
     },
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "this is the symmetric complement of the step-8 fail-closed clause"
+      "pattern": "This is the symmetric complement of the step-8 fail-closed clause"
     }
   ]
 }

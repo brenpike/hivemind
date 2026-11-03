@@ -1,9 +1,9 @@
 {
-  "plugin/agents/cerebrate.md": 21763,
+  "plugin/agents/cerebrate.md": 17165,
   "plugin/agents/changeling.md": 5230,
   "plugin/agents/drone.md": 7429,
-  "plugin/agents/github-reviewer.md": 21510,
-  "plugin/agents/local-reviewer.md": 23340,
+  "plugin/agents/github-reviewer.md": 17333,
+  "plugin/agents/local-reviewer.md": 18267,
   "plugin/agents/overlord.md": 64351,
   "plugin/agents/synapse.md": 1910,
   "plugin/governance/decision-autonomy.md": 12239,

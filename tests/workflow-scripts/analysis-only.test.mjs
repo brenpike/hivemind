@@ -763,9 +763,9 @@ describe('analysis-only: agent options and prompts', () => {
   });
   test('the rules the planner prompts dropped are in cerebrate.md', () => {
     for (const rule of [
-      'write the plan or report assuming each raised question\'s recommendation.',
+      'write the plan or report assuming every raised recommendation.',
       'Return the full revised plan or report, not only what changed.',
-      'Raise again every decision the reply does not settle, the ones decided for the user included, each with your recommendation.'
+      'Raise again, with your recommendation, every decision the reply leaves unsettled, those decided for the user included.'
     ]) {
       assert.ok(cerebrateText.includes(rule), rule);
     }
@@ -1317,7 +1317,7 @@ describe('analysis-only: facts reach the planner', () => {
       assert.ok(call.prompt.includes(FACTS_BLOCK), call.opts.label);
       assert.ok(call.prompt.includes(BOUNDARY_SENTENCE), call.opts.label);
     }
-    assert.ok(cerebrateText.includes('Read that file with Read, one page at a time, until you have read every line. Follow its `content_rule`.'));
+    assert.ok(cerebrateText.includes('Read the whole file with Read, a page at a time, and follow its `content_rule`.'));
   });
   test('the facts block names the file and line count the facts step returned', async () => {
     const facts = { ...FACTS_RAN, facts_file: '.hivemind/facts/facts-20261021T000000Z-ffffffffffff.json', facts_lines: '3' };

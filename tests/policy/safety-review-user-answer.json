@@ -8,15 +8,15 @@
   "consumers": [
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "`user_answer` is the user's decision on one candidate only. Its `candidate_url` is matched only against the URLs of the step-2 candidate set and never goes into a command"
+      "pattern": "`user_answer` decides one candidate only. Its `candidate_url` is matched only against the step-2 candidate URLs and never enters a command"
     },
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "the reply is never posted to GitHub word for word"
+      "pattern": "never post the reply to GitHub word for word"
     },
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "when `user_answer` matches a candidate, its reply routes that candidate. A reply that keeps a high-severity rejection: record that decision at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), commit and push the record with the cycle's fixes at step 7, and reply citing the record, so the candidate counts as addressed."
+      "pattern": "a matching `user_answer` routes its candidate: a reply keeping a high-severity rejection records that decision at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), commits and pushes the record with the cycle's fixes at step 7, and replies citing the record, so the candidate counts as addressed;"
     },
     {
       "file": "plugin/skills/github-review-loop/SKILL.md",

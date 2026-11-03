@@ -3427,7 +3427,7 @@ const ROW_TESTS = {
       const gateSchema = userQuestion.properties.gate;
       assert.deepEqual([gateSchema.type, gateSchema.additionalProperties, gateSchema.required], ['object', false, ['irreversible', 'architectural']]);
       assert.deepEqual(Object.values(gateSchema.properties).map((property) => property.type), ['boolean', 'boolean']);
-      assert.ok(reviewerText.includes('- `gate` is required and holds the booleans `irreversible` and `architectural`'));
+      assert.ok(reviewerText.includes('- `gate`, required: the booleans `irreversible` and `architectural`'));
       const optionSchema = userQuestion.properties.options;
       const recommendationSchema = userQuestion.properties.recommendation;
       assert.deepEqual([optionSchema.minItems, optionSchema.maxItems, optionSchema.items.additionalProperties], [2, 4, false]);
@@ -4076,7 +4076,7 @@ const ROW_TESTS = {
         COUNT_FIELDS.forEach((field) => assert.ok(!Object.hasOwn(block, field), field));
         assert.ok(prompt.includes(lib.boundarySentence()));
         assert.ok(!prompt.includes('The review block holds'), prompt);
-        assert.ok(cerebrateText.includes('when a standard-delivery plan prompt carries a review block: the result of the local\nreview that sent the run back to planning.'));
+        assert.ok(cerebrateText.includes('when a standard-delivery plan prompt carries a review block: the result of the local review that sent the run back to planning.'));
         assert.ok(!callOf(run, 'plan-1').prompt.includes('<review>'));
       });
       test(`a taken ${label} keeps rejected findings, the ledger path and the counts out of the plan prompt`, async () => {

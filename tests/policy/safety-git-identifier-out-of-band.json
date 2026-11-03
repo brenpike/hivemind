@@ -44,7 +44,7 @@
     },
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "push ONCE (batch only, never per fix) via `bash \"${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh\" --head <allowlist-validated-working_branch> --base <allowlist-validated-base> --remote origin --expect-commit <allowlist-validated-commit>`; exit 1 means return `blocked` (relay the blocker)."
+      "pattern": "push once, batched, never per fix: `bash \"${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh\" --head <allowlist-validated-working_branch> --base <allowlist-validated-base> --remote origin --expect-commit <allowlist-validated-commit>`. Exit 1 returns `blocked`, relaying the blocker."
     }
   ]
 }

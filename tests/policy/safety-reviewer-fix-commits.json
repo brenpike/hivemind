@@ -48,7 +48,7 @@
     },
     {
       "file": "plugin/agents/local-reviewer.md",
-      "pattern": "EXPLICITLY forbids this agent from committing"
+      "pattern": "explicitly forbids this agent from committing"
     },
     {
       "file": "plugin/agents/local-reviewer.md",
@@ -56,7 +56,7 @@
     },
     {
       "file": "plugin/agents/local-reviewer.md",
-      "pattern": "This checkpoint is load-bearing for convergence"
+      "pattern": "commit-policy wording in a delegation never suppresses this step"
     },
     {
       "file": "plugin/agents/overlord.md",
