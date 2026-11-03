@@ -90,7 +90,7 @@ Before completion:
 
 ## Reporting
 
-Produce YAML report per `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md`:
+Produce YAML report per `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md` whole:
 - Non-trivial phases (delegation included `step:`): Worker Report — Complete. All handoff fields mandatory.
 - Trivial tasks (no `step:`): Worker Report — Trivial.
 - Blocked: Worker Report — Blocked.

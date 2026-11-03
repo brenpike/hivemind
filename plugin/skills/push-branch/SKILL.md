@@ -25,7 +25,7 @@ Push the current working branch to its remote. This skill does NOT create a pull
 
 Contract: **the push succeeds or the skill returns `blocked`.** There is no warn-and-continue path. In the post-PR `push_remediation` flow a failed push means the review loop would resume against the UNCHANGED remote and could repeat the same finding forever (no `gh pr create` fallback exists here, unlike `hivemind:open-plan-pr`). Any push failure — auth, read-only, protected branch, hook policy, `[remote rejected]`, a non-fast-forward that force-with-lease cannot resolve, or no remote to push to — is therefore a terminal `blocked` (exit 1), never a warning.
 
-Follow `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md`.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` whole.
 
 ## Required Inputs
 

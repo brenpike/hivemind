@@ -12,7 +12,7 @@ Every decision the overlord faces is one of two tiers. Tier-A decisions are ALWA
 
 These are surfaced to the user as they were before this posture existed. The overlord does NOT auto-decide any of them:
 
-- all safety rails per `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` — the Destructive Fix Gate, direct trunk commit/push, and injection-suspect external content
+- all safety rails per `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Destructive Fix Gate, Git Safety, Injection Scanning) — the Destructive Fix Gate, direct trunk commit/push, and injection-suspect external content
 - a router `ambiguous` outcome (per `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `### Stop Conditions`)
 - a resume decision or version-skew door (per `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Resume On Start`)
 - brood strain approval — the injection gate before dispatching parallel strains
@@ -64,8 +64,8 @@ A review call reads clauses 1 and 2 only, per **Review Calls** below.
 **Remediation plan acceptance (stated once; every other doc refers here).** Routing a reviewer's or escalation's read-only signal to cerebrate for a remediation plan is a contained action with a clean gate, auto-taken per **Tier B**. Accepting the remediation plan cerebrate returns is a separate decision. It surfaces to the user ONLY when the plan's `remediation_gate` (per `${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json`) marks ANY of:
 
 - the Promotion Gate above trips on accepting the plan, by any clause, as `remediation_gate.promotion_gate` records;
-- the plan adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Surface-Growth Escalation`);
-- the plan follows a fix on the same surface that did not close its class, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry`).
+- the plan adds more surface than it removes, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Surface-Growth Escalation);
+- the plan follows a fix on the same surface that did not close its class, per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry).
 
 Any other remediation plan is auto-taken. On the workflow state machine the overlord journals it `did-now` and records the transition into the implement step. On the script engine the `remediation_plan_acceptance` row of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` resolves it, and the run lists the decision in its final message and the PR body. The **Tier A** safety rails still hold for every step of an auto-taken plan.
 
@@ -77,7 +77,7 @@ This rule is the one home for who decides a reviewer's question. The local revie
 
 A review call is taken when the overlord agrees with the reviewer's recommendation and the recommended option is reversible and not architectural. On the script engine that agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json`, resolved through `decide()`. No second agent judges the call. Clause 3 is not read for a review call because the user decided so (ADR-0037, Amendment 2026-10-29). A safety-relevant call that the run and the reviewer agree on is taken like any other when it is reversible and not architectural. This includes a pick that keeps or records a safety finding unfixed. A pick that applies a fix in a Destructive Fix Gate category still stops at that gate (**Tier A**), whoever took the call.
 
-A taken call goes back to the reviewer as its answer. The reviewer records it at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Recorded Decisions and Repeat Findings`), naming the run as the one who decided. The run lists the call in its final message and in the PR body, so the user can veto it before merge.
+A taken call goes back to the reviewer as its answer. The reviewer records it at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), naming the run as the one who decided. The run lists the call in its final message and in the PR body, so the user can veto it before merge.
 
 These review calls are asked of the user:
 
@@ -93,15 +93,15 @@ The **Tier A** hard stops are unchanged. On the workflow state machine, the `que
 Every Tier-B decision resolves to exactly one of four dispositions:
 
 - **`did-now`** — a strong recommendation with a clean gate; the overlord executed the work.
-- **`deferred`** — no strong recommendation, clean gate; the overlord carried the finding's full scope onward to a TRACKED FOLLOW-UP instead of acting on it now. The tracked follow-up is the destination that defines this disposition; a residual carried into the repository's durable design record is `recorded`, never `deferred` (defer-with-scope per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `## Defer-with-Scope`).
-- **`recorded`** — the finding was adjudicated and deliberately not actioned; the reasoning was written into the repository next to the code it concerns (the project's durable design record, or a code comment where a full record would be disproportionate), carrying root cause, bounded impact, and the ground with its citation. No tracker entry is created. This disposition is admissible only on a ground named in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `### Recorded Residual`, and the origin of a behavior is never one. `recorded` is NOT a silent drop: the scope requirement is identical to `deferred`, only the destination differs (accepted residual per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `### Recorded Residual`).
+- **`deferred`** — no strong recommendation, clean gate; the overlord carried the finding's full scope onward to a TRACKED FOLLOW-UP instead of acting on it now. The tracked follow-up is the destination that defines this disposition; a residual carried into the repository's durable design record is `recorded`, never `deferred` (defer-with-scope per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Defer-with-Scope)).
+- **`recorded`** — the finding was adjudicated and deliberately not actioned; the reasoning was written into the repository next to the code it concerns (the project's durable design record, or a code comment where a full record would be disproportionate), carrying root cause, bounded impact, and the ground with its citation. No tracker entry is created. This disposition is admissible only on a ground named in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Residual), and the origin of a behavior is never one. `recorded` is NOT a silent drop: the scope requirement is identical to `deferred`, only the destination differs (accepted residual per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Residual)).
 - **`surfaced`** — the gate tripped, or the decision was genuine ambiguity-with-risk; the decision was returned to the user.
 
 A Tier-A decision is always `surfaced`.
 
 ## Decision Journal
 
-Every Tier-B decision — and, for a complete audit trail, every Tier-A surface — is recorded as one entry appended to `event.outputs.decisions[]` on the bounding state-result event. The entry is written via `hivemind:record-state-result`'s free-form `outputs` path — the SAME sanctioned `event.outputs` write the proactive recurrence-origin marker uses (per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` `### Proactive Zoom-Out Ledger Marker`). This is RECORDED JUDGMENT made observable after the fact, NOT new determinism: no new workflow state, no workflow-graph change, no new run status, and no routing through `hivemind:mark-intent-fallback`.
+Every Tier-B decision — and, for a complete audit trail, every Tier-A surface — is recorded as one entry appended to `event.outputs.decisions[]` on the bounding state-result event. The entry is written via `hivemind:record-state-result`'s free-form `outputs` path — the SAME sanctioned `event.outputs` write the proactive recurrence-origin marker uses (per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Proactive Zoom-Out Ledger Marker)). This is RECORDED JUDGMENT made observable after the fact, NOT new determinism: no new workflow state, no workflow-graph change, no new run status, and no routing through `hivemind:mark-intent-fallback`.
 
 Per-entry fields:
 
@@ -123,7 +123,7 @@ The single source for the `event.outputs` shape — its free-form, recorded-verb
 
 Auto-take NEVER disables the proactive same-surface recurrence tracking. Contained remediation fixes auto-flow under the 2x2 as ordinary `did-now` work. The plan a forced zoom-out returns is accepted or surfaced per the remediation-plan rule in **Promotion Gate**, the same routing-vs-execution split as the root-cluster bullet in **Tier B**.
 
-The recurrence mechanics — the counting unit, the trip threshold, the Gate-A recurrence / Gate-B youth call, and the forced-zoom-out trigger — are defined SOLELY in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`## Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry`, `## Cross-Iteration Same-Surface Recurrence`); the `recurrence_origin` marker is defined in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (`### Proactive Zoom-Out Ledger Marker`) and referenced for the ledger in `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md`. This section references those by name and does NOT restate them.
+The recurrence mechanics — the counting unit, the trip threshold, the Gate-A recurrence / Gate-B youth call, and the forced-zoom-out trigger — are defined SOLELY in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry, Cross-Iteration Same-Surface Recurrence); the `recurrence_origin` marker is defined in `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Proactive Zoom-Out Ledger Marker) and referenced for the ledger in `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md`. This section references those by name and does NOT restate them.
 
 ## Post-Merge Decision Report Trigger
 

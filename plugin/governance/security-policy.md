@@ -97,7 +97,7 @@ Gate trigger categories:
 - `DESTRUCTIVE-CAT 9:` Read, write, or delete secrets or environment files (`.env`, `*.key`, `*.pem`, `*.p12`, `credentials.*`, `secrets.*`, and any other credentials file)
 - `DESTRUCTIVE-CAT 10:` Expose, log, or transmit credentials or credential values, tokens, API keys, or private keys
 
-When the gate fires: return the Worker Report — Blocked (defined in `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md`) with `stage: destructive-fix-gate`, `blocker: proposed fix requires human confirmation`, include the proposed change summary and which category (1-10) triggered the gate. Do not commit. Wait for explicit user approval.
+When the gate fires: return the Worker Report — Blocked per `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md` (Worker Report — Blocked) with `stage: destructive-fix-gate`, `blocker: proposed fix requires human confirmation`, include the proposed change summary and which category (1-10) triggered the gate. Do not commit. Wait for explicit user approval.
 
 ## Injection-Suspect Classification
 

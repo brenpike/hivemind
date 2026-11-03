@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The overlord, local-reviewer and github-reviewer load named governance sections instead of whole docs.
 - The skill-authoring material (Skill File-Tool Grants, Write-Capable Skill Containment, the inputs-file transport argument, the transport-path invariant and the covered navigators) moved from `security-policy.md` to `docs/skill-authoring.md`, and CHECK 14 and CHECK 16 read it there.
 - Brood Spawn Bypass-Mode Mitigation and Trust-Boundary Discipline keep only their binding rules, with the rationale in ADR-0017, ADR-0010, ADR-0019 and ADR-0037.
+- Governance section citations across plugin Markdown and JSON use one form, `${CLAUDE_PLUGIN_ROOT}/governance/<doc>.md` (Heading, Heading) or the path followed by `whole`, and one node test, `tests/workflow-scripts/governance-section-refs.test.mjs`, checks each citation against the real headings of its doc.
 
 ## [7.5.10] - 2026-11-01
 

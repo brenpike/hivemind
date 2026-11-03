@@ -217,8 +217,7 @@ detection) is reported `not-checked`.
    source. The skill's own `Edit(.hivemind/seed-inputs-*.json)` allowed-tools entry
    pre-approves this Write while the skill runs.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
-   `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
-   Transport Degradation Is a Hard Stop).
+   `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 5. **Apply.** Run the `apply` phase once:
    ```bash
    bash "${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh" apply .hivemind/seed-inputs-<token>.json
@@ -358,4 +357,4 @@ issues:
 - None
 ```
 
-Use the Worker Report — Blocked schema from `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md` for blocked states.
+Use the Worker Report — Blocked schema from `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md` (Worker Report — Blocked) for blocked states.

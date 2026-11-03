@@ -18,7 +18,7 @@ shell: bash
 
 Watch one open PR and drive remediation to a terminal state. Does NOT classify feedback — that is `hivemind:github-reviewer` fix-mode work.
 
-Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md`, `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`.
+Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` whole, `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` whole, `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` whole.
 
 ## Why this runs in the main session
 

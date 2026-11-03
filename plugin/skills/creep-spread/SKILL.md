@@ -170,4 +170,4 @@ term_sources:
 
 ```
 
-Use the Worker Report — Blocked schema from `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md` for blocked states.
+Use the schema from `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md` (Worker Report — Blocked) for blocked states.

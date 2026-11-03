@@ -42,7 +42,7 @@ Output: two tab-separated integers. Both must be `0` to proceed. Non-zero = pres
 
 ## Version Bumps
 
-A bump is required when a PR changes files affecting: runtime behavior, public API, compatibility contract, generated/packaged output, distribution metadata, or documented consumer expectation. Full rules: `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md`.
+A bump is required when a PR changes files affecting: runtime behavior, public API, compatibility contract, generated/packaged output, distribution metadata, or documented consumer expectation. Full rules: `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Trigger).
 
 No bump required for: docs-only, test-only, CI-only, governance-only, changelog-only, markdown-only changes (unless they alter a documented consumer expectation).
 

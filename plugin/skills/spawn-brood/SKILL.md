@@ -190,8 +190,7 @@ The caller resolves and passes these; the skill does not resolve them.
    Bypass-Mode Mitigation), not this write. Do NOT use a fixed singleton path —
    concurrent spawns must not clobber each other's staging file.
    If the Write tool is ABSENT from this session, STOP BLOCKED per
-   `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern →
-   Transport Degradation Is a Hard Stop).
+   `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 
 3. **Execute the script** with one Bash call, passing the staging path as `$1`:
    ```bash

@@ -23,7 +23,7 @@ Slice a committed **PRD** into vertically-sliced **GitHub issues**: one thin, en
 
 This skill is a standalone leaf transform. It names the conceptual pipeline (interrogated plan → PRD → sliced issues) for orientation only; it never references, instructs invoking, or chains to any other skill. Its output is the published issue set — there is no plan, PRD, or handoff side-effect.
 
-Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md`, `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md`, `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`.
+Load and follow: `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` whole, `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` whole, `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` whole.
 
 ## Where this runs
 

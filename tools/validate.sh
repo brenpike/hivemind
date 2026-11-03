@@ -374,13 +374,12 @@ run_suites() {
 #     plugin/skills/_shared/{containment,ledger-engine-io}.sh,
 #     plugin/skills/create-working-branch/scripts/create-working-branch.sh,
 #     plugin/skills/bump-type/scripts/bump-type.sh, tests/workflow-scripts/**,
-#     plugin/agents/*.md (the load-line test reads every agent's Load lines; the node tests also pin
-#       the overlord launch contract, the drone read-only and validation fix task clauses, the
-#       synapse runner prompt words, the cerebrate plan block and the local-reviewer exit_reason
-#       enum, and agent-loads.test.mjs reads changeling.md),
-#     plugin/governance/*.md (the load-line test checks every section a Load line names; the
-#       runner sentences are pinned against the safety-rails grant and the definitions Validation
-#       Procedure clauses),
+#     plugin/**/*.md and plugin/**/*.json (governance-section-refs.test.mjs reads every plugin
+#       Markdown and JSON file and checks each governance section citation it holds; the node
+#       tests also pin the overlord launch contract, the drone read-only and validation fix task
+#       clauses, the synapse runner prompt words, the cerebrate plan block and the local-reviewer
+#       exit_reason enum, agent-loads.test.mjs reads changeling.md, and the runner sentences are
+#       pinned against the safety-rails grant and the definitions Validation Procedure clauses),
 #     plugin/hooks/synapse-gate.sh (standard-delivery.test.mjs runs it on every runner command),
 #     plugin/skills/molt/scripts/molt.sh (standard-delivery.test.mjs runs it),
 #     plugin/skills/_shared/allowlist.sh (identifier.test.mjs parity; also sourced by the
@@ -704,10 +703,11 @@ map_path() {
 
   # test_workflow_scripts: the workflow-script sources, the generated plugin/workflows/*.js they
   # build, the two data files the build copies in, the facts and plan contracts the node tests
-  # validate, every plugin/agents/*.md and plugin/governance/*.md (the load-line test reads each
-  # agent's Load lines and checks that every governance section a Load line names exists; the node
-  # tests also pin the overlord launch contract, agent-loads.test.mjs reads changeling.md, and the
-  # agent and governance clauses listed below), the gather-facts entrypoint
+  # validate, every plugin Markdown and JSON file under plugin/ (governance-section-refs.test.mjs
+  # reads every plugin Markdown and JSON file and checks that each governance section citation
+  # parses and names exactly one heading of its doc; the node tests also pin the overlord launch
+  # contract, agent-loads.test.mjs reads changeling.md, and the agent and governance clauses listed
+  # below), the gather-facts entrypoint
   # whose facts-file path pattern analysis-only.test.mjs cross-checks and the jq assembly program
   # facts-schema.test.mjs checks against the facts contract (the other gather-facts files route only
   # to test_gather_facts), the create-working-branch.sh and bump-type.sh enums plan-schema.test.mjs
@@ -726,7 +726,8 @@ map_path() {
   # by bump-type.sh), the open-plan-pr.sh and push-branch.sh entrypoints standard-delivery.test.mjs
   # runs, the local-reviewer agent whose exit_reason enum is pinned against the review route table,
   # the safety-rails and definitions governance docs whose grant and Validation Procedure clauses the
-  # runner sentences are pinned against (these agent and governance files route by the two globs),
+  # runner sentences are pinned against (these agent and governance files route by the plugin
+  # Markdown glob),
   # and the node tests themselves. Every path here except the
   # node tests keeps its other routes by union (for example *.json keeps validate_workflows,
   # next-wave.sh and its fixtures keep test_next_wave, cerebrate.md and local-reviewer.md keep
@@ -756,8 +757,8 @@ map_path() {
      || "$p" == plugin/skills/_shared/ledger-engine-io.sh \
      || "$p" == plugin/skills/create-working-branch/scripts/create-working-branch.sh \
      || "$p" == plugin/skills/bump-type/scripts/bump-type.sh \
-     || "$p" == plugin/agents/*.md \
-     || "$p" == plugin/governance/*.md \
+     || "$p" == plugin/*.md \
+     || "$p" == plugin/*.json \
      || "$p" == plugin/hooks/synapse-gate.sh \
      || "$p" == plugin/skills/molt/scripts/molt.sh \
      || "$p" == plugin/skills/_shared/allowlist.sh \
@@ -1469,9 +1470,11 @@ self_test() {
 
   # 9. Each workflow-script input the KNOWN_SUITES probe (#1) does not reach must route to
   #    test_workflow_scripts.sh. #1 probes a plugin/workflow-src/* path, so it would stay green if
-  #    the generated-script, data-file, agent glob (overlord, drone, synapse, cerebrate,
-  #    local-reviewer, github-reviewer, changeling), governance doc glob (safety-rails,
-  #    definitions, security-policy, workflow, decision-autonomy, report-format), route-workflow skill,
+  #    the generated-script, data-file, plugin Markdown glob (agents overlord, drone, synapse,
+  #    cerebrate, local-reviewer, github-reviewer, changeling; governance docs safety-rails,
+  #    definitions, security-policy, workflow, decision-autonomy, report-format; a skill SKILL.md, a
+  #    skill references/*.md, a plugin/references/*.md), plugin JSON glob (plugin.json, outside
+  #    references and workflows), route-workflow skill,
   #    workflow-definition, node-test-read or node-test-run script/fixture (open-plan-pr.sh,
   #    push-branch.sh, synapse-gate.sh), or sourced _shared lib (bump-type-derive.sh) selector were
   #    dropped. Probe each directly so removing any one selector FAILS here.
@@ -1511,6 +1514,10 @@ self_test() {
     "plugin/governance/workflow.md" \
     "plugin/governance/decision-autonomy.md" \
     "plugin/governance/report-format.md" \
+    "plugin/skills/molt/SKILL.md" \
+    "plugin/skills/detect-remediation-signals/references/cluster-case-studies.md" \
+    "plugin/references/run-ledger-schema.md" \
+    "plugin/.claude-plugin/plugin.json" \
     "plugin/skills/route-workflow/SKILL.md" \
     "plugin/workflows/analysis-only.json"; do
     SELECTED=(); FORCE_FULL=0; FORCE_FULL_REASON=''

@@ -19,7 +19,7 @@ Rules: (none)
 
 Before:
 - [ ] `base` and `iteration` inputs are provided or resolvable
-- [ ] Git state is not unsafe per Definitions
+- [ ] Git state is not unsafe per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State)
 - [ ] `codex-plugin-cc` is available
 - [ ] `focus`, if present, is forwarded as a positional argv AFTER a `--` option terminator (which forces it positional regardless of leading dashes) — never spliced into a shell, jq, or digest program; omit the trailing `-- "<focus>"` entirely when focus is absent
 
@@ -37,7 +37,7 @@ Invoked by the `local-reviewer` agent only.
 
 - `base`: base branch/ref to review against (e.g., `main`). When not supplied by caller, resolve from `git remote show origin | grep 'HEAD branch'` or default to `main`.
 - `iteration`: iteration number (integer, default `1`). Used for output labeling.
-- `focus` (optional): a caller-composed, reviewer-abstracted risk-framing string. When provided, it is forwarded INERTLY as the adversarial-review positional focus argument — a single quoted Bash argv passed to `node` (becoming one node argv), forwarded after a `--` option terminator so the codex parser treats it as a positional regardless of leading dashes (position alone does NOT make it inert). The focus string is subject to the External Content Boundary per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`; this skill's only job is inert forwarding. NEVER splice `focus` into a shell program string, a jq program, or the SHA-256 `node -e` digest program. As cheap defense-in-depth, a focus value whose first non-whitespace character is `-` is guarded (stripped/neutralized) before forwarding; this is advisory belt-and-suspenders — the `--` terminator is the load-bearing protection and is sufficient alone, so this guard is NON-BLOCKING and must never become an exit-1 path. The existing injection-suspect scan applies to RETURNED findings only and is unchanged.
+- `focus` (optional): a caller-composed, reviewer-abstracted risk-framing string. When provided, it is forwarded INERTLY as the adversarial-review positional focus argument — a single quoted Bash argv passed to `node` (becoming one node argv), forwarded after a `--` option terminator so the codex parser treats it as a positional regardless of leading dashes (position alone does NOT make it inert). The focus string is subject to `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary); this skill's only job is inert forwarding. NEVER splice `focus` into a shell program string, a jq program, or the SHA-256 `node -e` digest program. As cheap defense-in-depth, a focus value whose first non-whitespace character is `-` is guarded (stripped/neutralized) before forwarding; this is advisory belt-and-suspenders — the `--` terminator is the load-bearing protection and is sufficient alone, so this guard is NON-BLOCKING and must never become an exit-1 path. The existing injection-suspect scan applies to RETURNED findings only and is unchanged.
 
 ## Review Invocation
 

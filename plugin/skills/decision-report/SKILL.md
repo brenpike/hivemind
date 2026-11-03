@@ -15,10 +15,10 @@ shell: bash
 Render a human-readable narrative of every decision a completed run took on the user's behalf
 and RETURN it as chat text. This is the rendering half of the post-merge report policy; the
 TRIGGER and firing policy are defined in `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md`
-(## Post-Merge Decision Report Trigger) and are not restated here.
+(Post-Merge Decision Report Trigger) and are not restated here.
 
 The decision journal this skill renders is defined in
-`${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (## Decision Journal); its per-entry
+`${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal); its per-entry
 field shape and free-form `event.outputs.decisions[]` location are documented in
 `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md` (Event shape).
 
@@ -131,7 +131,7 @@ user reads the auto-decisions in that light.
 ## Pointers
 
 - Decision journal + autonomy posture (single source):
-  `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md`.
+  `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Journal).
 - Journal field shape on `event.outputs.decisions[]`:
   `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md` (Event shape).
 - Consumer glossary format (consumer-side `CONTEXT.md` / `CONTEXT-MAP.md`, resolved at runtime
