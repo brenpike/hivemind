@@ -4215,10 +4215,11 @@ mark_time 'CHECK17'
 # plugin/. Size is bytes with CR stripped, so a CRLF checkout measures as CI
 # does. A finding names the path, its size and its budget when a covered file
 # is over budget, has no entry, or is more than CHECK18_SLACK_PERCENT under
-# budget (the ratchet: a file that shrinks lowers its budget), and when an
-# entry names no covered file. The budget file must match a positive schema:
-# exactly one flat JSON object, no repeated key, each key matching
-# CHECK18_PATH_CLASS, each budget an integer from 0 to CHECK18_BUDGET_MAX.
+# budget (a file at most CHECK18_SLACK_PERCENT under its budget yields no
+# finding), and when an entry names no covered file. The budget file must
+# match a positive schema: exactly one flat JSON object, no repeated key, each
+# key matching CHECK18_PATH_CLASS, each budget an integer from 0 to
+# CHECK18_BUDGET_MAX.
 # Anything else is one non-allowlistable finding and no budget is checked. A
 # covered path outside CHECK18_PATH_CLASS is a non-allowlistable finding. The
 # rule: docs/engineering-principles.md (P25 — Prose Authoring).
