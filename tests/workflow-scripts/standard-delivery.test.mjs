@@ -2958,7 +2958,7 @@ const ROW_TESTS = {
       const start = procedure.indexOf('On the script engine, ');
       assert.notEqual(start, -1);
       const clause = procedure.slice(start, procedure.indexOf('not a Worker Self-Check.', start) + 'not a Worker Self-Check.'.length);
-      for (const phrase of ['the plan\'s validation commands, once per gate run', 'running each once is its whole task', 'When the plan names none, the drone runs this procedure itself as its whole task, so an empty list never skips validation.', 'not a Worker Self-Check']) {
+      for (const phrase of ['the plan\'s validation commands, once per gate run', 'running each once is its whole task', 'If the plan names none, the drone runs this procedure as its whole task: an empty list never skips validation.', 'not a Worker Self-Check']) {
         assert.ok(clause.includes(phrase), phrase);
       }
       const commandsSentence = main.validationCommandsSentence();
@@ -7002,7 +7002,7 @@ const ROW_TESTS = {
       assert.ok(synapseGrantLines[0].includes('(Synapse Runner Gate)'), synapseGrantLines[0]);
       assert.ok(synapseGrantLines[0].includes('Its prompt neither grants nor revokes it'), synapseGrantLines[0]);
       const implementerLine = safetyRailsText.split('\n').find((line) => line.startsWith('- `COMMIT-GRANT delegated-implementer:`'));
-      assert.ok(implementerLine.startsWith('- `COMMIT-GRANT delegated-implementer:` drone and changeling commit or push ONLY when'), implementerLine);
+      assert.ok(implementerLine.startsWith('- `COMMIT-GRANT delegated-implementer:` drone and changeling commit or push only when that delegation explicitly authorizes it'), implementerLine);
       assert.ok(!implementerLine.includes('synapse'), implementerLine);
       const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
       assert.ok(synapseText.includes('It needs no grant in the prompt and no message from the user, so never report `blocked` for want of one.'));

@@ -12,11 +12,11 @@
     },
     {
       "file": "plugin/governance/security-policy.md",
-      "pattern": "reintroduces exactly the delimiter-injection class ADR-0017 exists to close"
+      "pattern": "is forbidden: it reopens the delimiter-injection class ADR-0017 closes"
     },
     {
       "file": "plugin/governance/security-policy.md",
-      "pattern": "UNLESS the Write call to the fixed-literal transport path SUCCEEDS — including after an operator approves a permission prompt — the navigator MUST stop blocked, report the OBSERVED OUTCOME, and never author the inputs file by any other transport"
+      "pattern": "UNLESS the Write call to the fixed-literal transport path SUCCEEDS — including after an operator approves a permission prompt — the navigator MUST stop blocked, report the observed outcome, and author the inputs file by no other transport"
     },
     {
       "file": "plugin/skills/init-run-ledger/SKILL.md",
