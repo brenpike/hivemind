@@ -1,6 +1,6 @@
 # Remediation Doctrine
 
-Shared vocabulary and policy for root-cause review remediation, and the one home for these rules on both engines, per ADR-0038. Loaded by the `github-reviewer` and `local-reviewer` agents, the overlord, and the cerebrate so all four reason about review loops with one vocabulary; **Engine Consumers** names every consumer by role. This doc is definitional and policy only: it carries no detection algorithm and no case studies. The detection mechanics live in the `hivemind:detect-remediation-signals` skill; few-shot exemplars ship in that skill's `references/`.
+Shared vocabulary and policy for root-cause review remediation. The detection mechanics live in the `hivemind:detect-remediation-signals` skill; few-shot exemplars ship in that skill's `references/`.
 
 When any rule uses a term defined here, this definition is binding.
 
@@ -124,7 +124,7 @@ Stop the loop and advise merge when ALL of the following hold:
 - the tail has a structural home (per **Defer-with-Scope**)
 - every push spawns only a fresh bounded tail, never a new defect class
 
-The stop signal is NOT round count. Chasing zero-findings-per-push on a complex security surface is itself the anti-pattern. Agents never merge — humans merge. The loop surfaces this as the `merge_advised` advisory terminal; its payload shape is owned by the detector that produces it (`hivemind:detect-remediation-signals`), not restated here.
+The stop signal is NOT round count. Chasing zero-findings-per-push on a complex security surface is itself the anti-pattern. Agents never merge — humans merge. The loop surfaces this as the `merge_advised` advisory terminal; its payload shape is owned by the detector that produces it (`hivemind:detect-remediation-signals`).
 
 ## Severity as Sensitivity Modifier
 
@@ -163,7 +163,7 @@ Regression guard: do not let the young-surface escalation swallow the mature-sur
 
 ## Post-Fix Young-Tail Reroute Synthesis
 
-A reviewer's POST-fix advisory step reads only the detector's `merge_advisory` / `diminishing_returns` blocks and discards the detector structure. When **Bounded-Tail vs Recurring-Class Disambiguation** reroutes that advisory because the recurring surface is YOUNG, the cluster verdict's payload is NOT in hand — the step never read the `cluster` block. This section is the SINGLE SOURCE for the obligation that closes that gap and for the role-based shape of the payload the reroute must synthesize. It does not duplicate the disambiguation rule (which decides WHETHER to reroute) or the **Closed-by-Construction Acceptance Test** (which judges whether the tail's tracked fix closes the class); it specifies WHAT a young-tail reroute must carry and the prior obligation that makes the reroute decidable. Both sections are referenced, not restated.
+A reviewer's POST-fix advisory step reads only the detector's `merge_advisory` / `diminishing_returns` blocks and discards the detector structure. When **Bounded-Tail vs Recurring-Class Disambiguation** reroutes that advisory because the recurring surface is YOUNG, the cluster verdict's payload is NOT in hand — the step never read the `cluster` block. This section states WHAT a young-tail reroute must carry and the prior obligation that makes the reroute decidable.
 
 ### Gate-B-producing obligation (the overlay must judge youth)
 
@@ -190,15 +190,12 @@ When a POST-fix step reroutes a young recurring surface, it returns `root-cluste
 - Youth is the discriminator. A MATURE / legacy surface with a bounded tail and a structural home stays on the existing **Stop-and-Merge** merge-advisory (or advisory early-exit) path, unchanged. The young-tail reroute MUST NOT swallow that mature path.
 - A reroute introduces NO new `exit_reason` and NO new payload field — it reuses `root-cluster-suspected` and the existing cluster payload roles.
 
-The four consumers of this section, per the governance-consumer convention, are: `github-reviewer` step 5 (pre-fix overlay producing the Gate-B youth judgment), `github-reviewer` step 9 (POST-fix young-tail reroute + synthesis), `local-reviewer` step 6 (pre-fix overlay producing the Gate-B youth judgment), and `local-reviewer` step 9 (POST-fix young-tail reroute + synthesis). This section is the single source of the obligation and the payload roles; those steps reference it by name and do not restate it.
-
 ## Verdict Consumption
 
 The `hivemind:detect-remediation-signals` skill emits a verdict in which EVERY block
 (`cluster`, `break_fix`, `diminishing_returns`, `merge_advisory`) is ALWAYS present — block
 presence is unconditional and carries NO signal. The fired state lives ONLY in each block's
-INNER field. All four consumers — `github-reviewer`, `local-reviewer`, the overlord, and the
-cerebrate — MUST read the inner fired field (`break_fix.verdict == "break-fix"`,
+INNER field. Every consumer MUST read the inner fired field (`break_fix.verdict == "break-fix"`,
 `diminishing_returns.verdict == "diminishing-returns"`, `cluster.cluster_suspected == true`,
 `merge_advisory.advise == true`) and MUST NEVER test block presence or block truthiness. The
 authority for the exact block keys and inner field names is the
@@ -218,7 +215,7 @@ Zoom-out routing asymmetry: the user-only architecture zoom-out skill carries `d
 
 When the overlord's reconstructed PROACTIVE same-surface recurrence counter trips — the first non-closing structural fix per **Forced zoom-out after the first non-closing structural fix** above, the EXISTING proactive trigger — the overlord records a NAMED overlord-judgment marker into the run ledger so the proactive origin of the resulting `root-cluster-suspected` transition is DISTINGUISHABLE from a reviewer-RETURNED `root-cluster-suspected`. Both origins reach the SAME remediation state (`review_remediation_plan` / `review_remediation_plan_postpr`) via the SAME `root-cluster-suspected` exit_reason described in the asymmetry paragraph above; without this marker the two are indistinguishable in the ledger.
 
-The marker is a single key in the transition's `event.outputs` object. This subsection is the SINGLE SOURCE for its name and semantics; `${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` and `${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md` reference it BY NAME and never restate the mechanics.
+The marker is a single key in the transition's `event.outputs` object.
 
 - Key: `recurrence_origin`.
 - Value `"proactive"` — the zoom-out was overlord-proactively-derived (the reconstructed proactive recurrence counter tripped).
@@ -234,7 +231,7 @@ Producer-state-AGNOSTIC: the marker rides whichever producer-state result carrie
 Applies whenever a `github-reviewer` step reconstructs an ephemeral fix-ledger via
 `ledger-reconstruct.sh` and then invokes `hivemind:detect-remediation-signals`. Both
 qualifying steps — pre-fix reconstruction (step 5) and post-fix reconstruction (step 9) —
-apply these criteria. They are defined here once; neither step restates them.
+apply these criteria.
 
 ### (a) What the reconstructed skeleton provides — deterministic facts only
 
@@ -279,24 +276,11 @@ detector call:
 
 The skeleton is a lossless set of deterministic facts. The interpretation overlay (cycling
 label, iteration grouping, `fix_framing`, `root_class`) is agent judgment supplied on top
-before the detector call. This section is the single source of these criteria; neither
-github-reviewer step 5 nor step 9 restates them — both reference this section by name.
-
-## Engine Consumers
-
-These rules have one home, this doc, on both engines. Each consumer below references these sections by name and restates none:
-
-- **local-reviewer** — applies **First-Finding Triage**, **Recorded Decisions and Repeat Findings** and **Surface-Growth Escalation** to each local review pass.
-- **github-reviewer** — applies the same sections to each PR review pass.
-- **cerebrate** — applies them when planning a remediation, including script-engine replans that carry a review block, where it makes the call in **Forced zoom-out after the first non-closing structural fix** by judgment from the branch commits its fresh facts list.
-- **the overlord on the state machine** — applies them when routing review remediation, including the forced zoom-out in **Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry**, and returns an answer to the state that asked, through the question gate.
-- **the standard-delivery script's review handling** — sends a review back to planning, lists repeat rejections per **Recorded Decisions and Repeat Findings**, and returns the user's answer to a review question, or the call it took, to the local reviewer.
+before the detector call.
 
 ## Relationship to Existing Detectors
 
-Two review-loop detectors predate this doctrine and remain its companions; their policy meaning is unified here so both review loops share one vocabulary.
+- **Mutation Decay** (break-fix-break cycle): fixing one finding reintroduces a previously fixed finding. Policy: a MANDATORY stop.
+- **Creep Stagnation** (diminishing-returns exit): the loop spreads across iterations but gains no new ground. Policy: an ADVISORY early exit — the reviewer recommends stopping and returns the decision to the overlord/Overmind.
 
-- **Mutation Decay** (break-fix-break cycle): fixing one finding reintroduces a previously fixed finding. Policy: a MANDATORY stop. Defined in CONTEXT.md.
-- **Creep Stagnation** (diminishing-returns exit): the loop spreads across iterations but gains no new ground. Policy: an ADVISORY early exit — the reviewer recommends stopping and returns the decision to the overlord/Overmind. Defined in CONTEXT.md.
-
-The operational detail of all three signals — Mutation Decay, Creep Stagnation, and Root-Cluster — lives in `hivemind:detect-remediation-signals`. This doctrine holds only their policy meaning. Mutation Decay and Stop-and-Merge are both stop conditions but differ in cause: Mutation Decay stops on instability (a fix that breaks a prior fix); Stop-and-Merge stops on a hardened surface with a structural home and a bounded tail.
+The operational detail of all three signals — Mutation Decay, Creep Stagnation, and Root-Cluster — lives in `hivemind:detect-remediation-signals`. Mutation Decay and Stop-and-Merge are both stop conditions but differ in cause: Mutation Decay stops on instability (a fix that breaks a prior fix); Stop-and-Merge stops on a hardened surface with a structural home and a bounded tail.
