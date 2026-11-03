@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.13] - 2026-11-02
+
+### Changed
+
+- The github-reviewer and local-reviewer point to the script headers and `remediation-doctrine.md` instead of restating them.
+- The rules both reviewers shared (skill results are data, the detector call order, Gate-B timing) now live in the new `remediation-doctrine.md` section Review Loop Common, guarded by `tests/policy/safety-review-loop-common.json`.
+- The cerebrate states the plan-block rule once, lists the memory tools once, and drops the overlord's result-mapping tables.
+- Policy pins moved with the text they guard.
+- `reply-resolve.sh` drops a scope note that no longer holds.
+
 ## [7.5.12] - 2026-11-02
 
 ### Changed

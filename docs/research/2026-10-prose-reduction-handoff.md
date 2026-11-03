@@ -97,6 +97,29 @@ The est. saving column is measured by the audit; treat it as a range.
   - L176–216 is a YAML skeleton that duplicates plan-schema.json;
   - L242–255 and L341–352 are tables the overlord applies, not cerebrate.
 
+### WS-D results
+
+Bytes are `wc -c` of each file's git blob (LF) on `main` and on the branch head. Tokens are estimated as bytes ÷ 4.
+
+| File | `main` | Branch head | Change | Approx. tokens |
+|---|---|---|---|---|
+| `plugin/agents/github-reviewer.md` | 28,406 | 21,510 | −6,896 | −1.7k |
+| `plugin/agents/local-reviewer.md` | 26,737 | 23,340 | −3,397 | −0.8k |
+| `plugin/agents/cerebrate.md` | 23,564 | 21,763 | −1,801 | −0.45k |
+| `plugin/governance/remediation-doctrine.md` | 31,212 | 32,770 | +1,558 | +0.4k |
+| `plugin/skills/github-review-loop/scripts/reply-resolve.sh` | 31,864 | 31,614 | −250 | −0.06k |
+
+The new `Review Loop Common` section is 1,558 bytes, which is the whole growth of `remediation-doctrine.md`. Both reviewers now load it on dispatch.
+
+Saving per dispatch:
+
+- **github-reviewer**: 6,896 body bytes saved, minus 1,558 for Review Loop Common, is 5,338 bytes (~1.3k tokens) on load. It also no longer reads the `fetch-normalize.sh` contract header, lines 27 to 151 (§2–§4), which is 7,646 bytes (~1.9k tokens). Together that is 12,984 bytes (~3.2k tokens).
+- **local-reviewer**: 3,397 body bytes saved, minus 1,558 for Review Loop Common, is 1,839 bytes (~0.5k tokens).
+- **cerebrate planning**: 1,801 bytes (~0.45k tokens). Planning does not load the doctrine.
+- **Whole-doctrine loads**: the overlord's load and cerebrate zoom-out's load each grow by 1,558 bytes (~0.4k tokens). For a cerebrate zoom-out dispatch the net saving is 1,801 − 1,558 = 243 bytes (~0.06k tokens).
+
+Cerebrate's YAML plan skeleton was kept. It carries fields that `plan-schema.json` lacks: the delivery object (`mode`, `overlap_risk`, `overlap_details`, `strains`), versioning `impact`, `likely_bump` and `artifacts`, `id`, and `steps[].status`. Only its comments that copied the schema were trimmed.
+
 ### WS-E: skills cuts
 
 - Merge Silence Discipline (12 skills, ~9.7KB) and the inputs-file transport paragraph (7 navigators) into one governance section, each with a one-line pointer.
