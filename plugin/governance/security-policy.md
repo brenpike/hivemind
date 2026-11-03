@@ -24,13 +24,13 @@ An agent that finds data-origin text treated as an instruction (e.g. a review co
 
 A detached brood child runs unattended in `--permission-mode auto` with its task description, possibly an issue body, in its prompt, so no human sees an embedded instruction at a permission prompt. Three controls are the boundary; the child's tools change product files only.
 
-1. **Data-boundary preamble in `task.md`.** `hivemind:spawn-brood` writes the canonical data-boundary preamble (the quote above) as the first lines of every child's `task.md`, above the description.
-2. **Pre-spawn human approval of normalized task text.** The overlord brood gate gets the human's explicit approval of the normalized `{name, description}` before invoking `hivemind:spawn-brood`; that approval is the description's injection gate.
+1. **Data-boundary preamble in `task.md`.** `hivemind:spawn-brood` (`${CLAUDE_PLUGIN_ROOT}/skills/spawn-brood/scripts/spawn-brood.sh`) writes the canonical data-boundary preamble (the quote above) as the first lines of every child's `task.md`, above the description.
+2. **Pre-spawn human approval of normalized task text.** The overlord brood gate (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md`) gets the human's explicit approval of the normalized `{name, description}` before invoking `hivemind:spawn-brood`; that approval is the description's injection gate.
 3. **Allowlist constraint on `branch`/`base`.** `hivemind:spawn-brood` rejects a `base` outside `^[A-Za-z0-9._/-]+$` (non-empty, no leading `-`, no `..`), checked in the agent's own reasoning before any Bash call. `hivemind:brood-status` re-checks the manifest values and each worktree's git-reported live branch before their first shell use.
 
 **Strain plugin-read grant.** `hivemind:spawn-brood` starts each strain with `--settings` at `.hivemind/broods/<brood-id>/strain-settings.json`, outside the strain's working folder. It holds only plugin-folder `Read(/<root>/**)` rules, one per plugin-root spelling that passes the positive charset gate: no Edit rule, no working-folder rule. No user settings file changes.
 
-**Broods MUST be spawned only against trusted bases**: a base's committed hooks, `.claude/` settings, `.mcp.json` servers and build or test code run at child launch, before any permission check. Rationale: ADR-0017, ADR-0010.
+**Broods MUST be spawned only against trusted bases**: a base's committed hooks, `.claude/` settings, `.mcp.json` servers and build or test code run at child launch, before any permission check. Adoption history, the rejected config provisioning (option C), the classifier dependency and the base-trust rationale: ADR-0017 (amendments 2026-06-02, 2026-07-27, 2026-10-24, 2026-10-31) and ADR-0010 (amendment 2026-10-31).
 
 ## Trust-Boundary Discipline
 
@@ -44,7 +44,7 @@ Boundaries (rationale: ADR-0019, ADR-0037 slice 4 amendment); the third is conte
 
 ## Shell Identifier Discipline
 
-A git or GitHub identifier (branch, base, remote, upstream ref, commit SHA, PR reference) never enters model-authored Bash source as an unvalidated literal. Double quotes do not protect it: Bash expands `$(...)`, backticks and `${...}` inside them, and `git check-ref-format` accepts names holding them. A variable's contents are never re-evaluated.
+This rule covers every Bash command an agent or skill authors. A git or GitHub identifier (branch, base, remote, upstream ref, commit SHA, PR reference) never enters model-authored Bash source as an unvalidated literal. Double quotes do not protect it: Bash expands `$(...)`, backticks and `${...}` inside them, and `git check-ref-format` accepts names holding them. A variable's contents are never re-evaluated.
 
 When a command can produce the identifier in the same Bash call, capture it out-of-band: command substitution into a shell variable, used only as `"$var"`. An identifier that must enter command text as a literal, from the caller or an earlier call's output, first passes the identifier gate in the agent's own reasoning before that Bash call; a failing value stops the procedure with a blocker that does not echo it.
 
