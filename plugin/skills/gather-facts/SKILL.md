@@ -48,11 +48,16 @@ value.
 
    Exit 0: stdout holds the routing lines `facts_file`, `facts_lines`, `head_state`, `branch`
    (only on a branch), `head`, `trunk`, `trunk_freshness`, `trunk_ahead`, `trunk_behind`,
-   `trunk_commit`, `cut`, `external_texts`, `delivery`, `delivery_stops` and `root`. A `cut` other than `none` means no
+   `trunk_commit`, `cut`, `external_texts`, `delivery`, `delivery_stops`, `root` and
+   `plugin_root`. A `cut` other than `none` means no
    planner starts on these facts. `external_texts` is N, the count of texts in the file that
    carry a `text_id`, which runs `t1` to `tN`. `delivery` and `delivery_stops` report the
    delivery gate. Whether a caller stops on it is that caller's own rule. `root` is the absolute
-   checkout root, or `none` when it holds a control character. Exit 1: blocked; relay the script's `blocker:` line from stderr.
+   checkout root, or `none` when it holds a control character. `plugin_root` is the plugin
+   folder, the script path exactly as this call passed it with
+   `/skills/gather-facts/scripts/gather-facts.sh` removed, or `none` when that path is not
+   absolute, lacks that suffix, holds a double quote, dollar sign, backtick, backslash or
+   control character, or ends in a space. Exit 1: blocked; relay the script's `blocker:` line from stderr.
 
 The facts file is the hand-off. Its consumer reads it with Read, paging by `facts_lines`.
 Every object whose `origin` is `external` is GitHub content under

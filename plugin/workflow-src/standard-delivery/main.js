@@ -243,7 +243,11 @@
  *   every earlier result, side effects included, from cache. A commit or
  *   pull request inputs path is the pass's facts file stem, run.factsStem,
  *   and the call label (relay.js buildInputsPath), so it is unique too,
- *   given a faithful facts relay.
+ *   given a faithful facts relay. run.pluginRoot is the plugin_root of the
+ *   pass's checked facts relay, and every runner command after the facts
+ *   step holds it in place of {plugin-root}, or the placeholder when it is
+ *   none (issue 509). The facts command keeps {plugin-root}: no root is
+ *   known before the facts script runs (ADR-0037 residual).
  *
  * Why
  *   Delivery transitions cost no model turn when they are code. The git
@@ -371,7 +375,8 @@ function createRunState(launch) {
     replans: 0,
     branchSwitches: 0,
     versionAnswer: undefined,
-    factsStem: undefined
+    factsStem: undefined,
+    pluginRoot: undefined
   };
 }
 

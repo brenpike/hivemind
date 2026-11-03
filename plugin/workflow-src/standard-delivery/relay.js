@@ -5,13 +5,12 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The steps read trunk,
- *          references, pass, answerLog, head and factsStem, and runCommitStep
- *          passes its checked commit to observeHead (record.js), which writes head.
+ *          references, pass, answerLog, head, factsStem and pluginRoot, and
+ *          runCommitStep passes its checked commit to observeHead (record.js), which writes head.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   relay  each runner result: {outcome, stdout, stderr} under
  *          RELAY_SCHEMA, its stdout read with lib/routing.js.
- *   RUN_NOUN, RUN_NAME, RUNNER_MODEL, PLANNER_AGENT and RELAY_SCHEMA from
- *   main.js.
+ *   RUN_NOUN, RUN_NAME, RUNNER_MODEL, PLANNER_AGENT and RELAY_SCHEMA from main.js.
  *
  * Outputs
  *   runFactsStep(run)  {facts}, else a cause for stopDelivery (record.js),
@@ -56,7 +55,8 @@
  *   Facts   a haiku hivemind:synapse runner runs the gather-facts command
  *           and relays its stdout word for word; the workflow parses it with
  *           gatherFactsRoutingSpec(), checks it with isConsistentFactsRelay
- *           (lib/facts.js) and sets run.factsStem from it before the scan.
+ *           (lib/facts.js) and sets run.factsStem and run.pluginRoot from it before the scan.
+ *           Its own command keeps {plugin-root}; later commands hold run.pluginRoot (main.js).
  *   Scan    the shared scan step, when the facts count external texts.
  *           runPassScan calls agent() itself on every pass and returns
  *           its cause or undefined; on pass 1 with the prompt, options and
@@ -102,14 +102,13 @@
  *   through capItemLines.
  *   Runner prompts carry no request text and put every branch and trunk
  *   name in their command block only. Every runner is a hivemind:synapse
- *   and the scan, validation and fix rounds drones (lib/facts.js). A
- *   runner prompt is one task line, dataBlocksSentence(), a
- *   buildRunnerCommand command block and for commit and PR an inputs_file
- *   block, in the block names and placeholders of
- *   ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md, which owns
- *   how a runner uses them (docs/engineering-principles.md P24). Each step
- *   checks its words with describeRunnerWordProblem before the call. How
- *   a runner relays is the RELAY_SCHEMA field descriptions.
+ *   and the scan, validation and fix rounds drones (lib/facts.js). A runner
+ *   prompt is one task line, dataBlocksSentence(), a buildRunnerCommand
+ *   command block and for commit and PR an inputs_file block, in the block
+ *   names and placeholders of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md, which
+ *   owns how a runner uses them (docs/engineering-principles.md P24). Each
+ *   step checks its words with describeRunnerWordProblem before the call.
+ *   How a runner relays is the RELAY_SCHEMA field descriptions.
  *   Relayed reply (issue 432): the harness relays the user's latest message
  *   to every workflow agent, so after a resume each agent sees the reply to
  *   the pause as a user message. Once run.answerLog is not empty, every
@@ -431,6 +430,7 @@ async function runFactsStep(run) {
     return checked;
   }
   run.factsStem = /facts-([^/]+)\.json$/.exec(checked.facts.facts_file)[1];
+  run.pluginRoot = checked.facts.plugin_root;
   const scanned = await runPassScan(checked.facts, run);
   return scanned === undefined ? checked : scanned;
 }
@@ -439,8 +439,8 @@ function listBranchWords(plan, freshness, trunk) {
   return ['--base', plan.base, '--branch', plan.branch, '--classification', plan.classification, '--trunk-freshness', freshness, '--trunk', trunk];
 }
 
-function buildBranchPrompt(words) {
-  return ['Create or confirm the working branch with the command below.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('create-working-branch', words))].join('\n');
+function buildBranchPrompt(words, pluginRoot) {
+  return ['Create or confirm the working branch with the command below.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('create-working-branch', words, pluginRoot))].join('\n');
 }
 
 function checkBranchRelay(relay, plan, freshness) {
@@ -468,7 +468,7 @@ async function runBranchStep(run, plan, freshness) {
   if (commandStop !== undefined) {
     return commandStop;
   }
-  const relay = await runRunnerRelay(() => addResumeNote(buildBranchPrompt(words), run), 'branch-' + run.pass, 'Branch');
+  const relay = await runRunnerRelay(() => addResumeNote(buildBranchPrompt(words, run.pluginRoot), run), 'branch-' + run.pass, 'Branch');
   return checkBranchRelay(relay, plan, freshness);
 }
 
@@ -526,9 +526,9 @@ function listCommitWords(trunk, inputsPath) {
   return ['--trunk', trunk, '--inputs', inputsPath];
 }
 
-function buildCommitPrompt(files, plan, trunk, inputsPath, stepName, subject) {
+function buildCommitPrompt(files, plan, trunk, inputsPath, stepName, subject, pluginRoot) {
   const content = { type: commitTypeMap()[plan.classification], breaking: plan.breaking, subject: subject, files: files };
-  return ['Run the command below to commit ' + commitStepTexts(stepName).purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', listCommitWords(trunk, inputsPath))), formatInputsFileBlock(inputsPath, content)].join('\n');
+  return ['Run the command below to commit ' + commitStepTexts(stepName).purpose + '.', dataBlocksSentence(), '', formatCommandBlock(buildRunnerCommand('molt', listCommitWords(trunk, inputsPath), pluginRoot)), formatInputsFileBlock(inputsPath, content)].join('\n');
 }
 
 function readOutsidePath(payload) {
@@ -586,7 +586,7 @@ async function runCommitStep(run, plan, commit, stepCauses) {
   if (commandStop !== undefined) {
     return stopDelivery(stepCauses.concat([commandStop]), run, [], isReplan);
   }
-  const relay = await runRunnerRelay((label) => addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, listWords(label)[3], commit.stepName, subject), run), commit.label, 'Commit');
+  const relay = await runRunnerRelay((label) => addResumeNote(buildCommitPrompt(commit.files, plan, run.trunk, listWords(label)[3], commit.stepName, subject, run.pluginRoot), run), commit.label, 'Commit');
   const checked = checkCommitRelay(relay, plan, commit.stepName);
   if (checked.problem !== undefined) {
     return stopDelivery(stepCauses.concat([checked]), run, [], isReplan);

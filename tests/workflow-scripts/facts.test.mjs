@@ -108,6 +108,7 @@ describe('gatherFactsRoutingSpec against real gather-facts.sh stdout', () => {
     assert.equal(values.external_texts, '0');
     assert.equal(values.delivery, 'ready');
     assert.equal(values.delivery_stops, 'none');
+    assert.equal(values.plugin_root, repoRoot + 'plugin');
     const factsText = readFileSync(join(gitRoot, values.facts_file), 'utf8');
     assert.equal(String(factsText.split('\n').length - 1), values.facts_lines);
   });
@@ -190,7 +191,8 @@ describe('gatherFactsRoutingSpec shape', () => {
     for (const [key, value] of Object.entries(sample)) {
       assert.equal(spec[key].pattern.flags, '', key);
       assert.equal(lib.matchesFactsLine(key, value), true, key);
-      const bentValues = key === 'root' ? [value + '\n', '\t' + value, value + '\u007f', ''] : [value + '\n', ' ' + value, value + ' ', '!' + value, value + '!', ''];
+      const freeBentValues = { root: [value + '\n', '\t' + value, value + '\u007f', ''], plugin_root: [value + '\n', ' ' + value, value + ' ', '!' + value, value + '"', value + '\u007f', ''] };
+      const bentValues = freeBentValues[key] ?? [value + '\n', ' ' + value, value + ' ', '!' + value, value + '!', ''];
       for (const bent of bentValues) {
         assert.equal(lib.matchesFactsLine(key, bent), false, key + ' ' + JSON.stringify(bent));
       }
@@ -206,7 +208,8 @@ describe('gatherFactsRoutingSpec shape', () => {
     ['trunk_ahead', ['0', '7'], ['01', '-1', '1.0']],
     ['cut', ['none', 'pull_requests', 'references,pull_requests'], ['none,references', 'history', 'references,']],
     ['delivery_stops', ['none', 'dirty_paths,cut_fields'], ['none,dirty_paths', 'dirty', ',dirty_paths']],
-    ['root', ['none', '/home/user/repo', '/a b/c d', 'C:/repo'], ['', '/a\tb', '/a\nb', '/a\u0000b', '/a\u001fb', '/a\u007fb']]
+    ['root', ['none', '/home/user/repo', '/a b/c d', 'C:/repo'], ['', '/a\tb', '/a\nb', '/a\u0000b', '/a\u001fb', '/a\u007fb']],
+    ['plugin_root', ['none', '/home/user/.claude/plugins/cache/brenpike/hivemind/7.5.15', '/a b/c d', 'C:/plugin', 'd:/x y/plugin', '/'], ['', 'None', 'plugin', './plugin', ' /plugin', '/plugin ', 'C:plugin', 'C:\\plugin', '/a"b', '/a$b', '/a`b', '/a\\b', '/a\tb', '/a\nb', '/a\u0000b', '/a\u001fb', '/a\u007fb', '~/plugin']]
   ]) {
     test(`${key} accepts ${JSON.stringify(good)} and rejects ${JSON.stringify(bad)}`, () => {
       good.forEach((value) => assert.equal(lib.matchesFactsLine(key, value), true, value));
@@ -504,6 +507,23 @@ describe('synapse runner commands and blocks', () => {
     assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main']), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main');
     assert.equal(lib.buildGatherFactsCommand('main', []), 'bash "{plugin-root}/skills/gather-facts/scripts/gather-facts.sh" --trunk main');
     assert.equal(lib.buildGatherFactsCommand('develop', ['12', '40']), 'bash "{plugin-root}/skills/gather-facts/scripts/gather-facts.sh" --trunk develop --ref 12 --ref 40');
+  });
+  test('a runner command given a root holds it in place of {plugin-root}, and one given none or no string keeps the placeholder', () => {
+    assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main'], '/opt/plugins/hivemind'), 'bash "/opt/plugins/hivemind/skills/molt/scripts/molt.sh" --trunk main');
+    assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main'], '/a b/plugin'), 'bash "/a b/plugin/skills/molt/scripts/molt.sh" --trunk main');
+    assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main'], 'C:/plugin'), 'bash "C:/plugin/skills/molt/scripts/molt.sh" --trunk main');
+    for (const root of ['none', undefined, null, 7]) {
+      assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main'], root), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main', String(root));
+    }
+  });
+  test('the real script reports the plugin root its gather-facts command ran from, and the gate allows a later command built with that root for synapse only', { skip: !hasJq && 'jq is not installed' }, () => {
+    const run = spawnSync('bash', ['-c', resolveCommand(lib.buildGatherFactsCommand('main', []))], { cwd: gitRoot, env: scriptEnv, encoding: 'utf8' });
+    assert.equal(run.status, 0, run.stderr);
+    const reported = parseFacts(run.stdout).values.plugin_root;
+    assert.equal(reported, pluginRoot);
+    const command = lib.buildRunnerCommand('gather-facts', lib.listGatherFactsWords('main', []), reported);
+    assert.equal(askGate(command, 'hivemind:synapse'), 'allow', command);
+    assert.equal(askGate(command, 'hivemind:drone'), 'none', command);
   });
   test('the gather-facts command runs the real script once {plugin-root} is the plugin path', () => {
     const run = spawnSync('bash', ['-c', resolveCommand(lib.buildGatherFactsCommand('main', []))], { cwd: gitRoot, env: scriptEnv, encoding: 'utf8' });

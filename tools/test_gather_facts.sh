@@ -217,23 +217,31 @@ head_sha() {
 
 # ── Engine helpers ───────────────────────────────────────────────────────────
 
-# run_engine <name> <cwd> <PATH> <engine args...> -> runs the engine; sets LAST_OUT (stdout, exact),
-# LAST_RC, LAST_ERR (stderr file), and LAST_FACTS (absolute facts file) on exit 0. Every facts file
-# is recorded for the final schema check and checked here for the text invariants.
+# run_engine <name> <cwd> <PATH> <engine args...> -> run_engine_at with the committed engine.
+run_engine() {
+    local name="$1" run_cwd="$2" run_path="$3"
+    shift 3
+    run_engine_at "$name" "$run_cwd" "$run_path" "$ENGINE" "$@"
+}
+
+# run_engine_at <name> <cwd> <PATH> <engine path> <engine args...> -> runs the engine at <engine
+# path>, passed to bash as given; sets LAST_OUT (stdout, exact), LAST_RC, LAST_ERR (stderr file),
+# and LAST_FACTS (absolute facts file) on exit 0. Every facts file is recorded for the final schema
+# check and checked here for the text invariants.
 LAST_OUT=''
 LAST_RC=0
 LAST_ERR=''
 LAST_FACTS=''
-run_engine() {
-    local name="$1" run_cwd="$2" run_path="$3"
-    shift 3
+run_engine_at() {
+    local name="$1" run_cwd="$2" run_path="$3" engine_path="$4"
+    shift 4
     LAST_ERR="$WORKDIR/$name.err"
     LAST_RC=0
     LAST_FACTS=''
     local captured
     captured="$(cd "$run_cwd" || exit 97
         engine_rc=0
-        PATH="$run_path" "$BASH_BIN" "$ENGINE" "$@" 2>"$LAST_ERR" || engine_rc=$?
+        PATH="$run_path" "$BASH_BIN" "$engine_path" "$@" 2>"$LAST_ERR" || engine_rc=$?
         printf 'x'
         exit "$engine_rc")" || LAST_RC=$?
     LAST_OUT="${captured%x}"
@@ -553,7 +561,7 @@ test_freshness() {
     create_world fresh
     run_engine fresh "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok fresh
-    assert_equal fresh-keys 'facts_file,facts_lines,head_state,branch,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops,root' \
+    assert_equal fresh-keys 'facts_file,facts_lines,head_state,branch,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops,root,plugin_root' \
         "$(route_keys)" "routing keys and order"
     assert_route fresh-state trunk_freshness fresh
     assert_route fresh-branch branch "$BRANCH"
@@ -848,7 +856,7 @@ test_head_states() {
     run_engine unsafe-name "$WORK_TREE" "$STUB_PATH" --trunk main
     assert_ok unsafe-name
     assert_route unsafe-name-state head_state unsafe_name
-    assert_equal unsafe-name-keys 'facts_file,facts_lines,head_state,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops,root' \
+    assert_equal unsafe-name-keys 'facts_file,facts_lines,head_state,head,trunk,trunk_freshness,trunk_ahead,trunk_behind,trunk_commit,cut,external_texts,delivery,delivery_stops,root,plugin_root' \
         "$(route_keys)" "no branch line"
     assert_fact unsafe-name-no-branch-key '.repository | has("branch")' false
     assert_route unsafe-name-stop delivery_stops branch_name_unsafe
@@ -876,6 +884,46 @@ test_root() {
     assert_ok root-control
     assert_route root-control-none root none
     assert_route root-control-ready delivery ready
+}
+
+# ── The plugin folder line ──────────────────────────────────────────────────
+
+# copy_plugin <folder> -> copies the gather-facts skill and skills/_shared to <folder>/skills, so
+# an engine run from that copy has <folder> as its plugin folder.
+copy_plugin() {
+    mkdir -p "$1/skills"
+    cp -R "$REPO_ROOT/plugin/skills/gather-facts" "$REPO_ROOT/plugin/skills/_shared" "$1/skills/"
+}
+
+test_plugin_root() {
+    local plugin_copy engine_suffix='skills/gather-facts/scripts/gather-facts.sh'
+
+    create_world plugin-root-absolute
+    plugin_copy="$WORLD_ROOT/plugin copy"
+    copy_plugin "$plugin_copy"
+    run_engine_at plugin-root-absolute "$WORK_TREE" "$STUB_PATH" "$plugin_copy/$engine_suffix" --trunk main
+    assert_ok plugin-root-absolute
+    assert_route plugin-root-absolute-folder plugin_root "$plugin_copy"
+
+    create_world plugin-root-relative
+    copy_plugin "$WORLD_ROOT/plugin"
+    run_engine_at plugin-root-relative "$WORK_TREE" "$STUB_PATH" "../plugin/$engine_suffix" --trunk main
+    assert_ok plugin-root-relative
+    assert_route plugin-root-relative-none plugin_root none
+
+    create_world plugin-root-dollar
+    plugin_copy="$WORLD_ROOT/plug\$in"
+    copy_plugin "$plugin_copy"
+    run_engine_at plugin-root-dollar "$WORK_TREE" "$STUB_PATH" "$plugin_copy/$engine_suffix" --trunk main
+    assert_ok plugin-root-dollar
+    assert_route plugin-root-dollar-none plugin_root none
+
+    create_world plugin-root-trailing-space
+    plugin_copy="$WORLD_ROOT/plugin copy "
+    copy_plugin "$plugin_copy"
+    run_engine_at plugin-root-trailing-space "$WORK_TREE" "$STUB_PATH" "$plugin_copy/$engine_suffix" --trunk main
+    assert_ok plugin-root-trailing-space
+    assert_route plugin-root-trailing-space-none plugin_root none
 }
 
 # ── Past the bound: a history whose facts file passes 256 KB ────────────────
@@ -1669,6 +1717,7 @@ test_paths_and_subjects
 test_history_shapes
 test_head_states
 test_root
+test_plugin_root
 test_big_history
 test_references
 test_pull_requests

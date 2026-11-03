@@ -1901,3 +1901,53 @@ The issue 428 amendment above names the Skill File-Tool Grants section of `plugi
 The issue 428 amendment's text is unchanged. Its pointer to `plugin/governance/security-policy.md` is read through this amendment.
 
 The rest of ADR-0037 is unchanged. Status remains accepted.
+
+## Amendment 2026-11-03: runner commands carry the plugin root the facts script reports (issue 509)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/509. In run `wf_b8b4e8b0-4ac`, the run R1 that became PR 510, the pull request runner sent its command with `{plugin-root}` still in place. The synapse gate denied the command twice, and the pull request was opened by hand.
+
+**Root cause.** `buildRunnerCommand` (`plugin/workflow-src/lib/facts.js`) writes every runner command as `bash "{plugin-root}/skills/<s>/scripts/<s>.sh" ...`, and `plugin/agents/synapse.md` has the haiku runner replace `{plugin-root}` with the root by hand. So each command depends on a model swapping one byte-exact value into the text. The gate matches that value byte for byte, so any miss is a deny.
+
+**The user's decision.** Q2, option A (2026-11-03): the facts script reports the root, and the engine writes it into the commands it builds after the facts step.
+
+**The change.**
+
+- `gather-facts.sh` prints a new last routing line, `plugin_root`. Its value is the literal path bash ran the script from, minus `/skills/gather-facts/scripts/gather-facts.sh`. The value is `none` when that path is not absolute, lacks that suffix, holds a double quote, a dollar sign, a backtick, a backslash or a control byte, or ends in a space. `plugin/skills/gather-facts/SKILL.md` documents the line, and `tools/test_gather_facts.sh` covers it.
+- The engine checks the line along with the other facts lines and keeps it per pass as `run.pluginRoot`. It writes that root into the branch command, the commit commands (wave, fix, review and head check) and the pull request command. When the value is `none`, it keeps the `{plugin-root}` placeholder, as before.
+- The facts command, and the one command in analysis-only, keep `{plugin-root}`, because the engine knows no root before the first script runs. That remainder is the residual below.
+- The synapse gate hook and its tests, `plugin/agents/synapse.md` and `plugin/governance/security-policy.md` (Synapse Runner Gate) are unchanged. The policy stays accurate because the reported root is the same text the hook already matches.
+
+**Why the literal BASH_SOURCE text is not the BASH_SOURCE that finding 27d328fd rejected.** That section rejected BASH_SOURCE as a second source of the root for the hook. The bootstrap form in `tools/test_script_bootstrap.sh` resolves it with `pwd -P`, and a resolved path can differ from the text Claude Code substitutes. This change resolves nothing: it takes the literal text bash ran, which is the path written in the facts command. The gate allows the facts command only when that path is `CLAUDE_PLUGIN_ROOT` byte for byte, so the root the script reports is the root the gate matches. The hook still reads only `CLAUDE_PLUGIN_ROOT` and gains no second source.
+
+**Options ruled out.**
+
+- **A hook `updatedInput` rewrite.** Rejected by the user decision of 2026-10-30 (Q2 of local review finding 6bc3a379): it adds rewrite logic to a security gate and turns a hook failure from a prompt into a failed runner.
+- **Rewording `plugin/agents/synapse.md`.** The swap stays a model task, so a miss stays possible.
+- **A retry with the same prompt.** The same model gets the same prompt and the same swap. R1 was denied twice.
+- **A launch-argument root.** The launching model would type the root into the launch arguments, which moves the same byte-exact swap to another model. No check ties that value to the root the gate matches. Launch text can also reach the engine changed (the issue 500 pattern).
+
+**Edge cases.**
+
+- A plugin path with a space stays one double-quoted word, as now.
+- A root holding a byte with no exact form reports `none`. The gate already denies every runner command in that case (the residuals of findings 6bc3a379 and 27d328fd).
+- A root ending in a space reports `none`, so its later runner commands keep `{plugin-root}`, as before this change. This is the user's decision of 2026-11-03 on local review finding 96a6a97b, option B: the facts script reports `none`, and the consumer's `plugin_root` pattern and its tests stay unchanged. Loosening the consumer pattern to accept a trailing space (option A) was rejected.
+- A relay that changes `plugin_root` fails as malformed facts or as a gate deny at the branch step, both before any wave (the faithful-relay residual of the issue 447 amendment).
+- A resumed run gets `run.pluginRoot` from each pass's own facts relay.
+- Analysis-only parses only four facts values, so the new line does not affect it, and its prompts stay byte-identical.
+
+**Surface account.**
+
+- Added: 1 routing line in `gather-facts.sh`, with its skill text and tests; 1 checked facts value and `run.pluginRoot` in the engine, with its tests; this amendment and 1 changelog entry.
+- Changed: the branch, commit and pull request commands carry the reported root in place of the placeholder when the root is known.
+- Unchanged: the hook, its tests, `plugin/agents/synapse.md`, `plugin/governance/security-policy.md`, the facts command and the analysis-only command.
+- Net: one routing line and one run field remove the model swap from every runner command after the facts step.
+
+**Recorded residual: the facts command still relies on synapse's swap.**
+
+- **Not covered.** The facts command of standard-delivery and the one command of analysis-only still carry `{plugin-root}`, and synapse still replaces it by hand.
+- **Bounded impact.** A miss there is a gate deny on the run's first step, before any branch, wave or commit. Before this change, a miss could land at the pull request step, after review.
+- **Ground.** The engine cannot know the root before the first script runs, and the hook `updatedInput` route was rejected (2026-10-30).
+
+The rest of ADR-0037 is unchanged. Status remains accepted.
+
+Links: https://github.com/brenpike/hivemind/issues/509, https://github.com/brenpike/hivemind/pull/510.
