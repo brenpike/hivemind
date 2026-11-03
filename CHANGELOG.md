@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.14] - 2026-11-03
+
+### Changed
+
+- `remediation-doctrine.md` states each rule once, in fewer words. It keeps the same rules and section names.
+- Policy pins moved with the text they guard.
+
 ## [7.5.13] - 2026-11-02
 
 ### Changed
