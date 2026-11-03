@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.16] - 2026-11-03
+
+### Changed
+
+- `security-policy.md`, `safety-rails.md` and `definitions.md` state each rule once, in fewer words. They keep the same rules and section names. The Synapse Runner Gate section is unchanged.
+
 ## [7.5.15] - 2026-11-03
 
 ### Fixed
