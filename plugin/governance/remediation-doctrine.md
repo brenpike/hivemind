@@ -18,10 +18,10 @@ Before any one-off fix, ask: would the next review comment be this same shape wi
 
 At the first non-trivial finding, before any fix is planned or applied, answer four questions. Triage keys on the first finding, never on a finding count.
 
-1. **Introduced or inherited.** Either way, a found root cause is fixed at its source in the PR that found it, even outside the reviewed diff. Origin never licenses a deferral or a residual.
-2. **Root class and owning layer.** The fix lands in the layer that owns the root class, not at the symptom.
-3. **Remove before harden.** Prefer removing or retiring the surface over hardening it.
-4. **Threat model.** When a recorded threat model excludes the assumed attacker or failure, reject the finding at the source by citing the record; do not harden. When none is recorded, recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls), when a reviewer raises it, and a call for the user otherwise.
+1. **Introduced or inherited.** Did this branch introduce the behavior, or inherit it from trunk? Either way, a found root cause is fixed at its source in the PR that found it, even outside the reviewed diff. Origin never licenses a deferral or a residual.
+2. **Root class and owning layer.** What is the root class, and which layer owns it? The fix lands in the layer that owns the root class, not at the symptom.
+3. **Remove before harden.** Can the surface be removed or retired instead of hardened? Prefer removing or retiring the surface over hardening it.
+4. **Threat model.** Is the attacker or failure the finding assumes inside the recorded threat model? When a recorded threat model excludes the assumed attacker or failure, reject the finding at the source by citing the record; do not harden. When none is recorded, recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls), when a reviewer raises it, and a call for the user otherwise.
 
 The answers feed **Closed-by-Construction Preference** and **Surface-Growth Escalation**. A question 4 rejection is handled per **Recorded Decisions and Repeat Findings**.
 
