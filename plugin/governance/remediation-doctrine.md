@@ -1,39 +1,35 @@
 # Remediation Doctrine
 
-Shared vocabulary and policy for root-cause review remediation. The detection mechanics live in the `hivemind:detect-remediation-signals` skill; few-shot exemplars ship in that skill's `references/`.
-
-When any rule uses a term defined here, this definition is binding.
+Terms and policy for root-cause review remediation. Detection mechanics live in `hivemind:detect-remediation-signals`. A term defined here binds every rule that uses it.
 
 ## Root-Cluster
 
-A set of N-or-more review findings that share a root cause, surface, or fix-framing. A root-cluster is the signal that per-finding patching must STOP and the loop must zoom out: the findings are symptoms of one defect, so patching them individually is a treadmill that spawns the next symptom on the next pass.
+N or more review findings that share a root cause, surface, or fix-framing. It stops per-finding patching; the loop zooms out.
 
-When a reviewer detects a root-cluster it returns the `root-cluster-suspected` exit_reason, carrying the cluster: the shared files/surface, the N thread URLs or finding IDs, the hypothesized root cause, and the same-framing rationale. The overlord consumes this signal to route to a structural fix (via cerebrate) instead of dispatching N narrow patches.
+A reviewer that detects one returns the `root-cluster-suspected` exit_reason with the cluster: the shared files or surface, the N thread URLs or finding IDs, the hypothesized root cause, and the same-framing rationale. The overlord routes it to a structural fix via cerebrate.
 
-The cluster threshold N is tuned by severity per **Severity as Sensitivity Modifier**.
+Severity tunes N per **Severity as Sensitivity Modifier**.
 
 ## Same-Framing Test
 
-Before committing to any one-off fix, ask: would the next reviewer comment be this same shape with a different byte, field, or path? If yes, the root is unfixed — escalate to a structural fix rather than patch the instance.
-
-The same-framing test is applied per-candidate during classification. A "yes" answer is a primary input to **Root-Cluster** detection: it converts a lone finding into evidence that a class, not an instance, is at fault.
+Before any one-off fix, ask: would the next review comment be this same shape with a different byte, field, or path? If yes, the root is unfixed: escalate to a structural fix. Apply it per candidate during classification; a yes is **Root-Cluster** evidence.
 
 ## First-Finding Triage
 
-At the FIRST non-trivial finding, before any fix is planned or applied, answer the four questions below. Triage is keyed on the first finding, never on a finding count: a root cause found once is found.
+At the first non-trivial finding, before any fix is planned or applied, answer four questions. Triage keys on the first finding, never on a finding count.
 
-1. **Introduced or inherited.** Was the behavior introduced by this branch or inherited from trunk? Either way, a found root cause is fixed at its source in the PR that found it, even when that source lies outside the reviewed diff. Origin never licenses a deferral or a residual.
-2. **Root class and owning layer.** What is the root class, and which layer owns it? The fix lands in that layer, not at the symptom.
-3. **Remove before harden.** Can the surface be removed or retired instead of hardened? Removal is preferred: a removed surface emits no further findings.
-4. **Threat model.** Is the attacker or failure the finding assumes inside the recorded threat model? When a recorded threat model puts it outside, reject the finding at the source by citing the record, and do not harden. When no threat model is recorded, recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls), when a reviewer raises it, and a call for the user otherwise.
+1. **Introduced or inherited.** Either way, a found root cause is fixed at its source in the PR that found it, even outside the reviewed diff. Origin never licenses a deferral or a residual.
+2. **Root class and owning layer.** The fix lands in the layer that owns the root class, not at the symptom.
+3. **Remove before harden.** Prefer removing or retiring the surface over hardening it.
+4. **Threat model.** When a recorded threat model excludes the assumed attacker or failure, reject the finding at the source by citing the record; do not harden. When none is recorded, recording one is a review call, asked or taken per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls), when a reviewer raises it, and a call for the user otherwise.
 
-The answers feed **Closed-by-Construction Preference** and **Surface-Growth Escalation**. A finding rejected under question 4 is handled per **Recorded Decisions and Repeat Findings**.
+The answers feed **Closed-by-Construction Preference** and **Surface-Growth Escalation**. A question 4 rejection is handled per **Recorded Decisions and Repeat Findings**.
 
 ## Closed-by-Construction Preference
 
-When choosing a structural fix, prefer one that dissolves the whole class by construction over one that handles the observed instance. A closed-by-construction fix makes the next same-framing finding impossible rather than merely unobserved. Ordered preferences:
+Prefer a fix that makes the whole class impossible over one that handles the instance:
 
-- positive allowlist over reject-enumeration (blacklist)
+- positive allowlist over reject-enumeration
 - a real parser over hand-parsing
 - ground-truth derivation over validating untrusted input
 - floor-at-input plus encode-at-output over per-context charset handling
@@ -41,48 +37,35 @@ When choosing a structural fix, prefer one that dissolves the whole class by con
 
 ### Closed-by-Construction Acceptance Test
 
-A named gate applied as PROSE JUDGMENT by both reviewers AND the overlord before accepting any candidate "structural" remediation as cluster-closing. It is the discriminator between a fix that dissolves the class and one that merely extends the handled set under a structural-looking name.
-
-The gate question, asked of every proposed structural fix:
+Before accepting a structural fix as cluster-closing, both reviewers and the overlord ask, by judgment:
 
 > What class of future finding does this make impossible, and why?
 
-Decision rule on the answer:
+- An answer that enumerates handled cases is **complete-the-known-set**, the **Same-Framing Test** answering yes. Keep the cluster open and escalate.
+- An answer that names a class eliminated by changing the key, the primitive, or the approach is closed-by-construction: accept it.
 
-- If the answer ENUMERATES handled cases — "we now also check X", "we added the missing attribute", "the predicate now covers this case too" — the fix is NOT closed-by-construction. It is **complete-the-known-set**, and it is still whack-a-mole: the next un-enumerated attribute is the next finding. Keep the cluster OPEN and escalate; do not accept the fix as cluster-closing.
-- If the answer NAMES AN ELIMINATED CLASS by changing the KEY, the primitive, or the approach — "title is no longer the key, so title-collision findings cannot exist", "the value is now derived from ground truth rather than validated, so malformed-input findings cannot exist" — the fix IS closed-by-construction. Accept it as cluster-closing.
-
-The two training shapes, generically:
-
-- **Closed.** A fix that was reaching for the wrong primitive (e.g. a fuzzy/approximate lookup used as an exactness oracle) is replaced by a ground-truth-enumerating primitive that cannot produce the failure mode. The class is named and gone.
-- **Not closed.** A predicate that gains another conjunct or another checked attribute per finding — the shape stays identical, only the byte/field/path differs each pass. This is the **Same-Framing Test** answering "yes" against a fix dressed as structural.
-
-This gate refines the ordered preferences above: a preference is only satisfied when the chosen fix passes this test. A reject-enumeration that grows one entry per finding fails it; a positive allowlist or a real parser that makes the malformed class unrepresentable passes it.
+A preference above holds only when the fix passes this test.
 
 ## Surface-Growth Escalation
 
-A fix that adds more surface than it removes is not applied. Count, by judgment, the new files, code paths, checks, state and lines the fix adds against those it removes. When the fix grows the surface, ask the user one architectural call instead: a one-line ask, options that include removing the surface and recording the threat model, and a recommendation. The call rides the engine's existing user-question path.
+A fix that adds more surface than it removes is not applied. Count, by judgment, the files, code paths, checks, state and lines it adds against those it removes. When it grows the surface, ask the user one architectural call instead: a one-line ask, options that include removing the surface and recording the threat model, and a recommendation, on the engine's existing user-question path.
 
 ## Bounded-Impact Gating
 
-Assess the actual blast radius of a finding independent of the reviewer's severity badge: is it informational-only? does it touch only already-validated enum/charset surfaces? does the attacker already control the input? The assessed impact — not the badge — informs the fix-now vs defer vs accept decision for a finding that is not a found root cause. A badge is an input to this assessment, never a substitute for it.
-
-Impact never defers a found root cause. A found root cause is fixed at its source per **First-Finding Triage**, whatever its assessed impact.
+Judge a finding's actual blast radius: is it informational only, does it touch only already-validated enum or charset surfaces, does the attacker already control the input? For a finding that is not a found root cause, the assessed impact decides fix now, defer, or accept; the severity badge is an input, never a substitute. A found root cause is fixed per **First-Finding Triage**, whatever its impact.
 
 ## Defer-with-Scope
 
-Defer-with-Scope applies only to findings that are not a found root cause: for example, the edge-case and wording tail after the diminishing-returns exit. A found root cause, introduced or inherited, is fixed at its source per **First-Finding Triage** and is never deferred.
+Applies only to a finding that is not a found root cause.
 
-A finding is never silently dropped. Every actionable finding left unfixed in the current loop MUST carry full root-cause scope, its linked threads, and a bounded-impact note (per **Bounded-Impact Gating**). That obligation is common to BOTH permitted destinations; what differs is WHERE the record lives.
+Every actionable finding left unfixed in the current loop MUST carry full root-cause scope, its linked threads, and a bounded-impact note per **Bounded-Impact Gating**, in one of two destinations:
 
-- **Tracked issue.** File or defer to a tracked issue when the finding is WORK someone should do: its remediation is genuinely wanted but out of scope for this loop, or it belongs to the same family as an already-tracked structural change. Default to an EXISTING tracked home; create a NEW issue only when no existing home fits.
-- **Recorded residual.** Record the decision in the repository per **Recorded Residual** below.
+- **Tracked issue.** For wanted work out of scope for this loop, or in the family of an already-tracked structural change. Prefer an existing tracked home; create one only when none fits.
+- **Recorded residual.** Preferred when the finding is a decision rather than work, per **Recorded Residual** below.
 
-The discriminating test: an issue asserts that SOMEONE WILL ACT; a recorded residual asserts that WE DECIDED, AND HERE IS WHY. Filing a decision as an issue is a category error — it inflates the backlog and buries the reasoning away from the code it concerns.
+Anything else, or a record missing any of these, is a forbidden silent drop. The originating thread is then replied-to and resolved citing the tracking issue or the recorded residual.
 
-Either destination, carrying full scope, is the only permitted way to leave an actionable finding unfixed in the current loop. A record that omits scope, linkage, or impact rationale is a silent drop and is forbidden. The originating thread is then replied-to and resolved citing the tracking issue or the recorded residual.
-
-The actor that leaves a finding unfixed OWNS its destination: the issue filed or the record written BEFORE the loop terminates, never merely named, and that actor carries the destination's LOCATION in its own record of the decision so a later reader can reach it.
+The actor that leaves a finding unfixed files the issue or writes the record before the loop terminates, and carries its location in its own record of the decision.
 
 "Structural home" names a ROLE, not a destination type: the tail's reasoning has a durable home. The admissible destinations are the two defined above — Tracked issue and Recorded residual. A restatement must carry BOTH and cite this section; binding the role noun to a single destination type ("a tracked structural home") re-narrows the role and is the forbidden form.
 
@@ -90,30 +73,20 @@ The actor that leaves a finding unfixed OWNS its destination: the issue filed or
 
 A found, fixable root cause, introduced or inherited, is never recorded in place of a fix. A residual is admissible only on one of two grounds:
 
-- **Outside the threat model.** The attacker or failure the finding assumes is outside the recorded threat model, per **Recorded Decisions and Repeat Findings**.
+- **Outside the threat model.** The assumed attacker or failure is outside the recorded threat model, per **Recorded Decisions and Repeat Findings**.
 - **Unclosable on this engine.** No fix on this engine can close the class, and the user decided so.
 
-Origin is not a ground. "Inherited" is a universal escape hatch that launders real work into a silent drop.
+Origin is not a ground. On either ground, leave the finding unfixed and write the reasoning next to the code it concerns: in the project's durable design records, named by role, never by a presumed path, or, where it keeps none or a full record is disproportionate, in a code comment. The record carries full root-cause scope, linked threads, a bounded-impact note, and the ground with its citation. Open no tracker entry.
 
-On either ground, the finding is left unfixed as a recorded residual: write the reasoning into the repository adjacent to the code it concerns — the project's durable design record (an architecture-decision record wherever the project keeps them), or a code comment where a full record would be disproportionate — carrying the root cause, the bounded impact, and the ground with its citation, and open NO tracker entry.
-
-A recorded residual is NOT a silent drop. The scope requirement is IDENTICAL to a deferral — full root-cause scope, linked threads, bounded-impact note — only the destination differs. Recording is PREFERRED over filing when the finding is a decision rather than work.
-
-Name the destination by ROLE, never by a presumed path: wherever this project keeps its durable design records. Where the project keeps none, or where a full record would be disproportionate to the finding, a code comment adjacent to the behavior is the FLOOR. Recording nothing is never a permitted destination.
-
-Recording is NOT one-way. A recorded residual whose reasoning is later invalidated — the impact turns out to be unbounded, the attacker or failure turns out to be inside the recorded threat model, or a fix on this engine turns out to close the class — is PROMOTED to a filed issue carrying the same scope.
+A residual whose reasoning later fails (unbounded impact, an attacker or failure inside the threat model, or a fix on this engine that closes the class) is promoted to a filed issue with the same scope.
 
 ## Recorded Decisions and Repeat Findings
 
-A user's rejection of a finding and a threat model are DECISIONS. Each is recorded at its source in the project's durable design record — named by role: wherever this project keeps its durable design records — on the branch or on trunk.
+A user's rejection of a finding and a threat model are decisions, each recorded at its source in the project's durable design records, named by role, on the branch or on trunk. The key is the recorded decision, never a finding id or a question.
 
-The key is the recorded decision, never a finding id or a question. A finding id is derived from the finding's file, lines and title, so it changes from run to run, and a question lives for one run only. Neither survives to the next review, so neither can carry a decision.
+A later finding that contests a recorded decision is a repeat: the reviewer rejects it by citing the record, lists it for the user before the PR, does not fix it, and never asks again. A finding that shows a failure the record does not cover is new and gets **First-Finding Triage**.
 
-A later finding that contests a recorded decision is a REPEAT. The reviewer rejects it by citing the record, lists it for the user before the PR, does not fix it, and never asks again. A finding that shows a failure the record does not cover is NEW, and gets **First-Finding Triage**.
-
-When the user rejects a finding, the rejection is recorded at its source before the next review reads it, so that review reads the record instead of asking again. The reviewer that asked records it when the user's answer comes back to it in the same run: the local reviewer in a delivery run, the GitHub reviewer in a PR watch. Otherwise the next plan records it as a plan step.
-
-A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls) is recorded the same way, by the reviewer that asked, naming the run as the one who decided.
+A user's rejection is recorded before the next review reads it: by the reviewer that asked, when the answer reaches it in the same run (the local reviewer in a delivery run, the GitHub reviewer in a PR watch), otherwise by the next plan as a plan step. A call the run took under `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Review Calls) is recorded the same way by the reviewer that asked, naming the run as the decider.
 
 ## Stop-and-Merge
 
