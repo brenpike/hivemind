@@ -23,7 +23,7 @@
   },
   "source": {
     "file": "plugin/governance/safety-rails.md",
-    "pattern": "Commit and push authority is a POSITIVE GRANT"
+    "pattern": "Commit and push authority is a positive grant: an agent commits or pushes only if a grant line below names it"
   },
   "consumers": [
     {
@@ -76,7 +76,7 @@
     },
     {
       "file": "plugin/governance/safety-rails.md",
-      "pattern": "`COMMIT-GRANT delegated-implementer:` drone and changeling commit or push ONLY when their delegation explicitly authorizes it"
+      "pattern": "`COMMIT-GRANT delegated-implementer:` drone and changeling commit or push only when that delegation explicitly authorizes it"
     }
   ]
 }
