@@ -1,0 +1,50 @@
+{
+  "rule": "policy-check-set-pinned",
+  "description": "P3 consumer-assertion: the set of numbered checks in tools/policy_check.sh is pinned outside the checks themselves. Every check block opens with a `=== CHECK N: <title> ===` banner; this fixture extracts the `CHECK N` label of every `=== CHECK` banner (case-insensitive, any spacing after `===`, label ending at the first `:`, quote or `=`) and asserts it in equal mode against CHECK 1 through CHECK 18, each exactly once. Deleting a banner fails as missing; adding a banner for a new check without adding it here fails as an extra; a second banner reusing a number fails its occurrence count. Honest capability statement: the pin asserts that each banner line is present in tools/policy_check.sh, not that the block under it executes, still emits findings, or is reached at all; a check skipped by an early return, a guard, or a commented-out body with its banner left in place stays green. A new check authored without a `=== CHECK` banner is invisible to this pin. Canary blocks and the SAFETY, COMPAT, DISCOVERY and WORKFLOW-FIXTURES suites carry no `=== CHECK` banner and are not covered here; titles are not pinned, so retitling a check stays green.",
+  "set_check": {
+    "extract_regex": "(?i)===\\s*(CHECK[^:'\"=]*)",
+    "expected_set": [
+      "CHECK 1",
+      "CHECK 2",
+      "CHECK 3",
+      "CHECK 4",
+      "CHECK 5",
+      "CHECK 6",
+      "CHECK 7",
+      "CHECK 8",
+      "CHECK 9",
+      "CHECK 10",
+      "CHECK 11",
+      "CHECK 12",
+      "CHECK 13",
+      "CHECK 14",
+      "CHECK 15",
+      "CHECK 16",
+      "CHECK 17",
+      "CHECK 18"
+    ],
+    "expected_counts": {
+      "CHECK 1": 1,
+      "CHECK 2": 1,
+      "CHECK 3": 1,
+      "CHECK 4": 1,
+      "CHECK 5": 1,
+      "CHECK 6": 1,
+      "CHECK 7": 1,
+      "CHECK 8": 1,
+      "CHECK 9": 1,
+      "CHECK 10": 1,
+      "CHECK 11": 1,
+      "CHECK 12": 1,
+      "CHECK 13": 1,
+      "CHECK 14": 1,
+      "CHECK 15": 1,
+      "CHECK 16": 1,
+      "CHECK 17": 1,
+      "CHECK 18": 1
+    },
+    "files": [
+      { "path": "tools/policy_check.sh", "mode": "equal" }
+    ]
+  }
+}
