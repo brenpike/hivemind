@@ -3427,7 +3427,7 @@ const ROW_TESTS = {
       const gateSchema = userQuestion.properties.gate;
       assert.deepEqual([gateSchema.type, gateSchema.additionalProperties, gateSchema.required], ['object', false, ['irreversible', 'architectural']]);
       assert.deepEqual(Object.values(gateSchema.properties).map((property) => property.type), ['boolean', 'boolean']);
-      assert.ok(reviewerText.includes('- `gate` is required and holds the booleans `irreversible` and `architectural`'));
+      assert.ok(reviewerText.includes('- `gate`, required: the booleans `irreversible` and `architectural`'));
       const optionSchema = userQuestion.properties.options;
       const recommendationSchema = userQuestion.properties.recommendation;
       assert.deepEqual([optionSchema.minItems, optionSchema.maxItems, optionSchema.items.additionalProperties], [2, 4, false]);

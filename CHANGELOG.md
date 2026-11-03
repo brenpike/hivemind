@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `local-reviewer.md`, `github-reviewer.md` and `cerebrate.md` state each rule once, in fewer words. They keep the same rules, step numbers, section names and contract YAML. Policy pins and one workflow-script test moved with the text they guard.
+- `local-reviewer.md`, `github-reviewer.md` and `cerebrate.md` state each rule once, in fewer words. They keep the same rules, step numbers, section names and contract YAML. Policy pins and three workflow-script tests moved with the text they guard.
 
 ## [7.5.17] - 2026-11-03
 

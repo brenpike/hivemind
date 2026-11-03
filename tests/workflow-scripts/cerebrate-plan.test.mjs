@@ -11,25 +11,25 @@ const briefSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/decisi
 
 const PLAN_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/plan-schema.json';
 const BRIEF_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schema.json';
-const SCHEMA_READ_SENTENCE = 'Before you return a plan or a question, read `' + PLAN_SCHEMA_PATH + '` and `' + BRIEF_SCHEMA_PATH + '` with Read for what each field means.';
+const SCHEMA_READ_SENTENCE = 'Before returning a plan or a question, read `' + PLAN_SCHEMA_PATH + '` and `' + BRIEF_SCHEMA_PATH + '` with Read for field meanings.';
 const DOCTRINE_PATH = '${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md';
 const GOVERNANCE_PATH_PREFIX = '${CLAUDE_PLUGIN_ROOT}/governance/';
 const SECTION_READ_PATTERN = /`\$\{CLAUDE_PLUGIN_ROOT\}\/governance\/[^`]+\.md` \(/;
 const LOAD_AND_FOLLOW_PATTERN = /load and follow/i;
 const READ_DISCIPLINE_RULES = [
-  'Put every independent Read, Grep and Glob of a research step in one turn, as parallel calls.',
+  'Issue a research step\'s independent Read, Grep and Glob calls in one turn, in parallel.',
   'Grep to locate, then Read only the needed line range with `offset` and `limit`.',
-  'Never read a file or range that is already in context again.',
+  'Never re-read a file or range already in context.',
   'Grep long append-only documents (a changelog, an ADR, a plan, a handoff); never read them whole.',
-  'When the request names a document, read only the section the request is about.'
+  'Of a document the request names, read only the section it is about.'
 ];
-const SCOPE_BLOCK_RULE = 'Plan from that block. Each document entry locates a section and does not bound it. Read the whole section that holds the entry\'s line, and take where the section starts and ends from the file, not from the entry. Do not check again the paths the block lists, and research only what the block does not cover.';
-const SCOPE_BLOCK_COVERAGE_RULE = 'A document entry covers nothing when the file has no such line, or when the section that holds the line is not one the request or the facts texts name.';
-const SCOPE_MODE_LOCATOR_RULE ='For each section of a repository document that the request or the facts texts name, the document\'s path and the line the section starts on. Find the line with Grep, and copy no text. Leave a section you cannot find for the planner.';
-const SCOPE_MODE_LIMITS_RULE = 'The paths or directories that the request confines the work to, along with the user\'s answers when the delegation carries an answers block. Where they disagree, a later answer beats both the request and any earlier answer. Return none when nothing confines the work.';
-const ANSWERS_SETTLE_RULE = 'an answers block in it holds the user\'s earlier answers. Each entry holds the questions of one round, the user\'s reply, and settled, the Q labels the reply settled. Only the questions and decisions an entry\'s settled labels name are settled for good: never raise them again and never reverse them. Every other question in that entry was still open after the reply. Labels belong to their own round, so Q1 in one entry is not Q1 in another.';
-const STEP_SIZE_RULE = 'Size each step as one concern that one drone can carry. A step that mixes concerns, or that edits more than about four files beyond its own tests and generated output, is split along its file or concern seams. The split steps get `depends_on` only where the order is real.';
-const RESEARCH_NOT_A_STEP_RULE = 'Every plan step changes files, so never make research, a probe or a measurement a plan step. Research, probes and measurements are your own work, and what your tools cannot answer goes to `Open questions:`.';
+const SCOPE_BLOCK_RULE = 'Plan from it. A document entry locates a section without bounding it: read the whole section holding the entry\'s line, taking its start and end from the file, not the entry. Do not recheck the paths the block lists; research only what it does not cover.';
+const SCOPE_BLOCK_COVERAGE_RULE = 'A document entry covers nothing when the file has no such line, or the section holding it is not one the request or the facts texts name.';
+const SCOPE_MODE_LOCATOR_RULE ='For each repository-document section the request or the facts texts name: the document\'s path and the section\'s start line, found with Grep, no text copied. Leave a section you cannot find for the planner.';
+const SCOPE_MODE_LIMITS_RULE = 'The paths or directories the request confines the work to, with the user\'s answers when the delegation carries an answers block; where they disagree, a later answer beats the request and any earlier answer. Return none when nothing confines the work.';
+const ANSWERS_SETTLE_RULE = 'an answers block holds the user\'s earlier answers, each entry one round\'s questions, the user\'s reply, and settled, the Q labels the reply settled. Only the questions and decisions its settled labels name are settled for good: never raise or reverse them. Every other question in that entry stayed open. Labels are per round: Q1 in one entry is not Q1 in another.';
+const STEP_SIZE_RULE = 'Size each step as one concern one drone can carry. Split a step that mixes concerns, or edits more than about four files beyond its own tests and generated output, along its file or concern seams, with `depends_on` only where the order is real.';
+const RESEARCH_NOT_A_STEP_RULE = 'Every plan step changes files: research, probes and measurements are never plan steps but your own work, and what your tools cannot answer goes to `Open questions:`.';
 
 function readSection(text, heading) {
   const lines = text.split('\n');
@@ -150,7 +150,7 @@ describe('cerebrate research reads only what the plan needs', () => {
     assert.ok(!readSection(cerebrateText, '## Research Rules').includes('under-reading is the expensive failure'));
   });
   test('the Scope Mode section exists and plans nothing', () => {
-    assert.ok(readSection(cerebrateText, '### Scope Mode').includes('In this mode you plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.'));
+    assert.ok(readSection(cerebrateText, '### Scope Mode').includes('In this mode plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.'));
   });
   test('Scope Mode returns a locator for each section, not copied text', () => {
     assert.ok(readSection(cerebrateText, '### Scope Mode').includes(SCOPE_MODE_LOCATOR_RULE), SCOPE_MODE_LOCATOR_RULE);
