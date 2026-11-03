@@ -56,7 +56,7 @@
     },
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "`<allowlist-validated-commit>` is the full SHA of the checkpoint commit this step just made, read from that commit call's output. The summary line `git commit` prints shows only an abbreviated SHA, so the commit call ends with `git rev-parse HEAD`, run in that same Bash call only after the commit succeeds, and its output is the value. Never read it from HEAD in a later call. Before the push call it passes the commit SHA class of the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). A value that fails returns `blocked` with `blocker_reason: input outside the safe identifier allowlist`."
+      "pattern": "ending that same Bash call with `git rev-parse HEAD`, run only after the commit succeeds. Its output is `<allowlist-validated-commit>`, the full SHA of this checkpoint (`git commit` prints only an abbreviated one); never read it from HEAD in a later call. Before the push call it must pass the commit SHA class of the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); a value that fails returns `blocked` with `blocker_reason: input outside the safe identifier allowlist`."
     },
     {
       "file": "plugin/skills/molt/scripts/molt.sh",

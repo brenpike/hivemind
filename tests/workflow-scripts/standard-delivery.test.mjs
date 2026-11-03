@@ -4076,7 +4076,7 @@ const ROW_TESTS = {
         COUNT_FIELDS.forEach((field) => assert.ok(!Object.hasOwn(block, field), field));
         assert.ok(prompt.includes(lib.boundarySentence()));
         assert.ok(!prompt.includes('The review block holds'), prompt);
-        assert.ok(cerebrateText.includes('when a standard-delivery plan prompt carries a review block: the result of the local\nreview that sent the run back to planning.'));
+        assert.ok(cerebrateText.includes('when a standard-delivery plan prompt carries a review block: the result of the local review that sent the run back to planning.'));
         assert.ok(!callOf(run, 'plan-1').prompt.includes('<review>'));
       });
       test(`a taken ${label} keeps rejected findings, the ledger path and the counts out of the plan prompt`, async () => {
