@@ -8,9 +8,11 @@ const DOCTRINE_PATH = '${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md'
 const LOAD_LINE_PREFIX = 'Load and follow: ';
 const GOVERNANCE_PATH_PREFIX = '${CLAUDE_PLUGIN_ROOT}/governance/';
 const WORKER_AGENT_PATHS = ['plugin/agents/drone.md', 'plugin/agents/changeling.md'];
+const DOCTRINE_WHOLE_MARKER = 'remediation-doctrine.md` whole';
+const REVIEWER_AGENT_PATHS = ['plugin/agents/local-reviewer.md', 'plugin/agents/github-reviewer.md'];
 const AGENT_SECTIONS = [
-  { agentPath: 'plugin/agents/drone.md', remediationHeading: '## Review Remediation' },
-  { agentPath: 'plugin/agents/overlord.md', remediationHeading: '## Review Remediation Posture' },
+  { agentPath: 'plugin/agents/drone.md', remediationHeading: '## Review Remediation', loadsWhole: false },
+  { agentPath: 'plugin/agents/overlord.md', remediationHeading: '## Review Remediation Posture', loadsWhole: true },
 ];
 
 function readAgentText(agentPath) {
@@ -33,14 +35,32 @@ function readSection(text, heading, agentPath) {
 }
 
 describe('agents load the remediation doctrine only in their review-remediation section', () => {
-  for (const { agentPath, remediationHeading } of AGENT_SECTIONS) {
+  for (const { agentPath, remediationHeading, loadsWhole } of AGENT_SECTIONS) {
     test(`${agentPath}: the Load and follow line does not name the doctrine`, () => {
       const loadLine = readLoadLine(readAgentText(agentPath), agentPath);
       assert.ok(!loadLine.includes('remediation-doctrine.md'), `${agentPath} loads the doctrine on every dispatch`);
     });
-    test(`${agentPath}: ${remediationHeading} says to load and follow the doctrine`, () => {
-      const section = readSection(readAgentText(agentPath), remediationHeading, agentPath);
-      assert.ok(section.includes('load and follow `' + DOCTRINE_PATH + '`'), `${remediationHeading} does not load the doctrine`);
+    if (loadsWhole) {
+      test(`${agentPath}: ${remediationHeading} says to load and follow the doctrine whole`, () => {
+        const section = readSection(readAgentText(agentPath), remediationHeading, agentPath);
+        assert.ok(section.includes('load and follow `' + DOCTRINE_PATH + '` whole'), `${remediationHeading} does not load the doctrine whole`);
+      });
+    } else {
+      test(`${agentPath}: ${remediationHeading} loads and follows the doctrine by a section list`, () => {
+        const section = readSection(readAgentText(agentPath), remediationHeading, agentPath);
+        assert.ok(section.includes('load and follow `' + DOCTRINE_PATH + '` ('), `${remediationHeading} does not load the doctrine by section`);
+        assert.ok(!section.includes(DOCTRINE_WHOLE_MARKER), `${remediationHeading} loads the doctrine whole`);
+      });
+    }
+  }
+});
+
+describe('reviewer agents load the remediation doctrine by section', () => {
+  for (const agentPath of REVIEWER_AGENT_PATHS) {
+    test(`${agentPath}: the Load and follow line cites the doctrine with a section list`, () => {
+      const loadLine = readLoadLine(readAgentText(agentPath), agentPath);
+      assert.ok(loadLine.includes('`' + DOCTRINE_PATH + '` ('), `${agentPath} does not load the doctrine by section`);
+      assert.ok(!loadLine.includes(DOCTRINE_WHOLE_MARKER), `${agentPath} loads the doctrine whole`);
     });
   }
 });
