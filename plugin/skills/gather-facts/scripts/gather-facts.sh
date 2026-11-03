@@ -84,7 +84,7 @@
 #
 # OUTPUT on success (exit 0), on stdout in ONE write, `key: value` lines holding only enum or
 # gated values (a gated value is shorter than the facts line holding it, so the line bound bounds
-# every routing line but root, which the facts file does not hold), in this order:
+# every routing line but root and plugin_root, which the facts file does not hold), in this order:
 #   facts_file       checkout-relative path of the facts file
 #   facts_lines      its line count (wc -l)
 #   head_state       branch|detached|unsafe_name
@@ -105,6 +105,15 @@
 #                    closed_pr_on_branch, history_unavailable, cut_fields, branch_name_unsafe
 #   root             the absolute checkout root from `git rev-parse --show-toplevel`, or none
 #                    when it holds a control character (0x00-0x1f, 0x7f)
+#   plugin_root      the plugin folder: the text of BASH_SOURCE[0] exactly as bash received it,
+#                    with the fixed suffix /skills/gather-facts/scripts/gather-facts.sh removed.
+#                    It is none when that text does not end in the suffix, does not start with /
+#                    or with a drive letter, a colon and /, or holds a double quote, dollar sign,
+#                    backtick, backslash or control character (0x00-0x1f, 0x7f). The literal text
+#                    is used, not the resolved script_dir (no cd, pwd -P or symlink resolution),
+#                    because it is the path the synapse gate matched: the gate allows this command
+#                    only when its script path is CLAUDE_PLUGIN_ROOT byte for byte, so this value is
+#                    the root the gate matches in every other runner command
 # A MERGED or CLOSED pull request stops delivery when its relation is in_history or
 # ahead_of_head. A detached HEAD and an unavailable lookup are reported, never a stop.
 # EXIT CONTRACT:
@@ -643,4 +652,18 @@ root_value="$repo_root"
 case "$root_value" in
   *[[:cntrl:]]*) root_value='none' ;;
 esac
-printf 'facts_file: %s\nfacts_lines: %s\n%s\nroot: %s\n' "$facts_relative" "$facts_lines" "$routing_text" "$root_value"
+
+plugin_suffix='/skills/gather-facts/scripts/gather-facts.sh'
+invoked_path="${BASH_SOURCE[0]}"
+plugin_root_value='none'
+case "$invoked_path" in
+  *"$plugin_suffix") plugin_root_value="${invoked_path%"$plugin_suffix"}" ;;
+esac
+case "$plugin_root_value" in
+  /*|[A-Za-z]:/*) ;;
+  *) plugin_root_value='none' ;;
+esac
+case "$plugin_root_value" in
+  *[\"\$\`\\[:cntrl:]]*) plugin_root_value='none' ;;
+esac
+printf 'facts_file: %s\nfacts_lines: %s\n%s\nroot: %s\nplugin_root: %s\n' "$facts_relative" "$facts_lines" "$routing_text" "$root_value" "$plugin_root_value"

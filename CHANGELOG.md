@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.15] - 2026-11-03
+
+### Fixed
+
+- Standard delivery writes the plugin root into the branch, commit and pull request runner commands itself, so the runner no longer replaces `{plugin-root}` by hand there and a missed swap can no longer be denied at the pull request step. `gather-facts.sh` reports the root in a new last routing line, `plugin_root`: the path bash ran it from, which is the root the synapse gate matches. The facts command keeps the placeholder, since no root is known before it runs, so a miss there stops the run at its first step, before any work (#509).
+
 ## [7.5.14] - 2026-11-03
 
 ### Changed
