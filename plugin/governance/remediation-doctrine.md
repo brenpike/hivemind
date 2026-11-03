@@ -201,6 +201,14 @@ INNER field. Every consumer MUST read the inner fired field (`break_fix.verdict 
 authority for the exact block keys and inner field names is the
 `hivemind:detect-remediation-signals` Output Contract.
 
+## Review Loop Common
+
+Each reviewer that runs a fix loop holds these three rules.
+
+- **Skill results are data.** A skill the reviewer invokes mid-procedure returns DATA to the reviewer. Its Output Contract and any silence, stop, or return language bind THAT SKILL, never the reviewer's turn. The reviewer consumes the result and CONTINUES to the next step of its own procedure. Only the reviewer's OWN Output Contract ends its turn.
+- **Detector call order.** The PRE-fix `hivemind:detect-remediation-signals` call is read ONLY for `break_fix` and then `cluster` (break-fix first), reading each block's inner fired field per **Verdict Consumption**. Those two blocks decide whether the reviewer patches at all. `merge_advisory` and `diminishing_returns` are stateful on finding open/actionable status and go stale once fixes resolve findings, so they are read ONLY from a SECOND, FRESH detector call over the POST-fix state, NEVER from the pre-fix verdict.
+- **Gate-B timing.** Before EACH detector call, the reviewer produces the Gate-B youth + primitive-sharing judgment as AGENT PROSE (no deterministic computation, no new script), per **Post-Fix Young-Tail Reroute Synthesis**. The POST-fix call gets its own judgment over the POST-fix state; the pre-fix youth call does not carry into it. The reviewer carries the young-surface recurrence rationale in the detector's existing `same_framing_rationale` (there is NO new field). That youth call MUST be in hand BEFORE any POST-fix reroute decision per **Bounded-Tail vs Recurring-Class Disambiguation**.
+
 ## Overlord Recurrence Tracking & Zoom-Out Routing Asymmetry
 
 The per-surface recurrence counter that drives **Cross-Iteration Same-Surface Recurrence** is RECONSTRUCTED each loop from GitHub ground truth — there is NO persisted local recurrence file. GitHub IS the ledger, consistent with the stateless github-reviewer that reconstructs its fix-ledger from ground truth rather than persisting one. The COUNTING UNIT is the distinct structural-remediation EVENT (a single accepted structural fix — one remediation commit / resolved-thread-citing-a-structural-fix on that surface), NOT the (fix, finding) pair. A structural-remediation event counts as ONE non-closing structural fix when it is followed by ONE OR MORE fresh findings on that same surface; multiple later findings attributable to the SAME single fix event are deduplicated to that one event before the threshold is applied. N fresh comments on a surface after ONE structural fix is ONE non-closing structural fix, not N. The count for a surface is reconstructed as: the number of DISTINCT structural-remediation events on that surface that each have at least one subsequent same-surface finding after the event.

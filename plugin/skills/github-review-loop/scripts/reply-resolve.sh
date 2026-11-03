@@ -56,11 +56,6 @@
 # written. Recorded residual for that unverified-citation posture:
 # docs/adr/0032-defer-marker-sentinel-and-agent-layer-home-truth.md.
 #
-# SCOPE NOTE: this script is the DESIGNATED single source.
-# The duplicate prose in github-reviewer.md step 12 is NOT collapsed here — that
-# rewire is a dependent step that edits the agent. Its continued existence after
-# this step is EXPECTED.
-#
 # SCOPE NOTE (P9 — do not over-generalize): this script is github-reviewer-scoped.
 # It is NOT pre-parameterized for the local-reviewer or any other caller; the
 # genuinely-shared kernel is the mutation contract for THIS loop only.
