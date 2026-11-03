@@ -46,13 +46,13 @@ Open PR only when: plan complete, validation passed, version bump included if re
 
 Local review gate: if local review ran on the branch, the PR opens only when its last exit reason holds the gate. Gate-holding exits: `clean`, and `diminishing-returns` once its advisory exit is taken. Any other exit, max-iterations-reached included, holds nothing and stops the PR on every path: workflow script, state machine, or any step outside both. Local review that did not run (not configured, or skipped) neither holds nor blocks the PR.
 
-PR body: what changed and why, at the length the change needs; modified paths grouped by plan step; validation status; version and release notes when a bump applies.
+PR body must include: what changed and why, at the length the change needs; modified paths grouped by plan step; validation status; version and release notes when a bump applies.
 
 ## Framework Defaults
 
 - Trunk: `main`
 - Merge strategy: squash
-- Review: at least one human approval
+- Review: at least one human approval required
 - PR target: resolved trunk branch
 
 ## Brood Execution

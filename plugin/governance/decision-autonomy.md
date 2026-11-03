@@ -4,7 +4,7 @@ A term defined here binds every rule that uses it.
 
 ## Decision Tiers
 
-Each decision is Tier A, always surfaced to the user, or Tier B, auto-decided and journaled while the promotion gate is clean; a gate trip on its recommended action surfaces it like Tier A.
+Each decision is Tier A, always surfaced to the user, or Tier B, auto-decided and journaled only while the promotion gate is clean; a gate trip on its recommended action surfaces it like Tier A.
 
 ### Tier A — Always Surface
 
@@ -96,7 +96,7 @@ Auto-take never disables proactive same-surface recurrence tracking. Contained r
 
 ## Post-Merge Decision Report Trigger
 
-While the operator enables it, after a run's PR merges the overlord surfaces in chat, in the consumer project's ubiquitous language, a report of the decisions it made on the user's behalf. `hivemind:decision-report` renders it; no report file is written.
+While the operator enables it, and only then, after a run's PR merges the overlord surfaces in chat, in the consumer project's ubiquitous language, a report of the decisions it made on the user's behalf. `hivemind:decision-report` renders it; no report file is written.
 
 The report is gated on `HIVEMIND_ENABLE_DECISION_REPORT`, set in the `env` block of `.claude/settings.json` (committed) or `.claude/settings.local.json` (gitignored), the channel of `HIVEMIND_SKIP_PR_WATCH` and `HIVEMIND_LOCAL_REVIEW_MODEL`, and checked by presence, with a mechanical non-empty test that reads no prose. When `HIVEMIND_ENABLE_DECISION_REPORT` is unset or empty, the default, the deferred-report scan renders no report, never invokes `hivemind:decision-report`, and makes no GitHub call of any kind: no PR-state lookup, no `gh pr view`. The committed settings file inherits into brood worktrees. The key gates only the chat report, not the **Decision Journal**, Tier-B autonomy, the 2x2 or the gate.
 

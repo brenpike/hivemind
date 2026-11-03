@@ -18,7 +18,7 @@ Versions follow Semantic Versioning 2.0.0: `MAJOR.MINOR.PATCH`.
 | MINOR | Backward-compatible public API, capability, option, behavior, or artifact surface |
 | PATCH | Bug fix, internal refactor, or implementation change with no public compatibility impact |
 
-A `0.x.y` artifact may take a minor increment for a breaking change, still with a changelog entry under `Changed` or `Removed` naming the breaking surface (function, type, flag, file, endpoint) and the migration path.
+A `0.x.y` artifact may take a minor increment for a breaking change, which must still have a changelog entry under `Changed` or `Removed` naming the breaking surface (function, type, flag, file, endpoint) and the migration path.
 
 Pre-release labels such as `1.2.0-beta.1` need overlord coordination and project release-workflow support.
 
@@ -34,7 +34,7 @@ A PR needs a version bump when it changes files affecting a published artifact's
 - distribution metadata
 - documented consumer expectation
 
-`CLAUDE.md` or docs it references define the exact bump-trigger paths.
+`CLAUDE.md` or docs it references must define the exact bump-trigger paths.
 
 No bump is required by default for these changes:
 
@@ -77,13 +77,13 @@ Only the engine holds the revert pre-pass, the per-commit row mapping and the do
 
 The overlord delegates version and release file edits to drone; the bump ships in the triggering change's PR unless the user explicitly directs otherwise.
 
-Project docs must name the files to update atomically: canonical version file, changelog or release notes, package or artifact metadata, documentation mirrors, release validation files, and the like. Each artifact has one canonical version source; mirrors are informational, kept in sync.
+Project docs must name the files to update atomically: canonical version file, changelog or release notes, package or artifact metadata, documentation mirrors, release validation files, and the like. Each artifact must have one canonical version source; mirrors are informational and must be kept in sync.
 
 If `CLAUDE.md` lists no artifact files for a triggered bump, the overlord stops and asks the user before delegating any version edit. The drone must not infer artifact files.
 
 ## CHANGELOG / Release Notes
 
-Each versioned artifact keeps a changelog or release notes unless `CLAUDE.md` defines another mechanism. Recommended Keep a Changelog sections: Added, Changed, Deprecated, Removed, Fixed, Security.
+Each versioned artifact must keep a changelog or release notes unless `CLAUDE.md` defines another mechanism. Recommended Keep a Changelog sections: Added, Changed, Deprecated, Removed, Fixed, Security.
 
 On a bump, turn pending unreleased entries into a dated release section, then, unless `CLAUDE.md` says otherwise, reset the unreleased section to:
 
