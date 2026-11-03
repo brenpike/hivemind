@@ -7,11 +7,11 @@
   "consumers": [
     {
       "file": "plugin/agents/github-reviewer.md",
-      "pattern": "`## Post-Fix Young-Tail Reroute Synthesis`"
+      "pattern": "remediation-doctrine.md` (Post-Fix Young-Tail Reroute Synthesis)"
     },
     {
       "file": "plugin/agents/local-reviewer.md",
-      "pattern": "`## Post-Fix Young-Tail Reroute Synthesis`"
+      "pattern": "remediation-doctrine.md` (Post-Fix Young-Tail Reroute Synthesis)"
     }
   ]
 }

@@ -62,7 +62,7 @@
     },
     {
       "file": "plugin/agents/local-reviewer.md",
-      "pattern": "Apply the destructive fix gate per `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` before any fix matching a gate category"
+      "pattern": "Apply the destructive fix gate per `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Destructive Fix Gate) before any fix matching a gate category"
     }
   ]
 }

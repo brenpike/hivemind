@@ -7,11 +7,11 @@
   "consumers": [
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "`### Proactive Zoom-Out Ledger Marker`"
+      "pattern": "remediation-doctrine.md` (Proactive Zoom-Out Ledger Marker)"
     },
     {
       "file": "plugin/references/run-ledger-schema.md",
-      "pattern": "(### Proactive Zoom-Out Ledger Marker)"
+      "pattern": "remediation-doctrine.md` (Proactive Zoom-Out Ledger Marker)"
     }
   ]
 }

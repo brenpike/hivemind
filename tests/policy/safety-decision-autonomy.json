@@ -15,11 +15,11 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "(Decision Tiers → Tier B)"
+      "pattern": "per `${CLAUDE_PLUGIN_ROOT}/governance/decision-autonomy.md` (Decision Tiers, The Autonomy 2x2);"
     },
     {
       "file": "plugin/references/run-ledger-schema.md",
-      "pattern": "decision-autonomy.md (## Decision Journal)"
+      "pattern": "decision-autonomy.md` (Decision Journal)"
     }
   ]
 }

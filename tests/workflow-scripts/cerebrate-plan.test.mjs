@@ -14,7 +14,7 @@ const BRIEF_SCHEMA_PATH = '${CLAUDE_PLUGIN_ROOT}/references/decision-brief-schem
 const SCHEMA_READ_SENTENCE = 'Before you return a plan or a question, read `' + PLAN_SCHEMA_PATH + '` and `' + BRIEF_SCHEMA_PATH + '` with Read for what each field means.';
 const DOCTRINE_PATH = '${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md';
 const GOVERNANCE_PATH_PREFIX = '${CLAUDE_PLUGIN_ROOT}/governance/';
-const SECTION_READ_PATTERN = /read the `## /i;
+const SECTION_READ_PATTERN = /`\$\{CLAUDE_PLUGIN_ROOT\}\/governance\/[^`]+\.md` \(/;
 const LOAD_AND_FOLLOW_PATTERN = /load and follow/i;
 const READ_DISCIPLINE_RULES = [
   'Put every independent Read, Grep and Glob of a research step in one turn, as parallel calls.',
