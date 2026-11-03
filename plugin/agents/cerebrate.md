@@ -242,7 +242,9 @@ When a delegation gives the user's reply to the questions shown and asks you to 
 ### Plan Result Mapping
 
 PLANNING mode (states like `plan`, `review_remediation_plan`, `brood_plan`): cerebrate
-emits a delivery mode (single, multi or brood), open questions, or a blocker.
+emits a delivery mode (single, multi or brood), open questions, or a blocker. The overlord
+maps `delivery.mode` to `single`, `multi` or `brood`, a blocker to `blocked`, and any open
+question to `open_questions`, even when the plan also sets a delivery mode.
 
 ### Remediation Zoom-Out Mode
 
@@ -331,7 +333,8 @@ In this mode you plan nothing, raise no question, read neither schema file, load
 ### Analysis Result Mapping
 
 ANALYSIS mode (read-only, states like `analyze` in analysis-only): cerebrate emits no
-delivery mode, only complete, open questions, or a blocker.
+delivery mode. The overlord maps a delivered analysis to `complete`, any open question to
+`open_questions`, and a blocker to `blocked`.
 
 ### Finalization Gate
 
