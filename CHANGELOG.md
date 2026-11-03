@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.17] - 2026-11-03
+
+### Changed
+
+- `decision-autonomy.md`, `versioning.md` and `workflow.md` state each rule once, in fewer words. They keep the same rules and every cited section name; the two Tier subheadings drop their history notes. `report-format.md` is unchanged.
+
 ## [7.5.16] - 2026-11-03
 
 ### Changed
