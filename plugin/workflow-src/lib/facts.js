@@ -32,9 +32,10 @@
  *   formatCommandBlock(command), formatInputsFileBlock(path, content)
  *       the synapse data blocks: command, a JSON string holding one whole
  *       command line, and inputs_file, {path, content}. Their names and
- *       the one placeholder a command holds, {plugin-root}, are the words
- *       of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md. An inputs path holds
- *       no placeholder: the workflow builds it whole.
+ *       the one placeholder a command can hold, {plugin-root}, are the
+ *       words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md. A command holds
+ *       the placeholder only when buildRunnerCommand got no root. An inputs
+ *       path holds no placeholder: the workflow builds it whole.
  *   runnerValuePatterns()
  *       the value class of each flag a runner command carries, the
  *       classes of the synapse gate hook
@@ -53,24 +54,29 @@
  *       into more words that could still match an exact form: a step
  *       checks its words with this before it builds a command and stops
  *       on a problem.
- *   buildRunnerCommand(skill, words)
- *       'bash "{plugin-root}/skills/<skill>/scripts/<skill>.sh"', then
- *       each of words, joined by one space: the exact form the synapse
- *       gate hook allows. The script path is the one double-quoted word,
- *       so a plugin path with a space stays one word. It checks nothing
- *       itself.
+ *   buildRunnerCommand(skill, words, root)
+ *       'bash "<root>/skills/<skill>/scripts/<skill>.sh"', then each of
+ *       words, joined by one space: the exact form the synapse gate hook
+ *       allows. <root> is root when root is a string other than none, the
+ *       plugin_root a checked facts relay reported, else the placeholder
+ *       {plugin-root}, which the runner fills. The script path is the one
+ *       double-quoted word, so a plugin path with a space stays one word.
+ *       It checks nothing itself: root has passed the plugin_root pattern.
  *   listGatherFactsWords(trunk, references)
  *       the gather-facts words: --trunk trunk, then --ref and each
  *       reference in order, with no --remote.
  *   buildGatherFactsCommand(trunk, references)
- *       buildRunnerCommand of gather-facts and those words.
+ *       buildRunnerCommand of gather-facts and those words, with no root,
+ *       so it holds {plugin-root}: no root is known before the facts
+ *       script runs.
  *   gatherFactsRoutingSpec()
  *       the parseRoutingLines spec (routing.js) for the stdout of
  *       plugin/skills/gather-facts/scripts/gather-facts.sh. Its keys are
  *       the keys of that script's OUTPUT header in its order: facts_file,
  *       facts_lines, head_state, branch, head, trunk, trunk_freshness,
  *       trunk_ahead, trunk_behind, trunk_commit, cut, external_texts,
- *       delivery, delivery_stops, root. Every key is required but branch. Every pattern is
+ *       delivery, delivery_stops, root, plugin_root. Every key is required
+ *       but branch. Every pattern is
  *       anchored at both ends and has no flags:
  *         facts_file  .hivemind/facts/facts-<UTC>-<random>.json as the
  *                     script names it: 8 digits, T, 6 digits, Z, a dash
@@ -86,6 +92,13 @@
  *         root        one or more characters, none of them a control
  *                     character (U+0000 to U+001F, U+007F): the absolute
  *                     checkout root, or none.
+ *         plugin_root none, or a path that starts with / or with a drive
+ *                     letter, a colon and /, holds no double quote,
+ *                     dollar sign, backtick, backslash or control
+ *                     character, and has no leading or trailing space:
+ *                     the plugin root the synapse gate matched when it
+ *                     allowed the facts command, so it can stand in for
+ *                     {plugin-root} in every later runner command.
  *       The enums are those of plugin/references/facts-schema.json, and
  *       tests/workflow-scripts/facts.test.mjs holds them equal.
  *   factsHeadStates, factsTrunkFreshnessValues, factsCutFields,
@@ -284,8 +297,9 @@ function describeRunnerWordProblem(words) {
   return undefined;
 }
 
-function buildRunnerCommand(skill, words) {
-  return ['bash', '"{plugin-root}/skills/' + skill + '/scripts/' + skill + '.sh"', ...words].join(' ');
+function buildRunnerCommand(skill, words, root) {
+  const commandRoot = typeof root === 'string' && root !== 'none' ? root : '{plugin-root}';
+  return ['bash', '"' + commandRoot + '/skills/' + skill + '/scripts/' + skill + '.sh"', ...words].join(' ');
 }
 
 function listGatherFactsWords(trunk, references) {
@@ -331,6 +345,7 @@ function factsListSource(values) {
 
 function gatherFactsRoutingSpec() {
   const count = wholeFactsPattern('0|[1-9][0-9]*');
+  const pathBytes = '"$`\\\\\\u0000-\\u001f\\u007f';
   return {
     facts_file: { pattern: wholeFactsPattern('\\.hivemind\\/facts\\/facts-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}\\.json'), required: true },
     facts_lines: { pattern: wholeFactsPattern('[1-9][0-9]*'), required: true },
@@ -346,7 +361,8 @@ function gatherFactsRoutingSpec() {
     external_texts: { pattern: count, required: true },
     delivery: { pattern: wholeFactsPattern(factsEnumSource(factsDeliveryValues())), required: true },
     delivery_stops: { pattern: wholeFactsPattern(factsListSource(factsDeliveryStops())), required: true },
-    root: { pattern: wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'), required: true }
+    root: { pattern: wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'), required: true },
+    plugin_root: { pattern: wholeFactsPattern('none|(?:/|[A-Za-z]:/)(?:[^' + pathBytes + ']*[^ ' + pathBytes + '])?'), required: true }
   };
 }
 

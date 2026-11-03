@@ -299,12 +299,12 @@ function listPullRequestWords(plan, head, inputsPath) {
   return ['--head', plan.branch, '--base', plan.base, '--expect-commit', head, '--inputs', inputsPath];
 }
 
-function buildPullRequestPrompt(plan, head, inputsPath, texts, draft) {
+function buildPullRequestPrompt(plan, head, inputsPath, texts, draft, pluginRoot) {
   return [
     'Run the command below to push the working branch and open its pull request or reuse the open one.',
     dataBlocksSentence(),
     '',
-    formatCommandBlock(buildRunnerCommand('open-plan-pr', listPullRequestWords(plan, head, inputsPath))),
+    formatCommandBlock(buildRunnerCommand('open-plan-pr', listPullRequestWords(plan, head, inputsPath), pluginRoot)),
     formatInputsFileBlock(inputsPath, { title: texts.title, body: texts.body, comment: texts.comment, draft: draft })
   ].join('\n');
 }
@@ -343,7 +343,7 @@ async function runPullRequestStep(run, plan, gates) {
   if (commandStop !== undefined) {
     return stopDelivery([commandStop], run, [], false);
   }
-  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(plan, run.head, listWords(callLabel)[7], texts, run.draft), run);
+  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(plan, run.head, listWords(callLabel)[7], texts, run.draft, run.pluginRoot), run);
   const relay = await runRunnerRelay(buildPrompt, label, 'PR');
   const checked = checkPullRequestRelay(relay, run.head);
   if (checked.problem === undefined) {

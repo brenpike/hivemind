@@ -633,7 +633,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'bb9b41d258118d27';
+const BUILD_ID = '72b9a09cfe545cc0';
 
 function supportedSchemaKeywords(){
 return[
@@ -2105,8 +2105,9 @@ return'its '+flag+' value is not one the script takes';
 }
 return undefined;
 }
-function buildRunnerCommand(skill,words){
-return['bash','"{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh"',...words].join(' ');
+function buildRunnerCommand(skill,words,root){
+const commandRoot=typeof root==='string'&&root!=='none'?root:'{plugin-root}';
+return['bash','"'+commandRoot+'/skills/'+skill+'/scripts/'+skill+'.sh"',...words].join(' ');
 }
 function listGatherFactsWords(trunk,references){
 return['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])];
@@ -2141,6 +2142,7 @@ return'none|'+item+'(?:,'+item+')*';
 }
 function gatherFactsRoutingSpec(){
 const count=wholeFactsPattern('0|[1-9][0-9]*');
+const pathBytes='"$`\\\\\\u0000-\\u001f\\u007f';
 return{
 facts_file:{pattern:wholeFactsPattern('\\.hivemind\\/facts\\/facts-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}\\.json'),required:true},
 facts_lines:{pattern:wholeFactsPattern('[1-9][0-9]*'),required:true},
@@ -2156,7 +2158,8 @@ cut:{pattern:wholeFactsPattern(factsListSource(factsCutFields())),required:true}
 external_texts:{pattern:count,required:true},
 delivery:{pattern:wholeFactsPattern(factsEnumSource(factsDeliveryValues())),required:true},
 delivery_stops:{pattern:wholeFactsPattern(factsListSource(factsDeliveryStops())),required:true},
-root:{pattern:wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'),required:true}
+root:{pattern:wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'),required:true},
+plugin_root:{pattern:wholeFactsPattern('none|(?:/|[A-Za-z]:/)(?:[^'+pathBytes+']*[^ '+pathBytes+'])?'),required:true}
 };
 }
 function matchesFactsLine(key,value){
@@ -3365,12 +3368,12 @@ return texts;
 function listPullRequestWords(plan,head,inputsPath){
 return['--head',plan.branch,'--base',plan.base,'--expect-commit',head,'--inputs',inputsPath];
 }
-function buildPullRequestPrompt(plan,head,inputsPath,texts,draft){
+function buildPullRequestPrompt(plan,head,inputsPath,texts,draft,pluginRoot){
 return[
 'Run the command below to push the working branch and open its pull request or reuse the open one.',
 dataBlocksSentence(),
 '',
-formatCommandBlock(buildRunnerCommand('open-plan-pr',listPullRequestWords(plan,head,inputsPath))),
+formatCommandBlock(buildRunnerCommand('open-plan-pr',listPullRequestWords(plan,head,inputsPath),pluginRoot)),
 formatInputsFileBlock(inputsPath,{title:texts.title,body:texts.body,comment:texts.comment,draft:draft})
 ].join('\n');
 }
@@ -3406,7 +3409,7 @@ const commandStop=describeCommandStop('pull request',listWords(label),listWords(
 if(commandStop!==undefined){
 return stopDelivery([commandStop],run,[],false);
 }
-const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(plan,run.head,listWords(callLabel)[7],texts,run.draft),run);
+const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(plan,run.head,listWords(callLabel)[7],texts,run.draft,run.pluginRoot),run);
 const relay=await runRunnerRelay(buildPrompt,label,'PR');
 const checked=checkPullRequestRelay(relay,run.head);
 if(checked.problem===undefined){
@@ -3788,14 +3791,15 @@ if(checked.problem!==undefined){
 return checked;
 }
 run.factsStem=/facts-([^/]+)\.json$/.exec(checked.facts.facts_file)[1];
+run.pluginRoot=checked.facts.plugin_root;
 const scanned=await runPassScan(checked.facts,run);
 return scanned===undefined?checked:scanned;
 }
 function listBranchWords(plan,freshness,trunk){
 return['--base',plan.base,'--branch',plan.branch,'--classification',plan.classification,'--trunk-freshness',freshness,'--trunk',trunk];
 }
-function buildBranchPrompt(words){
-return['Create or confirm the working branch with the command below.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('create-working-branch',words))].join('\n');
+function buildBranchPrompt(words,pluginRoot){
+return['Create or confirm the working branch with the command below.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('create-working-branch',words,pluginRoot))].join('\n');
 }
 function checkBranchRelay(relay,plan,freshness){
 const stopped='so '+RUN_NAME+' stopped before any wave.';
@@ -3821,7 +3825,7 @@ const commandStop=describeCommandStop('branch',words);
 if(commandStop!==undefined){
 return commandStop;
 }
-const relay=await runRunnerRelay(()=>addResumeNote(buildBranchPrompt(words),run),'branch-'+run.pass,'Branch');
+const relay=await runRunnerRelay(()=>addResumeNote(buildBranchPrompt(words,run.pluginRoot),run),'branch-'+run.pass,'Branch');
 return checkBranchRelay(relay,plan,freshness);
 }
 function needsBranchReplan(branchValues,facts,plan){
@@ -3870,9 +3874,9 @@ return isUsableSubject(subject)?subject:fallbackSubject;
 function listCommitWords(trunk,inputsPath){
 return['--trunk',trunk,'--inputs',inputsPath];
 }
-function buildCommitPrompt(files,plan,trunk,inputsPath,stepName,subject){
+function buildCommitPrompt(files,plan,trunk,inputsPath,stepName,subject,pluginRoot){
 const content={type:commitTypeMap()[plan.classification],breaking:plan.breaking,subject:subject,files:files};
-return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',listCommitWords(trunk,inputsPath))),formatInputsFileBlock(inputsPath,content)].join('\n');
+return['Run the command below to commit '+commitStepTexts(stepName).purpose+'.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('molt',listCommitWords(trunk,inputsPath),pluginRoot)),formatInputsFileBlock(inputsPath,content)].join('\n');
 }
 function readOutsidePath(payload){
 try{
@@ -3925,7 +3929,7 @@ const commandStop=describeCommandStop('commit',listWords(commit.label),listWords
 if(commandStop!==undefined){
 return stopDelivery(stepCauses.concat([commandStop]),run,[],isReplan);
 }
-const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,listWords(label)[3],commit.stepName,subject),run),commit.label,'Commit');
+const relay=await runRunnerRelay((label)=>addResumeNote(buildCommitPrompt(commit.files,plan,run.trunk,listWords(label)[3],commit.stepName,subject,run.pluginRoot),run),commit.label,'Commit');
 const checked=checkCommitRelay(relay,plan,commit.stepName);
 if(checked.problem!==undefined){
 return stopDelivery(stepCauses.concat([checked]),run,[],isReplan);
@@ -4657,7 +4661,8 @@ pass:0,
 replans:0,
 branchSwitches:0,
 versionAnswer:undefined,
-factsStem:undefined
+factsStem:undefined,
+pluginRoot:undefined
 };
 }
 function keepReplanReview(passEnd,replan){

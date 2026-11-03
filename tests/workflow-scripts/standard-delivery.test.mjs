@@ -50,7 +50,7 @@ const THIRD = '3'.repeat(40);
 const TRUNK_COMMIT = '4'.repeat(40);
 const FACTS_FILE = '.hivemind/facts/facts-20261021T120000Z-0123456789ab.json';
 const FACTS_STEM = '20261021T120000Z-0123456789ab';
-const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head', 'trunk', 'trunk_freshness', 'trunk_ahead', 'trunk_behind', 'trunk_commit', 'cut', 'external_texts', 'delivery', 'delivery_stops', 'root'];
+const FACTS_KEYS = ['facts_file', 'facts_lines', 'head_state', 'branch', 'head', 'trunk', 'trunk_freshness', 'trunk_ahead', 'trunk_behind', 'trunk_commit', 'cut', 'external_texts', 'delivery', 'delivery_stops', 'root', 'plugin_root'];
 const CHECKOUT_ROOT = '/work/checkout';
 const WORKER_DONE = { outcome: 'complete', summary: 'Done.' };
 const VALIDATE_PASSED = { outcome: 'passed' };
@@ -146,6 +146,7 @@ function factsStdout(changes = {}) {
     delivery: 'ready',
     delivery_stops: 'none',
     root: CHECKOUT_ROOT,
+    plugin_root: pluginRoot,
     ...changes
   };
   return FACTS_KEYS.filter((key) => values[key] !== undefined).map((key) => key + ': ' + values[key]).join('\n') + '\n';
@@ -482,9 +483,9 @@ function hasDataBlock(prompt, name) {
  * inputs_file content fields. The --inputs path is left out.
  */
 function readRunnerInputs(prompt) {
-  const words = readDataBlock(prompt, 'command').split(' ');
+  const words = readDataBlock(prompt, 'command').replace(/^bash "[^"]*" /, '').split(' ');
   const inputs = {};
-  for (let index = 2; index < words.length; index += 2) {
+  for (let index = 0; index < words.length; index += 2) {
     const key = words[index].replace(/^--/, '').replace(/-/g, '_');
     if (key === 'ref') {
       inputs.ref = [...(inputs.ref ?? []), words[index + 1]];
@@ -2040,7 +2041,7 @@ const ROW_TESTS = {
       const run = await runWorkflow({ request: REQUEST, trunk: 'trunk-zq' }, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'branch-1');
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "{plugin-root}/skills/create-working-branch/scripts/create-working-branch.sh" --base base-zq --branch feature/branch-zq --classification bugfix --trunk-freshness fresh --trunk trunk-zq');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/create-working-branch/scripts/create-working-branch.sh" --base base-zq --branch feature/branch-zq --classification bugfix --trunk-freshness fresh --trunk trunk-zq');
       assert.deepEqual(readRunnerInputs(call.prompt), { base: 'base-zq', branch: 'feature/branch-zq', classification: 'bugfix', trunk_freshness: 'fresh', trunk: 'trunk-zq' });
       const outsideCommand = withoutDataBlock(call.prompt, 'command');
       for (const name of ['trunk-zq', 'branch-zq', 'base-zq', 'bugfix']) {
@@ -2275,7 +2276,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const call = callOf(run, 'commit-1-1');
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main --inputs .hivemind/molt-inputs-20261021T120000Z-0123456789ab-commit-1-1.json');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/molt/scripts/molt.sh" --trunk main --inputs .hivemind/molt-inputs-20261021T120000Z-0123456789ab-commit-1-1.json');
       assert.deepEqual(readDataBlock(call.prompt, 'inputs_file'), { path: '.hivemind/molt-inputs-20261021T120000Z-0123456789ab-commit-1-1.json', content: { type: 'fix', breaking: true, subject: 'Step S1 is done.', files: ['src/a.js', 'src/b.js'] } });
       assert.deepEqual(withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file').split('\n'), ['Run the command below to commit the wave of plan steps that just ran.', lib.dataBlocksSentence(), '']);
       assert.equal(call.opts.agentType, 'hivemind:synapse');
@@ -4317,7 +4318,7 @@ const ROW_TESTS = {
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'PR');
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'stdout', 'stderr']);
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "{plugin-root}/skills/open-plan-pr/scripts/open-plan-pr.sh" --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/open-plan-pr/scripts/open-plan-pr.sh" --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json');
       const inputsFile = readDataBlock(call.prompt, 'inputs_file');
       assert.deepEqual(Object.keys(inputsFile), ['path', 'content']);
       assert.equal(inputsFile.path, '.hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json');
@@ -7018,15 +7019,39 @@ const ROW_TESTS = {
       assert.ok(!synapseText.includes('{token}'));
       assert.ok(!synapseText.includes('wherever they appear'));
       const run = await runWorkflow(LAUNCH, happyResults());
+      assert.ok(readDataBlock(callOf(run, 'facts-1').prompt, 'command').startsWith('bash "{plugin-root}/skills/'));
       for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
-        assert.ok(readDataBlock(prompt, 'command').startsWith('bash "{plugin-root}/skills/'), label);
+        if (label !== 'facts-1') {
+          assert.ok(readDataBlock(prompt, 'command').startsWith('bash "' + pluginRoot + '/skills/'), label);
+        }
         assert.equal(hasDataBlock(prompt, 'inputs_file'), label !== 'facts-1' && label !== 'branch-1', label);
       }
       for (const label of ['commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
         assert.ok(!prompt.includes('{token}'), label);
         assert.ok(!readDataBlock(prompt, 'inputs_file').path.includes('{'), label);
+      }
+    });
+    test('a facts relay with plugin_root none keeps {plugin-root} in every runner command, the branch, wave, fix, review, head check and pull request ones included', async () => {
+      const noRoot = { 'facts-1': factsRelay({ plugin_root: 'none' }) };
+      const fixed = await runWorkflow(LAUNCH, fixFlowResults(noRoot));
+      const results = happyResults({ ...noRoot, 'pr-1': { outcome: 'blocked', stderr: 'blocker: PR_STOP_ZQ\n' }, 'head-1-1': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });
+      const paused = await runWorkflow(LAUNCH, results);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
+      assert.equal(fixed.result.outcome, 'complete', fixed.result.message);
+      const runnerCalls = [fixed, resumed].flatMap((run) => run.calls).filter((call) => call.opts.agentType === 'hivemind:synapse');
+      for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'fix-commit-1-1', 'review-commit-1-1', 'head-1-1', 'pr-1', 'pr-1-2']) {
+        assert.ok(runnerCalls.some((call) => call.opts.label === label), label);
+      }
+      for (const call of runnerCalls) {
+        assert.ok(readDataBlock(call.prompt, 'command').startsWith('bash "{plugin-root}/skills/'), call.opts.label);
+      }
+    });
+    test('a facts relay with no plugin_root line, or a relative, quote-bearing or space-ended one, blocks as malformed facts', async () => {
+      for (const changes of [{ plugin_root: undefined }, { plugin_root: 'plugin' }, { plugin_root: '/a"b' }, { plugin_root: '/a$b' }, { plugin_root: '/a\\b' }, { plugin_root: '/a ' }]) {
+        const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(changes) });
+        assertPassStopPause(run, MALFORMED_FACTS, 'facts-1');
       }
     });
     test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs file Write an allow', async () => {
@@ -7039,10 +7064,12 @@ const ROW_TESTS = {
       const paused = await runWorkflow(LAUNCH, results);
       const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Fixed.'), results);
       const runnerCalls = [fresh, stale, resumed].flatMap((run) => run.calls).filter((call) => call.opts.agentType === 'hivemind:synapse');
-      assert.deepEqual([...new Set(runnerCalls.map((call) => readDataBlock(call.prompt, 'command').split('/')[2]))].sort(), ['create-working-branch', 'gather-facts', 'molt', 'open-plan-pr']);
+      assert.deepEqual([...new Set(runnerCalls.map((call) => /\/skills\/([^/]+)\/scripts\//.exec(readDataBlock(call.prompt, 'command'))[1]))].sort(), ['create-working-branch', 'gather-facts', 'molt', 'open-plan-pr']);
       assert.ok(runnerCalls.some((call) => call.opts.label === 'head-1-1') && runnerCalls.some((call) => call.opts.label === 'fix-commit-1-1'));
       for (const call of runnerCalls) {
-        const command = readDataBlock(call.prompt, 'command').split('{plugin-root}').join(pluginRoot);
+        const builtCommand = readDataBlock(call.prompt, 'command');
+        assert.equal(builtCommand.includes('{plugin-root}'), call.opts.label.startsWith('facts-'), call.opts.label);
+        const command = builtCommand.split('{plugin-root}').join(pluginRoot);
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:synapse', tool_input: { command: command } }), 'allow', call.opts.label + ': ' + command);
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:drone', tool_input: { command: command } }), 'none', call.opts.label);
         if (hasDataBlock(call.prompt, 'inputs_file')) {

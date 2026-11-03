@@ -616,7 +616,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '522be1eec6369f42';
+const BUILD_ID = '40593a0b01c2e66c';
 
 function supportedSchemaKeywords(){
 return[
@@ -2088,8 +2088,9 @@ return'its '+flag+' value is not one the script takes';
 }
 return undefined;
 }
-function buildRunnerCommand(skill,words){
-return['bash','"{plugin-root}/skills/'+skill+'/scripts/'+skill+'.sh"',...words].join(' ');
+function buildRunnerCommand(skill,words,root){
+const commandRoot=typeof root==='string'&&root!=='none'?root:'{plugin-root}';
+return['bash','"'+commandRoot+'/skills/'+skill+'/scripts/'+skill+'.sh"',...words].join(' ');
 }
 function listGatherFactsWords(trunk,references){
 return['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])];
@@ -2124,6 +2125,7 @@ return'none|'+item+'(?:,'+item+')*';
 }
 function gatherFactsRoutingSpec(){
 const count=wholeFactsPattern('0|[1-9][0-9]*');
+const pathBytes='"$`\\\\\\u0000-\\u001f\\u007f';
 return{
 facts_file:{pattern:wholeFactsPattern('\\.hivemind\\/facts\\/facts-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}\\.json'),required:true},
 facts_lines:{pattern:wholeFactsPattern('[1-9][0-9]*'),required:true},
@@ -2139,7 +2141,8 @@ cut:{pattern:wholeFactsPattern(factsListSource(factsCutFields())),required:true}
 external_texts:{pattern:count,required:true},
 delivery:{pattern:wholeFactsPattern(factsEnumSource(factsDeliveryValues())),required:true},
 delivery_stops:{pattern:wholeFactsPattern(factsListSource(factsDeliveryStops())),required:true},
-root:{pattern:wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'),required:true}
+root:{pattern:wholeFactsPattern('[^\\u0000-\\u001f\\u007f]+'),required:true},
+plugin_root:{pattern:wholeFactsPattern('none|(?:/|[A-Za-z]:/)(?:[^'+pathBytes+']*[^ '+pathBytes+'])?'),required:true}
 };
 }
 function matchesFactsLine(key,value){
