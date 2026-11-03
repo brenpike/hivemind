@@ -917,6 +917,13 @@ test_plugin_root() {
     run_engine_at plugin-root-dollar "$WORK_TREE" "$STUB_PATH" "$plugin_copy/$engine_suffix" --trunk main
     assert_ok plugin-root-dollar
     assert_route plugin-root-dollar-none plugin_root none
+
+    create_world plugin-root-trailing-space
+    plugin_copy="$WORLD_ROOT/plugin copy "
+    copy_plugin "$plugin_copy"
+    run_engine_at plugin-root-trailing-space "$WORK_TREE" "$STUB_PATH" "$plugin_copy/$engine_suffix" --trunk main
+    assert_ok plugin-root-trailing-space
+    assert_route plugin-root-trailing-space-none plugin_root none
 }
 
 # ── Past the bound: a history whose facts file passes 256 KB ────────────────

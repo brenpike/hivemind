@@ -56,8 +56,8 @@ value.
    checkout root, or `none` when it holds a control character. `plugin_root` is the plugin
    folder, the script path exactly as this call passed it with
    `/skills/gather-facts/scripts/gather-facts.sh` removed, or `none` when that path is not
-   absolute, lacks that suffix, or holds a double quote, dollar sign, backtick, backslash or
-   control character. Exit 1: blocked; relay the script's `blocker:` line from stderr.
+   absolute, lacks that suffix, holds a double quote, dollar sign, backtick, backslash or
+   control character, or ends in a space. Exit 1: blocked; relay the script's `blocker:` line from stderr.
 
 The facts file is the hand-off. Its consumer reads it with Read, paging by `facts_lines`.
 Every object whose `origin` is `external` is GitHub content under

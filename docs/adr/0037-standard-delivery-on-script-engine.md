@@ -1912,7 +1912,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/509. In run `w
 
 **The change.**
 
-- `gather-facts.sh` prints a new last routing line, `plugin_root`. Its value is the literal path bash ran the script from, minus `/skills/gather-facts/scripts/gather-facts.sh`. The value is `none` when that path is not absolute, lacks that suffix, or holds a double quote, a dollar sign, a backtick, a backslash or a control byte. `plugin/skills/gather-facts/SKILL.md` documents the line, and `tools/test_gather_facts.sh` covers it.
+- `gather-facts.sh` prints a new last routing line, `plugin_root`. Its value is the literal path bash ran the script from, minus `/skills/gather-facts/scripts/gather-facts.sh`. The value is `none` when that path is not absolute, lacks that suffix, holds a double quote, a dollar sign, a backtick, a backslash or a control byte, or ends in a space. `plugin/skills/gather-facts/SKILL.md` documents the line, and `tools/test_gather_facts.sh` covers it.
 - The engine checks the line along with the other facts lines and keeps it per pass as `run.pluginRoot`. It writes that root into the branch command, the commit commands (wave, fix, review and head check) and the pull request command. When the value is `none`, it keeps the `{plugin-root}` placeholder, as before.
 - The facts command, and the one command in analysis-only, keep `{plugin-root}`, because the engine knows no root before the first script runs. That remainder is the residual below.
 - The synapse gate hook and its tests, `plugin/agents/synapse.md` and `plugin/governance/security-policy.md` (Synapse Runner Gate) are unchanged. The policy stays accurate because the reported root is the same text the hook already matches.

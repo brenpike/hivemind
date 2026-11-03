@@ -109,7 +109,8 @@
 #                    with the fixed suffix /skills/gather-facts/scripts/gather-facts.sh removed.
 #                    It is none when that text does not end in the suffix, does not start with /
 #                    or with a drive letter, a colon and /, or holds a double quote, dollar sign,
-#                    backtick, backslash or control character (0x00-0x1f, 0x7f). The literal text
+#                    backtick, backslash or control character (0x00-0x1f, 0x7f), or ends in a
+#                    space (the facts consumer's plugin_root pattern rejects that). The literal text
 #                    is used, not the resolved script_dir (no cd, pwd -P or symlink resolution),
 #                    because it is the path the synapse gate matched: the gate allows this command
 #                    only when its script path is CLAUDE_PLUGIN_ROOT byte for byte, so this value is
@@ -664,6 +665,6 @@ case "$plugin_root_value" in
   *) plugin_root_value='none' ;;
 esac
 case "$plugin_root_value" in
-  *[\"\$\`\\[:cntrl:]]*) plugin_root_value='none' ;;
+  *[\"\$\`\\[:cntrl:]]*|*' ') plugin_root_value='none' ;;
 esac
 printf 'facts_file: %s\nfacts_lines: %s\n%s\nroot: %s\nplugin_root: %s\n' "$facts_relative" "$facts_lines" "$routing_text" "$root_value" "$plugin_root_value"
