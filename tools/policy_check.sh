@@ -4211,26 +4211,46 @@ mark_time 'CHECK17'
 # ── CHECK 18: Prose files fit their byte budget ────────────────────────────
 #
 # tests/policy/prose-byte-budget.json maps each covered prose file's
-# repo-relative path to its integer byte budget. Covered: plugin/agents/*.md,
-# plugin/governance/*.md, plugin/skills/*/SKILL.md, plugin/skills/_shared/*.md
-# and plugin/references/*.md. Size is bytes with CR stripped, so a CRLF
-# checkout measures as CI does. A finding names the path, its size and its
-# budget when a covered file is over budget, has no entry, or is more than
-# CHECK18_SLACK_PERCENT under budget (the ratchet: a file that shrinks lowers
-# its budget), and when an entry names no covered file. The rule:
-# docs/engineering-principles.md (P25 — Prose Authoring).
+# repo-relative path to its integer byte budget. Covered: every *.md file under
+# plugin/. Size is bytes with CR stripped, so a CRLF checkout measures as CI
+# does. A finding names the path, its size and its budget when a covered file
+# is over budget, has no entry, or is more than CHECK18_SLACK_PERCENT under
+# budget (the ratchet: a file that shrinks lowers its budget), and when an
+# entry names no covered file. The budget file must match a positive schema:
+# exactly one flat JSON object, no repeated key, each key matching
+# CHECK18_PATH_CLASS, each budget an integer from 0 to CHECK18_BUDGET_MAX.
+# Anything else is one non-allowlistable finding and no budget is checked. A
+# covered path outside CHECK18_PATH_CLASS is a non-allowlistable finding. The
+# rule: docs/engineering-principles.md (P25 — Prose Authoring).
 
 echo ''
 echo '=== CHECK 18: Prose files fit their byte budget ==='
 
 CHECK18_BUDGET_REL='tests/policy/prose-byte-budget.json'
 CHECK18_SLACK_PERCENT=5
-CHECK18_COVERED_REGEX='^plugin/(agents|governance|references|skills/_shared)/[^/]+\.md$|^plugin/skills/[^/]+/SKILL\.md$'
-CHECK18_BUDGET_JQ="$JQ_NOSEP_DEF"'if type != "object" then error("the budget file is not a JSON object") else . end
-    | to_entries[]
-    | if (.value | type) != "number" or .value != (.value | floor) or .value < 0
-      then error("the budget for \(.key) is not a non-negative integer") else . end
-    | (.key | nosep), "\u001f", (.value | tostring), "\u001f"'
+CHECK18_PATH_CLASS='[A-Za-z0-9._/-]+'
+CHECK18_BUDGET_MAX=1000000000
+# INVARIANT: jq --stream sees every key as written, so a repeated key is caught
+# before any object is built. The single top-level object closes in exactly
+# one length-1 event, the last; {} is the lone [[], {}] event.
+CHECK18_BUDGET_JQ='[inputs] as $events
+    | if $events == [[[], {}]] then empty
+      else
+        ($events | map(select(length == 2))) as $leaves
+        | ($leaves | map(.[0][0])) as $keys
+        | if ($events | map(select(length == 1)) | length) != 1 or ($events | last | length) != 1
+            or any($leaves[]; (.[0] | length) != 1 or (.[0][0] | type) != "string")
+          then error("the budget file is not one flat JSON object") else . end
+        | if ($keys | length) != ($keys | unique | length)
+          then error("the budget file repeats a key") else . end
+        | $leaves[]
+        | .[0][0] as $key | .[1] as $budget
+        | if ($key | test("\\A" + $path_class + "\\z") | not)
+          then error("a budget key holds a character outside the path class") else . end
+        | if ($budget | type) != "number" or $budget != ($budget | floor) or $budget < 0 or $budget > $budget_max
+          then error("the budget for \($key) is not an integer from 0 to \($budget_max)") else . end
+        | $key, "\u001f", ($budget | floor | tostring), "\u001f"
+      end'
 
 # check18_measure_bytes FILE
 # Prints FILE's size in bytes with every CR stripped. Returns non-zero when
@@ -4244,11 +4264,12 @@ check18_measure_bytes() {
 # check18_compare_budget BUDGET_FILE SIZES_TEXT
 # SIZES_TEXT holds one "path<TAB>bytes" line per covered file. Prints one
 # "path<TAB>description" line per violation of BUDGET_FILE. Returns non-zero
-# when BUDGET_FILE is unreadable or not a JSON object of integer budgets.
+# when BUDGET_FILE is unreadable or does not match the budget schema.
 check18_compare_budget() {
     local budget_records entry_path entry_budget size_path size_bytes
     local -A budget_by_path=()
-    budget_records="$(jq -j "$CHECK18_BUDGET_JQ" "$1")" || return
+    budget_records="$(jq -n -j --stream --arg path_class "$CHECK18_PATH_CLASS" \
+        --argjson budget_max "$CHECK18_BUDGET_MAX" "$CHECK18_BUDGET_JQ" "$1")" || return
     while IFS= read -r -d $'\x1f' entry_path && IFS= read -r -d $'\x1f' entry_budget; do
         budget_by_path["$entry_path"]="$entry_budget"
     done <<< "$budget_records"
@@ -4267,7 +4288,7 @@ check18_compare_budget() {
         fi
     done <<< "$2"
     for entry_path in "${!budget_by_path[@]}"; do
-        printf '%s\t%s\n' "$entry_path" "has a budget of ${budget_by_path[$entry_path]} bytes but is not a covered file (missing, or outside the covered globs) -- delete the entry"
+        printf '%s\t%s\n' "$entry_path" "has a budget of ${budget_by_path[$entry_path]} bytes but is not a covered file (missing, or not a .md file under plugin/) -- delete the entry"
     done
 }
 
@@ -4278,8 +4299,12 @@ declare -a check18_md_files=()
 discover_checked_paths 'CHECK18' check18_md_files files 'plugin Markdown files' "$PLUGIN_ROOT" -- -name '*.md' || check18_found=true
 for md_file in "${check18_md_files[@]}"; do
     md_rel="${md_file#"$REPO_ROOT"/}"
-    [[ "$md_rel" =~ $CHECK18_COVERED_REGEX ]] || continue
     check18_covered_count=$((check18_covered_count + 1))
+    if [[ ! "$md_rel" =~ ^${CHECK18_PATH_CLASS}$ ]]; then
+        check18_found=true
+        add_finding 'CHECK18' "$md_file" 0 'this path holds a character outside CHECK18_PATH_CLASS, so its byte budget is unchecked -- rename it' deny
+        continue
+    fi
     if ! check18_bytes="$(check18_measure_bytes "$md_file")"; then
         check18_found=true
         add_finding 'CHECK18' "$md_file" 0 'this file could not be measured, so its byte budget is unchecked -- make it readable' deny
@@ -4293,7 +4318,7 @@ check18_hits="$(check18_compare_budget "$REPO_ROOT/$CHECK18_BUDGET_REL" "$check1
 if [[ "$check18_compare_rc" -ne 0 ]]; then
     check18_found=true
     add_finding 'CHECK18' "$CHECK18_BUDGET_REL" 0 \
-        "reading the budget exited ${check18_compare_rc}: the file is missing, unreadable, or not a JSON object of non-negative integer budgets, so no budget is checked" deny
+        "reading the budget exited ${check18_compare_rc}: the file is missing, unreadable, or not one flat JSON object of unique path keys and integer budgets from 0 to ${CHECK18_BUDGET_MAX}, so no budget is checked" deny
 fi
 while IFS=$'\t' read -r budget_path budget_text; do
     [[ -z "$budget_path" ]] && continue
@@ -4303,8 +4328,10 @@ done <<< "$check18_hits"
 
 # ── CHECK 18 DETECTION CANARY ──────────────────────────────────────────────
 # check18_compare_budget and check18_measure_bytes over fixed inputs, in BOTH
-# directions: each violation kind yields exactly one finding, and a file at
-# its budget or exactly CHECK18_SLACK_PERCENT under it yields none.
+# directions: each violation kind yields exactly one finding, a file at its
+# budget or exactly CHECK18_SLACK_PERCENT under it yields none, and every
+# budget file off the schema, and every unreadable input, yields a non-zero
+# status.
 
 check18_canary_finding() {
     check18_found=true
@@ -4319,6 +4346,15 @@ check18_expect_flagged() {
     canary_output="$(check18_compare_budget <(printf '%s' "$3") "$2")" || canary_rc=$?
     if [[ "$canary_rc" -ne 0 || "$canary_output" != $'x.md\t'*"$4"* || "$canary_output" == *$'\n'* ]]; then
         check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected exactly one x.md finding holding '$4'"
+    fi
+    return 0
+}
+
+# check18_expect_rejected LABEL BUDGET_JSON
+# Requires a non-zero status from check18_compare_budget on BUDGET_JSON.
+check18_expect_rejected() {
+    if check18_compare_budget <(printf '%s' "$2") $'x.md\t100' > /dev/null 2>&1; then
+        check18_canary_finding "$1 was accepted, expected a non-zero status"
     fi
     return 0
 }
@@ -4339,8 +4375,25 @@ check18_expect_flagged 'a budget for a missing file' '' '{"x.md":100}' 'is not a
 check18_expect_flagged 'a file more than 5% under budget' $'x.md\t94' '{"x.md":100}' 'under its budget of 100'
 check18_expect_clean 'a file at budget' $'x.md\t100' '{"x.md":100}'
 check18_expect_clean 'a file exactly 5% under budget' $'x.md\t95' '{"x.md":100}'
-if check18_compare_budget <(printf '%s' '{"x.md":"100"}') $'x.md\t100' > /dev/null 2>&1; then
-    check18_canary_finding 'a non-integer budget was accepted, expected a non-zero status'
+check18_expect_clean 'a budget of 1000000000' $'x.md\t1000000000' '{"x.md":1000000000}'
+check18_expect_clean 'an empty budget object with no covered file' '' '{}'
+check18_expect_rejected 'a string budget' '{"x.md":"100"}'
+check18_expect_rejected 'a duplicate key' '{"x.md":100,"x.md":100}'
+check18_expect_rejected 'a key with a tab' '{"x.md":100,"x\t.md":100}'
+check18_expect_rejected 'a key with a newline' '{"x.md":100,"x\n.md":100}'
+check18_expect_rejected 'a budget of 1000000001' '{"x.md":1000000001}'
+check18_expect_rejected 'a budget of -1' '{"x.md":-1}'
+check18_expect_rejected 'a budget of 1.5' '{"x.md":1.5}'
+check18_expect_rejected 'a top-level array' '[{"x.md":100}]'
+check18_expect_rejected 'a nested object' '{"x.md":100,"y":{"x.md":100}}'
+check18_expect_rejected 'two top-level objects' '{"x.md":100} {"y.md":100}'
+check18_expect_rejected 'an empty budget file' ''
+check18_expect_rejected 'malformed JSON' '{"x.md":100'
+if check18_compare_budget /dev/null/g-missing-budget.json $'x.md\t100' > /dev/null 2>&1; then
+    check18_canary_finding 'a missing budget file was accepted, expected a non-zero status'
+fi
+if check18_measure_bytes /dev/null/g-missing-prose.md > /dev/null 2>&1; then
+    check18_canary_finding 'measuring a missing file succeeded, expected a non-zero status'
 fi
 check18_canary_bytes="$(check18_measure_bytes <(printf 'ab\r\ncd\n'))" || check18_canary_bytes='unreadable'
 if [[ "$check18_canary_bytes" != '6' ]]; then

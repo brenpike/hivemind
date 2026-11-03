@@ -123,7 +123,7 @@ These rules hold for new and edited prose under `plugin/`.
 - Pinned or test-read text is not frozen. Reword it, then re-pin the same rule to its key terms, not a whole sentence, with bite proof per the pin-authoring contract in `tests/policy/README.md`. Rewording and re-pinning is not weakening. Deleting a check or test, or narrowing what it checks, is.
 - Frozen text is only locked sections, text a script under `plugin/` or `tools/` parses at runtime (proven by grep), and cited heading names.
 - A review fix restores the lost meaning in the fewest words, and must not add more surface than it removes (`plugin/governance/remediation-doctrine.md` (Surface-Growth Escalation)).
-- Each covered file must fit its byte budget in `tests/policy/prose-byte-budget.json`, measured with CR stripped. CHECK 18 of `tools/policy_check.sh` fails a file over its budget, a file more than 5% under it, and a covered file with no entry, so a shrink forces its budget down. Raising one budget means lowering another by as much, or a raise the PR justifies.
+- Each covered file must fit its byte budget in `tests/policy/prose-byte-budget.json`, measured with CR stripped. CHECK 18 of `tools/policy_check.sh` fails a file over its budget, a file more than 5% under it, and a covered file with no entry, so a shrink forces its budget down. CHECK 18 does not check raises: a raise is a visible, reviewed change to the budget file, and review holds it to lowering another budget by as much or to a justification in the PR.
 
 ## Sources
 
