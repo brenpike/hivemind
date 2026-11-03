@@ -4208,6 +4208,154 @@ fi
 
 mark_time 'CHECK17'
 
+# ── CHECK 18: Prose files fit their byte budget ────────────────────────────
+#
+# tests/policy/prose-byte-budget.json maps each covered prose file's
+# repo-relative path to its integer byte budget. Covered: plugin/agents/*.md,
+# plugin/governance/*.md, plugin/skills/*/SKILL.md, plugin/skills/_shared/*.md
+# and plugin/references/*.md. Size is bytes with CR stripped, so a CRLF
+# checkout measures as CI does. A finding names the path, its size and its
+# budget when a covered file is over budget, has no entry, or is more than
+# CHECK18_SLACK_PERCENT under budget (the ratchet: a file that shrinks lowers
+# its budget), and when an entry names no covered file. The rule:
+# docs/engineering-principles.md (P25 — Prose Authoring).
+
+echo ''
+echo '=== CHECK 18: Prose files fit their byte budget ==='
+
+CHECK18_BUDGET_REL='tests/policy/prose-byte-budget.json'
+CHECK18_SLACK_PERCENT=5
+CHECK18_COVERED_REGEX='^plugin/(agents|governance|references|skills/_shared)/[^/]+\.md$|^plugin/skills/[^/]+/SKILL\.md$'
+CHECK18_BUDGET_JQ="$JQ_NOSEP_DEF"'if type != "object" then error("the budget file is not a JSON object") else . end
+    | to_entries[]
+    | if (.value | type) != "number" or .value != (.value | floor) or .value < 0
+      then error("the budget for \(.key) is not a non-negative integer") else . end
+    | (.key | nosep), "\u001f", (.value | tostring), "\u001f"'
+
+# check18_measure_bytes FILE
+# Prints FILE's size in bytes with every CR stripped. Returns non-zero when
+# FILE cannot be read.
+check18_measure_bytes() {
+    local byte_total
+    byte_total="$(tr -d '\r' < "$1" | wc -c)" || return
+    printf '%d\n' "$((byte_total))"
+}
+
+# check18_compare_budget BUDGET_FILE SIZES_TEXT
+# SIZES_TEXT holds one "path<TAB>bytes" line per covered file. Prints one
+# "path<TAB>description" line per violation of BUDGET_FILE. Returns non-zero
+# when BUDGET_FILE is unreadable or not a JSON object of integer budgets.
+check18_compare_budget() {
+    local budget_records entry_path entry_budget size_path size_bytes
+    local -A budget_by_path=()
+    budget_records="$(jq -j "$CHECK18_BUDGET_JQ" "$1")" || return
+    while IFS= read -r -d $'\x1f' entry_path && IFS= read -r -d $'\x1f' entry_budget; do
+        budget_by_path["$entry_path"]="$entry_budget"
+    done <<< "$budget_records"
+    while IFS=$'\t' read -r size_path size_bytes; do
+        [[ -z "$size_path" ]] && continue
+        if [[ -z "${budget_by_path[$size_path]+x}" ]]; then
+            printf '%s\t%s\n' "$size_path" "is ${size_bytes} bytes and has no budget -- add it to ${CHECK18_BUDGET_REL} with a deliberate budget"
+            continue
+        fi
+        entry_budget="${budget_by_path[$size_path]}"
+        unset 'budget_by_path[$size_path]'
+        if (( size_bytes > entry_budget )); then
+            printf '%s\t%s\n' "$size_path" "is ${size_bytes} bytes, over its budget of ${entry_budget} -- cut it, or raise the budget and lower another by as much"
+        elif (( size_bytes * 100 < entry_budget * (100 - CHECK18_SLACK_PERCENT) )); then
+            printf '%s\t%s\n' "$size_path" "is ${size_bytes} bytes, more than ${CHECK18_SLACK_PERCENT}% under its budget of ${entry_budget} -- lower the budget to ${size_bytes}"
+        fi
+    done <<< "$2"
+    for entry_path in "${!budget_by_path[@]}"; do
+        printf '%s\t%s\n' "$entry_path" "has a budget of ${budget_by_path[$entry_path]} bytes but is not a covered file (missing, or outside the covered globs) -- delete the entry"
+    done
+}
+
+check18_found=false
+check18_covered_count=0
+check18_sizes=''
+declare -a check18_md_files=()
+discover_checked_paths 'CHECK18' check18_md_files files 'plugin Markdown files' "$PLUGIN_ROOT" -- -name '*.md' || check18_found=true
+for md_file in "${check18_md_files[@]}"; do
+    md_rel="${md_file#"$REPO_ROOT"/}"
+    [[ "$md_rel" =~ $CHECK18_COVERED_REGEX ]] || continue
+    check18_covered_count=$((check18_covered_count + 1))
+    if ! check18_bytes="$(check18_measure_bytes "$md_file")"; then
+        check18_found=true
+        add_finding 'CHECK18' "$md_file" 0 'this file could not be measured, so its byte budget is unchecked -- make it readable' deny
+        continue
+    fi
+    check18_sizes+="${md_rel}"$'\t'"${check18_bytes}"$'\n'
+done
+
+check18_compare_rc=0
+check18_hits="$(check18_compare_budget "$REPO_ROOT/$CHECK18_BUDGET_REL" "$check18_sizes")" || check18_compare_rc=$?
+if [[ "$check18_compare_rc" -ne 0 ]]; then
+    check18_found=true
+    add_finding 'CHECK18' "$CHECK18_BUDGET_REL" 0 \
+        "reading the budget exited ${check18_compare_rc}: the file is missing, unreadable, or not a JSON object of non-negative integer budgets, so no budget is checked" deny
+fi
+while IFS=$'\t' read -r budget_path budget_text; do
+    [[ -z "$budget_path" ]] && continue
+    check18_found=true
+    add_finding 'CHECK18' "$budget_path" 0 "$budget_text"
+done <<< "$check18_hits"
+
+# ── CHECK 18 DETECTION CANARY ──────────────────────────────────────────────
+# check18_compare_budget and check18_measure_bytes over fixed inputs, in BOTH
+# directions: each violation kind yields exactly one finding, and a file at
+# its budget or exactly CHECK18_SLACK_PERCENT under it yields none.
+
+check18_canary_finding() {
+    check18_found=true
+    add_finding 'CHECK18' 'tools/policy_check.sh' 0 "detection canary: $1"
+    return 0
+}
+
+# check18_expect_flagged LABEL SIZES_TEXT BUDGET_JSON EXPECTED_TEXT
+# Requires exactly one finding, for x.md, whose description holds EXPECTED_TEXT.
+check18_expect_flagged() {
+    local canary_output canary_rc=0
+    canary_output="$(check18_compare_budget <(printf '%s' "$3") "$2")" || canary_rc=$?
+    if [[ "$canary_rc" -ne 0 || "$canary_output" != $'x.md\t'*"$4"* || "$canary_output" == *$'\n'* ]]; then
+        check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected exactly one x.md finding holding '$4'"
+    fi
+    return 0
+}
+
+# check18_expect_clean LABEL SIZES_TEXT BUDGET_JSON
+check18_expect_clean() {
+    local canary_output canary_rc=0
+    canary_output="$(check18_compare_budget <(printf '%s' "$3") "$2")" || canary_rc=$?
+    if [[ "$canary_rc" -ne 0 || -n "$canary_output" ]]; then
+        check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected no finding"
+    fi
+    return 0
+}
+
+check18_expect_flagged 'a file over budget' $'x.md\t101' '{"x.md":100}' 'over its budget of 100'
+check18_expect_flagged 'a file with no budget' $'x.md\t100' '{}' 'has no budget'
+check18_expect_flagged 'a budget for a missing file' '' '{"x.md":100}' 'is not a covered file'
+check18_expect_flagged 'a file more than 5% under budget' $'x.md\t94' '{"x.md":100}' 'under its budget of 100'
+check18_expect_clean 'a file at budget' $'x.md\t100' '{"x.md":100}'
+check18_expect_clean 'a file exactly 5% under budget' $'x.md\t95' '{"x.md":100}'
+if check18_compare_budget <(printf '%s' '{"x.md":"100"}') $'x.md\t100' > /dev/null 2>&1; then
+    check18_canary_finding 'a non-integer budget was accepted, expected a non-zero status'
+fi
+check18_canary_bytes="$(check18_measure_bytes <(printf 'ab\r\ncd\n'))" || check18_canary_bytes='unreadable'
+if [[ "$check18_canary_bytes" != '6' ]]; then
+    check18_canary_finding "a CRLF input measured ${check18_canary_bytes} bytes, expected 6 with CR stripped"
+fi
+
+if [[ "$check18_found" == false ]]; then
+    echo "[PASS] Check 18: All $check18_covered_count covered prose files fit their byte budget"
+    CHECKS_PASSED=$((CHECKS_PASSED + 1))
+else
+    CHECKS_FAILED=$((CHECKS_FAILED + 1))
+fi
+
+mark_time 'CHECK18'
+
 # ── SAFETY REGRESSION TESTS ────────────────────────────────────────────────
 
 echo ''
