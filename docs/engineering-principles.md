@@ -107,6 +107,24 @@ Do not add an abstraction, parameter, configuration knob, or layer of generality
 
 A workflow script passes an agent three things: the task, the run's data, and short user-facing message templates. It never restates an agent's or a skill's own instructions. When a prompt seems to need a rule its target lacks, the rule goes into that agent definition or skill, not into the script. The reason is where each side can read. An agent reads its definition and its skills when it runs, but a running script cannot read files, so a rule copied into a script is a second copy that drifts from its home (P22) and grows the bundle toward the approval limit. Per P3, the guard is a test, not this paragraph: the per-script prose budget and the duplication check in `tools/build_workflows.mjs` fail the build when a script grows past its budget or a sentence pasted whole into one string literal or template piece copies a sentence of any agent definition or skill. The duplication check is a verbatim-copy tripwire: a sentence split across literals, or reworded, passes it and rests on review (ADR-0037, the amendment for issue 459). Raising a budget is a visible, reviewed change to that file, never a quiet edit to make the build pass.
 
+## P25 — Prose Authoring
+
+These rules hold for new and edited prose under `plugin/`.
+
+- Behavior comes first. Every obligation, condition, exception, ordering, cited heading, bold term and parsed literal keeps its meaning. A byte saving never justifies dropping or weakening a rule.
+- Write each rule in the fewest words that keep its meaning.
+- State each rule once, in its home, and cite it elsewhere.
+- Use no ALL-CAPS emphasis.
+- Keep rationale, history and threat models out of rules. They go in an ADR, or in `docs/` when no ADR holds them.
+- Write no consumer lists and no "single source" or "not restated here" sentences.
+- Write no negation that repeats a positive rule.
+- Keep an obligation word (must, never, only, required) wherever the meaning needs it.
+- Cite governance only as `${CLAUDE_PLUGIN_ROOT}/governance/<doc>.md` (Heading) or `whole`, per the `CLAUDE.md` editing rules. `tests/workflow-scripts/governance-section-refs.test.mjs` enforces it.
+- Pinned or test-read text is not frozen. Reword it, then re-pin the same rule to its key terms, not a whole sentence, with bite proof per the pin-authoring contract in `tests/policy/README.md`. Rewording and re-pinning is not weakening. Deleting a check or test, or narrowing what it checks, is.
+- Frozen text is only locked sections, text a script under `plugin/` or `tools/` parses at runtime (proven by grep), and cited heading names.
+- A review fix restores the lost meaning in the fewest words, and must not add more surface than it removes (`plugin/governance/remediation-doctrine.md` (Surface-Growth Escalation)).
+- Each covered file must fit its byte budget in `tests/policy/prose-byte-budget.json`, enforced by CHECK 18 of `tools/policy_check.sh`, which defines what is measured and what fails. CHECK 18 does not check raises: review holds a raise to lowering another budget by as much or to a justification in the PR.
+
 ## Sources
 
 - https://code.claude.com/docs/en/skills — Claude Code "Extend Claude with skills": the create-a-skill trigger ("a section of CLAUDE.md has grown into a procedure rather than a fact"; "a skill's body loads only when it's used"). Roots for P4/P6/P8/P10.
