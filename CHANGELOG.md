@@ -13,6 +13,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.12] - 2026-11-02
+
+### Changed
+
+- The drone, local-reviewer and github-reviewer read named sections of `remediation-doctrine.md` instead of the whole doc.
+- `remediation-doctrine.md` drops its Engine Consumers section, its consumer re-listings and its single-source meta sentences. ADR-0038 now holds the consumer list.
+- Relationship to Existing Detectors no longer points at `CONTEXT.md`, which the installed plugin cannot resolve.
+
 ## [7.5.11] - 2026-11-02
 
 ### Changed
