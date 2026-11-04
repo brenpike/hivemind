@@ -10,7 +10,7 @@ Source for the `hivemind` Claude Code plugin + a single-plugin marketplace point
 
 Project engineering principles governing how prose, scripts, and skills are factored across agents/skills/governance live in `docs/engineering-principles.md`. Consult it before extracting procedure out of an agent or skill, or when deciding whether something belongs in a script, a skill, or a governance doc.
 
-Prose under `plugin/` follows `docs/engineering-principles.md` P25 (Prose Authoring) and must fit its byte budget in `tests/policy/prose-byte-budget.json` (`tools/policy_check.sh` CHECK 18).
+Prose under `plugin/` follows `docs/engineering-principles.md` P25 (Prose Authoring) and must fit its byte budget in `tests/policy/prose-byte-budget.json` (`tools/policy_check.sh` CHECK 18); raising a budget needs a user-approved entry in `tests/policy/prose-budget-raises.json`, which CHECK 18 checks against the merge-base.
 
 ## Repository layout
 

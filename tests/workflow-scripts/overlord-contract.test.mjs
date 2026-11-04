@@ -58,6 +58,17 @@ function readSection(body, heading) {
   return (end === -1 ? rest : rest.slice(0, end)).join('\n');
 }
 
+function normalizeWhitespace(text) {
+  return text.replace(/\s+/g, ' ').trim();
+}
+
+function assertSectionHasPhrases(heading, phrases) {
+  const sectionText = normalizeWhitespace(readSection(body, heading));
+  for (const phrase of phrases) {
+    assert.ok(sectionText.includes(normalizeWhitespace(phrase)), `${heading} lacks ${phrase}`);
+  }
+}
+
 const { frontmatter, body } = splitFrontmatter(overlordText);
 const engineSection = readSection(body, '## Engine');
 const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The result is built to fit the completion notice.')) ?? '';
@@ -146,9 +157,9 @@ describe('overlord Engine section', () => {
   test('Engine no longer names the dropped decisions field', () => {
     assert.ok(!engineSection.includes('decisions'));
   });
-  test('Engine treats a cut notice as a defect that does not resume, fall back or read a file', () => {
+  test('Engine treats a cut notice as a defect that does not resume or read a file, and counts the run as failed', () => {
     assert.notEqual(defectParagraph, '', '## Engine has a paragraph starting The result is built to fit the completion notice.');
-    for (const phrase of ['that is a defect', 'do not resume', 'fall back', 'read any file']) {
+    for (const phrase of ['that is a defect', 'do not resume', 'read any file', 'The run counts as failed.']) {
       assert.ok(defectParagraph.includes(phrase), `defect paragraph lacks ${phrase}`);
     }
   });
@@ -167,9 +178,17 @@ describe('overlord Engine section', () => {
     }
   });
   test('Engine states the fallback clause', () => {
-    assert.ok(engineSection.includes('If the launch is refused or blocked'));
-    assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
-    assert.ok(engineSection.includes('A run that started, then failed or ended blocked, is reported as it ended and does not fall back.'));
+    for (const phrase of [
+      'For `standard-delivery`, launch only when `## Instinct` picks the engine',
+      'If a `standard-delivery` launch is refused or blocked (denied, not found, or workflows turned off), or the started run fails or ends blocked, say so in one line and continue on Instinct from the branch\'s last commit without asking;',
+      'the final report says it switched and where the engine stopped.',
+      'Uncommitted edits the failed run left stop the takeover per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State) and are never discarded',
+      'Instinct never relaunches the engine.',
+      'A run the user stopped does not fall back.',
+      'Any other workflow runs a refused or blocked launch on the state machine and reports a started run as it ended.',
+    ]) {
+      assert.ok(normalizeWhitespace(engineSection).includes(normalizeWhitespace(phrase)), `## Engine fallback clause lacks ${phrase}`);
+    }
   });
 });
 
@@ -328,5 +347,32 @@ describe('overlord workflow definition reads', () => {
   test('Workflow State Execution sends the scan rule to the gather-facts consumer rules', () => {
     assert.ok(stateExecutionSection.includes('the scan its consumer rules require does not pass'), '## Workflow State Execution does not defer the scan rule to the skill consumer rules');
     assert.ok(stateExecutionSection.includes('the texts the scan did not account for'), '## Workflow State Execution does not surface the texts the scan did not account for');
+  });
+});
+
+// These check each phrase is present inside its own `## ` section, never its meaning, per tests/policy/README.md (1. Honest capability statement); ADR-0039 decisions 2 to 4.
+describe('overlord section-scoped Instinct pins', () => {
+  test('readSection stops at the next H2 and keeps an H3 inside its parent', () => {
+    const syntheticBody = ['## First', 'first text', '### Child', 'child text', '## Second', 'second text'].join('\n');
+    const firstSection = readSection(syntheticBody, '## First');
+    assert.ok(!firstSection.includes('second text'), 'a phrase in the next ## section was found in the section before it');
+    assert.ok(firstSection.includes('child text'), 'a ### subsection left its parent section');
+  });
+  test('Instinct states the permanent path, the default choice, the plan and the one-commit PR gate', () => {
+    assertSectionHasPhrases('## Instinct', [
+      'Instinct, a permanent delivery path beside the script engine, is also its `standard-delivery` fallback',
+      'A `standard-delivery` request that names neither path takes the engine when it carries a `working_branch.base` ref',
+      'otherwise ask the user which, with your recommendation',
+      'Every run needs a plan before any edit',
+      'the PR by `hivemind:open-plan-pr` only on a commit that validation and local review (unless the Codex plugin is unavailable or the request skips it) both passed on',
+      'a later commit rerunning both',
+    ]);
+  });
+  test('Parallel Delegation Safety holds on any path and forbids git writes and repo-global mutations', () => {
+    assertSectionHasPhrases('## Parallel Delegation Safety', [
+      'These rules hold for every wave, on any path.',
+      'Each wave delegation must forbid git writes',
+      'Each wave delegation must forbid repo-global mutations',
+    ]);
   });
 });

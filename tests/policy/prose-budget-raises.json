@@ -1,0 +1,13 @@
+{
+  "description": "User-approved raises of prose byte budgets, read by tools/policy_check.sh CHECK 18. A budget in tests/policy/prose-byte-budget.json higher than the same path's budget at the merge-base fails CHECK 18 unless this file holds an entry for that path whose `from` is the merge-base budget and whose `to` is at least the new budget. Add an entry only with the user's approval. Each entry holds exactly: `path` (the covered file's repo-relative path), `from` and `to` (integer budgets, `to` above `from`), `approved_by` (who approved it), `date` (YYYY-MM-DD) and `reason` (why the raise is needed). A path with no budget at the merge-base needs no entry, and lowering a budget needs none. Entries are kept as the approval record.",
+  "raises": [
+    {
+      "path": "plugin/agents/overlord.md",
+      "from": 64351,
+      "to": 65846,
+      "approved_by": "user",
+      "date": "2026-11-04",
+      "reason": "Codifies the Instinct delivery path, its standard-delivery engine fallback, and the Tier A stop that sends budget raises to the user (PR #517, ADR-0039)."
+    }
+  ]
+}

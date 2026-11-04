@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.20] - 2026-11-03
+
+### Added
+
+- `overlord.md` names Instinct: a permanent delivery path the overlord drives by judgment without a run ledger, beside the script engine; when a `standard-delivery` request names neither path, the overlord asks which to take. A refused or blocked `standard-delivery` launch now runs on Instinct instead of the workflow state machine, a started one that fails continues on Instinct, and Instinct never relaunches the engine (ADR-0039). The wave delegation rules move to a new `## Parallel Delegation Safety` section, and raising a prose byte budget is a Tier A question.
+
 ## [7.5.19] - 2026-11-03
 
 ### Changed

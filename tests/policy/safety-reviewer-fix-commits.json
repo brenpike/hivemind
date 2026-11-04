@@ -68,7 +68,7 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "this prohibition is scoped to WAVE WORKER delegations"
+      "pattern": "This prohibition is scoped to wave worker delegations"
     },
     {
       "file": "plugin/agents/synapse.md",
