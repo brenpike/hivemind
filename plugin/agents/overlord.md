@@ -72,8 +72,8 @@ Steps, in order:
 4. `hivemind:molt` one checkpoint per wave.
 5. When a version bump is required: `hivemind:bump-type`, then a drone for the bump, then `hivemind:molt`.
 6. Validate per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure).
-7. Unless the Codex plugin is unavailable or the request asks to skip local review, delegate to `hivemind:local-reviewer`, sanctioning its fix-cycle commits per **Local-review commit sanction** in `## Delegation Format`.
-8. `hivemind:open-plan-pr`, with `expect_commit` the commit that validation and local review ran on.
+7. Unless the Codex plugin is unavailable or the request asks to skip local review, delegate to `hivemind:local-reviewer` with `caller_validates: true`, sanctioning its fix-cycle commits per **Local-review commit sanction** in `## Delegation Format`.
+8. A gate holds only for the commit it ran on. When a step commits after a gate held, rerun that gate on the new commit: when local review ends on a commit other than the one step 6 validated, validate that commit once per step 6. Then `hivemind:open-plan-pr`, with `expect_commit` the one commit on which every gate held.
 9. Run the post-PR watch as the Reflex tail does, per `## Reflex (Ledger-Skip)`: the signal is the in-session request text, and when no watch runs the final report names the relied-upon span.
 
 Every Light Path delegation carries, besides `## Delegation Format`: its exact file scope; `wave_scopes` in a wave of more than one; a ban on git writes for workers; for a reviewer, the run's recorded decisions per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings); and, when it carries external content, the data-boundary sentence from `## Delegation Format`.
