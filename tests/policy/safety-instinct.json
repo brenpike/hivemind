@@ -1,11 +1,63 @@
 {
   "rule": "Instinct is permanent, asked for, the engine fallback, planned, gated on one commit, and wave delegations stay safe",
-  "description": "P3 coupling inside plugin/agents/overlord.md. The source pin carries Instinct's standing claim: it is a named, permanent delivery path beside the script engine, so rewording it into a temporary path is loud (ADR-0039 decision 2). Three consumer pins carry the path-choice rule for a standard-delivery request that names neither path, one per clause: the discriminating condition (names neither the engine nor Instinct), the exemption (a request carrying a working_branch.base ref takes the engine without asking, which keeps an unattended overlord from stalling on a question), and the obligation (otherwise ask the user which to use). Four consumer pins carry the engine fallback in the Engine section (ADR-0039 decisions 3 and 4): a refused or blocked standard-delivery launch runs on Instinct, condition and obligation in one pattern; a started standard-delivery run that failed or ended blocked continues on Instinct from the branch's current git state without asking the user; before any planning or delegation the takeover checks the tree per Unsafe Git State and uncommitted edits the failed run left stop the run, check and stop in one pattern; and Instinct never relaunches the engine. Four consumer pins carry Instinct's run obligations, each on its key terms: a plan before any edit, from cerebrate or supplied by the user; the PR opened only on a commit that validation and local review both passed on, condition and obligation in one pattern; a commit made after a gate passed reruns that gate; and anything else decided per Stop Conditions. Three consumer pins carry the Parallel Delegation Safety section: its heading together with its opening sentence, so a heading rename is loud even though the section is also cited by name elsewhere in the file, and the two must-forbid rules (git writes, repo-global mutations), each pinned on its subject and its obligation. Honest residual: pins claim word sequences only, never meaning. A rewrite elsewhere in the file that contradicts a pinned clause stays green, and a citation of the section from another file is not checked. Not pinned here: the Engine sentence and the Tier A bullet that cite the path-choice rule, the fallback's final-report, surface-never-discard, stop-rule and user-stopped clauses (tests/workflow-scripts/overlord-contract.test.mjs reads the Engine fallback paragraph), the local-review skip exemption, the working-branch, delegation, molt and post-PR watch obligations of Instinct, and the sentence that sends run-ledger writes to the final report.",
+  "description": "P3 coupling inside plugin/agents/overlord.md. This fixture pins every obligation, condition and exception clause of three surfaces: the `## Instinct` section, the `## Parallel Delegation Safety` section, and the standard-delivery path-choice and fallback sentences of `## Engine`. Each pin sits on a clause's key terms, never a whole paragraph; one pattern covers several clauses of one sentence where they read as one unit. The source pin carries Instinct's standing claim that it is a named, permanent delivery path beside the script engine, so rewording it into a temporary path is loud (ADR-0039 decision 2). Engine (ADR-0039 decisions 3 and 4): a standard-delivery request has its path chosen per `## Instinct` and launches only when that picks the engine; a refused or blocked standard-delivery launch runs on Instinct, and any other refused or blocked launch runs on the workflow state machine; a started standard-delivery run that failed or ended blocked continues on Instinct from the branch's current git state without asking the user, and the final report says it switched and where the engine stopped; before any planning or delegation the takeover checks the tree per Unsafe Git State, and uncommitted edits the failed run left stop the run and are surfaced, never discarded; a rule that stops every path stops Instinct at the same point; Instinct never relaunches the engine; a run the user stopped does not fall back; any other started run that failed or ended blocked is reported as it ended and does not fall back. Instinct: its role as the engine's fallback and its drive by judgment with no run ledger and no init-run-ledger, record-state-result or next-wave gating; the path-choice rule for a standard-delivery request naming neither path, one pin per clause (the discriminating condition, the exemption that takes the engine for a request carrying a working_branch.base ref so an unattended overlord never stalls on a question, and the obligation to ask the user, with a recommendation), and the rule that Instinct is taken only when the user picks it, the request names it or `## Engine` sends the request to it; the `A run must have:` list header and every bullet: a plan before any edit from cerebrate or the user, gather-facts before cerebrate with a stop on its blocked record, a working branch from create-working-branch, every edit delegated to a drone or changeling with exact file scope and no git writes, a wave of only ready steps run under Parallel Delegation Safety, every delegation per Delegation Format with recorded decisions for a reviewer and the data-boundary sentence for external content, every commit made by molt with one checkpoint per wave and a bump typed by bump-type, the PR opened by open-plan-pr with expect_commit only on a commit validation and local review both passed on, local review by local-reviewer with caller_validates and sanctioned fix-cycle commits, skipped only when the Codex plugin is unavailable or the request asks, a gate rerun after any later commit, and the post-PR watch as the Reflex tail runs it; the sentence deciding anything else per Stop Conditions; the sentence sending run-ledger writes to the final report; the `Operating rules:` header and its four rules (validation in the background with </dev/null, every gated script command run alone, TaskStop on a drone that reports done while its background work runs, git status and the diff checked before trusting a stale or late result); and the closing Final Report obligation. Parallel Delegation Safety: its heading with its opening sentence, so a heading rename is loud even though the section is also cited by name elsewhere in the file, plus that sentence's any-path scope, and all six bullets: disjoint file scopes; wave_scopes carried in a wave of more than one, with a self-check that still blocks outside the declared wave surface; the must-forbid git writes rule with its stash, reset, checkout and clean examples, the sole-committer rule, and the reviewer fix-cycle commit exception; the must-forbid repo-global mutations rule with its examples; the destructive-fix gate and external-content boundary riding each delegation unchanged; and the wave split with its soft cap of 4 concurrent delegations. The exception's scoping words (`This prohibition is scoped to wave worker delegations`) are pinned by tests/policy/safety-reviewer-fix-commits.json and not repeated here. tests/workflow-scripts/overlord-contract.test.mjs also asserts the Engine fallback sentences. Honest residual: pins claim word sequences only, never meaning. A rewrite elsewhere in the file that contradicts a pinned clause stays green, a clause added to one of these surfaces has no pin until one is written, and a citation of these sections from another file is not checked. Not pinned here, as citations that name Instinct rather than obligations of these surfaces: the Tier A bullet that names the engine-or-Instinct question, and the sentences in `## Safety Rails`, `## Reflex (Ledger-Skip)`, `## Workflow State Execution` and `## Brood Execution` that name Instinct.",
   "source": {
     "file": "plugin/agents/overlord.md",
     "pattern": "Instinct is a named, permanent delivery path beside the script engine"
   },
   "consumers": [
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "choose the path per `## Instinct` first, and launch only when that picks the engine"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "If a `standard-delivery` launch is refused or blocked (denied, not found, or workflows turned off), say so in one line and run the request on Instinct"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Any other refused or blocked launch runs on the workflow state machine"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "A `standard-delivery` run that started, then failed or ended blocked, continues on Instinct from the branch's current git state without asking the user"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "and the final report says it switched and where the engine stopped"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Before any planning or delegation, the takeover checks the tree per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State), and uncommitted edits the failed run left stop the run"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "uncommitted edits the failed run left stop the run: surface them, never discard them"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "A rule that stops every path stops Instinct at the same point, per `### Stop Conditions` and `## Safety Rails`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Instinct never relaunches the engine"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "A run the user stopped does not fall back"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Any other run that started, then failed or ended blocked, is reported as it ended and does not fall back"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "and the engine's fallback per `## Engine`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "The overlord drives it by judgment with no run ledger: no `hivemind:init-run-ledger`, `hivemind:record-state-result` or `hivemind:next-wave` gating"
+    },
     {
       "file": "plugin/agents/overlord.md",
       "pattern": "selects `standard-delivery` and the request names neither the engine nor Instinct"
@@ -20,19 +72,15 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "If a `standard-delivery` launch is refused or blocked (denied, not found, or workflows turned off), say so in one line and run the request on Instinct"
+      "pattern": "which to use, with your recommendation"
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "A `standard-delivery` run that started, then failed or ended blocked, continues on Instinct from the branch's current git state without asking the user"
+      "pattern": "Take Instinct only when the user picks it, the request names it or `## Engine` sends the request to it"
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "Before any planning or delegation, the takeover checks the tree per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State), and uncommitted edits the failed run left stop the run"
-    },
-    {
-      "file": "plugin/agents/overlord.md",
-      "pattern": "Instinct never relaunches the engine"
+      "pattern": "A run must have:\n\n- a plan before any edit"
     },
     {
       "file": "plugin/agents/overlord.md",
@@ -40,7 +88,51 @@
     },
     {
       "file": "plugin/agents/overlord.md",
+      "pattern": "Invoke `hivemind:gather-facts` before `hivemind:cerebrate` per the `hivemind:gather-facts` paragraph of `## Workflow State Execution`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "where that paragraph records `blocked`, stop and surface why"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "a working branch from `hivemind:create-working-branch`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "every edit delegated to a drone or changeling `with exact file scope` and no git writes"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "A wave holds only steps with no unmet `depends_on` and runs under `## Parallel Delegation Safety`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "every delegation per `## Delegation Format`: a reviewer's with the run's recorded decisions per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings)"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "one carrying external content with the data-boundary sentence"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "every commit made by `hivemind:molt`: one checkpoint per wave, and the version bump, typed by `hivemind:bump-type`, when one is required"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "the PR opened by `hivemind:open-plan-pr`, with `expect_commit`, only on a commit"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
       "pattern": "only on a commit that validation per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) and local review both passed on"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Local review is `hivemind:local-reviewer` with `caller_validates: true` and its fix-cycle commits sanctioned per **Local-review commit sanction** in `## Delegation Format`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "skipped only when the Codex plugin is unavailable or the request asks to skip it"
     },
     {
       "file": "plugin/agents/overlord.md",
@@ -48,7 +140,35 @@
     },
     {
       "file": "plugin/agents/overlord.md",
+      "pattern": "the post-PR watch as the Reflex tail runs it, per `## Reflex (Ledger-Skip)`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
       "pattern": "Decide anything else, such as order, failures and questions, per `### Stop Conditions`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "A rule that writes to the run ledger writes to the final report instead"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Operating rules:\n\n- Run validation in the background with `</dev/null`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Run every gated script command alone, never chained with `&&`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "`TaskStop` a drone that reports done while its background work still runs"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Check `git status` and the diff before trusting a stale or late agent result"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "End with the report in `## Final Report`"
     },
     {
       "file": "plugin/agents/overlord.md",
@@ -56,11 +176,51 @@
     },
     {
       "file": "plugin/agents/overlord.md",
+      "pattern": "These rules hold for every wave of parallel delegations, on any path"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Wave members have disjoint file scopes, so parallel delegations never write the same file"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Each wave delegation in a wave of more than one carries `wave_scopes` per `## Delegation Format`"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "still blocks on anything outside the declared wave surface"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
       "pattern": "Each wave delegation must forbid git writes"
     },
     {
       "file": "plugin/agents/overlord.md",
+      "pattern": "must forbid git writes, including stash, reset, checkout and clean in the shared tree"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Wave workers (drone, changeling) never commit; the overlord is the sole committer"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "a reviewer agent's fix-cycle checkpoint commits are the sanctioned exception per `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Commit Authority)"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
       "pattern": "Each wave delegation must forbid repo-global mutations"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "repo-global mutations, such as dependency installs and tree-wide formatters, that would collide across concurrent agents"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "The destructive-fix gate and the external-content boundary ride each delegation unchanged"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "The overlord may split a large wave into smaller parallel batches by judgment (soft cap: at most 4 concurrent delegations) and dispatch the rest later"
     }
   ]
 }
