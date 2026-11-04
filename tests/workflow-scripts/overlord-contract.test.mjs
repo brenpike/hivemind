@@ -383,3 +383,62 @@ describe('overlord section-scoped Instinct pins', () => {
     ]);
   });
 });
+
+// These check each state-machine rule's key phrases inside its own `## ` section, never its meaning, per tests/policy/README.md (1. Honest capability statement).
+describe('overlord section-scoped state-machine pins', () => {
+  test('Implement Loop aggregates a wave fail-closed and records one result and one checkpoint', () => {
+    assertSectionHasPhrases('## Implement Loop (Wave Execution)', [
+      '`all_done: true` (empty `wave`, `remaining` 0) maps to the `all_steps_complete` transition',
+      'any `blocked` records `blocked`; else any `needs_replan` records `needs_replan`; else `complete`',
+      'Record one `implement_step` result with `hivemind:record-state-result`, setting `event.outputs.completed_steps` to the step-ids completed in this wave',
+      'molt one `checkpoint` for the whole wave',
+      'never record an undispatched step in `completed_steps`',
+    ]);
+  });
+  test('Implement Loop degrades to judgment only when next-wave cannot run, and stops on its blocker', () => {
+    assertSectionHasPhrases('## Implement Loop (Wave Execution)', [
+      'When `hivemind:next-wave` cannot run (script or substrate missing) or fails transiently',
+      'drain steps by judgment, respecting `depends_on` and file disjointness yourself',
+      'When it exits 1 with a `blocker:` line',
+      'the fallback does not apply: this is a hard stop. Record `blocked` and surface it to the user.',
+      'You must never re-parse or drain the rejected `plan.steps` by judgment.',
+    ]);
+  });
+  test('Implement Loop checks out the PR branch at pr_branch_preflight and persists the PR identity', () => {
+    assertSectionHasPhrases('## Implement Loop (Wave Execution)', [
+      'at the `pr_branch_preflight` decision (entered from `intake` on both the `watch` and `fix` routes), resolve the PR\'s head branch',
+      'check it out before delegating to any reviewer',
+      'Carry the intake route forward as the same `watch`/`fix` outcome; take `blocked` if the branch cannot be resolved or checked out.',
+      'When recording `pr_branch_preflight`, or `open_pr`, with `hivemind:record-state-result`, you must pass `outputs: { pr: <url>, head_ref_oid: <sha> }`',
+    ]);
+    assertSectionHasPhrases('## Safety Rails', ['never delegate to a reviewer before the `pr_branch_preflight` checkout in `## Implement Loop (Wave Execution)` (PR identity)']);
+  });
+  test('Resume On Start anchors its scan, guards the ledger leaf and gates version skew', () => {
+    assertSectionHasPhrases('## Resume On Start', [
+      'with `<checkout-root>` from `git rev-parse --show-toplevel`, never CWD-relative',
+      'Two or more: surface them; never auto-pick.',
+      'never a path built from an externally supplied `run_id`',
+      'only through the ledger-read guard (`hivemind_open_ledger` / `hivemind_assert_ledger_contained`), never raw',
+      'Before the version-skew gate, check `ledger.run.mode`.',
+      'never re-apply the skew doors',
+      'never auto-resume or continue the deterministic run against the new definition',
+      'Offer exactly two doors',
+      'invoke `hivemind:mark-intent-fallback` with `close_status: cancelled` on the old run',
+    ]);
+  });
+  test('Resume On Start gates the decision report before any GitHub call and fails open', () => {
+    assertSectionHasPhrases('## Resume On Start', [
+      'Check `HIVEMIND_ENABLE_DECISION_REPORT` by presence before any GitHub call.',
+      'Unset or empty: make no GitHub call, render nothing, and `touch` each awaiting run\'s marker.',
+      'surface the narrative it returns in chat, then `touch <rundir>/.decision-report-done`',
+      'The deferred-report scan is best-effort and fail-open, an exception to `## Tool-Error Recovery`.',
+      'or with the key unset a marker `touch`, fails for any reason, never stop or block the session: leave that run awaiting and unmarked',
+    ]);
+  });
+  test('Intent-Driven Fallback marks only a readable skewed ledger', () => {
+    assertSectionHasPhrases('## Intent-Driven Fallback (Universal)', [
+      'invoke `hivemind:mark-intent-fallback` with the `run_id`, the current state string and a summary, and no `close_status`',
+      'never call `hivemind:mark-intent-fallback`, which needs a readable ledger, and attempt no engine write',
+    ]);
+  });
+});
