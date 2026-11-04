@@ -71,8 +71,8 @@ function assertSectionHasPhrases(heading, phrases) {
 
 const { frontmatter, body } = splitFrontmatter(overlordText);
 const engineSection = readSection(body, '## Engine');
-const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('The result is built to fit the completion notice.')) ?? '';
-const relayParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Only the harness completion notice is the run\'s result.')) ?? '';
+const defectParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('A notice is cut only when its result is not one complete JSON object;')) ?? '';
+const relayParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('Only the harness completion notice is the run\'s result, never your own summary.')) ?? '';
 const stateExecutionSection = readSection(body, '## Workflow State Execution');
 const questionGateParagraph = stateExecutionSection.split('\n\n').find((paragraph) => paragraph.startsWith('**Question gate.**')) ?? '';
 const engineSentences = engineSection.split(/(?<=[.!?])\s+/);
@@ -80,7 +80,7 @@ const handOffParagraph = engineSection.split('\n\n').find((paragraph) => paragra
 const stopParagraph = engineSection.split('\n\n').find((paragraph) => paragraph.startsWith('When the user asks to stop a launched run')) ?? '';
 
 function readDeliveryLaunchArgNames() {
-  const template = engineSection.match(/with args `(\{[^`]*\})`/);
+  const template = engineSection.match(/only these args: `(\{[^`]*\})`/);
   assert.ok(template, '## Engine has a launch args template');
   const templateNames = [...template[1].matchAll(/"([a-z_]+)":/g)].map((match) => match[1]);
   const deliverySentence = engineSentences.find((sentence) => sentence.startsWith(DELIVERY_ARGS_LEAD));
@@ -142,12 +142,12 @@ describe('overlord Engine section', () => {
     }
   });
   test('Engine limits launch and resume args and adds no runner instructions', () => {
-    for (const phrase of ['Launch args hold only `request`, `trunk` and `references`, plus `local_review` and `draft` when `<id>` is `standard-delivery`.', 'Resume args hold only the launch args, the keys of `resume_args` and `reply`.', 'Add no instruction, note or summary for the workflow\'s agents', 'They take their task only from the script.']) {
+    for (const phrase of ['launch it by name with the `Workflow` tool and only these args: `{', 'When `<id>` is `standard-delivery`, the launch args also hold `local_review` and `draft`.', 'Resume args hold only the launch args, the keys of `resume_args` and `reply`.', 'Add no instruction, note or summary for the workflow\'s agents to launch or resume args.', 'They take their task only from the script.']) {
       assert.ok(engineSection.includes(phrase), `## Engine args clause lacks ${phrase}`);
     }
   });
   test('Engine keeps the routing outcome out of chat', () => {
-    for (const phrase of ['Keep its routing outcome out of chat.', 'Act on it without printing it.']) {
+    for (const phrase of ['Act on its routing outcome without printing it.']) {
       assert.ok(engineSection.includes(phrase), `## Engine routing clause lacks ${phrase}`);
     }
   });
@@ -158,8 +158,8 @@ describe('overlord Engine section', () => {
     assert.ok(!engineSection.includes('decisions'));
   });
   test('Engine treats a cut notice as a defect that does not resume or read a file, and counts the run as failed', () => {
-    assert.notEqual(defectParagraph, '', '## Engine has a paragraph starting The result is built to fit the completion notice.');
-    for (const phrase of ['that is a defect', 'do not resume', 'read any file', 'The run counts as failed.']) {
+    assert.notEqual(defectParagraph, '', '## Engine has a paragraph starting A notice is cut only when its result is not one complete JSON object;');
+    for (const phrase of ['A cut notice is a defect', 'do not resume', 'read any file', 'The run counts as failed.']) {
       assert.ok(defectParagraph.includes(phrase), `defect paragraph lacks ${phrase}`);
     }
   });
@@ -198,7 +198,7 @@ describe('overlord standard-delivery launch args', () => {
   test('Engine names local_review and draft for standard-delivery', () => {
     assert.ok(launchArgNames.includes('local_review'), `launch args are ${JSON.stringify(launchArgNames)}`);
     assert.ok(launchArgNames.includes('draft'), `launch args are ${JSON.stringify(launchArgNames)}`);
-    for (const phrase of ['`local_review` is `false` when the Codex plugin is not available in this session or the request asks to skip local review, and `true` otherwise.', '`draft` is `true` only when the request asks for a draft pull request, and `false` otherwise.']) {
+    for (const phrase of ['`local_review` is `false` when the Codex plugin is unavailable in this session or the request skips local review, else `true`.', '`draft` is `true` only when the request asks for a draft pull request, else `false`.']) {
       assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
     }
   });
@@ -235,12 +235,19 @@ describe('overlord pull request hand-off and opt-in', () => {
       assert.ok(!handOffParagraph.includes(phrase), `pr hand-off paragraph restates the watch predicate: ${phrase}`);
     }
   });
+  test('the Reflex tail points to the watch predicate and does not restate it', () => {
+    const reflexSection = readSection(body, '## Reflex (Ledger-Skip)');
+    assert.ok(reflexSection.includes('under the canonical predicate stated once under `## Review Remediation Posture` (Default post-PR watch)'), '## Reflex (Ledger-Skip) lacks the watch predicate pointer');
+    for (const phrase of ['if and only if', '`not_requested`', '`watch_requested`']) {
+      assert.ok(!reflexSection.includes(phrase), `## Reflex (Ledger-Skip) restates the watch predicate: ${phrase}`);
+    }
+  });
   test('the never-enter rule covers only the launched request', () => {
-    assert.ok(engineSection.includes('Do not enter the workflow state machine for the launched request and do not create a run ledger for it.'));
+    assert.ok(engineSection.includes('Do not enter the workflow state machine or create a run ledger for the launched request.'));
     assert.ok(handOffParagraph.includes('covers only the launched request'));
   });
   test('Engine states the approval prompt opt-in, that a No interrupts the turn, and the permissions.deny opt-out', () => {
-    for (const phrase of ['The `Workflow` tool\'s approval prompt is the opt-in to a workflow, and no other opt-in exists.', 'A No at the approval prompt interrupts the turn: nothing runs and nothing falls back.', 'A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next']) {
+    for (const phrase of ['The `Workflow` tool\'s approval prompt is the only opt-in to a workflow.', 'A No there interrupts the turn: nothing runs and nothing falls back.', 'A `Workflow(hivemind:<id>)` entry in `permissions.deny` is the opt-out: it denies the launch, which falls back as stated next']) {
       assert.ok(engineSection.includes(phrase), `## Engine lacks ${phrase}`);
     }
   });
@@ -267,7 +274,7 @@ describe('overlord stop and resume of a stopped run', () => {
 
 describe('overlord relay and cut rules', () => {
   test('the relay paragraph HTML-unescapes message', () => {
-    assert.notEqual(relayParagraph, '', '## Engine has a paragraph starting Only the harness completion notice is the run\'s result.');
+    assert.notEqual(relayParagraph, '', '## Engine has a paragraph starting Only the harness completion notice is the run\'s result, never your own summary.');
     for (const phrase of ['HTML-escapes its result', 'JSON string value', '`&lt;`', '`&gt;`', '`&amp;`']) {
       assert.ok(relayParagraph.includes(phrase), `relay paragraph lacks ${phrase}`);
     }
