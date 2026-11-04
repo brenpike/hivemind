@@ -121,7 +121,7 @@ Three optional operator overrides are read from the `env` block of `.claude/sett
 | `HIVEMIND_SKIP_PR_WATCH` | Checked by presence (any non-empty value): the overlord never watches a PR after opening it, and does not read your request for a watch opt-out. Unset or empty means the default watch applies. | `docs/adr/0029-default-pr-watch-and-idle-window-lifecycle.md` |
 | `HIVEMIND_ENABLE_DECISION_REPORT` | Covers state-machine runs only: workflow-script runs keep no run ledger, so the report does not see them, and they show their decisions in the final message and the PR body instead. Opt-in, checked by presence (any non-empty value). When set, after a run's PR merges or closes the overlord shows you a report of the decisions it made on your behalf (`hivemind:decision-report`, chat only). The decision journal in the run ledger is written either way. When unset or empty, no report is rendered and no GitHub call is made, but runs that would have reported still get a zero-byte `.decision-report-done` marker, so enabling the key later only reports runs that finish after you enable it. | `docs/adr/0030-config-gated-post-merge-decision-report.md` |
 
-To keep a workflow on the state machine, add a `Workflow(hivemind:analysis-only)` or `Workflow(hivemind:standard-delivery)` entry to `permissions.deny` in `.claude/settings.json` or `.claude/settings.local.json`. The launch is then refused with no prompt, and the overlord says so in one line and runs the request on the state machine (see [Two engines](#two-engines)).
+To keep a workflow off its workflow script, add a `Workflow(hivemind:analysis-only)` or `Workflow(hivemind:standard-delivery)` entry to `permissions.deny` in `.claude/settings.json` or `.claude/settings.local.json`. The launch is then refused with no prompt, and the overlord says so in one line and falls back: an `analysis-only` request runs on the state machine, and a `standard-delivery` request on Instinct (see [Two engines](#two-engines)).
 
 ## Recommended companion plugins
 
@@ -196,7 +196,7 @@ Hivemind coordinates specialized bioforms to plan, build, review, and ship code,
 
 | Bioform | Role | What it does |
 |---|---|---|
-| :eye: **Overlord** | Orchestrator | The control plane and your main interface. Routes each request to a workflow, then launches its workflow script or runs the workflow state machine and its run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation; never writes code. |
+| :eye: **Overlord** | Orchestrator | The control plane and your main interface. Routes each request to a workflow, then launches its workflow script, runs a `standard-delivery` request on Instinct, or runs the workflow state machine and its run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation; never writes code. |
 | :brain: **Cerebrate** | Strategist | Researches the codebase and returns the **directive**: `STEP-NNN` steps with exact file scopes, dependencies, risks, and a delivery shape (single, multi, or brood). Has no shell: its tools are Read, Glob, Grep, LSP, the web tools, and the claude-mem search tools. Takes branch state only from the facts file. Never writes files. |
 | :hammer: **Drone** | Builder | Implements code, fixes bugs, refactors, and updates tests and release metadata within an explicitly assigned file scope. The default owner of every step. |
 | :performing_arts: **Changeling** | Shaper | Presentational UI/UX: markup, styling, layout, design tokens, visual states, presentational accessibility, within its assigned file scope. |
@@ -254,7 +254,7 @@ A `standard-delivery` script run, from request to PR:
 
 **Post-PR watch.** When the run opened or reused a PR, the overlord applies the default watch rule (see **Post-PR watch** below) and runs `pr-feedback-remediation` with intake `watch` on the state machine for that PR. That watch is a new run with its own run ledger.
 
-**State-machine fallback.** When the launch is refused, or the Workflow tool is absent, `standard-delivery` runs on its state machine, from request to watched PR. A planner's open questions, and a reviewer's question or high-severity rejection, go to the `question` gate: the overlord asks you, and your answer goes back to the state that asked, in the same run. The state machine does not rerun earlier gates after a later commit, so the run stops and asks you before it opens the PR:
+**State machine.** A `standard-delivery` run that started on the state machine resumes there and runs on it from request to watched PR. A refused `standard-delivery` launch, or one with no Workflow tool, runs on Instinct instead (ADR-0039). A planner's open questions, and a reviewer's question or high-severity rejection, go to the `question` gate: the overlord asks you, and your answer goes back to the state that asked, in the same run. The state machine does not rerun earlier gates after a later commit, so the run stops and asks you before it opens the PR:
 
 ```
 You --> Overlord --> route-workflow --> standard-delivery
@@ -303,7 +303,7 @@ Workflow definitions (JSON state machines) and the generated workflow scripts li
 | `hatchery-dispatch.json` | Brood plan, strain approval, spawn the brood, then monitor it | none |
 | `exploratory-intent-session.json` | Open-ended exploration with user checkpoints, ending in a report | none |
 
-A workflow with a script runs it when the launch goes ahead, and its JSON state machine otherwise (see [Two engines](#two-engines)). The scripts are built from `plugin/workflow-src/` by `tools/build_workflows.mjs`.
+A workflow with a script runs it when the launch goes ahead. Otherwise `standard-delivery` runs on Instinct, and `analysis-only` on its JSON state machine (see [Two engines](#two-engines)). The scripts are built from `plugin/workflow-src/` by `tools/build_workflows.mjs`.
 
 ### Brood Mode: Parallel Execution
 
@@ -401,7 +401,7 @@ README.md
 
 | Agent | Model | Role |
 |---|---|---|
-| `hivemind:overlord` | opus | Session default agent. Routes each request to a workflow, then launches its workflow script or runs the workflow state machine and run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation and never writes code. |
+| `hivemind:overlord` | opus | Session default agent. Routes each request to a workflow, then launches its workflow script, runs a `standard-delivery` request on Instinct, or runs the workflow state machine and run ledger. Owns branches, checkpoint commits, version-bump decisions, PRs, and review routing. Delegates all implementation and never writes code. |
 | `hivemind:cerebrate` | opus | Research and implementation planning: returns `STEP-NNN` steps with exact file scopes, dependencies, risks, and a delivery shape. No shell (Read, Glob, Grep, LSP, web tools, claude-mem search) and no file writes; branch state comes from the facts file. |
 | `hivemind:drone` | opus | Implementation within explicitly assigned file scope; the default owner of every step. |
 | `hivemind:changeling` | sonnet | Presentational UI/UX work within explicitly assigned file scope. |
