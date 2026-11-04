@@ -51,7 +51,7 @@ These stay as they were (D6): the path-choice rule (a `standard-delivery` reques
 
 - **One fewer reason to enter the state machine.** A `standard-delivery` request no longer reaches it on a refused launch or a failed run. The state machine keeps the workflows with no script launch and resumed runs.
 - **A refused `analysis-only` launch still runs on the state machine.** Instinct delivers a change through a pull request, which an analysis request does not ask for.
-- **A failed run's state comes from git, not from the run.** Instinct reads the branch's current git state. It does not read the failed run's stored result, so work the run did that left no commit is done again.
+- **A failed run's state comes from git, not from the run.** Instinct reads the branch's current git state. It does not read the failed run's stored result, so work the run did that left no commit is done again. Edits the run left uncommitted are not taken over: the working-branch script refuses a dirty tree before any change (ADR-0037 invariant 1), so Instinct stops there, as every path does, and never commits, stashes or discards an edit it did not make.
 - **Matching a step-list finding is judgment.** The reviewer decides whether a finding asks for a step list or shows a real missing obligation, as for any recorded decision (ADR-0038 decision 4).
 
 Links: https://github.com/brenpike/hivemind/issues/409, `docs/adr/0035-one-script-per-workflow-engine.md`, `docs/adr/0037-standard-delivery-on-script-engine.md`, `docs/adr/0038-root-cause-at-the-first-finding.md`.
