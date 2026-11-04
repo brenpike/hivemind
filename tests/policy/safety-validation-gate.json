@@ -8,7 +8,7 @@
   "consumers": [
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "Run validation per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure)"
+      "pattern": "at a `validate` state, run validation per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure)"
     },
     {
       "file": "plugin/skills/open-plan-pr/SKILL.md",
