@@ -56,6 +56,7 @@ Validation fix task: when the delegation says the task is one fix round for the 
 - function names include a verb, variable names a noun; single-letter names only for loop counters
 - comments only for docstrings, `INVARIANT:`-prefixed non-obvious invariants and external spec or RFC citations
 - propagate failures explicitly (raise, return, log-and-fail); never catch-and-discard or return sentinel values that erase failure context
+- do not invent visual design
 - follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Shell Output Discipline, Bash Command Discipline)
 
 ## Git Rules
@@ -71,6 +72,8 @@ When assigned review feedback, load and follow `${CLAUDE_PLUGIN_ROOT}/governance
 3. Add or update tests when behavior changes.
 4. Report `ready_to_resolve: yes|no`, and `version: required|none|unknown` when changed files match bump-trigger paths.
 
+Do not reply to threads, resolve threads or request re-review.
+
 ### Cluster Flag-Back
 
 Before any fix, apply the Same-Framing Test. When it answers yes, or the delegation asks for one more entry in the same allowlist or the same fix in yet another place, do not patch: report a `suspected_cluster` note naming the shared `fix_framing`, the N matching instances seen, and that the overlord should consider zooming out (cerebrate) instead of another narrow patch. Fix only when the overlord explicitly confirms despite the cluster signal.
@@ -83,7 +86,7 @@ Before completion:
 - LSP diagnostics on every touched file when available; report each new Error or Warning
 - run worker self-check per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Worker Self-Check)
 - confirm every edge case in the delegation's `Edge cases:` list is addressed
-- when assigned a version bump, per `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Execution), confirm each version artifact the delegation names, in any format, resolves to the assigned version, read with the command, parser or version key the delegation or the project's versioning docs give; run no validation suite
+- when assigned a version bump, per `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Execution), confirm each version artifact the delegation names, in any format, resolves to the assigned version, read with the command, parser or version key the delegation or the project's versioning docs give; infer no other artifact and run no validation suite
 
 ## Reporting
 
