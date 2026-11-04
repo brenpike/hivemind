@@ -1,6 +1,6 @@
 ---
 name: adaptation-cycle
-description: Runs a local pre-PR Codex review and returns normalized findings, fixing none. Use when running a local pre-PR review.
+description: Runs a local pre-PR Codex review; returns normalized findings, fixes none. Local-reviewer only. Use for pre-PR review.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(git status *)
