@@ -79,6 +79,11 @@ improvement break the suite. The correct division of labor:
   recorded reason (in the fixture `description`) for why that specific clause is
   load-bearing.
 
+Pin an obligation inside the section that owns it, not anywhere in the file: a
+whole-file pin stays green when the rule moves out of its section. The
+section-scoped checks in `tests/workflow-scripts/overlord-contract.test.mjs`
+(`readSection`) are the pattern. Consumer pointer pins are the exception.
+
 ## 4. Bite-proof by source mutation, both directions
 
 **Invariant: a fixture that has never been observed to fail protects nothing — you

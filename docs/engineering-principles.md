@@ -114,6 +114,7 @@ These rules hold for new and edited prose under `plugin/`.
 - Behavior comes first. Every obligation, condition, exception, ordering, cited heading, bold term and parsed literal keeps its meaning. A byte saving never justifies dropping or weakening a rule.
 - Write each rule in the fewest words that keep its meaning.
 - State each rule once, in its home, and cite it elsewhere.
+- A doc that needs a rule points to the section that owns it and never copies its text, because copies drift.
 - Use no ALL-CAPS emphasis.
 - Keep rationale, history and threat models out of rules. They go in an ADR, or in `docs/` when no ADR holds them.
 - Write no consumer lists and no "single source" or "not restated here" sentences.
@@ -123,6 +124,7 @@ These rules hold for new and edited prose under `plugin/`.
 - Pinned or test-read text is not frozen. Reword it, then re-pin the same rule to its key terms, not a whole sentence, with bite proof per the pin-authoring contract in `tests/policy/README.md`. Rewording and re-pinning is not weakening. Deleting a check or test, or narrowing what it checks, is.
 - Frozen text is only locked sections, text a script under `plugin/` or `tools/` parses at runtime (proven by grep), and cited heading names.
 - A review fix restores the lost meaning in the fewest words, and must not add more surface than it removes (`plugin/governance/remediation-doctrine.md` (Surface-Growth Escalation)).
+- A review-fix commit adds no net prose to a `plugin/` file: fix by cutting, or by a pointer to the rule's home.
 - Each covered file must fit its byte budget in `tests/policy/prose-byte-budget.json`, enforced by CHECK 18 of `tools/policy_check.sh`, which defines what is measured and what fails. Raising a budget needs a user-approved entry in `tests/policy/prose-budget-raises.json`; CHECK 18 compares each budget with the one at the merge-base and fails an unapproved raise.
 
 ## Sources
