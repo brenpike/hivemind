@@ -2570,7 +2570,7 @@ const ROW_TESTS = {
       assert.equal(lib.runnerToolSentence, undefined);
     });
     test('the runner read-only sentence is the read-only task trigger of drone.md and nothing more', () => {
-      const clause = readDroneClause('except for a read-only task: when the delegation says ', 'needs no branch or base.');
+      const clause = readDroneClause('Exception, a read-only task: when the delegation says ', 'needs no branch or base.');
       const condition = clause.match(/when the delegation says the task (.+?), it runs on /);
       assert.ok(condition, clause);
       assert.equal(lib.runnerReadOnlySentence(), 'This task is read-only: it ' + condition[1] + '.');
@@ -3038,7 +3038,7 @@ const ROW_TESTS = {
       assert.ok(!run.result.message.includes('landed after'), run.result.message);
     });
     test('the validation fix sentence is the validation fix task trigger of drone.md and nothing more', () => {
-      const clause = readDroneClause('A validation fix task takes its scope from the fix: when the delegation says ', 'created, edited or deleted.');
+      const clause = readDroneClause('Validation fix task: when the delegation says ', 'created, edited or deleted.');
       const condition = clause.match(/when the delegation says (.+?), its assigned scope is (.+?), and its report lists (.+?)\.$/);
       assert.ok(condition, clause);
       assert.equal(main.validationFixSentence(), 'This is a validation fix task: ' + condition[1] + '.');
@@ -7015,7 +7015,7 @@ const ROW_TESTS = {
         assert.ok(synapseText.includes(word), word);
       }
       assert.ok(synapseText.includes('Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` string.'));
-      assert.ok(synapseText.includes('Never replace anything in `inputs_file`: write its `content` to its `path` exactly as given'));
+      assert.ok(synapseText.includes('to its `path`, exactly as given: never replace anything in `inputs_file`'));
       assert.ok(!synapseText.includes('{token}'));
       assert.ok(!synapseText.includes('wherever they appear'));
       const run = await runWorkflow(LAUNCH, happyResults());

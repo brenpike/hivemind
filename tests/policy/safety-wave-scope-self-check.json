@@ -1,6 +1,6 @@
 {
   "rule": "Wave-scope self-check consumer coupling",
-  "description": "P3 consumer-assertion: plugin/governance/definitions.md (Unsafe Git State) defines the safe surface for a wave delegation as the assigned scope UNION the declared wave-sibling scopes passed on the delegation's wave_scopes field. plugin/agents/drone.md and plugin/agents/changeling.md are the named consumers whose git status --porcelain verification bullet applies that union. plugin/agents/overlord.md is the named consumer that emits the wave_scopes field in ## Delegation Format. Renaming or removing the convention in the definition or either consumer without updating the others is an unprotected coupling.",
+  "description": "P3 consumer-assertion: plugin/governance/definitions.md (Unsafe Git State) defines the safe surface for a wave delegation as the assigned scope UNION the declared wave-sibling scopes passed on the delegation's wave_scopes field. plugin/agents/drone.md and plugin/agents/changeling.md are the named consumers whose git status --porcelain verification bullet applies that union, with its no-field default, and forbids the worker to edit or git-mutate a declared wave-sibling file; each pin spans the union, the default and the prohibition, so dropping any of them fails. plugin/agents/overlord.md is the named consumer that emits the wave_scopes field in ## Delegation Format. Renaming or removing the convention in the definition or either consumer without updating the others is an unprotected coupling.",
   "source": {
     "file": "plugin/governance/definitions.md",
     "pattern": "declared wave-sibling scopes"
@@ -8,11 +8,11 @@
   "consumers": [
     {
       "file": "plugin/agents/drone.md",
-      "pattern": "declared wave-sibling scopes passed on the delegation's `wave_scopes` field"
+      "pattern": "outside the assigned scope plus the declared wave-sibling scopes (`wave_scopes`; absent, the assigned scope only) is blocked per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State). Declared wave-sibling files are expected-modified; never edit or git-mutate them."
     },
     {
       "file": "plugin/agents/changeling.md",
-      "pattern": "declared wave-sibling scopes passed on the delegation's `wave_scopes` field"
+      "pattern": "outside the assigned scope plus the declared wave-sibling scopes (`wave_scopes`; absent, the assigned scope only) is blocked per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Unsafe Git State). Declared wave-sibling files are expected-modified; never edit or git-mutate them."
     },
     {
       "file": "plugin/agents/overlord.md",
