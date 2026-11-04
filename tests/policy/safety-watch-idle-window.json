@@ -8,7 +8,7 @@
   "consumers": [
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "`max_remediation_cycles` is a FLOOR declared and enforced by `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, which REJECTS any `max_remediation_cycles` below it: no caller may invoke this loop with a lower value."
+      "pattern": "`max_remediation_cycles` is a floor declared and enforced by `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, which rejects any lower `max_remediation_cycles`: no caller may invoke this loop with a lower value."
     }
   ]
 }

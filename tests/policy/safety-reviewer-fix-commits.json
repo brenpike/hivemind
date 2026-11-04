@@ -60,15 +60,15 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "MUST SANCTION the reviewer's own fix-cycle checkpoint commits"
+      "pattern": "must sanction the reviewer's own fix-cycle checkpoint commits"
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "MUST NOT forbid the reviewer committing"
+      "pattern": "must not forbid the reviewer committing"
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "This prohibition is scoped to wave worker delegations"
+      "pattern": "This prohibition covers only wave worker delegations"
     },
     {
       "file": "plugin/agents/synapse.md",

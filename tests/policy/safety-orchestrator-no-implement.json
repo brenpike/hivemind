@@ -12,7 +12,7 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "grant is sanctioned SOLELY for authoring fixed-literal-prefix inputs files under the gitignored"
+      "pattern": "The `Write` grant is only for fixed-literal-prefix inputs files under the gitignored `.hivemind/` tree"
     }
   ]
 }
