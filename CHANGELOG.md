@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `overlord.md` names the Light Path: a permanent delivery path the overlord drives without a run ledger, beside the script engine. For a `standard-delivery` request that names neither, the overlord asks the user which path to take. The parallel-delegation safety rules move to a new `## Parallel Delegation Safety` section that the Light Path and the implement loop both cite.
+- `overlord.md` names the Light Path: a permanent delivery path the overlord drives without a run ledger, beside the script engine. For a `standard-delivery` request that names neither, the overlord asks the user which path to take. The parallel-delegation safety rules move to a new `## Parallel Delegation Safety` section that the Light Path and the implement loop both cite. The Light Path is intent-driven, not a step list, and opens its pull request only on a commit that validation and local review both passed on.
 
 ## [7.5.19] - 2026-11-03
 
