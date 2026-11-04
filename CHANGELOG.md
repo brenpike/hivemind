@@ -13,6 +13,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.5.19] - 2026-11-03
+
+### Changed
+
+- `drone.md`, `changeling.md` and `synapse.md` state each rule once, in fewer words. They keep the same rules, section names, frontmatter and report shapes; text the cited governance sections already hold is cut. Policy pins and three workflow-script tests moved with the text they guard.
+
 ## [7.5.18] - 2026-11-03
 
 ### Changed

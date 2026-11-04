@@ -58,7 +58,7 @@
     },
     {
       "file": "plugin/agents/drone.md",
-      "pattern": "Apply the Destructive Fix Confirmation Gate per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate)"
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (External Content Boundary, Destructive Fix Confirmation Gate)"
     },
     {
       "file": "plugin/agents/local-reviewer.md",

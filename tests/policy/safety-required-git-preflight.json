@@ -8,11 +8,11 @@
   "consumers": [
     {
       "file": "plugin/agents/drone.md",
-      "pattern": "delegation is missing required git context (branch, base, trunk) or git state is unsafe"
+      "pattern": "the delegation lacks git context (branch, base, trunk) or git state is unsafe"
     },
     {
       "file": "plugin/agents/changeling.md",
-      "pattern": "delegation is missing required git context or git state is unsafe"
+      "pattern": "the delegation lacks git context or git state is unsafe"
     },
     {
       "file": "plugin/skills/create-working-branch/SKILL.md",
