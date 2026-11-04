@@ -220,7 +220,7 @@ Launching a script:
 
 - In manual mode, the Workflow tool's approval prompt is the opt-in. A No at the prompt interrupts the turn: nothing runs and nothing falls back.
 - A `Workflow(hivemind:<id>)` entry in `permissions.deny` refuses the launch with no prompt, and the overlord says so in one line and falls back: a `standard-delivery` request runs on Instinct, and any other request on the state machine. A launch refused because the workflow is not found, or because workflows are turned off, falls back the same way.
-- A `standard-delivery` run that started and then failed or ended blocked continues on Instinct from the branch's current git state without asking you, and the final report says it switched and where the engine stopped. A stop that holds on every path still stops it, and Instinct never relaunches the engine. A run you stopped does not fall back. Any other run that started and then failed or ended blocked is reported as it ended and does not fall back.
+- A `standard-delivery` run that started and then failed or ended blocked continues on Instinct from the branch's current git state without asking you, and the final report says it switched and where the engine stopped. Uncommitted edits the failed run left stop it, as does a stop that holds on every path, and Instinct never relaunches the engine. A run you stopped does not fall back. Any other run that started and then failed or ended blocked is reported as it ended and does not fall back.
 - In auto mode, the classifier decides the launch and no approval prompt is shown.
 - Brood children launch the scripts like any session. They start in auto mode, so no approval prompt is shown, and a refused launch falls back as it does in any session.
 
