@@ -20,7 +20,7 @@ Then run `/hivemind:seed-hive` once in each project (see [Per-project setup](#pe
 - **bash** (macOS, Linux, or WSL on Windows)
 - **git** and **gh** (GitHub CLI)
 - **jq**: required by the run-ledger engines (`hivemind:init-run-ledger`, `hivemind:record-state-result`), by the facts and git scripts (`hivemind:gather-facts`, `hivemind:molt`, `hivemind:open-plan-pr`), and by `hivemind:seed-hive`
-- Claude Code CLI. When Claude Code's Workflow tool is available, analysis and delivery requests run as workflow scripts; otherwise they run on the workflow state machine (see [Two engines](#two-engines)).
+- Claude Code CLI. When Claude Code's Workflow tool is available, analysis requests run as a workflow script and delivery requests run as one or on Instinct; otherwise analysis requests run on the workflow state machine and delivery requests on Instinct (see [Two engines](#two-engines)).
 - **tmux**: only for brood execution (`hivemind:spawn-brood`, `hivemind:brood-status`)
 - **node**: only for the optional local Codex review (`codex` companion)
 
@@ -210,17 +210,19 @@ One more agent, the **Synapse**, runs the committed runner scripts for the workf
 
 ### Two engines
 
-`hivemind:route-workflow` selects the workflow first, for every request that is not a Reflex. One of two engines then runs it:
+`hivemind:route-workflow` selects the workflow first, for every request that is not a Reflex. One of two engines, or Instinct, then runs it:
 
 - **Workflow scripts.** `analysis-only` and `standard-delivery` launch as the `hivemind:analysis-only` and `hivemind:standard-delivery` Workflow scripts when Claude Code's Workflow tool is available. `analysis-only` has been a script since 6.0.0, and `standard-delivery` since 7.0.0.
-- **The workflow state machine.** Every other workflow (`pr-feedback-remediation`, `hatchery-dispatch`, `exploratory-intent-session`) runs on its JSON state machine, and so does a request whose launch is refused.
+- **The workflow state machine.** Every other workflow (`pr-feedback-remediation`, `hatchery-dispatch`, `exploratory-intent-session`) runs on its JSON state machine, and so does an `analysis-only` request whose launch is refused.
+- **Instinct.** A `standard-delivery` request can also run on Instinct, a delivery path the overlord drives by judgment, with no workflow script and no run ledger. It keeps the plan, the working branch and every delivery gate. When a delivery request names neither the engine nor Instinct, the overlord asks you which to use; a brood child, whose task carries a `working_branch.base` ref, takes the engine. Instinct is also the engine's fallback for `standard-delivery` (ADR-0039).
 
 Launching a script:
 
 - In manual mode, the Workflow tool's approval prompt is the opt-in. A No at the prompt interrupts the turn: nothing runs and nothing falls back.
-- A `Workflow(hivemind:<id>)` entry in `permissions.deny` falls back to the state machine: the launch is refused with no prompt, and the overlord says so in one line and runs the request on the state machine. A launch refused because the workflow is not found, or because workflows are turned off, falls back the same way. A run that started and then failed or ended blocked is reported as it ended and does not fall back.
+- A `Workflow(hivemind:<id>)` entry in `permissions.deny` refuses the launch with no prompt, and the overlord says so in one line and falls back: a `standard-delivery` request runs on Instinct, and any other request on the state machine. A launch refused because the workflow is not found, or because workflows are turned off, falls back the same way.
+- A `standard-delivery` run that started and then failed or ended blocked continues on Instinct from the branch's current git state without asking you, and the final report says it switched and where the engine stopped. A stop that holds on every path still stops it, and Instinct never relaunches the engine. A run you stopped does not fall back. Any other run that started and then failed or ended blocked is reported as it ended and does not fall back.
 - In auto mode, the classifier decides the launch and no approval prompt is shown.
-- Brood children launch the scripts like any session. They start in auto mode, so no approval prompt is shown, and a refused launch falls back to the state machine as it does in any session.
+- Brood children launch the scripts like any session. They start in auto mode, so no approval prompt is shown, and a refused launch falls back as it does in any session.
 
 How a script run behaves:
 

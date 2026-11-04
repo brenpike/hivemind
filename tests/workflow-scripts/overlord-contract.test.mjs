@@ -168,11 +168,9 @@ describe('overlord Engine section', () => {
   });
   test('Engine states the fallback clause', () => {
     for (const phrase of [
-      'If a `standard-delivery` launch is refused or blocked',
-      'say so in one line and run the request on Instinct.',
+      'If a `standard-delivery` launch is refused or blocked (denied, not found, or workflows turned off), say so in one line and run the request on Instinct.',
       'Any other refused or blocked launch runs on the workflow state machine.',
-      'continues on Instinct from the branch\'s current git state without asking the user',
-      'the final report says it switched and where the engine stopped',
+      'A `standard-delivery` run that started, then failed or ended blocked, continues on Instinct from the branch\'s current git state without asking the user, and the final report says it switched and where the engine stopped.',
       'Instinct never relaunches the engine.',
       'A run the user stopped does not fall back.',
       'Any other run that started, then failed or ended blocked, is reported as it ended and does not fall back.',

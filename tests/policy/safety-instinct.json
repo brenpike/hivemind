@@ -24,7 +24,7 @@
     },
     {
       "file": "plugin/agents/overlord.md",
-      "pattern": "run that started, then failed or ended blocked, continues on Instinct from the branch's current git state without asking the user"
+      "pattern": "A `standard-delivery` run that started, then failed or ended blocked, continues on Instinct from the branch's current git state without asking the user"
     },
     {
       "file": "plugin/agents/overlord.md",
