@@ -4221,8 +4221,24 @@ mark_time 'CHECK17'
 # key matching CHECK18_PATH_CLASS, each budget an integer from 0 to
 # CHECK18_BUDGET_MAX.
 # Anything else is one non-allowlistable finding and no budget is checked. A
-# covered path outside CHECK18_PATH_CLASS is a non-allowlistable finding. The
-# rule: docs/engineering-principles.md (P25 — Prose Authoring).
+# covered path outside CHECK18_PATH_CLASS is a non-allowlistable finding.
+# A budget raise needs a recorded user approval. The base is the merge-base of
+# HEAD with POLICY_CHECK_BASE when that is set, else with origin/main, else with
+# main. A budget higher than the same path's budget in the budget file at the
+# base is a non-allowlistable finding unless tests/policy/prose-budget-raises.json
+# holds an entry for that path whose `from` is the base budget and whose `to` is
+# at least the new budget. A path with no budget at the base (a new entry, or no
+# budget file at the base) needs no entry. Lowering a budget needs no entry.
+# When HEAD is the base (a push to main) the working-tree budget is compared
+# with HEAD's, so only an uncommitted raise can fire. No resolvable base, a base
+# budget file off the budget schema, and a raises file off the raises schema
+# are each one non-allowlistable finding, and no raise is checked. The raises
+# file schema: exactly one JSON object with no repeated key, holding exactly a
+# non-blank string `description` and an array `raises`; each raise exactly
+# `path` (matching CHECK18_PATH_CLASS), integer `from` and `to` from 0 to
+# CHECK18_BUDGET_MAX with `to` above `from`, `date` as YYYY-MM-DD, and non-blank
+# string `approved_by` and `reason`. The rule: docs/engineering-principles.md
+# (P25 — Prose Authoring).
 
 echo ''
 echo '=== CHECK 18: Prose files fit their byte budget ==='
@@ -4231,6 +4247,7 @@ CHECK18_BUDGET_REL='tests/policy/prose-byte-budget.json'
 CHECK18_SLACK_PERCENT=5
 CHECK18_PATH_CLASS='[A-Za-z0-9._/-]+'
 CHECK18_BUDGET_MAX=1000000000
+CHECK18_RAISES_REL='tests/policy/prose-budget-raises.json'
 # INVARIANT: jq --stream sees every key as written, so a repeated key is caught
 # before any object is built. The single top-level object closes in exactly
 # one length-1 event, the last; {} is the lone [[], {}] event.
@@ -4252,6 +4269,32 @@ CHECK18_BUDGET_JQ='[inputs] as $events
           then error("the budget for \($key) is not an integer from 0 to \($budget_max)") else . end
         | $key, "\u001f", ($budget | floor | tostring), "\u001f"
       end'
+# INVARIANT: rebuilding the stream from the one parsed document reproduces the
+# events as written only when no object repeats a key, since a parsed object
+# keeps one value per key.
+CHECK18_RAISES_JQ='[inputs] as $events
+    | [fromstream($events[])] as $docs
+    | if ($docs | length) != 1 or ([$docs[0] | tostream] != $events)
+      then error("the raises file is not one JSON document without a repeated key") else . end
+    | $docs[0]
+    | if type != "object" or (keys != ["description", "raises"])
+      then error("the raises file is not an object of exactly description and raises") else . end
+    | if (.description | type) != "string" or (.description | test("\\S") | not)
+      then error("the raises description is not a non-blank string") else . end
+    | if (.raises | type) != "array" then error("raises is not an array") else . end
+    | .raises[]
+    | if type != "object" or (keys != ["approved_by", "date", "from", "path", "reason", "to"])
+      then error("a raise is not an object of exactly path, from, to, approved_by, date and reason") else . end
+    | if (.path | type) != "string" or (.path | test("\\A" + $path_class + "\\z") | not)
+      then error("a raise path is not a string in the path class") else . end
+    | if any(.from, .to; type != "number" or . != floor or . < 0 or . > $budget_max)
+      then error("the from or to of \(.path) is not an integer from 0 to \($budget_max)") else . end
+    | if .to <= .from then error("the raise of \(.path) does not raise its budget") else . end
+    | if (.date | type) != "string" or (.date | test("\\A[0-9]{4}-[0-9]{2}-[0-9]{2}\\z") | not)
+      then error("the date of the raise of \(.path) is not YYYY-MM-DD") else . end
+    | if any(.approved_by, .reason; type != "string" or (test("\\S") | not))
+      then error("the approved_by or reason of the raise of \(.path) is not a non-blank string") else . end
+    | .path, "\u001f", (.from | floor | tostring), "\u001f", (.to | floor | tostring), "\u001f"'
 
 # check18_measure_bytes FILE
 # Prints FILE's size in bytes with every CR stripped. Returns non-zero when
@@ -4262,6 +4305,14 @@ check18_measure_bytes() {
     printf '%d\n' "$((byte_total))"
 }
 
+# check18_read_budget BUDGET_FILE
+# Prints one "path<US>budget<US>" record per entry of BUDGET_FILE. Returns
+# non-zero when BUDGET_FILE is unreadable or does not match the budget schema.
+check18_read_budget() {
+    jq -n -j --stream --arg path_class "$CHECK18_PATH_CLASS" \
+        --argjson budget_max "$CHECK18_BUDGET_MAX" "$CHECK18_BUDGET_JQ" "$1"
+}
+
 # check18_compare_budget BUDGET_FILE SIZES_TEXT
 # SIZES_TEXT holds one "path<TAB>bytes" line per covered file. Prints one
 # "path<TAB>description" line per violation of BUDGET_FILE. Returns non-zero
@@ -4269,8 +4320,7 @@ check18_measure_bytes() {
 check18_compare_budget() {
     local budget_records entry_path entry_budget size_path size_bytes
     local -A budget_by_path=()
-    budget_records="$(jq -n -j --stream --arg path_class "$CHECK18_PATH_CLASS" \
-        --argjson budget_max "$CHECK18_BUDGET_MAX" "$CHECK18_BUDGET_JQ" "$1")" || return
+    budget_records="$(check18_read_budget "$1")" || return
     while IFS= read -r -d $'\x1f' entry_path && IFS= read -r -d $'\x1f' entry_budget; do
         budget_by_path["$entry_path"]="$entry_budget"
     done <<< "$budget_records"
@@ -4283,7 +4333,7 @@ check18_compare_budget() {
         entry_budget="${budget_by_path[$size_path]}"
         unset 'budget_by_path[$size_path]'
         if (( size_bytes > entry_budget )); then
-            printf '%s\t%s\n' "$size_path" "is ${size_bytes} bytes, over its budget of ${entry_budget} -- cut it, or raise the budget and lower another by as much"
+            printf '%s\t%s\n' "$size_path" "is ${size_bytes} bytes, over its budget of ${entry_budget} -- cut it, or raise the budget, which needs a user-approved entry in ${CHECK18_RAISES_REL}"
         elif (( size_bytes * 100 < entry_budget * (100 - CHECK18_SLACK_PERCENT) )); then
             printf '%s\t%s\n' "$size_path" "is ${size_bytes} bytes, more than ${CHECK18_SLACK_PERCENT}% under its budget of ${entry_budget} -- lower the budget to ${size_bytes}"
         fi
@@ -4291,6 +4341,76 @@ check18_compare_budget() {
     for entry_path in "${!budget_by_path[@]}"; do
         printf '%s\t%s\n' "$entry_path" "has a budget of ${budget_by_path[$entry_path]} bytes but is not a covered file (missing, or not a .md file under plugin/) -- delete the entry"
     done
+}
+
+# check18_resolve_base EXPLICIT_REF
+# Prints the merge-base of HEAD with EXPLICIT_REF when it is non-empty, else
+# with the first of origin/main and main that has one. Returns non-zero when no
+# candidate resolves.
+check18_resolve_base() {
+    local base_candidate merge_base
+    local -a base_candidates=(origin/main main)
+    if [[ -n "$1" ]]; then
+        base_candidates=("$1")
+    fi
+    for base_candidate in "${base_candidates[@]}"; do
+        if git -C "$REPO_ROOT" rev-parse --verify --quiet "${base_candidate}^{commit}" > /dev/null 2>&1 \
+            && merge_base="$(git -C "$REPO_ROOT" merge-base "$base_candidate" HEAD 2> /dev/null)"; then
+            printf '%s\n' "$merge_base"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# check18_read_base_file BASE_COMMIT REL_PATH
+# Prints REL_PATH as committed at BASE_COMMIT, or an empty budget object when
+# BASE_COMMIT holds no such path, since then every budget is new. Returns
+# non-zero when git cannot read BASE_COMMIT.
+check18_read_base_file() {
+    local tree_entry
+    tree_entry="$(git -C "$REPO_ROOT" ls-tree "$1" -- "$2")" || return
+    if [[ -z "$tree_entry" ]]; then
+        printf '{}'
+        return 0
+    fi
+    git -C "$REPO_ROOT" show "$1:$2"
+}
+
+# check18_compare_raises BASE_BUDGET_FILE HEAD_BUDGET_FILE RAISES_FILE BASE_LABEL
+# Prints one "path<TAB>description" line per budget in HEAD_BUDGET_FILE above
+# the same path's budget in BASE_BUDGET_FILE with no RAISES_FILE entry whose
+# `from` is the base budget and whose `to` is at least the new budget. Returns 3
+# when BASE_BUDGET_FILE, 4 when HEAD_BUDGET_FILE and 5 when RAISES_FILE is
+# unreadable or off its schema.
+check18_compare_raises() {
+    local base_records head_records raise_records entry_path entry_budget
+    local base_budget raise_from raise_to approval_key approved_to
+    local -A base_by_path=() approved_to_by_key=()
+    base_records="$(check18_read_budget "$1")" || return 3
+    head_records="$(check18_read_budget "$2")" || return 4
+    raise_records="$(jq -n -j --stream --arg path_class "$CHECK18_PATH_CLASS" \
+        --argjson budget_max "$CHECK18_BUDGET_MAX" "$CHECK18_RAISES_JQ" "$3")" || return 5
+    while IFS= read -r -d $'\x1f' entry_path && IFS= read -r -d $'\x1f' entry_budget; do
+        base_by_path["$entry_path"]="$entry_budget"
+    done <<< "$base_records"
+    while IFS= read -r -d $'\x1f' entry_path && IFS= read -r -d $'\x1f' raise_from \
+        && IFS= read -r -d $'\x1f' raise_to; do
+        approval_key="${entry_path}"$'\t'"${raise_from}"
+        approved_to="${approved_to_by_key[$approval_key]:-0}"
+        if (( raise_to > approved_to )); then
+            approved_to_by_key["$approval_key"]="$raise_to"
+        fi
+    done <<< "$raise_records"
+    while IFS= read -r -d $'\x1f' entry_path && IFS= read -r -d $'\x1f' entry_budget; do
+        [[ -z "${base_by_path[$entry_path]+x}" ]] && continue
+        base_budget="${base_by_path[$entry_path]}"
+        (( entry_budget <= base_budget )) && continue
+        approval_key="${entry_path}"$'\t'"${base_budget}"
+        approved_to="${approved_to_by_key[$approval_key]:-0}"
+        (( approved_to >= entry_budget )) && continue
+        printf '%s\t%s\n' "$entry_path" "has a budget of ${entry_budget} bytes, raised from ${base_budget} at the merge-base ${4} with no recorded approval -- restore the budget, or ask the user and add their approval to ${CHECK18_RAISES_REL} with from ${base_budget} and to at least ${entry_budget}"
+    done <<< "$head_records"
 }
 
 check18_found=false
@@ -4326,6 +4446,54 @@ while IFS=$'\t' read -r budget_path budget_text; do
     check18_found=true
     add_finding 'CHECK18' "$budget_path" 0 "$budget_text"
 done <<< "$check18_hits"
+
+# check18_report_raises
+# Compares the budget file with the one at the merge-base and records each
+# unapproved raise, or one finding when the base or a file cannot be read.
+check18_report_raises() {
+    local base_commit base_budget raise_hits raise_rc=0 raise_path raise_text
+    if ! base_commit="$(check18_resolve_base "${POLICY_CHECK_BASE:-}")"; then
+        check18_found=true
+        add_finding 'CHECK18' "$CHECK18_BUDGET_REL" 0 \
+            "no merge-base of HEAD resolved (tried ${POLICY_CHECK_BASE:+POLICY_CHECK_BASE=}${POLICY_CHECK_BASE:-origin/main, main}), so no budget raise is checked -- fetch the base branch or set POLICY_CHECK_BASE" deny
+        return 0
+    fi
+    if ! base_budget="$(check18_read_base_file "$base_commit" "$CHECK18_BUDGET_REL")"; then
+        check18_found=true
+        add_finding 'CHECK18' "$CHECK18_BUDGET_REL" 0 \
+            "reading the budget at the merge-base ${base_commit:0:12} failed, so no budget raise is checked" deny
+        return 0
+    fi
+    raise_hits="$(check18_compare_raises <(printf '%s' "$base_budget") "$REPO_ROOT/$CHECK18_BUDGET_REL" \
+        "$REPO_ROOT/$CHECK18_RAISES_REL" "${base_commit:0:12}")" || raise_rc=$?
+    case "$raise_rc" in
+        0) ;;
+        3)
+            check18_found=true
+            add_finding 'CHECK18' "$CHECK18_BUDGET_REL" 0 \
+                "the budget at the merge-base ${base_commit:0:12} is off the budget schema, so no budget raise is checked" deny
+            ;;
+        5)
+            check18_found=true
+            add_finding 'CHECK18' "$CHECK18_RAISES_REL" 0 \
+                "reading the raises exited ${raise_rc}: the file is missing, unreadable, or off the raises schema in the CHECK 18 header, so no budget raise is checked" deny
+            ;;
+        *)
+            check18_found=true
+            add_finding 'CHECK18' "$CHECK18_BUDGET_REL" 0 \
+                "comparing budgets with the merge-base ${base_commit:0:12} exited ${raise_rc}, so no budget raise is checked" deny
+            ;;
+    esac
+    while IFS=$'\t' read -r raise_path raise_text; do
+        [[ -z "$raise_path" ]] && continue
+        check18_found=true
+        add_finding 'CHECK18' "$raise_path" 0 "$raise_text" deny
+    done <<< "$raise_hits"
+}
+
+if [[ "$check18_compare_rc" -eq 0 ]]; then
+    check18_report_raises
+fi
 
 # ── CHECK 18 DETECTION CANARY ──────────────────────────────────────────────
 # check18_compare_budget and check18_measure_bytes over fixed inputs, in BOTH
@@ -4392,6 +4560,79 @@ check18_expect_rejected 'an empty budget file' ''
 check18_expect_rejected 'malformed JSON' '{"x.md":100'
 if check18_compare_budget /dev/null/g-missing-budget.json $'x.md\t100' > /dev/null 2>&1; then
     check18_canary_finding 'a missing budget file was accepted, expected a non-zero status'
+fi
+
+# check18_expect_raise_flagged LABEL BASE_JSON HEAD_JSON RAISES_JSON EXPECTED_TEXT
+# Requires exactly one raise finding, for x.md, whose description holds EXPECTED_TEXT.
+check18_expect_raise_flagged() {
+    local canary_output canary_rc=0
+    canary_output="$(check18_compare_raises <(printf '%s' "$2") <(printf '%s' "$3") <(printf '%s' "$4") base)" || canary_rc=$?
+    if [[ "$canary_rc" -ne 0 || "$canary_output" != $'x.md\t'*"$5"* || "$canary_output" == *$'\n'* ]]; then
+        check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected exactly one x.md finding holding '$5'"
+    fi
+    return 0
+}
+
+# check18_expect_raise_clean LABEL BASE_JSON HEAD_JSON RAISES_JSON
+check18_expect_raise_clean() {
+    local canary_output canary_rc=0
+    canary_output="$(check18_compare_raises <(printf '%s' "$2") <(printf '%s' "$3") <(printf '%s' "$4") base)" || canary_rc=$?
+    if [[ "$canary_rc" -ne 0 || -n "$canary_output" ]]; then
+        check18_canary_finding "$1 produced status ${canary_rc} and [${canary_output//$'\n'/ | }], expected no finding"
+    fi
+    return 0
+}
+
+# check18_expect_raise_rejected LABEL STATUS BASE_JSON RAISES_JSON
+# Requires exactly STATUS from check18_compare_raises on BASE_JSON and
+# RAISES_JSON with a head budget of {"x.md":120}.
+check18_expect_raise_rejected() {
+    local canary_rc=0
+    check18_compare_raises <(printf '%s' "$3") <(printf '%s' '{"x.md":120}') <(printf '%s' "$4") base > /dev/null 2>&1 || canary_rc=$?
+    if [[ "$canary_rc" -ne "$2" ]]; then
+        check18_canary_finding "$1 produced status ${canary_rc}, expected status $2"
+    fi
+    return 0
+}
+
+check18_canary_raise() {
+    printf '{"description":"d","raises":[{"path":"x.md","from":%s,"to":%s,"approved_by":"%s","date":"%s","reason":"%s"}]}' "$@"
+}
+check18_canary_no_raises='{"description":"d","raises":[]}'
+check18_expect_raise_flagged 'a raise with no entry' '{"x.md":100}' '{"x.md":120}' "$check18_canary_no_raises" 'raised from 100 at the merge-base base'
+check18_expect_raise_flagged 'a raise past its entry' '{"x.md":100}' '{"x.md":120}' "$(check18_canary_raise 100 119 u 2026-11-03 r)" 'raised from 100'
+check18_expect_raise_flagged 'a raise whose entry has another from' '{"x.md":100}' '{"x.md":120}' "$(check18_canary_raise 90 120 u 2026-11-03 r)" 'raised from 100'
+check18_expect_raise_clean 'a raise with an entry to the new budget' '{"x.md":100}' '{"x.md":120}' "$(check18_canary_raise 100 120 u 2026-11-03 r)"
+check18_expect_raise_clean 'a raise with an entry above the new budget' '{"x.md":100}' '{"x.md":120}' "$(check18_canary_raise 100 200 u 2026-11-03 r)"
+check18_expect_raise_clean 'a lowered budget' '{"x.md":100}' '{"x.md":80}' "$check18_canary_no_raises"
+check18_expect_raise_clean 'an unchanged budget' '{"x.md":100}' '{"x.md":100}' "$check18_canary_no_raises"
+check18_expect_raise_clean 'a budget new since the base' '{}' '{"x.md":120}' "$check18_canary_no_raises"
+check18_expect_raise_rejected 'a base budget off the schema' 3 '{"x.md":"100"}' "$check18_canary_no_raises"
+check18_expect_raise_rejected 'a raise with a blank approved_by' 5 '{"x.md":100}' "$(check18_canary_raise 100 120 ' ' 2026-11-03 r)"
+check18_expect_raise_rejected 'a raise with a blank reason' 5 '{"x.md":100}' "$(check18_canary_raise 100 120 u 2026-11-03 '')"
+check18_expect_raise_rejected 'a raise with a date off YYYY-MM-DD' 5 '{"x.md":100}' "$(check18_canary_raise 100 120 u 2026-11-3 r)"
+check18_expect_raise_rejected 'a raise whose to is not above from' 5 '{"x.md":100}' "$(check18_canary_raise 100 100 u 2026-11-03 r)"
+check18_expect_raise_rejected 'a raise with a string to' 5 '{"x.md":100}' "$(check18_canary_raise 100 '"120"' u 2026-11-03 r)"
+check18_expect_raise_rejected 'a raise with a fractional to' 5 '{"x.md":100}' "$(check18_canary_raise 100 120.5 u 2026-11-03 r)"
+check18_expect_raise_rejected 'a raise with no approved_by' 5 '{"x.md":100}' '{"description":"d","raises":[{"path":"x.md","from":100,"to":120,"date":"2026-11-03","reason":"r"}]}'
+check18_expect_raise_rejected 'a raise with an extra key' 5 '{"x.md":100}' '{"description":"d","raises":[{"path":"x.md","from":100,"to":120,"approved_by":"u","date":"2026-11-03","reason":"r","x":1}]}'
+check18_expect_raise_rejected 'a raise repeating a key' 5 '{"x.md":100}' '{"description":"d","raises":[{"path":"x.md","from":100,"to":120,"to":200,"approved_by":"u","date":"2026-11-03","reason":"r"}]}'
+check18_expect_raise_rejected 'a raises file repeating raises' 5 '{"x.md":100}' '{"description":"d","raises":[],"raises":[]}'
+check18_expect_raise_rejected 'a raise path with a space' 5 '{"x.md":100}' '{"description":"d","raises":[{"path":"x .md","from":100,"to":120,"approved_by":"u","date":"2026-11-03","reason":"r"}]}'
+check18_expect_raise_rejected 'a raises file with no description' 5 '{"x.md":100}' '{"raises":[]}'
+check18_expect_raise_rejected 'a top-level raises array' 5 '{"x.md":100}' '[]'
+check18_expect_raise_rejected 'two raises documents' 5 '{"x.md":100}' "${check18_canary_no_raises} ${check18_canary_no_raises}"
+check18_expect_raise_rejected 'an empty raises file' 5 '{"x.md":100}' ''
+if check18_compare_raises <(printf '{}') <(printf '{}') /dev/null/g-missing-raises.json base > /dev/null 2>&1; then
+    check18_canary_finding 'a missing raises file was accepted, expected a non-zero status'
+fi
+if check18_resolve_base 'refs/g-missing-base' > /dev/null 2>&1; then
+    check18_canary_finding 'an unresolvable base resolved, expected a non-zero status'
+fi
+check18_canary_head="$(git -C "$REPO_ROOT" rev-parse HEAD 2> /dev/null)" || check18_canary_head='unreadable'
+check18_canary_base="$(check18_resolve_base HEAD 2> /dev/null)" || check18_canary_base='unresolved'
+if [[ "$check18_canary_base" != "$check18_canary_head" ]]; then
+    check18_canary_finding "the base HEAD resolved to ${check18_canary_base}, expected HEAD ${check18_canary_head}"
 fi
 if check18_measure_bytes /dev/null/g-missing-prose.md > /dev/null 2>&1; then
     check18_canary_finding 'measuring a missing file succeeded, expected a non-zero status'

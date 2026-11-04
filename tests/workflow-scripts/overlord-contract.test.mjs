@@ -168,12 +168,11 @@ describe('overlord Engine section', () => {
   });
   test('Engine states the fallback clause', () => {
     for (const phrase of [
-      'If a `standard-delivery` launch is refused or blocked (denied, not found, or workflows turned off), say so in one line and run the request on Instinct.',
-      'Any other refused or blocked launch runs on the workflow state machine.',
-      'A `standard-delivery` run that started, then failed or ended blocked, continues on Instinct from the branch\'s current git state without asking the user, and the final report says it switched and where the engine stopped.',
+      'If a `standard-delivery` launch is refused or blocked (denied, not found, or workflows turned off), or the started run fails or ends blocked, say so in one line and continue on Instinct from the branch\'s last commit without asking;',
+      'the final report says it switched and where the engine stopped.',
       'Instinct never relaunches the engine.',
       'A run the user stopped does not fall back.',
-      'Any other run that started, then failed or ended blocked, is reported as it ended and does not fall back.',
+      'Any other workflow runs a refused or blocked launch on the state machine and reports a started run as it ended.',
     ]) {
       assert.ok(engineSection.includes(phrase), `## Engine fallback clause lacks ${phrase}`);
     }

@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- `overlord.md` names Instinct: a permanent delivery path the overlord drives without a run ledger, beside the script engine. For a `standard-delivery` request that names neither, the overlord asks the user which path to take. A refused or blocked `standard-delivery` launch now runs on Instinct instead of the workflow state machine, and a started `standard-delivery` run that fails or ends blocked continues on Instinct from the branch's git state; Instinct never relaunches the engine (ADR-0039). The parallel-delegation safety rules move to a new `## Parallel Delegation Safety` section that Instinct and the implement loop both cite. Instinct is intent-driven, not a step list, and opens its pull request only on a commit that validation and local review both passed on.
+- `overlord.md` names Instinct: a permanent delivery path the overlord drives by judgment without a run ledger, beside the script engine; when a `standard-delivery` request names neither path, the overlord asks which to take. A refused or blocked `standard-delivery` launch now runs on Instinct instead of the workflow state machine, a started one that fails continues on Instinct, and Instinct never relaunches the engine (ADR-0039). The wave delegation rules move to a new `## Parallel Delegation Safety` section, and raising a prose byte budget is a Tier A question.
 
 ## [7.5.19] - 2026-11-03
 
