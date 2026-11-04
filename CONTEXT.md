@@ -89,6 +89,10 @@ An instinctive response that bypasses the cerebrate when all reflex conditions a
 _Alias_: trivial fast path (TFP)
 _Avoid_: quick path, shortcut
 
+**Instinct**:
+A permanent, named delivery path for a non-Reflex `standard-delivery` request, beside the script engine. The overlord drives it by judgment — no workflow script, no **Run Ledger**, no state-machine gating. Pairs with **Reflex**: Reflex is the trivial fast path, Instinct the full delivery done by intent. It states what every run must have — a plan before any edit (a **Directive** from the **Cerebrate**, or one the Overmind supplies), a **Working Branch**, every edit delegated with exact **Scope**, every commit via **Molt**, the PR only on a commit that **Validation** and local review both passed on, and the post-PR watch — and leaves order to judgment; not a step sequence. When a `standard-delivery` request names neither path, the overlord asks the Overmind: engine or Instinct (a brood child, whose task carries `working_branch.base`, takes the engine). A refused or blocked engine launch runs on Instinct; a started engine run that fails continues on Instinct from the branch's git state, automatically. Stops that hold on every path still stop it; it never relaunches the engine.
+_Avoid_: light path (the placeholder name), intent-driven fallback (the degraded mode of a ledgered run), manual mode
+
 **Session Facts**:
 Cached resolved values (trunk name, task-type, claude-mem status, active-step) that persist within a task to avoid redundant lookups.
 _Avoid_: state, config, environment
@@ -427,8 +431,10 @@ _Avoid_: degraded mode, manual mode, safe mode
 - `hivemind:plan-to-prd`, `hivemind:prd-to-issues`, and `hivemind:create-handoff` (planned skills — not yet implemented) are designed as decoupled leaf transforms — none invokes another (ADR-0013); their output is path-agnostic (ADR-0012)
 - A **Vertical Slice** becomes one GitHub issue and one **Strain** candidate; the **Cerebrate** re-derives file overlap at brood-time and remains the sole independence authority (issues never self-declare scope)
 
-- A **Workflow Router** selects exactly one **Workflow Definition** for a request, or routes to the **Exploratory Intent Session** when no concrete workflow matches; the **Overlord** then executes that definition's states, advancing only via the **Transition Engine** and recording progress in the **Run Ledger**
+- A **Workflow Router** selects exactly one **Workflow Definition** for a request, or routes to the **Exploratory Intent Session** when no concrete workflow matches; outside **Instinct**, the **Overlord** then executes that definition's states, advancing only via the **Transition Engine** and recording progress in the **Run Ledger**
 - A **Reflex** (trivial fast path) bypasses the **Workflow Router** and the **Run Ledger** entirely — the **Overlord** drives the short delivery tail by intent, just as it skips the **Cerebrate**
+- **Instinct** follows the **Workflow Router** (it is taken only for `standard-delivery`) but bypasses the **Run Ledger** and the **Transition Engine** — unlike a **Reflex**, it keeps the **Cerebrate** plan, the **Working Branch**, and every delivery gate
+- A refused or blocked script-engine launch runs on **Instinct**; a started engine run that fails continues on **Instinct** from the branch's git state. **Instinct** never relaunches the engine, and the stops that hold on every path still stop it
 - **Intent-Driven Fallback** is the floor beneath every **Workflow Definition**: when the deterministic substrate is invalidated, execution degrades to judgment rather than failing
 - **Run Ownership** (RUN-OWNERSHIP-01) is enforced by worktree isolation; a **Hatchery** reads child **Run Ledgers** read-only and never mutates them (consistent with ADR-0007)
 - The declarative **Workflow Definition** + **Run Ledger** are JSON (parsed by `jq`); all inter-agent/human-read contracts stay YAML — format follows consumer (ADR-0018)
@@ -459,3 +465,4 @@ _Avoid_: degraded mode, manual mode, safe mode
 - "essence" vs "spawn" — resolved: **Spawn** (delegation) flows downward (overlord to worker); **Essence** (handoff) flows upward/forward (worker report stored for future phases).
 - "scope" — resolved: always means file scope (the explicit file list in a spawn), never task scope or project scope.
 - "validation" vs "verification" — resolved and promoted to glossary terms: **Validation** means running declared project commands; **Verification** means the overlord's post-phase acceptance checks (scope compliance, report schema conformance, git state safety).
+- "light path" — placeholder name, resolved to **Instinct**.

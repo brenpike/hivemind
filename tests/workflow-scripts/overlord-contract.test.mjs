@@ -146,9 +146,9 @@ describe('overlord Engine section', () => {
   test('Engine no longer names the dropped decisions field', () => {
     assert.ok(!engineSection.includes('decisions'));
   });
-  test('Engine treats a cut notice as a defect that does not resume, fall back or read a file', () => {
+  test('Engine treats a cut notice as a defect that does not resume or read a file, and counts the run as failed', () => {
     assert.notEqual(defectParagraph, '', '## Engine has a paragraph starting The result is built to fit the completion notice.');
-    for (const phrase of ['that is a defect', 'do not resume', 'fall back', 'read any file']) {
+    for (const phrase of ['that is a defect', 'do not resume', 'read any file', 'The run counts as failed.']) {
       assert.ok(defectParagraph.includes(phrase), `defect paragraph lacks ${phrase}`);
     }
   });
@@ -167,9 +167,18 @@ describe('overlord Engine section', () => {
     }
   });
   test('Engine states the fallback clause', () => {
-    assert.ok(engineSection.includes('If the launch is refused or blocked'));
-    assert.ok(engineSection.includes('say so in one line and run the request on the workflow state machine'));
-    assert.ok(engineSection.includes('A run that started, then failed or ended blocked, is reported as it ended and does not fall back.'));
+    for (const phrase of [
+      'If a `standard-delivery` launch is refused or blocked',
+      'say so in one line and run the request on Instinct.',
+      'Any other refused or blocked launch runs on the workflow state machine.',
+      'continues on Instinct from the branch\'s current git state without asking the user',
+      'the final report says it switched and where the engine stopped',
+      'Instinct never relaunches the engine.',
+      'A run the user stopped does not fall back.',
+      'Any other run that started, then failed or ended blocked, is reported as it ended and does not fall back.',
+    ]) {
+      assert.ok(engineSection.includes(phrase), `## Engine fallback clause lacks ${phrase}`);
+    }
   });
 });
 
