@@ -1,6 +1,6 @@
 ---
 name: brood-status
-description: Renders a read-only hatchery dashboard showing each strain's tmux session state, branch existence, and PR status for all broods under the current checkout. Use when checking brood status or hatchery progress.
+description: Renders a read-only dashboard of each brood strain's tmux session, branch and PR state. Use when checking brood status.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/brood-status/scripts/brood-status-collect.sh")
 shell: bash

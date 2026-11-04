@@ -1,9 +1,6 @@
 ---
 name: prd-to-issues
-description: >-
-  Slices a committed PRD into vertically-sliced brood-ready GitHub issues anchored to the PRD
-  file. Use when decomposing a PRD into GitHub issues, creating vertical slices from a PRD, or
-  breaking a PRD into trackable work.
+description: Slices a committed PRD into vertical, brood-ready GitHub issues anchored to it. Use when breaking a PRD into issues.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(find *)

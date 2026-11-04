@@ -1,6 +1,6 @@
 ---
 name: create-working-branch
-description: Creates or confirms the compliant working branch for the current approved plan. Use when starting implementation on an approved plan and the working branch needs to be created or verified.
+description: Creates or confirms the compliant working branch for the approved plan. Use when starting implementation on it.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/create-working-branch/scripts/create-working-branch.sh" *)
   - Bash(printf *)
@@ -63,17 +63,10 @@ Validate `trunk` against the same gate; on failure, exit 1 with `blocker: trunk 
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own; its steps are tool calls only.
-  The trunk-freshness warning is the script's `warning:` stdout line.
-- The procedure ends at the requirement 3 Bash tool call, which hands the routing data back
-  to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = orchestrator proceeds. Routing data (`branch`, `commit`, `created`, and any `warning`) is in stdout.
-- Exit 1 = blocked. Emit reason: `printf 'blocker: <reason>' >&2; exit 1`
-- Never include a `status:` field in any output.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The
+trunk-freshness warning is the script's `warning:` stdout line, not chat text. The procedure
+ends at the requirement 3 Bash call. Emit a blocker as
+`printf 'blocker: <reason>' >&2; exit 1`. Never include a `status:` field in any output.
 
 ## Do Not
 

@@ -1,6 +1,6 @@
 ---
 name: open-plan-pr
-description: Opens a pull request for a successfully completed approved plan after final verification. Use when validation and versioning gates have passed and the plan is ready for PR.
+description: Opens the PR for a completed approved plan after final verification. Use once validation and versioning gates pass.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh" *)
   - Bash(git status *)
@@ -89,16 +89,9 @@ Validate `expect_commit` as a commit SHA against the identifier gate in `${CLAUD
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The procedure ends at the step 6 Bash tool call, which hands the routing data back to the
-  caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = orchestrator proceeds. Routing data (if any) is in stdout.
-- Exit 1 = blocked. Emit reason: `printf 'blocker: <reason>' >&2; exit 1`
-- Never include a `status:` field in any output.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The procedure
+ends at the step 6 Bash call. Emit a blocker as `printf 'blocker: <reason>' >&2; exit 1`. Never
+include a `status:` field in any output.
 
 ## Do Not
 
@@ -112,7 +105,5 @@ as a workflow state or as one step inside a longer procedure:
 - push, open a PR, or read a PR with your own commands; only the script does
 - paste the title, the body, or the comment into a Bash command
 - use the Write tool for anything other than the `.hivemind/pr-inputs-<token>.json` inputs file
-- author the inputs file through any transport other than the Write tool: no heredoc, no shell
-  redirection, no inline script. A Write that does not succeed is a hard stop, not a workaround;
-  see `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`
-  (Transport Degradation Is a Hard Stop).
+- author the inputs file by any transport other than the Write tool; see
+  `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).

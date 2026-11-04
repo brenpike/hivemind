@@ -1,9 +1,6 @@
 ---
 name: creep-spread
-description: >-
-  Generates or enriches CONTEXT.md (or CONTEXT-MAP.md and per-context files for multi-context repos)
-  with domain terms extracted from project artifacts. Use when seeding a new hive, building a
-  domain glossary, or updating CONTEXT.md.
+description: Generates or enriches CONTEXT.md (or CONTEXT-MAP.md) with domain terms from project artifacts. Use to build a glossary.
 allowed-tools:
   - Read
   - Write

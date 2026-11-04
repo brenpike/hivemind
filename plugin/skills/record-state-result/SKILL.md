@@ -1,6 +1,6 @@
 ---
 name: record-state-result
-description: Records a workflow state outcome into the run ledger, validates the transition against the workflow definition, and advances state.current to the legal next state. Use when advancing a run after a state completes.
+description: Records a state outcome in the run ledger, validates the transition and advances state.current. Use after a state ends.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/record-state-result/scripts/record-state-result.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
@@ -71,9 +71,8 @@ engine-maintained, with no inputs-file field to set it.
 ## Inputs JSON
 
 The script owns deterministic read -> validate -> mutate -> atomic-write; the navigator
-authors a single JSON inputs file and passes its path as the one positional argument. Every
-value crosses the transport as data only — never interpolated into shell source or the jq
-program source. The script FIRST checks the whole inputs file against its contract (one JSON
+authors a single JSON inputs file and passes its path as the one positional argument. The
+script FIRST checks the whole inputs file against its contract (one JSON
 object; the field rules below), on the intact JSON values, before it reads any field or opens
 the ledger. Shape:
 
@@ -192,30 +191,12 @@ validation failure the on-disk ledger is byte-unchanged.
    `outputs`, `plan_steps`, `plan_path`) is structured JSON data, never spliced into command
    source.
 
-2. **Write the inputs file** via the Write tool to a PER-INVOCATION-UNIQUE gitignored path
-   `.hivemind/runs/.record-inputs-<token>.json`. GENERATE an invocation-unique `<token>` for the
-   filename (a UTC timestamp plus a random component, such as `20260601T014132Z-a1b2c3`) so two
-   concurrent same-checkout overlord sessions (distinct runs) author DISTINCT inputs files and
-   cannot clobber each other's payload between the Write and the script exec; safe sequential
-   re-records of the same run are also protected (closes the singleton-inputs TRANSPORT TOCTOU;
-   see ADR-0019). Note: the token makes the TRANSPORT FILE invocation-unique — it does NOT make
-   concurrent mutation of ONE run's ledger safe. A run ledger is owned and mutated by exactly one
-   overlord instance (RUN-OWNERSHIP-01, worktree isolation); concurrent same-run ledger mutation
-   is outside the design envelope. Serializing same-run ledger writes (a per-run lock) is deferred, not implemented here. `file_path` =
-   `.hivemind/runs/.record-inputs-<token>.json`, `content` = the JSON object from step 1. The
-   leading-dot `.record-inputs-*` name is a SIBLING of the run dirs (`runs/<run-id>/`), not one of
-   them, so it stays OUT of the `runs/<run-id>/` glob — it never collides with `state.json` or the
-   engine's atomic temp `.state.json.XXXXXX` inside a run dir (distinct names, different dir level),
-   and never pollutes the run-dir scan. The path carries NO `run_id` (no caller-derived component
-   below the fixed-literal `.hivemind/runs/` level), so a committed symlinked run-dir leaf cannot
-   redirect the Write outside the checkout. `.hivemind/` is gitignored. Do NOT pass the inputs via
-   stdin/heredoc: a heredoc reintroduces the very delimiter-injection class the inert Write-tool-file
-   pattern exists to avoid (ADR-0017). Cleanup is not required: this is transient gitignored state and
-   `.hivemind/` is ephemeral. Write performs no shell parsing of the values, and the engine
-   keeps `summary` / `plan_path` text out of shell variables and out of shell and jq program
-   source (it reads them from the inputs file as data, so each is stored exactly), and
-   `outputs` / `plan_steps` enter the write as data only.
-   If the Write tool is ABSENT from this session, STOP BLOCKED per
+2. **Write the inputs file** with the Write tool, per
+   `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern):
+   `file_path` = `.hivemind/runs/.record-inputs-<token>.json`, where `<token>` is new for each
+   invocation (a UTC timestamp plus a random part, such as `20260601T014132Z-a1b2c3`);
+   `content` = the JSON object from step 1. No cleanup is needed.
+   If the Write call does not succeed, stop blocked per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 
 3. **Execute the script** with one Bash call, passing the inputs file path:
@@ -245,19 +226,10 @@ validation failure the on-disk ledger is byte-unchanged.
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The Write tool (step 2) is a permitted NON-FINAL tool call — it emits no chat text and
-  authors ONLY the inputs file (`.hivemind/runs/.record-inputs-<token>.json`). The final
-  action is the Bash script call (step 3), which performs every atomic ledger write.
-- The procedure ends at the step 3 Bash script call, which hands the routing data back
-  to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = caller advances to `current_state`, which the `state_definition` line defines;
-  routing data is on stdout.
-  Exit 1 = blocked; the reason is on stderr and the ledger is unchanged.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The step 2 Write
+is the inputs-file Write; the procedure ends at the step 3 Bash call, which performs every
+atomic ledger write. Exit 0: the caller advances to `current_state`, which the
+`state_definition` line defines. Exit 1: the ledger is unchanged.
 
 ## Do Not
 
@@ -270,9 +242,7 @@ as a workflow state or as one step inside a longer procedure:
   NOT hand-mutation.
 - use the Write tool for anything other than the `.hivemind/runs/.record-inputs-<token>.json`
   inputs file.
-- author the inputs file via any transport other than the Write tool — no heredoc, no shell
-  redirection, no inline python/node script. A missing Write tool is a hard stop, not a
-  workaround; see `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`
-  (Transport Degradation Is a Hard Stop).
+- author the inputs file by any transport other than the Write tool; see
+  `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 - commit, push, or open a PR.
 - Read or reconstruct the script body — invoke it with the documented inputs file path.

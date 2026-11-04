@@ -1,6 +1,6 @@
 ---
 name: github-review-loop
-description: Watches an open PR and remediates review feedback in a loop until a terminal condition. Executed by the overlord only — loop must run in the main session where Monitor survives subagent dispatches. Use when watching a PR for the GitHub review loop.
+description: Watches an open PR and remediates review feedback to a terminal state. Overlord in main session only. Use to watch a PR.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Monitor

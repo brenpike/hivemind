@@ -1,6 +1,6 @@
 ---
 name: adaptation-cycle
-description: Runs a local pre-PR Codex review via codex-plugin-cc, normalizes findings, and returns them to the caller. Review-only — does not fix findings. Invoked by local-reviewer agent only. Use when running a local pre-PR review.
+description: Runs a local pre-PR Codex review; returns normalized findings, fixes none. Local-reviewer only. Use for pre-PR review.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(git status *)
@@ -100,15 +100,9 @@ For parsing rules and the normalized findings schema, read `${CLAUDE_PLUGIN_ROOT
 
 ## Silence Discipline
 
-This is a pipeline skill, invoked mid-procedure by its caller. The rules below govern this
-skill's own procedure, not the calling agent's turn:
-
-- This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The procedure ends at the step 10 Bash tool call, which hands the routing data back to the
-  caller; the caller then resumes its own procedure at the step that invoked this skill.
-- Exit 0 = orchestrator proceeds. Routing data (if any) is in stdout.
-- Exit 1 = blocked. Emit reason: `printf 'blocker: <reason>' >&2; exit 1`
-- Never include a `status:` field in any output.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The procedure
+ends at the step 10 Bash call. Emit a blocker as `printf 'blocker: <reason>' >&2; exit 1`.
+Never include a `status:` field in any output.
 
 ## Do Not
 

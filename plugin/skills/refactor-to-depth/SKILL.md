@@ -1,8 +1,6 @@
 ---
 name: refactor-to-depth
-description: >-
-  Deepens a module via behavior-preserving structural refactor. Use when deepening a module,
-  extracting behind a port/adapter, or executing a ranked refactoring-blueprint candidate.
+description: Deepens a module via a behavior-preserving structural refactor. Use when deepening a module or extracting behind a port.
 allowed-tools:
   - Read
   - Write
@@ -20,6 +18,7 @@ allowed-tools:
   - Bash(mix test *)
   - Bash(bundle exec rspec *)
 shell: bash
+disable-model-invocation: true
 ---
 
 # Refactor to Depth (Refactor-Under-Green)

@@ -1,9 +1,6 @@
 ---
 name: detect-remediation-signals
-description: >-
-  Detects break-fix, root-cluster, diminishing-returns, and stop-and-merge signals from a
-  fix-ledger. Use when a reviewer needs one verdict on accumulated findings before the next
-  patch (whack-a-mole / plateau / merge-advise check).
+description: Detects break-fix, root-cluster, diminishing-returns and stop-and-merge signals in a fix-ledger. Use before a next fix.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash

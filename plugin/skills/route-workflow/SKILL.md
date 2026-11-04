@@ -1,6 +1,6 @@
 ---
 name: route-workflow
-description: Classifies a non-Reflex request and selects the handling workflow as the sole workflow classifier, emitting selected, ambiguous, exploratory, or blocked. Use when routing or classifying a request to a workflow.
+description: Selects the workflow for a non-Reflex request as the sole workflow classifier. Use when routing a request.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)   # pre-approves this plugin's file Reads and searches for the agents launched in the same turn
 shell: bash
@@ -125,13 +125,11 @@ next: "Ask the user to clarify the desired outcome."
 
 ## Silence Discipline
 
-This is a reasoning-driven skill with no committed script. The rule below governs this
-skill's own procedure, not the calling agent's turn — the skill returns control to whatever invoked it, whether that
-caller runs it as a workflow state or as one step inside a longer procedure:
-
-- The procedure ends by emitting exactly one of the routing YAML shapes above. That
-  emission hands the routing decision back to the caller as this skill's return value — it
-  is NOT the caller's terminal output and does NOT end the caller's turn; the caller then continues from the point at which it invoked this skill.
+This skill has no script. Its procedure ends by emitting exactly one of the routing YAML shapes
+above: that emission is this skill's return value to the caller, not the caller's terminal
+output, and does not end the caller's turn. The skill returns control to whatever invoked it,
+whether the caller runs it as a workflow state or as one step inside a longer procedure; the
+caller then continues from the point at which it invoked this skill.
 
 ## Constraints
 

@@ -1,6 +1,6 @@
 ---
 name: spawn-brood
-description: Dispatches parallel overlord sessions as a brood, spawning N Claude Code instances in separate git worktrees via tmux and writing the brood manifest. Use when spawning a brood or running parallel strains.
+description: Spawns a brood of parallel overlord sessions in git worktrees via tmux and writes its manifest. Use to run strains.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/spawn-brood/scripts/spawn-brood.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
@@ -177,19 +177,14 @@ The caller resolves and passes these; the skill does not resolve them.
      in-set collision and a blocker.
    - Every value is data. None is interpolated into generated shell command source.
 
-2. **Write the inputs file** via the Write tool to a per-invocation mktemp-unique
-   staging path under `.hivemind/` (e.g. `.hivemind/spawn-inputs.<rand>.json`).
-   Use the Write tool's `file_path` parameter for that unique path; set `content`
-   to the JSON object from step 1. Write performs no shell parsing of the values.
-   `spawn-brood.sh` reads the inputs file once into memory and reads each field
-   from that copy with `jq` into a shell variable, so no field is interpolated
-   into shell or jq program source. That is a transport
-   property only: the description is carried on into the child's prompt as
-   `task.description`, and the controls that bound that text are the compensating
-   controls in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Brood Spawn
-   Bypass-Mode Mitigation), not this write. Do NOT use a fixed singleton path —
-   concurrent spawns must not clobber each other's staging file.
-   If the Write tool is ABSENT from this session, STOP BLOCKED per
+2. **Write the inputs file** with the Write tool, per
+   `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern):
+   `file_path` = a per-invocation mktemp-unique staging path under `.hivemind/` (e.g.
+   `.hivemind/spawn-inputs.<rand>.json`), never a fixed singleton path; `content` = the JSON
+   object from step 1. The strain description reaches the child's prompt as
+   `task.description`; the controls in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`
+   (Brood Spawn Bypass-Mode Mitigation) bound that text, not this Write.
+   If the Write call does not succeed, stop blocked per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 
 3. **Execute the script** with one Bash call, passing the staging path as `$1`:
@@ -227,18 +222,11 @@ rejected and the script exits with a blocker.
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The Write tool (step 2) is a permitted NON-FINAL tool call — it emits no chat text.
-- The procedure ends at the step 3 Bash script call, which hands the routing data back
-  to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = caller proceeds (all strains running, or all non-running strains are
-  `starting`); routing data (`brood_id:`, `manifest:`, and `attach:` lines for
-  running AND starting strains) is on stdout. Exit 1 = blocked; the reason is
-  on stderr (pre-flight blocker or at least one genuinely `failed` strain).
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The step 2 Write
+is the inputs-file Write; the procedure ends at the step 3 Bash call. Exit 0: all strains are
+running, or every non-running strain is `starting`; the routing data is the `brood_id:` and
+`manifest:` lines and the `attach:` lines for running and starting strains. Exit 1: a
+pre-flight blocker or at least one genuinely `failed` strain.
 
 ## Do Not
 
@@ -250,8 +238,6 @@ as a workflow state or as one step inside a longer procedure:
   the script exits 1 with a blocker if any are missing.
 - supply `brood_id` or per-strain `branch` in the inputs — the script generates
   the brood-id and creates no strain branch; caller-supplied values are ignored.
-- author the inputs file via any transport other than the Write tool — no heredoc, no shell
-  redirection, no inline python/node script. A missing Write tool is a hard stop, not a
-  workaround; see `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`
-  (Transport Degradation Is a Hard Stop).
+- author the inputs file by any transport other than the Write tool; see
+  `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 - Read or reconstruct the script body — invoke it with the documented argument.

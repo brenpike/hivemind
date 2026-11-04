@@ -1,6 +1,6 @@
 ---
 name: bump-type
-description: Derives the dominant Bump Type Determination row and bump verdict for the working-branch commits since the base, emitting a routing decision the caller acts on. Use when deciding whether a version bump is required and which bump type applies.
+description: Derives the bump verdict and dominant Bump Type Determination row for commits since the base. Use when deciding a bump.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/bump-type/scripts/bump-type.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
@@ -111,16 +111,8 @@ The caller resolves and passes these; the skill does not invent them.
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The only action is the Bash script call (step 1); the engine performs no writes.
-- The procedure ends at the step 1 Bash script call, which hands the routing data back
-  to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = caller routes on the returned `verdict`; routing data is on stdout.
-  Exit 1 = blocked; the reason is on stderr and nothing was mutated.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The only action
+is the step 1 Bash call, where the procedure ends.
 
 ## Do Not
 

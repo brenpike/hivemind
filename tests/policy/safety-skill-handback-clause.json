@@ -1,11 +1,72 @@
 {
   "rule": "Skill handback clause carried by every handback-bearing skill body",
+  "description": "P3 consumer-assertion: `## Silence Discipline` in plugin/governance/definitions.md is the canonical statement that a pipeline skill returns control to whatever invoked it, after which the caller continues from the point at which it invoked the skill, and that its procedure produces zero chat text of its own. The source pin holds the heading, which every pointer cites by name. The three canonical consumer pins hold the handback clause (both halves: control returns to the invoker, and the caller continues from its invoking point) and the no-chat-text rule in that file. Each pipeline skill that follows the section is pinned on its pointer to it by name, not on the rule text. The skills that state the handback clause in their own body (route-workflow, whose procedure ends by emitting routing YAML, and the skills with no Silence Discipline section) are pinned on both halves of the clause. A pin proves only that the words exist in the named file; it cannot see a new skill that omits the pointer, or a rewrite that keeps the words and changes the meaning.",
   "source": {
-    "file": "plugin/skills/molt/SKILL.md",
-    "pattern": "returns control to whatever invoked it"
+    "file": "plugin/governance/definitions.md",
+    "pattern": "## Silence Discipline"
   },
   "consumers": [
     {
+      "file": "plugin/governance/definitions.md",
+      "pattern": "returns control to whatever invoked it"
+    },
+    {
+      "file": "plugin/governance/definitions.md",
+      "pattern": "the caller then continues from the point at which it invoked the skill"
+    },
+    {
+      "file": "plugin/governance/definitions.md",
+      "pattern": "The procedure produces zero chat text of its own"
+    },
+    {
+      "file": "plugin/skills/adaptation-cycle/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/bump-type/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/create-working-branch/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/gather-facts/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/init-run-ledger/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/mark-intent-fallback/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/molt/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/next-wave/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/open-plan-pr/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/push-branch/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/record-state-result/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
+      "file": "plugin/skills/spawn-brood/SKILL.md",
+      "pattern": "`${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline)"
+    },
+    {
       "file": "plugin/skills/brood-status/SKILL.md",
       "pattern": "returns control to whatever invoked it"
     },
@@ -14,35 +75,7 @@
       "pattern": "returns control to whatever invoked it"
     },
     {
-      "file": "plugin/skills/create-working-branch/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
-      "file": "plugin/skills/gather-facts/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
       "file": "plugin/skills/github-review-loop/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
-      "file": "plugin/skills/init-run-ledger/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
-      "file": "plugin/skills/mark-intent-fallback/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
-      "file": "plugin/skills/molt/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
-      "file": "plugin/skills/next-wave/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
-      "file": "plugin/skills/open-plan-pr/SKILL.md",
       "pattern": "returns control to whatever invoked it"
     },
     {
@@ -54,19 +87,7 @@
       "pattern": "returns control to whatever invoked it"
     },
     {
-      "file": "plugin/skills/push-branch/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
-      "file": "plugin/skills/record-state-result/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
       "file": "plugin/skills/route-workflow/SKILL.md",
-      "pattern": "returns control to whatever invoked it"
-    },
-    {
-      "file": "plugin/skills/spawn-brood/SKILL.md",
       "pattern": "returns control to whatever invoked it"
     },
     {
@@ -78,35 +99,7 @@
       "pattern": "the caller then continues from the point at which it invoked this skill"
     },
     {
-      "file": "plugin/skills/create-working-branch/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/gather-facts/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
       "file": "plugin/skills/github-review-loop/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/init-run-ledger/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/mark-intent-fallback/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/molt/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/next-wave/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/open-plan-pr/SKILL.md",
       "pattern": "the caller then continues from the point at which it invoked this skill"
     },
     {
@@ -118,19 +111,7 @@
       "pattern": "the caller then continues from the point at which it invoked this skill"
     },
     {
-      "file": "plugin/skills/push-branch/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/record-state-result/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
       "file": "plugin/skills/route-workflow/SKILL.md",
-      "pattern": "the caller then continues from the point at which it invoked this skill"
-    },
-    {
-      "file": "plugin/skills/spawn-brood/SKILL.md",
       "pattern": "the caller then continues from the point at which it invoked this skill"
     }
   ]

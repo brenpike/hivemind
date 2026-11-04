@@ -1,9 +1,6 @@
 ---
 name: decision-report
-description: >-
-  Renders a chronological narrative of the auto-decisions a completed run made on the user's
-  behalf, in the consumer project's domain language, and RETURNS it as chat text. Use after a
-  run's PR merges or closes when the run journaled at least one auto-decision.
+description: Narrates, as chat text, the auto-decisions a finished run journaled. Use after the run's PR merges or closes.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(git rev-parse *)
