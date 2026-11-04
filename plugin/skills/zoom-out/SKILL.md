@@ -1,6 +1,6 @@
 ---
 name: zoom-out
-description: Provides broader architectural context and a higher-level perspective on a section of code. Use when unfamiliar with a code area or needing to see how it fits into the bigger picture.
+description: Gives broader architectural context on a section of code. Use when unfamiliar with a code area or how it fits the whole.
 allowed-tools: []
 shell: bash
 disable-model-invocation: true

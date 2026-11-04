@@ -1,9 +1,6 @@
 ---
 name: improving-architecture
-description: >-
-  Analyzes a codebase read-only and emits a ranked deepening/refactoring blueprint for
-  testability and AI-navigability, editing nothing. Use when improving architecture, finding
-  refactor opportunities, or making code more testable or AI-navigable.
+description: Analyzes a codebase read-only and ranks deepening and refactoring candidates. Use when improving architecture.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
   - Bash(git log *)

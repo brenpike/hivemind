@@ -1,9 +1,6 @@
 ---
 name: plan-interrogation
-description: >-
-  Interviews the user about their plan one question at a time, challenging it against the
-  project's domain model and updating CONTEXT.md and ADRs as decisions crystallise. Use when
-  stress-testing, red-teaming, interrogating, or hardening a plan.
+description: Interviews the user one question at a time to stress-test a plan, updating CONTEXT.md and ADRs. Use to harden a plan.
 allowed-tools:
   - Read
   - Write

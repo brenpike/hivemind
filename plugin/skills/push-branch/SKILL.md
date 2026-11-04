@@ -1,6 +1,6 @@
 ---
 name: push-branch
-description: Pushes the current working branch to its remote without creating a PR. Use when resuming a review loop by pushing remediation commits to the remote.
+description: Pushes the current working branch to its remote without opening a PR. Use when pushing review-remediation commits.
 allowed-tools:
   - Bash(git status *)
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-branch.sh" *)
@@ -53,16 +53,9 @@ Every push runs through `${CLAUDE_PLUGIN_ROOT}/skills/push-branch/scripts/push-b
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The procedure ends at the requirement 2 Bash tool call, which hands the routing data back
-  to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = orchestrator proceeds. Routing data (`branch` + `commit`) is in stdout.
-- Exit 1 = blocked. Emit reason: `printf 'blocker: <reason>' >&2; exit 1`
-- Never include a `status:` field in any output.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The procedure
+ends at the requirement 2 Bash call. Emit a blocker as
+`printf 'blocker: <reason>' >&2; exit 1`. Never include a `status:` field in any output.
 
 ## Do Not
 

@@ -1,6 +1,6 @@
 ---
 name: gather-facts
-description: Gathers the facts a planner needs about the current branch, with no shell of its own, into one facts file - trunk freshness after a fetch, dirty paths, the whole history against trunk, the branch's pull requests, and the text of named issues or pull requests. Use when branch facts are needed before planning or replanning delivery.
+description: Gathers branch facts (trunk freshness, dirty paths, history, PRs, named issues) into a facts file. Use before planning.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/gather-facts/scripts/gather-facts.sh" *)
   - Bash(printf *)
@@ -73,16 +73,9 @@ skill reads none of it and does not judge it.
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn - the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own - its steps are tool calls only.
-- The procedure ends at the requirement 1 Bash tool call, which hands the routing data back
-  to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = the caller proceeds. Routing data is in stdout.
-- Exit 1 = blocked. Emit reason: `printf 'blocker: <reason>' >&2; exit 1`
-- Never include a `status:` field in any output.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The procedure
+ends at the requirement 1 Bash call. Emit a blocker as
+`printf 'blocker: <reason>' >&2; exit 1`. Never include a `status:` field in any output.
 
 ## Do Not
 

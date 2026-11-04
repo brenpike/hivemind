@@ -1,6 +1,6 @@
 ---
 name: seed-hive
-description: Applies required .claude/settings.json keys to make the overlord the session default agent and gitignores .hivemind/ and .claude/worktrees/. Use when adopting the plugin in a new project or repairing plugin setup.
+description: Sets the overlord as default agent in .claude/settings.json and gitignores hivemind state. Use to adopt or repair setup.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/seed-hive/scripts/seed-hive.sh" *)
   - Bash(git rev-parse *)   # navigator resolves the project root (git rev-parse --show-toplevel) before calling detect/apply — Procedure step 1
@@ -8,6 +8,7 @@ allowed-tools:
   - Edit(.hivemind/seed-inputs-*.json)
   - Skill   # hivemind:creep-spread orchestration step — a skill cannot be invoked from bash (P5)
 shell: bash
+disable-model-invocation: true
 ---
 
 # Setup Project
@@ -163,13 +164,9 @@ authorizes an agent overwrite, never clobbering a malformed file.
 
 ## Inputs JSON (apply)
 
-Once every tri-state is resolved, author ONE inputs file (via the Write tool) at the
-PER-INVOCATION-UNIQUE gitignored path `.hivemind/seed-inputs-<token>.json` carrying the
-RESOLVED values and the detection facts, and pass that path to the `apply` phase. Every value
-crosses the transport as data only — the engine reads each field with `jq` into a shell
-variable and never interpolates it into shell or jq program source. What the engine does with
-a field after that read is the field's own contract. Shape (authoritative: the entrypoint
-header):
+Once every tri-state is resolved, author ONE inputs file (step 4) carrying the RESOLVED
+values and the detection facts, and pass its path to the `apply` phase. Shape (authoritative:
+the entrypoint header):
 
 ```json
 {
@@ -207,16 +204,12 @@ detection) is reported `not-checked`.
 3. **Resolve confirmation (judgment).** Apply Interactive Confirmation to resolve `caveman`,
    `claude_mem`, and `codex` to final `yes`/`no` (interactive prompt, headless fallback, or
    explicit-input verbatim).
-4. **Author the inputs file** via the Write tool at `.hivemind/seed-inputs-<token>.json`, with
-   the resolved values and detection facts matching the Inputs JSON shape above. GENERATE an
-   invocation-unique `<token>` for the filename (a UTC timestamp plus a random component, such
-   as `20260601T014132Z-a1b2c3`) so two concurrent same-checkout sessions author DISTINCT inputs
-   files and cannot clobber each other's payload between the Write and the script exec.
-   `.hivemind/` is gitignored. Write performs no shell parsing, and the engine reads each
-   field with `jq` into a shell variable, so no value is interpolated into shell or jq program
-   source. The skill's own `Edit(.hivemind/seed-inputs-*.json)` allowed-tools entry
-   pre-approves this Write while the skill runs.
-   If the Write tool is ABSENT from this session, STOP BLOCKED per
+4. **Author the inputs file** with the Write tool, per
+   `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern), at
+   `.hivemind/seed-inputs-<token>.json`, where `<token>` is new for each invocation (a UTC
+   timestamp plus a random part, such as `20260601T014132Z-a1b2c3`), with the resolved values
+   and detection facts matching the Inputs JSON shape above.
+   If the Write call does not succeed, stop blocked per
    `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 5. **Apply.** Run the `apply` phase once:
    ```bash
@@ -281,10 +274,8 @@ detection) is reported `not-checked`.
   object in Conflict Resolution above.
 - overwrite a conflicting `agent` value without EXPLICIT user approval — the engine reports
   blocked, and the navigator may proceed only after the user approves.
-- author the inputs file via any transport other than the Write tool — no heredoc, no shell
-  redirection, no inline python/node script. A missing Write tool is a hard stop, not a
-  workaround; see `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`
-  (Transport Degradation Is a Hard Stop).
+- author the inputs file by any transport other than the Write tool; see
+  `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 - proceed if the project root cannot be resolved.
 - commit, push, or otherwise touch git state.
 - Read or reconstruct the engine body — invoke it with the documented phase + argument.

@@ -1,6 +1,6 @@
 ---
 name: molt
-description: Creates a checkpoint commit for the current approved plan. Use when completing a phase, milestone, version bump, or review-remediation item.
+description: Creates a checkpoint commit for the current approved plan. Use when completing a phase, milestone, bump or review fix.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh" *)
   - Bash(git status *)
@@ -92,16 +92,9 @@ Every commit runs through `${CLAUDE_PLUGIN_ROOT}/skills/molt/scripts/molt.sh`. T
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The procedure ends at the requirement 5 Bash tool call, which hands the routing data back
-  to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = orchestrator proceeds. Routing data (if any) is in stdout.
-- Exit 1 = blocked. Emit reason: `printf 'blocker: <reason>' >&2; exit 1`
-- Never include a `status:` field in any output.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The procedure
+ends at the requirement 5 Bash call. Emit a blocker as
+`printf 'blocker: <reason>' >&2; exit 1`. Never include a `status:` field in any output.
 
 ## Do Not
 
@@ -113,7 +106,5 @@ as a workflow state or as one step inside a longer procedure:
 - stage or commit with your own git commands; only the script stages and commits
 - paste the message or a path into a Bash command
 - use the Write tool for anything other than the `.hivemind/molt-inputs-<token>.json` inputs file
-- author the inputs file through any transport other than the Write tool: no heredoc, no shell
-  redirection, no inline script. A Write that does not succeed is a hard stop, not a workaround;
-  see `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md`
-  (Transport Degradation Is a Hard Stop).
+- author the inputs file by any transport other than the Write tool; see
+  `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).

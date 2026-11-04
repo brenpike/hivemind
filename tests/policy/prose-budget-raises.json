@@ -8,6 +8,14 @@
       "approved_by": "user",
       "date": "2026-11-04",
       "reason": "Codifies the Instinct delivery path, its standard-delivery engine fallback, and the Tier A stop that sends budget raises to the user (PR #517, ADR-0039)."
+    },
+    {
+      "path": "plugin/governance/definitions.md",
+      "from": 6362,
+      "to": 7084,
+      "approved_by": "user",
+      "date": "2026-11-04",
+      "reason": "E1: new shared Silence Discipline section replaces the copy in 12 skill files; net prose change across files -15,910 bytes"
     }
   ]
 }

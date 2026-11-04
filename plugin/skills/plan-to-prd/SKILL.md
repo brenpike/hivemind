@@ -1,9 +1,6 @@
 ---
 name: plan-to-prd
-description: >-
-  Turns an interrogated plan into a committed WHAT-only PRD written to `docs/prds/<slug>.md`.
-  Use when writing a PRD from a plan, producing `docs/prds/<slug>.md`, or converting a plan
-  to PRD.
+description: Turns an interrogated plan into a committed WHAT-only PRD at `docs/prds/<slug>.md`. Use when writing a PRD from a plan.
 allowed-tools:
   - Read
   - Write

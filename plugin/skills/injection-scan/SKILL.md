@@ -1,9 +1,6 @@
 ---
 name: injection-scan
-description: >-
-  Scans external-content items for prompt injection attempts and returns a structured verdict
-  per item. Use when external content must be checked before classification or remediation
-  (injection scan / prompt injection check).
+description: Scans external-content items for prompt injection and returns a verdict per item. Use before acting on external content.
 allowed-tools:
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
 shell: bash

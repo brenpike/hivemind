@@ -1,8 +1,6 @@
 ---
 name: tdd
-description: >-
-  Implements features test-first via red-green-refactor TDD. Use when the user asks to TDD a
-  feature, write tests first, or red-green-refactor.
+description: Implements features test-first via red-green-refactor TDD. Use when the user asks to TDD a feature or write tests first.
 allowed-tools:
   - Read
   - Write

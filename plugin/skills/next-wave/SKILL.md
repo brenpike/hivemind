@@ -1,6 +1,6 @@
 ---
 name: next-wave
-description: Computes the ready wave of independent plan steps for the intra-run parallel-wave implement loop, reading the run ledger and emitting the step ids to dispatch this iteration. Use when computing the next wave or ready-set of plan steps.
+description: Computes the ready wave of independent plan steps from the run ledger. Use when choosing the next steps to dispatch.
 allowed-tools:
   - Bash(bash "${CLAUDE_PLUGIN_ROOT}/skills/next-wave/scripts/next-wave.sh" *)
   - Read(~/.claude/plugins/cache/brenpike/hivemind/**)
@@ -86,16 +86,8 @@ done set covers every step.
 
 ## Silence Discipline
 
-This is a pipeline skill. The rules below govern this skill's own procedure, not the calling
-agent's turn — the skill returns control to whatever invoked it, whether that caller runs it
-as a workflow state or as one step inside a longer procedure:
-
-- This skill's procedure produces zero chat text of its own — its steps are tool calls only.
-- The only action is the Bash script call (step 1); the engine performs no writes.
-- The procedure ends at the step 1 Bash script call, which hands the routing data back
-  to the caller; the caller then continues from the point at which it invoked this skill.
-- Exit 0 = caller dispatches the returned `wave`; routing data is on stdout.
-  Exit 1 = blocked; the reason is on stderr and nothing was mutated.
+Follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Silence Discipline). The only action
+is the step 1 Bash call, where the procedure ends.
 
 ## Do Not
 
