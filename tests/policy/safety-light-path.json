@@ -1,0 +1,34 @@
+{
+  "rule": "Light Path is permanent, asked for, and wave delegations stay safe",
+  "description": "P3 coupling inside plugin/agents/overlord.md. The source pin carries the Light Path's standing claim: it is permanent and never a fallback, so rewording it into a degraded or temporary path is loud. Three consumer pins carry the path-choice rule for a standard-delivery request that names neither path, one per clause: the discriminating condition (names neither the engine nor the Light Path), the exemption (a request carrying a working_branch.base ref takes the engine without asking, which keeps an unattended overlord from stalling on a question), and the obligation (otherwise ask the user which to use). Three consumer pins carry the Parallel Delegation Safety section: its heading together with its opening sentence, so a heading rename is loud even though the section is also cited by name elsewhere in the file, and the two must-forbid rules (git writes, repo-global mutations), each pinned on its subject and its obligation. Honest residual: pins claim word sequences only, never meaning. A rewrite elsewhere in the file that contradicts a pinned clause stays green, a citation of the section from another file is not checked, and the Engine sentence and the Tier A bullet that cite the Light Path rule are not pinned.",
+  "source": {
+    "file": "plugin/agents/overlord.md",
+    "pattern": "permanent delivery path beside the script engine, never a fallback"
+  },
+  "consumers": [
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "selects `standard-delivery` and the request names neither the engine nor the Light Path"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "take the engine if the request carries a `working_branch.base` ref"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "otherwise ask the user which to use"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "## Parallel Delegation Safety\n\nThese rules hold for every wave of parallel delegations"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Each wave delegation must forbid git writes"
+    },
+    {
+      "file": "plugin/agents/overlord.md",
+      "pattern": "Each wave delegation must forbid repo-global mutations"
+    }
+  ]
+}
