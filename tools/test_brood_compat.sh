@@ -403,21 +403,34 @@ EARLY_EXIT_PIPELINE_ALLOWLIST=()
 # early_exit_pipeline_lines <file>: print `<line>: <command>` for each command line in <file> with a
 # pipeline stage that can stop reading early (head; grep -q, -m, --quiet, --silent or --max-count;
 # awk whose program holds exit; sed whose script holds q), unless EARLY_EXIT_PIPELINE_ALLOWLIST
-# lists it. Comment lines are skipped; a line ending in `\` or `|` is joined to the next.
+# lists it. A stage may start with `command` or `env` (with dash options) and NAME=value
+# assignments, and `|&` counts as a pipe. Comment lines are skipped; a line ending in `\` or `|`
+# is joined to the next, the `\` dropped.
+# It is a regex scan, not a shell parser. It misses a reader behind any other wrapper (a function,
+# xargs, timeout, stdbuf, `env -u NAME`), other early-exit readers (read, perl, python, a script)
+# and a pipe split across lines without a trailing `|` or `\`. It flags a quoted literal holding
+# such a pipe; reword that literal rather than allowlist it. The ERR trap above is the backstop:
+# a missed reader that kills its writer still prints a FAIL line.
 early_exit_pipeline_lines() {
     local suite_file="$1" sq="'" line_text command_text="" command_start=0 line_no=0
     local reader_pattern allowed_text trimmed_text continued_pattern='(\\|[|])[[:space:]]*$'
+    local backslash_pattern='^(.*)\\[[:space:]]*$'
+    local stage_start='(^|[^|])[|]&?[[:space:]]*((command|env)([[:space:]]+-[^[:space:]]*)*[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*'
     local -a reader_patterns=(
-        '(^|[^|])[|][[:space:]]*head([[:space:]]|[)]|$)'
-        '(^|[^|])[|][[:space:]]*grep[^|]*[[:space:]](-[a-zA-Z]*[qm]|--(quiet|silent|max-count))'
-        "(^|[^|])[|][[:space:]]*awk[[:space:]][^$sq]*$sq[^$sq]*exit"
-        "(^|[^|])[|][[:space:]]*sed[[:space:]][^|]*[0-9;{}/\$$sq[:space:]][qQ][0-9]*([;}$sq[:space:]]|\$)"
+        "${stage_start}head([[:space:]]|[)]|\$)"
+        "${stage_start}grep[^|]*[[:space:]](-[a-zA-Z]*[qm]|--(quiet|silent|max-count))"
+        "${stage_start}awk[[:space:]][^$sq]*$sq[^$sq]*exit"
+        "${stage_start}sed[[:space:]][^|]*[0-9;{}/\$$sq[:space:]][qQ][0-9]*([;}$sq[:space:]]|\$)"
     )
     while IFS= read -r line_text || [[ -n "$line_text" ]]; do
         line_no=$((line_no + 1))
         if [[ -z "$command_text" ]]; then
             [[ "$line_text" =~ ^[[:space:]]*# ]] && continue
             command_start="$line_no"
+        fi
+        if [[ "$line_text" =~ $backslash_pattern ]]; then
+            command_text+="${BASH_REMATCH[1]} "
+            continue
         fi
         command_text+="$line_text"
         [[ "$line_text" =~ $continued_pattern ]] && continue
