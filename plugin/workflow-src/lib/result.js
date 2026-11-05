@@ -32,6 +32,8 @@
  *                 points, maxExcerptLength() when absent.
  *   describeNoResult(result)  result any value, what one agent() returned.
  *   describeUnusableResult(problem, result)  problem a string.
+ *   readBlockerAction(blocker, nextAction)  blocker any value, a step's
+ *                 blocker; nextAction the step's own next_action.
  *   isTransientFailure(text)  text any value, a runner's stderr or blocker.
  *   nextStepLine(nextAction)  a next action: 'fix_cause', 'run_again',
  *                 'answer', 'approve', 'report' or absent. An agent sets
@@ -84,7 +86,12 @@
  *                 failure does. Otherwise the empty string.
  *   describeUnusableResult  {problem: problem + ' ' + describeNoResult(null),
  *                 nextAction: 'run_again', agentFailure: true} for a null
- *                 result, else {problem}. agentFailure is set only here.
+ *                 result, else {problem, nextAction: 'report'}: a result
+ *                 the run cannot use is its own step's failure, so nothing
+ *                 in the repo needs a fix. agentFailure is set only here.
+ *   readBlockerAction  'report' when quoteDiagnostic(blocker) is undefined,
+ *                 since a lead that names no reason has no cause to clear,
+ *                 else nextAction.
  *   isTransientFailure  true only when text is a string that names, by one
  *                 fixed case-insensitive pattern, a root cause the Transient
  *                 Failure definition of definitions.md lists, else false.
@@ -174,7 +181,8 @@
  *   error, so describeNoResult names that failure and never the step's
  *   output, which does not exist (issue 460). describeUnusableResult alone
  *   gives it that sentence, run_again and the agentFailure mark, so a caller
- *   can end the run on it (issue 457). finish builds every blocked message
+ *   can end the run on it (issue 457), and gives any other unusable result
+ *   report (issues 481, 498). finish builds every blocked message
  *   from its causes, so no caller sets its lead or Next line (49be981e).
  *
  * Why
@@ -320,9 +328,13 @@ function describeNoResult(result) {
 
 function describeUnusableResult(problem, result) {
   if (result !== null) {
-    return { problem: problem };
+    return { problem: problem, nextAction: 'report' };
   }
   return { problem: problem + ' ' + describeNoResult(result), nextAction: 'run_again', agentFailure: true };
+}
+
+function readBlockerAction(blocker, nextAction) {
+  return quoteDiagnostic(blocker) === undefined ? 'report' : nextAction;
 }
 
 function isTransientFailure(text) {

@@ -124,7 +124,9 @@
  *   One rule covers every step: a null result from any agent() call, an
  *   agent failure, is a cause through describeUnusableResult
  *   (lib/result.js), with the describeNoResult sentence once and next
- *   action run_again, and a non-null unusable result keeps the fix line.
+ *   action run_again, and a non-null unusable result gets report, as does
+ *   a cause whose lead names no reason, a runner command stop and a
+ *   synapse-gate denial (issues 481, 498).
  *   run_again gives a line saying nothing in the repo needs a fix and to
  *   run the request again later; fix_cause or no value gives the fix line,
  *   to clear the cause named above, then run the request again. Code alone

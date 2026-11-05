@@ -91,7 +91,19 @@
  *   The relay is read through describeUnusableResult (lib/result.js): a
  *   null result, an agent failure, adds the agent-failure sentence and
  *   next action run_again, and stopDelivery ends the run on it; any other
- *   unusable result keeps the fix line and pauses.
+ *   unusable result, malformed routing lines among them, gets report and
+ *   pauses. The text size and attribution stops are report too.
+ *   A stop names what the run saw of the push: a blocked relay whose
+ *   stderr holds a synapse-gate denial (isGateDenial, relay.js) or an
+ *   inputs refusal of the open-plan-pr script (isInputsRefusal), each made
+ *   before any push, says this step pushed nothing and is report; any
+ *   other stop says the run did not see whether it pushed, and that taking
+ *   the step again pushes the same commit and reuses a pull request open
+ *   on it, since the script pushes --expect-commit and reuses the open
+ *   pull request on the pushed commit. Any other blocked relay takes
+ *   readRelayAction. isInputsRefusal matches a blocker line of each inputs
+ *   file refusal and each validate_program reason of the script, none of
+ *   which comes after the push, and a parity test pins it to the script.
  *
  * Why
  *   The pull request is the one push of the run, so its texts and the
@@ -309,17 +321,28 @@ function buildPullRequestPrompt(plan, head, inputsPath, texts, draft, pluginRoot
   ].join('\n');
 }
 
+function isInputsRefusal(stderr) {
+  return /^blocker: (?:(?:inputs?|title|body|draft|comment) |cannot read the inputs file$)/m.test(stderr);
+}
+
+function describePullRequestBlocker(stderr, unseenPush) {
+  const isUnpushed = isGateDenial(stderr) || isInputsRefusal(stderr);
+  const lead = 'The pull request step was blocked, so ' + RUN_NAME + (isUnpushed ? ' stopped. This step pushed nothing.' : unseenPush);
+  return { problem: lead + ' ' + describeRelayBlocker(stderr, true), nextAction: readRelayAction(stderr, isUnpushed) };
+}
+
 function checkPullRequestRelay(relay, head) {
-  const stopped = 'so ' + RUN_NAME + ' stopped. The branch may be on its remote, and a pull request may be open for it.';
+  const unseenPush = ' stopped and did not see whether this step pushed. Taking it again pushes the same commit and reuses a pull request open on it.';
+  const stopped = 'so ' + RUN_NAME + unseenPush;
   if (!validateSchema(RELAY_SCHEMA, relay).ok) {
     return describeUnusableResult('The pull request step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: 'The pull request step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
+    return describePullRequestBlocker(relay.stderr, unseenPush);
   }
   const values = readRelayedLines(relay, openPlanPrRoutingSpec());
   if (values === undefined || values.commented === values.created) {
-    return { problem: 'The pull request step returned malformed routing lines, ' + stopped };
+    return describeUnusableResult('The pull request step returned malformed routing lines, ' + stopped, relay);
   }
   if (values.head_ref_oid !== head) {
     return { problem: 'The pull request step reported a head commit other than the commit every gate held on, ' + stopped, terminal: true };
@@ -334,7 +357,7 @@ function describePullRequestLabel(run, count) {
 async function runPullRequestStep(run, plan, gates) {
   const texts = buildPullRequestTexts(run, plan, gates);
   if (texts.problem !== undefined) {
-    return stopDelivery([{ problem: texts.problem, terminal: true }], run, [], false);
+    return stopDelivery([{ problem: texts.problem, terminal: true, nextAction: 'report' }], run, [], false);
   }
   phase('PR');
   const label = describePullRequestLabel(run, gates.runs.pr);

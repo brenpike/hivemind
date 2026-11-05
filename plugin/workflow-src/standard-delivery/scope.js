@@ -40,7 +40,7 @@
  *   fails SCOPE_SCHEMA stops the run before planning, through
  *   describeUnusableResult (lib/result.js): a null result, an agent
  *   failure, adds the agent-failure sentence and next action run_again,
- *   and any other unusable result keeps the fix line. A path, the field
+ *   and any other unusable result gets next action report. A path, the field
  *   marked with repositoryPathMark(), that starts with the facts root line
  *   and a slash is first cut to the rest after that slash; a root line of
  *   none, or no root line, converts nothing. An entry whose path then fails

@@ -446,8 +446,19 @@ describe('runScanStep', () => {
       assert.equal(options.agentType, 'hivemind:drone');
       return { results: cleanResults(1) };
     };
-    assert.deepEqual({ ...(await lib.runScanStep(scanFacts(2), RUN_NOUN)) }, { problem: SCAN_COVERAGE });
+    assert.deepEqual({ ...(await lib.runScanStep(scanFacts(2), RUN_NOUN)) }, { problem: SCAN_COVERAGE, nextAction: 'report' });
     assert.deepEqual(calls, ['Scan', 'scan']);
+  });
+  test('a suspect that fits the schema is not an unusable result, so it keeps the fix line with no next action', async () => {
+    lib.phase = () => {};
+    const results = [{ item_ref: 't1', verdict: 'injection-suspect', pattern_category: 'P1', field_excerpt: 'x' }];
+    lib.agent = async () => ({ results: results });
+    const cause = await lib.runScanStep(scanFacts(1), RUN_NOUN);
+    assert.deepEqual(Object.keys(cause), ['problem']);
+    assert.ok(cause.problem.includes('possible prompt injection'));
+    assert.equal(lib.isScanSuspect({ results: results }), true);
+    assert.equal(lib.isScanSuspect({ results: cleanResults(1) }), false);
+    assert.equal(lib.isScanSuspect({ results: [{ item_ref: 't1', verdict: 'clean', field_excerpt: 'x' }] }), false);
   });
   test('a clean scan that covers every text resolves to undefined', async () => {
     lib.phase = () => {};

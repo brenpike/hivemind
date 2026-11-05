@@ -36,6 +36,15 @@
  *           relay (ADR-0037), else undefined: a --inputs command stop.
  *   capItemLines(itemLines)  the first maxListedItems() lines, then a count
  *           of the rest.
+ *   readRelayAction(stderr, isRefusedFirst)  the next action of a blocked
+ *           runner relay: report when isRefusedFirst is true, when
+ *           describeRelayBlocker finds no reason or when isGateDenial holds,
+ *           else none, the fix line. isRefusedFirst is optional, false when
+ *           absent: the PR step's open-plan-pr inputs refusal (pr.js).
+ *   isGateDenial(stderr)  true when stderr holds a deny reason of
+ *           ${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh, each of which starts
+ *           'synapse-gate: '. The hook refused the runner's call, so the
+ *           script never ran and nothing in the repo needs a fix.
  *   versionCheckRoutingSpec()  bumpTypeRoutingSpec() plus the bump-type.sh
  *           --version-file keys in its OUTPUT order: version_check, then
  *           optional trunk_version and expected_version, each a SemVer core
@@ -85,7 +94,10 @@
  *   so every step from the facts through the gates reads a null result
  *   through describeUnusableResult (lib/result.js), the only place a null
  *   result gets the describeNoResult sentence and next action run_again. A
- *   non-null result that fails its schema or routing keeps the fix line.
+ *   non-null result that fails its schema or routing goes through it too,
+ *   so it gets report (issues 481, 498), as a runner command stop does. A
+ *   blocked relay takes readRelayAction: report for a hook denial or a
+ *   relay that gives no reason, else the fix line.
  *   A file-changing step reads its own result before its commit and passes
  *   its causes to runCommitStep, which stops through stopDelivery, isReplan
  *   true for a wave: a failed commit adds its cause after them, so a commit
@@ -316,7 +328,7 @@ function plannerCallOptions(label, phaseTitle, resultSchema) {
 
 function describeCommandStop(stepNoun, words, retryWords = []) {
   const problem = describeRunnerWordProblem(words.concat(retryWords));
-  return problem === undefined ? undefined : { problem: 'The ' + stepNoun + ' step did not run its script, so ' + RUN_NAME + ' stopped: ' + problem + '.', terminal: true };
+  return problem === undefined ? undefined : { problem: 'The ' + stepNoun + ' step did not run its script, so ' + RUN_NAME + ' stopped: ' + problem + '.', terminal: true, nextAction: 'report' };
 }
 
 function buildDeliveryFactsPrompt(words) {
@@ -327,17 +339,27 @@ function splitStderrLines(stderr) {
   return typeof stderr === 'string' ? stderr.split(/\r\n|\r|\n/) : [];
 }
 
-function describeRelayBlocker(stderr, startsSentence) {
+function quoteRelayBlocker(stderr) {
   const stderrLines = splitStderrLines(stderr);
   const blockerPayloads = stderrLines.filter((line) => line.startsWith('blocker: ')).map((line) => line.slice('blocker: '.length)).filter((payload) => payload.trim() !== '');
-  const stderrQuote = quoteDiagnostic(stderrLines.filter((line) => line.trim() !== '').slice(0, 2).join('\n'));
-  let reason = 'it gave no reason.';
   if (blockerPayloads.length > 0) {
-    reason = 'its blocker line says ' + quoteDiagnostic(blockerPayloads.pop()) + '.';
-  } else if (stderrQuote !== undefined) {
-    reason = 'its stderr says ' + stderrQuote + '.';
+    return 'its blocker line says ' + quoteDiagnostic(blockerPayloads.pop()) + '.';
   }
+  const stderrQuote = quoteDiagnostic(stderrLines.filter((line) => line.trim() !== '').slice(0, 2).join('\n'));
+  return stderrQuote === undefined ? undefined : 'its stderr says ' + stderrQuote + '.';
+}
+
+function describeRelayBlocker(stderr, startsSentence) {
+  const reason = quoteRelayBlocker(stderr) || 'it gave no reason.';
   return startsSentence ? reason.charAt(0).toUpperCase() + reason.slice(1) : reason;
+}
+
+function isGateDenial(stderr) {
+  return /synapse-gate: /.test(stderr);
+}
+
+function readRelayAction(stderr, isRefusedFirst = false) {
+  return isRefusedFirst || quoteRelayBlocker(stderr) === undefined || isGateDenial(stderr) ? 'report' : undefined;
 }
 
 function readRelayedLines(relay, spec) {
@@ -386,11 +408,11 @@ function checkDeliveryFacts(relay, trunk) {
     return describeUnusableResult(malformedFactsMessage(RUN_NOUN), relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: blockedFactsMessage(RUN_NOUN, describeRelayBlocker(relay.stderr, false)) };
+    return { problem: blockedFactsMessage(RUN_NOUN, describeRelayBlocker(relay.stderr, false)), nextAction: readRelayAction(relay.stderr) };
   }
   const facts = readRelayedLines(relay, gatherFactsRoutingSpec());
   if (facts === undefined || !isConsistentFactsRelay(facts, trunk)) {
-    return { problem: malformedFactsMessage(RUN_NOUN) };
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN), relay);
   }
   if (facts.cut !== 'none') {
     return { problem: cutFactsMessage(RUN_NOUN, facts.cut) };
@@ -413,8 +435,7 @@ async function runPassScan(facts, run) {
   if (problem === undefined) {
     return undefined;
   }
-  const isSuspect = validateSchema(scanStepSchema(), scan).ok && scan.results.some((result) => result.verdict === 'injection-suspect');
-  return isSuspect ? { problem: problem, terminal: true } : describeUnusableResult(problem, scan);
+  return isScanSuspect(scan) ? { problem: problem, terminal: true } : describeUnusableResult(problem, scan);
 }
 
 async function runFactsStep(run) {
@@ -449,11 +470,11 @@ function checkBranchRelay(relay, plan, freshness) {
     return describeUnusableResult('The branch step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true), terminal: true };
+    return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true), terminal: true, nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, createWorkingBranchRoutingSpec());
   if (values === undefined || values.warning !== branchWarningTexts()[freshness]) {
-    return { problem: 'The branch step returned malformed routing lines, ' + stopped };
+    return describeUnusableResult('The branch step returned malformed routing lines, ' + stopped, relay);
   }
   if (values.branch !== plan.branch) {
     return { problem: 'The branch step reported a branch other than the plan branch, ' + stopped, terminal: true };
@@ -557,11 +578,11 @@ function checkCommitRelay(relay, plan, stepName) {
     return describeUnusableResult('The commit step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: describeCommitBlocker(relay.stderr, stepNoun), terminal: true };
+    return { problem: describeCommitBlocker(relay.stderr, stepNoun), terminal: true, nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, moltRoutingSpec());
   if (values === undefined) {
-    return { problem: 'The commit step returned malformed routing lines, ' + stopped };
+    return describeUnusableResult('The commit step returned malformed routing lines, ' + stopped, relay);
   }
   if (values.branch !== plan.branch) {
     return { problem: 'The commit step reported a branch other than the plan branch, ' + stopped, terminal: true };

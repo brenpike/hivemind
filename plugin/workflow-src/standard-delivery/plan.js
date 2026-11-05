@@ -98,9 +98,12 @@
  *   stopDelivery (record.js) with isReplan true, so the reply starts a new
  *   pass outside maxReplans(). A null result, an agent failure, adds the
  *   agent-failure sentence through describeUnusableResult (lib/result.js)
- *   and ends the run with next action run_again; any other problem, a
- *   planner's blocked outcome among them, pauses with the fix line, and
- *   the reply reaches the next plan prompt's answers block. A revise that
+ *   and ends the run with next action run_again; any other problem pauses,
+ *   and the reply reaches the next plan prompt's answers block. A
+ *   planner's blocked outcome that fits its schema keeps the fix line,
+ *   report when its blocker gives no reason (readBlockerAction); every
+ *   other problem is unusable, so describeUnusableResult types it report.
+ *   The settled question guard below is report too: a workflow defect. A revise that
  *   fails the plan check logs its reply first, settled [], so the stop
  *   asks the next round.
  *   Each validation_commands entry is one command line: describePlanProblem
@@ -550,7 +553,8 @@ async function runPlanningPass(run, facts, passScope, replan) {
       if (shownAsks.length > 0) {
         run.answerLog.push(buildAnswerEntry(shownEntry, undefined));
       }
-      return stopDelivery([describeUnusableResult(problem, planResult)], run, [], true);
+      const isPlannerBlock = validateSchema(resultSchema, planResult).ok && planResult.outcome === 'blocked';
+      return stopDelivery([isPlannerBlock ? { problem: problem, nextAction: readBlockerAction(planResult.blocker) } : describeUnusableResult(problem, planResult)], run, [], true);
     }
     if (shownAsks.length > 0) {
       run.answerLog.push(buildAnswerEntry(shownEntry, planResult));
@@ -579,7 +583,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
      */
     const resettled = resolution.asks.find((ask) => settledKinds.has(ask.kind) && [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, TRUNK_STALE_KIND].includes(ask.kind));
     if (resettled !== undefined) {
-      return stopDelivery([{ problem: 'Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', terminal: true }], run, [], true);
+      return stopDelivery([{ problem: 'Workflow defect: the ' + resettled.kind + ' question came back after a reply settled it, so ' + RUN_NAME + ' stopped.', terminal: true, nextAction: 'report' }], run, [], true);
     }
     const isAcceptance = resolution.asks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
     const lead = describePlanLine(planResult.plan, isAcceptance ? resolution.outsidePaths : []);

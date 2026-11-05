@@ -682,9 +682,24 @@ describe('describeUnusableResult', () => {
     assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', null)), { problem: 'P. ' + sentence, nextAction: 'run_again', agentFailure: true });
     assert.equal(lib.describeUnusableResult('P.', null).problem.split(sentence).length - 1, 1);
   });
-  test('any other result gives the problem alone', () => {
+  test('any other result gives the problem alone with next action report, the line saying nothing in your repo needs a fix', () => {
     for (const result of [{}, undefined, 'x', 0]) {
-      assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', result)), { problem: 'P.' }, JSON.stringify(result));
+      assert.deepEqual(structuredClone(lib.describeUnusableResult('P.', result)), { problem: 'P.', nextAction: 'report' }, JSON.stringify(result));
+    }
+    assert.ok(lib.nextStepLine('report').startsWith('Next: nothing in your repo needs a fix'));
+  });
+});
+
+describe('readBlockerAction', () => {
+  test('a blocker with no non-blank line gives report, since its lead names no reason', () => {
+    for (const blocker of [undefined, null, '', ' \n\t', 7, {}]) {
+      assert.equal(lib.readBlockerAction(blocker, 'fix_cause'), 'report', JSON.stringify(blocker));
+      assert.equal(lib.readBlockerAction(blocker, 'run_again'), 'report', JSON.stringify(blocker));
+    }
+  });
+  test('a blocker with a reason keeps the step\'s own next action, absent included', () => {
+    for (const nextAction of ['fix_cause', 'run_again', undefined]) {
+      assert.equal(lib.readBlockerAction('The disk is full.', nextAction), nextAction, String(nextAction));
     }
   });
 });

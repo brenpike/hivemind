@@ -78,7 +78,10 @@
  *   module.
  *   A null gate result reads through describeUnusableResult (lib/result.js),
  *   next action run_again, and readGateEditOutcome passes its agentFailure
- *   mark on. The fix step reads its result before the commit and passes its
+ *   mark on; any other unusable result, a malformed version relay among
+ *   them, gets report. A blocked validation or fix round whose blocker
+ *   gives no reason is report too (readBlockerAction), and a blocked
+ *   version relay takes readRelayAction (relay.js). The fix step reads its result before the commit and passes its
  *   cause, if any, to runCommitStep (relay.js), which stops with every
  *   cause through stopDelivery with isReplan false, so a commit stop never
  *   hides a step cause; a stop it returns is returned as is. A null fix
@@ -259,7 +262,7 @@ function readGateEditOutcome(result, schema) {
     return { status: 'blocked', reason: unusable.problem, files: [], nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
   }
   if (result.outcome === 'blocked') {
-    return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: result.next_action };
+    return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: readBlockerAction(result.blocker, result.next_action) };
   }
   return { status: 'complete', files: result.files };
 }
@@ -292,7 +295,7 @@ function readValidateOutcome(result, schema) {
     return describeUnusableResult('The validation step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.', result);
   }
   if (result.outcome === 'blocked') {
-    return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: result.next_action };
+    return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: readBlockerAction(result.blocker, result.next_action) };
   }
   const validation = { status: result.outcome, failures: result.failures };
   if (Object.hasOwn(result, 'version')) {
@@ -304,11 +307,11 @@ function readValidateOutcome(result, schema) {
 function checkVersionRelay(relay) {
   const stopped = 'so ' + RUN_NAME + ' stopped before the pull request.';
   if (relay.outcome === 'blocked') {
-    return { problem: 'The version check of the validation step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
+    return { problem: 'The version check of the validation step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true), nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, versionCheckRoutingSpec());
   if (values === undefined || !isConsistentVersionRelay(values)) {
-    return { problem: 'The version check of the validation step returned malformed routing lines, ' + stopped };
+    return describeUnusableResult('The version check of the validation step returned malformed routing lines, ' + stopped, relay);
   }
   return { values: values };
 }

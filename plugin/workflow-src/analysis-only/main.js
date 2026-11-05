@@ -150,7 +150,10 @@
  *   Each goes through describeUnusableResult (result.js), the one place
  *   that adds the describeNoResult sentence naming the agent failure and
  *   the run_again Next line, so the user does not look for a cause in the
- *   repo (issue 460). The build-skew stop gets the answer line, any other
+ *   repo (issue 460). Malformed facts routing and a planner result that
+ *   does not fit the analysis schema go through it too, so each gets the
+ *   report line, as every unusable result does (issues 481, 498). The
+ *   build-skew stop gets the answer line, any other
  *   blocked end the fix line, which says to clear the cause named above,
  *   then run the request again (nextStepLine, result.js).
  *   A blocked facts or planner result shows its blocker only through
@@ -327,7 +330,7 @@ function describeFactsProblem(facts) {
     && isCutList(facts.cut)
     && isTextCount(facts.external_texts);
   if (!isWellFormed) {
-    return { problem: malformedFactsMessage(RUN_NOUN) };
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN), facts);
   }
   if (facts.cut !== 'none') {
     return { problem: cutFactsMessage(RUN_NOUN, facts.cut) };
@@ -363,7 +366,7 @@ function describeReplyProblem(analysis, checkSchema) {
     return describeUnusableResult('The planner returned no result, so the analysis stopped.', analysis);
   }
   if (!validateSchema(checkSchema, analysis).ok) {
-    return { problem: 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.' };
+    return describeUnusableResult('The planner returned a result that does not fit the analysis schema, so the analysis stopped.', analysis);
   }
   if (analysis.outcome === 'blocked') {
     return { problem: 'The planner could not do the analysis: ' + describeReason(analysis.blocker) };
