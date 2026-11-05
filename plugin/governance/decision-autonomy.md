@@ -67,7 +67,7 @@ With any flag set on the state machine, the overlord by judgment (ADR-0006) paus
 
 Only this rule says who decides a reviewer's question. The local reviewer writes its `user-input-required` or `high-severity-rejection` call (options, a recommendation with honest strength, its read of Promotion Gate clauses 1 and 2 on the recommended option) but never decides it. Recording a new threat model a reviewer raises is a review call.
 
-The run takes a call when the overlord agrees with the recommendation and the recommended option is reversible and not architectural. On the script engine, agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` via `decide()`; no second agent judges. Clause 3 is not read (user decision, ADR-0037, Amendment 2026-10-29): a safety-relevant call both agree on is taken when reversible and not architectural, even a pick that keeps or records a safety finding unfixed. A pick that applies a fix in a Destructive Fix Gate category still stops at that gate (**Tier A**), whoever took the call.
+The run takes a call when the overlord agrees with the recommendation and the recommended option is reversible and not architectural. On the script engine, agreement is the `review_question` and `high_severity_rejection` rows of `${CLAUDE_PLUGIN_ROOT}/references/decision-autonomy-table.json` via `decide()`; no second agent judges. Clause 3 is not read (user decision, ADR-0037, Amendment 2026-10-29): a safety-relevant call both agree on is taken when reversible and not architectural, even a pick that keeps or records a safety finding unfixed. A call whose pick applies a fix in a Destructive Fix Gate category is asked, never taken (**Tier A**); a gate hold after a taken call asks that call again.
 
 A taken call returns to the reviewer as its answer, recorded at its source per `${CLAUDE_PLUGIN_ROOT}/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings), naming the run as decider; the run lists it in its final message and the PR body, for the user to veto before merge.
 
@@ -114,4 +114,4 @@ Key unset or empty: the overlord `touch`es the `.decision-report-done` marker of
 
 The scan is best-effort and fail-open in both modes, never session-blocking; a run left awaiting retries next session.
 
-The marker's existence is the sole idempotency token: "this run will produce no further decision report", rendered or suppressed. Made by `touch`, it holds no content, so no splice or injection surface. There is no ledger marker, no `decision-report.md` file, no new `run.status` value and no schema change.
+The marker's existence is the sole idempotency token: "this run will produce no further decision report", rendered or suppressed. There is no ledger marker, no `decision-report.md` file, no new `run.status` value and no schema change.

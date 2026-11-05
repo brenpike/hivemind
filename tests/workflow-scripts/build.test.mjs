@@ -54,7 +54,7 @@ const liveIds = listLiveWorkflowIds(repoRoot);
 const draftIds = listDraftWorkflowIds(repoRoot);
 const DRAFT_ID = 'draft-check';
 const MAX_SOURCE_LINES = 600;
-const DELIVERY_MODULES = ['briefs.js', 'gates.js', 'paths.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review.js', 'scope.js', 'specs.js', 'waves.js'];
+const DELIVERY_MODULES = ['briefs.js', 'gates.js', 'paths.js', 'plan.js', 'pr.js', 'record.js', 'relay.js', 'review-schema.js', 'review.js', 'scope.js', 'specs.js', 'tails.js', 'waves.js'];
 const PROSE_BUDGETS_PATTERN = /export const PROSE_BUDGETS = Object\.freeze\(\{[^}]*\}\);/;
 const MAX_PROSE_MARGIN = 1000;
 const CEREBRATE_SENTENCE = 'You do not write or edit code.';

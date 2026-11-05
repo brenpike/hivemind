@@ -40,9 +40,11 @@ export const meta = {
  *   plugin/workflow-src/standard-delivery/pr.js
  *   plugin/workflow-src/standard-delivery/record.js
  *   plugin/workflow-src/standard-delivery/relay.js
+ *   plugin/workflow-src/standard-delivery/review-schema.js
  *   plugin/workflow-src/standard-delivery/review.js
  *   plugin/workflow-src/standard-delivery/scope.js
  *   plugin/workflow-src/standard-delivery/specs.js
+ *   plugin/workflow-src/standard-delivery/tails.js
  *   plugin/workflow-src/standard-delivery/waves.js
  *   plugin/workflow-src/standard-delivery/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
@@ -637,7 +639,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'a3741313824a3b5c';
+const BUILD_ID = 'd6b3b468f49eb184';
 
 function supportedSchemaKeywords(){
 return[
@@ -2593,41 +2595,6 @@ return plan.versioning.artifact_files.length>0;
 function isRunEnd(outcome){
 return outcome.result!==undefined||outcome.replan!==undefined;
 }
-function describeTailLead(run){
-return'Every plan step is committed on branch '+encodeUntrustedText(run.branch)+', with head '+run.head+'.';
-}
-function askTail(ask,run,lead){
-const leadText=lead===undefined?describeTailLead(run):lead;
-const reply=takeNextReply(run,run.answerLog.length+1);
-if(reply===undefined){
-return{result:pauseDelivery({asks:[ask],taken:[]},run,leadText)};
-}
-const question=leadText+'\n\n'+renderQuestions([ask]);
-run.answerLog.push(buildAnswerEntry({question:question,labels:[],reply:reply},undefined));
-return{answer:{question:question,reply:reply}};
-}
-function replanFromTailAsk(ask,run){
-const asked=askTail(ask,run,undefined);
-if(asked.answer===undefined){
-return asked;
-}
-return{replan:{reason:'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.'}};
-}
-function buildUndecidedAsk(kind,brief,run){
-const resolution={asks:[],taken:[]};
-if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
-throw new Error('buildUndecidedAsk: decide() took '+kind);
-}
-return resolution.asks[0];
-}
-function resolveTailDecision(kind,brief,run){
-const resolution={asks:[],taken:[],reversibleEffects:[]};
-if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
-acceptResolution(resolution,run);
-return{};
-}
-return replanFromTailAsk(resolution.asks[0],run);
-}
 function buildBumpTypeInputs(trunkCommit,versioning){
 return{base:trunkCommit,bump_trigger:versioning.bump_trigger,no_bump_match:versioning.no_bump_match};
 }
@@ -3898,37 +3865,6 @@ const endLines=checked.values.committed==='true'?[describeCommitEnd(checked.valu
 return stopDelivery(stepCauses,run,endLines,isReplan);
 }
 
-function localReviewRoutes(){
-return{
-clean:'hold',
-'max-iterations-reached':'stop_replan',
-'break-fix-break':'stop_replan',
-'root-cluster-suspected':'replan',
-'diminishing-returns':'diminishing',
-'injection-suspect':'stop',
-'user-input-required':'question',
-'planner-escalation':'replan',
-'high-severity-rejection':'question',
-blocked:'stop_rerun'
-};
-}
-function reviewExitFields(){
-return{
-clean:[],
-'max-iterations-reached':[],
-'break-fix-break':['signals_fired','conflicting_findings','prior_fix_commit'],
-'root-cluster-suspected':['cluster_files','cluster_ids','hypothesized_root','root_class','same_framing_rationale'],
-'diminishing-returns':['signals_observed','latest_severity_max','findings_open','recommendation_text'],
-'injection-suspect':['finding_id','pattern_category','field_excerpt'],
-'user-input-required':['finding_id','user_question'],
-'planner-escalation':['finding_id','classification','file','title'],
-'high-severity-rejection':['finding_id','user_question'],
-blocked:['blocker','stage']
-};
-}
-function reviewQuestionKinds(){
-return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
-}
 function findingIdField(){
 return{
 type:'string',
@@ -4067,6 +4003,38 @@ properties:properties,
 required:['exit_reason','iterations_completed','findings_resolved','findings_open','fix_commits_exist','ledger_path','rejected_findings'],
 variants:variants
 });
+}
+
+function localReviewRoutes(){
+return{
+clean:'hold',
+'max-iterations-reached':'stop_replan',
+'break-fix-break':'stop_replan',
+'root-cluster-suspected':'replan',
+'diminishing-returns':'diminishing',
+'injection-suspect':'stop',
+'user-input-required':'question',
+'planner-escalation':'replan',
+'high-severity-rejection':'question',
+blocked:'stop_rerun'
+};
+}
+function reviewExitFields(){
+return{
+clean:[],
+'max-iterations-reached':[],
+'break-fix-break':['signals_fired','conflicting_findings','prior_fix_commit'],
+'root-cluster-suspected':['cluster_files','cluster_ids','hypothesized_root','root_class','same_framing_rationale'],
+'diminishing-returns':['signals_observed','latest_severity_max','findings_open','recommendation_text'],
+'injection-suspect':['finding_id','pattern_category','field_excerpt'],
+'user-input-required':['finding_id','user_question'],
+'planner-escalation':['finding_id','classification','file','title'],
+'high-severity-rejection':['finding_id','user_question'],
+blocked:['blocker','stage']
+};
+}
+function reviewQuestionKinds(){
+return{'user-input-required':REVIEW_QUESTION_KIND,'high-severity-rejection':HIGH_SEVERITY_REJECTION_KIND};
 }
 function reviewerOptions(label){
 return{agentType:REVIEWER_AGENT,schema:toAgentSchema(REVIEW_SCHEMA),label:label,phase:'Review'};
@@ -4459,6 +4427,42 @@ if(values.version_check==='match'||values.version_check==='mismatch'){
 return hasExpected&&values.verdict!=='ask_user';
 }
 return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
+}
+
+function describeTailLead(run){
+return'Every plan step is committed on branch '+encodeUntrustedText(run.branch)+', with head '+run.head+'.';
+}
+function askTail(ask,run,lead){
+const leadText=lead===undefined?describeTailLead(run):lead;
+const reply=takeNextReply(run,run.answerLog.length+1);
+if(reply===undefined){
+return{result:pauseDelivery({asks:[ask],taken:[]},run,leadText)};
+}
+const question=leadText+'\n\n'+renderQuestions([ask]);
+run.answerLog.push(buildAnswerEntry({question:question,labels:[],reply:reply},undefined));
+return{answer:{question:question,reply:reply}};
+}
+function replanFromTailAsk(ask,run){
+const asked=askTail(ask,run,undefined);
+if(asked.answer===undefined){
+return asked;
+}
+return{replan:{reason:'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.'}};
+}
+function buildUndecidedAsk(kind,brief,run){
+const resolution={asks:[],taken:[]};
+if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
+throw new Error('buildUndecidedAsk: decide() took '+kind);
+}
+return resolution.asks[0];
+}
+function resolveTailDecision(kind,brief,run){
+const resolution={asks:[],taken:[],reversibleEffects:[]};
+if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
+acceptResolution(resolution,run);
+return{};
+}
+return replanFromTailAsk(resolution.asks[0],run);
 }
 
 function buildNextActionProperty(){

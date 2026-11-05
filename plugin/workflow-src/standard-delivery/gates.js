@@ -1,8 +1,8 @@
 /*
  * standard-delivery gates.js: the gates of the standard-delivery workflow. It
- * holds the gate ids, names and labels, the tail asks, the validate and
- * fix steps, the gate rerun and the gate loop. Its tail briefs live in
- * briefs.js.
+ * holds the gate ids, names and labels, the validate and fix steps, the
+ * gate rerun and the gate loop. Its tail briefs live in briefs.js and its
+ * tail asks in tails.js.
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
@@ -116,25 +116,8 @@
  *   asks. The pull request step runs only when every configured gate holds on
  *   the head, as the last step of the gate loop, under label pr-P, then
  *   pr-P-N with N counting gates.runs.pr.
- *   Tail asks: a question after the last wave pauses through pauseDelivery
- *   with a lead and its question: askTail(ask, run, lead) leads with the
- *   given lead string, as a local review question passes, else with
- *   describeTailLead(run), every plan step committed on the encoded branch
- *   at the head. Tail rounds share run.answerLog and the answers round
- *   numbering with planning rounds, so a resume replays every earlier agent
- *   from cache and takes the reply at the ask. At reply time askTail adds
- *   the {question, settled, reply} entry buildAnswerEntry (lib/brief.js)
- *   builds to run.answerLog, the question being that lead and the question,
- *   so every later plan prompt shows it in the answers block; it returns
- *   {question, reply} as the answer. No revise reads a tail reply, so its
- *   settled is always [] and it stays the user's own words in every later
- *   answers block, review questions included: a review decision lives in the
- *   reviewer's record. A reply to a local review question reruns the review
- *   gate on the current head, after any stale gate, with the next gateLabel
- *   count and user_answer {question, reply}. Any other tail reply starts a
- *   new pass from the facts step with the answers block, outside
- *   maxReplans(). Nothing is pushed before every configured gate holds on
- *   one commit.
+ *   A question after the last wave pauses through askTail (tails.js).
+ *   Nothing is pushed before every configured gate holds on one commit.
  *
  * Why
  *   A gate holds only on a commit, so one loop decides which gate runs next
@@ -216,52 +199,6 @@ function hasVersionFiles(plan) {
 
 function isRunEnd(outcome) {
   return outcome.result !== undefined || outcome.replan !== undefined;
-}
-
-function describeTailLead(run) {
-  return 'Every plan step is committed on branch ' + encodeUntrustedText(run.branch) + ', with head ' + run.head + '.';
-}
-
-function askTail(ask, run, lead) {
-  const leadText = lead === undefined ? describeTailLead(run) : lead;
-  const reply = takeNextReply(run, run.answerLog.length + 1);
-  if (reply === undefined) {
-    return { result: pauseDelivery({ asks: [ask], taken: [] }, run, leadText) };
-  }
-  const question = leadText + '\n\n' + renderQuestions([ask]);
-  run.answerLog.push(buildAnswerEntry({ question: question, labels: [], reply: reply }, undefined));
-  return { answer: { question: question, reply: reply } };
-}
-
-function replanFromTailAsk(ask, run) {
-  const asked = askTail(ask, run, undefined);
-  if (asked.answer === undefined) {
-    return asked;
-  }
-  return { replan: { reason: 'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
-}
-
-/**
- * Returns the ask resolveDecision (plan.js) builds for a question decide()
- * must never take: its brief, kind and the reason decide() gives at
- * run.level. Throws when decide() takes it, so no undecided question is
- * ever auto-taken.
- */
-function buildUndecidedAsk(kind, brief, run) {
-  const resolution = { asks: [], taken: [] };
-  if (resolveDecision(kind, brief, undefined, run, resolution) === 'take') {
-    throw new Error('buildUndecidedAsk: decide() took ' + kind);
-  }
-  return resolution.asks[0];
-}
-
-function resolveTailDecision(kind, brief, run) {
-  const resolution = { asks: [], taken: [], reversibleEffects: [] };
-  if (resolveDecision(kind, brief, undefined, run, resolution) === 'take') {
-    acceptResolution(resolution, run);
-    return {};
-  }
-  return replanFromTailAsk(resolution.asks[0], run);
 }
 
 function buildBumpTypeInputs(trunkCommit, versioning) {

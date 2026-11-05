@@ -11,9 +11,10 @@
  * the overlord's, not this script's (ADR-0037 decision 4).
  *
  * The phase modules of this directory hold every other function, and the
- * build bundles them, in name order, ahead of this file: gates.js, plan.js,
- * pr.js, record.js, relay.js, review.js, scope.js and waves.js. Each opens
- * with the contract of its steps. This file holds the launch reading, the
+ * build bundles them, in name order, ahead of this file: briefs.js,
+ * gates.js, paths.js, plan.js, pr.js, record.js, relay.js,
+ * review-schema.js, review.js, scope.js, specs.js, tails.js and waves.js.
+ * Each opens with the contract of its steps. This file holds the launch reading, the
  * run state, the pass loop and every top-level constant and limit.
  *
  * Inputs
@@ -52,7 +53,7 @@
  *   pause is a one-line lead of what happened, then the questions
  *   renderQuestions shows, with the reply line last: a planning pause leads
  *   with describePlanLine(plan, outsidePaths) (plan.js), a tail ask with its
- *   own lead (askTail, gates.js). A run end is its lead, then, when blocked,
+ *   own lead (askTail, tails.js). A run end is its lead, then, when blocked,
  *   the Next line, any later causes and the commit end line, then only the
  *   records ADR-0037 decision 3 needs in chat:
  *   the branch and its head once a wave ran, the
@@ -106,7 +107,7 @@
  *   question, and the reply takes the stopped step again or plans again.
  *   Every undecided question, a step_stop, a version question, the fix
  *   limit and the gate rerun limit, resolves through decide() in
- *   buildUndecidedAsk (gates.js), which throws on a take: step_stop and
+ *   buildUndecidedAsk (tails.js), which throws on a take: step_stop and
  *   version_bump_indeterminable surface at every level, and both limit
  *   briefs have strength none.
  *   Each new pass reads the head from its branch step through observeHead
