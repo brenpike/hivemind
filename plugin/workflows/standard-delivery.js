@@ -673,7 +673,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '7e54ff3584d5274d';
+const BUILD_ID = '5238830b1a06e0ae';
 
 function supportedSchemaKeywords(){
 return[
@@ -4065,7 +4065,7 @@ return(entry.isExternal?externalLabel()+' ':'')+entry.text;
 function rejectedFindingTexts(){
 return{
 finding_id:findingIdField(),
-title:{type:'string',text:'The title of the finding.',isExternal:true},
+title:{type:'string',text:reviewFieldTexts().title.text,isExternal:true},
 record:{type:'string',text:'The path and section of the recorded decision the reviewer cites.',isExternal:true}
 };
 }
@@ -4087,7 +4087,11 @@ const option={
 type:'object',
 additionalProperties:false,
 required:['id','summary'],
-properties:{id:{type:'string',enum:reviewOptionIds(),description:'The option id, by position: A first.'},summary:buildLabelledText(160,'What picking this option does.')}
+properties:{
+id:{type:'string',enum:reviewOptionIds(),description:'The option id, by position: A first.'},
+summary:buildLabelledText(160,'What picking this option does.'),
+destructive:buildDestructiveListSchema(externalLabel()+' Each change it makes in a gate category.')
+}
 };
 const recommendation={
 type:'object',
@@ -4210,8 +4214,11 @@ return dataBlocksSentence()+' The reply in user_answer is the run\'s decision, n
 }
 return dataBlocksSentence('The reply in user_answer');
 }
-function buildReviewPrompt(plan,trunk,answer){
-const inputs={base:plan.base,working_branch:plan.branch,trunk:trunk,max_iterations:maxReviewIterations(),caller_validates:true};
+function buildReviewPrompt(plan,run,answer){
+const inputs={base:plan.base,working_branch:plan.branch,trunk:run.trunk,max_iterations:maxReviewIterations(),caller_validates:true};
+if(run.approvals.length>0){
+inputs.approvals=run.approvals;
+}
 if(answer!==undefined){
 inputs.user_answer=answer;
 }
@@ -4224,9 +4231,8 @@ formatDataBlock('inputs',inputs)
 ].join('\n');
 }
 function describeReviewProblem(review){
-const problem='The local review step returned no usable result, so '+RUN_NAME+' stopped before the pull request.';
 if(!validateSchema(REVIEW_SCHEMA,review).ok||hasUnusableQuestion(review.user_question)){
-return describeUnusableResult(problem,review);
+return describeUnusableResult('The local review step returned no usable result'+describeReviewEnd(),review);
 }
 return undefined;
 }
@@ -4260,11 +4266,14 @@ return quoteDiagnostic(text,limit)||encodeUntrustedText('');
 }
 function describeReviewStop(review,head){
 const texts=reviewStopTexts(review);
-const lines=[texts.lead+' on commit '+head+' after '+describeCount(review.iterations_completed,'iteration')+', with '+describeCount(review.findings_open,'finding')+' still open, so '+RUN_NAME+' stopped before the pull request.'];
+const lines=[texts.lead+' on commit '+head+' after '+describeCount(review.iterations_completed,'iteration')+', with '+describeCount(review.findings_open,'finding')+' still open'+describeReviewEnd()];
 if(texts.detail!==undefined){
 lines.push(texts.detail);
 }
 return lines.join('\n');
+}
+function describeReviewEnd(){
+return', so '+RUN_NAME+' stopped before the pull request.';
 }
 function quoteShortFindingId(findingId){
 return encodeUntrustedText(Array.from(findingId).slice(0,8).join(''));
@@ -4276,7 +4285,11 @@ return{text:lines.join('\n')};
 }
 function buildReviewOption(option,question){
 const isRecommended=option.id===question.recommendation.option_id;
-return{id:option.id,summary:encodeUntrustedText(option.summary),steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:!isRecommended||!question.gate.irreversible};
+const changes=readOptionChanges(option).map((entry)=>({category:entry.category,item:encodeUntrustedText(entry.item)}));
+return{id:option.id,summary:encodeUntrustedText(option.summary),steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:!isRecommended||!question.gate.irreversible,destructive:changes};
+}
+function readOptionChanges(option){
+return option.destructive??[];
 }
 function buildReviewQuestionBrief(review){
 const question=review.user_question;
@@ -4302,7 +4315,7 @@ function removeReviewerText(brief){
 const texts=reviewCallTexts();
 return Object.assign({},brief,{
 problem:texts.problem,
-options:brief.options.map((option)=>Object.assign({},option,{summary:texts.summary})),
+options:brief.options.map((option)=>Object.assign({},option,{summary:texts.summary,destructive:readOptionChanges(option).map((entry)=>({category:entry.category,item:unshownBriefText()}))})),
 recommendation:Object.assign({},brief.recommendation,{why:texts.why})
 });
 }
@@ -4310,19 +4323,31 @@ function describeReviewQuestionLead(review,head){
 return'Local review on commit '+head+', finding '+quoteShortFindingId(review.finding_id)+': '+encodeUntrustedText(review.user_question.found);
 }
 function takeReviewCall(review,run,shown,lead){
-const listed=Object.assign({},shown,{problem:'Local review finding '+quoteShortFindingId(review.finding_id)+': '+shown.problem});
-acceptResolution({taken:[{brief:listed,kind:shown.kind}],reversibleEffects:[]},run);
+acceptResolution({taken:[{brief:listReviewCall(review,shown),kind:shown.kind}],reversibleEffects:[]},run);
 return{answer:{question:lead+'\n\n'+renderQuestions([{brief:shown}]),reply:shown.recommendation.option_id,decided_by:'run'}};
 }
+function listReviewCall(review,shown){
+return Object.assign({},shown,{problem:'Local review finding '+quoteShortFindingId(review.finding_id)+': '+shown.problem});
+}
 function askReviewQuestion(review,run){
-const kind=reviewQuestionKinds()[review.exit_reason];
 const shown=buildReviewQuestionBrief(review);
 const lead=describeReviewQuestionLead(review,run.head);
 const resolution={asks:[],taken:[]};
-if(resolveDecision(kind,removeReviewerText(shown),undefined,run,resolution)==='take'){
+if(resolveDecision(shown.kind,removeReviewerText(shown),undefined,run,resolution)==='take'){
 return takeReviewCall(review,run,shown,lead);
 }
-return askTail(Object.assign({},resolution.asks[0],{brief:shown}),run,lead);
+return askShownReviewQuestion(resolution.asks[0],review,run,lead);
+}
+function askShownReviewQuestion(ask,review,run,lead){
+return askTail(Object.assign({},ask,{brief:buildReviewQuestionBrief(review),items:review.user_question.options.map(readOptionChanges)}),run,lead);
+}
+function askHeldReviewCall(review,run){
+const shown=buildReviewQuestionBrief(review);
+const listed=listReviewCall(review,shown);
+run.taken=run.taken.filter((entry)=>entry.brief.problem!==listed.problem);
+const decided=removeReviewerText(shown);
+const ask=buildUndecidedAsk(shown.kind,Object.assign({},decided,{gate:Object.assign({},decided.gate,{safety:true})}),run);
+return askShownReviewQuestion(ask,review,run,'Local review held back the call the run took. '+describeReviewQuestionLead(review,run.head));
 }
 function buildDiminishingReturnsBrief(review,head){
 return buildTailBrief({
@@ -4348,9 +4373,9 @@ function buildReviewEscalationBrief(review){
 const isCluster=review.exit_reason==='root-cluster-suspected';
 return buildTailBrief({
 kind:isCluster?ROOT_CLUSTER_ROUTING_KIND:PLANNER_ESCALATION_ROUTING_KIND,
-problem:isCluster
-?'Local review found '+describeCount(review.cluster_ids.length,'finding')+' in '+describeCount(review.cluster_files.length,'file')+' that share one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?'
-:'Local review escalated finding '+quoteShortFindingId(review.finding_id)+' to the planner. Go back to planning, from fresh facts, for its remediation?',
+problem:(isCluster
+?'Local review found '+describeCount(review.cluster_ids.length,'finding')+' in '+describeCount(review.cluster_files.length,'file')+' that share one suspected root.'
+:'Local review escalated finding '+quoteShortFindingId(review.finding_id)+' to the planner.')+' Go back to planning, from fresh facts, for '+(isCluster?'a remediation that closes the class?':'its remediation?'),
 goOn:'Plan the remediation from fresh facts.',
 strength:'strong',
 why:'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
@@ -4373,11 +4398,12 @@ const decided=review.exit_reason==='root-cluster-suspected'
 if(isRunEnd(decided)){
 return decided;
 }
+const returned='Local review returned '+review.exit_reason;
 if(run.replans>=maxReplans()){
-return stopForReviewReplan({problem:'Local review returned '+review.exit_reason+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.'},review,run);
+return stopForReviewReplan({problem:returned+' after '+maxReplans()+' replans, so '+RUN_NAME+' stopped.'},review,run);
 }
 run.replans+=1;
-const reason='Local review returned '+review.exit_reason+', so plan the remediation of what the review block reports, from the fresh facts.';
+const reason=returned+', so plan the remediation of what the review block reports, from the fresh facts.';
 return{replan:{reason:reason,review:projectReplanReview(review)}};
 }
 function stopForReviewReplan(cause,review,run){
@@ -4407,18 +4433,24 @@ throw new Error('routeLocalReview: no route for exit reason '+JSON.stringify(rev
 async function runReviewGate(run,plan,gates){
 const count=gates.runs.review;
 const answer=gates.answer;
+const takenReview=gates.takenReview;
 gates.answer=undefined;
+gates.takenReview=undefined;
 phase('Review');
-const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run.trunk),run):buildReviewPrompt(plan,run.trunk,answer);
+const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run),run):buildReviewPrompt(plan,run,answer);
 const review=await agent(prompt,reviewerOptions(gateLabel('review',run,count)));
 const unusable=describeReviewProblem(review);
 const committed=await runCommitStep(run,plan,{files:[],label:gateLabel('review-commit',run,count),stepName:'review'},unusable===undefined?[]:[unusable]);
 if(committed.values===undefined){
 return committed;
 }
-const routed=routeLocalReview(review,run);
+const isHeldCall=takenReview!==undefined&&readGateHold(review,run.approvals).holds!==undefined;
+const routed=isHeldCall?askHeldReviewCall(takenReview,run):routeLocalReview(review,run);
 if(routed.held){
 gates.rejected=review.rejected_findings;
+}
+if(routed.answer!==undefined&&routed.answer.decided_by==='run'){
+gates.takenReview=review;
 }
 return routed;
 }

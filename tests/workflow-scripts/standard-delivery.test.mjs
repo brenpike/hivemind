@@ -948,6 +948,15 @@ const FOURTH = '5'.repeat(40);
 const ESCALATION = { ...REVIEW_CLEAN, exit_reason: 'planner-escalation', findings_open: 1, finding_id: 'f5f5f5f5', classification: 'architecture', file: 'src/cache.js', title: 'The cache layer skips the "auth" check.' };
 const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.' };
 const USER_QUESTION = { found: 'One cache serves every tenant, so a tenant can read the entries of another.', ask: 'Should the cache be keyed by tenant?', options: [{ id: 'A', summary: 'Key the cache by tenant.' }, { id: 'B', summary: 'Keep one shared cache.' }], recommendation: { option_id: 'A', strength: 'strong', why: 'Tenant data stays apart.' }, gate: { irreversible: false, architectural: true } };
+const LOOSE_QUESTION = {
+  found: 'The check rejects a valid cache key, and the tests assert that rejection.',
+  ask: 'Loosen the check and flip the test assertions, or keep it?',
+  options: [{ id: 'A', summary: 'Loosen the check and flip the test assertions.', destructive: [TEST_X] }, { id: 'B', summary: 'Keep the check and its tests.', destructive: [] }],
+  recommendation: { option_id: 'A', strength: 'strong', why: 'The key is valid, so the check is wrong.' },
+  gate: { irreversible: false, architectural: false }
+};
+const HELD_QUESTION = { found: 'HELD_FOUND_ZQ.', ask: 'HELD_ASK_ZQ?', options: [{ id: 'A', summary: 'HELD_PICK_ZQ.' }, { id: 'B', summary: 'HELD_OTHER_ZQ.' }], recommendation: { option_id: 'A', strength: 'strong', why: 'HELD_WHY_ZQ.' }, gate: { irreversible: false, architectural: false } };
+const GATE_HOLD = { ...REVIEW_CLEAN, exit_reason: 'blocked', findings_open: 1, blocker: 'Proposed fix requires human confirmation: it flips the assertions of tests/cache.test.js.', stage: 'destructive-fix-gate' };
 const DIMINISHING = { ...REVIEW_CLEAN, exit_reason: 'diminishing-returns', findings_open: 2, signals_observed: ['severity-decay'], latest_severity_max: 'low', recommendation_text: 'Stop here; the rest is style.' };
 const ARCHITECTURAL_GATE = { promotion_gate: { irreversible: false, architectural: true, safety: false }, grows_surface: false, repeats_surface: false };
 const FULL_GATE = { promotion_gate: { irreversible: true, architectural: true, safety: true }, grows_surface: true, repeats_surface: true };
@@ -3155,7 +3164,8 @@ const ROW_TESTS = {
       assert.equal((moduleSource.match(/replanFromTailAsk\(buildUndecidedAsk\(/g) || []).length, 2);
       assert.ok(moduleSource.includes('replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND, buildFixLimitBrief(run.head), run), run)'));
       assert.ok(moduleSource.includes('replanFromTailAsk(buildUndecidedAsk(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, true), run), run)'));
-      assert.ok(moduleSource.includes('return askTail(Object.assign({}, resolution.asks[0], { brief: shown }), run, lead);'));
+      assert.ok(moduleSource.includes('return askShownReviewQuestion(resolution.asks[0], review, run, lead);'));
+      assert.ok(moduleSource.includes('return askTail(Object.assign({}, ask, { brief: buildReviewQuestionBrief(review), items: review.user_question.options.map(readOptionChanges) }), run, lead);'));
     });
     test('askTail logs a reply with settled [] and the lead plus questions, and returns the answer as {question, reply}', () => {
       const state = main.createRunState({ argsObject: { answers: {}, reply: TAIL_REPLY }, request: REQUEST, trunk: 'main', references: [], localReview: true });
@@ -3593,7 +3603,8 @@ const ROW_TESTS = {
     test('every undecided question resolves through decide() with the kind its call site passes, and a take throws', () => {
       const sites = [...moduleSource.matchAll(/buildUndecidedAsk\(([A-Za-z_]+), (build[A-Za-z]+)\(/g)].map((match) => match[1] + ' ' + match[2]).sort();
       assert.deepEqual(sites, ['GATE_RERUN_KIND buildGateRerunBrief', 'STEP_STOP_KIND buildApprovalBrief', 'STEP_STOP_KIND buildStepStopBrief', 'VALIDATION_REMEDIATION_KIND buildFixLimitBrief', 'VERSION_BUMP_INDETERMINABLE_KIND buildVersionQuestionBrief']);
-      assert.equal((moduleSource.match(/buildUndecidedAsk\(/g) || []).length, 6);
+      assert.equal((moduleSource.match(/buildUndecidedAsk\(/g) || []).length, 7);
+      assert.ok(moduleSource.includes('const ask = buildUndecidedAsk(shown.kind, Object.assign({}, decided, { gate: Object.assign({}, decided.gate, { safety: true }) }), run);'));
       const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       const reasonOf = (kind, brief) => main.buildUndecidedAsk(kind, brief, run).reason;
       assert.equal(reasonOf('version_bump_indeterminable', main.buildVersionQuestionBrief({ version_check: 'undetermined' })), 'table_surface');
@@ -3701,12 +3712,25 @@ const ROW_TESTS = {
     });
     test('a review run after a reply to its question also gets user_answer in its inputs block', () => {
       const answer = { question: 'QUESTION_ZQ', reply: 'REPLY_ZQ' };
-      const prompt = main.buildReviewPrompt(makePlan(), 'main', answer);
+      const state = { trunk: 'main', approvals: [] };
+      const prompt = main.buildReviewPrompt(makePlan(), state, answer);
       assert.deepEqual(readDataBlock(prompt, 'inputs'), { base: 'main', working_branch: 'feature/cache', trunk: 'main', max_iterations: 10, caller_validates: true, user_answer: answer });
       assert.ok(prompt.includes(lib.dataBlocksSentence('The reply in user_answer')), prompt);
       assert.ok(reviewerText.includes('`user_answer` is the user\'s answer to the question this loop returned'));
       assert.ok(!withoutDataBlock(prompt, 'inputs').includes('REPLY_ZQ'));
-      assert.ok(!main.buildReviewPrompt(makePlan(), 'main').includes('user_answer'));
+      assert.ok(!main.buildReviewPrompt(makePlan(), state).includes('user_answer'));
+    });
+    test('a review prompt carries run.approvals in its inputs block only when it is not empty, so with none it is byte for byte as before', () => {
+      const answer = { question: 'QUESTION_ZQ', reply: 'A' };
+      const plain = main.buildReviewPrompt(makePlan(), { trunk: 'main', approvals: [] }, answer);
+      const approved = main.buildReviewPrompt(makePlan(), { trunk: 'main', approvals: [TEST_X, TEST_Y] }, answer);
+      assert.ok(!plain.includes('approvals'), plain);
+      assert.deepEqual(Object.keys(readDataBlock(approved, 'inputs')), ['base', 'working_branch', 'trunk', 'max_iterations', 'caller_validates', 'approvals', 'user_answer']);
+      assert.deepEqual(readDataBlock(approved, 'inputs').approvals, [TEST_X, TEST_Y]);
+      assert.equal(withoutDataBlock(approved, 'inputs'), withoutDataBlock(plain, 'inputs'));
+      assert.ok(!withoutDataBlock(approved, 'inputs').includes(TEST_X.item), approved);
+      assert.ok(readReviewerContract('## Input Contract').keys.includes('approvals'));
+      assert.ok(reviewerText.includes('`approvals` holds the changes the user approved per'));
     });
     test('the inputs are local-reviewer Input Contract keys, and max_iterations and caller_validates match it', () => {
       const contract = readReviewerContract('## Input Contract');
@@ -3736,6 +3760,35 @@ const ROW_TESTS = {
   },
   'SD-33': () => {
     const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'user_question', 'blocker', 'rejected_findings'];
+    test('each user_question option carries an optional destructive list, labelled and bounded as buildDestructiveListSchema builds it', () => {
+      const schema = structuredClone(main.buildReviewSchema());
+      const optionItem = schema.properties.user_question.properties.options.items;
+      const destructive = optionItem.properties.destructive;
+      assert.deepEqual(optionItem.required, ['id', 'summary']);
+      assert.deepEqual(Object.keys(optionItem.properties), ['id', 'summary', 'destructive']);
+      assert.ok(destructive.description.startsWith('Can carry external content. '), destructive.description);
+      assert.deepEqual(destructive, structuredClone(main.buildDestructiveListSchema(destructive.description)));
+      assert.deepEqual([destructive.maxItems, destructive.items.properties.item.maxLength, destructive.items.properties.category.enum], [4, 160, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]]);
+      assert.ok(reviewerText.includes('a `destructive` list of the changes it makes in a gate category, each a `category` (1-10) and an `item`, empty when none.'));
+      const withOption = (changes) => ({ ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'f1f1f1f1', user_question: { ...USER_QUESTION, options: [{ ...USER_QUESTION.options[0], ...changes }, USER_QUESTION.options[1]] } });
+      for (const list of [undefined, [], [TEST_X, TEST_Y, TEST_X, { category: 10, item: '\u{1F600}'.repeat(160) }]]) {
+        assert.ok(lib.validateSchema(schema, withOption({ destructive: list })).ok, JSON.stringify(list));
+        assert.equal(main.describeReviewProblem(withOption({ destructive: list })), undefined);
+      }
+      for (const [label, list] of [
+        ['five entries', [TEST_X, TEST_X, TEST_X, TEST_X, TEST_X]],
+        ['category 11', [{ ...TEST_X, category: 11 }]],
+        ['category 0', [{ ...TEST_X, category: 0 }]],
+        ['a category that is no integer', [{ ...TEST_X, category: '3' }]],
+        ['an item of 161 code points', [{ category: 3, item: 'x'.repeat(161) }]],
+        ['an entry with another key', [{ ...TEST_X, note: 'x' }]],
+        ['an entry with no item', [{ category: 3 }]],
+        ['a list that is no array', TEST_X]
+      ]) {
+        assert.ok(!lib.validateSchema(schema, withOption({ destructive: list })).ok, label);
+        assert.notEqual(main.describeReviewProblem(withOption({ destructive: list })), undefined, label);
+      }
+    });
     test('REVIEW_SCHEMA holds the Output Contract fields, requires the always-present ones, and labels each Codex-derived text field', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const agentSchema = callOf(run, 'review-1-1').opts.schema;
@@ -4366,6 +4419,46 @@ const ROW_TESTS = {
       assert.ok(message.includes('- B: "Keep\\u2014it."'), message);
       assert.ok(message.includes('Recommendation: A (weak). "Because\\u0000."'), message);
       assert.ok(main.buildReviewEscalationBrief({ ...ESCALATION, finding_id: longId }).problem.includes('finding "a1b2c3d4" to the planner'));
+    });
+    const loose = { ...userInput, finding_id: 'd0d0d0d0', user_question: LOOSE_QUESTION };
+    const looseAsk = () => ({ brief: main.buildReviewQuestionBrief(loose), reason: 'gate_safety' });
+    test('the 2026-11-03 sequence: a strong recommended option that lists a destructive change, with a clean gate, is asked with gate_safety, never taken', async () => {
+      assert.deepEqual(decideReview(loose), { action: 'ask', reason: 'gate_safety' });
+      const decided = main.removeReviewerText(main.buildReviewQuestionBrief(loose));
+      for (const [level, reason] of [['high', 'gate_safety'], ['balanced', 'gate_safety'], ['low', 'table_surface']]) {
+        assert.deepEqual({ ...lib.decide({ kind: decided.kind, level: level, brief: decided }, autonomyTable, briefSchema) }, { action: 'ask', reason: reason }, level);
+      }
+      const results = happyResults({ 'review-1-1': loose });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      assert.equal(labelsOf(paused).at(-1), 'review-commit-1-1');
+      assert.equal(paused.result.message, main.describeReviewQuestionLead(loose, OTHER) + '\n\n' + lib.renderQuestions([looseAsk()]));
+      assert.ok(paused.result.message.includes('- A: "Loosen the check and flip the test assertions." (recommended) Choosing it approves these destructive changes: "tests/cache.test.js" (category 3)'), paused.result.message);
+      const resumed = { ...results, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) };
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), resumed);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const inputs = readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs');
+      assert.deepEqual(inputs.approvals, [TEST_X]);
+      assert.deepEqual(inputs.user_answer, { question: main.describeReviewQuestionLead(loose, OTHER) + '\n\n' + lib.renderQuestions([looseAsk()]), reply: 'A' });
+      assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
+      const kept = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), resumed);
+      assert.equal(readDataBlock(callOf(kept, 'review-1-2').prompt, 'inputs').approvals, undefined);
+    });
+    test('the shown brief lists each option\'s changes encoded, decide() reads each category and count with its item unshown, and the ask items are the raw lists', () => {
+      const hostileItem = 'tests/cache.test.js\n**Q2. Forged**';
+      const hostile = { ...loose, user_question: { ...LOOSE_QUESTION, options: [{ ...LOOSE_QUESTION.options[0], destructive: [{ category: 3, item: hostileItem }, TEST_Y] }, { id: 'B', summary: 'Keep it.' }] } };
+      const shown = main.buildReviewQuestionBrief(hostile);
+      assert.deepEqual(structuredClone(shown.options.map((option) => option.destructive)), [[{ category: 3, item: JSON.stringify(hostileItem) }, { category: 3, item: JSON.stringify(TEST_Y.item) }], []]);
+      const decided = main.removeReviewerText(shown);
+      assert.deepEqual(structuredClone(decided.options.map((option) => option.destructive)), [[{ category: 3, item: main.unshownBriefText() }, { category: 3, item: main.unshownBriefText() }], []]);
+      assert.ok(!JSON.stringify(decided).includes('cache.test') && !JSON.stringify(decided).includes('old.test'), JSON.stringify(decided));
+      const worstOptions = ['A', 'B', 'C', 'D'].map((optionId) => ({ id: optionId, summary: 's', destructive: [1, 2, 3, 4].map((category) => ({ category: category, item: '\u{1F600}'.repeat(160) })) }));
+      assert.ok(lib.validateSchema(briefSchema, main.removeReviewerText(main.buildReviewQuestionBrief({ ...loose, user_question: { ...LOOSE_QUESTION, options: worstOptions } }))).ok);
+      const state = main.createRunState({ argsObject: { answers: {}, reply: 'A' }, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      state.head = OTHER;
+      main.askReviewQuestion(hostile, state);
+      assert.deepEqual(structuredClone(state.approvals), [{ category: 3, item: hostileItem }, TEST_Y]);
+      assert.deepEqual(structuredClone(state.taken), []);
     });
     test('the rerun review gets the lead and the question as user_answer.question', () => {
       const state = main.createRunState({ argsObject: { answers: {}, reply: 'A' }, request: REQUEST, trunk: 'main', references: [], localReview: true });
@@ -5483,7 +5576,7 @@ const ROW_TESTS = {
       const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
       const reads = [...moduleCode.matchAll(/\breview\.(\w+)(?!\w|\.length\b)/g)].map((match) => match[1]);
       assert.ok(external.includes('blocker') && external.includes('field_excerpt') && reads.includes('exit_reason'));
-      assert.deepEqual(reads.filter((name) => external.includes(name)).sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'finding_id', 'user_question', 'user_question', 'user_question']);
+      assert.deepEqual(reads.filter((name) => external.includes(name)).sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'finding_id', 'user_question', 'user_question', 'user_question', 'user_question']);
       const encodedReads = [...moduleCode.matchAll(/\b(?:quoteShortFindingId|encodeUntrustedText|quoteOrEmpty)\(review\.(\w+)(?!\w|\.)/g)].map((match) => match[1]);
       assert.deepEqual(encodedReads.sort(), ['blocker', 'field_excerpt', 'finding_id', 'finding_id', 'finding_id', 'finding_id']);
       const schemaProperties = main.buildReviewSchema().properties;
@@ -7967,11 +8060,12 @@ const ROW_TESTS = {
       assert.deepEqual(run.answerLog.map((entry) => entry.reply), ['B', 'A']);
       assert.deepEqual(run.approvals, []);
     });
-    test('run.approvals has two writers, each applying the choices code read from the user\'s reply', () => {
+    test('run.approvals has two writers, each applying the choices code read from the user\'s reply, and the review inputs only copy it', () => {
       const code = stripCommentsAndStrings(moduleSource);
-      assert.deepEqual(code.match(/\bapprovals: \[\]|\.approvals = [^;]+;/g), [
-        '.approvals = applyApprovalChoices(run.approvals, shownAsks, readReplyChoices(shownEntry.reply, shownAsks));',
-        '.approvals = applyApprovalChoices(run.approvals, asks, choices);',
+      assert.deepEqual(code.match(/\bapprovals: \[\]|\b\w+\.approvals = [^;]+;/g), [
+        'run.approvals = applyApprovalChoices(run.approvals, shownAsks, readReplyChoices(shownEntry.reply, shownAsks));',
+        'inputs.approvals = run.approvals;',
+        'run.approvals = applyApprovalChoices(run.approvals, asks, choices);',
         'approvals: []'
       ]);
       assert.ok(code.includes('const choices = readReplyChoices(reply, asks);'));
@@ -8048,6 +8142,89 @@ const ROW_TESTS = {
       const prompt = main.buildWorkerPrompt(plan.steps[0], [], plan, approvedState([hostile]));
       assert.deepEqual(readDataBlock(prompt, 'approvals'), [hostile]);
       assert.equal(prompt.split('\n').filter((line) => line === '</approvals>').length, 1);
+    });
+  },
+  'SD-79': () => {
+    const heldCall = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'beef0001' + 'c'.repeat(56), user_question: HELD_QUESTION };
+    const heldLead = (review) => 'Local review held back the call the run took. ' + main.describeReviewQuestionLead(review, OTHER);
+    const heldText = (review) => heldLead(review) + '\n\n' + lib.renderQuestions([{ brief: main.buildReviewQuestionBrief(review), reason: 'gate_safety' }]);
+    const heldResults = (review, changes = {}) => happyResults({ 'review-1-1': review, 'review-1-2': GATE_HOLD, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }), ...changes });
+    const answeredResults = (review, changes = {}) => heldResults(review, { 'review-1-3': REVIEW_CLEAN, 'review-commit-1-3': commitRelay({ commit: OTHER, committed: 'false' }), ...changes });
+    test('a gate hold right after a call the run took, one that lists no destructive change, asks that call\'s question of the user with a lead saying local review held it back', async () => {
+      assert.ok(HELD_QUESTION.options.every((option) => !Object.hasOwn(option, 'destructive')));
+      const run = await runWorkflow(LAUNCH, heldResults(heldCall));
+      assert.equal(run.result.needs_user, true, run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2']);
+      assert.equal(readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs').user_answer.decided_by, 'run');
+      assert.equal(run.result.message, heldText(heldCall));
+      assert.ok(!run.result.message.includes('Local review was blocked'), run.result.message);
+      assert.ok(!run.result.message.includes(heldCall.finding_id), run.result.message);
+    });
+    test('the held call leaves run.taken, and its question resolves through buildUndecidedAsk on the code-built brief with gate.safety true', () => {
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      state.head = OTHER;
+      const other = { brief: makeBrief({ problem: 'OTHER_CALL_ZQ' }), kind: 'planner_question' };
+      state.taken.push(other);
+      main.askReviewQuestion(heldCall, state);
+      assert.equal(state.taken.length, 2);
+      const paused = main.askHeldReviewCall(heldCall, state);
+      assert.deepEqual(structuredClone(state.taken), [structuredClone(other)]);
+      assert.equal(paused.result.needs_user, true);
+      assert.equal(paused.result.message, heldText(heldCall));
+      const decided = main.removeReviewerText(main.buildReviewQuestionBrief(heldCall));
+      for (const level of ['high', 'balanced']) {
+        assert.equal(lib.decide({ kind: decided.kind, level: level, brief: decided }, autonomyTable, briefSchema).action, 'take', level);
+        assert.deepEqual({ ...lib.decide({ kind: decided.kind, level: level, brief: { ...decided, gate: { ...decided.gate, safety: true } } }, autonomyTable, briefSchema) }, { action: 'ask', reason: 'gate_safety' }, level);
+      }
+    });
+    test('a reply reruns local review with user_answer and no decided_by, and the call is no longer listed as decided for you', async () => {
+      const results = answeredResults(heldCall);
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'review-1-3', 'review-commit-1-3', 'pr-1']);
+      paused.calls.forEach((call, index) => assert.equal(run.calls[index].prompt, call.prompt, call.opts.label));
+      const prompt = callOf(run, 'review-1-3').prompt;
+      assert.deepEqual(readDataBlock(prompt, 'inputs').user_answer, { question: heldText(heldCall), reply: 'A' });
+      assert.equal(readDataBlock(prompt, 'inputs').approvals, undefined);
+      assert.ok(prompt.includes(lib.dataBlocksSentence('The reply in user_answer')), prompt);
+      assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
+      assert.ok(!prBodyOf(run, 'pr-1').includes(main.reviewCallTexts().problem), prBodyOf(run, 'pr-1'));
+    });
+    test('a letter reply to the held call applies the approvals its option lists through the tail path', async () => {
+      const listing = { ...heldCall, user_question: { ...HELD_QUESTION, options: [HELD_QUESTION.options[0], { ...HELD_QUESTION.options[1], destructive: [TEST_Y] }] } };
+      const results = answeredResults(listing);
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.message, heldText(listing));
+      assert.ok(paused.result.message.includes('- B: "HELD_OTHER_ZQ." Choosing it approves these destructive changes: "tests/old.test.js" (category 3)'), paused.result.message);
+      const approved = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
+      assert.deepEqual(readDataBlock(callOf(approved, 'review-1-3').prompt, 'inputs').approvals, [TEST_Y]);
+      const ownWords = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Take B, but keep the old test.'), results);
+      assert.equal(readDataBlock(callOf(ownWords, 'review-1-3').prompt, 'inputs').approvals, undefined);
+    });
+    test('a hold named by its blocker alone is held too, as readGateHold reads it', async () => {
+      const run = await runWorkflow(LAUNCH, heldResults(heldCall, { 'review-1-2': { ...GATE_HOLD, stage: 'fix' } }));
+      assert.equal(run.result.message, heldText(heldCall));
+    });
+    for (const [label, changes, lastLabel, review] of [
+      ['a gate hold with no taken call before it', { 'review-1-1': GATE_HOLD }, 'review-commit-1-1', GATE_HOLD],
+      ['any other block right after a taken call', { 'review-1-2': { ...GATE_HOLD, stage: 'invoke_review', blocker: 'Codex is unavailable.' } }, 'review-commit-1-2', { ...GATE_HOLD, stage: 'invoke_review', blocker: 'Codex is unavailable.' }]
+    ]) {
+      test(`${label} stops as before`, async () => {
+        const run = await runWorkflow(LAUNCH, heldResults(heldCall, changes));
+        assert.equal(run.result.needs_user, true, run.result.message);
+        assert.equal(labelsOf(run).at(-1), lastLabel);
+        assert.ok(run.result.message.startsWith(main.describeReviewStop(review, OTHER) + '\n\n'), run.result.message);
+        assert.ok(!run.result.message.includes('held back the call'), run.result.message);
+      });
+    }
+    test('a gate hold after the user\'s reply to the held call stops as before', async () => {
+      const results = answeredResults(heldCall, { 'review-1-3': GATE_HOLD });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), results);
+      assert.equal(run.result.needs_user, true, run.result.message);
+      assert.equal(labelsOf(run).at(-1), 'review-commit-1-3');
+      assert.ok(run.result.message.startsWith(main.describeReviewStop(GATE_HOLD, OTHER) + '\n\n'), run.result.message);
     });
   }
 };

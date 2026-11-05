@@ -6,7 +6,9 @@
  * Inputs
  *   localReviewRoutes() and reviewExitFields() (review.js), the exit
  *   reasons and the fields each one names; externalLabel() (paths.js);
- *   scanExcerptLimit() (lib/facts.js); buildTaggedSchema (lib/schema.js).
+ *   scanExcerptLimit() (lib/facts.js); buildTaggedSchema (lib/schema.js);
+ *   buildDestructiveListSchema (approvals.js), the optional destructive
+ *   list of each user_question option.
  *
  * Outputs
  *   buildReviewSchema()  REVIEW_SCHEMA, which main.js builds once: the
@@ -85,7 +87,7 @@ function describeReviewField(entry) {
 function rejectedFindingTexts() {
   return {
     finding_id: findingIdField(),
-    title: { type: 'string', text: 'The title of the finding.', isExternal: true },
+    title: { type: 'string', text: reviewFieldTexts().title.text, isExternal: true },
     record: { type: 'string', text: 'The path and section of the recorded decision the reviewer cites.', isExternal: true }
   };
 }
@@ -111,7 +113,11 @@ function buildUserQuestionSchema(description) {
     type: 'object',
     additionalProperties: false,
     required: ['id', 'summary'],
-    properties: { id: { type: 'string', enum: reviewOptionIds(), description: 'The option id, by position: A first.' }, summary: buildLabelledText(160, 'What picking this option does.') }
+    properties: {
+      id: { type: 'string', enum: reviewOptionIds(), description: 'The option id, by position: A first.' },
+      summary: buildLabelledText(160, 'What picking this option does.'),
+      destructive: buildDestructiveListSchema(externalLabel() + ' Each change it makes in a gate category.')
+    }
   };
   const recommendation = {
     type: 'object',

@@ -6,10 +6,12 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState: pass, answerLog, head,
- *          trunk and taken.
+ *          trunk, approvals and taken.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   gates  the gate loop state of runGates (gates.js): runs.review, answer
- *          and rejected.
+ *          and rejected, and takenReview, which only this module sets and
+ *          reads: the review whose call the run took, kept for the next
+ *          review run alone.
  *   review the local reviewer result, under REVIEW_SCHEMA.
  *
  * Outputs
@@ -40,7 +42,19 @@
  *           decision-autonomy.md (Review Calls), decide() reads the brief
  *           removeReviewerText builds in code from those choices, with safety
  *           false because clause 3 is not read, so it takes an agreed call that
- *           is reversible and not architectural and asks every other one. A
+ *           is reversible, not architectural and lists no destructive change,
+ *           and asks every other one. Each option's destructive list is shown
+ *           with its items encoded, and decide() reads each entry's category
+ *           with its item unshownBriefText(), so a recommended option that
+ *           lists a change asks gate_safety and is never taken. An ask's items
+ *           are the raw lists, so a letter reply approves the chosen option's
+ *           changes (applyApprovalChoices, approvals.js). When the review run
+ *           right after a take returns a hold readGateHold (approvals.js)
+ *           reads, askHeldReviewCall removes that call from run.taken and asks
+ *           its question of the user, through buildUndecidedAsk with
+ *           gate.safety true, its lead saying local review held back the call
+ *           the run took. The inputs block carries run.approvals as approvals
+ *           only when it is not empty. A
  *           take never pauses and never touches run.answerLog: takeReviewCall
  *           lists the call in run.taken, named by the short finding id with the
  *           encoded ask, and reruns the review gate with the next gateLabel
@@ -157,8 +171,11 @@ function describeReviewAnswerData(answer) {
   return dataBlocksSentence('The reply in user_answer');
 }
 
-function buildReviewPrompt(plan, trunk, answer) {
-  const inputs = { base: plan.base, working_branch: plan.branch, trunk: trunk, max_iterations: maxReviewIterations(), caller_validates: true };
+function buildReviewPrompt(plan, run, answer) {
+  const inputs = { base: plan.base, working_branch: plan.branch, trunk: run.trunk, max_iterations: maxReviewIterations(), caller_validates: true };
+  if (run.approvals.length > 0) {
+    inputs.approvals = run.approvals;
+  }
   if (answer !== undefined) {
     inputs.user_answer = answer;
   }
@@ -179,9 +196,8 @@ function buildReviewPrompt(plan, trunk, answer) {
  * agent failure, the describeNoResult sentence and next action run_again.
  */
 function describeReviewProblem(review) {
-  const problem = 'The local review step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.';
   if (!validateSchema(REVIEW_SCHEMA, review).ok || hasUnusableQuestion(review.user_question)) {
-    return describeUnusableResult(problem, review);
+    return describeUnusableResult('The local review step returned no usable result' + describeReviewEnd(), review);
   }
   return undefined;
 }
@@ -230,11 +246,15 @@ function quoteOrEmpty(text, limit) {
 
 function describeReviewStop(review, head) {
   const texts = reviewStopTexts(review);
-  const lines = [texts.lead + ' on commit ' + head + ' after ' + describeCount(review.iterations_completed, 'iteration') + ', with ' + describeCount(review.findings_open, 'finding') + ' still open, so ' + RUN_NAME + ' stopped before the pull request.'];
+  const lines = [texts.lead + ' on commit ' + head + ' after ' + describeCount(review.iterations_completed, 'iteration') + ', with ' + describeCount(review.findings_open, 'finding') + ' still open' + describeReviewEnd()];
   if (texts.detail !== undefined) {
     lines.push(texts.detail);
   }
   return lines.join('\n');
+}
+
+function describeReviewEnd() {
+  return ', so ' + RUN_NAME + ' stopped before the pull request.';
 }
 
 function quoteShortFindingId(findingId) {
@@ -249,7 +269,12 @@ function buildRejectedFindingsBlock(note, rejectedFindings) {
 
 function buildReviewOption(option, question) {
   const isRecommended = option.id === question.recommendation.option_id;
-  return { id: option.id, summary: encodeUntrustedText(option.summary), steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: !isRecommended || !question.gate.irreversible };
+  const changes = readOptionChanges(option).map((entry) => ({ category: entry.category, item: encodeUntrustedText(entry.item) }));
+  return { id: option.id, summary: encodeUntrustedText(option.summary), steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: !isRecommended || !question.gate.irreversible, destructive: changes };
+}
+
+function readOptionChanges(option) {
+  return option.destructive ?? [];
 }
 
 /**
@@ -291,7 +316,7 @@ function removeReviewerText(brief) {
   const texts = reviewCallTexts();
   return Object.assign({}, brief, {
     problem: texts.problem,
-    options: brief.options.map((option) => Object.assign({}, option, { summary: texts.summary })),
+    options: brief.options.map((option) => Object.assign({}, option, { summary: texts.summary, destructive: readOptionChanges(option).map((entry) => ({ category: entry.category, item: unshownBriefText() })) })),
     recommendation: Object.assign({}, brief.recommendation, { why: texts.why })
   });
 }
@@ -307,20 +332,46 @@ function describeReviewQuestionLead(review, head) {
  * reply, and decided_by run. run.answerLog is not touched.
  */
 function takeReviewCall(review, run, shown, lead) {
-  const listed = Object.assign({}, shown, { problem: 'Local review finding ' + quoteShortFindingId(review.finding_id) + ': ' + shown.problem });
-  acceptResolution({ taken: [{ brief: listed, kind: shown.kind }], reversibleEffects: [] }, run);
+  acceptResolution({ taken: [{ brief: listReviewCall(review, shown), kind: shown.kind }], reversibleEffects: [] }, run);
   return { answer: { question: lead + '\n\n' + renderQuestions([{ brief: shown }]), reply: shown.recommendation.option_id, decided_by: 'run' } };
 }
 
+function listReviewCall(review, shown) {
+  return Object.assign({}, shown, { problem: 'Local review finding ' + quoteShortFindingId(review.finding_id) + ': ' + shown.problem });
+}
+
 function askReviewQuestion(review, run) {
-  const kind = reviewQuestionKinds()[review.exit_reason];
   const shown = buildReviewQuestionBrief(review);
   const lead = describeReviewQuestionLead(review, run.head);
   const resolution = { asks: [], taken: [] };
-  if (resolveDecision(kind, removeReviewerText(shown), undefined, run, resolution) === 'take') {
+  if (resolveDecision(shown.kind, removeReviewerText(shown), undefined, run, resolution) === 'take') {
     return takeReviewCall(review, run, shown, lead);
   }
-  return askTail(Object.assign({}, resolution.asks[0], { brief: shown }), run, lead);
+  return askShownReviewQuestion(resolution.asks[0], review, run, lead);
+}
+
+/**
+ * Pauses on ask with the shown brief of review, its items the reviewer's
+ * raw destructive list of each option, so a letter reply approves the
+ * chosen option's changes (applyApprovalChoices, approvals.js).
+ */
+function askShownReviewQuestion(ask, review, run, lead) {
+  return askTail(Object.assign({}, ask, { brief: buildReviewQuestionBrief(review), items: review.user_question.options.map(readOptionChanges) }), run, lead);
+}
+
+/**
+ * Asks the user the question of review, a call the run took that local
+ * review then held back at the destructive-fix gate: the call leaves
+ * run.taken, and the question resolves through buildUndecidedAsk on the
+ * code-built brief with gate.safety true, so it is asked, never taken.
+ */
+function askHeldReviewCall(review, run) {
+  const shown = buildReviewQuestionBrief(review);
+  const listed = listReviewCall(review, shown);
+  run.taken = run.taken.filter((entry) => entry.brief.problem !== listed.problem);
+  const decided = removeReviewerText(shown);
+  const ask = buildUndecidedAsk(shown.kind, Object.assign({}, decided, { gate: Object.assign({}, decided.gate, { safety: true }) }), run);
+  return askShownReviewQuestion(ask, review, run, 'Local review held back the call the run took. ' + describeReviewQuestionLead(review, run.head));
 }
 
 function buildDiminishingReturnsBrief(review, head) {
@@ -350,9 +401,9 @@ function buildReviewEscalationBrief(review) {
   const isCluster = review.exit_reason === 'root-cluster-suspected';
   return buildTailBrief({
     kind: isCluster ? ROOT_CLUSTER_ROUTING_KIND : PLANNER_ESCALATION_ROUTING_KIND,
-    problem: isCluster
-      ? 'Local review found ' + describeCount(review.cluster_ids.length, 'finding') + ' in ' + describeCount(review.cluster_files.length, 'file') + ' that share one suspected root. Go back to planning, from fresh facts, for a remediation that closes the class?'
-      : 'Local review escalated finding ' + quoteShortFindingId(review.finding_id) + ' to the planner. Go back to planning, from fresh facts, for its remediation?',
+    problem: (isCluster
+      ? 'Local review found ' + describeCount(review.cluster_ids.length, 'finding') + ' in ' + describeCount(review.cluster_files.length, 'file') + ' that share one suspected root.'
+      : 'Local review escalated finding ' + quoteShortFindingId(review.finding_id) + ' to the planner.') + ' Go back to planning, from fresh facts, for ' + (isCluster ? 'a remediation that closes the class?' : 'its remediation?'),
     goOn: 'Plan the remediation from fresh facts.',
     strength: 'strong',
     why: 'The finding needs more than a simple fix, and a remediation plan that cannot be undone, changes how the system is built or touches safety comes to you before it runs.'
@@ -381,11 +432,12 @@ function requestReviewReplan(review, run) {
   if (isRunEnd(decided)) {
     return decided;
   }
+  const returned = 'Local review returned ' + review.exit_reason;
   if (run.replans >= maxReplans()) {
-    return stopForReviewReplan({ problem: 'Local review returned ' + review.exit_reason + ' after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.' }, review, run);
+    return stopForReviewReplan({ problem: returned + ' after ' + maxReplans() + ' replans, so ' + RUN_NAME + ' stopped.' }, review, run);
   }
   run.replans += 1;
-  const reason = 'Local review returned ' + review.exit_reason + ', so plan the remediation of what the review block reports, from the fresh facts.';
+  const reason = returned + ', so plan the remediation of what the review block reports, from the fresh facts.';
   return { replan: { reason: reason, review: projectReplanReview(review) } };
 }
 
@@ -418,18 +470,24 @@ function routeLocalReview(review, run) {
 async function runReviewGate(run, plan, gates) {
   const count = gates.runs.review;
   const answer = gates.answer;
+  const takenReview = gates.takenReview;
   gates.answer = undefined;
+  gates.takenReview = undefined;
   phase('Review');
-  const prompt = answer === undefined ? addResumeNote(buildReviewPrompt(plan, run.trunk), run) : buildReviewPrompt(plan, run.trunk, answer);
+  const prompt = answer === undefined ? addResumeNote(buildReviewPrompt(plan, run), run) : buildReviewPrompt(plan, run, answer);
   const review = await agent(prompt, reviewerOptions(gateLabel('review', run, count)));
   const unusable = describeReviewProblem(review);
   const committed = await runCommitStep(run, plan, { files: [], label: gateLabel('review-commit', run, count), stepName: 'review' }, unusable === undefined ? [] : [unusable]);
   if (committed.values === undefined) {
     return committed;
   }
-  const routed = routeLocalReview(review, run);
+  const isHeldCall = takenReview !== undefined && readGateHold(review, run.approvals).holds !== undefined;
+  const routed = isHeldCall ? askHeldReviewCall(takenReview, run) : routeLocalReview(review, run);
   if (routed.held) {
     gates.rejected = review.rejected_findings;
+  }
+  if (routed.answer !== undefined && routed.answer.decided_by === 'run') {
+    gates.takenReview = review;
   }
   return routed;
 }
