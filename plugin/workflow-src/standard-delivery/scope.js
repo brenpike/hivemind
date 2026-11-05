@@ -4,8 +4,8 @@
  * scope check and the scope step.
  *
  * Inputs
- *   run    the run state of main.js createRunState: request, pass and
- *          answerLog.
+ *   run    the run state of main.js createRunState: request, pass,
+ *          decisions and answerLog, read through listAnswerEntries.
  *   facts  the checked facts of the pass, from runFactsStep (relay.js).
  *          Its root line, the checkout root, converts scope paths.
  *   scope  the planner result in Scope Mode, under SCOPE_SCHEMA.
@@ -52,9 +52,10 @@
  *   work. A limit that fails isRepositoryPath matches no plan file, so the
  *   check of edits outside the limits asks: it fails closed by
  *   construction.
- *   With an empty answerLog the scope prompt is the prompt of a run with
- *   no answers, and it carries no resume note, so a resume replays it from
- *   cache. Otherwise it carries the whole log in an answers data block
+ *   With no decision and an empty answerLog the scope prompt is the prompt
+ *   of a run with no answers, and it carries no resume note, so a resume
+ *   replays it from cache. Otherwise it carries listAnswerEntries(run), each
+ *   launch decision then the whole log, in an answers data block
  *   right after the request block, and its data line calls settled only
  *   what the settled labels of each entry name, so an open question shown
  *   in the same round is never taken as settled.
@@ -175,7 +176,7 @@ function keepRepositoryPathEntries(scope, root) {
 
 async function runScopeStep(run, facts, round) {
   phase('Scope');
-  const scope = await agent(buildScopePrompt(run.request, facts, run.answerLog), scopeOptions(run.pass, round));
+  const scope = await agent(buildScopePrompt(run.request, facts, listAnswerEntries(run)), scopeOptions(run.pass, round));
   const unusable = describeScopeProblem(scope);
   return unusable === undefined ? { scope: keepRepositoryPathEntries(scope, facts.root) } : unusable;
 }

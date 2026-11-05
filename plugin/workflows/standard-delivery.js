@@ -673,7 +673,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '5238830b1a06e0ae';
+const BUILD_ID = '669f3510de99547b';
 
 function supportedSchemaKeywords(){
 return[
@@ -3131,11 +3131,12 @@ return'holds a control character';
 return'';
 }
 function describePlanProblem(planResult,resultSchema,facts,trunk,references){
+const stopped=', so '+RUN_NAME+' stopped.';
 if(!isPlainObject(planResult)){
-return'The planner returned no result, so '+RUN_NAME+' stopped.';
+return'The planner returned no result'+stopped;
 }
 if(!validateSchema(resultSchema,planResult).ok){
-return'The planner returned a plan that does not fit the plan schema, so '+RUN_NAME+' stopped.';
+return'The planner returned a plan that does not fit the plan schema'+stopped;
 }
 if(planResult.outcome==='blocked'){
 return'The planner could not plan the delivery: '+describeReason(planResult.blocker);
@@ -3143,40 +3144,40 @@ return'The planner could not plan the delivery: '+describeReason(planResult.bloc
 const plan=planResult.plan;
 const pathLocation=findRepositoryPathProblem(PLAN_SCHEMA,plan,'');
 if(pathLocation!==''){
-return'The plan names a path at '+pathLocation+' that is not a plain path inside the repository, so '+RUN_NAME+' stopped.';
+return'The plan names a path at '+pathLocation+' that is not a plain path inside the repository'+stopped;
 }
 const wave=computeWave(plan.steps,[]);
 if(!wave.ok){
 return'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem);
 }
 if(plan.trunk_freshness!==facts.trunk_freshness){
-return'The plan copies a trunk freshness other than the facts, so '+RUN_NAME+' stopped.';
+return'The plan copies a trunk freshness other than the facts'+stopped;
 }
 if(!isGitIdentifier(plan.branch)||!isGitIdentifier(plan.base)){
-return'The plan names a branch or base that is not a safe git name, so '+RUN_NAME+' stopped.';
+return'The plan names a branch or base that is not a safe git name'+stopped;
 }
 if(!plan.versioning.artifact_files.every((artifactPath)=>isGitIdentifier(artifactPath))){
-return'The plan names a version file path that is not a safe git path, so '+RUN_NAME+' stopped.';
+return'The plan names a version file path that is not a safe git path'+stopped;
 }
 for(let index=0;index<plan.validation_commands.length;index+=1){
 const commandProblem=describeValidationCommandProblem(plan.validation_commands[index]);
 if(commandProblem!==''){
-return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+', so '+RUN_NAME+' stopped.';
+return'The plan names a validation command at validation_commands['+index+'] that '+commandProblem+stopped;
 }
 }
 const typedTitle=new RegExp('^('+Object.values(commitTypeMap()).join('|')+')(\\([^()]*\\))?!?:','i');
 if(typedTitle.test(cleanTitleText(plan.title))){
-return'The plan title starts with a commit type, which the workflow writes before it, so '+RUN_NAME+' stopped.';
+return'The plan title starts with a commit type, which the workflow writes before it'+stopped;
 }
 if(buildTitleText(plan)===''){
-return'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so '+RUN_NAME+' stopped.';
+return'The plan title leaves no text once it is cleaned and cut to fit the pull request title'+stopped;
 }
 const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
 if(isOnOtherBranch&&plan.branch!==facts.branch){
-return'The run started on branch '+encodeUntrustedText(facts.branch)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+', so '+RUN_NAME+' stopped.';
+return'The run started on branch '+encodeUntrustedText(facts.branch)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+stopped;
 }
 if(!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(plan.branch)){
-return'The plan names branch '+encodeUntrustedText(plan.branch)+', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so '+RUN_NAME+' stopped.';
+return'The plan names branch '+encodeUntrustedText(plan.branch)+', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens'+stopped;
 }
 return describeClosesProblem(plan,references);
 }
@@ -3302,7 +3303,7 @@ let shownAsks=[];
 let shownResult;
 let shownEntry;
 const settledKinds=new Set();
-const planPrompt=buildPlanPrompt(run.request,facts,scope,replan,run.answerLog);
+const planPrompt=buildPlanPrompt(run.request,facts,scope,replan,listAnswerEntries(run));
 let planResult=await agent(planPrompt,plannerCallOptions('plan-'+run.pass,'Plan',resultSchema));
 for(;;){
 const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk,run.references);
@@ -3348,7 +3349,7 @@ shownAsks=resolution.asks;
 shownResult=planResult;
 shownEntry={question:questions,labels:listShownLabels(shownAsks),reply:reply};
 resultSchema=buildReviseResultSchema(shownAsks);
-const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:run.answerLog,plan:planResult.plan,questions:questions,reply:reply});
+const revisePrompt=buildPlanRevisePrompt({request:run.request,facts:facts,scope:scope,answers:listAnswerEntries(run),plan:planResult.plan,questions:questions,reply:reply});
 planResult=await agent(revisePrompt,plannerCallOptions('revise-'+round,'Revise',resultSchema));
 }
 }
@@ -4537,7 +4538,7 @@ limits:scope.limits.map((limit)=>toLimitPath(limit,root))
 }
 async function runScopeStep(run,facts,round){
 phase('Scope');
-const scope=await agent(buildScopePrompt(run.request,facts,run.answerLog),scopeOptions(run.pass,round));
+const scope=await agent(buildScopePrompt(run.request,facts,listAnswerEntries(run)),scopeOptions(run.pass,round));
 const unusable=describeScopeProblem(scope);
 return unusable===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:unusable;
 }
@@ -4868,6 +4869,12 @@ return 256;
 function maxPullRequestTextLength(){
 return 60000;
 }
+function maxDecisions(){
+return 10;
+}
+function maxDecisionLength(){
+return 2000;
+}
 function readDeliveryLaunch(rawArgs){
 const argsObject=readArgsObject(rawArgs);
 if(!isNonEmptyString(argsObject.request)){
@@ -4878,7 +4885,7 @@ if(launchInputs.problem!==undefined){
 return launchInputs;
 }
 if(!isGitIdentifier(launchInputs.trunk)){
-return{problem:'The trunk launch arg is not a safe git branch name, so '+RUN_NAME+' did not start.'};
+return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
 }
 const reviewInput=readLocalReview(argsObject);
 if(reviewInput.problem!==undefined){
@@ -4888,7 +4895,14 @@ const draftInput=readDraft(argsObject);
 if(draftInput.problem!==undefined){
 return draftInput;
 }
-return{argsObject:argsObject,request:argsObject.request,trunk:launchInputs.trunk,references:launchInputs.references,localReview:reviewInput.localReview,draft:draftInput.draft};
+const decisionsInput=readDecisions(argsObject);
+if(decisionsInput.problem!==undefined){
+return decisionsInput;
+}
+return{argsObject:argsObject,request:argsObject.request,trunk:launchInputs.trunk,references:launchInputs.references,localReview:reviewInput.localReview,draft:draftInput.draft,decisions:decisionsInput.decisions};
+}
+function describeLaunchProblem(reason){
+return{problem:reason+', so '+RUN_NAME+' did not start.'};
 }
 function readLocalReview(argsObject){
 if(argsObject.local_review===undefined){
@@ -4897,7 +4911,7 @@ return{localReview:true};
 if(argsObject.local_review===true||argsObject.local_review===false){
 return{localReview:argsObject.local_review};
 }
-return{problem:'The local_review launch arg must be true or false, so '+RUN_NAME+' did not start.'};
+return describeLaunchProblem('The local_review launch arg must be true or false');
 }
 function readDraft(argsObject){
 if(argsObject.draft===undefined){
@@ -4906,7 +4920,25 @@ return{draft:false};
 if(argsObject.draft===true||argsObject.draft===false){
 return{draft:argsObject.draft};
 }
-return{problem:'The draft launch arg must be true or false, so '+RUN_NAME+' did not start.'};
+return describeLaunchProblem('The draft launch arg must be true or false');
+}
+function isDecision(decision){
+return isNonEmptyString(decision)&&Array.from(decision).length<=maxDecisionLength();
+}
+function readDecisions(argsObject){
+const decisions=argsObject.decisions;
+if(decisions===undefined){
+return{decisions:[]};
+}
+if(Array.isArray(decisions)&&decisions.length>0&&decisions.length<=maxDecisions()&&decisions.every(isDecision)){
+return{decisions:decisions.slice()};
+}
+return describeLaunchProblem('The decisions launch arg must be a list of 1 to '+maxDecisions()+' non-blank strings of at most '+maxDecisionLength()+' characters each');
+}
+function listAnswerEntries(run){
+const label=questionLabel(0);
+const decisionEntries=run.decisions.map((decision)=>buildAnswerEntry({question:label+'. A decision you settled before the run started.',labels:[label],chosen:[{label:label}],reply:decision},undefined));
+return decisionEntries.concat(run.answerLog);
 }
 function createRunState(launch){
 return{
@@ -4915,6 +4947,7 @@ trunk:launch.trunk,
 references:launch.references,
 localReview:launch.localReview,
 draft:launch.draft,
+decisions:launch.decisions??[],
 level:resolveLevel(undefined,AUTONOMY_TABLE),
 storedAnswers:readStoredAnswers(launch.argsObject),
 pendingReply:readPendingReply(launch.argsObject),

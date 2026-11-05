@@ -27,7 +27,11 @@
  *          the launch turns it off, and any other value stops the run. draft
  *          is true or false: absent means false, so the pull request opens
  *          ready for review unless the launch asks for a draft, and any
- *          other value stops the run. answers and reply
+ *          other value stops the run. decisions, from the launch args
+ *          only, is absent or a list of 1 to maxDecisions() non-blank
+ *          strings of at most maxDecisionLength() code points each: the
+ *          user's own replies settled before launch, word for word. Any
+ *          other value stops the run before any agent call. answers and reply
  *          follow the result.js pause contract: answers['round-N'] holds the
  *          reply to round N, and reply answers the first round with no
  *          stored answer, only when answers is present. Round N is the
@@ -116,6 +120,10 @@
  *   commit made during a pause, or by a commit runner whose relay could
  *   not be read. That read also stamps run.headRound after the last
  *   planning reply.
+ *   run.decisions holds the decisions launch arg, [] when absent.
+ *   listAnswerEntries(run) puts one settled entry per decision ahead of
+ *   run.answerLog, and only the scope, plan and revise prompts read it;
+ *   run.answerLog, its rounds and resume_args never hold a decision.
  *   run.approvals starts [] and changes only through applyApprovalChoices
  *   (approvals.js) at each reply round, so it holds only the destructive
  *   changes the user's own replies approved, never a decision the run took.
@@ -326,6 +334,14 @@ function maxPullRequestTextLength() {
   return 60000;
 }
 
+function maxDecisions() {
+  return 10;
+}
+
+function maxDecisionLength() {
+  return 2000;
+}
+
 function readDeliveryLaunch(rawArgs) {
   const argsObject = readArgsObject(rawArgs);
   if (!isNonEmptyString(argsObject.request)) {
@@ -336,7 +352,7 @@ function readDeliveryLaunch(rawArgs) {
     return launchInputs;
   }
   if (!isGitIdentifier(launchInputs.trunk)) {
-    return { problem: 'The trunk launch arg is not a safe git branch name, so ' + RUN_NAME + ' did not start.' };
+    return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
   }
   const reviewInput = readLocalReview(argsObject);
   if (reviewInput.problem !== undefined) {
@@ -346,7 +362,15 @@ function readDeliveryLaunch(rawArgs) {
   if (draftInput.problem !== undefined) {
     return draftInput;
   }
-  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.localReview, draft: draftInput.draft };
+  const decisionsInput = readDecisions(argsObject);
+  if (decisionsInput.problem !== undefined) {
+    return decisionsInput;
+  }
+  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.localReview, draft: draftInput.draft, decisions: decisionsInput.decisions };
+}
+
+function describeLaunchProblem(reason) {
+  return { problem: reason + ', so ' + RUN_NAME + ' did not start.' };
 }
 
 function readLocalReview(argsObject) {
@@ -356,7 +380,7 @@ function readLocalReview(argsObject) {
   if (argsObject.local_review === true || argsObject.local_review === false) {
     return { localReview: argsObject.local_review };
   }
-  return { problem: 'The local_review launch arg must be true or false, so ' + RUN_NAME + ' did not start.' };
+  return describeLaunchProblem('The local_review launch arg must be true or false');
 }
 
 function readDraft(argsObject) {
@@ -366,7 +390,36 @@ function readDraft(argsObject) {
   if (argsObject.draft === true || argsObject.draft === false) {
     return { draft: argsObject.draft };
   }
-  return { problem: 'The draft launch arg must be true or false, so ' + RUN_NAME + ' did not start.' };
+  return describeLaunchProblem('The draft launch arg must be true or false');
+}
+
+function isDecision(decision) {
+  return isNonEmptyString(decision) && Array.from(decision).length <= maxDecisionLength();
+}
+
+/**
+ * Returns {decisions}, the decisions launch arg, [] when absent, or a
+ * launch problem when it is not a list of 1 to maxDecisions() decisions.
+ */
+function readDecisions(argsObject) {
+  const decisions = argsObject.decisions;
+  if (decisions === undefined) {
+    return { decisions: [] };
+  }
+  if (Array.isArray(decisions) && decisions.length > 0 && decisions.length <= maxDecisions() && decisions.every(isDecision)) {
+    return { decisions: decisions.slice() };
+  }
+  return describeLaunchProblem('The decisions launch arg must be a list of 1 to ' + maxDecisions() + ' non-blank strings of at most ' + maxDecisionLength() + ' characters each');
+}
+
+/**
+ * Returns one settled answer entry per launch decision, the decision word
+ * for word as its reply, followed by run.answerLog.
+ */
+function listAnswerEntries(run) {
+  const label = questionLabel(0);
+  const decisionEntries = run.decisions.map((decision) => buildAnswerEntry({ question: label + '. A decision you settled before the run started.', labels: [label], chosen: [{ label: label }], reply: decision }, undefined));
+  return decisionEntries.concat(run.answerLog);
 }
 
 function createRunState(launch) {
@@ -376,6 +429,7 @@ function createRunState(launch) {
     references: launch.references,
     localReview: launch.localReview,
     draft: launch.draft,
+    decisions: launch.decisions ?? [],
     level: resolveLevel(undefined, AUTONOMY_TABLE),
     storedAnswers: readStoredAnswers(launch.argsObject),
     pendingReply: readPendingReply(launch.argsObject),

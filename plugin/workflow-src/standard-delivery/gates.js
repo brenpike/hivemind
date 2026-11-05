@@ -14,7 +14,8 @@
  *          trunk_commit is the base of the version check.
  *   gates  the gate loop state runGates builds: held, notes, runs
  *          (validate, review, fix, headCheck and pr), failures, fixRounds,
- *          reruns, rejected and answer.
+ *          reruns, rejected, answer and takenReview, which only review.js
+ *          sets and reads (runReviewGate).
  *          failures maps a head to the kept failed validation on it:
  *          {status, failures, versionOnly, versionLine}.
  *   FIX_SCHEMA, VALIDATE_SCHEMA, VALIDATE_COMMANDS_SCHEMA and the limits of

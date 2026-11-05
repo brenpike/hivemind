@@ -8226,6 +8226,101 @@ const ROW_TESTS = {
       assert.equal(labelsOf(run).at(-1), 'review-commit-1-3');
       assert.ok(run.result.message.startsWith(main.describeReviewStop(GATE_HOLD, OTHER) + '\n\n'), run.result.message);
     });
+  },
+  'SD-80': () => {
+    const DECISION = 'Use Redis for the cache. DECISION_MARKER_ZQ';
+    const DECIDED = { ...LAUNCH, decisions: [DECISION] };
+    const ASTRAL = '\u{1F600}';
+    const decisionEntry = (reply) => ({ question: 'Q1. A decision you settled before the run started.', settled: ['Q1'], reply: reply });
+    const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
+    const invalid = [
+      ['a string', DECISION],
+      ['an object', { 0: DECISION }],
+      ['null', null],
+      ['an empty list', []],
+      ['a list of 11', Array.from({ length: 11 }, (unused, index) => 'Decision ' + index + '.')],
+      ['a list with a blank entry', [DECISION, ' \n ']],
+      ['a list with an empty entry', ['']],
+      ['a list with a non-string entry', [DECISION, 7]],
+      ['a list with an entry of 2001 code points', [ASTRAL.repeat(2001)]]
+    ];
+    for (const [name, decisions] of invalid) {
+      test('decisions as ' + name + ' blocks the launch with no agent call', async () => {
+        const run = await runWorkflow({ ...LAUNCH, decisions: decisions }, happyResults());
+        assert.deepEqual(run.result, { needs_user: false, outcome: 'blocked', message: withNextStep('The decisions launch arg must be a list of 1 to 10 non-blank strings of at most 2000 characters each, so the delivery did not start.') });
+        assert.deepEqual(run.calls, []);
+      });
+    }
+    test('a list of 10 and an entry of exactly 2000 code points launch, each decision kept word for word', async () => {
+      const decisions = [ASTRAL.repeat(2000), ...Array.from({ length: 9 }, (unused, index) => ' Decision ' + index + '.\n')];
+      const run = await runWorkflow({ ...LAUNCH, decisions: decisions }, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'answers'), decisions.map(decisionEntry));
+    });
+    test('with no decisions no prompt has an answers block and run.decisions is []', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(run.calls.every((call) => !hasDataBlock(call.prompt, 'answers')));
+      assert.equal(callOf(run, 'plan-1').prompt.split('\n')[2], lib.dataBlocksSentence(undefined));
+      const state = main.createRunState(main.readDeliveryLaunch({ request: REQUEST }));
+      assert.deepEqual(structuredClone([state.decisions, main.listAnswerEntries(state)]), [[], []]);
+    });
+    test('each decision reaches the scope, plan and revise prompts as a settled entry ahead of the answer log, and a resume replays the earlier prompts', async () => {
+      const paused = await runWorkflow(DECIDED, { 'facts-1': factsRelay(), 'plan-1': gated });
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      for (const label of ['scope-1', 'plan-1']) {
+        const prompt = callOf(paused, label).prompt;
+        assert.equal(prompt.split('\n')[2], SETTLED_ANSWERS_LINE, label);
+        assert.deepEqual(readDataBlock(prompt, 'answers'), [decisionEntry(DECISION)], label);
+      }
+      const resumed = await runWorkflow(resumeWith(DECIDED, paused.result, 'Go with A.'), happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) }));
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      for (const label of ['scope-1', 'plan-1']) {
+        assert.equal(callOf(resumed, label).prompt, callOf(paused, label).prompt, label);
+      }
+      const revise = callOf(resumed, 'revise-1').prompt;
+      assert.equal(revise.split('\n')[2], lib.dataBlocksSentence('The reply block') + SETTLED_LABELS_SENTENCE);
+      assert.deepEqual(readDataBlock(revise, 'answers'), [decisionEntry(DECISION)]);
+      assert.equal(readDataBlock(revise, 'reply'), 'Go with A.');
+      const rescoped = readDataBlock(callOf(resumed, 'scope-1-1').prompt, 'answers');
+      assert.deepEqual(rescoped.map((entry) => entry.reply), [DECISION, 'Go with A.']);
+      assert.deepEqual(rescoped[0], decisionEntry(DECISION));
+    });
+    test('a decision never enters the answer rounds, resume_args or the resume note', async () => {
+      const paused = await runWorkflow(DECIDED, { 'facts-1': factsRelay(), 'plan-1': gated });
+      assert.deepEqual(paused.result.resume_args, { answers: {}, build: BUILD_ID });
+      const again = await runWorkflow(resumeWith(DECIDED, paused.result, 'Go with A.'), { 'facts-1': factsRelay(), 'plan-1': gated, 'revise-1': reviseResult(gated, []) });
+      assert.equal(again.result.needs_user, true, again.result.message);
+      assert.deepEqual(again.result.resume_args, { answers: { 'round-1': 'Go with A.' }, build: BUILD_ID });
+      const fresh = await runWorkflow(DECIDED, happyResults());
+      assert.equal(fresh.result.outcome, 'complete', fresh.result.message);
+      assert.ok(fresh.calls.every((call) => !call.prompt.includes(main.resumedReplySentence())));
+    });
+    test('a decision never changes run.approvals, even one written as a letter reply', async () => {
+      const destructive = planResult(makePlan(), [destructiveBrief([[TEST_X], []])]);
+      const argsFor = (reply) => ({ ...LAUNCH, decisions: ['Q1 A', 'A'], build: BUILD_ID, answers: { 'round-1': reply } });
+      const results = happyResults({ 'plan-1': destructive, 'revise-1': reviseResult(planResult(), ['Q1']) });
+      const freeText = await runWorkflow(argsFor('Go on as you think best.'), results);
+      assert.equal(freeText.result.outcome, 'complete', freeText.result.message);
+      assert.ok(!hasDataBlock(callOf(freeText, 'work-1-STEP-001').prompt, 'approvals'));
+      const letter = await runWorkflow(argsFor('A'), results);
+      assert.deepEqual(readDataBlock(callOf(letter, 'work-1-STEP-001').prompt, 'approvals'), [TEST_X]);
+      const state = main.createRunState(main.readDeliveryLaunch({ request: REQUEST, decisions: ['Q1 A'] }));
+      main.listAnswerEntries(state);
+      assert.deepEqual(structuredClone([state.approvals, state.answerLog]), [[], []]);
+    });
+    test('analysis-only does not read decisions: a valid or invalid decisions arg leaves its run unchanged', async () => {
+      const analysisSource = buildWorkflow(repoRoot, 'analysis-only');
+      const analysis = loadWorkflowSource(analysisSource, 'analysis-only (in memory)');
+      const runAnalysis = async (args) => structuredClone(await analysis.run({ args: args, results: { facts: null } }));
+      const plain = await runAnalysis({ request: REQUEST });
+      assert.ok(plain.calls.length > 0);
+      for (const decisions of [[DECISION], 'not a list']) {
+        const decided = await runAnalysis({ request: REQUEST, decisions: decisions });
+        assert.deepEqual([decided.result, decided.calls], [plain.result, plain.calls]);
+      }
+      assert.doesNotMatch(analysisSource, /\.decisions\b/);
+    });
   }
 };
 
