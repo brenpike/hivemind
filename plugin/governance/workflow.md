@@ -38,7 +38,7 @@ Proceed only when both tab-separated integers it prints are `0`; otherwise offer
 
 ## Version Bumps
 
-A PR needs a bump when it changes runtime behavior, public API, compatibility contract, generated or packaged output, distribution metadata or documented consumer expectation; a docs-, test-, CI-, governance-, changelog- or markdown-only change needs none unless it alters a documented consumer expectation. MAJOR: breaking public API, compatibility, data format or runtime contract; MINOR: backward-compatible new capability, option or behavior; PATCH: bug fix or internal refactor, no public impact. Rules: `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (Bump Trigger).
+Judge whether a change needs a version bump, and its type, by `${CLAUDE_PLUGIN_ROOT}/governance/versioning.md` (SemVer Rules, Bump Trigger); read those sections when a run reaches that judgment.
 
 ## PR Requirements
 
