@@ -1,6 +1,6 @@
 # Workflow State Machine Reference
 
-Read this file to understand the declarative workflow substrate: how workflow definitions are shaped, the legal v1 state types, the governing invariant, and the universal fallback. The runtime contract is established in ADR-0018.
+Read this file to understand the declarative workflow substrate: how workflow definitions are shaped, the legal v1 state types, the governing invariant, and the universal fallback. The runtime contract is established in ADR-0018. `tools/validate_workflows.sh` checks definitions against it; agents read the runtime rules from `plugin/agents/overlord.md` and `plugin/references/run-ledger-schema.md`, not from this file.
 
 ## What a workflow definition is
 
@@ -151,7 +151,7 @@ Looping is expressed with an explicit `decision` state (e.g. `implement_next_ste
 
 ## Run ownership
 
-A run ledger is owned and mutated only by the overlord instance whose worktree contains it; cross-instance reads (the hatchery reading a child ledger for status) are read-only, enforced by worktree isolation rather than convention — each instance's `.hivemind/runs/` lives in its own working tree; the brood manifest is the sole shared artifact and only the hatchery writes it. See [run-ledger-schema.md](${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md) for the ledger shape and [brood-ledger-model.md](${CLAUDE_PLUGIN_ROOT}/references/brood-ledger-model.md) for the manifest.
+A run ledger is owned and mutated only by the overlord instance whose worktree contains it; cross-instance reads (the hatchery reading a child ledger for status) are read-only, enforced by worktree isolation rather than convention — each instance's `.hivemind/runs/` lives in its own working tree; the brood manifest is the sole shared artifact and only the hatchery writes it. See [run-ledger-schema.md](${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md) for the ledger shape and [brood-ledger-model.md](brood-ledger-model.md) for the manifest.
 
 ## Intent-driven execution is the universal fallback
 

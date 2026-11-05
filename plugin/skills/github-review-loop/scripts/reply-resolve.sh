@@ -11,11 +11,11 @@
 # (github-reviewer.md step 12), where the ordering invariant (reply BEFORE
 # resolve), the reply-body format, the resolve-eligibility predicate, and the
 # non-blocking-resolve posture all drifted independently from the actual GraphQL
-# templates in references/github-pr-review-graphql.md.
+# templates in docs/references/github-pr-review-graphql.md.
 #
 # This script OWNS the runtime mutation calls. The two GraphQL mutations it issues
 # are the canonical templates from
-#   ${CLAUDE_PLUGIN_ROOT}/references/github-pr-review-graphql.md
+#   docs/references/github-pr-review-graphql.md
 #     - "Reply to Review Thread"  -> addPullRequestReviewThreadReply
 #     - "Resolve Review Thread"   -> resolveReviewThread
 # cited here as the query origin. External content (the summary text, the tracked
@@ -398,7 +398,7 @@ else
 fi
 
 # The canonical mutations. Owned HERE as the single source; the query bodies are
-# the verbatim templates from references/github-pr-review-graphql.md. External
+# the verbatim templates from docs/references/github-pr-review-graphql.md. External
 # content (the body string) is DATA: passed via `gh -f body=...`, never spliced
 # into the query text itself.
 REPLY_MUTATION='

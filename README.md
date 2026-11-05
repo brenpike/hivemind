@@ -366,11 +366,12 @@ plugin/                     # plugin root; everything Claude Code loads lives he
   governance/               # runtime governance docs loaded via ${CLAUDE_PLUGIN_ROOT}/governance/
   workflows/                # JSON workflow definitions (state machines) and the generated .js workflow scripts
   workflow-src/             # workflow script sources (<id>/meta.js, <id>/main.js, lib/), built into workflows/
-  references/               # runtime reference docs (ledger, facts, plan and brief schemas, autonomy table, GraphQL operations, state machine)
+  references/               # runtime reference docs (ledger, facts, plan and brief schemas, autonomy table, Author Filtering)
 web/                        # GitHub Pages website (HTML, styles, TypeScript in src/, vitest tests)
 docs/
   adr/                      # architecture decision records
   prds/                     # product requirement documents
+  references/               # maintainer specs for scripts
   design/prototypes/        # archived design explorations (not deployed)
   design/design-system.html # style system reference (not deployed)
   engineering-principles.md
@@ -466,16 +467,16 @@ Governance docs are plugin runtime data: agents load them via `${CLAUDE_PLUGIN_R
 
 ### References
 
-Runtime reference docs in `plugin/references/`:
+Runtime reference docs in `plugin/references/`, and maintainer specs in `docs/references/` (the rows say which):
 
 | File | Contents |
 |---|---|
 | `run-ledger-schema.md` | Run ledger shape (`.hivemind/runs/<run-id>/state.json`), event shape, and decision-journal convention |
-| `workflow-state-machine.md` | Workflow definition shape, legal state types, and the governing invariant |
-| `brood-ledger-model.md` | Brood manifest shape and how it bridges to per-strain run ledgers |
+| `docs/references/workflow-state-machine.md` | Maintainer spec, not loaded at runtime: workflow definition shape, legal state types, and the governing invariant |
+| `docs/references/brood-ledger-model.md` | Maintainer spec for the brood scripts, not loaded at runtime: brood manifest shape and how it bridges to per-strain run ledgers |
 | `fix-ledger-schema.md` | Local reviewer fix-ledger schema |
-| `github-pr-review-graphql.md` | GitHub operations for PR review remediation, reviewer filters, and approval detection |
-| `github-subissue-graphql.md` | GitHub operations for native sub-issues |
+| `github-pr-review-graphql.md` | Author Filtering only: reviewer identity scoping for `reviewer_filter`. The GraphQL and shell spec for PR review remediation is in `docs/references/github-pr-review-graphql.md` |
+| `docs/references/github-subissue-graphql.md` | Maintainer spec for the sub-issue scripts, not loaded at runtime: GitHub operations for native sub-issues |
 | `facts-schema.json` | Shape of the branch facts file `hivemind:gather-facts` writes: branch state, history against trunk, the branch's PRs, and the external texts, each list saying whether it is complete |
 | `plan-schema.json` | The plan payload the cerebrate returns to the `standard-delivery` script: branch, the pull request title, classification, bump judgments, the validation commands the validate step runs, delivery, and steps with file scopes, dependencies and declared effects outside the repo |
 | `decision-autonomy-table.json` | The autonomy table workflow scripts decide by: hard stops, and per decision kind whether each autonomy level decides it or asks you |

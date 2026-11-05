@@ -16,7 +16,7 @@
 #
 # This script OWNS the runtime reaction mutation. The mutation it issues is the
 # canonical template from
-#   ${CLAUDE_PLUGIN_ROOT}/references/github-pr-review-graphql.md
+#   docs/references/github-pr-review-graphql.md
 #     - "Reaction Marker" (Emit)  -> addReaction(input:{subjectId,content:EYES})
 # cited here as the query origin, and the EYES constant below is conceptually
 # single-sourced from that same subsection (it is the SAME literal the classifier
@@ -76,9 +76,9 @@
 #     (unmapped-surface). The reaction mutation is NEVER a fallback.
 #   - SINGLE NAMED MARKER: EYES is the ONE reaction content, defined ONCE as a
 #     script-level readonly constant and identical to the literal the classifier
-#     harvest keys on (references/github-pr-review-graphql.md "Reaction Marker").
+#     harvest keys on (docs/references/github-pr-review-graphql.md "Reaction Marker").
 #   - IDEMPOTENCY: a duplicate is a server-side success per
-#     ${CLAUDE_PLUGIN_ROOT}/references/github-pr-review-graphql.md (Reaction Marker ->
+#     docs/references/github-pr-review-graphql.md (Reaction Marker ->
 #     Emit), never special-cased: it arrives as the same success payload and passes
 #     the RESPONSE CHECK below like any first reaction. It cannot happen in normal
 #     flow, because a node already carrying the viewer's EYES reaction classifies
@@ -150,7 +150,7 @@ SURFACE=""
 CANDIDATE_URL=""
 
 # EYES is the SINGLE named marker constant — a member of the GraphQL ReactionContent
-# enum, conceptually single-sourced from references/github-pr-review-graphql.md
+# enum, conceptually single-sourced from docs/references/github-pr-review-graphql.md
 # ("Reaction Marker"). It is the SAME literal the classifier harvest keys on.
 readonly REACTION_CONTENT="EYES"
 
@@ -211,7 +211,7 @@ fi
 
 # The canonical reaction mutation. Owned HERE as the single source; the query body
 # is the verbatim "Reaction Marker" (Emit) template from
-# references/github-pr-review-graphql.md. External content (the node id) is DATA:
+# docs/references/github-pr-review-graphql.md. External content (the node id) is DATA:
 # passed via `gh -F id=...` as the typed `$id: ID!` variable, never spliced into the
 # query text itself.
 REACT_MUTATION='

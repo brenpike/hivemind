@@ -21,9 +21,7 @@ Rules: `GIT-01` (no trunk commits).
 The manifest (`.hivemind/broods/<brood-id>/manifest.json`) is a registry and
 coordination artifact, not the source of truth for child workflow state, which lives
 in each child's own run ledger. This skill never creates a child or hatchery ledger:
-`hatchery.ledger` only points at the hatchery ledger. Manifest shape, task.md
-contents, launch and verification passes, and status derivation:
-`${CLAUDE_PLUGIN_ROOT}/references/brood-ledger-model.md`.
+`hatchery.ledger` only points at the hatchery ledger.
 
 ## Required Inputs
 

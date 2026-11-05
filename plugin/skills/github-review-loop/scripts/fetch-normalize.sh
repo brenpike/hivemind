@@ -11,7 +11,7 @@
 # sites that drift independently (the node-id escalation chain):
 #   - prefilter.sh's inline GraphQL query literal,
 #   - the github-reviewer agent prose (steps 3 / 4 / 13's field lists),
-#   - references/github-pr-review-graphql.md's query templates.
+#   - docs/references/github-pr-review-graphql.md's query templates.
 # This script OWNS the canonical fetch query and the normalized output schema.
 # It is behavior-preserving on the fetch + normalize path: the candidate set it
 # emits is the union of (a) the shared classifier filter's per-comment /
