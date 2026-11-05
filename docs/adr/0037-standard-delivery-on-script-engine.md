@@ -1951,3 +1951,30 @@ This amendment covers https://github.com/brenpike/hivemind/issues/509. In run `w
 The rest of ADR-0037 is unchanged. Status remains accepted.
 
 Links: https://github.com/brenpike/hivemind/issues/509, https://github.com/brenpike/hivemind/pull/510.
+
+## Amendment 2026-11-04: the build's dynamic-access refusal keeps its names (local review finding 4840d918)
+
+**The finding.** Local review finding 4840d918, on the branch for issue 508, said `UNRESOLVABLE_READS` in `tools/build_workflows.mjs` refuses only `eval`, `globalThis`, `Function`, `this` and `with`. It said code that reaches the Function constructor as `({}).constructor.constructor`, or reads a global alias such as `window`, `self` or `global`, could read a declaration the build prunes while the build passes. It asked for an allowlisted syntax subset, or no pruning when such code occurs.
+
+**Decided 2026-11-04, run call: rejected.** The run took this call under `plugin/governance/decision-autonomy.md` (Review Calls), option A: keep the refusal as it is. The user can veto it before merge. This is a recorded decision under `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). It is not a recorded residual, because no defect is left unfixed.
+
+**Reasons.**
+
+- A built script runs as the body of one async function. Its sources parse with top-level return and await, and `tests/workflow-scripts/harness.mjs` runs it the same way. So each top-level declaration it carries is local to that function, never a property of the global object.
+- Code the Function constructor builds, by any path to it, and code an indirect eval runs, run in global scope and cannot see that function's locals. A global alias reaches only global properties. None of them can read a declaration the build prunes.
+- Only a direct eval and a `with` statement resolve names in the enclosing scope. A direct eval is a call of the identifier `eval` itself. The build refuses `eval` and `with`, and also `this` and `globalThis`.
+- Probe, 2026-11-04, in a Node `vm` context: inside an async function that declares `helper`, `({}).constructor.constructor("return typeof helper")()`, `(0, eval)("typeof helper")` and `typeof globalThis.helper` each gave `undefined`, and `eval("typeof helper")` gave `function`.
+- The asked allowlist adds a syntax checker and removes nothing (doctrine Surface-Growth Escalation), and closes no class the scope rule above leaves open.
+
+**Scope.** A finding is a REPEAT of this decision when it says code built at run time (the Function constructor by any path, or an indirect eval) or a global alias can read a declaration the build prunes, or asks the refusal to cover more names for that reason. A finding is NEW, and gets First-Finding Triage, when it shows any of these:
+
+- a built script that runs other than as one function body, so its top-level declarations become global properties;
+- a direct eval or a `with` statement the build does not refuse;
+- a read of a pruned declaration through a path that resolves names in the script's own scope;
+- a declaration the built script reads by name that the build prunes.
+
+**The key.** This record is matched by the scope above, not by the finding id, since finding ids change from run to run.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/508.
