@@ -120,10 +120,10 @@ function reviewDecisionProblems() {
 
 function toPullRequestDecision(entry) {
   if (Object.values(reviewQuestionKinds()).includes(entry.kind)) {
-    return { brief: removeReviewerText(entry.brief) };
+    return { brief: removeReviewerText(entry.brief), kind: entry.kind };
   }
   const problem = reviewDecisionProblems()[entry.kind];
-  return problem === undefined ? { brief: entry.brief } : { brief: Object.assign({}, entry.brief, { problem: problem }) };
+  return { brief: problem === undefined ? entry.brief : Object.assign({}, entry.brief, { problem: problem }), kind: entry.kind };
 }
 
 function isPullRequestCharacter(codePoint, keepsLines) {

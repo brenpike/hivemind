@@ -2713,7 +2713,11 @@ const ROW_TESTS = {
       routineOnly.taken.push(entries[0], entries[5], entries.at(-1));
       assert.deepEqual([...main.buildRunRecordParts(routineOnly, routineOnly.taken, undefined).map((part) => part.id)], []);
       assert.deepEqual([...main.buildRecordTailBlocks(routineOnly, routineOnly.taken)], []);
-      assert.throws(() => main.buildRunRecordParts(routineOnly, [], undefined), /^Error: buildRunRecordParts: taken must map run\.taken$/);
+      const reordered = [...state.taken].reverse().filter((entry, index) => index % 2 === 0);
+      const reorderedShown = reordered.filter((entry) => listedKinds.includes(entry.kind)).map((entry) => ({ brief: entry.brief }));
+      assert.ok(reordered.length < state.taken.length && reorderedShown.length > 0 && reorderedShown.length < reordered.length);
+      assert.equal(main.buildRunRecordParts(state, reordered, undefined).find((part) => part.id === 'decisions').text, lib.renderDecisions(reorderedShown));
+      assert.equal(main.buildRunRecordParts(state, reordered.map(main.toPullRequestDecision), undefined).find((part) => part.id === 'decisions').compact, lib.renderDecisionsCompact(reordered.filter((entry) => listedKinds.includes(entry.kind)).map(main.toPullRequestDecision)));
     });
     test('a pause after waves lists no commit, and a resume replays every earlier prompt byte for byte', async () => {
       const results = happyResults({

@@ -31,8 +31,8 @@
  *   observeHead(run, commit, branch)  sets run.head to commit, run.branch
  *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
- *           request body and its comment carry, with no commit list. taken
- *           is run.taken mapped in order; a length that differs throws.
+ *           request body and its comment carry, with no commit list. Each
+ *           taken entry keeps its kind, so the routine ones drop out.
  *   routineDecisionKinds()  the kinds of taken decision no record shows:
  *           plan_acceptance, remediation_plan_acceptance and gate_rerun.
  *           buildRunRecordParts, buildRecordTailBlocks and so every final
@@ -153,14 +153,7 @@ function isShownDecision(entry) {
 }
 
 function buildRunRecordParts(run, taken, gates) {
-  /*
-   * INVARIANT: taken is run.taken mapped in order (pr.js), so the kind of
-   * taken[index] is the kind of run.taken[index].
-   */
-  if (taken.length !== run.taken.length) {
-    throw new Error('buildRunRecordParts: taken must map run.taken');
-  }
-  const shown = taken.filter((entry, index) => isShownDecision(run.taken[index]));
+  const shown = taken.filter(isShownDecision);
   const parts = [];
   if (run.reversibleEffects.length > 0) {
     parts.push({ id: 'reversible_effects', text: renderReversibleEffects(run.reversibleEffects), external: true });
