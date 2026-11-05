@@ -673,7 +673,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'a6e5645ee2793e4a';
+const BUILD_ID = '7e54ff3584d5274d';
 
 function supportedSchemaKeywords(){
 return[
@@ -2424,6 +2424,41 @@ return{category:entry.category,item:entry.item};
 function hasItem(items,entry){
 return items.some((other)=>other.category===entry.category&&other.item===entry.item);
 }
+function buildDestructiveListSchema(description){
+const entry={
+type:'object',
+additionalProperties:false,
+required:['category','item'],
+properties:{category:{type:'integer',enum:[1,2,3,4,5,6,7,8,9,10]},item:{type:'string',maxLength:160}}
+};
+return{type:'array',maxItems:4,description:description,items:entry};
+}
+function readGateHold(result,approvals){
+if(quoteDiagnostic(result.blocker)===undefined){
+return{nextAction:'report'};
+}
+if(result.stage!=='destructive-fix-gate'&&!isDestructiveGateBlocker(result.blocker)){
+return{nextAction:result.next_action};
+}
+const listed=Array.isArray(result.destructive)?result.destructive.map(readItem):[];
+const holds=listed.filter((entry)=>!hasItem(approvals,entry));
+return{nextAction:holds.length===0?'report':'approve',holds:holds};
+}
+function isDestructiveGateBlocker(text){
+return text.trimStart().toLowerCase().startsWith('proposed fix requires human confirmation');
+}
+function describeGateWait(){
+return' waits for your approval at the destructive-fix gate';
+}
+function describeApprovalsHome(approvals,replyHome){
+if(approvals.length===0){
+return replyHome;
+}
+return replyHome===undefined?'The approvals block':replyHome+', like the approvals block,';
+}
+function listApprovalsBlock(approvals){
+return approvals.length===0?[]:[formatDataBlock('approvals',approvals)];
+}
 
 function remediationGateTexts(){
 return{
@@ -2439,7 +2474,7 @@ return{
 id:'plan',
 kind:PLAN_ACCEPTANCE_KIND,
 problem:'Start delivering the plan: create or confirm its working branch and run its steps.',
-criticality:{level:'medium',likelihood:'certain',blast_radius:'The working branch and the files the plan steps list.',if_ignored:unshownBriefText()},
+criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
 {id:'A',summary:'Accept the plan and run its steps.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'medium',value:'high',reversible:true},
 {id:'B',summary:'Stop before any step runs.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true}
@@ -2469,7 +2504,7 @@ return{
 id:'trunk',
 kind:TRUNK_STALE_KIND,
 problem:'The trunk may not be up to date: its freshness is '+facts.trunk_freshness+', '+Number(facts.trunk_ahead)+' commits ahead of its remote and '+Number(facts.trunk_behind)+' behind. Create or confirm the working branch from it anyway?',
-criticality:{level:'low',likelihood:'occasional',blast_radius:'The base of the working branch.',if_ignored:unshownBriefText()},
+criticality:{level:'low',likelihood:'occasional',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
 {id:'A',summary:'Go on from the trunk as it is.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'medium',reversible:true},
 {id:'B',summary:'Stop so you can bring the trunk up to date first.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true}
@@ -2484,7 +2519,7 @@ return{
 id:'effect',
 kind:EXTERNAL_EFFECT_KIND,
 problem:'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
-criticality:{level:'high',likelihood:'certain',blast_radius:'Something outside the repo, which no branch change can undo.',if_ignored:unshownBriefText()},
+criticality:{level:'high',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
 {id:'A',summary:'Go on and let the step make this effect.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:false},
 {id:'B',summary:'Change or drop the step first.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true}
@@ -2515,7 +2550,7 @@ return{
 id:'tail',
 kind:kind,
 problem:problem,
-criticality:{level:'medium',likelihood:'certain',blast_radius:'The working branch and the pull request it becomes.',if_ignored:unshownBriefText()},
+criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
 {id:'A',summary:goOn,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true},
 {id:'B',summary:other===undefined?'Plan again: this run gives your reply to the planner before anything goes further.':other,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true}
@@ -2527,30 +2562,47 @@ gate:{irreversible:false,architectural:false,safety:false}
 }
 function stepStopTexts(){
 return{
-approve:['none','reply','Only you can approve a change the destructive-fix gate holds back.'],
 fix_cause:['strong','commit any change and reply','Clearing it lets the step go on.'],
 report:['weak','nothing in your repo needs a fix: the run\'s own step failed; reply to try once more','A stop that comes back is a workflow defect: report it, do not retry.'],
 run_again:['strong','reply','The cause clears itself.']
 };
+}
+function describeStopThen(isReplan){
+return isReplan?'the run plans again from fresh facts':'the run takes the stopped step again';
 }
 function buildStepStopBrief(causes,isReplan){
 const texts=stepStopTexts();
 const leadAction=orderStopCauses(causes)[0].nextAction;
 const[strength,words,why]=Object.hasOwn(texts,leadAction)?texts[leadAction]:texts.fix_cause;
 const action=leadAction==='report'?words:describeStopAction(leadAction,words);
-const then=isReplan?'the run plans again from fresh facts.':'the run takes the stopped step again.';
-return{
-id:'stop',
+const brief=buildTailBrief({
 kind:STEP_STOP_KIND,
-problem:action.charAt(0).toUpperCase()+action.slice(1)+', and '+then,
-criticality:{level:'medium',likelihood:'certain',blast_radius:'The working branch and the pull request it becomes.',if_ignored:unshownBriefText()},
-options:[
-{id:'A',summary:isReplan?'Go on: plan again from fresh facts.':'Go on: take the stopped step again.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true}
-],
-recommendation:{option_id:'A',strength:strength,why:why},
-assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
-gate:{irreversible:false,architectural:false,safety:false}
-};
+problem:action.charAt(0).toUpperCase()+action.slice(1)+', and '+describeStopThen(isReplan)+'.',
+goOn:isReplan?'Go on: plan again from fresh facts.':'Go on: take the stopped step again.',
+strength:strength,
+why:why
+});
+return Object.assign(brief,{options:brief.options.slice(0,1)});
+}
+function buildApprovalBrief(stepText,change,isReplan){
+const brief=buildTailBrief({
+kind:STEP_STOP_KIND,
+problem:stepText+describeGateWait()+'.',
+goOn:'Approve this change.',
+other:'Keep it as it is, and '+describeStopThen(isReplan)+' without it.',
+strength:'none',
+why:'Only you can approve a change the destructive-fix gate holds back.'
+});
+brief.options[0].destructive=[change];
+return brief;
+}
+function buildApprovalAsk(hold,isReplan,run){
+const ask=buildUndecidedAsk(STEP_STOP_KIND,buildApprovalBrief('A step',{category:hold.category,item:unshownBriefText()},isReplan),run);
+const shown=buildApprovalBrief('Step '+encodeUntrustedText(hold.stepId),{category:hold.category,item:encodeUntrustedText(hold.item)},isReplan);
+return Object.assign({},ask,{brief:shown,items:[[{category:hold.category,item:hold.item}],[]]});
+}
+function buildApprovalAsks(holds,isReplan,run){
+return holds.map((hold)=>buildApprovalAsk(hold,isReplan,run));
 }
 function raiseVersion(version,bumpType){
 const parts=version.split('.').map(Number);
@@ -2576,7 +2628,7 @@ kind:VERSION_BUMP_INDETERMINABLE_KIND,
 problem:isUnreadable
 ?'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
 :'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-criticality:{level:'medium',likelihood:'certain',blast_radius:'The version files on the working branch and the pull request it becomes.',if_ignored:unshownBriefText()},
+criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:listVersionOptions(values),
 recommendation:{option_id:'A',strength:'none',why:'Only you can decide the version of this delivery.'},
 assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
@@ -2642,10 +2694,12 @@ properties:{
 outcome:{type:'string',enum:['complete','blocked'],description:'complete when the task is done. blocked when it cannot be done.'},
 blocker:{type:'string',maxLength:400,description:'Why the task cannot be done, in one or two short sentences written for the user.'},
 next_action:buildNextActionProperty(),
-files:{type:'array',description:'Every path you created, edited or deleted, relative to the top of the repository.',items:{type:'string'}}
+files:{type:'array',description:'Every path you created, edited or deleted, relative to the top of the repository.',items:{type:'string'}},
+stage:buildStageProperty(),
+destructive:buildDestructiveListSchema(describeHeldChanges())
 },
 required:['outcome','files'],
-variants:{complete:{required:[],optional:[]},blocked:{required:[],optional:['blocker','next_action']}}
+variants:{complete:{required:[],optional:[]},blocked:{required:[],optional:['blocker','next_action','stage','destructive']}}
 });
 }
 function buildValidateSchema(hasCommands,hasVersion){
@@ -2688,13 +2742,13 @@ return outcome.result!==undefined||outcome.replan!==undefined;
 function buildBumpTypeInputs(trunkCommit,versioning){
 return{base:trunkCommit,bump_trigger:versioning.bump_trigger,no_bump_match:versioning.no_bump_match};
 }
-function readGateEditOutcome(result,schema){
+function readGateEditOutcome(result,schema,approvals){
 if(!validateSchema(schema,result).ok){
-const unusable=describeUnusableResult('it returned no usable result.',result);
+const unusable=describeUnusableEdit(result);
 return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 if(result.outcome==='blocked'){
-return{status:'blocked',reason:describeReason(result.blocker),files:result.files,nextAction:readBlockerAction(result.blocker,result.next_action)};
+return Object.assign({status:'blocked',reason:describeReason(result.blocker),files:result.files},readGateHold(result,approvals));
 }
 return{status:'complete',files:result.files};
 }
@@ -2776,12 +2830,12 @@ const versionLine=describeVersionMismatch(values);
 const isFailed=validation.status==='failed';
 return{status:'failed',failures:isFailed?validation.failures+'\n\n'+versionLine:versionLine,versionOnly:!isFailed,versionLine:versionLine};
 }
-function buildFixPrompt(fix,plan,trunk){
+function buildFixPrompt(fix,plan,run){
 const lines=[
 'Fix the failed validation of the delivery: the failures block below holds what the validation reported.',
 validationFixSentence(),
 boundarySentence(),
-fix.userAnswer===undefined?dataBlocksSentence():dataBlocksSentence('The reply in user_answer'),
+dataBlocksSentence(describeApprovalsHome(run.approvals,fix.userAnswer===undefined?undefined:'The reply in user_answer')),
 '',
 formatDataBlock('failures',fix.failures)
 ];
@@ -2791,17 +2845,24 @@ lines.push(formatDataBlock('version_files',plan.versioning.artifact_files));
 if(fix.userAnswer!==undefined){
 lines.push(formatDataBlock('user_answer',fix.userAnswer));
 }
-lines.push(formatDataBlock('plan_summary',plan.summary),formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:trunk}));
+lines.push(formatDataBlock('plan_summary',plan.summary),formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:run.trunk}),...listApprovalsBlock(run.approvals));
 return lines.join('\n');
+}
+function describeFixCause(edit){
+const cause={problem:'The validation fix round was blocked, so '+RUN_NAME+' stopped: '+edit.reason,nextAction:edit.nextAction,agentFailure:edit.agentFailure};
+if(edit.nextAction==='approve'){
+cause.holds=edit.holds.map((hold)=>({stepId:'fix',...hold}));
+}
+return cause;
 }
 async function runFixRound(run,plan,fix,gates){
 phase('Fix');
 gates.runs.fix+=1;
 const count=gates.runs.fix;
-const prompt=fix.userAnswer===undefined?addResumeNote(buildFixPrompt(fix,plan,run.trunk),run):buildFixPrompt(fix,plan,run.trunk);
+const prompt=fix.userAnswer===undefined?addResumeNote(buildFixPrompt(fix,plan,run),run):buildFixPrompt(fix,plan,run);
 const result=await agent(prompt,droneOptions(gateLabel('fix',run,count),'Fix',FIX_SCHEMA));
-const edit=readGateEditOutcome(result,FIX_SCHEMA);
-const stepCauses=edit.status==='blocked'?[{problem:'The validation fix round was blocked, so '+RUN_NAME+' stopped: '+edit.reason,nextAction:edit.nextAction,agentFailure:edit.agentFailure}]:[];
+const edit=readGateEditOutcome(result,FIX_SCHEMA,run.approvals);
+const stepCauses=edit.status==='blocked'?[describeFixCause(edit)]:[];
 const committed=await runCommitStep(run,plan,{files:edit.files,label:gateLabel('fix-commit',run,count),stepName:'fix'},stepCauses);
 if(committed.values===undefined){
 return committed;
@@ -3608,11 +3669,18 @@ function describeStopLead(causes,endLines){
 const causeTexts=buildStopBlocks(causes).filter((block)=>block.whole!==true).map((block)=>block.text);
 return causeTexts.concat(endLines).join('\n');
 }
+function listStopAsks(causes,run,isReplan){
+const leadCause=orderStopCauses(causes)[0];
+if(leadCause.nextAction==='approve'){
+return buildApprovalAsks(leadCause.holds,isReplan,run);
+}
+return[buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(causes,isReplan),run)];
+}
 function stopDelivery(causes,run,endLines,isReplan){
 if(causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
 return{result:finishDeliveryBlocked(causes,run,endLines)};
 }
-const asked=askTail(buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(causes,isReplan),run),run,describeStopLead(causes,endLines));
+const asked=askTails(listStopAsks(causes,run,isReplan),run,describeStopLead(causes,endLines));
 if(asked.answer===undefined){
 return asked;
 }
@@ -4574,6 +4642,15 @@ enum:['fix_cause','run_again'],
 description:'run_again when the cause is outside the repo and passes with no change, such as machine load, a timeout or a network failure. fix_cause otherwise.'
 };
 }
+function buildStageProperty(){
+return{type:'string',maxLength:40,description:'Worker Report stage.'};
+}
+function describeHeldChanges(){
+return'With stage destructive-fix-gate: each change held back for approval, by gate category number and the one item it changes, named exactly.';
+}
+function describeUnusableEdit(result){
+return describeUnusableResult('it returned no usable result.',result);
+}
 function buildWorkerSchema(){
 return buildTaggedSchema({
 tag:'outcome',
@@ -4586,26 +4663,28 @@ description:'complete when the step outcome holds. blocked when the step cannot 
 summary:{type:'string',description:'What you changed, in one or two sentences.'},
 blocker:{type:'string',maxLength:400,description:'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.'},
 next_action:buildNextActionProperty(),
-stage:{type:'string',maxLength:40,description:'Worker Report stage.'}
+stage:buildStageProperty(),
+destructive:buildDestructiveListSchema(describeHeldChanges())
 },
 required:['outcome','summary'],
 variants:{
 complete:{required:[],optional:[]},
-blocked:{required:[],optional:['blocker','next_action','stage']},
+blocked:{required:[],optional:['blocker','next_action','stage','destructive']},
 needs_replan:{required:[],optional:['blocker']}
 }
 });
 }
-function buildWorkerPrompt(step,waveScopes,plan,trunk){
+function buildWorkerPrompt(step,waveScopes,plan,run){
 return[
 'Do one step of the approved delivery plan: the step in the step block below.',
 boundarySentence(),
-dataBlocksSentence(),
+dataBlocksSentence(describeApprovalsHome(run.approvals,undefined)),
 '',
 formatDataBlock('step',step),
 formatDataBlock('wave_scopes',waveScopes),
 formatDataBlock('plan_summary',plan.summary),
-formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:trunk})
+formatDataBlock('git',{branch:plan.branch,base:plan.base,trunk:run.trunk}),
+...listApprovalsBlock(run.approvals)
 ].join('\n');
 }
 function listStepFiles(steps){
@@ -4629,33 +4708,31 @@ return plan.steps.find((step)=>step.id===stepId);
 }
 function createWorkerTask(step,waveSteps,plan,run){
 const waveScopes=listStepFiles(waveSteps.filter((other)=>other.id!==step.id));
-const prompt=addResumeNote(buildWorkerPrompt(step,waveScopes,plan,run.trunk),run);
+const prompt=addResumeNote(buildWorkerPrompt(step,waveScopes,plan,run),run);
 const options={agentType:step.owner,schema:toAgentSchema(WORKER_SCHEMA),label:'work-'+run.pass+'-'+step.id,phase:'Waves'};
 return()=>agent(prompt,options);
 }
-function readWorkerOutcome(step,result){
+function readWorkerOutcome(step,result,approvals){
 if(!validateSchema(WORKER_SCHEMA,result).ok){
-const unusable=describeUnusableResult('it returned no usable result.',result);
+const unusable=describeUnusableEdit(result);
 return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 if(result.outcome==='complete'){
 return{stepId:step.id,status:'complete'};
 }
-return{stepId:step.id,status:result.outcome,reason:describeReason(result.blocker),nextAction:readWorkerAction(result)};
+return Object.assign({stepId:step.id,status:result.outcome,reason:describeReason(result.blocker)},readGateHold(result,approvals));
 }
-function readWorkerAction(result){
-if(quoteDiagnostic(result.blocker)===undefined){
-return'report';
+function describeBlockedVerb(outcome){
+if(outcome.holds===undefined){
+return' was blocked: ';
 }
-const isGateHold=result.stage==='destructive-fix-gate'||isDestructiveGateBlocker(result.blocker);
-return isGateHold?'approve':result.next_action;
-}
-function isDestructiveGateBlocker(text){
-return text.trimStart().toLowerCase().startsWith('proposed fix requires human confirmation');
+return outcome.nextAction==='approve'?describeGateWait()+': ':' stopped at the destructive-fix gate without a change the run can approve: ';
 }
 function describeBlockedStep(outcome){
-const verb=outcome.nextAction==='approve'?' waits for your approval at the destructive-fix gate: ':' was blocked: ';
-return'- Step '+encodeUntrustedText(outcome.stepId)+verb+outcome.reason;
+return'- Step '+encodeUntrustedText(outcome.stepId)+describeBlockedVerb(outcome)+outcome.reason;
+}
+function listStepHolds(outcomes){
+return outcomes.flatMap((outcome)=>(outcome.nextAction==='approve'?outcome.holds.map((hold)=>({stepId:outcome.stepId,...hold})):[]));
 }
 function describeBlockedWave(blockedOutcomes){
 const lead='A worker did not finish its step, so '+RUN_NAME+' stopped after its wave:';
@@ -4664,6 +4741,9 @@ const stepLines=orderedOutcomes.map(describeBlockedStep);
 const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:orderedOutcomes[0].nextAction};
 if(blockedOutcomes.some((outcome)=>outcome.agentFailure===true)){
 cause.agentFailure=true;
+}
+if(cause.nextAction==='approve'){
+cause.holds=listStepHolds(orderedOutcomes);
 }
 return cause;
 }
@@ -4694,7 +4774,7 @@ const waveSteps=wave.wave.map((stepId)=>findPlanStep(plan,stepId));
 phase('Waves');
 const workerResults=await parallel(waveSteps.map((step)=>createWorkerTask(step,waveSteps,plan,run)));
 run.waveCount+=1;
-const outcomes=waveSteps.map((step,index)=>readWorkerOutcome(step,workerResults[index]));
+const outcomes=waveSteps.map((step,index)=>readWorkerOutcome(step,workerResults[index],run.approvals));
 const blockedOutcomes=outcomes.filter((outcome)=>outcome.status==='blocked');
 const stepCauses=blockedOutcomes.length>0?[describeBlockedWave(blockedOutcomes)]:[];
 const commit={files:listStepFiles(waveSteps),label:'commit-'+run.pass+'-'+waveNumber,stepName:'wave',subject:buildWaveSubject(waveSteps,waveNumber)};

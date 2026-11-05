@@ -5,7 +5,7 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The loop reads pass,
- *          replies and trunk, and updates waveCount and replans.
+ *          replies, trunk and approvals, and updates waveCount and replans.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
  *   facts  the checked facts of the pass, passed on to runGates.
  *   Each worker result: an object under WORKER_SCHEMA, or null.
@@ -17,6 +17,11 @@
  *          wave or the reply to a stop.
  *   buildNextActionProperty()  the next_action property the worker, gate
  *          edit and validate schemas share.
+ *   buildStageProperty() and describeHeldChanges()  the stage property
+ *          and the destructive list description the worker and gate edit
+ *          schemas share.
+ *   describeUnusableEdit(result)  the cause of an unusable worker or gate
+ *          edit result, through describeUnusableResult (lib/stop.js).
  *   buildWaveSubject(waveSteps, waveNumber)  the commit subject of a wave:
  *          the outcome of its one step, or the ids of its steps then the
  *          first outcome, through toCommitSubject (relay.js), whose
@@ -33,15 +38,17 @@
  *   worker result counts as blocked: its reason names the agent failure
  *   through describeUnusableResult (lib/stop.js), with next action
  *   run_again, and readWorkerOutcome passes its agentFailure mark on.
- *   readWorkerOutcome types a blocked worker: report when its blocker
- *   gives no reason, approve when its stage is destructive-fix-gate or its
- *   blocker starts with the security-policy.md gate text, else its own
- *   next_action. describeBlockedWave makes the one cause of a blocked wave:
- *   a lead line naming the stop, then one line per blocked step in
- *   orderStopCauses order (lib/stop.js) through capItemLines, an approve
- *   step waiting for approval, the first giving the next action, so
- *   run_again only when every blocked worker says so, and agentFailure
- *   when any blocked worker had a null result. A plan that cannot be
+ *   readWorkerOutcome types a blocked worker through readGateHold
+ *   (approvals.js) with run.approvals. describeBlockedWave makes the one
+ *   cause of a blocked wave: a lead line naming the stop, then one line per
+ *   blocked step in orderStopCauses order (lib/stop.js) through
+ *   capItemLines, an approve step waiting for approval and a report hold
+ *   stopped at the gate without a change the run can approve, the first
+ *   giving the next action, so run_again only when every blocked worker
+ *   says so, holds the {stepId, category, item} of each approve step's
+ *   holds, and agentFailure when any blocked worker had a null result.
+ *   The worker prompt carries the approvals block only when run.approvals
+ *   is not empty. A plan that cannot be
  *   scheduled mid-run is a report stop. runCommitStep
  *   (relay.js) takes that cause as its step cause and stops with it through
  *   stopDelivery (record.js) as a replan, so a commit stop never hides it,
@@ -66,6 +73,18 @@ function buildNextActionProperty() {
   };
 }
 
+function buildStageProperty() {
+  return { type: 'string', maxLength: 40, description: 'Worker Report stage.' };
+}
+
+function describeHeldChanges() {
+  return 'With stage destructive-fix-gate: each change held back for approval, by gate category number and the one item it changes, named exactly.';
+}
+
+function describeUnusableEdit(result) {
+  return describeUnusableResult('it returned no usable result.', result);
+}
+
 function buildWorkerSchema() {
   return buildTaggedSchema({
     tag: 'outcome',
@@ -78,27 +97,29 @@ function buildWorkerSchema() {
       summary: { type: 'string', description: 'What you changed, in one or two sentences.' },
       blocker: { type: 'string', maxLength: 400, description: 'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty(),
-      stage: { type: 'string', maxLength: 40, description: 'Worker Report stage.' }
+      stage: buildStageProperty(),
+      destructive: buildDestructiveListSchema(describeHeldChanges())
     },
     required: ['outcome', 'summary'],
     variants: {
       complete: { required: [], optional: [] },
-      blocked: { required: [], optional: ['blocker', 'next_action', 'stage'] },
+      blocked: { required: [], optional: ['blocker', 'next_action', 'stage', 'destructive'] },
       needs_replan: { required: [], optional: ['blocker'] }
     }
   });
 }
 
-function buildWorkerPrompt(step, waveScopes, plan, trunk) {
+function buildWorkerPrompt(step, waveScopes, plan, run) {
   return [
     'Do one step of the approved delivery plan: the step in the step block below.',
     boundarySentence(),
-    dataBlocksSentence(),
+    dataBlocksSentence(describeApprovalsHome(run.approvals, undefined)),
     '',
     formatDataBlock('step', step),
     formatDataBlock('wave_scopes', waveScopes),
     formatDataBlock('plan_summary', plan.summary),
-    formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: trunk })
+    formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: run.trunk }),
+    ...listApprovalsBlock(run.approvals)
   ].join('\n');
 }
 
@@ -126,37 +147,35 @@ function findPlanStep(plan, stepId) {
 
 function createWorkerTask(step, waveSteps, plan, run) {
   const waveScopes = listStepFiles(waveSteps.filter((other) => other.id !== step.id));
-  const prompt = addResumeNote(buildWorkerPrompt(step, waveScopes, plan, run.trunk), run);
+  const prompt = addResumeNote(buildWorkerPrompt(step, waveScopes, plan, run), run);
   const options = { agentType: step.owner, schema: toAgentSchema(WORKER_SCHEMA), label: 'work-' + run.pass + '-' + step.id, phase: 'Waves' };
   return () => agent(prompt, options);
 }
 
-function readWorkerOutcome(step, result) {
+function readWorkerOutcome(step, result, approvals) {
   if (!validateSchema(WORKER_SCHEMA, result).ok) {
-    const unusable = describeUnusableResult('it returned no usable result.', result);
+    const unusable = describeUnusableEdit(result);
     return { stepId: step.id, status: 'blocked', reason: unusable.problem, nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
   }
   if (result.outcome === 'complete') {
     return { stepId: step.id, status: 'complete' };
   }
-  return { stepId: step.id, status: result.outcome, reason: describeReason(result.blocker), nextAction: readWorkerAction(result) };
+  return Object.assign({ stepId: step.id, status: result.outcome, reason: describeReason(result.blocker) }, readGateHold(result, approvals));
 }
 
-function readWorkerAction(result) {
-  if (quoteDiagnostic(result.blocker) === undefined) {
-    return 'report';
+function describeBlockedVerb(outcome) {
+  if (outcome.holds === undefined) {
+    return ' was blocked: ';
   }
-  const isGateHold = result.stage === 'destructive-fix-gate' || isDestructiveGateBlocker(result.blocker);
-  return isGateHold ? 'approve' : result.next_action;
-}
-
-function isDestructiveGateBlocker(text) {
-  return text.trimStart().toLowerCase().startsWith('proposed fix requires human confirmation');
+  return outcome.nextAction === 'approve' ? describeGateWait() + ': ' : ' stopped at the destructive-fix gate without a change the run can approve: ';
 }
 
 function describeBlockedStep(outcome) {
-  const verb = outcome.nextAction === 'approve' ? ' waits for your approval at the destructive-fix gate: ' : ' was blocked: ';
-  return '- Step ' + encodeUntrustedText(outcome.stepId) + verb + outcome.reason;
+  return '- Step ' + encodeUntrustedText(outcome.stepId) + describeBlockedVerb(outcome) + outcome.reason;
+}
+
+function listStepHolds(outcomes) {
+  return outcomes.flatMap((outcome) => (outcome.nextAction === 'approve' ? outcome.holds.map((hold) => ({ stepId: outcome.stepId, ...hold })) : []));
 }
 
 function describeBlockedWave(blockedOutcomes) {
@@ -166,6 +185,9 @@ function describeBlockedWave(blockedOutcomes) {
   const cause = { problem: [lead, ...capItemLines(stepLines)].join('\n'), nextAction: orderedOutcomes[0].nextAction };
   if (blockedOutcomes.some((outcome) => outcome.agentFailure === true)) {
     cause.agentFailure = true;
+  }
+  if (cause.nextAction === 'approve') {
+    cause.holds = listStepHolds(orderedOutcomes);
   }
   return cause;
 }
@@ -199,7 +221,7 @@ async function runPlanWaves(run, plan, facts) {
     phase('Waves');
     const workerResults = await parallel(waveSteps.map((step) => createWorkerTask(step, waveSteps, plan, run)));
     run.waveCount += 1;
-    const outcomes = waveSteps.map((step, index) => readWorkerOutcome(step, workerResults[index]));
+    const outcomes = waveSteps.map((step, index) => readWorkerOutcome(step, workerResults[index], run.approvals));
     const blockedOutcomes = outcomes.filter((outcome) => outcome.status === 'blocked');
     const stepCauses = blockedOutcomes.length > 0 ? [describeBlockedWave(blockedOutcomes)] : [];
     const commit = { files: listStepFiles(waveSteps), label: 'commit-' + run.pass + '-' + waveNumber, stepName: 'wave', subject: buildWaveSubject(waveSteps, waveNumber) };

@@ -44,8 +44,18 @@
  *            the repo needs a fix, strong. report: nothing in your repo
  *            needs a fix, a step of the run failed, reply to try once more,
  *            weak, and its why says a stop that comes back is a workflow
- *            defect to report, not retry. approve: approve or refuse the
- *            change named above, strength none.
+ *            defect to report, not retry. It is built through
+ *            buildTailBrief with its option B left out.
+ *   buildApprovalAsks(holds, isReplan, run)  the asks of an approve stop,
+ *            one step_stop ask per held item {stepId, category, item}, in
+ *            hold order. Its shown brief names the encoded step in its
+ *            problem; option A, Approve this change, lists the encoded item
+ *            with its category; option B keeps it as it is, and the reply
+ *            plans again or takes the stopped step again without it;
+ *            strength none. decide() reads a code-built copy with no step
+ *            id and an unshown item, which fits BRIEF_SCHEMA whatever the
+ *            hold holds. ask.items is [[{category, item}], []], so only
+ *            the user's own reply choosing A approves the item as given.
  *   buildVersionQuestionBrief(values)  the version_bump_indeterminable
  *            brief the validate gate asks through buildUndecidedAsk
  *            (tails.js), strength none. For undetermined its options are a major, minor and
@@ -88,7 +98,7 @@ function buildPlanAcceptanceBrief(plan) {
     id: 'plan',
     kind: PLAN_ACCEPTANCE_KIND,
     problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the files the plan steps list.', if_ignored: unshownBriefText() },
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
       { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true },
       { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
@@ -120,7 +130,7 @@ function buildTrunkStaleBrief(facts) {
     id: 'trunk',
     kind: TRUNK_STALE_KIND,
     problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
-    criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'The base of the working branch.', if_ignored: unshownBriefText() },
+    criticality: { level: 'low', likelihood: 'occasional', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
       { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true },
       { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
@@ -136,7 +146,7 @@ function buildExternalEffectBrief(summary) {
     id: 'effect',
     kind: EXTERNAL_EFFECT_KIND,
     problem: 'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
-    criticality: { level: 'high', likelihood: 'certain', blast_radius: 'Something outside the repo, which no branch change can undo.', if_ignored: unshownBriefText() },
+    criticality: { level: 'high', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
       { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false },
       { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
@@ -182,7 +192,7 @@ function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
     id: 'tail',
     kind: kind,
     problem: problem,
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
       { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true },
       { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
@@ -195,11 +205,14 @@ function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
 
 function stepStopTexts() {
   return {
-    approve: ['none', 'reply', 'Only you can approve a change the destructive-fix gate holds back.'],
     fix_cause: ['strong', 'commit any change and reply', 'Clearing it lets the step go on.'],
     report: ['weak', 'nothing in your repo needs a fix: the run\'s own step failed; reply to try once more', 'A stop that comes back is a workflow defect: report it, do not retry.'],
     run_again: ['strong', 'reply', 'The cause clears itself.']
   };
+}
+
+function describeStopThen(isReplan) {
+  return isReplan ? 'the run plans again from fresh facts' : 'the run takes the stopped step again';
 }
 
 function buildStepStopBrief(causes, isReplan) {
@@ -207,19 +220,37 @@ function buildStepStopBrief(causes, isReplan) {
   const leadAction = orderStopCauses(causes)[0].nextAction;
   const [strength, words, why] = Object.hasOwn(texts, leadAction) ? texts[leadAction] : texts.fix_cause;
   const action = leadAction === 'report' ? words : describeStopAction(leadAction, words);
-  const then = isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.';
-  return {
-    id: 'stop',
+  const brief = buildTailBrief({
     kind: STEP_STOP_KIND,
-    problem: action.charAt(0).toUpperCase() + action.slice(1) + ', and ' + then,
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
-    options: [
-      { id: 'A', summary: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true }
-    ],
-    recommendation: { option_id: 'A', strength: strength, why: why },
-    assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
-    gate: { irreversible: false, architectural: false, safety: false }
-  };
+    problem: action.charAt(0).toUpperCase() + action.slice(1) + ', and ' + describeStopThen(isReplan) + '.',
+    goOn: isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.',
+    strength: strength,
+    why: why
+  });
+  return Object.assign(brief, { options: brief.options.slice(0, 1) });
+}
+
+function buildApprovalBrief(stepText, change, isReplan) {
+  const brief = buildTailBrief({
+    kind: STEP_STOP_KIND,
+    problem: stepText + describeGateWait() + '.',
+    goOn: 'Approve this change.',
+    other: 'Keep it as it is, and ' + describeStopThen(isReplan) + ' without it.',
+    strength: 'none',
+    why: 'Only you can approve a change the destructive-fix gate holds back.'
+  });
+  brief.options[0].destructive = [change];
+  return brief;
+}
+
+function buildApprovalAsk(hold, isReplan, run) {
+  const ask = buildUndecidedAsk(STEP_STOP_KIND, buildApprovalBrief('A step', { category: hold.category, item: unshownBriefText() }, isReplan), run);
+  const shown = buildApprovalBrief('Step ' + encodeUntrustedText(hold.stepId), { category: hold.category, item: encodeUntrustedText(hold.item) }, isReplan);
+  return Object.assign({}, ask, { brief: shown, items: [[{ category: hold.category, item: hold.item }], []] });
+}
+
+function buildApprovalAsks(holds, isReplan, run) {
+  return holds.map((hold) => buildApprovalAsk(hold, isReplan, run));
 }
 
 function raiseVersion(version, bumpType) {
@@ -249,7 +280,7 @@ function buildVersionQuestionBrief(values) {
     problem: isUnreadable
       ? 'The version check cannot read one version from the version files. It reads the top-level version string of a .json file, the one version = "X.Y.Z" line of a .toml file and any other file whole, each a plain X.Y.Z version, the same at the trunk. Which version should they hold?'
       : 'The version bump cannot be told from the commits on the branch and the plan answers on versioning. Which version bump does the delivery need?',
-    criticality: { level: 'medium', likelihood: 'certain', blast_radius: 'The version files on the working branch and the pull request it becomes.', if_ignored: unshownBriefText() },
+    criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: listVersionOptions(values),
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide the version of this delivery.' },
     assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],

@@ -6,7 +6,7 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
- *          head, headRound, trunk and localReview, and update answerLog,
+ *          head, headRound, trunk, localReview and approvals, and update answerLog,
  *          notRunGates and versionAnswer. headRound is the answerLog length
  *          at the last head read (observeHead, record.js).
  *   plan   the accepted plan, from runPlanningPass (plan.js).
@@ -82,8 +82,13 @@
  *   next action run_again, and readGateEditOutcome passes its agentFailure
  *   mark on; any other unusable result, a malformed version relay among
  *   them, gets report. A blocked validation or fix round whose blocker
- *   gives no reason is report too (readBlockerAction), and a blocked
- *   version relay takes readRelayAction (relay.js). The fix step reads its result before the commit and passes its
+ *   gives no reason is report too (readBlockerAction), a blocked fix
+ *   round is typed through readGateHold (approvals.js) with run.approvals,
+ *   its approve cause holding the {stepId 'fix', category, item} of each
+ *   hold, and a blocked version relay takes readRelayAction (relay.js).
+ *   The fix prompt carries the approvals block only when run.approvals is
+ *   not empty. A fix round hold stops with isReplan false, so the reply
+ *   reruns the gate, and its next fix round carries the approvals. The fix step reads its result before the commit and passes its
  *   cause, if any, to runCommitStep (relay.js), which stops with every
  *   cause through stopDelivery with isReplan false, so a commit stop never
  *   hides a step cause; a stop it returns is returned as is. A null fix
@@ -154,10 +159,12 @@ function buildGateEditSchema() {
       outcome: { type: 'string', enum: ['complete', 'blocked'], description: 'complete when the task is done. blocked when it cannot be done.' },
       blocker: { type: 'string', maxLength: 400, description: 'Why the task cannot be done, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty(),
-      files: { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } }
+      files: { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } },
+      stage: buildStageProperty(),
+      destructive: buildDestructiveListSchema(describeHeldChanges())
     },
     required: ['outcome', 'files'],
-    variants: { complete: { required: [], optional: [] }, blocked: { required: [], optional: ['blocker', 'next_action'] } }
+    variants: { complete: { required: [], optional: [] }, blocked: { required: [], optional: ['blocker', 'next_action', 'stage', 'destructive'] } }
   });
 }
 
@@ -205,13 +212,13 @@ function buildBumpTypeInputs(trunkCommit, versioning) {
   return { base: trunkCommit, bump_trigger: versioning.bump_trigger, no_bump_match: versioning.no_bump_match };
 }
 
-function readGateEditOutcome(result, schema) {
+function readGateEditOutcome(result, schema, approvals) {
   if (!validateSchema(schema, result).ok) {
-    const unusable = describeUnusableResult('it returned no usable result.', result);
+    const unusable = describeUnusableEdit(result);
     return { status: 'blocked', reason: unusable.problem, files: [], nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
   }
   if (result.outcome === 'blocked') {
-    return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: readBlockerAction(result.blocker, result.next_action) };
+    return Object.assign({ status: 'blocked', reason: describeReason(result.blocker), files: result.files }, readGateHold(result, approvals));
   }
   return { status: 'complete', files: result.files };
 }
@@ -311,12 +318,12 @@ function applyVersionCheck(validation, run) {
   return { status: 'failed', failures: isFailed ? validation.failures + '\n\n' + versionLine : versionLine, versionOnly: !isFailed, versionLine: versionLine };
 }
 
-function buildFixPrompt(fix, plan, trunk) {
+function buildFixPrompt(fix, plan, run) {
   const lines = [
     'Fix the failed validation of the delivery: the failures block below holds what the validation reported.',
     validationFixSentence(),
     boundarySentence(),
-    fix.userAnswer === undefined ? dataBlocksSentence() : dataBlocksSentence('The reply in user_answer'),
+    dataBlocksSentence(describeApprovalsHome(run.approvals, fix.userAnswer === undefined ? undefined : 'The reply in user_answer')),
     '',
     formatDataBlock('failures', fix.failures)
   ];
@@ -326,18 +333,26 @@ function buildFixPrompt(fix, plan, trunk) {
   if (fix.userAnswer !== undefined) {
     lines.push(formatDataBlock('user_answer', fix.userAnswer));
   }
-  lines.push(formatDataBlock('plan_summary', plan.summary), formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: trunk }));
+  lines.push(formatDataBlock('plan_summary', plan.summary), formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: run.trunk }), ...listApprovalsBlock(run.approvals));
   return lines.join('\n');
+}
+
+function describeFixCause(edit) {
+  const cause = { problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + edit.reason, nextAction: edit.nextAction, agentFailure: edit.agentFailure };
+  if (edit.nextAction === 'approve') {
+    cause.holds = edit.holds.map((hold) => ({ stepId: 'fix', ...hold }));
+  }
+  return cause;
 }
 
 async function runFixRound(run, plan, fix, gates) {
   phase('Fix');
   gates.runs.fix += 1;
   const count = gates.runs.fix;
-  const prompt = fix.userAnswer === undefined ? addResumeNote(buildFixPrompt(fix, plan, run.trunk), run) : buildFixPrompt(fix, plan, run.trunk);
+  const prompt = fix.userAnswer === undefined ? addResumeNote(buildFixPrompt(fix, plan, run), run) : buildFixPrompt(fix, plan, run);
   const result = await agent(prompt, droneOptions(gateLabel('fix', run, count), 'Fix', FIX_SCHEMA));
-  const edit = readGateEditOutcome(result, FIX_SCHEMA);
-  const stepCauses = edit.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + edit.reason, nextAction: edit.nextAction, agentFailure: edit.agentFailure }] : [];
+  const edit = readGateEditOutcome(result, FIX_SCHEMA, run.approvals);
+  const stepCauses = edit.status === 'blocked' ? [describeFixCause(edit)] : [];
   const committed = await runCommitStep(run, plan, { files: edit.files, label: gateLabel('fix-commit', run, count), stepName: 'fix' }, stepCauses);
   if (committed.values === undefined) {
     return committed;

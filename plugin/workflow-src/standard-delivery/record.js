@@ -10,8 +10,11 @@
  *   gates   the gate loop state of runGates (gates.js), once the gates ran.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a stop, {problem, nextAction?, terminal?,
- *           agentFailure?} each: terminal true marks a cause no reply can
- *           clear, and agentFailure comes only from describeUnusableResult.
+ *           agentFailure?, holds?} each: terminal true marks a cause no
+ *           reply can clear, agentFailure comes only from
+ *           describeUnusableResult, and a cause with next action approve
+ *           carries holds, its held items {stepId, category, item}, never
+ *           empty.
  *   endLines  lines a stop shows after its causes, such as a commit end.
  *   commit, branch  a head read from a checked relay: the commit line of
  *           a molt relay or of a branch relay, and the plan branch.
@@ -54,9 +57,12 @@
  *           maxBlockedLeadLength() code points has the cutAtBoundary prefix
  *           of at most those code points as its compact form.
  *   stopDelivery  ends through finishDeliveryBlocked when any cause is
- *           terminal or an agent failure. Otherwise it asks one undecided
+ *           terminal or an agent failure. When its lead cause in
+ *           orderStopCauses order is approve, it asks buildApprovalAsks
+ *           (briefs.js) of that cause's holds through askTails (tails.js),
+ *           one question per held item. Otherwise it asks one undecided
  *           step_stop question (buildStepStopBrief, briefs.js) through
- *           buildUndecidedAsk and askTail (tails.js): decide() asks it
+ *           buildUndecidedAsk and askTails: decide() asks it
  *           table_surface at every level, so its recommendation, strong
  *           for fix_cause and run_again, is never taken. The askTail lead is
  *           the cause problems in buildStopBlocks order, then the end
@@ -253,11 +259,19 @@ function describeStopLead(causes, endLines) {
   return causeTexts.concat(endLines).join('\n');
 }
 
+function listStopAsks(causes, run, isReplan) {
+  const leadCause = orderStopCauses(causes)[0];
+  if (leadCause.nextAction === 'approve') {
+    return buildApprovalAsks(leadCause.holds, isReplan, run);
+  }
+  return [buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(causes, isReplan), run)];
+}
+
 function stopDelivery(causes, run, endLines, isReplan) {
   if (causes.some((cause) => cause.terminal === true || cause.agentFailure === true)) {
     return { result: finishDeliveryBlocked(causes, run, endLines) };
   }
-  const asked = askTail(buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(causes, isReplan), run), run, describeStopLead(causes, endLines));
+  const asked = askTails(listStopAsks(causes, run, isReplan), run, describeStopLead(causes, endLines));
   if (asked.answer === undefined) {
     return asked;
   }
