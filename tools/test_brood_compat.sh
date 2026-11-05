@@ -226,7 +226,7 @@ BOOTED_EOF
 # hivemind-release-strain <short>: create the exit file for strain <short>, then wait until no live
 # tmux session name ends in -<short>, so the strain's session is gone before this returns.
 : > "$HIVEMIND_TEST_SIGNAL_DIR/exit-$1"
-hivemind-real-wait 30 bash -c '! tmux list-sessions -F "#{session_name}" 2>/dev/null | grep -q -- "-$1\$"' _ "$1"
+hivemind-real-wait 30 bash -c 'sessions="$(tmux list-sessions -F "#{session_name}" 2>/dev/null)"; ! grep -q -- "-$1\$" <<<"$sessions"' _ "$1"
 RELEASE_EOF
 
     cat > "$STUB_BIN/hivemind-fake-clock" <<'CLOCK_EOF'
@@ -314,6 +314,17 @@ cleanup() {
 }
 trap cleanup EXIT
 
+# report_unguarded_failure <status> <line> <command>: the ERR trap. set -e ends the suite at a
+# failed command outside any guard, before the running case can report, so this prints that case's
+# FAIL line first. It reports only in the main shell, where a subshell's failure surfaces as the
+# status of the command that ran it.
+report_unguarded_failure() {
+    [ "$BASH_SUBSHELL" -eq 0 ] || return 0
+    failed "${name:-${FUNCNAME[1]:-main}}" "suite stopped: '$3' exited $1 (expected 0) at line $2 in ${FUNCNAME[1]:-main}"
+}
+set -E
+trap 'report_unguarded_failure "$?" "$LINENO" "$BASH_COMMAND"' ERR
+
 # Build the test-scoped claude stub ONCE at suite top-level (#169). This MUST happen in the main
 # shell — not inside spawn_deps_satisfied, which runs in a command substitution where a STUB_BIN
 # assignment would be confined to the subshell and never reach the parent. STUB_BIN is reaped by
@@ -331,12 +342,123 @@ SEED_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/hivemind-brood-compat-seed.XXXXXX")"
 # attacker CONTENT (a counterfeit tmux_session line inside a description string) for
 # manifest STRUCTURE; the value is whatever the genuine sibling field holds.
 extract_tmux_session() {
-    jq -r '.strains[].tmux_session // empty' "$1" 2>/dev/null | head -1
+    local sessions
+    sessions="$(jq -r '.strains[].tmux_session // empty' "$1" 2>/dev/null)" || return
+    head -n 1 <<<"$sessions"
 }
 
 # extract_branch: pull the first strain's branch value from the JSON manifest with jq.
 extract_branch() {
-    jq -r '.strains[].branch // empty' "$1" 2>/dev/null | head -1
+    local branches
+    branches="$(jq -r '.strains[].branch // empty' "$1" 2>/dev/null)" || return
+    head -n 1 <<<"$branches"
+}
+
+# INVARIANT: the helpers below read a command's output only after the command has finished. A
+# reader that stops early (head, grep -q, awk with exit) can close a pipe while its writer still
+# writes; the writer then dies of SIGPIPE and pipefail fails the pipeline at random (#518). Each
+# helper fails with the command's own status when the command fails, as the pipeline did.
+
+# find_prints_any <find args...>: succeed when find exits 0 and prints at least one path.
+find_prints_any() {
+    local found_paths
+    found_paths="$(find "$@" 2>/dev/null)" || return
+    [ -n "$found_paths" ]
+}
+
+# index_entry_has_mode <gitroot> <path> <mode>: succeed when the index of <gitroot> lists <path>
+# with file mode <mode> (120000 for a symlink, 100644 for a regular file).
+index_entry_has_mode() {
+    local index_entries
+    index_entries="$(git -C "$1" ls-files -s -- "$2")" || return
+    grep -q "^$3 " <<<"$index_entries"
+}
+
+# first_sed_match <sed-script> <file>: print the first line `sed -n <sed-script> <file>` prints, or
+# nothing when it prints none.
+first_sed_match() {
+    local sed_lines
+    sed_lines="$(sed -n "$1" "$2" 2>/dev/null)" || return
+    head -n 1 <<<"$sed_lines"
+}
+
+# launched_session_name <stdout-file>: print the tmux session named on the first `attach:` line of
+# spawn-brood stdout in <stdout-file>, or nothing.
+launched_session_name() {
+    first_sed_match 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$1"
+}
+
+# worktree_has_branch_line <gitroot> <worktree>: print `yes` when `git worktree list --porcelain`
+# for <gitroot> shows a branch line for <worktree>, else nothing.
+worktree_has_branch_line() {
+    local worktree_listing
+    worktree_listing="$(git -C "$1" worktree list --porcelain 2>/dev/null)" || return
+    awk -v p="$2" '$1=="worktree" && $2==p {f=1; next} f && $1=="branch" {print "yes"; exit} f && NF==0 {exit}' <<<"$worktree_listing"
+}
+
+# INVARIANT: EARLY_EXIT_PIPELINE_ALLOWLIST stays empty. It holds exact command lines, leading
+# blanks trimmed, that the early-exit pipeline self-check accepts.
+EARLY_EXIT_PIPELINE_ALLOWLIST=()
+
+# early_exit_pipeline_lines <file>: print `<line>: <command>` for each command line in <file> with a
+# pipeline stage that can stop reading early (head; grep -q, -m, --quiet, --silent or --max-count;
+# awk whose program holds exit; sed whose script holds q), unless EARLY_EXIT_PIPELINE_ALLOWLIST
+# lists it. A stage may start with `command` or `env` (with dash options) and NAME=value
+# assignments, and `|&` counts as a pipe. Comment lines are skipped; a line ending in `\` or `|`
+# is joined to the next, the `\` dropped.
+# It is a regex scan, not a shell parser. It misses a reader behind any other wrapper (a function,
+# xargs, timeout, stdbuf, `env -u NAME`), other early-exit readers (read, perl, python, a script)
+# and a pipe split across lines without a trailing `|` or `\`. It flags a quoted literal holding
+# such a pipe; reword that literal rather than allowlist it. The ERR trap above is the backstop:
+# a missed reader that kills its writer still prints a FAIL line.
+early_exit_pipeline_lines() {
+    local suite_file="$1" sq="'" line_text command_text="" command_start=0 line_no=0
+    local reader_pattern allowed_text trimmed_text continued_pattern='(\\|[|])[[:space:]]*$'
+    local backslash_pattern='^(.*)\\[[:space:]]*$'
+    local stage_start='(^|[^|])[|]&?[[:space:]]*((command|env)([[:space:]]+-[^[:space:]]*)*[[:space:]]+|[A-Za-z_][A-Za-z0-9_]*=[^[:space:]]*[[:space:]]+)*'
+    local -a reader_patterns=(
+        "${stage_start}head([[:space:]]|[)]|\$)"
+        "${stage_start}grep[^|]*[[:space:]](-[a-zA-Z]*[qm]|--(quiet|silent|max-count))"
+        "${stage_start}awk[[:space:]][^$sq]*$sq[^$sq]*exit"
+        "${stage_start}sed[[:space:]][^|]*[0-9;{}/\$$sq[:space:]][qQ][0-9]*([;}$sq[:space:]]|\$)"
+    )
+    while IFS= read -r line_text || [[ -n "$line_text" ]]; do
+        line_no=$((line_no + 1))
+        if [[ -z "$command_text" ]]; then
+            [[ "$line_text" =~ ^[[:space:]]*# ]] && continue
+            command_start="$line_no"
+        fi
+        if [[ "$line_text" =~ $backslash_pattern ]]; then
+            command_text+="${BASH_REMATCH[1]} "
+            continue
+        fi
+        command_text+="$line_text"
+        [[ "$line_text" =~ $continued_pattern ]] && continue
+        trimmed_text="${command_text#"${command_text%%[![:space:]]*}"}"
+        command_text=""
+        for reader_pattern in "${reader_patterns[@]}"; do
+            [[ "$trimmed_text" =~ $reader_pattern ]] || continue
+            for allowed_text in "${EARLY_EXIT_PIPELINE_ALLOWLIST[@]}"; do
+                [[ "$trimmed_text" == "$allowed_text" ]] && continue 3
+            done
+            printf '%s: %s\n' "$command_start" "$trimmed_text"
+            break
+        done
+    done < "$suite_file"
+}
+
+# ── Self-check: no pipeline in this suite ends in an early-exit reader (#518) ─────
+# Under pipefail, a reader that stops early can kill its writer with SIGPIPE and fail the case at
+# random. Every reader of a command's output must take it captured, from a here-string.
+assert_no_early_exit_pipelines() {
+    local name="SUITE:no-early-exit-reader-pipelines"
+    local offending_lines
+    offending_lines="$(early_exit_pipeline_lines "$(realpath "$0")")"
+    if [[ -z "$offending_lines" ]]; then
+        pass "$name" "no pipeline stage in this suite can stop reading before its writer ends"
+    else
+        failed "$name" "early-exit reader pipelines (capture the output, read it from a here-string): $offending_lines"
+    fi
 }
 
 # The v4 brood-id-namespaced identifiers the committed fixtures carry. Both fixtures share one
@@ -668,7 +790,7 @@ assert_spawn_brood_symlink_escape_blocked() {
     # escape target: no brood/ STATE dir, no manifest, no worktree. A successful escape would
     # land .hivemind/brood/manifest.json (and possibly worktrees) under the external target.
     local escaped=no
-    if find "$external" -mindepth 1 -print 2>/dev/null | grep -q .; then
+    if find_prints_any "$external" -mindepth 1 -print; then
         escaped=yes
     fi
     # ANTI-VACUITY: assert the `.hivemind/broods/<brood-id>` WRITE-CHAIN guard (spawn-brood.sh:286)
@@ -762,7 +884,7 @@ assert_spawn_brood_inputs_external_rejected() {
     # is the test's OWN artifact and is excluded; a successful escape would create spawn-brood
     # outputs (a `brood/` STATE dir / manifest.json / worktrees) BESIDE it.
     local escaped=no
-    if find "$external" -mindepth 1 ! -name 'brood-inputs.json' -print 2>/dev/null | grep -q .; then
+    if find_prints_any "$external" -mindepth 1 ! -name 'brood-inputs.json' -print; then
         escaped=yes
     fi
     if [[ "$rc" -ne 0 && "$escaped" == "no" ]]; then
@@ -824,7 +946,7 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked() {
     git -C "$gitroot" add -A
     git -C "$gitroot" commit -q -m "evil: track .hivemind as external symlink"
     # Confirm it is committed as a symlink (mode 120000) — the vector under test.
-    if ! git -C "$gitroot" ls-files -s -- .hivemind | grep -q '^120000 '; then
+    if ! index_entry_has_mode "$gitroot" .hivemind 120000; then
         failed "$name" "fixture error: .hivemind was not committed as a symlink on evil ref"
         return
     fi
@@ -870,7 +992,7 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked() {
     # have been written under the external escape target. A successful escape (OLD behavior) would
     # land $external/brood/task.md (the provisioned task file) under the external target.
     local escaped=no
-    if find "$external" -mindepth 1 -print 2>/dev/null | grep -q .; then
+    if find_prints_any "$external" -mindepth 1 -print; then
         escaped=yes
     fi
     # The offending worktree must also be removed (not left dangling for a later launch).
@@ -879,11 +1001,8 @@ assert_spawn_brood_child_worktree_symlink_escape_blocked() {
     # rm -rf "$wt") but leaves the now-empty <brood-id>/ PARENT dir behind — that empty parent is
     # benign and must NOT count as a leak. A real leak is a still-REGISTERED git worktree under
     # .claude/worktrees/, so ask git (ground truth) rather than scanning for any leftover dir.
-    local worktree_leaked=no
-    if git -C "$gitroot" worktree list --porcelain 2>/dev/null \
-         | grep -E '^worktree .*/\.claude/worktrees/' | grep -q .; then
-        worktree_leaked=yes
-    fi
+    local worktree_leaked
+    worktree_leaked="$(registered_strain_worktree_exists "$gitroot")"
     # #169 NON-VACUITY: the child-worktree guard fires BEFORE the per-strain provisioning/launch,
     # so the stub claude must NEVER have been exec'd — the per-case launch marker must be ABSENT.
     # With the guard deleted, provisioning would proceed, tmux would exec the stub into the
@@ -954,7 +1073,7 @@ assert_spawn_brood_child_leaf_task_escape_blocked() {
     git -C "$gitroot" add -f "$gitroot/.hivemind/brood/task.md"
     git -C "$gitroot" commit -q -m "evil: real .hivemind/brood dir, task.md leaf symlinked to external file path"
     # Confirm the leaf is committed as a symlink (mode 120000) — the exact escape vector.
-    if ! git -C "$gitroot" ls-files -s -- .hivemind/brood/task.md | grep -q '^120000 '; then
+    if ! index_entry_has_mode "$gitroot" .hivemind/brood/task.md 120000; then
         failed "$name" "fixture error: .hivemind/brood/task.md was not committed as a symlink on evil ref"
         return
     fi
@@ -999,7 +1118,7 @@ assert_spawn_brood_child_leaf_task_escape_blocked() {
     # Leaf guard must reject (non-zero) AND nothing written under external escape target.
     # A successful escape would CREATE external/task.md (followed from the symlink leaf).
     local escaped=no
-    if find "$external" -mindepth 1 -print 2>/dev/null | grep -q .; then
+    if find_prints_any "$external" -mindepth 1 -print; then
         escaped=yes
     fi
     # The leaf guard emits a specific rejection message before tearing down the worktree.
@@ -1014,11 +1133,8 @@ assert_spawn_brood_child_leaf_task_escape_blocked() {
     # rm -rf "$wt") but leaves the now-empty <brood-id>/ PARENT dir behind — that empty parent is
     # benign and must NOT count as a leak. A real leak is a still-REGISTERED git worktree under
     # .claude/worktrees/, so ask git (ground truth) rather than scanning for any leftover dir.
-    local worktree_leaked=no
-    if git -C "$gitroot" worktree list --porcelain 2>/dev/null \
-         | grep -E '^worktree .*/\.claude/worktrees/' | grep -q .; then
-        worktree_leaked=yes
-    fi
+    local worktree_leaked
+    worktree_leaked="$(registered_strain_worktree_exists "$gitroot")"
     # #169 NON-VACUITY: the task.md leaf guard fires BEFORE the per-strain `tmux new-session`, so
     # the stub claude must NEVER have been exec'd — the per-case launch marker must be ABSENT.
     # With the leaf guard deleted, the printf redirect would follow the symlink, the strain would
@@ -1075,7 +1191,7 @@ assert_spawn_brood_child_leaf_settings_escape_blocked() {
     git -C "$gitroot" add -f "$gitroot/.claude/settings.local.json"
     git -C "$gitroot" commit -q -m "evil2: real .claude dir, symlinked settings.local.json leaf"
     # Confirm symlink leaf committed as mode 120000.
-    if ! git -C "$gitroot" ls-files -s -- .claude/settings.local.json | grep -q '^120000 '; then
+    if ! index_entry_has_mode "$gitroot" .claude/settings.local.json 120000; then
         failed "$name" "fixture error: .claude/settings.local.json was not committed as a symlink on evil2 ref"
         return
     fi
@@ -1120,7 +1236,7 @@ assert_spawn_brood_child_leaf_settings_escape_blocked() {
     # Leaf guard must reject (non-zero) AND nothing written under external escape target.
     # A successful escape would write external/settings.local.json via cp.
     local escaped=no
-    if find "$external" -mindepth 1 -print 2>/dev/null | grep -q .; then
+    if find_prints_any "$external" -mindepth 1 -print; then
         escaped=yes
     fi
     # The leaf guard emits a specific rejection message before tearing down the worktree.
@@ -1135,11 +1251,8 @@ assert_spawn_brood_child_leaf_settings_escape_blocked() {
     # rm -rf "$wt") but leaves the now-empty <brood-id>/ PARENT dir behind — that empty parent is
     # benign and must NOT count as a leak. A real leak is a still-REGISTERED git worktree under
     # .claude/worktrees/, so ask git (ground truth) rather than scanning for any leftover dir.
-    local worktree_leaked=no
-    if git -C "$gitroot" worktree list --porcelain 2>/dev/null \
-         | grep -E '^worktree .*/\.claude/worktrees/' | grep -q .; then
-        worktree_leaked=yes
-    fi
+    local worktree_leaked
+    worktree_leaked="$(registered_strain_worktree_exists "$gitroot")"
     # #169 NON-VACUITY: the settings.local.json leaf guard fires BEFORE the per-strain
     # `tmux new-session`, so the stub claude must NEVER have been exec'd — the per-case launch
     # marker must be ABSENT. With the leaf guard deleted, the cp would follow the symlink, the
@@ -1195,7 +1308,7 @@ assert_spawn_brood_child_leaf_regular_ok() {
     git -C "$gitroot" add -f "$gitroot/.hivemind/brood/task.md"
     git -C "$gitroot" commit -q -m "safe: real .hivemind/brood/task.md regular file"
     # Confirm it is NOT a symlink (mode 100644, not 120000).
-    if git -C "$gitroot" ls-files -s -- .hivemind/brood/task.md | grep -q '^120000 '; then
+    if index_entry_has_mode "$gitroot" .hivemind/brood/task.md 120000; then
         failed "$name" "fixture error: .hivemind/brood/task.md was committed as a symlink — test setup error"
         return
     fi
@@ -1243,7 +1356,7 @@ assert_spawn_brood_child_leaf_regular_ok() {
     # private server so no stub session leaks past this case (the EXIT kill-server is the final
     # safety net, but reaping here keeps later cases isolated).
     local launched_session
-    launched_session="$(sed -n 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$stdout_out" 2>/dev/null | head -1)"
+    launched_session="$(launched_session_name "$stdout_out")"
     [ -n "$launched_session" ] && tmux kill-session -t "$launched_session" 2>/dev/null || true
 
     # ANTI-FALSE-REJECT: the leaf guard emits a specific rejection message. Its ABSENCE
@@ -1264,7 +1377,7 @@ assert_spawn_brood_child_leaf_regular_ok() {
     local canon_gitroot launched_cwd stub_launched_ok=no
     canon_gitroot="$(cd "$gitroot" 2>/dev/null && pwd -P)"
     if [ -s "$marker" ]; then
-        launched_cwd="$(sed -n 's/^cwd=//p' "$marker" 2>/dev/null | head -1)"
+        launched_cwd="$(first_sed_match 's/^cwd=//p' "$marker")"
         # Expected strain worktree: <canon_gitroot>/.claude/worktrees/<brood-id>/api. The brood-id
         # is internally generated, so match the fixed prefix + the /api strain leaf rather than a
         # literal full path.
@@ -1279,7 +1392,7 @@ assert_spawn_brood_child_leaf_regular_ok() {
     # bypass-permissions flag, no skipDangerousModePermissionPrompt settings value and no
     # --disallowedTools list, so the classifier launches its workflow on the script engine.
     local launched_argv argv_ok=no
-    launched_argv="$(sed -n 's/^argv=//p' "$marker" 2>/dev/null | head -1)"
+    launched_argv="$(first_sed_match 's/^argv=//p' "$marker")"
     case "$launched_argv" in
         *"--permission-mode auto"*) argv_ok=yes ;;
     esac
@@ -1345,7 +1458,7 @@ run_strain_settings_spawn() {
 # read_launch_field <field>: print the first value the stub recorded for <field> in
 # $WORKDIR/launch-marker.txt; prints nothing when the field or the marker is absent.
 read_launch_field() {
-    sed -n "s/^$1=//p" "$WORKDIR/launch-marker.txt" 2>/dev/null | head -1
+    first_sed_match "s/^$1=//p" "$WORKDIR/launch-marker.txt"
 }
 
 # check_strain_launch_common: print `yes` when the stub launched once into the `api` strain
@@ -1567,7 +1680,7 @@ run_facts_base_refusal_case() {
     printf '{}\n' > "$gitroot/.hivemind/facts/$facts_leaf"
     git -C "$gitroot" add -f "$gitroot/.hivemind/facts/$facts_leaf"
     git -C "$gitroot" commit -q -m "evil: tracks .hivemind/facts/$facts_leaf"
-    if ! git -C "$gitroot" ls-files -s -- ".hivemind/facts/$facts_leaf" | grep -q '^100644 '; then
+    if ! index_entry_has_mode "$gitroot" ".hivemind/facts/$facts_leaf" 100644; then
         failed "$name" "fixture error: .hivemind/facts/$facts_leaf was not committed as a regular file on evil ref"
         return
     fi
@@ -1587,16 +1700,13 @@ run_facts_base_refusal_case() {
         HIVEMIND_TEST_SIGNAL_DIR="$WORKDIR" bash "$SPAWN_SCRIPT" "$inputs" ) \
         >"$stdout_out" 2>"$stderr_out" || rc=$?
     local launched_session
-    launched_session="$(sed -n 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$stdout_out" 2>/dev/null | head -1)"
+    launched_session="$(launched_session_name "$stdout_out")"
     [ -n "$launched_session" ] && tmux kill-session -t "$launched_session" 2>/dev/null || true
 
     local guard_warned=no stub_launched=no worktree_leaked=no applied_line=no
     grep -qE '^warning: child worktree .* already holds \.hivemind/facts \(base ref tracks \.hivemind/facts\); refusing to provision or launch strain api$' "$stderr_out" 2>/dev/null && guard_warned=yes
     [ -s "$marker" ] && stub_launched=yes
-    if git -C "$gitroot" worktree list --porcelain 2>/dev/null \
-         | grep -E '^worktree .*/\.claude/worktrees/' | grep -q .; then
-        worktree_leaked=yes
-    fi
+    worktree_leaked="$(registered_strain_worktree_exists "$gitroot")"
     [ -n "$(find_strain_worktree "$gitroot")" ] && worktree_leaked=yes
     grep -q '^remote: applied' "$stdout_out" 2>/dev/null && applied_line=yes
 
@@ -1828,7 +1938,7 @@ LONGSTUB_EOF
     # delivers lines in order, so every keystroke spawn-brood sent is recorded before the sentinel.
     local launched_session wt received sentinel_seen=no
     local sentinel_line="hivemind-test-sentinel"
-    launched_session="$(sed -n 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$stdout_out" 2>/dev/null | head -1)"
+    launched_session="$(launched_session_name "$stdout_out")"
     wt="$(find_strain_worktree "$gitroot")"
     received="$wt/.hivemind/stub-received.txt"
     if [ -n "$launched_session" ] && tmux send-keys -t "$launched_session" "$sentinel_line" Enter 2>/dev/null \
@@ -2085,7 +2195,7 @@ PROMOTEHOOK_EOF
         >"$stdout_out" 2>/dev/null || rc=$?
     # Reap the launched session (the stub would otherwise wait out its exit-file cap).
     local launched_session
-    launched_session="$(sed -n 's/^attach: tmux attach -t \([^ ]*\).*/\1/p' "$stdout_out" 2>/dev/null | head -1)"
+    launched_session="$(launched_session_name "$stdout_out")"
     [ -n "$launched_session" ] && tmux kill-session -t "$launched_session" 2>/dev/null || true
     tmux kill-server 2>/dev/null || true
 
@@ -2360,8 +2470,9 @@ UUIDSTUB_EOF
 # <gitroot>/.claude/worktrees/, else `no`. An empty leftover <brood-id>/ parent dir is benign; a
 # registered worktree is the real leak.
 registered_strain_worktree_exists() {
-    if git -C "$1" worktree list --porcelain 2>/dev/null \
-         | grep -E '^worktree .*/\.claude/worktrees/' | grep -q .; then
+    local worktree_listing
+    if worktree_listing="$(git -C "$1" worktree list --porcelain 2>/dev/null)" \
+         && grep -qE '^worktree .*/\.claude/worktrees/' <<<"$worktree_listing"; then
         printf 'yes'
     else
         printf 'no'
@@ -2582,7 +2693,7 @@ proj_manifest_path() {
 
 # brood_line_value: print the value of the BROOD line in $1 (entrypoint output), or nothing.
 brood_line_value() {
-    printf '%s\n' "$1" | awk -F'\t' '/^BROOD\t/ { print $2; exit }'
+    awk -F'\t' '/^BROOD\t/ { print $2; exit }' <<<"$1"
 }
 
 # count_brood_lines: number of BROOD lines in $1.
@@ -2593,7 +2704,7 @@ count_brood_lines() {
 # brood_line_first: print `yes` when the FIRST line of $1 is a BROOD line (so it precedes every
 # STRAIN line), `no` otherwise.
 brood_line_first() {
-    case "$(printf '%s\n' "$1" | head -n 1)" in
+    case "$(head -n 1 <<<"$1")" in
         "BROOD	"*) printf 'yes' ;;
         *) printf 'no' ;;
     esac
@@ -2676,7 +2787,7 @@ write_ledger() {
 # 11=facts_evidence (yes|no — a gather-facts output file in the ground-truth worktree).
 strain_field() {
     local output="$1" idx="$2"
-    printf '%s\n' "$output" | awk -F'\t' -v i="$idx" '/^STRAIN\t/ { print $i; exit }'
+    awk -F'\t' -v i="$idx" '/^STRAIN\t/ { print $i; exit }' <<<"$output"
 }
 
 # count_strain_lines: number of STRAIN lines in $1.
@@ -2721,7 +2832,7 @@ assert_reconcile_settle_clamp_bounds_huge_override() {
     # Non-vacuity guard: the gate body MUST be present in the slice. If the structural length gate is
     # reverted/removed this assignment vanishes and we fail loudly rather than silently passing a
     # gate-less region (which would let oversized digit strings through).
-    if ! printf '%s\n' "$gate_region" | grep -q 'RECONCILE_SETTLE=60'; then
+    if ! grep -q 'RECONCILE_SETTLE=60' <<<"$gate_region"; then
         failed "$name" "digit-length gate not found in $SPAWN_SCRIPT (gate reverted/missing?) -- region: $gate_region"
         return
     fi
@@ -2922,10 +3033,10 @@ assert_proj_no_live_worktree() {
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MISSING" \
           && "$(strain_field "$out" 9)" == "MISSING" ]] \
-          && ! printf '%s' "$out" | grep -q 'ghostsentinel'; then
+          && ! grep -q 'ghostsentinel' <<<"$out"; then
         pass "$name" "exit 0; worktree_path matches no live worktree -> ledger MISSING; NOT used as path-anchor fallback (sentinel absent)"
     else
-        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(printf '%s' "$out" | grep -q ghostsentinel && echo yes || echo no)"
+        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(grep -q ghostsentinel <<<"$out" && echo yes || echo no)"
     fi
 }
 
@@ -2994,8 +3105,7 @@ assert_proj_detached_head_located() {
 
     # Confirm the worktree really is detached (no branch line) so the case is non-vacuous.
     local has_branch_line
-    has_branch_line="$(git -C "$PROJ_WORKDIR" worktree list --porcelain 2>/dev/null \
-        | awk -v p="$wt" '$1=="worktree" && $2==p {f=1; next} f && $1=="branch" {print "yes"; exit} f && NF==0 {exit}')"
+    has_branch_line="$(worktree_has_branch_line "$PROJ_WORKDIR" "$wt")"
     if [[ "$has_branch_line" == "yes" ]]; then
         skip "$name" "worktree did not detach on this git; cannot exercise the detached-HEAD path"
         return
@@ -3072,8 +3182,7 @@ assert_proj_live_branch_detached() {
 
     # Confirm the worktree really is detached (non-vacuous): no branch line in porcelain output.
     local has_branch_line
-    has_branch_line="$(git -C "$PROJ_WORKDIR" worktree list --porcelain 2>/dev/null \
-        | awk -v p="$wt" '$1=="worktree" && $2==p {f=1; next} f && $1=="branch" {print "yes"; exit} f && NF==0 {exit}')"
+    has_branch_line="$(worktree_has_branch_line "$PROJ_WORKDIR" "$wt")"
     if [[ "$has_branch_line" == "yes" ]]; then
         skip "$name" "worktree did not detach on this git; cannot exercise the detached-HEAD live-branch path"
         return
@@ -3114,7 +3223,7 @@ assert_proj_facts_yes() {
 
     local out rc=0
     out="$(run_project "$brood_id")" || rc=$?
-    local nf; nf="$(printf '%s\n' "$out" | awk -F'\t' '/^STRAIN\t/ { print NF; exit }')"
+    local nf; nf="$(awk -F'\t' '/^STRAIN\t/ { print NF; exit }' <<<"$out")"
     if [[ "$rc" -eq 0 \
           && "$nf" == "11" \
           && "$(strain_field "$out" 8)" == "MISSING" \
@@ -3144,7 +3253,7 @@ assert_proj_facts_no() {
 
     local out rc=0
     out="$(run_project "$brood_id")" || rc=$?
-    local first10; first10="$(printf '%s\n' "$out" | awk -F'\t' -v OFS='\t' '/^STRAIN\t/ { NF=10; print; exit }')"
+    local first10; first10="$(awk -F'\t' -v OFS='\t' '/^STRAIN\t/ { NF=10; print; exit }' <<<"$out")"
     local expected10
     expected10="$(printf 'STRAIN\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s' \
         "$GT_BROOD_ID" "api" "$wt" "$branch" "brood-api" "running" "implement_step" "running" "$branch")"
@@ -3382,10 +3491,10 @@ assert_proj_traversal_selector_missing() {
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MISSING" \
           && "$(strain_field "$out" 9)" == "MISSING" ]] \
-          && ! printf '%s' "$out" | grep -q 'travsentinel'; then
+          && ! grep -q 'travsentinel' <<<"$out"; then
         pass "$name" "exit 0; traversal selector matches no git entry -> ledger MISSING; NOT consumed as path-anchor fallback (sentinel absent)"
     else
-        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(printf '%s' "$out" | grep -q travsentinel && echo yes || echo no)"
+        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(grep -q travsentinel <<<"$out" && echo yes || echo no)"
     fi
 }
 
@@ -3441,10 +3550,10 @@ assert_proj_symlink_leaf() {
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
           && "$(strain_field "$out" 9)" == "MALFORMED" ]] \
-          && ! printf '%s' "$out" | grep -q 'leakedsentinel'; then
+          && ! grep -q 'leakedsentinel' <<<"$out"; then
         pass "$name" "exit 0; symlinked leaf rejected -> MALFORMED; symlink target content not leaked"
     else
-        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(printf '%s' "$out" | grep -q leakedsentinel && echo yes || echo no)"
+        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(grep -q leakedsentinel <<<"$out" && echo yes || echo no)"
     fi
 }
 
@@ -3474,10 +3583,10 @@ assert_proj_unreadable_ledger() {
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
           && "$(strain_field "$out" 9)" == "MALFORMED" ]] \
-          && ! printf '%s' "$out" | grep -q 'implement_step'; then
+          && ! grep -q 'implement_step' <<<"$out"; then
         pass "$name" "exit 0; present-but-unreadable ledger -> MALFORMED (not MISSING); content not leaked"
     else
-        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(printf '%s' "$out" | grep -q implement_step && echo yes || echo no)"
+        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(grep -q implement_step <<<"$out" && echo yes || echo no)"
     fi
 }
 
@@ -3508,10 +3617,10 @@ assert_proj_suggested_id_escape() {
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
           && "$(strain_field "$out" 9)" == "MALFORMED" ]] \
-          && ! printf '%s' "$out" | grep -q 'escapesentinel'; then
+          && ! grep -q 'escapesentinel' <<<"$out"; then
         pass "$name" "exit 0; suggested_id '../escape' -> MALFORMED; no escape read (sentinel absent)"
     else
-        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(printf '%s' "$out" | grep -q escapesentinel && echo yes || echo no)"
+        failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9); leaked=$(grep -q escapesentinel <<<"$out" && echo yes || echo no)"
     fi
 }
 
@@ -3520,7 +3629,7 @@ assert_proj_missing_arg() {
     local name="PROJ-MISSING-ARG:no-manifest-arg-blocks"
     local err rc=0
     err="$(bash "$PROJECT_SCRIPT" 2>&1 >/dev/null)" || rc=$?
-    if [[ "$rc" -ne 0 ]] && printf '%s' "$err" | grep -q '^blocker:'; then
+    if [[ "$rc" -ne 0 ]] && grep -q '^blocker:' <<<"$err"; then
         pass "$name" "exit $rc (nonzero); blocker: emitted on stderr"
     else
         failed "$name" "rc=$rc stderr=[$err]"
@@ -3545,12 +3654,12 @@ assert_proj_output_encoding() {
     out="$(run_project "$brood_id")" || rc=$?
     local wtcell; wtcell="$(strain_field "$out" 4)"
     local raw_pipe=no
-    printf '%s' "$wtcell" | grep -qF '|' && raw_pipe=yes
+    grep -qF '|' <<<"$wtcell" && raw_pipe=yes
     # An escaped pipe '\|' contains the byte '|' too, so distinguish: raw == a '|' NOT preceded by a
     # backslash. Strip escaped pipes first, then look for any surviving bare '|'.
     local stripped; stripped="$(printf '%s' "$wtcell" | sed 's/\\|//g')"
     local bare_pipe=no
-    printf '%s' "$stripped" | grep -qF '|' && bare_pipe=yes
+    grep -qF '|' <<<"$stripped" && bare_pipe=yes
     if [[ "$rc" -eq 0 && "$(count_strain_lines "$out")" -eq 1 && "$bare_pipe" == "no" ]]; then
         pass "$name" "exit 0; worktree_path display cell has no raw unescaped '|' (output-encoded): [$wtcell]"
     else
@@ -3602,8 +3711,8 @@ assert_proj_no_tmpdir_needed() {
     chmod 0700 "$bad_tmpdir"
     local lines; lines="$(count_strain_lines "$out")"
     local api_name web_name
-    api_name="$(printf '%s\n' "$out" | awk -F'\t' '$3=="api"{print $3; exit}')"
-    web_name="$(printf '%s\n' "$out" | awk -F'\t' '$3=="web"{print $3; exit}')"
+    api_name="$(awk -F'\t' '$3=="api"{print $3; exit}' <<<"$out")"
+    web_name="$(awk -F'\t' '$3=="web"{print $3; exit}' <<<"$out")"
     if [[ "$rc" -eq 0 && "$lines" -eq 2 && "$api_name" == "api" && "$web_name" == "web" ]]; then
         pass "$name" "exit 0; 2 STRAIN lines (api, web) with non-writable TMPDIR — no writable-temp dependency"
     else
@@ -3679,8 +3788,8 @@ assert_proj_multi_strain() {
     out="$(run_project "$brood_id")" || rc=$?
     local lines; lines="$(count_strain_lines "$out")"
     local api_state web_state
-    api_state="$(printf '%s\n' "$out" | awk -F'\t' '$3=="api"{print $8; exit}')"
-    web_state="$(printf '%s\n' "$out" | awk -F'\t' '$3=="web"{print $8; exit}')"
+    api_state="$(awk -F'\t' '$3=="api"{print $8; exit}' <<<"$out")"
+    web_state="$(awk -F'\t' '$3=="web"{print $8; exit}' <<<"$out")"
     if [[ "$rc" -eq 0 && "$lines" -eq 2 \
           && "$api_state" == "implement_step" && "$web_state" == "MALFORMED" ]]; then
         pass "$name" "exit 0; 2 STRAIN lines; api state=implement_step, web state=MALFORMED (independent)"
@@ -3702,7 +3811,7 @@ assert_proj_unreadable_manifest() {
     out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_path
-    sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
+    sentinel_path="$(awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }' <<<"$out")"
     if [[ "$rc" -eq 2 && "$strain_lines" -eq 0 && "$sentinel_path" == "$manifest" ]]; then
         pass "$name" "exit 2; MANIFEST_UNREADABLE sentinel emitted (path=$sentinel_path); no STRAIN lines"
     else
@@ -3723,7 +3832,7 @@ assert_proj_valid_empty_manifest() {
     out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_seen=no
-    printf '%s\n' "$out" | grep -q '^MANIFEST_UNREADABLE	' && sentinel_seen=yes
+    grep -q '^MANIFEST_UNREADABLE	' <<<"$out" && sentinel_seen=yes
     if [[ "$rc" -eq 0 && "$strain_lines" -eq 0 && "$sentinel_seen" == "no" \
           && "$(count_brood_lines "$out")" -eq 1 && "$(brood_line_value "$out")" == "$GT_BROOD_ID" ]]; then
         pass "$name" "exit 0; valid empty manifest -> one BROOD line, no STRAIN lines, no MANIFEST_UNREADABLE sentinel"
@@ -3748,7 +3857,7 @@ assert_proj_wrong_shape_unreadable() {
         out="$(run_project "$brood_id")" || rc=$?
         local strain_lines; strain_lines="$(count_strain_lines "$out")"
         local sentinel_path
-        sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
+        sentinel_path="$(awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }' <<<"$out")"
         if [[ "$rc" -ne 2 || "$strain_lines" -ne 0 || "$sentinel_path" != "$manifest" ]]; then
             all_ok=no
             detail+=" [$body -> rc=$rc lines=$strain_lines sentinel=$sentinel_path]"
@@ -3775,7 +3884,7 @@ assert_proj_object_element_missing_name() {
     out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_seen=no
-    printf '%s\n' "$out" | grep -q '^MANIFEST_UNREADABLE	' && sentinel_seen=yes
+    grep -q '^MANIFEST_UNREADABLE	' <<<"$out" && sentinel_seen=yes
     # name is now field 3 (brood_id field 2). brood_id is absent in this minimal manifest -> field 2
     # renders MALFORMED; name (field 3) also MALFORMED (presentation rejects the empty name).
     if [[ "$rc" -eq 0 && "$strain_lines" -eq 1 && "$sentinel_seen" == "no" \
@@ -3839,7 +3948,7 @@ assert_proj_literal_nul_manifest() {
     out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_path
-    sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
+    sentinel_path="$(awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }' <<<"$out")"
     if [[ "$rc" -eq 2 && "$strain_lines" -eq 0 && "$sentinel_path" == "$manifest" ]]; then
         pass "$name" "exit 2; literal-NUL manifest -> MANIFEST_UNREADABLE (path=$sentinel_path)"
     else
@@ -3870,7 +3979,7 @@ PY
     local lines; lines="$(count_strain_lines "$out")"
     # branch is now field 5. It MUST be MALFORMED, and the stripped `feature/apislice` must not appear.
     if [[ "$rc" -eq 0 && "$lines" -eq 1 && "$(strain_field "$out" 5)" == "MALFORMED" ]] \
-       && ! printf '%s' "$out" | grep -q 'feature/apislice'; then
+       && ! grep -q 'feature/apislice' <<<"$out"; then
         pass "$name" "exit 0; one STRAIN line; branch=MALFORMED; control-stripped branch NOT emitted"
     else
         failed "$name" "rc=$rc lines=$lines branch=$(strain_field "$out" 5)"
@@ -3893,7 +4002,7 @@ assert_proj_multidoc_manifest() {
     out="$(run_project "$brood_id")" || rc=$?
     local strain_lines; strain_lines="$(count_strain_lines "$out")"
     local sentinel_path
-    sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
+    sentinel_path="$(awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }' <<<"$out")"
     if [[ "$rc" -eq 2 && "$strain_lines" -eq 0 && "$sentinel_path" == "$manifest" ]]; then
         pass "$name" "exit 2; multi-document manifest -> MANIFEST_UNREADABLE (path=$sentinel_path)"
     else
@@ -3916,7 +4025,7 @@ assert_proj_trailing_nul_manifest() {
     local out rc=0
     out="$(run_project "$brood_id")" || rc=$?
     local sentinel_path
-    sentinel_path="$(printf '%s\n' "$out" | awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }')"
+    sentinel_path="$(awk -F'\t' '/^MANIFEST_UNREADABLE\t/ { print $2; exit }' <<<"$out")"
     if [[ "$rc" -eq 2 && "$(count_strain_lines "$out")" -eq 0 && "$(count_brood_lines "$out")" -eq 0 \
           && "$sentinel_path" == "$manifest" ]]; then
         pass "$name" "exit 2; trailing-NUL manifest -> MANIFEST_UNREADABLE (path=$sentinel_path); no BROOD or STRAIN line"
@@ -3941,10 +4050,10 @@ proj_run_refusal() {
     local err; err="$(cat "$err_file")"
     rm -f "$err_file"
     local leaked=no
-    if [ -n "$leak_sentinel" ] && printf '%s\n%s' "$out" "$err" | grep -qF -- "$leak_sentinel"; then
+    if [ -n "$leak_sentinel" ] && grep -qF -- "$leak_sentinel" <<<"$out"$'\n'"$err"; then
         leaked=yes
     fi
-    if [[ "$rc" -eq 1 && -z "$out" && "$leaked" == "no" ]] && printf '%s\n' "$err" | grep -q '^blocker: '; then
+    if [[ "$rc" -eq 1 && -z "$out" && "$leaked" == "no" ]] && grep -q '^blocker: ' <<<"$err"; then
         pass "$name" "exit 1; blocker on stderr; no stdout line; refused manifest never read"
     else
         failed "$name" "rc=$rc leaked=$leaked out=[$out] stderr=[$err]"
@@ -4067,7 +4176,7 @@ assert_proj_literal_nul_ledger() {
     if [[ "$rc" -eq 0 \
           && "$(strain_field "$out" 8)" == "MALFORMED" \
           && "$(strain_field "$out" 9)" == "MALFORMED" ]] \
-          && ! printf '%s' "$out" | grep -q 'plan'; then
+          && ! grep -q 'plan' <<<"$out"; then
         pass "$name" "exit 0; literal-NUL ledger -> both scalars MALFORMED; content not leaked"
     else
         failed "$name" "rc=$rc state=$(strain_field "$out" 8) run=$(strain_field "$out" 9)"
@@ -4317,7 +4426,7 @@ assert_discover_symlinked_broods_blocker() {
     out="$( cd "$root" && bash "$DISCOVER_SCRIPT" 2>"$err_file" )" || rc=$?
     local err; err="$(cat "$err_file")"
     rm -rf "$tmp"
-    if [[ "$rc" -eq 1 && -z "$out" ]] && printf '%s\n' "$err" | grep -q '^blocker: '; then
+    if [[ "$rc" -eq 1 && -z "$out" ]] && grep -q '^blocker: ' <<<"$err"; then
         pass "$name" "exit 1; blocker on stderr; no path emitted (the symlinked broods dir is never followed)"
     else
         failed "$name" "rc=$rc out=[$out] stderr=[$err]"
@@ -4487,6 +4596,10 @@ assert_collect_unreadable_isolated() {
     fi
 }
 
+echo '=== Suite self-check: no early-exit reader pipelines (#518) ==='
+assert_no_early_exit_pipelines
+
+echo ''
 echo '=== Brood manifest back-compat tests: brood-status reads v1 (old) and v2 (new) manifests ==='
 assert_v1_old
 assert_v2_new
@@ -4859,7 +4972,7 @@ assert_collect_symlinked_broods_blocker() {
     out="$( cd "$root" && bash "$COLLECT_SCRIPT" 2>"$err_file" )" || rc=$?
     local err; err="$(cat "$err_file")"
     rm -rf "$tmp"
-    if [[ "$rc" -eq 1 && -z "$out" ]] && printf '%s\n' "$err" | grep -q '^blocker: '; then
+    if [[ "$rc" -eq 1 && -z "$out" ]] && grep -q '^blocker: ' <<<"$err"; then
         pass "$name" "exit 1; blocker on stderr; no JSON document (a refused listing is never an empty dashboard)"
     else
         failed "$name" "rc=$rc out=[$out] stderr=[$err]"
@@ -4903,7 +5016,7 @@ assert_collect_symlinked_entry_blocker() {
         ok=yes
     fi
     local leaked=no
-    printf '%s' "$out" | grep -q 'entryleaksentinel' && leaked=yes
+    grep -q 'entryleaksentinel' <<<"$out" && leaked=yes
     rm -rf "$tmp"
     if [[ "$rc" -eq 0 && "$ok" == "yes" && "$leaked" == "no" ]]; then
         pass "$name" "exit 0; symlinked brood entry -> blocker brood (detail is the projector's blocker line); sibling rendered; outside manifest never read"
@@ -5225,8 +5338,7 @@ assert_collect_detached_no_false_failed() {
 
     # Confirm detachment is non-vacuous (no branch line for this worktree).
     local has_branch_line
-    has_branch_line="$(git -C "$root" worktree list --porcelain 2>/dev/null \
-        | awk -v p="$wt" '$1=="worktree" && $2==p {f=1; next} f && $1=="branch" {print "yes"; exit} f && NF==0 {exit}')"
+    has_branch_line="$(worktree_has_branch_line "$root" "$wt")"
     if [[ "$has_branch_line" == "yes" ]]; then
         git -C "$root" worktree remove --force "$wt" 2>/dev/null || true
         rm -rf "$tmp"
