@@ -30,6 +30,7 @@ import {
   findNonRegularOutputs,
   findOrphanWorkflowIds,
   isDraftWorkflow,
+  listBuiltSourcePaths,
   listDraftWorkflowIds,
   listLiveWorkflowIds,
   listModulePaths,
@@ -63,6 +64,8 @@ const ACORN_SHA256 = '76254fc76529713b4dfd2532972d17a991ffd9aafeebb1f977445b5506
 const LITERAL_TOKEN_TYPES = [tokTypes.string, tokTypes.regexp, tokTypes.template, tokTypes.invalidTemplate];
 const SEEDED_MODULE_PATH = 'plugin/workflow-src/analysis-only/seeded.js';
 const BUILD_ID_LINE_PATTERN = /^const BUILD_ID = '([0-9a-f]*)';$/gm;
+const DATA_FILES = [['AUTONOMY_TABLE', 'decision-autonomy-table.json', projectAutonomyTable], ['BRIEF_SCHEMA', 'decision-brief-schema.json', projectSchema], ['PLAN_SCHEMA', 'plan-schema.json', projectSchema]];
+const BUILT_SCRIPT_OPTIONS = { ecmaVersion: 'latest', sourceType: 'script', allowReturnOutsideFunction: true, allowAwaitOutsideFunction: true, allowImportExportEverywhere: true };
 const scratchRoots = [];
 let scratchBuilderCount = 0;
 
@@ -257,6 +260,92 @@ function assertBuildAndCheckThrow(scratchRoot, pattern) {
 function listWorkflowSourcePaths() {
   const paths = workflowIds.flatMap((id) => listSourcePaths(repoRoot, id)).filter((path) => path.startsWith('plugin/workflow-src/'));
   return [...new Set(paths)].map((path) => path.slice('plugin/workflow-src/'.length));
+}
+
+const PROPERTY_SLOTS = { MemberExpression: 'property', Property: 'key', MethodDefinition: 'key', PropertyDefinition: 'key' };
+
+function listNodeDeclarations(node) {
+  if (node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration') {
+    return [node.id.name];
+  }
+  return node.type === 'VariableDeclaration' ? node.declarations.map((declarator) => declarator.id.name) : [];
+}
+
+/**
+ * Returns the names the top-level nodes of program declare.
+ */
+function listTopLevelNames(program) {
+  return new Set(program.body.flatMap(listNodeDeclarations));
+}
+
+function visitReads(value, names) {
+  if (value === null || typeof value !== 'object' || typeof value.type !== 'string') {
+    return;
+  }
+  if (value.type === 'Identifier') {
+    names.add(value.name);
+    return;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    if (key !== 'label' && !(PROPERTY_SLOTS[value.type] === key && !value.computed)) {
+      [child].flat().forEach((item) => visitReads(item, names));
+    }
+  }
+}
+
+/**
+ * Returns, sorted, each top-level declaration of the built script source
+ * that no root reads, transitively. A root is a top-level node that
+ * declares no name, the export of meta among them. A read is an Identifier
+ * other than a non-computed property or key and a label.
+ */
+function findUnreadDeclarations(source) {
+  const readsByName = new Map();
+  const pending = [];
+  for (const node of parse(source, BUILT_SCRIPT_OPTIONS).body) {
+    const names = listNodeDeclarations(node);
+    const reads = new Set();
+    visitReads(node, reads);
+    names.forEach((name) => reads.delete(name));
+    if (names.length === 0) {
+      pending.push(...reads);
+    }
+    names.forEach((name) => readsByName.set(name, [...reads]));
+  }
+  const reached = new Set();
+  while (pending.length > 0) {
+    const name = pending.pop();
+    if (!reached.has(name) && readsByName.has(name)) {
+      reached.add(name);
+      pending.push(...readsByName.get(name));
+    }
+  }
+  return [...readsByName.keys()].filter((name) => !reached.has(name)).sort();
+}
+
+/**
+ * Returns, sorted, each name that a code source of id under root declares
+ * at top level, or that is a data constant or BUILD_ID, that the built
+ * script source does not declare and yet holds as an identifier token,
+ * property names included.
+ */
+function findDroppedNamedDeclarations(root, id, source) {
+  const declared = listTopLevelNames(parse(source, BUILT_SCRIPT_OPTIONS));
+  const codePaths = listSourcePaths(root, id).filter((path) => path.startsWith('plugin/workflow-src/') && !path.endsWith('/meta.js'));
+  const sourceNames = codePaths.flatMap((path) => [...listTopLevelNames(parse(readFileSync(join(root, path), 'utf8'), BUILT_SCRIPT_OPTIONS))]);
+  const tokenNames = new Set(readSyntax(source).tokens.filter((token) => token.type === tokTypes.name).map((token) => token.value));
+  return [...new Set([...DATA_FILES.map(([name]) => name), 'BUILD_ID', ...sourceNames])].filter((name) => !declared.has(name) && tokenNames.has(name)).sort();
+}
+
+/**
+ * Returns the compacted text of the first top-level node of the code
+ * source at path that the built script source carries.
+ */
+function readFirstCarriedNode(source, path) {
+  const declared = listTopLevelNames(parse(source, BUILT_SCRIPT_OPTIONS));
+  const compacted = compactCode(readStrippedCode(path));
+  const node = parse(compacted, BUILT_SCRIPT_OPTIONS).body.find((candidate) => candidate.type !== 'FunctionDeclaration' || declared.has(candidate.id.name));
+  return compacted.slice(node.start, node.end);
 }
 
 function countLines(source) {
@@ -462,7 +551,7 @@ describe('build_workflows inputs are regular files at their own path (ADR-0037, 
     ['a symlinked meta.js', (root) => moveOutside(root, 'plugin/workflow-src/analysis-only/meta.js'), isSymlink('plugin/workflow-src/analysis-only/meta\\.js'), true],
     ['a symlinked main.js', (root) => moveOutside(root, 'plugin/workflow-src/analysis-only/main.js'), isSymlink('plugin/workflow-src/analysis-only/main\\.js'), true],
     ['a symlinked library', (root) => moveOutside(root, 'plugin/workflow-src/lib/schema.js'), isSymlink('plugin/workflow-src/lib/schema\\.js'), true],
-    ['a symlinked data file', (root) => moveOutside(root, 'plugin/references/plan-schema.json'), isSymlink('plugin/references/plan-schema\\.json'), true],
+    ['a symlinked data file', (root) => moveOutside(root, 'plugin/references/decision-brief-schema.json'), isSymlink('plugin/references/decision-brief-schema\\.json'), true],
     ['a symlinked module, which never drops out', seedOutsideModule, isSymlink('plugin/workflow-src/analysis-only/seeded\\.js'), true],
     ['a directory named like a module', (root) => mkdirSync(join(root, SEEDED_MODULE_PATH)), 'plugin/workflow-src/analysis-only/seeded\\.js is a directory, not a regular file\\.' + RULE, true],
     ['a symlinked agent file', (root) => moveOutside(root, 'plugin/agents/drone.md'), isSymlink('plugin/agents/drone\\.md'), true],
@@ -732,6 +821,7 @@ describe('build_workflows compactCode', () => {
     const scratchRoot = makeScratchCopy();
     const body = regexStatements.map(([, source]) => source.replace(/^/gm, '  ')).join('\n');
     writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), 'function seededRegexStatements(enabled, value, x, s) {\n' + body + '\n}\n');
+    appendAnalysisMainLines(scratchRoot, ['void seededRegexStatements;']);
     const built = buildWorkflow(scratchRoot, 'analysis-only');
     const compactedModule = '\nfunction seededRegexStatements(enabled,value,x,s){\n' + regexStatements.map(([, , expected]) => expected).join('\n') + '\n}\n';
     assert.ok(built.includes(compactedModule), 'the seeded module is not in the built script, compacted');
@@ -745,12 +835,16 @@ describe('build_workflows compactCode', () => {
       const meta = stripComments(readFileSync(join(repoRoot, 'plugin/workflow-src', id, 'meta.js'), 'utf8').replace(/\r/g, ''), 'module').trim();
       assert.ok(source.startsWith(meta + '\n\n/*\n * GENERATED'), id);
       assert.ok(meta.includes('\n  '), id);
-      for (const name of ['AUTONOMY_TABLE', 'BRIEF_SCHEMA', 'PLAN_SCHEMA']) {
-        assert.ok(source.includes('\n\nconst ' + name + ' = ' + JSON.stringify(readDataConstant(repoRoot, name), null, 1).replace(/^ +/gm, '') + ';\n\n'), name);
+      const builtPaths = listBuiltSourcePaths(repoRoot, id);
+      for (const [name, file] of DATA_FILES.filter(([, file]) => builtPaths.includes('plugin/references/' + file))) {
+        assert.ok(source.includes('\n\nconst ' + name + ' = ' + JSON.stringify(readDataConstant(repoRoot, name), null, 1).replace(/^ +/gm, '') + ';\n\n'), name + ' ' + file);
       }
-      const codePaths = listSourcePaths(repoRoot, id).filter((path) => path.startsWith('plugin/workflow-src/') && !path.endsWith('/meta.js'));
-      for (const path of codePaths) {
-        assert.ok(source.includes('\n\n' + compactCode(readStrippedCode(path)) + '\n'), path);
+      const declaredNames = listTopLevelNames(parse(source, BUILT_SCRIPT_OPTIONS));
+      for (const path of builtPaths.filter((codePath) => codePath.startsWith('plugin/workflow-src/') && !codePath.endsWith('/meta.js'))) {
+        const compacted = compactCode(readStrippedCode(path));
+        const carried = parse(compacted, BUILT_SCRIPT_OPTIONS).body.filter((node) => node.type !== 'FunctionDeclaration' || declaredNames.has(node.id.name));
+        assert.ok(carried.length > 0, path);
+        assert.ok(source.includes('\n\n' + carried.map((node) => compacted.slice(node.start, node.end)).join('\n') + '\n'), path);
       }
     });
   }
@@ -794,6 +888,7 @@ describe('build_workflows modules', () => {
     const scratchRoot = makeScratchCopy();
     writeFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/extra.js'), '/*\n * extra.js: a seeded module.\n */\n\nasync function seededHelper(value = { key: [1] }) {\n  return { value: value, text: \'const X = 1;\' };\n}\n\nfunction seededOther() {\n  return /[{(]/.test(\'}\');\n}\n');
     writeFileSync(join(scratchRoot, 'plugin/workflow-src/analysis-only/notes.txt'), 'const NOT_A_MODULE = 1;\n');
+    appendAnalysisMainLines(scratchRoot, ['void [seededHelper, seededOther];']);
     assert.deepEqual(listModulePaths(scratchRoot, 'analysis-only'), ['plugin/workflow-src/analysis-only/extra.js']);
     const source = buildWorkflow(scratchRoot, 'analysis-only');
     const banner = source.slice(source.indexOf('/*\n * GENERATED'), source.indexOf('*/'));
@@ -847,6 +942,94 @@ describe('build_workflows modules', () => {
   });
 });
 
+describe('build_workflows carries only what a script reads', () => {
+  for (const id of liveIds) {
+    test(builtPathFor(id) + ' carries no top-level declaration that nothing it runs reads', () => {
+      assert.deepEqual(findUnreadDeclarations(readBuilt(id)), []);
+    });
+    test(builtPathFor(id) + ' drops no top-level declaration its code names', () => {
+      assert.deepEqual(findDroppedNamedDeclarations(repoRoot, id, readBuilt(id)), []);
+    });
+  }
+  test('analysis-only reads no plan schema, so it carries no PLAN_SCHEMA and its banner names no plan-schema.json', () => {
+    const source = readBuilt('analysis-only');
+    assert.ok(listSourcePaths(repoRoot, 'analysis-only').includes('plugin/references/plan-schema.json'));
+    assert.ok(!listBuiltSourcePaths(repoRoot, 'analysis-only').includes('plugin/references/plan-schema.json'));
+    assert.ok(!source.includes('PLAN_SCHEMA') && !source.includes('plan-schema.json'));
+    assert.ok(readBuilt('standard-delivery').includes('\nconst PLAN_SCHEMA = '));
+  });
+  test('a function read through a shorthand property, a default value, a callback or a template is carried with what it reads, and one read by no root or only as a key is not', () => {
+    const scratchRoot = makeScratchCopy();
+    writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), [
+      'function seededShorthand() {\n  return seededDeep();\n}',
+      'function seededDeep() {\n  return 1;\n}',
+      'function seededDefault(value = seededDefaultValue()) {\n  return value;\n}',
+      'function seededDefaultValue() {\n  return 2;\n}',
+      'function seededCallback(value) {\n  return value;\n}',
+      'function seededTemplate() {\n  return 4;\n}',
+      'function seededUnread() {\n  return seededUnreadOnly();\n}',
+      'function seededUnreadOnly() {\n  return 5;\n}',
+      'function seededKeyOnly() {\n  return 6;\n}'
+    ].join('\n') + '\n');
+    appendAnalysisMainLines(scratchRoot, ['void [{ seededShorthand }, seededDefault, [1].map(seededCallback), `${seededTemplate()}`, { seededKeyOnly: 1 }.seededKeyOnly];']);
+    const source = buildWorkflow(scratchRoot, 'analysis-only');
+    for (const name of ['seededShorthand', 'seededDeep', 'seededDefault', 'seededDefaultValue', 'seededCallback', 'seededTemplate']) {
+      assert.ok(source.includes('function ' + name + '('), name);
+    }
+    for (const name of ['seededUnread', 'seededUnreadOnly', 'seededKeyOnly']) {
+      assert.ok(!source.includes('function ' + name + '('), name);
+    }
+    assert.deepEqual(findUnreadDeclarations(source), []);
+  });
+  test('a module with no function a root reads is left out, and the banner does not name it', () => {
+    const scratchRoot = makeScratchCopy();
+    writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), 'function seededUnread() {\n  return 1;\n}\n');
+    const source = buildWorkflow(scratchRoot, 'analysis-only');
+    assert.ok(listSourcePaths(scratchRoot, 'analysis-only').includes(SEEDED_MODULE_PATH));
+    assert.ok(!listBuiltSourcePaths(scratchRoot, 'analysis-only').includes(SEEDED_MODULE_PATH));
+    assert.ok(!source.includes('seededUnread') && !source.includes(SEEDED_MODULE_PATH));
+    assert.equal(source, readBuilt('analysis-only'));
+  });
+  test('a const of main.js that nothing reads fails the build and --check, naming the file and the name', () => {
+    const scratchRoot = makeScratchCopy();
+    appendAnalysisMainLines(scratchRoot, ['const SEEDED_UNREAD = 1;']);
+    assertBuildAndCheckThrow(scratchRoot, /^Error: plugin\/workflow-src\/analysis-only\/main\.js: nothing the workflow runs reads the top-level declaration of SEEDED_UNREAD\. Remove it\.$/);
+  });
+  test('a function read by a default value or a computed key of a top-level destructuring const is carried', () => {
+    const scratchRoot = makeScratchCopy();
+    const names = ['seededObjectDefault', 'seededArrayDefault', 'seededNestedDefault', 'seededKey'];
+    writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), names.map((name) => 'function ' + name + '() {\n  return \'k\';\n}').join('\n') + '\n');
+    appendAnalysisMainLines(scratchRoot, [
+      'const { seededObjectBound = seededObjectDefault() } = {};',
+      'const [seededArrayBound = seededArrayDefault()] = [];',
+      'const { nested: [{ seededNestedBound = seededNestedDefault() }] = [{}] } = {};',
+      'const { [seededKey()]: seededComputedBound } = {};',
+      'void [seededObjectBound, seededArrayBound, seededNestedBound, seededComputedBound];'
+    ]);
+    const source = buildWorkflow(scratchRoot, 'analysis-only');
+    for (const name of names) {
+      assert.ok(source.includes('function ' + name + '('), name);
+    }
+  });
+  for (const [name, line] of [['eval', 'log(eval(\'1\'));'], ['globalThis', 'log(globalThis.x);'], ['Function', 'log(Function(\'return 1\'));'], ['this', 'log(this);'], ['with', 'with ({}) {\n  log(1);\n}']]) {
+    test('reached code that reads ' + name + ' fails the build and --check, naming the id, and unreached code that reads it builds', () => {
+      const scratchRoot = makeScratchCopy();
+      writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), 'function seededUnreached() {\n  ' + line.replace(/\n/g, '\n  ') + '\n}\n');
+      assert.equal(buildWorkflow(scratchRoot, 'analysis-only'), readBuilt('analysis-only'));
+      appendAnalysisMainLines(scratchRoot, [line]);
+      assertBuildAndCheckThrow(scratchRoot, new RegExp('^Error: analysis-only: the built script reads ' + name + ', '));
+    });
+  }
+  test('a workflow that reads no BUILD_ID carries no BUILD_ID line', () => {
+    const scratchRoot = makeScratchCopy();
+    const mainPath = join(scratchRoot, 'plugin/workflow-src/analysis-only/main.js');
+    writeFileSync(mainPath, readFileSync(mainPath, 'utf8').replaceAll('BUILD_ID', '\'seeded\''));
+    const source = buildWorkflow(scratchRoot, 'analysis-only');
+    assert.ok(!source.includes('BUILD_ID'));
+    assert.ok(readBuilt('analysis-only').includes('\n\nconst BUILD_ID = \''));
+  });
+});
+
 describe('build_workflows BUILD_ID', () => {
   for (const id of liveIds) {
     test(builtPathFor(id) + ' holds the hash of the built script without its BUILD_ID line', () => {
@@ -855,7 +1038,8 @@ describe('build_workflows BUILD_ID', () => {
       assert.equal(buildId.length, BUILD_ID_LENGTH);
       const unstamped = source.replace('const BUILD_ID = \'' + buildId + '\';\n\n', '');
       assert.equal(buildId, createHash('sha256').update(unstamped).digest('hex').slice(0, BUILD_ID_LENGTH));
-      assert.ok(source.includes('\n\nconst PLAN_SCHEMA = ' + JSON.stringify(readDataConstant(repoRoot, 'PLAN_SCHEMA'), null, 1).replace(/^ +/gm, '') + ';\n\nconst BUILD_ID = '));
+      const [lastName] = DATA_FILES.filter(([, file]) => listBuiltSourcePaths(repoRoot, id).includes('plugin/references/' + file)).at(-1);
+      assert.ok(source.includes('\n\nconst ' + lastName + ' = ' + JSON.stringify(readDataConstant(repoRoot, lastName), null, 1).replace(/^ +/gm, '') + ';\n\nconst BUILD_ID = '), lastName);
     });
   }
   test('the same sources build the same BUILD_ID', () => {
@@ -867,6 +1051,7 @@ describe('build_workflows BUILD_ID', () => {
   test('a change to the built script changes BUILD_ID', () => {
     const scratchRoot = makeScratchCopy();
     writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), 'function seededBuildIdProbe() {}\n');
+    appendAnalysisMainLines(scratchRoot, ['void seededBuildIdProbe;']);
     assert.notEqual(readBuildId(buildWorkflow(scratchRoot, 'analysis-only')), readBuildId(buildWorkflow(repoRoot, 'analysis-only')));
   });
   test('a comment-only source edit leaves the built script and BUILD_ID unchanged', () => {
@@ -1069,7 +1254,7 @@ describe('build_workflows schema projection', () => {
 
 describe('build_workflows prose guards', () => {
   test('the prose budgets are pinned, one per workflow id', () => {
-    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 19200, 'standard-delivery': 43800 });
+    assert.deepEqual(PROSE_BUDGETS, { 'analysis-only': 16050, 'standard-delivery': 43800 });
     assert.ok(Object.isFrozen(PROSE_BUDGETS));
     assert.deepEqual(Object.keys(PROSE_BUDGETS).sort(), workflowIds);
   });
@@ -1195,21 +1380,31 @@ for (const id of liveIds) {
       assert.ok(metaEnd !== -1 && bannerStart === metaEnd + 5, 'banner must follow meta');
       const banner = source.slice(bannerStart, source.indexOf('*/', bannerStart));
       const sourceLines = banner.split('\n').filter((line) => line.startsWith(' *   ')).map((line) => line.slice(' *   '.length));
-      assert.deepEqual(sourceLines, listSourcePaths(repoRoot, id));
-      for (const name of ['workflow-src/' + id + '/meta.js', 'workflow-src/' + id + '/main.js', ...LIB_FILES.map((file) => 'workflow-src/lib/' + file), 'decision-autonomy-table.json', 'plan-schema.json']) {
+      assert.deepEqual(sourceLines, listBuiltSourcePaths(repoRoot, id));
+      for (const name of ['workflow-src/' + id + '/meta.js', 'workflow-src/' + id + '/main.js', 'workflow-src/lib/schema.js', 'decision-autonomy-table.json', 'decision-brief-schema.json']) {
         assert.ok(banner.includes(name), name);
       }
+      const allPaths = listSourcePaths(repoRoot, id);
+      assert.deepEqual(allPaths.filter((path) => sourceLines.includes(path)), sourceLines);
       assert.ok(banner.includes('Do not edit by hand'));
       assert.ok(banner.includes(REBUILD_COMMAND));
     });
     test('data constants and libraries come in build order', () => {
-      const markers = ['const AUTONOMY_TABLE = ', 'const BRIEF_SCHEMA = ', 'const PLAN_SCHEMA = ', 'const BUILD_ID = ', 'function validateSchema(', 'function decisionReasons(', 'function renderQuestions(', 'function resultFields(', 'function computeWave(', 'function parseRoutingLines(', 'function readArgsObject(', 'function isGitIdentifier(', 'function gatherFactsRoutingSpec('];
+      const builtPaths = listBuiltSourcePaths(repoRoot, id);
+      const dataMarkers = DATA_FILES.filter(([, file]) => builtPaths.includes('plugin/references/' + file)).map(([name]) => 'const ' + name + ' = ');
+      const codeMarkers = builtPaths.filter((path) => path.startsWith('plugin/workflow-src/') && !path.endsWith('/meta.js')).map((path) => readFirstCarriedNode(source, path));
+      const markers = [...dataMarkers, 'const BUILD_ID = ', ...codeMarkers];
+      assert.ok(dataMarkers.length > 0 && codeMarkers.length > 0);
       const positions = markers.map((marker) => source.indexOf(marker));
       assert.ok(positions.every((position) => position !== -1), JSON.stringify(positions));
       assert.deepEqual([...positions].sort((left, right) => left - right), positions);
     });
     test('each data constant is unindented JSON, one key or element per line, over more than one line, equal to the projection of its file', () => {
-      const constants = [['AUTONOMY_TABLE', 'decision-autonomy-table.json', projectAutonomyTable], ['BRIEF_SCHEMA', 'decision-brief-schema.json', projectSchema], ['PLAN_SCHEMA', 'plan-schema.json', projectSchema]];
+      const builtPaths = listBuiltSourcePaths(repoRoot, id);
+      const constants = DATA_FILES.filter(([, file]) => builtPaths.includes('plugin/references/' + file));
+      for (const [name] of DATA_FILES.filter((constant) => !constants.includes(constant))) {
+        assert.ok(!source.includes('const ' + name + ' = '), name);
+      }
       for (const [name, file, project] of constants) {
         const fileData = project(JSON.parse(readFileSync(join(repoRoot, 'plugin/references', file), 'utf8')));
         assert.deepEqual(readDataConstant(repoRoot, name), fileData, name);

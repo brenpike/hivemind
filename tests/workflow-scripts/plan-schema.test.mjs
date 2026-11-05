@@ -24,7 +24,8 @@ const SUBSET_KEYWORDS = [
   'additionalProperties',
   'items',
   'minItems',
-  'maxLength'
+  'maxLength',
+  'pattern'
 ];
 const OPTIONAL_PROPERTIES = { $: ['closes'] };
 

@@ -106,10 +106,10 @@
  *   Each validation_commands entry is one command line: describePlanProblem
  *   refuses a blank entry, or one that holds a line break or another
  *   control character, naming the reason, before the branch step.
- *   Branch names: describePlanProblem refuses a plan.branch outside the
- *   Branch Taxonomy and Branch Naming of
- *   ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md, so a runner with no
- *   skill body never creates one (issue 467).
+ *   Branch names: by the plan schema branch pattern, which the schema check
+ *   tests first, describePlanProblem refuses a plan.branch outside the
+ *   Branch Taxonomy and Branch Naming of ${CLAUDE_PLUGIN_ROOT}/governance/workflow.md,
+ *   so a runner with no skill body never creates one (issue 467).
  *   Title type: describePlanProblem refuses a plan whose cleaned
  *   plan.title starts with a commitTypeMap() value in any letter case, an optional
  *   parenthesized scope, an optional '!' and ':', with a fixed message that
@@ -372,7 +372,7 @@ function describePlanProblem(planResult, resultSchema, facts, trunk, references)
   if (isOnOtherBranch && plan.branch !== facts.branch) {
     return 'The run started on branch ' + encodeUntrustedText(facts.branch) + ' and delivers on it, but the plan names branch ' + encodeUntrustedText(plan.branch) + ', so ' + RUN_NAME + ' stopped.';
   }
-  if (!/^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)\/[a-z0-9]+(-[a-z0-9]+)*$/.test(plan.branch)) {
+  if (!new RegExp(PLAN_SCHEMA.properties.branch.pattern, 'u').test(plan.branch)) {
     return 'The plan names branch ' + encodeUntrustedText(plan.branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so ' + RUN_NAME + ' stopped.';
   }
   return describeClosesProblem(plan, references);
