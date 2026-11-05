@@ -130,14 +130,14 @@
  *   the repo and passes with no change, fix_cause otherwise.
  *   One rule covers every step: a null result from any agent() call, an
  *   agent failure, is a cause through describeUnusableResult
- *   (lib/result.js), with the describeNoResult sentence once and next
+ *   (lib/stop.js), with the describeNoResult sentence once and next
  *   action run_again, and a non-null unusable result gets report, as does
  *   a cause whose lead names no reason, a runner command stop and a
  *   synapse-gate denial (issues 481, 498).
  *   run_again gives a line saying nothing in the repo needs a fix and to
  *   run the request again later; fix_cause or no value gives the fix line,
  *   to clear the cause named above, then run the request again. Code alone
- *   sets answer, approve and report, and describeStopAction (lib/result.js)
+ *   sets answer, approve and report, and describeStopAction (lib/stop.js)
  *   holds every action phrase.
  *   A blocked wave says run_again only when every blocked worker does.
  *   Compound rule: a file-changing step passes its own causes to
@@ -146,7 +146,7 @@
  *   facts, scan, scope, plan or branch stop goes through stopDelivery with
  *   isReplan true, and its reply starts a new pass outside maxReplans();
  *   the launch check alone ends in runDelivery. orderStopCauses
- *   (lib/result.js) orders causes stably by approve, fix_cause or no
+ *   (lib/stop.js) orders causes stably by approve, fix_cause or no
  *   value, answer, report, then run_again, and the first cause gives the
  *   Next line, so it is run_again only when every cause is. A lead
  *   longer than maxBlockedLeadLength() code points has as its compact form

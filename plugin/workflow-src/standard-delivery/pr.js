@@ -88,7 +88,7 @@
  *   (relay.js), in any case: code holds this check, not a skill body the
  *   runner may never read, so buildPullRequestTexts makes one a terminal
  *   stop before any push (issue 467).
- *   The relay is read through describeUnusableResult (lib/result.js): a
+ *   The relay is read through describeUnusableResult (lib/stop.js): a
  *   null result, an agent failure, adds the agent-failure sentence and
  *   next action run_again, and stopDelivery ends the run on it; any other
  *   unusable result, malformed routing lines among them, gets report and

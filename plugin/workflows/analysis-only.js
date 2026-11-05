@@ -18,6 +18,7 @@ export const meta = {
  *   plugin/workflow-src/lib/decide.js
  *   plugin/workflow-src/lib/brief.js
  *   plugin/workflow-src/lib/result.js
+ *   plugin/workflow-src/lib/stop.js
  *   plugin/workflow-src/lib/args.js
  *   plugin/workflow-src/lib/identifier.js
  *   plugin/workflow-src/lib/facts.js
@@ -373,7 +374,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'ef61d4b1281890fe';
+const BUILD_ID = '1b9d05824b7495fa';
 
 function supportedSchemaKeywords(){
 return[
@@ -1056,55 +1057,6 @@ function describeReason(text){
 const quoted=quoteDiagnostic(text,maxReasonLength());
 return quoted===undefined?'it gave no reason.':'it says '+quoted+'.';
 }
-function describeNoResult(result){
-if(result!==null){
-return'';
-}
-return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
-}
-function describeUnusableResult(problem,result){
-if(result!==null){
-return{problem:problem,nextAction:'report'};
-}
-return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
-}
-function stopActions(then){
-return{
-approve:'approve or refuse the change named above, then '+then+' with that answer',
-fix_cause:'clear the cause named above, then '+then,
-answer:then+' with the answers in it',
-report:'nothing in your repo needs a fix, so report this stop as a workflow defect, then '+then,
-run_again:'nothing in the repo needs a fix, so '+then+' later, for example once the machine is idle'
-};
-}
-function readStopAction(nextAction){
-return Object.hasOwn(stopActions(''),nextAction)?nextAction:'fix_cause';
-}
-function describeStopAction(nextAction,then){
-return stopActions(then)[readStopAction(nextAction)];
-}
-function nextStepLine(nextAction){
-return'Next: '+describeStopAction(nextAction,'run the request again')+'.';
-}
-function orderStopCauses(causes){
-const actionOrder=Object.keys(stopActions(''));
-const rankCause=(cause)=>actionOrder.indexOf(readStopAction(cause.nextAction));
-return causes.slice().sort((first,second)=>rankCause(first)-rankCause(second));
-}
-function maxBlockedLeadLength(){
-return 1000;
-}
-function buildStopBlocks(causes){
-if(!Array.isArray(causes)||causes.length===0){
-throw new Error('buildStopBlocks: causes must be a non-empty array');
-}
-const orderedCauses=orderStopCauses(causes);
-const leadText=orderedCauses[0].problem;
-const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
-const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
-const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
-return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
-}
 function canCarry(resumeArgs){
 const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
 return noticeLength(emptyPause)<=Math.floor(noticeBudget()/2);
@@ -1322,6 +1274,56 @@ return typeof value==='object'&&value!==null&&!Array.isArray(value);
 }
 function countCharacter(text,character){
 return text.split(character).length-1;
+}
+
+function describeNoResult(result){
+if(result!==null){
+return'';
+}
+return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+function describeUnusableResult(problem,result){
+if(result!==null){
+return{problem:problem,nextAction:'report'};
+}
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
+}
+function stopActions(then){
+return{
+approve:'approve or refuse the change named above, then '+then+' with that answer',
+fix_cause:'clear the cause named above, then '+then,
+answer:then+' with the answers in it',
+report:'nothing in your repo needs a fix, so report this stop as a workflow defect, then '+then,
+run_again:'nothing in the repo needs a fix, so '+then+' later, for example once the machine is idle'
+};
+}
+function readStopAction(nextAction){
+return Object.hasOwn(stopActions(''),nextAction)?nextAction:'fix_cause';
+}
+function describeStopAction(nextAction,then){
+return stopActions(then)[readStopAction(nextAction)];
+}
+function nextStepLine(nextAction){
+return'Next: '+describeStopAction(nextAction,'run the request again')+'.';
+}
+function orderStopCauses(causes){
+const actionOrder=Object.keys(stopActions(''));
+const rankCause=(cause)=>actionOrder.indexOf(readStopAction(cause.nextAction));
+return causes.slice().sort((first,second)=>rankCause(first)-rankCause(second));
+}
+function maxBlockedLeadLength(){
+return 1000;
+}
+function buildStopBlocks(causes){
+if(!Array.isArray(causes)||causes.length===0){
+throw new Error('buildStopBlocks: causes must be a non-empty array');
+}
+const orderedCauses=orderStopCauses(causes);
+const leadText=orderedCauses[0].problem;
+const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
+const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
+const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
+return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 
 function isPlainObject(value){

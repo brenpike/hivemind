@@ -31,7 +31,7 @@
  *   Every wave ends with the commit runner, whatever its workers returned.
  *   The loop reads every worker outcome before the commit, and a null
  *   worker result counts as blocked: its reason names the agent failure
- *   through describeUnusableResult (lib/result.js), with next action
+ *   through describeUnusableResult (lib/stop.js), with next action
  *   run_again, and readWorkerOutcome passes its agentFailure mark on.
  *   readWorkerOutcome types a blocked worker: report when its blocker
  *   gives no reason, approve when its stage is destructive-fix-gate or its
@@ -39,7 +39,7 @@
  *   next_action. describeBlockedWave makes the one cause of a blocked wave:
  *   a lead line naming the stop, then one line per blocked step through
  *   capItemLines, an approve step saying it waits for approval, with the
- *   next action first in orderStopCauses order (lib/result.js), so
+ *   next action first in orderStopCauses order (lib/stop.js), so
  *   run_again only when every blocked worker says so, and agentFailure
  *   when any blocked worker had a null result. A plan that cannot be
  *   scheduled mid-run is a report stop. runCommitStep

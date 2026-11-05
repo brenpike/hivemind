@@ -7,7 +7,7 @@ import { listSourcePaths, stripCommentsAndStrings } from '../../tools/build_work
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const libDir = repoRoot + 'plugin/workflow-src/lib/';
-const lib = loadLibs(['decide.js', 'brief.js', 'result.js'].map((name) => libDir + name));
+const lib = loadLibs(['decide.js', 'brief.js', 'result.js', 'stop.js'].map((name) => libDir + name));
 const EM_DASH = '—';
 const ONE_REPLY_LINE = 'Reply with an option, like A, or in your own words.';
 const MANY_REPLY_LINE = 'Reply with a label and an option for each, like Q1 A, or in your own words.';

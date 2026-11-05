@@ -14,9 +14,9 @@
  *            ids and limit flag of a gate decision (gates.js).
  *   values   the routing values of a version check whose version_check is
  *            undetermined or unreadable (gates.js).
- *   The kind constants of main.js, unshownBriefText, isRepositoryPath,
- *   listPlanPaths and describeCount (plan.js), and gateNames, joinNames,
- *   maxFixRounds and maxGateReruns.
+ *   The kind constants of main.js, unshownBriefText and describeCount
+ *   (plan.js), isRepositoryPath and listPlanPaths (paths.js), and
+ *   gateNames, joinNames, maxFixRounds and maxGateReruns.
  *
  * Outputs
  *   buildPlanAcceptanceBrief(plan), buildRemediationPlanBrief(plan),

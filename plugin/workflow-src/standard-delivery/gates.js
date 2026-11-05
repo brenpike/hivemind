@@ -42,7 +42,7 @@
  *           two versioning answers and the version files, and relays it in
  *           the version field the schema then requires under passed, failed
  *           and not_run. Its stdout parses with versionCheckRoutingSpec()
- *           and passes isConsistentVersionRelay (relay.js). With no version
+ *           and passes isConsistentVersionRelay (specs.js). With no version
  *           file the prompt and schema are as before, and no bump-type run
  *           happens.
  *   Fix     a failed validation resolves through decide(). Each taken round is
@@ -78,7 +78,7 @@
  *   A contractRows() check is a function of the built script, not of main.js:
  *   the build bundles this module into it, so a row can name a function of this
  *   module.
- *   A null gate result reads through describeUnusableResult (lib/result.js),
+ *   A null gate result reads through describeUnusableResult (lib/stop.js),
  *   next action run_again, and readGateEditOutcome passes its agentFailure
  *   mark on; any other unusable result, a malformed version relay among
  *   them, gets report. A blocked validation or fix round whose blocker

@@ -11,7 +11,7 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const libDir = repoRoot + 'plugin/workflow-src/lib/';
 const gatherFactsPath = repoRoot + 'plugin/skills/gather-facts/scripts/gather-facts.sh';
 const factsSchema = JSON.parse(readFileSync(repoRoot + 'plugin/references/facts-schema.json', 'utf8'));
-const lib = loadLibs(['schema.js', 'result.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js'].map((name) => libDir + name));
+const lib = loadLibs(['schema.js', 'result.js', 'stop.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js'].map((name) => libDir + name));
 
 const RUN_NOUN = 'delivery';
 const FACTS_FILE = '.hivemind/facts/facts-20261021T101500Z-0123456789ab.json';

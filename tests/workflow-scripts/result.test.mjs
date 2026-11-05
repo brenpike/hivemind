@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { loadLibs } from './harness.mjs';
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
-const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
+const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js', repoRoot + 'plugin/workflow-src/lib/stop.js']);
 
 const HARNESS_CUT = 8000;
 const FIX_LINE = 'Next: clear the cause named above, then run the request again.';

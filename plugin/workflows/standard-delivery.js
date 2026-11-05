@@ -27,6 +27,7 @@ export const meta = {
  *   plugin/workflow-src/lib/decide.js
  *   plugin/workflow-src/lib/brief.js
  *   plugin/workflow-src/lib/result.js
+ *   plugin/workflow-src/lib/stop.js
  *   plugin/workflow-src/lib/waves.js
  *   plugin/workflow-src/lib/routing.js
  *   plugin/workflow-src/lib/args.js
@@ -34,12 +35,14 @@ export const meta = {
  *   plugin/workflow-src/lib/facts.js
  *   plugin/workflow-src/standard-delivery/briefs.js
  *   plugin/workflow-src/standard-delivery/gates.js
+ *   plugin/workflow-src/standard-delivery/paths.js
  *   plugin/workflow-src/standard-delivery/plan.js
  *   plugin/workflow-src/standard-delivery/pr.js
  *   plugin/workflow-src/standard-delivery/record.js
  *   plugin/workflow-src/standard-delivery/relay.js
  *   plugin/workflow-src/standard-delivery/review.js
  *   plugin/workflow-src/standard-delivery/scope.js
+ *   plugin/workflow-src/standard-delivery/specs.js
  *   plugin/workflow-src/standard-delivery/waves.js
  *   plugin/workflow-src/standard-delivery/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
@@ -634,7 +637,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '5679525c6893fc87';
+const BUILD_ID = '4d2c349ddd7841d4';
 
 function supportedSchemaKeywords(){
 return[
@@ -1341,73 +1344,6 @@ function describeReason(text){
 const quoted=quoteDiagnostic(text,maxReasonLength());
 return quoted===undefined?'it gave no reason.':'it says '+quoted+'.';
 }
-function describeNoResult(result){
-if(result!==null){
-return'';
-}
-return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
-}
-function describeUnusableResult(problem,result){
-if(result!==null){
-return{problem:problem,nextAction:'report'};
-}
-return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
-}
-function readBlockerAction(blocker,nextAction){
-return quoteDiagnostic(blocker)===undefined?'report':nextAction;
-}
-function isTransientFailure(text){
-return typeof text==='string'&&transientFailurePatterns().some((pattern)=>pattern.test(text));
-}
-function transientFailurePatterns(){
-return[
-/\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
-/\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
-/\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
-/\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
-/\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
-/\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
-/\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
-/\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
-];
-}
-function stopActions(then){
-return{
-approve:'approve or refuse the change named above, then '+then+' with that answer',
-fix_cause:'clear the cause named above, then '+then,
-answer:then+' with the answers in it',
-report:'nothing in your repo needs a fix, so report this stop as a workflow defect, then '+then,
-run_again:'nothing in the repo needs a fix, so '+then+' later, for example once the machine is idle'
-};
-}
-function readStopAction(nextAction){
-return Object.hasOwn(stopActions(''),nextAction)?nextAction:'fix_cause';
-}
-function describeStopAction(nextAction,then){
-return stopActions(then)[readStopAction(nextAction)];
-}
-function nextStepLine(nextAction){
-return'Next: '+describeStopAction(nextAction,'run the request again')+'.';
-}
-function orderStopCauses(causes){
-const actionOrder=Object.keys(stopActions(''));
-const rankCause=(cause)=>actionOrder.indexOf(readStopAction(cause.nextAction));
-return causes.slice().sort((first,second)=>rankCause(first)-rankCause(second));
-}
-function maxBlockedLeadLength(){
-return 1000;
-}
-function buildStopBlocks(causes){
-if(!Array.isArray(causes)||causes.length===0){
-throw new Error('buildStopBlocks: causes must be a non-empty array');
-}
-const orderedCauses=orderStopCauses(causes);
-const leadText=orderedCauses[0].problem;
-const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
-const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
-const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
-return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
-}
 function canCarry(resumeArgs){
 const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
 return noticeLength(emptyPause)<=Math.floor(noticeBudget()/2);
@@ -1629,6 +1565,74 @@ return typeof value==='object'&&value!==null&&!Array.isArray(value);
 }
 function countCharacter(text,character){
 return text.split(character).length-1;
+}
+
+function describeNoResult(result){
+if(result!==null){
+return'';
+}
+return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+function describeUnusableResult(problem,result){
+if(result!==null){
+return{problem:problem,nextAction:'report'};
+}
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
+}
+function readBlockerAction(blocker,nextAction){
+return quoteDiagnostic(blocker)===undefined?'report':nextAction;
+}
+function isTransientFailure(text){
+return typeof text==='string'&&transientFailurePatterns().some((pattern)=>pattern.test(text));
+}
+function transientFailurePatterns(){
+return[
+/\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
+/\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
+/\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
+/\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
+/\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
+/\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
+/\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
+/\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
+];
+}
+function stopActions(then){
+return{
+approve:'approve or refuse the change named above, then '+then+' with that answer',
+fix_cause:'clear the cause named above, then '+then,
+answer:then+' with the answers in it',
+report:'nothing in your repo needs a fix, so report this stop as a workflow defect, then '+then,
+run_again:'nothing in the repo needs a fix, so '+then+' later, for example once the machine is idle'
+};
+}
+function readStopAction(nextAction){
+return Object.hasOwn(stopActions(''),nextAction)?nextAction:'fix_cause';
+}
+function describeStopAction(nextAction,then){
+return stopActions(then)[readStopAction(nextAction)];
+}
+function nextStepLine(nextAction){
+return'Next: '+describeStopAction(nextAction,'run the request again')+'.';
+}
+function orderStopCauses(causes){
+const actionOrder=Object.keys(stopActions(''));
+const rankCause=(cause)=>actionOrder.indexOf(readStopAction(cause.nextAction));
+return causes.slice().sort((first,second)=>rankCause(first)-rankCause(second));
+}
+function maxBlockedLeadLength(){
+return 1000;
+}
+function buildStopBlocks(causes){
+if(!Array.isArray(causes)||causes.length===0){
+throw new Error('buildStopBlocks: causes must be a non-empty array');
+}
+const orderedCauses=orderStopCauses(causes);
+const leadText=orderedCauses[0].problem;
+const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
+const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
+const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
+return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 
 function computeWave(steps,doneIds){
@@ -2879,6 +2883,43 @@ gates.answer=ended.answer;
 }
 }
 
+function externalLabel(){
+return'Can carry external content.';
+}
+function repositoryPathMark(){
+return externalLabel()+' Repository path.';
+}
+function toAsciiLowerCase(text){
+return text.replace(/[A-Z]/g,(letter)=>String.fromCharCode(letter.charCodeAt(0)+32));
+}
+function isRepositoryPath(value){
+if(typeof value!=='string'||value.length===0||value.startsWith('/')){
+return false;
+}
+const isOneLine=Array.from(value).every((character)=>character.codePointAt(0)>=32&&character.codePointAt(0)!==127);
+return isOneLine&&value.split('/').every((part)=>!['','.','..','.git'].includes(toAsciiLowerCase(part)));
+}
+function collectRepositoryPaths(schema,value,location,found){
+if(typeof schema.description==='string'&&schema.description.startsWith(repositoryPathMark())){
+found.push({location:location,value:value});
+}
+if(schema.properties!==undefined&&isPlainObject(value)){
+const presentNames=Object.keys(schema.properties).filter((name)=>Object.prototype.hasOwnProperty.call(value,name));
+presentNames.forEach((name)=>collectRepositoryPaths(schema.properties[name],value[name],location===''?name:location+'.'+name,found));
+}
+if(schema.items!==undefined&&Array.isArray(value)){
+value.forEach((item,index)=>collectRepositoryPaths(schema.items,item,location+'['+index+']',found));
+}
+return found;
+}
+function findRepositoryPathProblem(schema,value,location){
+const problem=collectRepositoryPaths(schema,value,location,[]).find((entry)=>!isRepositoryPath(entry.value));
+return problem===undefined?'':problem.location;
+}
+function listPlanPaths(plan){
+return[...new Set(collectRepositoryPaths(PLAN_SCHEMA,plan,'',[]).map((entry)=>entry.value))];
+}
+
 function omitSchemaDialect(schema){
 return Object.fromEntries(Object.entries(schema).filter(([key])=>key!=='$schema'));
 }
@@ -2915,42 +2956,6 @@ items:{type:'string',enum:listShownLabels(shownAsks)}
 };
 spec.required.push('settled');
 return buildTaggedSchema(spec);
-}
-function externalLabel(){
-return'Can carry external content.';
-}
-function repositoryPathMark(){
-return externalLabel()+' Repository path.';
-}
-function toAsciiLowerCase(text){
-return text.replace(/[A-Z]/g,(letter)=>String.fromCharCode(letter.charCodeAt(0)+32));
-}
-function isRepositoryPath(value){
-if(typeof value!=='string'||value.length===0||value.startsWith('/')){
-return false;
-}
-const isOneLine=Array.from(value).every((character)=>character.codePointAt(0)>=32&&character.codePointAt(0)!==127);
-return isOneLine&&value.split('/').every((part)=>!['','.','..','.git'].includes(toAsciiLowerCase(part)));
-}
-function collectRepositoryPaths(schema,value,location,found){
-if(typeof schema.description==='string'&&schema.description.startsWith(repositoryPathMark())){
-found.push({location:location,value:value});
-}
-if(schema.properties!==undefined&&isPlainObject(value)){
-const presentNames=Object.keys(schema.properties).filter((name)=>Object.prototype.hasOwnProperty.call(value,name));
-presentNames.forEach((name)=>collectRepositoryPaths(schema.properties[name],value[name],location===''?name:location+'.'+name,found));
-}
-if(schema.items!==undefined&&Array.isArray(value)){
-value.forEach((item,index)=>collectRepositoryPaths(schema.items,item,location+'['+index+']',found));
-}
-return found;
-}
-function findRepositoryPathProblem(schema,value,location){
-const problem=collectRepositoryPaths(schema,value,location,[]).find((entry)=>!isRepositoryPath(entry.value));
-return problem===undefined?'':problem.location;
-}
-function listPlanPaths(plan){
-return[...new Set(collectRepositoryPaths(PLAN_SCHEMA,plan,'',[]).map((entry)=>entry.value))];
 }
 function settledAnswersSentence(replyHome){
 return dataBlocksSentence(replyHome)+' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
@@ -3579,86 +3584,6 @@ docs:'docs',
 test:'test',
 ci:'ci'
 };
-}
-function commitShaPattern(){
-return/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-}
-function branchWarningTexts(){
-return{
-stale:'trunk is stale or diverged from origin; proceeding as acknowledged at preflight',
-skipped:'trunk freshness check was skipped'
-};
-}
-function createWorkingBranchRoutingSpec(){
-const warnings=branchWarningTexts();
-return{
-branch:{pattern:gitIdentifierPattern(),required:true},
-commit:{pattern:commitShaPattern(),required:true},
-created:{pattern:/^(?:true|false)$/,required:true},
-warning:{pattern:new RegExp('^(?:'+warnings.stale+'|'+warnings.skipped+')$'),required:false}
-};
-}
-function moltRoutingSpec(){
-return{
-branch:{pattern:gitIdentifierPattern(),required:true},
-commit:{pattern:commitShaPattern(),required:true},
-committed:{pattern:/^(?:true|false)$/,required:true}
-};
-}
-function bumpTypeRoutingSpec(){
-const count={pattern:/^(?:0|[1-9][0-9]*)$/,required:true};
-return{
-dominant_row:{pattern:/^(?:MAJOR|MINOR|PATCH|NO_BUMP|NONE|MULTI)$/,required:true},
-verdict:{pattern:/^(?:bump_required|no_bump|ask_user)$/,required:true},
-bump_type:{pattern:/^(?:major|minor|patch|none)$/,required:true},
-rule_applied:{pattern:/^[1-6]$/,required:true},
-counts:{block:{major:count,minor:count,patch:count,no_bump:count},required:true},
-mapped_commits:count,
-dropped_reverts:count
-};
-}
-function pullRequestWarningTexts(){
-return[
-'push was rejected; the branch is not on its remote',
-'no upstream and no origin remote; push deferred',
-'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
-];
-}
-function openPlanPrRoutingSpec(){
-return{
-url:{pattern:/^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/,required:true},
-head_ref_oid:{pattern:commitShaPattern(),required:true},
-created:{pattern:/^(?:true|false)$/,required:true},
-commented:{pattern:/^(?:true|false)$/,required:true},
-warning:{pattern:new RegExp('^(?:'+pullRequestWarningTexts().join('|')+')$'),required:false}
-};
-}
-function semverCorePattern(){
-return/^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
-}
-function versionCheckRoutingSpec(){
-return Object.assign(bumpTypeRoutingSpec(),{
-version_check:{pattern:/^(?:match|mismatch|unreadable|undetermined)$/,required:true},
-trunk_version:{pattern:semverCorePattern(),required:false},
-expected_version:{pattern:semverCorePattern(),required:false}
-});
-}
-function isConsistentBumpRelay(values){
-const counts=values.counts;
-const countSum=Number(counts.major)+Number(counts.minor)+Number(counts.patch)+Number(counts.no_bump);
-return(values.verdict==='bump_required')===(values.bump_type!=='none')
-&&countSum===Number(values.mapped_commits);
-}
-function isConsistentVersionRelay(values){
-const hasExpected=values.expected_version!==undefined;
-const hasTrunk=values.trunk_version!==undefined;
-if(!isConsistentBumpRelay(values)||(hasExpected&&!hasTrunk)){
-return false;
-}
-if(values.version_check==='match'||values.version_check==='mismatch'){
-return hasExpected&&values.verdict!=='ask_user';
-}
-return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
 }
 function validationTaskSentence(){
 return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
@@ -4453,6 +4378,87 @@ phase('Scope');
 const scope=await agent(buildScopePrompt(run.request,facts,run.answerLog),scopeOptions(run.pass,round));
 const unusable=describeScopeProblem(scope);
 return unusable===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:unusable;
+}
+
+function commitShaPattern(){
+return/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+}
+function branchWarningTexts(){
+return{
+stale:'trunk is stale or diverged from origin; proceeding as acknowledged at preflight',
+skipped:'trunk freshness check was skipped'
+};
+}
+function createWorkingBranchRoutingSpec(){
+const warnings=branchWarningTexts();
+return{
+branch:{pattern:gitIdentifierPattern(),required:true},
+commit:{pattern:commitShaPattern(),required:true},
+created:{pattern:/^(?:true|false)$/,required:true},
+warning:{pattern:new RegExp('^(?:'+warnings.stale+'|'+warnings.skipped+')$'),required:false}
+};
+}
+function moltRoutingSpec(){
+return{
+branch:{pattern:gitIdentifierPattern(),required:true},
+commit:{pattern:commitShaPattern(),required:true},
+committed:{pattern:/^(?:true|false)$/,required:true}
+};
+}
+function bumpTypeRoutingSpec(){
+const count={pattern:/^(?:0|[1-9][0-9]*)$/,required:true};
+return{
+dominant_row:{pattern:/^(?:MAJOR|MINOR|PATCH|NO_BUMP|NONE|MULTI)$/,required:true},
+verdict:{pattern:/^(?:bump_required|no_bump|ask_user)$/,required:true},
+bump_type:{pattern:/^(?:major|minor|patch|none)$/,required:true},
+rule_applied:{pattern:/^[1-6]$/,required:true},
+counts:{block:{major:count,minor:count,patch:count,no_bump:count},required:true},
+mapped_commits:count,
+dropped_reverts:count
+};
+}
+function pullRequestWarningTexts(){
+return[
+'push was rejected; the branch is not on its remote',
+'no upstream and no origin remote; push deferred',
+'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
+];
+}
+function openPlanPrRoutingSpec(){
+return{
+url:{pattern:/^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/,required:true},
+head_ref_oid:{pattern:commitShaPattern(),required:true},
+created:{pattern:/^(?:true|false)$/,required:true},
+commented:{pattern:/^(?:true|false)$/,required:true},
+warning:{pattern:new RegExp('^(?:'+pullRequestWarningTexts().join('|')+')$'),required:false}
+};
+}
+function semverCorePattern(){
+return/^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
+}
+function versionCheckRoutingSpec(){
+return Object.assign(bumpTypeRoutingSpec(),{
+version_check:{pattern:/^(?:match|mismatch|unreadable|undetermined)$/,required:true},
+trunk_version:{pattern:semverCorePattern(),required:false},
+expected_version:{pattern:semverCorePattern(),required:false}
+});
+}
+function isConsistentBumpRelay(values){
+const counts=values.counts;
+const countSum=Number(counts.major)+Number(counts.minor)+Number(counts.patch)+Number(counts.no_bump);
+return(values.verdict==='bump_required')===(values.bump_type!=='none')
+&&countSum===Number(values.mapped_commits);
+}
+function isConsistentVersionRelay(values){
+const hasExpected=values.expected_version!==undefined;
+const hasTrunk=values.trunk_version!==undefined;
+if(!isConsistentBumpRelay(values)||(hasExpected&&!hasTrunk)){
+return false;
+}
+if(values.version_check==='match'||values.version_check==='mismatch'){
+return hasExpected&&values.verdict!=='ask_user';
+}
+return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
 }
 
 function buildNextActionProperty(){

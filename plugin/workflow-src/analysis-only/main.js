@@ -147,7 +147,7 @@
  *   agent() returns null on an agent API error, such as an expired login.
  *   A null facts result blocks as malformed facts, a null scan result as a
  *   scan it cannot use, and a null analyze or revise result as no result.
- *   Each goes through describeUnusableResult (result.js), the one place
+ *   Each goes through describeUnusableResult (stop.js), the one place
  *   that adds the describeNoResult sentence naming the agent failure and
  *   the run_again Next line, so the user does not look for a cause in the
  *   repo (issue 460). Malformed facts routing and a planner result that
@@ -155,7 +155,7 @@
  *   report line, as every unusable result does (issues 481, 498). The
  *   build-skew stop gets the answer line, any other
  *   blocked end the fix line, which says to clear the cause named above,
- *   then run the request again (nextStepLine, result.js).
+ *   then run the request again (nextStepLine, stop.js).
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
  *   quoted whole up to maxReasonLength() code points, 600, else cut by

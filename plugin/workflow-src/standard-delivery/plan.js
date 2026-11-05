@@ -1,10 +1,10 @@
 /*
  * standard-delivery plan.js: the planning pass of the standard-delivery
- * workflow. It holds the plan result and revise schemas, the path checks
- * of plan values, the plan and revise prompts, the plan check, the
- * planning pause lead and the resolution of every decision of a planning
- * pass. Its code-built briefs and the outside-limit check live in
- * briefs.js.
+ * workflow. It holds the plan result and revise schemas, the plan and
+ * revise prompts, the plan check, the planning pause lead and the
+ * resolution of every decision of a planning pass. Its code-built briefs
+ * and the outside-limit check live in briefs.js, and the path checks of
+ * plan values in paths.js.
  *
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
@@ -77,27 +77,14 @@
  *   question is open. Rejected: a free-text reply has no code parse, and a
  *   pause per effect adds stops (review finding d5619285, option C).
  *   Every plan value at a field whose PLAN_SCHEMA description starts with
- *   repositoryPathMark() must pass isRepositoryPath (review finding
- *   461fe942). collectRepositoryPaths walks the schema for the mark, so a
- *   new path field is read once it carries the mark, by
- *   findRepositoryPathProblem and by listPlanPaths. describePlanProblem
- *   runs the path check after the schema check and before computeWave, so
- *   a bad path stops the run before the branch step and any later agent
- *   call. The rule is the files rule of molt.sh, its home, and a parity test
- *   runs one corpus through both and requires the same verdicts, so a change
- *   lands in both. The check is lexical, so a symlinked path or one that
- *   names a directory is left to molt.sh. Fix round files are not plan
- *   fields: they reach only molt.sh, which applies the same rule before any
- *   change. The user rejected local review finding c2e0ada3, which asked for
- *   a check of fix round files members in the workflow, on this basis
- *   (ADR-0037, Amendment 2026-10-25). isGitIdentifier stays on
- *   artifact_files for the bump-type --version-file argument of the
- *   validate step (gates.js), since the path rule allows spaces, shell
- *   characters and a leading '-'.
+ *   repositoryPathMark() must pass isRepositoryPath (paths.js holds the
+ *   rule). describePlanProblem runs findRepositoryPathProblem after the
+ *   schema check and before computeWave, so a bad path stops the run
+ *   before the branch step and any later agent call.
  *   Stops (issue 457): a plan, revise or rescope problem goes through
  *   stopDelivery (record.js) with isReplan true, so the reply starts a new
  *   pass outside maxReplans(). A null result, an agent failure, adds the
- *   agent-failure sentence through describeUnusableResult (lib/result.js)
+ *   agent-failure sentence through describeUnusableResult (lib/stop.js)
  *   and ends the run with next action run_again; any other problem pauses,
  *   and the reply reaches the next plan prompt's answers block. A
  *   planner's blocked outcome that fits its schema keeps the fix line,
@@ -215,57 +202,6 @@ function buildReviseResultSchema(shownAsks) {
   };
   spec.required.push('settled');
   return buildTaggedSchema(spec);
-}
-
-function externalLabel() {
-  return 'Can carry external content.';
-}
-
-function repositoryPathMark() {
-  return externalLabel() + ' Repository path.';
-}
-
-function toAsciiLowerCase(text) {
-  return text.replace(/[A-Z]/g, (letter) => String.fromCharCode(letter.charCodeAt(0) + 32));
-}
-
-function isRepositoryPath(value) {
-  if (typeof value !== 'string' || value.length === 0 || value.startsWith('/')) {
-    return false;
-  }
-  const isOneLine = Array.from(value).every((character) => character.codePointAt(0) >= 32 && character.codePointAt(0) !== 127);
-  return isOneLine && value.split('/').every((part) => !['', '.', '..', '.git'].includes(toAsciiLowerCase(part)));
-}
-
-/**
- * Pushes {location, value} to found for each value at a node the mark names,
- * in pre-order over the present properties and items. Returns found.
- */
-function collectRepositoryPaths(schema, value, location, found) {
-  if (typeof schema.description === 'string' && schema.description.startsWith(repositoryPathMark())) {
-    found.push({ location: location, value: value });
-  }
-  if (schema.properties !== undefined && isPlainObject(value)) {
-    const presentNames = Object.keys(schema.properties).filter((name) => Object.prototype.hasOwnProperty.call(value, name));
-    presentNames.forEach((name) => collectRepositoryPaths(schema.properties[name], value[name], location === '' ? name : location + '.' + name, found));
-  }
-  if (schema.items !== undefined && Array.isArray(value)) {
-    value.forEach((item, index) => collectRepositoryPaths(schema.items, item, location + '[' + index + ']', found));
-  }
-  return found;
-}
-
-function findRepositoryPathProblem(schema, value, location) {
-  const problem = collectRepositoryPaths(schema, value, location, []).find((entry) => !isRepositoryPath(entry.value));
-  return problem === undefined ? '' : problem.location;
-}
-
-/**
- * Returns the distinct plan paths in walk order: the values at PLAN_SCHEMA
- * fields the mark names, version files then step files.
- */
-function listPlanPaths(plan) {
-  return [...new Set(collectRepositoryPaths(PLAN_SCHEMA, plan, '', []).map((entry) => entry.value))];
 }
 
 function settledAnswersSentence(replyHome) {
