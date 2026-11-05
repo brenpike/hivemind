@@ -31,11 +31,15 @@
  *                 'reply_size' or 'exact_text_size'. Only analysis-only
  *                 stops at 'pause_limit': standard-delivery pauses for
  *                 every open question while its replies fit.
+ *   readReplyChoices(reply, asks)
+ *     reply  the user's reply to a pause, any value.
+ *     asks   as for renderQuestions: the asks that pause showed.
  *   buildAnswerEntry(round, revise)
- *     round   {question, labels, reply} for one answer round: question is
- *             the questions text the pause showed, labels the labels it
- *             showed, the settled enum of the revise that reads the round,
- *             and reply the user's reply.
+ *     round   {question, labels, reply, chosen} for one answer round:
+ *             question is the questions text the pause showed, labels the
+ *             labels it showed, the settled enum of the revise that reads
+ *             the round, and reply the user's reply. chosen is optional:
+ *             the readReplyChoices result for that reply.
  *     revise  the revise result of that round once it passed its check, or
  *             undefined when no such result exists. Its settled array names
  *             the shown labels the reply settled.
@@ -46,7 +50,12 @@
  *     a bold "Qn. problem" line; one "- L: summary" line per option, L
  *     being optionLabel of the option's position and the reply token, with
  *     " (recommended)" on the first option whose id equals the
- *     recommendation option_id; then "Recommendation: L (strength). why",
+ *     recommendation option_id, then, when its destructive list is a
+ *     non-empty array, on the same line " Choosing it approves these
+ *     destructive changes: " and each entry as "item (category n)", item
+ *     through renderText and whole, n the category when it is an integer
+ *     and renderText of it otherwise, joined by "; "; then
+ *     "Recommendation: L (strength). why",
  *     L being the letter of that option or 'not given' when no option id
  *     matches, or "Recommendation: none. why" when strength is none.
  *     Only for an exact entry whose brief carries verbatim, a "Word for
@@ -95,11 +104,20 @@
  *     question labelled Q1..Qn by position, with its problem and the
  *     letter of the option the report assumes, L as in renderQuestions, or
  *     the line 'I have no recommendation of my own.'
+ *   readReplyChoices  [{label, optionIndex}], one per answered question
+ *     in reply order, when the whole reply, trimmed, fits the strict reply
+ *     grammar; [] for any other reply, a non-string included. For one ask
+ *     the reply, less one trailing full stop, is an option letter in either
+ *     case or one pair. For more asks it is pairs separated by a comma, a
+ *     semicolon or whitespace. A pair is a shown label, an optional colon,
+ *     and an option letter in either case. Each label appears once and its
+ *     letter is optionLabel of one of its brief's options; optionIndex is
+ *     that option's position.
  *   buildAnswerEntry  one answer log entry {question, settled, reply}, in
  *     that key order. question and reply are copied from round unchanged.
- *     settled holds the labels of round.labels that revise.settled names,
- *     in shown order, once each; [] when revise is undefined, and [] when
- *     round.labels is empty.
+ *     settled holds the labels of round.labels that revise.settled names or
+ *     a round.chosen entry labels, in shown order, once each; [] when both
+ *     name none, and [] when round.labels is empty.
  *
  * Invariants
  *   Bounded fields: the brief text fields shown are written for the user
@@ -123,7 +141,8 @@
  *   encoded in a question and exactly as given by renderDecisions, and
  *   only renderDecisions shows the verbatim of a taken decision.
  *   One question with two options and no verbatim renders in 6 lines.
- *   Invalid arguments and unknown stop reasons throw. So do questionLabel,
+ *   Invalid arguments and unknown stop reasons throw, except that
+ *   readReplyChoices returns [] for any reply. So do questionLabel,
  *   decisionLabel and optionLabel for anything but a non-negative integer.
  *   renderOpenQuestions with 'pause_limit' calls pauseLimit() from
  *   result.js, and renderQuestions with an exact entry calls
@@ -131,9 +150,13 @@
  *   loaded too, as in every built script.
  *   No size budget lives here.
  *   Settled labels have one writer, buildAnswerEntry, and it is fed only a
- *   revise result that passed its check. A label the revise names that the
- *   round did not show is dropped, so an entry never calls settled a
- *   question the user was not shown.
+ *   revise result that passed its check and choices code read from the
+ *   reply. A label the revise or a choice names that the round did not show
+ *   is dropped, so an entry never calls settled a question the user was not
+ *   shown.
+ *   readReplyChoices reads a choice only from a reply that is nothing but
+ *   choices, so a reply that adds any words, such as "A, and keep test X",
+ *   is never read as a bare choice.
  *
  * Why
  *   The user answers from this text alone, so each question carries only
@@ -159,21 +182,21 @@
  *   so the workflows cannot drift on which labels a reply settled.
  *   A summary already ends its own sentence, so a second full stop would
  *   only read as a typo (issue 498).
+ *   Only the user's own reply choosing an option that names a destructive
+ *   change approves it (security-policy.md, Destructive Fix Confirmation
+ *   Gate), so the option line names every such change whole, and the reply
+ *   choices are read by code, not by a model (issue 499).
  */
 
 function renderQuestions(asks) {
-  if (!Array.isArray(asks) || asks.length === 0) {
-    throw new Error('renderQuestions: asks must be a non-empty array');
-  }
+  assertArray(asks, 'renderQuestions: asks', true);
   const blocks = asks.map((entry, index) => renderQuestion(entry, index));
   blocks.push(renderReplyLine(asks.length));
   return blocks.join('\n\n');
 }
 
 function renderDecisions(taken) {
-  if (!Array.isArray(taken)) {
-    throw new Error('renderDecisions: taken must be an array');
-  }
+  assertArray(taken, 'renderDecisions: taken', false);
   if (taken.length === 0) {
     return '';
   }
@@ -183,9 +206,7 @@ function renderDecisions(taken) {
 }
 
 function renderDecisionsCompact(taken) {
-  if (!Array.isArray(taken)) {
-    throw new Error('renderDecisionsCompact: taken must be an array');
-  }
+  assertArray(taken, 'renderDecisionsCompact: taken', false);
   if (taken.length === 0) {
     return '';
   }
@@ -195,45 +216,53 @@ function renderDecisionsCompact(taken) {
 }
 
 function renderOpenQuestions(open, stopReason = 'pause_limit') {
-  if (!Array.isArray(open) || open.length === 0) {
-    throw new Error('renderOpenQuestions: open must be a non-empty array');
-  }
+  assertArray(open, 'renderOpenQuestions: open', true);
   const lines = [renderStopIntro(stopReason)];
   open.forEach((entry, index) => lines.push(renderOpenQuestion(entry, index)));
   return lines.join('\n');
 }
 
 function renderStopIntro(stopReason) {
+  return 'I stopped asking ' + renderStopCause(stopReason) + '. These are still open:';
+}
+
+function renderStopCause(stopReason) {
   switch (stopReason) {
     case 'pause_limit':
-      return 'I stopped asking after ' + pauseLimit() + ' rounds of questions. These are still open:';
+      return 'after ' + pauseLimit() + ' rounds of questions';
     case 'reply_size':
-      return 'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
+      return 'because your replies so far are too long to carry into another round of questions';
     case 'exact_text_size':
-      return 'I stopped asking because the exact text of a question is too long to show you in full. These are still open:';
+      return 'because the exact text of a question is too long to show you in full';
     default:
       throw new Error('renderOpenQuestions: no intro for stop reason ' + JSON.stringify(stopReason));
   }
 }
 
-function questionLabel(index) {
-  if (!Number.isInteger(index) || index < 0) {
-    throw new Error('questionLabel: index must be a non-negative integer');
+function assertArray(value, name, isNonEmptyRequired) {
+  if (!Array.isArray(value) || (isNonEmptyRequired && value.length === 0)) {
+    throw new Error(name + (isNonEmptyRequired ? ' must be a non-empty array' : ' must be an array'));
   }
+}
+
+function assertIndex(index, caller) {
+  if (!Number.isInteger(index) || index < 0) {
+    throw new Error(caller + ': index must be a non-negative integer');
+  }
+}
+
+function questionLabel(index) {
+  assertIndex(index, 'questionLabel');
   return 'Q' + (index + 1);
 }
 
 function decisionLabel(index) {
-  if (!Number.isInteger(index) || index < 0) {
-    throw new Error('decisionLabel: index must be a non-negative integer');
-  }
+  assertIndex(index, 'decisionLabel');
   return 'D' + (index + 1);
 }
 
 function optionLabel(index) {
-  if (!Number.isInteger(index) || index < 0) {
-    throw new Error('optionLabel: index must be a non-negative integer');
-  }
+  assertIndex(index, 'optionLabel');
   let label = '';
   let rest = index;
   do {
@@ -244,22 +273,47 @@ function optionLabel(index) {
 }
 
 function listShownLabels(asks) {
-  if (!Array.isArray(asks) || asks.length === 0) {
-    throw new Error('listShownLabels: asks must be a non-empty array');
-  }
+  assertArray(asks, 'listShownLabels: asks', true);
   return asks.map((entry, index) => questionLabel(index));
 }
 
+function readReplyChoices(reply, asks) {
+  const shownLabels = listShownLabels(asks);
+  if (typeof reply !== 'string') {
+    return [];
+  }
+  const replyText = asks.length === 1 ? reply.trim().replace(/\.$/, '') : reply.trim();
+  const pairs = asks.length === 1 && /^[A-Za-z]+$/.test(replyText) ? [[shownLabels[0], replyText]] : readReplyPairs(replyText);
+  const choices = pairs.map(([label, letter]) => ({ label: label, optionIndex: findLetterIndex(asks[shownLabels.indexOf(label)], letter) }));
+  const isEachValid = choices.every((choice, index) => choice.optionIndex !== -1 && choices.findIndex((other) => other.label === choice.label) === index);
+  return isEachValid ? choices : [];
+}
+
+function readReplyPairs(replyText) {
+  if (!/^Q\d+(?::\s*|\s+)[A-Za-z]+(?:(?:\s*[,;]\s*|\s+)Q\d+(?::\s*|\s+)[A-Za-z]+)*$/.test(replyText)) {
+    return [];
+  }
+  return [...replyText.matchAll(/(Q\d+)(?::\s*|\s+)([A-Za-z]+)/g)].map((match) => [match[1], match[2]]);
+}
+
+function findLetterIndex(entry, letter) {
+  const options = readField(readField(entry, 'brief'), 'options');
+  if (!Array.isArray(options)) {
+    return -1;
+  }
+  return [...options.keys()].map((index) => optionLabel(index)).indexOf(letter.toUpperCase());
+}
+
 function buildAnswerEntry(round, revise) {
+  const callerPrefix = 'buildAnswerEntry: ';
   const shownLabels = readField(round, 'labels');
-  if (!Array.isArray(shownLabels)) {
-    throw new Error('buildAnswerEntry: round.labels must be an array');
-  }
+  assertArray(shownLabels, callerPrefix + 'round.labels', false);
   const reviseLabels = revise === undefined ? [] : readField(revise, 'settled');
-  if (!Array.isArray(reviseLabels)) {
-    throw new Error('buildAnswerEntry: revise.settled must be an array');
-  }
-  const settled = shownLabels.filter((label, index) => reviseLabels.includes(label) && shownLabels.indexOf(label) === index);
+  assertArray(reviseLabels, callerPrefix + 'revise.settled', false);
+  const choices = readField(round, 'chosen') ?? [];
+  assertArray(choices, callerPrefix + 'round.chosen', false);
+  const choiceLabels = choices.map((choice) => readField(choice, 'label'));
+  const settled = shownLabels.filter((label, index) => (reviseLabels.includes(label) || choiceLabels.includes(label)) && shownLabels.indexOf(label) === index);
   return { question: round.question, settled: settled, reply: round.reply };
 }
 
@@ -298,7 +352,19 @@ function renderOptions(options, recommendedIndex) {
 
 function renderOption(option, index, recommendedIndex) {
   const mark = index === recommendedIndex ? ' (recommended)' : '';
-  return '- ' + optionLabel(index) + ': ' + renderText(readField(option, 'summary')) + mark;
+  return '- ' + optionLabel(index) + ': ' + renderText(readField(option, 'summary')) + mark + renderDestructive(readField(option, 'destructive'));
+}
+
+function renderDestructive(changes) {
+  if (!Array.isArray(changes) || changes.length === 0) {
+    return '';
+  }
+  return ' Choosing it approves these destructive changes: ' + changes.map((change) => renderDestructiveChange(change)).join('; ');
+}
+
+function renderDestructiveChange(change) {
+  const category = readField(change, 'category');
+  return renderText(readField(change, 'item')) + ' (category ' + (Number.isInteger(category) ? category : renderText(category)) + ')';
 }
 
 function renderRecommendation(recommendation, options) {
@@ -395,10 +461,7 @@ function readField(record, name) {
 }
 
 function renderText(value) {
-  if (typeof value !== 'string') {
-    return 'not given';
-  }
-  const lineText = value
+  const lineText = typeof value !== 'string' ? '' : value
     .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();

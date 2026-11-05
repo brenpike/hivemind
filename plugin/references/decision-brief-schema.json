@@ -87,6 +87,28 @@
           "reversible": {
             "type": "boolean",
             "description": "True when this option can be undone cheaply."
+          },
+          "destructive": {
+            "type": "array",
+            "maxItems": 4,
+            "description": "Each change this option makes in a category of ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Destructive Fix Confirmation Gate). Absent or empty when none. Choosing the option approves exactly these.",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["category", "item"],
+              "properties": {
+                "category": {
+                  "type": "integer",
+                  "enum": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+                  "description": "Number of the gate category the change falls in."
+                },
+                "item": {
+                  "type": "string",
+                  "maxLength": 160,
+                  "description": "Written for the user: the one thing changed, named exactly, e.g. a file path or branch name."
+                }
+              }
+            }
           }
         }
       }
@@ -172,7 +194,7 @@
         },
         "safety": {
           "type": "boolean",
-          "description": "True when the recommended action touches safety."
+          "description": "True when the recommended action touches safety. A recommended option listing a destructive change counts."
         }
       }
     },

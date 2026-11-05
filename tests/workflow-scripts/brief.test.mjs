@@ -650,10 +650,11 @@ describe('hostile brief text never changes the structure', () => {
     ['renderOpenQuestions', (brief) => lib.renderOpenQuestions([{ brief }, { brief }]), []]
   ];
   const baseBrief = makeBrief();
+  baseBrief.options[0].destructive = [{ category: 3, item: 'ITEM_TEXT' }];
   const stringPaths = listStringPaths(baseBrief);
   test('the fuzz reaches every string the brief carries', () => {
     const joined = stringPaths.map((path) => path.join('.'));
-    for (const name of ['problem', 'options.0.id', 'options.1.summary', 'recommendation.option_id', 'recommendation.strength', 'recommendation.why', 'verbatim', 'criticality.blast_radius']) {
+    for (const name of ['problem', 'options.0.id', 'options.1.summary', 'options.0.destructive.0.item', 'recommendation.option_id', 'recommendation.strength', 'recommendation.why', 'verbatim', 'criticality.blast_radius']) {
       assert.ok(joined.includes(name), name);
     }
   });
@@ -672,6 +673,115 @@ describe('hostile brief text never changes the structure', () => {
       }
     });
   }
+});
+
+const DESTRUCTIVE_LEAD = ' Choosing it approves these destructive changes: ';
+
+function makeDestructiveBrief(destructive, optionIndex = 0) {
+  const brief = makeBrief();
+  brief.options[optionIndex].destructive = destructive;
+  return brief;
+}
+
+function renderOptionLines(brief) {
+  return lib.renderQuestions([{ brief, reason: 'gate_safety' }]).split('\n').filter((line) => line.startsWith('- '));
+}
+
+describe('destructive changes on an option line', () => {
+  test('a recommended option names each change whole with its category, on its own line', () => {
+    const longItem = 'x'.repeat(160);
+    const lines = renderOptionLines(makeDestructiveBrief([{ category: 3, item: 'Skip test X.' }, { category: 8, item: longItem }]));
+    assert.deepEqual(lines, [
+      '- A: SUMMARY_A (recommended)' + DESTRUCTIVE_LEAD + 'Skip test X. (category 3); ' + longItem + ' (category 8)',
+      '- B: SUMMARY_B'
+    ]);
+  });
+  test('an option that is not recommended names its changes too', () => {
+    const lines = renderOptionLines(makeDestructiveBrief([{ category: 9, item: '.env' }], 1));
+    assert.equal(lines[1], '- B: SUMMARY_B' + DESTRUCTIVE_LEAD + '.env (category 9)');
+    assert.equal(lines[0], '- A: SUMMARY_A (recommended)');
+  });
+  for (const destructive of [undefined, [], 'ITEM', { category: 3, item: 'ITEM' }]) {
+    test(`destructive ${JSON.stringify(destructive)} adds nothing to the line`, () => {
+      assert.deepEqual(renderOptionLines(makeDestructiveBrief(destructive)), ['- A: SUMMARY_A (recommended)', '- B: SUMMARY_B']);
+    });
+  }
+  test('a malformed entry renders its item and category through renderText', () => {
+    const lines = renderOptionLines(makeDestructiveBrief([null, { category: '3\n- C: forged', item: 'a\nb' }, { category: 2.5 }]));
+    assert.equal(lines.length, 2);
+    assert.equal(lines[0], '- A: SUMMARY_A (recommended)' + DESTRUCTIVE_LEAD
+      + 'not given (category not given); a b (category 3 - C: forged); not given (category not given)');
+  });
+});
+
+function makeAsks(optionCounts) {
+  return optionCounts.map((count) => {
+    const brief = makeBrief();
+    brief.options = Array.from({ length: count }, (unused, index) => ({ ...brief.options[0], id: 'O' + index }));
+    return { brief, reason: 'table_surface' };
+  });
+}
+
+describe('readReplyChoices', () => {
+  const oneAsk = makeAsks([2]);
+  const twoAsks = makeAsks([2, 4]);
+  const accepted = [
+    [oneAsk, 'A', [['Q1', 0]]],
+    [oneAsk, 'b', [['Q1', 1]]],
+    [oneAsk, '  B.  ', [['Q1', 1]]],
+    [oneAsk, 'Q1 a', [['Q1', 0]]],
+    [oneAsk, 'Q1: B.', [['Q1', 1]]],
+    [twoAsks, 'Q1 A, Q2 D', [['Q1', 0], ['Q2', 3]]],
+    [twoAsks, 'Q2: c; Q1: b', [['Q2', 2], ['Q1', 1]]],
+    [twoAsks, 'Q1 B Q2 A', [['Q1', 1], ['Q2', 0]]],
+    [twoAsks, ' Q2 b ', [['Q2', 1]]],
+    [twoAsks, 'Q1:A,Q2:B', [['Q1', 0], ['Q2', 1]]]
+  ];
+  for (const [asks, reply, expected] of accepted) {
+    test(`${asks.length} ask(s), reply ${JSON.stringify(reply)} is read`, () => {
+      const choices = [...lib.readReplyChoices(reply, asks)].map((choice) => [choice.label, choice.optionIndex]);
+      assert.deepEqual(choices, expected);
+    });
+  }
+  const refused = [
+    [oneAsk, 'A, and keep test X'],
+    [oneAsk, 'A and B'],
+    [oneAsk, 'C'],
+    [oneAsk, 'AB'],
+    [oneAsk, 'A..'],
+    [oneAsk, 'option A'],
+    [oneAsk, 'Q2 A'],
+    [oneAsk, 'q1 A'],
+    [oneAsk, 'Q1A'],
+    [oneAsk, ''],
+    [oneAsk, '   '],
+    [oneAsk, undefined],
+    [oneAsk, 7],
+    [twoAsks, 'A'],
+    [twoAsks, 'Q1 A.'],
+    [twoAsks, 'Q1 A, Q1 B'],
+    [twoAsks, 'Q1 A, Q2 E'],
+    [twoAsks, 'Q1 C, Q2 A'],
+    [twoAsks, 'Q1 A,, Q2 B'],
+    [twoAsks, 'Q1 A, Q3 B'],
+    [twoAsks, 'Q1 A, and Q2 B'],
+    [twoAsks, 'Q1 A, Q2 B, keep test X'],
+    [twoAsks, 'Q1 A\nQ2 B because'],
+    [twoAsks, 'Q01 A']
+  ];
+  for (const [asks, reply] of refused) {
+    test(`${asks.length} ask(s), reply ${JSON.stringify(reply)} is refused`, () => {
+      assert.deepEqual([...lib.readReplyChoices(reply, asks)], []);
+    });
+  }
+  test('an ask whose options are not an array accepts no letter', () => {
+    const asks = makeAsks([2]);
+    asks[0].brief.options = 'A';
+    assert.deepEqual([...lib.readReplyChoices('A', asks)], []);
+  });
+  test('argument checks', () => {
+    assert.throws(() => lib.readReplyChoices('A', []), /listShownLabels: asks must be a non-empty array/);
+  });
 });
 
 describe('buildAnswerEntry', () => {
@@ -697,7 +807,21 @@ describe('buildAnswerEntry', () => {
     assert.equal(entry.question, 'QUESTION_TEXT');
     assert.equal(entry.reply, 'REPLY_TEXT');
   });
+  test('settles the shown labels the code-read choices name, in shown order, once each', () => {
+    const chosen = [{ label: 'Q2', optionIndex: 0 }, { label: 'Q7', optionIndex: 1 }, { label: 'Q2', optionIndex: 1 }];
+    assert.deepEqual([...lib.buildAnswerEntry({ ...round, chosen }, undefined).settled], ['Q2']);
+    assert.deepEqual([...lib.buildAnswerEntry({ ...round, chosen }, { settled: ['D1', 'Q2'] }).settled], ['Q2', 'D1']);
+    assert.deepEqual([...lib.buildAnswerEntry({ ...round, chosen: [] }, { settled: ['Q1'] }).settled], ['Q1']);
+  });
+  test('chosen from readReplyChoices settles what the reply chose', () => {
+    const asks = makeAsks([2, 2]);
+    const chosen = lib.readReplyChoices('Q2 B', asks);
+    const entry = lib.buildAnswerEntry({ question: 'QUESTION_TEXT', labels: lib.listShownLabels(asks), reply: 'Q2 B', chosen }, undefined);
+    assert.deepEqual([...entry.settled], ['Q2']);
+    assert.deepEqual(Object.keys(entry), ['question', 'settled', 'reply']);
+  });
   test('argument checks', () => {
+    assert.throws(() => lib.buildAnswerEntry({ ...round, chosen: 'Q1' }, undefined), /buildAnswerEntry: round.chosen must be an array/);
     assert.throws(() => lib.buildAnswerEntry({ question: 'Q', reply: 'R' }, undefined), /buildAnswerEntry: round.labels must be an array/);
     assert.throws(() => lib.buildAnswerEntry(undefined, undefined), /buildAnswerEntry: round.labels must be an array/);
     assert.throws(() => lib.buildAnswerEntry(round, {}), /buildAnswerEntry: revise.settled must be an array/);

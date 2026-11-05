@@ -295,6 +295,39 @@ const BRIEF_SCHEMA = {
 },
 "reversible": {
 "type": "boolean"
+},
+"destructive": {
+"type": "array",
+"maxItems": 4,
+"items": {
+"type": "object",
+"additionalProperties": false,
+"required": [
+"category",
+"item"
+],
+"properties": {
+"category": {
+"type": "integer",
+"enum": [
+1,
+2,
+3,
+4,
+5,
+6,
+7,
+8,
+9,
+10
+]
+},
+"item": {
+"type": "string",
+"maxLength": 160
+}
+}
+}
 }
 }
 }
@@ -639,7 +672,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'd6b3b468f49eb184';
+const BUILD_ID = 'e011763e23f92966';
 
 function supportedSchemaKeywords(){
 return[
@@ -1013,7 +1046,7 @@ return askFor('gate_irreversible');
 if(brief.gate.architectural){
 return askFor('gate_architectural');
 }
-if(brief.gate.safety){
+if(brief.gate.safety||isRecommendedOptionDestructive(brief)){
 return askFor('gate_safety');
 }
 if(askReason!==undefined){
@@ -1033,6 +1066,9 @@ return{action:'ask',reason:reason};
 function isRecommendedOptionIrreversible(brief){
 return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.reversible===false);
 }
+function isRecommendedOptionDestructive(brief){
+return brief.options.some((option)=>option.id===brief.recommendation.option_id&&Array.isArray(option.destructive)&&option.destructive.length>0);
+}
 function isRecommendationAnOption(brief){
 const optionIds=brief.options.map((option)=>option.id);
 const idsAreUnique=optionIds.every((optionId,index)=>optionIds.indexOf(optionId)===index);
@@ -1040,17 +1076,13 @@ return idsAreUnique&&optionIds.indexOf(brief.recommendation.option_id)!==-1;
 }
 
 function renderQuestions(asks){
-if(!Array.isArray(asks)||asks.length===0){
-throw new Error('renderQuestions: asks must be a non-empty array');
-}
+assertArray(asks,'renderQuestions: asks',true);
 const blocks=asks.map((entry,index)=>renderQuestion(entry,index));
 blocks.push(renderReplyLine(asks.length));
 return blocks.join('\n\n');
 }
 function renderDecisions(taken){
-if(!Array.isArray(taken)){
-throw new Error('renderDecisions: taken must be an array');
-}
+assertArray(taken,'renderDecisions: taken',false);
 if(taken.length===0){
 return'';
 }
@@ -1059,9 +1091,7 @@ taken.forEach((entry,index)=>lines.push(renderTakenDecision(entry,index)));
 return lines.join('\n');
 }
 function renderDecisionsCompact(taken){
-if(!Array.isArray(taken)){
-throw new Error('renderDecisionsCompact: taken must be an array');
-}
+assertArray(taken,'renderDecisionsCompact: taken',false);
 if(taken.length===0){
 return'';
 }
@@ -1070,41 +1100,46 @@ taken.forEach((entry,index)=>lines.push(renderCompactDecision(entry,index)));
 return lines.join('\n');
 }
 function renderOpenQuestions(open,stopReason='pause_limit'){
-if(!Array.isArray(open)||open.length===0){
-throw new Error('renderOpenQuestions: open must be a non-empty array');
-}
+assertArray(open,'renderOpenQuestions: open',true);
 const lines=[renderStopIntro(stopReason)];
 open.forEach((entry,index)=>lines.push(renderOpenQuestion(entry,index)));
 return lines.join('\n');
 }
 function renderStopIntro(stopReason){
+return'I stopped asking '+renderStopCause(stopReason)+'. These are still open:';
+}
+function renderStopCause(stopReason){
 switch(stopReason){
 case'pause_limit':
-return'I stopped asking after '+pauseLimit()+' rounds of questions. These are still open:';
+return'after '+pauseLimit()+' rounds of questions';
 case'reply_size':
-return'I stopped asking because your replies so far are too long to carry into another round of questions. These are still open:';
+return'because your replies so far are too long to carry into another round of questions';
 case'exact_text_size':
-return'I stopped asking because the exact text of a question is too long to show you in full. These are still open:';
+return'because the exact text of a question is too long to show you in full';
 default:
 throw new Error('renderOpenQuestions: no intro for stop reason '+JSON.stringify(stopReason));
 }
 }
-function questionLabel(index){
-if(!Number.isInteger(index)||index<0){
-throw new Error('questionLabel: index must be a non-negative integer');
+function assertArray(value,name,isNonEmptyRequired){
+if(!Array.isArray(value)||(isNonEmptyRequired&&value.length===0)){
+throw new Error(name+(isNonEmptyRequired?' must be a non-empty array':' must be an array'));
 }
+}
+function assertIndex(index,caller){
+if(!Number.isInteger(index)||index<0){
+throw new Error(caller+': index must be a non-negative integer');
+}
+}
+function questionLabel(index){
+assertIndex(index,'questionLabel');
 return'Q'+(index+1);
 }
 function decisionLabel(index){
-if(!Number.isInteger(index)||index<0){
-throw new Error('decisionLabel: index must be a non-negative integer');
-}
+assertIndex(index,'decisionLabel');
 return'D'+(index+1);
 }
 function optionLabel(index){
-if(!Number.isInteger(index)||index<0){
-throw new Error('optionLabel: index must be a non-negative integer');
-}
+assertIndex(index,'optionLabel');
 let label='';
 let rest=index;
 do{
@@ -1114,21 +1149,19 @@ rest=Math.floor(rest/26)-1;
 return label;
 }
 function listShownLabels(asks){
-if(!Array.isArray(asks)||asks.length===0){
-throw new Error('listShownLabels: asks must be a non-empty array');
-}
+assertArray(asks,'listShownLabels: asks',true);
 return asks.map((entry,index)=>questionLabel(index));
 }
 function buildAnswerEntry(round,revise){
+const callerPrefix='buildAnswerEntry: ';
 const shownLabels=readField(round,'labels');
-if(!Array.isArray(shownLabels)){
-throw new Error('buildAnswerEntry: round.labels must be an array');
-}
+assertArray(shownLabels,callerPrefix+'round.labels',false);
 const reviseLabels=revise===undefined?[]:readField(revise,'settled');
-if(!Array.isArray(reviseLabels)){
-throw new Error('buildAnswerEntry: revise.settled must be an array');
-}
-const settled=shownLabels.filter((label,index)=>reviseLabels.includes(label)&&shownLabels.indexOf(label)===index);
+assertArray(reviseLabels,callerPrefix+'revise.settled',false);
+const choices=readField(round,'chosen')??[];
+assertArray(choices,callerPrefix+'round.chosen',false);
+const choiceLabels=choices.map((choice)=>readField(choice,'label'));
+const settled=shownLabels.filter((label,index)=>(reviseLabels.includes(label)||choiceLabels.includes(label))&&shownLabels.indexOf(label)===index);
 return{question:round.question,settled:settled,reply:round.reply};
 }
 function renderReplyLine(count){
@@ -1162,7 +1195,17 @@ return options.map((option,index)=>renderOption(option,index,recommendedIndex));
 }
 function renderOption(option,index,recommendedIndex){
 const mark=index===recommendedIndex?' (recommended)':'';
-return'- '+optionLabel(index)+': '+renderText(readField(option,'summary'))+mark;
+return'- '+optionLabel(index)+': '+renderText(readField(option,'summary'))+mark+renderDestructive(readField(option,'destructive'));
+}
+function renderDestructive(changes){
+if(!Array.isArray(changes)||changes.length===0){
+return'';
+}
+return' Choosing it approves these destructive changes: '+changes.map((change)=>renderDestructiveChange(change)).join('; ');
+}
+function renderDestructiveChange(change){
+const category=readField(change,'category');
+return renderText(readField(change,'item'))+' (category '+(Number.isInteger(category)?category:renderText(category))+')';
 }
 function renderRecommendation(recommendation,options){
 const why=renderText(readField(recommendation,'why'));
@@ -1246,10 +1289,7 @@ return undefined;
 return record[name];
 }
 function renderText(value){
-if(typeof value!=='string'){
-return'not given';
-}
-const lineText=value
+const lineText=typeof value!=='string'?'':value
 .replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/g,' ')
 .replace(/\s+/g,' ')
 .trim();

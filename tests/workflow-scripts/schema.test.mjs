@@ -63,7 +63,7 @@ function makeBrief(overrides = {}) {
     kind: 'planner_question',
     problem: 'Pick a format.',
     criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'One file.', if_ignored: 'Nothing.' },
-    options: [{ id: 'A', summary: 'S', steel_man: 'F', straw_man: 'G', effort: 'small', value: 'high', reversible: true }],
+    options: [{ id: 'A', summary: 'S', steel_man: 'F', straw_man: 'G', effort: 'small', value: 'high', reversible: true, destructive: [{ category: 3, item: 'D' }] }],
     ruled_out: [{ summary: 'R', why: 'W' }],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Y' },
     assumptions: [{ statement: 'S', origin: 'user', evidence: 'E' }],
@@ -447,7 +447,21 @@ describe('the decision brief schema', () => {
     const brief = makeBrief();
     delete brief.ruled_out;
     delete brief.verbatim;
+    delete brief.options[0].destructive;
     assert.equal(validate(briefSchema, brief).ok, true);
+  });
+  for (const category of [0, 11, 2.5, '3']) {
+    test(`a destructive category ${JSON.stringify(category)} is rejected`, () => {
+      const brief = setBriefPath(makeBrief(), '$.options[0].destructive[0].category', category);
+      const errors = validate(briefSchema, brief).errors;
+      assert.equal(errors.length, 1, JSON.stringify(errors));
+      assert.ok(errors[0].startsWith('$.options[0].destructive[0].category: '), errors[0]);
+    });
+  }
+  test('a fifth destructive entry is rejected', () => {
+    const destructive = Array.from({ length: 5 }, (unused, index) => ({ category: index + 1, item: 'D' }));
+    const brief = setBriefPath(makeBrief(), '$.options[0].destructive', destructive);
+    assert.equal(validate(briefSchema, brief).ok, false);
   });
   for (const name of briefSchema.required) {
     test(`missing ${name} is rejected`, () => {
@@ -463,6 +477,7 @@ describe('the decision brief schema', () => {
     assert.ok(blankablePaths.includes('$.recommendation.option_id'));
     assert.ok(blankablePaths.includes('$.options[0].id'));
     assert.ok(blankablePaths.includes('$.verbatim'));
+    assert.ok(blankablePaths.includes('$.options[0].destructive[0].item'));
   });
   for (const path of blankablePaths) {
     test(`a blank ${path} is rejected`, () => {
