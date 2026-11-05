@@ -1621,12 +1621,12 @@ const ROW_TESTS = {
     });
   },
   'SD-09': () => {
-    test('taken planner questions and the plan acceptance are listed in the final message', async () => {
+    test('taken planner questions are listed in the final message, and the taken plan acceptance is not', async () => {
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [strong]) }));
       assert.equal(run.result.outcome, 'complete');
-      const taken = [{ brief: strong }, { brief: main.buildPlanAcceptanceBrief(makePlan()) }];
-      assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact(taken)), run.result.message);
+      assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: strong }])), run.result.message);
+      assert.ok(!run.result.message.includes(main.buildPlanAcceptanceBrief(makePlan()).problem), run.result.message);
     });
     test('a brief kind never picks the rule: the call site kind does', async () => {
       const hardStopKind = makeBrief({ problem: 'KIND_PROBLEM', kind: 'external_effect' });
@@ -2666,11 +2666,11 @@ const ROW_TESTS = {
     });
   },
   'SD-19': () => {
-    test('the final message lists the reversible effects and every taken decision, and neither it nor the pull request body lists the commits', async () => {
+    test('the final message lists the reversible effects and every taken decision not of a routine kind, and neither it nor the pull request body lists the commits', async () => {
       const plan = effectPlan('Post a preview link.', true);
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
-      const taken = [{ brief: strong }, { brief: main.buildPlanAcceptanceBrief(plan) }];
+      const taken = [{ brief: strong }];
       assert.deepEqual(run.result, {
         needs_user: false,
         outcome: 'complete',
@@ -2683,6 +2683,37 @@ const ROW_TESTS = {
         ].join('\n\n')
       });
       assert.ok(!listsCommits(prBodyOf(run, 'pr-1')), prBodyOf(run, 'pr-1'));
+    });
+    test('a run whose only taken decision is the plan acceptance shows no line for it in the final message, the pull request body or its comment', async () => {
+      const run = await runWorkflow(LAUNCH, happyResults());
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      const acceptance = main.buildPlanAcceptanceBrief(makePlan());
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      state.head = OTHER;
+      state.taken.push({ brief: acceptance, kind: 'plan_acceptance' });
+      const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' } });
+      for (const text of [run.result.message, prBodyOf(run, 'pr-1'), texts.body, texts.comment]) {
+        assert.ok(!text.includes('Decided for you') && !text.includes(acceptance.problem), text);
+      }
+      assert.equal(state.taken.length, 1);
+    });
+    test('the routine kinds are plan_acceptance, remediation_plan_acceptance and gate_rerun: no record lists them, run.taken keeps them, and every other taken kind is listed', () => {
+      assert.deepEqual([...main.routineDecisionKinds()], ['plan_acceptance', 'remediation_plan_acceptance', 'gate_rerun']);
+      const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const listedKinds = ['trunk_stale', 'validation_remediation', 'diminishing_returns_exit', 'planner_escalation_routing', 'root_cluster_routing', 'review_question', 'high_severity_rejection', 'planner_question'];
+      const entries = ['plan_acceptance', ...listedKinds.slice(0, 4), 'remediation_plan_acceptance', ...listedKinds.slice(4), 'gate_rerun'].map((kind) => ({ brief: makeBrief({ problem: 'KIND_' + kind }), kind: kind }));
+      state.taken.push(...entries);
+      const listed = entries.filter((entry) => listedKinds.includes(entry.kind)).map((entry) => ({ brief: entry.brief }));
+      const decisions = main.buildRunRecordParts(state, state.taken, undefined).find((part) => part.id === 'decisions');
+      assert.equal(decisions.text, lib.renderDecisions(listed));
+      assert.equal(decisions.compact, lib.renderDecisionsCompact(listed));
+      assert.deepEqual([...main.buildRecordTailBlocks(state, state.taken).map((block) => block.text)], [lib.renderDecisionsCompact(listed)]);
+      assert.equal(state.taken.length, entries.length);
+      const routineOnly = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      routineOnly.taken.push(entries[0], entries[5], entries.at(-1));
+      assert.deepEqual([...main.buildRunRecordParts(routineOnly, routineOnly.taken, undefined).map((part) => part.id)], []);
+      assert.deepEqual([...main.buildRecordTailBlocks(routineOnly, routineOnly.taken)], []);
+      assert.throws(() => main.buildRunRecordParts(routineOnly, [], undefined), /^Error: buildRunRecordParts: taken must map run\.taken$/);
     });
     test('a pause after waves lists no commit, and a resume replays every earlier prompt byte for byte', async () => {
       const results = happyResults({
@@ -2751,7 +2782,7 @@ const ROW_TESTS = {
       assert.equal(run.result.needs_user, false);
       assert.equal(run.result.outcome, 'blocked');
       const openQuestions = lib.renderOpenQuestions(summaries.map((summary) => ({ brief: main.buildExternalEffectBrief(summary) })), 'exact_text_size');
-      assert.equal(run.result.message, [OPEN_LEAD, RUN_AGAIN, openQuestions, lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(plan) }])].join('\n\n'));
+      assert.equal(run.result.message, [OPEN_LEAD, RUN_AGAIN, openQuestions].join('\n\n'));
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
     });
     test('reply_size and exact_text_size are the only open question stops', () => {
@@ -2886,7 +2917,7 @@ const ROW_TESTS = {
     function versionAskOf(values) {
       return limitAsk(main.buildVersionQuestionBrief(parsedVersion(values)));
     }
-    test('undetermined asks version_bump_indeterminable with no decide() call, each option naming the version it gives', async () => {
+    test('undetermined asks version_bump_indeterminable through buildUndecidedAsk, table_surface at every level, each option naming the version it gives', async () => {
       const run = await runWorkflow(LAUNCH, versionResults({ 'validate-1-1': validateWithVersion(ASK_UNDETERMINED) }));
       assertTailPause(run, [versionAskOf(ASK_UNDETERMINED)], 'validate-1-1');
       const brief = structuredClone(main.buildVersionQuestionBrief(parsedVersion(ASK_UNDETERMINED)));
@@ -2901,7 +2932,12 @@ const ROW_TESTS = {
           assert.equal(lib.decide({ kind: shown.kind, level: level, brief: shown }, autonomyTable, briefSchema).action, 'ask', level);
         }
       }
-      assert.ok(!/resolve(?:Tail)?Decision\(VERSION_BUMP_INDETERMINABLE_KIND/.test(moduleSource));
+      assert.ok(moduleSource.includes('buildUndecidedAsk(VERSION_BUMP_INDETERMINABLE_KIND, buildVersionQuestionBrief(validation.question), run)'));
+      for (const level of autonomyTable.levels) {
+        const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+        state.level = level;
+        assert.equal(main.buildUndecidedAsk('version_bump_indeterminable', brief, state).reason, 'table_surface', level);
+      }
       const row = autonomyTable.rows.find((candidate) => candidate.kind === 'version_bump_indeterminable');
       assert.ok(row.resolved_at.includes('standard-delivery.validate') && !row.resolved_at.includes('standard-delivery.bump'), JSON.stringify(row.resolved_at));
       assert.ok(autonomyTable.rows.every((candidate) => !candidate.resolved_at.includes('standard-delivery.bump')));
@@ -2941,7 +2977,7 @@ const ROW_TESTS = {
         assert.ok(callOf(run, 'validate-1-2').prompt.includes(main.resumedReplySentence()));
         assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version as the user replied, held on commit ' + THIRD), prBodyOf(run, 'pr-1'));
         assert.ok(!labelsOf(run).includes('facts-2'));
-        assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(VERSION_PLAN) }])), run.result.message);
+        assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
       });
     }
     test('a version question over failed commands gives the one fix round the command failures and the version line', async () => {
@@ -2967,12 +3003,14 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', 'validate-1-1']);
       assert.ok(run.calls.every((call) => !/push/i.test(call.prompt.replace(/never push|no push|, push/gi, ''))), 'no call pushes');
     });
-    test('every tail ask goes through askTail, and no tail ask ends the run', () => {
+    test('every tail ask goes through askTail, an undecided one through buildUndecidedAsk with its kind, and no tail ask ends the run', () => {
       assert.ok(!moduleSource.includes('finishTailAsk') && !moduleSource.includes('before_pr'));
       assert.ok(moduleSource.includes('function askTail(ask, run, lead) {\n  const leadText = lead === undefined ? describeTailLead(run) : lead;'));
       assert.ok(moduleSource.includes('return { result: pauseDelivery({ asks: [ask], taken: [] }, run, leadText) };'));
       assert.ok(moduleSource.includes('  return replanFromTailAsk(resolution.asks[0], run);\n}'));
       assert.equal((moduleSource.match(/replanFromTailAsk\(buildUndecidedAsk\(/g) || []).length, 2);
+      assert.ok(moduleSource.includes('replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND, buildFixLimitBrief(run.head), run), run)'));
+      assert.ok(moduleSource.includes('replanFromTailAsk(buildUndecidedAsk(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, true), run), run)'));
       assert.ok(moduleSource.includes('return askTail(Object.assign({}, resolution.asks[0], { brief: shown }), run, lead);'));
     });
     test('askTail logs a reply with settled [] and the lead plus questions, and returns the answer as {question, reply}', () => {
@@ -3118,7 +3156,7 @@ const ROW_TESTS = {
       assert.ok(!withoutDataBlock(call.prompt, 'failures').includes(FAILURE_TEXT));
       assert.deepEqual(readRunnerInputs(callOf(run, 'fix-commit-1-1').prompt), { files: ['src/cache.js'], type: 'feat', breaking: false, subject: 'fix the failed validation', trunk: 'main' });
       const remediation = { brief: main.buildValidationRemediationBrief(OTHER, 1) };
-      assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, remediation])), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([remediation])), run.result.message);
       assert.ok(!run.result.message.includes('landed after'), run.result.message);
     });
     test('the validation fix sentence is the validation fix task trigger of drone.md and nothing more', () => {
@@ -3204,7 +3242,7 @@ const ROW_TESTS = {
         const prompt = callOf(run, 'fix-1-1').prompt;
         assert.equal(readDataBlock(prompt, 'failures'), VERSION_LINE);
         assert.deepEqual(readDataBlock(prompt, 'version_files'), ['VERSION']);
-        assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(VERSION_PLAN) }])), run.result.message);
+        assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
         assert.ok(prBodyOf(run, 'pr-1').includes('- validation: passed, version 1.3.0, held on commit ' + THIRD), prBodyOf(run, 'pr-1'));
       }
       const noBump = parsedVersion({ dominant_row: 'NO_BUMP', verdict: 'no_bump', bump_type: 'none', rule_applied: '4', counts: { major: '0', minor: '0', patch: '0', no_bump: '1' }, version_check: 'mismatch', expected_version: '1.2.3' });
@@ -3338,17 +3376,39 @@ const ROW_TESTS = {
         assert.ok(isHardStop || (row !== undefined && row.resolved_at.some((site) => site.startsWith('standard-delivery.'))), kind);
       }
       assert.equal((moduleSource.match(/\bdecide\(\{/g) || []).length, 1);
-      assert.ok(moduleSource.includes('decide({ kind: kind, level: run.level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA)'));
+      assert.ok(moduleSource.includes('decide({ kind: kind, level: run.level, brief: brief, askReason: askReason }, AUTONOMY_TABLE, BRIEF_SCHEMA)'));
       const kindArgs = [...moduleSource.matchAll(/\bresolve(?:Tail)?Decision\(([A-Za-z_]+),/g)].map((match) => match[1]);
       assert.ok(kindArgs.length > 0);
       kindArgs.filter((name) => name !== 'kind').forEach((name) => assert.ok(/^[A-Z_]+_KIND$/.test(name), name));
     });
-    test('step_stop is asked with no decide() call, and its row surfaces at every level at standard-delivery.stop', () => {
+    test('step_stop surfaces at every level at standard-delivery.stop, so decide() asks each stop brief table_surface, a strong one included', () => {
       const row = autonomyTable.rows.find((candidate) => candidate.kind === 'step_stop');
       assert.deepEqual([row.high, row.balanced, row.low], ['surface', 'surface', 'surface']);
       assert.deepEqual(row.resolved_at, ['standard-delivery.stop']);
       assert.equal(main.buildStepStopBrief([{ problem: 'P.' }], false).kind, 'step_stop');
-      assert.ok(!/resolve(?:Tail)?Decision\(STEP_STOP_KIND/.test(moduleSource));
+      for (const nextAction of ['fix_cause', 'run_again', 'report', 'approve']) {
+        const brief = main.buildStepStopBrief([{ problem: 'P.', nextAction: nextAction }], false);
+        for (const level of autonomyTable.levels) {
+          const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+          run.level = level;
+          const ask = main.buildUndecidedAsk('step_stop', brief, run);
+          assert.deepEqual([ask.brief, ask.kind, ask.reason], [brief, 'step_stop', 'table_surface'], nextAction + ' ' + level);
+          assert.equal(run.taken.length, 0, nextAction + ' ' + level);
+        }
+      }
+      assert.equal(main.buildStepStopBrief([{ problem: 'P.', nextAction: 'fix_cause' }], false).recommendation.strength, 'strong');
+    });
+    test('every undecided question resolves through decide() with the kind its call site passes, and a take throws', () => {
+      const sites = [...moduleSource.matchAll(/buildUndecidedAsk\(([A-Za-z_]+), (build[A-Za-z]+)\(/g)].map((match) => match[1] + ' ' + match[2]).sort();
+      assert.deepEqual(sites, ['GATE_RERUN_KIND buildGateRerunBrief', 'STEP_STOP_KIND buildStepStopBrief', 'VALIDATION_REMEDIATION_KIND buildFixLimitBrief', 'VERSION_BUMP_INDETERMINABLE_KIND buildVersionQuestionBrief']);
+      assert.equal((moduleSource.match(/buildUndecidedAsk\(/g) || []).length, 5);
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+      const reasonOf = (kind, brief) => main.buildUndecidedAsk(kind, brief, run).reason;
+      assert.equal(reasonOf('version_bump_indeterminable', main.buildVersionQuestionBrief({ version_check: 'undetermined' })), 'table_surface');
+      assert.equal(reasonOf('validation_remediation', main.buildFixLimitBrief(HEAD)), 'no_recommendation');
+      assert.equal(reasonOf('gate_rerun', main.buildGateRerunBrief(['validate'], HEAD, true)), 'no_recommendation');
+      assert.throws(() => main.buildUndecidedAsk('validation_remediation', main.buildValidationRemediationBrief(HEAD, 1), run), /^Error: buildUndecidedAsk: decide\(\) took validation_remediation$/);
+      assert.equal(run.taken.length, 0);
     });
   },
   'SD-30': () => {
@@ -3410,7 +3470,7 @@ const ROW_TESTS = {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS.slice(0, -2), 'pr-1']);
-      assert.ok(run.result.message.includes('\n\nValidation held on commit ' + OTHER + '. Not configured for this run: local review.\n\n'), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\nValidation held on commit ' + OTHER + '. Not configured for this run: local review.'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-1').includes('- local review: not configured for this run'), prBodyOf(run, 'pr-1'));
       assert.ok(!run.phases.includes('Review'));
     });
@@ -3869,8 +3929,8 @@ const ROW_TESTS = {
     });
     test('clean holds the gate with no decision added', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
-      assert.ok(run.result.message.includes('\n\n' + HELD_ALL + OTHER + '.'), run.result.message);
-      assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }])), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\n' + HELD_ALL + OTHER + '.'), run.result.message);
+      assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
     });
   },
   'SD-36': () => {
@@ -4067,11 +4127,11 @@ const ROW_TESTS = {
         assert.ok(!withoutDataBlock(prompt, 'inputs').includes('AGREED_'), prompt);
         assert.ok(!run.result.message.includes(agreedId), run.result.message);
         const listed = { ...main.buildReviewQuestionBrief(review), problem: 'Local review finding "c0ffee01": "AGREED_ASK_ZQ?"' };
-        assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: listed }])), run.result.message);
-        assert.ok(run.result.message.endsWith('- D2. Local review finding "c0ffee01": "AGREED_ASK_ZQ?" Chose A: "AGREED_PICK_ZQ."'), run.result.message);
+        assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: listed }])), run.result.message);
+        assert.ok(run.result.message.endsWith('Decided for you:\n- D1. Local review finding "c0ffee01": "AGREED_ASK_ZQ?" Chose A: "AGREED_PICK_ZQ."'), run.result.message);
         const body = prBodyOf(run, 'pr-1');
         const texts = main.reviewCallTexts();
-        assert.ok(body.includes('  D2. ' + texts.problem + '\n    Chose option A: ' + texts.summary + '\n    Why: ' + texts.why), body);
+        assert.ok(body.includes('  D1. ' + texts.problem + '\n    Chose option A: ' + texts.summary + '\n    Why: ' + texts.why), body);
         assert.ok(!body.includes('AGREED_') && !body.includes('c0ffee01'), body);
         assert.ok(!JSON.stringify(readRunnerInputs(callOf(run, 'pr-1').prompt)).includes('AGREED_'));
       });
@@ -4133,7 +4193,7 @@ const ROW_TESTS = {
       assert.ok(brief.problem.includes('with 2 findings still open. Stop fixing'), brief.problem);
       assert.ok(!brief.problem.includes('"low"'), brief.problem);
       assert.ok(run.result.message.includes('\n\n' + HELD_ALL + OTHER + '.'), run.result.message);
-      assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: brief }])), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: brief }])), run.result.message);
       assert.deepEqual({ ...lib.decide({ kind: 'diminishing_returns_exit', level: undefined, brief: brief }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
     });
     test('a surfaced diminishing_returns_exit pauses asking, and the reply starts a new pass', async () => {
@@ -4252,14 +4312,14 @@ const ROW_TESTS = {
       }
       return { ...CLEAN_GATE, [flag]: true };
     }
-    test('a remediation plan with a clean gate is taken at the default level and listed, with no pause', async () => {
+    test('a remediation plan with a clean gate is taken at the default level, with no pause, and is not listed while the escalation is', async () => {
       const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
       const remediationBrief = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
       assert.equal(remediationBrief.problem, 'Run the remediation plan for the local review findings on the working branch, then every gate again.');
-      const taken = [{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildReviewEscalationBrief(ESCALATION) }, { brief: remediationBrief }];
-      assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact(taken)), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }])), run.result.message);
+      assert.ok(!run.result.message.includes(remediationBrief.problem), run.result.message);
     });
     for (const [flag, reason] of Object.entries(GATE_FLAGS)) {
       test(`a remediation plan whose gate sets ${flag} asks once with ${reason}, through the pause and revise path, and the run goes on once replied to`, async () => {
@@ -4277,8 +4337,7 @@ const ROW_TESTS = {
         assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
         assert.equal(readDataBlock(callOf(run, 'revise-1').prompt, 'reply'), 'Yes, run it.');
         assert.ok(run.result.message.includes('\n\n' + HELD_ALL + THIRD + '.'), run.result.message);
-        const taken = [{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: main.buildReviewEscalationBrief(ESCALATION) }];
-        assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact(taken)), run.result.message);
+        assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildReviewEscalationBrief(ESCALATION) }])), run.result.message);
       });
     }
     test('a remediation plan whose gate sets every flag names each in its problem, within the problem bound', () => {
@@ -4305,7 +4364,7 @@ const ROW_TESTS = {
       assert.ok(!run.result.message.includes('effect outside the repo'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-2').startsWith('```\n' + REMEDIATION_PLAN.summary + '\n```'), prBodyOf(run, 'pr-2'));
     });
-    test('remediation_plan_acceptance takes a clean gate at high and balanced, asks a set flag there, asks at low, and every later pass of the run uses it', () => {
+    test('remediation_plan_acceptance takes a clean gate at high and balanced, asks a set flag there, asks at low, asks outside_limits with its own recommendation, and every later pass of the run uses it', () => {
       const clean = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
       assert.equal(clean.kind, 'remediation_plan_acceptance');
       assert.deepEqual({ ...clean.gate }, { irreversible: false, architectural: false, safety: false });
@@ -4332,6 +4391,10 @@ const ROW_TESTS = {
       const cleanLater = { asks: [], taken: [] };
       assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, cleanLater, EMPTY_SCOPE), 'take');
       assert.equal(cleanLater.taken[0].kind, 'remediation_plan_acceptance');
+      const outside = { asks: [], taken: [] };
+      assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, outside, { documents: [], paths: [], limits: ['docs'] }), 'ask');
+      assert.deepEqual([outside.asks[0].kind, outside.asks[0].reason], ['remediation_plan_acceptance', 'outside_limits']);
+      assert.deepEqual({ ...outside.asks[0].brief.recommendation }, { ...clean.recommendation });
     });
     test('a needs_replan pass after a remediation pass resolves its plan as a remediation plan again', async () => {
       const results = remediationResults(ESCALATION, {
@@ -4356,9 +4419,8 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'validate-1-2', 'pr-1']);
-      assert.ok(run.result.message.includes('\n\n' + HELD_ALL + THIRD + '.'), run.result.message);
-      const rerun = main.buildGateRerunBrief(['validate'], THIRD, false);
-      assert.equal(run.result.message.split(rerun.problem).length - 1, 1, run.result.message);
+      assert.ok(run.result.message.endsWith('\n\n' + HELD_ALL + THIRD + '.'), run.result.message);
+      assert.ok(!run.result.message.includes('landed after') && !run.result.message.includes('Decided for you'), run.result.message);
     });
     test('a runner fix commit after local review held sends the run back through local review, and the brief names only the gates that rerun', async () => {
       const results = happyResults({
@@ -4374,10 +4436,10 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'validate-1-2', 'fix-1-1', 'fix-commit-1-1', 'validate-1-3', 'review-1-2', 'review-commit-1-2', 'pr-1']);
-      assert.ok(run.result.message.includes('\n\n' + HELD_ALL + FOURTH + '.'), run.result.message);
       const rerun = main.buildGateRerunBrief(['validate', 'review'], FOURTH, false);
       assert.ok(rerun.problem.startsWith('Commit ' + FOURTH + ' landed after validation and local review held on an earlier commit.'), rerun.problem);
-      assert.ok(run.result.message.includes(rerun.problem), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: main.buildValidationRemediationBrief(THIRD, 1) }])), run.result.message);
+      assert.ok(!run.result.message.includes('landed after'), run.result.message);
     });
     test('a gate that is not configured is never stale', async () => {
       const results = fixFlowResults();
@@ -4543,13 +4605,13 @@ const ROW_TESTS = {
     });
   },
   'SD-45': () => {
-    test('the body holds the summary and the run record, and the comment its lead and the same run record: reversible effects, gates with their commits, every decision', async () => {
+    test('the body holds the summary and the run record, and the comment its lead and the same run record: reversible effects, gates with their commits, every decision not of a routine kind', async () => {
       const plan = effectPlan('Post a preview link.', true);
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
-      const decisions = lib.renderDecisions([{ brief: strong }, { brief: main.buildPlanAcceptanceBrief(plan) }]);
+      const decisions = lib.renderDecisions([{ brief: strong }]);
       const record = ['```\nEffects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."\n```', gates, '```\n' + decisions + '\n```'];
       assert.equal(inputs.body, ['```\n' + plan.summary + '\n```', ...record].join('\n\n'));
       assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...record].join('\n\n'));
@@ -4638,8 +4700,8 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gates = gatesBlock(['validation: not run, the project documents no validation commands, held on commit ' + OTHER, 'local review: not configured for this run']);
-      assert.ok(inputs.body.includes('\n\n' + gates + '\n\n'), inputs.body);
-      assert.ok(inputs.comment.includes('\n\n' + gates), inputs.comment);
+      assert.ok(inputs.body.endsWith('\n\n' + gates), inputs.body);
+      assert.ok(inputs.comment.endsWith('\n\n' + gates), inputs.comment);
     });
     test('a taken diminishing returns exit shows a fixed problem, the open finding count and no reviewer text', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': DIMINISHING }));
@@ -4684,7 +4746,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [question]) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
-      const compact = lib.renderDecisionsCompact([{ brief: question }, { brief: main.buildPlanAcceptanceBrief(makePlan()) }]);
+      const compact = lib.renderDecisionsCompact([{ brief: question }]);
       for (const text of [inputs.body, inputs.comment]) {
         assert.ok(text.endsWith('\n\n```\n' + compact + '\n```'), text.slice(-400));
         assert.ok(text.length <= 60000 && !text.includes('S'.repeat(100)));
@@ -4762,13 +4824,13 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': { outcome: 'ran', stdout: stdout } }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
-      assert.ok(run.result.message.startsWith('Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.\n\n' + HELD_ALL + OTHER + '.\n\n'), run.result.message);
+      assert.equal(run.result.message, 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.\n\n' + HELD_ALL + OTHER + '.');
     });
     for (const warning of ['push was rejected; the branch is not on its remote', 'no upstream and no origin remote; push deferred', 'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked']) {
       test(`the warning ${JSON.stringify(warning)} is named in the final message`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'pr-1': cannedPrRunner({ warning: warning }) }));
         assert.equal(run.result.outcome, 'complete', run.result.message);
-        assert.ok(run.result.message.startsWith(openedLine(OTHER) + '\n\n' + HELD_ALL + OTHER + '.\n\nThe pull request step warned: ' + warning + '.\n\n'), run.result.message);
+        assert.equal(run.result.message, openedLine(OTHER) + '\n\n' + HELD_ALL + OTHER + '.\n\nThe pull request step warned: ' + warning + '.');
       });
     }
     const unseenPush = 'so the delivery stopped and did not see whether this step pushed. Taking it again pushes the same commit and reuses a pull request open on it.';
@@ -4865,7 +4927,7 @@ const ROW_TESTS = {
       assert.ok(!createArgs.includes('--head'));
       assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), readRunnerInputs(callOf(run, 'pr-1').prompt).body);
       assert.ok(!prRelays[0].stdout.includes('commented: true'));
-      assert.ok(run.result.message.startsWith(openedLine(head) + '\n\n' + HELD_ALL + head + '.\n\nThe pull request step warned: gh cannot read the push remote as a GitHub repository; the PR head repository was not checked.\n\n'), run.result.message);
+      assert.equal(run.result.message, openedLine(head) + '\n\n' + HELD_ALL + head + '.\n\nThe pull request step warned: gh cannot read the push remote as a GitHub repository; the PR head repository was not checked.');
     });
     test('real open-plan-pr.sh refuses a head other than expect_commit, and the run pauses naming the PR step', async () => {
       const scratch = makeScratchRepo();
@@ -4889,16 +4951,17 @@ const ROW_TESTS = {
     test('with local_review false the final message names the PR and names the gate not configured', async () => {
       const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.ok(run.result.message.startsWith(openedLine(OTHER) + '\n\nValidation held on commit ' + OTHER + '. Not configured for this run: local review.\n\n'), run.result.message);
+      assert.equal(run.result.message, openedLine(OTHER) + '\n\nValidation held on commit ' + OTHER + '. Not configured for this run: local review.');
       assert.ok(!run.result.message.includes('Gates that did not run'), run.result.message);
     });
-    test('a reused PR comment carries the full run record, and the final message its lines and no commit list', async () => {
+    test('a reused PR comment carries the full run record, and the final message its lines, each taken decision not of a routine kind and no commit list', async () => {
       const plan = effectPlan('Post a preview link.', true);
-      const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults({ 'plan-1': planResult(plan), 'pr-1': cannedPrRunner({ created: 'false', commented: 'true' }) }));
+      const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
+      const run = await runWorkflow({ ...LAUNCH, local_review: false }, happyResults({ 'plan-1': planResult(plan, [strong]), 'pr-1': cannedPrRunner({ created: 'false', commented: 'true' }) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
       const effects = 'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."';
-      const taken = [{ brief: main.buildPlanAcceptanceBrief(plan) }];
+      const taken = [{ brief: strong }];
       const decisions = lib.renderDecisions(taken);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: not configured for this run']);
       const comment = readRunnerInputs(callOf(run, 'pr-1').prompt).comment;
@@ -5291,8 +5354,7 @@ const ROW_TESTS = {
       assert.equal(paragraphs[1], main.nextStepLine('run_again'));
       assert.equal(paragraphs[2], 'The wave was committed as ' + OTHER + ', so that commit can hold partial edits.');
       assert.equal(paragraphs[3], branchLine(OTHER));
-      assert.equal(paragraphs.at(-1), lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }]));
-      assert.equal(paragraphs.length, 5, run.result.message);
+      assert.equal(paragraphs.length, 4, run.result.message);
     });
     test('a blocked result before any commit shows no branch line', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(), 'branch-1': { outcome: 'blocked', stderr: 'blocker: No branch.\n' } });
@@ -5544,14 +5606,14 @@ const ROW_TESTS = {
       const message = assertMessageShape(run.result.message, [], [stderr], 'pause');
       assert.ok(message.split('\n\n')[0].endsWith('", shortened.'), message);
     });
-    test('an open-question stop with 6 taken decisions shows each on one line', async () => {
+    test('an open-question stop with 5 taken planner questions and a taken plan acceptance shows each question on one line and no line for the acceptance', async () => {
       const asked = planResult(longPlan, [...takenBriefs, makeGatedBrief('GATED_PROBLEM')]);
       const run = await runWorkflow({ ...LAUNCH, build: BUILD_ID, answers: { 'round-1': 'x'.repeat(5000) } }, happyResults({ 'plan-1': asked, 'revise-1': reviseResult(asked, []) }));
       assert.equal(run.result.outcome, 'blocked');
       assert.ok(run.result.message.includes('I stopped asking because your replies so far are too long to carry'), run.result.message);
       const message = assertMessageShape(run.result.message, [LONG_SUMMARY], [], 'blocked');
       const decided = message.split('\n\n').find((paragraph) => paragraph.startsWith('Decided for you:'));
-      assert.equal(decided.split('\n').length, 7, decided);
+      assert.equal(decided, lib.renderDecisionsCompact(takenBriefs.map((brief) => ({ brief: brief }))));
     });
     test('a user-input-required pause is one lead line naming the finding by its short id, then the reviewer question', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan), 'review-1-1': userInput }));
@@ -5573,7 +5635,7 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assertMessageShape(run.result.message, [LONG_SUMMARY], [], 'complete');
       assert.ok(prBodyOf(run, 'pr-1').startsWith('```\n' + LONG_SUMMARY + '\n```'), prBodyOf(run, 'pr-1'));
-      assert.ok(prBodyOf(run, 'pr-1').includes('    Word for word:\n' + LONG_SUMMARY), prBodyOf(run, 'pr-1'));
+      assert.equal(prBodyOf(run, 'pr-1').split(LONG_SUMMARY).length, 2, prBodyOf(run, 'pr-1'));
     });
   },
   'SD-54': () => {
@@ -5695,14 +5757,14 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const message = run.result.message;
       const lead = openedLine(OTHER) + '\n\n' + HELD_ALL + OTHER + '.';
-      assert.ok(message.startsWith(lead + '\n\n' + [heading, lockLine, hostileLine].join('\n') + '\n\nDecided for you:'), message);
+      assert.equal(message, lead + '\n\n' + [heading, lockLine, hostileLine].join('\n'));
       assert.ok(!message.includes(longId), message);
       for (const rejectedText of ['distributed lock', '@owner', 'docs/adr/', 'Decisions']) {
         assert.ok(!message.includes(rejectedText), rejectedText);
       }
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       for (const text of [inputs.body, inputs.comment]) {
-        assert.ok(text.includes('\n- local review: ' + twoNote + ', held on commit ' + OTHER + '\n'), text);
+        assert.ok(text.endsWith('\n- local review: ' + twoNote + ', held on commit ' + OTHER), text);
         for (const rejectedText of ['a1b2c3d4', 'distributed lock', 'docs/adr/', 'f9f9f9f9', '@owner', 'Decisions', 'The findings it rejected']) {
           assert.ok(!text.includes(rejectedText), rejectedText);
         }
@@ -6535,7 +6597,7 @@ const ROW_TESTS = {
       const results = happyResults({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) });
       const run = await runWorkflow(answeredArgs({}), results);
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.ok(run.result.message.includes('D1. '), run.result.message);
+      assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
       const revise = callOf(run, 'revise-1');
       assert.ok(!readDataBlock(revise.prompt, 'questions').includes('D1. '), revise.prompt);
       assert.deepEqual(revise.opts.schema.properties.settled.items.enum, ['Q1']);
@@ -6602,7 +6664,6 @@ const ROW_TESTS = {
     });
   },
   'SD-69': () => {
-    const LIMITS_WHY = 'Only you can say if the plan may change files outside the limits.';
     const UNUSABLE_SCOPE = 'The scope step returned a result it could not use, so the delivery stopped before planning.';
     const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
     function limitsScope(limits) {
@@ -6611,9 +6672,14 @@ const ROW_TESTS = {
     function outsideProblem(brief, count) {
       return brief.problem + ' It changes ' + count + ' outside the limits you set.';
     }
-    function assertOutsideAsk(message, problem, outsidePaths, plan) {
-      assert.ok(message.includes('Q1. ' + problem), message);
-      assert.ok(message.includes('Recommendation: none. ' + LIMITS_WHY), message);
+    /**
+     * Asserts the acceptance ask of `brief` shows its problem with the
+     * outside count and its own recommendation, never strength none.
+     */
+    function assertOutsideAsk(message, brief, outsidePaths, plan) {
+      assert.ok(message.includes('Q1. ' + outsideProblem(brief, outsidePaths.length + ' file')), message);
+      assert.ok(message.includes(lib.renderRecommendation(brief.recommendation, brief.options)), message);
+      assert.ok(!message.includes('Recommendation: none.'), message);
       const lead = main.describePlanLine(plan, outsidePaths);
       assert.equal(message.split('\n\n')[0], lead, message);
       assert.ok(lead.endsWith(' Outside the limits you set: ' + outsidePaths.map((path) => lib.encodeUntrustedText(path)).join(', ') + '.'), lead);
@@ -6647,25 +6713,40 @@ const ROW_TESTS = {
         assert.equal(inside.result.outcome, 'complete', limit + ' ' + inside.result.message);
       }
     });
-    test('a request limit with a file outside asks plan_acceptance no_recommendation at the default level with the outside paths in the lead', async () => {
+    /**
+     * Asserts resolvePlanAsks asks the acceptance of `plan` under `limits`
+     * with reason outside_limits at the default level and every other level
+     * asks it, its brief keeping the built recommendation.
+     */
+    function assertOutsideLimitsReason(plan, limits, built, prepareRun) {
+      for (const level of autonomyTable.levels) {
+        const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+        run.level = level;
+        prepareRun(run);
+        const resolution = main.resolvePlanAsks(planResult(plan), parsedFacts(), run, limitsScope(limits));
+        assert.equal(resolution.taken.length, 0, level);
+        assert.equal(resolution.asks.length, 1, level);
+        assert.equal(resolution.asks[0].kind, built.kind, level);
+        assert.deepEqual({ ...resolution.asks[0].brief.recommendation }, { ...built.recommendation }, level);
+        assert.equal(resolution.asks[0].reason, level === 'low' ? 'table_surface' : 'outside_limits', level);
+      }
+      const marked = main.markOutsideLimits(built, ['x.js']);
+      assert.deepEqual({ ...lib.decide({ kind: built.kind, level: autonomyTable.default_level, brief: marked }, autonomyTable, briefSchema) }, { action: 'take', reason: 'auto' });
+    }
+    test('a request limit with a file outside asks plan_acceptance outside_limits at every level, its own recommendation shown, with the outside paths in the lead', async () => {
       const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['docs']) }));
       assert.equal(paused.result.needs_user, true);
       assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
-      assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
-      const marked = main.markOutsideLimits(main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js']);
-      assert.deepEqual({ ...marked.recommendation }, { ...main.buildPlanAcceptanceBrief(makePlan()).recommendation, strength: 'none', why: LIMITS_WHY });
-      for (const level of autonomyTable.levels) {
-        assert.equal(lib.decide({ kind: 'plan_acceptance', level: level, brief: marked }, autonomyTable, briefSchema).action, 'ask', level);
-      }
-      assert.deepEqual({ ...lib.decide({ kind: 'plan_acceptance', level: autonomyTable.default_level, brief: marked }, autonomyTable, briefSchema) }, { action: 'ask', reason: 'no_recommendation' });
+      assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
+      assertOutsideLimitsReason(makePlan(), ['docs'], main.buildPlanAcceptanceBrief(makePlan()), () => {});
     });
-    test('a request limit with a file outside asks remediation_plan_acceptance no_recommendation at the default level with the outside paths in the lead', async () => {
+    test('a request limit with a file outside asks remediation_plan_acceptance outside_limits at every level, its own recommendation shown, with the outside paths in the lead', async () => {
       const paused = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN), 'scope-2': limitsScope(['docs']) }));
       assert.equal(paused.result.needs_user, true);
       assert.deepEqual(labelsOf(paused), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2']);
-      assertOutsideAsk(paused.result.message, outsideProblem(main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), '1 file'), ['src/auth.js'], CLEAN_REMEDIATION_PLAN);
-      const marked = main.markOutsideLimits(main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), ['src/auth.js']);
-      assert.deepEqual({ ...lib.decide({ kind: 'remediation_plan_acceptance', level: autonomyTable.default_level, brief: marked }, autonomyTable, briefSchema) }, { action: 'ask', reason: 'no_recommendation' });
+      assertOutsideAsk(paused.result.message, main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), ['src/auth.js'], CLEAN_REMEDIATION_PLAN);
+      const escalate = (run) => run.taken.push({ brief: makeBrief(), kind: 'planner_escalation_routing' });
+      assertOutsideLimitsReason(CLEAN_REMEDIATION_PLAN, ['docs'], main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN), escalate);
     });
     test('an answer-only limit asks in the same pass after scope-1-1, whose prompt carries the answers block', async () => {
       const { paused } = await pauseOnAnswerLimit(['docs']);
@@ -6673,7 +6754,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
       assert.equal(readDataBlock(callOf(paused, 'scope-1-1').prompt, 'answers').length, 1);
       assert.ok(!callOf(paused, 'scope-1').prompt.includes('<answers>'));
-      assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
+      assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
     });
     test('an answer-only limit asks in a later pass whose scope-2 prompt carries the answers block', async () => {
       const results = happyResults({
@@ -6690,7 +6771,7 @@ const ROW_TESTS = {
       assert.ok(labelsOf(run).includes('scope-1-1'), JSON.stringify(labelsOf(run)));
       assert.deepEqual(labelsOf(run).slice(-3), ['facts-2', 'scope-2', 'plan-2']);
       assert.deepEqual(readDataBlock(callOf(run, 'scope-2').prompt, 'answers'), readDataBlock(callOf(run, 'plan-2').prompt, 'answers'));
-      assertOutsideAsk(run.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
+      assertOutsideAsk(run.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
     });
     test('a later answer that widens the limit is taken, and a same-build resume replays scope-1-1 from cache', async () => {
       const { results, paused } = await pauseOnAnswerLimit(['docs'], { 'revise-2': reviseResult(planResult(), []), 'scope-1-2': limitsScope(['docs', 'src']) });
@@ -6729,7 +6810,7 @@ const ROW_TESTS = {
       const run = await runSettledThenReplan(['docs']);
       assert.equal(run.result.needs_user, true);
       assert.deepEqual(labelsOf(run).slice(-3), ['facts-2', 'scope-2', 'plan-2']);
-      assertOutsideAsk(run.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
+      assertOutsideAsk(run.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
     });
     test('a later pass whose re-scoped limits include the outside file takes the plan', async () => {
       const run = await runSettledThenReplan(['docs', 'src']);
@@ -6743,7 +6824,7 @@ const ROW_TESTS = {
         assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([limit]))], ['src/cache.js'], limit);
         const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
         assert.equal(paused.result.needs_user, true, limit);
-        assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(makePlan()), '1 file'), ['src/cache.js'], makePlan());
+        assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(makePlan()), ['src/cache.js'], makePlan());
       }
     });
     test('a re-scope result that fails SCOPE_SCHEMA pauses before any wave, after the reply of its round is logged', async () => {
@@ -6772,19 +6853,20 @@ const ROW_TESTS = {
       for (const brief of [markedFull, markedPlan]) {
         assert.ok(lib.validateSchema(briefSchema, brief).ok, brief.problem);
         assert.ok(lib.validateSchema(agentBriefSchema, brief).ok, brief.problem);
-        assert.equal(brief.recommendation.strength, 'none');
+        assert.equal(brief.recommendation.strength, 'strong');
       }
+      assert.deepEqual({ ...markedPlan.recommendation }, { ...main.buildPlanAcceptanceBrief(makePlan()).recommendation });
       const suffix = ' It changes 400 files outside the limits you set.';
       assert.ok(markedFull.problem === unmarkedProblem || markedFull.problem === unmarkedProblem + suffix, markedFull.problem);
       assert.equal(markedPlan.problem, main.buildPlanAcceptanceBrief(makePlan()).problem + suffix);
     });
     for (const keyPath of collectPathFields(planSchema, [], [])) {
-      test(`a path outside the limits at ${describeKeyPath(keyPath)} asks plan_acceptance no_recommendation naming it`, async () => {
+      test(`a path outside the limits at ${describeKeyPath(keyPath)} asks plan_acceptance outside_limits naming it`, async () => {
         const plan = planWithValueAt(keyPath, 'outside/x.js');
         const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['src']), 'plan-1': planResult(plan) }));
         assert.equal(paused.result.needs_user, true);
         assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
-        assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(plan), '1 file'), ['outside/x.js'], plan);
+        assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(plan), ['outside/x.js'], plan);
       });
     }
     const VERSIONED_PLAN = { ...versionedPlan(), trunk_freshness: 'fresh' };
@@ -6802,7 +6884,7 @@ const ROW_TESTS = {
       const paused = await runVersionedUnder(['src']);
       assert.equal(paused.result.needs_user, true);
       assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
-      assertOutsideAsk(paused.result.message, outsideProblem(main.buildPlanAcceptanceBrief(VERSIONED_PLAN), '1 file'), ['VERSION'], VERSIONED_PLAN);
+      assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(VERSIONED_PLAN), ['VERSION'], VERSIONED_PLAN);
       const run = await runVersionedUnder(['src', 'VERSION']);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const labels = labelsOf(run);
@@ -6859,6 +6941,18 @@ const ROW_TESTS = {
       const stopped = structuredClone(main.stopDelivery(causes, stopState(), [], false));
       assert.deepEqual(stopped, { result: { needs_user: true, resume_args: { answers: {}, build: BUILD_ID }, message: 'SLOW_ONE_ZQ.\nSLOW_TWO_ZQ.\n\n' + lib.renderQuestions([stopAskOf(causes, false)]) } });
       assert.ok(main.buildStepStopBrief(causes, false).problem.startsWith('Nothing in the repo needs a fix, so reply later'));
+    });
+    test('a stop with a strong recommendation pauses at every level: stopDelivery asks step_stop through buildUndecidedAsk and decide() never takes it', () => {
+      assert.ok(moduleSource.includes('askTail(buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(causes, isReplan), run), run, describeStopLead(causes, endLines))'));
+      for (const nextAction of ['fix_cause', 'run_again']) {
+        for (const level of autonomyTable.levels) {
+          const state = stopState();
+          state.level = level;
+          const stopped = structuredClone(main.stopDelivery([{ problem: 'P.', nextAction: nextAction }], state, [], false));
+          assert.equal(stopped.result.needs_user, true, nextAction + ' ' + level);
+          assert.equal(state.taken.length, 0, nextAction + ' ' + level);
+        }
+      }
     });
     test('the pause lead is the cause problems in buildStopBlocks order, then the end lines, one per line', () => {
       const causes = [{ problem: 'LATER_ZQ.', nextAction: 'run_again' }, { problem: 'FIRST_ZQ.\nSTEP_LINE_ZQ' }, { problem: 'SECOND_ZQ.', nextAction: 'fix_cause' }];
@@ -7111,8 +7205,8 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'review-1-2', 'review-commit-1-2', 'pr-1-2']);
       assert.equal(readRunnerInputs(callOf(resumed, 'pr-1').prompt).expect_commit, OTHER);
       assert.equal(readRunnerInputs(callOf(resumed, 'pr-1-2').prompt).expect_commit, THIRD);
-      assert.ok(resumed.result.message.includes('\n\n' + HELD_ALL + THIRD + '.'), resumed.result.message);
-      assert.ok(resumed.result.message.includes(main.buildGateRerunBrief(['validate', 'review'], THIRD, false).problem), resumed.result.message);
+      assert.ok(resumed.result.message.endsWith('\n\n' + HELD_ALL + THIRD + '.'), resumed.result.message);
+      assert.ok(!resumed.result.message.includes('landed after'), resumed.result.message);
     });
     test('a malformed head check pauses, and its reply runs head-P-N with the next count', async () => {
       const results = happyResults({ 'pr-1': prBlocked, 'head-1-1': { outcome: 'ran', stdout: 'nonsense\n' }, 'head-1-2': headRelay(OTHER), 'pr-1-2': cannedPrRunner() });

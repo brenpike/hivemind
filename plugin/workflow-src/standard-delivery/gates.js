@@ -63,8 +63,10 @@
  *                 stopDelivery, and the reply resets the round count and
  *                 runs the head check, then validation again. Any other
  *                 failure keeps the fix limit ask.
- *   undetermined, unreadable  the run asks version_bump_indeterminable with
- *                 no decide() call (buildVersionQuestionBrief, briefs.js).
+ *   undetermined, unreadable  the run asks version_bump_indeterminable
+ *                 through buildUndecidedAsk, which decide() asks
+ *                 table_surface at every level (buildVersionQuestionBrief,
+ *                 briefs.js).
  *                 The reply becomes run.versionAnswer and runs one fix round
  *                 with the version_files and user_answer blocks, outside
  *                 decide() and the round limit, and never starts a new pass.
@@ -239,8 +241,18 @@ function replanFromTailAsk(ask, run) {
   return { replan: { reason: 'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
 }
 
-function buildUndecidedAsk(brief) {
-  return { brief: brief, reason: 'no_recommendation' };
+/**
+ * Returns the ask resolveDecision (plan.js) builds for a question decide()
+ * must never take: its brief, kind and the reason decide() gives at
+ * run.level. Throws when decide() takes it, so no undecided question is
+ * ever auto-taken.
+ */
+function buildUndecidedAsk(kind, brief, run) {
+  const resolution = { asks: [], taken: [] };
+  if (resolveDecision(kind, brief, undefined, run, resolution) === 'take') {
+    throw new Error('buildUndecidedAsk: decide() took ' + kind);
+  }
+  return resolution.asks[0];
 }
 
 function resolveTailDecision(kind, brief, run) {
@@ -416,7 +428,7 @@ async function runValidateStep(run, plan, facts, gates) {
 }
 
 async function askVersionQuestion(run, plan, gates, validation) {
-  const asked = askTail(buildUndecidedAsk(buildVersionQuestionBrief(validation.question)), run, undefined);
+  const asked = askTail(buildUndecidedAsk(VERSION_BUMP_INDETERMINABLE_KIND, buildVersionQuestionBrief(validation.question), run), run, undefined);
   if (asked.answer === undefined) {
     return asked;
   }
@@ -451,7 +463,7 @@ async function runValidateGate(run, plan, facts, gates) {
   }
   gates.failures[run.head] = validation;
   if (gates.fixRounds >= maxFixRounds()) {
-    return validation.versionOnly === true ? stopVersionFixLimit(run, gates, validation) : replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)), run);
+    return validation.versionOnly === true ? stopVersionFixLimit(run, gates, validation) : replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND, buildFixLimitBrief(run.head), run), run);
   }
   if (validation.versionOnly !== true) {
     const decided = resolveTailDecision(VALIDATION_REMEDIATION_KIND, buildValidationRemediationBrief(run.head, gates.fixRounds + 1), run);
@@ -469,7 +481,7 @@ function resolveGateRerun(run, gates) {
     return {};
   }
   if (gates.reruns >= maxGateReruns()) {
-    return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds, run.head, true)), run);
+    return replanFromTailAsk(buildUndecidedAsk(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, true), run), run);
   }
   gates.reruns += 1;
   return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, false), run);

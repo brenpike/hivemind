@@ -156,11 +156,13 @@
  *   path through the mark walk (listPlanPaths): the version files and the
  *   step files the wave commits take. When scope.limits is not empty, a
  *   plan path that neither equals a limit nor sits under limit + '/' makes
- *   the plan or remediation plan acceptance brief recommendation strength
- *   none, so decide() asks it no_recommendation at every level. Its problem
- *   names their count when it fits, and the pause lead of a round that shows
- *   the acceptance names up to maxListedItems() of them, each encoded whole,
- *   then the count of the rest. Empty limits leave the brief as it
+ *   resolvePlanAcceptance pass askReason outside_limits to decide(), so the
+ *   plan or remediation plan acceptance asks at every level, with its own
+ *   recommendation shown: markOutsideLimits never changes the strength or
+ *   why. A surface cell or a gate flag asks first, with its own reason. The
+ *   acceptance problem names their count when it fits, and the pause lead
+ *   of a round that shows the acceptance names up to maxListedItems() of
+ *   them, each encoded whole, then the count of the rest. Empty limits leave the brief as it
  *   was. The limits come only from the scope step, so a later pass asks a
  *   file outside them again. Validation fix round and local review edits are
  *   not plan paths and are outside the limits (ADR-0037, finding 2ecc5af1).
@@ -422,8 +424,8 @@ function unshownBriefText() {
   return 'Not shown.';
 }
 
-function resolveDecision(kind, brief, scope, run, resolution) {
-  const decision = decide({ kind: kind, level: run.level, brief: brief }, AUTONOMY_TABLE, BRIEF_SCHEMA);
+function resolveDecision(kind, brief, scope, run, resolution, askReason) {
+  const decision = decide({ kind: kind, level: run.level, brief: brief, askReason: askReason }, AUTONOMY_TABLE, BRIEF_SCHEMA);
   if (decision.action === 'take') {
     resolution.taken.push({ brief: brief, kind: kind });
     return 'take';
@@ -474,10 +476,11 @@ function resolveExternalEffects(plan, run, resolution) {
 function resolvePlanAcceptance(plan, run, resolution, scope) {
   const isRemediation = run.taken.some((entry) => entry.kind === PLANNER_ESCALATION_ROUTING_KIND || entry.kind === ROOT_CLUSTER_ROUTING_KIND);
   resolution.outsidePaths = listOutsidePaths(plan, scope);
+  const askReason = resolution.outsidePaths.length === 0 ? undefined : 'outside_limits';
   if (isRemediation) {
-    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildRemediationPlanBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution);
+    return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildRemediationPlanBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution, askReason);
   }
-  return resolveDecision(PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution);
+  return resolveDecision(PLAN_ACCEPTANCE_KIND, markOutsideLimits(buildPlanAcceptanceBrief(plan), resolution.outsidePaths), [run.pass, plan], run, resolution, askReason);
 }
 
 function resolvePlanAsks(planResult, facts, run, scope) {

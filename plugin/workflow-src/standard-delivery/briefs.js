@@ -25,9 +25,11 @@
  *            names no step: the step id lives only in the question key.
  *   listOutsidePaths(plan, scope)  the plan paths outside every limit of
  *            the scope, [] when it sets none.
- *   markOutsideLimits(brief, outsidePaths)  the acceptance brief with
- *            recommendation strength none when a plan path is outside the
- *            limits.
+ *   markOutsideLimits(brief, outsidePaths)  the acceptance brief with the
+ *            outside count added to its problem when a plan path is outside
+ *            the limits and the problem still fits. It never changes the
+ *            recommendation: its strength and why stay as built, and
+ *            plan.js asks the acceptance with askReason outside_limits.
  *   buildTailBrief({kind, problem, goOn, other, strength, why})  the
  *            shared shape of a tail brief, also used by review.js.
  *   buildValidationRemediationBrief, buildFixLimitBrief and
@@ -45,8 +47,8 @@
  *            defect to report, not retry. approve: approve or refuse the
  *            change named above, strength none.
  *   buildVersionQuestionBrief(values)  the version_bump_indeterminable
- *            brief the validate gate asks with no decide() call, strength
- *            none. For undetermined its options are a major, minor and
+ *            brief the validate gate asks through buildUndecidedAsk
+ *            (gates.js), strength none. For undetermined its options are a major, minor and
  *            patch bump and no bump, each naming the version it gives
  *            (raiseVersion) when trunk_version is known; for unreadable its
  *            problem names the formats the check reads, and its options
@@ -172,10 +174,7 @@ function markOutsideLimits(brief, outsidePaths) {
    * set. The pause lead names the outside paths and their count in every
    * case.
    */
-  return Object.assign(brief, {
-    problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem,
-    recommendation: { ...brief.recommendation, strength: 'none', why: 'Only you can say if the plan may change files outside the limits.' }
-  });
+  return Object.assign(brief, { problem: problem.length <= BRIEF_SCHEMA.properties.problem.maxLength ? problem : brief.problem });
 }
 
 function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
