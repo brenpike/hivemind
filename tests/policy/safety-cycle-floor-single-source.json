@@ -12,7 +12,7 @@
     },
     {
       "file": "plugin/skills/github-review-loop/SKILL.md",
-      "pattern": "`max_remediation_cycles` is a FLOOR. The floor value is DECLARED and ENFORCED by `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, and no literal is restated here"
+      "pattern": "`max_remediation_cycles` is a floor declared and enforced by `${CLAUDE_PLUGIN_ROOT}/skills/github-review-loop/scripts/loop-state.sh`, and no literal is restated here"
     },
     {
       "file": "plugin/agents/overlord.md",
