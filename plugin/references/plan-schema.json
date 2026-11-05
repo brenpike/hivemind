@@ -104,7 +104,8 @@
     "branch": {
       "type": "string",
       "maxLength": 200,
-      "description": "Can carry external content. The working branch the run delivers on. A run that starts on a branch other than trunk names that branch."
+      "pattern": "^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)/[a-z0-9]+(-[a-z0-9]+)*$",
+      "description": "Can carry external content. The working branch the run delivers on. A run that starts on a branch other than trunk names that branch. It is a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash, and lowercase words joined by hyphens."
     },
     "base": {
       "type": "string",

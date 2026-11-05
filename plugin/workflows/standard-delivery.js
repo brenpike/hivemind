@@ -482,7 +482,8 @@ const PLAN_SCHEMA = {
 },
 "branch": {
 "type": "string",
-"maxLength": 200
+"maxLength": 200,
+"pattern": "^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)/[a-z0-9]+(-[a-z0-9]+)*$"
 },
 "base": {
 "type": "string"
@@ -633,7 +634,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '72b9a09cfe545cc0';
+const BUILD_ID = '0d8b5d03e7078c70';
 
 function supportedSchemaKeywords(){
 return[
@@ -966,21 +967,6 @@ removeSchemaAnyOf(schema.items);
 return schema;
 }
 
-function decisionReasons(){
-return[
-'hard_stop',
-'malformed_brief',
-'unknown_kind',
-'table_surface',
-'bad_cell',
-'gate_irreversible',
-'gate_architectural',
-'gate_safety',
-'no_recommendation',
-'recommendation_not_an_option',
-'auto'
-];
-}
 function resolveLevel(value,table){
 if(value===undefined||value===null||value===''){
 return table.default_level;
@@ -1261,20 +1247,11 @@ function renderToken(value){
 return renderText(value).replace(/_/g,' ');
 }
 
-function resultFields(){
-return['needs_user','outcome','resume_args','pr','message'];
-}
 function replyField(){
 return'reply';
 }
 function pauseLimit(){
 return 3;
-}
-function canPause(pausesSoFar){
-if(!Number.isInteger(pausesSoFar)||pausesSoFar<0){
-throw new Error('canPause: pausesSoFar must be a non-negative integer');
-}
-return pausesSoFar<pauseLimit();
 }
 function noticeBudget(){
 return 8000-256;
@@ -1795,9 +1772,6 @@ return steps.some((other)=>other.id!==stepId
 &&other.files.some((otherFile)=>typeof otherFile==='string'&&otherFile.startsWith(prefix)));
 }
 
-function routingProblems(){
-return['missing','malformed'];
-}
 function routingKeyPattern(){
 return/^[a-z][a-z0-9_]*$/;
 }
@@ -2112,9 +2086,6 @@ return['bash','"'+commandRoot+'/skills/'+skill+'/scripts/'+skill+'.sh"',...words
 function listGatherFactsWords(trunk,references){
 return['--trunk',trunk,...references.flatMap((reference)=>['--ref',reference])];
 }
-function buildGatherFactsCommand(trunk,references){
-return buildRunnerCommand('gather-facts',listGatherFactsWords(trunk,references));
-}
 function factsHeadStates(){
 return['branch','detached','unsafe_name'];
 }
@@ -2283,15 +2254,6 @@ buildFactsBlock(facts)
 }
 function scanOptions(){
 return{agentType:droneAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
-}
-async function runScanStep(facts,runNoun){
-if(Number(facts.external_texts)>0){
-phase('Scan');
-const scan=await agent(buildScanPrompt(facts),scanOptions());
-const problem=describeScanProblem(scan,facts,runNoun);
-return problem===undefined?undefined:describeUnusableResult(problem,scan);
-}
-return undefined;
 }
 function renderSuspectLine(result){
 const category=isNonEmptyString(result.pattern_category)?result.pattern_category:'no category given';
@@ -3046,7 +3008,7 @@ const isOnOtherBranch=facts.head_state==='branch'&&facts.branch!==trunk;
 if(isOnOtherBranch&&plan.branch!==facts.branch){
 return'The run started on branch '+encodeUntrustedText(facts.branch)+' and delivers on it, but the plan names branch '+encodeUntrustedText(plan.branch)+', so '+RUN_NAME+' stopped.';
 }
-if(!/^(feature|bugfix|hotfix|refactor|chore|docs|test|ci)\/[a-z0-9]+(-[a-z0-9]+)*$/.test(plan.branch)){
+if(!new RegExp(PLAN_SCHEMA.properties.branch.pattern,'u').test(plan.branch)){
 return'The plan names branch '+encodeUntrustedText(plan.branch)+', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so '+RUN_NAME+' stopped.';
 }
 return describeClosesProblem(plan,references);

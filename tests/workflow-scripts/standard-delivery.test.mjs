@@ -1406,7 +1406,7 @@ const ROW_TESTS = {
       ['an unknown dependency', planResult(makePlan({ steps: [makeStep('STEP-001', ['a.js'], { depends_on: ['STEP-009'] })] })), 'The plan steps cannot be scheduled, so the delivery stopped: plan.steps[0].depends_on[0]: unknown step id'],
       ['a dependency cycle', planResult(makePlan({ steps: [makeStep('A', ['a.js'], { depends_on: ['B'] }), makeStep('B', ['b.js'], { depends_on: ['A'] })] })), 'The plan steps cannot be scheduled, so the delivery stopped: dependency cycle detected among plan steps'],
       ['a trunk freshness other than the facts', planResult(makePlan({ trunk_freshness: 'behind' })), 'The plan copies a trunk freshness other than the facts, so the delivery stopped.'],
-      ['an unsafe branch', planResult(makePlan({ branch: 'feature/..x' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
+      ['an unsafe branch', planResult(makePlan({ branch: 'feature/..x' })), schemaProblem],
       ['an unsafe base', planResult(makePlan({ base: '-main' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
       ['a version file path with a .. part', planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['a/../VERSION'] } })), pathProblem('versioning.artifact_files[0]')],
       ...[['VERSION', 'my file.json'], ['VERSION;touch x'], ['$(touch x)/VERSION'], ['-VERSION']].map((artifactFiles) => [
@@ -1572,27 +1572,49 @@ const ROW_TESTS = {
     });
     const branchProblem = (branch) => 'The plan names branch ' + lib.encodeUntrustedText(branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so the delivery stopped.';
     const taxonomyPrefixes = [...workflowRulesText.split('## Branch Taxonomy')[1].split('\n## ')[0].matchAll(/^\| `([a-z]+)\/` \|/gm)].map((match) => match[1]);
+    const acceptedBranches = [...taxonomyPrefixes.map((prefix) => prefix + '/cache'), 'bugfix/proj-123-fix-cache', 'feature/467-synapse-runner', 'ci/a1-b2'];
     const refusedBranches = ['main', 'feat/cache', 'release/cache', 'cache', 'Feature/cache', 'feature/Cache', 'feature/my_cache', 'feature/a/b', 'feature/cache-', 'feature/-cache', 'feature/a--b', 'feature/cache.v2', 'feature/'];
-    test('the plan check takes each Branch Taxonomy prefix of workflow.md, with or without a ticket, and no other', () => {
+    const unpatternedSchema = structuredClone(planSchema);
+    delete unpatternedSchema.properties.branch.pattern;
+    test('the plan schema takes each Branch Taxonomy prefix of workflow.md, with or without a ticket, and no other', () => {
       assert.deepEqual(taxonomyPrefixes, ['feature', 'bugfix', 'hotfix', 'refactor', 'chore', 'docs', 'test', 'ci']);
       const resultSchema = main.buildPlanResultSchema(planSchema, briefSchema);
-      for (const branch of [...taxonomyPrefixes.map((prefix) => prefix + '/cache'), 'bugfix/proj-123-fix-cache', 'feature/467-synapse-runner', 'ci/a1-b2']) {
+      for (const branch of acceptedBranches) {
+        assert.equal(main.describePlanProblem(planResult(makePlan({ branch: branch })), resultSchema, parsedFacts(), 'main'), undefined, branch);
+      }
+      for (const branch of refusedBranches) {
+        assert.equal(main.describePlanProblem(planResult(makePlan({ branch: branch })), resultSchema, parsedFacts(), 'main'), schemaProblem, branch);
+      }
+    });
+    test('behind a schema with no branch pattern, the branch checks still refuse an unsafe or untyped branch', () => {
+      assert.notEqual(planSchema.properties.branch.pattern, undefined);
+      const resultSchema = main.buildPlanResultSchema(unpatternedSchema, briefSchema);
+      for (const branch of acceptedBranches) {
         assert.equal(main.describePlanProblem(planResult(makePlan({ branch: branch })), resultSchema, parsedFacts(), 'main'), undefined, branch);
       }
       for (const branch of refusedBranches) {
         assert.equal(main.describePlanProblem(planResult(makePlan({ branch: branch })), resultSchema, parsedFacts(), 'main'), branchProblem(branch), branch);
       }
+      assert.equal(main.describePlanProblem(planResult(makePlan({ branch: 'feature/..x' })), resultSchema, parsedFacts(), 'main'), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.');
+    });
+    test('the branch check tests the pattern PLAN_SCHEMA carries, so the two cannot differ', () => {
+      assert.equal(agentPlanSchema.properties.branch.pattern, planSchema.properties.branch.pattern);
+      const probe = loadMainFunctions(builtSource);
+      vm.runInContext('PLAN_SCHEMA.properties.branch.pattern = \'^seeded/[a-z]+$\';', probe);
+      const resultSchema = probe.buildPlanResultSchema(unpatternedSchema, briefSchema);
+      assert.equal(probe.describePlanProblem(planResult(makePlan({ branch: 'seeded/cache' })), resultSchema, parsedFacts(), 'main'), undefined);
+      assert.equal(probe.describePlanProblem(planResult(makePlan({ branch: 'feature/cache' })), resultSchema, parsedFacts(), 'main'), branchProblem('feature/cache'));
     });
     for (const branch of ['feat/cache', 'feature/my_cache']) {
-      test(`a plan branch ${JSON.stringify(branch)} outside the branch taxonomy pauses before the branch step`, async () => {
+      test(`a plan branch ${JSON.stringify(branch)} outside the branch taxonomy fails the plan schema and pauses before the branch step`, async () => {
         const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan({ branch: branch })) });
-        assertPassStopPause(run, branchProblem(branch), 'plan-1');
+        assertPassStopPause(run, schemaProblem, 'plan-1');
         assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
       });
     }
     test('a run started on a branch outside the taxonomy pauses at the plan check even when the plan names that branch', async () => {
       const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay({ branch: 'my-work' }), 'plan-1': planResult(makePlan({ branch: 'my-work' })) });
-      assertPassStopPause(run, branchProblem('my-work'), 'plan-1');
+      assertPassStopPause(run, schemaProblem, 'plan-1');
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1']);
     });
   },
