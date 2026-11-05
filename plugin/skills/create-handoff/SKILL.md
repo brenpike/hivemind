@@ -30,7 +30,7 @@ Session-agnostic and resumable at any boundary. Resolve inputs in this order:
 1. **Plan (required)**: the interrogated plan, from the live conversation context (a plan already on screen or just produced) or from a file at `.hivemind/plans/<slug>.md`. If both are present, prefer the live context and treat the file as a cross-check. A plan from live context needs `.hivemind/plans/<slug>.md` as the durable backing for the handoff's plan pointer, and that file must exist by the time the handoff is written. This skill materializes it when only live context was supplied, so a pre-persisted plan is no precondition.
 2. **Handoff-context (optional, never required)**: extra session state the caller passes (recent decisions, in-flight questions, pointers). When absent, synthesize entirely from the plan; never ask for it or block on it.
 
-Derive `<slug>` from the input: the plan file's basename, or the slug already in use for the initiative. **Never hardcode a slug.** One slug per initiative names `.hivemind/plans/<slug>.md`, `.hivemind/handoffs/<slug>.md`, and `docs/prds/<slug>.md`.
+Derive `<slug>` from the plan file's basename, else the initiative's existing slug, else its name. **Never hardcode a slug.** One slug per initiative names `.hivemind/plans/<slug>.md`, `.hivemind/handoffs/<slug>.md`, and `docs/prds/<slug>.md`.
 
 ## Procedure
 
