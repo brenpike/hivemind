@@ -33,6 +33,7 @@ export const meta = {
  *   plugin/workflow-src/lib/args.js
  *   plugin/workflow-src/lib/identifier.js
  *   plugin/workflow-src/lib/facts.js
+ *   plugin/workflow-src/standard-delivery/approvals.js
  *   plugin/workflow-src/standard-delivery/briefs.js
  *   plugin/workflow-src/standard-delivery/gates.js
  *   plugin/workflow-src/standard-delivery/paths.js
@@ -672,7 +673,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'e011763e23f92966';
+const BUILD_ID = 'a6e5645ee2793e4a';
 
 function supportedSchemaKeywords(){
 return[
@@ -1151,6 +1152,30 @@ return label;
 function listShownLabels(asks){
 assertArray(asks,'listShownLabels: asks',true);
 return asks.map((entry,index)=>questionLabel(index));
+}
+function readReplyChoices(reply,asks){
+const shownLabels=listShownLabels(asks);
+if(typeof reply!=='string'){
+return[];
+}
+const replyText=asks.length===1?reply.trim().replace(/\.$/,''):reply.trim();
+const pairs=asks.length===1&&/^[A-Za-z]+$/.test(replyText)?[[shownLabels[0],replyText]]:readReplyPairs(replyText);
+const choices=pairs.map(([label,letter])=>({label:label,optionIndex:findLetterIndex(asks[shownLabels.indexOf(label)],letter)}));
+const isEachValid=choices.every((choice,index)=>choice.optionIndex!==-1&&choices.findIndex((other)=>other.label===choice.label)===index);
+return isEachValid?choices:[];
+}
+function readReplyPairs(replyText){
+if(!/^Q\d+(?::\s*|\s+)[A-Za-z]+(?:(?:\s*[,;]\s*|\s+)Q\d+(?::\s*|\s+)[A-Za-z]+)*$/.test(replyText)){
+return[];
+}
+return[...replyText.matchAll(/(Q\d+)(?::\s*|\s+)([A-Za-z]+)/g)].map((match)=>[match[1],match[2]]);
+}
+function findLetterIndex(entry,letter){
+const options=readField(readField(entry,'brief'),'options');
+if(!Array.isArray(options)){
+return-1;
+}
+return[...options.keys()].map((index)=>optionLabel(index)).indexOf(letter.toUpperCase());
 }
 function buildAnswerEntry(round,revise){
 const callerPrefix='buildAnswerEntry: ';
@@ -2375,6 +2400,31 @@ return'The injection scan did not return exactly one result for each text from G
 return undefined;
 }
 
+function applyApprovalChoices(approvals,asks,choices){
+const shownLabels=choices.length===0?[]:listShownLabels(asks);
+return choices.reduce((kept,choice)=>applyApprovalChoice(kept,listOptionItems(asks[shownLabels.indexOf(choice.label)]),choice.optionIndex),[...approvals]);
+}
+function applyApprovalChoice(approvals,optionItems,optionIndex){
+const chosen=optionItems[optionIndex]??[];
+const withdrawn=optionItems.flat().filter((entry)=>!hasItem(chosen,entry));
+const kept=approvals.filter((entry)=>!hasItem(withdrawn,entry));
+return chosen.reduce((list,entry)=>(hasItem(list,entry)?list:list.concat([entry])),kept);
+}
+function hasDestructiveOption(ask){
+return listOptionItems(ask).some((items)=>items.length>0);
+}
+function listOptionItems(ask){
+const options=Array.isArray(ask.brief.options)?ask.brief.options:[];
+const lists=Array.isArray(ask.items)?ask.items:options.map((option)=>option.destructive);
+return lists.map((items)=>(Array.isArray(items)?items.map(readItem):[]));
+}
+function readItem(entry){
+return{category:entry.category,item:entry.item};
+}
+function hasItem(items,entry){
+return items.some((other)=>other.category===entry.category&&other.item===entry.item);
+}
+
 function remediationGateTexts(){
 return{
 irreversible:'cannot be undone',
@@ -3170,6 +3220,10 @@ settledKinds.add(ask.kind);
 }
 });
 }
+function logPlanningReply(run,shownEntry,shownAsks,revise){
+run.answerLog.push(buildAnswerEntry(shownEntry,revise));
+run.approvals=applyApprovalChoices(run.approvals,shownAsks,readReplyChoices(shownEntry.reply,shownAsks));
+}
 function takeNextReply(run,round){
 const storedReply=readStoredReply(run.storedAnswers,round);
 if(storedReply!==undefined){
@@ -3193,13 +3247,13 @@ for(;;){
 const problem=describePlanProblem(planResult,resultSchema,facts,run.trunk,run.references);
 if(problem!==undefined){
 if(shownAsks.length>0){
-run.answerLog.push(buildAnswerEntry(shownEntry,undefined));
+logPlanningReply(run,shownEntry,shownAsks,undefined);
 }
 const isPlannerBlock=validateSchema(resultSchema,planResult).ok&&planResult.outcome==='blocked';
 return stopDelivery([isPlannerBlock?{problem:problem,nextAction:readBlockerAction(planResult.blocker)}:describeUnusableResult(problem,planResult)],run,[],true);
 }
 if(shownAsks.length>0){
-run.answerLog.push(buildAnswerEntry(shownEntry,planResult));
+logPlanningReply(run,shownEntry,shownAsks,planResult);
 markSettledAsks(run.answerLog[run.answerLog.length-1].settled,shownAsks,run,settledKinds);
 if(shownAsks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind)&&run.answeredKeys.has(ask.key))){
 planResult=shownResult;
@@ -3540,7 +3594,7 @@ if(!canCarry(resumeArgs)){
 return finishOpenQuestions(resolution,'reply_size',run);
 }
 const questionsBlock={text:renderQuestions(resolution.asks)};
-if(resolution.asks.some((ask)=>ask.exact===true)){
+if(resolution.asks.some((ask)=>ask.exact===true||hasDestructiveOption(ask))){
 questionsBlock.whole=true;
 }
 const compactLead=cutAtBoundary(lead,maxBlockedLeadLength());
@@ -3563,7 +3617,7 @@ if(asked.answer===undefined){
 return asked;
 }
 if(isReplan){
-return{replan:{reason:'The user replied to a stop the run paused at, so plan again from the fresh facts with the answers block.'}};
+return buildReplyReplan('a stop the run paused at');
 }
 return{rerun:true};
 }
@@ -4472,22 +4526,30 @@ return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasEx
 function describeTailLead(run){
 return'Every plan step is committed on branch '+encodeUntrustedText(run.branch)+', with head '+run.head+'.';
 }
-function askTail(ask,run,lead){
+function askTails(asks,run,lead){
 const leadText=lead===undefined?describeTailLead(run):lead;
 const reply=takeNextReply(run,run.answerLog.length+1);
 if(reply===undefined){
-return{result:pauseDelivery({asks:[ask],taken:[]},run,leadText)};
+return{result:pauseDelivery({asks:asks,taken:[]},run,leadText)};
 }
-const question=leadText+'\n\n'+renderQuestions([ask]);
-run.answerLog.push(buildAnswerEntry({question:question,labels:[],reply:reply},undefined));
+const question=leadText+'\n\n'+renderQuestions(asks);
+const choices=readReplyChoices(reply,asks);
+run.answerLog.push(buildAnswerEntry({question:question,labels:listShownLabels(asks),reply:reply,chosen:choices},undefined));
+run.approvals=applyApprovalChoices(run.approvals,asks,choices);
 return{answer:{question:question,reply:reply}};
+}
+function askTail(ask,run,lead){
+return askTails([ask],run,lead);
 }
 function replanFromTailAsk(ask,run){
 const asked=askTail(ask,run,undefined);
 if(asked.answer===undefined){
 return asked;
 }
-return{replan:{reason:'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.'}};
+return buildReplyReplan('a question the run asked after the last wave');
+}
+function buildReplyReplan(asked){
+return{replan:{reason:'The user replied to '+asked+', so plan again from the fresh facts with the answers block.'}};
 }
 function buildUndecidedAsk(kind,brief,run){
 const resolution={asks:[],taken:[]};
@@ -4748,6 +4810,7 @@ answerLog:[],
 answeredKeys:new Set(),
 taken:[],
 reversibleEffects:[],
+approvals:[],
 head:undefined,
 branch:undefined,
 headRound:undefined,

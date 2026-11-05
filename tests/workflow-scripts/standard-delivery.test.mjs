@@ -869,6 +869,40 @@ function tailAskOf() {
   return limitAsk(main.buildFixLimitBrief(OTHER));
 }
 
+const TEST_X = { category: 3, item: 'tests/cache.test.js' };
+const TEST_Y = { category: 3, item: 'tests/old.test.js' };
+const TEST_Z = { category: 5, item: 'docs/cache.md' };
+
+/**
+ * A gated planner question whose option at each index lists the items of
+ * optionItems at that index in destructive, and no destructive key for an
+ * option optionItems leaves out.
+ */
+function destructiveBrief(optionItems) {
+  const brief = makeGatedBrief('DESTRUCTIVE_PROBLEM');
+  return { ...brief, options: brief.options.map((option, index) => (optionItems[index] === undefined ? option : { ...option, destructive: optionItems[index] })) };
+}
+
+/**
+ * Runs runPlanningPass of the built script on a fresh pass 1 run state whose
+ * stored answers are answers, with agent() returning results by label and
+ * EMPTY_SCOPE for every scope label, and returns {end, approvals,
+ * answerLog, taken}.
+ */
+async function runPlanningRounds(results, answers) {
+  main.phase = () => undefined;
+  main.agent = async (prompt, opts) => (opts.label.startsWith('scope-') ? EMPTY_SCOPE : structuredClone(results[opts.label] ?? null));
+  try {
+    const run = main.createRunState({ argsObject: { answers: answers }, request: REQUEST, trunk: 'main', references: [] });
+    run.pass = 1;
+    const end = await main.runPlanningPass(run, parsedFacts(), EMPTY_SCOPE, undefined);
+    return structuredClone({ end: end, approvals: run.approvals, answerLog: run.answerLog, taken: run.taken });
+  } finally {
+    delete main.phase;
+    delete main.agent;
+  }
+}
+
 const FOURTH = '5'.repeat(40);
 const ESCALATION = { ...REVIEW_CLEAN, exit_reason: 'planner-escalation', findings_open: 1, finding_id: 'f5f5f5f5', classification: 'architecture', file: 'src/cache.js', title: 'The cache layer skips the "auth" check.' };
 const CLUSTER = { ...REVIEW_CLEAN, exit_reason: 'root-cluster-suspected', findings_open: 2, cluster_files: ['src/cache.js'], cluster_ids: ['F1', 'F2'], hypothesized_root: 'The cache key is built from raw input.', root_class: 'input-keying', same_framing_rationale: 'Both findings patch the key builder.' };
@@ -2812,6 +2846,17 @@ const ROW_TESTS = {
       assert.equal(run.result.needs_user, true);
       assert.ok(run.result.message.endsWith(lib.noticeMarker('cut')), run.result.message.slice(-300));
     });
+    test('a pause with a destructive option is whole: too long to show whole, it ends blocked exact_text_size and cuts no item', async () => {
+      const maxQuestions = Array.from({ length: 15 }, (_, index) => makeMaxBrief(index));
+      maxQuestions[14] = { ...maxQuestions[14], options: [maxQuestions[14].options[0], { ...maxQuestions[14].options[1], destructive: [TEST_X] }] };
+      const run = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), maxQuestions) });
+      assert.equal(run.result.needs_user, false, run.result.message.slice(-300));
+      assert.equal(run.result.outcome, 'blocked');
+      assert.equal(run.result.message, [OPEN_LEAD, RUN_AGAIN, lib.renderOpenQuestions(maxQuestions.map((brief) => ({ brief: brief })), 'exact_text_size')].join('\n\n'));
+      const fits = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [destructiveBrief([[], [TEST_X]])]) });
+      assert.equal(fits.result.needs_user, true);
+      assert.ok(fits.result.message.includes(': Use the raw path. Choosing it approves these destructive changes: tests/cache.test.js (category 3)\n'), fits.result.message);
+    });
   },
   'SD-21': () => {
     const unusableLead = 'The validation step returned no usable result, so the delivery stopped before the pull request.';
@@ -3021,8 +3066,9 @@ const ROW_TESTS = {
     });
     test('every tail ask goes through askTail, an undecided one through buildUndecidedAsk with its kind, and no tail ask ends the run', () => {
       assert.ok(!moduleSource.includes('finishTailAsk') && !moduleSource.includes('before_pr'));
-      assert.ok(moduleSource.includes('function askTail(ask, run, lead) {\n  const leadText = lead === undefined ? describeTailLead(run) : lead;'));
-      assert.ok(moduleSource.includes('return { result: pauseDelivery({ asks: [ask], taken: [] }, run, leadText) };'));
+      assert.ok(moduleSource.includes('function askTails(asks, run, lead) {\n  const leadText = lead === undefined ? describeTailLead(run) : lead;'));
+      assert.ok(moduleSource.includes('return { result: pauseDelivery({ asks: asks, taken: [] }, run, leadText) };'));
+      assert.ok(moduleSource.includes('function askTail(ask, run, lead) {\n  return askTails([ask], run, lead);\n}'));
       assert.ok(moduleSource.includes('  return replanFromTailAsk(resolution.asks[0], run);\n}'));
       assert.equal((moduleSource.match(/replanFromTailAsk\(buildUndecidedAsk\(/g) || []).length, 2);
       assert.ok(moduleSource.includes('replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND, buildFixLimitBrief(run.head), run), run)'));
@@ -3035,6 +3081,16 @@ const ROW_TESTS = {
       const asked = main.askTail(tailAskOf(), state, 'LEAD_ZQ');
       assert.deepEqual(structuredClone(asked), { answer: { question: question, reply: TAIL_REPLY } });
       assert.deepEqual(structuredClone(state.answerLog), [{ question: question, settled: [], reply: TAIL_REPLY }]);
+    });
+    test('askTail settles the label a letter reply chooses and gives the tail question no key, and askTails reads one choice per shown ask', () => {
+      const state = main.createRunState({ argsObject: { answers: { 'round-1': 'a', 'round-2': 'Q2: B; Q1 A' } }, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      main.askTail(tailAskOf(), state, 'LEAD_ZQ');
+      const asks = [tailAskOf(), surfacedAsk(main.buildValidationRemediationBrief(OTHER, 1))];
+      const asked = main.askTails(asks, state, 'LEAD_ZQ');
+      assert.deepEqual(structuredClone(asked), { answer: { question: 'LEAD_ZQ\n\n' + lib.renderQuestions(asks), reply: 'Q2: B; Q1 A' } });
+      assert.deepEqual(structuredClone(state.answerLog.map((entry) => entry.settled)), [['Q1'], ['Q1', 'Q2']]);
+      assert.equal(state.answeredKeys.size, 0);
+      assert.equal(asks.some((ask) => ask.key !== undefined), false);
     });
     test('a tail round shares the round numbering with the planning rounds, and its resume replays every earlier agent', async () => {
       const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
@@ -5952,7 +6008,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'review-1-2', 'review-commit-1-2', 'facts-2', 'scope-2', 'plan-2']);
       const prompt = callOf(run, 'plan-2').prompt;
       assert.deepEqual(readDataBlock(prompt, 'review'), structuredClone(main.projectReplanReview(ESCALATION)));
-      assert.deepEqual(readDataBlock(prompt, 'answers'), [{ question: reviewQuestionText(), settled: [], reply: reviewReply }]);
+      assert.deepEqual(readDataBlock(prompt, 'answers'), [{ question: reviewQuestionText(), settled: ['Q1'], reply: reviewReply }]);
       assert.equal(prompt.split('\n')[2], SETTLED_ANSWERS_LINE, prompt);
       assert.ok(prompt.indexOf('<review>') < prompt.indexOf('<answers>'));
       assert.ok(!prompt.split('\n').includes('<answer>'), prompt);
@@ -5962,13 +6018,13 @@ const ROW_TESTS = {
       assert.deepEqual(Object.keys(replanned.replan), ['reason', 'review']);
       assert.equal(state.replans, 1);
     });
-    test('one review reply gives the rerun user_answer {question, reply} and the replan answers entry settled []', async () => {
+    test('one letter review reply gives the rerun user_answer {question, reply} and the replan answers entry settled [Q1]', async () => {
       const results = answeredReviewResults({ 'review-1-2': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN) });
       const paused = await runWorkflow(LAUNCH, results);
       const run = await runWorkflow(resumeWith(LAUNCH, paused.result, reviewReply), results);
       assert.equal(run.result.needs_user, true, run.result.message);
       assert.deepEqual(readDataBlock(callOf(run, 'review-1-2').prompt, 'inputs').user_answer, { question: reviewQuestionText(), reply: reviewReply });
-      assert.deepEqual(readDataBlock(callOf(run, 'scope-2').prompt, 'answers'), [{ question: reviewQuestionText(), settled: [], reply: reviewReply }]);
+      assert.deepEqual(readDataBlock(callOf(run, 'scope-2').prompt, 'answers'), [{ question: reviewQuestionText(), settled: ['Q1'], reply: reviewReply }]);
     });
     test('a review reply that reruns the review and then replans is logged settled [] in scope-2 and plan-2', async () => {
       const results = answeredReviewResults({ 'review-1-2': ESCALATION, 'facts-2': onPlanBranchFacts(OTHER), 'plan-2': planResult(REMEDIATION_PLAN) });
@@ -6552,6 +6608,13 @@ const ROW_TESTS = {
       assert.equal(readDataBlock(revise, 'reply'), 'Yes, run it.');
       assert.ok(revise.indexOf('<answers>') < revise.indexOf('<earlier_plan>'));
       assert.ok(!callOf(run, 'revise-1').prompt.includes('<answers>'));
+    });
+    test('a letter planning reply settles only what the checked revise names', async () => {
+      const unsettled = await runPlanningRounds({ 'plan-1': gated, 'revise-1': reviseResult(gated, []) }, { 'round-1': 'A' });
+      assert.equal(unsettled.end.result.needs_user, true, JSON.stringify(unsettled.end));
+      assert.deepEqual(unsettled.answerLog.map((entry) => entry.settled), [[]]);
+      const settled = await runPlanningRounds({ 'plan-1': gated, 'revise-1': reviseResult(planResult(), ['Q1']) }, { 'round-1': 'A' });
+      assert.deepEqual(settled.answerLog.map((entry) => entry.settled), [['Q1']]);
     });
     const secondBrief = { ...makeGatedBrief('SECOND_PROBLEM'), id: 'Q2' };
     const twoGated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM'), secondBrief]);
@@ -7645,6 +7708,95 @@ const ROW_TESTS = {
       assert.equal(problemOf([1e30], ['1' + '0'.repeat(30)]), closesProblem(0));
       assert.equal(problemOf([0], ['0', '00']), closesProblem(0));
       assert.equal(problemOf([488, 0], ['488', '0']), closesProblem(1));
+    });
+  },
+  'SD-77': () => {
+    const keepAsk = (items) => ({ brief: destructiveBrief(items), reason: 'gate_safety' });
+    test('a chosen option adds its items once, as a new list, and a sibling choice withdraws the items only its siblings list', () => {
+      const ask = keepAsk([[TEST_X, TEST_Y, TEST_X], [TEST_Y]]);
+      const approvals = [TEST_Z];
+      const added = main.applyApprovalChoices(approvals, [ask], [{ label: 'Q1', optionIndex: 0 }]);
+      assert.deepEqual(structuredClone(added), [TEST_Z, TEST_X, TEST_Y]);
+      assert.deepEqual(approvals, [TEST_Z]);
+      assert.deepEqual(structuredClone(main.applyApprovalChoices(added, [ask], [{ label: 'Q1', optionIndex: 1 }])), [TEST_Z, TEST_Y]);
+      assert.deepEqual(structuredClone(main.applyApprovalChoices([TEST_X], [keepAsk([[TEST_X]])], [{ label: 'Q1', optionIndex: 1 }])), []);
+    });
+    test('the key is the category and the item text, and each choice reads the ask its label names', () => {
+      const otherCategory = { ...TEST_X, category: 4 };
+      const asks = [keepAsk([[], [TEST_Y]]), keepAsk([[TEST_X], [otherCategory]])];
+      const approvals = main.applyApprovalChoices([], asks, lib.readReplyChoices('Q2 B, Q1 B', asks));
+      assert.deepEqual(structuredClone(approvals), [otherCategory, TEST_Y]);
+      assert.deepEqual(structuredClone(main.applyApprovalChoices(approvals, asks, lib.readReplyChoices('Q2 A', asks))), [TEST_Y, TEST_X]);
+    });
+    test('ask.items, when set, holds the items of each option in place of the destructive lists', () => {
+      const ask = { ...surfacedAsk(makeBrief()), items: [[TEST_X], []] };
+      assert.equal(main.hasDestructiveOption(ask), true);
+      assert.equal(main.hasDestructiveOption(surfacedAsk(makeBrief())), false);
+      assert.equal(main.hasDestructiveOption({ ...keepAsk([[TEST_X]]), items: [[], []] }), false);
+      const approved = main.applyApprovalChoices([], [ask], [{ label: 'Q1', optionIndex: 0 }]);
+      assert.deepEqual(structuredClone(approved), [TEST_X]);
+      assert.deepEqual(structuredClone(main.applyApprovalChoices(approved, [ask], [{ label: 'Q1', optionIndex: 1 }])), []);
+    });
+    test('a reply in the user\'s own words approves nothing, in planning and after the last wave', async () => {
+      const freeText = 'Go with B, but keep the old test.';
+      const planning = await runPlanningRounds({ 'plan-1': planResult(makePlan(), [destructiveBrief([[], [TEST_X]])]), 'revise-1': reviseResult(planResult(), ['Q1']) }, { 'round-1': freeText });
+      assert.ok(planning.end.plan !== undefined, JSON.stringify(planning.end));
+      assert.deepEqual(planning.approvals, []);
+      const state = main.createRunState({ argsObject: { answers: {}, reply: freeText }, request: REQUEST, trunk: 'main', references: [] });
+      main.askTail(keepAsk([[], [TEST_X]]), state, 'LEAD_ZQ');
+      assert.deepEqual(structuredClone(state.approvals), []);
+      assert.deepEqual(structuredClone(state.answerLog[0].settled), []);
+    });
+    test('a decision the run took never approves: a taken question leaves the list empty, and a destructive recommendation is asked, never taken', async () => {
+      const taken = await runPlanningRounds({ 'plan-1': planResult(makePlan(), [{ ...destructiveBrief([[], [TEST_X]]), gate: makeBrief().gate }]) }, {});
+      assert.ok(taken.end.plan !== undefined, JSON.stringify(taken.end));
+      assert.ok(taken.taken.some((entry) => entry.kind === 'planner_question'), JSON.stringify(taken.taken));
+      assert.deepEqual(taken.approvals, []);
+      const asked = await runPlanningRounds({ 'plan-1': planResult(makePlan(), [{ ...destructiveBrief([[TEST_X], []]), gate: makeBrief().gate }]) }, {});
+      assert.equal(asked.end.result.needs_user, true);
+      assert.ok(asked.end.result.message.includes(' Choosing it approves these destructive changes: tests/cache.test.js (category 3)'), asked.end.result.message);
+      assert.deepEqual(asked.approvals, []);
+    });
+    test('a planning letter reply approves its option on the logged-after-revise path and on the failed-revise path', async () => {
+      const plan = planResult(makePlan(), [destructiveBrief([[], [TEST_X]])]);
+      const logged = await runPlanningRounds({ 'plan-1': plan, 'revise-1': reviseResult(planResult(), ['Q1']) }, { 'round-1': 'B' });
+      assert.ok(logged.end.plan !== undefined, JSON.stringify(logged.end));
+      assert.deepEqual(logged.approvals, [TEST_X]);
+      const failed = await runPlanningRounds({ 'plan-1': plan, 'revise-1': { outcome: 'complete' } }, { 'round-1': 'B' });
+      assert.equal(failed.end.result.needs_user, true, JSON.stringify(failed.end));
+      assert.deepEqual(failed.answerLog.map((entry) => entry.settled), [[]]);
+      assert.deepEqual(failed.approvals, [TEST_X]);
+    });
+    test('a later choice of a sibling option withdraws the items it no longer lists', async () => {
+      const plan = planResult(makePlan(), [destructiveBrief([[], [TEST_X]])]);
+      const run = await runPlanningRounds({ 'plan-1': plan, 'revise-1': reviseResult(plan, []), 'revise-2': reviseResult(planResult(), ['Q1']) }, { 'round-1': 'B', 'round-2': 'A' });
+      assert.ok(run.end.plan !== undefined, JSON.stringify(run.end));
+      assert.deepEqual(run.answerLog.map((entry) => entry.reply), ['B', 'A']);
+      assert.deepEqual(run.approvals, []);
+    });
+    test('run.approvals has two writers, each applying the choices code read from the user\'s reply', () => {
+      const code = stripCommentsAndStrings(moduleSource);
+      assert.deepEqual(code.match(/\bapprovals: \[\]|\.approvals = [^;]+;/g), [
+        '.approvals = applyApprovalChoices(run.approvals, shownAsks, readReplyChoices(shownEntry.reply, shownAsks));',
+        '.approvals = applyApprovalChoices(run.approvals, asks, choices);',
+        'approvals: []'
+      ]);
+      assert.ok(code.includes('const choices = readReplyChoices(reply, asks);'));
+      assert.equal((code.match(/applyApprovalChoices\(/g) || []).length, 3);
+    });
+    test('a resume that replays the same replies builds the same approvals', async () => {
+      const results = { 'plan-1': planResult(makePlan(), [destructiveBrief([[TEST_Y], [TEST_X]])]), 'revise-1': reviseResult(planResult(), ['Q1']) };
+      const first = await runPlanningRounds(results, { 'round-1': 'b.' });
+      const second = await runPlanningRounds(results, { 'round-1': 'b.' });
+      assert.deepEqual(first.approvals, [TEST_X]);
+      assert.deepEqual(second.approvals, first.approvals);
+      const tailApprovals = () => {
+        const state = main.createRunState({ argsObject: { answers: { 'round-1': 'A' } }, request: REQUEST, trunk: 'main', references: [] });
+        main.askTail(keepAsk([[TEST_X], []]), state, 'LEAD_ZQ');
+        return structuredClone(state.approvals);
+      };
+      assert.deepEqual(tailApprovals(), [TEST_X]);
+      assert.deepEqual(tailApprovals(), tailApprovals());
     });
   }
 };

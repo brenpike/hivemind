@@ -48,7 +48,7 @@
  *            change named above, strength none.
  *   buildVersionQuestionBrief(values)  the version_bump_indeterminable
  *            brief the validate gate asks through buildUndecidedAsk
- *            (gates.js), strength none. For undetermined its options are a major, minor and
+ *            (tails.js), strength none. For undetermined its options are a major, minor and
  *            patch bump and no bump, each naming the version it gives
  *            (raiseVersion) when trunk_version is known; for unreadable its
  *            problem names the formats the check reads, and its options

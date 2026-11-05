@@ -46,14 +46,17 @@
  *   Every chat message has one shape, built here:
  *   pauseDelivery(resolution, run, lead)  the lead, then
  *           renderQuestions(resolution.asks), a whole block when an ask is
- *           exact. The reply line is the last line. No commit, gate line,
+ *           exact or has a destructive option (hasDestructiveOption,
+ *           approvals.js), so no destructive item is ever cut: a block
+ *           that cannot show whole ends through finishOpenQuestions,
+ *           exact_text_size. The reply line is the last line. No commit, gate line,
  *           taken decision or detail block. A lead longer than
  *           maxBlockedLeadLength() code points has the cutAtBoundary prefix
  *           of at most those code points as its compact form.
  *   stopDelivery  ends through finishDeliveryBlocked when any cause is
  *           terminal or an agent failure. Otherwise it asks one undecided
  *           step_stop question (buildStepStopBrief, briefs.js) through
- *           buildUndecidedAsk and askTail (gates.js): decide() asks it
+ *           buildUndecidedAsk and askTail (tails.js): decide() asks it
  *           table_surface at every level, so its recommendation, strong
  *           for fix_cause and run_again, is never taken. The askTail lead is
  *           the cause problems in buildStopBlocks order, then the end
@@ -234,7 +237,7 @@ function pauseDelivery(resolution, run, lead) {
     return finishOpenQuestions(resolution, 'reply_size', run);
   }
   const questionsBlock = { text: renderQuestions(resolution.asks) };
-  if (resolution.asks.some((ask) => ask.exact === true)) {
+  if (resolution.asks.some((ask) => ask.exact === true || hasDestructiveOption(ask))) {
     questionsBlock.whole = true;
   }
   const compactLead = cutAtBoundary(lead, maxBlockedLeadLength());
@@ -259,7 +262,7 @@ function stopDelivery(causes, run, endLines, isReplan) {
     return asked;
   }
   if (isReplan) {
-    return { replan: { reason: 'The user replied to a stop the run paused at, so plan again from the fresh facts with the answers block.' } };
+    return buildReplyReplan('a stop the run paused at');
   }
   return { rerun: true };
 }

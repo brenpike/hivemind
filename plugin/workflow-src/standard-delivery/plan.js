@@ -9,8 +9,9 @@
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
  *           request, trunk, references, level, pass, storedAnswers and
- *           pendingReply, and updates answerLog, answeredKeys, taken and
- *           reversibleEffects. references reach describeClosesProblem (pr.js).
+ *           pendingReply, and updates answerLog, answeredKeys, taken,
+ *           approvals and reversibleEffects. references reach
+ *           describeClosesProblem (pr.js).
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
  *           Once the revise result of a reply round passes the plan check,
@@ -31,7 +32,7 @@
  *           question of the pass is settled or taken, else what stopDelivery
  *           returns or {result}, the pause of an open question.
  *   takeNextReply(run, round)  the reply to a round, also read by the
- *           tail asks of gates.js.
+ *           tail asks of tails.js.
  *   The steps it runs, as meta.js names them:
  *   Plan    hivemind:cerebrate returns a plan result: PLAN_SCHEMA under
  *           plan, with outcome, questions and blocker.
@@ -131,6 +132,10 @@
  *   the pause showed, settled the shown labels the revise names, in shown
  *   order, [] when it names none. The answered keys of the round come from
  *   that logged settled, so the keys and the log share one derivation.
+ *   On both paths that log a planning reply, logPlanningReply also applies
+ *   readReplyChoices (lib/brief.js) of the reply to run.approvals through
+ *   applyApprovalChoices (approvals.js); settled still comes only from the
+ *   revise.
  *   Every plan prompt once the log is not empty carries the whole log in
  *   an answers data block, and a revise prompt the entries of earlier
  *   rounds. Its data line calls settled only
@@ -466,6 +471,11 @@ function markSettledAsks(settledLabels, shownAsks, run, settledKinds) {
   });
 }
 
+function logPlanningReply(run, shownEntry, shownAsks, revise) {
+  run.answerLog.push(buildAnswerEntry(shownEntry, revise));
+  run.approvals = applyApprovalChoices(run.approvals, shownAsks, readReplyChoices(shownEntry.reply, shownAsks));
+}
+
 function takeNextReply(run, round) {
   const storedReply = readStoredReply(run.storedAnswers, round);
   if (storedReply !== undefined) {
@@ -490,13 +500,13 @@ async function runPlanningPass(run, facts, passScope, replan) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk, run.references);
     if (problem !== undefined) {
       if (shownAsks.length > 0) {
-        run.answerLog.push(buildAnswerEntry(shownEntry, undefined));
+        logPlanningReply(run, shownEntry, shownAsks, undefined);
       }
       const isPlannerBlock = validateSchema(resultSchema, planResult).ok && planResult.outcome === 'blocked';
       return stopDelivery([isPlannerBlock ? { problem: problem, nextAction: readBlockerAction(planResult.blocker) } : describeUnusableResult(problem, planResult)], run, [], true);
     }
     if (shownAsks.length > 0) {
-      run.answerLog.push(buildAnswerEntry(shownEntry, planResult));
+      logPlanningReply(run, shownEntry, shownAsks, planResult);
       markSettledAsks(run.answerLog[run.answerLog.length - 1].settled, shownAsks, run, settledKinds);
       if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
         planResult = shownResult;

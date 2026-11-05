@@ -116,6 +116,9 @@
  *   commit made during a pause, or by a commit runner whose relay could
  *   not be read. That read also stamps run.headRound after the last
  *   planning reply.
+ *   run.approvals starts [] and changes only through applyApprovalChoices
+ *   (approvals.js) at each reply round, so it holds only the destructive
+ *   changes the user's own replies approved, never a decision the run took.
  *   No version question plans again: its reply becomes run.versionAnswer
  *   and runs one fix round, and no later version check of the run fails
  *   or asks (gates.js).
@@ -380,6 +383,7 @@ function createRunState(launch) {
     answeredKeys: new Set(),
     taken: [],
     reversibleEffects: [],
+    approvals: [],
     head: undefined,
     branch: undefined,
     headRound: undefined,

@@ -5,17 +5,22 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState. The tail asks read
- *          branch and head, and update answerLog; resolveDecision (plan.js)
+ *          branch and head, and update answerLog and approvals;
+ *          resolveDecision (plan.js)
  *          reads level, and a take updates taken through acceptResolution.
  *   ask    one ask, as resolveDecision (plan.js) builds it.
+ *   asks   the asks one pause shows, in shown order.
  *   kind, brief  a decide() kind and its code-built brief.
  *   lead   the lead string of the pause, or undefined.
  *
  * Outputs
- *   askTail(ask, run, lead)  {result}, the pause, or {answer: {question,
+ *   askTails(asks, run, lead)  {result}, the pause, or {answer: {question,
  *          reply}} once the user replied.
+ *   askTail(ask, run, lead)  askTails([ask], run, lead).
  *   replanFromTailAsk(ask, run)  the pause, or {replan} once the user
  *          replied.
+ *   buildReplyReplan(asked)  the {replan} of a reply to what asked names,
+ *          also returned by stopDelivery (record.js).
  *   buildUndecidedAsk  the ask, for kind, brief and run, of a question
  *          decide() must never take.
  *   resolveTailDecision(kind, brief, run)  {} when decide() takes it, else
@@ -26,19 +31,24 @@
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
  *   Tail asks: a question after the last wave pauses through pauseDelivery
- *   with a lead and its question: askTail(ask, run, lead) leads with the
+ *   with a lead and its questions: askTails(asks, run, lead) leads with the
  *   given lead string, as a local review question passes, else with
  *   describeTailLead(run), every plan step committed on the encoded branch
  *   at the head. Tail rounds share run.answerLog and the answers round
  *   numbering with planning rounds, so a resume replays every earlier agent
- *   from cache and takes the reply at the ask. At reply time askTail adds
+ *   from cache and takes the reply at the ask. At reply time askTails adds
  *   the {question, settled, reply} entry buildAnswerEntry (lib/brief.js)
- *   builds to run.answerLog, the question being that lead and the question,
+ *   builds to run.answerLog, the question being that lead and the questions,
  *   so every later plan prompt shows it in the answers block; it returns
  *   {question, reply} as the answer. No revise reads a tail reply, so its
- *   settled is always [] and it stays the user's own words in every later
- *   answers block, review questions included: a review decision lives in the
- *   reviewer's record. A reply to a local review question reruns the review
+ *   settled holds only the shown labels readReplyChoices (lib/brief.js)
+ *   reads from it: a letter reply settles its label, and a reply in the
+ *   user's own words settles none and stays the user's own words in every
+ *   later answers block, review questions included: a review decision lives
+ *   in the reviewer's record. The same choices update run.approvals through
+ *   applyApprovalChoices (approvals.js). A tail question has no question
+ *   key, so a settled label never keys it: a step_stop asked again is asked,
+ *   never skipped. A reply to a local review question reruns the review
  *   gate on the current head, after any stale gate, with the next gateLabel
  *   count and user_answer {question, reply}. Any other tail reply starts a
  *   new pass from the facts step with the answers block, outside
@@ -53,15 +63,21 @@ function describeTailLead(run) {
   return 'Every plan step is committed on branch ' + encodeUntrustedText(run.branch) + ', with head ' + run.head + '.';
 }
 
-function askTail(ask, run, lead) {
+function askTails(asks, run, lead) {
   const leadText = lead === undefined ? describeTailLead(run) : lead;
   const reply = takeNextReply(run, run.answerLog.length + 1);
   if (reply === undefined) {
-    return { result: pauseDelivery({ asks: [ask], taken: [] }, run, leadText) };
+    return { result: pauseDelivery({ asks: asks, taken: [] }, run, leadText) };
   }
-  const question = leadText + '\n\n' + renderQuestions([ask]);
-  run.answerLog.push(buildAnswerEntry({ question: question, labels: [], reply: reply }, undefined));
+  const question = leadText + '\n\n' + renderQuestions(asks);
+  const choices = readReplyChoices(reply, asks);
+  run.answerLog.push(buildAnswerEntry({ question: question, labels: listShownLabels(asks), reply: reply, chosen: choices }, undefined));
+  run.approvals = applyApprovalChoices(run.approvals, asks, choices);
   return { answer: { question: question, reply: reply } };
+}
+
+function askTail(ask, run, lead) {
+  return askTails([ask], run, lead);
 }
 
 function replanFromTailAsk(ask, run) {
@@ -69,7 +85,11 @@ function replanFromTailAsk(ask, run) {
   if (asked.answer === undefined) {
     return asked;
   }
-  return { replan: { reason: 'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
+  return buildReplyReplan('a question the run asked after the last wave');
+}
+
+function buildReplyReplan(asked) {
+  return { replan: { reason: 'The user replied to ' + asked + ', so plan again from the fresh facts with the answers block.' } };
 }
 
 /**
