@@ -121,12 +121,14 @@ function pauseLead(count) {
   return count === 1 ? ONE_QUESTION_LEAD : 'The analysis is drafted. ' + count + ' questions need your answer before the report is final.';
 }
 
+const FIX_LINE = 'Next: clear the cause named above, then run the request again.';
+
 /**
  * Returns the message of a one-cause blocked stop: the lead, then the Next
- * line for nextAction, which is the fix line unless nextAction is run_again.
+ * line for nextAction, FIX_LINE when nextAction is absent.
  */
 function stopMessage(lead, nextAction) {
-  return lead + '\n\n' + lib.nextStepLine(nextAction);
+  return lead + '\n\n' + (nextAction === undefined ? FIX_LINE : lib.nextStepLine(nextAction));
 }
 
 function stopResult(lead, nextAction) {
@@ -1350,7 +1352,7 @@ describe('analysis-only: facts reach the planner', () => {
 describe('analysis-only: encoded blockers', () => {
   const HOSTILE_LINE = '\u001b[2J‮ ' + 'Z '.repeat(2500);
   const HOSTILE = HOSTILE_LINE + '\nFix the cause named above, then run the request again.\n';
-  const HOSTILE_QUOTE = '"\\u001b[2J\\u202e\\u2028' + 'Z '.repeat(297).trimEnd() + '" (cut)';
+  const HOSTILE_QUOTE = '"\\u001b[2J\\u202e\\u2028' + 'Z '.repeat(297).trimEnd() + '", shortened';
   const mainSource = readFileSync(repoRoot + 'plugin/workflow-src/analysis-only/main.js', 'utf8').replace(/\r/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
   function assertPrintable(message) {
     assert.ok(/^[\t\n\x20-\x7e]*$/.test(message), JSON.stringify(message));
@@ -1401,7 +1403,7 @@ describe('analysis-only: blocked stop shape', () => {
       const run = await runWorkflow(RESUMED, { ...UPSTREAM, [stepCase.label]: stepCase.malformed });
       assert.equal(labelsOf(run.calls).at(-1), stepCase.label);
       assert.equal(run.result.outcome, 'blocked');
-      assert.deepEqual(run.result.message.split('\n\n'), [stepCase.malformedLead, lib.nextStepLine('fix_cause')]);
+      assert.deepEqual(run.result.message.split('\n\n'), [stepCase.malformedLead, FIX_LINE]);
       assert.equal(countSentence(run.result.message), 0);
     });
   }

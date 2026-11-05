@@ -271,6 +271,22 @@ describe('compact decisions', () => {
       assert.equal(text.includes(needle), false, `shows ${needle}`);
     }
   });
+  test('a summary ending in . ! or ?, alone or before a closing quote, gets no second terminal mark', () => {
+    const cases = [
+      ['Hash the path.', 'Hash the path.'],
+      ['Ship it!', 'Ship it!'],
+      ['Keep both?', 'Keep both?'],
+      ['Say "done."', 'Say "done."'],
+      ['Say "go!"', 'Say "go!"'],
+      ['Ask "why?"', 'Ask "why?"'],
+      ['Use "fast"', 'Use "fast".'],
+      ['Hash the path', 'Hash the path.']
+    ];
+    for (const [summary, shown] of cases) {
+      const brief = makeBrief({ options: [{ id: 'A', summary: summary }] });
+      assert.equal(lib.renderDecisionsCompact([{ brief }]), 'Decided for you:\n- D1. PROBLEM_TEXT Chose A: ' + shown, summary);
+    }
+  });
   test('renderDecisionsCompact of nothing is empty', () => {
     assert.equal(lib.renderDecisionsCompact([]), '');
   });

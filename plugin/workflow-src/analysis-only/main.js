@@ -151,13 +151,14 @@
  *   that adds the describeNoResult sentence naming the agent failure and
  *   the run_again Next line, so the user does not look for a cause in the
  *   repo (issue 460). The build-skew stop gets the answer line, any other
- *   blocked end the fix line.
+ *   blocked end the fix line, which says to clear the cause named above,
+ *   then run the request again (nextStepLine, result.js).
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
  *   quoted whole up to maxReasonLength() code points, 600, else cut by
- *   cutAtBoundary at a sentence or word boundary with the mark ' (cut)'
- *   after the quote, and encoded by encodeUntrustedText, or 'it gave no
- *   reason.' when it has none. So a control character, an escape sequence,
+ *   cutAtBoundary at a sentence or word boundary with the words
+ *   ', shortened' after the quote, and encoded by encodeUntrustedText,
+ *   or 'it gave no reason.' when it has none. So a control character, an escape sequence,
  *   a bidi mark or a line feed in it never reaches the user raw.
  *   Open questions never end it blocked: only a missing request, a bad
  *   trunk or references arg, a build skew on resume, a facts or scan stop,

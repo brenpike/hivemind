@@ -7,8 +7,12 @@ const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const lib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
 
 const HARNESS_CUT = 8000;
-const FIX_LINE = 'Next: fix what stopped the run, then run the request again.';
+const FIX_LINE = 'Next: clear the cause named above, then run the request again.';
 const ANSWER_LINE = 'Next: run the request again with the answers in it.';
+const RUN_AGAIN_LINE = 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+const APPROVE_LINE = 'Next: approve or refuse the change named above, then run the request again with that answer.';
+const REPORT_LINE = 'Next: nothing in your repo needs a fix, so report this stop as a workflow defect, then run the request again.';
+const CUT_MARK = ', shortened';
 const PULL_REQUEST = { url: 'https://github.com/brenpike/hivemind/pull/409', head_ref_oid: 'a'.repeat(40), created: true };
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 const ALPHABETS = {
@@ -569,13 +573,14 @@ describe('encode at output', () => {
     assert.equal(quoted, '"\\u001b[2J\\u202e\\u2066\\u200b\\u2028\\u007f\\u0085 \\\\ \\""');
     assert.ok(PRINTABLE.test(quoted));
   });
-  test('quoteDiagnostic cuts the joined line to 200 code points at a boundary, marks the cut and never splits a pair', () => {
-    assert.equal(lib.quoteDiagnostic('a'.repeat(5000)), '"' + 'a'.repeat(200) + '" (cut)');
-    assert.equal(lib.quoteDiagnostic('a'.repeat(150) + '\n' + 'b'.repeat(150)), '"' + 'a'.repeat(150) + '" (cut)');
-    assert.equal(lib.quoteDiagnostic('One. ' + 'b'.repeat(250)), '"One." (cut)');
+  test('quoteDiagnostic cuts the joined line to 200 code points at a boundary, follows the cut with the words , shortened and never splits a pair', () => {
+    assert.equal(lib.quoteDiagnostic('a'.repeat(5000)), '"' + 'a'.repeat(200) + '"' + CUT_MARK);
+    assert.equal(lib.quoteDiagnostic('a'.repeat(150) + '\n' + 'b'.repeat(150)), '"' + 'a'.repeat(150) + '"' + CUT_MARK);
+    assert.equal(lib.quoteDiagnostic('One. ' + 'b'.repeat(250)), '"One."' + CUT_MARK);
     const quoted = lib.quoteDiagnostic('x' + '\u{1F600}'.repeat(300));
-    assert.equal(quoted, '"x' + '\\ud83d\\ude00'.repeat(199) + '" (cut)');
-    assert.ok(!LONE_SURROGATE.test(JSON.parse(quoted.slice(0, -' (cut)'.length))));
+    assert.equal(quoted, '"x' + '\\ud83d\\ude00'.repeat(199) + '"' + CUT_MARK);
+    assert.ok(!LONE_SURROGATE.test(JSON.parse(quoted.slice(0, -CUT_MARK.length))));
+    assert.ok(!quoted.includes(' (cut)'), quoted);
   });
   test('quoteDiagnostic adds no cut mark when nothing was cut', () => {
     assert.equal(lib.quoteDiagnostic('a'.repeat(200)), '"' + 'a'.repeat(200) + '"');
@@ -583,9 +588,9 @@ describe('encode at output', () => {
     assert.equal(lib.quoteDiagnostic('\u{1F600}'.repeat(200)), '"' + '\\ud83d\\ude00'.repeat(200) + '"');
   });
   test('quoteDiagnostic takes an optional limit', () => {
-    assert.equal(lib.quoteDiagnostic('one two three', 7), '"one two" (cut)');
+    assert.equal(lib.quoteDiagnostic('one two three', 7), '"one two"' + CUT_MARK);
     assert.equal(lib.quoteDiagnostic('one two three', 13), '"one two three"');
-    assert.equal(lib.quoteDiagnostic('a'.repeat(300), 250), '"' + 'a'.repeat(250) + '" (cut)');
+    assert.equal(lib.quoteDiagnostic('a'.repeat(300), 250), '"' + 'a'.repeat(250) + '"' + CUT_MARK);
     assert.equal(lib.quoteDiagnostic('a'.repeat(300)), lib.quoteDiagnostic('a'.repeat(300), lib.maxExcerptLength()));
     assert.throws(() => lib.quoteDiagnostic('text', 0), /cutAtBoundary: limit must be a positive integer/);
   });
@@ -600,8 +605,8 @@ describe('encode at output', () => {
     const reason = sentence + ' ' + 'x'.repeat(600 - sentence.length - 1);
     assert.equal(Array.from(reason).length, 600);
     assert.equal(lib.describeReason(reason), 'it says "' + reason + '".');
-    assert.equal(lib.describeReason(reason + 'y'), 'it says "' + sentence + '" (cut).');
-    assert.equal(lib.describeReason('w'.repeat(700)), 'it says "' + 'w'.repeat(600) + '" (cut).');
+    assert.equal(lib.describeReason(reason + 'y'), 'it says "' + sentence + '", shortened.');
+    assert.equal(lib.describeReason('w'.repeat(700)), 'it says "' + 'w'.repeat(600) + '", shortened.');
     assert.equal(lib.describeReason('\u{1F600}'.repeat(600)), 'it says "' + '\\ud83d\\ude00'.repeat(600) + '".');
   });
   test('describeReason quotes a reason or says it gave none', () => {
@@ -738,22 +743,65 @@ describe('isTransientFailure', () => {
 });
 
 describe('nextStepLine', () => {
-  test('run_again says nothing in the repo needs a fix, anything else gives the fix line', () => {
-    const runAgainLine = 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
-    const fixLine = 'Next: fix what stopped the run, then run the request again.';
-    assert.equal(lib.nextStepLine('run_again'), runAgainLine);
-    for (const nextAction of ['fix_cause', undefined]) {
-      assert.equal(lib.nextStepLine(nextAction), fixLine, String(nextAction));
+  test('run_again says nothing in the repo needs a fix, and fix_cause, an absent or an unknown value gives the fix line', () => {
+    assert.equal(lib.nextStepLine('run_again'), RUN_AGAIN_LINE);
+    for (const nextAction of ['fix_cause', undefined, 'toString', 'other']) {
+      assert.equal(lib.nextStepLine(nextAction), FIX_LINE, String(nextAction));
     }
   });
   test('answer says to run the request again with the answers in it', () => {
     assert.equal(lib.nextStepLine('answer'), ANSWER_LINE);
   });
+  test('approve names approving or refusing the change, and report names reporting a workflow defect', () => {
+    assert.equal(lib.nextStepLine('approve'), APPROVE_LINE);
+    assert.equal(lib.nextStepLine('report'), REPORT_LINE);
+  });
+  test('each line names one action and none says to fix what stopped the run', () => {
+    for (const line of [FIX_LINE, ANSWER_LINE, RUN_AGAIN_LINE, APPROVE_LINE, REPORT_LINE]) {
+      assert.ok(!line.includes('fix what stopped the run'), line);
+      assert.equal(line.split('Next: ').length, 2, line);
+      assert.ok(!/[.!?]\.|\.\./.test(line), line);
+    }
+  });
+  test('describeStopAction gives the action phrase with the next move joined in', () => {
+    assert.equal(lib.describeStopAction('fix_cause', 'reply'), 'clear the cause named above, then reply');
+    assert.equal(lib.describeStopAction(undefined, 'reply'), 'clear the cause named above, then reply');
+    assert.equal(lib.describeStopAction('approve', 'reply'), 'approve or refuse the change named above, then reply with that answer');
+    assert.equal(lib.describeStopAction('run_again', 'reply'), 'nothing in the repo needs a fix, so reply later, for example once the machine is idle');
+    assert.equal(lib.describeStopAction('report', 'reply'), 'nothing in your repo needs a fix, so report this stop as a workflow defect, then reply');
+    assert.equal(lib.describeStopAction('answer', 'reply'), 'reply with the answers in it');
+  });
+});
+
+describe('orderStopCauses', () => {
+  test('orders causes stably by approve, fix_cause or absent, answer, report, run_again', () => {
+    const causes = [
+      { problem: 'R1.', nextAction: 'run_again' },
+      { problem: 'P1.', nextAction: 'report' },
+      { problem: 'N1.', nextAction: 'answer' },
+      { problem: 'F1.' },
+      { problem: 'A1.', nextAction: 'approve' },
+      { problem: 'F2.', nextAction: 'fix_cause' },
+      { problem: 'P2.', nextAction: 'report' },
+      { problem: 'A2.', nextAction: 'approve' },
+      { problem: 'R2.', nextAction: 'run_again' },
+      { problem: 'N2.', nextAction: 'answer' }
+    ];
+    const ordered = lib.orderStopCauses(causes).map((cause) => cause.problem);
+    assert.deepEqual(ordered, ['A1.', 'A2.', 'F1.', 'F2.', 'N1.', 'N2.', 'P1.', 'P2.', 'R1.', 'R2.']);
+    assert.equal(causes[0].problem, 'R1.');
+  });
+  test('the Next line comes from the first ordered cause', () => {
+    for (const [nextAction, line] of [['approve', APPROVE_LINE], ['fix_cause', FIX_LINE], ['answer', ANSWER_LINE], ['report', REPORT_LINE]]) {
+      const blocks = lib.buildStopBlocks([{ problem: 'R.', nextAction: 'run_again' }, { problem: 'X.', nextAction: nextAction }]);
+      assert.deepEqual(structuredClone(blocks), [{ text: 'X.' }, { text: line, whole: true }, { text: 'R.' }], nextAction);
+    }
+  });
 });
 
 describe('buildStopBlocks', () => {
-  const fixLine = 'Next: fix what stopped the run, then run the request again.';
-  const runAgainLine = 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
+  const fixLine = FIX_LINE;
+  const runAgainLine = RUN_AGAIN_LINE;
   test('causes that need a fix lead with the fix line, then run_again causes, each in step order', () => {
     const causes = [
       { problem: 'A.', nextAction: 'run_again' },

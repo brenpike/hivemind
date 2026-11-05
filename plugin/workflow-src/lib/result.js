@@ -33,8 +33,13 @@
  *   describeNoResult(result)  result any value, what one agent() returned.
  *   describeUnusableResult(problem, result)  problem a string.
  *   isTransientFailure(text)  text any value, a runner's stderr or blocker.
- *   nextStepLine(nextAction)  'fix_cause', 'run_again', 'answer' or absent.
- *   buildStopBlocks(causes)  causes non-empty array of {problem, nextAction?}.
+ *   nextStepLine(nextAction)  a next action: 'fix_cause', 'run_again',
+ *                 'answer', 'approve', 'report' or absent. An agent sets
+ *                 only fix_cause or run_again; code alone sets the rest.
+ *   describeStopAction(nextAction, then)  nextAction as above, then the
+ *                 words of the user's next move, such as 'reply'.
+ *   orderStopCauses(causes), buildStopBlocks(causes)  causes non-empty
+ *                 array of {problem, nextAction?}.
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
@@ -68,8 +73,8 @@
  *                 line. Otherwise its non-blank lines, split on CRLF, CR or
  *                 LF and each trimmed, joined with one space, cut by
  *                 cutAtBoundary to limit and passed through
- *                 encodeUntrustedText. When the cut dropped text, the mark
- *                 ' (cut)' follows the closing quote.
+ *                 encodeUntrustedText. When the cut dropped text, the plain
+ *                 words ', shortened' follow the closing quote.
  *   describeReason  'it says ' + quoteDiagnostic(text, maxReasonLength())
  *                 + '.', or 'it gave no reason.' when that quote is
  *                 undefined. A reason is quoted whole up to 600 code points.
@@ -83,12 +88,20 @@
  *   isTransientFailure  true only when text is a string that names, by one
  *                 fixed case-insensitive pattern, a root cause the Transient
  *                 Failure definition of definitions.md lists, else false.
- *   nextStepLine  the Next line: run_again says nothing in the repo needs a
- *                 fix; answer says rerun with the answers; else the fix line.
+ *   describeStopAction  the one action phrase of nextAction, then joined
+ *                 in: approve or refuse the change named above, clear the
+ *                 cause named above, rerun with the answers, report the stop
+ *                 as a workflow defect since nothing in your repo needs a
+ *                 fix, or rerun later since nothing in the repo does. An
+ *                 absent or unknown value is fix_cause.
+ *   nextStepLine  'Next: ' + describeStopAction(nextAction, 'run the request
+ *                 again') + '.', one action per line.
+ *   orderStopCauses  causes stably ordered by next action: approve,
+ *                 fix_cause or absent, answer, report, run_again.
  *   maxBlockedLeadLength  1000, the code points of a compact lead.
  *   buildStopBlocks  the lead, then its Next line as a whole block, then a
- *                 block per later cause. Causes not run_again lead, then
- *                 run_again ones, in given order. The lead compact is
+ *                 block per later cause, in orderStopCauses order; the
+ *                 first cause leads. The lead compact is
  *                 cutAtBoundary(problem, maxBlockedLeadLength()) if shorter.
  *
  * Contract the overlord relays
@@ -170,6 +183,9 @@
  *   keeps the notice whole and a whole block whole by its key. Call-site
  *   stops could hide an agent failure or misstate the Next line, so finish
  *   takes causes (findings 3827ab1a, 58a21e45 and 49be981e).
+ *   A stop names one action the user can take, and the most pressing
+ *   leads, so the stop order and the action phrases share one table
+ *   (issues 481, 498). A cut quote says so in words a reader knows.
  */
 
 function resultFields() {
@@ -287,7 +303,7 @@ function quoteDiagnostic(text, limit = maxExcerptLength()) {
   }
   const joinedLine = textLines.join(' ');
   const keptLine = cutAtBoundary(joinedLine, limit);
-  return encodeUntrustedText(keptLine) + (keptLine === joinedLine ? '' : ' (cut)');
+  return encodeUntrustedText(keptLine) + (keptLine === joinedLine ? '' : ', shortened');
 }
 
 function describeReason(text) {
@@ -326,14 +342,33 @@ function transientFailurePatterns() {
   ];
 }
 
+function stopActions(then) {
+  /* INVARIANT: the key order is the stop order orderStopCauses ranks by. */
+  return {
+    approve: 'approve or refuse the change named above, then ' + then + ' with that answer',
+    fix_cause: 'clear the cause named above, then ' + then,
+    answer: then + ' with the answers in it',
+    report: 'nothing in your repo needs a fix, so report this stop as a workflow defect, then ' + then,
+    run_again: 'nothing in the repo needs a fix, so ' + then + ' later, for example once the machine is idle'
+  };
+}
+
+function readStopAction(nextAction) {
+  return Object.hasOwn(stopActions(''), nextAction) ? nextAction : 'fix_cause';
+}
+
+function describeStopAction(nextAction, then) {
+  return stopActions(then)[readStopAction(nextAction)];
+}
+
 function nextStepLine(nextAction) {
-  if (nextAction === 'run_again') {
-    return 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
-  }
-  if (nextAction === 'answer') {
-    return 'Next: run the request again with the answers in it.';
-  }
-  return 'Next: fix what stopped the run, then run the request again.';
+  return 'Next: ' + describeStopAction(nextAction, 'run the request again') + '.';
+}
+
+function orderStopCauses(causes) {
+  const actionOrder = Object.keys(stopActions(''));
+  const rankCause = (cause) => actionOrder.indexOf(readStopAction(cause.nextAction));
+  return causes.slice().sort((first, second) => rankCause(first) - rankCause(second));
 }
 
 function maxBlockedLeadLength() {
@@ -345,8 +380,7 @@ function buildStopBlocks(causes) {
   if (!Array.isArray(causes) || causes.length === 0) {
     throw new Error('buildStopBlocks: causes must be a non-empty array');
   }
-  const fixCauses = causes.filter((cause) => cause.nextAction !== 'run_again');
-  const orderedCauses = fixCauses.concat(causes.filter((cause) => cause.nextAction === 'run_again'));
+  const orderedCauses = orderStopCauses(causes);
   const leadText = orderedCauses[0].problem;
   const compactLead = cutAtBoundary(leadText, maxBlockedLeadLength());
   const leadBlock = compactLead === leadText ? { text: leadText } : { text: leadText, compact: compactLead };

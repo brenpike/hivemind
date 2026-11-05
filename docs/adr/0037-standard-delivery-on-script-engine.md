@@ -1978,3 +1978,28 @@ Links: https://github.com/brenpike/hivemind/issues/509, https://github.com/brenp
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/508.
+
+## Amendment 2026-11-05: typed stop causes and plain run messages (issues 481 and 498)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/481 and https://github.com/brenpike/hivemind/issues/498. Stop messages told the user to fix a cause or run again in cases where neither helps, stop briefs carried one generic recommendation, and a few messages guessed state the run had not seen.
+
+**The change.**
+
+- **Five next actions.** `fix_cause`, `run_again` and `answer` stay. `approve` and `report` are new, and only code sets them. The Next line comes from the first match in this stop order: `approve`, `fix_cause` (or absent), `answer`, `report`, `run_again`. The agent-facing `next_action` enum stays `[fix_cause, run_again]`. Routing is unchanged: pause or end, rerun or replan, and `agentFailure`.
+- **A schema failure is a report.** A non-null result that is unusable, meaning it fails its schema, is typed `report` on both engines. This reverses the rule "A non-null result that fails its schema or its routing keeps the fix line" in the "Only a null result says to run again" paragraph of Amendment 2026-10-28: one message shape (issue 460). A null result keeps `run_again` plus `agentFailure`. A planner's valid blocked outcome stays `fix_cause`.
+- **One `step_stop` brief per type.** Each has a real recommendation and is resolved through `decide()`. `fix_cause`: option A, strong. `run_again`: option A, strong. `report`: option A, weak. If the same stop returns, it is a workflow defect: report it, do not retry. `approve`: strength none, because only the user can approve what the destructive-fix gate holds back.
+- **`decide()` takes an ask reason.** The caller passes a reason from the closed list `['outside_limits']`. It replaces the strength rewrite in `markOutsideLimits`. Brief fields never name an ask reason. The undecided asks (`step_stop`, `version_bump_indeterminable`, the fix limit and the gate-rerun limit) resolve through `decide()`. The irreversible external-effect brief (`briefs.js`) keeps strength none: code wrote it, and only the user can authorize an outside effect.
+- **Worker report `stage`.** The worker report gains an optional `stage`, valid on blocked only. Stage `destructive-fix-gate`, or a blocker starting `proposed fix requires human confirmation`, types the stop `approve`. Approve and refuse options, and labeled stop replies, are deferred to issue 499.
+- **Routine kinds leave the decision record.** The rendered decision record drops `plan_acceptance`, `remediation_plan_acceptance` and `gate_rerun`. `run.taken` keeps them.
+- **Cut quotes.** A cut quote ends with the words `, shortened` in place of ` (cut)`. Terminal punctuation is not doubled.
+- **PR-step stops no longer guess push state.** "may be" is removed. A refusal known to precede the push says the step pushed nothing. Otherwise the message says the run did not see whether this step pushed, and that taking the step again pushes the same commit and reuses its open PR. Observed push and PR state on a blocked exit is deferred to the PR-body and transport slice (issues 506 and 501).
+
+**Recorded residual: refusals typed as report read relayed text.**
+
+- **Not covered.** Typing a hook refusal (a synapse-gate deny) or an `open-plan-pr` inputs refusal as `report` reads runner-relayed text. Forged text can change only the wording and the recommendation.
+- **Bounded impact.** It never changes routing: pause or end, rerun or replan and `agentFailure` do not read the type.
+- **Ground.** Code has no other signal for these refusals. Parity tests pin the matched texts, so a drift in either source fails a test.
+
+The rest of ADR-0037 is unchanged. Status remains accepted.
+
+Links: https://github.com/brenpike/hivemind/issues/481, https://github.com/brenpike/hivemind/issues/498.

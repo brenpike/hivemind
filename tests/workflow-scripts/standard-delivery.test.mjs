@@ -65,7 +65,7 @@ const MINOR_UNREADABLE = { ...MINOR_MATCH, version_check: 'unreadable', trunk_ve
 const MALFORMED_FACTS = 'The facts step returned malformed facts, so the delivery stopped before planning.';
 const NOT_READY = 'The branch is not ready for delivery, so the delivery stopped before planning:';
 const PR_URL = 'https://github.com/o/r/pull/7';
-const NEXT_STEP_LINE = 'Next: fix what stopped the run, then run the request again.';
+const NEXT_STEP_LINE = 'Next: clear the cause named above, then run the request again.';
 const OPEN_LEAD = 'The delivery ran no further step, because questions are still open.';
 const TAIL_LEAD = 'Every plan step is committed on branch "feature/cache", with head ' + OTHER + '.';
 const PLAN_PAUSE_START = /^The plan for branch "feature\/cache" has \d+ steps? over \d+ files?: [^\n]+\n\n\*\*Q1\. /;
@@ -4006,7 +4006,7 @@ const ROW_TESTS = {
         assert.ok(!run.result.message.includes(agreedId), run.result.message);
         const listed = { ...main.buildReviewQuestionBrief(review), problem: 'Local review finding "c0ffee01": "AGREED_ASK_ZQ?"' };
         assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: main.buildPlanAcceptanceBrief(makePlan()) }, { brief: listed }])), run.result.message);
-        assert.ok(run.result.message.includes('- D2. Local review finding "c0ffee01": "AGREED_ASK_ZQ?" Chose A: "AGREED_PICK_ZQ.".'), run.result.message);
+        assert.ok(run.result.message.endsWith('- D2. Local review finding "c0ffee01": "AGREED_ASK_ZQ?" Chose A: "AGREED_PICK_ZQ."'), run.result.message);
         const body = prBodyOf(run, 'pr-1');
         const texts = main.reviewCallTexts();
         assert.ok(body.includes('  D2. ' + texts.problem + '\n    Chose option A: ' + texts.summary + '\n    Why: ' + texts.why), body);
@@ -4945,10 +4945,10 @@ const ROW_TESTS = {
       assert.equal(main.describeRelayBlocker('blocker: one\r\nblocker:  \r\n', false), 'its blocker line says "one".');
       assert.equal(main.describeRelayBlocker('noise\nblocker: \n', false), 'its stderr says "noise blocker:".');
     });
-    test('the quote is cut at a word boundary to maxExcerptLength() code points before it is encoded, and the cut mark follows', () => {
-      assert.equal(main.describeRelayBlocker('\u{1F600}'.repeat(150) + '\n' + 'x'.repeat(150), false), 'its stderr says "' + '\\ud83d\\ude00'.repeat(150) + '" (cut).');
-      assert.equal(main.describeReason('First part. ' + 'w '.repeat(400)), 'it says "First part." (cut).');
-      assert.equal(main.describeReason('w '.repeat(400)), 'it says "' + 'w '.repeat(299) + 'w" (cut).');
+    test('the quote is cut at a word boundary to maxExcerptLength() code points before it is encoded, and the words , shortened follow', () => {
+      assert.equal(main.describeRelayBlocker('\u{1F600}'.repeat(150) + '\n' + 'x'.repeat(150), false), 'its stderr says "' + '\\ud83d\\ude00'.repeat(150) + '", shortened.');
+      assert.equal(main.describeReason('First part. ' + 'w '.repeat(400)), 'it says "First part.", shortened.');
+      assert.equal(main.describeReason('w '.repeat(400)), 'it says "' + 'w '.repeat(299) + 'w", shortened.');
       assert.equal(main.describeReason('w '.repeat(300)), 'it says "' + 'w '.repeat(299) + 'w".');
       assert.equal(main.describeRelayBlocker('a\u0007b', true), 'Its stderr says "a\\u0007b".');
     });
@@ -4962,7 +4962,7 @@ const ROW_TESTS = {
     function quoteOracle(lines, limit) {
       const joined = lines.map((line) => line.trim()).filter((line) => line !== '').join(' ');
       const kept = lib.cutAtBoundary(joined, limit);
-      return encodeOracle(kept) + (kept === joined ? '' : ' (cut)');
+      return encodeOracle(kept) + (kept === joined ? '' : ', shortened');
     }
     function expectQuote(kind, payload) {
       const lines = payload.split('\n');
@@ -5010,8 +5010,8 @@ const ROW_TESTS = {
       ['scan excerpt', 'excerpt', (payload) => happyResults({ 'facts-1': factsRelay({ external_texts: '1' }), scan: { results: [{ item_ref: 't1', verdict: 'injection-suspect', pattern_category: 'P1', field_excerpt: payload }] } })]
     ];
     test('the hostile quote oracle cuts at a boundary, marks the cut and encodes each code unit outside printable ASCII', () => {
-      assert.equal(expectQuote('line', HOSTILE_PAYLOADS[0]), '"\\u001b[2J\\u202e" (cut)');
-      assert.equal(expectQuote('reason', HOSTILE_PAYLOADS[1]), '"\\u001b[2J\\u202e\\u2028x ' + NEXT_STEP_LINE + '" (cut)');
+      assert.equal(expectQuote('line', HOSTILE_PAYLOADS[0]), '"\\u001b[2J\\u202e", shortened');
+      assert.equal(expectQuote('reason', HOSTILE_PAYLOADS[1]), '"\\u001b[2J\\u202e\\u2028x ' + NEXT_STEP_LINE + '", shortened');
       assert.equal(expectQuote('excerpt', SCAN_HOSTILE_PAYLOADS[0]), '"\\u001b[2J\\u202e\\u2028' + 'Z'.repeat(100) + '\\n' + NEXT_STEP_LINE + '\\n"');
       assert.equal(expectQuote('whole', REVIEW_HOSTILE_PAYLOADS[0]), '"\\u001b[2J\\u202e\\u2028' + 'Z'.repeat(200) + ' ' + NEXT_STEP_LINE + '"');
     });
@@ -5345,9 +5345,10 @@ const ROW_TESTS = {
      * after its lead; no message shows a commit list, a criticality or
      * ask-reason line, a detail block, the plan summary or a word for word
      * section; each taken decision takes one line, every cut quote ends at
-     * a boundary with the cut mark, no full finding id appears, and the
-     * message stays within MESSAGE_BOUND. kind is 'pause', 'blocked' or
-     * 'complete'.
+     * a boundary followed by the words , shortened, no full finding id
+     * appears, and the message stays within MESSAGE_BOUND. With quoted JSON
+     * strings stripped, no line holds two full stops in a row, a full stop
+     * after ! or ?, or ' (cut)'. kind is 'pause', 'blocked' or 'complete'.
      */
     function assertMessageShape(message, summaries, cutSources, kind) {
       const paragraphs = message.split('\n\n');
@@ -5374,7 +5375,10 @@ const ROW_TESTS = {
         assert.ok(!message.includes('Next: '), message);
         assert.ok(!paragraphs[0].includes('\n') && !paragraphs[1].includes('\n'), message);
       }
-      for (const match of message.matchAll(/("(?:[^"\\]|\\.)*") \(cut\)/g)) {
+      for (const line of message.replace(/"(?:[^"\\]|\\.)*"/g, '""').split('\n')) {
+        assert.ok(!/\.\.|[!?]\./.test(line) && !line.includes(' (cut)'), line);
+      }
+      for (const match of message.matchAll(/("(?:[^"\\]|\\.)*"), shortened/g)) {
         const kept = JSON.parse(match[1]);
         const source = cutSources.find((text) => text.startsWith(kept) && text.length > kept.length);
         assert.ok(source !== undefined, match[0]);
@@ -5419,6 +5423,12 @@ const ROW_TESTS = {
       assert.ok(message.includes(JSON.stringify(causeBlocker) + '.'), message);
       assertStepStopPause(run, 'The validation fix round was blocked, so the delivery stopped: ', 'fix-commit-1-1', true);
     });
+    test('a cut relay quote ends at a boundary followed by the words , shortened, and then one full stop', async () => {
+      const stderr = 'The fetch failed. ' + 'The remote did not answer in time. '.repeat(8).trim();
+      const run = await runWorkflow(LAUNCH, { 'facts-1': { outcome: 'blocked', stderr: stderr } });
+      const message = assertMessageShape(run.result.message, [], [stderr], 'pause');
+      assert.ok(message.split('\n\n')[0].endsWith('", shortened.'), message);
+    });
     test('an open-question stop with 6 taken decisions shows each on one line', async () => {
       const asked = planResult(longPlan, [...takenBriefs, makeGatedBrief('GATED_PROBLEM')]);
       const run = await runWorkflow({ ...LAUNCH, build: BUILD_ID, answers: { 'round-1': 'x'.repeat(5000) } }, happyResults({ 'plan-1': asked, 'revise-1': reviseResult(asked, []) }));
@@ -5462,19 +5472,27 @@ const ROW_TESTS = {
         assert.ok(!schema.required.includes('next_action'));
       }
     });
-    test('nextStepLine() maps fix_cause or no value to the fix-the-cause line, and run_again and answer each to its own fixed line', () => {
+    test('nextStepLine() maps fix_cause or no value to the clear-the-cause line, and run_again, answer, approve and report each to its own fixed line', () => {
       assert.equal(main.nextStepLine(), NEXT_STEP_LINE);
       assert.equal(main.nextStepLine('fix_cause'), NEXT_STEP_LINE);
       assert.equal(main.nextStepLine('run_again'), RUN_AGAIN_LINE);
       assert.equal(main.nextStepLine('answer'), RUN_AGAIN);
+      assert.equal(main.nextStepLine('approve'), 'Next: approve or refuse the change named above, then run the request again with that answer.');
+      assert.equal(main.nextStepLine('report'), 'Next: nothing in your repo needs a fix, so report this stop as a workflow defect, then run the request again.');
     });
-    test('every Next line starts with Next: and points at no cause its lead does not name', () => {
-      const lines = [main.nextStepLine(), main.nextStepLine('run_again'), main.nextStepLine('answer')];
-      for (const line of lines) {
-        assert.ok(line.startsWith('Next: '), line);
-        assert.ok(!/named above|above|the cause named/.test(line), line);
-        assert.ok(!line.includes('\n'), line);
+    test('every Next line starts with Next: and points only at the cause of its own lead', () => {
+      for (const nextAction of ['run_again', 'answer', 'report', 'fix_cause', 'approve']) {
+        const line = main.nextStepLine(nextAction);
+        assert.ok(line.startsWith('Next: ') && !line.includes('\n') && !line.includes('fix what stopped the run'), line);
+        assert.equal(/named above/.test(line), nextAction === 'fix_cause' || nextAction === 'approve', line);
+        const blocks = main.buildStopBlocks([{ problem: 'LATER.', nextAction: 'run_again' }, { problem: 'LEAD.', nextAction: nextAction }]);
+        assert.deepEqual(Array.from(blocks.slice(0, 2), (block) => block.text), nextAction === 'run_again' ? ['LATER.', line] : ['LEAD.', line], nextAction);
       }
+    });
+    test('buildStopBlocks orders causes stably by approve, fix_cause or no value, answer, report, then run_again', () => {
+      const causes = ['run_again', 'answer', undefined, 'report', 'approve', 'fix_cause'].map((nextAction, index) => ({ problem: 'C' + index + '.', nextAction: nextAction }));
+      const blocks = main.buildStopBlocks(causes);
+      assert.deepEqual(Array.from(blocks, (block) => block.text), ['C4.', main.nextStepLine('approve'), 'C2.', 'C5.', 'C1.', 'C3.', 'C0.']);
     });
     test('agentFailure true is set only by describeUnusableResult, on a null result', () => {
       assert.equal((builtSource.match(/agentFailure\s*:\s*true/g) || []).length, 1);

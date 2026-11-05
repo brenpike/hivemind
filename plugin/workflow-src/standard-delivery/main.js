@@ -126,16 +126,20 @@
  *   (lib/result.js), with the describeNoResult sentence once and next
  *   action run_again, and a non-null unusable result keeps the fix line.
  *   run_again gives a line saying nothing in the repo needs a fix and to
- *   run the request again later; fix_cause or no value gives the fix line.
+ *   run the request again later; fix_cause or no value gives the fix line,
+ *   to clear the cause named above, then run the request again. Code alone
+ *   sets answer, approve and report, and describeStopAction (lib/result.js)
+ *   holds every action phrase.
  *   A blocked wave says run_again only when every blocked worker does.
  *   Compound rule: a file-changing step passes its own causes to
  *   runCommitStep (relay.js), which stops through stopDelivery with them
  *   and a failed commit's cause after them, so no stop hides another. A
  *   facts, scan, scope, plan or branch stop goes through stopDelivery with
  *   isReplan true, and its reply starts a new pass outside maxReplans();
- *   the launch check alone ends in runDelivery. Causes that need
- *   a fix lead, with the fix line, then agent failures, each group in step
- *   order, so the Next line is run_again only when every cause is. A lead
+ *   the launch check alone ends in runDelivery. orderStopCauses
+ *   (lib/result.js) orders causes stably by approve, fix_cause or no
+ *   value, answer, report, then run_again, and the first cause gives the
+ *   Next line, so it is run_again only when every cause is. A lead
  *   longer than maxBlockedLeadLength() code points has as its compact form
  *   the cutAtBoundary prefix of at most those code points, so it never
  *   cuts mid-word, and the lead of an open question stop is fixed and
@@ -159,8 +163,8 @@
  *   validation blocker goes through describeReason, and each dirty path a
  *   commit relay names goes through quoteDiagnostic: each made one line and
  *   cut at a sentence or word boundary to maxExcerptLength() code points
- *   first, or to maxReasonLength() through describeReason, with the cut
- *   mark after a cut quote. The blocker of a review stop goes through
+ *   first, or to maxReasonLength() through describeReason, with the words
+ *   ', shortened' after a cut quote. The blocker of a review stop goes through
  *   quoteDiagnostic with a limit equal to its maxLength 300, so it is made
  *   one line and never cut. Branch names, step ids, reversible effect
  *   summaries and the other review values, the excerpt of a review stop

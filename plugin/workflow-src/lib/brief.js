@@ -68,7 +68,9 @@
  *   renderDecisionsCompact  "Decided for you:" then one line per decision,
  *     labelled D1..Dn by position: "- Dn. problem Chose L: summary.", L as
  *     in renderQuestions and the summary being that of the chosen option,
- *     with no why and no verbatim. The empty string when taken is empty.
+ *     with no why and no verbatim. The full stop after the summary is left
+ *     out when the summary ends in '.', '!' or '?', alone or before a
+ *     closing quote mark. The empty string when taken is empty.
  *   questionLabel    the label renderQuestions and renderOpenQuestions show
  *     by position: 'Q' + (index + 1).
  *   decisionLabel    the label renderDecisions and renderDecisionsCompact
@@ -155,6 +157,8 @@
  *   treat only the labels in its settled array as the user's settled
  *   decisions (issue 472). Settled labels have one writer, buildAnswerEntry,
  *   so the workflows cannot drift on which labels a reply settled.
+ *   A summary already ends its own sentence, so a second full stop would
+ *   only read as a typo (issue 498).
  */
 
 function renderQuestions(asks) {
@@ -354,8 +358,9 @@ function renderCompactDecision(entry, index) {
   const brief = readField(entry, 'brief');
   const options = readField(brief, 'options');
   const optionId = readField(readField(brief, 'recommendation'), 'option_id');
+  const summary = renderText(readField(readChosenOption(options, optionId), 'summary'));
   return '- ' + decisionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' Chose '
-    + renderOptionLetter(options, optionId) + ': ' + renderText(readField(readChosenOption(options, optionId), 'summary')) + '.';
+    + renderOptionLetter(options, optionId) + ': ' + summary + (/[.!?]["']?$/.test(summary) ? '' : '.');
 }
 
 function findRecommendedIndex(options, recommendation) {
