@@ -637,7 +637,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '4d2c349ddd7841d4';
+const BUILD_ID = 'a3741313824a3b5c';
 
 function supportedSchemaKeywords(){
 return[
@@ -4553,8 +4553,9 @@ return'- Step '+encodeUntrustedText(outcome.stepId)+verb+outcome.reason;
 }
 function describeBlockedWave(blockedOutcomes){
 const lead='A worker did not finish its step, so '+RUN_NAME+' stopped after its wave:';
-const stepLines=blockedOutcomes.map(describeBlockedStep);
-const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:orderStopCauses(blockedOutcomes)[0].nextAction};
+const orderedOutcomes=orderStopCauses(blockedOutcomes);
+const stepLines=orderedOutcomes.map(describeBlockedStep);
+const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:orderedOutcomes[0].nextAction};
 if(blockedOutcomes.some((outcome)=>outcome.agentFailure===true)){
 cause.agentFailure=true;
 }

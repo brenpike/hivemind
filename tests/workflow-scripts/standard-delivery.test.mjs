@@ -2577,6 +2577,18 @@ const ROW_TESTS = {
         assert.ok(run.result.message.endsWith('\n\n' + stopQuestionOf(nextAction)), JSON.stringify(workers) + run.result.message);
       }
     });
+    test('a capped blocked wave lists its steps in stop order, so the step that sets the next action stays shown', async () => {
+      const slow = { blocker: 'The registry timed out.', next_action: 'run_again' };
+      const workers = { S1: slow, S2: slow, S3: slow, S4: slow, S5: slow, S6: { blocker: 'Dropping the table needs approval.', stage: 'destructive-fix-gate' } };
+      const run = await runBlockedWave(workers);
+      assert.deepEqual(run.result.message.split('\n\n')[0].split('\n').slice(0, 3), [
+        waveLead,
+        '- Step "S6" waits for your approval at the destructive-fix gate: it says "Dropping the table needs approval.".',
+        '- Step "S1" was blocked: it says "The registry timed out.".'
+      ]);
+      assert.ok(run.result.message.includes('- and 1 more.'), run.result.message);
+      assert.ok(run.result.message.endsWith('\n\n' + stopQuestionOf('approve')), run.result.message);
+    });
   },
   'SD-17': () => {
     function replanResults(passes) {

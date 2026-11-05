@@ -37,9 +37,9 @@
  *   gives no reason, approve when its stage is destructive-fix-gate or its
  *   blocker starts with the security-policy.md gate text, else its own
  *   next_action. describeBlockedWave makes the one cause of a blocked wave:
- *   a lead line naming the stop, then one line per blocked step through
- *   capItemLines, an approve step saying it waits for approval, with the
- *   next action first in orderStopCauses order (lib/stop.js), so
+ *   a lead line naming the stop, then one line per blocked step in
+ *   orderStopCauses order (lib/stop.js) through capItemLines, an approve
+ *   step waiting for approval, the first giving the next action, so
  *   run_again only when every blocked worker says so, and agentFailure
  *   when any blocked worker had a null result. A plan that cannot be
  *   scheduled mid-run is a report stop. runCommitStep
@@ -161,8 +161,9 @@ function describeBlockedStep(outcome) {
 
 function describeBlockedWave(blockedOutcomes) {
   const lead = 'A worker did not finish its step, so ' + RUN_NAME + ' stopped after its wave:';
-  const stepLines = blockedOutcomes.map(describeBlockedStep);
-  const cause = { problem: [lead, ...capItemLines(stepLines)].join('\n'), nextAction: orderStopCauses(blockedOutcomes)[0].nextAction };
+  const orderedOutcomes = orderStopCauses(blockedOutcomes);
+  const stepLines = orderedOutcomes.map(describeBlockedStep);
+  const cause = { problem: [lead, ...capItemLines(stepLines)].join('\n'), nextAction: orderedOutcomes[0].nextAction };
   if (blockedOutcomes.some((outcome) => outcome.agentFailure === true)) {
     cause.agentFailure = true;
   }
