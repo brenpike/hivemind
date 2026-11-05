@@ -673,7 +673,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '669f3510de99547b';
+const BUILD_ID = 'cfe50d87cd977052';
 
 function supportedSchemaKeywords(){
 return[
@@ -2859,12 +2859,15 @@ async function runFixRound(run,plan,fix,gates){
 phase('Fix');
 gates.runs.fix+=1;
 const count=gates.runs.fix;
-const prompt=fix.userAnswer===undefined?addResumeNote(buildFixPrompt(fix,plan,run),run):buildFixPrompt(fix,plan,run);
+const round=fix.userAnswer===undefined&&gates.fixAnswer!==undefined?{...fix,userAnswer:gates.fixAnswer}:fix;
+gates.fixAnswer=undefined;
+const prompt=round.userAnswer===undefined?addResumeNote(buildFixPrompt(round,plan,run),run):buildFixPrompt(round,plan,run);
 const result=await agent(prompt,droneOptions(gateLabel('fix',run,count),'Fix',FIX_SCHEMA));
 const edit=readGateEditOutcome(result,FIX_SCHEMA,run.approvals);
 const stepCauses=edit.status==='blocked'?[describeFixCause(edit)]:[];
 const committed=await runCommitStep(run,plan,{files:edit.files,label:gateLabel('fix-commit',run,count),stepName:'fix'},stepCauses);
 if(committed.values===undefined){
+gates.fixAnswer=committed.stopAnswer;
 return committed;
 }
 return{held:false};
@@ -2957,7 +2960,7 @@ return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.he
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined};
+const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined,fixAnswer:undefined};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
@@ -3688,7 +3691,7 @@ return asked;
 if(isReplan){
 return buildReplyReplan('a stop the run paused at');
 }
-return{rerun:true};
+return{rerun:true,stopAnswer:asked.answer};
 }
 
 function trunkFreshnessMap(){

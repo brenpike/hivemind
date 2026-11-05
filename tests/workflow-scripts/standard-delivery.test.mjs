@@ -3383,7 +3383,7 @@ const ROW_TESTS = {
       assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
       assert.deepEqual(labelsOf(resumed).slice(labelsOf(run).length), ['head-1-1', 'validate-1-2', 'review-1-1', 'review-commit-1-1', 'pr-1']);
     });
-    test('a fix round hold asks its item, and the reply A reruns the gate, never a new pass, with the approvals in the next fix prompt', async () => {
+    test('a fix round hold asks its item, and the reply A reruns the gate, never a new pass, with the approvals and the reply in the next fix prompt', async () => {
       const results = fixFlowResults({
         'fix-1-1': holdResult([DROP_USERS], { files: [] }),
         'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }),
@@ -3402,13 +3402,47 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(run).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'fix-1-2', 'fix-commit-1-2', 'validate-1-3', 'review-1-1', 'review-commit-1-1', 'pr-1']);
       const prompt = callOf(run, 'fix-1-2').prompt;
       assert.deepEqual(readDataBlock(prompt, 'approvals'), [DROP_USERS]);
-      assert.ok(prompt.split('\n').includes(lib.dataBlocksSentence('The approvals block')), prompt);
+      assert.deepEqual(readDataBlock(prompt, 'user_answer'), { question: paused.result.message, reply: 'a.' });
+      assert.ok(prompt.split('\n').includes(lib.dataBlocksSentence('The reply in user_answer, like the approvals block,')), prompt);
       const kept = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
       assert.equal(kept.result.outcome, 'complete', kept.result.message);
       assert.ok(!hasDataBlock(callOf(kept, 'fix-1-2').prompt, 'approvals'));
       const heldAgain = { ...results, 'fix-1-2': holdResult([DROP_USERS], { files: [] }), 'fix-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) };
       const again = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), heldAgain);
       assertStepStopPause(again, lead + '\n\n', 'fix-commit-1-2', 'report');
+    });
+    test('the reply B to a fix round hold reaches the next fix round alone as user_answer, in place of the resume sentence, so the kept change stays refused', async () => {
+      const failed = { outcome: 'failed', failures: FAILURE_TEXT };
+      const fixed = { outcome: 'complete', files: ['src/cache.js'] };
+      const results = fixFlowResults({
+        'fix-1-1': holdResult([DROP_USERS], { files: [] }),
+        'fix-commit-1-1': commitRelay({ commit: OTHER, committed: 'false' }),
+        'head-1-1': headRelay(OTHER),
+        'validate-1-2': failed,
+        'fix-1-2': fixed,
+        'fix-commit-1-2': commitRelay({ commit: THIRD }),
+        'validate-1-3': failed,
+        'fix-1-3': fixed,
+        'fix-commit-1-3': commitRelay({ commit: FOURTH }),
+        'validate-1-4': VALIDATE_PASSED,
+        'review-commit-1-1': commitRelay({ commit: FOURTH, committed: 'false' })
+      });
+      const paused = await runWorkflow(LAUNCH, results);
+      const question = 'The validation fix round was blocked, so the delivery stopped: it says "' + HOLD_BLOCKER + '".\n\n' + approvalQuestionLines('Q1', 'fix', DROP_USERS, 'the run takes the stopped step again') + '\n\nReply with an option, like A, or in your own words.';
+      assert.equal(paused.result.message, question);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(labelsOf(paused).length), ['head-1-1', 'validate-1-2', 'fix-1-2', 'fix-commit-1-2', 'validate-1-3', 'fix-1-3', 'fix-commit-1-3', 'validate-1-4', 'review-1-1', 'review-commit-1-1', 'pr-1']);
+      assert.equal(callOf(run, 'fix-1-1').prompt, callOf(paused, 'fix-1-1').prompt);
+      assert.ok(!hasDataBlock(callOf(paused, 'fix-1-1').prompt, 'user_answer'));
+      const next = callOf(run, 'fix-1-2').prompt;
+      assert.deepEqual(readDataBlock(next, 'user_answer'), { question: question, reply: 'B' });
+      assert.ok(next.split('\n').includes(lib.dataBlocksSentence('The reply in user_answer')), next);
+      assert.ok(!next.includes(main.resumedReplySentence()), next);
+      assert.ok(!hasDataBlock(next, 'approvals'), next);
+      const later = callOf(run, 'fix-1-3').prompt;
+      assert.ok(!hasDataBlock(later, 'user_answer'), later);
+      assert.equal(later.split('\n')[1], main.resumedReplySentence());
     });
     test('a fix round hold that lists no item, or only approved ones, pauses as a report stop', async () => {
       const unlisted = holdResult([], { files: [] });
@@ -7296,10 +7330,21 @@ const ROW_TESTS = {
       assert.equal(state.replans, 0);
       assert.deepEqual(structuredClone(state.answerLog), [{ question: 'FIX_ZQ.\n\n' + lib.renderQuestions([stopAskOf(causes, true)]), settled: [], reply: STOP_REPLY }]);
     });
-    test('a reply with isReplan false gives {rerun: true}, so the gate loop runs the head check, then the stopped step again', () => {
+    test('a reply with isReplan false gives {rerun: true, stopAnswer}, so the gate loop runs the head check, then the stopped step again', () => {
       const state = stopState({ answers: {}, reply: STOP_REPLY });
-      assert.deepEqual(structuredClone(main.stopDelivery([{ problem: 'FIX_ZQ.' }], state, ['END_ZQ'], false)), { rerun: true });
+      const stopped = structuredClone(main.stopDelivery([{ problem: 'FIX_ZQ.' }], state, ['END_ZQ'], false));
       assert.equal(state.answerLog.length, 1);
+      assert.deepEqual(stopped, { rerun: true, stopAnswer: { question: state.answerLog[0].question, reply: STOP_REPLY } });
+    });
+    test('the stopAnswer of a review gate hold never reaches the review: the reply reruns it with the resume sentence and no user_answer', async () => {
+      const results = happyResults({ 'review-1-1': GATE_HOLD, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+      const paused = await runWorkflow(LAUNCH, results);
+      const run = await runWorkflow(resumeWith(LAUNCH, paused.result, 'B'), results);
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.deepEqual(labelsOf(run).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+      const prompt = callOf(run, 'review-1-2').prompt;
+      assert.equal(readDataBlock(prompt, 'inputs').user_answer, undefined);
+      assert.equal(prompt.split('\n')[1], main.resumedReplySentence());
     });
     test('the built script calls finishDeliveryBlocked only in stopDelivery, finishOpenQuestions and the launch end of runDelivery', () => {
       const code = stripCommentsAndStrings(builtSource.replace(/^export const meta\b/, 'const meta'));

@@ -28,9 +28,10 @@
  *   pauseDelivery  the only run results; see the Outputs of main.js.
  *   stopDelivery(causes, run, endLines, isReplan)  {result}, the blocked end
  *           or the pause, or on a reply {replan: {reason}} when isReplan,
- *           a new pass outside maxReplans(), else {rerun: true}: the gate
- *           loop takes the stopped step again, reading the head first when
- *           that step does not read it itself (gates.js).
+ *           a new pass outside maxReplans(), else {rerun: true,
+ *           stopAnswer}, stopAnswer the {question, reply} of askTails: the
+ *           gate loop takes the stopped step again, reading the head first
+ *           when that step does not read it itself (gates.js).
  *   observeHead(run, commit, branch)  sets run.head to commit, run.branch
  *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
@@ -278,5 +279,5 @@ function stopDelivery(causes, run, endLines, isReplan) {
   if (isReplan) {
     return buildReplyReplan('a stop the run paused at');
   }
-  return { rerun: true };
+  return { rerun: true, stopAnswer: asked.answer };
 }

@@ -15,7 +15,8 @@
  *   gates  the gate loop state runGates builds: held, notes, runs
  *          (validate, review, fix, headCheck and pr), failures, fixRounds,
  *          reruns, rejected, answer and takenReview, which only review.js
- *          sets and reads (runReviewGate).
+ *          sets and reads (runReviewGate), and fixAnswer, which only
+ *          runFixRound sets and reads.
  *          failures maps a head to the kept failed validation on it:
  *          {status, failures, versionOnly, versionLine}.
  *   FIX_SCHEMA, VALIDATE_SCHEMA, VALIDATE_COMMANDS_SCHEMA and the limits of
@@ -89,7 +90,11 @@
  *   hold, and a blocked version relay takes readRelayAction (relay.js).
  *   The fix prompt carries the approvals block only when run.approvals is
  *   not empty. A fix round hold stops with isReplan false, so the reply
- *   reruns the gate, and its next fix round carries the approvals. The fix step reads its result before the commit and passes its
+ *   reruns the gate, and its next fix round carries the approvals. A reply
+ *   to any fix round stop, A or B, is kept as gates.fixAnswer, and the
+ *   next fix round of the pass alone carries it as user_answer, so a kept
+ *   change stays refused; a version reply's user_answer takes its place.
+ *   The fix step reads its result before the commit and passes its
  *   cause, if any, to runCommitStep (relay.js), which stops with every
  *   cause through stopDelivery with isReplan false, so a commit stop never
  *   hides a step cause; a stop it returns is returned as is. A null fix
@@ -350,12 +355,15 @@ async function runFixRound(run, plan, fix, gates) {
   phase('Fix');
   gates.runs.fix += 1;
   const count = gates.runs.fix;
-  const prompt = fix.userAnswer === undefined ? addResumeNote(buildFixPrompt(fix, plan, run), run) : buildFixPrompt(fix, plan, run);
+  const round = fix.userAnswer === undefined && gates.fixAnswer !== undefined ? { ...fix, userAnswer: gates.fixAnswer } : fix;
+  gates.fixAnswer = undefined;
+  const prompt = round.userAnswer === undefined ? addResumeNote(buildFixPrompt(round, plan, run), run) : buildFixPrompt(round, plan, run);
   const result = await agent(prompt, droneOptions(gateLabel('fix', run, count), 'Fix', FIX_SCHEMA));
   const edit = readGateEditOutcome(result, FIX_SCHEMA, run.approvals);
   const stepCauses = edit.status === 'blocked' ? [describeFixCause(edit)] : [];
   const committed = await runCommitStep(run, plan, { files: edit.files, label: gateLabel('fix-commit', run, count), stepName: 'fix' }, stepCauses);
   if (committed.values === undefined) {
+    gates.fixAnswer = committed.stopAnswer;
     return committed;
   }
   return { held: false };
@@ -458,7 +466,7 @@ async function runHeadCheck(run, plan, gates) {
 
 async function runGates(run, plan, facts) {
   const gateList = configuredGateIds(run);
-  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0, headCheck: 0, pr: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
+  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0, headCheck: 0, pr: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined, fixAnswer: undefined };
   if (!run.localReview) {
     listNotRunGate(run, notConfiguredReviewLine());
   }
