@@ -147,17 +147,21 @@
  *   agent() returns null on an agent API error, such as an expired login.
  *   A null facts result blocks as malformed facts, a null scan result as a
  *   scan it cannot use, and a null analyze or revise result as no result.
- *   Each goes through describeUnusableResult (result.js), the one place
+ *   Each goes through describeUnusableResult (stop.js), the one place
  *   that adds the describeNoResult sentence naming the agent failure and
  *   the run_again Next line, so the user does not look for a cause in the
- *   repo (issue 460). The build-skew stop gets the answer line, any other
- *   blocked end the fix line.
+ *   repo (issue 460). Malformed facts routing and a planner result that
+ *   does not fit the analysis schema go through it too, so each gets the
+ *   report line, as every unusable result does (issues 481, 498). The
+ *   build-skew stop gets the answer line, any other
+ *   blocked end the fix line, which says to clear the cause named above,
+ *   then run the request again (nextStepLine, stop.js).
  *   A blocked facts or planner result shows its blocker only through
  *   describeReason (result.js): its non-blank lines joined into one line,
  *   quoted whole up to maxReasonLength() code points, 600, else cut by
- *   cutAtBoundary at a sentence or word boundary with the mark ' (cut)'
- *   after the quote, and encoded by encodeUntrustedText, or 'it gave no
- *   reason.' when it has none. So a control character, an escape sequence,
+ *   cutAtBoundary at a sentence or word boundary with the words
+ *   ', shortened' after the quote, and encoded by encodeUntrustedText,
+ *   or 'it gave no reason.' when it has none. So a control character, an escape sequence,
  *   a bidi mark or a line feed in it never reaches the user raw.
  *   Open questions never end it blocked: only a missing request, a bad
  *   trunk or references arg, a build skew on resume, a facts or scan stop,
@@ -326,7 +330,7 @@ function describeFactsProblem(facts) {
     && isCutList(facts.cut)
     && isTextCount(facts.external_texts);
   if (!isWellFormed) {
-    return { problem: malformedFactsMessage(RUN_NOUN) };
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN), facts);
   }
   if (facts.cut !== 'none') {
     return { problem: cutFactsMessage(RUN_NOUN, facts.cut) };
@@ -362,7 +366,7 @@ function describeReplyProblem(analysis, checkSchema) {
     return describeUnusableResult('The planner returned no result, so the analysis stopped.', analysis);
   }
   if (!validateSchema(checkSchema, analysis).ok) {
-    return { problem: 'The planner returned a result that does not fit the analysis schema, so the analysis stopped.' };
+    return describeUnusableResult('The planner returned a result that does not fit the analysis schema, so the analysis stopped.', analysis);
   }
   if (analysis.outcome === 'blocked') {
     return { problem: 'The planner could not do the analysis: ' + describeReason(analysis.blocker) };

@@ -1,7 +1,8 @@
 /*
  * standard-delivery relay.js: the runner steps of the standard-delivery
- * workflow. It holds the runner options, the prompt sentences, the routing
- * specs, the relay helpers, and the facts, branch and commit steps.
+ * workflow. It holds the runner options, the prompt sentences, the relay
+ * helpers, and the facts, branch and commit steps. The routing specs live
+ * in specs.js.
  *
  * Inputs
  *   run    the run state of main.js createRunState. The steps read trunk,
@@ -28,7 +29,7 @@
  *           or the head check.
  *   runRunnerRelay(buildPrompt, label, phaseTitle)  the relay of one runner
  *           call of buildPrompt(label); a relay that fits RELAY_SCHEMA, is
- *           blocked and whose stderr isTransientFailure (lib/result.js) runs
+ *           blocked and whose stderr isTransientFailure (lib/stop.js) runs
  *           once more under label <label>-retry with buildPrompt of that
  *           label, and that relay is returned.
  *   buildInputsPath(run, kind, label)  .hivemind/<kind>-inputs-<stem>-<label>
@@ -36,22 +37,23 @@
  *           relay (ADR-0037), else undefined: a --inputs command stop.
  *   capItemLines(itemLines)  the first maxListedItems() lines, then a count
  *           of the rest.
- *   versionCheckRoutingSpec()  bumpTypeRoutingSpec() plus the bump-type.sh
- *           --version-file keys in its OUTPUT order: version_check, then
- *           optional trunk_version and expected_version, each a SemVer core
- *           of at most 15 digits a part, so briefs.js raises it exactly.
- *   isConsistentVersionRelay(values)  the bump checks; match and mismatch
- *           carry both versions and a verdict other than ask_user,
- *           undetermined has verdict ask_user and no expected_version, and
- *           expected_version comes only with trunk_version.
+ *   readRelayAction(stderr, isRefusedFirst)  the next action of a blocked
+ *           runner relay: report when isRefusedFirst is true, when
+ *           describeRelayBlocker finds no reason or when isGateDenial holds,
+ *           else none, the fix line. isRefusedFirst is optional, false when
+ *           absent: the PR step's open-plan-pr inputs refusal (pr.js).
+ *   isGateDenial(stderr)  true when stderr holds a deny reason of
+ *           ${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh, each of which starts
+ *           'synapse-gate: '. The hook refused the runner's call, so the
+ *           script never ran and nothing in the repo needs a fix.
  *   describeCommitEnd(commitValues, stepName)  one sentence: the commit
  *           the step's files went into.
  *   toCommitSubject(text, fallbackSubject)  text made one line and cut by
  *           cutAtBoundary (lib/result.js) to maxSubjectLength() code points,
  *           or fallbackSubject when that line is blank, holds a breaking
  *           change marker or an attribution string molt SKILL.md forbids.
- *   The options, sentences, routing specs and relay helpers every other
- *   runner step uses. The steps, as meta.js names them:
+ *   The options, sentences and relay helpers every other runner step
+ *   uses. The steps, as meta.js names them:
  *   Facts   a haiku hivemind:synapse runner runs the gather-facts command
  *           and relays its stdout word for word; the workflow parses it with
  *           gatherFactsRoutingSpec(), checks it with isConsistentFactsRelay
@@ -83,9 +85,12 @@
  *   reads it (ADR-0037 invariant 4).
  *   Agent failures (issue 460): agent() returns null on an agent API error,
  *   so every step from the facts through the gates reads a null result
- *   through describeUnusableResult (lib/result.js), the only place a null
+ *   through describeUnusableResult (lib/stop.js), the only place a null
  *   result gets the describeNoResult sentence and next action run_again. A
- *   non-null result that fails its schema or routing keeps the fix line.
+ *   non-null result that fails its schema or routing goes through it too,
+ *   so it gets report (issues 481, 498), as a runner command stop does. A
+ *   blocked relay takes readRelayAction: report for a hook denial or a
+ *   relay that gives no reason, else the fix line.
  *   A file-changing step reads its own result before its commit and passes
  *   its causes to runCommitStep, which stops through stopDelivery, isReplan
  *   true for a wave: a failed commit adds its cause after them, so a commit
@@ -160,97 +165,6 @@ function commitTypeMap() {
   };
 }
 
-function commitShaPattern() {
-  return /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-}
-
-function branchWarningTexts() {
-  return {
-    stale: 'trunk is stale or diverged from origin; proceeding as acknowledged at preflight',
-    skipped: 'trunk freshness check was skipped'
-  };
-}
-
-function createWorkingBranchRoutingSpec() {
-  const warnings = branchWarningTexts();
-  return {
-    branch: { pattern: gitIdentifierPattern(), required: true },
-    commit: { pattern: commitShaPattern(), required: true },
-    created: { pattern: /^(?:true|false)$/, required: true },
-    warning: { pattern: new RegExp('^(?:' + warnings.stale + '|' + warnings.skipped + ')$'), required: false }
-  };
-}
-
-function moltRoutingSpec() {
-  return {
-    branch: { pattern: gitIdentifierPattern(), required: true },
-    commit: { pattern: commitShaPattern(), required: true },
-    committed: { pattern: /^(?:true|false)$/, required: true }
-  };
-}
-
-function bumpTypeRoutingSpec() {
-  const count = { pattern: /^(?:0|[1-9][0-9]*)$/, required: true };
-  return {
-    dominant_row: { pattern: /^(?:MAJOR|MINOR|PATCH|NO_BUMP|NONE|MULTI)$/, required: true },
-    verdict: { pattern: /^(?:bump_required|no_bump|ask_user)$/, required: true },
-    bump_type: { pattern: /^(?:major|minor|patch|none)$/, required: true },
-    rule_applied: { pattern: /^[1-6]$/, required: true },
-    counts: { block: { major: count, minor: count, patch: count, no_bump: count }, required: true },
-    mapped_commits: count,
-    dropped_reverts: count
-  };
-}
-
-function pullRequestWarningTexts() {
-  return [
-    'push was rejected; the branch is not on its remote',
-    'no upstream and no origin remote; push deferred',
-    'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
-  ];
-}
-
-function openPlanPrRoutingSpec() {
-  return {
-    url: { pattern: /^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/, required: true },
-    head_ref_oid: { pattern: commitShaPattern(), required: true },
-    created: { pattern: /^(?:true|false)$/, required: true },
-    commented: { pattern: /^(?:true|false)$/, required: true },
-    warning: { pattern: new RegExp('^(?:' + pullRequestWarningTexts().join('|') + ')$'), required: false }
-  };
-}
-
-function semverCorePattern() {
-  return /^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
-}
-
-function versionCheckRoutingSpec() {
-  return Object.assign(bumpTypeRoutingSpec(), {
-    version_check: { pattern: /^(?:match|mismatch|unreadable|undetermined)$/, required: true },
-    trunk_version: { pattern: semverCorePattern(), required: false },
-    expected_version: { pattern: semverCorePattern(), required: false }
-  });
-}
-
-function isConsistentBumpRelay(values) {
-  const counts = values.counts;
-  const countSum = Number(counts.major) + Number(counts.minor) + Number(counts.patch) + Number(counts.no_bump);
-  return (values.verdict === 'bump_required') === (values.bump_type !== 'none')
-    && countSum === Number(values.mapped_commits);
-}
-
-function isConsistentVersionRelay(values) {
-  const hasExpected = values.expected_version !== undefined;
-  const hasTrunk = values.trunk_version !== undefined;
-  if (!isConsistentBumpRelay(values) || (hasExpected && !hasTrunk)) {
-    return false;
-  }
-  if (values.version_check === 'match' || values.version_check === 'mismatch') {
-    return hasExpected && values.verdict !== 'ask_user';
-  }
-  return values.version_check === 'unreadable' || (values.verdict === 'ask_user' && !hasExpected);
-}
-
 function validationTaskSentence() {
   return 'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
 }
@@ -316,7 +230,7 @@ function plannerCallOptions(label, phaseTitle, resultSchema) {
 
 function describeCommandStop(stepNoun, words, retryWords = []) {
   const problem = describeRunnerWordProblem(words.concat(retryWords));
-  return problem === undefined ? undefined : { problem: 'The ' + stepNoun + ' step did not run its script, so ' + RUN_NAME + ' stopped: ' + problem + '.', terminal: true };
+  return problem === undefined ? undefined : { problem: 'The ' + stepNoun + ' step did not run its script, so ' + RUN_NAME + ' stopped: ' + problem + '.', terminal: true, nextAction: 'report' };
 }
 
 function buildDeliveryFactsPrompt(words) {
@@ -327,17 +241,27 @@ function splitStderrLines(stderr) {
   return typeof stderr === 'string' ? stderr.split(/\r\n|\r|\n/) : [];
 }
 
-function describeRelayBlocker(stderr, startsSentence) {
+function quoteRelayBlocker(stderr) {
   const stderrLines = splitStderrLines(stderr);
   const blockerPayloads = stderrLines.filter((line) => line.startsWith('blocker: ')).map((line) => line.slice('blocker: '.length)).filter((payload) => payload.trim() !== '');
-  const stderrQuote = quoteDiagnostic(stderrLines.filter((line) => line.trim() !== '').slice(0, 2).join('\n'));
-  let reason = 'it gave no reason.';
   if (blockerPayloads.length > 0) {
-    reason = 'its blocker line says ' + quoteDiagnostic(blockerPayloads.pop()) + '.';
-  } else if (stderrQuote !== undefined) {
-    reason = 'its stderr says ' + stderrQuote + '.';
+    return 'its blocker line says ' + quoteDiagnostic(blockerPayloads.pop()) + '.';
   }
+  const stderrQuote = quoteDiagnostic(stderrLines.filter((line) => line.trim() !== '').slice(0, 2).join('\n'));
+  return stderrQuote === undefined ? undefined : 'its stderr says ' + stderrQuote + '.';
+}
+
+function describeRelayBlocker(stderr, startsSentence) {
+  const reason = quoteRelayBlocker(stderr) || 'it gave no reason.';
   return startsSentence ? reason.charAt(0).toUpperCase() + reason.slice(1) : reason;
+}
+
+function isGateDenial(stderr) {
+  return /synapse-gate: /.test(stderr);
+}
+
+function readRelayAction(stderr, isRefusedFirst = false) {
+  return isRefusedFirst || quoteRelayBlocker(stderr) === undefined || isGateDenial(stderr) ? 'report' : undefined;
 }
 
 function readRelayedLines(relay, spec) {
@@ -386,11 +310,11 @@ function checkDeliveryFacts(relay, trunk) {
     return describeUnusableResult(malformedFactsMessage(RUN_NOUN), relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: blockedFactsMessage(RUN_NOUN, describeRelayBlocker(relay.stderr, false)) };
+    return { problem: blockedFactsMessage(RUN_NOUN, describeRelayBlocker(relay.stderr, false)), nextAction: readRelayAction(relay.stderr) };
   }
   const facts = readRelayedLines(relay, gatherFactsRoutingSpec());
   if (facts === undefined || !isConsistentFactsRelay(facts, trunk)) {
-    return { problem: malformedFactsMessage(RUN_NOUN) };
+    return describeUnusableResult(malformedFactsMessage(RUN_NOUN), relay);
   }
   if (facts.cut !== 'none') {
     return { problem: cutFactsMessage(RUN_NOUN, facts.cut) };
@@ -413,8 +337,7 @@ async function runPassScan(facts, run) {
   if (problem === undefined) {
     return undefined;
   }
-  const isSuspect = validateSchema(scanStepSchema(), scan).ok && scan.results.some((result) => result.verdict === 'injection-suspect');
-  return isSuspect ? { problem: problem, terminal: true } : describeUnusableResult(problem, scan);
+  return isScanSuspect(scan) ? { problem: problem, terminal: true } : describeUnusableResult(problem, scan);
 }
 
 async function runFactsStep(run) {
@@ -449,11 +372,11 @@ function checkBranchRelay(relay, plan, freshness) {
     return describeUnusableResult('The branch step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true), terminal: true };
+    return { problem: 'The branch step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true), terminal: true, nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, createWorkingBranchRoutingSpec());
   if (values === undefined || values.warning !== branchWarningTexts()[freshness]) {
-    return { problem: 'The branch step returned malformed routing lines, ' + stopped };
+    return describeUnusableResult('The branch step returned malformed routing lines, ' + stopped, relay);
   }
   if (values.branch !== plan.branch) {
     return { problem: 'The branch step reported a branch other than the plan branch, ' + stopped, terminal: true };
@@ -557,11 +480,11 @@ function checkCommitRelay(relay, plan, stepName) {
     return describeUnusableResult('The commit step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
-    return { problem: describeCommitBlocker(relay.stderr, stepNoun), terminal: true };
+    return { problem: describeCommitBlocker(relay.stderr, stepNoun), terminal: true, nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, moltRoutingSpec());
   if (values === undefined) {
-    return { problem: 'The commit step returned malformed routing lines, ' + stopped };
+    return describeUnusableResult('The commit step returned malformed routing lines, ' + stopped, relay);
   }
   if (values.branch !== plan.branch) {
     return { problem: 'The commit step reported a branch other than the plan branch, ' + stopped, terminal: true };

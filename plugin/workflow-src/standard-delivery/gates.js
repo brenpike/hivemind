@@ -42,7 +42,7 @@
  *           two versioning answers and the version files, and relays it in
  *           the version field the schema then requires under passed, failed
  *           and not_run. Its stdout parses with versionCheckRoutingSpec()
- *           and passes isConsistentVersionRelay (relay.js). With no version
+ *           and passes isConsistentVersionRelay (specs.js). With no version
  *           file the prompt and schema are as before, and no bump-type run
  *           happens.
  *   Fix     a failed validation resolves through decide(). Each taken round is
@@ -63,8 +63,10 @@
  *                 stopDelivery, and the reply resets the round count and
  *                 runs the head check, then validation again. Any other
  *                 failure keeps the fix limit ask.
- *   undetermined, unreadable  the run asks version_bump_indeterminable with
- *                 no decide() call (buildVersionQuestionBrief, briefs.js).
+ *   undetermined, unreadable  the run asks version_bump_indeterminable
+ *                 through buildUndecidedAsk, which decide() asks
+ *                 table_surface at every level (buildVersionQuestionBrief,
+ *                 briefs.js).
  *                 The reply becomes run.versionAnswer and runs one fix round
  *                 with the version_files and user_answer blocks, outside
  *                 decide() and the round limit, and never starts a new pass.
@@ -76,9 +78,12 @@
  *   A contractRows() check is a function of the built script, not of main.js:
  *   the build bundles this module into it, so a row can name a function of this
  *   module.
- *   A null gate result reads through describeUnusableResult (lib/result.js),
+ *   A null gate result reads through describeUnusableResult (lib/stop.js),
  *   next action run_again, and readGateEditOutcome passes its agentFailure
- *   mark on. The fix step reads its result before the commit and passes its
+ *   mark on; any other unusable result, a malformed version relay among
+ *   them, gets report. A blocked validation or fix round whose blocker
+ *   gives no reason is report too (readBlockerAction), and a blocked
+ *   version relay takes readRelayAction (relay.js). The fix step reads its result before the commit and passes its
  *   cause, if any, to runCommitStep (relay.js), which stops with every
  *   cause through stopDelivery with isReplan false, so a commit stop never
  *   hides a step cause; a stop it returns is returned as is. A null fix
@@ -236,8 +241,18 @@ function replanFromTailAsk(ask, run) {
   return { replan: { reason: 'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
 }
 
-function buildUndecidedAsk(brief) {
-  return { brief: brief, reason: 'no_recommendation' };
+/**
+ * Returns the ask resolveDecision (plan.js) builds for a question decide()
+ * must never take: its brief, kind and the reason decide() gives at
+ * run.level. Throws when decide() takes it, so no undecided question is
+ * ever auto-taken.
+ */
+function buildUndecidedAsk(kind, brief, run) {
+  const resolution = { asks: [], taken: [] };
+  if (resolveDecision(kind, brief, undefined, run, resolution) === 'take') {
+    throw new Error('buildUndecidedAsk: decide() took ' + kind);
+  }
+  return resolution.asks[0];
 }
 
 function resolveTailDecision(kind, brief, run) {
@@ -259,7 +274,7 @@ function readGateEditOutcome(result, schema) {
     return { status: 'blocked', reason: unusable.problem, files: [], nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
   }
   if (result.outcome === 'blocked') {
-    return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: result.next_action };
+    return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: readBlockerAction(result.blocker, result.next_action) };
   }
   return { status: 'complete', files: result.files };
 }
@@ -292,7 +307,7 @@ function readValidateOutcome(result, schema) {
     return describeUnusableResult('The validation step returned no usable result, so ' + RUN_NAME + ' stopped before the pull request.', result);
   }
   if (result.outcome === 'blocked') {
-    return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: result.next_action };
+    return { problem: 'The validation step was blocked, so ' + RUN_NAME + ' stopped before the pull request: ' + describeReason(result.blocker), nextAction: readBlockerAction(result.blocker, result.next_action) };
   }
   const validation = { status: result.outcome, failures: result.failures };
   if (Object.hasOwn(result, 'version')) {
@@ -304,11 +319,11 @@ function readValidateOutcome(result, schema) {
 function checkVersionRelay(relay) {
   const stopped = 'so ' + RUN_NAME + ' stopped before the pull request.';
   if (relay.outcome === 'blocked') {
-    return { problem: 'The version check of the validation step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true) };
+    return { problem: 'The version check of the validation step was blocked, ' + stopped + ' ' + describeRelayBlocker(relay.stderr, true), nextAction: readRelayAction(relay.stderr) };
   }
   const values = readRelayedLines(relay, versionCheckRoutingSpec());
   if (values === undefined || !isConsistentVersionRelay(values)) {
-    return { problem: 'The version check of the validation step returned malformed routing lines, ' + stopped };
+    return describeUnusableResult('The version check of the validation step returned malformed routing lines, ' + stopped, relay);
   }
   return { values: values };
 }
@@ -413,7 +428,7 @@ async function runValidateStep(run, plan, facts, gates) {
 }
 
 async function askVersionQuestion(run, plan, gates, validation) {
-  const asked = askTail(buildUndecidedAsk(buildVersionQuestionBrief(validation.question)), run, undefined);
+  const asked = askTail(buildUndecidedAsk(VERSION_BUMP_INDETERMINABLE_KIND, buildVersionQuestionBrief(validation.question), run), run, undefined);
   if (asked.answer === undefined) {
     return asked;
   }
@@ -448,7 +463,7 @@ async function runValidateGate(run, plan, facts, gates) {
   }
   gates.failures[run.head] = validation;
   if (gates.fixRounds >= maxFixRounds()) {
-    return validation.versionOnly === true ? stopVersionFixLimit(run, gates, validation) : replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)), run);
+    return validation.versionOnly === true ? stopVersionFixLimit(run, gates, validation) : replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND, buildFixLimitBrief(run.head), run), run);
   }
   if (validation.versionOnly !== true) {
     const decided = resolveTailDecision(VALIDATION_REMEDIATION_KIND, buildValidationRemediationBrief(run.head, gates.fixRounds + 1), run);
@@ -466,7 +481,7 @@ function resolveGateRerun(run, gates) {
     return {};
   }
   if (gates.reruns >= maxGateReruns()) {
-    return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds, run.head, true)), run);
+    return replanFromTailAsk(buildUndecidedAsk(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, true), run), run);
   }
   gates.reruns += 1;
   return resolveTailDecision(GATE_RERUN_KIND, buildGateRerunBrief(staleIds, run.head, false), run);

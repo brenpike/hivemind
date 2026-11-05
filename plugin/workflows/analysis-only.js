@@ -18,6 +18,7 @@ export const meta = {
  *   plugin/workflow-src/lib/decide.js
  *   plugin/workflow-src/lib/brief.js
  *   plugin/workflow-src/lib/result.js
+ *   plugin/workflow-src/lib/stop.js
  *   plugin/workflow-src/lib/args.js
  *   plugin/workflow-src/lib/identifier.js
  *   plugin/workflow-src/lib/facts.js
@@ -373,7 +374,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'ac2c68899712dfaf';
+const BUILD_ID = '1b9d05824b7495fa';
 
 function supportedSchemaKeywords(){
 return[
@@ -706,6 +707,9 @@ removeSchemaAnyOf(schema.items);
 return schema;
 }
 
+function callerAskReasons(){
+return['outside_limits'];
+}
 function resolveLevel(value,table){
 if(value===undefined||value===null||value===''){
 return table.default_level;
@@ -715,7 +719,10 @@ return value;
 }
 return'low';
 }
-function decide({kind,level,brief},table,schema){
+function decide({kind,level,brief,askReason},table,schema){
+if(askReason!==undefined&&callerAskReasons().indexOf(askReason)===-1){
+throw new Error('decide: unknown askReason '+JSON.stringify(askReason));
+}
 const briefCheck=validateSchema(schema,brief);
 const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
@@ -743,6 +750,9 @@ return askFor('gate_architectural');
 }
 if(brief.gate.safety){
 return askFor('gate_safety');
+}
+if(askReason!==undefined){
+return askFor(askReason);
 }
 if(brief.recommendation.strength==='none'){
 return askFor('no_recommendation');
@@ -910,8 +920,9 @@ function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
 const options=readField(brief,'options');
 const optionId=readField(readField(brief,'recommendation'),'option_id');
+const summary=renderText(readField(readChosenOption(options,optionId),'summary'));
 return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose '
-+renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary'))+'.';
++renderOptionLetter(options,optionId)+': '+summary+(/[.!?]["']?$/.test(summary)?'':'.');
 }
 function findRecommendedIndex(options,recommendation){
 if(readField(recommendation,'strength')==='none'){
@@ -1040,47 +1051,11 @@ return undefined;
 }
 const joinedLine=textLines.join(' ');
 const keptLine=cutAtBoundary(joinedLine,limit);
-return encodeUntrustedText(keptLine)+(keptLine===joinedLine?'':' (cut)');
+return encodeUntrustedText(keptLine)+(keptLine===joinedLine?'':', shortened');
 }
 function describeReason(text){
 const quoted=quoteDiagnostic(text,maxReasonLength());
 return quoted===undefined?'it gave no reason.':'it says '+quoted+'.';
-}
-function describeNoResult(result){
-if(result!==null){
-return'';
-}
-return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
-}
-function describeUnusableResult(problem,result){
-if(result!==null){
-return{problem:problem};
-}
-return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
-}
-function nextStepLine(nextAction){
-if(nextAction==='run_again'){
-return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
-}
-if(nextAction==='answer'){
-return'Next: run the request again with the answers in it.';
-}
-return'Next: fix what stopped the run, then run the request again.';
-}
-function maxBlockedLeadLength(){
-return 1000;
-}
-function buildStopBlocks(causes){
-if(!Array.isArray(causes)||causes.length===0){
-throw new Error('buildStopBlocks: causes must be a non-empty array');
-}
-const fixCauses=causes.filter((cause)=>cause.nextAction!=='run_again');
-const orderedCauses=fixCauses.concat(causes.filter((cause)=>cause.nextAction==='run_again'));
-const leadText=orderedCauses[0].problem;
-const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
-const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
-const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
-return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 function canCarry(resumeArgs){
 const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
@@ -1299,6 +1274,56 @@ return typeof value==='object'&&value!==null&&!Array.isArray(value);
 }
 function countCharacter(text,character){
 return text.split(character).length-1;
+}
+
+function describeNoResult(result){
+if(result!==null){
+return'';
+}
+return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+function describeUnusableResult(problem,result){
+if(result!==null){
+return{problem:problem,nextAction:'report'};
+}
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
+}
+function stopActions(then){
+return{
+approve:'approve or refuse the change named above, then '+then+' with that answer',
+fix_cause:'clear the cause named above, then '+then,
+answer:then+' with the answers in it',
+report:'nothing in your repo needs a fix, so report this stop as a workflow defect, then '+then,
+run_again:'nothing in the repo needs a fix, so '+then+' later, for example once the machine is idle'
+};
+}
+function readStopAction(nextAction){
+return Object.hasOwn(stopActions(''),nextAction)?nextAction:'fix_cause';
+}
+function describeStopAction(nextAction,then){
+return stopActions(then)[readStopAction(nextAction)];
+}
+function nextStepLine(nextAction){
+return'Next: '+describeStopAction(nextAction,'run the request again')+'.';
+}
+function orderStopCauses(causes){
+const actionOrder=Object.keys(stopActions(''));
+const rankCause=(cause)=>actionOrder.indexOf(readStopAction(cause.nextAction));
+return causes.slice().sort((first,second)=>rankCause(first)-rankCause(second));
+}
+function maxBlockedLeadLength(){
+return 1000;
+}
+function buildStopBlocks(causes){
+if(!Array.isArray(causes)||causes.length===0){
+throw new Error('buildStopBlocks: causes must be a non-empty array');
+}
+const orderedCauses=orderStopCauses(causes);
+const leadText=orderedCauses[0].problem;
+const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
+const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
+const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
+return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 
 function isPlainObject(value){
@@ -1597,9 +1622,18 @@ if(Number(facts.external_texts)>0){
 phase('Scan');
 const scan=await agent(buildScanPrompt(facts),scanOptions());
 const problem=describeScanProblem(scan,facts,runNoun);
-return problem===undefined?undefined:describeUnusableResult(problem,scan);
+if(problem===undefined){
+return undefined;
+}
+return isScanSuspect(scan)?{problem:problem}:describeUnusableResult(problem,scan);
 }
 return undefined;
+}
+function isScanSuspect(scan){
+return validateSchema(scanStepSchema(),scan).ok&&scan.results.some(isSuspectResult);
+}
+function isSuspectResult(result){
+return result.verdict==='injection-suspect';
 }
 function renderSuspectLine(result){
 const category=isNonEmptyString(result.pattern_category)?result.pattern_category:'no category given';
@@ -1629,7 +1663,7 @@ const stopped='so '+describeRunNoun(runNoun)+' stopped before planning.';
 if(!validateSchema(scanStepSchema(),scan).ok){
 return'The injection scan returned a result it could not use, '+stopped;
 }
-const suspects=scan.results.filter((result)=>result.verdict==='injection-suspect');
+const suspects=scan.results.filter(isSuspectResult);
 if(suspects.length>0){
 return[
 'The injection scan flagged text from GitHub as a possible prompt injection, '+stopped+' Check these items before you run it again:',
@@ -1763,7 +1797,7 @@ const isWellFormed=matchesFactsLine('facts_file',facts.facts_file)
 &&isCutList(facts.cut)
 &&isTextCount(facts.external_texts);
 if(!isWellFormed){
-return{problem:malformedFactsMessage(RUN_NOUN)};
+return describeUnusableResult(malformedFactsMessage(RUN_NOUN),facts);
 }
 if(facts.cut!=='none'){
 return{problem:cutFactsMessage(RUN_NOUN,facts.cut)};
@@ -1796,7 +1830,7 @@ if(!isPlainObject(analysis)){
 return describeUnusableResult('The planner returned no result, so the analysis stopped.',analysis);
 }
 if(!validateSchema(checkSchema,analysis).ok){
-return{problem:'The planner returned a result that does not fit the analysis schema, so the analysis stopped.'};
+return describeUnusableResult('The planner returned a result that does not fit the analysis schema, so the analysis stopped.',analysis);
 }
 if(analysis.outcome==='blocked'){
 return{problem:'The planner could not do the analysis: '+describeReason(analysis.blocker)};

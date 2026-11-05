@@ -200,7 +200,7 @@ const SOURCE_DIR = 'plugin/workflow-src';
 const OUTPUT_DIR = 'plugin/workflows';
 const DRAFT_MARKER = 'DRAFT';
 const NON_MODULE_FILES = Object.freeze(['meta.js', 'main.js', 'contract.js']);
-export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'waves.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js']);
+export const LIB_FILES = Object.freeze(['schema.js', 'decide.js', 'brief.js', 'result.js', 'stop.js', 'waves.js', 'routing.js', 'args.js', 'identifier.js', 'facts.js']);
 const DATA_CONSTANTS = [
   { name: 'AUTONOMY_TABLE', path: 'plugin/references/decision-autonomy-table.json', project: projectAutonomyTable },
   { name: 'BRIEF_SCHEMA', path: 'plugin/references/decision-brief-schema.json', project: projectSchema },

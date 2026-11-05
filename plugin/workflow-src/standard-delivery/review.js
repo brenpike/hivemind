@@ -72,7 +72,7 @@
  *           the commit runner, which takes that problem as its step cause, so a
  *           commit stop never hides it, and a null result, an agent failure
  *           that ends the run, gets the describeNoResult sentence and the
- *           run_again Next line through describeUnusableResult (lib/result.js).
+ *           run_again Next line through describeUnusableResult (lib/stop.js).
  *           The script sets no zoom-out trigger: the planner makes that call by
  *           judgment from the branch commits in its fresh facts, per
  *           remediation-doctrine.md. No message cuts a reviewer value:
@@ -335,7 +335,7 @@ function buildReviewPrompt(plan, trunk, answer) {
  * Returns undefined for a usable review, else {problem, nextAction}: a
  * review that fails REVIEW_SCHEMA, gives user_question option ids other
  * than A, B, C and D in that order, or recommends no option of it is
- * unusable. describeUnusableResult (lib/result.js) gives a null review, an
+ * unusable. describeUnusableResult (lib/stop.js) gives a null review, an
  * agent failure, the describeNoResult sentence and next action run_again.
  */
 function describeReviewProblem(review) {

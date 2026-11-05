@@ -137,7 +137,7 @@
  *   malformedFactsMessage(runNoun), blockedFactsMessage(runNoun, blocker),
  *   cutFactsMessage(runNoun, cut)
  *       the facts step problems. The malformed message adds no agent-failure
- *       sentence: only describeUnusableResult (result.js) attaches it, for a
+ *       sentence: only describeUnusableResult (stop.js) attaches it, for a
  *       null result. The blocked message ends with blocker,
  *       the reason its caller built with describeReason (result.js) or
  *       describeRelayBlocker (standard-delivery main.js), so a step-written
@@ -171,9 +171,15 @@
  *   runScanStep(facts, runNoun)
  *       async. Runs the scan, phase Scan then one agent() call, only when
  *       external_texts is above 0, and resolves to undefined when
- *       describeScanProblem finds no problem, else to
- *       describeUnusableResult(problem, scan) (result.js), a cause. Resolves
- *       to undefined with no call when there is no text.
+ *       describeScanProblem finds no problem, to { problem } with no next
+ *       action, the fix line, when isScanSuspect, else to
+ *       describeUnusableResult(problem, scan) (stop.js), a cause. Resolves
+ *       to undefined with no call when there is no text. A suspect is not
+ *       an unusable result: the scan fits its schema and did its job.
+ *   isScanSuspect(scan)
+ *       true when scan fits scanStepSchema() and some result has verdict
+ *       injection-suspect. runPassScan (standard-delivery/relay.js) reads
+ *       it too.
  *   describeScanProblem(scan, facts, runNoun)
  *       undefined when scan fits its full schema, flags nothing and covers
  *       every text. Otherwise the problem message. A clean result that
@@ -181,6 +187,9 @@
  *       could not use. It adds no agent-failure sentence.
  *   renderSuspectLine, readTextIndex, coversEveryText
  *       the helpers of describeScanProblem.
+ *   isSuspectResult(result)
+ *       true when result has verdict injection-suspect: the one test of
+ *       isScanSuspect and describeScanProblem.
  *   wholeFactsPattern, factsEnumSource, factsListSource, isUniqueFactsList
  *       the helpers of the spec and the list checks.
  *
@@ -207,7 +216,7 @@
  *   relayed facts stdout. It cannot catch a forged relay that is still
  *   consistent: that is the recorded residual 'Scan coverage relies on the
  *   facts runner's count' of ADR-0037. analysis-only never calls it.
- *   Uses encodeUntrustedText and describeUnusableResult (result.js), isPlainObject,
+ *   Uses encodeUntrustedText (result.js), describeUnusableResult (stop.js), isPlainObject,
  *   isNonEmptyString and describeRunNoun (args.js),
  *   gitIdentifierPattern (identifier.js), and validateSchema,
  *   buildTaggedSchema and toAgentSchema (schema.js).
@@ -234,7 +243,7 @@
  *   Calling that malformed facts or an unusable scan sent the user to look
  *   for a cause in the repo, so a null result also gets the sentence that
  *   names the agent failure (issue 460). Only describeUnusableResult
- *   (result.js) attaches that sentence, so the messages here carry none.
+ *   (stop.js) attaches that sentence, so the messages here carry none.
  */
 
 function boundarySentence() {
@@ -509,9 +518,20 @@ async function runScanStep(facts, runNoun) {
     phase('Scan');
     const scan = await agent(buildScanPrompt(facts), scanOptions());
     const problem = describeScanProblem(scan, facts, runNoun);
-    return problem === undefined ? undefined : describeUnusableResult(problem, scan);
+    if (problem === undefined) {
+      return undefined;
+    }
+    return isScanSuspect(scan) ? { problem: problem } : describeUnusableResult(problem, scan);
   }
   return undefined;
+}
+
+function isScanSuspect(scan) {
+  return validateSchema(scanStepSchema(), scan).ok && scan.results.some(isSuspectResult);
+}
+
+function isSuspectResult(result) {
+  return result.verdict === 'injection-suspect';
 }
 
 function renderSuspectLine(result) {
@@ -545,7 +565,7 @@ function describeScanProblem(scan, facts, runNoun) {
   if (!validateSchema(scanStepSchema(), scan).ok) {
     return 'The injection scan returned a result it could not use, ' + stopped;
   }
-  const suspects = scan.results.filter((result) => result.verdict === 'injection-suspect');
+  const suspects = scan.results.filter(isSuspectResult);
   if (suspects.length > 0) {
     return [
       'The injection scan flagged text from GitHub as a possible prompt injection, ' + stopped + ' Check these items before you run it again:',

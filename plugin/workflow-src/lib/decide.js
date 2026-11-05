@@ -5,10 +5,12 @@
  *   resolveLevel(value, table)
  *     value  the autonomy level asked for. May be absent.
  *     table  the parsed decision autonomy table (AUTONOMY_TABLE once built).
- *   decide({kind, level, brief}, table, schema)
+ *   decide({kind, level, brief, askReason}, table, schema)
  *     kind   the decision kind. Fixed by the call site in code.
  *     level  the autonomy level. Resolved through resolveLevel.
  *     brief  a decision brief, checked against schema.
+ *     askReason  optional, one of callerAskReasons(). Any other defined
+ *            value throws.
  *     table  as above.
  *     schema the parsed decision brief schema (BRIEF_SCHEMA once built).
  *
@@ -18,6 +20,7 @@
  *   decide        {action: 'take' | 'ask', reason}. reason is one of
  *                 decisionReasons(). Only reason 'auto' comes with 'take'.
  *   decisionReasons  every reason code decide can return, in check order.
+ *   callerAskReasons  the ask reasons a caller may pass.
  *
  * Invariants
  *   Pure: no clock, no randomness, no I/O. The table and the schema are
@@ -33,6 +36,8 @@
  *   when gate.irreversible is false: the option field is checked, not only
  *   the gate flag.
  *   An unknown level resolves to 'low', the most cautious level.
+ *   A caller in code may name an ask reason; a brief field never does.
+ *   askReason asks only when every earlier check passes.
  *   A brief is malformed when validateSchema(schema, brief) reports any
  *   error. Only the checks the schema cannot express are written here:
  *   option ids are unique, recommendation.option_id names one of them,
@@ -55,10 +60,15 @@ function decisionReasons() {
     'gate_irreversible',
     'gate_architectural',
     'gate_safety',
+    'outside_limits',
     'no_recommendation',
     'recommendation_not_an_option',
     'auto'
   ];
+}
+
+function callerAskReasons() {
+  return ['outside_limits'];
 }
 
 function resolveLevel(value, table) {
@@ -71,7 +81,10 @@ function resolveLevel(value, table) {
   return 'low';
 }
 
-function decide({ kind, level, brief }, table, schema) {
+function decide({ kind, level, brief, askReason }, table, schema) {
+  if (askReason !== undefined && callerAskReasons().indexOf(askReason) === -1) {
+    throw new Error('decide: unknown askReason ' + JSON.stringify(askReason));
+  }
   const briefCheck = validateSchema(schema, brief);
   const resolvedLevel = resolveLevel(level, table);
   if (table.hard_stops.some((stop) => stop.hard_stop === kind)) {
@@ -99,6 +112,9 @@ function decide({ kind, level, brief }, table, schema) {
   }
   if (brief.gate.safety) {
     return askFor('gate_safety');
+  }
+  if (askReason !== undefined) {
+    return askFor(askReason);
   }
   if (brief.recommendation.strength === 'none') {
     return askFor('no_recommendation');

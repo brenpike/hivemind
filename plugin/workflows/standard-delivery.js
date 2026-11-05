@@ -27,6 +27,7 @@ export const meta = {
  *   plugin/workflow-src/lib/decide.js
  *   plugin/workflow-src/lib/brief.js
  *   plugin/workflow-src/lib/result.js
+ *   plugin/workflow-src/lib/stop.js
  *   plugin/workflow-src/lib/waves.js
  *   plugin/workflow-src/lib/routing.js
  *   plugin/workflow-src/lib/args.js
@@ -34,12 +35,14 @@ export const meta = {
  *   plugin/workflow-src/lib/facts.js
  *   plugin/workflow-src/standard-delivery/briefs.js
  *   plugin/workflow-src/standard-delivery/gates.js
+ *   plugin/workflow-src/standard-delivery/paths.js
  *   plugin/workflow-src/standard-delivery/plan.js
  *   plugin/workflow-src/standard-delivery/pr.js
  *   plugin/workflow-src/standard-delivery/record.js
  *   plugin/workflow-src/standard-delivery/relay.js
  *   plugin/workflow-src/standard-delivery/review.js
  *   plugin/workflow-src/standard-delivery/scope.js
+ *   plugin/workflow-src/standard-delivery/specs.js
  *   plugin/workflow-src/standard-delivery/waves.js
  *   plugin/workflow-src/standard-delivery/main.js
  * Do not edit by hand. Rebuild with `node tools/build_workflows.mjs`.
@@ -634,7 +637,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '0d8b5d03e7078c70';
+const BUILD_ID = 'a3741313824a3b5c';
 
 function supportedSchemaKeywords(){
 return[
@@ -967,6 +970,9 @@ removeSchemaAnyOf(schema.items);
 return schema;
 }
 
+function callerAskReasons(){
+return['outside_limits'];
+}
 function resolveLevel(value,table){
 if(value===undefined||value===null||value===''){
 return table.default_level;
@@ -976,7 +982,10 @@ return value;
 }
 return'low';
 }
-function decide({kind,level,brief},table,schema){
+function decide({kind,level,brief,askReason},table,schema){
+if(askReason!==undefined&&callerAskReasons().indexOf(askReason)===-1){
+throw new Error('decide: unknown askReason '+JSON.stringify(askReason));
+}
 const briefCheck=validateSchema(schema,brief);
 const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
@@ -1004,6 +1013,9 @@ return askFor('gate_architectural');
 }
 if(brief.gate.safety){
 return askFor('gate_safety');
+}
+if(askReason!==undefined){
+return askFor(askReason);
 }
 if(brief.recommendation.strength==='none'){
 return askFor('no_recommendation');
@@ -1201,8 +1213,9 @@ function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
 const options=readField(brief,'options');
 const optionId=readField(readField(brief,'recommendation'),'option_id');
+const summary=renderText(readField(readChosenOption(options,optionId),'summary'));
 return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose '
-+renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary'))+'.';
++renderOptionLetter(options,optionId)+': '+summary+(/[.!?]["']?$/.test(summary)?'':'.');
 }
 function findRecommendedIndex(options,recommendation){
 if(readField(recommendation,'strength')==='none'){
@@ -1325,62 +1338,11 @@ return undefined;
 }
 const joinedLine=textLines.join(' ');
 const keptLine=cutAtBoundary(joinedLine,limit);
-return encodeUntrustedText(keptLine)+(keptLine===joinedLine?'':' (cut)');
+return encodeUntrustedText(keptLine)+(keptLine===joinedLine?'':', shortened');
 }
 function describeReason(text){
 const quoted=quoteDiagnostic(text,maxReasonLength());
 return quoted===undefined?'it gave no reason.':'it says '+quoted+'.';
-}
-function describeNoResult(result){
-if(result!==null){
-return'';
-}
-return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
-}
-function describeUnusableResult(problem,result){
-if(result!==null){
-return{problem:problem};
-}
-return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
-}
-function isTransientFailure(text){
-return typeof text==='string'&&transientFailurePatterns().some((pattern)=>pattern.test(text));
-}
-function transientFailurePatterns(){
-return[
-/\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
-/\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
-/\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
-/\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
-/\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
-/\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
-/\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
-/\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
-];
-}
-function nextStepLine(nextAction){
-if(nextAction==='run_again'){
-return'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
-}
-if(nextAction==='answer'){
-return'Next: run the request again with the answers in it.';
-}
-return'Next: fix what stopped the run, then run the request again.';
-}
-function maxBlockedLeadLength(){
-return 1000;
-}
-function buildStopBlocks(causes){
-if(!Array.isArray(causes)||causes.length===0){
-throw new Error('buildStopBlocks: causes must be a non-empty array');
-}
-const fixCauses=causes.filter((cause)=>cause.nextAction!=='run_again');
-const orderedCauses=fixCauses.concat(causes.filter((cause)=>cause.nextAction==='run_again'));
-const leadText=orderedCauses[0].problem;
-const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
-const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
-const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
-return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 function canCarry(resumeArgs){
 const emptyPause={needs_user:true,resume_args:resumeArgs,message:''};
@@ -1603,6 +1565,74 @@ return typeof value==='object'&&value!==null&&!Array.isArray(value);
 }
 function countCharacter(text,character){
 return text.split(character).length-1;
+}
+
+function describeNoResult(result){
+if(result!==null){
+return'';
+}
+return'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
+}
+function describeUnusableResult(problem,result){
+if(result!==null){
+return{problem:problem,nextAction:'report'};
+}
+return{problem:problem+' '+describeNoResult(result),nextAction:'run_again',agentFailure:true};
+}
+function readBlockerAction(blocker,nextAction){
+return quoteDiagnostic(blocker)===undefined?'report':nextAction;
+}
+function isTransientFailure(text){
+return typeof text==='string'&&transientFailurePatterns().some((pattern)=>pattern.test(text));
+}
+function transientFailurePatterns(){
+return[
+/\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
+/\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
+/\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
+/\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
+/\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
+/\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
+/\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
+/\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
+];
+}
+function stopActions(then){
+return{
+approve:'approve or refuse the change named above, then '+then+' with that answer',
+fix_cause:'clear the cause named above, then '+then,
+answer:then+' with the answers in it',
+report:'nothing in your repo needs a fix, so report this stop as a workflow defect, then '+then,
+run_again:'nothing in the repo needs a fix, so '+then+' later, for example once the machine is idle'
+};
+}
+function readStopAction(nextAction){
+return Object.hasOwn(stopActions(''),nextAction)?nextAction:'fix_cause';
+}
+function describeStopAction(nextAction,then){
+return stopActions(then)[readStopAction(nextAction)];
+}
+function nextStepLine(nextAction){
+return'Next: '+describeStopAction(nextAction,'run the request again')+'.';
+}
+function orderStopCauses(causes){
+const actionOrder=Object.keys(stopActions(''));
+const rankCause=(cause)=>actionOrder.indexOf(readStopAction(cause.nextAction));
+return causes.slice().sort((first,second)=>rankCause(first)-rankCause(second));
+}
+function maxBlockedLeadLength(){
+return 1000;
+}
+function buildStopBlocks(causes){
+if(!Array.isArray(causes)||causes.length===0){
+throw new Error('buildStopBlocks: causes must be a non-empty array');
+}
+const orderedCauses=orderStopCauses(causes);
+const leadText=orderedCauses[0].problem;
+const compactLead=cutAtBoundary(leadText,maxBlockedLeadLength());
+const leadBlock=compactLead===leadText?{text:leadText}:{text:leadText,compact:compactLead};
+const laterBlocks=orderedCauses.slice(1).map((cause)=>({text:cause.problem}));
+return[leadBlock,{text:nextStepLine(orderedCauses[0].nextAction),whole:true}].concat(laterBlocks);
 }
 
 function computeWave(steps,doneIds){
@@ -2255,6 +2285,12 @@ buildFactsBlock(facts)
 function scanOptions(){
 return{agentType:droneAgentType(),model:'sonnet',schema:toAgentSchema(scanStepSchema()),label:'scan',phase:'Scan'};
 }
+function isScanSuspect(scan){
+return validateSchema(scanStepSchema(),scan).ok&&scan.results.some(isSuspectResult);
+}
+function isSuspectResult(result){
+return result.verdict==='injection-suspect';
+}
 function renderSuspectLine(result){
 const category=isNonEmptyString(result.pattern_category)?result.pattern_category:'no category given';
 const excerpt=typeof result.field_excerpt==='string'?result.field_excerpt:'';
@@ -2283,7 +2319,7 @@ const stopped='so '+describeRunNoun(runNoun)+' stopped before planning.';
 if(!validateSchema(scanStepSchema(),scan).ok){
 return'The injection scan returned a result it could not use, '+stopped;
 }
-const suspects=scan.results.filter((result)=>result.verdict==='injection-suspect');
+const suspects=scan.results.filter(isSuspectResult);
 if(suspects.length>0){
 return[
 'The injection scan flagged text from GitHub as a possible prompt injection, '+stopped+' Check these items before you run it again:',
@@ -2380,10 +2416,7 @@ if(outsidePaths.length===0){
 return brief;
 }
 const problem=brief.problem+' It changes '+describeCount(outsidePaths.length,'file')+' outside the limits you set.';
-return Object.assign(brief,{
-problem:problem.length<=BRIEF_SCHEMA.properties.problem.maxLength?problem:brief.problem,
-recommendation:{...brief.recommendation,strength:'none',why:'Only you can say if the plan may change files outside the limits.'}
-});
+return Object.assign(brief,{problem:problem.length<=BRIEF_SCHEMA.properties.problem.maxLength?problem:brief.problem});
 }
 function buildTailBrief({kind,problem,goOn,other,strength,why}){
 return{
@@ -2400,18 +2433,29 @@ assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefTe
 gate:{irreversible:false,architectural:false,safety:false}
 };
 }
+function stepStopTexts(){
+return{
+approve:['none','reply','Only you can approve a change the destructive-fix gate holds back.'],
+fix_cause:['strong','commit any change and reply','Clearing it lets the step go on.'],
+report:['weak','nothing in your repo needs a fix: the run\'s own step failed; reply to try once more','A stop that comes back is a workflow defect: report it, do not retry.'],
+run_again:['strong','reply','The cause clears itself.']
+};
+}
 function buildStepStopBrief(causes,isReplan){
-const isRunAgain=causes.every((cause)=>cause.nextAction==='run_again');
+const texts=stepStopTexts();
+const leadAction=orderStopCauses(causes)[0].nextAction;
+const[strength,words,why]=Object.hasOwn(texts,leadAction)?texts[leadAction]:texts.fix_cause;
+const action=leadAction==='report'?words:describeStopAction(leadAction,words);
 const then=isReplan?'the run plans again from fresh facts.':'the run takes the stopped step again.';
 return{
 id:'stop',
 kind:STEP_STOP_KIND,
-problem:(isRunAgain?'Nothing in the repo needs a fix: reply when you are ready to go on, and ':'Fix what stopped the run, then reply with every change committed, and ')+then,
+problem:action.charAt(0).toUpperCase()+action.slice(1)+', and '+then,
 criticality:{level:'medium',likelihood:'certain',blast_radius:'The working branch and the pull request it becomes.',if_ignored:unshownBriefText()},
 options:[
 {id:'A',summary:isReplan?'Go on: plan again from fresh facts.':'Go on: take the stopped step again.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true}
 ],
-recommendation:{option_id:'A',strength:'none',why:'Only you can tell when what stopped the run is out of the way.'},
+recommendation:{option_id:'A',strength:strength,why:why},
 assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
 gate:{irreversible:false,architectural:false,safety:false}
 };
@@ -2569,8 +2613,12 @@ return asked;
 }
 return{replan:{reason:'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.'}};
 }
-function buildUndecidedAsk(brief){
-return{brief:brief,reason:'no_recommendation'};
+function buildUndecidedAsk(kind,brief,run){
+const resolution={asks:[],taken:[]};
+if(resolveDecision(kind,brief,undefined,run,resolution)==='take'){
+throw new Error('buildUndecidedAsk: decide() took '+kind);
+}
+return resolution.asks[0];
 }
 function resolveTailDecision(kind,brief,run){
 const resolution={asks:[],taken:[],reversibleEffects:[]};
@@ -2589,7 +2637,7 @@ const unusable=describeUnusableResult('it returned no usable result.',result);
 return{status:'blocked',reason:unusable.problem,files:[],nextAction:unusable.nextAction,agentFailure:unusable.agentFailure};
 }
 if(result.outcome==='blocked'){
-return{status:'blocked',reason:describeReason(result.blocker),files:result.files,nextAction:result.next_action};
+return{status:'blocked',reason:describeReason(result.blocker),files:result.files,nextAction:readBlockerAction(result.blocker,result.next_action)};
 }
 return{status:'complete',files:result.files};
 }
@@ -2618,7 +2666,7 @@ if(!validateSchema(schema,result).ok){
 return describeUnusableResult('The validation step returned no usable result, so '+RUN_NAME+' stopped before the pull request.',result);
 }
 if(result.outcome==='blocked'){
-return{problem:'The validation step was blocked, so '+RUN_NAME+' stopped before the pull request: '+describeReason(result.blocker),nextAction:result.next_action};
+return{problem:'The validation step was blocked, so '+RUN_NAME+' stopped before the pull request: '+describeReason(result.blocker),nextAction:readBlockerAction(result.blocker,result.next_action)};
 }
 const validation={status:result.outcome,failures:result.failures};
 if(Object.hasOwn(result,'version')){
@@ -2629,11 +2677,11 @@ return validation;
 function checkVersionRelay(relay){
 const stopped='so '+RUN_NAME+' stopped before the pull request.';
 if(relay.outcome==='blocked'){
-return{problem:'The version check of the validation step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true)};
+return{problem:'The version check of the validation step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true),nextAction:readRelayAction(relay.stderr)};
 }
 const values=readRelayedLines(relay,versionCheckRoutingSpec());
 if(values===undefined||!isConsistentVersionRelay(values)){
-return{problem:'The version check of the validation step returned malformed routing lines, '+stopped};
+return describeUnusableResult('The version check of the validation step returned malformed routing lines, '+stopped,relay);
 }
 return{values:values};
 }
@@ -2720,7 +2768,7 @@ const validation=readValidateOutcome(result,schema);
 return validation.problem===undefined?applyVersionCheck(validation,run):validation;
 }
 async function askVersionQuestion(run,plan,gates,validation){
-const asked=askTail(buildUndecidedAsk(buildVersionQuestionBrief(validation.question)),run,undefined);
+const asked=askTail(buildUndecidedAsk(VERSION_BUMP_INDETERMINABLE_KIND,buildVersionQuestionBrief(validation.question),run),run,undefined);
 if(asked.answer===undefined){
 return asked;
 }
@@ -2753,7 +2801,7 @@ return{held:true,note:describeValidateNote(validation,plan,run)};
 }
 gates.failures[run.head]=validation;
 if(gates.fixRounds>=maxFixRounds()){
-return validation.versionOnly===true?stopVersionFixLimit(run,gates,validation):replanFromTailAsk(buildUndecidedAsk(buildFixLimitBrief(run.head)),run);
+return validation.versionOnly===true?stopVersionFixLimit(run,gates,validation):replanFromTailAsk(buildUndecidedAsk(VALIDATION_REMEDIATION_KIND,buildFixLimitBrief(run.head),run),run);
 }
 if(validation.versionOnly!==true){
 const decided=resolveTailDecision(VALIDATION_REMEDIATION_KIND,buildValidationRemediationBrief(run.head,gates.fixRounds+1),run);
@@ -2770,7 +2818,7 @@ if(staleIds.length===0){
 return{};
 }
 if(gates.reruns>=maxGateReruns()){
-return replanFromTailAsk(buildUndecidedAsk(buildGateRerunBrief(staleIds,run.head,true)),run);
+return replanFromTailAsk(buildUndecidedAsk(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head,true),run),run);
 }
 gates.reruns+=1;
 return resolveTailDecision(GATE_RERUN_KIND,buildGateRerunBrief(staleIds,run.head,false),run);
@@ -2835,6 +2883,43 @@ gates.answer=ended.answer;
 }
 }
 
+function externalLabel(){
+return'Can carry external content.';
+}
+function repositoryPathMark(){
+return externalLabel()+' Repository path.';
+}
+function toAsciiLowerCase(text){
+return text.replace(/[A-Z]/g,(letter)=>String.fromCharCode(letter.charCodeAt(0)+32));
+}
+function isRepositoryPath(value){
+if(typeof value!=='string'||value.length===0||value.startsWith('/')){
+return false;
+}
+const isOneLine=Array.from(value).every((character)=>character.codePointAt(0)>=32&&character.codePointAt(0)!==127);
+return isOneLine&&value.split('/').every((part)=>!['','.','..','.git'].includes(toAsciiLowerCase(part)));
+}
+function collectRepositoryPaths(schema,value,location,found){
+if(typeof schema.description==='string'&&schema.description.startsWith(repositoryPathMark())){
+found.push({location:location,value:value});
+}
+if(schema.properties!==undefined&&isPlainObject(value)){
+const presentNames=Object.keys(schema.properties).filter((name)=>Object.prototype.hasOwnProperty.call(value,name));
+presentNames.forEach((name)=>collectRepositoryPaths(schema.properties[name],value[name],location===''?name:location+'.'+name,found));
+}
+if(schema.items!==undefined&&Array.isArray(value)){
+value.forEach((item,index)=>collectRepositoryPaths(schema.items,item,location+'['+index+']',found));
+}
+return found;
+}
+function findRepositoryPathProblem(schema,value,location){
+const problem=collectRepositoryPaths(schema,value,location,[]).find((entry)=>!isRepositoryPath(entry.value));
+return problem===undefined?'':problem.location;
+}
+function listPlanPaths(plan){
+return[...new Set(collectRepositoryPaths(PLAN_SCHEMA,plan,'',[]).map((entry)=>entry.value))];
+}
+
 function omitSchemaDialect(schema){
 return Object.fromEntries(Object.entries(schema).filter(([key])=>key!=='$schema'));
 }
@@ -2871,42 +2956,6 @@ items:{type:'string',enum:listShownLabels(shownAsks)}
 };
 spec.required.push('settled');
 return buildTaggedSchema(spec);
-}
-function externalLabel(){
-return'Can carry external content.';
-}
-function repositoryPathMark(){
-return externalLabel()+' Repository path.';
-}
-function toAsciiLowerCase(text){
-return text.replace(/[A-Z]/g,(letter)=>String.fromCharCode(letter.charCodeAt(0)+32));
-}
-function isRepositoryPath(value){
-if(typeof value!=='string'||value.length===0||value.startsWith('/')){
-return false;
-}
-const isOneLine=Array.from(value).every((character)=>character.codePointAt(0)>=32&&character.codePointAt(0)!==127);
-return isOneLine&&value.split('/').every((part)=>!['','.','..','.git'].includes(toAsciiLowerCase(part)));
-}
-function collectRepositoryPaths(schema,value,location,found){
-if(typeof schema.description==='string'&&schema.description.startsWith(repositoryPathMark())){
-found.push({location:location,value:value});
-}
-if(schema.properties!==undefined&&isPlainObject(value)){
-const presentNames=Object.keys(schema.properties).filter((name)=>Object.prototype.hasOwnProperty.call(value,name));
-presentNames.forEach((name)=>collectRepositoryPaths(schema.properties[name],value[name],location===''?name:location+'.'+name,found));
-}
-if(schema.items!==undefined&&Array.isArray(value)){
-value.forEach((item,index)=>collectRepositoryPaths(schema.items,item,location+'['+index+']',found));
-}
-return found;
-}
-function findRepositoryPathProblem(schema,value,location){
-const problem=collectRepositoryPaths(schema,value,location,[]).find((entry)=>!isRepositoryPath(entry.value));
-return problem===undefined?'':problem.location;
-}
-function listPlanPaths(plan){
-return[...new Set(collectRepositoryPaths(PLAN_SCHEMA,plan,'',[]).map((entry)=>entry.value))];
 }
 function settledAnswersSentence(replyHome){
 return dataBlocksSentence(replyHome)+' In each answers entry, only the questions its settled labels name are the user\'s settled decisions: never ask them again, never reverse them.';
@@ -3032,8 +3081,8 @@ return lead+' Outside the limits you set: '+joinNames(restCount>0?[...shownPaths
 function unshownBriefText(){
 return'Not shown.';
 }
-function resolveDecision(kind,brief,scope,run,resolution){
-const decision=decide({kind:kind,level:run.level,brief:brief},AUTONOMY_TABLE,BRIEF_SCHEMA);
+function resolveDecision(kind,brief,scope,run,resolution,askReason){
+const decision=decide({kind:kind,level:run.level,brief:brief,askReason:askReason},AUTONOMY_TABLE,BRIEF_SCHEMA);
 if(decision.action==='take'){
 resolution.taken.push({brief:brief,kind:kind});
 return'take';
@@ -3073,10 +3122,11 @@ resolveDecision(EXTERNAL_EFFECT_KIND,buildExternalEffectBrief(effect.summary),['
 function resolvePlanAcceptance(plan,run,resolution,scope){
 const isRemediation=run.taken.some((entry)=>entry.kind===PLANNER_ESCALATION_ROUTING_KIND||entry.kind===ROOT_CLUSTER_ROUTING_KIND);
 resolution.outsidePaths=listOutsidePaths(plan,scope);
+const askReason=resolution.outsidePaths.length===0?undefined:'outside_limits';
 if(isRemediation){
-return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND,markOutsideLimits(buildRemediationPlanBrief(plan),resolution.outsidePaths),[run.pass,plan],run,resolution);
+return resolveDecision(REMEDIATION_PLAN_ACCEPTANCE_KIND,markOutsideLimits(buildRemediationPlanBrief(plan),resolution.outsidePaths),[run.pass,plan],run,resolution,askReason);
 }
-return resolveDecision(PLAN_ACCEPTANCE_KIND,markOutsideLimits(buildPlanAcceptanceBrief(plan),resolution.outsidePaths),[run.pass,plan],run,resolution);
+return resolveDecision(PLAN_ACCEPTANCE_KIND,markOutsideLimits(buildPlanAcceptanceBrief(plan),resolution.outsidePaths),[run.pass,plan],run,resolution,askReason);
 }
 function resolvePlanAsks(planResult,facts,run,scope){
 const resolution={asks:[],taken:[],freshness:undefined,reversibleEffects:[],outsidePaths:[]};
@@ -3138,7 +3188,8 @@ if(problem!==undefined){
 if(shownAsks.length>0){
 run.answerLog.push(buildAnswerEntry(shownEntry,undefined));
 }
-return stopDelivery([describeUnusableResult(problem,planResult)],run,[],true);
+const isPlannerBlock=validateSchema(resultSchema,planResult).ok&&planResult.outcome==='blocked';
+return stopDelivery([isPlannerBlock?{problem:problem,nextAction:readBlockerAction(planResult.blocker)}:describeUnusableResult(problem,planResult)],run,[],true);
 }
 if(shownAsks.length>0){
 run.answerLog.push(buildAnswerEntry(shownEntry,planResult));
@@ -3160,7 +3211,7 @@ return{plan:planResult.plan,freshness:resolution.freshness};
 }
 const resettled=resolution.asks.find((ask)=>settledKinds.has(ask.kind)&&[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,TRUNK_STALE_KIND].includes(ask.kind));
 if(resettled!==undefined){
-return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true}],run,[],true);
+return stopDelivery([{problem:'Workflow defect: the '+resettled.kind+' question came back after a reply settled it, so '+RUN_NAME+' stopped.',terminal:true,nextAction:'report'}],run,[],true);
 }
 const isAcceptance=resolution.asks.some((ask)=>[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind));
 const lead=describePlanLine(planResult.plan,isAcceptance?resolution.outsidePaths:[]);
@@ -3189,10 +3240,10 @@ return{
 }
 function toPullRequestDecision(entry){
 if(Object.values(reviewQuestionKinds()).includes(entry.kind)){
-return{brief:removeReviewerText(entry.brief)};
+return{brief:removeReviewerText(entry.brief),kind:entry.kind};
 }
 const problem=reviewDecisionProblems()[entry.kind];
-return problem===undefined?{brief:entry.brief}:{brief:Object.assign({},entry.brief,{problem:problem})};
+return{brief:problem===undefined?entry.brief:Object.assign({},entry.brief,{problem:problem}),kind:entry.kind};
 }
 function isPullRequestCharacter(codePoint,keepsLines){
 if(keepsLines&&(codePoint===9||codePoint===10)){
@@ -3339,17 +3390,26 @@ formatCommandBlock(buildRunnerCommand('open-plan-pr',listPullRequestWords(plan,h
 formatInputsFileBlock(inputsPath,{title:texts.title,body:texts.body,comment:texts.comment,draft:draft})
 ].join('\n');
 }
+function isInputsRefusal(stderr){
+return/^blocker: (?:(?:inputs?|title|body|draft|comment) |cannot read the inputs file$)/m.test(stderr);
+}
+function describePullRequestBlocker(stderr,unseenPush){
+const isUnpushed=isGateDenial(stderr)||isInputsRefusal(stderr);
+const lead='The pull request step was blocked, so '+RUN_NAME+(isUnpushed?' stopped. This step pushed nothing.':unseenPush);
+return{problem:lead+' '+describeRelayBlocker(stderr,true),nextAction:readRelayAction(stderr,isUnpushed)};
+}
 function checkPullRequestRelay(relay,head){
-const stopped='so '+RUN_NAME+' stopped. The branch may be on its remote, and a pull request may be open for it.';
+const unseenPush=' stopped and did not see whether this step pushed. Taking it again pushes the same commit and reuses a pull request open on it.';
+const stopped='so '+RUN_NAME+unseenPush;
 if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult('The pull request step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
-return{problem:'The pull request step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true)};
+return describePullRequestBlocker(relay.stderr,unseenPush);
 }
 const values=readRelayedLines(relay,openPlanPrRoutingSpec());
 if(values===undefined||values.commented===values.created){
-return{problem:'The pull request step returned malformed routing lines, '+stopped};
+return describeUnusableResult('The pull request step returned malformed routing lines, '+stopped,relay);
 }
 if(values.head_ref_oid!==head){
 return{problem:'The pull request step reported a head commit other than the commit every gate held on, '+stopped,terminal:true};
@@ -3362,7 +3422,7 @@ return'pr-'+run.pass+(count===1?'':'-'+count);
 async function runPullRequestStep(run,plan,gates){
 const texts=buildPullRequestTexts(run,plan,gates);
 if(texts.problem!==undefined){
-return stopDelivery([{problem:texts.problem,terminal:true}],run,[],false);
+return stopDelivery([{problem:texts.problem,terminal:true,nextAction:'report'}],run,[],false);
 }
 phase('PR');
 const label=describePullRequestLabel(run,gates.runs.pr);
@@ -3393,7 +3453,14 @@ run.head=commit;
 run.branch=branch;
 run.headRound=run.answerLog.length;
 }
+function routineDecisionKinds(){
+return[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,GATE_RERUN_KIND];
+}
+function isShownDecision(entry){
+return!routineDecisionKinds().includes(entry.kind);
+}
 function buildRunRecordParts(run,taken,gates){
+const shown=taken.filter(isShownDecision);
 const parts=[];
 if(run.reversibleEffects.length>0){
 parts.push({id:'reversible_effects',text:renderReversibleEffects(run.reversibleEffects),external:true});
@@ -3403,8 +3470,8 @@ parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
 }else if(run.notRunGates.length>0){
 parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
 }
-if(taken.length>0){
-parts.push({id:'decisions',text:renderDecisions(taken),compact:renderDecisionsCompact(taken),external:true});
+if(shown.length>0){
+parts.push({id:'decisions',text:renderDecisions(shown),compact:renderDecisionsCompact(shown),external:true});
 }
 return parts;
 }
@@ -3413,11 +3480,12 @@ return'Branch '+encodeUntrustedText(run.branch)+' is at commit '+run.head+'.';
 }
 function buildRecordTailBlocks(run,taken){
 const blocks=[];
+const shown=taken.filter(isShownDecision);
 if(run.reversibleEffects.length>0){
 blocks.push({text:renderReversibleEffects(run.reversibleEffects)});
 }
-if(taken.length>0){
-blocks.push({text:renderDecisionsCompact(taken)});
+if(shown.length>0){
+blocks.push({text:renderDecisionsCompact(shown)});
 }
 return blocks;
 }
@@ -3483,7 +3551,7 @@ function stopDelivery(causes,run,endLines,isReplan){
 if(causes.some((cause)=>cause.terminal===true||cause.agentFailure===true)){
 return{result:finishDeliveryBlocked(causes,run,endLines)};
 }
-const asked=askTail(buildUndecidedAsk(buildStepStopBrief(causes,isReplan)),run,describeStopLead(causes,endLines));
+const asked=askTail(buildUndecidedAsk(STEP_STOP_KIND,buildStepStopBrief(causes,isReplan),run),run,describeStopLead(causes,endLines));
 if(asked.answer===undefined){
 return asked;
 }
@@ -3516,86 +3584,6 @@ docs:'docs',
 test:'test',
 ci:'ci'
 };
-}
-function commitShaPattern(){
-return/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
-}
-function branchWarningTexts(){
-return{
-stale:'trunk is stale or diverged from origin; proceeding as acknowledged at preflight',
-skipped:'trunk freshness check was skipped'
-};
-}
-function createWorkingBranchRoutingSpec(){
-const warnings=branchWarningTexts();
-return{
-branch:{pattern:gitIdentifierPattern(),required:true},
-commit:{pattern:commitShaPattern(),required:true},
-created:{pattern:/^(?:true|false)$/,required:true},
-warning:{pattern:new RegExp('^(?:'+warnings.stale+'|'+warnings.skipped+')$'),required:false}
-};
-}
-function moltRoutingSpec(){
-return{
-branch:{pattern:gitIdentifierPattern(),required:true},
-commit:{pattern:commitShaPattern(),required:true},
-committed:{pattern:/^(?:true|false)$/,required:true}
-};
-}
-function bumpTypeRoutingSpec(){
-const count={pattern:/^(?:0|[1-9][0-9]*)$/,required:true};
-return{
-dominant_row:{pattern:/^(?:MAJOR|MINOR|PATCH|NO_BUMP|NONE|MULTI)$/,required:true},
-verdict:{pattern:/^(?:bump_required|no_bump|ask_user)$/,required:true},
-bump_type:{pattern:/^(?:major|minor|patch|none)$/,required:true},
-rule_applied:{pattern:/^[1-6]$/,required:true},
-counts:{block:{major:count,minor:count,patch:count,no_bump:count},required:true},
-mapped_commits:count,
-dropped_reverts:count
-};
-}
-function pullRequestWarningTexts(){
-return[
-'push was rejected; the branch is not on its remote',
-'no upstream and no origin remote; push deferred',
-'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
-];
-}
-function openPlanPrRoutingSpec(){
-return{
-url:{pattern:/^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/,required:true},
-head_ref_oid:{pattern:commitShaPattern(),required:true},
-created:{pattern:/^(?:true|false)$/,required:true},
-commented:{pattern:/^(?:true|false)$/,required:true},
-warning:{pattern:new RegExp('^(?:'+pullRequestWarningTexts().join('|')+')$'),required:false}
-};
-}
-function semverCorePattern(){
-return/^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
-}
-function versionCheckRoutingSpec(){
-return Object.assign(bumpTypeRoutingSpec(),{
-version_check:{pattern:/^(?:match|mismatch|unreadable|undetermined)$/,required:true},
-trunk_version:{pattern:semverCorePattern(),required:false},
-expected_version:{pattern:semverCorePattern(),required:false}
-});
-}
-function isConsistentBumpRelay(values){
-const counts=values.counts;
-const countSum=Number(counts.major)+Number(counts.minor)+Number(counts.patch)+Number(counts.no_bump);
-return(values.verdict==='bump_required')===(values.bump_type!=='none')
-&&countSum===Number(values.mapped_commits);
-}
-function isConsistentVersionRelay(values){
-const hasExpected=values.expected_version!==undefined;
-const hasTrunk=values.trunk_version!==undefined;
-if(!isConsistentBumpRelay(values)||(hasExpected&&!hasTrunk)){
-return false;
-}
-if(values.version_check==='match'||values.version_check==='mismatch'){
-return hasExpected&&values.verdict!=='ask_user';
-}
-return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
 }
 function validationTaskSentence(){
 return'This is a validation task: the Validation Procedure of ${CLAUDE_PLUGIN_ROOT}/governance/definitions.md is its whole task, not a Worker Self-Check.';
@@ -3650,7 +3638,7 @@ return{agentType:PLANNER_AGENT,schema:toAgentSchema(resultSchema),label:label,ph
 }
 function describeCommandStop(stepNoun,words,retryWords=[]){
 const problem=describeRunnerWordProblem(words.concat(retryWords));
-return problem===undefined?undefined:{problem:'The '+stepNoun+' step did not run its script, so '+RUN_NAME+' stopped: '+problem+'.',terminal:true};
+return problem===undefined?undefined:{problem:'The '+stepNoun+' step did not run its script, so '+RUN_NAME+' stopped: '+problem+'.',terminal:true,nextAction:'report'};
 }
 function buildDeliveryFactsPrompt(words){
 return['Gather the branch facts with the command below.',dataBlocksSentence(),'',formatCommandBlock(buildRunnerCommand('gather-facts',words))].join('\n');
@@ -3658,17 +3646,24 @@ return['Gather the branch facts with the command below.',dataBlocksSentence(),''
 function splitStderrLines(stderr){
 return typeof stderr==='string'?stderr.split(/\r\n|\r|\n/):[];
 }
-function describeRelayBlocker(stderr,startsSentence){
+function quoteRelayBlocker(stderr){
 const stderrLines=splitStderrLines(stderr);
 const blockerPayloads=stderrLines.filter((line)=>line.startsWith('blocker: ')).map((line)=>line.slice('blocker: '.length)).filter((payload)=>payload.trim()!=='');
-const stderrQuote=quoteDiagnostic(stderrLines.filter((line)=>line.trim()!=='').slice(0,2).join('\n'));
-let reason='it gave no reason.';
 if(blockerPayloads.length>0){
-reason='its blocker line says '+quoteDiagnostic(blockerPayloads.pop())+'.';
-}else if(stderrQuote!==undefined){
-reason='its stderr says '+stderrQuote+'.';
+return'its blocker line says '+quoteDiagnostic(blockerPayloads.pop())+'.';
 }
+const stderrQuote=quoteDiagnostic(stderrLines.filter((line)=>line.trim()!=='').slice(0,2).join('\n'));
+return stderrQuote===undefined?undefined:'its stderr says '+stderrQuote+'.';
+}
+function describeRelayBlocker(stderr,startsSentence){
+const reason=quoteRelayBlocker(stderr)||'it gave no reason.';
 return startsSentence?reason.charAt(0).toUpperCase()+reason.slice(1):reason;
+}
+function isGateDenial(stderr){
+return/synapse-gate: /.test(stderr);
+}
+function readRelayAction(stderr,isRefusedFirst=false){
+return isRefusedFirst||quoteRelayBlocker(stderr)===undefined||isGateDenial(stderr)?'report':undefined;
 }
 function readRelayedLines(relay,spec){
 if(typeof relay.stdout!=='string'){
@@ -3711,11 +3706,11 @@ if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult(malformedFactsMessage(RUN_NOUN),relay);
 }
 if(relay.outcome==='blocked'){
-return{problem:blockedFactsMessage(RUN_NOUN,describeRelayBlocker(relay.stderr,false))};
+return{problem:blockedFactsMessage(RUN_NOUN,describeRelayBlocker(relay.stderr,false)),nextAction:readRelayAction(relay.stderr)};
 }
 const facts=readRelayedLines(relay,gatherFactsRoutingSpec());
 if(facts===undefined||!isConsistentFactsRelay(facts,trunk)){
-return{problem:malformedFactsMessage(RUN_NOUN)};
+return describeUnusableResult(malformedFactsMessage(RUN_NOUN),relay);
 }
 if(facts.cut!=='none'){
 return{problem:cutFactsMessage(RUN_NOUN,facts.cut)};
@@ -3737,8 +3732,7 @@ const problem=describeScanProblem(scan,facts,RUN_NOUN);
 if(problem===undefined){
 return undefined;
 }
-const isSuspect=validateSchema(scanStepSchema(),scan).ok&&scan.results.some((result)=>result.verdict==='injection-suspect');
-return isSuspect?{problem:problem,terminal:true}:describeUnusableResult(problem,scan);
+return isScanSuspect(scan)?{problem:problem,terminal:true}:describeUnusableResult(problem,scan);
 }
 async function runFactsStep(run){
 phase('Facts');
@@ -3769,11 +3763,11 @@ if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult('The branch step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
-return{problem:'The branch step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true),terminal:true};
+return{problem:'The branch step was blocked, '+stopped+' '+describeRelayBlocker(relay.stderr,true),terminal:true,nextAction:readRelayAction(relay.stderr)};
 }
 const values=readRelayedLines(relay,createWorkingBranchRoutingSpec());
 if(values===undefined||values.warning!==branchWarningTexts()[freshness]){
-return{problem:'The branch step returned malformed routing lines, '+stopped};
+return describeUnusableResult('The branch step returned malformed routing lines, '+stopped,relay);
 }
 if(values.branch!==plan.branch){
 return{problem:'The branch step reported a branch other than the plan branch, '+stopped,terminal:true};
@@ -3864,11 +3858,11 @@ if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult('The commit step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
-return{problem:describeCommitBlocker(relay.stderr,stepNoun),terminal:true};
+return{problem:describeCommitBlocker(relay.stderr,stepNoun),terminal:true,nextAction:readRelayAction(relay.stderr)};
 }
 const values=readRelayedLines(relay,moltRoutingSpec());
 if(values===undefined){
-return{problem:'The commit step returned malformed routing lines, '+stopped};
+return describeUnusableResult('The commit step returned malformed routing lines, '+stopped,relay);
 }
 if(values.branch!==plan.branch){
 return{problem:'The commit step reported a branch other than the plan branch, '+stopped,terminal:true};
@@ -4386,6 +4380,87 @@ const unusable=describeScopeProblem(scope);
 return unusable===undefined?{scope:keepRepositoryPathEntries(scope,facts.root)}:unusable;
 }
 
+function commitShaPattern(){
+return/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+}
+function branchWarningTexts(){
+return{
+stale:'trunk is stale or diverged from origin; proceeding as acknowledged at preflight',
+skipped:'trunk freshness check was skipped'
+};
+}
+function createWorkingBranchRoutingSpec(){
+const warnings=branchWarningTexts();
+return{
+branch:{pattern:gitIdentifierPattern(),required:true},
+commit:{pattern:commitShaPattern(),required:true},
+created:{pattern:/^(?:true|false)$/,required:true},
+warning:{pattern:new RegExp('^(?:'+warnings.stale+'|'+warnings.skipped+')$'),required:false}
+};
+}
+function moltRoutingSpec(){
+return{
+branch:{pattern:gitIdentifierPattern(),required:true},
+commit:{pattern:commitShaPattern(),required:true},
+committed:{pattern:/^(?:true|false)$/,required:true}
+};
+}
+function bumpTypeRoutingSpec(){
+const count={pattern:/^(?:0|[1-9][0-9]*)$/,required:true};
+return{
+dominant_row:{pattern:/^(?:MAJOR|MINOR|PATCH|NO_BUMP|NONE|MULTI)$/,required:true},
+verdict:{pattern:/^(?:bump_required|no_bump|ask_user)$/,required:true},
+bump_type:{pattern:/^(?:major|minor|patch|none)$/,required:true},
+rule_applied:{pattern:/^[1-6]$/,required:true},
+counts:{block:{major:count,minor:count,patch:count,no_bump:count},required:true},
+mapped_commits:count,
+dropped_reverts:count
+};
+}
+function pullRequestWarningTexts(){
+return[
+'push was rejected; the branch is not on its remote',
+'no upstream and no origin remote; push deferred',
+'gh cannot read the push remote as a GitHub repository; the PR head repository was not checked'
+];
+}
+function openPlanPrRoutingSpec(){
+return{
+url:{pattern:/^https:\/\/[A-Za-z0-9._/-]+\/pull\/[0-9]+$/,required:true},
+head_ref_oid:{pattern:commitShaPattern(),required:true},
+created:{pattern:/^(?:true|false)$/,required:true},
+commented:{pattern:/^(?:true|false)$/,required:true},
+warning:{pattern:new RegExp('^(?:'+pullRequestWarningTexts().join('|')+')$'),required:false}
+};
+}
+function semverCorePattern(){
+return/^(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})\.(?:0|[1-9][0-9]{0,14})$/;
+}
+function versionCheckRoutingSpec(){
+return Object.assign(bumpTypeRoutingSpec(),{
+version_check:{pattern:/^(?:match|mismatch|unreadable|undetermined)$/,required:true},
+trunk_version:{pattern:semverCorePattern(),required:false},
+expected_version:{pattern:semverCorePattern(),required:false}
+});
+}
+function isConsistentBumpRelay(values){
+const counts=values.counts;
+const countSum=Number(counts.major)+Number(counts.minor)+Number(counts.patch)+Number(counts.no_bump);
+return(values.verdict==='bump_required')===(values.bump_type!=='none')
+&&countSum===Number(values.mapped_commits);
+}
+function isConsistentVersionRelay(values){
+const hasExpected=values.expected_version!==undefined;
+const hasTrunk=values.trunk_version!==undefined;
+if(!isConsistentBumpRelay(values)||(hasExpected&&!hasTrunk)){
+return false;
+}
+if(values.version_check==='match'||values.version_check==='mismatch'){
+return hasExpected&&values.verdict!=='ask_user';
+}
+return values.version_check==='unreadable'||(values.verdict==='ask_user'&&!hasExpected);
+}
+
 function buildNextActionProperty(){
 return{
 type:'string',
@@ -4404,12 +4479,13 @@ description:'complete when the step outcome holds. blocked when the step cannot 
 },
 summary:{type:'string',description:'What you changed, in one or two sentences.'},
 blocker:{type:'string',maxLength:400,description:'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.'},
-next_action:buildNextActionProperty()
+next_action:buildNextActionProperty(),
+stage:{type:'string',maxLength:40,description:'Worker Report stage.'}
 },
 required:['outcome','summary'],
 variants:{
 complete:{required:[],optional:[]},
-blocked:{required:[],optional:['blocker','next_action']},
+blocked:{required:[],optional:['blocker','next_action','stage']},
 needs_replan:{required:[],optional:['blocker']}
 }
 });
@@ -4459,13 +4535,27 @@ return{stepId:step.id,status:'blocked',reason:unusable.problem,nextAction:unusab
 if(result.outcome==='complete'){
 return{stepId:step.id,status:'complete'};
 }
-return{stepId:step.id,status:result.outcome,reason:describeReason(result.blocker),nextAction:result.next_action};
+return{stepId:step.id,status:result.outcome,reason:describeReason(result.blocker),nextAction:readWorkerAction(result)};
+}
+function readWorkerAction(result){
+if(quoteDiagnostic(result.blocker)===undefined){
+return'report';
+}
+const isGateHold=result.stage==='destructive-fix-gate'||isDestructiveGateBlocker(result.blocker);
+return isGateHold?'approve':result.next_action;
+}
+function isDestructiveGateBlocker(text){
+return text.trimStart().toLowerCase().startsWith('proposed fix requires human confirmation');
+}
+function describeBlockedStep(outcome){
+const verb=outcome.nextAction==='approve'?' waits for your approval at the destructive-fix gate: ':' was blocked: ';
+return'- Step '+encodeUntrustedText(outcome.stepId)+verb+outcome.reason;
 }
 function describeBlockedWave(blockedOutcomes){
 const lead='A worker did not finish its step, so '+RUN_NAME+' stopped after its wave:';
-const stepLines=blockedOutcomes.map((outcome)=>'- Step '+encodeUntrustedText(outcome.stepId)+' was blocked: '+outcome.reason);
-const isRunAgain=blockedOutcomes.every((outcome)=>outcome.nextAction==='run_again');
-const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:isRunAgain?'run_again':'fix_cause'};
+const orderedOutcomes=orderStopCauses(blockedOutcomes);
+const stepLines=orderedOutcomes.map(describeBlockedStep);
+const cause={problem:[lead,...capItemLines(stepLines)].join('\n'),nextAction:orderedOutcomes[0].nextAction};
 if(blockedOutcomes.some((outcome)=>outcome.agentFailure===true)){
 cause.agentFailure=true;
 }
@@ -4489,7 +4579,7 @@ const doneIds=[];
 for(let waveNumber=1;;waveNumber+=1){
 const wave=computeWave(plan.steps,doneIds);
 if(!wave.ok){
-return stopDelivery([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem)}],run,[],true);
+return stopDelivery([{problem:'The plan steps cannot be scheduled, so '+RUN_NAME+' stopped: '+toPrintableAscii(wave.problem),nextAction:'report'}],run,[],true);
 }
 if(wave.all_done){
 return runGates(run,plan,facts);

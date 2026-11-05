@@ -7,7 +7,7 @@ import { listSourcePaths, stripCommentsAndStrings } from '../../tools/build_work
 
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const libDir = repoRoot + 'plugin/workflow-src/lib/';
-const lib = loadLibs(['decide.js', 'brief.js', 'result.js'].map((name) => libDir + name));
+const lib = loadLibs(['decide.js', 'brief.js', 'result.js', 'stop.js'].map((name) => libDir + name));
 const EM_DASH = '—';
 const ONE_REPLY_LINE = 'Reply with an option, like A, or in your own words.';
 const MANY_REPLY_LINE = 'Reply with a label and an option for each, like Q1 A, or in your own words.';
@@ -269,6 +269,22 @@ describe('compact decisions', () => {
     const text = lib.renderDecisionsCompact(taken);
     for (const needle of ['TAKEN_WHY', 'WHY_TEXT', 'Why', 'VERBATIM_TEXT', 'Word for word:']) {
       assert.equal(text.includes(needle), false, `shows ${needle}`);
+    }
+  });
+  test('a summary ending in . ! or ?, alone or before a closing quote, gets no second terminal mark', () => {
+    const cases = [
+      ['Hash the path.', 'Hash the path.'],
+      ['Ship it!', 'Ship it!'],
+      ['Keep both?', 'Keep both?'],
+      ['Say "done."', 'Say "done."'],
+      ['Say "go!"', 'Say "go!"'],
+      ['Ask "why?"', 'Ask "why?"'],
+      ['Use "fast"', 'Use "fast".'],
+      ['Hash the path', 'Hash the path.']
+    ];
+    for (const [summary, shown] of cases) {
+      const brief = makeBrief({ options: [{ id: 'A', summary: summary }] });
+      assert.equal(lib.renderDecisionsCompact([{ brief }]), 'Decided for you:\n- D1. PROBLEM_TEXT Chose A: ' + shown, summary);
     }
   });
   test('renderDecisionsCompact of nothing is empty', () => {

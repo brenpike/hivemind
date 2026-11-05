@@ -38,13 +38,13 @@
  *   function of this module.
  *   The scope result is checked before any field is read: a result that
  *   fails SCOPE_SCHEMA stops the run before planning, through
- *   describeUnusableResult (lib/result.js): a null result, an agent
+ *   describeUnusableResult (lib/stop.js): a null result, an agent
  *   failure, adds the agent-failure sentence and next action run_again,
- *   and any other unusable result keeps the fix line. A path, the field
+ *   and any other unusable result gets next action report. A path, the field
  *   marked with repositoryPathMark(), that starts with the facts root line
  *   and a slash is first cut to the rest after that slash; a root line of
  *   none, or no root line, converts nothing. An entry whose path then fails
- *   isRepositoryPath (plan.js) is dropped from the scope
+ *   isRepositoryPath (paths.js) is dropped from the scope
  *   (keepRepositoryPathEntries), as an entry left out: the planner then
  *   reads or checks it itself.
  *   A limit is made relative to the facts root the same way and loses a

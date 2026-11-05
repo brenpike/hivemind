@@ -9,7 +9,7 @@ import { discoverWorkflowIds, listModulePaths } from '../../tools/build_workflow
 const repoRoot = fileURLToPath(new URL('../../', import.meta.url));
 const sourceRoot = repoRoot + 'plugin/workflow-src/';
 const libDir = sourceRoot + 'lib/';
-const lib = loadLibs([libDir + 'result.js', libDir + 'args.js']);
+const lib = loadLibs([libDir + 'result.js', libDir + 'stop.js', libDir + 'args.js']);
 const NEW_LIBS = ['args.js', 'facts.js', 'identifier.js'];
 
 const RUN_NOUN = 'delivery';

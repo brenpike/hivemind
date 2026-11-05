@@ -31,7 +31,16 @@
  *   observeHead(run, commit, branch)  sets run.head to commit, run.branch
  *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
- *           request body and its comment carry, with no commit list.
+ *           request body and its comment carry, with no commit list. Each
+ *           taken entry keeps its kind, so the routine ones drop out.
+ *   routineDecisionKinds()  the kinds of taken decision no record shows:
+ *           plan_acceptance, remediation_plan_acceptance and gate_rerun.
+ *           buildRunRecordParts, buildRecordTailBlocks and so every final
+ *           message, finishOpenQuestions included, list only the taken
+ *           decisions of other kinds, and a run whose only taken decisions
+ *           are routine shows no decisions block or part. run.taken itself
+ *           keeps every entry: resolvePlanAcceptance (plan.js) reads the
+ *           routing kinds from it.
  *
  * Message shape (issue 460)
  *   Every chat message has one shape, built here:
@@ -44,8 +53,11 @@
  *   stopDelivery  ends through finishDeliveryBlocked when any cause is
  *           terminal or an agent failure. Otherwise it asks one undecided
  *           step_stop question (buildStepStopBrief, briefs.js) through
- *           askTail (gates.js), whose lead is the cause problems in
- *           buildStopBlocks order, then the end lines, one per line.
+ *           buildUndecidedAsk and askTail (gates.js): decide() asks it
+ *           table_surface at every level, so its recommendation, strong
+ *           for fix_cause and run_again, is never taken. The askTail lead is
+ *           the cause problems in buildStopBlocks order, then the end
+ *           lines, one per line.
  *   finishOpenQuestions  finishDeliveryBlocked over one cause, the fixed
  *           lead with next action answer, with the open questions as its
  *           end line and the round's taken decisions added to the run's.
@@ -56,14 +68,15 @@
  *           line (the open questions, or the commit end runCommitStep
  *           passes), one line naming the encoded branch and its head
  *           only once a wave ran, then the
- *           reversible effects and the taken decisions, one line each
+ *           reversible effects and the taken decisions not of a
+ *           routineDecisionKinds() kind, one line each
  *           (renderDecisionsCompact), as every final message lists them
  *           (ADR-0037 decision 3).
  *   finishDeliveryComplete  one line naming the pull request opened or
  *           pushed to and its commit, one line naming the gates that held
  *           and any gate not configured, the warning line when there is
  *           one, the rejected findings block, then the reversible effects
- *           and the taken decisions, one line each.
+ *           and the taken decisions not of a routine kind, one line each.
  *   Every Next line starts with 'Next:' and points at no cause the lead
  *   does not name. No message and no pull request text lists the
  *   commits: the branch and the pull request on GitHub hold them
@@ -126,7 +139,21 @@ function observeHead(run, commit, branch) {
   run.headRound = run.answerLog.length;
 }
 
+/**
+ * Returns the decision kinds every run takes as a matter of course: the
+ * plan and remediation plan acceptances and a gate rerun. No final message
+ * and no pull request text lists a taken decision of these kinds.
+ */
+function routineDecisionKinds() {
+  return [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND, GATE_RERUN_KIND];
+}
+
+function isShownDecision(entry) {
+  return !routineDecisionKinds().includes(entry.kind);
+}
+
 function buildRunRecordParts(run, taken, gates) {
+  const shown = taken.filter(isShownDecision);
   const parts = [];
   if (run.reversibleEffects.length > 0) {
     parts.push({ id: 'reversible_effects', text: renderReversibleEffects(run.reversibleEffects), external: true });
@@ -136,8 +163,8 @@ function buildRunRecordParts(run, taken, gates) {
   } else if (run.notRunGates.length > 0) {
     parts.push({ id: 'gates', text: renderNotRunGates(run.notRunGates), external: false });
   }
-  if (taken.length > 0) {
-    parts.push({ id: 'decisions', text: renderDecisions(taken), compact: renderDecisionsCompact(taken), external: true });
+  if (shown.length > 0) {
+    parts.push({ id: 'decisions', text: renderDecisions(shown), compact: renderDecisionsCompact(shown), external: true });
   }
   return parts;
 }
@@ -148,11 +175,12 @@ function describeBranchLine(run) {
 
 function buildRecordTailBlocks(run, taken) {
   const blocks = [];
+  const shown = taken.filter(isShownDecision);
   if (run.reversibleEffects.length > 0) {
     blocks.push({ text: renderReversibleEffects(run.reversibleEffects) });
   }
-  if (taken.length > 0) {
-    blocks.push({ text: renderDecisionsCompact(taken) });
+  if (shown.length > 0) {
+    blocks.push({ text: renderDecisionsCompact(shown) });
   }
   return blocks;
 }
@@ -226,7 +254,7 @@ function stopDelivery(causes, run, endLines, isReplan) {
   if (causes.some((cause) => cause.terminal === true || cause.agentFailure === true)) {
     return { result: finishDeliveryBlocked(causes, run, endLines) };
   }
-  const asked = askTail(buildUndecidedAsk(buildStepStopBrief(causes, isReplan)), run, describeStopLead(causes, endLines));
+  const asked = askTail(buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(causes, isReplan), run), run, describeStopLead(causes, endLines));
   if (asked.answer === undefined) {
     return asked;
   }

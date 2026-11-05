@@ -8,7 +8,8 @@
  *     blocks      the text the user reads, as below.
  *   finish({outcome, causes, blocks, pr})
  *     outcome     'complete' or 'blocked'.
- *     causes      as for buildStopBlocks, given exactly when blocked.
+ *     causes      as for buildStopBlocks (lib/stop.js), given exactly when
+ *                 blocked.
  *     blocks      the run's final text, as below. Optional when blocked.
  *     pr          optional. The pull request the run opened or reused:
  *                 {url, head_ref_oid, created}, no other key. url matches
@@ -30,11 +31,6 @@
  *                 step- or script-written reason, blocker line, stderr line
  *                 or path. limit optional, a positive integer of code
  *                 points, maxExcerptLength() when absent.
- *   describeNoResult(result)  result any value, what one agent() returned.
- *   describeUnusableResult(problem, result)  problem a string.
- *   isTransientFailure(text)  text any value, a runner's stderr or blocker.
- *   nextStepLine(nextAction)  'fix_cause', 'run_again', 'answer' or absent.
- *   buildStopBlocks(causes)  causes non-empty array of {problem, nextAction?}.
  *
  * Outputs
  *   pauseForUser  {needs_user: true, resume_args, message}
@@ -68,28 +64,11 @@
  *                 line. Otherwise its non-blank lines, split on CRLF, CR or
  *                 LF and each trimmed, joined with one space, cut by
  *                 cutAtBoundary to limit and passed through
- *                 encodeUntrustedText. When the cut dropped text, the mark
- *                 ' (cut)' follows the closing quote.
+ *                 encodeUntrustedText. When the cut dropped text, the plain
+ *                 words ', shortened' follow the closing quote.
  *   describeReason  'it says ' + quoteDiagnostic(text, maxReasonLength())
  *                 + '.', or 'it gave no reason.' when that quote is
  *                 undefined. A reason is quoted whole up to 600 code points.
- *   describeNoResult  for a null result, one fixed sentence: the step's
- *                 agent failed before it returned a result, as an agent API
- *                 error such as an expired login, a rate limit or a network
- *                 failure does. Otherwise the empty string.
- *   describeUnusableResult  {problem: problem + ' ' + describeNoResult(null),
- *                 nextAction: 'run_again', agentFailure: true} for a null
- *                 result, else {problem}. agentFailure is set only here.
- *   isTransientFailure  true only when text is a string that names, by one
- *                 fixed case-insensitive pattern, a root cause the Transient
- *                 Failure definition of definitions.md lists, else false.
- *   nextStepLine  the Next line: run_again says nothing in the repo needs a
- *                 fix; answer says rerun with the answers; else the fix line.
- *   maxBlockedLeadLength  1000, the code points of a compact lead.
- *   buildStopBlocks  the lead, then its Next line as a whole block, then a
- *                 block per later cause. Causes not run_again lead, then
- *                 run_again ones, in given order. The lead compact is
- *                 cutAtBoundary(problem, maxBlockedLeadLength()) if shorter.
  *
  * Contract the overlord relays
  *   The relay and resume rule has one home,
@@ -157,19 +136,17 @@
  *   digest and the blocker of each step result, so a message is short
  *   before it is fitted (issue 445). The fit below stays the backstop for
  *   any long text, such as the analysis-only report.
- *   A null result is an agent failure: agent() returns null on an agent API
- *   error, so describeNoResult names that failure and never the step's
- *   output, which does not exist (issue 460). describeUnusableResult alone
- *   gives it that sentence, run_again and the agentFailure mark, so a caller
- *   can end the run on it (issue 457). finish builds every blocked message
- *   from its causes, so no caller sets its lead or Next line (49be981e).
+ *   finish builds every blocked message from its causes, through
+ *   buildStopBlocks (lib/stop.js), so no caller sets its lead or Next line
+ *   (49be981e).
  *
  * Why
  *   A running workflow cannot take input mid-run, so asking means returning,
  *   in one fixed shape the overlord relays and resumes alike. Fitting here
  *   keeps the notice whole and a whole block whole by its key. Call-site
  *   stops could hide an agent failure or misstate the Next line, so finish
- *   takes causes (findings 3827ab1a, 58a21e45 and 49be981e).
+ *   takes causes (findings 3827ab1a, 58a21e45 and 49be981e). A cut quote
+ *   says so in words a reader knows.
  */
 
 function resultFields() {
@@ -287,71 +264,12 @@ function quoteDiagnostic(text, limit = maxExcerptLength()) {
   }
   const joinedLine = textLines.join(' ');
   const keptLine = cutAtBoundary(joinedLine, limit);
-  return encodeUntrustedText(keptLine) + (keptLine === joinedLine ? '' : ' (cut)');
+  return encodeUntrustedText(keptLine) + (keptLine === joinedLine ? '' : ', shortened');
 }
 
 function describeReason(text) {
   const quoted = quoteDiagnostic(text, maxReasonLength());
   return quoted === undefined ? 'it gave no reason.' : 'it says ' + quoted + '.';
-}
-
-function describeNoResult(result) {
-  if (result !== null) {
-    return '';
-  }
-  return 'The step\'s agent failed before it returned a result, as an agent API error such as an expired login, a rate limit or a network failure does.';
-}
-
-function describeUnusableResult(problem, result) {
-  if (result !== null) {
-    return { problem: problem };
-  }
-  return { problem: problem + ' ' + describeNoResult(result), nextAction: 'run_again', agentFailure: true };
-}
-
-function isTransientFailure(text) {
-  return typeof text === 'string' && transientFailurePatterns().some((pattern) => pattern.test(text));
-}
-
-function transientFailurePatterns() {
-  return [
-    /\bHTTP(?:\/[0-9.]+)?:? (?:error |status )?(?:5[0-9]{2}|429)\b/i,
-    /\b(?:5[0-9]{2} (?:Internal Server Error|Bad Gateway|Service Unavailable|Gateway Time-?out)|429 Too Many Requests)\b/i,
-    /\b(?:connection (?:reset|refused|aborted)|ECONN(?:RESET|REFUSED|ABORTED))\b/i,
-    /\b(?:could not resolve host|temporary failure in name resolution|name or service not known|DNS (?:resolution|lookup) failed|ENOTFOUND|EAI_AGAIN)\b/i,
-    /\b(?:TLS|SSL) handshake (?:failed|failure|error|timeout)\b/i,
-    /\bexit(?:ed)?(?: with)?(?: code| status)?:? (?:124|137)\b/i,
-    /\b(?:network (?:is )?unreachable|ENETUNREACH)\b/i,
-    /\b(?:connection timed out|RPC failed|early EOF|index-pack failed)\b/i
-  ];
-}
-
-function nextStepLine(nextAction) {
-  if (nextAction === 'run_again') {
-    return 'Next: nothing in the repo needs a fix, so run the request again later, for example once the machine is idle.';
-  }
-  if (nextAction === 'answer') {
-    return 'Next: run the request again with the answers in it.';
-  }
-  return 'Next: fix what stopped the run, then run the request again.';
-}
-
-function maxBlockedLeadLength() {
-  /* 1000: a code point costs at most 6 notice chars (\u00XX), so the compact lead, Next line and cut marker fit noticeBudget(). */
-  return 1000;
-}
-
-function buildStopBlocks(causes) {
-  if (!Array.isArray(causes) || causes.length === 0) {
-    throw new Error('buildStopBlocks: causes must be a non-empty array');
-  }
-  const fixCauses = causes.filter((cause) => cause.nextAction !== 'run_again');
-  const orderedCauses = fixCauses.concat(causes.filter((cause) => cause.nextAction === 'run_again'));
-  const leadText = orderedCauses[0].problem;
-  const compactLead = cutAtBoundary(leadText, maxBlockedLeadLength());
-  const leadBlock = compactLead === leadText ? { text: leadText } : { text: leadText, compact: compactLead };
-  const laterBlocks = orderedCauses.slice(1).map((cause) => ({ text: cause.problem }));
-  return [leadBlock, { text: nextStepLine(orderedCauses[0].nextAction), whole: true }].concat(laterBlocks);
 }
 
 function canCarry(resumeArgs) {

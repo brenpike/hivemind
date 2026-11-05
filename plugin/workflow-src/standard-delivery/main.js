@@ -56,21 +56,23 @@
  *   the Next line, any later causes and the commit end line, then only the
  *   records ADR-0037 decision 3 needs in chat:
  *   the branch and its head once a wave ran, the
- *   reversible effects and the taken decisions, one line each. A complete
+ *   reversible effects and the taken decisions other than the routine
+ *   kinds of routineDecisionKinds() (record.js), one line each. A complete
  *   run names the pull request and its commit, the gates that held and any
  *   gate not configured, the warning when there is one and the rejected
  *   findings. No message shows a commit list, a criticality or ask
  *   reason line, and no pause shows a taken decision.
  *   The pull request body and comment each carry the one run record
  *   buildRunRecordParts() returns: the reversible effects, the gates and
- *   the taken decisions, in that order, and no commit list (ADR-0037
+ *   the taken decisions other than the routine kinds, in that order, and
+ *   no commit list (ADR-0037
  *   decisions 2 and 3; review findings 1a75f008 and 6f87ce62), the decisions in full with
  *   their compact fallback (issue 445). Each decision is the same brief
  *   once however many passes took it.
  *   No question shows the plan summary or names this run's per-agent
  *   results. When the scope sets limits and a plan path lies outside them,
- *   the acceptance has no recommendation, so it is asked at every level,
- *   and the planning pause lead names up to maxListedItems() of those
+ *   the acceptance is asked at every level with askReason outside_limits
+ *   and its own recommendation shown, and the planning pause lead names up to maxListedItems() of those
  *   paths, each encoded whole, then the count of the rest (plan.js
  *   listPlanPaths). Only an irreversible effect, an exact ask, shows its
  *   text word for word.
@@ -102,6 +104,11 @@
  *   limit (finishOpenQuestions) or the launch check (issue 457). Every other
  *   stop pauses through stopDelivery (record.js) with one step_stop
  *   question, and the reply takes the stopped step again or plans again.
+ *   Every undecided question, a step_stop, a version question, the fix
+ *   limit and the gate rerun limit, resolves through decide() in
+ *   buildUndecidedAsk (gates.js), which throws on a take: step_stop and
+ *   version_bump_indeterminable surface at every level, and both limit
+ *   briefs have strength none.
  *   Each new pass reads the head from its branch step through observeHead
  *   (record.js), the one writer of run.head, before any wave: that commit
  *   equals the facts head by needsBranchReplan, so the pass starts from a
@@ -123,19 +130,25 @@
  *   the repo and passes with no change, fix_cause otherwise.
  *   One rule covers every step: a null result from any agent() call, an
  *   agent failure, is a cause through describeUnusableResult
- *   (lib/result.js), with the describeNoResult sentence once and next
- *   action run_again, and a non-null unusable result keeps the fix line.
+ *   (lib/stop.js), with the describeNoResult sentence once and next
+ *   action run_again, and a non-null unusable result gets report, as does
+ *   a cause whose lead names no reason, a runner command stop and a
+ *   synapse-gate denial (issues 481, 498).
  *   run_again gives a line saying nothing in the repo needs a fix and to
- *   run the request again later; fix_cause or no value gives the fix line.
+ *   run the request again later; fix_cause or no value gives the fix line,
+ *   to clear the cause named above, then run the request again. Code alone
+ *   sets answer, approve and report, and describeStopAction (lib/stop.js)
+ *   holds every action phrase.
  *   A blocked wave says run_again only when every blocked worker does.
  *   Compound rule: a file-changing step passes its own causes to
  *   runCommitStep (relay.js), which stops through stopDelivery with them
  *   and a failed commit's cause after them, so no stop hides another. A
  *   facts, scan, scope, plan or branch stop goes through stopDelivery with
  *   isReplan true, and its reply starts a new pass outside maxReplans();
- *   the launch check alone ends in runDelivery. Causes that need
- *   a fix lead, with the fix line, then agent failures, each group in step
- *   order, so the Next line is run_again only when every cause is. A lead
+ *   the launch check alone ends in runDelivery. orderStopCauses
+ *   (lib/stop.js) orders causes stably by approve, fix_cause or no
+ *   value, answer, report, then run_again, and the first cause gives the
+ *   Next line, so it is run_again only when every cause is. A lead
  *   longer than maxBlockedLeadLength() code points has as its compact form
  *   the cutAtBoundary prefix of at most those code points, so it never
  *   cuts mid-word, and the lead of an open question stop is fixed and
@@ -159,8 +172,8 @@
  *   validation blocker goes through describeReason, and each dirty path a
  *   commit relay names goes through quoteDiagnostic: each made one line and
  *   cut at a sentence or word boundary to maxExcerptLength() code points
- *   first, or to maxReasonLength() through describeReason, with the cut
- *   mark after a cut quote. The blocker of a review stop goes through
+ *   first, or to maxReasonLength() through describeReason, with the words
+ *   ', shortened' after a cut quote. The blocker of a review stop goes through
  *   quoteDiagnostic with a limit equal to its maxLength 300, so it is made
  *   one line and never cut. Branch names, step ids, reversible effect
  *   summaries and the other review values, the excerpt of a review stop
