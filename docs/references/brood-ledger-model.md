@@ -1,6 +1,6 @@
 # Brood Ledger Model
 
-Read this file to understand how the brood manifest bridges to per-strain run ledgers: the per-brood JSON `manifest_version: 4` shape (top-level `brood_id` + `created_at` + `hatchery` block, per-strain `run` pointer with `suggested_id` only), the ledger-path derivation from git ground truth, the injected child-task metadata, hatchery read-only monitoring with status-derivation priority (live child-ledger projection and facts-file started-evidence, informational-only, never overriding observable status), and the reconciliation concept.
+Read this file to understand how the brood manifest bridges to per-strain run ledgers: the per-brood JSON `manifest_version: 4` shape (top-level `brood_id` + `created_at` + `hatchery` block, per-strain `run` pointer with `suggested_id` only), the ledger-path derivation from git ground truth, the injected child-task metadata, hatchery read-only monitoring with status-derivation priority (live child-ledger projection and facts-file started-evidence, informational-only, never overriding observable status), and the reconciliation concept. It specifies the brood scripts (`spawn-brood.sh`, `brood-status-collect.sh`, `brood-status-project.sh`, `_shared/brood-state.sh`); agents read the brood rules from `plugin/agents/overlord.md` and the brood skills, not from this file.
 
 ## Format split: manifest JSON, child ledgers JSON
 

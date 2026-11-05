@@ -3,7 +3,7 @@
 # Workflow-definition structural validator for the hivemind plugin (plan §J.1).
 #
 # Validates every workflow definition under plugin/workflows/*.json against the
-# v1 contract in ${CLAUDE_PLUGIN_ROOT}/references/workflow-state-machine.md, and
+# v1 contract in docs/references/workflow-state-machine.md, and
 # structurally validates the run-ledger JSON shape of every ledger fixture under
 # tests/engine/ against ${CLAUDE_PLUGIN_ROOT}/references/run-ledger-schema.md.
 #
@@ -81,7 +81,7 @@ if ! command -v jq >/dev/null 2>&1; then
     exit 2
 fi
 
-# v1 legal state types (workflow-state-machine.md → V1 state types).
+# v1 legal state types (docs/references/workflow-state-machine.md → V1 state types).
 V1_STATE_TYPES='["decision","agent","skill","user_gate","terminal"]'
 
 # Safe id pattern for start, state names, transition results and transition

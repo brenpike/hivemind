@@ -116,7 +116,7 @@ Blocking issue refs, one per line as `#123`. Or, when there are none:
 
 ## Parent epic and sub-issue wiring
 
-Group the slices under one **parent epic issue** per PRD, each slice a native GitHub sub-issue. Use no initiative labels. Every sub-issue GraphQL operation goes through `${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh` (reference: `${CLAUDE_PLUGIN_ROOT}/references/github-subissue-graphql.md`).
+Group the slices under one **parent epic issue** per PRD, each slice a native GitHub sub-issue. Use no initiative labels. Every sub-issue GraphQL operation goes through `${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh`.
 
 ### Parent epic body
 

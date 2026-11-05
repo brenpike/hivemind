@@ -1,7 +1,7 @@
 # GitHub Sub-Issue GraphQL Reference
 
 Use these operations for managing GitHub native sub-issues from scripts such as
-`${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh`.
+`${CLAUDE_PLUGIN_ROOT}/skills/prd-to-issues/scripts/subissue-ops.sh`. No agent reads it at runtime: the prd-to-issues skill runs every sub-issue operation through that script.
 
 Sub-issues are a distinct feature from issue dependencies (the "blocked by" relationship).
 The two share no input fields and must not be conflated — see the field-name warning in
