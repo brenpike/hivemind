@@ -995,6 +995,22 @@ describe('build_workflows carries only what a script reads', () => {
     appendAnalysisMainLines(scratchRoot, ['const SEEDED_UNREAD = 1;']);
     assertBuildAndCheckThrow(scratchRoot, /^Error: plugin\/workflow-src\/analysis-only\/main\.js: nothing the workflow runs reads the top-level declaration of SEEDED_UNREAD\. Remove it\.$/);
   });
+  test('a function read by a default value or a computed key of a top-level destructuring const is carried', () => {
+    const scratchRoot = makeScratchCopy();
+    const names = ['seededObjectDefault', 'seededArrayDefault', 'seededNestedDefault', 'seededKey'];
+    writeFileSync(join(scratchRoot, SEEDED_MODULE_PATH), names.map((name) => 'function ' + name + '() {\n  return \'k\';\n}').join('\n') + '\n');
+    appendAnalysisMainLines(scratchRoot, [
+      'const { seededObjectBound = seededObjectDefault() } = {};',
+      'const [seededArrayBound = seededArrayDefault()] = [];',
+      'const { nested: [{ seededNestedBound = seededNestedDefault() }] = [{}] } = {};',
+      'const { [seededKey()]: seededComputedBound } = {};',
+      'void [seededObjectBound, seededArrayBound, seededNestedBound, seededComputedBound];'
+    ]);
+    const source = buildWorkflow(scratchRoot, 'analysis-only');
+    for (const name of names) {
+      assert.ok(source.includes('function ' + name + '('), name);
+    }
+  });
   for (const [name, line] of [['eval', 'log(eval(\'1\'));'], ['globalThis', 'log(globalThis.x);'], ['Function', 'log(Function(\'return 1\'));'], ['this', 'log(this);'], ['with', 'with ({}) {\n  log(1);\n}']]) {
     test('reached code that reads ' + name + ' fails the build and --check, naming the id, and unreached code that reads it builds', () => {
       const scratchRoot = makeScratchCopy();

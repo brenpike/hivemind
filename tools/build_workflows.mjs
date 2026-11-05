@@ -1076,12 +1076,32 @@ function collectReadNames(value, names) {
   return names;
 }
 
+/**
+ * Returns the names a binding pattern binds. A default value and a computed
+ * key bind no name, so they stay reads of the declaration.
+ */
+function listBoundNames(pattern) {
+  if (pattern === null) {
+    return [];
+  }
+  if (pattern.type === 'Identifier') {
+    return [pattern.name];
+  }
+  if (pattern.type === 'ObjectPattern') {
+    return pattern.properties.flatMap((property) => listBoundNames(property.type === 'Property' ? property.value : property));
+  }
+  if (pattern.type === 'ArrayPattern') {
+    return pattern.elements.flatMap((element) => listBoundNames(element));
+  }
+  return listBoundNames(pattern.type === 'AssignmentPattern' ? pattern.left : pattern.argument);
+}
+
 function listDeclaredNames(node) {
   if (node.type === 'FunctionDeclaration' || node.type === 'ClassDeclaration') {
     return [node.id.name];
   }
   if (node.type === 'VariableDeclaration') {
-    return [...collectReadNames(node.declarations.map((declarator) => declarator.id), new Set())];
+    return node.declarations.flatMap((declarator) => listBoundNames(declarator.id));
   }
   return [];
 }
