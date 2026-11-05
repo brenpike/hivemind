@@ -28,6 +28,8 @@ const briefSchema = readJson('plugin/references/decision-brief-schema.json');
 const agentPlanSchema = readDataConstant(repoRoot, 'PLAN_SCHEMA');
 const agentBriefSchema = readDataConstant(repoRoot, 'BRIEF_SCHEMA');
 const droneText = readText(join(repoRoot, 'plugin/agents/drone.md'));
+const securityPolicyText = readText(join(repoRoot, 'plugin/governance/security-policy.md'));
+const reportFormatText = readText(join(repoRoot, 'plugin/governance/report-format.md'));
 const pluginRoot = join(repoRoot, 'plugin');
 const createBranchPath = join(repoRoot, 'plugin/skills/create-working-branch/scripts/create-working-branch.sh');
 const moltPath = join(repoRoot, 'plugin/skills/molt/scripts/molt.sh');
@@ -2262,7 +2264,24 @@ const ROW_TESTS = {
       assert.equal(first.opts.agentType, 'hivemind:drone');
       assert.equal(callOf(run, 'work-1-S2').opts.agentType, 'hivemind:changeling');
       assert.equal(first.opts.phase, 'Waves');
-      assert.deepEqual(Object.keys(first.opts.schema.properties), ['outcome', 'summary', 'blocker', 'next_action']);
+      assert.deepEqual(Object.keys(first.opts.schema.properties), ['outcome', 'summary', 'blocker', 'next_action', 'stage']);
+    });
+    test('the worker stage is an optional string of at most 40 code points, valid on blocked only', () => {
+      const schema = main.buildWorkerSchema();
+      assert.deepEqual([schema.properties.stage.type, schema.properties.stage.maxLength], ['string', 40]);
+      assert.ok(lib.validateSchema(schema, { outcome: 'blocked', summary: 'x', stage: 's'.repeat(40) }).ok);
+      assert.ok(lib.validateSchema(schema, { outcome: 'blocked', summary: 'x' }).ok);
+      assert.ok(!lib.validateSchema(schema, { outcome: 'blocked', summary: 'x', stage: 's'.repeat(41) }).ok);
+      assert.ok(!lib.validateSchema(schema, { outcome: 'complete', summary: 'x', stage: 'implementation' }).ok);
+      assert.ok(!lib.validateSchema(schema, { outcome: 'needs_replan', summary: 'x', blocker: 'y', stage: 'implementation' }).ok);
+    });
+    test('a plan that cannot be scheduled mid-run pauses with a report step_stop question, and its reply plans again', async () => {
+      const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [], localReview: true });
+      const cyclic = makePlan({ steps: [makeStep('A', ['a.js'], { depends_on: ['B'] }), makeStep('B', ['b.js'], { depends_on: ['A'] })] });
+      const stopped = structuredClone(await main.runPlanWaves(run, cyclic, {}));
+      const lead = 'The plan steps cannot be scheduled, so the delivery stopped: dependency cycle detected among plan steps';
+      assert.equal(stopped.result.message, lead + '\n\n' + lib.renderQuestions([limitAsk(main.buildStepStopBrief([{ problem: lead, nextAction: 'report' }], true))]));
+      assert.ok(!stopped.result.message.includes('named above'), stopped.result.message);
     });
     test('steps sharing a file run in separate waves', async () => {
       const shared = makePlan({ steps: [makeStep('S1', ['src/a.js']), makeStep('S2', ['src/a.js'])] });
@@ -2514,6 +2533,48 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, results);
       assert.ok(!labelsOf(run).includes('work-1-S2'));
       assert.ok(run.result.message.includes('Step "S1" was blocked: it gave no reason.'));
+    });
+    const waveLead = 'A worker did not finish its step, so the delivery stopped after its wave:';
+    const stopQuestionOf = (nextAction) => lib.renderQuestions([limitAsk(main.buildStepStopBrief([{ problem: 'P.', nextAction: nextAction }], true))]);
+    const runBlockedWave = (workers) => {
+      const ids = Object.keys(workers);
+      const plan = makePlan({ steps: ids.map((id, index) => makeStep(id, ['src/f' + index + '.js'])) });
+      const results = Object.fromEntries(ids.map((id) => ['work-1-' + id, { outcome: 'blocked', summary: 'Stopped.', ...workers[id] }]));
+      return runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan), ...results }));
+    };
+    test('a blocked worker with no blocker gives a report stop that names nothing to clear', async () => {
+      for (const worker of [{}, { next_action: 'fix_cause' }, { stage: 'destructive-fix-gate' }]) {
+        const run = await runBlockedWave({ S1: worker });
+        assert.ok(run.result.message.startsWith(waveLead + '\n- Step "S1" was blocked: it gave no reason.\n'), run.result.message);
+        assert.ok(run.result.message.endsWith('\n\n' + stopQuestionOf('report')), run.result.message);
+        assert.ok(!run.result.message.includes('named above'), run.result.message);
+      }
+      assert.equal(main.readWorkerAction({ outcome: 'blocked', summary: 'x', blocker: ' \n ', next_action: 'fix_cause' }), 'report');
+    });
+    test('the destructive-fix gate stage or blocker of security-policy.md gives an approve stop with an approval step line', async () => {
+      const gateLine = securityPolicyText.split('\n').find((line) => line.includes('When the gate fires, return the Worker Report'));
+      const stage = /`stage: ([^`]+)`/.exec(gateLine)[1];
+      const blocker = /`blocker: ([^`]+)`/.exec(gateLine)[1];
+      assert.deepEqual([stage, blocker], ['destructive-fix-gate', 'proposed fix requires human confirmation']);
+      const stageLine = reportFormatText.split('\n').find((line) => line.startsWith('stage: ['));
+      assert.ok(stageLine.slice('stage: ['.length, -1).split('|').includes(stage), stageLine);
+      for (const [worker, quoted] of [[{ blocker: 'Dropping the table needs approval.', stage: stage }, 'Dropping the table needs approval.'], [{ blocker: blocker + ': drop the users table.' }, blocker + ': drop the users table.'], [{ blocker: 'Proposed fix requires human confirmation.', next_action: 'run_again' }, 'Proposed fix requires human confirmation.']]) {
+        const run = await runBlockedWave({ S1: worker });
+        assert.ok(run.result.message.startsWith(waveLead + '\n- Step "S1" waits for your approval at the destructive-fix gate: it says "' + quoted + '".\n'), run.result.message);
+        assert.ok(run.result.message.endsWith('\n\n' + stopQuestionOf('approve')), run.result.message);
+      }
+      for (const worker of [{ blocker: 'Tests fail.', stage: 'implementation' }, { blocker: 'The fix ' + blocker + '.' }]) {
+        assert.equal(main.readWorkerAction({ outcome: 'blocked', summary: 'x', ...worker }), undefined, JSON.stringify(worker));
+      }
+    });
+    test('the wave cause takes the type first in stop order among its blocked workers', async () => {
+      const approve = { blocker: 'Dropping the table needs approval.', stage: 'destructive-fix-gate' };
+      const fix = { blocker: 'Tests fail.' };
+      const slow = { blocker: 'The registry timed out.', next_action: 'run_again' };
+      for (const [workers, nextAction] of [[{ S1: fix, S2: approve }, 'approve'], [{ S1: {}, S2: fix }, undefined], [{ S1: slow, S2: {} }, 'report'], [{ S1: slow, S2: slow }, 'run_again']]) {
+        const run = await runBlockedWave(workers);
+        assert.ok(run.result.message.endsWith('\n\n' + stopQuestionOf(nextAction)), JSON.stringify(workers) + run.result.message);
+      }
     });
   },
   'SD-17': () => {
@@ -5082,9 +5143,9 @@ const ROW_TESTS = {
       assert.ok(!overBound.result.message.includes('Z'.repeat(10)), overBound.result.message.slice(0, 300));
     });
     const moduleCode = stripCommentsAndStrings(moduleSource);
-    test('every .blocker and .stderr read in the workflow modules is the argument of describeReason, describeRelayBlocker, describeCommitBlocker or quoteOrEmpty, or of isTransientFailure, which shows nothing', () => {
+    test('every .blocker and .stderr read in the workflow modules is the argument of describeReason, describeRelayBlocker, describeCommitBlocker, quoteOrEmpty or quoteDiagnostic, or of isTransientFailure or isDestructiveGateBlocker, which show nothing', () => {
       const reads = moduleCode.match(/(?<!\))\.(?:blocker|stderr)\b/g) || [];
-      const encoded = moduleCode.match(/\b(?:describeReason|describeRelayBlocker|describeCommitBlocker|quoteOrEmpty|isTransientFailure)\(\w+\.(?:blocker|stderr)\b/g) || [];
+      const encoded = moduleCode.match(/\b(?:describeReason|describeRelayBlocker|describeCommitBlocker|quoteOrEmpty|quoteDiagnostic|isTransientFailure|isDestructiveGateBlocker)\(\w+\.(?:blocker|stderr)\b/g) || [];
       assert.ok(reads.length >= 9, String(reads.length));
       assert.equal(encoded.length, reads.length);
       assert.ok(moduleCode.includes('quoteOrEmpty(review.blocker, reviewFieldTexts().blocker.bounds.maxLength)'));
@@ -6733,7 +6794,7 @@ const ROW_TESTS = {
       const causes = [{ problem: 'SLOW_ONE_ZQ.', nextAction: 'run_again' }, { problem: 'SLOW_TWO_ZQ.', nextAction: 'run_again' }];
       const stopped = structuredClone(main.stopDelivery(causes, stopState(), [], false));
       assert.deepEqual(stopped, { result: { needs_user: true, resume_args: { answers: {}, build: BUILD_ID }, message: 'SLOW_ONE_ZQ.\nSLOW_TWO_ZQ.\n\n' + lib.renderQuestions([stopAskOf(causes, false)]) } });
-      assert.ok(main.buildStepStopBrief(causes, false).problem.startsWith('Nothing in the repo needs a fix: reply when you are ready to go on'));
+      assert.ok(main.buildStepStopBrief(causes, false).problem.startsWith('Nothing in the repo needs a fix, so reply later'));
     });
     test('the pause lead is the cause problems in buildStopBlocks order, then the end lines, one per line', () => {
       const causes = [{ problem: 'LATER_ZQ.', nextAction: 'run_again' }, { problem: 'FIRST_ZQ.\nSTEP_LINE_ZQ' }, { problem: 'SECOND_ZQ.', nextAction: 'fix_cause' }];
@@ -6750,18 +6811,31 @@ const ROW_TESTS = {
       assert.ok(stopped.result.message.includes(lib.cutAtBoundary(lead, lib.maxBlockedLeadLength())), 'the compact lead shows');
       assert.ok(lib.noticeLength(stopped.result) <= lib.noticeBudget());
     });
-    test('the brief fits BRIEF_SCHEMA with one option and strength none, and names what the reply does', () => {
+    test('the brief of each stop type fits BRIEF_SCHEMA with one option and its own recommendation, and names what the reply does', () => {
+      const expected = {
+        fix_cause: ['strong', 'Clear the cause named above, then commit any change and reply, and ', 'Clearing it lets the step go on.'],
+        run_again: ['strong', 'Nothing in the repo needs a fix, so reply later, for example once the machine is idle, and ', 'The cause clears itself.'],
+        report: ['weak', "Nothing in your repo needs a fix: the run's own step failed; reply to try once more, and ", 'A stop that comes back is a workflow defect: report it, do not retry.'],
+        approve: ['none', 'Approve or refuse the change named above, then reply with that answer, and ', 'Only you can approve a change the destructive-fix gate holds back.']
+      };
       for (const isReplan of [false, true]) {
-        for (const causes of [[{ problem: 'P.' }], [{ problem: 'P.', nextAction: 'run_again' }]]) {
-          const brief = structuredClone(main.buildStepStopBrief(causes, isReplan));
+        const then = isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.';
+        for (const [nextAction, [strength, start, why]] of Object.entries(expected)) {
+          const brief = structuredClone(main.buildStepStopBrief([{ problem: 'P.', nextAction: nextAction }], isReplan));
           assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
           assert.equal(brief.kind, 'step_stop');
           assert.equal(brief.options.length, 1);
-          assert.deepEqual([brief.recommendation.option_id, brief.recommendation.strength], ['A', 'none']);
-          assert.ok(brief.problem.endsWith(isReplan ? 'the run plans again from fresh facts.' : 'the run takes the stopped step again.'), brief.problem);
+          assert.equal(brief.options[0].summary, isReplan ? 'Go on: plan again from fresh facts.' : 'Go on: take the stopped step again.');
+          assert.deepEqual(brief.recommendation, { option_id: 'A', strength: strength, why: why });
+          assert.equal(brief.problem, start + then);
+          assert.ok(!JSON.stringify(brief).includes('Only you can tell when what stopped the run is out of the way.') && !brief.problem.includes('Fix what stopped the run'), brief.problem);
         }
+        assert.deepEqual(structuredClone(main.buildStepStopBrief([{ problem: 'P.' }], isReplan)), structuredClone(main.buildStepStopBrief([{ problem: 'P.', nextAction: 'fix_cause' }], isReplan)));
       }
-      assert.ok(main.buildStepStopBrief([{ problem: 'P.' }, { problem: 'Q.', nextAction: 'run_again' }], false).problem.startsWith('Fix what stopped the run, then reply'));
+      for (const [actions, leadAction] of [[['run_again', 'report'], 'report'], [['report', undefined], 'fix_cause'], [['run_again', 'fix_cause', 'approve'], 'approve']]) {
+        const causes = actions.map((nextAction) => ({ problem: 'P.', nextAction: nextAction }));
+        assert.deepEqual(structuredClone(main.buildStepStopBrief(causes, false)), structuredClone(main.buildStepStopBrief([{ problem: 'P.', nextAction: leadAction }], false)), JSON.stringify(actions));
+      }
     });
     test('a reply with isReplan true gives a new pass that does not count against maxReplans(), logged with settled []', () => {
       const state = stopState({ answers: {}, reply: STOP_REPLY });

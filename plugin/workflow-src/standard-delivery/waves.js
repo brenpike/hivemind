@@ -33,10 +33,16 @@
  *   worker result counts as blocked: its reason names the agent failure
  *   through describeUnusableResult (lib/result.js), with next action
  *   run_again, and readWorkerOutcome passes its agentFailure mark on.
- *   describeBlockedWave makes the one cause of a blocked wave: a lead line
- *   naming the stop, then one line per blocked step through capItemLines,
- *   with next action run_again only when every blocked worker says so, and
- *   agentFailure when any blocked worker had a null result. runCommitStep
+ *   readWorkerOutcome types a blocked worker: report when its blocker
+ *   gives no reason, approve when its stage is destructive-fix-gate or its
+ *   blocker starts with the security-policy.md gate text, else its own
+ *   next_action. describeBlockedWave makes the one cause of a blocked wave:
+ *   a lead line naming the stop, then one line per blocked step through
+ *   capItemLines, an approve step saying it waits for approval, with the
+ *   next action first in orderStopCauses order (lib/result.js), so
+ *   run_again only when every blocked worker says so, and agentFailure
+ *   when any blocked worker had a null result. A plan that cannot be
+ *   scheduled mid-run is a report stop. runCommitStep
  *   (relay.js) takes that cause as its step cause and stops with it through
  *   stopDelivery (record.js) as a replan, so a commit stop never hides it,
  *   and the loop returns that run end as is. Stops (issue 457): a wave with
@@ -71,12 +77,13 @@ function buildWorkerSchema() {
       },
       summary: { type: 'string', description: 'What you changed, in one or two sentences.' },
       blocker: { type: 'string', maxLength: 400, description: 'Why the step is blocked or needs a new plan, in one or two short sentences written for the user.' },
-      next_action: buildNextActionProperty()
+      next_action: buildNextActionProperty(),
+      stage: { type: 'string', maxLength: 40, description: 'Worker Report stage.' }
     },
     required: ['outcome', 'summary'],
     variants: {
       complete: { required: [], optional: [] },
-      blocked: { required: [], optional: ['blocker', 'next_action'] },
+      blocked: { required: [], optional: ['blocker', 'next_action', 'stage'] },
       needs_replan: { required: [], optional: ['blocker'] }
     }
   });
@@ -132,14 +139,30 @@ function readWorkerOutcome(step, result) {
   if (result.outcome === 'complete') {
     return { stepId: step.id, status: 'complete' };
   }
-  return { stepId: step.id, status: result.outcome, reason: describeReason(result.blocker), nextAction: result.next_action };
+  return { stepId: step.id, status: result.outcome, reason: describeReason(result.blocker), nextAction: readWorkerAction(result) };
+}
+
+function readWorkerAction(result) {
+  if (quoteDiagnostic(result.blocker) === undefined) {
+    return 'report';
+  }
+  const isGateHold = result.stage === 'destructive-fix-gate' || isDestructiveGateBlocker(result.blocker);
+  return isGateHold ? 'approve' : result.next_action;
+}
+
+function isDestructiveGateBlocker(text) {
+  return text.trimStart().toLowerCase().startsWith('proposed fix requires human confirmation');
+}
+
+function describeBlockedStep(outcome) {
+  const verb = outcome.nextAction === 'approve' ? ' waits for your approval at the destructive-fix gate: ' : ' was blocked: ';
+  return '- Step ' + encodeUntrustedText(outcome.stepId) + verb + outcome.reason;
 }
 
 function describeBlockedWave(blockedOutcomes) {
   const lead = 'A worker did not finish its step, so ' + RUN_NAME + ' stopped after its wave:';
-  const stepLines = blockedOutcomes.map((outcome) => '- Step ' + encodeUntrustedText(outcome.stepId) + ' was blocked: ' + outcome.reason);
-  const isRunAgain = blockedOutcomes.every((outcome) => outcome.nextAction === 'run_again');
-  const cause = { problem: [lead, ...capItemLines(stepLines)].join('\n'), nextAction: isRunAgain ? 'run_again' : 'fix_cause' };
+  const stepLines = blockedOutcomes.map(describeBlockedStep);
+  const cause = { problem: [lead, ...capItemLines(stepLines)].join('\n'), nextAction: orderStopCauses(blockedOutcomes)[0].nextAction };
   if (blockedOutcomes.some((outcome) => outcome.agentFailure === true)) {
     cause.agentFailure = true;
   }
@@ -166,7 +189,7 @@ async function runPlanWaves(run, plan, facts) {
   for (let waveNumber = 1; ; waveNumber += 1) {
     const wave = computeWave(plan.steps, doneIds);
     if (!wave.ok) {
-      return stopDelivery([{ problem: 'The plan steps cannot be scheduled, so ' + RUN_NAME + ' stopped: ' + toPrintableAscii(wave.problem) }], run, [], true);
+      return stopDelivery([{ problem: 'The plan steps cannot be scheduled, so ' + RUN_NAME + ' stopped: ' + toPrintableAscii(wave.problem), nextAction: 'report' }], run, [], true);
     }
     if (wave.all_done) {
       return runGates(run, plan, facts);
