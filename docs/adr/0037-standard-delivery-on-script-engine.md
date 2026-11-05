@@ -2003,3 +2003,66 @@ This amendment covers https://github.com/brenpike/hivemind/issues/481 and https:
 The rest of ADR-0037 is unchanged. Status remains accepted.
 
 Links: https://github.com/brenpike/hivemind/issues/481, https://github.com/brenpike/hivemind/issues/498.
+
+## Amendment 2026-11-05: destructive approvals reach the run, and decisions settled before launch (issues 499 and 500)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/499 and https://github.com/brenpike/hivemind/issues/500. A user who chose a plan option that deletes tests was asked again at the destructive-fix gate, three times, because no reply reached a worker as approval. Decisions the user settled in chat before launch could not reach a run at all.
+
+**The change.**
+
+- **Options name destructive changes.** A brief option carries an optional `destructive` list. Each entry is `{category, item}`: category an integer 1 to 10, a Destructive Fix Gate category of `plugin/governance/security-policy.md`, and item a string of at most 160 code points. `decide()` asks `gate_safety` when the recommended option lists an entry, for every kind, review calls included, even when `gate.safety` is false. Each option line shows each item whole, with its category. A question block that cannot show whole ends with `exact_text_size`, so no item is ever cut.
+- **A strict letter reply approves.** `readReplyChoices` (`lib/brief.js`) reads choices in code, and only from a reply that is nothing but choices: one option letter for one question, or label and letter pairs for more. `applyApprovalChoices` (`approvals.js`) then adds exactly the chosen option's items, and withdraws each item that only sibling options list. An approval is keyed by its category and item text and lives on `run.approvals`. A decision the run took never reaches the list. Workers and fix rounds get the list as an `approvals` data block, and local review as `inputs.approvals`, only when it is not empty, so a run with no approval prompts as before.
+- **Gate holds list their items.** A worker or fix round blocked at the destructive-fix gate (by its stage or its blocker text, as the typed-stops amendment above defines) lists the items it holds back. The stop asks one approve-or-keep question per held item not yet approved: option A approves that item, option B keeps it as it is and the reply plans again or takes the stopped step again without it, strength none. A hold that lists no item, or only approved items, is a `report` stop, since it holds back no change the run can ask about. This reverses the `approve` typing the typed-stops amendment gave a hold that lists no item.
+- **Review calls.** Review options carry a `destructive` list too. A destructive review call is asked, never taken. When the review run right after a call the run took returns a gate hold, that call leaves `run.taken` and its original question is asked of the user.
+- **Labeled tail and stop replies.** Tail and stop questions show their Q labels. A letter reply settles its label through `buildAnswerEntry` (`round.chosen`). A reply in the user's own words settles none.
+- **The `decisions` launch arg.** It is absent, or a list of 1 to 10 non-blank strings of at most 2000 code points each: the user's replies settled before launch, word for word. Any other value stops the run before any agent call. Each decision becomes one settled answer entry ahead of the answer log in the scope, plan and revise prompts. It never approves a destructive change, and never changes the answer log, its rounds or the resume args. analysis-only does not read it.
+- The JSON state machine is unchanged.
+
+**User decisions.**
+
+- **2026-11-04.** Explicit approval is the user's own reply choosing an option that names the items, or a per-item approve. A call the run took is never approval. Clause 3 is still not read (Amendment 2026-10-29): a destructive pick is the Tier A gate, not clause 3.
+- **2026-11-05, Q1.** Each option of a review `user_question` carries its own destructive list. The review gate stays `{irreversible, architectural}`.
+- **2026-11-05, Q3.** No separate stop option. A cancelling reply ends the run, and TaskStop stops a running one.
+- **2026-11-05, prose budgets.** No raise. The user chose to measure before approving any raise, so every step paid for its text with cuts.
+
+**Keys.** Here "keyed" means the per-item approval keys, category and item text. Tail questions have no question key. A keyed `step_stop` would be skipped once its label settled, so a stop that came back would rerun the stopped step without asking, in a loop.
+
+**Recorded residual: approval keys are exact item text.**
+
+- **Not covered.** An approval matches only the same category and the same item text. A worker that describes an approved change in other words is held again.
+- **Bounded impact.** It costs one more question. It never approves a change the user did not approve.
+- **Ground.** Code cannot tell that two wordings name one change. An exact key holds by construction; a fuzzy match would let a judgment approve.
+
+**Recorded residual: free-text replies approve nothing.**
+
+- **Not covered.** A reply in the user's own words, such as "A, and delete those tests", approves no item, even when it means to.
+- **Bounded impact.** The gate holds again and asks one question per item. No unapproved change goes through.
+- **Ground.** Only a strict reply that code reads is the user's own choice. Reading approval from free text would make an agent the judge of approval.
+
+**Recorded residual: a producer can under-list items.**
+
+- **Not covered.** A planner, reviewer or worker that leaves a destructive change out of its `destructive` list gets no per-item question for it. A plan option that deletes tests and lists nothing can be chosen or taken without approval of that change.
+- **Bounded impact.** The change still meets the destructive-fix gate at the worker. Three backstops apply: a hold that lists no item types `report`, never a silent pass; local-reviewer's rule returns `user-input-required` with the fix listed in `destructive`, never `blocked`; and a hold right after a taken review call asks that call again.
+- **Ground.** Only the producer knows what its option would do. The schema accepts the list but cannot force it.
+
+**Recorded residual: changed decisions on resume.**
+
+- **Not covered.** A resume that passes a different `decisions` launch arg changes the scope, plan and revise prompts.
+- **Bounded impact.** Those agent calls miss the cache and run again. The answer log, its rounds and the resume args are unchanged, so the resume stays valid.
+- **Ground.** The decisions are the user's own launch input, and the resume contract replays the reply rounds, which the arg never touches.
+
+**Recorded residual: approvals are not yet listed in the PR body.**
+
+- **Not covered.** The pull request body does not list the changes the user's replies approved.
+- **Bounded impact.** The approved changes are in the diff, and the replies are in chat. A reviewer of the PR sees no list of them.
+- **Ground.** The PR body belongs to the PR-body slice, https://github.com/brenpike/hivemind/issues/506.
+
+**Recorded residual: local review does not see settled decisions.**
+
+- **Not covered.** Local review gets neither the `decisions` launch arg nor the answers settled during the run. It gets only `user_answer` for its own question, and `approvals`.
+- **Bounded impact.** Local review may raise or fix a finding against a decision the user settled. A destructive fix still holds at the gate, and every change is in the PR for the user to veto before merge.
+- **Ground.** Tracked as https://github.com/brenpike/hivemind/issues/531.
+
+The rest of ADR-0037 is unchanged. Status remains accepted.
+
+Links: https://github.com/brenpike/hivemind/issues/499, https://github.com/brenpike/hivemind/issues/500, https://github.com/brenpike/hivemind/issues/506, https://github.com/brenpike/hivemind/issues/531.

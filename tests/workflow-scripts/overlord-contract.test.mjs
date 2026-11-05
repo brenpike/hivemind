@@ -11,8 +11,10 @@ const overlordText = readFileSync(repoRoot + 'plugin/agents/overlord.md', 'utf8'
 const resultLib = loadLibs([repoRoot + 'plugin/workflow-src/lib/result.js']);
 const DELIVERY_ID = 'standard-delivery';
 const DELIVERY_ARGS_LEAD = 'When `<id>` is `standard-delivery`, the launch args also hold ';
-const VALID_LAUNCH_VALUES = { request: 'Add a cache to the facts step', trunk: 'main', references: [12], local_review: false, draft: true };
-const INVALID_LAUNCH_VALUES = { request: '   ', trunk: '-main', references: ['twelve'], local_review: 'yes', draft: 'no' };
+const DELIVERY_ARGS_SENTENCE = DELIVERY_ARGS_LEAD + '`local_review` and `draft`, and `decisions` only when the user settled a decision for this request before launch.';
+const DECISIONS_ENTRY_SENTENCE = 'Each `decisions` entry is one reply of the user\'s that settled one, word for word, after the question it answers, word for word, when it answers one; never your summary.';
+const VALID_LAUNCH_VALUES = { request: 'Add a cache to the facts step', trunk: 'main', references: [12], local_review: false, draft: true, decisions: ['Keep the cache in memory only.'] };
+const INVALID_LAUNCH_VALUES = { request: '   ', trunk: '-main', references: ['twelve'], local_review: 'yes', draft: 'no', decisions: ['   '] };
 
 /**
  * Builds standard-delivery in memory and runs it without its last
@@ -142,7 +144,7 @@ describe('overlord Engine section', () => {
     }
   });
   test('Engine limits launch and resume args and adds no runner instructions', () => {
-    for (const phrase of ['launch it by name with the `Workflow` tool and only these args: `{', 'When `<id>` is `standard-delivery`, the launch args also hold `local_review` and `draft`.', 'Resume args hold only the launch args, the keys of `resume_args` and `reply`.', 'Add no instruction, note or summary for the workflow\'s agents to launch or resume args.', 'They take their task only from the script.']) {
+    for (const phrase of ['launch it by name with the `Workflow` tool and only these args: `{', DELIVERY_ARGS_SENTENCE, DECISIONS_ENTRY_SENTENCE, 'Resume args hold only the launch args, the keys of `resume_args` and `reply`.', 'Add no instruction, note or summary for the workflow\'s agents to launch or resume args.', 'They take their task only from the script.']) {
       assert.ok(engineSection.includes(phrase), `## Engine args clause lacks ${phrase}`);
     }
   });
@@ -154,8 +156,9 @@ describe('overlord Engine section', () => {
   test('Engine no longer names the dropped answer_key field', () => {
     assert.ok(!engineSection.includes('answer_key'));
   });
-  test('Engine no longer names the dropped decisions field', () => {
-    assert.ok(!engineSection.includes('decisions'));
+  test('Engine names decisions only in its launch-arg sentences', () => {
+    const decisionsSentences = engineSentences.filter((sentence) => sentence.includes('decisions'));
+    assert.deepEqual(decisionsSentences, [DELIVERY_ARGS_SENTENCE, DECISIONS_ENTRY_SENTENCE]);
   });
   test('Engine treats a cut notice as a defect that does not resume or read a file, and counts the run as failed', () => {
     assert.notEqual(defectParagraph, '', '## Engine has a paragraph starting A notice is cut only when its result is not one complete JSON object;');
@@ -212,6 +215,7 @@ describe('overlord standard-delivery launch args', () => {
     assert.equal(launch.problem, undefined, `readDeliveryLaunch refused ${JSON.stringify(launchArgs)}: ${launch.problem}`);
     assert.equal(launch.localReview, VALID_LAUNCH_VALUES.local_review);
     assert.equal(launch.draft, VALID_LAUNCH_VALUES.draft);
+    assert.equal(JSON.stringify(launch.decisions), JSON.stringify(VALID_LAUNCH_VALUES.decisions));
   });
   for (const argName of launchArgNames) {
     test(`a bad ${argName} launch arg makes readDeliveryLaunch return a problem`, () => {
