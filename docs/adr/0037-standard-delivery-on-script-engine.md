@@ -2113,6 +2113,13 @@ This amendment covers https://github.com/brenpike/hivemind/issues/504 and https:
 - **Bounded impact.** It falls back to the existing autonomy table, and the Tier A rule still binds the overlord.
 - **Ground.** Only the brief writer knows what its option would do. The schema requires the flag but cannot check its value.
 
+**Recorded residual: a limit matches the paths under it, file or directory.**
+
+- **Not covered.** A limit is a path with no kind. `listOutsidePaths` counts a plan file inside a limit when it equals the limit or sits under the limit plus `/`, so a limit naming a file would also cover paths under that name. Code cannot tell a file limit from a directory limit.
+- **Bounded impact.** A plan path can sit under a limit only when that limit names a directory at the commit the plan writes, since git holds one path as a file or a directory, never both. A plan that turns a file limit into a directory changes the limit path itself, which the limit covers. Limits only trigger a question; they are not access control. Every file still shows in the PR and at every gate.
+- **Ground.** Outside the threat model: the limit paths come from the user's own words through the scope model, and a wrong match only drops a question, never widens the work. A required file-or-directory kind on each limit would add a schema field, a check and a scope-model duty to remove no reachable failure.
+- **Decided by the run.** Local review finding 7b533a7f39fdba8f8b9925d29222f51d97b1e62244ca05e6ae6f9952a7bfe2c5 asked whether to keep the descendant match or add a required kind. The run, not the user, kept the match on 2026-11-05, per `plugin/governance/decision-autonomy.md` (Review Calls). The user can veto it before merge.
+
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/504, https://github.com/brenpike/hivemind/issues/497.
