@@ -2262,4 +2262,11 @@ These rationales were cut from `plugin/agents/local-reviewer.md` to pay for the 
 - **Bounded impact.** Post-PR remediation is not on the script engine yet (see Deferred items), and the user sees every pushed commit on the pull request.
 - **Ground.** Issue 496 names the local reviewer only.
 
+**Recorded residual: the undo assumes no one else edits a fixed file during its fix.**
+
+- **Not covered.** The undo restores the fix's files to `HEAD` with no snapshot taken before the fix. If the operator, or another program run as the same user, edits one of those files between the fix and its check, the restore discards that edit too. Output the check itself creates is not removed by the undo.
+- **Bounded impact.** The run goes one step at a time on a clean tree (invariant 1), and no wave worker runs during the local review gate, so no other step of the run edits these files. Output the check creates is left in the tree, and the commit script after local review refuses it and stops the run, naming the paths. No failing edit is committed.
+- **Ground.** Outside the threat model: an edit by anyone else to a file during its local review fix is not a failure this loop defends against. Hardening it would need a per-fix snapshot and ownership check, which grows the loop's surface.
+- **Decision.** Taken by the run, not the user, under `plugin/governance/decision-autonomy.md` (Review Calls), on 2026-11-06, for local review finding 47411cae ("Undo has no ownership-safe path snapshot"). The pick kept the undo as it is and recorded this residual. The run lists it for the user to veto before merge.
+
 The rest of ADR-0037 is unchanged.
