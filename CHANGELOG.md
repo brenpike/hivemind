@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.1] - 2026-11-06
+
+### Fixed
+
+- Scope questions name only limits the user stated, exempt the version and changelog files, and give a reason for each file outside the limits (#504).
+- An option beyond the request is always asked, never auto-taken (#497).
+
+### Changed
+
+- Decision-brief options gain a required `beyond_request` field.
+- The plan schema gains a required `versioning.changelog_files` and an optional `steps[].limits_reason`.
+
 ## [7.5.20] - 2026-11-03
 
 ### Added

@@ -63,7 +63,7 @@ function makeBrief(overrides = {}) {
     kind: 'planner_question',
     problem: 'Pick a format.',
     criticality: { level: 'low', likelihood: 'occasional', blast_radius: 'One file.', if_ignored: 'Nothing.' },
-    options: [{ id: 'A', summary: 'S', steel_man: 'F', straw_man: 'G', effort: 'small', value: 'high', reversible: true, destructive: [{ category: 3, item: 'D' }] }],
+    options: [{ id: 'A', summary: 'S', steel_man: 'F', straw_man: 'G', effort: 'small', value: 'high', reversible: true, beyond_request: false, destructive: [{ category: 3, item: 'D' }] }],
     ruled_out: [{ summary: 'R', why: 'W' }],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Y' },
     assumptions: [{ statement: 'S', origin: 'user', evidence: 'E' }],
@@ -458,6 +458,13 @@ describe('the decision brief schema', () => {
       assert.ok(errors[0].startsWith('$.options[0].destructive[0].category: '), errors[0]);
     });
   }
+  test('an option needs a boolean beyond_request', () => {
+    const missing = makeBrief();
+    delete missing.options[0].beyond_request;
+    assert.deepEqual(validate(briefSchema, missing).errors, ['$.options[0]: required: missing beyond_request']);
+    const mistyped = setBriefPath(makeBrief(), '$.options[0].beyond_request', 'false');
+    assert.deepEqual(validate(briefSchema, mistyped).errors, ['$.options[0].beyond_request: type boolean expected']);
+  });
   test('a fifth destructive entry is rejected', () => {
     const destructive = Array.from({ length: 5 }, (unused, index) => ({ category: index + 1, item: 'D' }));
     const brief = setBriefPath(makeBrief(), '$.options[0].destructive', destructive);

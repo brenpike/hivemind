@@ -182,26 +182,28 @@ plan:
   classification: feature
   breaking: false
   delivery:
-    mode: single            # single | multi | brood
-    overlap_risk: null      # low|medium|high — required when mode: brood
-    overlap_details: null   # text — required when mode: brood
-    strains: []             # required when mode: brood; each {name, description, branch, workflow_hint}
+    mode: single # single | multi | brood
+    overlap_risk: null # low|medium|high — required when mode: brood
+    overlap_details: null # text — required when mode: brood
+    strains: [] # required when mode: brood; each {name, description, branch, workflow_hint}
   versioning:
-    impact: none            # none|possible|required|unknown
-    likely_bump: none       # major|minor|patch|none|unknown
+    impact: none # none|possible|required|unknown
+    likely_bump: none # major|minor|patch|none|unknown
     artifacts: []
-    bump_trigger: "no"      # yes|no
-    no_bump_match: "no"     # yes|no
+    bump_trigger: "no" # yes|no
+    no_bump_match: "no" # yes|no
     artifact_files: []
+    changelog_files: []
   validation_commands: []
   steps:
     - id: STEP-001
-      owner: hivemind:drone   # hivemind:drone (default) | hivemind:changeling (presentational only)
+      owner: hivemind:drone # hivemind:drone (default) | hivemind:changeling (presentational only)
       files:
         - path/to/file
       outcome: ""
       depends_on: []
-      external_effects: []  # each {summary, reversible}
+      external_effects: [] # each {summary, reversible}
+      limits_reason: ""
       status: pending
 ```
 
@@ -258,7 +260,7 @@ When a delegation asks you to scope a request for its planner, return three thin
 
 - For each repository-document section the request or the facts texts name: the document's path and the section's start line, found with Grep, no text copied. Leave a section you cannot find for the planner.
 - For each repository path a section or the request names for the work: whether it exists now, and any drift, checked with batched Glob calls.
-- The paths or directories the request confines the work to, with the user's answers when the delegation carries an answers block; where they disagree, a later answer beats the request and any earlier answer. Return none when nothing confines the work.
+- Each scope limit the request or an answer states in words, with its origin; a path they only name confines nothing. A later answer beats the request and any earlier answer. Return none when nothing confines the work.
 
 In this mode plan nothing, raise no question, read neither schema file, load no governance doc and search no memory.
 

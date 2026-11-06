@@ -149,7 +149,8 @@
       "required": [
         "bump_trigger",
         "no_bump_match",
-        "artifact_files"
+        "artifact_files",
+        "changelog_files"
       ],
       "description": "The plan's answers to the two judgments in ${CLAUDE_PLUGIN_ROOT}/governance/versioning.md (Bump Type Determination), and the files that hold the version. The validate step passes the two answers and the version files to bump-type unchanged.",
       "properties": {
@@ -176,6 +177,14 @@
             "type": "string",
             "maxLength": 400,
             "description": "Can carry external content. Repository path. One file that holds a version."
+          }
+        },
+        "changelog_files": {
+          "type": "array",
+          "description": "Each changelog file the project's versioning docs name, written by the step that sets the version. Empty when they name none. A file here or in artifact_files never counts as outside the scope limits.",
+          "items": {
+            "type": "string",
+            "description": "Can carry external content. One changelog file."
           }
         }
       }
@@ -272,6 +281,12 @@
                 }
               }
             }
+          },
+          "limits_reason": {
+            "type": "string",
+            "minLength": 0,
+            "maxLength": 160,
+            "description": "Can carry external content. Optional. Written for the user: one plain sentence why this step changes a file outside the scope limits; omit or leave blank otherwise."
           }
         }
       }

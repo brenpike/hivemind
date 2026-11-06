@@ -43,7 +43,7 @@ Anything the runtime loads must live under `plugin/`.
 
 ## Versioning
 
-Single source of truth: `plugin/.claude-plugin/plugin.json` `"version"`. Bump triggers and policy: `plugin/governance/versioning.md`. README does not carry a version.
+Single source of truth: `plugin/.claude-plugin/plugin.json` `"version"`. Each bump adds a dated `CHANGELOG.md` section. Policy: `plugin/governance/versioning.md`. README has no version.
 
 ## Branching / PR workflow
 

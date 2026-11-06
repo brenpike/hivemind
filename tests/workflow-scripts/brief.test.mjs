@@ -19,8 +19,8 @@ function makeBrief(overrides = {}) {
     problem: 'PROBLEM_TEXT',
     criticality: { level: 'high', likelihood: 'edge_case', blast_radius: 'BLAST_TEXT', if_ignored: 'IGNORED_TEXT' },
     options: [
-      { id: 'A', summary: 'SUMMARY_A', steel_man: 'FOR_A', straw_man: 'AGAINST_A', effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: 'SUMMARY_B', steel_man: 'FOR_B', straw_man: 'AGAINST_B', effort: 'large', value: 'low', reversible: false }
+      { id: 'A', summary: 'SUMMARY_A', steel_man: 'FOR_A', straw_man: 'AGAINST_A', effort: 'small', value: 'high', reversible: true, beyond_request: false },
+      { id: 'B', summary: 'SUMMARY_B', steel_man: 'FOR_B', straw_man: 'AGAINST_B', effort: 'large', value: 'low', reversible: false, beyond_request: false }
     ],
     recommendation: { option_id: 'A', strength: 'weak', why: 'WHY_TEXT' },
     assumptions: [
@@ -711,6 +711,41 @@ describe('destructive changes on an option line', () => {
     assert.equal(lines.length, 2);
     assert.equal(lines[0], '- A: SUMMARY_A (recommended)' + DESTRUCTIVE_LEAD
       + 'not given (category not given); a b (category 3 - C: forged); not given (category not given)');
+  });
+});
+
+const BEYOND_MARK = ' This goes beyond what you asked for.';
+
+function makeBeyondBrief(beyond, optionIndex = 0) {
+  const brief = makeBrief();
+  brief.options[optionIndex].beyond_request = beyond;
+  return brief;
+}
+
+describe('beyond the request on an option line', () => {
+  test('a recommended option beyond the request says so after the recommended mark', () => {
+    assert.deepEqual(renderOptionLines(makeBeyondBrief(true)), ['- A: SUMMARY_A (recommended)' + BEYOND_MARK, '- B: SUMMARY_B']);
+  });
+  test('an option that is not recommended says so too', () => {
+    assert.deepEqual(renderOptionLines(makeBeyondBrief(true, 1)), ['- A: SUMMARY_A (recommended)', '- B: SUMMARY_B' + BEYOND_MARK]);
+  });
+  test('the mark comes before the destructive changes', () => {
+    const brief = makeBeyondBrief(true);
+    brief.options[0].destructive = [{ category: 3, item: 'Skip test X.' }];
+    assert.equal(renderOptionLines(brief)[0], '- A: SUMMARY_A (recommended)' + BEYOND_MARK + DESTRUCTIVE_LEAD + 'Skip test X. (category 3)');
+  });
+  for (const beyond of [false, undefined, 'true', 1, null]) {
+    test(`beyond_request ${JSON.stringify(beyond)} adds nothing to the line`, () => {
+      assert.deepEqual(renderOptionLines(makeBeyondBrief(beyond)), ['- A: SUMMARY_A (recommended)', '- B: SUMMARY_B']);
+    });
+  }
+  test('only the option lines change', () => {
+    const plain = lib.renderQuestions([{ brief: makeBrief(), reason: 'table_surface' }]);
+    const beyond = lib.renderQuestions([{ brief: makeBeyondBrief(true), reason: 'table_surface' }]);
+    assert.equal(beyond, plain.replace('- A: SUMMARY_A (recommended)', '- A: SUMMARY_A (recommended)' + BEYOND_MARK));
+    assert.equal(lib.renderDecisions([{ brief: makeBeyondBrief(true) }]), lib.renderDecisions([{ brief: makeBrief() }]));
+    assert.equal(lib.renderDecisionsCompact([{ brief: makeBeyondBrief(true) }]), lib.renderDecisionsCompact([{ brief: makeBrief() }]));
+    assert.equal(lib.renderOpenQuestions([{ brief: makeBeyondBrief(true) }]), lib.renderOpenQuestions([{ brief: makeBrief() }]));
   });
 });
 

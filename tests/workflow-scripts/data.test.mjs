@@ -19,7 +19,8 @@ const SHOWN_FIELD_PATHS = {
   strength: ['recommendation', 'strength'],
   destructive: ['options', 'items', 'destructive'],
   category: ['options', 'items', 'destructive', 'items', 'category'],
-  item: ['options', 'items', 'destructive', 'items', 'item']
+  item: ['options', 'items', 'destructive', 'items', 'item'],
+  beyond_request: ['options', 'items', 'beyond_request']
 };
 const INTERNAL_FIELDS = ['id', 'option_id', 'kind'];
 const ASK_OR_ROUND_FIELDS = ['brief', 'exact', 'labels', 'settled', 'chosen', 'label'];
@@ -38,6 +39,9 @@ function hasShownBound(node) {
   }
   if (node.type === 'integer') {
     return Array.isArray(node.enum);
+  }
+  if (node.type === 'boolean') {
+    return true;
   }
   return node.type === 'object' && node.additionalProperties === false;
 }

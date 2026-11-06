@@ -4,7 +4,7 @@ A term defined here binds every rule that uses it.
 
 ## Decision Tiers
 
-Each decision is Tier A, always surfaced to the user, or Tier B, auto-decided and journaled only while the promotion gate is clean; a gate trip on its recommended action surfaces it like Tier A.
+Each decision is Tier A, always surfaced to the user, or Tier B, auto-decided and journaled only while the promotion gate is clean.
 
 ### Tier A — Always Surface
 
@@ -17,6 +17,7 @@ The overlord never auto-decides:
 - a tool call failed after retry exhaustion (`${CLAUDE_PLUGIN_ROOT}/agents/overlord.md` `## Tool-Error Recovery`)
 - a genuine fact-needed blocker: a fact only the user holds
 - every merge recommendation; the human merges, never the overlord
+- an option that goes beyond the request
 - the whole gate-trips column of **The Autonomy 2x2**
 
 ### Tier B — Auto-Decide and Journal

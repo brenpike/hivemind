@@ -20,8 +20,8 @@ function makeBrief(overrides = {}) {
     problem: 'Pick a storage format.',
     criticality: { level: 'medium', likelihood: 'common', blast_radius: 'One file.', if_ignored: 'Nothing ships.' },
     options: [
-      { id: 'A', summary: 'Use JSON.', steel_man: 'Simple.', straw_man: 'Verbose.', effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: 'Use YAML.', steel_man: 'Readable.', straw_man: 'Ambiguous.', effort: 'medium', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Use JSON.', steel_man: 'Simple.', straw_man: 'Verbose.', effort: 'small', value: 'high', reversible: true, beyond_request: false },
+      { id: 'B', summary: 'Use YAML.', steel_man: 'Readable.', straw_man: 'Ambiguous.', effort: 'medium', value: 'medium', reversible: true, beyond_request: false }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Less effort for more value.' },
     assumptions: [{ statement: 'Files stay small.', origin: 'assumed', evidence: 'No large inputs seen.' }],
@@ -167,6 +167,52 @@ describe('gate flags', () => {
   });
 });
 
+function makeBeyondBrief(beyondIndex, overrides = {}) {
+  const base = makeBrief();
+  const options = base.options.map((option, index) => ({ ...option, beyond_request: index === beyondIndex }));
+  return makeBrief({ options, ...overrides });
+}
+
+describe('beyond request', () => {
+  test('a recommended option with beyond_request true asks beyond_request at every level and kind', () => {
+    const brief = makeBeyondBrief(0);
+    for (const kind of [...table.rows.map((row) => row.kind), ...hardStopKinds]) {
+      for (const level of [...table.levels, undefined]) {
+        const verdict = decideWith(kind, level, brief);
+        const row = table.rows.find((entry) => entry.kind === kind);
+        const expected = row !== undefined && row[resolvedLevelOf(level)] === 'auto' ? 'beyond_request' : verdict.reason;
+        assert.deepEqual(verdict, { action: 'ask', reason: expected }, `${kind} at ${level}`);
+      }
+    }
+  });
+  test('it asks beyond_request at every auto cell of the real table', () => {
+    const autoCells = table.rows.flatMap((row) => table.levels.filter((level) => row[level] === 'auto').map((level) => [row.kind, level]));
+    assert.ok(autoCells.length > 0);
+    for (const [kind, level] of autoCells) {
+      assert.deepEqual(decideWith(kind, level, makeBrief()), takeAuto, `${kind} at ${level}`);
+      assert.deepEqual(decideWith(kind, level, makeBeyondBrief(0)), { action: 'ask', reason: 'beyond_request' }, `${kind} at ${level}`);
+    }
+  });
+  test('an option with beyond_request true that is not recommended does not make it ask', () => {
+    assert.deepEqual(decideWith('plan_acceptance', 'high', makeBeyondBrief(1)), takeAuto);
+  });
+  test('gate_safety wins over beyond_request', () => {
+    const gate = { irreversible: false, architectural: false, safety: true };
+    assert.equal(decideWith('plan_acceptance', 'high', makeBeyondBrief(0, { gate })).reason, 'gate_safety');
+  });
+  test('beyond_request wins over askReason and the recommendation checks', () => {
+    const none = { option_id: 'A', strength: 'none', why: 'Both are fine.' };
+    assert.deepEqual(decideAsking('plan_acceptance', 'high', makeBeyondBrief(0)), { action: 'ask', reason: 'beyond_request' });
+    assert.equal(decideWith('plan_acceptance', 'high', makeBeyondBrief(0, { recommendation: none })).reason, 'beyond_request');
+  });
+  test('a brief whose every option goes beyond the request is malformed even for an auto cell', () => {
+    const brief = makeBrief({ options: makeBrief().options.map((option) => ({ ...option, beyond_request: true })) });
+    for (const level of table.levels) {
+      assert.deepEqual(decideWith('plan_acceptance', level, brief), { action: 'ask', reason: 'malformed_brief' }, level);
+    }
+  });
+});
+
 describe('recommendation', () => {
   test('strength none asks no_recommendation', () => {
     const recommendation = { option_id: 'A', strength: 'none', why: 'Both are fine.' };
@@ -281,7 +327,10 @@ describe('malformed brief', () => {
     'strength none with blank option_id': makeBrief({ recommendation: { option_id: '', strength: 'none', why: 'Both are fine.' } }),
     'empty verbatim': makeBrief({ verbatim: '' }),
     'destructive category outside 1 to 10': makeBrief({ options: [{ ...base.options[0], destructive: [{ category: 11, item: 'X' }] }] }),
-    'destructive entry missing item': makeBrief({ options: [{ ...base.options[0], destructive: [{ category: 3 }] }] })
+    'destructive entry missing item': makeBrief({ options: [{ ...base.options[0], destructive: [{ category: 3 }] }] }),
+    'option missing beyond_request': makeBrief({ options: [{ ...base.options[0], beyond_request: undefined }, base.options[1]] }),
+    'option beyond_request not boolean': makeBrief({ options: [{ ...base.options[0], beyond_request: 'false' }, base.options[1]] }),
+    'every option beyond_request true': makeBrief({ options: base.options.map((option) => ({ ...option, beyond_request: true })) })
   };
   for (const [name, brief] of Object.entries(malformed)) {
     test(`${name} asks malformed_brief`, () => {
@@ -340,7 +389,7 @@ describe('decisionReasons', () => {
   test('lists every reason in check order, ending with auto', () => {
     assert.deepEqual(structuredClone(lib.decisionReasons()), [
       'hard_stop', 'malformed_brief', 'unknown_kind', 'table_surface', 'bad_cell',
-      'gate_irreversible', 'gate_architectural', 'gate_safety', 'outside_limits',
+      'gate_irreversible', 'gate_architectural', 'gate_safety', 'beyond_request', 'outside_limits',
       'no_recommendation', 'recommendation_not_an_option', 'auto'
     ]);
   });
