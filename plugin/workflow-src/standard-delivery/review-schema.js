@@ -199,8 +199,8 @@ function buildReviewSchema() {
     findings_open: { type: 'integer', description: 'How many findings are still open.' },
     fix_commits_exist: { type: 'boolean', description: 'true when the loop committed at least one fix.' },
     ledger_path: { type: 'string', description: 'The path of the fix ledger.' },
-    rejected_findings: buildFindingListSchema(' Every finding the loop rejected under a recorded decision', rejectedFindingTexts()),
-    undone_fixes: buildFindingListSchema(' Every finding whose failed fix the loop undid', undoneFixTexts())
+    rejected_findings: buildFindingListSchema(' The findings the loop rejected under a recorded decision', rejectedFindingTexts()),
+    undone_fixes: buildFindingListSchema(' The findings whose failed fix the loop undid', undoneFixTexts())
   };
   const required = Object.keys(properties);
   for (const [name, entry] of Object.entries(reviewFieldTexts())) {

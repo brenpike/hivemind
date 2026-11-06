@@ -3935,8 +3935,8 @@ const ROW_TESTS = {
       const undoneList = schema.properties.undone_fixes;
       const undoneItem = undoneList.items;
       assert.deepEqual([undoneList.type, undoneList.maxItems, undoneList.minItems], ['array', 50, undefined]);
-      assert.equal(undoneList.description, 'Can carry external content. Every finding whose failed fix the loop undid, empty when none.');
-      assert.equal(schema.properties.rejected_findings.description, 'Can carry external content. Every finding the loop rejected under a recorded decision, empty when none.');
+      assert.equal(undoneList.description, 'Can carry external content. The findings whose failed fix the loop undid, empty when none.');
+      assert.equal(schema.properties.rejected_findings.description, 'Can carry external content. The findings the loop rejected under a recorded decision, empty when none.');
       assert.deepEqual([undoneItem.type, undoneItem.additionalProperties, undoneItem.required], ['object', false, ['finding_id', 'title']]);
       assert.deepEqual(Object.keys(undoneItem.properties), undoneItem.required);
       assert.deepEqual(undoneItem.properties, { finding_id: rejectedItem.properties.finding_id, title: rejectedItem.properties.title });
@@ -3947,7 +3947,7 @@ const ROW_TESTS = {
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, undone_fixes: [{ finding_id: 'e8e8e8e8' }] }).ok, 'an undone fix with no title');
       const fixStep = reviewerText.slice(reviewerText.indexOf('7. **Fix simple findings:**'), reviewerText.indexOf('8. **Checkpoint:**'));
       assert.ok(fixStep.includes('A fix that fails its check is undone: restore only the files it touched to `HEAD`, removing any it created. It, and any earlier fix of this iteration that restore undid, goes `regressed`, never resolved.'), fixStep);
-      assert.ok(reviewerText.includes('and `undone_fixes` every `regressed` finding, each with `finding_id` and `title`; both copied as data, at most 50, empty when none.'));
+      assert.ok(reviewerText.includes('and `undone_fixes` the `regressed` findings, each with `finding_id` and `title`; both copied as data, at most 50, empty when none.'));
       assert.deepEqual(contract.keys.slice(-2), ['rejected_findings', 'undone_fixes']);
       assert.equal(contract.values.undone_fixes, '<list>');
       const question = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'f1f1f1f1', user_question: USER_QUESTION };
