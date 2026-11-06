@@ -27,7 +27,7 @@
 # residual). Flags come in any order; each appears once except the repeatable --ref and
 # --version-file; required flags must be present; bump-type's positional base comes first. Values
 # pass their class: names hivemind_assert_identifier (skills/_shared/allowlist.sh), refs digits,
-# commit 40 or 64 lowercase hex, the enums the scripts define, inputs
+# commit 40 or 64 lowercase hex, the enums the scripts define, inputs and open-plan-pr's body file
 # .hivemind/<molt|pr>-inputs-<token>.json with <token> 1 to 64 of [A-Za-z0-9-]. A tab, newline or
 # other control byte, any other quoting, a redirection or anything appended is not exact.
 #
@@ -84,7 +84,7 @@ runner_usage_text() {
     gather-facts) printf '%s' '--trunk <branch> [--remote <remote>] [--ref <number>]...' ;;
     create-working-branch) printf '%s' '--base <branch> --branch <branch> --classification feature|bugfix|hotfix|refactor|chore|docs|test|ci --trunk-freshness fresh|stale|skipped --trunk <branch>' ;;
     bump-type) printf '%s' '<base> --bump-trigger yes|no --no-bump-match yes|no [--version-file <path>]...' ;;
-    open-plan-pr) printf '%s' '--head <branch> --base <branch> [--remote <remote>] --expect-commit <commit> --inputs .hivemind/pr-inputs-<token>.json' ;;
+    open-plan-pr) printf '%s' '--head <branch> --base <branch> [--remote <remote>] --expect-commit <commit> --inputs .hivemind/pr-inputs-<token>.json --body-file .hivemind/pr-inputs-<token>-body.json' ;;
     *) return 1 ;;
   esac
 }
@@ -97,7 +97,7 @@ runner_required_flags() {
     gather-facts) printf '%s' '--trunk' ;;
     create-working-branch) printf '%s' '--base --branch --classification --trunk-freshness --trunk' ;;
     bump-type) printf '%s' '--bump-trigger --no-bump-match' ;;
-    open-plan-pr) printf '%s' '--head --base --expect-commit --inputs' ;;
+    open-plan-pr) printf '%s' '--head --base --expect-commit --inputs --body-file' ;;
     *) return 1 ;;
   esac
 }
@@ -118,7 +118,7 @@ set_flag_rule() {
     'bump-type --version-file') flag_class=identifier; flag_repeat=yes ;;
     'open-plan-pr --head' | 'open-plan-pr --base' | 'open-plan-pr --remote') flag_class=identifier ;;
     'open-plan-pr --expect-commit') flag_class=commit ;;
-    'open-plan-pr --inputs') flag_class=pr_inputs ;;
+    'open-plan-pr --inputs' | 'open-plan-pr --body-file') flag_class=pr_inputs ;;
     *) return 1 ;;
   esac
 }
