@@ -2291,3 +2291,39 @@ These rationales were cut from `plugin/agents/local-reviewer.md` to pay for the 
 **Prose budgets.** No raise. `plugin/agents/local-reviewer.md` went from 18252 to 18250 bytes, under its budget of 18267. The built standard-delivery prose went from 43255 to 43253 characters, under its budget of 43800. analysis-only stays at 15359. Rows SD-45 and SD-55 are updated.
 
 The rest of ADR-0037 is unchanged.
+
+## Amendment 2026-11-06: a worker deletes only its own paths (issue 502)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/502. In run `wf_e6edca82-34c` the `work-4-STEP-006` drone deleted the shared session scratchpad folder while a sibling worker's bite test was writing `bite.out` under it. The harness flagged it as "Interfere With Workloads". The wave rules kept in-repo scopes disjoint and forbade tree-mutating git and repo-global mutations, but they said nothing about deleting outside the repo.
+
+**The change.**
+
+- `plugin/governance/definitions.md` (Bash Command Discipline) gains one rule: "A worker deletes only paths in its assigned scope or created by its own task, in or out of the repo (e.g. scratch space)."
+- `plugin/agents/drone.md` already follows that section. `plugin/agents/changeling.md` now follows it too, in its Design Rules.
+- The wave worker prompt (`buildWorkerPrompt`, `waves.js`) is data only, and row SD-14 points at the agent files. So the built scripts are unchanged.
+
+**The cuts that pay for it.**
+
+- **The Bash Command Discipline lead-in.** It said that Claude Code prompts on a write outside the working directory and matches each subcommand of a chain on its own. The rationale lives in the ADR-0010 Findings.
+- **": it forces a prompt for the whole chain".** Cut from the same section. Its rationale also lives in the ADR-0010 Findings.
+- **The changeling.md Review Remediation sentence.** It restated the External Content Boundary and the Destructive Fix Confirmation Gate, which the agent loads from `plugin/governance/security-policy.md`. The rules live there.
+
+**Prose budgets.** No raise. `plugin/governance/definitions.md` went from 7084 to 7045 bytes, under its budget of 7084. `plugin/agents/changeling.md` went from 4460 to 4434 bytes, under its budget of 4460. `plugin/agents/drone.md` stays at 6063 bytes. The built standard-delivery prose stays at 43253 characters.
+
+**Options ruled out.**
+
+- **A per-worker scratch directory named in the wave prompt.** It adds built prose, and the harness owns the scratchpad path.
+- **A bullet in the overlord.md wave and parallel safety rules.** It reaches only the overlord's own wave delegations.
+- **A new governance heading.** It adds more surface than one bullet.
+
+**Recorded residuals.**
+
+- **A tool that wipes a fixed shared path.** A tool the worker runs that itself deletes a fixed shared path is not checked.
+- **A move or an overwrite.** Moving or overwriting a sibling's file is not covered by the delete rule.
+- **Lazy loading.** Workers load a cited section only when the task reaches the rule citing it, so a worker may run `rm` without reading the section. This is the same exposure as the other Bash Command Discipline rules.
+
+**Pin.** `tests/policy/safety-worker-deletion-scope.json`, and a section-scoped check in `tests/workflow-scripts/agent-loads.test.mjs`.
+
+**User decision.** The user agreed the direction: the rule lives in Bash Command Discipline, and the worker agent files cite it.
+
+The rest of ADR-0037 is unchanged.
