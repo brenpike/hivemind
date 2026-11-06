@@ -1,0 +1,18 @@
+{
+  "rule": "Worker deletion scope consumer coupling",
+  "description": "P3 consumer-assertion: plugin/governance/definitions.md (Bash Command Discipline) states that a worker deletes only files and empty folders in its assigned scope or created by its own task, in or out of the repo, each by name. The source pin spans the restriction, the files-and-empty-folders unit, both permitted sets, the in-or-out-of-repo reach and the by-name clause, so dropping or inverting any of them fails. plugin/agents/drone.md (## Coding Principles) and plugin/agents/changeling.md (## Design Rules) are the named consumers; each consumer pin is the pointer that cites the section by its heading, not the rule prose. Honest capability statement: every pin here is whole-file, so the rule or a pointer moving out of its section stays green in this fixture and is caught only by the section-scoped checks in tests/workflow-scripts/agent-loads.test.mjs. The drone pointer pin spans that line's whole heading list, so it also pins Shell Output Discipline, and dropping that name fails this fixture. A pin asserts word-sequence presence, never meaning: a rewrite-around that keeps the pinned bytes stays green, a pin cannot show that a recursive delete is refused, and a new worker agent that never cites the section is invisible to it.",
+  "source": {
+    "file": "plugin/governance/definitions.md",
+    "pattern": "A worker deletes only files and empty folders in its assigned scope or created by its own task, in or out of the repo, each by name"
+  },
+  "consumers": [
+    {
+      "file": "plugin/agents/drone.md",
+      "pattern": "follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Shell Output Discipline, Bash Command Discipline)"
+    },
+    {
+      "file": "plugin/agents/changeling.md",
+      "pattern": "follow `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Bash Command Discipline)"
+    }
+  ]
+}

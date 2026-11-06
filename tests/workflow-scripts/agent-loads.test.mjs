@@ -14,6 +14,14 @@ const AGENT_SECTIONS = [
   { agentPath: 'plugin/agents/drone.md', remediationHeading: '## Review Remediation', loadsWhole: false },
   { agentPath: 'plugin/agents/overlord.md', remediationHeading: '## Review Remediation Posture', loadsWhole: true },
 ];
+const DEFINITIONS_PATH = 'plugin/governance/definitions.md';
+const DEFINITIONS_CITATION = '`' + GOVERNANCE_PATH_PREFIX + 'definitions.md` (';
+const BASH_DISCIPLINE_HEADING = 'Bash Command Discipline';
+const DELETION_SCOPE_CLAIM = 'A worker deletes only files and empty folders in its assigned scope or created by its own task, in or out of the repo, each by name';
+const DELETION_SCOPE_CONSUMERS = [
+  { agentPath: 'plugin/agents/drone.md', heading: '## Coding Principles' },
+  { agentPath: 'plugin/agents/changeling.md', heading: '## Design Rules' },
+];
 
 function readAgentText(agentPath) {
   return readFileSync(repoRoot + agentPath, 'utf8').replace(/\r/g, '');
@@ -32,6 +40,19 @@ function readSection(text, heading, agentPath) {
   const rest = lines.slice(start + 1);
   const end = rest.findIndex((line) => line.startsWith('## '));
   return (end === -1 ? rest : rest.slice(0, end)).join('\n');
+}
+
+function lineCitesDefinitionsHeading(line, heading) {
+  const citationStart = line.indexOf(DEFINITIONS_CITATION);
+  if (citationStart === -1) return false;
+  const listStart = citationStart + DEFINITIONS_CITATION.length;
+  const listEnd = line.indexOf(')', listStart);
+  if (listEnd === -1) return false;
+  return line.slice(listStart, listEnd).split(', ').includes(heading);
+}
+
+function sectionCitesDefinitionsHeading(section, heading) {
+  return section.split('\n').some((line) => lineCitesDefinitionsHeading(line, heading));
 }
 
 describe('agents load the remediation doctrine only in their review-remediation section', () => {
@@ -70,6 +91,19 @@ describe('worker agents load no governance doc whole on dispatch', () => {
     test(`${agentPath}: the Load and follow line names no governance path`, () => {
       const loadLine = readLoadLine(readAgentText(agentPath), agentPath);
       assert.ok(!loadLine.includes(GOVERNANCE_PATH_PREFIX), `${agentPath} loads a governance doc whole on every dispatch`);
+    });
+  }
+});
+
+describe('worker agents follow the deletion-scope rule in Bash Command Discipline', () => {
+  test(`${DEFINITIONS_PATH}: ## ${BASH_DISCIPLINE_HEADING} states the deletion-scope rule`, () => {
+    const section = readSection(readAgentText(DEFINITIONS_PATH), '## ' + BASH_DISCIPLINE_HEADING, DEFINITIONS_PATH);
+    assert.ok(section.includes(DELETION_SCOPE_CLAIM), `## ${BASH_DISCIPLINE_HEADING} does not state the deletion-scope rule`);
+  });
+  for (const { agentPath, heading } of DELETION_SCOPE_CONSUMERS) {
+    test(`${agentPath}: ${heading} cites definitions.md (${BASH_DISCIPLINE_HEADING})`, () => {
+      const section = readSection(readAgentText(agentPath), heading, agentPath);
+      assert.ok(sectionCitesDefinitionsHeading(section, BASH_DISCIPLINE_HEADING), `${heading} does not cite definitions.md (${BASH_DISCIPLINE_HEADING})`);
     });
   }
 });

@@ -2291,3 +2291,65 @@ These rationales were cut from `plugin/agents/local-reviewer.md` to pay for the 
 **Prose budgets.** No raise. `plugin/agents/local-reviewer.md` went from 18252 to 18250 bytes, under its budget of 18267. The built standard-delivery prose went from 43255 to 43253 characters, under its budget of 43800. analysis-only stays at 15359. Rows SD-45 and SD-55 are updated.
 
 The rest of ADR-0037 is unchanged.
+
+## Amendment 2026-11-06: a worker deletes only its own paths (issue 502)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/502. In run `wf_e6edca82-34c` the `work-4-STEP-006` drone deleted the shared session scratchpad folder while a sibling worker's bite test was writing `bite.out` under it. The harness flagged it as "Interfere With Workloads". The wave rules kept in-repo scopes disjoint and forbade tree-mutating git and repo-global mutations, but they said nothing about deleting outside the repo.
+
+**The change.**
+
+- `plugin/governance/definitions.md` (Bash Command Discipline) gains one rule: "A worker deletes only files and empty folders in its assigned scope or created by its own task, in or out of the repo, each by name."
+- `plugin/agents/drone.md` already follows that section. `plugin/agents/changeling.md` now follows it too, in its Design Rules.
+- The wave worker prompt (`buildWorkerPrompt`, `waves.js`) is data only, and row SD-14 points at the agent files. So the built scripts are unchanged.
+
+**The cuts that pay for it.**
+
+- **The Bash Command Discipline lead-in.** It said that Claude Code prompts on a write outside the working directory and matches each subcommand of a chain on its own. The rationale lives in the ADR-0010 Findings.
+- **": it forces a prompt for the whole chain".** Cut from the same section. Its rationale also lives in the ADR-0010 Findings.
+- **The changeling.md Review Remediation sentence.** It restated the External Content Boundary and the Destructive Fix Confirmation Gate, which the agent loads from `plugin/governance/security-policy.md`. The rules live there.
+
+**Prose budgets.** No raise. `plugin/governance/definitions.md` went from 7084 to 6980 bytes, under its budget of 7084. `plugin/agents/changeling.md` went from 4460 to 4434 bytes, under its budget of 4460. `plugin/agents/drone.md` stays at 6063 bytes. The built standard-delivery prose stays at 43253 characters.
+
+**Options ruled out.**
+
+- **A per-worker scratch directory named in the wave prompt.** It adds built prose, and the harness owns the scratchpad path.
+- **A bullet in the overlord.md wave and parallel safety rules.** It reaches only the overlord's own wave delegations.
+- **A new governance heading.** It adds more surface than one bullet.
+
+**Recorded residuals.**
+
+- **A tool that wipes a fixed shared path.** A tool the worker runs that itself deletes a fixed shared path is not checked.
+- **A move or an overwrite.** Moving or overwriting a sibling's file is not covered by the delete rule.
+- **Lazy loading.** Workers load a cited section only when the task reaches the rule citing it, so a worker may run `rm` without reading the section. This is the same exposure as the other Bash Command Discipline rules.
+
+**Pin.** `tests/policy/safety-worker-deletion-scope.json`, and a section-scoped check in `tests/workflow-scripts/agent-loads.test.mjs`.
+
+**User decision.** The user agreed the direction: the rule lives in Bash Command Discipline, and the worker agent files cite it.
+
+### Local review finding 72b906b8: a folder is deleted only once empty (2026-11-06)
+
+**The finding.** The first rule keyed on who created a path. So a worker could delete a folder it created after a sibling wrote into it. For example, two workers given the same prompt can pick the same scratch folder name.
+
+**Root cause.** It came in on this branch. The rule checked the delete target, and owning a folder says nothing about the files a sibling later put in it.
+
+**The change.** Each removed item is checked: a file by name, and a folder only when it is empty. So `rmdir` refuses a folder a sibling wrote into, at any depth and at any time. There is no recursive or pattern delete. This is the same key as "by name" in the issue 488 amendment.
+
+**Class eliminated.** No delete removes a file the worker did not create or was not assigned, through any folder that holds it. The key is the worker's own record of what it created, not a listing of a shared folder.
+
+**Bound.** An empty folder the worker created can be removed just before a sibling's first write into it. That write then fails, and no file is lost. A file of the same name stays under the residual "A move or an overwrite".
+
+**Options ruled out.**
+
+- **A folder only when everything in it is the worker's own.** A check and then a recursive delete races a sibling's write.
+- **A descendant clause on the old rule.** It completes a known set and keeps the path as the key.
+- **Unique scratch folder names set by a rule.** It adds prose, and the user chose to accept the bound instead.
+
+**The cut that pays for it.** Bash Command Discipline drops the wait-loop sentence "Agents enforce this at runtime; no static lint can see a runtime tool call." The bullet already binds agents.
+
+**Prose budgets.** No raise. `plugin/governance/definitions.md` went from 7045 to 6980 bytes, under its budget of 7084. `plugin/agents/drone.md` stays at 6063 bytes and `plugin/agents/changeling.md` at 4434. The built standard-delivery prose stays at 43253 characters.
+
+**Pin.** The pattern in `tests/policy/safety-worker-deletion-scope.json` and `DELETION_SCOPE_CLAIM` in `tests/workflow-scripts/agent-loads.test.mjs` carry the new rule. Both were proven to bite, red then green: dropping "empty " and dropping ", each by name" each fail both checks.
+
+**User decision.** The user chose option A: accept the re-key, and record the empty-folder race as the rule's bound.
+
+The rest of ADR-0037 is unchanged.

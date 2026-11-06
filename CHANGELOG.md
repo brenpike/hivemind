@@ -13,6 +13,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.4] - 2026-11-06
+
+### Changed
+
+- Bash Command Discipline drops its permission-engine rationale, kept in ADR-0010, and its note that no static lint sees wait-loops, kept in ADR-0037.
+- `changeling.md` drops its restatement of the review gates it cites.
+
+### Fixed
+
+- A worker deletes only files and empty folders in its assigned scope or created by its own task, in or out of the repo, each by name, so a parallel wave worker no longer removes a sibling's scratch files, even in a folder it created (#502).
+- `changeling.md` now follows Bash Command Discipline as `drone.md` does (#502).
+
+No prose budget changed.
+
 ## [7.6.3] - 2026-11-06
 
 ### Changed

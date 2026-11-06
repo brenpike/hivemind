@@ -27,13 +27,12 @@ Emit no decorative shell output: banners (`echo "=== X ==="`), progress or statu
 
 ## Bash Command Discipline
 
-Claude Code prompts on any out-of-cwd write or redirect and matches each subcommand of a compound command on its own, so:
-
 - Read and search files with the Read, Grep and Glob tools; use Bash only when no dedicated tool covers the task.
 - Run one single-purpose command per Bash call. Never chain with `&&`, `||`, `;`, `|`, `|&` or `&` just to batch steps or narrate.
 - Redirect only to `/dev/null` or a path inside the working directory, never out of cwd (e.g. `/tmp`).
-- Never chain an unlisted command (`rm`, `mv`, `chmod`, `find`, shell `for`/`while` loops) with allowlisted ones: it forces a prompt for the whole chain. Run it alone, and only when required.
-- **No hand-rolled wait-loops.** Never poll with `sleep`/`pgrep`/`until`/`while` for a command to finish. Run it as a `run_in_background` task and react to its completion notification, or arm a Monitor that emits on the genuine completion marker: background-task completion or Monitor is **the only sanctioned wait primitive**. A one-shot `sleep` is not a wait-loop and is allowed. Agents enforce this at runtime; no static lint can see a runtime tool call.
+- Never chain an unlisted command (`rm`, `mv`, `chmod`, `find`, shell `for`/`while` loops) with allowlisted ones. Run it alone, and only when required.
+- A worker deletes only files and empty folders in its assigned scope or created by its own task, in or out of the repo, each by name.
+- **No hand-rolled wait-loops.** Never poll with `sleep`/`pgrep`/`until`/`while` for a command to finish. Run it as a `run_in_background` task and react to its completion notification, or arm a Monitor that emits on the genuine completion marker: background-task completion or Monitor is **the only sanctioned wait primitive**. A one-shot `sleep` is not a wait-loop and is allowed.
 - **No self-matching wait condition.** A wait condition never matches a string in its own command line; match a token the watched process writes to its output, not the command's name or path. `pgrep -f "tools/validate.sh"` from a shell whose command line holds `tools/validate.sh` matches itself and never ends.
 
 ## Silence Discipline
