@@ -2298,7 +2298,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/502. In run `w
 
 **The change.**
 
-- `plugin/governance/definitions.md` (Bash Command Discipline) gains one rule: "A worker deletes only paths in its assigned scope or created by its own task, in or out of the repo (e.g. scratch space)."
+- `plugin/governance/definitions.md` (Bash Command Discipline) gains one rule: "A worker deletes only files and empty folders in its assigned scope or created by its own task, in or out of the repo, each by name."
 - `plugin/agents/drone.md` already follows that section. `plugin/agents/changeling.md` now follows it too, in its Design Rules.
 - The wave worker prompt (`buildWorkerPrompt`, `waves.js`) is data only, and row SD-14 points at the agent files. So the built scripts are unchanged.
 
@@ -2308,7 +2308,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/502. In run `w
 - **": it forces a prompt for the whole chain".** Cut from the same section. Its rationale also lives in the ADR-0010 Findings.
 - **The changeling.md Review Remediation sentence.** It restated the External Content Boundary and the Destructive Fix Confirmation Gate, which the agent loads from `plugin/governance/security-policy.md`. The rules live there.
 
-**Prose budgets.** No raise. `plugin/governance/definitions.md` went from 7084 to 7045 bytes, under its budget of 7084. `plugin/agents/changeling.md` went from 4460 to 4434 bytes, under its budget of 4460. `plugin/agents/drone.md` stays at 6063 bytes. The built standard-delivery prose stays at 43253 characters.
+**Prose budgets.** No raise. `plugin/governance/definitions.md` went from 7084 to 6980 bytes, under its budget of 7084. `plugin/agents/changeling.md` went from 4460 to 4434 bytes, under its budget of 4460. `plugin/agents/drone.md` stays at 6063 bytes. The built standard-delivery prose stays at 43253 characters.
 
 **Options ruled out.**
 
@@ -2325,5 +2325,31 @@ This amendment covers https://github.com/brenpike/hivemind/issues/502. In run `w
 **Pin.** `tests/policy/safety-worker-deletion-scope.json`, and a section-scoped check in `tests/workflow-scripts/agent-loads.test.mjs`.
 
 **User decision.** The user agreed the direction: the rule lives in Bash Command Discipline, and the worker agent files cite it.
+
+### Local review finding 72b906b8: a folder is deleted only once empty (2026-11-06)
+
+**The finding.** The first rule keyed on who created a path. So a worker could delete a folder it created after a sibling wrote into it. For example, two workers given the same prompt can pick the same scratch folder name.
+
+**Root cause.** It came in on this branch. The rule checked the delete target, and owning a folder says nothing about the files a sibling later put in it.
+
+**The change.** Each removed item is checked: a file by name, and a folder only when it is empty. So `rmdir` refuses a folder a sibling wrote into, at any depth and at any time. There is no recursive or pattern delete. This is the same key as "by name" in the issue 488 amendment.
+
+**Class eliminated.** No delete removes a file the worker did not create or was not assigned, through any folder that holds it. The key is the worker's own record of what it created, not a listing of a shared folder.
+
+**Bound.** An empty folder the worker created can be removed just before a sibling's first write into it. That write then fails, and no file is lost. A file of the same name stays under the residual "A move or an overwrite".
+
+**Options ruled out.**
+
+- **A folder only when everything in it is the worker's own.** A check and then a recursive delete races a sibling's write.
+- **A descendant clause on the old rule.** It completes a known set and keeps the path as the key.
+- **Unique scratch folder names set by a rule.** It adds prose, and the user chose to accept the bound instead.
+
+**The cut that pays for it.** Bash Command Discipline drops the wait-loop sentence "Agents enforce this at runtime; no static lint can see a runtime tool call." The bullet already binds agents.
+
+**Prose budgets.** No raise. `plugin/governance/definitions.md` went from 7045 to 6980 bytes, under its budget of 7084. `plugin/agents/drone.md` stays at 6063 bytes and `plugin/agents/changeling.md` at 4434. The built standard-delivery prose stays at 43253 characters.
+
+**Pin.** The pattern in `tests/policy/safety-worker-deletion-scope.json` and `DELETION_SCOPE_CLAIM` in `tests/workflow-scripts/agent-loads.test.mjs` carry the new rule. Both were proven to bite, red then green: dropping "empty " and dropping ", each by name" each fail both checks.
+
+**User decision.** The user chose option A: accept the re-key, and record the empty-folder race as the rule's bound.
 
 The rest of ADR-0037 is unchanged.

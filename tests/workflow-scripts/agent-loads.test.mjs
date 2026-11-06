@@ -17,7 +17,7 @@ const AGENT_SECTIONS = [
 const DEFINITIONS_PATH = 'plugin/governance/definitions.md';
 const DEFINITIONS_CITATION = '`' + GOVERNANCE_PATH_PREFIX + 'definitions.md` (';
 const BASH_DISCIPLINE_HEADING = 'Bash Command Discipline';
-const DELETION_SCOPE_CLAIM = 'A worker deletes only paths in its assigned scope or created by its own task, in or out of the repo';
+const DELETION_SCOPE_CLAIM = 'A worker deletes only files and empty folders in its assigned scope or created by its own task, in or out of the repo, each by name';
 const DELETION_SCOPE_CONSUMERS = [
   { agentPath: 'plugin/agents/drone.md', heading: '## Coding Principles' },
   { agentPath: 'plugin/agents/changeling.md', heading: '## Design Rules' },
