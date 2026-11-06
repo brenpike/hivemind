@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - A local review fix that fails its check is undone, with only its own files restored to the last commit. Its ledger entry goes `regressed`, and the run names it after the gates (#496).
+- The final message and PR record list the findings every local review of the run rejected or whose fix it undid, across replans and reruns (#496).
 
 ## [7.6.2] - 2026-11-06
 
