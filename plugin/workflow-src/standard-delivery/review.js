@@ -8,8 +8,8 @@
  *   run    the run state of main.js createRunState: pass, answerLog, head,
  *          trunk, approvals and taken.
  *   plan   the accepted plan, from runPlanningPass (plan.js).
- *   gates  the gate loop state of runGates (gates.js): runs.review, answer
- *          and rejected, and takenReview, which only this module sets and
+ *   gates  the gate loop state of runGates (gates.js): runs.review, answer,
+ *          rejected and undone, and takenReview, which only this module sets and
  *          reads: the review whose call the run took, kept for the next
  *          review run alone.
  *   review the local reviewer result, under REVIEW_SCHEMA.
@@ -33,8 +33,8 @@
  *           holds, a planner escalation or root cluster resolves through
  *           decide() and a take starts a new pass with replan data: the review
  *           projected to its exit_reason and the fields reviewExitFields()
- *           names for it, so rejected_findings, ledger_path and the counts
- *           never reach the planner. A question of the review,
+ *           names for it, so rejected_findings, undone_fixes, ledger_path and
+ *           the counts never reach the planner. A question of the review,
  *           user-input-required or high-severity-rejection, carries finding_id
  *           and the reviewer's user_question: found, ask, 2 to 4 options with
  *           ids A, B, C and D in that order, a recommendation with its
@@ -95,10 +95,11 @@
  *           message or the planner, and a field with no bound is not shown.
  *           rejected_findings lists the findings the loop rejected under
  *           recorded decisions (remediation-doctrine.md, Recorded Decisions
- *           and Repeat Findings): a held gate's note gives their code-built
- *           count, and the final complete message names each by its short id
- *           alone in its block, the one the pull request record carries
- *           too. localReviewRoutes() keys only on exit_reason.
+ *           and Repeat Findings), and undone_fixes the findings whose failed
+ *           fix the loop undid: a held gate's note gives the code-built count
+ *           of each list, and the final complete message names each finding
+ *           by its short id alone in its block, the one the pull request
+ *           record carries too. localReviewRoutes() keys only on exit_reason.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -112,8 +113,9 @@
  *   neutralizePullRequestText (pr.js): a routing decision taken on a review
  *   result is shown there with a fixed problem text, a taken review call as
  *   its compact decision line, the short finding id, the encoded ask and the
- *   encoded chosen summary with no why, and the rejected findings as their
- *   short ids in the block of buildRejectedFindingsBlock. A review question shows
+ *   encoded chosen summary with no why, and the rejected findings and
+ *   undone fixes as their short ids in the block of
+ *   buildRejectedFindingsBlock. A review question shows
  *   reviewer text, encoded, so its shown brief can exceed a BRIEF_SCHEMA bound
  *   once encoded, but decide() reads only the code-built brief of
  *   removeReviewerText, which always fits it, so a valid review never asks as
@@ -262,9 +264,26 @@ function quoteShortFindingId(findingId) {
   return encodeUntrustedText(Array.from(findingId).slice(0, 8).join(''));
 }
 
-function buildRejectedFindingsBlock(note, rejectedFindings) {
-  const lines = ['Local review: ' + note + '. The findings it rejected:'];
-  rejectedFindings.forEach((finding) => lines.push('- ' + quoteShortFindingId(finding.finding_id)));
+function pushShortIdLines(lines, findings) {
+  findings.forEach((finding) => lines.push('- ' + quoteShortFindingId(finding.finding_id)));
+}
+
+/**
+ * Returns the block of the held local review gate: its note, then the
+ * short id of each rejected finding under the rejected heading, shown
+ * unless only undone fixes are listed, then, when any fix was undone, the
+ * undone heading and the short id of each undone fix.
+ */
+function buildRejectedFindingsBlock(note, rejectedFindings, undoneFixes = []) {
+  const lines = ['Local review: ' + note + '.'];
+  if (rejectedFindings.length > 0 || undoneFixes.length === 0) {
+    lines[0] += ' The findings it rejected:';
+    pushShortIdLines(lines, rejectedFindings);
+  }
+  if (undoneFixes.length > 0) {
+    lines.push('The findings whose fix it undid:');
+    pushShortIdLines(lines, undoneFixes);
+  }
   return { text: lines.join('\n') };
 }
 
@@ -377,17 +396,22 @@ function buildDiminishingReturnsBrief(review, head) {
   });
 }
 
-function describeRejectedCount(rejectedFindings) {
-  const count = rejectedFindings.length;
-  if (count === 0) {
-    return '';
-  }
-  return ', ' + count + (count === 1 ? ' finding' : ' findings') + ' rejected under recorded decisions';
+function describeFindingCount(findings, tail) {
+  return findings.length === 0 ? '' : ', ' + describeCount(findings.length, 'finding') + tail;
+}
+
+/**
+ * Returns the code-built counts a held gate's note ends with: the findings
+ * rejected under recorded decisions, then the findings whose failed fix
+ * was undone, each left out when there are none.
+ */
+function describeHeldCounts(review) {
+  return describeFindingCount(review.rejected_findings, ' rejected under recorded decisions') + describeFindingCount(review.undone_fixes, ' whose failed fix was undone');
 }
 
 function resolveDiminishingReturns(review, run) {
   const decided = resolveTailDecision(DIMINISHING_RETURNS_EXIT_KIND, buildDiminishingReturnsBrief(review, run.head), run);
-  return isRunEnd(decided) ? decided : { held: true, note: 'diminishing returns, ' + review.findings_open + ' findings still open' + describeRejectedCount(review.rejected_findings) };
+  return isRunEnd(decided) ? decided : { held: true, note: 'diminishing returns, ' + review.findings_open + ' findings still open' + describeHeldCounts(review) };
 }
 
 function buildReviewEscalationBrief(review) {
@@ -442,7 +466,7 @@ function stopForReviewReplan(cause, review, run) {
 function routeLocalReview(review, run) {
   switch (localReviewRoutes()[review.exit_reason]) {
     case 'hold':
-      return { held: true, note: 'clean' + describeRejectedCount(review.rejected_findings) };
+      return { held: true, note: 'clean' + describeHeldCounts(review) };
     case 'diminishing':
       return resolveDiminishingReturns(review, run);
     case 'replan':
@@ -478,6 +502,7 @@ async function runReviewGate(run, plan, gates) {
   const routed = isHeldCall ? askHeldReviewCall(takenReview, run) : routeLocalReview(review, run);
   if (routed.held) {
     gates.rejected = review.rejected_findings;
+    gates.undone = review.undone_fixes;
   }
   if (routed.answer !== undefined && routed.answer.decided_by === 'run') {
     gates.takenReview = review;

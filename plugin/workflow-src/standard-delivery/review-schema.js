@@ -12,8 +12,9 @@
  *
  * Outputs
  *   buildReviewSchema()  REVIEW_SCHEMA, which main.js builds once: the
- *          always-present fields, rejected_findings, and each field of
- *          reviewFieldTexts() under the exit_reason that names it.
+ *          always-present fields, rejected_findings and undone_fixes among
+ *          them, and each field of reviewFieldTexts() under the exit_reason
+ *          that names it.
  *   reviewFieldTexts()  the type, text, external mark and bounds of each
  *          conditional review field.
  *   findingIdField()  the finding id shape.
@@ -33,9 +34,12 @@
  *   throws on a list entry with none. The review strings that reach no
  *   message and not the planner keep no maxLength: ledger_path, stage,
  *   prior_fix_commit, latest_severity_max, the entries of signals_fired,
- *   signals_observed and conflicting_findings, and the title and record
- *   of each rejected finding. Each field that can carry Codex-derived
+ *   signals_observed and conflicting_findings, the title and record of
+ *   each rejected finding and the title of each undone fix. Each field that can carry Codex-derived
  *   text starts its description with externalLabel().
+ *   The always-present fields are the properties buildReviewSchema sets
+ *   before it adds those of reviewFieldTexts(), so the required list is
+ *   their keys, in that order, the Output Contract order.
  *   iterations_completed, findings_resolved and findings_open are display
  *   only. The user rejected local review finding de83f9cf, which asked
  *   for bounds and consistency checks on them (ADR-0037, Amendment
@@ -84,12 +88,17 @@ function describeReviewField(entry) {
   return (entry.isExternal ? externalLabel() + ' ' : '') + entry.text;
 }
 
-function rejectedFindingTexts() {
+function undoneFixTexts() {
   return {
     finding_id: findingIdField(),
-    title: { type: 'string', text: reviewFieldTexts().title.text, isExternal: true },
-    record: { type: 'string', text: 'The path and section of the recorded decision the reviewer cites.', isExternal: true }
+    title: { type: 'string', text: reviewFieldTexts().title.text, isExternal: true }
   };
+}
+
+function rejectedFindingTexts() {
+  return Object.assign(undoneFixTexts(), {
+    record: { type: 'string', text: 'The path and section of the recorded decision the reviewer cites.', isExternal: true }
+  });
 }
 
 function buildFindingItemSchema(texts) {
@@ -98,6 +107,14 @@ function buildFindingItemSchema(texts) {
     properties[name] = buildReviewFieldSchema(name, entry);
   }
   return { type: 'object', additionalProperties: false, required: Object.keys(texts), properties: properties };
+}
+
+/**
+ * Returns the schema of an always-present finding list: externally
+ * labelled, at most 50 entries of texts, and empty when the loop has none.
+ */
+function buildFindingListSchema(text, texts) {
+  return { type: 'array', description: externalLabel() + text + ', empty when none.', maxItems: 50, items: buildFindingItemSchema(texts) };
 }
 
 function reviewOptionIds() {
@@ -182,8 +199,10 @@ function buildReviewSchema() {
     findings_open: { type: 'integer', description: 'How many findings are still open.' },
     fix_commits_exist: { type: 'boolean', description: 'true when the loop committed at least one fix.' },
     ledger_path: { type: 'string', description: 'The path of the fix ledger.' },
-    rejected_findings: { type: 'array', description: externalLabel() + ' Every finding the loop rejected under a recorded decision, empty when none.', maxItems: 50, items: buildFindingItemSchema(rejectedFindingTexts()) }
+    rejected_findings: buildFindingListSchema(' Every finding the loop rejected under a recorded decision', rejectedFindingTexts()),
+    undone_fixes: buildFindingListSchema(' Every finding whose failed fix the loop undid', undoneFixTexts())
   };
+  const required = Object.keys(properties);
   for (const [name, entry] of Object.entries(reviewFieldTexts())) {
     properties[name] = buildReviewFieldSchema(name, entry);
   }
@@ -194,7 +213,7 @@ function buildReviewSchema() {
   return buildTaggedSchema({
     tag: 'exit_reason',
     properties: properties,
-    required: ['exit_reason', 'iterations_completed', 'findings_resolved', 'findings_open', 'fix_commits_exist', 'ledger_path', 'rejected_findings'],
+    required: required,
     variants: variants
   });
 }
