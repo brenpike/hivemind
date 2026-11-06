@@ -264,7 +264,7 @@ PR3 and PR4 touch disjoint files and can proceed in parallel, and so can PR4 and
 | The github-reviewer adds an EYES reaction to a Codex summary comment with no findings, though the marker is for fixed or deferred items only (PR8 smoke F4). Watch path, on the current engine | 3 |
 | Hard stops outside workflows other than git side effects | Unassigned |
 | A restart whose branch already holds every step must still plan one step, a step whose outcome already holds, because the plan schema sets `minItems` and `computeWave` keeps parity with `next-wave.sh` | Unassigned |
-| The local reviewer's contract does not say whether a fix that fails validation is undone or left in the tree. Under invariant 1 a leftover edit stops the run at the commit script after local review, which names the paths | 3 |
+| Settled 2026-11-06 by issue 496: a fix that fails its check is undone, with only its own files restored to `HEAD` and any it created removed. Its finding goes `regressed` and is named in the required `undone_fixes` list, which the run shows after the gates. Before: the local reviewer's contract did not say whether a fix that fails validation is undone or left in the tree, and under invariant 1 a leftover edit stopped the run at the commit script after local review, which named the paths (see Amendment 2026-11-06: a local review fix that fails its check is undone (issue 496)) | Settled (issue 496) |
 | Post-PR remediation on the engine, reviewer briefs, autonomy level as plugin `userConfig`. Amended 2026-10-25 (issue 453): the state-machine watch now has a reply path. A reviewer or planner question goes to the `question` user gate, and the answer goes back to the state that asked, in the same run. Post-PR remediation on the engine and reviewer briefs stay slice 3 (see Amendment 2026-10-25: open questions pause on both engines, and a run can be stopped (issue 453)) | 3 |
 | Questions in the delivery tail end the run with the question open, until reviewer briefs bring a reply path. They are the bound on validation fix rounds or gate reruns, a bump type that cannot be determined, and a reviewer question or high-severity rejection. Each asks in plain words. Amended 2026-10-23: each such stop ends the run blocked, not complete, and names the next action (see Amendment 2026-10-23: question keys, blocked stops and the question template). Amended 2026-10-24 (issue 441): a reviewer question or high-severity rejection names its finding by a short id and lists every finding still open, from the reviewer's `open_findings`, in its detail block (see Amendment 2026-10-24: short run messages). The reply path is still slice 3. Settled 2026-10-25 by issue 453: every tail question pauses the run, and the reply resumes it. An answer to a local review question goes back to the local reviewer on the same commit, and any other answer starts a new planning pass with an answer block (see Amendment 2026-10-25: open questions pause on both engines, and a run can be stopped (issue 453)) | Settled (issue 453) |
 | Settled 2026-11-01 by issue 494: required at script level in both scripts. Before: `--expect-commit` stayed optional in `push-branch.sh` and `open-plan-pr.sh` for current-engine callers, standard-delivery passed it on every push (its contract table), and it was to become required at script level when the post-PR watch moved to the engine. Every current-engine caller now passes it too (see Amendment 2026-11-01: the push and PR scripts require the expected commit (issue 494)) | Settled (issue 494) |
@@ -419,7 +419,7 @@ Links: https://github.com/brenpike/hivemind/issues/409, `docs/adr/0007-fleet-chi
 This amendment covers the script changes of https://github.com/brenpike/hivemind/issues/448. `docs/adr/0038-root-cause-at-the-first-finding.md` records the decisions, and `plugin/governance/remediation-doctrine.md` states the rules. The script follows the doctrine and copies none of it. The state-machine definitions are unchanged.
 
 - **`rejected_findings` is a required review field.** The local reviewer returns every finding it rejected under a recorded decision, each with its `finding_id`, `title` and `record`, the path and section of the decision it cites. The list is empty when there are none. Each value is labelled as able to carry external content. A result without the field stops the run blocked, as any result that fails `REVIEW_SCHEMA` does. Text: `rejectedFindingTexts`, `buildFindingItemSchema`, `buildOpenFindingSchema`, `buildReviewSchema` and `buildReviewPrompt` in `plugin/workflow-src/standard-delivery/main.js`, row SD-33.
-- **The review gate note gives the count.** When the review that held the gate lists rejected findings, its note adds a code-built count: "N findings rejected under recorded decisions". The pull request body and comment carry that count and no rejected-finding text, so no Codex text reaches the pull request. Text: `describeRejectedCount`, `routeLocalReview`, `resolveDiminishingReturns`, `runReviewGate` and `runGates`.
+- **The review gate note gives the count.** When the review that held the gate lists rejected findings, its note adds a code-built count: "N findings rejected under recorded decisions". The pull request body and comment carry that count and no rejected-finding text, so no Codex text reaches the pull request. Text: `describeRejectedCount`, `routeLocalReview`, `resolveDiminishingReturns`, `runReviewGate` and `runGates`. Amended 2026-11-06 (local review finding 0f6d3394): the count covers every usable review of the run.
 - **The details go in chat only.** The final complete message carries a detail block right after its first block, headed by that note. It names each rejected finding by the first 8 code points of its `finding_id`, with its title and record, each value encoded as external content. Its compact form keeps only the id and the title. An empty list adds nothing. Text: `renderRejectedFindingLine`, `buildRejectedFindingsBlock`, `finishDeliveryComplete` and `runPullRequestStep`, row SD-55. Amended 2026-10-28 (local review finding 7703cd64): the block names each rejected finding by its short id only, with no title and no record (see Amendment 2026-10-28: one message shape (issue 460)).
 - **No zoom-out trigger.** The script sets no zoom-out trigger, and every review replan gets the same remediation reason. The planner makes the zoom-out call by judgment from the branch commits in its fresh facts (ADR-0038 decision 3). This branch's first draft keyed the reason on a run-wide flag, which made any second review replan look like a non-closing structural fix (local review finding 65415fd0), so the flag and its branch are removed. Remediation plan acceptance reads the run's taken review-routing decision instead of the flag, with unchanged behavior. Text: `requestReviewReplan`, `resolvePlanAcceptance` and `createRunState`, rows SD-39 and SD-40.
 - **Only the escalation reaches the planner.** A local review that sends the run back to planning passes the planner only its `exit_reason` and the fields that `exit_reason` names. So a finding rejected under a recorded decision, the fix ledger path, the open findings and the counts never reach remediation planning. The projection is a positive allowlist drawn from the same per-exit field table the review schema uses. Text: `projectReplanReview` and `requestReviewReplan` in `plugin/workflow-src/standard-delivery/main.js`, row SD-39.
@@ -2199,5 +2199,95 @@ This amendment covers https://github.com/brenpike/hivemind/issues/506 and https:
 - **Not covered.** `jq -R` replaces each invalid UTF-8 sequence of the body file with U+FFFD, so such a body is changed, not refused.
 - **Bounded impact.** The workflow body is a JavaScript string and the Write tool writes text, so neither path produces invalid UTF-8. A replaced sequence shows as a visible character in editable pull request text and adds no control character.
 - **Ground.** That is how jq reads raw input. A separate byte check would guard a case the Write tool does not produce.
+
+The rest of ADR-0037 is unchanged.
+
+## Amendment 2026-11-06: a local review fix that fails its check is undone (issue 496)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/496. The local reviewer's contract did not say whether a fix that fails its check is undone or left in the tree. Under invariant 1 a leftover edit stopped the run at the commit script after local review, which named the paths but not the finding.
+
+**The change.**
+
+- **The undo.** Step 7 of `plugin/agents/local-reviewer.md` undoes a fix that fails its check. The reviewer restores only the files that fix touched to `HEAD`, and removes any file it created. The fix goes `regressed`, never resolved. So does any earlier fix of the same iteration that this restore undid. Amended 2026-11-06 (GitHub review thread https://github.com/brenpike/hivemind/pull/540#discussion_r4493063020): an earlier fix of the iteration in a restored file is undone whole, all its files restored and any it created removed, and so on for each file that restores, so no `regressed` fix keeps part of its edit in the tree. Root cause: the restore worked per file while `regressed` named a whole fix, so an earlier fix of files A and B lost its A part to a later failing fix of A, kept its B part, and went to the step-8 checkpoint half applied while `undone_fixes` called it undone. Eliminated class: the undo unit is the fix, never the file, so a fix is either whole in the tree or wholly gone.
+- **The report.** The Output Contract gains a required `undone_fixes` list: the `regressed` findings, each with `finding_id` and `title`, copied as data, at most 50, empty when none. `REVIEW_SCHEMA` (`review-schema.js`) requires it too, beside `rejected_findings`.
+- **The run.** A held local review gate's note gives the code-built count of undone fixes after the rejected findings (`describeHeldCounts`, `review.js`). The final complete message and the pull request record list each undone fix by its short id under "The findings whose fix it undid:", in the block of `buildRejectedFindingsBlock`. The planner never receives `undone_fixes`, as it never receives `rejected_findings`. Amended 2026-11-06 (local review finding 0f6d3394): the run keeps both lists across every review of the run (see "Local review finding 0f6d3394" below).
+- Rows SD-33, SD-39, SD-45 and SD-55 name the new rules.
+- Patch, 7.6.3.
+
+**User decision.**
+
+- **2026-11-05.** The user chose this change as item 7 of the initiative plan.
+
+**Why undo, not leave or commit.**
+
+- **Leave.** A failing edit left in the tree is swept into the next commit, or the next commit refuses it.
+- **Commit.** The caller validates every commit the loop leaves. A failed fix that is committed fails there.
+- **Each validated fix is still committed.** The loop cannot reach `clean` without its fix commit, because step 3 reviews only the committed HEAD.
+- **The no-progress guard.** It returns `clean` instead of re-running the same review.
+- **The step-9 early exit.** It is advisory, never a forced stop.
+
+These rationales were cut from `plugin/agents/local-reviewer.md` to pay for the new text. They live here now.
+
+**Scope of the undo.** The undo restores only the files of the fixes it undoes, and touches no other path. This is consistent with `plugin/governance/safety-rails.md` (Git Safety). The destructive fix gate is unaffected, because an undo is not a fix.
+
+**Prose budgets.** No raise. `plugin/agents/local-reviewer.md` went from 18265 to 18252 bytes, under its budget of 18267. The standard-delivery built prose went from 43271 to 43255 characters, under its budget of 43800. analysis-only stays at 15359. The offset: `buildReviewSchema` derives the `REVIEW_SCHEMA` required list from its always-present property keys, instead of listing them again.
+
+**Recorded residual: one restore can undo an earlier fix of the same iteration.**
+
+- **Not covered.** An earlier fix of the same iteration in the same file passed its check. Restoring that file to `HEAD` undoes it too, whole, its other files included.
+- **Bounded impact.** That fix goes `regressed` and is named in `undone_fixes`, and none of its edit stays in the tree, so the user sees it in the gate note, the final message and the pull request record. No failing edit is committed.
+- **Ground.** Restoring whole files to `HEAD` is the undo that leaves no failing edit. Keeping the earlier fix would need the loop to track each fix's edits apart.
+
+**Recorded residual: a failure the fix did not cause still undoes it.**
+
+- **Not covered.** With `caller_validates` false or absent, the check is the project-wide Validation Procedure. A failure there that the fix did not cause still undoes the fix.
+- **Bounded impact.** The fix is named as undone, and its finding stays for the next review. The tree is left as it was at `HEAD`.
+- **Ground.** A project-wide result does not show which failure a fix caused.
+
+**Recorded residual: a regressed finding gets no second fix.**
+
+- **Not covered.** The loop does not try a second fix for a `regressed` finding.
+- **Bounded impact.** The finding is named in `undone_fixes`, so it reaches the user and the pull request record.
+- **Ground.** The ledger's status transitions have no edge out of `regressed`. Adding one would grow the fix ledger contract.
+
+**Recorded residual: stop exits do not name rejected findings or undone fixes.**
+
+- **Not covered.** Only a held gate's note, the final complete message and the pull request record name rejected findings or undone fixes. A stop exit's message does not.
+- **Bounded impact.** The undo still ran, so no failing edit is left. The fix ledger at `ledger_path` records each `regressed` entry. A stop the run goes on from keeps both lists for the final message and the pull request record.
+- **Ground.** Each stop message names its own cause and next action. Adding the list to every stop exit would grow each message for a case the ledger already records.
+
+**Recorded residual: the github-reviewer has the same gap after the pull request.**
+
+- **Not covered.** `plugin/agents/github-reviewer.md` does not say whether a post-PR fix that fails its check is undone. It is not changed here.
+- **Bounded impact.** Post-PR remediation is not on the script engine yet (see Deferred items), and the user sees every pushed commit on the pull request.
+- **Ground.** Issue 496 names the local reviewer only.
+
+**Recorded residual: the undo assumes no one else edits a fixed file during its fix.**
+
+- **Not covered.** The undo restores the fix's files to `HEAD` with no snapshot taken before the fix. If the operator, or another program run as the same user, edits one of those files between the fix and its check, the restore discards that edit too. Output the check itself creates is not removed by the undo.
+- **Bounded impact.** The run goes one step at a time on a clean tree (invariant 1), and no wave worker runs during the local review gate, so no other step of the run edits these files. Output the check creates is left in the tree, and the commit script after local review refuses it and stops the run, naming the paths. No failing edit is committed.
+- **Ground.** Outside the threat model: an edit by anyone else to a file during its local review fix is not a failure this loop defends against. Hardening it would need a per-fix snapshot and ownership check, which grows the loop's surface.
+- **Decision.** Taken by the run, not the user, under `plugin/governance/decision-autonomy.md` (Review Calls), on 2026-11-06, for local review finding 47411cae ("Undo has no ownership-safe path snapshot"). The pick kept the undo as it is and recorded this residual. The run lists it for the user to veto before merge.
+
+### Local review finding 0f6d3394: the run keeps the lists of every review (2026-11-06)
+
+**The finding.** The final message and the pull request record listed the rejected findings and undone fixes of one review only. A run with a replan or a rerun lost the lists of the earlier reviews.
+
+**Root cause.** The lists lived in the per-pass gate loop state (`runGates`). The loop wrote them only when a review held the gate. A replan, a root cluster, `stop_replan`, the `maxReplans()` stop, `stop_rerun`, a diminishing ask, a question or take rerun, and a review rerun after a review commit all dropped or overwrote them. `rejected_findings` inherited this from trunk (see the issue 448 amendment). `undone_fixes` copied it on this branch.
+
+**The change.**
+
+- **Where the lists live.** `createRunState` holds `run.rejected` and `run.undone`.
+- **When they are kept.** `keepReviewLists(run, review)` runs in `runReviewGate` whenever `describeReviewProblem` returns undefined. It runs before `runCommitStep` and before routing.
+- **How they merge.** Each list is a first-seen union by `finding_id`.
+- **Who reads them.** The held note (`describeHeldCounts`) and the run record (`hasListedFindings`, `buildRunRecordParts`, `finishDeliveryComplete`) read the run lists.
+
+**Class eliminated.** No `exit_reason`, route, pass boundary or later review can drop the lists of a usable review. There is no conditional write and no per-pass reset.
+
+**Resume.** The lists are rebuilt by replay of cached results. Nothing new is persisted. The planner boundary is unchanged: `projectReplanReview` still drops both lists.
+
+**Finding f3ae254e.** The word "every" is dropped from both list texts, in `plugin/agents/local-reviewer.md` and the `REVIEW_SCHEMA` descriptions. A review lists at most 50, and its ledger holds the rest. The run lists have no cap beyond the union. The chat fit and the pull request size stop bound them. A finding raised again at moved lines gets a new id and is listed again.
+
+**Prose budgets.** No raise. `plugin/agents/local-reviewer.md` went from 18252 to 18250 bytes, under its budget of 18267. The built standard-delivery prose went from 43255 to 43253 characters, under its budget of 43800. analysis-only stays at 15359. Rows SD-45 and SD-55 are updated.
 
 The rest of ADR-0037 is unchanged.

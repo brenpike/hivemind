@@ -689,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '625de6fb3f919c2e';
+const BUILD_ID = '28e4884f9562cb74';
 
 function supportedSchemaKeywords(){
 return[
@@ -2970,7 +2970,7 @@ return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.he
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,rejected:[],answer:undefined,fixAnswer:undefined};
+const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,answer:undefined,fixAnswer:undefined};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
@@ -3599,6 +3599,9 @@ return!routineDecisionKinds().includes(entry.kind);
 function renderApprovals(approvals){
 return['Destructive changes you approved:',...approvals.map((change)=>'- '+renderDestructiveChange(change))].join('\n');
 }
+function hasListedFindings(run){
+return run.rejected.length>0||run.undone.length>0;
+}
 function buildRunRecordParts(run,taken,gates){
 const shown=taken.filter(isShownDecision);
 const parts=[];
@@ -3610,8 +3613,8 @@ parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
 }else if(run.notRunGates.length>0){
 parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
 }
-if(gates!==undefined&&gates.rejected.length>0){
-parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review,gates.rejected).text,external:true});
+if(gates!==undefined&&hasListedFindings(run)){
+parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review,run.rejected,run.undone).text,external:true});
 }
 if(run.approvals.length>0){
 parts.push({id:'approvals',text:renderApprovals(run.approvals),external:true});
@@ -3663,8 +3666,8 @@ const blocks=[{text:describePullRequest(prValues)},{text:describeHeldGates(run)}
 if(prValues.warning!==undefined){
 blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
 }
-if(gates.rejected.length>0){
-blocks.push(buildRejectedFindingsBlock(gates.notes.review,gates.rejected));
+if(hasListedFindings(run)){
+blocks.push(buildRejectedFindingsBlock(gates.notes.review,run.rejected,run.undone));
 }
 blocks.push(...buildRecordTailBlocks(run,run.taken));
 return finish({outcome:'complete',blocks:blocks,pr:pr});
@@ -4086,12 +4089,16 @@ stage:{type:'string',text:'The loop stage that was blocked.',isExternal:false}
 function describeReviewField(entry){
 return(entry.isExternal?externalLabel()+' ':'')+entry.text;
 }
-function rejectedFindingTexts(){
+function undoneFixTexts(){
 return{
 finding_id:findingIdField(),
-title:{type:'string',text:reviewFieldTexts().title.text,isExternal:true},
-record:{type:'string',text:'The path and section of the recorded decision the reviewer cites.',isExternal:true}
+title:{type:'string',text:reviewFieldTexts().title.text,isExternal:true}
 };
+}
+function rejectedFindingTexts(){
+return Object.assign(undoneFixTexts(),{
+record:{type:'string',text:'The path and section of the recorded decision the reviewer cites.',isExternal:true}
+});
 }
 function buildFindingItemSchema(texts){
 const properties={};
@@ -4099,6 +4106,9 @@ for(const[name,entry]of Object.entries(texts)){
 properties[name]=buildReviewFieldSchema(name,entry);
 }
 return{type:'object',additionalProperties:false,required:Object.keys(texts),properties:properties};
+}
+function buildFindingListSchema(text,texts){
+return{type:'array',description:externalLabel()+text+', empty when none.',maxItems:50,items:buildFindingItemSchema(texts)};
 }
 function reviewOptionIds(){
 return['A','B','C','D'];
@@ -4178,8 +4188,10 @@ findings_resolved:{type:'integer',description:'How many findings the loop fixed.
 findings_open:{type:'integer',description:'How many findings are still open.'},
 fix_commits_exist:{type:'boolean',description:'true when the loop committed at least one fix.'},
 ledger_path:{type:'string',description:'The path of the fix ledger.'},
-rejected_findings:{type:'array',description:externalLabel()+' Every finding the loop rejected under a recorded decision, empty when none.',maxItems:50,items:buildFindingItemSchema(rejectedFindingTexts())}
+rejected_findings:buildFindingListSchema(' The findings the loop rejected under a recorded decision',rejectedFindingTexts()),
+undone_fixes:buildFindingListSchema(' The findings whose failed fix the loop undid',undoneFixTexts())
 };
+const required=Object.keys(properties);
 for(const[name,entry]of Object.entries(reviewFieldTexts())){
 properties[name]=buildReviewFieldSchema(name,entry);
 }
@@ -4190,7 +4202,7 @@ variants[exitReason]={required:fields,optional:[]};
 return buildTaggedSchema({
 tag:'exit_reason',
 properties:properties,
-required:['exit_reason','iterations_completed','findings_resolved','findings_open','fix_commits_exist','ledger_path','rejected_findings'],
+required:required,
 variants:variants
 });
 }
@@ -4302,9 +4314,19 @@ return', so '+RUN_NAME+' stopped before the pull request.';
 function quoteShortFindingId(findingId){
 return encodeUntrustedText(Array.from(findingId).slice(0,8).join(''));
 }
-function buildRejectedFindingsBlock(note,rejectedFindings){
-const lines=['Local review: '+note+'. The findings it rejected:'];
-rejectedFindings.forEach((finding)=>lines.push('- '+quoteShortFindingId(finding.finding_id)));
+function pushShortIdLines(lines,findings){
+findings.forEach((finding)=>lines.push('- '+quoteShortFindingId(finding.finding_id)));
+}
+function buildRejectedFindingsBlock(note,rejectedFindings,undoneFixes=[]){
+const lines=['Local review: '+note+'.'];
+if(rejectedFindings.length>0||undoneFixes.length===0){
+lines[0]+=' The findings it rejected:';
+pushShortIdLines(lines,rejectedFindings);
+}
+if(undoneFixes.length>0){
+lines.push('The findings whose fix it undid:');
+pushShortIdLines(lines,undoneFixes);
+}
 return{text:lines.join('\n')};
 }
 function buildReviewOption(option,question){
@@ -4374,16 +4396,26 @@ strength:'strong',
 why:'More review rounds fix little now, and the open findings stay on the record for you before the merge.'
 });
 }
-function describeRejectedCount(rejectedFindings){
-const count=rejectedFindings.length;
-if(count===0){
-return'';
+function describeFindingCount(findings,tail){
+return findings.length===0?'':', '+describeCount(findings.length,'finding')+tail;
 }
-return', '+count+(count===1?' finding':' findings')+' rejected under recorded decisions';
+function describeHeldCounts(run){
+return describeFindingCount(run.rejected,' rejected under recorded decisions')+describeFindingCount(run.undone,' whose failed fix was undone');
+}
+function keepNewFindings(kept,findings){
+for(const finding of findings){
+if(!kept.some((entry)=>entry.finding_id===finding.finding_id)){
+kept.push(finding);
+}
+}
+}
+function keepReviewLists(run,review){
+keepNewFindings(run.rejected,review.rejected_findings);
+keepNewFindings(run.undone,review.undone_fixes);
 }
 function resolveDiminishingReturns(review,run){
 const decided=resolveTailDecision(DIMINISHING_RETURNS_EXIT_KIND,buildDiminishingReturnsBrief(review,run.head),run);
-return isRunEnd(decided)?decided:{held:true,note:'diminishing returns, '+review.findings_open+' findings still open'+describeRejectedCount(review.rejected_findings)};
+return isRunEnd(decided)?decided:{held:true,note:'diminishing returns, '+review.findings_open+' findings still open'+describeHeldCounts(run)};
 }
 function buildReviewEscalationBrief(review){
 const isCluster=review.exit_reason==='root-cluster-suspected';
@@ -4429,7 +4461,7 @@ return stopped.replan===undefined?stopped:{replan:{reason:stopped.replan.reason,
 function routeLocalReview(review,run){
 switch(localReviewRoutes()[review.exit_reason]){
 case'hold':
-return{held:true,note:'clean'+describeRejectedCount(review.rejected_findings)};
+return{held:true,note:'clean'+describeHeldCounts(run)};
 case'diminishing':
 return resolveDiminishingReturns(review,run);
 case'replan':
@@ -4456,15 +4488,15 @@ phase('Review');
 const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run),run):buildReviewPrompt(plan,run,answer);
 const review=await agent(prompt,reviewerOptions(gateLabel('review',run,count)));
 const unusable=describeReviewProblem(review);
+if(unusable===undefined){
+keepReviewLists(run,review);
+}
 const committed=await runCommitStep(run,plan,{files:[],label:gateLabel('review-commit',run,count),stepName:'review'},unusable===undefined?[]:[unusable]);
 if(committed.values===undefined){
 return committed;
 }
 const isHeldCall=takenReview!==undefined&&readGateHold(review,run.approvals).holds!==undefined;
 const routed=isHeldCall?askHeldReviewCall(takenReview,run):routeLocalReview(review,run);
-if(routed.held){
-gates.rejected=review.rejected_findings;
-}
 if(routed.answer!==undefined&&routed.answer.decided_by==='run'){
 gates.takenReview=review;
 }
@@ -4965,6 +4997,8 @@ answeredKeys:new Set(),
 taken:[],
 reversibleEffects:[],
 approvals:[],
+rejected:[],
+undone:[],
 head:undefined,
 branch:undefined,
 headRound:undefined,

@@ -5,12 +5,13 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState: head, taken,
- *          approvals, reversibleEffects, notRunGates and draft.
+ *          approvals, reversibleEffects, notRunGates, draft, rejected
+ *          and undone.
  *   plan   the accepted plan, from runPlanningPass (plan.js). plan.title
  *          reaches only the pull request title, and plan.digest, the
  *          step ids, outcomes and files and the optional plan.closes only
  *          the body. plan.summary reaches no pull request text.
- *   gates  the gate loop state of runGates (gates.js): notes, rejected and
+ *   gates  the gate loop state of runGates (gates.js): notes and
  *          runs.pr, the count of this step's runs in the pass.
  *   maxTitleLength() and maxPullRequestTextLength() from main.js.
  *
@@ -39,34 +40,29 @@
  *           command value outside its class (describeCommandStop,
  *           relay.js), a body path whose token passes 64 characters
  *           among them, is a terminal stop before the call. Its stdout parses with
- *           openPlanPrRoutingSpec(), head_ref_oid must equal H, and the run
- *           finishes complete with pr. The runner call goes through
- *           runRunnerRelay (relay.js), so a transient block runs once more
- *           under pr-P-retry with the inputs and body paths of that label, and the
- *           step checks the words of both labels before the call. A pull
- *           request text over its size limit and a
- *           head_ref_oid other than H are terminal stops. A blocked,
- *           malformed or other unusable relay pauses through stopDelivery
- *           (record.js). The step makes one runner call: the gate loop
- *           runs the head check after a reply, then this step again under
- *           pr-P-N, N from 2, or the gates first when the head moved, so
- *           expect_commit is always a head the run read. The title is the
- *           commit type of the plan classification, the breaking marker, a
- *           colon and plan.title, never the summary, cut at a word only when
- *           longer than maxTitleLength() code points, never inside a
- *           bracket the cut text opened (issue 469). buildTitleText(plan)
- *           gives the text after the prefix; the plan check refuses a plan
- *           whose text is empty, so the title is never only its type
- *           (issue 469). The body is the closing lines of
- *           renderClosingLines(plan), one Closes line per plan.closes
- *           number, then the digest paragraph, digest.problem then
- *           digest.change through renderText with a blank one left out,
- *           then a Steps: line and one line per step, its id, files and
- *           outcome through renderText (issue 506). The comment is a fixed
- *           lead with no closing line. Each is followed by the one run
- *           record buildRunRecordParts() returns, every decision in it one
- *           compact line, the question and the chosen option with no why.
- *           No pull request text holds a code fence.
+ *           openPlanPrRoutingSpec(), head_ref_oid must equal H, and the run finishes
+ *           complete with pr. The runner call goes through runRunnerRelay (relay.js),
+ *           so a transient block runs once more under pr-P-retry with the inputs and
+ *           body paths of that label, and the step checks the words of both labels
+ *           before the call. A pull request text over its size limit and a head_ref_oid
+ *           other than H are terminal stops. A blocked, malformed or other unusable
+ *           relay pauses through stopDelivery (record.js). The step makes one runner
+ *           call: the gate loop runs the head check after a reply, then this step again
+ *           under pr-P-N, N from 2, or the gates first when the head moved, so
+ *           expect_commit is always a head the run read. The title is the commit type
+ *           of the plan classification, the breaking marker, a colon and plan.title,
+ *           never the summary, cut at a word only when longer than maxTitleLength()
+ *           code points, never inside a bracket the cut text opened (issue 469).
+ *           buildTitleText(plan) gives the text after the prefix; the plan check
+ *           refuses a plan whose text is empty, so the title is never only its type
+ *           (issue 469). The body is the closing lines of renderClosingLines(plan), one
+ *           Closes line per plan.closes number, then the digest paragraph,
+ *           digest.problem then digest.change through renderText with a blank one left
+ *           out, then a Steps: line and one line per step, its id, files and outcome
+ *           through renderText (issue 506). The comment is a fixed lead with no closing
+ *           line. Each is followed by the one run record buildRunRecordParts() returns,
+ *           every decision in it one compact line, the question and the chosen option
+ *           with no why. No pull request text holds a code fence.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of

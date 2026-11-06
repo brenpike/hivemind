@@ -57,7 +57,7 @@ const CHECKOUT_ROOT = '/work/checkout';
 const WORKER_DONE = { outcome: 'complete', summary: 'Done.' };
 const VALIDATE_PASSED = { outcome: 'passed' };
 const LEDGER_PATH = '.hivemind/review-loop/fix-ledger.yaml';
-const REVIEW_CLEAN = { exit_reason: 'clean', iterations_completed: 1, findings_resolved: 0, findings_open: 0, fix_commits_exist: false, ledger_path: LEDGER_PATH, rejected_findings: [] };
+const REVIEW_CLEAN = { exit_reason: 'clean', iterations_completed: 1, findings_resolved: 0, findings_open: 0, fix_commits_exist: false, ledger_path: LEDGER_PATH, rejected_findings: [], undone_fixes: [] };
 const HELD_ALL = 'Validation and local review held on commit ';
 const BUMP_KEYS = ['dominant_row', 'verdict', 'bump_type', 'rule_applied', 'counts', 'mapped_commits', 'dropped_reverts', 'version_check', 'trunk_version', 'expected_version'];
 const MINOR_MATCH = { dominant_row: 'MINOR', verdict: 'bump_required', bump_type: 'minor', rule_applied: '3', counts: { major: '0', minor: '1', patch: '0', no_bump: '0' }, mapped_commits: '1', dropped_reverts: '0', version_check: 'match', trunk_version: '1.2.3', expected_version: '1.3.0' };
@@ -2878,7 +2878,7 @@ const ROW_TESTS = {
       const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       state.head = OTHER;
       state.taken.push({ brief: acceptance, kind: 'plan_acceptance' });
-      const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] });
+      const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' } });
       for (const text of [run.result.message, prBodyOf(run, 'pr-1'), texts.body, texts.comment]) {
         assert.ok(!text.includes('Decided for you') && !text.includes(acceptance.problem), text);
       }
@@ -3843,7 +3843,7 @@ const ROW_TESTS = {
     });
   },
   'SD-33': () => {
-    const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'user_question', 'blocker', 'rejected_findings'];
+    const external = ['conflicting_findings', 'cluster_files', 'cluster_ids', 'hypothesized_root', 'root_class', 'same_framing_rationale', 'latest_severity_max', 'recommendation_text', 'finding_id', 'field_excerpt', 'classification', 'file', 'title', 'user_question', 'blocker', 'rejected_findings', 'undone_fixes'];
     test('each user_question option carries an optional destructive list, labelled and bounded as buildDestructiveListSchema builds it', () => {
       const schema = structuredClone(main.buildReviewSchema());
       const optionItem = schema.properties.user_question.properties.options.items;
@@ -3932,6 +3932,24 @@ const ROW_TESTS = {
       assert.ok(lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [rejected] }).ok);
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [{ ...rejected, note: 'x' }] }).ok);
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, rejected_findings: [{ ...rejected, record: undefined }] }).ok);
+      const undoneList = schema.properties.undone_fixes;
+      const undoneItem = undoneList.items;
+      assert.deepEqual([undoneList.type, undoneList.maxItems, undoneList.minItems], ['array', 50, undefined]);
+      assert.equal(undoneList.description, 'Can carry external content. The findings whose failed fix the loop undid, empty when none.');
+      assert.equal(schema.properties.rejected_findings.description, 'Can carry external content. The findings the loop rejected under a recorded decision, empty when none.');
+      assert.deepEqual([undoneItem.type, undoneItem.additionalProperties, undoneItem.required], ['object', false, ['finding_id', 'title']]);
+      assert.deepEqual(Object.keys(undoneItem.properties), undoneItem.required);
+      assert.deepEqual(undoneItem.properties, { finding_id: rejectedItem.properties.finding_id, title: rejectedItem.properties.title });
+      assert.equal(undoneItem.properties.title.maxLength, undefined);
+      const undone = { finding_id: 'e8e8e8e8', title: 'T.' };
+      assert.ok(lib.validateSchema(schema, { ...REVIEW_CLEAN, undone_fixes: [undone] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, undone_fixes: [{ ...undone, record: 'R.' }] }).ok, 'an undone fix with another key');
+      assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, undone_fixes: [{ finding_id: 'e8e8e8e8' }] }).ok, 'an undone fix with no title');
+      const fixStep = reviewerText.slice(reviewerText.indexOf('7. **Fix simple findings:**'), reviewerText.indexOf('8. **Checkpoint:**'));
+      assert.ok(fixStep.includes('A fix that fails its check is undone: restore only the files it touched to `HEAD`, removing any it created. Earlier fixes of this iteration in a restored file are undone whole too. All go `regressed`.'), fixStep);
+      assert.ok(reviewerText.includes('and `undone_fixes` the `regressed` findings, each with `finding_id` and `title`; both copied as data, at most 50, empty when none.'));
+      assert.deepEqual(contract.keys.slice(-2), ['rejected_findings', 'undone_fixes']);
+      assert.equal(contract.values.undone_fixes, '<list>');
       const question = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', finding_id: 'f1f1f1f1', user_question: USER_QUESTION };
       const withQuestion = (changes) => ({ ...question, user_question: { ...USER_QUESTION, ...changes } });
       const option = (id) => ({ id: id, summary: 'S.' });
@@ -3977,19 +3995,20 @@ const ROW_TESTS = {
       assert.ok(descriptions.length > 20, String(descriptions.length));
       descriptions.flatMap(toSentences).forEach((sentence) => assert.ok(!reviewerSentences.has(sentence), sentence));
     });
-    test('every conditional list field holds at least one entry, rejected_findings may be empty, and a conditional count throws', async () => {
+    test('every conditional list field holds at least one entry, rejected_findings and undone_fixes may be empty, and a conditional count throws', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       const schema = callOf(run, 'review-1-1').opts.schema;
       const conditionalArrays = Object.keys(main.reviewFieldTexts()).filter((name) => schema.properties[name].type === 'array');
       assert.deepEqual(conditionalArrays.sort(), ['cluster_files', 'cluster_ids', 'conflicting_findings', 'signals_fired', 'signals_observed']);
       conditionalArrays.forEach((name) => assert.equal(schema.properties[name].minItems, 1, name));
       assert.equal(schema.properties.rejected_findings.minItems, undefined);
+      assert.equal(schema.properties.undone_fixes.minItems, undefined);
       const fullSchema = main.buildReviewSchema();
-      const listBounds = Object.fromEntries([...conditionalArrays, 'rejected_findings'].map((name) => [name, fullSchema.properties[name].maxItems]));
-      assert.deepEqual(listBounds, { cluster_files: 20, cluster_ids: 20, conflicting_findings: 20, signals_fired: 10, signals_observed: 10, rejected_findings: 50 });
+      const listBounds = Object.fromEntries([...conditionalArrays, 'rejected_findings', 'undone_fixes'].map((name) => [name, fullSchema.properties[name].maxItems]));
+      assert.deepEqual(listBounds, { cluster_files: 20, cluster_ids: 20, conflicting_findings: 20, signals_fired: 10, signals_observed: 10, rejected_findings: 50, undone_fixes: 50 });
       assert.deepEqual([fullSchema.properties.cluster_files.items.maxLength, fullSchema.properties.cluster_ids.items.maxLength], [400, 64]);
-      const findingIdBounds = [fullSchema.properties.finding_id, fullSchema.properties.rejected_findings.items.properties.finding_id].map((property) => [property.maxLength, property.pattern]);
-      assert.deepEqual(findingIdBounds, [[64, '^[0-9a-f]{8,64}$'], [64, '^[0-9a-f]{8,64}$']]);
+      const findingIdBounds = [fullSchema.properties.finding_id, fullSchema.properties.rejected_findings.items.properties.finding_id, fullSchema.properties.undone_fixes.items.properties.finding_id].map((property) => [property.maxLength, property.pattern]);
+      assert.deepEqual(findingIdBounds, [[64, '^[0-9a-f]{8,64}$'], [64, '^[0-9a-f]{8,64}$'], [64, '^[0-9a-f]{8,64}$']]);
       const stringBounds = Object.fromEntries(['hypothesized_root', 'root_class', 'same_framing_rationale', 'classification', 'file', 'title', 'field_excerpt'].map((name) => [name, fullSchema.properties[name].maxLength]));
       assert.deepEqual(stringBounds, { hypothesized_root: 300, root_class: 100, same_framing_rationale: 600, classification: 100, file: 400, title: 300, field_excerpt: 200 });
       assert.deepEqual([...fullSchema.properties.pattern_category.enum], ['P1', 'P2', 'P3', 'P4']);
@@ -4001,12 +4020,15 @@ const ROW_TESTS = {
     const malformed = 'The local review step returned no usable result, so the delivery stopped before the pull request.';
     const withoutLedger = Object.fromEntries(Object.entries(REVIEW_CLEAN).filter(([key]) => key !== 'ledger_path'));
     const withoutRejected = Object.fromEntries(Object.entries(REVIEW_CLEAN).filter(([key]) => key !== 'rejected_findings'));
+    const withoutUndone = Object.fromEntries(Object.entries(REVIEW_CLEAN).filter(([key]) => key !== 'undone_fixes'));
     const escalationWithoutFile = Object.fromEntries(Object.entries(ESCALATION).filter(([key]) => key !== 'file'));
     const breakFix = { ...REVIEW_CLEAN, exit_reason: 'break-fix-break', signals_fired: ['same-construct'], conflicting_findings: ['F2'], prior_fix_commit: OTHER };
     for (const [label, review] of [
       ['an empty object', {}],
       ['no ledger_path', withoutLedger],
       ['no rejected_findings', withoutRejected],
+      ['no undone_fixes', withoutUndone],
+      ['an undone fix with a record', { ...REVIEW_CLEAN, undone_fixes: [{ finding_id: 'e8e8e8e8', title: 'T.', record: 'R.' }] }],
       ['a rejected finding with no record', { ...REVIEW_CLEAN, rejected_findings: [{ finding_id: 'f9f9f9f9', title: 'T.' }] }],
       ['an unknown exit_reason', { ...REVIEW_CLEAN, exit_reason: 'done' }],
       ['an extra field', { ...REVIEW_CLEAN, note: 'x' }],
@@ -4033,6 +4055,8 @@ const ROW_TESTS = {
       ['a finding_id of 65 hex characters', { ...ESCALATION, finding_id: 'f'.repeat(65) }],
       ['a rejected finding_id that is not lowercase hex', { ...REVIEW_CLEAN, rejected_findings: [{ finding_id: 'F9', title: 'T.', record: 'R.' }] }],
       ['51 rejected findings', { ...REVIEW_CLEAN, rejected_findings: Array.from({ length: 51 }, () => ({ finding_id: 'f9f9f9f9', title: 'T.', record: 'R.' })) }],
+      ['an undone finding_id that is not lowercase hex', { ...REVIEW_CLEAN, undone_fixes: [{ finding_id: 'E8', title: 'T.' }] }],
+      ['51 undone fixes', { ...REVIEW_CLEAN, undone_fixes: Array.from({ length: 51 }, () => ({ finding_id: 'e8e8e8e8', title: 'T.' })) }],
       ['11 signals_fired', { ...breakFix, signals_fired: Array.from({ length: 11 }, () => 'same-construct') }],
       ['21 conflicting_findings', { ...breakFix, conflicting_findings: Array.from({ length: 21 }, () => 'F2') }],
       ['21 cluster_ids', { ...CLUSTER, cluster_ids: Array.from({ length: 21 }, () => 'F1') }],
@@ -4053,6 +4077,7 @@ const ROW_TESTS = {
         ESCALATION,
         { ...ESCALATION, finding_id: 'f'.repeat(64), title: 't'.repeat(300) },
         { ...REVIEW_CLEAN, rejected_findings: Array.from({ length: 50 }, () => ({ finding_id: 'f9f9f9f9', title: 'T.', record: 'R.' })) },
+        { ...REVIEW_CLEAN, undone_fixes: Array.from({ length: 50 }, () => ({ finding_id: 'e8e8e8e8', title: 'T.' })) },
         { ...breakFix, signals_fired: Array.from({ length: 10 }, () => 'same-construct'), conflicting_findings: Array.from({ length: 20 }, () => 'F2') },
         { ...CLUSTER, cluster_ids: Array.from({ length: 20 }, () => 'F1'), cluster_files: ['f'.repeat(400)], hypothesized_root: 'h'.repeat(300) },
         injection,
@@ -4578,7 +4603,7 @@ const ROW_TESTS = {
     });
   },
   'SD-39': () => {
-    const COUNT_FIELDS = ['iterations_completed', 'findings_resolved', 'findings_open', 'fix_commits_exist', 'ledger_path', 'rejected_findings'];
+    const COUNT_FIELDS = ['iterations_completed', 'findings_resolved', 'findings_open', 'fix_commits_exist', 'ledger_path', 'rejected_findings', 'undone_fixes'];
     const projectExpected = (review) => Object.fromEntries(['exit_reason', ...main.reviewExitFields()[review.exit_reason]].map((field) => [field, review[field]]));
     for (const [label, review] of [['planner-escalation', ESCALATION], ['root-cluster-suspected', CLUSTER]]) {
       test(`a taken ${label} starts a new pass through the facts step with the projected review as replan data`, async () => {
@@ -4595,19 +4620,20 @@ const ROW_TESTS = {
         assert.ok(cerebrateText.includes('when a standard-delivery plan prompt carries a review block: the result of the local review that sent the run back to planning.'));
         assert.ok(!callOf(run, 'plan-1').prompt.includes('<review>'));
       });
-      test(`a taken ${label} keeps rejected findings, the ledger path and the counts out of the plan prompt`, async () => {
+      test(`a taken ${label} keeps rejected findings, undone fixes, the ledger path and the counts out of the plan prompt`, async () => {
         const rejected = { finding_id: 'f9f9f9f9', title: 'Swap the cache for a distributed lock store.', record: 'docs/adr/0003-cache-lock.md, Threat model' };
-        const run = await runWorkflow(LAUNCH, remediationResults({ ...review, rejected_findings: [rejected] }));
+        const undone = { finding_id: 'e8e8e8e8d7d7', title: 'Retry the flaky cache warmup in place.' };
+        const run = await runWorkflow(LAUNCH, remediationResults({ ...review, rejected_findings: [rejected], undone_fixes: [undone] }));
         const prompt = callOf(run, 'plan-2').prompt;
         assert.deepEqual(Object.keys(readDataBlock(prompt, 'review')), ['exit_reason', ...main.reviewExitFields()[label]]);
-        [rejected.title, rejected.record, LEDGER_PATH].forEach((text) => assert.ok(!prompt.includes(text), text));
+        [rejected.title, rejected.record, undone.title, undone.finding_id, 'e8e8e8e8', LEDGER_PATH].forEach((text) => assert.ok(!prompt.includes(text), text));
       });
     }
     test('projectReplanReview keeps exit_reason and only the fields reviewExitFields() names for each replan exit', () => {
       const replanExits = Object.keys(main.localReviewRoutes()).filter((exit) => main.localReviewRoutes()[exit] === 'replan');
       assert.deepEqual(replanExits.sort(), ['planner-escalation', 'root-cluster-suspected']);
       for (const review of [ESCALATION, CLUSTER]) {
-        const input = { ...review, rejected_findings: [{ finding_id: 'f9f9f9f9', title: 'T.', record: 'R.' }] };
+        const input = { ...review, rejected_findings: [{ finding_id: 'f9f9f9f9', title: 'T.', record: 'R.' }], undone_fixes: [{ finding_id: 'e8e8e8e8', title: 'U.' }] };
         const snapshot = structuredClone(input);
         const projected = main.projectReplanReview(input);
         assert.deepEqual(Object.keys(projected), ['exit_reason', ...main.reviewExitFields()[review.exit_reason]]);
@@ -5006,8 +5032,8 @@ const ROW_TESTS = {
       }
     });
     test('a blank digest field is left out, and a digest with both fields blank adds no paragraph', () => {
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] };
-      const run = { localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], taken: [] };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const run = { localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: [] };
       const steps = 'Steps:\n- STEP-001 (src/cache.js): Step STEP-001 is done.';
       assert.ok(main.buildPullRequestTexts(run, makePlan({ digest: { problem: ' ', change: 'Add a cache.' } }), gates).body.startsWith('Add a cache.\n\n' + steps + '\n\n'));
       assert.ok(main.buildPullRequestTexts(run, makePlan({ digest: { problem: 'Reads are slow.', change: '' } }), gates).body.startsWith('Reads are slow.\n\n' + steps + '\n\n'));
@@ -5020,7 +5046,7 @@ const ROW_TESTS = {
       run.reversibleEffects.push({ stepId: 'STEP-001', summary: 'Post a preview link.' });
       run.notRunGates.push(main.notConfiguredReviewLine());
       run.taken.push({ brief: makeBrief({ problem: 'PARITY_PROBLEM' }), kind: 'planner_question' });
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
       for (const gateArg of [undefined, gates]) {
         const parts = main.buildRunRecordParts(run, run.taken, gateArg);
         assert.deepEqual([...parts.map((part) => part.id)], ['reversible_effects', 'gates', 'decisions']);
@@ -5061,8 +5087,8 @@ const ROW_TESTS = {
       run.head = OTHER;
       run.approvals.push({ category: 3, item: 'tests/cache.test.js' }, { category: 1, item: 'Drop @octocat <b>users</b>' });
       run.taken.push({ brief: makeBrief({ problem: 'APPROVAL_PROBLEM' }), kind: 'planner_question' });
-      const rejected = [{ finding_id: 'a1b2c3d4'.repeat(8) }];
-      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean, 1 finding rejected under recorded decisions' }, rejected: rejected };
+      run.rejected.push({ finding_id: 'a1b2c3d4'.repeat(8) });
+      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean, 1 finding rejected under recorded decisions' } };
       const parts = main.buildRunRecordParts(run, run.taken, gates);
       assert.deepEqual([...parts.map((part) => part.id)], ['gates', 'rejected_findings', 'approvals', 'decisions']);
       const texts = main.buildPullRequestTexts(run, makePlan(), gates);
@@ -5073,7 +5099,7 @@ const ROW_TESTS = {
       assert.ok(texts.body.endsWith('\n\n' + record), texts.body);
       assert.equal(texts.comment, 'The delivery pushed commit ' + OTHER + ' to this pull request.\n\n' + record);
       assert.ok(!texts.body.includes('a1b2c3d4a1b2'), texts.body);
-      assert.deepEqual([...main.buildRunRecordParts(run, [], { ...gates, rejected: [] }).map((part) => part.id)], ['gates', 'approvals']);
+      assert.deepEqual([...main.buildRunRecordParts({ ...run, rejected: [] }, [], gates).map((part) => part.id)], ['gates', 'approvals']);
     });
     test('neutralizePullRequestText puts each GitHub reference form in a code span and escapes backslashes, backticks, [, ], <, > and & elsewhere', () => {
       for (const [text, neutral] of [
@@ -5190,9 +5216,9 @@ const ROW_TESTS = {
       assert.equal(run.result.pr, undefined);
     });
     test('a comment over maxPullRequestTextLength() stops the run naming the comment and its size, and a text at the limit passes', () => {
-      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean' }, rejected: [] };
+      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean' } };
       const plan = makePlan({ digest: { problem: '', change: '' }, steps: [makeStep('S', ['a'], { outcome: 'x' })] });
-      const runWith = (problem) => ({ localReview: true, head: OTHER, waveCount: 1, notRunGates: [], reversibleEffects: [], approvals: [], taken: [{ brief: makeBrief({ problem: problem }), kind: 'planner_question' }] });
+      const runWith = (problem) => ({ localReview: true, head: OTHER, waveCount: 1, notRunGates: [], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: [{ brief: makeBrief({ problem: problem }), kind: 'planner_question' }] });
       const shortTexts = main.buildPullRequestTexts(runWith('P'), plan, gates);
       const bodyOverhead = shortTexts.body.length - 1;
       const commentOverhead = shortTexts.comment.length - 1;
@@ -5204,8 +5230,8 @@ const ROW_TESTS = {
     const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped before the pull request and pushed nothing.';
     test('a title, body or comment that holds a forbiddenSubjectTexts() string in any case names that text, neutralized text included', () => {
       assert.deepEqual([...main.forbiddenSubjectTexts()], ['co-authored-by:', 'authored-by:', 'generated with', 'created with claude', '\u{1f916} generated']);
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] };
-      const runWith = (taken) => ({ localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], taken: taken });
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const runWith = (taken) => ({ localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: taken });
       assert.equal(main.buildPullRequestTexts(runWith([]), makePlan(), gates).problem, undefined);
       for (const forbidden of main.forbiddenSubjectTexts()) {
         for (const text of [forbidden, forbidden.toUpperCase()]) {
@@ -5219,8 +5245,8 @@ const ROW_TESTS = {
       }
     });
     test('the comment is checked when neither the title nor the body holds the string', () => {
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] };
-      const run = { localReview: false, head: 'Co-Authored-By: x', waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], taken: [] };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const run = { localReview: false, head: 'Co-Authored-By: x', waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], rejected: [], undone: [], taken: [] };
       assert.deepEqual({ ...main.buildPullRequestTexts(run, makePlan(), gates) }, { problem: attributionProblem('comment') });
     });
     for (const [label, changes, noun] of [['title', { title: 'Created With Claude the cache' }, 'title'], ['body', { digest: { problem: 'Add the cache layer.', change: 'Generated with a tool.' } }, 'body']]) {
@@ -6264,7 +6290,190 @@ const ROW_TESTS = {
       const run = await runWorkflow(LAUNCH, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.ok(!run.result.message.includes('rejected under recorded decisions'), run.result.message);
+      assert.ok(!run.result.message.includes('undone') && !run.result.message.includes('undid'), run.result.message);
       assert.ok(prBodyOf(run, 'pr-1').includes('- local review: clean, held on commit ' + OTHER), prBodyOf(run, 'pr-1'));
+      assert.ok(!prBodyOf(run, 'pr-1').includes('Local review:'), prBodyOf(run, 'pr-1'));
+    });
+    const undoneLock = { finding_id: 'e8e8e8e8' + 'd7'.repeat(28), title: 'Retry the cache warmup @owner <b>zqx</b>' };
+    const undoneHostile = { finding_id: 'c6c6c6c6', title: 'Line\nqzbreak [x](y)' };
+    const undoneHeading = 'The findings whose fix it undid:';
+    const undoneLines = ['- "e8e8e8e8"', '- "c6c6c6c6"'];
+    const assertUndoneRun = (run, note, block) => {
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(run.result.message.startsWith(openedLine(OTHER) + '\n\n' + HELD_ALL + OTHER + '.\n\n' + block), run.result.message);
+      const isTaken = run.result.message.includes('\n\nDecided for you:\n');
+      assert.equal(run.result.message.split('\n\n').length, isTaken ? 4 : 3, run.result.message);
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(text.includes('\n- local review: ' + note + ', held on commit ' + OTHER + '\n\n' + block + (isTaken ? '\n\n' : '')), text);
+        assert.ok(isTaken || text.endsWith(block), text);
+      }
+      for (const text of [run.result.message, inputs.body, inputs.comment]) {
+        for (const undoneText of ['d7d7', 'cache warmup', '@owner', 'zqx', 'qzbreak', '[x]']) {
+          assert.ok(!text.includes(undoneText), undoneText);
+        }
+      }
+    };
+    test('undone fixes alone get their count in the gate note and their short ids under the undone heading, with no rejected heading', async () => {
+      const note = 'clean, 2 findings whose failed fix was undone';
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, undone_fixes: [undoneLock, undoneHostile] } }));
+      assertUndoneRun(run, note, ['Local review: ' + note + '.', undoneHeading, ...undoneLines].join('\n'));
+      assert.ok(!run.result.message.includes('The findings it rejected:'), run.result.message);
+    });
+    test('one undone fix is counted in the singular, and a taken diminishing returns exit adds the count to its note', async () => {
+      const single = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, undone_fixes: [undoneLock] } }));
+      assertUndoneRun(single, 'clean, 1 finding whose failed fix was undone', ['Local review: clean, 1 finding whose failed fix was undone.', undoneHeading, undoneLines[0]].join('\n'));
+      const diminishing = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...DIMINISHING, undone_fixes: [undoneLock] } }));
+      const note = 'diminishing returns, 2 findings still open, 1 finding whose failed fix was undone';
+      assertUndoneRun(diminishing, note, ['Local review: ' + note + '.', undoneHeading, undoneLines[0]].join('\n'));
+    });
+    test('both lists give the rejected count, then the undone count, and the block lists the rejected findings, then the undone fixes', async () => {
+      const note = twoNote + ', 1 finding whose failed fix was undone';
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...rejectedReview, undone_fixes: [undoneHostile] } }));
+      const block = ['Local review: ' + note + '. The findings it rejected:', lockLine, hostileLine, undoneHeading, undoneLines[1]].join('\n');
+      assertUndoneRun(run, note, block);
+      assert.equal(main.buildRejectedFindingsBlock(note, rejectedReview.rejected_findings, [undoneHostile]).text, block);
+    });
+    test('buildRejectedFindingsBlock with no undone fix gives the rejected block alone, the same as with no third argument', () => {
+      for (const rejected of [rejectedReview.rejected_findings, []]) {
+        assert.deepEqual(main.buildRejectedFindingsBlock(twoNote, rejected, []), main.buildRejectedFindingsBlock(twoNote, rejected));
+      }
+      assert.equal(main.buildRejectedFindingsBlock(twoNote, []).text, heading);
+    });
+    test('an undone list at its maxItems bound of 50 shows 50 short id lines, and the run still ends complete', async () => {
+      const many = Array.from({ length: 50 }, (_, index) => ({ finding_id: index.toString(16).padStart(8, '0') + 'e'.repeat(40), title: 'T'.repeat(300) }));
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': { ...REVIEW_CLEAN, undone_fixes: many } }));
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(run.result.message.includes('Local review: clean, 50 findings whose failed fix was undone.\n' + undoneHeading + '\n'), run.result.message);
+      assert.equal(run.result.message.split('\n').filter((line) => /^- "[0-9a-f]{8}"$/.test(line)).length, 50);
+      assert.ok(!run.result.message.includes('T'.repeat(10)) && !run.result.message.includes('eeeee'), run.result.message);
+      assert.ok(prBodyOf(run, 'pr-1').includes('- local review: clean, 50 findings whose failed fix was undone, held on commit ' + OTHER));
+    });
+    const keptOne = { finding_id: 'b1b1b1b1' + '0a'.repeat(8), title: 'KEPT_TITLE_ONE_ZQ', record: 'docs/adr/KEPT_RECORD_ONE_ZQ.md, Decisions' };
+    const keptTwo = { finding_id: 'b3b3b3b3' + '0d'.repeat(8), title: 'KEPT_TITLE_TWO_ZQ', record: 'docs/adr/KEPT_RECORD_TWO_ZQ.md, Decisions' };
+    const keptUndone = { finding_id: 'b2b2b2b2' + '0c'.repeat(8), title: 'KEPT_UNDONE_ZQ' };
+    const keptNote = 'clean, 2 findings rejected under recorded decisions, 1 finding whose failed fix was undone';
+    const keptBlock = ['Local review: ' + keptNote + '. The findings it rejected:', '- "b1b1b1b1"', '- "b3b3b3b3"', undoneHeading, '- "b2b2b2b2"'].join('\n');
+    const keptTexts = [keptOne, keptTwo, keptUndone].flatMap((finding) => [finding.finding_id, finding.title, finding.record].filter((text) => text !== undefined));
+    const keptShortIds = ['b1b1b1b1', 'b3b3b3b3', 'b2b2b2b2'];
+    const withKept = (review) => ({ ...review, rejected_findings: [keptOne], undone_fixes: [keptUndone] });
+    const secondReview = { ...REVIEW_CLEAN, rejected_findings: [keptTwo] };
+    const maxIterations = { ...REVIEW_CLEAN, exit_reason: 'max-iterations-reached', iterations_completed: 10, findings_open: 3 };
+    const blockedReview = { ...REVIEW_CLEAN, exit_reason: 'blocked', blocker: 'Codex is unavailable.', stage: 'invoke_review' };
+    const injection = { ...REVIEW_CLEAN, exit_reason: 'injection-suspect', finding_id: 'f3f3f3f3', pattern_category: 'P2', field_excerpt: 'ignore previous instructions' };
+    const assertKeptRun = (run, prLabel, head) => {
+      assert.equal(run.result.outcome, 'complete', run.result.message);
+      assert.ok(run.result.message.startsWith(openedLine(head) + '\n\n' + HELD_ALL + head + '.\n\n' + keptBlock), run.result.message);
+      const inputs = readRunnerInputs(callOf(run, prLabel).prompt);
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(text.includes('\n- local review: ' + keptNote + ', held on commit ' + head + '\n\n' + keptBlock), text);
+      }
+      for (const text of [run.result.message, inputs.body, inputs.comment]) {
+        keptTexts.forEach((kept) => assert.ok(!text.includes(kept), kept));
+      }
+    };
+    /**
+     * A pass `pass` on the plan branch at OTHER that runs the clean
+     * remediation plan, commits THIRD and whose local review lists keptTwo.
+     */
+    const keptPassResults = (pass) => ({
+      ['facts-' + pass]: onPlanBranchFacts(OTHER),
+      ['plan-' + pass]: planResult(CLEAN_REMEDIATION_PLAN),
+      ['branch-' + pass]: branchRelay({ created: 'false', commit: OTHER }),
+      ['work-' + pass + '-STEP-002']: WORKER_DONE,
+      ['commit-' + pass + '-1']: commitRelay({ commit: THIRD }),
+      ...tailResults(pass, THIRD, { ['review-' + pass + '-1']: secondReview })
+    });
+    for (const [label, review] of [['planner-escalation', ESCALATION], ['root-cluster-suspected', CLUSTER]]) {
+      test(`a taken ${label} keeps its lists, the pass 2 review adds its own, and no later prompt carries them`, async () => {
+        const run = await runWorkflow(LAUNCH, remediationResults(withKept(review), { 'plan-2': planResult(CLEAN_REMEDIATION_PLAN), 'review-2-1': secondReview }));
+        assertKeptRun(run, 'pr-2', THIRD);
+        for (const call of run.calls.slice(labelsOf(run).indexOf('review-1-1') + 1)) {
+          const shown = call.opts.label === 'pr-2' ? keptTexts : [...keptTexts, ...keptShortIds];
+          shown.forEach((text) => assert.ok(!call.prompt.includes(text), call.opts.label + ' ' + text));
+        }
+      });
+    }
+    test('a max-iterations-reached stop keeps its lists through the reply into the next pass', async () => {
+      const results = { ...happyResults({ 'review-1-1': withKept(maxIterations) }), ...keptPassResults(2) };
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      assert.equal(labelsOf(paused).at(-1), 'review-commit-1-1');
+      assertKeptRun(await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go on.'), results), 'pr-2', THIRD);
+    });
+    test('a planner-escalation stop at maxReplans() keeps its lists through the reply into the next pass', async () => {
+      const results = happyResults({ 'work-1-STEP-001': { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved.' } });
+      for (let pass = 2; pass <= 4; pass += 1) {
+        Object.assign(results, {
+          ['facts-' + pass]: onPlanBranchFacts(OTHER),
+          ['plan-' + pass]: planResult(),
+          ['branch-' + pass]: branchRelay({ created: 'false', commit: OTHER }),
+          ['work-' + pass + '-STEP-001']: pass < 4 ? { outcome: 'needs_replan', summary: 'Stopped.', blocker: 'The API moved again.' } : WORKER_DONE,
+          ['commit-' + pass + '-1']: commitRelay({ commit: OTHER, committed: 'false' }),
+          ...tailResults(pass, OTHER, { ['review-' + pass + '-1']: withKept(ESCALATION) })
+        });
+      }
+      Object.assign(results, keptPassResults(5));
+      const paused = await runWorkflow(LAUNCH, results);
+      assertStepStopPause(paused, 'Local review returned planner-escalation after 3 replans, so the delivery stopped.\n\n', 'review-commit-4-1', undefined, true);
+      assertKeptRun(await runWorkflow(resumeWith(LAUNCH, paused.result, 'Go on.'), results), 'pr-5', THIRD);
+    });
+    test('a blocked review keeps its lists, and the review its reply runs lists them with its own', async () => {
+      const results = happyResults({ 'review-1-1': withKept(blockedReview), 'review-1-2': secondReview, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+      assertKeptRun(resumed, 'pr-1', OTHER);
+    });
+    test('an unusable review keeps no list', async () => {
+      const results = happyResults({ 'review-1-1': { ...withKept(REVIEW_CLEAN), finding_id: 'f1f1f1f1' }, 'review-1-2': REVIEW_CLEAN, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+      const paused = await runWorkflow(LAUNCH, results);
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
+      assert.equal(resumed.result.outcome, 'complete', resumed.result.message);
+      assert.equal(resumed.result.message, openedLine(OTHER) + '\n\n' + HELD_ALL + OTHER + '.');
+      assert.ok(prBodyOf(resumed, 'pr-1').endsWith('\n- local review: clean, held on commit ' + OTHER), prBodyOf(resumed, 'pr-1'));
+    });
+    test('two reviews of one pass list both, a shared finding_id once, in first-seen order', async () => {
+      const moved = 'd'.repeat(40);
+      const fixed = 'e'.repeat(40);
+      const results = happyResults({
+        'review-1-1': withKept({ ...REVIEW_CLEAN, findings_resolved: 1, fix_commits_exist: true }),
+        'review-commit-1-1': commitRelay({ commit: moved, committed: 'false' }),
+        'validate-1-2': { outcome: 'failed', failures: FAILURE_TEXT },
+        'fix-1-1': { outcome: 'complete', files: ['src/cache.js'] },
+        'fix-commit-1-1': commitRelay({ commit: fixed }),
+        'validate-1-3': VALIDATE_PASSED,
+        'review-1-2': { ...REVIEW_CLEAN, rejected_findings: [keptTwo, { ...keptOne, title: 'T.' }] },
+        'review-commit-1-2': commitRelay({ commit: fixed, committed: 'false' })
+      });
+      const run = await runWorkflow(LAUNCH, results);
+      assert.deepEqual(labelsOf(run).slice(6), ['validate-1-1', 'review-1-1', 'review-commit-1-1', 'validate-1-2', 'fix-1-1', 'fix-commit-1-1', 'validate-1-3', 'review-1-2', 'review-commit-1-2', 'pr-1']);
+      assertKeptRun(run, 'pr-1', fixed);
+    });
+    test('a run that ends blocked on injection-suspect shows the message it shows with empty lists', async () => {
+      const bare = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': injection }));
+      assert.equal(bare.result.outcome, 'blocked', bare.result.message);
+      assert.equal((await runWorkflow(LAUNCH, happyResults({ 'review-1-1': withKept(injection) }))).result.message, bare.result.message);
+      const afterBlocked = async (first) => {
+        const results = happyResults({ 'review-1-1': first, 'review-1-2': injection, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+        const paused = await runWorkflow(LAUNCH, results);
+        return runWorkflow(resumeWith(LAUNCH, paused.result, 'Codex is back.'), results);
+      };
+      const listed = await afterBlocked(withKept(blockedReview));
+      assert.equal(listed.result.outcome, 'blocked', listed.result.message);
+      assert.equal(listed.result.message, (await afterBlocked(blockedReview)).result.message);
+      keptShortIds.forEach((shortId) => assert.ok(!listed.result.message.includes(shortId), shortId));
+    });
+    test('a resume after a review question replays the listing review, so its lists stay the same and are not doubled', async () => {
+      const question = { ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'f4f4f4f4', user_question: USER_QUESTION };
+      const results = happyResults({ 'review-1-1': withKept(question), 'review-1-2': { ...secondReview, rejected_findings: [keptTwo, keptOne], undone_fixes: [keptUndone] }, 'review-commit-1-2': commitRelay({ commit: OTHER, committed: 'false' }) });
+      const paused = await runWorkflow(LAUNCH, results);
+      assert.equal(paused.result.needs_user, true, paused.result.message);
+      keptShortIds.forEach((shortId) => assert.ok(!paused.result.message.includes(shortId), shortId));
+      const resumed = await runWorkflow(resumeWith(LAUNCH, paused.result, 'A'), results);
+      assert.deepEqual(labelsOf(resumed).slice(labelsOf(paused).length), ['review-1-2', 'review-commit-1-2', 'pr-1']);
+      assertKeptRun(resumed, 'pr-1', OTHER);
     });
   },
   'SD-56': () => {
@@ -6588,9 +6797,10 @@ const ROW_TESTS = {
         assert.ok(strings.length > 0, name);
         strings.forEach(([path, property]) => assert.ok(Number.isInteger(property.maxLength), path + ' reaches the planner with no maxLength'));
       }
-      const messageStrings = ['finding_id', 'blocker', 'field_excerpt', 'pattern_category', 'user_question', 'rejected_findings'].flatMap((name) => collectStringPaths(properties[name], name, []));
-      const shownStrings = messageStrings.filter(([path]) => !['rejected_findings[].title', 'rejected_findings[].record'].includes(path));
+      const messageStrings = ['finding_id', 'blocker', 'field_excerpt', 'pattern_category', 'user_question', 'rejected_findings', 'undone_fixes'].flatMap((name) => collectStringPaths(properties[name], name, []));
+      const shownStrings = messageStrings.filter(([path]) => !['rejected_findings[].title', 'rejected_findings[].record', 'undone_fixes[].title'].includes(path));
       assert.ok(shownStrings.some(([path]) => path === 'rejected_findings[].finding_id'), shownStrings.map(([path]) => path).join(', '));
+      assert.ok(shownStrings.some(([path]) => path === 'undone_fixes[].finding_id'), shownStrings.map(([path]) => path).join(', '));
       shownStrings.forEach(([path, property]) => assert.ok(Number.isInteger(property.maxLength) || Array.isArray(property.enum), path + ' is shown with no maxLength or enum'));
       const arrays = collectArrayPaths(schema, 'review', []);
       assert.ok(arrays.length >= 7, String(arrays.length));
@@ -6626,6 +6836,17 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message.slice(0, 300));
       assert.ok(!run.result.message.includes('U'.repeat(10)) && !run.result.message.includes('cccc'), run.result.message);
       assert.equal(main.buildRejectedFindingsBlock('clean', rejected.slice(0, 1)).text.split('\n')[1], '- "00000000"');
+    });
+    test('a complete run with 50 rejected findings and 50 undone fixes of 5000 character titles shows only their short ids', async () => {
+      const rejected = Array.from({ length: 50 }, (_, index) => ({ finding_id: index.toString(16).padStart(8, '0') + 'c'.repeat(56), title: UNBOUNDED, record: UNBOUNDED }));
+      const undone = Array.from({ length: 50 }, (_, index) => ({ finding_id: (index + 64).toString(16).padStart(8, '0') + 'b'.repeat(56), title: UNBOUNDED }));
+      const review = { ...REVIEW_CLEAN, rejected_findings: rejected, undone_fixes: undone };
+      assert.equal(main.describeReviewProblem(review), undefined);
+      const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': review }));
+      assert.equal(run.result.outcome, 'complete', run.result.message.slice(0, 300));
+      assert.ok(!run.result.message.includes('U'.repeat(10)) && !run.result.message.includes('cccc') && !run.result.message.includes('bbbb'), run.result.message);
+      assert.equal(run.result.message.split('\n').filter((line) => /^- "[0-9a-f]{8}"$/.test(line)).length, 100);
+      assert.ok(!prBodyOf(run, 'pr-1').includes('U'.repeat(10)), prBodyOf(run, 'pr-1').slice(0, 300));
     });
     test('every code-built brief fits the brief schema with worst-case inputs', () => {
       const astralId = '\u{1F600}'.repeat(64);
@@ -8630,7 +8851,7 @@ function readGateDecision(scratch, input) {
 function heldGates(run) {
   const held = Object.fromEntries(main.configuredGateIds(run).map((gateId) => [gateId, OTHER]));
   const notes = Object.fromEntries(main.configuredGateIds(run).map((gateId) => [gateId, 'passed']));
-  return { held: held, notes: notes, runs: { validate: 1, review: 1, fix: 0, headCheck: 0, pr: 1 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
+  return { held: held, notes: notes, runs: { validate: 1, review: 1, fix: 0, headCheck: 0, pr: 1 }, failures: {}, fixRounds: 0, reruns: 0, answer: undefined };
 }
 
 /**
