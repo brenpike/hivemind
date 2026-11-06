@@ -6,7 +6,7 @@
  * Inputs
  *   run     the run state of main.js createRunState, or undefined when the
  *           launch check failed: reversibleEffects, notRunGates, taken,
- *           branch, head, headRound, waveCount and answerLog.
+ *           approvals, branch, head, headRound, waveCount and answerLog.
  *   gates   the gate loop state of runGates (gates.js), once the gates ran.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a stop, {problem, nextAction?, terminal?,
@@ -21,7 +21,8 @@
  *   isReplan  true when a reply to a stop plans again from fresh facts.
  *   result.js finish, which builds a blocked message from the causes,
  *   pauseForUser and the fit helpers, and brief.js renderQuestions,
- *   renderOpenQuestions and renderDecisionsCompact.
+ *   renderOpenQuestions, renderDecisionsCompact and
+ *   renderDestructiveChange.
  *
  * Outputs
  *   finishDeliveryBlocked, finishDeliveryComplete, finishOpenQuestions and
@@ -35,8 +36,13 @@
  *   observeHead(run, commit, branch)  sets run.head to commit, run.branch
  *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
- *           request body and its comment carry, with no commit list. Each
- *           taken entry keeps its kind, so the routine ones drop out.
+ *           request body and its comment carry, with no commit list, in
+ *           order: the reversible effects, the gates, the rejected findings
+ *           block of buildRejectedFindingsBlock (review.js) when gates
+ *           holds any, the approvals of run.approvals one line each
+ *           through renderDestructiveChange under one label, then the
+ *           decisions through renderDecisionsCompact alone. Each taken
+ *           entry keeps its kind, so the routine ones drop out.
  *   routineDecisionKinds()  the kinds of taken decision no record shows:
  *           plan_acceptance, remediation_plan_acceptance and gate_rerun.
  *           buildRunRecordParts, buildRecordTailBlocks and so every final
@@ -162,6 +168,10 @@ function isShownDecision(entry) {
   return !routineDecisionKinds().includes(entry.kind);
 }
 
+function renderApprovals(approvals) {
+  return ['Destructive changes you approved:', ...approvals.map((change) => '- ' + renderDestructiveChange(change))].join('\n');
+}
+
 function buildRunRecordParts(run, taken, gates) {
   const shown = taken.filter(isShownDecision);
   const parts = [];
@@ -173,8 +183,14 @@ function buildRunRecordParts(run, taken, gates) {
   } else if (run.notRunGates.length > 0) {
     parts.push({ id: 'gates', text: renderNotRunGates(run.notRunGates), external: false });
   }
+  if (gates !== undefined && gates.rejected.length > 0) {
+    parts.push({ id: 'rejected_findings', text: buildRejectedFindingsBlock(gates.notes.review, gates.rejected).text, external: true });
+  }
+  if (run.approvals.length > 0) {
+    parts.push({ id: 'approvals', text: renderApprovals(run.approvals), external: true });
+  }
   if (shown.length > 0) {
-    parts.push({ id: 'decisions', text: renderDecisions(shown), compact: renderDecisionsCompact(shown), external: true });
+    parts.push({ id: 'decisions', text: renderDecisionsCompact(shown), external: true });
   }
   return parts;
 }

@@ -97,8 +97,8 @@
  *           recorded decisions (remediation-doctrine.md, Recorded Decisions
  *           and Repeat Findings): a held gate's note gives their code-built
  *           count, and the final complete message names each by its short id
- *           alone in a chat-only block. localReviewRoutes() keys only on
- *           exit_reason.
+ *           alone in its block, the one the pull request record carries
+ *           too. localReviewRoutes() keys only on exit_reason.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -108,11 +108,12 @@
  *   (ADR-0036 decision 13). The local review result carries Codex-derived text:
  *   REVIEW_SCHEMA labels each such field, it reaches the planner only in a data
  *   block under the boundary sentence, it reaches the user only encoded by
- *   encodeUntrustedText, and it never reaches the pull request texts: a
- *   decision taken on a review result is shown there with a fixed problem text,
- *   a taken review call with the fixed reviewCallTexts() and no finding id, and
- *   the rejected findings only as the count in the review gate note, while each
- *   one's short id shows in the final message alone. A review question shows
+ *   encodeUntrustedText, and it reaches the pull request texts only through
+ *   neutralizePullRequestText (pr.js): a routing decision taken on a review
+ *   result is shown there with a fixed problem text, a taken review call as
+ *   its compact decision line, the short finding id, the encoded ask and the
+ *   encoded chosen summary with no why, and the rejected findings as their
+ *   short ids in the block of buildRejectedFindingsBlock. A review question shows
  *   reviewer text, encoded, so its shown brief can exceed a BRIEF_SCHEMA bound
  *   once encoded, but decide() reads only the code-built brief of
  *   removeReviewerText, which always fits it, so a valid review never asks as
@@ -299,25 +300,17 @@ function buildReviewQuestionBrief(review) {
   };
 }
 
-function reviewCallTexts() {
-  return {
-    problem: 'Local review asked about a finding, and the run took the option the reviewer recommended.',
-    summary: 'The option the reviewer recommended.',
-    why: 'The run took it because the call is reversible and not architectural. The reviewer recorded the decision on the branch, so you can veto it before you merge.'
-  };
-}
-
 /**
  * Returns a copy of a review question brief whose problem, option
- * summaries and why are the fixed reviewCallTexts(), so it holds no
- * reviewer text and every text field is code-built.
+ * summaries, destructive items and why are unshownBriefText() (plan.js),
+ * so it holds no reviewer text and every text field is code-built. Only
+ * decide() reads it, and no message shows it.
  */
 function removeReviewerText(brief) {
-  const texts = reviewCallTexts();
   return Object.assign({}, brief, {
-    problem: texts.problem,
-    options: brief.options.map((option) => Object.assign({}, option, { summary: texts.summary, destructive: readOptionChanges(option).map((entry) => ({ category: entry.category, item: unshownBriefText() })) })),
-    recommendation: Object.assign({}, brief.recommendation, { why: texts.why })
+    problem: unshownBriefText(),
+    options: brief.options.map((option) => Object.assign({}, option, { summary: unshownBriefText(), destructive: readOptionChanges(option).map((entry) => ({ category: entry.category, item: unshownBriefText() })) })),
+    recommendation: Object.assign({}, brief.recommendation, { why: unshownBriefText() })
   });
 }
 

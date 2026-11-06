@@ -30,7 +30,7 @@
     },
     "closes": {
       "type": "array",
-      "description": "Optional. The number of each issue in the facts references that this plan fixes, so that merging its pull request closes that issue. List only an issue the run fixes: leave out a reference the request names for context, a pull request, and an issue the plan only touches. Empty or absent when the plan fixes none of them. The plan check refuses a number that is not one of the references the run started with. The pull request body then opens with one plain closing line per number, outside the fenced summary.",
+      "description": "Optional. The number of each issue in the facts references that this plan fixes, so that merging its pull request closes that issue. List only an issue the run fixes: leave out a reference the request names for context, a pull request, and an issue the plan only touches. Empty or absent when the plan fixes none of them. The plan check refuses a number that is not one of the references the run started with. The pull request body then opens with one plain closing line per number.",
       "items": {
         "type": "integer",
         "description": "One issue number, copied from the number of a facts references entry."
@@ -43,7 +43,7 @@
         "problem",
         "change"
       ],
-      "description": "The plan in two short sentences written for the user. A question about accepting the plan shows them as written, in place of the summary.",
+      "description": "Two short sentences for a reviewer who never saw the chat: no question labels or option letters. They open the pull request body and the plan question.",
       "properties": {
         "problem": {
           "type": "string",
@@ -247,7 +247,7 @@
           },
           "outcome": {
             "type": "string",
-            "description": "Can carry external content. What is true when the step is done."
+            "description": "Can carry external content. What is true when the step is done, as the pull request body lists it: no question labels."
           },
           "depends_on": {
             "type": "array",

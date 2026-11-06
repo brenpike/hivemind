@@ -5,10 +5,11 @@
  *
  * Inputs
  *   run    the run state of main.js createRunState: head, taken,
- *          reversibleEffects, notRunGates and draft.
+ *          approvals, reversibleEffects, notRunGates and draft.
  *   plan   the accepted plan, from runPlanningPass (plan.js). plan.title
- *          reaches only the pull request title, and plan.summary and the
- *          optional plan.closes only the body.
+ *          reaches only the pull request title, and plan.digest, the
+ *          step ids, outcomes and files and the optional plan.closes only
+ *          the body. plan.summary reaches no pull request text.
  *   gates  the gate loop state of runGates (gates.js): notes, rejected and
  *          runs.pr, the count of this step's runs in the pass.
  *   maxTitleLength() and maxPullRequestTextLength() from main.js.
@@ -17,8 +18,8 @@
  *   runPullRequestStep(run, plan, gates)  {result}: finishDeliveryComplete
  *          naming the pull request, a pause, or a blocked finish, or
  *          {rerun: true} when the user replied to its stop.
- *   renderLiteralBlock(text)  the literal fenced block the pull request
- *          texts put external text in.
+ *   neutralizePullRequestText(text)  text GitHub renders literally: the
+ *          one renderer of every external part of the pull request texts.
  *   describeClosesProblem(plan, references)  the last check of
  *          describePlanProblem (plan.js): the problem of a plan.closes
  *          number that is not the number of one of references, the launch
@@ -54,29 +55,29 @@
  *           whose text is empty, so the title is never only its type
  *           (issue 469). The body is the closing lines of
  *           renderClosingLines(plan), one Closes line per plan.closes
- *           number, then the plan summary, and the
- *           comment a fixed lead with no closing line, each followed by the
- *           one run record
- *           buildRunRecordParts() returns, the same record the final
- *           message carries, with every taken decision and no reviewer
- *           text. The plan text that can carry external content sits in
- *           literal fenced blocks.
+ *           number, then the digest paragraph, digest.problem then
+ *           digest.change through renderText with a blank one left out,
+ *           then a Steps: line and one line per step, its id, files and
+ *           outcome through renderText (issue 506). The comment is a fixed
+ *           lead with no closing line. Each is followed by the one run
+ *           record buildRunRecordParts() returns, every decision in it one
+ *           compact line, the question and the chosen option with no why.
+ *           No pull request text holds a code fence.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
  *   main.js: the build bundles this module into it, so a row can name a
  *   function of this module.
  *   The pull request body and comment carry the one run record
- *   buildRunRecordParts() returns, as the final message does. The summary
- *   and the external parts of that record, the reversible effects and the
- *   decisions, reach the pull request body and comment only through
- *   renderLiteralBlock(), so GitHub shows them as literal text and an
- *   at-mention, issue reference or HTML in them does nothing. The
- *   gates and the comment lead are code-built and stay plain. So are the
- *   closing lines, which sit ahead of the fenced summary and outside any
- *   fence, so GitHub links each issue they name as closed by the pull
- *   request (issue 491): each is the fixed text and an integer the plan
- *   check found among the launch references, never planner text.
+ *   buildRunRecordParts() returns. The digest, the step lines and the
+ *   external parts of that record reach the pull request body and comment
+ *   only through neutralizePullRequestText(), so an at-mention, issue
+ *   reference, URL or HTML in them links, closes or notifies nothing. The
+ *   gates, the labels and the comment lead are code-built and stay plain.
+ *   So are the closing lines, which open the body, so GitHub links each
+ *   issue they name as closed by the pull request (issue 491): each is the
+ *   fixed text and an integer the plan check found among the launch
+ *   references, never planner text.
  *   The closes check is membership only: which reference the run fixes is
  *   the planner's judgment, and the engine never reads the facts file, so
  *   code does not check that a number names an issue rather than a pull
@@ -87,7 +88,10 @@
  *   No title, body or comment holds a forbiddenSubjectTexts() string
  *   (relay.js), in any case: code holds this check, not a skill body the
  *   runner may never read, so buildPullRequestTexts makes one a terminal
- *   stop before any push (issue 467).
+ *   stop before any push (issue 467). The check reads the neutralized
+ *   texts: neutralizing wraps or escapes no character of those strings, so
+ *   each stays detectable. A text over maxPullRequestTextLength() is a
+ *   terminal stop naming its size; no shorter form is tried.
  *   The relay is read through describeUnusableResult (lib/stop.js): a
  *   null result, an agent failure, adds the agent-failure sentence and
  *   next action run_again, and stopDelivery ends the run on it; any other
@@ -96,7 +100,10 @@
  *   A stop names what the run saw of the push: a blocked relay whose
  *   stderr holds a synapse-gate denial (isGateDenial, relay.js) or an
  *   inputs refusal of the open-plan-pr script (isInputsRefusal), each made
- *   before any push, says this step pushed nothing and is report; any
+ *   before any push, says this step pushed nothing and is report. A
+ *   blocked relay whose stderr holds the line pushed: no says the same and
+ *   keeps the action readRelayAction gives its blocker, and one holding
+ *   pushed: yes says the step pushed commit H. Any
  *   other stop says the run did not see whether it pushed, and that taking
  *   the step again pushes the same commit and reuses a pull request open
  *   on it, since the script pushes --expect-commit and reuses the open
@@ -119,11 +126,8 @@ function reviewDecisionProblems() {
 }
 
 function toPullRequestDecision(entry) {
-  if (Object.values(reviewQuestionKinds()).includes(entry.kind)) {
-    return { brief: removeReviewerText(entry.brief), kind: entry.kind };
-  }
   const problem = reviewDecisionProblems()[entry.kind];
-  return { brief: problem === undefined ? entry.brief : Object.assign({}, entry.brief, { problem: problem }), kind: entry.kind };
+  return problem === undefined ? entry : { brief: Object.assign({}, entry.brief, { problem: problem }), kind: entry.kind };
 }
 
 function isPullRequestCharacter(codePoint, keepsLines) {
@@ -137,10 +141,17 @@ function cleanPullRequestText(text, keepsLines) {
   return Array.from(text).map((character) => (isPullRequestCharacter(character.codePointAt(0), keepsLines) ? character : ' ')).join('');
 }
 
-function renderLiteralBlock(text) {
-  const longestRun = Array.from(text.matchAll(/`+/g)).reduce((longest, match) => Math.max(longest, match[0].length), 0);
-  const fence = '`'.repeat(Math.max(3, longestRun + 1));
-  return fence + '\n' + text + '\n' + fence;
+/**
+ * Returns text with each URL, owner/repo reference, issue reference, GH-N
+ * reference and at-mention in a single-backtick code span, and every
+ * backslash, backtick, <, > and & outside them backslash-escaped, so GitHub
+ * renders the text literally and links, closes or notifies nothing from it.
+ * No span holds a backtick or a blank, so each one is literal whole.
+ */
+function neutralizePullRequestText(text) {
+  return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
+    .map((piece, index) => (index % 2 === 1 ? '`' + piece + '`' : piece.replace(/[\\`<>&]/g, '\\$&')))
+    .join('');
 }
 
 function cleanTitleText(text) {
@@ -226,13 +237,12 @@ function renderPullRequestGates(run, gates) {
   return lines.join('\n');
 }
 
-function renderPullRequestPart(part, isCompact) {
-  const text = isCompact && part.compact !== undefined ? part.compact : part.text;
-  return part.external ? renderLiteralBlock(text) : text;
+function renderPullRequestPart(part) {
+  return part.external ? neutralizePullRequestText(part.text) : part.text;
 }
 
-function renderPullRequestRecord(run, gates, isCompact) {
-  return buildRunRecordParts(run, run.taken.map(toPullRequestDecision), gates).map((part) => renderPullRequestPart(part, isCompact));
+function renderPullRequestRecord(run, gates) {
+  return buildRunRecordParts(run, run.taken.map(toPullRequestDecision), gates).map(renderPullRequestPart);
 }
 
 function listCloses(plan) {
@@ -262,44 +272,45 @@ function renderClosingLines(plan) {
   return [...new Set(listCloses(plan))].map((number) => 'Closes #' + number);
 }
 
-function buildPullRequestBody(run, plan, gates, isCompact) {
+/**
+ * Returns the digest paragraph of the body: digest.problem, then
+ * digest.change, each through renderText, a blank one left out, or '' when
+ * both are blank.
+ */
+function renderDigestParagraph(plan) {
+  return [plan.digest.problem, plan.digest.change].filter((text) => text.trim() !== '').map(renderText).join(' ');
+}
+
+function renderStepLines(plan) {
+  return ['Steps:', ...plan.steps.map((step) => '- ' + renderText(step.id) + ' (' + step.files.map(renderText).join(', ') + '): ' + renderText(step.outcome))].join('\n');
+}
+
+function buildPullRequestBody(run, plan, gates) {
   const closingLines = renderClosingLines(plan);
   const parts = closingLines.length === 0 ? [] : [closingLines.join('\n')];
-  if (plan.summary.trim() !== '') {
-    parts.push(renderLiteralBlock(plan.summary));
+  const digest = renderDigestParagraph(plan);
+  if (digest !== '') {
+    parts.push(neutralizePullRequestText(digest));
   }
-  parts.push(...renderPullRequestRecord(run, gates, isCompact));
+  parts.push(neutralizePullRequestText(renderStepLines(plan)), ...renderPullRequestRecord(run, gates));
   return cleanPullRequestText(parts.join('\n\n'), true);
 }
 
-function buildPullRequestComment(run, gates, isCompact) {
-  const parts = ['The delivery pushed commit ' + run.head + ' to this pull request.', ...renderPullRequestRecord(run, gates, isCompact)];
+function buildPullRequestComment(run, gates) {
+  const parts = ['The delivery pushed commit ' + run.head + ' to this pull request.', ...renderPullRequestRecord(run, gates)];
   return cleanPullRequestText(parts.join('\n\n'), true);
-}
-
-function fitPullRequestText(buildText) {
-  const full = buildText(false);
-  if (full.length <= maxPullRequestTextLength()) {
-    return { text: full };
-  }
-  const compact = buildText(true);
-  return compact.length <= maxPullRequestTextLength() ? { text: compact } : { size: compact.length };
 }
 
 function describePullRequestTextSize(noun, size) {
-  return 'The pull request ' + noun + ' would be ' + size + ' characters even with the decisions in short form, more than the limit of ' + maxPullRequestTextLength() + ', so ' + RUN_NAME + ' stopped before the pull request and pushed nothing.';
+  return 'The pull request ' + noun + ' would be ' + size + ' characters, more than the limit of ' + maxPullRequestTextLength() + ', so ' + RUN_NAME + ' stopped before the pull request and pushed nothing.';
 }
 
 function buildPullRequestTexts(run, plan, gates) {
-  const body = fitPullRequestText((isCompact) => buildPullRequestBody(run, plan, gates, isCompact));
-  if (body.text === undefined) {
-    return { problem: describePullRequestTextSize('body', body.size) };
+  const texts = { title: buildPullRequestTitle(plan), body: buildPullRequestBody(run, plan, gates), comment: buildPullRequestComment(run, gates) };
+  const longNoun = ['body', 'comment'].find((noun) => texts[noun].length > maxPullRequestTextLength());
+  if (longNoun !== undefined) {
+    return { problem: describePullRequestTextSize(longNoun, texts[longNoun].length) };
   }
-  const comment = fitPullRequestText((isCompact) => buildPullRequestComment(run, gates, isCompact));
-  if (comment.text === undefined) {
-    return { problem: describePullRequestTextSize('comment', comment.size) };
-  }
-  const texts = { title: buildPullRequestTitle(plan), body: body.text, comment: comment.text };
   const attributedNoun = Object.keys(texts).find((noun) => forbiddenSubjectTexts().some((forbidden) => texts[noun].toLowerCase().includes(forbidden)));
   if (attributedNoun !== undefined) {
     return { problem: 'The pull request ' + attributedNoun + ' would hold an attribution string, so ' + RUN_NAME + ' stopped before the pull request and pushed nothing.' };
@@ -325,9 +336,22 @@ function isInputsRefusal(stderr) {
   return /^blocker: (?:(?:inputs?|title|body|draft|comment) |cannot read the inputs file$)/m.test(stderr);
 }
 
-function describePullRequestBlocker(stderr, unseenPush) {
+/**
+ * Returns the words after the run name of a blocked pull request step: it
+ * pushed nothing when refused before the push or when stderr holds the
+ * line pushed: no, it pushed head when stderr holds pushed: yes, else
+ * unseenPush.
+ */
+function describeBlockedPush(stderr, head, isUnpushed, unseenPush) {
+  if (isUnpushed || /^pushed: no$/m.test(stderr)) {
+    return ' stopped. This step pushed nothing.';
+  }
+  return /^pushed: yes$/m.test(stderr) ? ' stopped after this step pushed commit ' + head + '.' : unseenPush;
+}
+
+function describePullRequestBlocker(stderr, head, unseenPush) {
   const isUnpushed = isGateDenial(stderr) || isInputsRefusal(stderr);
-  const lead = 'The pull request step was blocked, so ' + RUN_NAME + (isUnpushed ? ' stopped. This step pushed nothing.' : unseenPush);
+  const lead = 'The pull request step was blocked, so ' + RUN_NAME + describeBlockedPush(stderr, head, isUnpushed, unseenPush);
   return { problem: lead + ' ' + describeRelayBlocker(stderr, true), nextAction: readRelayAction(stderr, isUnpushed) };
 }
 
@@ -338,7 +362,7 @@ function checkPullRequestRelay(relay, head) {
     return describeUnusableResult('The pull request step returned a result it could not use, ' + stopped, relay);
   }
   if (relay.outcome === 'blocked') {
-    return describePullRequestBlocker(relay.stderr, unseenPush);
+    return describePullRequestBlocker(relay.stderr, head, unseenPush);
   }
   const values = readRelayedLines(relay, openPlanPrRoutingSpec());
   if (values === undefined || values.commented === values.created) {

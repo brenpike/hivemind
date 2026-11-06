@@ -25,7 +25,7 @@ The orchestrator resolves and passes these; the skill never resolves them itself
 
 ## Optional Inputs
 
-When one is absent, the script works as it does without it. Step 5 writes each given value as its inputs-file field, verbatim.
+When one is absent, the script works as it does without it. Step 5 writes each given value verbatim, `body` as the body file and each other value as its inputs-file field.
 
 - `title`, `body`: the PR title and body.
 - `comment`: text for the open PR the script reuses. The script posts it only on a reused PR; a created PR gets no comment.
@@ -35,34 +35,33 @@ The caller passes as `expect_commit` the commit on which it checked validation, 
 
 ## Requirements
 
-Every push and every PR open runs through `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`. It reads the PR title and body from an inputs file this skill writes with the Write tool, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern), so no title or body text enters a shell command.
+Every push and every PR open runs through `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`. It reads the PR title from an inputs file and the body from a body file, both written by this skill with the Write tool, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Inert Inputs-File Navigator Pattern), so no title or body text enters a shell command.
 
 **Input gate.** Before any Bash call, validate `head`, `base` and, when provided, `push_remote` against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline); on failure, exit 1 with `blocker: head, base or push_remote contains characters outside the safe allowlist`, which echoes no value. Validate `expect_commit` as a commit SHA against the identifier gate in `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline) before any Bash call; on failure, exit 1 with `blocker: expected commit is not a full object id`, which echoes no value.
 
-1. Confirm current branch matches `head` and is not `base`. The step 6 script checks this in the same process as the push, so the check and the push act on one reading of the branch; no separate Bash call compares them. On mismatch or trunk match, the script exits 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
+1. Confirm current branch matches `head` and is not `base`. The step 6 script checks this in the same process as the push; no separate Bash call compares them. On mismatch or trunk match, the script exits 1 with `blocker: current branch does not match head or equals base`, which echoes neither value.
 2. Confirm no unexpected unstaged changes; the script refuses a dirty tree before any change.
 3. Confirm validation outcome per `${CLAUDE_PLUGIN_ROOT}/governance/definitions.md` (Validation Procedure) is one of: every declared command passed, or `Not run (no validation commands defined)`. Exit 1 with blocker if the procedure returned the Worker Report — Blocked (`stage: validation`) or any declared command failed.
 4. Confirm required version/release metadata is included or not required, and that the local review gate held, or local review did not run, per `${CLAUDE_PLUGIN_ROOT}/governance/workflow.md` (PR Requirements).
 5. Write the PR title and body, or take `title` and `body` when given. The title is one line; the body holds the summary, validation notes, version/release notes and unresolved issues. The title, the body and a given `comment` must not contain a string the `## Do Not` list forbids; that check is this skill's own. A given value is never changed: when one carries such a string, exit 1 with `blocker: PR text carries a string the Do Not list forbids`, which echoes no value.
 
-   Then write the inputs file with the Write tool. `file_path` is `.hivemind/pr-inputs-<token>.json`, where `<token>` is new for each invocation, made only of letters, digits and `-`, such as a UTC timestamp plus a random part (`20261020T141500Z-a1b2c3`). `content` is one JSON object:
+   Then write two files with the Write tool, where `<token>` is new for each invocation, made only of letters, digits and `-`, such as a UTC timestamp plus a random part (`20261020T141500Z-a1b2c3`). First the body file: `file_path` is `.hivemind/pr-inputs-<token>-body.json` and `content` is the body as raw Markdown. Then the inputs file: `file_path` is `.hivemind/pr-inputs-<token>.json` and `content` is one JSON object:
 
    ```json
    {
      "title": "<title>",
-     "body": "<body>",
      "draft": false
    }
    ```
 
-   Write a given `draft` as the `draft` field; otherwise set `draft` to `true` only when the user asked for a draft PR, and leave it out when they did not. Add a `"comment": "<comment>"` field only when `comment` is given. The script header gives each field's rule. If the Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
+   Write a given `draft` as the `draft` field; otherwise set `draft` to `true` only when the user asked for a draft PR, and leave it out when they did not. Add a `"comment": "<comment>"` field only when `comment` is given. The script header gives each field's rule. If either Write call does not succeed, stop blocked per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).
 6. **Final Bash tool call.** Run the PR script, where each `<allowlist-validated-...>` placeholder is the input value that passed its gate above and `<token>` is the token from step 5. Pass `--remote` only when `push_remote` is provided:
 
    ```bash
-   bash "${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --expect-commit <allowlist-validated-commit> --inputs .hivemind/pr-inputs-<token>.json
+   bash "${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh" --head <allowlist-validated-head> --base <allowlist-validated-base> [--remote <allowlist-validated-remote>] --expect-commit <allowlist-validated-commit> --inputs .hivemind/pr-inputs-<token>.json --body-file .hivemind/pr-inputs-<token>-body.json
    ```
 
-   Before it opens or reuses the PR, the script pushes by running the push-branch script as a child process. Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). The script header defines the refusals, push, open-PR reuse, create call, PR check and output. The script never passes `--head` to `gh pr create`; see recorded residuals R1 and R3 in `${CLAUDE_PLUGIN_ROOT}/skills/open-plan-pr/scripts/open-plan-pr.sh`.
+   Every push runs through the push-branch script, per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Shell Identifier Discipline). The script header defines the refusals, push, open-PR reuse, create call, PR check and output.
    - exit 0: stdout `url: <url>` and `head_ref_oid: <sha>` are the routing data, then `created: true|false`, then `commented: true|false` only when the inputs carry `comment`, then a `warning:` line when the push warned or the head repository was not checked; record it as a warning. `created: false` means the script reused the open PR from the push remote's repository on the pushed commit and left its title and body unchanged. `commented: true` means the script posted the comment on that reused PR; each run that reuses a PR posts its own comment.
    - exit 1: blocked; relay the script's stderr, whose last line is the `blocker:` line.
 
@@ -83,6 +82,6 @@ include a `status:` field in any output.
 - include any of the following strings (any case) in commit messages or PR content: `Co-Authored-By:`, `Generated with`, `Created with Claude`, `🤖 Generated`, any `Authored-by:` line naming a bot/AI/agent, or any line attributing generated-content authorship
 - push, open a PR, or read a PR with your own commands; only the script does
 - paste the title, the body, or the comment into a Bash command
-- use the Write tool for anything other than the `.hivemind/pr-inputs-<token>.json` inputs file
-- author the inputs file by any transport other than the Write tool; see
+- use the Write tool for anything other than the `.hivemind/pr-inputs-<token>-body.json` body file and the `.hivemind/pr-inputs-<token>.json` inputs file
+- author either file by any transport other than the Write tool; see
   `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Transport Degradation Is a Hard Stop).

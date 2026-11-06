@@ -689,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'efafb460aea580c5';
+const BUILD_ID = '9ebb8487f715b394';
 
 function supportedSchemaKeywords(){
 return[
@@ -1107,10 +1107,6 @@ const blocks=asks.map((entry,index)=>renderQuestion(entry,index));
 blocks.push(renderReplyLine(asks.length));
 return blocks.join('\n\n');
 }
-function renderDecisions(taken){
-assertArray(taken,'renderDecisions: taken',false);
-return renderDecisionBlock(taken,renderTakenDecision);
-}
 function renderDecisionsCompact(taken){
 assertArray(taken,'renderDecisionsCompact: taken',false);
 return renderDecisionBlock(taken,renderCompactDecision);
@@ -1269,12 +1265,6 @@ return[];
 }
 return['Word for word:\n'+encodeUntrustedText(verbatim)];
 }
-function renderVerbatim(verbatim,labelIndent){
-if(!hasVerbatim(verbatim)){
-return[];
-}
-return[labelIndent+'Word for word:',verbatim];
-}
 function hasVerbatim(verbatim){
 return typeof verbatim==='string'&&verbatim!=='';
 }
@@ -1287,16 +1277,6 @@ const choice=hasChoice
 ?'The report assumes option '+renderOptionLetter(readField(brief,'options'),optionId)+'.'
 :'I have no recommendation of my own.';
 return'  '+questionLabel(index)+'. '+renderText(readField(brief,'problem'))+' '+choice;
-}
-function renderTakenDecision(entry,index){
-const brief=readField(entry,'brief');
-const lines=[
-'  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem')),
-'    Chose option '+renderChoice(brief),
-'    Why: '+renderText(readField(readField(brief,'recommendation'),'why'))
-];
-lines.push(...renderVerbatim(readField(brief,'verbatim'),'    '));
-return lines.join('\n');
 }
 function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
@@ -3394,11 +3374,8 @@ return{
 };
 }
 function toPullRequestDecision(entry){
-if(Object.values(reviewQuestionKinds()).includes(entry.kind)){
-return{brief:removeReviewerText(entry.brief),kind:entry.kind};
-}
 const problem=reviewDecisionProblems()[entry.kind];
-return{brief:problem===undefined?entry.brief:Object.assign({},entry.brief,{problem:problem}),kind:entry.kind};
+return problem===undefined?entry:{brief:Object.assign({},entry.brief,{problem:problem}),kind:entry.kind};
 }
 function isPullRequestCharacter(codePoint,keepsLines){
 if(keepsLines&&(codePoint===9||codePoint===10)){
@@ -3409,10 +3386,10 @@ return codePoint>=32&&(codePoint<127||codePoint>159);
 function cleanPullRequestText(text,keepsLines){
 return Array.from(text).map((character)=>(isPullRequestCharacter(character.codePointAt(0),keepsLines)?character:' ')).join('');
 }
-function renderLiteralBlock(text){
-const longestRun=Array.from(text.matchAll(/`+/g)).reduce((longest,match)=>Math.max(longest,match[0].length),0);
-const fence='`'.repeat(Math.max(3,longestRun+1));
-return fence+'\n'+text+'\n'+fence;
+function neutralizePullRequestText(text){
+return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
+.map((piece,index)=>(index%2===1?'`'+piece+'`':piece.replace(/[\\`<>&]/g,'\\$&')))
+.join('');
 }
 function cleanTitleText(text){
 return cleanPullRequestText(text,false).replace(/\s+/gu,' ').trim();
@@ -3476,12 +3453,11 @@ lines.push('- '+name+': '+gates.notes[gateId]+', held on commit '+gates.held[gat
 }
 return lines.join('\n');
 }
-function renderPullRequestPart(part,isCompact){
-const text=isCompact&&part.compact!==undefined?part.compact:part.text;
-return part.external?renderLiteralBlock(text):text;
+function renderPullRequestPart(part){
+return part.external?neutralizePullRequestText(part.text):part.text;
 }
-function renderPullRequestRecord(run,gates,isCompact){
-return buildRunRecordParts(run,run.taken.map(toPullRequestDecision),gates).map((part)=>renderPullRequestPart(part,isCompact));
+function renderPullRequestRecord(run,gates){
+return buildRunRecordParts(run,run.taken.map(toPullRequestDecision),gates).map(renderPullRequestPart);
 }
 function listCloses(plan){
 return plan.closes===undefined?[]:plan.closes;
@@ -3493,40 +3469,35 @@ return index===-1?undefined:'The plan names an issue at closes['+index+'] that i
 function renderClosingLines(plan){
 return[...new Set(listCloses(plan))].map((number)=>'Closes #'+number);
 }
-function buildPullRequestBody(run,plan,gates,isCompact){
+function renderDigestParagraph(plan){
+return[plan.digest.problem,plan.digest.change].filter((text)=>text.trim()!=='').map(renderText).join(' ');
+}
+function renderStepLines(plan){
+return['Steps:',...plan.steps.map((step)=>'- '+renderText(step.id)+' ('+step.files.map(renderText).join(', ')+'): '+renderText(step.outcome))].join('\n');
+}
+function buildPullRequestBody(run,plan,gates){
 const closingLines=renderClosingLines(plan);
 const parts=closingLines.length===0?[]:[closingLines.join('\n')];
-if(plan.summary.trim()!==''){
-parts.push(renderLiteralBlock(plan.summary));
+const digest=renderDigestParagraph(plan);
+if(digest!==''){
+parts.push(neutralizePullRequestText(digest));
 }
-parts.push(...renderPullRequestRecord(run,gates,isCompact));
+parts.push(neutralizePullRequestText(renderStepLines(plan)),...renderPullRequestRecord(run,gates));
 return cleanPullRequestText(parts.join('\n\n'),true);
 }
-function buildPullRequestComment(run,gates,isCompact){
-const parts=['The delivery pushed commit '+run.head+' to this pull request.',...renderPullRequestRecord(run,gates,isCompact)];
+function buildPullRequestComment(run,gates){
+const parts=['The delivery pushed commit '+run.head+' to this pull request.',...renderPullRequestRecord(run,gates)];
 return cleanPullRequestText(parts.join('\n\n'),true);
-}
-function fitPullRequestText(buildText){
-const full=buildText(false);
-if(full.length<=maxPullRequestTextLength()){
-return{text:full};
-}
-const compact=buildText(true);
-return compact.length<=maxPullRequestTextLength()?{text:compact}:{size:compact.length};
 }
 function describePullRequestTextSize(noun,size){
-return'The pull request '+noun+' would be '+size+' characters even with the decisions in short form, more than the limit of '+maxPullRequestTextLength()+', so '+RUN_NAME+' stopped before the pull request and pushed nothing.';
+return'The pull request '+noun+' would be '+size+' characters, more than the limit of '+maxPullRequestTextLength()+', so '+RUN_NAME+' stopped before the pull request and pushed nothing.';
 }
 function buildPullRequestTexts(run,plan,gates){
-const body=fitPullRequestText((isCompact)=>buildPullRequestBody(run,plan,gates,isCompact));
-if(body.text===undefined){
-return{problem:describePullRequestTextSize('body',body.size)};
+const texts={title:buildPullRequestTitle(plan),body:buildPullRequestBody(run,plan,gates),comment:buildPullRequestComment(run,gates)};
+const longNoun=['body','comment'].find((noun)=>texts[noun].length>maxPullRequestTextLength());
+if(longNoun!==undefined){
+return{problem:describePullRequestTextSize(longNoun,texts[longNoun].length)};
 }
-const comment=fitPullRequestText((isCompact)=>buildPullRequestComment(run,gates,isCompact));
-if(comment.text===undefined){
-return{problem:describePullRequestTextSize('comment',comment.size)};
-}
-const texts={title:buildPullRequestTitle(plan),body:body.text,comment:comment.text};
 const attributedNoun=Object.keys(texts).find((noun)=>forbiddenSubjectTexts().some((forbidden)=>texts[noun].toLowerCase().includes(forbidden)));
 if(attributedNoun!==undefined){
 return{problem:'The pull request '+attributedNoun+' would hold an attribution string, so '+RUN_NAME+' stopped before the pull request and pushed nothing.'};
@@ -3548,9 +3519,15 @@ formatInputsFileBlock(inputsPath,{title:texts.title,body:texts.body,comment:text
 function isInputsRefusal(stderr){
 return/^blocker: (?:(?:inputs?|title|body|draft|comment) |cannot read the inputs file$)/m.test(stderr);
 }
-function describePullRequestBlocker(stderr,unseenPush){
+function describeBlockedPush(stderr,head,isUnpushed,unseenPush){
+if(isUnpushed||/^pushed: no$/m.test(stderr)){
+return' stopped. This step pushed nothing.';
+}
+return/^pushed: yes$/m.test(stderr)?' stopped after this step pushed commit '+head+'.':unseenPush;
+}
+function describePullRequestBlocker(stderr,head,unseenPush){
 const isUnpushed=isGateDenial(stderr)||isInputsRefusal(stderr);
-const lead='The pull request step was blocked, so '+RUN_NAME+(isUnpushed?' stopped. This step pushed nothing.':unseenPush);
+const lead='The pull request step was blocked, so '+RUN_NAME+describeBlockedPush(stderr,head,isUnpushed,unseenPush);
 return{problem:lead+' '+describeRelayBlocker(stderr,true),nextAction:readRelayAction(stderr,isUnpushed)};
 }
 function checkPullRequestRelay(relay,head){
@@ -3560,7 +3537,7 @@ if(!validateSchema(RELAY_SCHEMA,relay).ok){
 return describeUnusableResult('The pull request step returned a result it could not use, '+stopped,relay);
 }
 if(relay.outcome==='blocked'){
-return describePullRequestBlocker(relay.stderr,unseenPush);
+return describePullRequestBlocker(relay.stderr,head,unseenPush);
 }
 const values=readRelayedLines(relay,openPlanPrRoutingSpec());
 if(values===undefined||values.commented===values.created){
@@ -3614,6 +3591,9 @@ return[PLAN_ACCEPTANCE_KIND,REMEDIATION_PLAN_ACCEPTANCE_KIND,GATE_RERUN_KIND];
 function isShownDecision(entry){
 return!routineDecisionKinds().includes(entry.kind);
 }
+function renderApprovals(approvals){
+return['Destructive changes you approved:',...approvals.map((change)=>'- '+renderDestructiveChange(change))].join('\n');
+}
 function buildRunRecordParts(run,taken,gates){
 const shown=taken.filter(isShownDecision);
 const parts=[];
@@ -3625,8 +3605,14 @@ parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
 }else if(run.notRunGates.length>0){
 parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
 }
+if(gates!==undefined&&gates.rejected.length>0){
+parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review,gates.rejected).text,external:true});
+}
+if(run.approvals.length>0){
+parts.push({id:'approvals',text:renderApprovals(run.approvals),external:true});
+}
 if(shown.length>0){
-parts.push({id:'decisions',text:renderDecisions(shown),compact:renderDecisionsCompact(shown),external:true});
+parts.push({id:'decisions',text:renderDecisionsCompact(shown),external:true});
 }
 return parts;
 }
@@ -4337,19 +4323,11 @@ assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefTe
 gate:{irreversible:question.gate.irreversible,architectural:question.gate.architectural,safety:false}
 };
 }
-function reviewCallTexts(){
-return{
-problem:'Local review asked about a finding, and the run took the option the reviewer recommended.',
-summary:'The option the reviewer recommended.',
-why:'The run took it because the call is reversible and not architectural. The reviewer recorded the decision on the branch, so you can veto it before you merge.'
-};
-}
 function removeReviewerText(brief){
-const texts=reviewCallTexts();
 return Object.assign({},brief,{
-problem:texts.problem,
-options:brief.options.map((option)=>Object.assign({},option,{summary:texts.summary,destructive:readOptionChanges(option).map((entry)=>({category:entry.category,item:unshownBriefText()}))})),
-recommendation:Object.assign({},brief.recommendation,{why:texts.why})
+problem:unshownBriefText(),
+options:brief.options.map((option)=>Object.assign({},option,{summary:unshownBriefText(),destructive:readOptionChanges(option).map((entry)=>({category:entry.category,item:unshownBriefText()}))})),
+recommendation:Object.assign({},brief.recommendation,{why:unshownBriefText()})
 });
 }
 function describeReviewQuestionLead(review,head){
