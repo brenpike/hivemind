@@ -38,10 +38,10 @@
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
  *           request body and its comment carry, with no commit list, in
  *           order: the reversible effects, the gates, the rejected findings
- *           block of buildRejectedFindingsBlock (review.js) when gates
- *           holds any rejected finding or undone fix, the approvals of run.approvals one line each
- *           through renderDestructiveChange under one label, then the
- *           decisions through renderDecisionsCompact alone. Each taken
+ *           block of buildRejectedFindingsBlock (review.js) when run.rejected
+ *           or run.undone is not empty, the approvals of run.approvals one
+ *           line each through renderDestructiveChange under one label, then
+ *           the decisions through renderDecisionsCompact alone. Each taken
  *           entry keeps its kind, so the routine ones drop out.
  *   routineDecisionKinds()  the kinds of taken decision no record shows:
  *           plan_acceptance, remediation_plan_acceptance and gate_rerun.
@@ -89,11 +89,11 @@
  *           (renderDecisionsCompact), as every final message lists them
  *           (ADR-0037 decision 3).
  *   finishDeliveryComplete  one line naming the pull request opened or
- *           pushed to and its commit, one line naming the gates that held
- *           and any gate not configured, the warning line when there is
- *           one, the rejected findings block when gates holds any rejected
- *           finding or undone fix, then the reversible effects
- *           and the taken decisions not of a routine kind, one line each.
+ *           pushed to and its commit, one line naming the gates that held and
+ *           any gate not configured, the warning line when there is one, the
+ *           rejected findings block when run.rejected or run.undone is not
+ *           empty, then the reversible effects and the taken decisions not of a
+ *           routine kind, one line each.
  *   Every Next line starts with 'Next:' and points at no cause the lead
  *   does not name. No message and no pull request text lists the
  *   commits: the branch and the pull request on GitHub hold them
@@ -173,8 +173,8 @@ function renderApprovals(approvals) {
   return ['Destructive changes you approved:', ...approvals.map((change) => '- ' + renderDestructiveChange(change))].join('\n');
 }
 
-function hasListedFindings(gates) {
-  return gates.rejected.length > 0 || gates.undone.length > 0;
+function hasListedFindings(run) {
+  return run.rejected.length > 0 || run.undone.length > 0;
 }
 
 function buildRunRecordParts(run, taken, gates) {
@@ -188,8 +188,8 @@ function buildRunRecordParts(run, taken, gates) {
   } else if (run.notRunGates.length > 0) {
     parts.push({ id: 'gates', text: renderNotRunGates(run.notRunGates), external: false });
   }
-  if (gates !== undefined && hasListedFindings(gates)) {
-    parts.push({ id: 'rejected_findings', text: buildRejectedFindingsBlock(gates.notes.review, gates.rejected, gates.undone).text, external: true });
+  if (gates !== undefined && hasListedFindings(run)) {
+    parts.push({ id: 'rejected_findings', text: buildRejectedFindingsBlock(gates.notes.review, run.rejected, run.undone).text, external: true });
   }
   if (run.approvals.length > 0) {
     parts.push({ id: 'approvals', text: renderApprovals(run.approvals), external: true });
@@ -247,8 +247,8 @@ function finishDeliveryComplete(run, plan, prValues, gates) {
   if (prValues.warning !== undefined) {
     blocks.push({ text: 'The pull request step warned: ' + prValues.warning + '.' });
   }
-  if (hasListedFindings(gates)) {
-    blocks.push(buildRejectedFindingsBlock(gates.notes.review, gates.rejected, gates.undone));
+  if (hasListedFindings(run)) {
+    blocks.push(buildRejectedFindingsBlock(gates.notes.review, run.rejected, run.undone));
   }
   blocks.push(...buildRecordTailBlocks(run, run.taken));
   return finish({ outcome: 'complete', blocks: blocks, pr: pr });

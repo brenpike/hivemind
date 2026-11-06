@@ -689,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '7ffffe18adb79876';
+const BUILD_ID = 'f867875cc6d3c34b';
 
 function supportedSchemaKeywords(){
 return[
@@ -2970,7 +2970,7 @@ return runCommitStep(run,plan,{files:[],label:gateLabel('head',run,gates.runs.he
 }
 async function runGates(run,plan,facts){
 const gateList=configuredGateIds(run);
-const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,rejected:[],undone:[],answer:undefined,fixAnswer:undefined};
+const gates={held:{},notes:{},runs:{validate:0,review:0,fix:0,headCheck:0,pr:0},failures:{},fixRounds:0,reruns:0,answer:undefined,fixAnswer:undefined};
 if(!run.localReview){
 listNotRunGate(run,notConfiguredReviewLine());
 }
@@ -3599,8 +3599,8 @@ return!routineDecisionKinds().includes(entry.kind);
 function renderApprovals(approvals){
 return['Destructive changes you approved:',...approvals.map((change)=>'- '+renderDestructiveChange(change))].join('\n');
 }
-function hasListedFindings(gates){
-return gates.rejected.length>0||gates.undone.length>0;
+function hasListedFindings(run){
+return run.rejected.length>0||run.undone.length>0;
 }
 function buildRunRecordParts(run,taken,gates){
 const shown=taken.filter(isShownDecision);
@@ -3613,8 +3613,8 @@ parts.push({id:'gates',text:renderPullRequestGates(run,gates),external:false});
 }else if(run.notRunGates.length>0){
 parts.push({id:'gates',text:renderNotRunGates(run.notRunGates),external:false});
 }
-if(gates!==undefined&&hasListedFindings(gates)){
-parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review,gates.rejected,gates.undone).text,external:true});
+if(gates!==undefined&&hasListedFindings(run)){
+parts.push({id:'rejected_findings',text:buildRejectedFindingsBlock(gates.notes.review,run.rejected,run.undone).text,external:true});
 }
 if(run.approvals.length>0){
 parts.push({id:'approvals',text:renderApprovals(run.approvals),external:true});
@@ -3666,8 +3666,8 @@ const blocks=[{text:describePullRequest(prValues)},{text:describeHeldGates(run)}
 if(prValues.warning!==undefined){
 blocks.push({text:'The pull request step warned: '+prValues.warning+'.'});
 }
-if(hasListedFindings(gates)){
-blocks.push(buildRejectedFindingsBlock(gates.notes.review,gates.rejected,gates.undone));
+if(hasListedFindings(run)){
+blocks.push(buildRejectedFindingsBlock(gates.notes.review,run.rejected,run.undone));
 }
 blocks.push(...buildRecordTailBlocks(run,run.taken));
 return finish({outcome:'complete',blocks:blocks,pr:pr});
@@ -4399,12 +4399,23 @@ why:'More review rounds fix little now, and the open findings stay on the record
 function describeFindingCount(findings,tail){
 return findings.length===0?'':', '+describeCount(findings.length,'finding')+tail;
 }
-function describeHeldCounts(review){
-return describeFindingCount(review.rejected_findings,' rejected under recorded decisions')+describeFindingCount(review.undone_fixes,' whose failed fix was undone');
+function describeHeldCounts(run){
+return describeFindingCount(run.rejected,' rejected under recorded decisions')+describeFindingCount(run.undone,' whose failed fix was undone');
+}
+function keepNewFindings(kept,findings){
+for(const finding of findings){
+if(!kept.some((entry)=>entry.finding_id===finding.finding_id)){
+kept.push(finding);
+}
+}
+}
+function keepReviewLists(run,review){
+keepNewFindings(run.rejected,review.rejected_findings);
+keepNewFindings(run.undone,review.undone_fixes);
 }
 function resolveDiminishingReturns(review,run){
 const decided=resolveTailDecision(DIMINISHING_RETURNS_EXIT_KIND,buildDiminishingReturnsBrief(review,run.head),run);
-return isRunEnd(decided)?decided:{held:true,note:'diminishing returns, '+review.findings_open+' findings still open'+describeHeldCounts(review)};
+return isRunEnd(decided)?decided:{held:true,note:'diminishing returns, '+review.findings_open+' findings still open'+describeHeldCounts(run)};
 }
 function buildReviewEscalationBrief(review){
 const isCluster=review.exit_reason==='root-cluster-suspected';
@@ -4450,7 +4461,7 @@ return stopped.replan===undefined?stopped:{replan:{reason:stopped.replan.reason,
 function routeLocalReview(review,run){
 switch(localReviewRoutes()[review.exit_reason]){
 case'hold':
-return{held:true,note:'clean'+describeHeldCounts(review)};
+return{held:true,note:'clean'+describeHeldCounts(run)};
 case'diminishing':
 return resolveDiminishingReturns(review,run);
 case'replan':
@@ -4477,16 +4488,15 @@ phase('Review');
 const prompt=answer===undefined?addResumeNote(buildReviewPrompt(plan,run),run):buildReviewPrompt(plan,run,answer);
 const review=await agent(prompt,reviewerOptions(gateLabel('review',run,count)));
 const unusable=describeReviewProblem(review);
+if(unusable===undefined){
+keepReviewLists(run,review);
+}
 const committed=await runCommitStep(run,plan,{files:[],label:gateLabel('review-commit',run,count),stepName:'review'},unusable===undefined?[]:[unusable]);
 if(committed.values===undefined){
 return committed;
 }
 const isHeldCall=takenReview!==undefined&&readGateHold(review,run.approvals).holds!==undefined;
 const routed=isHeldCall?askHeldReviewCall(takenReview,run):routeLocalReview(review,run);
-if(routed.held){
-gates.rejected=review.rejected_findings;
-gates.undone=review.undone_fixes;
-}
 if(routed.answer!==undefined&&routed.answer.decided_by==='run'){
 gates.takenReview=review;
 }
@@ -4987,6 +4997,8 @@ answeredKeys:new Set(),
 taken:[],
 reversibleEffects:[],
 approvals:[],
+rejected:[],
+undone:[],
 head:undefined,
 branch:undefined,
 headRound:undefined,

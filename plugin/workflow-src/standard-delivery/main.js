@@ -58,23 +58,22 @@
  *   shows, with the reply line last: a planning pause leads with
  *   describePlanLine(plan, outsidePaths) (plan.js), one line, then one line
  *   per shown outside path, a tail ask with its own one-line lead (askTail,
- *   tails.js). A run end is its lead, then, when blocked,
- *   the Next line, any later causes and the commit end line, then only the
- *   records ADR-0037 decision 3 needs in chat:
- *   the branch and its head once a wave ran, the
- *   reversible effects and the taken decisions other than the routine
- *   kinds of routineDecisionKinds() (record.js), one line each. A complete
- *   run names the pull request and its commit, the gates that held and any
- *   gate not configured, the warning when there is one, the rejected
- *   findings and the undone fixes. No message shows a commit list, a criticality or ask
+ *   tails.js). A run end is its lead, then, when blocked, the Next line, any
+ *   later causes and the commit end line, then only the records ADR-0037
+ *   decision 3 needs in chat: the branch and its head once a wave ran, the
+ *   reversible effects and the taken decisions other than the routine kinds
+ *   of routineDecisionKinds() (record.js), one line each. A complete run
+ *   names the pull request and its commit, the gates that held and any gate
+ *   not configured, the warning when there is one, the run.rejected and
+ *   run.undone findings. No message shows a commit list, a criticality or ask
  *   reason line, and no pause shows a taken decision.
  *   The pull request body and comment each carry the one run record
  *   buildRunRecordParts() returns: the reversible effects, the gates, the
- *   rejected findings and undone fixes, the approvals and the taken decisions other than
- *   the routine kinds, in that order, and no commit list (ADR-0037
- *   decisions 2 and 3; review findings 1a75f008 and 6f87ce62), each
- *   decision one compact line with no why (issue 506). Each decision is
- *   the same brief once however many passes took it.
+ *   run.rejected and run.undone findings, the approvals and the taken
+ *   decisions other than the routine kinds, in that order, and no commit list
+ *   (ADR-0037 decisions 2 and 3; review findings 1a75f008 and 6f87ce62), each
+ *   decision one compact line with no why (issue 506). Each decision is the
+ *   same brief once however many passes took it.
  *   No question shows the plan summary or names this run's per-agent
  *   results. When the scope sets limits and a plan path, not a version or
  *   changelog file of versioning, lies outside them, the acceptance is
@@ -441,6 +440,8 @@ function createRunState(launch) {
     taken: [],
     reversibleEffects: [],
     approvals: [],
+    rejected: [],
+    undone: [],
     head: undefined,
     branch: undefined,
     headRound: undefined,
