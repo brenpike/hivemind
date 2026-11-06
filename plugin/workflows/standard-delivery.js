@@ -689,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '981fbafd8f5782e5';
+const BUILD_ID = '625de6fb3f919c2e';
 
 function supportedSchemaKeywords(){
 return[
@@ -3392,7 +3392,7 @@ return Array.from(text).map((character)=>(isPullRequestCharacter(character.codeP
 }
 function neutralizePullRequestText(text){
 return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
-.map((piece,index)=>(index%2===1?'`'+piece+'`':piece.replace(/[\\`<>&]/g,'\\$&')))
+.map((piece,index)=>(index%2===1?'`'+piece+'`':piece.replace(/[\\`[\]<>&]/g,'\\$&')))
 .join('');
 }
 function cleanTitleText(text){

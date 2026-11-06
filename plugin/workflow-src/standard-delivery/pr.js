@@ -148,14 +148,14 @@ function cleanPullRequestText(text, keepsLines) {
 /**
  * Returns text with each URL, owner/repo reference, issue reference, GH-N
  * reference and at-mention in a single-backtick code span, and every
- * backslash, backtick, <, > and & outside them backslash-escaped, so nothing
- * in the text mentions, closes or links an issue. Other Markdown (headings,
- * emphasis, links, images) still renders.
- * No span holds a backtick or a blank, so each one is literal whole.
+ * backslash, backtick, [, ], <, > and & outside them backslash-escaped, so
+ * nothing in it mentions, closes or links an issue, or forms a link or
+ * image. Headings and emphasis still render.
+ * No span holds a backtick or a blank, so each is literal whole.
  */
 function neutralizePullRequestText(text) {
   return text.split(/((?:https?:\/\/|www\.)[^\s`]+|(?<![\w.-])[\w.-]+\/[\w.-]+#\d+|#\d+|GH-\d+|@[\w-]+(?:\/[\w-]+)?)/i)
-    .map((piece, index) => (index % 2 === 1 ? '`' + piece + '`' : piece.replace(/[\\`<>&]/g, '\\$&')))
+    .map((piece, index) => (index % 2 === 1 ? '`' + piece + '`' : piece.replace(/[\\`[\]<>&]/g, '\\$&')))
     .join('');
 }
 

@@ -2132,7 +2132,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/506 and https:
 **The change.**
 
 - **The body.** `buildPullRequestBody` (`pr.js`) builds, in order: the `Closes #<n>` lines of `renderClosingLines`; the digest paragraph of `renderDigestParagraph`, `plan.digest.problem` then `plan.digest.change`, a blank one left out; a `Steps:` line and one line per step from `renderStepLines`, its id, files and outcome; then the run record of `buildRunRecordParts` (`record.js`). The record holds the reversible effects, the gates, the rejected findings by short id in the block of `buildRejectedFindingsBlock`, each `run.approvals` entry on its own line through `renderDestructiveChange` under "Destructive changes you approved:", and every shown decision as its `renderDecisionsCompact` line. `plan.summary` reaches no pull request text, and no pull request text holds a code fence. `renderLiteralBlock` is removed.
-- **One neutralizer.** Every external part goes through `neutralizePullRequestText`: each at-mention, issue reference, owner/repo reference, GH-N reference and URL sits in a single-backtick code span, and each backslash, backtick, `<`, `>` and `&` elsewhere is backslash-escaped. The closing lines, the gates, the labels and the comment lead stay plain. The attribution check reads the neutralized texts.
+- **One neutralizer.** Every external part goes through `neutralizePullRequestText`: each at-mention, issue reference, owner/repo reference, GH-N reference and URL sits in a single-backtick code span, and each backslash, backtick, `[`, `]`, `<`, `>` and `&` elsewhere is backslash-escaped. The closing lines, the gates, the labels and the comment lead stay plain. The attribution check reads the neutralized texts.
 - **Review decision lines.** A taken local review call shows as its compact decision line: the short finding id, the encoded ask and the encoded chosen summary, never the why. This reverses, for the pull request texts, the fixed-texts rule of the review-call amendment above. `reviewCallTexts()` is removed, and `removeReviewerText` fills the brief only `decide()` reads with `unshownBriefText()`.
 - **The reuse comment** carries the same run record after its fixed lead, and no closing line.
 - **Size.** A body or comment over `maxPullRequestTextLength()` is a terminal stop naming its size, before any push. The compact fallback is removed, since every decision line is already compact.
@@ -2177,9 +2177,10 @@ This amendment covers https://github.com/brenpike/hivemind/issues/506 and https:
 
 **Recorded residual: Markdown forms outside the neutralizer render.**
 
-- **Not covered.** Headings, emphasis and `[x](y)` links in planner text render as Markdown.
-- **Bounded impact.** None of them pings a user, or links or closes an issue: mentions, issue references and URLs sit in code spans, and HTML characters are escaped.
+- **Not covered.** Headings and emphasis in planner text render as Markdown.
+- **Bounded impact.** Neither pings a user, or links or closes an issue: mentions, issue references and URLs sit in code spans, HTML characters are escaped, and `[` and `]` are escaped, so no link, image or reference definition forms, whatever its destination.
 - **Ground.** Escaping every Markdown form would make the body hard to read for the reviewer it is written for. The neutralizer covers each form whose effect reaches beyond the pull request.
+- **Narrowed 2026-11-06.** GitHub review finding https://github.com/brenpike/hivemind/pull/539#discussion_r4489032333 showed that `[x](/o/r/issues/7)` and a protocol-relative destination linked an issue, since the neutralizer keyed links on a URL scheme. The fix escapes the link syntax itself rather than listing destination forms, and tests pin relative, protocol-relative, image and reference-style links.
 
 **Recorded residual: the comment stays in the JSON inputs file.**
 

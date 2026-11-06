@@ -4989,8 +4989,8 @@ const ROW_TESTS = {
      * Returns text with each backslash escape and each single-backtick code
      * span removed, the text GitHub could read as markup.
      */
-    const readOutsideCode = (text) => text.replace(/\\[\\`<>&]/g, '').replace(/`[^`\n]+`/g, '');
-    const hasLiveMarkup = (text) => /@\w|#\d|GH-\d|https?:|www\.|[<>&`\\]/i.test(readOutsideCode(text));
+    const readOutsideCode = (text) => text.replace(/\\[\\`[\]<>&]/g, '').replace(/`[^`\n]+`/g, '');
+    const hasLiveMarkup = (text) => /@\w|#\d|GH-\d|https?:|www\.|[[\]<>&`\\]/i.test(readOutsideCode(text));
     test('the body holds the digest, the steps and the run record, and the comment its lead and the same run record: reversible effects, gates with their commits, every decision not of a routine kind', async () => {
       const plan = effectPlan('Post a preview link.', true);
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
@@ -5075,7 +5075,7 @@ const ROW_TESTS = {
       assert.ok(!texts.body.includes('a1b2c3d4a1b2'), texts.body);
       assert.deepEqual([...main.buildRunRecordParts(run, [], { ...gates, rejected: [] }).map((part) => part.id)], ['gates', 'approvals']);
     });
-    test('neutralizePullRequestText puts each GitHub reference form in a code span and escapes backslashes, backticks, <, > and & elsewhere', () => {
+    test('neutralizePullRequestText puts each GitHub reference form in a code span and escapes backslashes, backticks, [, ], <, > and & elsewhere', () => {
       for (const [text, neutral] of [
         ['Ping @octocat and @org/team.', 'Ping `@octocat` and `@org/team`.'],
         [HASH + '12', '`' + HASH + '12`'],
@@ -5087,6 +5087,9 @@ const ROW_TESTS = {
         ['&' + HASH + '64;', '\\&`' + HASH + '64`;'],
         ['a `b` c', 'a \\`b\\` c'],
         ['c:\\d\\', 'c:\\\\d\\\\'],
+        ['[context](/brenpike/hivemind/issues/7)', '\\[context\\](/brenpike/hivemind/issues/7)'],
+        ['[context](//github.com/o/r/issues/7)', '\\[context\\](//github.com/o/r/issues/7)'],
+        ['![x](../issues/7) and [y][1]\n[1]: /o/r/issues/7', '!\\[x\\](../issues/7) and \\[y\\]\\[1\\]\n\\[1\\]: /o/r/issues/7'],
         ['Plain text, a src/cache.js path.', 'Plain text, a src/cache.js path.']
       ]) {
         assert.equal(main.neutralizePullRequestText(text), neutral, text);
@@ -5096,7 +5099,7 @@ const ROW_TESTS = {
       assert.equal(main.neutralizePullRequestText(long), long);
     });
     test('external text in the body and the comment carries no live mention, reference, URL or HTML, holds no code fence, and the gates stay plain', async () => {
-      const hostile = 'Ping @octocat, Fixes ' + HASH + '12, o/r' + HASH + '3, GH-4, https://github.com/o/r/issues/5, <b>x</b> &' + HASH + '64; ```` code ```` and c:\\d.';
+      const hostile = 'Ping @octocat, Fixes ' + HASH + '12, o/r' + HASH + '3, GH-4, https://github.com/o/r/issues/5, <b>x</b> &' + HASH + '64; ```` code ```` [x](/o/r/issues/6) and c:\\d.';
       const step = makeStep('STEP-001', ['src/@octocat.js'], { outcome: 'Tell @octocat it is done. ' + hostile, external_effects: [{ summary: 'Post to @octocat <b>now</b> & GH-4.', reversible: true }] });
       const plan = makePlan({ digest: { problem: hostile, change: 'Close ' + HASH + '9.' }, steps: [step] });
       const options = makeBrief().options.map((option) => ({ ...option, summary: option.summary + ' Ask @octocat.' }));
@@ -5113,7 +5116,7 @@ const ROW_TESTS = {
         assert.ok(text.includes('Ask `@octocat` for a key.') && text.includes('Hash the path. Ask `@octocat`.'), text);
         assert.ok(!text.includes('As @octocat said.') && !text.includes('As `@octocat` said.'), text);
       }
-      assert.ok(inputs.body.startsWith('Ping `@octocat`, Fixes `' + HASH + '12`, `o/r' + HASH + '3`, `GH-4`, `https://github.com/o/r/issues/5,` \\<b\\>x\\</b\\> \\&`' + HASH + '64`; \\`\\`\\`\\` code \\`\\`\\`\\` and c:\\\\d. Close `' + HASH + '9`.\n\nSteps:\n- STEP-001 (src/`@octocat`.js): Tell `@octocat` it is done.'), inputs.body);
+      assert.ok(inputs.body.startsWith('Ping `@octocat`, Fixes `' + HASH + '12`, `o/r' + HASH + '3`, `GH-4`, `https://github.com/o/r/issues/5,` \\<b\\>x\\</b\\> \\&`' + HASH + '64`; \\`\\`\\`\\` code \\`\\`\\`\\` \\[x\\](/o/r/issues/6) and c:\\\\d. Close `' + HASH + '9`.\n\nSteps:\n- STEP-001 (src/`@octocat`.js): Tell `@octocat` it is done.'), inputs.body);
       assert.ok(inputs.body.includes('- step "STEP-001": "Post to `@octocat` \\<b\\>now\\</b\\> \\& `GH-4`."'), inputs.body);
     });
     test('a validation not run and a local review not configured are each named', async () => {
@@ -5161,7 +5164,7 @@ const ROW_TESTS = {
         assert.ok(isPullRequestText(text, true), JSON.stringify(text));
       }
       assert.ok(inputs.body.startsWith('Cache the reads. Then the writes.\n\nSteps:\n- STEP-001 (src/cache.js): Done now.\n\n'), JSON.stringify(inputs.body));
-      assert.ok(inputs.comment.includes('Pick a key. [31m'), inputs.comment);
+      assert.ok(inputs.comment.includes('Pick a key. \\[31m'), inputs.comment);
     });
     test('every decision is one compact line with no why and no verbatim text', async () => {
       const question = makeBrief({ problem: 'LONG_VERBATIM_PROBLEM', verbatim: 'S'.repeat(500), recommendation: { option_id: 'A', strength: 'strong', why: 'WHY_TEXT_ZQ.' } });
