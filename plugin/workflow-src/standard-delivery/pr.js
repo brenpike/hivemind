@@ -18,8 +18,9 @@
  *   runPullRequestStep(run, plan, gates)  {result}: finishDeliveryComplete
  *          naming the pull request, a pause, or a blocked finish, or
  *          {rerun: true} when the user replied to its stop.
- *   neutralizePullRequestText(text)  text GitHub renders literally: the
- *          one renderer of every external part of the pull request texts.
+ *   neutralizePullRequestText(text)  text in which nothing mentions, closes
+ *          or links an issue; other Markdown still renders: the one renderer
+ *          of every external part of the pull request texts.
  *   describeClosesProblem(plan, references)  the last check of
  *          describePlanProblem (plan.js): the problem of a plan.closes
  *          number that is not the number of one of references, the launch
@@ -147,8 +148,9 @@ function cleanPullRequestText(text, keepsLines) {
 /**
  * Returns text with each URL, owner/repo reference, issue reference, GH-N
  * reference and at-mention in a single-backtick code span, and every
- * backslash, backtick, <, > and & outside them backslash-escaped, so GitHub
- * renders the text literally and links, closes or notifies nothing from it.
+ * backslash, backtick, <, > and & outside them backslash-escaped, so nothing
+ * in the text mentions, closes or links an issue. Other Markdown (headings,
+ * emphasis, links, images) still renders.
  * No span holds a backtick or a blank, so each one is literal whole.
  */
 function neutralizePullRequestText(text) {
