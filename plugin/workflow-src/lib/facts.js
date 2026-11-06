@@ -29,9 +29,12 @@
  *   formatDataBlock(name, text)
  *       '<name>', the JSON of text with each '<' escaped, '</name>', on
  *       three lines.
- *   formatCommandBlock(command), formatInputsFileBlock(path, content)
+ *   formatCommandBlock(command), formatInputsFileBlock(path, content),
+ *   formatBodyFileBlock(path, text)
  *       the synapse data blocks: command, a JSON string holding one whole
- *       command line, and inputs_file, {path, content}. Their names and
+ *       command line, inputs_file, {path, content}, content an object or
+ *       its JSON text, and body_file, {path, content}, content the raw
+ *       pull request body. Their names and
  *       the one placeholder a command can hold, {plugin-root}, are the
  *       words of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md. A command holds
  *       the placeholder only when buildRunnerCommand got no root. An inputs
@@ -44,7 +47,8 @@
  *       digits, --expect-commit 40 or 64 lowercase hex digits,
  *       --classification and --trunk-freshness their enums, and --inputs
  *       .hivemind/molt-inputs-<token>.json or .hivemind/pr-inputs-<token>.json,
- *       <token> 1 to 64 characters of A-Z, a-z, 0-9 and dash.
+ *       <token> 1 to 64 characters of A-Z, a-z, 0-9 and dash, and
+ *       --body-file the pr form alone.
  *   describeRunnerWordProblem(words)
  *       undefined when words is flag and value pairs, each flag a
  *       runnerValuePatterns() key and each value a string its pattern
@@ -279,6 +283,10 @@ function formatInputsFileBlock(path, content) {
   return formatDataBlock('inputs_file', { path: path, content: content });
 }
 
+function formatBodyFileBlock(path, text) {
+  return formatDataBlock('body_file', { path: path, content: text });
+}
+
 function runnerValuePatterns() {
   const name = gitIdentifierPattern();
   return {
@@ -290,7 +298,8 @@ function runnerValuePatterns() {
     '--expect-commit': /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
     '--classification': /^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
     '--trunk-freshness': /^(?:fresh|stale|skipped)$/,
-    '--inputs': /^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/
+    '--inputs': /^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+    '--body-file': /^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/
   };
 }
 

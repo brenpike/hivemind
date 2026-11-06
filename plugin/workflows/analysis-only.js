@@ -411,7 +411,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '151fd01fa6c3a2e3';
+const BUILD_ID = 'f5d685db8cf4ee46';
 
 function supportedSchemaKeywords(){
 return[
@@ -1531,7 +1531,8 @@ return{
 '--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
-'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/
+'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+'--body-file':/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/
 };
 }
 function describeRunnerWordProblem(words){

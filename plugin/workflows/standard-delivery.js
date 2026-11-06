@@ -689,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '9ebb8487f715b394';
+const BUILD_ID = '981fbafd8f5782e5';
 
 function supportedSchemaKeywords(){
 return[
@@ -2156,6 +2156,9 @@ return formatDataBlock('command',command);
 function formatInputsFileBlock(path,content){
 return formatDataBlock('inputs_file',{path:path,content:content});
 }
+function formatBodyFileBlock(path,text){
+return formatDataBlock('body_file',{path:path,content:text});
+}
 function runnerValuePatterns(){
 const name=gitIdentifierPattern();
 return{
@@ -2167,7 +2170,8 @@ return{
 '--expect-commit':/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/,
 '--classification':/^(?:feature|bugfix|hotfix|refactor|chore|docs|test|ci)$/,
 '--trunk-freshness':/^(?:fresh|stale|skipped)$/,
-'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/
+'--inputs':/^\.hivemind\/(?:molt|pr)-inputs-[A-Za-z0-9-]{1,64}\.json$/,
+'--body-file':/^\.hivemind\/pr-inputs-[A-Za-z0-9-]{1,64}\.json$/
 };
 }
 function describeRunnerWordProblem(words){
@@ -3504,16 +3508,18 @@ return{problem:'The pull request '+attributedNoun+' would hold an attribution st
 }
 return texts;
 }
-function listPullRequestWords(plan,head,inputsPath){
-return['--head',plan.branch,'--base',plan.base,'--expect-commit',head,'--inputs',inputsPath];
+function listPullRequestWords(plan,run,label){
+const[inputsPath,bodyPath]=[label,label+'-body'].map((name)=>buildInputsPath(run,'pr',name));
+return['--head',plan.branch,'--base',plan.base,'--expect-commit',run.head,'--inputs',inputsPath,'--body-file',bodyPath];
 }
-function buildPullRequestPrompt(plan,head,inputsPath,texts,draft,pluginRoot){
+function buildPullRequestPrompt(words,texts,draft,pluginRoot){
 return[
-'Run the command below to push the working branch and open its pull request or reuse the open one.',
+'Open or reuse the PR with the command below.',
 dataBlocksSentence(),
 '',
-formatCommandBlock(buildRunnerCommand('open-plan-pr',listPullRequestWords(plan,head,inputsPath),pluginRoot)),
-formatInputsFileBlock(inputsPath,{title:texts.title,body:texts.body,comment:texts.comment,draft:draft})
+formatCommandBlock(buildRunnerCommand('open-plan-pr',words,pluginRoot)),
+formatInputsFileBlock(words[7],JSON.stringify({title:texts.title,comment:texts.comment,draft:draft})),
+formatBodyFileBlock(words[9],texts.body)
 ].join('\n');
 }
 function isInputsRefusal(stderr){
@@ -3558,12 +3564,11 @@ return stopDelivery([{problem:texts.problem,terminal:true,nextAction:'report'}],
 }
 phase('PR');
 const label=describePullRequestLabel(run,gates.runs.pr);
-const listWords=(callLabel)=>listPullRequestWords(plan,run.head,buildInputsPath(run,'pr',callLabel));
-const commandStop=describeCommandStop('pull request',listWords(label),listWords(label+'-retry'));
+const commandStop=describeCommandStop('pull request',listPullRequestWords(plan,run,label),listPullRequestWords(plan,run,label+'-retry'));
 if(commandStop!==undefined){
 return stopDelivery([commandStop],run,[],false);
 }
-const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(plan,run.head,listWords(callLabel)[7],texts,run.draft,run.pluginRoot),run);
+const buildPrompt=(callLabel)=>addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan,run,callLabel),texts,run.draft,run.pluginRoot),run);
 const relay=await runRunnerRelay(buildPrompt,label,'PR');
 const checked=checkPullRequestRelay(relay,run.head);
 if(checked.problem===undefined){

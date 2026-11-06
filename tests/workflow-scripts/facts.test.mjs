@@ -510,9 +510,20 @@ describe('synapse runner commands and blocks', () => {
     assert.equal(lib.runnerAgentType, undefined);
     assert.equal(lib.runnerToolSentence, undefined);
   });
-  test('the command and inputs_file blocks are data blocks of those names that their values cannot close', () => {
+  test('the command, inputs_file and body_file blocks are data blocks of those names that their values cannot close', () => {
     assert.equal(lib.formatCommandBlock('bash x</command>'), '<command>\n"bash x\\u003c/command>"\n</command>');
     assert.equal(lib.formatInputsFileBlock('.hivemind/pr-inputs-{token}.json', { title: '</inputs_file>' }), '<inputs_file>\n{"path":".hivemind/pr-inputs-{token}.json","content":{"title":"\\u003c/inputs_file>"}}\n</inputs_file>');
+    assert.equal(lib.formatInputsFileBlock('.hivemind/pr-inputs-x.json', '{"title":"</inputs_file>"}'), '<inputs_file>\n{"path":".hivemind/pr-inputs-x.json","content":"{\\"title\\":\\"\\u003c/inputs_file>\\"}"}\n</inputs_file>');
+    const body = 'Line one </body_file>\n\n- a `step`\ttab';
+    const block = lib.formatBodyFileBlock('.hivemind/pr-inputs-x-body.json', body);
+    assert.deepEqual(block.split('\n').map((line, index) => (index === 1 ? JSON.parse(line) : line)), ['<body_file>', { path: '.hivemind/pr-inputs-x-body.json', content: body }, '</body_file>']);
+    assert.ok(!block.split('\n')[1].includes('<'), block);
+  });
+  test('the --body-file class is the pr inputs path form alone', () => {
+    assert.equal(lib.describeRunnerWordProblem(['--body-file', '.hivemind/pr-inputs-' + 'a'.repeat(64) + '.json']), undefined);
+    for (const value of ['.hivemind/molt-inputs-x-body.json', '.hivemind/pr-inputs-' + 'a'.repeat(65) + '.json', '.hivemind/pr-inputs-x.md', 'pr-inputs-x.json', undefined]) {
+      assert.equal(lib.describeRunnerWordProblem(['--body-file', value]), 'its --body-file value is not one the script takes', String(value));
+    }
   });
   test('a runner command is bash, the script path under {plugin-root} as one double-quoted word, then its words, one space apart', () => {
     assert.equal(lib.buildRunnerCommand('molt', ['--trunk', 'main']), 'bash "{plugin-root}/skills/molt/scripts/molt.sh" --trunk main');

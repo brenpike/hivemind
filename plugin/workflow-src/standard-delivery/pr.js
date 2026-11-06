@@ -27,18 +27,21 @@
  *   The step, as meta.js names it:
  *   PR      once every configured gate held on one commit H, a haiku
  *           synapse runner runs the open-plan-pr command once. The
- *           command carries only --head, --base,
- *           --expect-commit H and the inputs path buildInputsPath
- *           (relay.js) builds for the call label, and the inputs_file
- *           block only the title, body and comment the code builds and
- *           draft from the launch. This runner is the only push the
+ *           command carries only --head, --base, --expect-commit H,
+ *           --inputs, the path buildInputsPath (relay.js) builds for the
+ *           call label, and --body-file, the one it builds for that label
+ *           and -body. The inputs_file content is a JSON string of only the
+ *           title and comment the code builds and draft from the launch,
+ *           and the body_file content the body the code builds, the raw
+ *           text the script reads whole. This runner is the only push the
  *           workflow makes, so every push carries --expect-commit. A
  *           command value outside its class (describeCommandStop,
- *           relay.js) is a terminal stop before the call. Its stdout parses with
+ *           relay.js), a body path whose token passes 64 characters
+ *           among them, is a terminal stop before the call. Its stdout parses with
  *           openPlanPrRoutingSpec(), head_ref_oid must equal H, and the run
  *           finishes complete with pr. The runner call goes through
  *           runRunnerRelay (relay.js), so a transient block runs once more
- *           under pr-P-retry with the inputs path of that label, and the
+ *           under pr-P-retry with the inputs and body paths of that label, and the
  *           step checks the words of both labels before the call. A pull
  *           request text over its size limit and a
  *           head_ref_oid other than H are terminal stops. A blocked,
@@ -318,17 +321,19 @@ function buildPullRequestTexts(run, plan, gates) {
   return texts;
 }
 
-function listPullRequestWords(plan, head, inputsPath) {
-  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', head, '--inputs', inputsPath];
+function listPullRequestWords(plan, run, label) {
+  const [inputsPath, bodyPath] = [label, label + '-body'].map((name) => buildInputsPath(run, 'pr', name));
+  return ['--head', plan.branch, '--base', plan.base, '--expect-commit', run.head, '--inputs', inputsPath, '--body-file', bodyPath];
 }
 
-function buildPullRequestPrompt(plan, head, inputsPath, texts, draft, pluginRoot) {
+function buildPullRequestPrompt(words, texts, draft, pluginRoot) {
   return [
-    'Run the command below to push the working branch and open its pull request or reuse the open one.',
+    'Open or reuse the PR with the command below.',
     dataBlocksSentence(),
     '',
-    formatCommandBlock(buildRunnerCommand('open-plan-pr', listPullRequestWords(plan, head, inputsPath), pluginRoot)),
-    formatInputsFileBlock(inputsPath, { title: texts.title, body: texts.body, comment: texts.comment, draft: draft })
+    formatCommandBlock(buildRunnerCommand('open-plan-pr', words, pluginRoot)),
+    formatInputsFileBlock(words[7], JSON.stringify({ title: texts.title, comment: texts.comment, draft: draft })),
+    formatBodyFileBlock(words[9], texts.body)
   ].join('\n');
 }
 
@@ -385,12 +390,11 @@ async function runPullRequestStep(run, plan, gates) {
   }
   phase('PR');
   const label = describePullRequestLabel(run, gates.runs.pr);
-  const listWords = (callLabel) => listPullRequestWords(plan, run.head, buildInputsPath(run, 'pr', callLabel));
-  const commandStop = describeCommandStop('pull request', listWords(label), listWords(label + '-retry'));
+  const commandStop = describeCommandStop('pull request', listPullRequestWords(plan, run, label), listPullRequestWords(plan, run, label + '-retry'));
   if (commandStop !== undefined) {
     return stopDelivery([commandStop], run, [], false);
   }
-  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(plan, run.head, listWords(callLabel)[7], texts, run.draft, run.pluginRoot), run);
+  const buildPrompt = (callLabel) => addResumeNote(buildPullRequestPrompt(listPullRequestWords(plan, run, callLabel), texts, run.draft, run.pluginRoot), run);
   const relay = await runRunnerRelay(buildPrompt, label, 'PR');
   const checked = checkPullRequestRelay(relay, run.head);
   if (checked.problem === undefined) {

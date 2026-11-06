@@ -479,10 +479,12 @@ function hasDataBlock(prompt, name) {
 }
 
 /**
- * Reads the command and inputs_file blocks of a synapse runner prompt into
- * one object: each flag value of the command under the flag name, dashes
- * made underscores and every --ref value in one ref list, then the
- * inputs_file content fields. The --inputs path is left out.
+ * Reads the command, inputs_file and body_file blocks of a synapse runner
+ * prompt into one object: each flag value of the command under the flag
+ * name, dashes made underscores and every --ref value in one ref list, then
+ * the inputs_file content fields, a string content parsed as JSON, then the
+ * body_file content as body. The --inputs and --body-file paths are left
+ * out.
  */
 function readRunnerInputs(prompt) {
   const words = readDataBlock(prompt, 'command').replace(/^bash "[^"]*" /, '').split(' ');
@@ -491,11 +493,16 @@ function readRunnerInputs(prompt) {
     const key = words[index].replace(/^--/, '').replace(/-/g, '_');
     if (key === 'ref') {
       inputs.ref = [...(inputs.ref ?? []), words[index + 1]];
-    } else if (key !== 'inputs') {
+    } else if (key !== 'inputs' && key !== 'body_file') {
       inputs[key] = words[index + 1];
     }
   }
-  return hasDataBlock(prompt, 'inputs_file') ? { ...inputs, ...readDataBlock(prompt, 'inputs_file').content } : inputs;
+  if (!hasDataBlock(prompt, 'inputs_file')) {
+    return inputs;
+  }
+  const content = readDataBlock(prompt, 'inputs_file').content;
+  const fields = { ...inputs, ...(typeof content === 'string' ? JSON.parse(content) : content) };
+  return hasDataBlock(prompt, 'body_file') ? { ...fields, body: readDataBlock(prompt, 'body_file').content } : fields;
 }
 
 function withoutDataBlock(prompt, name) {
@@ -506,12 +513,11 @@ function withoutDataBlock(prompt, name) {
 }
 
 /**
- * The prompt text outside its command block and, when it has one, its
- * inputs_file block.
+ * The prompt text outside its command block and, when it has them, its
+ * inputs_file and body_file blocks.
  */
 function readTextOutsideRunnerBlocks(prompt) {
-  const outside = withoutDataBlock(prompt, 'command');
-  return hasDataBlock(outside, 'inputs_file') ? withoutDataBlock(outside, 'inputs_file') : outside;
+  return ['inputs_file', 'body_file'].reduce((outside, name) => (hasDataBlock(outside, name) ? withoutDataBlock(outside, name) : outside), withoutDataBlock(prompt, 'command'));
 }
 
 function resumeWith(launchArgs, pausedResult, reply) {
@@ -586,19 +592,20 @@ const UNREAD_WRITE_ERROR = 'File has not been read yet. Read it first before wri
 
 /**
  * Does what synapse.md says a runner does with a prompt: it puts the plugin
- * root for {plugin-root} in the command, writes the inputs_file content as
- * JSON to its path as given when the block is there, then runs the filled
+ * root for {plugin-root} in the command, writes the inputs_file content,
+ * then the body_file content, to its path as given when the block is there,
+ * a string content as is and an object as JSON, then runs the filled
  * command with bash -c, as the Bash tool does, so the double-quoted script
- * path stays one word. Like the Write tool, it refuses an inputs path that
+ * path stays one word. Like the Write tool, it refuses a file path that
  * already exists, which it never read: blocked with UNREAD_WRITE_ERROR.
  */
 function runCommandBlock(scratch, prompt) {
-  if (hasDataBlock(prompt, 'inputs_file')) {
-    const inputsFile = readDataBlock(prompt, 'inputs_file');
-    if (existsSync(join(scratch.repo, inputsFile.path))) {
+  for (const name of ['inputs_file', 'body_file'].filter((blockName) => hasDataBlock(prompt, blockName))) {
+    const file = readDataBlock(prompt, name);
+    if (existsSync(join(scratch.repo, file.path))) {
       return { outcome: 'blocked', stderr: UNREAD_WRITE_ERROR };
     }
-    writeRepoFile(scratch, inputsFile.path, JSON.stringify(inputsFile.content));
+    writeRepoFile(scratch, file.path, typeof file.content === 'string' ? file.content : JSON.stringify(file.content));
   }
   const command = readDataBlock(prompt, 'command').split('{plugin-root}').join(pluginRoot);
   assert.ok(command.startsWith('bash '), command);
@@ -2823,7 +2830,7 @@ const ROW_TESTS = {
       assert.ok(callOf(run, 'validate-1-1').prompt.includes(lib.runnerReadOnlySentence()));
       for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
-        const outside = withoutDataBlock(hasDataBlock(prompt, 'inputs_file') ? withoutDataBlock(prompt, 'inputs_file') : prompt, 'command');
+        const outside = readTextOutsideRunnerBlocks(prompt);
         for (const text of [lib.runnerReadOnlySentence(), 'git-script', 'skill', 'tool call', 'Make no']) {
           assert.ok(!outside.includes(text), label + ' ' + text);
         }
@@ -4814,14 +4821,14 @@ const ROW_TESTS = {
     });
   },
   'SD-42': () => {
-    test('once every gate held on H, the PR runner invokes open-plan-pr with only head, base, expect_commit H, title, body, comment and draft', async () => {
+    test('once every gate held on H, the PR runner invokes open-plan-pr with only head, base, expect_commit H, title, comment, draft and the body in its own file', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.equal(labelsOf(run).at(-1), 'pr-1');
       assert.equal(run.phases.at(-1), 'PR');
       const call = callOf(run, 'pr-1');
-      const outside = withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file');
-      assert.deepEqual(outside.split('\n'), ['Run the command below to push the working branch and open its pull request or reuse the open one.', lib.dataBlocksSentence(), '']);
+      const outside = readTextOutsideRunnerBlocks(call.prompt);
+      assert.deepEqual(outside.split('\n'), ['Open or reuse the PR with the command below.', lib.dataBlocksSentence(), '']);
       assert.ok(!call.prompt.includes('set stdout'));
       assert.ok(!call.prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(!/grant/i.test(outside), outside);
@@ -4829,11 +4836,18 @@ const ROW_TESTS = {
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'PR');
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'stdout', 'stderr']);
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/open-plan-pr/scripts/open-plan-pr.sh" --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/open-plan-pr/scripts/open-plan-pr.sh" --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json --body-file .hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1-body.json');
       const inputsFile = readDataBlock(call.prompt, 'inputs_file');
       assert.deepEqual(Object.keys(inputsFile), ['path', 'content']);
       assert.equal(inputsFile.path, '.hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json');
-      assert.deepEqual(Object.keys(inputsFile.content), ['title', 'body', 'comment', 'draft']);
+      assert.equal(typeof inputsFile.content, 'string');
+      assert.deepEqual(Object.keys(JSON.parse(inputsFile.content)), ['title', 'comment', 'draft']);
+      const bodyFile = readDataBlock(call.prompt, 'body_file');
+      assert.deepEqual(Object.keys(bodyFile), ['path', 'content']);
+      assert.equal(bodyFile.path, '.hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1-body.json');
+      assert.equal(typeof bodyFile.content, 'string');
+      assert.ok(bodyFile.content.includes('\n\nSteps:\n'), bodyFile.content);
+      assert.deepEqual(call.prompt.split('\n').filter((line) => /^<[a-z_]+>$/.test(line)), ['<command>', '<inputs_file>', '<body_file>']);
       assert.ok(!outside.includes('feature/cache') && !outside.includes(OTHER), outside);
     });
     for (const [label, results, head, args = LAUNCH] of [
@@ -5317,6 +5331,19 @@ const ROW_TESTS = {
       assert.equal(main.isInputsRefusal('title must be one line of text\n'), false);
       assert.equal(main.isInputsRefusal(undefined), false);
     });
+    test('the pushed lines the PR step reads are the lines the PR script prints right before its blocker line', () => {
+      const scriptLines = [...openPlanPrText.matchAll(/^\s*pushed_line='([^']+)'$/gm)].map((match) => match[1]).sort();
+      assert.deepEqual(scriptLines, ['pushed: no', 'pushed: yes']);
+      assert.ok(openPlanPrText.includes('printf \'%s\\n\' "$pushed_line" >&2'), 'the script prints the pushed line as one stderr line');
+      assert.ok(/^blocker\(\) \{ relay_child_stderr; write_pushed_line; printf 'blocker: %s\\n' "\$1" >&2; exit 1; \}$/m.test(openPlanPrText), 'the pushed line comes right before the blocker line');
+      const prSource = readText(join(sourceDir, 'pr.js'));
+      const workflowLines = [...prSource.matchAll(/\/\^(pushed: [a-z]+)\$\/m/g)].map((match) => match[1]).sort();
+      assert.deepEqual(workflowLines, scriptLines);
+      for (const line of scriptLines) {
+        assert.notEqual(main.describeBlockedPush(line + '\nblocker: the PR could not be created\n', OTHER, false, 'UNSEEN_ZQ'), 'UNSEEN_ZQ', line);
+      }
+      assert.equal(main.describeBlockedPush('blocker: the PR could not be created\n', OTHER, false, 'UNSEEN_ZQ'), 'UNSEEN_ZQ');
+    });
     test('no pull request stop guesses with may be: the run says what it saw of the push', () => {
       const prSource = readText(join(sourceDir, 'pr.js'));
       assert.ok(!/\bmay be\b/i.test(prSource), 'pr.js holds may be');
@@ -5338,7 +5365,14 @@ const ROW_TESTS = {
       const createArgs = readFileSync(join(logDir, 'create.args'), 'utf8').split('\n');
       assert.ok(createArgs.includes('--base') && createArgs.includes('main') && createArgs.includes('--title=feat: Add the cache layer'), JSON.stringify(createArgs));
       assert.ok(!createArgs.includes('--head'));
-      assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), readRunnerInputs(callOf(run, 'pr-1').prompt).body);
+      const prPrompt = callOf(run, 'pr-1').prompt;
+      const sentBody = readDataBlock(prPrompt, 'body_file').content;
+      assert.ok(sentBody.split('\n').length > 3, sentBody);
+      assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), sentBody);
+      assert.ok(!Object.hasOwn(JSON.parse(readDataBlock(prPrompt, 'inputs_file').content), 'body'));
+      for (const name of ['inputs_file', 'body_file']) {
+        assert.equal(existsSync(join(scratch.repo, readDataBlock(prPrompt, name).path)), false, name);
+      }
       assert.ok(!prRelays[0].stdout.includes('commented: true'));
       assert.equal(run.result.message, openedLine(head) + '\n\n' + HELD_ALL + head + '.\n\nThe pull request step warned: gh cannot read the push remote as a GitHub repository; the PR head repository was not checked.');
     });
@@ -5679,8 +5713,8 @@ const ROW_TESTS = {
       assert.equal(encoded.length, reads.length);
       assert.ok(moduleCode.includes('quoteOrEmpty(review.blocker, reviewFieldTexts().blocker.bounds.maxLength)'));
     });
-    test('every JSON.stringify( in the workflow modules sits in a throw, in questionKey or in the acceptResolution comparison', () => {
-      const allowed = { throw: 0, questionKey: 0, acceptResolution: 0 };
+    test('every JSON.stringify( in the workflow modules sits in a throw, in questionKey, in the acceptResolution comparison or in the PR inputs_file content', () => {
+      const allowed = { throw: 0, questionKey: 0, acceptResolution: 0, pullRequestInputs: 0 };
       const stray = [];
       for (const chunk of moduleCode.split(/\n(?=(?:async )?function \w+\()/)) {
         const functionName = (/^(?:async )?function (\w+)\(/.exec(chunk) || [])[1];
@@ -5691,13 +5725,15 @@ const ROW_TESTS = {
             allowed.questionKey += 1;
           } else if (functionName === 'acceptResolution' && /JSON\.stringify\(listed\.brief\) === JSON\.stringify\(entry\.brief\)/.test(line)) {
             allowed.acceptResolution += 1;
+          } else if (functionName === 'buildPullRequestPrompt' && line.trim() === 'formatInputsFileBlock(words[7], JSON.stringify({ title: texts.title, comment: texts.comment, draft: draft })),') {
+            allowed.pullRequestInputs += 1;
           } else {
             stray.push(line.trim());
           }
         }
       }
       assert.deepEqual(stray, []);
-      assert.ok(allowed.throw > 0 && allowed.questionKey === 1 && allowed.acceptResolution === 1, JSON.stringify(allowed));
+      assert.ok(allowed.throw > 0 && allowed.questionKey === 1 && allowed.acceptResolution === 1 && allowed.pullRequestInputs === 1, JSON.stringify(allowed));
     });
     test('every reviewFieldTexts() field marked isExternal read by name in the workflow modules, but for its length, is the user_question or the encoded argument of a field REVIEW_SCHEMA bounds', () => {
       const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
@@ -7617,8 +7653,12 @@ const ROW_TESTS = {
           const firstPath = '.hivemind/' + kind + '-inputs-' + FACTS_STEM + '-' + label + '.json';
           const retryPath = '.hivemind/' + kind + '-inputs-' + FACTS_STEM + '-' + label + '-retry.json';
           assert.ok(firstPrompt.includes(firstPath) && retryPrompt.includes(retryPath), retryPrompt);
+          if (kind === 'pr') {
+            assert.deepEqual([readDataBlock(firstPrompt, 'body_file').path, readDataBlock(retryPrompt, 'body_file').path], [firstPath.replace(/\.json$/, '-body.json'), retryPath.replace(/\.json$/, '-body.json')]);
+          }
           assert.notEqual(retryPrompt, firstPrompt);
-          assert.equal(retryPrompt.split(retryPath).join(firstPath), firstPrompt);
+          const stemLabel = FACTS_STEM + '-' + label;
+          assert.equal(retryPrompt.split(stemLabel + '-retry').join(stemLabel), firstPrompt);
         }
         assert.deepEqual({ ...callOf(run, label + '-retry').opts, label: label }, { ...callOf(run, label).opts });
       });
@@ -7853,11 +7893,12 @@ const ROW_TESTS = {
     });
     test('the runner prompts use the block names and placeholders of synapse.md', async () => {
       const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
-      for (const word of ['`command`', '`inputs_file`', '`{plugin-root}`', '{path, content}']) {
+      for (const word of ['`command`', '`inputs_file`', '`body_file`', '`{plugin-root}`', '{path, content}']) {
         assert.ok(synapseText.includes(word), word);
       }
       assert.ok(synapseText.includes('Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` string.'));
-      assert.ok(synapseText.includes('to its `path`, exactly as given: never replace anything in `inputs_file`'));
+      assert.ok(synapseText.includes('- `body_file`, only for a pull request: `{path, content}`.'));
+      assert.ok(synapseText.includes('1. Write any `inputs_file`, then any `body_file`: its `content` (a string as is, an object as JSON) to its `path`, exactly as given: never replace anything in `inputs_file`.'));
       assert.ok(!synapseText.includes('{token}'));
       assert.ok(!synapseText.includes('wherever they appear'));
       const run = await runWorkflow(LAUNCH, happyResults());
@@ -7868,12 +7909,16 @@ const ROW_TESTS = {
           assert.ok(readDataBlock(prompt, 'command').startsWith('bash "' + pluginRoot + '/skills/'), label);
         }
         assert.equal(hasDataBlock(prompt, 'inputs_file'), label !== 'facts-1' && label !== 'branch-1', label);
+        assert.equal(hasDataBlock(prompt, 'body_file'), label === 'pr-1', label);
       }
       for (const label of ['commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
         assert.ok(!prompt.includes('{token}'), label);
         assert.ok(!readDataBlock(prompt, 'inputs_file').path.includes('{'), label);
       }
+      assert.equal(typeof readDataBlock(callOf(run, 'commit-1-1').prompt, 'inputs_file').content, 'object');
+      assert.equal(typeof readDataBlock(callOf(run, 'pr-1').prompt, 'inputs_file').content, 'string');
+      assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'body_file').path.includes('{'));
     });
     test('a facts relay with plugin_root none keeps {plugin-root} in every runner command, the branch, wave, fix, review, head check and pull request ones included', async () => {
       const noRoot = { 'facts-1': factsRelay({ plugin_root: 'none' }) };
@@ -7896,7 +7941,7 @@ const ROW_TESTS = {
         assertPassStopPause(run, MALFORMED_FACTS, 'facts-1', 'report');
       }
     });
-    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs file Write an allow', async () => {
+    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs and body file Writes an allow', async () => {
       const scratch = makeScratchRepo();
       mkdirSync(join(scratch.repo, '.hivemind'));
       const fresh = await runWorkflow({ request: REQUEST, references: [5, 12] }, fixFlowResults());
@@ -7914,10 +7959,11 @@ const ROW_TESTS = {
         const command = builtCommand.split('{plugin-root}').join(pluginRoot);
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:synapse', tool_input: { command: command } }), 'allow', call.opts.label + ': ' + command);
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:drone', tool_input: { command: command } }), 'none', call.opts.label);
-        if (hasDataBlock(call.prompt, 'inputs_file')) {
-          const filePath = readDataBlock(call.prompt, 'inputs_file').path;
+        for (const name of ['inputs_file', 'body_file'].filter((blockName) => hasDataBlock(call.prompt, blockName))) {
+          const filePath = readDataBlock(call.prompt, name).path;
           assert.equal(readGateDecision(scratch, { tool_name: 'Write', agent_type: 'hivemind:synapse', cwd: scratch.repo, tool_input: { file_path: filePath, content: '{}' } }), 'allow', call.opts.label + ': ' + filePath);
         }
+        assert.equal(hasDataBlock(call.prompt, 'body_file'), /open-plan-pr/.test(builtCommand), call.opts.label);
       }
     });
     test('every runner inputs path is the stem of its pass facts file and the call label, and no two calls of a run share one', async () => {
@@ -7952,7 +7998,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(second), labelsOf(first));
       const firstPaths = pairInputsPaths(first, happyResults()).map((pair) => pair.path);
       const secondPaths = pairInputsPaths(second, otherResults).map((pair) => pair.path);
-      assert.equal(firstPaths.length, 3);
+      assert.equal(firstPaths.length, 4);
       assert.ok(secondPaths.every((path) => !firstPaths.includes(path)), JSON.stringify([firstPaths, secondPaths]));
     });
     test('a paused run sends each commit and PR prompt byte for byte as its resumed run sends it under the same label', async () => {
@@ -7970,6 +8016,9 @@ const ROW_TESTS = {
         assert.equal(inputsPath, '.hivemind/' + kind + '-inputs-' + FACTS_STEM + '-' + label + '.json');
         assert.equal(lib.describeRunnerWordProblem(['--inputs', inputsPath]), undefined, inputsPath);
       }
+      const bodyPath = main.buildInputsPath({ factsStem: FACTS_STEM }, 'pr', 'pr-999-999-retry-body');
+      assert.equal(lib.describeRunnerWordProblem(['--body-file', bodyPath]), undefined, bodyPath);
+      assert.equal(lib.describeRunnerWordProblem(['--body-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-pr-1-body.json']), 'its --body-file value is not one the script takes');
       assert.equal(main.buildInputsPath({ factsStem: undefined }, 'molt', 'commit-1-1'), undefined);
     });
     test('a call label whose retry label would leave the --inputs class is a terminal stop before any runner call', async () => {
@@ -7984,7 +8033,7 @@ const ROW_TESTS = {
       const origin = addBareOrigin(scratch);
       writeCreatePathGh(scratch, origin);
       const staleStem = '20200101T000000Z-aaaaaaaaaaaa';
-      const stalePaths = ['molt-inputs-' + staleStem + '-commit-1-1', 'molt-inputs-' + staleStem + '-review-commit-1-1', 'pr-inputs-' + staleStem + '-pr-1'].map((name) => '.hivemind/' + name + '.json');
+      const stalePaths = ['molt-inputs-' + staleStem + '-commit-1-1', 'molt-inputs-' + staleStem + '-review-commit-1-1', 'pr-inputs-' + staleStem + '-pr-1', 'pr-inputs-' + staleStem + '-pr-1-body'].map((name) => '.hivemind/' + name + '.json');
       stalePaths.forEach((path) => writeRepoFile(scratch, path, 'STALE_ZQ\n'));
       const run = await runWorkflow(LAUNCH, realResults(scratch, { 'plan-1': planResult(makePlan()), 'pr-1': realPrRunner(scratch) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -8016,7 +8065,8 @@ const ROW_TESTS = {
       ['pull request', '--expect-commit', (run) => main.runPullRequestStep({ ...run, head: 'SECRETZQ --base main' }, makePlan(), heldGates(run))],
       ['pull request', '--head', (run) => main.runPullRequestStep({ ...run, head: OTHER }, makePlan({ branch: 'feature/cache --head SECRETZQ' }), heldGates(run))],
       ['commit', '--inputs', (run) => main.runCommitStep(run, makePlan(), { files: [], label: 'commit-1-1', stepName: 'wave', subject: 'Step S1 is done.' }, [])],
-      ['pull request', '--inputs', (run) => main.runPullRequestStep({ ...run, head: OTHER }, makePlan(), heldGates(run))]
+      ['pull request', '--inputs', (run) => main.runPullRequestStep({ ...run, head: OTHER }, makePlan(), heldGates(run))],
+      ['pull request', '--body-file', (run) => main.runPullRequestStep({ ...run, head: OTHER, factsStem: 'SECRETZQ'.padEnd(50, 'z') }, makePlan(), heldGates(run))]
     ]) {
       test(`a ${stepNoun} command value outside its class for ${flag} is a terminal stop before the runner call, naming the flag and not the value`, async () => {
         const stepped = await runStepWithStubAgent(callStep);
@@ -8534,7 +8584,9 @@ const ROW_TESTS = {
  * Pairs each runner call of a run that carries an inputs_file block with
  * the path that block names, the --inputs word of its command, and the
  * expected path: .hivemind/<kind>-inputs-<stem>-<label>.json, stem the
- * facts_file of the latest facts relay in results before the call.
+ * facts_file of the latest facts relay in results before the call. A call
+ * that carries a body_file block adds a pair of that path, the --body-file
+ * word and .hivemind/pr-inputs-<stem>-<label>-body.json.
  */
 function pairInputsPaths(run, results) {
   let stem;
@@ -8549,6 +8601,10 @@ function pairInputsPaths(run, results) {
       const words = readDataBlock(call.prompt, 'command').split(' ');
       const kind = words[1].includes('/molt/') ? 'molt' : 'pr';
       pairs.push({ label: label, path: readDataBlock(call.prompt, 'inputs_file').path, word: words[words.indexOf('--inputs') + 1], expected: '.hivemind/' + kind + '-inputs-' + stem + '-' + label + '.json' });
+    }
+    if (hasDataBlock(call.prompt, 'body_file')) {
+      const words = readDataBlock(call.prompt, 'command').split(' ');
+      pairs.push({ label: label + ' body', path: readDataBlock(call.prompt, 'body_file').path, word: words[words.indexOf('--body-file') + 1], expected: '.hivemind/pr-inputs-' + stem + '-' + label + '-body.json' });
     }
   }
   return pairs;
