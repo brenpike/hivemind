@@ -8,9 +8,10 @@
  *
  * Inputs
  *   run     the run state of main.js createRunState. The pass reads
- *           request, trunk, references, level, pass, storedAnswers and
- *           pendingReply, and updates answerLog, answeredKeys, taken and
- *           reversibleEffects. references reach describeClosesProblem (pr.js).
+ *           request, trunk, references, level, pass, decisions,
+ *           storedAnswers and pendingReply, and updates answerLog, answeredKeys, taken,
+ *           approvals and reversibleEffects. references reach
+ *           describeClosesProblem (pr.js).
  *   facts   the checked facts of the pass, from runFactsStep (relay.js).
  *   scope   the checked scope of the pass, from runScopeStep (scope.js).
  *           Once the revise result of a reply round passes the plan check,
@@ -31,7 +32,7 @@
  *           question of the pass is settled or taken, else what stopDelivery
  *           returns or {result}, the pause of an open question.
  *   takeNextReply(run, round)  the reply to a round, also read by the
- *           tail asks of gates.js.
+ *           tail asks of tails.js.
  *   The steps it runs, as meta.js names them:
  *   Plan    hivemind:cerebrate returns a plan result: PLAN_SCHEMA under
  *           plan, with outcome, questions and blocker.
@@ -131,14 +132,20 @@
  *   the pause showed, settled the shown labels the revise names, in shown
  *   order, [] when it names none. The answered keys of the round come from
  *   that logged settled, so the keys and the log share one derivation.
+ *   On both paths that log a planning reply, logPlanningReply also applies
+ *   readReplyChoices (lib/brief.js) of the reply to run.approvals through
+ *   applyApprovalChoices (approvals.js); settled still comes only from the
+ *   revise.
  *   Every plan prompt once the log is not empty carries the whole log in
  *   an answers data block, and a revise prompt the entries of earlier
  *   rounds. Its data line calls settled only
  *   what the settled labels of an entry name, never the reply of the round
  *   being revised, so a replan never asks or reverses a settled answer and
- *   never takes an open question as settled (issue 472). With an empty log,
- *   the plan and first revise prompts are the prompts of a run with no
- *   answers, so a resume replays them from cache.
+ *   never takes an open question as settled (issue 472). Each prompt
+ *   takes the log through listAnswerEntries (main.js), which puts one
+ *   settled entry per launch decision ahead of it (issue 500). With no
+ *   decision and an empty log, the plan and first revise prompts are the
+ *   prompts of a run with no answers, so a resume replays them from cache.
  *   Outside-limit ask: the limit check and the pause lead read every plan
  *   path through the mark walk (listPlanPaths): the version files and the
  *   step files the wave commits take. When scope.limits is not empty, a
@@ -269,11 +276,12 @@ function describeValidationCommandProblem(command) {
 }
 
 function describePlanProblem(planResult, resultSchema, facts, trunk, references) {
+  const stopped = ', so ' + RUN_NAME + ' stopped.';
   if (!isPlainObject(planResult)) {
-    return 'The planner returned no result, so ' + RUN_NAME + ' stopped.';
+    return 'The planner returned no result' + stopped;
   }
   if (!validateSchema(resultSchema, planResult).ok) {
-    return 'The planner returned a plan that does not fit the plan schema, so ' + RUN_NAME + ' stopped.';
+    return 'The planner returned a plan that does not fit the plan schema' + stopped;
   }
   if (planResult.outcome === 'blocked') {
     return 'The planner could not plan the delivery: ' + describeReason(planResult.blocker);
@@ -281,40 +289,40 @@ function describePlanProblem(planResult, resultSchema, facts, trunk, references)
   const plan = planResult.plan;
   const pathLocation = findRepositoryPathProblem(PLAN_SCHEMA, plan, '');
   if (pathLocation !== '') {
-    return 'The plan names a path at ' + pathLocation + ' that is not a plain path inside the repository, so ' + RUN_NAME + ' stopped.';
+    return 'The plan names a path at ' + pathLocation + ' that is not a plain path inside the repository' + stopped;
   }
   const wave = computeWave(plan.steps, []);
   if (!wave.ok) {
     return 'The plan steps cannot be scheduled, so ' + RUN_NAME + ' stopped: ' + toPrintableAscii(wave.problem);
   }
   if (plan.trunk_freshness !== facts.trunk_freshness) {
-    return 'The plan copies a trunk freshness other than the facts, so ' + RUN_NAME + ' stopped.';
+    return 'The plan copies a trunk freshness other than the facts' + stopped;
   }
   if (!isGitIdentifier(plan.branch) || !isGitIdentifier(plan.base)) {
-    return 'The plan names a branch or base that is not a safe git name, so ' + RUN_NAME + ' stopped.';
+    return 'The plan names a branch or base that is not a safe git name' + stopped;
   }
   if (!plan.versioning.artifact_files.every((artifactPath) => isGitIdentifier(artifactPath))) {
-    return 'The plan names a version file path that is not a safe git path, so ' + RUN_NAME + ' stopped.';
+    return 'The plan names a version file path that is not a safe git path' + stopped;
   }
   for (let index = 0; index < plan.validation_commands.length; index += 1) {
     const commandProblem = describeValidationCommandProblem(plan.validation_commands[index]);
     if (commandProblem !== '') {
-      return 'The plan names a validation command at validation_commands[' + index + '] that ' + commandProblem + ', so ' + RUN_NAME + ' stopped.';
+      return 'The plan names a validation command at validation_commands[' + index + '] that ' + commandProblem + stopped;
     }
   }
   const typedTitle = new RegExp('^(' + Object.values(commitTypeMap()).join('|') + ')(\\([^()]*\\))?!?:', 'i');
   if (typedTitle.test(cleanTitleText(plan.title))) {
-    return 'The plan title starts with a commit type, which the workflow writes before it, so ' + RUN_NAME + ' stopped.';
+    return 'The plan title starts with a commit type, which the workflow writes before it' + stopped;
   }
   if (buildTitleText(plan) === '') {
-    return 'The plan title leaves no text once it is cleaned and cut to fit the pull request title, so ' + RUN_NAME + ' stopped.';
+    return 'The plan title leaves no text once it is cleaned and cut to fit the pull request title' + stopped;
   }
   const isOnOtherBranch = facts.head_state === 'branch' && facts.branch !== trunk;
   if (isOnOtherBranch && plan.branch !== facts.branch) {
-    return 'The run started on branch ' + encodeUntrustedText(facts.branch) + ' and delivers on it, but the plan names branch ' + encodeUntrustedText(plan.branch) + ', so ' + RUN_NAME + ' stopped.';
+    return 'The run started on branch ' + encodeUntrustedText(facts.branch) + ' and delivers on it, but the plan names branch ' + encodeUntrustedText(plan.branch) + stopped;
   }
   if (!new RegExp(PLAN_SCHEMA.properties.branch.pattern, 'u').test(plan.branch)) {
-    return 'The plan names branch ' + encodeUntrustedText(plan.branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens, so ' + RUN_NAME + ' stopped.';
+    return 'The plan names branch ' + encodeUntrustedText(plan.branch) + ', which is not a prefix of feature, bugfix, hotfix, refactor, chore, docs, test or ci, a slash and lowercase words joined by hyphens' + stopped;
   }
   return describeClosesProblem(plan, references);
 }
@@ -466,6 +474,11 @@ function markSettledAsks(settledLabels, shownAsks, run, settledKinds) {
   });
 }
 
+function logPlanningReply(run, shownEntry, shownAsks, revise) {
+  run.answerLog.push(buildAnswerEntry(shownEntry, revise));
+  run.approvals = applyApprovalChoices(run.approvals, shownAsks, readReplyChoices(shownEntry.reply, shownAsks));
+}
+
 function takeNextReply(run, round) {
   const storedReply = readStoredReply(run.storedAnswers, round);
   if (storedReply !== undefined) {
@@ -484,19 +497,19 @@ async function runPlanningPass(run, facts, passScope, replan) {
   let shownResult;
   let shownEntry;
   const settledKinds = new Set();
-  const planPrompt = buildPlanPrompt(run.request, facts, scope, replan, run.answerLog);
+  const planPrompt = buildPlanPrompt(run.request, facts, scope, replan, listAnswerEntries(run));
   let planResult = await agent(planPrompt, plannerCallOptions('plan-' + run.pass, 'Plan', resultSchema));
   for (;;) {
     const problem = describePlanProblem(planResult, resultSchema, facts, run.trunk, run.references);
     if (problem !== undefined) {
       if (shownAsks.length > 0) {
-        run.answerLog.push(buildAnswerEntry(shownEntry, undefined));
+        logPlanningReply(run, shownEntry, shownAsks, undefined);
       }
       const isPlannerBlock = validateSchema(resultSchema, planResult).ok && planResult.outcome === 'blocked';
       return stopDelivery([isPlannerBlock ? { problem: problem, nextAction: readBlockerAction(planResult.blocker) } : describeUnusableResult(problem, planResult)], run, [], true);
     }
     if (shownAsks.length > 0) {
-      run.answerLog.push(buildAnswerEntry(shownEntry, planResult));
+      logPlanningReply(run, shownEntry, shownAsks, planResult);
       markSettledAsks(run.answerLog[run.answerLog.length - 1].settled, shownAsks, run, settledKinds);
       if (shownAsks.some((ask) => [PLAN_ACCEPTANCE_KIND, REMEDIATION_PLAN_ACCEPTANCE_KIND].includes(ask.kind) && run.answeredKeys.has(ask.key))) {
         planResult = shownResult;
@@ -537,7 +550,7 @@ async function runPlanningPass(run, facts, passScope, replan) {
     shownResult = planResult;
     shownEntry = { question: questions, labels: listShownLabels(shownAsks), reply: reply };
     resultSchema = buildReviseResultSchema(shownAsks);
-    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: run.answerLog, plan: planResult.plan, questions: questions, reply: reply });
+    const revisePrompt = buildPlanRevisePrompt({ request: run.request, facts: facts, scope: scope, answers: listAnswerEntries(run), plan: planResult.plan, questions: questions, reply: reply });
     planResult = await agent(revisePrompt, plannerCallOptions('revise-' + round, 'Revise', resultSchema));
   }
 }

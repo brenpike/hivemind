@@ -1,12 +1,12 @@
 /*
  * standard-delivery gates.js: the gates of the standard-delivery workflow. It
- * holds the gate ids, names and labels, the tail asks, the validate and
- * fix steps, the gate rerun and the gate loop. Its tail briefs live in
- * briefs.js.
+ * holds the gate ids, names and labels, the validate and fix steps, the
+ * gate rerun and the gate loop. Its tail briefs live in briefs.js and its
+ * tail asks in tails.js.
  *
  * Inputs
  *   run    the run state of main.js createRunState. The gates read pass,
- *          head, headRound, trunk and localReview, and update answerLog,
+ *          head, headRound, trunk, localReview and approvals, and update answerLog,
  *          notRunGates and versionAnswer. headRound is the answerLog length
  *          at the last head read (observeHead, record.js).
  *   plan   the accepted plan, from runPlanningPass (plan.js).
@@ -14,7 +14,9 @@
  *          trunk_commit is the base of the version check.
  *   gates  the gate loop state runGates builds: held, notes, runs
  *          (validate, review, fix, headCheck and pr), failures, fixRounds,
- *          reruns, rejected and answer.
+ *          reruns, rejected, answer and takenReview, which only review.js
+ *          sets and reads (runReviewGate), and fixAnswer, which only
+ *          runFixRound sets and reads.
  *          failures maps a head to the kept failed validation on it:
  *          {status, failures, versionOnly, versionLine}.
  *   FIX_SCHEMA, VALIDATE_SCHEMA, VALIDATE_COMMANDS_SCHEMA and the limits of
@@ -82,8 +84,17 @@
  *   next action run_again, and readGateEditOutcome passes its agentFailure
  *   mark on; any other unusable result, a malformed version relay among
  *   them, gets report. A blocked validation or fix round whose blocker
- *   gives no reason is report too (readBlockerAction), and a blocked
- *   version relay takes readRelayAction (relay.js). The fix step reads its result before the commit and passes its
+ *   gives no reason is report too (readBlockerAction), a blocked fix
+ *   round is typed through readGateHold (approvals.js) with run.approvals,
+ *   its approve cause holding the {stepId 'fix', category, item} of each
+ *   hold, and a blocked version relay takes readRelayAction (relay.js).
+ *   The fix prompt carries the approvals block only when run.approvals is
+ *   not empty. A fix round hold stops with isReplan false, so the reply
+ *   reruns the gate, and its next fix round carries the approvals. A reply
+ *   to any fix round stop, A or B, is kept as gates.fixAnswer, and the
+ *   next fix round of the pass alone carries it as user_answer, so a kept
+ *   change stays refused; a version reply's user_answer takes its place.
+ *   The fix step reads its result before the commit and passes its
  *   cause, if any, to runCommitStep (relay.js), which stops with every
  *   cause through stopDelivery with isReplan false, so a commit stop never
  *   hides a step cause; a stop it returns is returned as is. A null fix
@@ -116,25 +127,8 @@
  *   asks. The pull request step runs only when every configured gate holds on
  *   the head, as the last step of the gate loop, under label pr-P, then
  *   pr-P-N with N counting gates.runs.pr.
- *   Tail asks: a question after the last wave pauses through pauseDelivery
- *   with a lead and its question: askTail(ask, run, lead) leads with the
- *   given lead string, as a local review question passes, else with
- *   describeTailLead(run), every plan step committed on the encoded branch
- *   at the head. Tail rounds share run.answerLog and the answers round
- *   numbering with planning rounds, so a resume replays every earlier agent
- *   from cache and takes the reply at the ask. At reply time askTail adds
- *   the {question, settled, reply} entry buildAnswerEntry (lib/brief.js)
- *   builds to run.answerLog, the question being that lead and the question,
- *   so every later plan prompt shows it in the answers block; it returns
- *   {question, reply} as the answer. No revise reads a tail reply, so its
- *   settled is always [] and it stays the user's own words in every later
- *   answers block, review questions included: a review decision lives in the
- *   reviewer's record. A reply to a local review question reruns the review
- *   gate on the current head, after any stale gate, with the next gateLabel
- *   count and user_answer {question, reply}. Any other tail reply starts a
- *   new pass from the facts step with the answers block, outside
- *   maxReplans(). Nothing is pushed before every configured gate holds on
- *   one commit.
+ *   A question after the last wave pauses through askTail (tails.js).
+ *   Nothing is pushed before every configured gate holds on one commit.
  *
  * Why
  *   A gate holds only on a commit, so one loop decides which gate runs next
@@ -171,10 +165,12 @@ function buildGateEditSchema() {
       outcome: { type: 'string', enum: ['complete', 'blocked'], description: 'complete when the task is done. blocked when it cannot be done.' },
       blocker: { type: 'string', maxLength: 400, description: 'Why the task cannot be done, in one or two short sentences written for the user.' },
       next_action: buildNextActionProperty(),
-      files: { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } }
+      files: { type: 'array', description: 'Every path you created, edited or deleted, relative to the top of the repository.', items: { type: 'string' } },
+      stage: buildStageProperty(),
+      destructive: buildDestructiveListSchema(describeHeldChanges())
     },
     required: ['outcome', 'files'],
-    variants: { complete: { required: [], optional: [] }, blocked: { required: [], optional: ['blocker', 'next_action'] } }
+    variants: { complete: { required: [], optional: [] }, blocked: { required: [], optional: ['blocker', 'next_action', 'stage', 'destructive'] } }
   });
 }
 
@@ -218,63 +214,17 @@ function isRunEnd(outcome) {
   return outcome.result !== undefined || outcome.replan !== undefined;
 }
 
-function describeTailLead(run) {
-  return 'Every plan step is committed on branch ' + encodeUntrustedText(run.branch) + ', with head ' + run.head + '.';
-}
-
-function askTail(ask, run, lead) {
-  const leadText = lead === undefined ? describeTailLead(run) : lead;
-  const reply = takeNextReply(run, run.answerLog.length + 1);
-  if (reply === undefined) {
-    return { result: pauseDelivery({ asks: [ask], taken: [] }, run, leadText) };
-  }
-  const question = leadText + '\n\n' + renderQuestions([ask]);
-  run.answerLog.push(buildAnswerEntry({ question: question, labels: [], reply: reply }, undefined));
-  return { answer: { question: question, reply: reply } };
-}
-
-function replanFromTailAsk(ask, run) {
-  const asked = askTail(ask, run, undefined);
-  if (asked.answer === undefined) {
-    return asked;
-  }
-  return { replan: { reason: 'The user replied to a question the run asked after the last wave, so plan again from the fresh facts with the answers block.' } };
-}
-
-/**
- * Returns the ask resolveDecision (plan.js) builds for a question decide()
- * must never take: its brief, kind and the reason decide() gives at
- * run.level. Throws when decide() takes it, so no undecided question is
- * ever auto-taken.
- */
-function buildUndecidedAsk(kind, brief, run) {
-  const resolution = { asks: [], taken: [] };
-  if (resolveDecision(kind, brief, undefined, run, resolution) === 'take') {
-    throw new Error('buildUndecidedAsk: decide() took ' + kind);
-  }
-  return resolution.asks[0];
-}
-
-function resolveTailDecision(kind, brief, run) {
-  const resolution = { asks: [], taken: [], reversibleEffects: [] };
-  if (resolveDecision(kind, brief, undefined, run, resolution) === 'take') {
-    acceptResolution(resolution, run);
-    return {};
-  }
-  return replanFromTailAsk(resolution.asks[0], run);
-}
-
 function buildBumpTypeInputs(trunkCommit, versioning) {
   return { base: trunkCommit, bump_trigger: versioning.bump_trigger, no_bump_match: versioning.no_bump_match };
 }
 
-function readGateEditOutcome(result, schema) {
+function readGateEditOutcome(result, schema, approvals) {
   if (!validateSchema(schema, result).ok) {
-    const unusable = describeUnusableResult('it returned no usable result.', result);
+    const unusable = describeUnusableEdit(result);
     return { status: 'blocked', reason: unusable.problem, files: [], nextAction: unusable.nextAction, agentFailure: unusable.agentFailure };
   }
   if (result.outcome === 'blocked') {
-    return { status: 'blocked', reason: describeReason(result.blocker), files: result.files, nextAction: readBlockerAction(result.blocker, result.next_action) };
+    return Object.assign({ status: 'blocked', reason: describeReason(result.blocker), files: result.files }, readGateHold(result, approvals));
   }
   return { status: 'complete', files: result.files };
 }
@@ -374,12 +324,12 @@ function applyVersionCheck(validation, run) {
   return { status: 'failed', failures: isFailed ? validation.failures + '\n\n' + versionLine : versionLine, versionOnly: !isFailed, versionLine: versionLine };
 }
 
-function buildFixPrompt(fix, plan, trunk) {
+function buildFixPrompt(fix, plan, run) {
   const lines = [
     'Fix the failed validation of the delivery: the failures block below holds what the validation reported.',
     validationFixSentence(),
     boundarySentence(),
-    fix.userAnswer === undefined ? dataBlocksSentence() : dataBlocksSentence('The reply in user_answer'),
+    dataBlocksSentence(describeApprovalsHome(run.approvals, fix.userAnswer === undefined ? undefined : 'The reply in user_answer')),
     '',
     formatDataBlock('failures', fix.failures)
   ];
@@ -389,20 +339,31 @@ function buildFixPrompt(fix, plan, trunk) {
   if (fix.userAnswer !== undefined) {
     lines.push(formatDataBlock('user_answer', fix.userAnswer));
   }
-  lines.push(formatDataBlock('plan_summary', plan.summary), formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: trunk }));
+  lines.push(formatDataBlock('plan_summary', plan.summary), formatDataBlock('git', { branch: plan.branch, base: plan.base, trunk: run.trunk }), ...listApprovalsBlock(run.approvals));
   return lines.join('\n');
+}
+
+function describeFixCause(edit) {
+  const cause = { problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + edit.reason, nextAction: edit.nextAction, agentFailure: edit.agentFailure };
+  if (edit.nextAction === 'approve') {
+    cause.holds = edit.holds.map((hold) => ({ stepId: 'fix', ...hold }));
+  }
+  return cause;
 }
 
 async function runFixRound(run, plan, fix, gates) {
   phase('Fix');
   gates.runs.fix += 1;
   const count = gates.runs.fix;
-  const prompt = fix.userAnswer === undefined ? addResumeNote(buildFixPrompt(fix, plan, run.trunk), run) : buildFixPrompt(fix, plan, run.trunk);
+  const round = fix.userAnswer === undefined && gates.fixAnswer !== undefined ? { ...fix, userAnswer: gates.fixAnswer } : fix;
+  gates.fixAnswer = undefined;
+  const prompt = round.userAnswer === undefined ? addResumeNote(buildFixPrompt(round, plan, run), run) : buildFixPrompt(round, plan, run);
   const result = await agent(prompt, droneOptions(gateLabel('fix', run, count), 'Fix', FIX_SCHEMA));
-  const edit = readGateEditOutcome(result, FIX_SCHEMA);
-  const stepCauses = edit.status === 'blocked' ? [{ problem: 'The validation fix round was blocked, so ' + RUN_NAME + ' stopped: ' + edit.reason, nextAction: edit.nextAction, agentFailure: edit.agentFailure }] : [];
+  const edit = readGateEditOutcome(result, FIX_SCHEMA, run.approvals);
+  const stepCauses = edit.status === 'blocked' ? [describeFixCause(edit)] : [];
   const committed = await runCommitStep(run, plan, { files: edit.files, label: gateLabel('fix-commit', run, count), stepName: 'fix' }, stepCauses);
   if (committed.values === undefined) {
+    gates.fixAnswer = committed.stopAnswer;
     return committed;
   }
   return { held: false };
@@ -505,7 +466,7 @@ async function runHeadCheck(run, plan, gates) {
 
 async function runGates(run, plan, facts) {
   const gateList = configuredGateIds(run);
-  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0, headCheck: 0, pr: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined };
+  const gates = { held: {}, notes: {}, runs: { validate: 0, review: 0, fix: 0, headCheck: 0, pr: 0 }, failures: {}, fixRounds: 0, reruns: 0, rejected: [], answer: undefined, fixAnswer: undefined };
   if (!run.localReview) {
     listNotRunGate(run, notConfiguredReviewLine());
   }

@@ -1,0 +1,26 @@
+{
+  "rule": "Destructive fix approval is the user's own reply, never a call the run took",
+  "description": "`plugin/governance/security-policy.md` `## Destructive Fix Confirmation Gate` is the single source for what counts as approval of a fix the gate holds. The source pin is one span of two sentences, and each clause in it is load-bearing. (1) Explicit approval is the user's own reply that picks an option naming the change, or approves the change itself: deleting it, or widening who may give approval, turns the suite red. (2) A call the run or the overlord took is never approval: deleting or inverting this clause would let an autonomous call clear the gate, and turns the suite red. (3) An `approvals` block or input a workflow builds from such replies, each entry a category and an item, approves exactly the changes it lists: dropping `exactly` or the category-and-item shape turns the suite red. Consumers pin the reference and the behavior that keeps a gate hold a question. `plugin/agents/local-reviewer.md` must still declare the optional `approvals` key in its Input Contract YAML block, must still say in prose that `approvals` holds the changes the user approved per the section, each a `category` and an `item`, and approves exactly those, and must still say, beside the destructive fix gate pointer, that a fix no `approvals` entry and no user-made `user_answer` pick covers returns `user-input-required` with an option listing the fix in `destructive`, never `blocked`; that span carries both the condition and the obligation. `plugin/governance/decision-autonomy.md` `### Review Calls` must still say that a call whose pick applies a fix in a Destructive Fix Gate category is asked, never taken (Tier A), and that a gate hold after a taken call asks that call again; the span carries both the asked-never-taken rule and the re-ask. What this pin honestly guarantees is exactly that these word sequences exist in these three named files; it claims nothing about meaning. Residuals, stated plainly: (1) a meaning inversion that leaves the pinned bytes intact is invisible, so surrounding prose that lets the run approve a gate fix elsewhere stays green; (2) the pins are whole-file, so a pinned sentence moved out of its section stays green; (3) the pins say nothing about whether the standard-delivery workflow script builds `approvals` only from the user's replies, carries `destructive` in its review schema, or asks rather than takes a call with a non-empty `destructive` option, which only the workflow-script tests can check; (4) the `destructive` field definition in the local-reviewer `user_question` `options` bullet is unpinned, so rewording it alone stays green; (5) the pin sees only the three files it names, and no fixture in this directory can detect a NEW reviewer or remediation actor that treats a run-taken call as approval without citing the section at all, which is an absence defect per rule 7 of the pin-authoring contract.",
+  "source": {
+    "file": "plugin/governance/security-policy.md",
+    "pattern": "Explicit approval is the user's own reply that picks an option naming the change, or approves the change itself; a call the run or the overlord took is never approval. An `approvals` block or input a workflow builds from such replies, each entry a category and an item, approves exactly the changes it lists."
+  },
+  "consumers": [
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "approvals: # optional"
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "`approvals` holds the changes the user approved per `${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md` (Destructive Fix Confirmation Gate), each a `category` and an `item`; it approves exactly those."
+    },
+    {
+      "file": "plugin/agents/local-reviewer.md",
+      "pattern": "When no `approvals` entry and no `user_answer` pick the user made covers that fix, return `user-input-required` with an option listing the fix in `destructive`, never `blocked`."
+    },
+    {
+      "file": "plugin/governance/decision-autonomy.md",
+      "pattern": "A call whose pick applies a fix in a Destructive Fix Gate category is asked, never taken (**Tier A**); a gate hold after a taken call asks that call again."
+    }
+  ]
+}

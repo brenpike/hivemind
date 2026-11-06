@@ -35,13 +35,18 @@
  *   A recommended option with reversible false asks gate_irreversible, even
  *   when gate.irreversible is false: the option field is checked, not only
  *   the gate flag.
+ *   A recommended option with a non-empty destructive list asks gate_safety,
+ *   even when gate.safety is false, for every kind, review kinds included:
+ *   only the user's own reply approves a destructive change, so a run never
+ *   takes one (security-policy.md, Destructive Fix Confirmation Gate).
  *   An unknown level resolves to 'low', the most cautious level.
  *   A caller in code may name an ask reason; a brief field never does.
  *   askReason asks only when every earlier check passes.
  *   A brief is malformed when validateSchema(schema, brief) reports any
  *   error. Only the checks the schema cannot express are written here:
  *   option ids are unique, recommendation.option_id names one of them,
- *   strength none, and reversible false on the recommended option.
+ *   strength none, and reversible false or a non-empty destructive list on
+ *   the recommended option.
  *
  * Why
  *   The model that writes a brief must not pick the rule that lets it act.
@@ -110,7 +115,7 @@ function decide({ kind, level, brief, askReason }, table, schema) {
   if (brief.gate.architectural) {
     return askFor('gate_architectural');
   }
-  if (brief.gate.safety) {
+  if (brief.gate.safety || isRecommendedOptionDestructive(brief)) {
     return askFor('gate_safety');
   }
   if (askReason !== undefined) {
@@ -131,6 +136,10 @@ function askFor(reason) {
 
 function isRecommendedOptionIrreversible(brief) {
   return brief.options.some((option) => option.id === brief.recommendation.option_id && option.reversible === false);
+}
+
+function isRecommendedOptionDestructive(brief) {
+  return brief.options.some((option) => option.id === brief.recommendation.option_id && Array.isArray(option.destructive) && option.destructive.length > 0);
 }
 
 function isRecommendationAnOption(brief) {

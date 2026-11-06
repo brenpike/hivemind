@@ -130,6 +130,37 @@ describe('gate flags', () => {
     const options = [base.options[0], { ...base.options[1], reversible: false }];
     assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ options })), takeAuto);
   });
+  test('a recommended option with a destructive change asks gate_safety at every level and kind, even when gate.safety is false', () => {
+    const base = makeBrief();
+    const options = [{ ...base.options[0], destructive: [{ category: 3, item: 'Skip test X.' }] }, base.options[1]];
+    const brief = makeBrief({ options });
+    for (const kind of [...table.rows.map((row) => row.kind), ...hardStopKinds]) {
+      for (const level of [...table.levels, undefined]) {
+        const verdict = decideWith(kind, level, brief);
+        const row = table.rows.find((entry) => entry.kind === kind);
+        const expected = row !== undefined && row[resolvedLevelOf(level)] === 'auto' ? 'gate_safety' : verdict.reason;
+        assert.deepEqual(verdict, { action: 'ask', reason: expected }, `${kind} at ${level}`);
+      }
+    }
+  });
+  for (const kind of ['review_question', 'high_severity_rejection']) {
+    test(`review kind ${kind} asks gate_safety for a recommended destructive option where it would take`, () => {
+      const base = makeBrief();
+      const options = [{ ...base.options[0], destructive: [{ category: 8, item: 'Edit .github/workflows/ci.yml.' }] }, base.options[1]];
+      assert.deepEqual(decideWith(kind, 'high', makeBrief()), takeAuto);
+      assert.deepEqual(decideWith(kind, 'high', makeBrief({ options })), { action: 'ask', reason: 'gate_safety' });
+    });
+  }
+  test('a destructive option that is not recommended does not block a take', () => {
+    const base = makeBrief();
+    const options = [base.options[0], { ...base.options[1], destructive: [{ category: 3, item: 'Skip test X.' }] }];
+    assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ options })), takeAuto);
+  });
+  test('an empty destructive list on the recommended option does not make it ask', () => {
+    const base = makeBrief();
+    const options = [{ ...base.options[0], destructive: [] }, base.options[1]];
+    assert.deepEqual(decideWith('plan_acceptance', 'high', makeBrief({ options })), takeAuto);
+  });
   test('table_surface wins over a gate flag', () => {
     const gate = { irreversible: true, architectural: false, safety: false };
     assert.equal(decideWith('plan_acceptance', 'low', makeBrief({ gate })).reason, 'table_surface');
@@ -248,7 +279,9 @@ describe('malformed brief', () => {
     'blank option summary': makeBrief({ options: [{ ...base.options[0], summary: '' }, base.options[1]] }),
     'blank recommendation why': makeBrief({ recommendation: { ...base.recommendation, why: '' } }),
     'strength none with blank option_id': makeBrief({ recommendation: { option_id: '', strength: 'none', why: 'Both are fine.' } }),
-    'empty verbatim': makeBrief({ verbatim: '' })
+    'empty verbatim': makeBrief({ verbatim: '' }),
+    'destructive category outside 1 to 10': makeBrief({ options: [{ ...base.options[0], destructive: [{ category: 11, item: 'X' }] }] }),
+    'destructive entry missing item': makeBrief({ options: [{ ...base.options[0], destructive: [{ category: 3 }] }] })
   };
   for (const [name, brief] of Object.entries(malformed)) {
     test(`${name} asks malformed_brief`, () => {

@@ -58,7 +58,7 @@ The rule defends against untrusted identifier text only. Repo hooks, local refs,
 
 Any remediation fix in a category below needs human confirmation first, whoever proposed it.
 
-This list is the only statement of the categories; no other document enumerates them. Each is one line, `DESTRUCTIVE-CAT <n>: <what the fix would do>`, numbered 1 through 10, no duplicates, so a cited number survives reordering.
+This list is the only statement of the categories; no other document enumerates them. Each is one line, `DESTRUCTIVE-CAT <n>: <what the fix would do>`, numbered 1 through 10, no duplicates.
 
 **Read every category at its broadest.** Each parenthetical is an example, never exhaustive. No marking, label, annotation or naming convention is a precondition for a category to fire: a file is security-relevant for what it does, not for what something says about it. A fix that plausibly falls inside a category fires it, and the gate applies.
 
@@ -74,6 +74,8 @@ This list is the only statement of the categories; no other document enumerates 
 - `DESTRUCTIVE-CAT 10:` Expose, log or transmit credentials, tokens, API keys or private keys
 
 When the gate fires, return the Worker Report — Blocked per `${CLAUDE_PLUGIN_ROOT}/governance/report-format.md` (Worker Report — Blocked) with `stage: destructive-fix-gate`, `blocker: proposed fix requires human confirmation`, the proposed change summary and which category (1-10) fired. Do not commit; wait for explicit user approval.
+
+Explicit approval is the user's own reply that picks an option naming the change, or approves the change itself; a call the run or the overlord took is never approval. An `approvals` block or input a workflow builds from such replies, each entry a category and an item, approves exactly the changes it lists.
 
 ## Injection-Suspect Classification
 
@@ -146,7 +148,7 @@ An operator declining a prompt means two things: the Write did not succeed, so t
 
 ### Synapse Runner Gate
 
-This subsection is the one canonical statement of the synapse runner gate. `hivemind:synapse` is the agent a workflow script starts to run one committed runner script. Its only tools are Bash and Write. Workflow scripts start it; the overlord never delegates to it. Nothing enforces who starts it, as the list below states. The gate is a plugin PreToolUse hook, `${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh`, registered in `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` for the Bash and Write tools.
+This subsection is the one canonical statement of the synapse runner gate. `hivemind:synapse` is the agent a workflow script starts to run one committed runner script; the overlord never delegates to it. Its only tools are Bash and Write. The gate is a plugin PreToolUse hook, `${CLAUDE_PLUGIN_ROOT}/hooks/synapse-gate.sh`, registered in `${CLAUDE_PLUGIN_ROOT}/hooks/hooks.json` for the Bash and Write tools.
 
 The gate knows five runner scripts: `molt.sh`, `gather-facts.sh`, `create-working-branch.sh`, `bump-type.sh` and `open-plan-pr.sh`. Each lives at `skills/<name>/scripts/<name>.sh` under the plugin root. A command is in exact form when it is `bash`, then one of those script paths under `CLAUDE_PLUGIN_ROOT`, then only the flags that script takes, each value in its fixed class, with single spaces between them. The script path is always one double-quoted word: `bash "<root>/skills/<name>/scripts/<name>.sh"`. A bare path is not exact. `<root>` is `CLAUDE_PLUGIN_ROOT` exactly as Claude Code sets it, never rewritten. So the path the hook matches is the one Claude Code substitutes into synapse's command and the one bash runs, and the hook's shared checks load from under that same root. Anything else is not exact: other quotes, a redirection, a pipe, a chained or appended command, a substitution, a control character, or a relative or copied path.
 
@@ -159,13 +161,13 @@ The hook decides as follows:
 - Write from `hivemind:synapse`: allow only `.hivemind/molt-inputs-<token>.json` or `.hivemind/pr-inputs-<token>.json`, relative or under the session's working directory. The parent must resolve to that directory's `.hivemind`, and the target must not be a symlink. Deny every other synapse Write.
 - Write from any other agent: no decision.
 
-The hook fails open to the normal permission flow. When it cannot decide, it outputs nothing. That covers a missing `jq`, an empty `CLAUDE_PLUGIN_ROOT`, malformed input, a timeout, and hooks turned off by settings. The hook itself never fails toward an allow: when it cannot decide, it allows nothing. A settings allow rule that covers the call still applies then, with none of the hook's checks; for synapse's inputs-file Write that is the seeded rules, listed below. It never exits 2, because exit 2 would block the call.
+The hook fails open to the normal permission flow. When it cannot decide, it outputs nothing. That covers a missing `jq`, an empty `CLAUDE_PLUGIN_ROOT`, malformed input, a timeout, and hooks turned off by settings. A settings allow rule that covers the call still applies then, with none of the hook's checks; for synapse's inputs-file Write that is the seeded rules, listed below. It never exits 2, because exit 2 would block the call.
 
 An allow from the hook only skips the prompt. A `permissions.deny` or `permissions.ask` rule in settings still wins over it.
 
-Synapse's inputs files use the fixed-literal transport of the Inert Inputs-File Navigator Pattern above, with the same paths as `hivemind:molt` and `hivemind:open-plan-pr`. The two forms are written in `${CLAUDE_PLUGIN_ROOT}/agents/synapse.md` and in the hook. The workflow builds each path whole: the token is the pass's facts file name between `facts-` and `.json`, then the agent call label, so synapse fills in no token. A navigator's `Edit(<glob>)` entry only pre-approves. Here the hook denies every other synapse Write, so no prompt text can steer where the Write lands. The engine's read-guard still runs before it reads the file.
+Synapse's inputs files use the fixed-literal transport of the Inert Inputs-File Navigator Pattern above, with the same paths as `hivemind:molt` and `hivemind:open-plan-pr`. The two forms are written in `${CLAUDE_PLUGIN_ROOT}/agents/synapse.md` and in the hook. The workflow builds each path whole: the token is the pass's facts file name between `facts-` and `.json`, then the agent call label, so synapse fills in no token. Here the hook denies every other synapse Write, so no prompt text can steer where the Write lands. The engine's read-guard still runs before it reads the file.
 
-Synapse commits or pushes only under the `synapse` grant in `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Commit Authority). That grant is standing and needs no grant in synapse's prompt. This subsection is the one statement of its bound: the hook enforces the exact-form bound above, and when the hook cannot decide, the normal permission flow applies, as the fail-open paragraph above states.
+Synapse commits or pushes only under the `synapse` grant in `${CLAUDE_PLUGIN_ROOT}/governance/safety-rails.md` (Commit Authority). That grant is standing and needs no grant in synapse's prompt. Its bound is the hook's exact-form bound above, or the normal permission flow when the hook cannot decide.
 
 What the gate does not guard:
 

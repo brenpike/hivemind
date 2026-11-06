@@ -10,8 +10,11 @@
  *   gates   the gate loop state of runGates (gates.js), once the gates ran.
  *   lead    the what-happened line of a pause, built by its call site.
  *   causes  the causes of a stop, {problem, nextAction?, terminal?,
- *           agentFailure?} each: terminal true marks a cause no reply can
- *           clear, and agentFailure comes only from describeUnusableResult.
+ *           agentFailure?, holds?} each: terminal true marks a cause no
+ *           reply can clear, agentFailure comes only from
+ *           describeUnusableResult, and a cause with next action approve
+ *           carries holds, its held items {stepId, category, item}, never
+ *           empty.
  *   endLines  lines a stop shows after its causes, such as a commit end.
  *   commit, branch  a head read from a checked relay: the commit line of
  *           a molt relay or of a branch relay, and the plan branch.
@@ -25,9 +28,10 @@
  *   pauseDelivery  the only run results; see the Outputs of main.js.
  *   stopDelivery(causes, run, endLines, isReplan)  {result}, the blocked end
  *           or the pause, or on a reply {replan: {reason}} when isReplan,
- *           a new pass outside maxReplans(), else {rerun: true}: the gate
- *           loop takes the stopped step again, reading the head first when
- *           that step does not read it itself (gates.js).
+ *           a new pass outside maxReplans(), else {rerun: true,
+ *           stopAnswer}, stopAnswer the {question, reply} of askTails: the
+ *           gate loop takes the stopped step again, reading the head first
+ *           when that step does not read it itself (gates.js).
  *   observeHead(run, commit, branch)  sets run.head to commit, run.branch
  *           to branch and run.headRound to the run.answerLog length.
  *   buildRunRecordParts(run, taken, gates)  the one run record the pull
@@ -46,14 +50,20 @@
  *   Every chat message has one shape, built here:
  *   pauseDelivery(resolution, run, lead)  the lead, then
  *           renderQuestions(resolution.asks), a whole block when an ask is
- *           exact. The reply line is the last line. No commit, gate line,
+ *           exact or has a destructive option (hasDestructiveOption,
+ *           approvals.js), so no destructive item is ever cut: a block
+ *           that cannot show whole ends through finishOpenQuestions,
+ *           exact_text_size. The reply line is the last line. No commit, gate line,
  *           taken decision or detail block. A lead longer than
  *           maxBlockedLeadLength() code points has the cutAtBoundary prefix
  *           of at most those code points as its compact form.
  *   stopDelivery  ends through finishDeliveryBlocked when any cause is
- *           terminal or an agent failure. Otherwise it asks one undecided
+ *           terminal or an agent failure. When its lead cause in
+ *           orderStopCauses order is approve, it asks buildApprovalAsks
+ *           (briefs.js) of that cause's holds through askTails (tails.js),
+ *           one question per held item. Otherwise it asks one undecided
  *           step_stop question (buildStepStopBrief, briefs.js) through
- *           buildUndecidedAsk and askTail (gates.js): decide() asks it
+ *           buildUndecidedAsk and askTails: decide() asks it
  *           table_surface at every level, so its recommendation, strong
  *           for fix_cause and run_again, is never taken. The askTail lead is
  *           the cause problems in buildStopBlocks order, then the end
@@ -234,7 +244,7 @@ function pauseDelivery(resolution, run, lead) {
     return finishOpenQuestions(resolution, 'reply_size', run);
   }
   const questionsBlock = { text: renderQuestions(resolution.asks) };
-  if (resolution.asks.some((ask) => ask.exact === true)) {
+  if (resolution.asks.some((ask) => ask.exact === true || hasDestructiveOption(ask))) {
     questionsBlock.whole = true;
   }
   const compactLead = cutAtBoundary(lead, maxBlockedLeadLength());
@@ -250,16 +260,24 @@ function describeStopLead(causes, endLines) {
   return causeTexts.concat(endLines).join('\n');
 }
 
+function listStopAsks(causes, run, isReplan) {
+  const leadCause = orderStopCauses(causes)[0];
+  if (leadCause.nextAction === 'approve') {
+    return buildApprovalAsks(leadCause.holds, isReplan, run);
+  }
+  return [buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(causes, isReplan), run)];
+}
+
 function stopDelivery(causes, run, endLines, isReplan) {
   if (causes.some((cause) => cause.terminal === true || cause.agentFailure === true)) {
     return { result: finishDeliveryBlocked(causes, run, endLines) };
   }
-  const asked = askTail(buildUndecidedAsk(STEP_STOP_KIND, buildStepStopBrief(causes, isReplan), run), run, describeStopLead(causes, endLines));
+  const asked = askTails(listStopAsks(causes, run, isReplan), run, describeStopLead(causes, endLines));
   if (asked.answer === undefined) {
     return asked;
   }
   if (isReplan) {
-    return { replan: { reason: 'The user replied to a stop the run paused at, so plan again from the fresh facts with the answers block.' } };
+    return buildReplyReplan('a stop the run paused at');
   }
-  return { rerun: true };
+  return { rerun: true, stopAnswer: asked.answer };
 }

@@ -16,10 +16,13 @@ const SHOWN_FIELD_PATHS = {
   summary: ['options', 'items', 'summary'],
   recommendation: ['recommendation'],
   why: ['recommendation', 'why'],
-  strength: ['recommendation', 'strength']
+  strength: ['recommendation', 'strength'],
+  destructive: ['options', 'items', 'destructive'],
+  category: ['options', 'items', 'destructive', 'items', 'category'],
+  item: ['options', 'items', 'destructive', 'items', 'item']
 };
 const INTERNAL_FIELDS = ['id', 'option_id', 'kind'];
-const ASK_OR_ROUND_FIELDS = ['brief', 'exact', 'labels', 'settled'];
+const ASK_OR_ROUND_FIELDS = ['brief', 'exact', 'labels', 'settled', 'chosen', 'label'];
 const VERBATIM_FIELDS = ['verbatim'];
 
 function readSchemaNode(path) {
@@ -32,6 +35,9 @@ function hasShownBound(node) {
   }
   if (node.type === 'array') {
     return Object.hasOwn(node, 'maxItems');
+  }
+  if (node.type === 'integer') {
+    return Array.isArray(node.enum);
   }
   return node.type === 'object' && node.additionalProperties === false;
 }
@@ -131,7 +137,8 @@ describe('brief schema bounds the fields written for the user', () => {
     ['options[].summary', properties.options.items.properties.summary, 160],
     ['recommendation.why', properties.recommendation.properties.why, 200],
     ['criticality.blast_radius', properties.criticality.properties.blast_radius, 160],
-    ['criticality.if_ignored', properties.criticality.properties.if_ignored, 160]
+    ['criticality.if_ignored', properties.criticality.properties.if_ignored, 160],
+    ['options[].destructive[].item', properties.options.items.properties.destructive.items.properties.item, 160]
   ]) {
     test(`${path} has maxLength ${bound} and says it is written for the user`, () => {
       assert.equal(node.maxLength, bound);
@@ -145,10 +152,20 @@ describe('brief schema stays inside the structured-output subset', () => {
   test('the root is an object schema', () => {
     assert.equal(schema.type, 'object');
   });
-  test('only options has maxItems, and it is 4', () => {
+  test('only options and options[].destructive have maxItems, and each is 4', () => {
     const bounded = nodes.filter(({ node }) => Object.hasOwn(node, 'maxItems'));
-    assert.deepEqual(bounded.map(({ path }) => path), ['$.properties.options']);
+    assert.deepEqual(bounded.map(({ path }) => path), ['$.properties.options', '$.properties.options.items.properties.destructive']);
     assert.equal(schema.properties.options.maxItems, 4);
+    assert.equal(schema.properties.options.items.properties.destructive.maxItems, 4);
+  });
+  test('options[].destructive is optional, its entries need an integer category 1 to 10 and an item', () => {
+    const destructive = schema.properties.options.items.properties.destructive;
+    assert.equal(schema.properties.options.items.required.includes('destructive'), false);
+    assert.deepEqual(destructive.items.required, ['category', 'item']);
+    assert.equal(destructive.items.properties.category.type, 'integer');
+    assert.deepEqual(destructive.items.properties.category.enum, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    assert.ok(destructive.description.includes('${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md (Destructive Fix Confirmation Gate)'), destructive.description);
+    assert.equal(destructive.description.includes('DESTRUCTIVE-CAT'), false);
   });
   for (const { node, path } of nodes) {
     test(`${path} has minItems at most 1`, () => {

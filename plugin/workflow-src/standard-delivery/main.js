@@ -11,9 +11,10 @@
  * the overlord's, not this script's (ADR-0037 decision 4).
  *
  * The phase modules of this directory hold every other function, and the
- * build bundles them, in name order, ahead of this file: gates.js, plan.js,
- * pr.js, record.js, relay.js, review.js, scope.js and waves.js. Each opens
- * with the contract of its steps. This file holds the launch reading, the
+ * build bundles them, in name order, ahead of this file: briefs.js,
+ * gates.js, paths.js, plan.js, pr.js, record.js, relay.js,
+ * review-schema.js, review.js, scope.js, specs.js, tails.js and waves.js.
+ * Each opens with the contract of its steps. This file holds the launch reading, the
  * run state, the pass loop and every top-level constant and limit.
  *
  * Inputs
@@ -26,7 +27,11 @@
  *          the launch turns it off, and any other value stops the run. draft
  *          is true or false: absent means false, so the pull request opens
  *          ready for review unless the launch asks for a draft, and any
- *          other value stops the run. answers and reply
+ *          other value stops the run. decisions, from the launch args
+ *          only, is absent or a list of 1 to maxDecisions() non-blank
+ *          strings of at most maxDecisionLength() code points each: the
+ *          user's own replies settled before launch, word for word. Any
+ *          other value stops the run before any agent call. answers and reply
  *          follow the result.js pause contract: answers['round-N'] holds the
  *          reply to round N, and reply answers the first round with no
  *          stored answer, only when answers is present. Round N is the
@@ -52,7 +57,7 @@
  *   pause is a one-line lead of what happened, then the questions
  *   renderQuestions shows, with the reply line last: a planning pause leads
  *   with describePlanLine(plan, outsidePaths) (plan.js), a tail ask with its
- *   own lead (askTail, gates.js). A run end is its lead, then, when blocked,
+ *   own lead (askTail, tails.js). A run end is its lead, then, when blocked,
  *   the Next line, any later causes and the commit end line, then only the
  *   records ADR-0037 decision 3 needs in chat:
  *   the branch and its head once a wave ran, the
@@ -106,7 +111,7 @@
  *   question, and the reply takes the stopped step again or plans again.
  *   Every undecided question, a step_stop, a version question, the fix
  *   limit and the gate rerun limit, resolves through decide() in
- *   buildUndecidedAsk (gates.js), which throws on a take: step_stop and
+ *   buildUndecidedAsk (tails.js), which throws on a take: step_stop and
  *   version_bump_indeterminable surface at every level, and both limit
  *   briefs have strength none.
  *   Each new pass reads the head from its branch step through observeHead
@@ -115,6 +120,13 @@
  *   commit made during a pause, or by a commit runner whose relay could
  *   not be read. That read also stamps run.headRound after the last
  *   planning reply.
+ *   run.decisions holds the decisions launch arg, [] when absent.
+ *   listAnswerEntries(run) puts one settled entry per decision ahead of
+ *   run.answerLog, and only the scope, plan and revise prompts read it;
+ *   run.answerLog, its rounds and resume_args never hold a decision.
+ *   run.approvals starts [] and changes only through applyApprovalChoices
+ *   (approvals.js) at each reply round, so it holds only the destructive
+ *   changes the user's own replies approved, never a decision the run took.
  *   No version question plans again: its reply becomes run.versionAnswer
  *   and runs one fix round, and no later version check of the run fails
  *   or asks (gates.js).
@@ -322,6 +334,14 @@ function maxPullRequestTextLength() {
   return 60000;
 }
 
+function maxDecisions() {
+  return 10;
+}
+
+function maxDecisionLength() {
+  return 2000;
+}
+
 function readDeliveryLaunch(rawArgs) {
   const argsObject = readArgsObject(rawArgs);
   if (!isNonEmptyString(argsObject.request)) {
@@ -332,7 +352,7 @@ function readDeliveryLaunch(rawArgs) {
     return launchInputs;
   }
   if (!isGitIdentifier(launchInputs.trunk)) {
-    return { problem: 'The trunk launch arg is not a safe git branch name, so ' + RUN_NAME + ' did not start.' };
+    return describeLaunchProblem('The trunk launch arg is not a safe git branch name');
   }
   const reviewInput = readLocalReview(argsObject);
   if (reviewInput.problem !== undefined) {
@@ -342,7 +362,15 @@ function readDeliveryLaunch(rawArgs) {
   if (draftInput.problem !== undefined) {
     return draftInput;
   }
-  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.localReview, draft: draftInput.draft };
+  const decisionsInput = readDecisions(argsObject);
+  if (decisionsInput.problem !== undefined) {
+    return decisionsInput;
+  }
+  return { argsObject: argsObject, request: argsObject.request, trunk: launchInputs.trunk, references: launchInputs.references, localReview: reviewInput.localReview, draft: draftInput.draft, decisions: decisionsInput.decisions };
+}
+
+function describeLaunchProblem(reason) {
+  return { problem: reason + ', so ' + RUN_NAME + ' did not start.' };
 }
 
 function readLocalReview(argsObject) {
@@ -352,7 +380,7 @@ function readLocalReview(argsObject) {
   if (argsObject.local_review === true || argsObject.local_review === false) {
     return { localReview: argsObject.local_review };
   }
-  return { problem: 'The local_review launch arg must be true or false, so ' + RUN_NAME + ' did not start.' };
+  return describeLaunchProblem('The local_review launch arg must be true or false');
 }
 
 function readDraft(argsObject) {
@@ -362,7 +390,36 @@ function readDraft(argsObject) {
   if (argsObject.draft === true || argsObject.draft === false) {
     return { draft: argsObject.draft };
   }
-  return { problem: 'The draft launch arg must be true or false, so ' + RUN_NAME + ' did not start.' };
+  return describeLaunchProblem('The draft launch arg must be true or false');
+}
+
+function isDecision(decision) {
+  return isNonEmptyString(decision) && Array.from(decision).length <= maxDecisionLength();
+}
+
+/**
+ * Returns {decisions}, the decisions launch arg, [] when absent, or a
+ * launch problem when it is not a list of 1 to maxDecisions() decisions.
+ */
+function readDecisions(argsObject) {
+  const decisions = argsObject.decisions;
+  if (decisions === undefined) {
+    return { decisions: [] };
+  }
+  if (Array.isArray(decisions) && decisions.length > 0 && decisions.length <= maxDecisions() && decisions.every(isDecision)) {
+    return { decisions: decisions.slice() };
+  }
+  return describeLaunchProblem('The decisions launch arg must be a list of 1 to ' + maxDecisions() + ' non-blank strings of at most ' + maxDecisionLength() + ' characters each');
+}
+
+/**
+ * Returns one settled answer entry per launch decision, the decision word
+ * for word as its reply, followed by run.answerLog.
+ */
+function listAnswerEntries(run) {
+  const label = questionLabel(0);
+  const decisionEntries = run.decisions.map((decision) => buildAnswerEntry({ question: label + '. A decision you settled before the run started.', labels: [label], chosen: [{ label: label }], reply: decision }, undefined));
+  return decisionEntries.concat(run.answerLog);
 }
 
 function createRunState(launch) {
@@ -372,6 +429,7 @@ function createRunState(launch) {
     references: launch.references,
     localReview: launch.localReview,
     draft: launch.draft,
+    decisions: launch.decisions ?? [],
     level: resolveLevel(undefined, AUTONOMY_TABLE),
     storedAnswers: readStoredAnswers(launch.argsObject),
     pendingReply: readPendingReply(launch.argsObject),
@@ -379,6 +437,7 @@ function createRunState(launch) {
     answeredKeys: new Set(),
     taken: [],
     reversibleEffects: [],
+    approvals: [],
     head: undefined,
     branch: undefined,
     headRound: undefined,
