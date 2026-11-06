@@ -270,7 +270,7 @@ function buildRejectedFindingsBlock(note, rejectedFindings) {
 function buildReviewOption(option, question) {
   const isRecommended = option.id === question.recommendation.option_id;
   const changes = readOptionChanges(option).map((entry) => ({ category: entry.category, item: encodeUntrustedText(entry.item) }));
-  return { id: option.id, summary: encodeUntrustedText(option.summary), steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: !isRecommended || !question.gate.irreversible, destructive: changes };
+  return { id: option.id, summary: encodeUntrustedText(option.summary), steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: !isRecommended || !question.gate.irreversible, beyond_request: false, destructive: changes };
 }
 
 function readOptionChanges(option) {

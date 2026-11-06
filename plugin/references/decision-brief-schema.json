@@ -55,7 +55,7 @@
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["id", "summary", "steel_man", "straw_man", "effort", "value", "reversible"],
+        "required": ["id", "summary", "steel_man", "straw_man", "effort", "value", "reversible", "beyond_request"],
         "properties": {
           "id": {
             "type": "string",
@@ -87,6 +87,10 @@
           "reversible": {
             "type": "boolean",
             "description": "True when this option can be undone cheaply."
+          },
+          "beyond_request": {
+            "type": "boolean",
+            "description": "True when this option does more than the request asks: work, files or changes the request does not name. Such an option is never the strong recommendation by default. A brief offering one also offers the in-request option, with the expansion filed as a follow-up issue, as a first-class option."
           },
           "destructive": {
             "type": "array",

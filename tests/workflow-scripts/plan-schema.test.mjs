@@ -24,10 +24,11 @@ const SUBSET_KEYWORDS = [
   'additionalProperties',
   'items',
   'minItems',
+  'minLength',
   'maxLength',
   'pattern'
 ];
-const OPTIONAL_PROPERTIES = { $: ['closes'] };
+const OPTIONAL_PROPERTIES = { $: ['closes'], '$.steps[]': ['limits_reason'] };
 
 function validate(value) {
   return structuredClone(lib.validateSchema(planSchema, value));
@@ -75,7 +76,7 @@ function makePlan() {
     trunk_freshness: 'fresh',
     classification: 'feature',
     breaking: false,
-    versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['plugin/.claude-plugin/plugin.json'] },
+    versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['plugin/.claude-plugin/plugin.json'], changelog_files: ['CHANGELOG.md'] },
     validation_commands: ['bash tools/validate.sh --changed'],
     delivery: 'multi',
     steps: [
@@ -131,7 +132,8 @@ describe('plan schema', () => {
     for (const [path, names] of Object.entries(OPTIONAL_PROPERTIES)) {
       const node = collectNodes(planSchema).find((entry) => entry.path === path).node;
       for (const name of names) {
-        assert.ok(node.properties[name].description.startsWith('Optional.'), path + '.' + name);
+        const description = node.properties[name].description;
+        assert.ok(description.startsWith('Optional.') || description.startsWith(EXTERNAL_LABEL + ' Optional.'), path + '.' + name);
       }
     }
   });
@@ -144,6 +146,13 @@ describe('plan schema', () => {
     plan.closes = [491, 488];
     assert.deepEqual(validate(plan), { ok: true, errors: [] });
     plan.closes = [];
+    assert.deepEqual(validate(plan), { ok: true, errors: [] });
+  });
+
+  test('limits_reason is optional and may be blank, and a plan with it is valid', () => {
+    const plan = makePlan();
+    plan.steps[0].limits_reason = 'The step sets the version in the changelog.';
+    plan.steps[1].limits_reason = '';
     assert.deepEqual(validate(plan), { ok: true, errors: [] });
   });
 
@@ -166,12 +175,14 @@ describe('plan schema', () => {
       '$.branch',
       '$.base',
       '$.versioning.artifact_files[]',
+      '$.versioning.changelog_files[]',
       '$.validation_commands[]',
       '$.steps[].id',
       '$.steps[].files[]',
       '$.steps[].outcome',
       '$.steps[].depends_on[]',
-      '$.steps[].external_effects[].summary'
+      '$.steps[].external_effects[].summary',
+      '$.steps[].limits_reason'
     ]);
   });
 
@@ -262,6 +273,7 @@ describe('plan schema', () => {
     ['a plan without title', (plan) => delete plan.title, '$: required: missing title'],
     ['a blank title', (plan) => { plan.title = ' \t '; }, '$.title: type string: blank'],
     ['a plan without versioning.artifact_files', (plan) => delete plan.versioning.artifact_files, '$.versioning: required: missing artifact_files'],
+    ['a plan without versioning.changelog_files', (plan) => delete plan.versioning.changelog_files, '$.versioning: required: missing changelog_files'],
     ['a plan without validation_commands', (plan) => delete plan.validation_commands, '$: required: missing validation_commands'],
     ['a validation command that is not a string', (plan) => { plan.validation_commands = [5]; }, '$.validation_commands[0]: type string expected'],
     ['a blank validation command', (plan) => { plan.validation_commands = [' \t ']; }, '$.validation_commands[0]: type string: blank'],
@@ -285,6 +297,7 @@ describe('plan schema', () => {
     ['an artifact file path over 400 code points', (plan) => { plan.versioning.artifact_files[0] = '\u{1F600}'.repeat(401); }, '$.versioning.artifact_files[0]: maxLength: more than 400 characters'],
     ['a step id over 64 code points', (plan) => { plan.steps[0].id = 'S'.repeat(65); }, '$.steps[0].id: maxLength: more than 64 characters'],
     ['a depends_on entry over 64 code points', (plan) => { plan.steps[1].depends_on[0] = 'S'.repeat(65); }, '$.steps[1].depends_on[0]: maxLength: more than 64 characters'],
+    ['a limits_reason over 160 code points', (plan) => { plan.steps[0].limits_reason = 'r'.repeat(161); }, '$.steps[0].limits_reason: maxLength: more than 160 characters'],
     ['an effect summary over 300 code points', (plan) => { plan.steps[1].external_effects[0].summary = 'e'.repeat(301); }, '$.steps[1].external_effects[0].summary: maxLength: more than 300 characters'],
     ['a closes that is not a list', (plan) => { plan.closes = 491; }, '$.closes: type array expected'],
     ['a closes number written as a string', (plan) => { plan.closes = ['491']; }, '$.closes[0]: type integer expected'],

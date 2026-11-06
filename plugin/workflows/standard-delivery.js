@@ -261,7 +261,8 @@ const BRIEF_SCHEMA = {
 "straw_man",
 "effort",
 "value",
-"reversible"
+"reversible",
+"beyond_request"
 ],
 "properties": {
 "id": {
@@ -295,6 +296,9 @@ const BRIEF_SCHEMA = {
 ]
 },
 "reversible": {
+"type": "boolean"
+},
+"beyond_request": {
 "type": "boolean"
 },
 "destructive": {
@@ -562,7 +566,8 @@ const PLAN_SCHEMA = {
 "required": [
 "bump_trigger",
 "no_bump_match",
-"artifact_files"
+"artifact_files",
+"changelog_files"
 ],
 "properties": {
 "bump_trigger": {
@@ -585,6 +590,12 @@ const PLAN_SCHEMA = {
 "type": "string",
 "maxLength": 400,
 "description": "Can carry external content. Repository path."
+}
+},
+"changelog_files": {
+"type": "array",
+"items": {
+"type": "string"
 }
 }
 }
@@ -666,6 +677,11 @@ const PLAN_SCHEMA = {
 }
 }
 }
+},
+"limits_reason": {
+"type": "string",
+"minLength": 0,
+"maxLength": 160
 }
 }
 }
@@ -673,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = 'cfe50d87cd977052';
+const BUILD_ID = 'efafb460aea580c5';
 
 function supportedSchemaKeywords(){
 return[
@@ -1027,7 +1043,7 @@ const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
 return askFor('hard_stop');
 }
-if(!briefCheck.ok){
+if(!briefCheck.ok||!hasInRequestOption(brief)){
 return askFor('malformed_brief');
 }
 const row=table.rows.find((candidate)=>candidate.kind===kind);
@@ -1050,6 +1066,9 @@ return askFor('gate_architectural');
 if(brief.gate.safety||isRecommendedOptionDestructive(brief)){
 return askFor('gate_safety');
 }
+if(isRecommendedOptionBeyondRequest(brief)){
+return askFor('beyond_request');
+}
 if(askReason!==undefined){
 return askFor(askReason);
 }
@@ -1070,6 +1089,12 @@ return brief.options.some((option)=>option.id===brief.recommendation.option_id&&
 function isRecommendedOptionDestructive(brief){
 return brief.options.some((option)=>option.id===brief.recommendation.option_id&&Array.isArray(option.destructive)&&option.destructive.length>0);
 }
+function isRecommendedOptionBeyondRequest(brief){
+return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true);
+}
+function hasInRequestOption(brief){
+return brief.options.some((option)=>option.beyond_request===false);
+}
 function isRecommendationAnOption(brief){
 const optionIds=brief.options.map((option)=>option.id);
 const idsAreUnique=optionIds.every((optionId,index)=>optionIds.indexOf(optionId)===index);
@@ -1084,21 +1109,17 @@ return blocks.join('\n\n');
 }
 function renderDecisions(taken){
 assertArray(taken,'renderDecisions: taken',false);
-if(taken.length===0){
-return'';
-}
-const lines=['Decided for you:'];
-taken.forEach((entry,index)=>lines.push(renderTakenDecision(entry,index)));
-return lines.join('\n');
+return renderDecisionBlock(taken,renderTakenDecision);
 }
 function renderDecisionsCompact(taken){
 assertArray(taken,'renderDecisionsCompact: taken',false);
+return renderDecisionBlock(taken,renderCompactDecision);
+}
+function renderDecisionBlock(taken,renderEntry){
 if(taken.length===0){
 return'';
 }
-const lines=['Decided for you:'];
-taken.forEach((entry,index)=>lines.push(renderCompactDecision(entry,index)));
-return lines.join('\n');
+return['Decided for you:',...taken.map((entry,index)=>renderEntry(entry,index))].join('\n');
 }
 function renderOpenQuestions(open,stopReason='pause_limit'){
 assertArray(open,'renderOpenQuestions: open',true);
@@ -1220,7 +1241,8 @@ return options.map((option,index)=>renderOption(option,index,recommendedIndex));
 }
 function renderOption(option,index,recommendedIndex){
 const mark=index===recommendedIndex?' (recommended)':'';
-return'- '+optionLabel(index)+': '+renderText(readField(option,'summary'))+mark+renderDestructive(readField(option,'destructive'));
+const beyond=readField(option,'beyond_request')===true?' This goes beyond what you asked for.':'';
+return'- '+optionLabel(index)+': '+renderText(readField(option,'summary'))+mark+beyond+renderDestructive(readField(option,'destructive'));
 }
 function renderDestructive(changes){
 if(!Array.isArray(changes)||changes.length===0){
@@ -1260,7 +1282,7 @@ function renderOpenQuestion(entry,index){
 const brief=readField(entry,'brief');
 const recommendation=readField(brief,'recommendation');
 const optionId=readField(recommendation,'option_id');
-const hasChoice=readField(recommendation,'strength')!=='none'&&typeof optionId==='string'&&optionId.trim()!=='';
+const hasChoice=!isStrengthNone(recommendation)&&typeof optionId==='string'&&optionId.trim()!=='';
 const choice=hasChoice
 ?'The report assumes option '+renderOptionLetter(readField(brief,'options'),optionId)+'.'
 :'I have no recommendation of my own.';
@@ -1268,30 +1290,33 @@ return'  '+questionLabel(index)+'. '+renderText(readField(brief,'problem'))+' '+
 }
 function renderTakenDecision(entry,index){
 const brief=readField(entry,'brief');
-const options=readField(brief,'options');
-const recommendation=readField(brief,'recommendation');
-const optionId=readField(recommendation,'option_id');
 const lines=[
 '  '+decisionLabel(index)+'. '+renderText(readField(brief,'problem')),
-'    Chose option '+renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary')),
-'    Why: '+renderText(readField(recommendation,'why'))
+'    Chose option '+renderChoice(brief),
+'    Why: '+renderText(readField(readField(brief,'recommendation'),'why'))
 ];
 lines.push(...renderVerbatim(readField(brief,'verbatim'),'    '));
 return lines.join('\n');
 }
 function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
+const choice=renderChoice(brief);
+return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose '
++choice+(/[.!?]["']?$/.test(choice)?'':'.');
+}
+function renderChoice(brief){
 const options=readField(brief,'options');
 const optionId=readField(readField(brief,'recommendation'),'option_id');
-const summary=renderText(readField(readChosenOption(options,optionId),'summary'));
-return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose '
-+renderOptionLetter(options,optionId)+': '+summary+(/[.!?]["']?$/.test(summary)?'':'.');
+return renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary'));
 }
 function findRecommendedIndex(options,recommendation){
-if(readField(recommendation,'strength')==='none'){
+if(isStrengthNone(recommendation)){
 return-1;
 }
 return findOptionIndex(options,readField(recommendation,'option_id'));
+}
+function isStrengthNone(recommendation){
+return readField(recommendation,'strength')==='none';
 }
 function findOptionIndex(options,optionId){
 if(!Array.isArray(options)||typeof optionId!=='string'){
@@ -2476,8 +2501,8 @@ kind:PLAN_ACCEPTANCE_KIND,
 problem:'Start delivering the plan: create or confirm its working branch and run its steps.',
 criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
-{id:'A',summary:'Accept the plan and run its steps.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'medium',value:'high',reversible:true},
-{id:'B',summary:'Stop before any step runs.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true}
+{id:'A',summary:'Accept the plan and run its steps.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'medium',value:'high',reversible:true,beyond_request:false},
+{id:'B',summary:'Stop before any step runs.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true,beyond_request:false}
 ],
 recommendation:{option_id:'A',strength:'strong',why:'Every change stays on the working branch, and every decision taken is listed for you before the merge.'},
 assumptions:[{statement:unshownBriefText(),origin:'assumed',evidence:unshownBriefText()}],
@@ -2506,8 +2531,8 @@ kind:TRUNK_STALE_KIND,
 problem:'The trunk may not be up to date: its freshness is '+facts.trunk_freshness+', '+Number(facts.trunk_ahead)+' commits ahead of its remote and '+Number(facts.trunk_behind)+' behind. Create or confirm the working branch from it anyway?',
 criticality:{level:'low',likelihood:'occasional',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
-{id:'A',summary:'Go on from the trunk as it is.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'medium',reversible:true},
-{id:'B',summary:'Stop so you can bring the trunk up to date first.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true}
+{id:'A',summary:'Go on from the trunk as it is.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'medium',reversible:true,beyond_request:false},
+{id:'B',summary:'Stop so you can bring the trunk up to date first.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true,beyond_request:false}
 ],
 recommendation:{option_id:'A',strength:'strong',why:'A stale base costs at most a rebase, and the run goes on.'},
 assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
@@ -2521,8 +2546,8 @@ kind:EXTERNAL_EFFECT_KIND,
 problem:'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
 criticality:{level:'high',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
-{id:'A',summary:'Go on and let the step make this effect.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:false},
-{id:'B',summary:'Change or drop the step first.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true}
+{id:'A',summary:'Go on and let the step make this effect.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:false,beyond_request:false},
+{id:'B',summary:'Change or drop the step first.',steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:true,beyond_request:false}
 ],
 recommendation:{option_id:'A',strength:'none',why:'Only you can decide whether this effect outside the repo may happen.'},
 assumptions:[{statement:unshownBriefText(),origin:'assumed',evidence:unshownBriefText()}],
@@ -2534,8 +2559,9 @@ function listOutsidePaths(plan,scope){
 if(scope.limits.length===0){
 return[];
 }
-const limits=scope.limits.filter((limit)=>isRepositoryPath(limit));
-const isInsideLimits=(file)=>limits.some((limit)=>file===limit||file.startsWith(limit+'/'));
+const limits=scope.limits.map((limit)=>limit.path).filter((limit)=>isRepositoryPath(limit));
+const versionFiles=[...plan.versioning.artifact_files,...plan.versioning.changelog_files];
+const isInsideLimits=(file)=>versionFiles.includes(file)||limits.some((limit)=>file===limit||file.startsWith(limit+'/'));
 return listPlanPaths(plan).filter((file)=>!isInsideLimits(file));
 }
 function markOutsideLimits(brief,outsidePaths){
@@ -2552,8 +2578,8 @@ kind:kind,
 problem:problem,
 criticality:{level:'medium',likelihood:'certain',blast_radius:unshownBriefText(),if_ignored:unshownBriefText()},
 options:[
-{id:'A',summary:goOn,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true},
-{id:'B',summary:other===undefined?'Plan again: this run gives your reply to the planner before anything goes further.':other,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true}
+{id:'A',summary:goOn,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true,beyond_request:false},
+{id:'B',summary:other===undefined?'Plan again: this run gives your reply to the planner before anything goes further.':other,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'trivial',value:'low',reversible:true,beyond_request:false}
 ],
 recommendation:{option_id:strength==='none'?'B':'A',strength:strength,why:why},
 assumptions:[{statement:unshownBriefText(),origin:'repo',evidence:unshownBriefText()}],
@@ -2610,7 +2636,7 @@ const raised={major:[parts[0]+1,0,0],minor:[parts[0],parts[1]+1,0],patch:[parts[
 return raised[bumpType].join('.');
 }
 function buildVersionOption(id,summary){
-return{id:id,summary:summary,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true};
+return{id:id,summary:summary,steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'high',reversible:true,beyond_request:false};
 }
 function listVersionOptions(values){
 if(values.version_check==='unreadable'){
@@ -3190,15 +3216,18 @@ return JSON.stringify([kind,scope,renderQuestions([ask])]);
 function describeCount(count,noun){
 return count+' '+noun+(count===1?'':'s');
 }
+function describeLimitsReason(plan,file){
+const reasonStep=plan.steps.find((step)=>step.files.includes(file)&&renderText(step.limits_reason)!==renderText(undefined));
+return reasonStep===undefined?'the plan gives no reason':renderText(reasonStep.limits_reason);
+}
 function describePlanLine(plan,outsidePaths){
 const fileCount=listPlanPaths(plan).length;
 const lead='The plan for branch '+encodeUntrustedText(plan.branch)+' has '+describeCount(plan.steps.length,'step')+' over '+describeCount(fileCount,'file')+': '+renderText(plan.digest.change);
 if(outsidePaths.length===0){
 return lead;
 }
-const shownPaths=outsidePaths.slice(0,maxListedItems()).map((file)=>encodeUntrustedText(file));
-const restCount=outsidePaths.length-shownPaths.length;
-return lead+' Outside the limits you set: '+joinNames(restCount>0?[...shownPaths,restCount+' more']:shownPaths,'and')+'.';
+const pathLines=outsidePaths.map((file)=>'- '+encodeUntrustedText(file)+': '+describeLimitsReason(plan,file));
+return[lead+' Outside the limits you set:',...capItemLines(pathLines)].join('\n');
 }
 function unshownBriefText(){
 return'Not shown.';
@@ -4290,7 +4319,7 @@ return{text:lines.join('\n')};
 function buildReviewOption(option,question){
 const isRecommended=option.id===question.recommendation.option_id;
 const changes=readOptionChanges(option).map((entry)=>({category:entry.category,item:encodeUntrustedText(entry.item)}));
-return{id:option.id,summary:encodeUntrustedText(option.summary),steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:!isRecommended||!question.gate.irreversible,destructive:changes};
+return{id:option.id,summary:encodeUntrustedText(option.summary),steel_man:unshownBriefText(),straw_man:unshownBriefText(),effort:'small',value:'medium',reversible:!isRecommended||!question.gate.irreversible,beyond_request:false,destructive:changes};
 }
 function readOptionChanges(option){
 return option.destructive??[];
@@ -4462,33 +4491,27 @@ function notConfiguredReviewLine(){
 return'local review: the run was launched with local_review false, so the gate is not configured and does not count as held.';
 }
 
+function buildScopeItem(properties){
+return{type:'object',properties:properties,required:Object.keys(properties),additionalProperties:false};
+}
 function buildScopeSchema(){
 const pathField={type:'string',maxLength:400,description:repositoryPathMark()+' It is relative to the repository root, like tools/validate.sh, never absolute.'};
-const documentItem={
-type:'object',
-properties:{
+const documentItem=buildScopeItem({
 path:pathField,
-line:{type:'integer',description:'The 1-based line where the section starts. It locates the section and does not bound it.'}
-},
-required:['path','line'],
-additionalProperties:false
-};
-const pathItem={
-type:'object',
-properties:{
+line:{type:'integer',description:'The 1-based line where the section starts.'}
+});
+const pathItem=buildScopeItem({
 path:pathField,
 exists:{type:'boolean',description:'true when the path exists now.'},
 drift:{type:'string',minLength:0,maxLength:400,description:externalLabel()+' How the path differs from what the section says, empty when it does not.'}
-},
-required:['path','exists','drift'],
-additionalProperties:false
-};
+});
+const limitItem=buildScopeItem({path:pathField,origin:{type:'string',enum:['request','answer']}});
 return{
 type:'object',
 properties:{
-documents:{type:'array',maxItems:10,description:'The sections of the named documents, empty when none. A section may be left out, and the planner then reads it itself.',items:documentItem},
-paths:{type:'array',maxItems:30,description:'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.',items:pathItem},
-limits:{type:'array',maxItems:30,description:'The paths or directories the request and the user\'s answers limit the work to, empty when none.',items:pathField}
+documents:{type:'array',maxItems:10,description:'The sections of the named documents, empty when none.',items:documentItem},
+paths:{type:'array',maxItems:30,description:'The paths a section or the request names for the work, empty when none.',items:pathItem},
+limits:{type:'array',maxItems:30,description:'Only the paths or directories the request or an answer limits the work to, empty when none.',items:limitItem}
 },
 required:['documents','paths','limits'],
 additionalProperties:false
@@ -4527,16 +4550,16 @@ return path.startsWith(prefix)?path.slice(prefix.length):path;
 function relativizeScopeEntry(entry,root){
 return Object.assign({},entry,{path:toRepositoryRelativePath(entry.path,root)});
 }
-function toLimitPath(limit,root){
-const relativeLimit=toRepositoryRelativePath(limit,root);
-return relativeLimit.endsWith('/')?relativeLimit.slice(0,-1):relativeLimit;
+function toLimitEntry(limit,root){
+const entry=relativizeScopeEntry(limit,root);
+return entry.path.endsWith('/')?Object.assign(entry,{path:entry.path.slice(0,-1)}):entry;
 }
 function keepRepositoryPathEntries(scope,root){
 const keepEntries=(entries)=>entries.map((entry)=>relativizeScopeEntry(entry,root)).filter((entry)=>isRepositoryPath(entry.path));
 return{
 documents:keepEntries(scope.documents),
 paths:keepEntries(scope.paths),
-limits:scope.limits.map((limit)=>toLimitPath(limit,root))
+limits:scope.limits.map((limit)=>toLimitEntry(limit,root))
 };
 }
 async function runScopeStep(run,facts,round){

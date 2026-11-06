@@ -19,7 +19,7 @@
  *                             entries whose path passes isRepositoryPath,
  *                             after a path under the checkout root is made
  *                             relative to it (toRepositoryRelativePath),
- *                             and every limit.
+ *                             and every limit, its origin kept.
  *   The step, as meta.js names it:
  *   Scope   hivemind:cerebrate in Scope Mode, on SCOPE_MODEL at effort
  *           high, returns the path and start line of each section of the
@@ -27,10 +27,12 @@
  *           section names, under SCOPE_SCHEMA. It returns start lines, not
  *           line ranges: the planner reads each whole section from the
  *           file. It also returns the limits the request and the user's
- *           answers set on the work. It runs once in every pass, after the
- *           facts step and the scan and before planning, with label
- *           scope-P. A re-scope runs it again in the same pass after the
- *           reply of answer round R, with label scope-P-R.
+ *           answers set on the work, each {path, origin}, origin request
+ *           or answer: a limit only inferred has no origin value. It runs
+ *           once in every pass, after the facts step and the scan and
+ *           before planning, with label scope-P. A re-scope runs it again
+ *           in the same pass after the reply of answer round R, with label
+ *           scope-P-R.
  *
  * Invariants
  *   A contractRows() check is a function of the built script, not of
@@ -47,11 +49,11 @@
  *   isRepositoryPath (paths.js) is dropped from the scope
  *   (keepRepositoryPathEntries), as an entry left out: the planner then
  *   reads or checks it itself.
- *   A limit is made relative to the facts root the same way and loses a
- *   trailing '/', but is never dropped: a dropped limit would widen the
- *   work. A limit that fails isRepositoryPath matches no plan file, so the
- *   check of edits outside the limits asks: it fails closed by
- *   construction.
+ *   A limit path is made relative to the facts root the same way and loses
+ *   a trailing '/', its origin kept, but the limit is never dropped: a
+ *   dropped limit would widen the work. A limit that fails
+ *   isRepositoryPath matches no plan file, so the check of edits outside
+ *   the limits asks: it fails closed by construction.
  *   With no decision and an empty answerLog the scope prompt is the prompt
  *   of a run with no answers, and it carries no resume note, so a resume
  *   replays it from cache. Otherwise it carries listAnswerEntries(run), each
@@ -62,11 +64,11 @@
  *   ADR-0037 invariant 4 holds by construction: the scope copies no
  *   document text and states no section's extent, because the planner
  *   takes each section's start and end from the file, so no copy or range
- *   can be cut; every string field starts with externalLabel(); and the
- *   documents and paths lists are partial by definition and bounded by
- *   maxItems, so an entry left out is read or checked by the planner itself
- *   and no step depends on a list being complete. The limits list is
- *   bounded by maxItems too.
+ *   can be cut; every string field but the origin enum starts with
+ *   externalLabel(); and the documents and paths lists are partial by
+ *   definition and bounded by maxItems, so an entry left out is read or
+ *   checked by the planner itself and no step depends on a list being
+ *   complete. The limits list is bounded by maxItems too.
  *   The scope reaches only the plan and revise prompts, in a scope data
  *   block after the request block. It never reaches a message, the pull
  *   request texts or a worker prompt.
@@ -89,33 +91,28 @@
  *   the whole document the planner read before the scope step.
  */
 
+function buildScopeItem(properties) {
+  return { type: 'object', properties: properties, required: Object.keys(properties), additionalProperties: false };
+}
+
 function buildScopeSchema() {
   const pathField = { type: 'string', maxLength: 400, description: repositoryPathMark() + ' It is relative to the repository root, like tools/validate.sh, never absolute.' };
-  const documentItem = {
-    type: 'object',
-    properties: {
-      path: pathField,
-      line: { type: 'integer', description: 'The 1-based line where the section starts. It locates the section and does not bound it.' }
-    },
-    required: ['path', 'line'],
-    additionalProperties: false
-  };
-  const pathItem = {
-    type: 'object',
-    properties: {
-      path: pathField,
-      exists: { type: 'boolean', description: 'true when the path exists now.' },
-      drift: { type: 'string', minLength: 0, maxLength: 400, description: externalLabel() + ' How the path differs from what the section says, empty when it does not.' }
-    },
-    required: ['path', 'exists', 'drift'],
-    additionalProperties: false
-  };
+  const documentItem = buildScopeItem({
+    path: pathField,
+    line: { type: 'integer', description: 'The 1-based line where the section starts.' }
+  });
+  const pathItem = buildScopeItem({
+    path: pathField,
+    exists: { type: 'boolean', description: 'true when the path exists now.' },
+    drift: { type: 'string', minLength: 0, maxLength: 400, description: externalLabel() + ' How the path differs from what the section says, empty when it does not.' }
+  });
+  const limitItem = buildScopeItem({ path: pathField, origin: { type: 'string', enum: ['request', 'answer'] } });
   return {
     type: 'object',
     properties: {
-      documents: { type: 'array', maxItems: 10, description: 'The sections of the named documents, empty when none. A section may be left out, and the planner then reads it itself.', items: documentItem },
-      paths: { type: 'array', maxItems: 30, description: 'The paths a section or the request names for the work, empty when none. A path may be left out, and the planner then checks it itself.', items: pathItem },
-      limits: { type: 'array', maxItems: 30, description: 'The paths or directories the request and the user\'s answers limit the work to, empty when none.', items: pathField }
+      documents: { type: 'array', maxItems: 10, description: 'The sections of the named documents, empty when none.', items: documentItem },
+      paths: { type: 'array', maxItems: 30, description: 'The paths a section or the request names for the work, empty when none.', items: pathItem },
+      limits: { type: 'array', maxItems: 30, description: 'Only the paths or directories the request or an answer limits the work to, empty when none.', items: limitItem }
     },
     required: ['documents', 'paths', 'limits'],
     additionalProperties: false
@@ -160,9 +157,9 @@ function relativizeScopeEntry(entry, root) {
   return Object.assign({}, entry, { path: toRepositoryRelativePath(entry.path, root) });
 }
 
-function toLimitPath(limit, root) {
-  const relativeLimit = toRepositoryRelativePath(limit, root);
-  return relativeLimit.endsWith('/') ? relativeLimit.slice(0, -1) : relativeLimit;
+function toLimitEntry(limit, root) {
+  const entry = relativizeScopeEntry(limit, root);
+  return entry.path.endsWith('/') ? Object.assign(entry, { path: entry.path.slice(0, -1) }) : entry;
 }
 
 function keepRepositoryPathEntries(scope, root) {
@@ -170,7 +167,7 @@ function keepRepositoryPathEntries(scope, root) {
   return {
     documents: keepEntries(scope.documents),
     paths: keepEntries(scope.paths),
-    limits: scope.limits.map((limit) => toLimitPath(limit, root))
+    limits: scope.limits.map((limit) => toLimitEntry(limit, root))
   };
 }
 

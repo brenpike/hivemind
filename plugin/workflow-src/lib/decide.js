@@ -39,14 +39,17 @@
  *   even when gate.safety is false, for every kind, review kinds included:
  *   only the user's own reply approves a destructive change, so a run never
  *   takes one (security-policy.md, Destructive Fix Confirmation Gate).
+ *   A recommended option with beyond_request true asks beyond_request at
+ *   every level and kind: a run never takes more than the request asks.
  *   An unknown level resolves to 'low', the most cautious level.
  *   A caller in code may name an ask reason; a brief field never does.
  *   askReason asks only when every earlier check passes.
  *   A brief is malformed when validateSchema(schema, brief) reports any
  *   error. Only the checks the schema cannot express are written here:
  *   option ids are unique, recommendation.option_id names one of them,
- *   strength none, and reversible false or a non-empty destructive list on
- *   the recommended option.
+ *   strength none, reversible false, a non-empty destructive list or
+ *   beyond_request true on the recommended option, and some option with
+ *   beyond_request false, so a brief always offers the in-request option.
  *
  * Why
  *   The model that writes a brief must not pick the rule that lets it act.
@@ -65,6 +68,7 @@ function decisionReasons() {
     'gate_irreversible',
     'gate_architectural',
     'gate_safety',
+    'beyond_request',
     'outside_limits',
     'no_recommendation',
     'recommendation_not_an_option',
@@ -95,7 +99,7 @@ function decide({ kind, level, brief, askReason }, table, schema) {
   if (table.hard_stops.some((stop) => stop.hard_stop === kind)) {
     return askFor('hard_stop');
   }
-  if (!briefCheck.ok) {
+  if (!briefCheck.ok || !hasInRequestOption(brief)) {
     return askFor('malformed_brief');
   }
   const row = table.rows.find((candidate) => candidate.kind === kind);
@@ -117,6 +121,9 @@ function decide({ kind, level, brief, askReason }, table, schema) {
   }
   if (brief.gate.safety || isRecommendedOptionDestructive(brief)) {
     return askFor('gate_safety');
+  }
+  if (isRecommendedOptionBeyondRequest(brief)) {
+    return askFor('beyond_request');
   }
   if (askReason !== undefined) {
     return askFor(askReason);
@@ -140,6 +147,14 @@ function isRecommendedOptionIrreversible(brief) {
 
 function isRecommendedOptionDestructive(brief) {
   return brief.options.some((option) => option.id === brief.recommendation.option_id && Array.isArray(option.destructive) && option.destructive.length > 0);
+}
+
+function isRecommendedOptionBeyondRequest(brief) {
+  return brief.options.some((option) => option.id === brief.recommendation.option_id && option.beyond_request === true);
+}
+
+function hasInRequestOption(brief) {
+  return brief.options.some((option) => option.beyond_request === false);
 }
 
 function isRecommendationAnOption(brief) {

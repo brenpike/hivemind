@@ -50,11 +50,13 @@
  *     a bold "Qn. problem" line; one "- L: summary" line per option, L
  *     being optionLabel of the option's position and the reply token, with
  *     " (recommended)" on the first option whose id equals the
- *     recommendation option_id, then, when its destructive list is a
- *     non-empty array, on the same line " Choosing it approves these
- *     destructive changes: " and each entry as "item (category n)", item
- *     through renderText and whole, n the category when it is an integer
- *     and renderText of it otherwise, joined by "; "; then
+ *     recommendation option_id, then " This goes beyond what you asked
+ *     for." on any option whose beyond_request is true, then, when its
+ *     destructive list is a non-empty array, on the same line " Choosing it
+ *     approves these destructive changes: " and each entry as "item
+ *     (category n)", item through renderText and whole, n the category
+ *     when it is an integer and renderText of it otherwise, joined by "; ";
+ *     then
  *     "Recommendation: L (strength). why",
  *     L being the letter of that option or 'not given' when no option id
  *     matches, or "Recommendation: none. why" when strength is none.
@@ -186,6 +188,8 @@
  *   change approves it (security-policy.md, Destructive Fix Confirmation
  *   Gate), so the option line names every such change whole, and the reply
  *   choices are read by code, not by a model (issue 499).
+ *   An option that goes beyond the request says so on its own line, so the
+ *   user sees the extra scope before choosing it (issue 497).
  */
 
 function renderQuestions(asks) {
@@ -197,22 +201,19 @@ function renderQuestions(asks) {
 
 function renderDecisions(taken) {
   assertArray(taken, 'renderDecisions: taken', false);
-  if (taken.length === 0) {
-    return '';
-  }
-  const lines = ['Decided for you:'];
-  taken.forEach((entry, index) => lines.push(renderTakenDecision(entry, index)));
-  return lines.join('\n');
+  return renderDecisionBlock(taken, renderTakenDecision);
 }
 
 function renderDecisionsCompact(taken) {
   assertArray(taken, 'renderDecisionsCompact: taken', false);
+  return renderDecisionBlock(taken, renderCompactDecision);
+}
+
+function renderDecisionBlock(taken, renderEntry) {
   if (taken.length === 0) {
     return '';
   }
-  const lines = ['Decided for you:'];
-  taken.forEach((entry, index) => lines.push(renderCompactDecision(entry, index)));
-  return lines.join('\n');
+  return ['Decided for you:', ...taken.map((entry, index) => renderEntry(entry, index))].join('\n');
 }
 
 function renderOpenQuestions(open, stopReason = 'pause_limit') {
@@ -352,7 +353,8 @@ function renderOptions(options, recommendedIndex) {
 
 function renderOption(option, index, recommendedIndex) {
   const mark = index === recommendedIndex ? ' (recommended)' : '';
-  return '- ' + optionLabel(index) + ': ' + renderText(readField(option, 'summary')) + mark + renderDestructive(readField(option, 'destructive'));
+  const beyond = readField(option, 'beyond_request') === true ? ' This goes beyond what you asked for.' : '';
+  return '- ' + optionLabel(index) + ': ' + renderText(readField(option, 'summary')) + mark + beyond + renderDestructive(readField(option, 'destructive'));
 }
 
 function renderDestructive(changes) {
@@ -399,7 +401,7 @@ function renderOpenQuestion(entry, index) {
   const brief = readField(entry, 'brief');
   const recommendation = readField(brief, 'recommendation');
   const optionId = readField(recommendation, 'option_id');
-  const hasChoice = readField(recommendation, 'strength') !== 'none' && typeof optionId === 'string' && optionId.trim() !== '';
+  const hasChoice = !isStrengthNone(recommendation) && typeof optionId === 'string' && optionId.trim() !== '';
   const choice = hasChoice
     ? 'The report assumes option ' + renderOptionLetter(readField(brief, 'options'), optionId) + '.'
     : 'I have no recommendation of my own.';
@@ -408,13 +410,10 @@ function renderOpenQuestion(entry, index) {
 
 function renderTakenDecision(entry, index) {
   const brief = readField(entry, 'brief');
-  const options = readField(brief, 'options');
-  const recommendation = readField(brief, 'recommendation');
-  const optionId = readField(recommendation, 'option_id');
   const lines = [
     '  ' + decisionLabel(index) + '. ' + renderText(readField(brief, 'problem')),
-    '    Chose option ' + renderOptionLetter(options, optionId) + ': ' + renderText(readField(readChosenOption(options, optionId), 'summary')),
-    '    Why: ' + renderText(readField(recommendation, 'why'))
+    '    Chose option ' + renderChoice(brief),
+    '    Why: ' + renderText(readField(readField(brief, 'recommendation'), 'why'))
   ];
   lines.push(...renderVerbatim(readField(brief, 'verbatim'), '    '));
   return lines.join('\n');
@@ -422,18 +421,26 @@ function renderTakenDecision(entry, index) {
 
 function renderCompactDecision(entry, index) {
   const brief = readField(entry, 'brief');
+  const choice = renderChoice(brief);
+  return '- ' + decisionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' Chose '
+    + choice + (/[.!?]["']?$/.test(choice) ? '' : '.');
+}
+
+function renderChoice(brief) {
   const options = readField(brief, 'options');
   const optionId = readField(readField(brief, 'recommendation'), 'option_id');
-  const summary = renderText(readField(readChosenOption(options, optionId), 'summary'));
-  return '- ' + decisionLabel(index) + '. ' + renderText(readField(brief, 'problem')) + ' Chose '
-    + renderOptionLetter(options, optionId) + ': ' + summary + (/[.!?]["']?$/.test(summary) ? '' : '.');
+  return renderOptionLetter(options, optionId) + ': ' + renderText(readField(readChosenOption(options, optionId), 'summary'));
 }
 
 function findRecommendedIndex(options, recommendation) {
-  if (readField(recommendation, 'strength') === 'none') {
+  if (isStrengthNone(recommendation)) {
     return -1;
   }
   return findOptionIndex(options, readField(recommendation, 'option_id'));
+}
+
+function isStrengthNone(recommendation) {
+  return readField(recommendation, 'strength') === 'none';
 }
 
 function findOptionIndex(options, optionId) {
