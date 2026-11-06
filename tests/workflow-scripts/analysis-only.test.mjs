@@ -45,8 +45,8 @@ function makeBrief(overrides = {}) {
     problem: 'Pick a cache key format.',
     criticality: { level: 'medium', likelihood: 'common', blast_radius: 'One module.', if_ignored: 'Keys collide.' },
     options: [
-      { id: 'A', summary: 'Hash the path.', steel_man: 'Short.', straw_man: 'Opaque.', effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: 'Use the raw path.', steel_man: 'Readable.', straw_man: 'Long.', effort: 'trivial', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Hash the path.', steel_man: 'Short.', straw_man: 'Opaque.', effort: 'small', value: 'high', reversible: true, beyond_request: false },
+      { id: 'B', summary: 'Use the raw path.', steel_man: 'Readable.', straw_man: 'Long.', effort: 'trivial', value: 'medium', reversible: true, beyond_request: false }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Less effort for more value.' },
     assumptions: [{ statement: 'Paths are unique.', origin: 'repo', evidence: 'src/cache.js' }],
@@ -587,6 +587,14 @@ describe('analysis-only: autonomy level', () => {
     const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [hardStopKind] }) });
     assert.equal(run.result.needs_user, false);
     assert.equal(run.result.outcome, 'complete');
+  });
+  test('a strongly recommended option beyond the request is asked with reason beyond_request, its line marked', async () => {
+    const beyond = makeBrief();
+    beyond.options[0].beyond_request = true;
+    const run = await runWorkflow({ request: REQUEST }, { analyze: makeAnalysis({ questions: [beyond] }) });
+    assert.equal(run.result.needs_user, true);
+    assert.equal(run.result.message, ONE_QUESTION_LEAD + '\n\n' + lib.renderQuestions([{ brief: beyond, reason: 'beyond_request' }]));
+    assert.ok(run.result.message.includes('- A: Hash the path. (recommended) This goes beyond what you asked for.'), run.result.message);
   });
   test('a malformed brief is asked, not taken', async () => {
     const malformed = makeBrief({ options: [] });

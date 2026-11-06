@@ -236,7 +236,8 @@ const BRIEF_SCHEMA = {
 "straw_man",
 "effort",
 "value",
-"reversible"
+"reversible",
+"beyond_request"
 ],
 "properties": {
 "id": {
@@ -270,6 +271,9 @@ const BRIEF_SCHEMA = {
 ]
 },
 "reversible": {
+"type": "boolean"
+},
+"beyond_request": {
 "type": "boolean"
 },
 "destructive": {
@@ -407,7 +411,7 @@ const BRIEF_SCHEMA = {
 }
 };
 
-const BUILD_ID = '3880636d76340726';
+const BUILD_ID = '151fd01fa6c3a2e3';
 
 function supportedSchemaKeywords(){
 return[
@@ -761,7 +765,7 @@ const resolvedLevel=resolveLevel(level,table);
 if(table.hard_stops.some((stop)=>stop.hard_stop===kind)){
 return askFor('hard_stop');
 }
-if(!briefCheck.ok){
+if(!briefCheck.ok||!hasInRequestOption(brief)){
 return askFor('malformed_brief');
 }
 const row=table.rows.find((candidate)=>candidate.kind===kind);
@@ -784,6 +788,9 @@ return askFor('gate_architectural');
 if(brief.gate.safety||isRecommendedOptionDestructive(brief)){
 return askFor('gate_safety');
 }
+if(isRecommendedOptionBeyondRequest(brief)){
+return askFor('beyond_request');
+}
 if(askReason!==undefined){
 return askFor(askReason);
 }
@@ -804,6 +811,12 @@ return brief.options.some((option)=>option.id===brief.recommendation.option_id&&
 function isRecommendedOptionDestructive(brief){
 return brief.options.some((option)=>option.id===brief.recommendation.option_id&&Array.isArray(option.destructive)&&option.destructive.length>0);
 }
+function isRecommendedOptionBeyondRequest(brief){
+return brief.options.some((option)=>option.id===brief.recommendation.option_id&&option.beyond_request===true);
+}
+function hasInRequestOption(brief){
+return brief.options.some((option)=>option.beyond_request===false);
+}
 function isRecommendationAnOption(brief){
 const optionIds=brief.options.map((option)=>option.id);
 const idsAreUnique=optionIds.every((optionId,index)=>optionIds.indexOf(optionId)===index);
@@ -818,12 +831,13 @@ return blocks.join('\n\n');
 }
 function renderDecisionsCompact(taken){
 assertArray(taken,'renderDecisionsCompact: taken',false);
+return renderDecisionBlock(taken,renderCompactDecision);
+}
+function renderDecisionBlock(taken,renderEntry){
 if(taken.length===0){
 return'';
 }
-const lines=['Decided for you:'];
-taken.forEach((entry,index)=>lines.push(renderCompactDecision(entry,index)));
-return lines.join('\n');
+return['Decided for you:',...taken.map((entry,index)=>renderEntry(entry,index))].join('\n');
 }
 function renderOpenQuestions(open,stopReason='pause_limit'){
 assertArray(open,'renderOpenQuestions: open',true);
@@ -921,7 +935,8 @@ return options.map((option,index)=>renderOption(option,index,recommendedIndex));
 }
 function renderOption(option,index,recommendedIndex){
 const mark=index===recommendedIndex?' (recommended)':'';
-return'- '+optionLabel(index)+': '+renderText(readField(option,'summary'))+mark+renderDestructive(readField(option,'destructive'));
+const beyond=readField(option,'beyond_request')===true?' This goes beyond what you asked for.':'';
+return'- '+optionLabel(index)+': '+renderText(readField(option,'summary'))+mark+beyond+renderDestructive(readField(option,'destructive'));
 }
 function renderDestructive(changes){
 if(!Array.isArray(changes)||changes.length===0){
@@ -955,7 +970,7 @@ function renderOpenQuestion(entry,index){
 const brief=readField(entry,'brief');
 const recommendation=readField(brief,'recommendation');
 const optionId=readField(recommendation,'option_id');
-const hasChoice=readField(recommendation,'strength')!=='none'&&typeof optionId==='string'&&optionId.trim()!=='';
+const hasChoice=!isStrengthNone(recommendation)&&typeof optionId==='string'&&optionId.trim()!=='';
 const choice=hasChoice
 ?'The report assumes option '+renderOptionLetter(readField(brief,'options'),optionId)+'.'
 :'I have no recommendation of my own.';
@@ -963,17 +978,23 @@ return'  '+questionLabel(index)+'. '+renderText(readField(brief,'problem'))+' '+
 }
 function renderCompactDecision(entry,index){
 const brief=readField(entry,'brief');
+const choice=renderChoice(brief);
+return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose '
++choice+(/[.!?]["']?$/.test(choice)?'':'.');
+}
+function renderChoice(brief){
 const options=readField(brief,'options');
 const optionId=readField(readField(brief,'recommendation'),'option_id');
-const summary=renderText(readField(readChosenOption(options,optionId),'summary'));
-return'- '+decisionLabel(index)+'. '+renderText(readField(brief,'problem'))+' Chose '
-+renderOptionLetter(options,optionId)+': '+summary+(/[.!?]["']?$/.test(summary)?'':'.');
+return renderOptionLetter(options,optionId)+': '+renderText(readField(readChosenOption(options,optionId),'summary'));
 }
 function findRecommendedIndex(options,recommendation){
-if(readField(recommendation,'strength')==='none'){
+if(isStrengthNone(recommendation)){
 return-1;
 }
 return findOptionIndex(options,readField(recommendation,'option_id'));
+}
+function isStrengthNone(recommendation){
+return readField(recommendation,'strength')==='none';
 }
 function findOptionIndex(options,optionId){
 if(!Array.isArray(options)||typeof optionId!=='string'){

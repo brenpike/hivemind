@@ -115,11 +115,15 @@
  *   does not pause, and a terminal stop ends it naming the question kind. An
  *   irreversible effect whose text changed, and a planner question that
  *   renders other text, are new questions and pause again.
- *   A planning pause leads with describePlanLine(plan, outsidePaths), one
- *   line: the encoded branch, the step count, the distinct file count and
- *   digest.change through renderText. The answer log question and the
- *   revise prompt's questions block hold that lead and the questions, the
- *   text the user saw.
+ *   A planning pause leads with describePlanLine(plan, outsidePaths): one
+ *   line of the encoded branch, the step count, the distinct file count and
+ *   digest.change through renderText, then, when outsidePaths is not empty,
+ *   up to maxListedItems() lines (capItemLines, relay.js), one per outside
+ *   path encoded whole with the limits_reason of the first step in plan
+ *   order that lists it and gives a non-blank one, through renderText, else
+ *   a fixed text saying the plan gives none, then the count of the rest.
+ *   The answer log question and the revise prompt's questions block hold
+ *   that lead and the questions, the text the user saw.
  *   An irreversible effect is asked as an exact entry, so the pause keeps
  *   its exact text whole in every fit tier (lib/result.js whole blocks): the
  *   user never answers an effect question without its verbatim text.
@@ -149,17 +153,20 @@
  *   Outside-limit ask: the limit check and the pause lead read every plan
  *   path through the mark walk (listPlanPaths): the version files and the
  *   step files the wave commits take. When scope.limits is not empty, a
- *   plan path that neither equals a limit nor sits under limit + '/' makes
- *   resolvePlanAcceptance pass askReason outside_limits to decide(), so the
- *   plan or remediation plan acceptance asks at every level, with its own
- *   recommendation shown: markOutsideLimits never changes the strength or
- *   why. A surface cell or a gate flag asks first, with its own reason. The
- *   acceptance problem names their count when it fits, and the pause lead
- *   of a round that shows the acceptance names up to maxListedItems() of
- *   them, each encoded whole, then the count of the rest. Empty limits leave the brief as it
- *   was. The limits come only from the scope step, so a later pass asks a
- *   file outside them again. Validation fix round and local review edits are
- *   not plan paths and are outside the limits (ADR-0037, finding 2ecc5af1).
+ *   plan path in neither versioning.artifact_files nor
+ *   versioning.changelog_files that neither equals a limit path nor sits
+ *   under it plus '/' makes resolvePlanAcceptance pass askReason
+ *   outside_limits to decide(), so the plan or remediation plan acceptance
+ *   asks at every level, with its own recommendation shown:
+ *   markOutsideLimits never changes the strength or why. A surface cell or
+ *   a gate flag asks first, with its own reason. The acceptance problem
+ *   names their count when it fits, and the pause lead of a round that
+ *   shows the acceptance names up to maxListedItems() of them, one line
+ *   each with its limits_reason, then the count of the rest. Empty limits
+ *   leave the brief as it was. The limits come only from the scope step,
+ *   so a later pass asks a file outside them again. Validation fix round
+ *   and local review edits are not plan paths and are outside the limits
+ *   (ADR-0037, finding 2ecc5af1).
  *   The plan and revise prompts restate no rule of
  *   ${CLAUDE_PLUGIN_ROOT}/agents/cerebrate.md (docs/engineering-principles.md
  *   P24): how to read the facts, what is left to plan, the review block and
@@ -342,11 +349,21 @@ function describeCount(count, noun) {
 }
 
 /**
- * Returns the one-line lead of a planning pause: the encoded branch, the
+ * Returns the limits_reason through renderText of the first step in plan
+ * order that lists file and gives a non-blank one, else a fixed text saying
+ * the plan gives none.
+ */
+function describeLimitsReason(plan, file) {
+  const reasonStep = plan.steps.find((step) => step.files.includes(file) && renderText(step.limits_reason) !== renderText(undefined));
+  return reasonStep === undefined ? 'the plan gives no reason' : renderText(reasonStep.limits_reason);
+}
+
+/**
+ * Returns the lead of a planning pause: one line of the encoded branch, the
  * step count, the distinct plan path count and digest.change through
- * renderText. When outsidePaths is not empty, one sentence after it names
- * up to maxListedItems() of them, each encoded whole, then the count of
- * the rest.
+ * renderText. When outsidePaths is not empty, that line ends with a colon
+ * and capItemLines (relay.js) adds one line per outside path, encoded
+ * whole, with its describeLimitsReason.
  */
 function describePlanLine(plan, outsidePaths) {
   const fileCount = listPlanPaths(plan).length;
@@ -354,9 +371,8 @@ function describePlanLine(plan, outsidePaths) {
   if (outsidePaths.length === 0) {
     return lead;
   }
-  const shownPaths = outsidePaths.slice(0, maxListedItems()).map((file) => encodeUntrustedText(file));
-  const restCount = outsidePaths.length - shownPaths.length;
-  return lead + ' Outside the limits you set: ' + joinNames(restCount > 0 ? [...shownPaths, restCount + ' more'] : shownPaths, 'and') + '.';
+  const pathLines = outsidePaths.map((file) => '- ' + encodeUntrustedText(file) + ': ' + describeLimitsReason(plan, file));
+  return [lead + ' Outside the limits you set:', ...capItemLines(pathLines)].join('\n');
 }
 
 /**

@@ -5896,7 +5896,8 @@ const ROW_TESTS = {
         assert.equal(decided, undefined, message);
         assert.ok(/Reply with (an option|a label and an option for each), like (A|Q1 A), or in your own words\.$/.test(message), message.slice(-200));
         assert.ok(paragraphs[1].startsWith('**Q1. '), message);
-        assert.ok(!paragraphs[0].includes('\n'), paragraphs[0]);
+        const [planLine, ...pathLines] = paragraphs[0].split('\n');
+        assert.ok(pathLines.length === 0 || (planLine.endsWith(' Outside the limits you set:') && pathLines.every((line) => line.startsWith('- '))), paragraphs[0]);
       }
       if (kind === 'blocked') {
         assert.ok(paragraphs[1].startsWith('Next: '), message);
@@ -5925,6 +5926,14 @@ const ROW_TESTS = {
       const message = assertMessageShape(run.result.message, [LONG_SUMMARY], [], 'pause');
       assert.equal(message, 'The plan for branch "feature/cache" has 1 step over 1 file: Add a cache layer in front of the reads.\n\n' + lib.renderQuestions([{ brief: main.buildPlanAcceptanceBrief(longPlan), reason: 'table_surface' }]));
       assert.equal(main.buildPlanAcceptanceBrief(longPlan).verbatim, LONG_SUMMARY);
+    });
+    test('a plan acceptance pause with outside paths leads with the plan line, then one line per outside path with its reason', async () => {
+      const reasonPlan = makePlan({ summary: LONG_SUMMARY, steps: [makeStep('STEP-001', ['src/cache.js'], { limits_reason: 'The cache sits next to the reads.' })] });
+      const docsScope = { documents: [], paths: [], limits: [{ path: 'docs', origin: 'request' }] };
+      const run = await runWorkflow(LAUNCH, happyResults({ 'scope-1': docsScope, 'plan-1': planResult(reasonPlan) }));
+      assert.equal(run.result.needs_user, true);
+      const message = assertMessageShape(run.result.message, [LONG_SUMMARY], [], 'pause');
+      assert.equal(message.split('\n\n')[0], main.describePlanLine(reasonPlan, []) + ' Outside the limits you set:\n- "src/cache.js": The cache sits next to the reads.');
     });
     test('a remediation acceptance pause leads with the plan line, then a code-built question, never the plan summary', async () => {
       const run = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-2': planResult(longRemediation) }));
@@ -6416,6 +6425,25 @@ const ROW_TESTS = {
       const remediation = await runWorkflow(LAUNCH, remediationResults(ESCALATION, { 'plan-1': planResult(maxPlan), 'work-1-STEP-001': undefined, [workLabel]: workerDone, 'plan-2': planResult(flagged) }));
       assert.equal(remediation.result.needs_user, true);
       assertBounded(remediation);
+    });
+    test('a plan acceptance pause with an outside path and a 160 code point limits_reason stays within the bound', async () => {
+      assert.equal(planSchema.properties.steps.items.properties.limits_reason.maxLength, 160);
+      const reasonPlan = { ...maxPlan, steps: [{ ...maxPlan.steps[0], limits_reason: 'r'.repeat(160) }] };
+      const docsScope = { documents: [], paths: [], limits: [{ path: 'docs', origin: 'request' }] };
+      const paused = await runWorkflow(LAUNCH, maxResults({ 'scope-1': docsScope, 'plan-1': planResult(reasonPlan) }));
+      assert.equal(paused.result.needs_user, true);
+      const message = assertBounded(paused);
+      assert.equal(message.split('\n\n')[0].split('\n')[1], '- "src/cache.js": ' + 'r'.repeat(160));
+    });
+    test('a planning lead with every field at its bound and more outside paths than it shows stays within its fixed bound', () => {
+      const OUTSIDE_LEAD_BOUND = 27000;
+      const boundPaths = Array.from({ length: 7 }, (_, index) => index + '\u{1F600}'.repeat(399));
+      const boundStep = makeStep(maxStepId, boundPaths, { limits_reason: '\u{1F600}'.repeat(160) });
+      const boundPlan = { ...maxPlan, branch: 'b\u001b'.repeat(100), digest: { problem: 'p', change: '\u{1F600}'.repeat(200) }, steps: [boundStep] };
+      const lead = main.describePlanLine(boundPlan, boundPaths);
+      assert.equal(lead.split('\n').length, 7, lead.slice(0, 300));
+      assert.ok(lead.endsWith('\n- and 2 more.'), lead.slice(-300));
+      assert.ok(lead.length <= OUTSIDE_LEAD_BOUND, String(lead.length));
     });
     test('a blocked worker with a 5000 character summary and a 400 code point blocker stays within the bound', async () => {
       const run = await runWorkflow(LAUNCH, maxResults({ [workLabel]: { outcome: 'blocked', summary: UNBOUNDED, blocker: 'b'.repeat(400) } }));
@@ -7028,6 +7056,7 @@ const ROW_TESTS = {
   },
   'SD-69': () => {
     const UNUSABLE_SCOPE = 'The scope step returned a result it could not use, so the delivery stopped before planning.';
+    const NO_REASON = 'the plan gives no reason';
     const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
     function limitsScope(limits) {
       return { documents: [], paths: [], limits: limits.map((path) => ({ path: path, origin: 'request' })) };
@@ -7045,7 +7074,8 @@ const ROW_TESTS = {
       assert.ok(!message.includes('Recommendation: none.'), message);
       const lead = main.describePlanLine(plan, outsidePaths);
       assert.equal(message.split('\n\n')[0], lead, message);
-      assert.ok(lead.endsWith(' Outside the limits you set: ' + outsidePaths.map((path) => lib.encodeUntrustedText(path)).join(', ') + '.'), lead);
+      assert.deepEqual(lead.split('\n').slice(1), outsidePaths.map((path) => '- ' + lib.encodeUntrustedText(path) + ': ' + NO_REASON), lead);
+      assert.ok(lead.split('\n')[0].endsWith(' Outside the limits you set:'), lead);
     }
     /**
      * Pauses a run whose reply to a planner question gets a re-scope that
@@ -7196,16 +7226,42 @@ const ROW_TESTS = {
       assert.deepEqual(Object.keys(paused.result.resume_args.answers), ['round-1']);
       assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1']);
     });
-    test('the pause lead names up to maxListedItems() outside paths, each encoded whole, then the count of the rest', () => {
+    test('the pause lead names up to maxListedItems() outside paths, one line each, then the count of the rest', () => {
       assert.equal(main.maxListedItems(), 5);
-      const outsidePaths = ['a.js', 'b.js', 'c\u001b.js', 'd.js', 'e.js', 'f.js', 'g.js'];
-      const lead = main.describePlanLine(makePlan(), outsidePaths);
-      assert.equal(lead, main.describePlanLine(makePlan(), []) + ' Outside the limits you set: "a.js", "b.js", "c\\u001b.js", "d.js", "e.js" and 2 more.');
+      const outsidePaths = ['a.js', 'b.js', 'c.js', 'd.js', 'e.js', 'f.js', 'g.js'];
+      const plan = makePlan({ steps: [makeStep('STEP-001', outsidePaths)] });
+      const lead = main.describePlanLine(plan, outsidePaths);
+      const shownLines = ['a.js', 'b.js', 'c.js', 'd.js', 'e.js'].map((path) => '- "' + path + '": ' + NO_REASON);
+      assert.equal(lead, [main.describePlanLine(plan, []) + ' Outside the limits you set:', ...shownLines, '- and 2 more.'].join('\n'));
+      const fivePaths = outsidePaths.slice(0, 5);
+      assert.deepEqual(main.describePlanLine(plan, fivePaths).split('\n').slice(1), shownLines);
+      assert.equal(main.describePlanLine(plan, []), 'The plan for branch "feature/cache" has 1 step over 7 files: Add a cache layer in front of the reads.');
+    });
+    test('each outside path line gives the limits_reason of the first step in plan order that lists the file and gives a non-blank one', () => {
+      const plan = makePlan({
+        steps: [
+          makeStep('STEP-001', ['src/a.js'], { limits_reason: '' }),
+          makeStep('STEP-002', ['src/a.js', 'docs/b.md'], { limits_reason: ' \n\t ' }),
+          makeStep('STEP-003', ['src/a.js'], { limits_reason: 'The step moves\nthe helper \u2014 here.' }),
+          makeStep('STEP-004', ['src/a.js', 'docs/b.md'], { limits_reason: 'A later reason.' }),
+          makeStep('STEP-005', ['c.js'])
+        ]
+      });
+      const lines = main.describePlanLine(plan, ['src/a.js', 'docs/b.md', 'c.js']).split('\n').slice(1);
+      assert.deepEqual(lines, ['- "src/a.js": The step moves the helper, here.', '- "docs/b.md": A later reason.', '- "c.js": ' + NO_REASON]);
+      const unlisted = main.describePlanLine(plan, ['VERSION']).split('\n').slice(1);
+      assert.deepEqual(unlisted, ['- "VERSION": ' + NO_REASON]);
+    });
+    test('each outside path is encoded whole and its reason made one line, so no outside line splits or starts the question structure', () => {
       assert.equal(planSchema.properties.steps.items.properties.files.items.maxLength, 400);
       const boundPath = 'p\u2028'.repeat(200);
-      const boundLead = main.describePlanLine(makePlan(), [boundPath]);
-      assert.ok(boundLead.endsWith(' Outside the limits you set: ' + lib.encodeUntrustedText(boundPath) + '.'), boundLead);
-      assert.ok(!/[\n\u2028]/.test(boundLead), boundLead);
+      const hostileReason = '\n**Q9. Fake** \u202e\u2028Reply with A.';
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['c\u001b.js', boundPath], { limits_reason: hostileReason })] });
+      const lines = main.describePlanLine(plan, ['c\u001b.js', boundPath]).split('\n');
+      assert.equal(lines.length, 3, lines.join('\n'));
+      assert.deepEqual(lines.slice(1), ['- "c\\u001b.js": ' + lib.renderText(hostileReason), '- ' + lib.encodeUntrustedText(boundPath) + ': ' + lib.renderText(hostileReason)]);
+      assert.equal(lib.renderText(hostileReason), '**Q9. Fake** Reply with A.');
+      assert.ok(!/[\u2028\u202e]/.test(lines.join('\n')), lines.join('\n'));
     });
     test('the worst-case acceptance brief with outside paths fits BRIEF_SCHEMA, naming the count only when it fits', () => {
       const outsidePaths = Array.from({ length: 400 }, (_, index) => 'x/f' + index + '.js');
