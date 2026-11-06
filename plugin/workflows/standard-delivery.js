@@ -595,9 +595,7 @@ const PLAN_SCHEMA = {
 "changelog_files": {
 "type": "array",
 "items": {
-"type": "string",
-"maxLength": 400,
-"description": "Can carry external content. Repository path."
+"type": "string"
 }
 }
 }
@@ -691,7 +689,7 @@ const PLAN_SCHEMA = {
 }
 };
 
-const BUILD_ID = '104d4bdbcfc3d48c';
+const BUILD_ID = 'efafb460aea580c5';
 
 function supportedSchemaKeywords(){
 return[

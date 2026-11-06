@@ -181,11 +181,10 @@
         },
         "changelog_files": {
           "type": "array",
-          "description": "Each changelog file the versioning docs name, written by the step that sets the version. Empty when they name none. A file here or in artifact_files is never outside the scope limits.",
+          "description": "Each changelog file the project's versioning docs name, written by the step that sets the version. Empty when they name none. A file here or in artifact_files never counts as outside the scope limits.",
           "items": {
             "type": "string",
-            "maxLength": 400,
-            "description": "Can carry external content. Repository path. One changelog file."
+            "description": "Can carry external content. One changelog file."
           }
         }
       }

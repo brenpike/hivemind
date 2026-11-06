@@ -188,7 +188,7 @@ describe('plan schema', () => {
 
   test('the repository path mark is on exactly the path fields', () => {
     const marked = collectNodes(planSchema).filter(({ node }) => node.description.startsWith(PATH_MARK));
-    assert.deepEqual(marked.map(({ path }) => path), ['$.versioning.artifact_files[]', '$.versioning.changelog_files[]', '$.steps[].files[]']);
+    assert.deepEqual(marked.map(({ path }) => path), ['$.versioning.artifact_files[]', '$.steps[].files[]']);
     for (const { node, path } of marked) {
       assert.equal(node.type, 'string', path + ' must be a string');
       assert.equal(node.enum, undefined, path + ' must have no enum');
@@ -295,7 +295,6 @@ describe('plan schema', () => {
     ['a branch over 200 code points', (plan) => { plan.branch = 'b'.repeat(201); }, '$.branch: maxLength: more than 200 characters'],
     ['a step file path over 400 code points', (plan) => { plan.steps[0].files[0] = 'f'.repeat(401); }, '$.steps[0].files[0]: maxLength: more than 400 characters'],
     ['an artifact file path over 400 code points', (plan) => { plan.versioning.artifact_files[0] = '\u{1F600}'.repeat(401); }, '$.versioning.artifact_files[0]: maxLength: more than 400 characters'],
-    ['a changelog file path over 400 code points', (plan) => { plan.versioning.changelog_files[0] = 'c'.repeat(401); }, '$.versioning.changelog_files[0]: maxLength: more than 400 characters'],
     ['a step id over 64 code points', (plan) => { plan.steps[0].id = 'S'.repeat(65); }, '$.steps[0].id: maxLength: more than 64 characters'],
     ['a depends_on entry over 64 code points', (plan) => { plan.steps[1].depends_on[0] = 'S'.repeat(65); }, '$.steps[1].depends_on[0]: maxLength: more than 64 characters'],
     ['a limits_reason over 160 code points', (plan) => { plan.steps[0].limits_reason = 'r'.repeat(161); }, '$.steps[0].limits_reason: maxLength: more than 160 characters'],

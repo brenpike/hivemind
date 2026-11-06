@@ -2075,6 +2075,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/504 and https:
 
 - **Options say when they go beyond the request.** Each decision-brief option requires a boolean `beyond_request`. `decide()` asks with reason `beyond_request`, checked after `gate_safety`, when the recommended option has it. A brief with no option inside the request is `malformed_brief`. The option line shows "This goes beyond what you asked for." Code-built options and review options carry `beyond_request: false`.
 - **Plan schema.** `versioning.changelog_files` is required. `steps[].limits_reason` is optional, at most 160 code points.
+- **Changelog entries.** `changelog_files` carries no repository path mark and no length cap: an entry only exempts a step file that is itself path-checked and bounded, so a bad entry matches nothing. Marking it would add built prose and a plan file count for no closed case.
 - **Limits carry their origin.** A scope limit is `{path, origin}`, origin `request` or `answer`. An inferred limit has no value to record, so "the limits you set" holds by construction.
 - **Files outside the limits.** `listOutsidePaths` never counts `artifact_files` or `changelog_files`. The planning pause lists one line per file outside the limits, with its `limits_reason` or "the plan gives no reason".
 - **Prose.** `plugin/governance/decision-autonomy.md` Tier A gains "an option that goes beyond the request". `plugin/agents/cerebrate.md` Scope Mode keeps only stated limits, each with its origin. `CLAUDE.md` Versioning names `CHANGELOG.md`.

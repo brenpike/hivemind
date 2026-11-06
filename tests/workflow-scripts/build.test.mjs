@@ -1244,7 +1244,7 @@ describe('build_workflows schema projection', () => {
     });
   }
   test('the plan schema has repository path fields to keep', () => {
-    assert.deepEqual(listMarkedLocations(readDataConstant(repoRoot, 'PLAN_SCHEMA')), ['$.versioning.artifact_files[]', '$.versioning.changelog_files[]', '$.steps[].files[]']);
+    assert.deepEqual(listMarkedLocations(readDataConstant(repoRoot, 'PLAN_SCHEMA')), ['$.versioning.artifact_files[]', '$.steps[].files[]']);
   });
   test('a field named title or description is a field, not an annotation', () => {
     const schema = { title: 'T', type: 'object', properties: { title: { type: 'string', description: 'D' }, description: { type: 'string' } }, items: { description: REPOSITORY_PATH_MARK + ' More.', enum: [{ description: 'kept' }] } };
