@@ -2208,7 +2208,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/496. The local
 
 **The change.**
 
-- **The undo.** Step 7 of `plugin/agents/local-reviewer.md` undoes a fix that fails its check. The reviewer restores only the files that fix touched to `HEAD`, and removes any file it created. The fix goes `regressed`, never resolved. So does any earlier fix of the same iteration that this restore undid.
+- **The undo.** Step 7 of `plugin/agents/local-reviewer.md` undoes a fix that fails its check. The reviewer restores only the files that fix touched to `HEAD`, and removes any file it created. The fix goes `regressed`, never resolved. So does any earlier fix of the same iteration that this restore undid. Amended 2026-11-06 (GitHub review thread https://github.com/brenpike/hivemind/pull/540#discussion_r4493063020): an earlier fix of the iteration in a restored file is undone whole, all its files restored and any it created removed, and so on for each file that restores, so no `regressed` fix keeps part of its edit in the tree. Root cause: the restore worked per file while `regressed` named a whole fix, so an earlier fix of files A and B lost its A part to a later failing fix of A, kept its B part, and went to the step-8 checkpoint half applied while `undone_fixes` called it undone. Eliminated class: the undo unit is the fix, never the file, so a fix is either whole in the tree or wholly gone.
 - **The report.** The Output Contract gains a required `undone_fixes` list: the `regressed` findings, each with `finding_id` and `title`, copied as data, at most 50, empty when none. `REVIEW_SCHEMA` (`review-schema.js`) requires it too, beside `rejected_findings`.
 - **The run.** A held local review gate's note gives the code-built count of undone fixes after the rejected findings (`describeHeldCounts`, `review.js`). The final complete message and the pull request record list each undone fix by its short id under "The findings whose fix it undid:", in the block of `buildRejectedFindingsBlock`. The planner never receives `undone_fixes`, as it never receives `rejected_findings`. Amended 2026-11-06 (local review finding 0f6d3394): the run keeps both lists across every review of the run (see "Local review finding 0f6d3394" below).
 - Rows SD-33, SD-39, SD-45 and SD-55 name the new rules.
@@ -2228,14 +2228,14 @@ This amendment covers https://github.com/brenpike/hivemind/issues/496. The local
 
 These rationales were cut from `plugin/agents/local-reviewer.md` to pay for the new text. They live here now.
 
-**Scope of the undo.** The undo restores only the fix's own files, and touches no other path. This is consistent with `plugin/governance/safety-rails.md` (Git Safety). The destructive fix gate is unaffected, because an undo is not a fix.
+**Scope of the undo.** The undo restores only the files of the fixes it undoes, and touches no other path. This is consistent with `plugin/governance/safety-rails.md` (Git Safety). The destructive fix gate is unaffected, because an undo is not a fix.
 
 **Prose budgets.** No raise. `plugin/agents/local-reviewer.md` went from 18265 to 18252 bytes, under its budget of 18267. The standard-delivery built prose went from 43271 to 43255 characters, under its budget of 43800. analysis-only stays at 15359. The offset: `buildReviewSchema` derives the `REVIEW_SCHEMA` required list from its always-present property keys, instead of listing them again.
 
 **Recorded residual: one restore can undo an earlier fix of the same iteration.**
 
-- **Not covered.** An earlier fix of the same iteration in the same file passed its check. Restoring that file to `HEAD` undoes it too.
-- **Bounded impact.** That fix goes `regressed` and is named in `undone_fixes`, so the user sees it in the gate note, the final message and the pull request record. No failing edit is committed.
+- **Not covered.** An earlier fix of the same iteration in the same file passed its check. Restoring that file to `HEAD` undoes it too, whole, its other files included.
+- **Bounded impact.** That fix goes `regressed` and is named in `undone_fixes`, and none of its edit stays in the tree, so the user sees it in the gate note, the final message and the pull request record. No failing edit is committed.
 - **Ground.** Restoring whole files to `HEAD` is the undo that leaves no failing edit. Keeping the earlier fix would need the loop to track each fix's edits apart.
 
 **Recorded residual: a failure the fix did not cause still undoes it.**

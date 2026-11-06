@@ -3946,7 +3946,7 @@ const ROW_TESTS = {
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, undone_fixes: [{ ...undone, record: 'R.' }] }).ok, 'an undone fix with another key');
       assert.ok(!lib.validateSchema(schema, { ...REVIEW_CLEAN, undone_fixes: [{ finding_id: 'e8e8e8e8' }] }).ok, 'an undone fix with no title');
       const fixStep = reviewerText.slice(reviewerText.indexOf('7. **Fix simple findings:**'), reviewerText.indexOf('8. **Checkpoint:**'));
-      assert.ok(fixStep.includes('A fix that fails its check is undone: restore only the files it touched to `HEAD`, removing any it created. It, and any earlier fix of this iteration that restore undid, goes `regressed`, never resolved.'), fixStep);
+      assert.ok(fixStep.includes('A fix that fails its check is undone: restore only the files it touched to `HEAD`, removing any it created. Earlier fixes of this iteration in a restored file are undone whole too. All go `regressed`.'), fixStep);
       assert.ok(reviewerText.includes('and `undone_fixes` the `regressed` findings, each with `finding_id` and `title`; both copied as data, at most 50, empty when none.'));
       assert.deepEqual(contract.keys.slice(-2), ['rejected_findings', 'undone_fixes']);
       assert.equal(contract.values.undone_fixes, '<list>');
