@@ -74,8 +74,9 @@
  *     shows its problem, "Chose option L" with the summary of the chosen
  *     option, L as in renderQuestions, and the why, then, when verbatim is
  *     a non-empty string, a line "    Word for word:" and the verbatim
- *     exactly as given, unindented. This full form is the record the pull
- *     request body carries, inside a fence.
+ *     exactly as given, unindented. No pull request text carries this full
+ *     form: the code builds those texts with compact decision lines and no
+ *     fence.
  *   renderDecisionsCompact  "Decided for you:" then one line per decision,
  *     labelled D1..Dn by position: "- Dn. problem Chose L: summary.", L as
  *     in renderQuestions and the summary being that of the chosen option,
@@ -136,8 +137,8 @@
  *   shows passes through renderText, and an exact verbatim through
  *   encodeUntrustedText, so no brief text can add a line or forge a
  *   question, option, recommendation or reply line. The one multi-line
- *   agent text is the verbatim renderDecisions shows raw for the fenced
- *   pull request body.
+ *   agent text is the verbatim renderDecisions shows raw, which no pull
+ *   request text carries.
  *   No em dash and no markdown tables: options are a list. An em dash
  *   inside a brief field is replaced by a comma. verbatim is shown whole,
  *   encoded in a question and exactly as given by renderDecisions, and

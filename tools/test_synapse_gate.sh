@@ -101,7 +101,7 @@ MOLT_ARGS='--trunk main --inputs .hivemind/molt-inputs-Tok-1.json'
 FACTS_ARGS='--trunk main --remote origin --ref 12 --ref 7'
 BRANCH_ARGS='--base main --branch feature/467-x --classification feature --trunk-freshness fresh --trunk main'
 BUMP_ARGS="$SHA40 --bump-trigger yes --no-bump-match no --version-file plugin/.claude-plugin/plugin.json --version-file CHANGELOG.md"
-PR_ARGS="--head feature/x --base main --remote origin --expect-commit $SHA64 --inputs .hivemind/pr-inputs-abc.json"
+PR_ARGS="--head feature/x --base main --remote origin --expect-commit $SHA64 --inputs .hivemind/pr-inputs-abc.json --body-file .hivemind/pr-inputs-abc-body.json"
 
 exact_args() {
   case "$1" in
@@ -137,8 +137,10 @@ QUOTED_PR="\"$PR\""
 
 expect_bash 'exact:flags-any-order' "$SYNAPSE" allow "bash $QUOTED_MOLT --inputs .hivemind/molt-inputs-z.json --trunk main"
 expect_bash 'exact:facts-trunk-only' "$SYNAPSE" allow "bash $QUOTED_FACTS --trunk main"
-expect_bash 'exact:pr-minimal' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json"
-expect_bash 'exact:pr-commit-40' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json"
+expect_bash 'exact:pr-minimal' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+expect_bash 'exact:pr-commit-40' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+expect_bash 'exact:pr-body-file-first' "$SYNAPSE" allow "bash $QUOTED_PR --body-file .hivemind/pr-inputs-a-body.json --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json"
+expect_bash 'exact:pr-body-file-token-64' "$SYNAPSE" allow "bash $QUOTED_PR --head feature/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-$TOKEN64.json"
 expect_bash 'exact:bump-no-version-file' "$SYNAPSE" allow "bash $QUOTED_BUMP main --bump-trigger no --no-bump-match yes"
 expect_bash 'exact:token-64' "$SYNAPSE" allow "bash $QUOTED_MOLT --trunk main --inputs .hivemind/molt-inputs-$TOKEN64.json"
 expect_bash 'exact:value-naming-a-script' "$SYNAPSE" allow "bash $QUOTED_FACTS --trunk molt.sh"
@@ -148,6 +150,7 @@ done
 
 # ── not exact: denied for synapse and, as lookalikes, for every agent ──────────────
 MOLT_EXACT="bash $QUOTED_MOLT $MOLT_ARGS"
+PR_NO_BODY="bash $QUOTED_PR --head f/x --base main --expect-commit $SHA40 --inputs .hivemind/pr-inputs-a.json"
 NL=$'\n'
 TAB=$'\t'
 NOT_EXACT_CASES=(
@@ -208,11 +211,23 @@ NOT_EXACT_CASES=(
   "bump-two-bases|bash $QUOTED_BUMP main main --bump-trigger yes --no-bump-match no"
   "bump-bad-yes-no|bash $QUOTED_BUMP main --bump-trigger maybe --no-bump-match no"
   "bump-version-file-dotdot|bash $QUOTED_BUMP main --bump-trigger yes --no-bump-match no --version-file ../x.json"
-  "pr-commit-uppercase|bash $QUOTED_PR --head f/x --base main --expect-commit 0123456789ABCDEF0123456789ABCDEF01234567 --inputs .hivemind/pr-inputs-a.json"
-  "pr-commit-39|bash $QUOTED_PR --head f/x --base main --expect-commit ${SHA40%7} --inputs .hivemind/pr-inputs-a.json"
-  "pr-molt-inputs|bash $QUOTED_PR --head f/x --base main --expect-commit $SHA40 --inputs .hivemind/molt-inputs-a.json"
-  "pr-missing-inputs|bash $QUOTED_PR --head f/x --base main --expect-commit $SHA40"
-  "pr-missing-expect-commit|bash $QUOTED_PR --head f/x --base main --inputs .hivemind/pr-inputs-a.json"
+  "pr-commit-uppercase|bash $QUOTED_PR --head f/x --base main --expect-commit 0123456789ABCDEF0123456789ABCDEF01234567 --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+  "pr-commit-39|bash $QUOTED_PR --head f/x --base main --expect-commit ${SHA40%7} --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+  "pr-molt-inputs|bash $QUOTED_PR --head f/x --base main --expect-commit $SHA40 --inputs .hivemind/molt-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+  "pr-missing-inputs|bash $QUOTED_PR --head f/x --base main --expect-commit $SHA40 --body-file .hivemind/pr-inputs-a-body.json"
+  "pr-missing-expect-commit|bash $QUOTED_PR --head f/x --base main --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+  "pr-missing-body-file|$PR_NO_BODY"
+  "pr-duplicate-body-file|$PR_NO_BODY --body-file .hivemind/pr-inputs-a-body.json --body-file .hivemind/pr-inputs-a-body.json"
+  "pr-duplicate-inputs|$PR_NO_BODY --inputs .hivemind/pr-inputs-a.json --body-file .hivemind/pr-inputs-a-body.json"
+  "pr-body-file-molt-inputs|$PR_NO_BODY --body-file .hivemind/molt-inputs-a-body.json"
+  "pr-body-file-outside-hivemind|$PR_NO_BODY --body-file pr-inputs-a-body.json"
+  "pr-body-file-absolute|$PR_NO_BODY --body-file /tmp/pr-inputs-a-body.json"
+  "pr-body-file-other-folder|$PR_NO_BODY --body-file docs/pr-inputs-a-body.json"
+  "pr-body-file-other-name|$PR_NO_BODY --body-file .hivemind/body.json"
+  "pr-body-file-traversal|$PR_NO_BODY --body-file .hivemind/../pr-inputs-a-body.json"
+  "pr-body-file-token-65|$PR_NO_BODY --body-file .hivemind/pr-inputs-$TOKEN65.json"
+  "pr-body-file-without-value|$PR_NO_BODY --body-file"
+  "pr-body-file-equals-form|$PR_NO_BODY --body-file=.hivemind/pr-inputs-a-body.json"
 )
 for case_row in "${NOT_EXACT_CASES[@]}"; do
   case_id="${case_row%%|*}"
@@ -268,6 +283,14 @@ case "$deny_reason" in
   *"bash $QUOTED_MOLT --trunk <branch> --inputs .hivemind/molt-inputs-<token>.json"*"Read tool"*)
     pass 'lookalike:reason' 'deny reason states the exact form and points to Read' ;;
   *) failed 'lookalike:reason' "reason=$deny_reason" ;;
+esac
+
+run_hook "$PLUGIN_ROOT" "$(bash_input "$DRONE" "git diff -- plugin/skills/open-plan-pr/scripts/open-plan-pr.sh")"
+deny_reason="$(printf '%s' "$hook_output" | jq -r '.hookSpecificOutput.permissionDecisionReason' 2>/dev/null)"
+case "$deny_reason" in
+  *"bash $QUOTED_PR --head <branch> --base <branch> [--remote <remote>] --expect-commit <commit> --inputs .hivemind/pr-inputs-<token>.json --body-file .hivemind/pr-inputs-<token>-body.json "*"Read tool"*)
+    pass 'lookalike:reason:open-plan-pr' 'deny reason states the exact form with --body-file' ;;
+  *) failed 'lookalike:reason:open-plan-pr' "reason=$deny_reason" ;;
 esac
 
 # ── synapse Write ───────────────────────────────────────────────────────────────

@@ -13,6 +13,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.2] - 2026-11-06
+
+### Changed
+
+- The open-plan-pr script takes the PR body from its own file (`--body-file`); its inputs file keeps title, draft and comment.
+- The workflow runner gets the body as a `body_file` block and the PR inputs as a ready JSON string.
+
+### Fixed
+
+- The pull request body is Markdown built from the plan digest, steps, gates, approvals and decisions, for a reviewer, with no planner notes or code fences (#506).
+- The runner no longer serializes the PR inputs by hand, which could write invalid JSON (#501).
+- A blocked pull request step says whether it pushed.
+
 ## [7.6.1] - 2026-11-06
 
 ### Changed

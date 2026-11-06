@@ -479,10 +479,12 @@ function hasDataBlock(prompt, name) {
 }
 
 /**
- * Reads the command and inputs_file blocks of a synapse runner prompt into
- * one object: each flag value of the command under the flag name, dashes
- * made underscores and every --ref value in one ref list, then the
- * inputs_file content fields. The --inputs path is left out.
+ * Reads the command, inputs_file and body_file blocks of a synapse runner
+ * prompt into one object: each flag value of the command under the flag
+ * name, dashes made underscores and every --ref value in one ref list, then
+ * the inputs_file content fields, a string content parsed as JSON, then the
+ * body_file content as body. The --inputs and --body-file paths are left
+ * out.
  */
 function readRunnerInputs(prompt) {
   const words = readDataBlock(prompt, 'command').replace(/^bash "[^"]*" /, '').split(' ');
@@ -491,11 +493,16 @@ function readRunnerInputs(prompt) {
     const key = words[index].replace(/^--/, '').replace(/-/g, '_');
     if (key === 'ref') {
       inputs.ref = [...(inputs.ref ?? []), words[index + 1]];
-    } else if (key !== 'inputs') {
+    } else if (key !== 'inputs' && key !== 'body_file') {
       inputs[key] = words[index + 1];
     }
   }
-  return hasDataBlock(prompt, 'inputs_file') ? { ...inputs, ...readDataBlock(prompt, 'inputs_file').content } : inputs;
+  if (!hasDataBlock(prompt, 'inputs_file')) {
+    return inputs;
+  }
+  const content = readDataBlock(prompt, 'inputs_file').content;
+  const fields = { ...inputs, ...(typeof content === 'string' ? JSON.parse(content) : content) };
+  return hasDataBlock(prompt, 'body_file') ? { ...fields, body: readDataBlock(prompt, 'body_file').content } : fields;
 }
 
 function withoutDataBlock(prompt, name) {
@@ -506,12 +513,11 @@ function withoutDataBlock(prompt, name) {
 }
 
 /**
- * The prompt text outside its command block and, when it has one, its
- * inputs_file block.
+ * The prompt text outside its command block and, when it has them, its
+ * inputs_file and body_file blocks.
  */
 function readTextOutsideRunnerBlocks(prompt) {
-  const outside = withoutDataBlock(prompt, 'command');
-  return hasDataBlock(outside, 'inputs_file') ? withoutDataBlock(outside, 'inputs_file') : outside;
+  return ['inputs_file', 'body_file'].reduce((outside, name) => (hasDataBlock(outside, name) ? withoutDataBlock(outside, name) : outside), withoutDataBlock(prompt, 'command'));
 }
 
 function resumeWith(launchArgs, pausedResult, reply) {
@@ -586,19 +592,20 @@ const UNREAD_WRITE_ERROR = 'File has not been read yet. Read it first before wri
 
 /**
  * Does what synapse.md says a runner does with a prompt: it puts the plugin
- * root for {plugin-root} in the command, writes the inputs_file content as
- * JSON to its path as given when the block is there, then runs the filled
+ * root for {plugin-root} in the command, writes the inputs_file content,
+ * then the body_file content, to its path as given when the block is there,
+ * a string content as is and an object as JSON, then runs the filled
  * command with bash -c, as the Bash tool does, so the double-quoted script
- * path stays one word. Like the Write tool, it refuses an inputs path that
+ * path stays one word. Like the Write tool, it refuses a file path that
  * already exists, which it never read: blocked with UNREAD_WRITE_ERROR.
  */
 function runCommandBlock(scratch, prompt) {
-  if (hasDataBlock(prompt, 'inputs_file')) {
-    const inputsFile = readDataBlock(prompt, 'inputs_file');
-    if (existsSync(join(scratch.repo, inputsFile.path))) {
+  for (const name of ['inputs_file', 'body_file'].filter((blockName) => hasDataBlock(prompt, blockName))) {
+    const file = readDataBlock(prompt, name);
+    if (existsSync(join(scratch.repo, file.path))) {
       return { outcome: 'blocked', stderr: UNREAD_WRITE_ERROR };
     }
-    writeRepoFile(scratch, inputsFile.path, JSON.stringify(inputsFile.content));
+    writeRepoFile(scratch, file.path, typeof file.content === 'string' ? file.content : JSON.stringify(file.content));
   }
   const command = readDataBlock(prompt, 'command').split('{plugin-root}').join(pluginRoot);
   assert.ok(command.startsWith('bash '), command);
@@ -749,6 +756,15 @@ function readFencedText(text) {
 
 function gatesBlock(lines) {
   return ['Gates:', ...lines.map((line) => '- ' + line)].join('\n');
+}
+
+/**
+ * Returns the digest paragraph and the Steps block a pull request body
+ * shows for plan, whose digest and steps hold no text the body neutralizes.
+ */
+function bodyStart(plan) {
+  const stepLines = plan.steps.map((step) => '- ' + step.id + ' (' + step.files.join(', ') + '): ' + step.outcome);
+  return [plan.digest.problem + ' ' + plan.digest.change, ['Steps:', ...stepLines].join('\n')].join('\n\n');
 }
 
 function recordRelays(runner, relays) {
@@ -1822,7 +1838,7 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run).slice(0, 7), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1']);
       assert.ok(!labelsOf(run).includes('revise-2'));
-      assert.ok(prBodyOf(run, 'pr-1').startsWith('```\n' + makePlan().summary + '\n```'), prBodyOf(run, 'pr-1'));
+      assert.ok(prBodyOf(run, 'pr-1').startsWith(bodyStart(makePlan()) + '\n\n'), prBodyOf(run, 'pr-1'));
     });
     test('a settled plan acceptance runs the shown plan, not the replacement plan the revise returned', async () => {
       const surfaced = buildWithSurfaceKinds(['plan_acceptance']);
@@ -1833,7 +1849,7 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
       assert.ok(!run.result.message.includes('effect outside the repo'), run.result.message);
-      assert.ok(prBodyOf(run, 'pr-1').startsWith('```\n' + makePlan().summary + '\n```'), prBodyOf(run, 'pr-1'));
+      assert.ok(prBodyOf(run, 'pr-1').startsWith(bodyStart(makePlan()) + '\n\n'), prBodyOf(run, 'pr-1'));
     });
     test('a plan acceptance waits for an open planner question, and the plan it accepts is the plan that runs', async () => {
       const surfaced = buildWithSurfaceKinds(['plan_acceptance']);
@@ -1859,7 +1875,7 @@ const ROW_TESTS = {
       const run = await runWorkflow(resumeWith(LAUNCH, second.result, 'Yes, go.'), results, surfaced);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), ['facts-1', 'scope-1', 'plan-1', 'revise-1', 'scope-1-1', 'revise-2', 'branch-1', 'work-1-STEP-001', 'commit-1-1', ...tailLabels(1)]);
-      assert.ok(prBodyOf(run, 'pr-1').startsWith('```\n' + revisedPlan.summary + '\n```'), prBodyOf(run, 'pr-1'));
+      assert.ok(prBodyOf(run, 'pr-1').startsWith(bodyStart(revisedPlan) + '\n\n'), prBodyOf(run, 'pr-1'));
     });
     test('a settled planner question raised again with only unrendered fields changed is not asked again', async () => {
       const options = makeBrief().options.map((option) => ({ ...option, steel_man: option.steel_man + ' Rewritten.' }));
@@ -2814,7 +2830,7 @@ const ROW_TESTS = {
       assert.ok(callOf(run, 'validate-1-1').prompt.includes(lib.runnerReadOnlySentence()));
       for (const label of ['facts-1', 'branch-1', 'commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
-        const outside = withoutDataBlock(hasDataBlock(prompt, 'inputs_file') ? withoutDataBlock(prompt, 'inputs_file') : prompt, 'command');
+        const outside = readTextOutsideRunnerBlocks(prompt);
         for (const text of [lib.runnerReadOnlySentence(), 'git-script', 'skill', 'tool call', 'Make no']) {
           assert.ok(!outside.includes(text), label + ' ' + text);
         }
@@ -2862,7 +2878,7 @@ const ROW_TESTS = {
       const state = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
       state.head = OTHER;
       state.taken.push({ brief: acceptance, kind: 'plan_acceptance' });
-      const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' } });
+      const texts = main.buildPullRequestTexts(state, makePlan(), { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] });
       for (const text of [run.result.message, prBodyOf(run, 'pr-1'), texts.body, texts.comment]) {
         assert.ok(!text.includes('Decided for you') && !text.includes(acceptance.problem), text);
       }
@@ -2876,8 +2892,8 @@ const ROW_TESTS = {
       state.taken.push(...entries);
       const listed = entries.filter((entry) => listedKinds.includes(entry.kind)).map((entry) => ({ brief: entry.brief }));
       const decisions = main.buildRunRecordParts(state, state.taken, undefined).find((part) => part.id === 'decisions');
-      assert.equal(decisions.text, lib.renderDecisions(listed));
-      assert.equal(decisions.compact, lib.renderDecisionsCompact(listed));
+      assert.equal(decisions.text, lib.renderDecisionsCompact(listed));
+      assert.equal(decisions.compact, undefined);
       assert.deepEqual([...main.buildRecordTailBlocks(state, state.taken).map((block) => block.text)], [lib.renderDecisionsCompact(listed)]);
       assert.equal(state.taken.length, entries.length);
       const routineOnly = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
@@ -2887,8 +2903,8 @@ const ROW_TESTS = {
       const reordered = [...state.taken].reverse().filter((entry, index) => index % 2 === 0);
       const reorderedShown = reordered.filter((entry) => listedKinds.includes(entry.kind)).map((entry) => ({ brief: entry.brief }));
       assert.ok(reordered.length < state.taken.length && reorderedShown.length > 0 && reorderedShown.length < reordered.length);
-      assert.equal(main.buildRunRecordParts(state, reordered, undefined).find((part) => part.id === 'decisions').text, lib.renderDecisions(reorderedShown));
-      assert.equal(main.buildRunRecordParts(state, reordered.map(main.toPullRequestDecision), undefined).find((part) => part.id === 'decisions').compact, lib.renderDecisionsCompact(reordered.filter((entry) => listedKinds.includes(entry.kind)).map(main.toPullRequestDecision)));
+      assert.equal(main.buildRunRecordParts(state, reordered, undefined).find((part) => part.id === 'decisions').text, lib.renderDecisionsCompact(reorderedShown));
+      assert.equal(main.buildRunRecordParts(state, reordered.map(main.toPullRequestDecision), undefined).find((part) => part.id === 'decisions').text, lib.renderDecisionsCompact(reordered.filter((entry) => listedKinds.includes(entry.kind)).map(main.toPullRequestDecision)));
     });
     test('a pause after waves lists no commit, and a resume replays every earlier prompt byte for byte', async () => {
       const results = happyResults({
@@ -4442,11 +4458,14 @@ const ROW_TESTS = {
         const listed = { ...main.buildReviewQuestionBrief(review), problem: 'Local review finding "c0ffee01": "AGREED_ASK_ZQ?"' };
         assert.ok(run.result.message.endsWith('\n\n' + lib.renderDecisionsCompact([{ brief: listed }])), run.result.message);
         assert.ok(run.result.message.endsWith('Decided for you:\n- D1. Local review finding "c0ffee01": "AGREED_ASK_ZQ?" Chose A: "AGREED_PICK_ZQ."'), run.result.message);
-        const body = prBodyOf(run, 'pr-1');
-        const texts = main.reviewCallTexts();
-        assert.ok(body.includes('  D1. ' + texts.problem + '\n    Chose option A: ' + texts.summary + '\n    Why: ' + texts.why), body);
-        assert.ok(!body.includes('AGREED_') && !body.includes('c0ffee01'), body);
-        assert.ok(!JSON.stringify(readRunnerInputs(callOf(run, 'pr-1').prompt)).includes('AGREED_'));
+        const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+        for (const text of [inputs.body, inputs.comment]) {
+          assert.ok(text.endsWith('\n\nDecided for you:\n- D1. Local review finding "c0ffee01": "AGREED_ASK_ZQ?" Chose A: "AGREED_PICK_ZQ."'), text);
+          for (const unshown of ['AGREED_WHY_ZQ', 'AGREED_FOUND_ZQ', 'AGREED_OTHER_ZQ', agreedId, 'Why:', main.unshownBriefText()]) {
+            assert.ok(!text.includes(unshown), unshown);
+          }
+        }
+        assert.equal(main.reviewCallTexts, undefined);
       });
     }
     test('a take never touches run.answerLog and lists the call once per finding, and distinct findings stay distinct', () => {
@@ -4708,14 +4727,14 @@ const ROW_TESTS = {
       const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(ESCALATION, { 'revise-1': reviseResult(rewritten, ['Q1']) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
-      assert.ok(prBodyOf(run, 'pr-2').startsWith('```\n' + REMEDIATION_PLAN.summary + '\n```'), prBodyOf(run, 'pr-2'));
+      assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(REMEDIATION_PLAN) + '\n\n'), prBodyOf(run, 'pr-2'));
     });
     test('a settled remediation plan acceptance runs the shown plan, not the replacement plan the revise returned', async () => {
       const run = await runWorkflow(REMEDIATION_LAUNCH, remediationResults(ESCALATION, { 'revise-1': reviseResult(planResult(replacementPlan()), ['Q1']) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.deepEqual(labelsOf(run), [...PASS_ONE_LABELS, 'facts-2', 'scope-2', 'plan-2', 'revise-1', 'branch-2', 'work-2-STEP-002', 'commit-2-1', ...tailLabels(2)]);
       assert.ok(!run.result.message.includes('effect outside the repo'), run.result.message);
-      assert.ok(prBodyOf(run, 'pr-2').startsWith('```\n' + REMEDIATION_PLAN.summary + '\n```'), prBodyOf(run, 'pr-2'));
+      assert.ok(prBodyOf(run, 'pr-2').startsWith(bodyStart(REMEDIATION_PLAN) + '\n\n'), prBodyOf(run, 'pr-2'));
     });
     test('remediation_plan_acceptance takes a clean gate at high and balanced, asks a set flag there, asks at low, asks outside_limits with its own recommendation, and every later pass of the run uses it', () => {
       const clean = main.buildRemediationPlanBrief(CLEAN_REMEDIATION_PLAN);
@@ -4802,14 +4821,14 @@ const ROW_TESTS = {
     });
   },
   'SD-42': () => {
-    test('once every gate held on H, the PR runner invokes open-plan-pr with only head, base, expect_commit H, title, body, comment and draft', async () => {
+    test('once every gate held on H, the PR runner invokes open-plan-pr with only head, base, expect_commit H, title, comment, draft and the body in its own file', async () => {
       const run = await runWorkflow(LAUNCH, happyResults());
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assert.equal(labelsOf(run).at(-1), 'pr-1');
       assert.equal(run.phases.at(-1), 'PR');
       const call = callOf(run, 'pr-1');
-      const outside = withoutDataBlock(withoutDataBlock(call.prompt, 'command'), 'inputs_file');
-      assert.deepEqual(outside.split('\n'), ['Run the command below to push the working branch and open its pull request or reuse the open one.', lib.dataBlocksSentence(), '']);
+      const outside = readTextOutsideRunnerBlocks(call.prompt);
+      assert.deepEqual(outside.split('\n'), ['Open or reuse the PR with the command below.', lib.dataBlocksSentence(), '']);
       assert.ok(!call.prompt.includes('set stdout'));
       assert.ok(!call.prompt.includes(lib.runnerReadOnlySentence()));
       assert.ok(!/grant/i.test(outside), outside);
@@ -4817,11 +4836,18 @@ const ROW_TESTS = {
       assert.equal(call.opts.model, 'haiku');
       assert.equal(call.opts.phase, 'PR');
       assert.deepEqual(Object.keys(call.opts.schema.properties), ['outcome', 'stdout', 'stderr']);
-      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/open-plan-pr/scripts/open-plan-pr.sh" --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json');
+      assert.equal(readDataBlock(call.prompt, 'command'), 'bash "' + pluginRoot + '/skills/open-plan-pr/scripts/open-plan-pr.sh" --head feature/cache --base main --expect-commit ' + OTHER + ' --inputs .hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json --body-file .hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1-body.json');
       const inputsFile = readDataBlock(call.prompt, 'inputs_file');
       assert.deepEqual(Object.keys(inputsFile), ['path', 'content']);
       assert.equal(inputsFile.path, '.hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1.json');
-      assert.deepEqual(Object.keys(inputsFile.content), ['title', 'body', 'comment', 'draft']);
+      assert.equal(typeof inputsFile.content, 'string');
+      assert.deepEqual(Object.keys(JSON.parse(inputsFile.content)), ['title', 'comment', 'draft']);
+      const bodyFile = readDataBlock(call.prompt, 'body_file');
+      assert.deepEqual(Object.keys(bodyFile), ['path', 'content']);
+      assert.equal(bodyFile.path, '.hivemind/pr-inputs-20261021T120000Z-0123456789ab-pr-1-body.json');
+      assert.equal(typeof bodyFile.content, 'string');
+      assert.ok(bodyFile.content.includes('\n\nSteps:\n'), bodyFile.content);
+      assert.deepEqual(call.prompt.split('\n').filter((line) => /^<[a-z_]+>$/.test(line)), ['<command>', '<inputs_file>', '<body_file>']);
       assert.ok(!outside.includes('feature/cache') && !outside.includes(OTHER), outside);
     });
     for (const [label, results, head, args = LAUNCH] of [
@@ -4958,16 +4984,34 @@ const ROW_TESTS = {
     });
   },
   'SD-45': () => {
-    test('the body holds the summary and the run record, and the comment its lead and the same run record: reversible effects, gates with their commits, every decision not of a routine kind', async () => {
+    const HASH = '#';
+    /**
+     * Returns text with each backslash escape and each single-backtick code
+     * span removed, the text GitHub could read as markup.
+     */
+    const readOutsideCode = (text) => text.replace(/\\[\\`[\]<>&]/g, '').replace(/`[^`\n]+`/g, '');
+    const hasLiveMarkup = (text) => /@\w|#\d|GH-\d|https?:|www\.|[[\]<>&`\\]/i.test(readOutsideCode(text));
+    test('the body holds the digest, the steps and the run record, and the comment its lead and the same run record: reversible effects, gates with their commits, every decision not of a routine kind', async () => {
       const plan = effectPlan('Post a preview link.', true);
       const strong = makeBrief({ problem: 'STRONG_PROBLEM' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [strong]) }));
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: clean, held on commit ' + OTHER]);
-      const decisions = lib.renderDecisions([{ brief: strong }]);
-      const record = ['```\nEffects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."\n```', gates, '```\n' + decisions + '\n```'];
-      assert.equal(inputs.body, ['```\n' + plan.summary + '\n```', ...record].join('\n\n'));
+      const record = ['Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."', gates, lib.renderDecisionsCompact([{ brief: strong }])];
+      assert.equal(inputs.body, [bodyStart(plan), ...record].join('\n\n'));
       assert.equal(inputs.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...record].join('\n\n'));
+      assert.ok(inputs.body.startsWith('Reads hit the database every time. Add a cache layer in front of the reads.\n\nSteps:\n- STEP-001 (src/cache.js): Step STEP-001 is done.\n\n'), inputs.body);
+      for (const text of [inputs.body, inputs.comment]) {
+        assert.ok(!text.includes(plan.summary) && !text.includes('Why:') && !text.includes(strong.recommendation.why), text);
+      }
+    });
+    test('a blank digest field is left out, and a digest with both fields blank adds no paragraph', () => {
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] };
+      const run = { localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], taken: [] };
+      const steps = 'Steps:\n- STEP-001 (src/cache.js): Step STEP-001 is done.';
+      assert.ok(main.buildPullRequestTexts(run, makePlan({ digest: { problem: ' ', change: 'Add a cache.' } }), gates).body.startsWith('Add a cache.\n\n' + steps + '\n\n'));
+      assert.ok(main.buildPullRequestTexts(run, makePlan({ digest: { problem: 'Reads are slow.', change: '' } }), gates).body.startsWith('Reads are slow.\n\n' + steps + '\n\n'));
+      assert.ok(main.buildPullRequestTexts(run, makePlan({ digest: { problem: '', change: ' \n' } }), gates).body.startsWith(steps + '\n\n'));
     });
     test('the body and the comment each carry the one run record buildRunRecordParts() returns, and no chat message builds it', () => {
       const run = main.createRunState({ request: REQUEST, trunk: 'main', references: [], localReview: false, argsObject: {} });
@@ -4976,7 +5020,7 @@ const ROW_TESTS = {
       run.reversibleEffects.push({ stepId: 'STEP-001', summary: 'Post a preview link.' });
       run.notRunGates.push(main.notConfiguredReviewLine());
       run.taken.push({ brief: makeBrief({ problem: 'PARITY_PROBLEM' }), kind: 'planner_question' });
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] };
       for (const gateArg of [undefined, gates]) {
         const parts = main.buildRunRecordParts(run, run.taken, gateArg);
         assert.deepEqual([...parts.map((part) => part.id)], ['reversible_effects', 'gates', 'decisions']);
@@ -4988,15 +5032,15 @@ const ROW_TESTS = {
       const plan = makePlan();
       const texts = main.buildPullRequestTexts(run, plan, gates);
       const prParts = main.buildRunRecordParts(run, run.taken.map(main.toPullRequestDecision), gates);
-      const rendered = [...prParts.map((part) => (part.external ? main.renderLiteralBlock(part.text) : part.text))];
-      assert.equal(texts.body, [main.renderLiteralBlock(plan.summary), ...rendered].join('\n\n'));
+      const rendered = [...prParts.map((part) => (part.external ? main.neutralizePullRequestText(part.text) : part.text))];
+      assert.equal(texts.body, [bodyStart(plan), ...rendered].join('\n\n'));
       assert.equal(texts.comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', ...rendered].join('\n\n'));
       for (const id of ['reversible_effects', 'decisions']) {
         assert.equal(prParts.find((part) => part.id === id).text, messageParts.find((part) => part.id === id).text, id);
       }
       for (const name of ['buildPullRequestBody', 'buildPullRequestComment']) {
         const source = String(main[name]);
-        for (const renderer of ['renderReversibleEffects', 'renderNotRunGates', 'renderPullRequestGates', 'renderDecisions', 'renderDecisionsCompact']) {
+        for (const renderer of ['renderReversibleEffects', 'renderNotRunGates', 'renderPullRequestGates', 'renderDecisions', 'renderDecisionsCompact', 'renderApprovals', 'buildRejectedFindingsBlock']) {
           assert.ok(!new RegExp('\\b' + renderer + '\\(').test(source), name + ' calls ' + renderer);
         }
       }
@@ -5009,42 +5053,71 @@ const ROW_TESTS = {
       }
       assert.equal(main.buildRunBlocks, undefined);
       assert.equal(main.toMessageBlock, undefined);
+      assert.equal(main.renderLiteralBlock, undefined);
     });
-    test('renderLiteralBlock fences the text unchanged with one backtick more than its longest backtick run, at least three', () => {
-      for (const [text, block] of [
-        ['', '```\n\n```'],
-        ['a', '```\na\n```'],
-        ['a`b', '```\na`b\n```'],
-        ['```', '````\n```\n````'],
-        ['x ```` y\n`````', '``````\nx ```` y\n`````\n``````']
+    test('the record lists the rejected findings by short id after the gates, then each approval on its own line, then the decisions', () => {
+      const run = main.createRunState({ request: REQUEST, trunk: 'main', references: [], localReview: true, argsObject: {} });
+      run.waveCount = 1;
+      run.head = OTHER;
+      run.approvals.push({ category: 3, item: 'tests/cache.test.js' }, { category: 1, item: 'Drop @octocat <b>users</b>' });
+      run.taken.push({ brief: makeBrief({ problem: 'APPROVAL_PROBLEM' }), kind: 'planner_question' });
+      const rejected = [{ finding_id: 'a1b2c3d4'.repeat(8) }];
+      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean, 1 finding rejected under recorded decisions' }, rejected: rejected };
+      const parts = main.buildRunRecordParts(run, run.taken, gates);
+      assert.deepEqual([...parts.map((part) => part.id)], ['gates', 'rejected_findings', 'approvals', 'decisions']);
+      const texts = main.buildPullRequestTexts(run, makePlan(), gates);
+      const approvals = 'Destructive changes you approved:\n- tests/cache.test.js (category 3)\n- Drop `@octocat` \\<b\\>users\\</b\\> (category 1)';
+      const rejectedBlock = 'Local review: clean, 1 finding rejected under recorded decisions. The findings it rejected:\n- "a1b2c3d4"';
+      const gateLines = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: clean, 1 finding rejected under recorded decisions, held on commit ' + OTHER]);
+      const record = [gateLines, rejectedBlock, approvals, lib.renderDecisionsCompact(run.taken)].join('\n\n');
+      assert.ok(texts.body.endsWith('\n\n' + record), texts.body);
+      assert.equal(texts.comment, 'The delivery pushed commit ' + OTHER + ' to this pull request.\n\n' + record);
+      assert.ok(!texts.body.includes('a1b2c3d4a1b2'), texts.body);
+      assert.deepEqual([...main.buildRunRecordParts(run, [], { ...gates, rejected: [] }).map((part) => part.id)], ['gates', 'approvals']);
+    });
+    test('neutralizePullRequestText puts each GitHub reference form in a code span and escapes backslashes, backticks, [, ], <, > and & elsewhere', () => {
+      for (const [text, neutral] of [
+        ['Ping @octocat and @org/team.', 'Ping `@octocat` and `@org/team`.'],
+        [HASH + '12', '`' + HASH + '12`'],
+        ['Fixes ' + HASH + '12.', 'Fixes `' + HASH + '12`.'],
+        ['See brenpike/hivemind' + HASH + '12 now', 'See `brenpike/hivemind' + HASH + '12` now'],
+        ['GH-12 and gh-7', '`GH-12` and `gh-7`'],
+        ['Read https://github.com/o/r/issues/7 and www.example.com/a', 'Read `https://github.com/o/r/issues/7` and `www.example.com/a`'],
+        ['<b>bold</b>', '\\<b\\>bold\\</b\\>'],
+        ['&' + HASH + '64;', '\\&`' + HASH + '64`;'],
+        ['a `b` c', 'a \\`b\\` c'],
+        ['c:\\d\\', 'c:\\\\d\\\\'],
+        ['[context](/brenpike/hivemind/issues/7)', '\\[context\\](/brenpike/hivemind/issues/7)'],
+        ['[context](//github.com/o/r/issues/7)', '\\[context\\](//github.com/o/r/issues/7)'],
+        ['![x](../issues/7) and [y][1]\n[1]: /o/r/issues/7', '!\\[x\\](../issues/7) and \\[y\\]\\[1\\]\n\\[1\\]: /o/r/issues/7'],
+        ['Plain text, a src/cache.js path.', 'Plain text, a src/cache.js path.']
       ]) {
-        const rendered = main.renderLiteralBlock(text);
-        assert.equal(rendered, block);
-        const fenceLength = rendered.indexOf('\n');
-        assert.equal(rendered.slice(fenceLength + 1, rendered.length - fenceLength - 1), text);
+        assert.equal(main.neutralizePullRequestText(text), neutral, text);
+        assert.ok(!hasLiveMarkup(neutral), neutral);
       }
+      const long = 'P'.repeat(60000) + ' x/'.repeat(20000);
+      assert.equal(main.neutralizePullRequestText(long), long);
     });
-    test('an at-mention in the plan text sits only inside closed fences of the body and the comment, and the gates stay outside', async () => {
-      const summary = 'Ping @octocat with ```` code ```` now.\n```';
-      const step = makeStep('STEP-001', ['src/@octocat.js'], { outcome: 'Tell @octocat it is done.', external_effects: [{ summary: 'Post to @octocat.', reversible: true }] });
-      const plan = makePlan({ summary: summary, steps: [step] });
+    test('external text in the body and the comment carries no live mention, reference, URL or HTML, holds no code fence, and the gates stay plain', async () => {
+      const hostile = 'Ping @octocat, Fixes ' + HASH + '12, o/r' + HASH + '3, GH-4, https://github.com/o/r/issues/5, <b>x</b> &' + HASH + '64; ```` code ```` [x](/o/r/issues/6) and c:\\d.';
+      const step = makeStep('STEP-001', ['src/@octocat.js'], { outcome: 'Tell @octocat it is done. ' + hostile, external_effects: [{ summary: 'Post to @octocat <b>now</b> & GH-4.', reversible: true }] });
+      const plan = makePlan({ digest: { problem: hostile, change: 'Close ' + HASH + '9.' }, steps: [step] });
       const options = makeBrief().options.map((option) => ({ ...option, summary: option.summary + ' Ask @octocat.' }));
-      const question = makeBrief({ problem: 'Ask @octocat for a key.', options: options, recommendation: { option_id: 'A', strength: 'strong', why: 'As @octocat said.' } });
+      const question = makeBrief({ problem: 'Ask @octocat for a key. ' + hostile, options: options, recommendation: { option_id: 'A', strength: 'strong', why: 'As @octocat said.' } });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [question]) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       const gateLines = ['Gates:', '- validation: passed, held on commit ' + OTHER, '- local review: clean, held on commit ' + OTHER];
       for (const text of [inputs.body, inputs.comment]) {
         const fenced = readFencedText(text);
-        assert.ok(fenced.closed, text);
-        assert.ok(fenced.outside.every((line) => !line.includes('@octocat')), JSON.stringify(fenced.outside));
-        gateLines.forEach((line) => assert.ok(fenced.outside.includes(line), line));
-        for (const shown of ['Ask @octocat for a key.', 'Hash the path. Ask @octocat.', 'As @octocat said.']) {
-          assert.ok(text.includes(shown), shown);
-        }
+        assert.ok(fenced.closed && fenced.outside.length === text.split('\n').length, text);
+        assert.ok(!hasLiveMarkup(text), readOutsideCode(text));
+        gateLines.forEach((line) => assert.ok(text.split('\n').includes(line), line));
+        assert.ok(text.includes('Ask `@octocat` for a key.') && text.includes('Hash the path. Ask `@octocat`.'), text);
+        assert.ok(!text.includes('As @octocat said.') && !text.includes('As `@octocat` said.'), text);
       }
-      assert.ok(inputs.body.startsWith('`````\n' + summary + '\n`````\n\n'), inputs.body);
-      assert.ok(inputs.body.includes('"Post to @octocat."'), inputs.body);
+      assert.ok(inputs.body.startsWith('Ping `@octocat`, Fixes `' + HASH + '12`, `o/r' + HASH + '3`, `GH-4`, `https://github.com/o/r/issues/5,` \\<b\\>x\\</b\\> \\&`' + HASH + '64`; \\`\\`\\`\\` code \\`\\`\\`\\` \\[x\\](/o/r/issues/6) and c:\\\\d. Close `' + HASH + '9`.\n\nSteps:\n- STEP-001 (src/`@octocat`.js): Tell `@octocat` it is done.'), inputs.body);
+      assert.ok(inputs.body.includes('- step "STEP-001": "Post to `@octocat` \\<b\\>now\\</b\\> \\& `GH-4`."'), inputs.body);
     });
     test('a validation not run and a local review not configured are each named', async () => {
       const plan = makePlan({ validation_commands: [] });
@@ -5083,74 +5156,74 @@ const ROW_TESTS = {
       });
     }
     test('no control character other than newline and tab reaches the body or the comment', async () => {
-      const plan = makePlan({ summary: 'Cache\u0007 the\treads.\r\nThen\u0000 the\u009b writes.\u007f' });
+      const plan = makePlan({ digest: { problem: 'Cache\u0007 the\treads.', change: 'Then\u0000 the\u009b writes.\u007f' }, steps: [makeStep('STEP-001', ['src/cache.js'], { outcome: 'Done\u0001 now.\r\n' })] });
       const question = makeBrief({ problem: 'Pick\u0001 a key.\u001b[31m' });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan, [question]) }));
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       for (const text of [inputs.body, inputs.comment]) {
         assert.ok(isPullRequestText(text, true), JSON.stringify(text));
       }
-      assert.ok(inputs.body.startsWith('```\nCache  the\treads. \nThen  the  writes. \n```\n\n'), JSON.stringify(inputs.body));
-      assert.ok(inputs.comment.includes('Pick a key. [31m'), inputs.comment);
+      assert.ok(inputs.body.startsWith('Cache the reads. Then the writes.\n\nSteps:\n- STEP-001 (src/cache.js): Done now.\n\n'), JSON.stringify(inputs.body));
+      assert.ok(inputs.comment.includes('Pick a key. \\[31m'), inputs.comment);
     });
-    test('decisions go compact when the full form would pass maxPullRequestTextLength()', async () => {
-      assert.equal(main.maxPullRequestTextLength(), 60000);
-      const question = makeBrief({ problem: 'LONG_VERBATIM_PROBLEM', verbatim: 'S'.repeat(61000) });
+    test('every decision is one compact line with no why and no verbatim text', async () => {
+      const question = makeBrief({ problem: 'LONG_VERBATIM_PROBLEM', verbatim: 'S'.repeat(500), recommendation: { option_id: 'A', strength: 'strong', why: 'WHY_TEXT_ZQ.' } });
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(), [question]) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
-      const compact = lib.renderDecisionsCompact([{ brief: question }]);
       for (const text of [inputs.body, inputs.comment]) {
-        assert.ok(text.endsWith('\n\n```\n' + compact + '\n```'), text.slice(-400));
-        assert.ok(text.length <= 60000 && !text.includes('S'.repeat(100)));
+        assert.ok(text.endsWith('\n\nDecided for you:\n- D1. LONG_VERBATIM_PROBLEM Chose A: Hash the path.'), text.slice(-400));
+        assert.ok(!text.includes('S'.repeat(100)) && !text.includes('WHY_TEXT_ZQ') && !text.includes('Why:') && !text.includes('Word for word'), text.slice(-400));
       }
     });
-    test('a body still too long in compact form stops the run blocked naming its size, with no PR call', async () => {
-      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan({ summary: 'P'.repeat(61000) })) }));
+    test('a body over maxPullRequestTextLength() stops the run blocked naming its size, with no PR call', async () => {
+      assert.equal(main.maxPullRequestTextLength(), 60000);
+      const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js'], { outcome: 'P'.repeat(61000) })] });
+      const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(plan) }));
       assert.equal(run.result.outcome, 'blocked');
-      const match = run.result.message.match(/^The pull request body would be ([0-9]+) characters even with the decisions in short form, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing\./);
+      const match = run.result.message.match(/^The pull request body would be ([0-9]+) characters, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing\./);
       assert.ok(match, run.result.message.slice(0, 300));
+      assert.ok(!run.result.message.includes('short form'), run.result.message.slice(0, 300));
       assert.equal(run.result.message.split('\n\n')[1], main.nextStepLine('report'));
       assert.ok(Number(match[1]) > 60000);
       assert.equal(labelsOf(run).at(-1), 'review-commit-1-1');
       assert.equal(run.result.pr, undefined);
     });
-    test('a comment still too long in compact form stops the run naming the comment and its size', () => {
-      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean' } };
-      const plan = makePlan({ summary: '' });
-      const longWhy = { ...makeBrief().recommendation, why: 'W'.repeat(61000) };
-      const runWith = (problem) => ({ localReview: true, head: OTHER, waveCount: 1, notRunGates: [], reversibleEffects: [], taken:[{ brief: makeBrief({ problem: problem, recommendation: longWhy }), kind: 'planner_question' }] });
+    test('a comment over maxPullRequestTextLength() stops the run naming the comment and its size, and a text at the limit passes', () => {
+      const gates = { held: { validate: OTHER, review: OTHER }, notes: { validate: 'passed', review: 'clean' }, rejected: [] };
+      const plan = makePlan({ digest: { problem: '', change: '' }, steps: [makeStep('S', ['a'], { outcome: 'x' })] });
+      const runWith = (problem) => ({ localReview: true, head: OTHER, waveCount: 1, notRunGates: [], reversibleEffects: [], approvals: [], taken: [{ brief: makeBrief({ problem: problem }), kind: 'planner_question' }] });
       const shortTexts = main.buildPullRequestTexts(runWith('P'), plan, gates);
       const bodyOverhead = shortTexts.body.length - 1;
       const commentOverhead = shortTexts.comment.length - 1;
-      assert.ok(commentOverhead > bodyOverhead, 'with no summary the comment lead is longer than the empty summary block of the body');
-      const problem = 'P'.repeat(60000 - commentOverhead + 1);
-      const texts = main.buildPullRequestTexts(runWith(problem), plan, gates);
-      assert.equal(texts.problem, 'The pull request comment would be 60001 characters even with the decisions in short form, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing.');
+      assert.ok(commentOverhead > bodyOverhead, 'the comment lead is longer than the steps block of the body');
+      assert.equal(main.buildPullRequestTexts(runWith('P'.repeat(60000 - commentOverhead)), plan, gates).problem, undefined);
+      const texts = main.buildPullRequestTexts(runWith('P'.repeat(60000 - commentOverhead + 1)), plan, gates);
+      assert.equal(texts.problem, 'The pull request comment would be 60001 characters, more than the limit of 60000, so the delivery stopped before the pull request and pushed nothing.');
     });
     const attributionProblem = (noun) => 'The pull request ' + noun + ' would hold an attribution string, so the delivery stopped before the pull request and pushed nothing.';
-    test('a title, body or comment that holds a forbiddenSubjectTexts() string in any case names that text', () => {
+    test('a title, body or comment that holds a forbiddenSubjectTexts() string in any case names that text, neutralized text included', () => {
       assert.deepEqual([...main.forbiddenSubjectTexts()], ['co-authored-by:', 'authored-by:', 'generated with', 'created with claude', '\u{1f916} generated']);
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
-      const runWith = (taken) => ({ localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], taken: taken });
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] };
+      const runWith = (taken) => ({ localReview: false, head: OTHER, waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], taken: taken });
       assert.equal(main.buildPullRequestTexts(runWith([]), makePlan(), gates).problem, undefined);
       for (const forbidden of main.forbiddenSubjectTexts()) {
         for (const text of [forbidden, forbidden.toUpperCase()]) {
           const titled = main.buildPullRequestTexts(runWith([]), makePlan({ title: 'Add ' + text + ' cache' }), gates);
           assert.deepEqual({ ...titled }, { problem: attributionProblem('title') }, text);
-          const bodied = main.buildPullRequestTexts(runWith([]), makePlan({ summary: 'Add the cache.\n\n' + text + ' a tool.' }), gates);
+          const bodied = main.buildPullRequestTexts(runWith([]), makePlan({ digest: { problem: 'Add the cache.', change: text + ' <b>@bot</b> a tool.' } }), gates);
           assert.deepEqual({ ...bodied }, { problem: attributionProblem('body') }, text);
-          const decided = main.buildPullRequestTexts(runWith([{ brief: makeBrief({ problem: text + ' PROBLEM' }), kind: 'planner_question' }]), makePlan(), gates);
+          const decided = main.buildPullRequestTexts(runWith([{ brief: makeBrief({ problem: text + ' @bot <bot@example.com> PROBLEM' }), kind: 'planner_question' }]), makePlan(), gates);
           assert.deepEqual({ ...decided }, { problem: attributionProblem('body') }, text);
         }
       }
     });
     test('the comment is checked when neither the title nor the body holds the string', () => {
-      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' } };
-      const run = { localReview: false, head: 'Co-Authored-By: x', waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], taken: [] };
+      const gates = { held: { validate: OTHER }, notes: { validate: 'passed' }, rejected: [] };
+      const run = { localReview: false, head: 'Co-Authored-By: x', waveCount: 1, notRunGates: [main.notConfiguredReviewLine()], reversibleEffects: [], approvals: [], taken: [] };
       assert.deepEqual({ ...main.buildPullRequestTexts(run, makePlan(), gates) }, { problem: attributionProblem('comment') });
     });
-    for (const [label, changes, noun] of [['title', { title: 'Created With Claude the cache' }, 'title'], ['body', { summary: 'Add the cache layer.\n\nGenerated with a tool.' }, 'body']]) {
+    for (const [label, changes, noun] of [['title', { title: 'Created With Claude the cache' }, 'title'], ['body', { digest: { problem: 'Add the cache layer.', change: 'Generated with a tool.' } }, 'body']]) {
       test(`a pull request ${label} with an attribution string ends the run blocked before any PR call`, async () => {
         const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(makePlan(changes)) }));
         assert.equal(run.result.outcome, 'blocked');
@@ -5208,7 +5281,11 @@ const ROW_TESTS = {
       ['a blocked relay', { outcome: 'blocked', stderr: 'blocker: working tree has uncommitted changes\n' }, 'The pull request step was blocked, ' + unseenPush + ' Its blocker line says "working tree has uncommitted changes".'],
       ['a blocked relay that gives no reason', { outcome: 'blocked' }, 'The pull request step was blocked, ' + unseenPush + ' It gave no reason.', 'report'],
       ['an inputs refusal', { outcome: 'blocked', stderr: 'blocker: title must be one line of text\n' }, unpushed + 'Its blocker line says "title must be one line of text".', 'report'],
-      ['a synapse-gate denial', { outcome: 'blocked', stderr: denial + '\n' }, unpushed + 'Its stderr says ' + JSON.stringify(denial) + '.', 'report']
+      ['a synapse-gate denial', { outcome: 'blocked', stderr: denial + '\n' }, unpushed + 'Its stderr says ' + JSON.stringify(denial) + '.', 'report'],
+      ['a pushed: no line', { outcome: 'blocked', stderr: 'pushed: no\nblocker: the pull request could not be created\n' }, unpushed + 'Its blocker line says "the pull request could not be created".'],
+      ['a pushed: yes line', { outcome: 'blocked', stderr: 'pushed: yes\nblocker: the pull request could not be created\n' }, 'The pull request step was blocked, so the delivery stopped after this step pushed commit ' + OTHER + '. Its blocker line says "the pull request could not be created".'],
+      ['a pushed line that is neither yes nor no', { outcome: 'blocked', stderr: 'pushed: maybe\nblocker: the pull request could not be created\n' }, 'The pull request step was blocked, ' + unseenPush + ' Its blocker line says "the pull request could not be created".'],
+      ['a pushed: yes line and an inputs refusal', { outcome: 'blocked', stderr: 'pushed: yes\nblocker: title must be one line of text\n' }, unpushed + 'Its blocker line says "title must be one line of text".', 'report']
     ]) {
       const isTerminal = message.includes('a head commit other than');
       test(`a relay with ${label} ${isTerminal ? 'ends the run blocked' : 'pauses with one step_stop question'} naming the pull request step, with the ${nextAction || 'fix_cause'} type`, async () => {
@@ -5257,6 +5334,19 @@ const ROW_TESTS = {
       assert.equal(main.isInputsRefusal('title must be one line of text\n'), false);
       assert.equal(main.isInputsRefusal(undefined), false);
     });
+    test('the pushed lines the PR step reads are the lines the PR script prints right before its blocker line', () => {
+      const scriptLines = [...openPlanPrText.matchAll(/^\s*pushed_line='([^']+)'$/gm)].map((match) => match[1]).sort();
+      assert.deepEqual(scriptLines, ['pushed: no', 'pushed: yes']);
+      assert.ok(openPlanPrText.includes('printf \'%s\\n\' "$pushed_line" >&2'), 'the script prints the pushed line as one stderr line');
+      assert.ok(/^blocker\(\) \{ relay_child_stderr; write_pushed_line; printf 'blocker: %s\\n' "\$1" >&2; exit 1; \}$/m.test(openPlanPrText), 'the pushed line comes right before the blocker line');
+      const prSource = readText(join(sourceDir, 'pr.js'));
+      const workflowLines = [...prSource.matchAll(/\/\^(pushed: [a-z]+)\$\/m/g)].map((match) => match[1]).sort();
+      assert.deepEqual(workflowLines, scriptLines);
+      for (const line of scriptLines) {
+        assert.notEqual(main.describeBlockedPush(line + '\nblocker: the PR could not be created\n', OTHER, false, 'UNSEEN_ZQ'), 'UNSEEN_ZQ', line);
+      }
+      assert.equal(main.describeBlockedPush('blocker: the PR could not be created\n', OTHER, false, 'UNSEEN_ZQ'), 'UNSEEN_ZQ');
+    });
     test('no pull request stop guesses with may be: the run says what it saw of the push', () => {
       const prSource = readText(join(sourceDir, 'pr.js'));
       assert.ok(!/\bmay be\b/i.test(prSource), 'pr.js holds may be');
@@ -5278,7 +5368,14 @@ const ROW_TESTS = {
       const createArgs = readFileSync(join(logDir, 'create.args'), 'utf8').split('\n');
       assert.ok(createArgs.includes('--base') && createArgs.includes('main') && createArgs.includes('--title=feat: Add the cache layer'), JSON.stringify(createArgs));
       assert.ok(!createArgs.includes('--head'));
-      assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), readRunnerInputs(callOf(run, 'pr-1').prompt).body);
+      const prPrompt = callOf(run, 'pr-1').prompt;
+      const sentBody = readDataBlock(prPrompt, 'body_file').content;
+      assert.ok(sentBody.split('\n').length > 3, sentBody);
+      assert.equal(readFileSync(join(logDir, 'body.md'), 'utf8'), sentBody);
+      assert.ok(!Object.hasOwn(JSON.parse(readDataBlock(prPrompt, 'inputs_file').content), 'body'));
+      for (const name of ['inputs_file', 'body_file']) {
+        assert.equal(existsSync(join(scratch.repo, readDataBlock(prPrompt, name).path)), false, name);
+      }
       assert.ok(!prRelays[0].stdout.includes('commented: true'));
       assert.equal(run.result.message, openedLine(head) + '\n\n' + HELD_ALL + head + '.\n\nThe pull request step warned: gh cannot read the push remote as a GitHub repository; the PR head repository was not checked.');
     });
@@ -5315,10 +5412,9 @@ const ROW_TESTS = {
       assert.deepEqual(run.result.pr, { url: PR_URL, head_ref_oid: OTHER, created: false });
       const effects = 'Effects outside the repo that the plan declares as reversible:\n- step "STEP-001": "Post a preview link."';
       const taken = [{ brief: strong }];
-      const decisions = lib.renderDecisions(taken);
       const gates = gatesBlock(['validation: passed, held on commit ' + OTHER, 'local review: not configured for this run']);
       const comment = readRunnerInputs(callOf(run, 'pr-1').prompt).comment;
-      assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', '```\n' + effects + '\n```', gates, '```\n' + decisions + '\n```'].join('\n\n'));
+      assert.equal(comment, ['The delivery pushed commit ' + OTHER + ' to this pull request.', effects, gates, lib.renderDecisionsCompact(taken)].join('\n\n'));
       const pushed = 'Pushed commit ' + OTHER + ' to the open pull request ' + PR_URL + ' and commented on it.';
       const held = 'Validation held on commit ' + OTHER + '. Not configured for this run: local review.';
       assert.equal(run.result.message, [pushed, held, effects, lib.renderDecisionsCompact(taken)].join('\n\n'));
@@ -5620,8 +5716,8 @@ const ROW_TESTS = {
       assert.equal(encoded.length, reads.length);
       assert.ok(moduleCode.includes('quoteOrEmpty(review.blocker, reviewFieldTexts().blocker.bounds.maxLength)'));
     });
-    test('every JSON.stringify( in the workflow modules sits in a throw, in questionKey or in the acceptResolution comparison', () => {
-      const allowed = { throw: 0, questionKey: 0, acceptResolution: 0 };
+    test('every JSON.stringify( in the workflow modules sits in a throw, in questionKey, in the acceptResolution comparison or in the PR inputs_file content', () => {
+      const allowed = { throw: 0, questionKey: 0, acceptResolution: 0, pullRequestInputs: 0 };
       const stray = [];
       for (const chunk of moduleCode.split(/\n(?=(?:async )?function \w+\()/)) {
         const functionName = (/^(?:async )?function (\w+)\(/.exec(chunk) || [])[1];
@@ -5632,13 +5728,15 @@ const ROW_TESTS = {
             allowed.questionKey += 1;
           } else if (functionName === 'acceptResolution' && /JSON\.stringify\(listed\.brief\) === JSON\.stringify\(entry\.brief\)/.test(line)) {
             allowed.acceptResolution += 1;
+          } else if (functionName === 'buildPullRequestPrompt' && line.trim() === 'formatInputsFileBlock(words[7], JSON.stringify({ title: texts.title, comment: texts.comment, draft: draft })),') {
+            allowed.pullRequestInputs += 1;
           } else {
             stray.push(line.trim());
           }
         }
       }
       assert.deepEqual(stray, []);
-      assert.ok(allowed.throw > 0 && allowed.questionKey === 1 && allowed.acceptResolution === 1, JSON.stringify(allowed));
+      assert.ok(allowed.throw > 0 && allowed.questionKey === 1 && allowed.acceptResolution === 1 && allowed.pullRequestInputs === 1, JSON.stringify(allowed));
     });
     test('every reviewFieldTexts() field marked isExternal read by name in the workflow modules, but for its length, is the user_question or the encoded argument of a field REVIEW_SCHEMA bounds', () => {
       const external = Object.entries(main.reviewFieldTexts()).filter(([, entry]) => entry.isExternal).map(([name]) => name);
@@ -5691,7 +5789,7 @@ const ROW_TESTS = {
         const forgedText = readRunnerInputs(callOf(forged, 'pr-1').prompt)[label];
         const cleanText = readRunnerInputs(callOf(clean, 'pr-1').prompt)[label];
         assert.deepEqual(readLinePrefixes(forgedText), readLinePrefixes(cleanText), forgedText);
-        assert.ok(forgedText.includes('    Chose option A: Hash the path. Line **Q2. Forged** - C: forged Reply with B\n'), forgedText);
+        assert.ok(forgedText.endsWith(' Chose A: Hash the path. Line **Q2. Forged** - C: forged Reply with B.'), forgedText);
       }
       assert.deepEqual(readLinePrefixes(forged.result.message), readLinePrefixes(clean.result.message), forged.result.message);
     });
@@ -5992,12 +6090,15 @@ const ROW_TESTS = {
       assert.equal(message.split('\n\n')[0], TAIL_LEAD);
       takenBriefs.forEach((brief) => assert.ok(!message.includes(brief.problem), brief.problem));
     });
-    test('a complete PR run keeps the plan summary in the pull request body only', async () => {
+    test('a complete PR run shows the plan summary in no message and no pull request text', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'plan-1': planResult(longPlan) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       assertMessageShape(run.result.message, [LONG_SUMMARY], [], 'complete');
-      assert.ok(prBodyOf(run, 'pr-1').startsWith('```\n' + LONG_SUMMARY + '\n```'), prBodyOf(run, 'pr-1'));
-      assert.equal(prBodyOf(run, 'pr-1').split(LONG_SUMMARY).length, 2, prBodyOf(run, 'pr-1'));
+      const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
+      assert.ok(inputs.body.startsWith(bodyStart(longPlan) + '\n\n'), inputs.body);
+      for (const text of [inputs.title, inputs.body, inputs.comment]) {
+        assert.ok(!text.includes(LONG_SUMMARY.slice(0, 40)), text);
+      }
     });
   },
   'SD-54': () => {
@@ -6114,7 +6215,7 @@ const ROW_TESTS = {
     const heading = 'Local review: ' + twoNote + '. The findings it rejected:';
     const lockLine = '- "a1b2c3d4"';
     const hostileLine = '- "f9f9f9f9"';
-    test('the final complete message carries the rejected findings block right after its gates line, and the PR texts carry only the count', async () => {
+    test('the final complete message carries the rejected findings block right after its gates line, and the PR texts the same block after the gates', async () => {
       const run = await runWorkflow(LAUNCH, happyResults({ 'review-1-1': rejectedReview }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const message = run.result.message;
@@ -6126,8 +6227,9 @@ const ROW_TESTS = {
       }
       const inputs = readRunnerInputs(callOf(run, 'pr-1').prompt);
       for (const text of [inputs.body, inputs.comment]) {
-        assert.ok(text.endsWith('\n- local review: ' + twoNote + ', held on commit ' + OTHER), text);
-        for (const rejectedText of ['a1b2c3d4', 'distributed lock', 'docs/adr/', 'f9f9f9f9', '@owner', 'Decisions', 'The findings it rejected']) {
+        assert.ok(text.endsWith('\n- local review: ' + twoNote + ', held on commit ' + OTHER + '\n\n' + [heading, lockLine, hostileLine].join('\n')), text);
+        assert.ok(!text.includes(longId), text);
+        for (const rejectedText of ['distributed lock', 'docs/adr/', '@owner', 'Decisions']) {
           assert.ok(!text.includes(rejectedText), rejectedText);
         }
       }
@@ -7554,8 +7656,12 @@ const ROW_TESTS = {
           const firstPath = '.hivemind/' + kind + '-inputs-' + FACTS_STEM + '-' + label + '.json';
           const retryPath = '.hivemind/' + kind + '-inputs-' + FACTS_STEM + '-' + label + '-retry.json';
           assert.ok(firstPrompt.includes(firstPath) && retryPrompt.includes(retryPath), retryPrompt);
+          if (kind === 'pr') {
+            assert.deepEqual([readDataBlock(firstPrompt, 'body_file').path, readDataBlock(retryPrompt, 'body_file').path], [firstPath.replace(/\.json$/, '-body.json'), retryPath.replace(/\.json$/, '-body.json')]);
+          }
           assert.notEqual(retryPrompt, firstPrompt);
-          assert.equal(retryPrompt.split(retryPath).join(firstPath), firstPrompt);
+          const stemLabel = FACTS_STEM + '-' + label;
+          assert.equal(retryPrompt.split(stemLabel + '-retry').join(stemLabel), firstPrompt);
         }
         assert.deepEqual({ ...callOf(run, label + '-retry').opts, label: label }, { ...callOf(run, label).opts });
       });
@@ -7790,11 +7896,12 @@ const ROW_TESTS = {
     });
     test('the runner prompts use the block names and placeholders of synapse.md', async () => {
       const synapseText = readText(join(repoRoot, 'plugin/agents/synapse.md'));
-      for (const word of ['`command`', '`inputs_file`', '`{plugin-root}`', '{path, content}']) {
+      for (const word of ['`command`', '`inputs_file`', '`body_file`', '`{plugin-root}`', '{path, content}']) {
         assert.ok(synapseText.includes(word), word);
       }
       assert.ok(synapseText.includes('Replace `{plugin-root}` with `${CLAUDE_PLUGIN_ROOT}`, only in the `command` string.'));
-      assert.ok(synapseText.includes('to its `path`, exactly as given: never replace anything in `inputs_file`'));
+      assert.ok(synapseText.includes('- `body_file`, only for a pull request: `{path, content}`.'));
+      assert.ok(synapseText.includes('1. Write any `inputs_file`, then any `body_file`: its `content` (a string as is, an object as JSON) to its `path`, exactly as given: never replace anything in `inputs_file`.'));
       assert.ok(!synapseText.includes('{token}'));
       assert.ok(!synapseText.includes('wherever they appear'));
       const run = await runWorkflow(LAUNCH, happyResults());
@@ -7805,12 +7912,16 @@ const ROW_TESTS = {
           assert.ok(readDataBlock(prompt, 'command').startsWith('bash "' + pluginRoot + '/skills/'), label);
         }
         assert.equal(hasDataBlock(prompt, 'inputs_file'), label !== 'facts-1' && label !== 'branch-1', label);
+        assert.equal(hasDataBlock(prompt, 'body_file'), label === 'pr-1', label);
       }
       for (const label of ['commit-1-1', 'review-commit-1-1', 'pr-1']) {
         const prompt = callOf(run, label).prompt;
         assert.ok(!prompt.includes('{token}'), label);
         assert.ok(!readDataBlock(prompt, 'inputs_file').path.includes('{'), label);
       }
+      assert.equal(typeof readDataBlock(callOf(run, 'commit-1-1').prompt, 'inputs_file').content, 'object');
+      assert.equal(typeof readDataBlock(callOf(run, 'pr-1').prompt, 'inputs_file').content, 'string');
+      assert.ok(!readDataBlock(callOf(run, 'pr-1').prompt, 'body_file').path.includes('{'));
     });
     test('a facts relay with plugin_root none keeps {plugin-root} in every runner command, the branch, wave, fix, review, head check and pull request ones included', async () => {
       const noRoot = { 'facts-1': factsRelay({ plugin_root: 'none' }) };
@@ -7833,7 +7944,7 @@ const ROW_TESTS = {
         assertPassStopPause(run, MALFORMED_FACTS, 'facts-1', 'report');
       }
     });
-    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs file Write an allow', async () => {
+    test('every command the engine builds gets an allow from the real synapse gate hook for hivemind:synapse only, and its inputs and body file Writes an allow', async () => {
       const scratch = makeScratchRepo();
       mkdirSync(join(scratch.repo, '.hivemind'));
       const fresh = await runWorkflow({ request: REQUEST, references: [5, 12] }, fixFlowResults());
@@ -7851,10 +7962,11 @@ const ROW_TESTS = {
         const command = builtCommand.split('{plugin-root}').join(pluginRoot);
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:synapse', tool_input: { command: command } }), 'allow', call.opts.label + ': ' + command);
         assert.equal(readGateDecision(scratch, { tool_name: 'Bash', agent_type: 'hivemind:drone', tool_input: { command: command } }), 'none', call.opts.label);
-        if (hasDataBlock(call.prompt, 'inputs_file')) {
-          const filePath = readDataBlock(call.prompt, 'inputs_file').path;
+        for (const name of ['inputs_file', 'body_file'].filter((blockName) => hasDataBlock(call.prompt, blockName))) {
+          const filePath = readDataBlock(call.prompt, name).path;
           assert.equal(readGateDecision(scratch, { tool_name: 'Write', agent_type: 'hivemind:synapse', cwd: scratch.repo, tool_input: { file_path: filePath, content: '{}' } }), 'allow', call.opts.label + ': ' + filePath);
         }
+        assert.equal(hasDataBlock(call.prompt, 'body_file'), /open-plan-pr/.test(builtCommand), call.opts.label);
       }
     });
     test('every runner inputs path is the stem of its pass facts file and the call label, and no two calls of a run share one', async () => {
@@ -7889,7 +8001,7 @@ const ROW_TESTS = {
       assert.deepEqual(labelsOf(second), labelsOf(first));
       const firstPaths = pairInputsPaths(first, happyResults()).map((pair) => pair.path);
       const secondPaths = pairInputsPaths(second, otherResults).map((pair) => pair.path);
-      assert.equal(firstPaths.length, 3);
+      assert.equal(firstPaths.length, 4);
       assert.ok(secondPaths.every((path) => !firstPaths.includes(path)), JSON.stringify([firstPaths, secondPaths]));
     });
     test('a paused run sends each commit and PR prompt byte for byte as its resumed run sends it under the same label', async () => {
@@ -7907,6 +8019,9 @@ const ROW_TESTS = {
         assert.equal(inputsPath, '.hivemind/' + kind + '-inputs-' + FACTS_STEM + '-' + label + '.json');
         assert.equal(lib.describeRunnerWordProblem(['--inputs', inputsPath]), undefined, inputsPath);
       }
+      const bodyPath = main.buildInputsPath({ factsStem: FACTS_STEM }, 'pr', 'pr-999-999-retry-body');
+      assert.equal(lib.describeRunnerWordProblem(['--body-file', bodyPath]), undefined, bodyPath);
+      assert.equal(lib.describeRunnerWordProblem(['--body-file', '.hivemind/molt-inputs-' + FACTS_STEM + '-pr-1-body.json']), 'its --body-file value is not one the script takes');
       assert.equal(main.buildInputsPath({ factsStem: undefined }, 'molt', 'commit-1-1'), undefined);
     });
     test('a call label whose retry label would leave the --inputs class is a terminal stop before any runner call', async () => {
@@ -7921,7 +8036,7 @@ const ROW_TESTS = {
       const origin = addBareOrigin(scratch);
       writeCreatePathGh(scratch, origin);
       const staleStem = '20200101T000000Z-aaaaaaaaaaaa';
-      const stalePaths = ['molt-inputs-' + staleStem + '-commit-1-1', 'molt-inputs-' + staleStem + '-review-commit-1-1', 'pr-inputs-' + staleStem + '-pr-1'].map((name) => '.hivemind/' + name + '.json');
+      const stalePaths = ['molt-inputs-' + staleStem + '-commit-1-1', 'molt-inputs-' + staleStem + '-review-commit-1-1', 'pr-inputs-' + staleStem + '-pr-1', 'pr-inputs-' + staleStem + '-pr-1-body'].map((name) => '.hivemind/' + name + '.json');
       stalePaths.forEach((path) => writeRepoFile(scratch, path, 'STALE_ZQ\n'));
       const run = await runWorkflow(LAUNCH, realResults(scratch, { 'plan-1': planResult(makePlan()), 'pr-1': realPrRunner(scratch) }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
@@ -7953,7 +8068,8 @@ const ROW_TESTS = {
       ['pull request', '--expect-commit', (run) => main.runPullRequestStep({ ...run, head: 'SECRETZQ --base main' }, makePlan(), heldGates(run))],
       ['pull request', '--head', (run) => main.runPullRequestStep({ ...run, head: OTHER }, makePlan({ branch: 'feature/cache --head SECRETZQ' }), heldGates(run))],
       ['commit', '--inputs', (run) => main.runCommitStep(run, makePlan(), { files: [], label: 'commit-1-1', stepName: 'wave', subject: 'Step S1 is done.' }, [])],
-      ['pull request', '--inputs', (run) => main.runPullRequestStep({ ...run, head: OTHER }, makePlan(), heldGates(run))]
+      ['pull request', '--inputs', (run) => main.runPullRequestStep({ ...run, head: OTHER }, makePlan(), heldGates(run))],
+      ['pull request', '--body-file', (run) => main.runPullRequestStep({ ...run, head: OTHER, factsStem: 'SECRETZQ'.padEnd(50, 'z') }, makePlan(), heldGates(run))]
     ]) {
       test(`a ${stepNoun} command value outside its class for ${flag} is a terminal stop before the runner call, naming the flag and not the value`, async () => {
         const stepped = await runStepWithStubAgent(callStep);
@@ -8081,24 +8197,25 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete', run.result.message);
       return readRunnerInputs(callOf(run, 'pr-1').prompt);
     };
-    test('a listed launch reference gives a plain Closes line ahead of the fenced summary, outside any fence', async () => {
-      const summary = 'Fix the cache reads. Closes #99 here stays literal.';
-      const bare = await prInputsOf(fixLaunch, makePlan({ summary: summary }));
-      const closing = await prInputsOf(fixLaunch, makePlan({ summary: summary, closes: [488] }));
+    test('a listed launch reference gives a plain Closes line ahead of the digest paragraph, whose own references stay literal', async () => {
+      const digest = { problem: 'Fix the cache reads.', change: 'Closes #99 here stays literal.' };
+      const bare = await prInputsOf(fixLaunch, makePlan({ digest: digest }));
+      const closing = await prInputsOf(fixLaunch, makePlan({ digest: digest, closes: [488] }));
       assert.equal(closing.body, 'Closes #488\n\n' + bare.body);
-      assert.ok(closing.body.startsWith('Closes #488\n\n```\n' + summary + '\n```\n\n'), closing.body);
+      assert.ok(closing.body.startsWith('Closes #488\n\nFix the cache reads. Closes `#99` here stays literal.\n\n'), closing.body);
       assert.equal(closing.body.split('\n').filter((line) => line.startsWith('Closes #')).length, 1);
     });
     test('each distinct listed number gets one line, in plan order', async () => {
       const inputs = await prInputsOf(fixLaunch, makePlan({ closes: [12, 488, 12] }));
-      assert.ok(inputs.body.startsWith('Closes #12\nCloses #488\n\n```\n'), inputs.body);
+      assert.ok(inputs.body.startsWith('Closes #12\nCloses #488\n\n' + bodyStart(makePlan()) + '\n\n'), inputs.body);
       assert.deepEqual([...main.renderClosingLines(makePlan({ closes: [12, 488, 12] }))], ['Closes #12', 'Closes #488']);
     });
     test('an absent or empty closes adds no Closes line and leaves the body as it was', async () => {
-      const absent = await prInputsOf(fixLaunch, makePlan({ summary: 'Fix #488.' }));
-      const empty = await prInputsOf(fixLaunch, makePlan({ summary: 'Fix #488.', closes: [] }));
+      const digest = { problem: 'Reads are slow.', change: 'Fix #488.' };
+      const absent = await prInputsOf(fixLaunch, makePlan({ digest: digest }));
+      const empty = await prInputsOf(fixLaunch, makePlan({ digest: digest, closes: [] }));
       assert.equal(empty.body, absent.body);
-      assert.ok(absent.body.startsWith('```\nFix #488.\n```\n\n'), absent.body);
+      assert.ok(absent.body.startsWith('Reads are slow. Fix `#488`.\n\n'), absent.body);
       assert.ok(!/^Closes #/m.test(absent.body), absent.body);
       assert.deepEqual([...main.renderClosingLines(makePlan())], []);
     });
@@ -8331,7 +8448,7 @@ const ROW_TESTS = {
       assert.equal(readDataBlock(prompt, 'inputs').approvals, undefined);
       assert.ok(prompt.includes(lib.dataBlocksSentence('The reply in user_answer')), prompt);
       assert.ok(!run.result.message.includes('Decided for you'), run.result.message);
-      assert.ok(!prBodyOf(run, 'pr-1').includes(main.reviewCallTexts().problem), prBodyOf(run, 'pr-1'));
+      assert.ok(!prBodyOf(run, 'pr-1').includes('Decided for you') && !prBodyOf(run, 'pr-1').includes('HELD_ASK_ZQ'), prBodyOf(run, 'pr-1'));
     });
     test('a letter reply to the held call applies the approvals its option lists through the tail path', async () => {
       const listing = { ...heldCall, user_question: { ...HELD_QUESTION, options: [HELD_QUESTION.options[0], { ...HELD_QUESTION.options[1], destructive: [TEST_Y] }] } };
@@ -8470,7 +8587,9 @@ const ROW_TESTS = {
  * Pairs each runner call of a run that carries an inputs_file block with
  * the path that block names, the --inputs word of its command, and the
  * expected path: .hivemind/<kind>-inputs-<stem>-<label>.json, stem the
- * facts_file of the latest facts relay in results before the call.
+ * facts_file of the latest facts relay in results before the call. A call
+ * that carries a body_file block adds a pair of that path, the --body-file
+ * word and .hivemind/pr-inputs-<stem>-<label>-body.json.
  */
 function pairInputsPaths(run, results) {
   let stem;
@@ -8485,6 +8604,10 @@ function pairInputsPaths(run, results) {
       const words = readDataBlock(call.prompt, 'command').split(' ');
       const kind = words[1].includes('/molt/') ? 'molt' : 'pr';
       pairs.push({ label: label, path: readDataBlock(call.prompt, 'inputs_file').path, word: words[words.indexOf('--inputs') + 1], expected: '.hivemind/' + kind + '-inputs-' + stem + '-' + label + '.json' });
+    }
+    if (hasDataBlock(call.prompt, 'body_file')) {
+      const words = readDataBlock(call.prompt, 'command').split(' ');
+      pairs.push({ label: label + ' body', path: readDataBlock(call.prompt, 'body_file').path, word: words[words.indexOf('--body-file') + 1], expected: '.hivemind/pr-inputs-' + stem + '-' + label + '-body.json' });
     }
   }
   return pairs;

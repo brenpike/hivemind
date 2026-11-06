@@ -69,12 +69,12 @@
  *   findings. No message shows a commit list, a criticality or ask
  *   reason line, and no pause shows a taken decision.
  *   The pull request body and comment each carry the one run record
- *   buildRunRecordParts() returns: the reversible effects, the gates and
- *   the taken decisions other than the routine kinds, in that order, and
- *   no commit list (ADR-0037
- *   decisions 2 and 3; review findings 1a75f008 and 6f87ce62), the decisions in full with
- *   their compact fallback (issue 445). Each decision is the same brief
- *   once however many passes took it.
+ *   buildRunRecordParts() returns: the reversible effects, the gates, the
+ *   rejected findings, the approvals and the taken decisions other than
+ *   the routine kinds, in that order, and no commit list (ADR-0037
+ *   decisions 2 and 3; review findings 1a75f008 and 6f87ce62), each
+ *   decision one compact line with no why (issue 506). Each decision is
+ *   the same brief once however many passes took it.
  *   No question shows the plan summary or names this run's per-agent
  *   results. When the scope sets limits and a plan path, not a version or
  *   changelog file of versioning, lies outside them, the acceptance is
@@ -91,8 +91,8 @@
  *   blocker of the plan result, worker, gate edit and validate schemas,
  *   400 code points. The
  *   unbounded agent fields never reach a message: plan.summary reaches
- *   only the pull request body and plan.title only the pull request
- *   title, a worker summary nothing, and
+ *   no pull request text either, plan.title only the pull request title,
+ *   a step outcome only the pull request body, a worker summary nothing, and
  *   validate failures only the fix prompt. The code-built brief of every
  *   plan, trunk, effect, validation, gate rerun, version and review routing
  *   decision fits BRIEF_SCHEMA with worst-case inputs, holds
@@ -209,7 +209,7 @@
  *   agreed call that is reversible and not architectural, at the levels
  *   whose cell is auto, and asks every other one. A take never pauses: the
  *   final message lists the call by its short finding id with the encoded
- *   ask and chosen summary, the pull request shows it with fixed texts, and
+ *   ask and chosen summary, the pull request shows that same line, and
  *   the review gate reruns with user_answer decided_by run. An ask pauses
  *   with one line, 'Local
  *   review on commit', the head, the finding's first 8 code points and the

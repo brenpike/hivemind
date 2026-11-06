@@ -2,7 +2,8 @@
 #
 # open-plan-pr: THIN executable entrypoint (ADR-0020) that places the working branch on its
 # remote and opens its pull request, or reuses the open one, in ONE process. It reads the inputs
-# file once, refuses before any change, pushes through push-branch.sh as a child process, then
+# file and the body file once each, refuses before any change, pushes through push-branch.sh as a
+# child process, then
 # reuses or creates the PR and verifies it against the values it checked. A change is a push, a
 # write to a branch ref, HEAD, the index, the work tree or git config, a PR created on GitHub, or
 # a comment posted on a PR.
@@ -18,6 +19,9 @@
 #                            Write tool (`.hivemind/pr-inputs-<token>.json`). A relative path is
 #                            resolved from the folder the script was started in, before the
 #                            script moves to the top of the work tree.
+#   --body-file <path>       REQUIRED. The body file, the PR body as raw Markdown the caller
+#                            wrote with the Write tool (`.hivemind/pr-inputs-<token>-body.json`).
+#                            A relative path is resolved like --inputs.
 # head, base, and remote pass hivemind_assert_identifier (_shared/allowlist.sh: non-empty, no
 # leading `-`, no `..`, charset ^[A-Za-z0-9._/-]+$) before any git or gh command runs (`head,
 # base or push_remote contains characters outside the safe allowlist`). Then an expect-commit
@@ -27,43 +31,53 @@
 #
 # INPUTS FILE (read once, with jq, into a private copy; no field enters shell or jq program
 # source, per ${CLAUDE_PLUGIN_ROOT}/governance/security-policy.md, Inert Inputs-File Navigator
-# Pattern). Fields, checked in this order, first failure wins:
+# Pattern). Fields, checked in this order, first failure wins, with the body file's rule (BODY
+# FILE) in the body's place:
 #   title     REQUIRED. One line of text with a non-space character and no control character.
-#   body      REQUIRED. Text with no control character other than newline and tab. It may be
-#             empty.
 #   draft     optional. true or false. true opens the PR as a draft. A reused PR is not changed.
 #   comment   optional. Text with a character other than space, newline and tab, and no control
 #             character other than newline and tab. It is posted only on a reused PR (REUSE).
-# No other field is allowed. The title reaches gh as one `--title=<value>` argument from a quoted
-# shell variable, and the body and the comment as files in the private work folder
-# (`--body-file=<path>`), so none of them is ever part of shell source or an argument's text. The
-# rule that the PR content carries no attribution string is the caller's judgment (the
-# open-plan-pr SKILL.md), not checked here.
+# No other field is allowed, so a `body` field is refused. The title reaches gh as one
+# `--title=<value>` argument from a quoted shell variable, and the body and the comment as files
+# in the private work folder (`--body-file=<path>`), so none of them is ever part of shell source
+# or an argument's text. The rule that the PR content carries no attribution string is the
+# caller's judgment (the open-plan-pr SKILL.md), not checked here.
 #
-# INPUTS FILE LIFETIME: the script deletes the inputs file once it has read it, right after the
-# jq read into the private copy, whether or not that read succeeded, and before the `inputs file
-# is not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
+# BODY FILE (read once, with `jq -R -s`, into the private `body.md`; its text enters no shell or
+# jq program source): the whole file is the PR body. It must be text with no control character
+# other than newline and tab, and it may be empty. Its path must not name the inputs file: a
+# path that names the same file, by any spelling or a hard link, is refused before either read.
+#
+# INPUTS AND BODY FILE LIFETIME: the script deletes each file once it has read it, the inputs file
+# right after the jq read into the private copy and the body file right after the jq read into
+# the private body, each whether or not its read succeeded, and both before the `inputs file is
+# not valid JSON` blocker and every later check (hivemind_remove_inputs_file in
 # _shared/containment.sh; ADR-0037). Only a leaf named `pr-inputs-<token>.json`, <token> 1 to 64
 # characters of [A-Za-z0-9-], directly under a real `.hivemind` folder at the top of the work tree
-# is deleted, from inside that folder and never through a symlink. Any other inputs path is read
-# and kept. A failed delete leaves the file and does not stop the run: its result and output are
-# discarded, so stdout, stderr and the exit contract are unchanged. A refusal before the read
-# (usage, the identifier gates, the expect-commit format, the delay, a missing tool, not a
-# checkout, `inputs file not found`, `inputs file resolves outside the checkout`) leaves the
-# file. A rerun must write the file again. Deleting this caller's scratch file is not a change in
-# the REFUSALS sense, so a refusal after the read still makes no change. Because the delete comes
-# before the dirty check, a deleted inputs file is never an untracked file there, even when
-# `.hivemind/` is not ignored; any other untracked file still is.
+# is deleted, from inside that folder and never through a symlink. For the body file the token is
+# `<token>-body`, so the caller's <token> must be at most 59 characters for the body file to be
+# deleted. Any other path is read and kept. A failed delete leaves the file and does not stop the
+# run: its result and output are discarded, so stdout, stderr and the exit contract are
+# unchanged. A refusal before the reads (usage, the identifier gates, the expect-commit format,
+# the delay, a missing tool, not a checkout, a file not found, a file that resolves outside the
+# checkout, the body file naming the inputs file) leaves both files. A rerun must write both
+# files again. Deleting this caller's scratch files is not a change in the REFUSALS sense, so a
+# refusal after the reads still makes no change. Because the deletes come before the dirty check,
+# a deleted inputs or body file is never an untracked file there, even when `.hivemind/` is not
+# ignored; any other untracked file still is.
 #
 # REFUSALS (fixed blockers, checked in this order, before any change; ADR-0037 invariant 1):
 #   delay        HIVEMIND_OPEN_PLAN_PR_REREAD_DELAY, when set, is not a whole number of seconds.
 #   tools        git, jq, or gh is not on PATH (`gh not found on PATH`).
 #   checkout     not inside a git work tree.
-#   inputs       the inputs file is missing (`inputs file not found`), resolves outside the
+#   inputs       the inputs file, then the body file, is missing (`inputs file not found`, `body
+#                file not found`); the inputs file, then the body file, resolves outside the
 #                checkout through a symlinked leaf or folder (`inputs file resolves outside the
-#                checkout`, checked before the first read), is not exactly one valid JSON value
-#                (`inputs file is not valid JSON`), or breaks a field rule above (one fixed
-#                reason per rule).
+#                checkout`, `body file resolves outside the checkout`); the body file names the
+#                inputs file (`body file is the inputs file`), all checked before the first read;
+#                the inputs file is not exactly one valid JSON value (`inputs file is not valid
+#                JSON`); the body file cannot be read (`body file cannot be read`); or a field
+#                rule or the body rule above is broken (one fixed reason per rule).
 #   in progress  a merge, rebase, cherry-pick, revert, cherry-pick or revert sequence, or bisect,
 #                each looked up with `git rev-parse --git-path` so a linked worktree reads its own
 #                state (_shared/git-refusals.sh).
@@ -144,6 +158,11 @@
 #      order, then `blocker: <fixed reason>` as the LAST line. Blocker text never echoes a
 #      caller-supplied, repository, or GitHub value. A blocker after PUSH means the branch may be on its remote;
 #      HEAD REPOSITORY, REUSE and VERIFY above name the blockers this script adds after the push.
+#      Once the child's stdout has passed the PUSH check, every blocker is preceded, right before
+#      the `blocker:` line, by `pushed: yes` when the push landed (no warning) or `pushed: no`
+#      when it was rejected or deferred. A blocker before the push, the child's own `blocker:`
+#      line, `the push script failed` and `the push script printed unexpected output` carry no
+#      `pushed:` line.
 #      After `the PR comment could not be posted`, the reused PR is open on the pushed commit and
 #      the comment may be missing from it.
 #
@@ -181,7 +200,8 @@
 #                  both, but gh still resolves its own head unless `--head` is passed, so the
 #                  shared process binds nothing. The push stays in push-branch.sh, called as a
 #                  child, so the push kernel stays apart from PR authoring, and the free-text
-#                  title and body reach this script through the inputs file, never as arguments.
+#                  title and body reach this script through the inputs file and the body file,
+#                  never as arguments.
 #   Linkage:     review findings f781f8c8, 87f850de, a3c042d0, bd3204af, 08991c85, and
 #                09ca6d9d, with b0f99069 as lineage; review thread r4331751745.
 #
@@ -254,7 +274,7 @@
 # id, so an open PR from another repository, such as a fork with the same branch name and the
 # same commit, is never reused. The push URL behind that id is read again from git config after
 # the push, and git config is trusted. The private work folder
-# (mktemp -d under TMPDIR) holds the inputs copy, the body file, the comment file, and the gh
+# (mktemp -d under TMPDIR) holds the inputs copy, the body copy, the comment file, and the gh
 # and push-branch.sh output, and is removed by the EXIT trap.
 #
 # Conventions (ADR-0020 thin entrypoint): `set -euo pipefail`, an EXIT trap ending in a
@@ -280,7 +300,15 @@ relay_child_stderr() {
   return 0
 }
 
-blocker() { relay_child_stderr; printf 'blocker: %s\n' "$1" >&2; exit 1; }
+# write_pushed_line
+#   Writes the `pushed: yes|no` line set once the push output has been parsed, or nothing before
+#   that.
+write_pushed_line() {
+  [ -z "${pushed_line:-}" ] || printf '%s\n' "$pushed_line" >&2
+  return 0
+}
+
+blocker() { relay_child_stderr; write_pushed_line; printf 'blocker: %s\n' "$1" >&2; exit 1; }
 
 # layout plugin/skills/open-plan-pr/scripts/ => ../../.. is the plugin root.
 # cd && pwd -P is portable (no realpath/readlink). NO ${CLAUDE_PLUGIN_ROOT} inside an engine
@@ -299,7 +327,7 @@ export LC_ALL=C
 export GIT_TERMINAL_PROMPT=0
 export GH_PROMPT_DISABLED=1
 
-usage_reason='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] --expect-commit <sha> --inputs <path>'
+usage_reason='invalid arguments; usage: open-plan-pr.sh --head <branch> --base <branch> [--remote <name>] --expect-commit <sha> --inputs <path> --body-file <path>'
 reject_warning='push was rejected; the branch is not on its remote'
 deferred_warning='no upstream and no origin remote; push deferred'
 reread_limit=5
@@ -314,6 +342,8 @@ expect_commit=''
 expect_commit_seen=false
 inputs_arg=''
 inputs_seen=false
+body_file_arg=''
+body_file_seen=false
 while [ "$#" -gt 0 ]; do
   [ "$#" -ge 2 ] || blocker "$usage_reason"
   case "$1" in
@@ -342,6 +372,11 @@ while [ "$#" -gt 0 ]; do
       inputs_arg="$2"
       inputs_seen=true
       ;;
+    --body-file)
+      [ "$body_file_seen" = false ] || blocker "$usage_reason"
+      body_file_arg="$2"
+      body_file_seen=true
+      ;;
     *)
       blocker "$usage_reason"
       ;;
@@ -349,8 +384,10 @@ while [ "$#" -gt 0 ]; do
   shift 2
 done
 
-[ "$head_seen" = true ] && [ "$base_seen" = true ] && [ "$expect_commit_seen" = true ] && [ "$inputs_seen" = true ] || blocker "$usage_reason"
+[ "$head_seen" = true ] && [ "$base_seen" = true ] && [ "$expect_commit_seen" = true ] && [ "$inputs_seen" = true ] \
+  && [ "$body_file_seen" = true ] || blocker "$usage_reason"
 [ -n "$inputs_arg" ] || blocker "$usage_reason"
+[ -n "$body_file_arg" ] || blocker "$usage_reason"
 
 identifier_reason='head, base or push_remote contains characters outside the safe allowlist'
 hivemind_assert_identifier "$head_name" || blocker "$identifier_reason"
@@ -379,6 +416,10 @@ esac
 case "$inputs_arg" in
   /*) INPUTS_FILE="$inputs_arg" ;;
   *) INPUTS_FILE="$PWD/$inputs_arg" ;;
+esac
+case "$body_file_arg" in
+  /*) BODY_INPUT_FILE="$body_file_arg" ;;
+  *) BODY_INPUT_FILE="$PWD/$body_file_arg" ;;
 esac
 
 command -v git >/dev/null 2>&1 || blocker "git not found on PATH"
@@ -411,36 +452,42 @@ repo_file="$work_dir/repo.json"
 # ── Inputs ──────────────────────────────────────────────────────────────────
 
 [ -f "$INPUTS_FILE" ] || blocker "inputs file not found"
+[ -f "$BODY_INPUT_FILE" ] || blocker "body file not found"
 hivemind_assert_inputs_contained "$work_tree_top" "$INPUTS_FILE" >/dev/null 2>&1 || blocker "inputs file resolves outside the checkout"
+hivemind_assert_inputs_contained "$work_tree_top" "$BODY_INPUT_FILE" >/dev/null 2>&1 || blocker "body file resolves outside the checkout"
+[ ! "$INPUTS_FILE" -ef "$BODY_INPUT_FILE" ] || blocker "body file is the inputs file"
 inputs_read_rc=0
 jq -c -s 'if length == 1 then .[0] else error("not one JSON value") end' "$INPUTS_FILE" >"$inputs_copy" 2>/dev/null \
   || inputs_read_rc=$?
 hivemind_remove_inputs_file "$work_tree_top" "$INPUTS_FILE" pr >/dev/null 2>&1 || :
+body_read_rc=0
+jq -R -s -j '.' "$BODY_INPUT_FILE" >"$body_file" 2>/dev/null || body_read_rc=$?
+hivemind_remove_inputs_file "$work_tree_top" "$BODY_INPUT_FILE" pr >/dev/null 2>&1 || :
 [ "$inputs_read_rc" = 0 ] || blocker "inputs file is not valid JSON"
+[ "$body_read_rc" = 0 ] || blocker "body file cannot be read"
 
-# The field rules from the header, in order. Prints the fixed reason of the first rule the
-# inputs break, or an empty line when every rule holds.
+# The field rules from the header, in order, with the body rule on $body, the private body copy.
+# Prints the fixed reason of the first rule the inputs break, or an empty line when every rule
+# holds.
 validate_program='
-def known_keys: ["title", "body", "draft", "comment"];
+def known_keys: ["title", "draft", "comment"];
 def is_one_line: explode | all(.[]; . >= 32 and . != 127);
 def is_text_block: explode | all(.[]; . == 9 or . == 10 or (. >= 32 and . != 127));
 if type != "object" then "inputs must be a JSON object"
-elif (keys - known_keys | length) > 0 then "inputs have a field other than title, body, draft and comment"
+elif (keys - known_keys | length) > 0 then "inputs have a field other than title, draft and comment"
 elif (.title | type) != "string" then "title must be one line of text"
 elif (.title | is_one_line | not) or (.title | test("[^ ]") | not) then "title must be one line of text"
-elif (.body | type) != "string" then "body must be text with no control characters other than newline and tab"
-elif (.body | is_text_block | not) then "body must be text with no control characters other than newline and tab"
+elif ($body | is_text_block | not) then "body must be text with no control characters other than newline and tab"
 elif has("draft") and (.draft | type) != "boolean" then "draft must be true or false"
 elif has("comment") and (.comment | type) != "string" then "comment must be non-blank text with no control characters other than newline and tab"
 elif has("comment") and ((.comment | is_text_block | not) or (.comment | test("[^ \t\n]") | not)) then "comment must be non-blank text with no control characters other than newline and tab"
 else "" end
 '
-inputs_reason="$(jq -r "$validate_program" "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
+inputs_reason="$(jq -r --rawfile body "$body_file" "$validate_program" "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
 [ -z "$inputs_reason" ] || blocker "$inputs_reason"
 
 title_text="$(jq -r '.title' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
 draft_value="$(jq -r '.draft == true' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
-jq -j '.body' "$inputs_copy" >"$body_file" 2>/dev/null || blocker "cannot read the inputs file"
 comment_given="$(jq -r 'has("comment")' "$inputs_copy" 2>/dev/null)" || blocker "cannot read the inputs file"
 if [ "$comment_given" = true ]; then
   jq -j '.comment' "$inputs_copy" >"$comment_file" 2>/dev/null || blocker "cannot read the inputs file"
@@ -620,6 +667,11 @@ EOF
   fi
 }
 parse_push_output
+if [ -z "$push_warning" ]; then
+  pushed_line='pushed: yes'
+else
+  pushed_line='pushed: no'
+fi
 
 # ── Head repository ─────────────────────────────────────────────────────────
 

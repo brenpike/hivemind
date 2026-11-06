@@ -34,7 +34,8 @@
  *           label, and that relay is returned.
  *   buildInputsPath(run, kind, label)  .hivemind/<kind>-inputs-<stem>-<label>
  *           .json, stem run.factsStem, unique per run given a faithful facts
- *           relay (ADR-0037), else undefined: a --inputs command stop.
+ *           relay (ADR-0037), else undefined: a --inputs command stop. The PR
+ *           step also builds its --body-file path with it (pr.js).
  *   capItemLines(itemLines)  the first maxListedItems() lines, then a count
  *           of the rest.
  *   readRelayAction(stderr, isRefusedFirst)  the next action of a blocked
@@ -109,7 +110,8 @@
  *   name in their command block only. Every runner is a hivemind:synapse
  *   and the scan, validation and fix rounds drones (lib/facts.js). A runner
  *   prompt is one task line, dataBlocksSentence(), a buildRunnerCommand
- *   command block and for commit and PR an inputs_file block, in the block
+ *   command block, for commit and PR an inputs_file block and for PR a
+ *   body_file block, in the block
  *   names and placeholders of ${CLAUDE_PLUGIN_ROOT}/agents/synapse.md, which
  *   owns how a runner uses them (docs/engineering-principles.md P24). Each
  *   step checks its words with describeRunnerWordProblem before the call.
@@ -128,10 +130,13 @@
  *   The commit and PR runners write their own inputs file and pass its path to
  *   molt.sh or open-plan-pr.sh (review finding fb4c129c), the path
  *   buildInputsPath builds (issue 487), unique per call and run given a faithful
- *   facts relay. What reaches git and GitHub rests on the runner copying its
- *   inputs_file block (ADR-0037 Risks). Each script refuses an inputs file
- *   outside the checkout or one that breaks a field rule, molt.sh refuses any
- *   dirty path outside its list, and the workflow checks every routing line.
+ *   facts relay. The PR runner also writes its body file, at the path
+ *   buildInputsPath builds for its label and -body, and passes it as
+ *   --body-file. What reaches git and GitHub rests on the runner copying its
+ *   inputs_file and body_file blocks (ADR-0037 Risks). Each script refuses an
+ *   inputs or body file outside the checkout or one that breaks a field rule,
+ *   molt.sh refuses any dirty path outside its list, and the workflow checks
+ *   every routing line.
  *
  * Why
  *   Every runner step is one committed script relayed word for word, so
