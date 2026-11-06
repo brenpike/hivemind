@@ -65,12 +65,12 @@
  *   reversible effects and the taken decisions other than the routine
  *   kinds of routineDecisionKinds() (record.js), one line each. A complete
  *   run names the pull request and its commit, the gates that held and any
- *   gate not configured, the warning when there is one and the rejected
- *   findings. No message shows a commit list, a criticality or ask
+ *   gate not configured, the warning when there is one, the rejected
+ *   findings and the undone fixes. No message shows a commit list, a criticality or ask
  *   reason line, and no pause shows a taken decision.
  *   The pull request body and comment each carry the one run record
  *   buildRunRecordParts() returns: the reversible effects, the gates, the
- *   rejected findings, the approvals and the taken decisions other than
+ *   rejected findings and undone fixes, the approvals and the taken decisions other than
  *   the routine kinds, in that order, and no commit list (ADR-0037
  *   decisions 2 and 3; review findings 1a75f008 and 6f87ce62), each
  *   decision one compact line with no why (issue 506). Each decision is
@@ -108,7 +108,7 @@
  *   pattern_category one of P1 to P4. A finding id is 8 to 64 lowercase hex
  *   characters by its schema pattern, so its short id, the first 8, is
  *   whole hex. A break-fix-break stop shows the count of conflicting
- *   findings and no entry, and a rejected finding shows its short id alone.
+ *   findings and no entry, and a rejected finding or undone fix shows its short id alone.
  *   A stop ends the run only on a terminal cause, an agent failure, a size
  *   limit (finishOpenQuestions) or the launch check (issue 457). Every other
  *   stop pauses through stopDelivery (record.js) with one step_stop

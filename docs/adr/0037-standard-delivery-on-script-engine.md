@@ -264,7 +264,7 @@ PR3 and PR4 touch disjoint files and can proceed in parallel, and so can PR4 and
 | The github-reviewer adds an EYES reaction to a Codex summary comment with no findings, though the marker is for fixed or deferred items only (PR8 smoke F4). Watch path, on the current engine | 3 |
 | Hard stops outside workflows other than git side effects | Unassigned |
 | A restart whose branch already holds every step must still plan one step, a step whose outcome already holds, because the plan schema sets `minItems` and `computeWave` keeps parity with `next-wave.sh` | Unassigned |
-| The local reviewer's contract does not say whether a fix that fails validation is undone or left in the tree. Under invariant 1 a leftover edit stops the run at the commit script after local review, which names the paths | 3 |
+| Settled 2026-11-06 by issue 496: a fix that fails its check is undone, with only its own files restored to `HEAD` and any it created removed. Its finding goes `regressed` and is named in the required `undone_fixes` list, which the run shows after the gates. Before: the local reviewer's contract did not say whether a fix that fails validation is undone or left in the tree, and under invariant 1 a leftover edit stopped the run at the commit script after local review, which named the paths (see Amendment 2026-11-06: a local review fix that fails its check is undone (issue 496)) | Settled (issue 496) |
 | Post-PR remediation on the engine, reviewer briefs, autonomy level as plugin `userConfig`. Amended 2026-10-25 (issue 453): the state-machine watch now has a reply path. A reviewer or planner question goes to the `question` user gate, and the answer goes back to the state that asked, in the same run. Post-PR remediation on the engine and reviewer briefs stay slice 3 (see Amendment 2026-10-25: open questions pause on both engines, and a run can be stopped (issue 453)) | 3 |
 | Questions in the delivery tail end the run with the question open, until reviewer briefs bring a reply path. They are the bound on validation fix rounds or gate reruns, a bump type that cannot be determined, and a reviewer question or high-severity rejection. Each asks in plain words. Amended 2026-10-23: each such stop ends the run blocked, not complete, and names the next action (see Amendment 2026-10-23: question keys, blocked stops and the question template). Amended 2026-10-24 (issue 441): a reviewer question or high-severity rejection names its finding by a short id and lists every finding still open, from the reviewer's `open_findings`, in its detail block (see Amendment 2026-10-24: short run messages). The reply path is still slice 3. Settled 2026-10-25 by issue 453: every tail question pauses the run, and the reply resumes it. An answer to a local review question goes back to the local reviewer on the same commit, and any other answer starts a new planning pass with an answer block (see Amendment 2026-10-25: open questions pause on both engines, and a run can be stopped (issue 453)) | Settled (issue 453) |
 | Settled 2026-11-01 by issue 494: required at script level in both scripts. Before: `--expect-commit` stayed optional in `push-branch.sh` and `open-plan-pr.sh` for current-engine callers, standard-delivery passed it on every push (its contract table), and it was to become required at script level when the post-PR watch moved to the engine. Every current-engine caller now passes it too (see Amendment 2026-11-01: the push and PR scripts require the expected commit (issue 494)) | Settled (issue 494) |
@@ -2199,5 +2199,67 @@ This amendment covers https://github.com/brenpike/hivemind/issues/506 and https:
 - **Not covered.** `jq -R` replaces each invalid UTF-8 sequence of the body file with U+FFFD, so such a body is changed, not refused.
 - **Bounded impact.** The workflow body is a JavaScript string and the Write tool writes text, so neither path produces invalid UTF-8. A replaced sequence shows as a visible character in editable pull request text and adds no control character.
 - **Ground.** That is how jq reads raw input. A separate byte check would guard a case the Write tool does not produce.
+
+The rest of ADR-0037 is unchanged.
+
+## Amendment 2026-11-06: a local review fix that fails its check is undone (issue 496)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/496. The local reviewer's contract did not say whether a fix that fails its check is undone or left in the tree. Under invariant 1 a leftover edit stopped the run at the commit script after local review, which named the paths but not the finding.
+
+**The change.**
+
+- **The undo.** Step 7 of `plugin/agents/local-reviewer.md` undoes a fix that fails its check. The reviewer restores only the files that fix touched to `HEAD`, and removes any file it created. The fix goes `regressed`, never resolved. So does any earlier fix of the same iteration that this restore undid.
+- **The report.** The Output Contract gains a required `undone_fixes` list: every `regressed` finding, each with `finding_id` and `title`, copied as data, at most 50, empty when none. `REVIEW_SCHEMA` (`review-schema.js`) requires it too, beside `rejected_findings`.
+- **The run.** A held local review gate's note gives the code-built count of undone fixes after the rejected findings (`describeHeldCounts`, `review.js`). The final complete message and the pull request record list each undone fix by its short id under "The findings whose fix it undid:", in the block of `buildRejectedFindingsBlock`. The planner never receives `undone_fixes`, as it never receives `rejected_findings`.
+- Rows SD-33, SD-39, SD-45 and SD-55 name the new rules.
+- Patch, 7.6.3.
+
+**User decision.**
+
+- **2026-11-05.** The user chose this change as item 7 of the initiative plan.
+
+**Why undo, not leave or commit.**
+
+- **Leave.** A failing edit left in the tree is swept into the next commit, or the next commit refuses it.
+- **Commit.** The caller validates every commit the loop leaves. A failed fix that is committed fails there.
+- **Each validated fix is still committed.** The loop cannot reach `clean` without its fix commit, because step 3 reviews only the committed HEAD.
+- **The no-progress guard.** It returns `clean` instead of re-running the same review.
+- **The step-9 early exit.** It is advisory, never a forced stop.
+
+These rationales were cut from `plugin/agents/local-reviewer.md` to pay for the new text. They live here now.
+
+**Scope of the undo.** The undo restores only the fix's own files, and touches no other path. This is consistent with `plugin/governance/safety-rails.md` (Git Safety). The destructive fix gate is unaffected, because an undo is not a fix.
+
+**Prose budgets.** No raise. `plugin/agents/local-reviewer.md` went from 18265 to 18252 bytes, under its budget of 18267. The standard-delivery built prose went from 43271 to 43255 characters, under its budget of 43800. analysis-only stays at 15359. The offset: `buildReviewSchema` derives the `REVIEW_SCHEMA` required list from its always-present property keys, instead of listing them again.
+
+**Recorded residual: one restore can undo an earlier fix of the same iteration.**
+
+- **Not covered.** An earlier fix of the same iteration in the same file passed its check. Restoring that file to `HEAD` undoes it too.
+- **Bounded impact.** That fix goes `regressed` and is named in `undone_fixes`, so the user sees it in the gate note, the final message and the pull request record. No failing edit is committed.
+- **Ground.** Restoring whole files to `HEAD` is the undo that leaves no failing edit. Keeping the earlier fix would need the loop to track each fix's edits apart.
+
+**Recorded residual: a failure the fix did not cause still undoes it.**
+
+- **Not covered.** With `caller_validates` false or absent, the check is the project-wide Validation Procedure. A failure there that the fix did not cause still undoes the fix.
+- **Bounded impact.** The fix is named as undone, and its finding stays for the next review. The tree is left as it was at `HEAD`.
+- **Ground.** A project-wide result does not show which failure a fix caused.
+
+**Recorded residual: a regressed finding gets no second fix.**
+
+- **Not covered.** The loop does not try a second fix for a `regressed` finding.
+- **Bounded impact.** The finding is named in `undone_fixes`, so it reaches the user and the pull request record.
+- **Ground.** The ledger's status transitions have no edge out of `regressed`. Adding one would grow the fix ledger contract.
+
+**Recorded residual: stop exits do not name undone fixes.**
+
+- **Not covered.** Only a held gate's note, the final complete message and the pull request record name undone fixes. A stop exit's message does not.
+- **Bounded impact.** The undo still ran, so no failing edit is left. The fix ledger at `ledger_path` records each `regressed` entry.
+- **Ground.** Each stop message names its own cause and next action. Adding the list to every stop exit would grow each message for a case the ledger already records.
+
+**Recorded residual: the github-reviewer has the same gap after the pull request.**
+
+- **Not covered.** `plugin/agents/github-reviewer.md` does not say whether a post-PR fix that fails its check is undone. It is not changed here.
+- **Bounded impact.** Post-PR remediation is not on the script engine yet (see Deferred items), and the user sees every pushed commit on the pull request.
+- **Ground.** Issue 496 names the local reviewer only.
 
 The rest of ADR-0037 is unchanged.
