@@ -181,7 +181,7 @@ function makePlan(changes = {}) {
     trunk_freshness: 'fresh',
     classification: 'feature',
     breaking: false,
-    versioning: { bump_trigger: 'no', no_bump_match: 'no', artifact_files: [] },
+    versioning: { bump_trigger: 'no', no_bump_match: 'no', artifact_files: [], changelog_files: [] },
     validation_commands: ['npm test'],
     delivery: 'single',
     steps: [makeStep('STEP-001', ['src/cache.js'])],
@@ -341,7 +341,7 @@ function parsedVersion(changes) {
   return lib.parseRoutingLines(bumpStdout(changes), main.versionCheckRoutingSpec()).values;
 }
 
-const VERSION_PLAN = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'] } });
+const VERSION_PLAN = makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['VERSION'], changelog_files: [] } });
 const VERSION_LINE = 'Version check: each file of the version_files block must hold version 1.3.0, the trunk version 1.2.3 raised by a minor bump.';
 
 /**
@@ -406,8 +406,8 @@ function makeBrief(changes = {}) {
     problem: 'Pick a cache key format.',
     criticality: { level: 'medium', likelihood: 'common', blast_radius: 'One module.', if_ignored: 'Keys collide.' },
     options: [
-      { id: 'A', summary: 'Hash the path.', steel_man: 'Short.', straw_man: 'Opaque.', effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: 'Use the raw path.', steel_man: 'Readable.', straw_man: 'Long.', effort: 'trivial', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Hash the path.', steel_man: 'Short.', straw_man: 'Opaque.', effort: 'small', value: 'high', reversible: true, beyond_request: false },
+      { id: 'B', summary: 'Use the raw path.', steel_man: 'Readable.', straw_man: 'Long.', effort: 'trivial', value: 'medium', reversible: true, beyond_request: false }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Less effort for more value.' },
     assumptions: [{ statement: 'Paths are unique.', origin: 'repo', evidence: 'src/cache.js' }],
@@ -656,7 +656,7 @@ function realResults(scratch, changes = {}) {
 }
 
 function versionedPlan(artifactFiles = ['VERSION']) {
-  return makePlan({ trunk_freshness: 'no_remote', versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles } });
+  return makePlan({ trunk_freshness: 'no_remote', versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles, changelog_files: [] } });
 }
 
 /**
@@ -1494,10 +1494,10 @@ const ROW_TESTS = {
       ['a trunk freshness other than the facts', planResult(makePlan({ trunk_freshness: 'behind' })), 'The plan copies a trunk freshness other than the facts, so the delivery stopped.'],
       ['an unsafe branch', planResult(makePlan({ branch: 'feature/..x' })), schemaProblem],
       ['an unsafe base', planResult(makePlan({ base: '-main' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
-      ['a version file path with a .. part', planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['a/../VERSION'] } })), pathProblem('versioning.artifact_files[0]')],
+      ['a version file path with a .. part', planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['a/../VERSION'], changelog_files: [] } })), pathProblem('versioning.artifact_files[0]')],
       ...[['VERSION', 'my file.json'], ['VERSION;touch x'], ['$(touch x)/VERSION'], ['-VERSION']].map((artifactFiles) => [
         'an unsafe version file path in ' + JSON.stringify(artifactFiles),
-        planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles } })),
+        planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles, changelog_files: [] } })),
         'The plan names a version file path that is not a safe git path, so the delivery stopped.'
       ]),
       ['a blank validation command', planResult(makePlan({ validation_commands: ['npm test', '  '] })), schemaProblem],
@@ -1711,6 +1711,40 @@ const ROW_TESTS = {
       assert.equal(run.result.outcome, 'complete');
       assert.ok(run.result.message.endsWith(lib.renderDecisionsCompact([{ brief: strong }])), run.result.message);
       assert.ok(!run.result.message.includes(main.buildPlanAcceptanceBrief(makePlan()).problem), run.result.message);
+    });
+    test('a planner question whose recommended option goes beyond the request asks at every level, beyond_request where the table takes it, and shows the mark', async () => {
+      const beyond = makeBrief({ problem: 'BEYOND_PROBLEM', options: makeBrief().options.map((option) => ({ ...option, beyond_request: option.id === 'A' })) });
+      const row = autonomyTable.rows.find((candidate) => candidate.kind === 'planner_question');
+      for (const level of autonomyTable.levels) {
+        const run = main.createRunState({ argsObject: {}, request: REQUEST, trunk: 'main', references: [] });
+        run.level = level;
+        const resolution = main.resolvePlanAsks(planResult(makePlan(), [beyond]), parsedFacts(), run, EMPTY_SCOPE);
+        assert.ok(!resolution.taken.some((entry) => entry.kind === 'planner_question'), level);
+        assert.deepEqual(structuredClone(resolution.asks.map((ask) => [ask.kind, ask.reason])), [['planner_question', row[level] === 'auto' ? 'beyond_request' : 'table_surface']], level);
+      }
+      const paused = await runWorkflow(LAUNCH, { 'facts-1': factsRelay(), 'plan-1': planResult(makePlan(), [beyond]) });
+      assert.equal(paused.result.needs_user, true);
+      assert.ok(paused.result.message.includes('- A: Hash the path. (recommended) This goes beyond what you asked for.\n- B: Use the raw path.\n'), paused.result.message);
+    });
+    test('every code-built brief offers only options within the request and fits BRIEF_SCHEMA with worst-case inputs', () => {
+      const briefs = [
+        main.buildPlanAcceptanceBrief(makePlan()),
+        main.buildRemediationPlanBrief({ ...REMEDIATION_PLAN, remediation_gate: FULL_GATE }),
+        main.buildTrunkStaleBrief(parsedFacts({ trunk_freshness: 'behind', trunk_behind: '1' })),
+        main.buildExternalEffectBrief('r'.repeat(300)),
+        main.buildValidationRemediationBrief(OTHER, 1),
+        main.buildFixLimitBrief(OTHER),
+        main.buildGateRerunBrief(['validate', 'review'], THIRD, true),
+        main.buildStepStopBrief([{ problem: 'P.', nextAction: 'report' }], true),
+        main.buildVersionQuestionBrief(parsedVersion(ASK_UNDETERMINED)),
+        main.buildVersionQuestionBrief(parsedVersion(MINOR_UNREADABLE)),
+        main.removeReviewerText(main.buildReviewQuestionBrief({ ...REVIEW_CLEAN, exit_reason: 'user-input-required', findings_open: 1, finding_id: 'f4f4f4f4', user_question: USER_QUESTION }))
+      ];
+      for (const brief of briefs) {
+        assert.ok(brief.options.every((option) => option.beyond_request === false), brief.kind);
+        assert.ok(lib.validateSchema(briefSchema, brief).ok, JSON.stringify(brief));
+        assert.ok(lib.validateSchema(agentBriefSchema, brief).ok, JSON.stringify(brief));
+      }
     });
     test('a brief kind never picks the rule: the call site kind does', async () => {
       const hardStopKind = makeBrief({ problem: 'KIND_PROBLEM', kind: 'external_effect' });
@@ -4711,7 +4745,7 @@ const ROW_TESTS = {
       assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, cleanLater, EMPTY_SCOPE), 'take');
       assert.equal(cleanLater.taken[0].kind, 'remediation_plan_acceptance');
       const outside = { asks: [], taken: [] };
-      assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, outside, { documents: [], paths: [], limits: ['docs'] }), 'ask');
+      assert.equal(main.resolvePlanAcceptance(CLEAN_REMEDIATION_PLAN, run, outside, { documents: [], paths: [], limits: [{ path: 'docs', origin: 'request' }] }), 'ask');
       assert.deepEqual([outside.asks[0].kind, outside.asks[0].reason], ['remediation_plan_acceptance', 'outside_limits']);
       assert.deepEqual({ ...outside.asks[0].brief.recommendation }, { ...clean.recommendation });
     });
@@ -6583,14 +6617,14 @@ const ROW_TESTS = {
       assert.equal(documentItem.properties.line.type, 'integer');
       assert.deepEqual([schema.properties.documents.maxItems, schema.properties.paths.maxItems, schema.properties.limits.maxItems], [10, 30, 30]);
       const limitItem = schema.properties.limits.items;
-      assert.equal(limitItem.type, 'string');
-      assert.ok(Number.isInteger(limitItem.maxLength));
-      assert.ok(limitItem.description.startsWith(main.repositoryPathMark()), limitItem.description);
+      assert.deepEqual([Object.keys(limitItem.properties), limitItem.required, limitItem.additionalProperties], [['path', 'origin'], ['path', 'origin'], false]);
+      assert.deepEqual(limitItem.properties.origin, { type: 'string', enum: ['request', 'answer'] });
+      assert.deepEqual([documentItem.additionalProperties, pathItem.additionalProperties], [false, false]);
       assert.deepEqual([Object.keys(pathItem.properties), pathItem.required], [['path', 'exists', 'drift'], ['path', 'exists', 'drift']]);
       assert.equal(pathItem.properties.exists.type, 'boolean');
-      for (const item of [documentItem, pathItem]) {
+      for (const item of [documentItem, pathItem, limitItem]) {
         assert.ok(item.properties.path.description.startsWith(main.repositoryPathMark()));
-        const stringFields = Object.values(item.properties).filter((property) => property.type === 'string');
+        const stringFields = Object.values(item.properties).filter((property) => property.type === 'string' && property.enum === undefined);
         assert.ok(stringFields.every((field) => Number.isInteger(field.maxLength)), JSON.stringify(item));
         assert.ok(stringFields.every((field) => field.description.startsWith(main.externalLabel())), JSON.stringify(item));
       }
@@ -6598,11 +6632,14 @@ const ROW_TESTS = {
       const fullScope = {
         documents: Array.from({ length: 10 }, (_, index) => ({ path: 'docs/a.md', line: index + 1 })),
         paths: Array.from({ length: 30 }, (_, index) => ({ path: 'src/f' + index + '.js', exists: true, drift: '' })),
-        limits: Array.from({ length: 30 }, (_, index) => 'src/d' + index)
+        limits: Array.from({ length: 30 }, (_, index) => ({ path: 'src/d' + index, origin: index % 2 === 0 ? 'request' : 'answer' }))
       };
       assert.ok(lib.validateSchema(schema, fullScope).ok);
-      assert.ok(!lib.validateSchema(schema, { ...fullScope, limits: [...fullScope.limits, 'src/d30'] }).ok);
-      assert.ok(!lib.validateSchema(schema, { ...fullScope, limits: ['x'.repeat(limitItem.maxLength + 1)] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...fullScope, limits: [...fullScope.limits, { path: 'src/d30', origin: 'request' }] }).ok);
+      assert.ok(!lib.validateSchema(schema, { ...fullScope, limits: [{ path: 'x'.repeat(limitItem.properties.path.maxLength + 1), origin: 'request' }] }).ok);
+      for (const limit of ['src', { path: 'src', origin: 'inferred' }, { path: 'src' }, { origin: 'request' }, { path: 'src', origin: 'request', why: 'x' }]) {
+        assert.ok(!lib.validateSchema(schema, { documents: [], paths: [], limits: [limit] }).ok, JSON.stringify(limit));
+      }
     });
   },
   'SD-62': () => {
@@ -6658,10 +6695,10 @@ const ROW_TESTS = {
       });
     });
     test('a checkout root that ends with a slash converts with no doubled slash', async () => {
-      const scope = { documents: [{ path: '/srv/docs/a.md', line: 1 }], paths: [{ path: '/srv//b.js', exists: true, drift: '' }], limits: ['/srv/src/'] };
+      const scope = { documents: [{ path: '/srv/docs/a.md', line: 1 }], paths: [{ path: '/srv//b.js', exists: true, drift: '' }], limits: [{ path: '/srv/src/', origin: 'answer' }] };
       const run = await runWorkflow(LAUNCH, happyResults({ 'facts-1': factsRelay({ root: '/srv/' }), 'scope-1': scope }));
       assert.equal(run.result.outcome, 'complete', run.result.message);
-      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/a.md', line: 1 }], paths: [], limits: ['src'] });
+      assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/a.md', line: 1 }], paths: [], limits: [{ path: 'src', origin: 'answer' }] });
     });
     test('a root line of none converts nothing, so every absolute path is dropped', async () => {
       const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }, { path: 'docs/b.md', line: 1 }], paths: [{ path: 'none/a.js', exists: true, drift: '' }], limits: [] };
@@ -6670,8 +6707,8 @@ const ROW_TESTS = {
       assert.deepEqual(readDataBlock(callOf(run, 'plan-1').prompt, 'scope'), { documents: [{ path: 'docs/b.md', line: 1 }], paths: [{ path: 'none/a.js', exists: true, drift: '' }], limits: [] });
     });
     test('no root value converts nothing', () => {
-      const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }], paths: [{ path: 'src/a.js', exists: true, drift: '' }], limits: [CHECKOUT_ROOT + '/src/'] };
-      assert.deepEqual(structuredClone(main.keepRepositoryPathEntries(scope, undefined)), { documents: [], paths: [{ path: 'src/a.js', exists: true, drift: '' }], limits: [CHECKOUT_ROOT + '/src'] });
+      const scope = { documents: [{ path: CHECKOUT_ROOT + '/docs/a.md', line: 3 }], paths: [{ path: 'src/a.js', exists: true, drift: '' }], limits: [{ path: CHECKOUT_ROOT + '/src/', origin: 'request' }] };
+      assert.deepEqual(structuredClone(main.keepRepositoryPathEntries(scope, undefined)), { documents: [], paths: [{ path: 'src/a.js', exists: true, drift: '' }], limits: [{ path: CHECKOUT_ROOT + '/src', origin: 'request' }] });
     });
     test('a facts relay with no root line or a root with a control character blocks as malformed facts', async () => {
       for (const changes of [{ root: undefined }, { root: '/work/check\tout' }]) {
@@ -6702,7 +6739,7 @@ const ROW_TESTS = {
       assert.ok(![paused.result, run.result].some((result) => JSON.stringify(result).includes('SCOPE_MARKER_QZ')));
     });
     test('a revise prompt after a re-scope carries the re-scope result as its scope block', async () => {
-      const rescoped = { documents: [], paths: [{ path: 'src/cache.js', exists: true, drift: '' }], limits: ['src'] };
+      const rescoped = { documents: [], paths: [{ path: 'src/cache.js', exists: true, drift: '' }], limits: [{ path: 'src', origin: 'answer' }] };
       const results = happyResults({
         'plan-1': planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]),
         'revise-1': reviseResult(planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM_TWO')]), ['Q1']),
@@ -6993,7 +7030,7 @@ const ROW_TESTS = {
     const UNUSABLE_SCOPE = 'The scope step returned a result it could not use, so the delivery stopped before planning.';
     const gated = planResult(makePlan(), [makeGatedBrief('GATED_PROBLEM')]);
     function limitsScope(limits) {
-      return { documents: [], paths: [], limits: limits };
+      return { documents: [], paths: [], limits: limits.map((path) => ({ path: path, origin: 'request' })) };
     }
     function outsideProblem(brief, count) {
       return brief.problem + ' It changes ' + count + ' outside the limits you set.';
@@ -7033,7 +7070,7 @@ const ROW_TESTS = {
       const plan = makePlan({ steps: [makeStep('STEP-001', ['src/cache.js', 'src/deep/a.js', 'srcx/b.js', 'docs/x.md', 'docs/x.mdx'])] });
       assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src', 'docs/x.md']))], ['srcx/b.js', 'docs/x.mdx']);
       assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src', 'srcx', 'docs']))], []);
-      assert.deepEqual([...main.keepRepositoryPathEntries(limitsScope(['src/', CHECKOUT_ROOT + '/docs/', 'docs/x.md']), CHECKOUT_ROOT).limits], ['src', 'docs', 'docs/x.md']);
+      assert.deepEqual(structuredClone(main.keepRepositoryPathEntries(limitsScope(['src/', CHECKOUT_ROOT + '/docs/', 'docs/x.md']), CHECKOUT_ROOT).limits), limitsScope(['src', 'docs', 'docs/x.md']).limits);
       for (const limit of ['src', 'src/', CHECKOUT_ROOT + '/src/', 'src/cache.js']) {
         const inside = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
         assert.equal(inside.result.outcome, 'complete', limit + ' ' + inside.result.message);
@@ -7145,7 +7182,7 @@ const ROW_TESTS = {
     });
     test('an absolute or .. limit is kept, matches nothing and asks', async () => {
       const limits = ['/other/src', '../src', 'src/..'];
-      assert.deepEqual([...main.keepRepositoryPathEntries(limitsScope(limits), CHECKOUT_ROOT).limits], limits);
+      assert.deepEqual(structuredClone(main.keepRepositoryPathEntries(limitsScope(limits), CHECKOUT_ROOT).limits), limitsScope(limits).limits);
       for (const limit of limits) {
         assert.deepEqual([...main.listOutsidePaths(makePlan(), limitsScope([limit]))], ['src/cache.js'], limit);
         const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope([limit]) }));
@@ -7186,7 +7223,7 @@ const ROW_TESTS = {
       assert.ok(markedFull.problem === unmarkedProblem || markedFull.problem === unmarkedProblem + suffix, markedFull.problem);
       assert.equal(markedPlan.problem, main.buildPlanAcceptanceBrief(makePlan()).problem + suffix);
     });
-    for (const keyPath of collectPathFields(planSchema, [], [])) {
+    for (const keyPath of collectPathFields(planSchema, [], []).filter((fieldPath) => fieldPath[0] !== 'versioning')) {
       test(`a path outside the limits at ${describeKeyPath(keyPath)} asks plan_acceptance outside_limits naming it`, async () => {
         const plan = planWithValueAt(keyPath, 'outside/x.js');
         const paused = await runWorkflow(LAUNCH, happyResults({ 'scope-1': limitsScope(['src']), 'plan-1': planResult(plan) }));
@@ -7206,15 +7243,19 @@ const ROW_TESTS = {
         'validate-1-1': validateWithVersion()
       }));
     }
-    test('a version file outside the limits asks naming it, and a limit that holds it lets the run go on to validation', async () => {
-      const paused = await runVersionedUnder(['src']);
-      assert.equal(paused.result.needs_user, true);
-      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
-      assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(VERSIONED_PLAN), ['VERSION'], VERSIONED_PLAN);
-      const run = await runVersionedUnder(['src', 'VERSION']);
+    test('a version file and a declared changelog file outside the limits never ask, and another step file outside them still asks', async () => {
+      const versioning = { ...VERSIONED_PLAN.versioning, changelog_files: ['CHANGELOG.md'] };
+      const plan = { ...VERSIONED_PLAN, versioning: versioning, steps: [makeStep('STEP-001', ['src/cache.js', 'VERSION', 'CHANGELOG.md'])] };
+      assert.deepEqual([...main.listOutsidePaths(plan, limitsScope(['src']))], []);
+      const run = await runVersionedUnder(['src'], plan);
       assert.equal(run.result.outcome, 'complete', run.result.message);
       const labels = labelsOf(run);
       assert.equal(labels[labels.indexOf('commit-1-1') + 1], 'validate-1-1');
+      const widened = { ...plan, steps: [makeStep('STEP-001', ['src/cache.js', 'VERSION', 'CHANGELOG.md', 'docs/x.md'])] };
+      const paused = await runVersionedUnder(['src'], widened);
+      assert.equal(paused.result.needs_user, true);
+      assert.deepEqual(labelsOf(paused), ['facts-1', 'scope-1', 'plan-1']);
+      assertOutsideAsk(paused.result.message, main.buildPlanAcceptanceBrief(widened), ['docs/x.md'], widened);
     });
     test('every wave commit takes only plan paths, and a plan step that sets the version file makes them take every plan path', async () => {
       const plan = { ...VERSIONED_PLAN, steps: [makeStep('STEP-001', ['src/cache.js', 'VERSION'])] };

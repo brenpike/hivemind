@@ -24,7 +24,8 @@
  *            the briefs plan.js resolves through decide(). The effect brief
  *            names no step: the step id lives only in the question key.
  *   listOutsidePaths(plan, scope)  the plan paths outside every limit of
- *            the scope, [] when it sets none.
+ *            the scope, [] when it sets none. A version or changelog file
+ *            the plan declares is never outside.
  *   markOutsideLimits(brief, outsidePaths)  the acceptance brief with the
  *            outside count added to its problem when a plan path is outside
  *            the limits and the problem still fits. It never changes the
@@ -100,8 +101,8 @@ function buildPlanAcceptanceBrief(plan) {
     problem: 'Start delivering the plan: create or confirm its working branch and run its steps.',
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true },
-      { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
+      { id: 'A', summary: 'Accept the plan and run its steps.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'medium', value: 'high', reversible: true, beyond_request: false },
+      { id: 'B', summary: 'Stop before any step runs.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true, beyond_request: false }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'Every change stays on the working branch, and every decision taken is listed for you before the merge.' },
     assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
@@ -132,8 +133,8 @@ function buildTrunkStaleBrief(facts) {
     problem: 'The trunk may not be up to date: its freshness is ' + facts.trunk_freshness + ', ' + Number(facts.trunk_ahead) + ' commits ahead of its remote and ' + Number(facts.trunk_behind) + ' behind. Create or confirm the working branch from it anyway?',
     criticality: { level: 'low', likelihood: 'occasional', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true },
-      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Go on from the trunk as it is.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'medium', reversible: true, beyond_request: false },
+      { id: 'B', summary: 'Stop so you can bring the trunk up to date first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true, beyond_request: false }
     ],
     recommendation: { option_id: 'A', strength: 'strong', why: 'A stale base costs at most a rebase, and the run goes on.' },
     assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
@@ -148,8 +149,8 @@ function buildExternalEffectBrief(summary) {
     problem: 'A plan step has an effect outside the repo that cannot be undone. May the run go on to it?',
     criticality: { level: 'high', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false },
-      { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true }
+      { id: 'A', summary: 'Go on and let the step make this effect.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: false, beyond_request: false },
+      { id: 'B', summary: 'Change or drop the step first.', steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'medium', reversible: true, beyond_request: false }
     ],
     recommendation: { option_id: 'A', strength: 'none', why: 'Only you can decide whether this effect outside the repo may happen.' },
     assumptions: [{ statement: unshownBriefText(), origin: 'assumed', evidence: unshownBriefText() }],
@@ -161,15 +162,17 @@ function buildExternalEffectBrief(summary) {
 /**
  * Returns the plan paths (listPlanPaths) outside every limit of the scope,
  * or [] when the scope sets no limit. A path is inside a limit when it
- * equals the limit or sits under limit + '/'. A limit that fails
- * isRepositoryPath matches no path.
+ * equals the limit path or sits under it plus '/'. A path in
+ * versioning.artifact_files or versioning.changelog_files is never outside.
+ * A limit that fails isRepositoryPath matches no path.
  */
 function listOutsidePaths(plan, scope) {
   if (scope.limits.length === 0) {
     return [];
   }
-  const limits = scope.limits.filter((limit) => isRepositoryPath(limit));
-  const isInsideLimits = (file) => limits.some((limit) => file === limit || file.startsWith(limit + '/'));
+  const limits = scope.limits.map((limit) => limit.path).filter((limit) => isRepositoryPath(limit));
+  const versionFiles = [...plan.versioning.artifact_files, ...plan.versioning.changelog_files];
+  const isInsideLimits = (file) => versionFiles.includes(file) || limits.some((limit) => file === limit || file.startsWith(limit + '/'));
   return listPlanPaths(plan).filter((file) => !isInsideLimits(file));
 }
 
@@ -194,8 +197,8 @@ function buildTailBrief({ kind, problem, goOn, other, strength, why }) {
     problem: problem,
     criticality: { level: 'medium', likelihood: 'certain', blast_radius: unshownBriefText(), if_ignored: unshownBriefText() },
     options: [
-      { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true },
-      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true }
+      { id: 'A', summary: goOn, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true, beyond_request: false },
+      { id: 'B', summary: other === undefined ? 'Plan again: this run gives your reply to the planner before anything goes further.' : other, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'trivial', value: 'low', reversible: true, beyond_request: false }
     ],
     recommendation: { option_id: strength === 'none' ? 'B' : 'A', strength: strength, why: why },
     assumptions: [{ statement: unshownBriefText(), origin: 'repo', evidence: unshownBriefText() }],
@@ -260,7 +263,7 @@ function raiseVersion(version, bumpType) {
 }
 
 function buildVersionOption(id, summary) {
-  return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true };
+  return { id: id, summary: summary, steel_man: unshownBriefText(), straw_man: unshownBriefText(), effort: 'small', value: 'high', reversible: true, beyond_request: false };
 }
 
 function listVersionOptions(values) {

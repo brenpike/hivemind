@@ -2066,3 +2066,53 @@ This amendment covers https://github.com/brenpike/hivemind/issues/499 and https:
 The rest of ADR-0037 is unchanged. Status remains accepted.
 
 Links: https://github.com/brenpike/hivemind/issues/499, https://github.com/brenpike/hivemind/issues/500, https://github.com/brenpike/hivemind/issues/506, https://github.com/brenpike/hivemind/issues/531.
+
+## Amendment 2026-11-06: scope questions name only limits the user stated, and an option beyond the request is never taken (issues 504 and 497)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/504 and https://github.com/brenpike/hivemind/issues/497. A scope question called limits the user never set "the limits you set", counted the version and changelog files as outside them, and gave no reason for any file outside them. An option that went beyond the request could be taken without asking.
+
+**The change.**
+
+- **Options say when they go beyond the request.** Each decision-brief option requires a boolean `beyond_request`. `decide()` asks with reason `beyond_request`, checked after `gate_safety`, when the recommended option has it. A brief with no option inside the request is `malformed_brief`. The option line shows "This goes beyond what you asked for." Code-built options and review options carry `beyond_request: false`.
+- **Plan schema.** `versioning.changelog_files` is required. `steps[].limits_reason` is optional, at most 160 code points.
+- **Limits carry their origin.** A scope limit is `{path, origin}`, origin `request` or `answer`. An inferred limit has no value to record, so "the limits you set" holds by construction.
+- **Files outside the limits.** `listOutsidePaths` never counts `artifact_files` or `changelog_files`. The planning pause lists one line per file outside the limits, with its `limits_reason` or "the plan gives no reason".
+- **Prose.** `plugin/governance/decision-autonomy.md` Tier A gains "an option that goes beyond the request". `plugin/agents/cerebrate.md` Scope Mode keeps only stated limits, each with its origin. `CLAUDE.md` Versioning names `CHANGELOG.md`.
+- JSON state machine: the Tier A bullet and the schema fields reach it; no agent prose change beyond `plugin/agents/cerebrate.md` Scope Mode.
+- Patch, 7.6.1.
+
+**User decisions.**
+
+- **2026-11-04.** The Tier A bullet: an option that goes beyond the request is always asked.
+- **2026-11-05, "Take recs".** The PR4 scope.
+- **Prose budgets.** No raise. Each step paid for its text with cuts.
+
+**Not folded.** Moving `PROSE_BUDGETS` into `tests/policy/prose-byte-budget.json`. CHECK 18's file is one flat object keyed by covered plugin Markdown files, and the build test rewrites the `PROSE_BUDGETS` literal by regex, so the move needs its own tools PR.
+
+**Follow-ups, beyond scope.**
+
+- Reviewer `user_question` options setting `beyond_request`.
+- A `tests/policy` pin for the Tier A bullet.
+- CHANGELOG backfill, 7.5.21 to 7.6.0.
+
+**Recorded residual: a declared changelog file is exempt on the planner's word.**
+
+- **Not covered.** A file the plan lists in `changelog_files` is never counted outside the limits, whatever it is.
+- **Bounded impact.** Limits only trigger a question; they are not access control. The file still shows in the PR and at every gate.
+- **Ground.** Only the planner knows the project's changelog files. The schema takes the list but cannot check it.
+
+**Recorded residual: the limit origin is the scope model's attribution.**
+
+- **Not covered.** The scope model, not code, says whether a limit came from the request or an answer.
+- **Bounded impact.** A guess labelled as stated only adds a question. It never widens the work.
+- **Ground.** Code cannot tell which words of the request set a limit.
+
+**Recorded residual: `beyond_request` is the brief writer's own flag.**
+
+- **Not covered.** An option beyond the request that the writer does not flag can be taken.
+- **Bounded impact.** It falls back to the existing autonomy table, and the Tier A rule still binds the overlord.
+- **Ground.** Only the brief writer knows what its option would do. The schema requires the flag but cannot check its value.
+
+The rest of ADR-0037 is unchanged.
+
+Links: https://github.com/brenpike/hivemind/issues/504, https://github.com/brenpike/hivemind/issues/497.
