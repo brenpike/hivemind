@@ -13,6 +13,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+## [7.6.3] - 2026-11-06
+
+### Changed
+
+- The local reviewer report and the standard-delivery `REVIEW_SCHEMA` gain a required `undone_fixes` list.
+
+### Fixed
+
+- A local review fix that fails its check is undone, with only its own files restored to the last commit. Its ledger entry goes `regressed`, and the run names it after the gates (#496).
+
 ## [7.6.2] - 2026-11-06
 
 ### Changed
