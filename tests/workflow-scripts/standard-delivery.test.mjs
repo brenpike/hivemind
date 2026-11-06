@@ -1495,6 +1495,11 @@ const ROW_TESTS = {
       ['an unsafe branch', planResult(makePlan({ branch: 'feature/..x' })), schemaProblem],
       ['an unsafe base', planResult(makePlan({ base: '-main' })), 'The plan names a branch or base that is not a safe git name, so the delivery stopped.'],
       ['a version file path with a .. part', planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: ['a/../VERSION'], changelog_files: [] } })), pathProblem('versioning.artifact_files[0]')],
+      ...['a/../CHANGELOG.md', '/CHANGELOG.md', 'CHANGELOG.md\u001b'].map((changelogFile) => [
+        'an unsafe changelog file path ' + JSON.stringify(changelogFile),
+        planResult(makePlan({ versioning: { bump_trigger: 'no', no_bump_match: 'no', artifact_files: [], changelog_files: [changelogFile] } })),
+        pathProblem('versioning.changelog_files[0]')
+      ]),
       ...[['VERSION', 'my file.json'], ['VERSION;touch x'], ['$(touch x)/VERSION'], ['-VERSION']].map((artifactFiles) => [
         'an unsafe version file path in ' + JSON.stringify(artifactFiles),
         planResult(makePlan({ versioning: { bump_trigger: 'yes', no_bump_match: 'no', artifact_files: artifactFiles, changelog_files: [] } })),
