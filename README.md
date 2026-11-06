@@ -62,7 +62,7 @@ Or run the setup skill once to apply the required keys automatically:
 - `.hivemind/broods/<brood-id>/manifest.json`: one manifest per brood
 - `.hivemind/review-loop/fix-ledger.yaml`: the local reviewer's finding ledger
 - `.hivemind/handoffs/` (and `.hivemind/plans/`): session-resumption handoffs and the plans they point at
-- short-lived inputs files that skills pass to their engine scripts, e.g. `.hivemind/seed-inputs-<token>.json`, `.hivemind/runs/.init-inputs-<token>.json`, and the molt and PR inputs files `.hivemind/molt-inputs-<token>.json` (the commit message and its file list) and `.hivemind/pr-inputs-<token>.json` (the PR title and body)
+- short-lived inputs files that skills pass to their engine scripts, e.g. `.hivemind/seed-inputs-<token>.json`, `.hivemind/runs/.init-inputs-<token>.json`, and the molt and PR inputs files `.hivemind/molt-inputs-<token>.json` (the commit message and its file list) and `.hivemind/pr-inputs-<token>.json` (the PR title, draft flag and reuse comment) with its body file `.hivemind/pr-inputs-<token>-body.json` (the raw PR body)
 
 If you prefer manual setup, add `.hivemind/` and `.claude/worktrees/` to your project's `.gitignore` directly.
 

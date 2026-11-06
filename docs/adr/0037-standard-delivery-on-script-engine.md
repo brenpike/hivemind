@@ -1069,7 +1069,7 @@ An ask pauses as before, with the lead, the reviewer's own question and its reco
 
 **How a taken call is listed.** Three places show it, so the user can veto it before the merge.
 
-- **The pull request.** The body and the reuse comment list the call with the fixed texts of `reviewCallTexts()`: a problem, an option summary and a why, with no finding id and no reviewer text. The no-reviewer-text boundary of row SD-45 holds.
+- **The pull request.** The body and the reuse comment list the call with the fixed texts of `reviewCallTexts()`: a problem, an option summary and a why, with no finding id and no reviewer text. The no-reviewer-text boundary of row SD-45 holds. Amended 2026-11-06 (issues 506 and 501): the pull request texts show the call as its compact decision line, the short finding id, the encoded ask and the encoded chosen summary, with no why, and `reviewCallTexts()` is removed (see Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501)).
 - **The diff.** The reviewer's record of the decision at its source, or its fix commit, carries the full text the user needs to veto the call.
 - **The chat.** The final message lists the call on one line, by its short finding id with the encoded ask and the encoded summary of the chosen option.
 
@@ -1836,7 +1836,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/491. PR 490, t
 
 - `plugin/references/plan-schema.json` gains an optional field, `closes`: a list of issue numbers. Empty or absent means none. The planner lists only a reference the run fixes, never one the request names for context.
 - `describePlanProblem` (`plan.js`) refuses a plan whose `closes` holds a number that is not the number of one of the launch `references` (`run.references`), with a fixed message naming its index. It goes through `stopDelivery` with isReplan true, as every other plan problem does.
-- `buildPullRequestBody` opens with one code-built plain line `Closes #<n>` per distinct number, in plan order, outside any fence and ahead of the fenced summary. The fence around planner text is unchanged. The pull request comment gets no closing line.
+- `buildPullRequestBody` opens with one code-built plain line `Closes #<n>` per distinct number, in plan order, outside any fence and ahead of the fenced summary. The fence around planner text is unchanged. The pull request comment gets no closing line. Amended 2026-11-06 (issues 506 and 501): the body holds no fence and no summary, and the closing lines open it ahead of the digest paragraph (see Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501)).
 - Row SD-76 is added, and SD-08 and SD-45 name the new clause.
 
 **Why the check is membership only.** The planner judges which reference the run fixes; code has no ground truth for that. Code could check that a number names an issue rather than a pull request only by reading the facts file, which the engine never reads: it reads the facts relay lines only. A `Closes #<n>` line that names a pull request closes nothing on GitHub, so that miss is harmless. The check therefore keeps the one property code can prove: every closing line names a number the launch gave, so the planner cannot close an issue the user did not name.
@@ -2055,7 +2055,7 @@ This amendment covers https://github.com/brenpike/hivemind/issues/499 and https:
 
 - **Not covered.** The pull request body does not list the changes the user's replies approved.
 - **Bounded impact.** The approved changes are in the diff, and the replies are in chat. A reviewer of the PR sees no list of them.
-- **Ground.** The PR body belongs to the PR-body slice, https://github.com/brenpike/hivemind/issues/506.
+- **Ground.** The PR body belongs to the PR-body slice, https://github.com/brenpike/hivemind/issues/506. Amended 2026-11-06 (issues 506 and 501): the body and the reuse comment list each approval under "Destructive changes you approved:" (see Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501)).
 
 **Recorded residual: local review does not see settled decisions.**
 
@@ -2124,3 +2124,79 @@ This amendment covers https://github.com/brenpike/hivemind/issues/504 and https:
 The rest of ADR-0037 is unchanged.
 
 Links: https://github.com/brenpike/hivemind/issues/504, https://github.com/brenpike/hivemind/issues/497.
+
+## Amendment 2026-11-06: the pull request body is built in code and sent in its own file (issues 506 and 501)
+
+This amendment covers https://github.com/brenpike/hivemind/issues/506 and https://github.com/brenpike/hivemind/issues/501. The pull request body showed the plan summary in a code fence and listed review calls with fixed texts, so a reviewer who never saw the chat could not read what the run did. The runner wrote the PR inputs JSON by hand, which could make it invalid, and a blocked pull request step did not say whether it pushed.
+
+**The change.**
+
+- **The body.** `buildPullRequestBody` (`pr.js`) builds, in order: the `Closes #<n>` lines of `renderClosingLines`; the digest paragraph of `renderDigestParagraph`, `plan.digest.problem` then `plan.digest.change`, a blank one left out; a `Steps:` line and one line per step from `renderStepLines`, its id, files and outcome; then the run record of `buildRunRecordParts` (`record.js`). The record holds the reversible effects, the gates, the rejected findings by short id in the block of `buildRejectedFindingsBlock`, each `run.approvals` entry on its own line through `renderDestructiveChange` under "Destructive changes you approved:", and every shown decision as its `renderDecisionsCompact` line. `plan.summary` reaches no pull request text, and no pull request text holds a code fence. `renderLiteralBlock` is removed.
+- **One neutralizer.** Every external part goes through `neutralizePullRequestText`: each at-mention, issue reference, owner/repo reference, GH-N reference and URL sits in a single-backtick code span, and each backslash, backtick, `<`, `>` and `&` elsewhere is backslash-escaped. The closing lines, the gates, the labels and the comment lead stay plain. The attribution check reads the neutralized texts.
+- **Review decision lines.** A taken local review call shows as its compact decision line: the short finding id, the encoded ask and the encoded chosen summary, never the why. This reverses, for the pull request texts, the fixed-texts rule of the review-call amendment above. `reviewCallTexts()` is removed, and `removeReviewerText` fills the brief only `decide()` reads with `unshownBriefText()`.
+- **The reuse comment** carries the same run record after its fixed lead, and no closing line.
+- **Size.** A body or comment over `maxPullRequestTextLength()` is a terminal stop naming its size, before any push. The compact fallback is removed, since every decision line is already compact.
+- **Transport.** `open-plan-pr.sh` requires `--body-file`: the PR body as raw Markdown, read once with `jq -R -s`. Its inputs file keeps only `title`, `draft` and `comment`, and a `body` field is refused. The body file path is `.hivemind/pr-inputs-<token>-body.json`, the pr-inputs form, so the skill `allowed-tools` glob, the hook Write rule, the script's delete rule and the `plugin/governance/security-policy.md` text stay unchanged. A `.json` name holds Markdown. The script deletes the body file after its read, as it does the inputs file, when `<token>` is at most 59 characters.
+- **The workflow.** `buildPullRequestPrompt` passes the `inputs_file` content as a JSON string built by `JSON.stringify`, and a `body_file` block (`formatBodyFileBlock`, `lib/facts.js`) holding the body. `buildInputsPath` builds both paths, the body path for the call label plus `-body`, so a retry writes neither file of the first call. A body path whose token passes 64 characters is a `--body-file` terminal command stop. `plugin/agents/synapse.md` writes `inputs_file`, then `body_file`: a string content as is, an object as JSON. The commit step still passes an object, and molt is unchanged.
+- **The hook.** The exact `open-plan-pr` form in `plugin/hooks/synapse-gate.sh` requires `--body-file`, in the pr-inputs value class.
+- **Push report.** Once the push script's output passes its check, every later blocker of `open-plan-pr.sh` is preceded by `pushed: yes` or `pushed: no`. `describeBlockedPush` (`pr.js`) names the observed push: `pushed: no` says this step pushed nothing, and `pushed: yes` says the run stopped after this step pushed commit H. The next action stays the one `readRelayAction` gives.
+- **The skill path.** On the JSON state machine, `plugin/skills/open-plan-pr/SKILL.md` writes the body file, then the inputs file, with the Write tool, and passes both paths.
+- Rows SD-42, SD-45, SD-46, SD-71, SD-74 and SD-76 name the new rules. `plugin/references/plan-schema.json` describes `digest` and step `outcome` for a reviewer who never saw the chat.
+- Patch, 7.6.2.
+
+**User decisions.**
+
+- **2026-11-04.** The no-reviewer-text boundary of SD-45 is reversed for the pull request texts, and the open-plan-pr contract may change to take the body from its own file.
+- **2026-11-05, "Take recs".** The PR5 scope.
+- **Q1, option A.** The `inputs_file` content is a string for the pull request step only.
+- **Q2, option A.** The body file takes the pr-inputs path form.
+- **Q3, option A.** The reuse comment carries the same run record as the body.
+- **Q4, option B.** The record lists the rejected findings by short id.
+- **Q5, option A.** Every decision line is compact.
+- **Q6, option A.** No digest check of the copied files now.
+
+**Prose budgets.** No raise. The standard-delivery built prose went from 43586 to 43271 characters. analysis-only went from 15346 to 15359, under its budget of 16050: the +13 is the shared `--body-file` key of `runnerValuePatterns()` (`lib/facts.js`), which it bundles, so it is irreducible. `plugin/skills/open-plan-pr/SKILL.md` went from 8167 to 8142 bytes, and `plugin/agents/synapse.md` from 1727 to 1724.
+
+**Follow-ups, beyond scope.**
+
+- https://github.com/brenpike/hivemind/issues/537: measure the numbers the request asked for on the final commit.
+- https://github.com/brenpike/hivemind/issues/538: a digest check of the copied files.
+- https://github.com/brenpike/hivemind/issues/501 is narrowed to the transport, with a comment posted on it.
+
+**Recorded residual: the runner's copy has no digest check.**
+
+- **Not covered.** The runner copies the `inputs_file` and `body_file` contents into their files, and nothing compares a copy with what the code built.
+- **Bounded impact.** A bad inputs file breaks a field rule and is refused before the push. A bad body ships, but into pull request text the user sees and can edit before merge.
+- **Ground.** The script has no expected digest to check against. Tracked as https://github.com/brenpike/hivemind/issues/538, after the user chose no digest now (Q6).
+
+**Recorded residual: the relayed `pushed:` line is the runner's copy.**
+
+- **Not covered.** The stop reads `pushed: yes` or `pushed: no` from the relayed stderr.
+- **Bounded impact.** A changed line changes only the stop's wording. The next action comes from the blocker line, and taking the step again pushes the same commit and reuses the pull request open on it.
+- **Ground.** Every relay is the runner's copy (ADR-0037 Risks), and `--expect-commit` binds the push itself.
+
+**Recorded residual: Markdown forms outside the neutralizer render.**
+
+- **Not covered.** Headings, emphasis and `[x](y)` links in planner text render as Markdown.
+- **Bounded impact.** None of them pings a user, or links or closes an issue: mentions, issue references and URLs sit in code spans, and HTML characters are escaped.
+- **Ground.** Escaping every Markdown form would make the body hard to read for the reviewer it is written for. The neutralizer covers each form whose effect reaches beyond the pull request.
+
+**Recorded residual: the comment stays in the JSON inputs file.**
+
+- **Not covered.** The reuse comment still travels as a JSON field, and on the skill path the agent writes that JSON itself.
+- **Bounded impact.** An invalid inputs file is refused (`inputs file is not valid JSON`) before any change. On the workflow, code serializes it and the runner writes the string as is.
+- **Ground.** The comment posts only on a reused pull request. Moving it out would add a third file, flag and hook form for a failure the script already refuses.
+
+**Recorded residual: a first file is left when the second Write fails.**
+
+- **Not covered.** When the second Write fails, the runner or the skill runs no command, so the file written first stays.
+- **Bounded impact.** It sits under `.hivemind/` and holds only text built for the pull request. A retry or rerun writes both files at new paths. A checkout that does not ignore `.hivemind/` sees it as untracked, and the next dirty check refuses until it is removed.
+- **Ground.** Only the script deletes the files, and it must not run after a failed Write. The runner holds Write and the exact runner commands, and no delete.
+
+**Recorded residual: invalid UTF-8 in the body becomes U+FFFD.**
+
+- **Not covered.** `jq -R` replaces each invalid UTF-8 sequence of the body file with U+FFFD, so such a body is changed, not refused.
+- **Bounded impact.** The workflow body is a JavaScript string and the Write tool writes text, so neither path produces invalid UTF-8. A replaced sequence shows as a visible character in editable pull request text and adds no control character.
+- **Ground.** That is how jq reads raw input. A separate byte check would guard a case the Write tool does not produce.
+
+The rest of ADR-0037 is unchanged.
