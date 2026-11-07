@@ -112,6 +112,12 @@
  *   limit (finishOpenQuestions) or the launch check (issue 457). Every other
  *   stop pauses through stopDelivery (record.js) with one step_stop
  *   question, and the reply takes the stopped step again or plans again.
+ *   A non-null scope, plan or revise result that fails its check, other
+ *   than a planner blocked outcome that gives a reason, goes back to its
+ *   agent with the check, up to maxCheckRetries() times
+ *   (buildCheckFixPrompt, checks.js); a result still failing then is a
+ *   terminal stop with next action report (describeCheckLimit), so a check
+ *   slip never asks the user.
  *   Every undecided question, a step_stop, a version question, the fix
  *   limit and the gate rerun limit, resolves through decide() in
  *   buildUndecidedAsk (tails.js), which throws on a take: step_stop and
@@ -265,7 +271,9 @@
  *   schema, the same schema with every anyOf removed, because the Messages
  *   API rejects a tool input schema that has anyOf at its top level.
  *   Labels come only from the pass, the round, the step id, the wave
- *   number, and the gate step with its run count (gateLabel), so each is
+ *   number, the gate step with its run count (gateLabel), and a check
+ *   retry's '-fix-N' suffix on its call's label, N from 1 to
+ *   maxCheckRetries(), so each is
  *   unique and a resume replays every earlier prompt byte for byte and gets
  *   every earlier result, side effects included, from cache. A commit or
  *   pull request inputs path is the pass's facts file stem, run.factsStem,
@@ -314,6 +322,10 @@ const SCOPE_SCHEMA = buildScopeSchema();
 
 function maxReplans() {
   return 3;
+}
+
+function maxCheckRetries() {
+  return 2;
 }
 
 function maxFixRounds() {
