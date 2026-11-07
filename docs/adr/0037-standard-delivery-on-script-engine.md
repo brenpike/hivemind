@@ -2610,3 +2610,28 @@ Links: https://github.com/brenpike/hivemind/issues/549, https://github.com/brenp
 **Decided by.** The run took this call, option A, per `plugin/governance/decision-autonomy.md` (Review Calls): a strong recommendation, reversible and not architectural. It is listed in the pull request body for the user's veto before merge.
 
 **Prose budgets.** No change under `plugin/`.
+
+### Local review finding 0c0cf284: the docs point to the Ask Set instead of copying it (2026-11-07)
+
+**The finding.** `README.md`, `CONTEXT.md` and the site pages `web/index.html`, `web/functionality.html` and `web/benefits.html` said things about who the run asks and what it lists that disagree with governance. Some said every open question or reviewer question pauses the run. Some left out that an agreed review call is taken even when it is safety-relevant. Some said every taken call is listed, but plan acceptance, remediation plan acceptance and gate reruns are not listed unless a listed reason holds.
+
+**Root cause.** Each docs surface copied the decision-autonomy rules in its own words instead of naming them, and each copy lost an exception. Earlier passes on this branch corrected one copy at a time on the same young surfaces, so the class stayed open.
+
+**Decision.**
+
+- **Who the run asks has one home.** It is `plugin/governance/decision-autonomy.md` (Decision Tiers, Review Calls). `README.md`, `CONTEXT.md` and the site pages name the closed Ask Set and point there. They never copy its members. An example uses "such as" and draws only on members with no exception: an irreversible call, an architectural call, a hard stop, a call with no recommendation.
+- **What a script run lists has one docs home per published surface.** They are "Decisions on the PR" in `README.md` and the PR step of `web/functionality.html`. Each states the three kinds that are not listed and when an acceptance is listed anyway. Every other mention points there and never says every taken call is listed.
+- **A new copy is a new finding.** A docs sentence outside those homes that states who is asked or what is listed is a defect of this class.
+
+**Options ruled out.**
+
+- **Another sentence-by-sentence correction.** Each earlier pass fixed one copy and left the others free to drift, so the next review found the next copy.
+- **A test that scans the docs for copies.** It grows the surface, the same call ADR-0018 amendment 2026-11-06 item 3 made for the Reflex conditions.
+
+**Repeat findings.** A later finding that asks a doc to copy the Ask Set members or the listing rule again is a repeat of this record, per `plugin/governance/remediation-doctrine.md` (Recorded Decisions and Repeat Findings). A finding that one of the two listing homes disagrees with governance is new.
+
+**Version.** None. The change is docs only, outside `plugin/`.
+
+**Prose budgets.** No change under `plugin/`.
+
+No earlier text of this ADR changes.

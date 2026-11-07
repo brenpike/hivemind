@@ -223,11 +223,11 @@ _Avoid_: signal detector, classifier, cluster checker
 ### Decision Autonomy
 
 **Decision Tier**:
-The A/B classification of an overlord decision. Tier A = always surfaced to the Overmind (safety rails, merge recommendations, genuine ambiguity-with-risk); Tier B = auto-decided and journaled by default. On the script engine only the Ask Set asks (an irreversible, architectural or safety call, a surfaced table cell, a hard stop, or a call with no recommendation); other calls are taken and listed under "Decided for you" on the PR for veto before merge. Rules: `plugin/governance/decision-autonomy.md` (Decision Tiers).
+The A/B classification of an overlord decision. Tier A = the closed Ask Set, always surfaced to the Overmind, such as an irreversible call, an architectural call, a hard stop or a call with no recommendation; Tier B = auto-decided and journaled by default. On the script engine only a call in the closed Ask Set asks. The run takes the rest and lists taken decisions under "Decided for you" on the PR for veto before merge, except the kinds README's Decisions on the PR names. Rules: `plugin/governance/decision-autonomy.md` (Decision Tiers, Review Calls).
 _Avoid_: priority, severity
 
 **Promotion Gate**:
-The test that promotes a Tier-B decision back to a surface — trips when the recommended action is irreversible OR architectural blast radius OR safety-relevant (destructive-fix categories).
+The test that promotes a Tier-B decision back to a surface — trips when the recommended action is irreversible OR architectural blast radius OR safety-relevant (destructive-fix categories). A review call reads only the irreversible and architectural clauses, per `plugin/governance/decision-autonomy.md` (Review Calls).
 _Avoid_: escalation gate, risk gate
 
 **Decision Journal**:
